@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <!-- Warning triangle — amber fill -->
+  <path d="M12 2.5 L22 20.5 L2 20.5 Z" fill="currentColor" stroke="none" rx="2"/>
+  <!-- Exclamation mark in white -->
+  <line x1="12" y1="9" x2="12" y2="15" stroke="white" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="12" cy="18" r="1" fill="white"/>
+</svg>

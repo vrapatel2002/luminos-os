@@ -1,0 +1,10 @@
+build/
+build/chroot/
+build/iso/
+*.iso
+models/*.onnx
+models/*.gguf
+__pycache__
+*.pyc
+.env
+config/luminos.conf.local

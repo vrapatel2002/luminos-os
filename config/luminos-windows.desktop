@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Luminos Windows Compatibility
+Comment=Run Windows applications via Luminos Zone 2
+Exec=luminos-run-windows %f
+Terminal=false
+Type=Application
+Categories=System;
+MimeType=application/x-ms-dos-executable;application/x-msi;application/x-ms-shortcut;
+NoDisplay=true
+StartupNotify=true

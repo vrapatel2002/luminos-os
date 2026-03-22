@@ -1,0 +1,15 @@
+# Install: sudo cp this /etc/systemd/system/ then sudo systemctl enable luminos-ai
+
+[Unit]
+Description=Luminos AI Orchestration Daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/luminos/src/daemon/main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
