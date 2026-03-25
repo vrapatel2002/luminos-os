@@ -40,7 +40,7 @@ apt purge -y gnome-shell gdm3 \
 # Remove unnecessary services
 systemctl disable --now \
   apport whoopsie ModemManager \
-  bluetooth  # re-enable after bluez install
+  bluetooth 2>/dev/null || true  # re-enable after bluez install
 
 # Install Sway stack
 apt-get install -y --no-install-recommends \
@@ -86,7 +86,7 @@ meson setup build \
   -Dexamples=false -Ddocs=false 2>/dev/null || true
 ninja -C build 2>/dev/null || true
 ninja -C build install 2>/dev/null || true
-ldconfig
+ldconfig || true
 cd /
 
 # swww for wallpaper

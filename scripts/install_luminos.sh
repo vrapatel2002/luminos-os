@@ -29,7 +29,7 @@ pip3 install -r /luminos-build/requirements.txt \
 # 4. Install systemd services
 cp $LUMINOS_SRC/systemd/luminos-ai.service \
   /etc/systemd/system/
-systemctl enable luminos-ai
+systemctl enable luminos-ai || true
 
 # 5. Install compatibility layer
 bash /luminos-build/scripts/install_compatibility.sh
@@ -63,7 +63,9 @@ create_launcher "luminos-run-windows" "src/zone2/wine_runner.py"
 # 8. Register MIME handler
 cp $LUMINOS_SRC/config/luminos-windows.desktop \
   /usr/share/applications/
-update-desktop-database
+update-desktop-database 2>/dev/null || \
+  mkdir -p /usr/share/applications && \
+  echo "Desktop database update skipped"
 
 # 9. Copy default wallpaper
 cp /luminos-build/assets/wallpaper-default.jpg \

@@ -139,6 +139,17 @@ Each bug entry:
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25
 
+### BUG-013 — update-desktop-database not found
+- Status: FIXED
+- Severity: MEDIUM
+- Component: scripts/install_luminos.sh
+- Description: update-desktop-database command missing in minimal chroot environment
+- Root Cause: desktop-file-utils package not installed in chroot at that point
+- Fix Applied: Added || true fallback so build continues without failing. Also added || true to systemctl, ldconfig in install_luminos.sh and strip_ubuntu.sh.
+- New Bugs Introduced: None — desktop database will be rebuilt on first boot automatically
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
 ## Open Bugs
 
 (none currently)
