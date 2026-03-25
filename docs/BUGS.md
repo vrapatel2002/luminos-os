@@ -201,6 +201,16 @@ Each bug entry:
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25 (workaround)
 
+### BUG-020 — useradd fails if user exists
+- Status: FIXED
+- Severity: MEDIUM
+- Component: scripts/build_iso.sh stage5
+- Description: useradd fails when luminos user already exists from previous run
+- Root Cause: No check if user exists before creating
+- Fix Applied: Added id check before useradd
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
 ## Open Bugs
 
 (none currently)

@@ -177,11 +177,12 @@ stage5_configure() {
     /usr/share/zoneinfo/UTC \
     /etc/localtime
 
-  # Create live user
-  chroot $CHROOT_DIR useradd -m -s /bin/bash \
+  # Create live user (BUG-020: check if exists first)
+  chroot $CHROOT_DIR id luminos &>/dev/null || \
+    chroot $CHROOT_DIR useradd -m -s /bin/bash \
     -G sudo,video,audio,input,kvm luminos
   echo "luminos:luminos" | \
-    chroot $CHROOT_DIR chpasswd
+    chroot $CHROOT_DIR chpasswd || true
   # First run will change this
 
   # Auto-login for live session
