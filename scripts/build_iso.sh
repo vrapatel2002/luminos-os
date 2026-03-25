@@ -340,7 +340,12 @@ umount_chroot "$CHROOT_DIR" 2>/dev/null || true
 mkdir -p $BUILD_DIR $CHROOT_DIR $ISO_DIR
 
 check_deps
-stage1_bootstrap
+if [ "${SKIP_STAGE1:-0}" = "1" ] && \
+   [ -d "$CHROOT_DIR/usr" ]; then
+  echo "--- Stage 1: SKIPPED (chroot exists) ---"
+else
+  stage1_bootstrap
+fi
 stage2_prepare
 stage3_strip
 stage4_install

@@ -191,6 +191,16 @@ Each bug entry:
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25
 
+### BUG-018 — debootstrap fails inside build script
+- Status: WORKAROUND
+- Severity: CRITICAL
+- Component: scripts/build_iso.sh stage1
+- Description: debootstrap always fails with tar extraction error when run from build script but works fine when run manually
+- Root Cause: Unknown — likely environment variable or directory state issue inside the script context
+- Fix Applied: Added SKIP_STAGE1=1 env var to skip Stage 1 when chroot already exists
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25 (workaround)
+
 ## Open Bugs
 
 (none currently)
