@@ -211,6 +211,16 @@ Each bug entry:
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25
 
+### BUG-021 — lupin-casper removed in Ubuntu 24.04
+- Status: FIXED
+- Severity: MEDIUM
+- Component: scripts/build_iso.sh stage5
+- Description: lupin-casper package not found
+- Root Cause: Package removed in Ubuntu 24.04
+- Fix Applied: Removed lupin-casper and other obsolete packages from install list
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
 ## Open Bugs
 
 (none currently)

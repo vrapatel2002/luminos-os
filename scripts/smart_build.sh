@@ -243,16 +243,12 @@ from src.compositor.compositor_config import write_config
 write_config('/etc/sway/config')
 " 2>/dev/null || echo "WARN: sway config generation failed (non-fatal)"
 
-  # Install kernel + live boot packages (BUG-017)
+  # Install kernel + live boot packages (BUG-017, BUG-021)
   chroot "$CHROOT_DIR" apt-get install -y \
     linux-image-generic \
-    linux-headers-generic \
     initramfs-tools \
     casper \
-    lupin-casper \
-    discover \
-    laptop-detect \
-    os-prober \
+    os-prober || true \
     2>&1 | tee -a "$LOG"
 
   # Verify kernel installed
