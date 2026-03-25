@@ -116,7 +116,9 @@ stage1_bootstrap() {
   export http_proxy=""
   export https_proxy=""
   export no_proxy=""
-  debootstrap --arch=amd64 --keep-debootstrap-dir \
+  # Remove any cached partial downloads (BUG-015)
+  rm -rf $CHROOT_DIR/debootstrap 2>/dev/null || true
+  debootstrap --arch=amd64 \
     $UBUNTU_CODENAME \
     $CHROOT_DIR \
     http://ca.archive.ubuntu.com/ubuntu/

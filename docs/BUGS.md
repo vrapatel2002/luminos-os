@@ -161,6 +161,16 @@ Each bug entry:
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25
 
+### BUG-015 — debootstrap cache corruption
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/build_iso.sh stage1
+- Description: --keep-debootstrap-dir reuses corrupted partial downloads causing tar extraction failures
+- Root Cause: Previous failed runs leave corrupted .deb files in debootstrap cache
+- Fix Applied: Removed --keep-debootstrap-dir, added rm of debootstrap cache before each run
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
 ## Open Bugs
 
 (none currently)
