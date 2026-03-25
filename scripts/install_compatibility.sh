@@ -27,13 +27,18 @@ echo "deb [signed-by=/etc/apt/keyrings/winehq.gpg] \
 https://dl.winehq.org/wine-builds/ubuntu/ $(lsb_release -cs) main" \
     > /etc/apt/sources.list.d/winehq.list
 
-apt update -q
-apt install -y --install-recommends winehq-stable
-apt install -y winetricks wine-gecko wine-mono
-
-# Enable 32-bit architecture (required for many Windows apps)
+# Enable 32-bit architecture (required for Wine)
 dpkg --add-architecture i386
+apt-get update -qq
+
 apt update -q
+apt install -y --install-recommends \
+  winehq-stable \
+  wine-stable-amd64 \
+  wine-stable-i386 || \
+apt install -y wine64 wine32 \
+  libwine winetricks
+apt install -y winetricks wine-gecko wine-mono
 
 # Symlink Wine into Luminos compat dir
 mkdir -p "$COMPAT_BASE/wine"

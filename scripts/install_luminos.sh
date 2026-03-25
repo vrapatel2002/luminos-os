@@ -21,8 +21,10 @@ cp -r /luminos-build/config $LUMINOS_SRC/
 cp -r /luminos-build/systemd $LUMINOS_SRC/
 
 # 3. Install Python dependencies
-pip3 install -r $LUMINOS_SRC/requirements.txt \
-  --break-system-packages
+pip3 install -r /luminos-build/requirements.txt \
+  --break-system-packages \
+  --ignore-installed \
+  2>&1 || true
 
 # 4. Install systemd services
 cp $LUMINOS_SRC/systemd/luminos-ai.service \

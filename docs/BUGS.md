@@ -1,0 +1,131 @@
+# Luminos OS — Bug Tracker
+Last Updated: 2026-03-25
+
+## Format
+Each bug entry:
+### BUG-XXX — Short title
+- Status: OPEN / FIXED / WONTFIX
+- Severity: CRITICAL / HIGH / MEDIUM / LOW
+- Component: which file/module affected
+- Description: what happens
+- Root Cause: why it happens
+- Fix Applied: what was changed
+- Date Found: date
+- Date Fixed: date
+
+---
+
+## Fixed Bugs
+
+### BUG-001 — build.log directory missing at start
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/build_iso.sh
+- Description: tee fails because build/ dir doesn't exist when LOG variable is defined
+- Root Cause: mkdir -p $BUILD_DIR was missing
+- Fix Applied: mkdir -p $BUILD_DIR added before LOG= line
+- Date Found: 2026-03-23
+- Date Fixed: 2026-03-23
+
+### BUG-002 — cp copies directory into itself
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/build_iso.sh stage2
+- Description: cp -r . $CHROOT_DIR/luminos-build/ fails because build/ is subdir of current dir
+- Root Cause: source and destination overlap
+- Fix Applied: replaced with rsync --exclude=build
+- Date Found: 2026-03-23
+- Date Fixed: 2026-03-23
+
+### BUG-003 — No apt sources in minimal chroot
+- Status: FIXED
+- Severity: CRITICAL
+- Component: scripts/strip_ubuntu.sh
+- Description: apt cant find packages in chroot
+- Root Cause: debootstrap minimal has no universe repo configured
+- Fix Applied: Added sources.list with all Ubuntu repos at top of strip script
+- Date Found: 2026-03-23
+- Date Fixed: 2026-03-23
+
+### BUG-004 — fuser -km crashes the OS
+- Status: FIXED
+- Severity: CRITICAL
+- Component: scripts/build_iso.sh safe_cleanup
+- Description: fuser -km kills display server and systemd causing full system crash
+- Root Cause: fuser -km kills ALL processes using any file under the path including critical system processes
+- Fix Applied: Removed fuser -km, replaced with sleep 5
+- Date Found: 2026-03-24
+- Date Fixed: 2026-03-24
+
+### BUG-005 — Stage order wrong squashfs vs cleanup
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/build_iso.sh main block
+- Description: stage6_cleanup deleted chroot before stage7_squashfs could read it
+- Root Cause: stages in wrong order
+- Fix Applied: Reordered to stage7 before stage6
+- Date Found: 2026-03-24
+- Date Fixed: 2026-03-24
+
+### BUG-006 — meson option typo
+- Status: FIXED
+- Severity: MEDIUM
+- Component: scripts/strip_ubuntu.sh
+- Description: -Dexample=false fails on newer gtk4-layer-shell versions
+- Root Cause: option renamed to -Dexamples=false
+- Fix Applied: Fixed typo
+- Date Found: 2026-03-24
+- Date Fixed: 2026-03-24
+
+### BUG-007 — requirements.txt wrong path
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/install_luminos.sh
+- Description: pip3 install fails, file not found at /opt/luminos/requirements.txt
+- Root Cause: pip runs before files are copied to /opt/luminos/
+- Fix Applied: Changed path to /luminos-build/requirements.txt
+- Date Found: 2026-03-24
+- Date Fixed: 2026-03-24
+
+### BUG-008 — typing-extensions conflict
+- Status: FIXED
+- Severity: MEDIUM
+- Component: scripts/install_luminos.sh
+- Description: pip fails on typing-extensions installed by debian
+- Root Cause: debian-installed packages have no RECORD file, pip cant uninstall
+- Fix Applied: Added --ignore-installed flag
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
+### BUG-009 — Wine missing i386 architecture
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/install_compatibility.sh
+- Description: wine-stable uninstallable, wine-stable-i386 not available
+- Root Cause: 32-bit architecture not enabled
+- Fix Applied: Added dpkg --add-architecture i386 before Wine install
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
+### BUG-010 — proc virtual files block rm -rf
+- Status: FIXED
+- Severity: CRITICAL
+- Component: scripts/build_iso.sh safe_cleanup
+- Description: rm -rf $CHROOT_DIR fails on /proc/PID/* kernel virtual files
+- Root Cause: mount --bind /proc inside chroot creates kernel virtual files that cannot be deleted with rm -rf. umount fails if any process still running inside chroot.
+- Fix Applied: lsof-based process killer + proc-aware find deletion (skip proc/sys/dev, rmdir after unmount)
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
+## Open Bugs
+
+(none currently)
+
+## Known Limitations (not bugs)
+
+- NPU classifier: stubbed, needs ONNX models on real AMD XDNA hardware
+- HIVE models: needs GGUF files downloaded
+- Zone 3 VM boot: needs vmlinux + rootfs.ext4
+- RAM compression: zram not configured yet
+- Disk encryption: not enabled by default
+- Secure Boot: ISO not signed

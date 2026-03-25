@@ -8,3 +8,5 @@ __pycache__
 *.pyc
 .env
 config/luminos.conf.local
+.claude/
+wget-log*

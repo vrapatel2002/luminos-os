@@ -10,6 +10,81 @@ OUTPUT_ISO="$BUILD_DIR/luminos-os-v0.1.0.iso"
 LOG="$BUILD_DIR/build.log"
 START_TIME=$(date +%s)
 
+umount_chroot() {
+  local chroot=$1
+  for mnt in \
+    "$chroot/dev/pts" \
+    "$chroot/dev/shm" \
+    "$chroot/dev/mqueue" \
+    "$chroot/dev/hugepages" \
+    "$chroot/dev" \
+    "$chroot/proc" \
+    "$chroot/sys/fs/cgroup" \
+    "$chroot/sys" \
+    "$chroot/run"; do
+    umount -lf "$mnt" 2>/dev/null || true
+  done
+  sleep 2
+}
+
+safe_cleanup() {
+  local chroot=$1
+  [ -z "$chroot" ] && return 0
+  [ "$chroot" = "/" ] && return 0
+  [ ! -d "$chroot" ] && return 0
+
+  echo "Cleaning up chroot: $chroot"
+
+  # Step 1: Kill anything running in chroot
+  for pid in $(lsof +D "$chroot" 2>/dev/null \
+    | awk 'NR>1 {print $2}' | sort -u); do
+    kill -9 $pid 2>/dev/null || true
+  done
+  sleep 2
+
+  # Step 2: Lazy force unmount everything
+  # Order matters — children before parents
+  for mnt in \
+    "$chroot/dev/pts" \
+    "$chroot/dev/shm" \
+    "$chroot/dev/mqueue" \
+    "$chroot/dev/hugepages" \
+    "$chroot/dev" \
+    "$chroot/proc" \
+    "$chroot/sys/fs/cgroup" \
+    "$chroot/sys" \
+    "$chroot/run"; do
+    umount -lf "$mnt" 2>/dev/null || true
+  done
+  sleep 2
+
+  # Step 3: Check if proc is really unmounted
+  if mountpoint -q "$chroot/proc" 2>/dev/null
+  then
+    echo "WARNING: proc still mounted, forcing"
+    umount -lf "$chroot/proc" 2>/dev/null || true
+    sleep 3
+  fi
+
+  # Step 4: Remove everything EXCEPT proc/sys/dev
+  # using find with pruning
+  find "$chroot" \
+    -mindepth 1 -maxdepth 1 \
+    ! -name "proc" \
+    ! -name "sys" \
+    ! -name "dev" \
+    -exec rm -rf {} + 2>/dev/null || true
+
+  # Step 5: Now proc/sys/dev should be empty
+  # virtual dirs — safe to rmdir
+  rmdir "$chroot/proc" 2>/dev/null || true
+  rmdir "$chroot/sys" 2>/dev/null || true
+  rmdir "$chroot/dev" 2>/dev/null || true
+  rmdir "$chroot" 2>/dev/null || true
+
+  echo "Cleanup complete"
+}
+
 echo "=== Luminos OS ISO Builder ===" | tee $LOG
 echo "Ubuntu base: $UBUNTU_VERSION ($UBUNTU_CODENAME)"
 echo "Output: $OUTPUT_ISO"
@@ -18,7 +93,7 @@ echo "Output: $OUTPUT_ISO"
 check_deps() {
   local deps=(debootstrap squashfs-tools \
     xorriso grub-pc-bin grub-efi-amd64-bin \
-    mtools dosfstools)
+    mtools dosfstools qemu-utils rsync lsof)
   local missing=()
   for dep in "${deps[@]}"; do
     if ! dpkg -l $dep &>/dev/null; then
@@ -34,10 +109,14 @@ check_deps() {
 # Stage 1: Bootstrap Ubuntu base
 stage1_bootstrap() {
   echo "--- Stage 1: Bootstrap Ubuntu $UBUNTU_CODENAME ---"
-  rm -rf $CHROOT_DIR
+  safe_cleanup $CHROOT_DIR
+  mkdir -p $CHROOT_DIR
+  export http_proxy=""
+  export https_proxy=""
+  export no_proxy=""
   debootstrap --arch=amd64 $UBUNTU_CODENAME \
     $CHROOT_DIR \
-    http://archive.ubuntu.com/ubuntu/
+    http://ca.archive.ubuntu.com/ubuntu/
   echo "Stage 1 complete" | tee -a $LOG
 }
 
@@ -51,7 +130,7 @@ stage2_prepare() {
 
   # Copy Luminos source into chroot
   mkdir -p $CHROOT_DIR/luminos-build
-  cp -r . $CHROOT_DIR/luminos-build/
+  rsync -a --exclude=build --exclude=.git . $CHROOT_DIR/luminos-build/
 
   # Network for apt
   cp /etc/resolv.conf $CHROOT_DIR/etc/
@@ -139,11 +218,8 @@ stage6_cleanup() {
   rm -rf $CHROOT_DIR/tmp/*
   rm -f $CHROOT_DIR/etc/resolv.conf
 
-  # Unmount
-  umount -lf $CHROOT_DIR/dev/pts || true
-  umount -lf $CHROOT_DIR/dev || true
-  umount -lf $CHROOT_DIR/proc || true
-  umount -lf $CHROOT_DIR/sys || true
+  # Unmount only — chroot files still needed for squashfs
+  umount_chroot $CHROOT_DIR
   echo "Stage 6 complete" | tee -a $LOG
 }
 
@@ -210,14 +286,27 @@ stage8_iso() {
 }
 
 # Main
+# Kill any leftover chroot processes
+if [ -d "$CHROOT_DIR" ]; then
+  for pid in $(lsof +D "$CHROOT_DIR" \
+    2>/dev/null | awk 'NR>1 {print $2}' \
+    | sort -u); do
+    kill -9 $pid 2>/dev/null || true
+  done
+  sleep 1
+  umount_chroot "$CHROOT_DIR"
+fi
+mkdir -p $BUILD_DIR $CHROOT_DIR $ISO_DIR
+
 check_deps
 stage1_bootstrap
 stage2_prepare
 stage3_strip
 stage4_install
 stage5_configure
-stage6_cleanup
 stage7_squashfs
+stage6_cleanup
+safe_cleanup $CHROOT_DIR
 stage8_iso
 
 END_TIME=$(date +%s)

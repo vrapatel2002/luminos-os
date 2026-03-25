@@ -83,7 +83,7 @@ git clone --depth 1 \
   /tmp/gtk4-layer-shell 2>/dev/null || true
 cd /tmp/gtk4-layer-shell
 meson setup build \
-  -Dexample=false -Ddocs=false 2>/dev/null || true
+  -Dexamples=false -Ddocs=false 2>/dev/null || true
 ninja -C build 2>/dev/null || true
 ninja -C build install 2>/dev/null || true
 ldconfig
