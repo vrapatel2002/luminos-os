@@ -38,7 +38,20 @@ apt install -y --install-recommends \
   wine-stable-i386 || \
 apt install -y wine64 wine32 \
   libwine winetricks
-apt install -y winetricks wine-gecko wine-mono
+apt install -y winetricks
+
+# Download wine-gecko and wine-mono manually (not in apt repos)
+GECKO_VER="2.47.4"
+MONO_VER="9.3.0"
+GECKO_URL="https://dl.winehq.org/wine/wine-gecko/${GECKO_VER}/wine-gecko-${GECKO_VER}-x86_64.msi"
+MONO_URL="https://dl.winehq.org/wine/wine-mono/${MONO_VER}/wine-mono-${MONO_VER}-x86_64.msi"
+
+mkdir -p /usr/share/wine/gecko
+mkdir -p /usr/share/wine/mono
+
+wget -q "$GECKO_URL" -O /usr/share/wine/gecko/wine-gecko-${GECKO_VER}-x86_64.msi || true
+wget -q "$MONO_URL" -O /usr/share/wine/mono/wine-mono-${MONO_VER}-x86_64.msi || true
+echo "Wine gecko and mono downloaded"
 
 # Symlink Wine into Luminos compat dir
 mkdir -p "$COMPAT_BASE/wine"

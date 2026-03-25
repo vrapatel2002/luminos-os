@@ -117,6 +117,17 @@ Each bug entry:
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25
 
+### BUG-011 — wine-gecko and wine-mono not in apt
+- Status: FIXED
+- Severity: MEDIUM
+- Component: scripts/install_compatibility.sh
+- Description: apt install wine-gecko wine-mono fails — packages not in Ubuntu repos
+- Root Cause: gecko and mono are distributed by WineHQ directly, not through apt
+- Fix Applied: wget from dl.winehq.org directly to /usr/share/wine/gecko and mono dirs
+- New Bugs Introduced: None — wget uses || true so build continues even if download fails. Wine works without gecko/mono for most apps, only needed for .NET and browser controls.
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
 ## Open Bugs
 
 (none currently)
