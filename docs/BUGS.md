@@ -150,6 +150,17 @@ Each bug entry:
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25
 
+### BUG-014 — mksquashfs includes proc/sys/dev
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/build_iso.sh stage7
+- Description: mksquashfs tries to read kernel virtual files in /proc /sys /dev causing thousands of "Failed to read" errors
+- Root Cause: No exclusions passed to mksquashfs
+- Fix Applied: Added -e exclusions for proc sys dev run tmp
+- New Bugs Introduced: None — these dirs are recreated automatically on every boot
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
 ## Open Bugs
 
 (none currently)

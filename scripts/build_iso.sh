@@ -233,6 +233,11 @@ stage7_squashfs() {
   mksquashfs $CHROOT_DIR \
     $ISO_DIR/casper/filesystem.squashfs \
     -comp xz -b 1M -no-progress \
+    -e $CHROOT_DIR/proc \
+    -e $CHROOT_DIR/sys \
+    -e $CHROOT_DIR/dev \
+    -e $CHROOT_DIR/run \
+    -e $CHROOT_DIR/tmp \
     2>&1 | tee -a $LOG
 
   # Filesystem size for installer
