@@ -109,12 +109,15 @@ check_deps() {
 # Stage 1: Bootstrap Ubuntu base
 stage1_bootstrap() {
   echo "--- Stage 1: Bootstrap Ubuntu $UBUNTU_CODENAME ---"
-  safe_cleanup $CHROOT_DIR
+  # Just unmount — never rm -rf at start (BUG-012)
+  umount_chroot $CHROOT_DIR 2>/dev/null || true
+  # debootstrap will overwrite existing chroot
   mkdir -p $CHROOT_DIR
   export http_proxy=""
   export https_proxy=""
   export no_proxy=""
-  debootstrap --arch=amd64 $UBUNTU_CODENAME \
+  debootstrap --arch=amd64 --keep-debootstrap-dir \
+    $UBUNTU_CODENAME \
     $CHROOT_DIR \
     http://ca.archive.ubuntu.com/ubuntu/
   echo "Stage 1 complete" | tee -a $LOG
@@ -286,16 +289,8 @@ stage8_iso() {
 }
 
 # Main
-# Kill any leftover chroot processes
-if [ -d "$CHROOT_DIR" ]; then
-  for pid in $(lsof +D "$CHROOT_DIR" \
-    2>/dev/null | awk 'NR>1 {print $2}' \
-    | sort -u); do
-    kill -9 $pid 2>/dev/null || true
-  done
-  sleep 1
-  umount_chroot "$CHROOT_DIR"
-fi
+# Only unmount at start — never rm -rf (BUG-012)
+umount_chroot "$CHROOT_DIR" 2>/dev/null || true
 mkdir -p $BUILD_DIR $CHROOT_DIR $ISO_DIR
 
 check_deps
@@ -306,8 +301,9 @@ stage4_install
 stage5_configure
 stage7_squashfs
 stage6_cleanup
-safe_cleanup $CHROOT_DIR
 stage8_iso
+# Only safe to delete chroot AFTER squashfs + ISO are built (BUG-012)
+safe_cleanup $CHROOT_DIR
 
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))

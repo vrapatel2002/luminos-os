@@ -128,6 +128,17 @@ Each bug entry:
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25
 
+### BUG-012 — safe_cleanup cant clean proc at start
+- Status: FIXED
+- Severity: CRITICAL
+- Component: scripts/build_iso.sh
+- Description: rm -rf chroot at build start fails on /proc/* kernel virtual files
+- Root Cause: Fundamental design error — cant rm -rf chroot that has proc mounted. lsof fix doesnt work because cleanup runs in same process tree as the chroot.
+- Fix Applied: Removed rm -rf from build start. Only unmount at start, let debootstrap overwrite. Only delete chroot AFTER squashfs + ISO are complete. Added --keep-debootstrap-dir to reuse partial downloads on retry.
+- New Bugs Introduced: Old chroot files may persist if debootstrap fails mid-run. Acceptable tradeoff — better than crashing.
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
 ## Open Bugs
 
 (none currently)
