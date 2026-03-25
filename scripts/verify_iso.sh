@@ -52,7 +52,7 @@ check "Sway installed" \
     && echo true || echo false)
 
 check "Wine64 installed" \
-  $([ -f "$SQMOUNT/usr/bin/wine64" ] \
+  $([ -f "$SQMOUNT/usr/bin/wine" ] \
     && echo true || echo false)
 
 check "Firecracker installed" \
