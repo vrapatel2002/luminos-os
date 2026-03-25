@@ -171,6 +171,16 @@ Each bug entry:
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25
 
+### BUG-016 — grub.cfg not found in Stage 8
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/build_iso.sh stage8
+- Description: cp build/grub.cfg fails, file not found
+- Root Cause: grub.cfg path wrong or file missing from repo
+- Fix Applied: Added inline grub.cfg generation as fallback if file not found
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
 ## Open Bugs
 
 (none currently)

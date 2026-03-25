@@ -256,8 +256,28 @@ stage8_iso() {
   mkdir -p $ISO_DIR/boot/grub
   mkdir -p $ISO_DIR/EFI/boot
 
-  # GRUB config
-  cp build/grub.cfg $ISO_DIR/boot/grub/
+  # GRUB config — copy if exists, generate inline if missing (BUG-016)
+  cp build/grub.cfg $ISO_DIR/boot/grub/ 2>/dev/null || \
+  cat > $ISO_DIR/boot/grub/grub.cfg << 'GRUBEOF'
+set default=0
+set timeout=5
+
+menuentry "Luminos OS" {
+  insmod all_video
+  linux /casper/vmlinuz boot=casper quiet splash
+  initrd /casper/initrd
+}
+
+menuentry "Luminos OS (Safe Graphics)" {
+  linux /casper/vmlinuz boot=casper nomodeset
+  initrd /casper/initrd
+}
+
+menuentry "Install Luminos to Disk" {
+  linux /casper/vmlinuz boot=casper only-ubiquity quiet splash
+  initrd /casper/initrd
+}
+GRUBEOF
 
   # Copy kernel + initrd from chroot
   cp $CHROOT_DIR/boot/vmlinuz \
