@@ -211,6 +211,19 @@ path.insert(0, '/opt/luminos')
 from src.compositor.compositor_config import write_config
 write_config('/etc/sway/config')
 "
+
+  # Install kernel + live boot packages (BUG-017)
+  chroot $CHROOT_DIR apt-get install -y \
+    linux-image-generic \
+    linux-headers-generic \
+    initramfs-tools \
+    casper \
+    lupin-casper \
+    discover \
+    laptop-detect \
+    os-prober \
+    2>&1 | tee -a $LOG
+
   echo "Stage 5 complete" | tee -a $LOG
 }
 
@@ -279,11 +292,17 @@ menuentry "Install Luminos to Disk" {
 }
 GRUBEOF
 
-  # Copy kernel + initrd from chroot
-  cp $CHROOT_DIR/boot/vmlinuz \
-    $ISO_DIR/casper/vmlinuz
-  cp $CHROOT_DIR/boot/initrd.img \
-    $ISO_DIR/casper/initrd
+  # Find vmlinuz and initrd wherever they are (BUG-017)
+  VMLINUZ=$(find $CHROOT_DIR/boot -name "vmlinuz*" | head -1)
+  INITRD=$(find $CHROOT_DIR/boot -name "initrd*" | head -1)
+
+  if [ -z "$VMLINUZ" ]; then
+    echo "ERROR: No kernel found in chroot"
+    exit 1
+  fi
+
+  cp $VMLINUZ $ISO_DIR/casper/vmlinuz
+  cp $INITRD $ISO_DIR/casper/initrd
 
   # Build EFI image
   grub-mkstandalone \

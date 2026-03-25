@@ -181,6 +181,16 @@ Each bug entry:
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25
 
+### BUG-017 — No kernel in chroot for Stage 8
+- Status: FIXED
+- Severity: CRITICAL
+- Component: scripts/build_iso.sh
+- Description: Stage 8 fails copying vmlinuz because no kernel installed in chroot
+- Root Cause: linux-image-generic not installed during chroot setup stages
+- Fix Applied: Added kernel + casper install in stage5, dynamic kernel file detection in stage8
+- Date Found: 2026-03-25
+- Date Fixed: 2026-03-25
+
 ## Open Bugs
 
 (none currently)
