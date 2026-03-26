@@ -342,25 +342,45 @@ stage8_iso() {
   mkdir -p "$ISO_DIR/boot/grub"
   mkdir -p "$ISO_DIR/EFI/boot"
 
-  # GRUB config — copy if exists, generate inline if missing (BUG-016)
+  # GRUB config — copy if exists, generate inline if missing (BUG-016, BUG-022)
+  # search command tells GRUB which device has the casper filesystem
   cp build/grub.cfg "$ISO_DIR/boot/grub/" 2>/dev/null || \
   cat > "$ISO_DIR/boot/grub/grub.cfg" << 'GRUBEOF'
 set default=0
 set timeout=5
 
+insmod part_gpt
+insmod part_msdos
+insmod fat
+insmod iso9660
+insmod loopback
+insmod all_video
+insmod gfxterm
+insmod gfxterm_background
+
+set gfxmode=auto
+terminal_output gfxterm
+
+search --no-floppy --set=root \
+  --file /casper/filesystem.squashfs
+
 menuentry "Luminos OS" {
-  insmod all_video
-  linux /casper/vmlinuz boot=casper quiet splash
+  linux /casper/vmlinuz \
+    boot=casper \
+    root=UUID=$(blkid -s UUID -o value /dev/sda) \
+    quiet splash ---
   initrd /casper/initrd
 }
 
 menuentry "Luminos OS (Safe Graphics)" {
-  linux /casper/vmlinuz boot=casper nomodeset
+  linux /casper/vmlinuz \
+    boot=casper nomodeset ---
   initrd /casper/initrd
 }
 
 menuentry "Install Luminos to Disk" {
-  linux /casper/vmlinuz boot=casper only-ubiquity quiet splash
+  linux /casper/vmlinuz \
+    boot=casper only-ubiquity quiet splash ---
   initrd /casper/initrd
 }
 GRUBEOF
