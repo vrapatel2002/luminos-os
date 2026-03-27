@@ -241,6 +241,16 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-024 — grub search command fails to find root device
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/smart_build.sh stage8 grub.cfg
+- Description: GRUB search --file command can fail to locate the ISO root device, preventing vmlinuz from loading
+- Root Cause: search command relies on runtime device enumeration which is unreliable across BIOS/EFI/VM environments
+- Fix Applied: Replaced search command with hardcoded set root=(cd0), removed loopback/gfxterm modules and toram parameter, simplified grub.cfg to minimal direct boot
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
 ## Open Bugs
 
 (none currently)
