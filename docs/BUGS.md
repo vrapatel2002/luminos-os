@@ -256,8 +256,18 @@ Each bug entry:
 - Severity: CRITICAL
 - Component: scripts/smart_build.sh stage8
 - Description: GRUB loads and shows menu but every entry fails with "file '/casper/vmlinuz' not found". Manual boot from GRUB command line works fine.
-- Root Cause: grub-mkstandalone embedded the full grub.cfg into the EFI binary's memdisk. GRUB's $prefix pointed to (memdisk)/boot/grub, so it never read the grub.cfg from the ISO filesystem. The bios.img had the same issue — no embedded config to locate the ISO device. Hardcoded set root=(cd0) from BUG-024 fix only works interactively, not when baked into the boot image.
-- Fix Applied: Created embedded bootstrap grub.cfg (search --file /casper/vmlinuz + configfile $prefix/grub.cfg) that is baked into both bios.img (via grub-mkimage -c) and bootx64.efi (via grub-mkstandalone). The bootstrap finds the correct device at runtime then chain-loads the real grub.cfg. Also: build bios.img with grub-mkimage + cdboot.img prepend, create efiboot.img FAT image properly, and updated main grub.cfg to Ubuntu live ISO style with set gfxpayload=keep, fsck.mode=skip, noprompt.
+- Root Cause: grub-mkstandalone embedded the full grub.cfg into the EFI binary's memdisk. GRUB's $prefix pointed to (memdisk)/boot/grub, so it never read the grub.cfg from the ISO filesystem.
+- Fix Applied: Switched to grub-mkrescue which handles embedded config, boot images, and xorriso automatically. grub.cfg uses search --file to find boot device. Superseded by BUG-026 fix.
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
+### BUG-026 — search_file.mod not found in grub-mkimage
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/smart_build.sh stage8
+- Description: grub-mkimage fails with "cannot open search_file.mod: No such file" when building BIOS boot image
+- Root Cause: Wrong module name — Ubuntu 24.04 GRUB uses search_fs_file.mod, not search_file.mod. Manual grub-mkimage + grub-mkstandalone + xorriso approach was fragile and error-prone.
+- Fix Applied: Replaced entire manual BIOS/EFI boot image pipeline with grub-mkrescue, which resolves all module names automatically, creates both BIOS and EFI boot images, and invokes xorriso correctly in one command. Modules pre-loaded: all_video boot cat chain configfile echo fat iso9660 linux loadenv normal part_gpt part_msdos reboot search search_label search_fs_file search_fs_uuid squash4 gfxterm png.
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 

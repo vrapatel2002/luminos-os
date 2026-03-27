@@ -384,7 +384,7 @@ stage7_squashfs() {
 }
 
 # ============================================================================
-# Stage 8: Build bootable ISO (BUG-025: fixed embedded GRUB config)
+# Stage 8: Build bootable ISO (BUG-025, BUG-026: grub-mkrescue)
 # ============================================================================
 stage8_iso() {
   if [ -f "$OUTPUT_ISO" ]; then
@@ -395,7 +395,6 @@ stage8_iso() {
   log_stage RUN 8 "build ISO"
 
   mkdir -p "$ISO_DIR/boot/grub"
-  mkdir -p "$ISO_DIR/EFI/boot"
 
   # ---- Find vmlinuz and initrd (BUG-017) ----
   VMLINUZ=$(find "$CHROOT_DIR/boot" -name "vmlinuz*" 2>/dev/null | head -1)
@@ -407,10 +406,13 @@ stage8_iso() {
     exit 1
   fi
 
+  mkdir -p "$ISO_DIR/casper"
   cp "$VMLINUZ" "$ISO_DIR/casper/vmlinuz"
   cp "$INITRD" "$ISO_DIR/casper/initrd"
 
   # ---- Main grub.cfg (lives on ISO at /boot/grub/grub.cfg) ----
+  # grub-mkrescue picks this up automatically from the ISO directory.
+  # Uses search --file to find the boot device at runtime (BUG-025).
   cat > "$ISO_DIR/boot/grub/grub.cfg" << 'GRUBEOF'
 set default=0
 set timeout=5
@@ -419,10 +421,8 @@ insmod all_video
 insmod gfxterm
 insmod png
 
-# If search hasn't already set root, try to find our media
-if [ -z "$root" ] || [ "$root" = "memdisk" ]; then
-  search --no-floppy --set=root --file /casper/vmlinuz
-fi
+# Find the device containing our kernel
+search --no-floppy --set=root --file /casper/vmlinuz
 
 menuentry "Luminos OS" {
   set gfxpayload=keep
@@ -462,78 +462,25 @@ menuentry "Install Luminos to Disk" {
 }
 GRUBEOF
 
-  # ---- Embedded bootstrap grub.cfg (BUG-025) ----
-  # This minimal config is baked into bios.img and bootx64.efi.
-  # Its only job: find the device with our kernel, then load the
-  # real grub.cfg from that device. This fixes the problem where
-  # GRUB's embedded config had wrong $prefix pointing to memdisk.
-  local EMBED_CFG
-  EMBED_CFG=$(mktemp)
-  cat > "$EMBED_CFG" << 'EMBEDEOF'
-search --no-floppy --set=root --file /casper/vmlinuz
-set prefix=($root)/boot/grub
-configfile $prefix/grub.cfg
-EMBEDEOF
-
-  # ---- Build BIOS boot image (i386-pc) ----
-  echo "Building BIOS boot image..."
-  grub-mkimage \
-    -O i386-pc \
-    -o "$ISO_DIR/boot/grub/bios.img" \
-    -p /boot/grub \
-    -c "$EMBED_CFG" \
-    biosdisk iso9660 part_gpt part_msdos \
-    search search_file normal configfile \
-    linux all_video gfxterm font \
-    echo test cat ls
-
-  # Prepend cdboot.img for El Torito
-  cat /usr/lib/grub/i386-pc/cdboot.img \
-    "$ISO_DIR/boot/grub/bios.img" \
-    > "$ISO_DIR/boot/grub/bios_eltorito.img"
-  mv "$ISO_DIR/boot/grub/bios_eltorito.img" \
-    "$ISO_DIR/boot/grub/bios.img"
-
-  # ---- Build EFI boot image (x86_64-efi) ----
-  echo "Building EFI boot image..."
-  grub-mkstandalone \
-    --format=x86_64-efi \
-    --output="$ISO_DIR/EFI/boot/bootx64.efi" \
-    --modules="part_gpt part_msdos fat iso9660 search search_file \
-               normal configfile linux all_video gfxterm font" \
-    "boot/grub/grub.cfg=$EMBED_CFG"
-
-  # ---- Create FAT efiboot.img containing bootx64.efi ----
-  echo "Building EFI boot FAT image..."
-  EFI_IMG="$ISO_DIR/EFI/boot/efiboot.img"
-  EFI_SIZE_KB=$(( ($(stat -c%s "$ISO_DIR/EFI/boot/bootx64.efi") / 1024) + 512 ))
-  dd if=/dev/zero of="$EFI_IMG" bs=1K count="$EFI_SIZE_KB" 2>/dev/null
-  mkfs.fat -F 16 "$EFI_IMG" >/dev/null
-  mmd -i "$EFI_IMG" ::EFI
-  mmd -i "$EFI_IMG" ::EFI/boot
-  mcopy -i "$EFI_IMG" "$ISO_DIR/EFI/boot/bootx64.efi" ::EFI/boot/bootx64.efi
-
-  rm -f "$EMBED_CFG"
-
-  # ---- Build ISO with xorriso ----
-  echo "Building ISO..."
-  xorriso -as mkisofs \
-    -iso-level 3 \
-    -full-iso9660-filenames \
+  # ---- Build ISO with grub-mkrescue (BUG-026) ----
+  # grub-mkrescue handles everything automatically:
+  #   - Resolves all GRUB modules (no manual search_file vs search_fs_file)
+  #   - Creates BIOS boot image (i386-pc) with correct cdboot.img
+  #   - Creates EFI boot image (x86_64-efi) with correct embedded config
+  #   - Creates efiboot.img FAT image
+  #   - Invokes xorriso with correct parameters
+  #   - Reads boot/grub/grub.cfg from ISO_DIR automatically
+  echo "Building ISO with grub-mkrescue..."
+  grub-mkrescue \
+    --modules="all_video boot cat chain configfile echo \
+               fat iso9660 linux loadenv normal \
+               part_gpt part_msdos reboot search \
+               search_label search_fs_file search_fs_uuid \
+               squash4 gfxterm png" \
+    --output="$OUTPUT_ISO" \
+    "$ISO_DIR" \
+    -- \
     -volid "LUMINOS_OS" \
-    -eltorito-boot boot/grub/bios.img \
-    -no-emul-boot -boot-load-size 4 \
-    -boot-info-table --eltorito-catalog \
-      boot/grub/boot.cat \
-    --grub2-boot-info --grub2-mbr \
-      /usr/lib/grub/i386-pc/boot_hybrid.img \
-    -eltorito-alt-boot \
-    -e EFI/boot/efiboot.img \
-    -no-emul-boot \
-    -append_partition 2 0xef \
-      "$EFI_IMG" \
-    -output "$OUTPUT_ISO" \
-    -graft-points "$ISO_DIR" \
     2>&1 | tee -a "$LOG"
 
   echo "Stage 8 complete" | tee -a "$LOG"
