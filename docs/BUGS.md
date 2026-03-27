@@ -231,6 +231,16 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-023 — initrd missing live-boot hooks
+- Status: FIXED
+- Severity: CRITICAL
+- Component: ISO build stage5
+- Description: Kernel panic on boot, /root empty, /root/dev/console not found
+- Root Cause: initrd generated before live-boot installed — no live filesystem hooks in initrd
+- Fix Applied: Install live-boot first, create custom initramfs hook, force initrd regeneration with clean env, verify live modules present via lsinitramfs, copy fresh initrd to ISO casper folder
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
 ## Open Bugs
 
 (none currently)

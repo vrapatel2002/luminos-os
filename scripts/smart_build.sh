@@ -243,21 +243,60 @@ from src.compositor.compositor_config import write_config
 write_config('/etc/sway/config')
 " 2>/dev/null || echo "WARN: sway config generation failed (non-fatal)"
 
-  # Install kernel + live boot packages (BUG-017, BUG-021, BUG-022)
+  # Install kernel (BUG-017)
   chroot "$CHROOT_DIR" apt-get install -y \
     linux-image-generic \
-    casper \
-    live-boot \
-    live-boot-initramfs-tools \
-    live-config \
-    live-config-systemd \
     initramfs-tools \
     os-prober || true \
     2>&1 | tee -a "$LOG"
 
-  # Regenerate initrd with casper/live-boot hooks (BUG-022)
-  chroot "$CHROOT_DIR" update-initramfs -u -k all \
+  # Step 1: Install live-boot packages FIRST (BUG-023, BUG-022, BUG-021)
+  # These MUST be installed before initrd regeneration so hooks are present
+  chroot "$CHROOT_DIR" apt-get install -y \
+    live-boot \
+    live-boot-initramfs-tools \
+    live-config \
+    live-config-systemd \
+    casper \
     2>&1 | tee -a "$LOG"
+
+  # Step 2: Create initramfs hook for live filesystem (BUG-023)
+  mkdir -p "$CHROOT_DIR/etc/initramfs-tools/hooks"
+  cat > "$CHROOT_DIR/etc/initramfs-tools/hooks/live_hook" << 'HOOK'
+#!/bin/sh
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in prereqs) prereqs; exit 0;; esac
+. /usr/share/initramfs-tools/hook-functions
+copy_exec /bin/mount /bin
+copy_exec /bin/umount /bin
+HOOK
+  chmod +x "$CHROOT_DIR/etc/initramfs-tools/hooks/live_hook"
+
+  # Step 3: Force regenerate initrd AFTER live-boot install (BUG-023)
+  chroot "$CHROOT_DIR" \
+    env -i HOME=/root TERM=linux PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    update-initramfs -u -k all -v \
+    2>&1 | tee -a "$LOG"
+
+  # Step 4: Verify initrd has live modules (BUG-023)
+  echo "Verifying initrd contains live-boot hooks..."
+  LIVE_CHECK=$(chroot "$CHROOT_DIR" sh -c \
+    "lsinitramfs /boot/initrd.img-* | grep live | head -5" 2>/dev/null || true)
+  if [ -z "$LIVE_CHECK" ]; then
+    echo "ERROR: live-boot hooks NOT found in initrd — BUG-023 not fixed"
+    echo "initrd was regenerated but contains no live/* files"
+    exit 1
+  fi
+  echo "OK: live-boot hooks found in initrd:"
+  echo "$LIVE_CHECK"
+
+  # Step 5: Copy fresh initrd to ISO casper folder (BUG-023)
+  mkdir -p "$ISO_DIR/casper"
+  NEW_INITRD=$(find "$CHROOT_DIR/boot" -name "initrd*" | head -1)
+  cp "$NEW_INITRD" "$ISO_DIR/casper/initrd"
+  chmod 644 "$ISO_DIR/casper/initrd"
+  echo "New initrd copied: $(ls -lh "$ISO_DIR/casper/initrd")"
 
   # Create required root directories for live boot (BUG-022)
   mkdir -p "$CHROOT_DIR/root/dev"
