@@ -251,6 +251,16 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-025 — GRUB embedded config ignores grub.cfg on ISO
+- Status: FIXED
+- Severity: CRITICAL
+- Component: scripts/smart_build.sh stage8
+- Description: GRUB loads and shows menu but every entry fails with "file '/casper/vmlinuz' not found". Manual boot from GRUB command line works fine.
+- Root Cause: grub-mkstandalone embedded the full grub.cfg into the EFI binary's memdisk. GRUB's $prefix pointed to (memdisk)/boot/grub, so it never read the grub.cfg from the ISO filesystem. The bios.img had the same issue — no embedded config to locate the ISO device. Hardcoded set root=(cd0) from BUG-024 fix only works interactively, not when baked into the boot image.
+- Fix Applied: Created embedded bootstrap grub.cfg (search --file /casper/vmlinuz + configfile $prefix/grub.cfg) that is baked into both bios.img (via grub-mkimage -c) and bootx64.efi (via grub-mkstandalone). The bootstrap finds the correct device at runtime then chain-loads the real grub.cfg. Also: build bios.img with grub-mkimage + cdboot.img prepend, create efiboot.img FAT image properly, and updated main grub.cfg to Ubuntu live ISO style with set gfxpayload=keep, fsck.mode=skip, noprompt.
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
 ## Open Bugs
 
 (none currently)
