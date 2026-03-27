@@ -271,6 +271,16 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-027 — squashfs missing root filesystem mount point directories
+- Status: FIXED
+- Severity: CRITICAL
+- Component: scripts/smart_build.sh stage7
+- Description: casper mounts squashfs but /root/dev, /root/proc, /root/sys are missing. Boot fails with "mount: mounting /dev on /root/dev failed: No such file or directory" and "can't open /root/dev/console: no such file"
+- Root Cause: mksquashfs -e "$CHROOT_DIR/dev" excluded the directories entirely from the squashfs — not even empty directory stubs survived. casper's /init needs /dev /proc /sys /run /tmp to exist as empty mount points inside the squashfs root.
+- Fix Applied: Changed mksquashfs exclusions from -e "$CHROOT_DIR/dev" (excludes entire directory) to -wildcards -e "dev/*" (keeps empty directory stub, excludes only contents). Added explicit creation of /dev /proc /sys /run /tmp /root /cdrom directories and /etc/fstab before squashfs build.
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
 ## Open Bugs
 
 (none currently)

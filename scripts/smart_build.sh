@@ -345,7 +345,7 @@ stage6_cleanup() {
 }
 
 # ============================================================================
-# Stage 7: Build squashfs
+# Stage 7: Build squashfs (BUG-027: preserve mount point directories)
 # ============================================================================
 stage7_squashfs() {
   if [ -f "$ISO_DIR/casper/filesystem.squashfs" ]; then
@@ -365,15 +365,36 @@ stage7_squashfs() {
   # Ensure chroot is unmounted before squashfs (cleaner image)
   umount_chroot "$CHROOT_DIR" 2>/dev/null || true
 
+  # ---- BUG-027: Create required mount point directories ----
+  # casper's /init mounts these into the squashfs root.
+  # They MUST exist as empty directories inside the squashfs.
+  # Previous bug: mksquashfs -e excluded them entirely.
+  for dir in dev proc sys run tmp; do
+    mkdir -p "$CHROOT_DIR/$dir"
+  done
+  chmod 1777 "$CHROOT_DIR/tmp"
+  mkdir -p "$CHROOT_DIR/root"
+  chmod 700 "$CHROOT_DIR/root"
+  # Ensure /etc/fstab exists (casper checks for it)
+  touch "$CHROOT_DIR/etc/fstab" 2>/dev/null || true
+  # Ensure /cdrom mount point exists for casper
+  mkdir -p "$CHROOT_DIR/cdrom"
+
   mkdir -p "$ISO_DIR/casper"
+
+  # ---- Build squashfs ----
+  # IMPORTANT: Use wildcard exclusions (dir/*) NOT directory exclusions (dir)
+  # so that the empty mount point directories are preserved in the squashfs.
+  # casper needs /dev /proc /sys /run /tmp to exist as empty dirs.
   mksquashfs "$CHROOT_DIR" \
     "$ISO_DIR/casper/filesystem.squashfs" \
     -comp xz -b 1M -no-progress \
-    -e "$CHROOT_DIR/proc" \
-    -e "$CHROOT_DIR/sys" \
-    -e "$CHROOT_DIR/dev" \
-    -e "$CHROOT_DIR/run" \
-    -e "$CHROOT_DIR/tmp" \
+    -wildcards \
+    -e "proc/*" \
+    -e "sys/*" \
+    -e "dev/*" \
+    -e "run/*" \
+    -e "tmp/*" \
     2>&1 | tee -a "$LOG"
 
   # Filesystem size for installer
