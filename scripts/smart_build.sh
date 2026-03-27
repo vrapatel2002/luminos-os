@@ -243,13 +243,29 @@ from src.compositor.compositor_config import write_config
 write_config('/etc/sway/config')
 " 2>/dev/null || echo "WARN: sway config generation failed (non-fatal)"
 
-  # Install kernel + live boot packages (BUG-017, BUG-021)
+  # Install kernel + live boot packages (BUG-017, BUG-021, BUG-022)
   chroot "$CHROOT_DIR" apt-get install -y \
     linux-image-generic \
-    initramfs-tools \
     casper \
+    live-boot \
+    live-boot-initramfs-tools \
+    live-config \
+    live-config-systemd \
+    initramfs-tools \
     os-prober || true \
     2>&1 | tee -a "$LOG"
+
+  # Regenerate initrd with casper/live-boot hooks (BUG-022)
+  chroot "$CHROOT_DIR" update-initramfs -u -k all \
+    2>&1 | tee -a "$LOG"
+
+  # Create required root directories for live boot (BUG-022)
+  mkdir -p "$CHROOT_DIR/root/dev"
+  mkdir -p "$CHROOT_DIR/root/proc"
+  mkdir -p "$CHROOT_DIR/root/sys"
+  mkdir -p "$CHROOT_DIR/root/run"
+  mkdir -p "$CHROOT_DIR/root/tmp"
+  mkdir -p "$CHROOT_DIR/cdrom"
 
   # Verify kernel installed
   if ! ls "$CHROOT_DIR"/boot/vmlinuz* &>/dev/null; then
@@ -342,7 +358,7 @@ stage8_iso() {
   mkdir -p "$ISO_DIR/boot/grub"
   mkdir -p "$ISO_DIR/EFI/boot"
 
-  # GRUB config — copy if exists, generate inline if missing (BUG-016, BUG-022)
+  # GRUB config — copy if exists, generate inline if missing (BUG-016)
   # search command tells GRUB which device has the casper filesystem
   cp build/grub.cfg "$ISO_DIR/boot/grub/" 2>/dev/null || \
   cat > "$ISO_DIR/boot/grub/grub.cfg" << 'GRUBEOF'
@@ -367,20 +383,21 @@ search --no-floppy --set=root \
 menuentry "Luminos OS" {
   linux /casper/vmlinuz \
     boot=casper \
-    root=UUID=$(blkid -s UUID -o value /dev/sda) \
+    live-media-path=/casper \
+    toram \
     quiet splash ---
   initrd /casper/initrd
 }
 
 menuentry "Luminos OS (Safe Graphics)" {
   linux /casper/vmlinuz \
-    boot=casper nomodeset ---
+    boot=casper live-media-path=/casper nomodeset ---
   initrd /casper/initrd
 }
 
 menuentry "Install Luminos to Disk" {
   linux /casper/vmlinuz \
-    boot=casper only-ubiquity quiet splash ---
+    boot=casper live-media-path=/casper only-ubiquity quiet splash ---
   initrd /casper/initrd
 }
 GRUBEOF

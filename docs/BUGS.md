@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-03-25
+Last Updated: 2026-03-27
 
 ## Format
 Each bug entry:
@@ -220,6 +220,16 @@ Each bug entry:
 - Fix Applied: Removed lupin-casper and other obsolete packages from install list
 - Date Found: 2026-03-25
 - Date Fixed: 2026-03-25
+
+### BUG-022 — casper can't mount squashfs on boot
+- Status: FIXED
+- Severity: CRITICAL
+- Component: ISO boot / casper
+- Description: casper finds squashfs but fails to mount it as root filesystem. Errors: "mounting /dev/nvme0n1p3 on /cdrom failed" and "/root/dev/console: no such file"
+- Root Cause: Missing live-boot packages (live-boot, live-boot-initramfs-tools, live-config, live-config-systemd) and initrd not regenerated after casper install. Also missing /root directory structure and live-media-path GRUB parameter.
+- Fix Applied: Added live-boot packages to stage5, regenerated initrd with update-initramfs -u -k all, created /root/{dev,proc,sys,run,tmp} and /cdrom directories, added live-media-path=/casper and toram to GRUB boot parameters
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
 
 ## Open Bugs
 

@@ -213,13 +213,29 @@ from src.compositor.compositor_config import write_config
 write_config('/etc/sway/config')
 "
 
-  # Install kernel + live boot packages (BUG-017, BUG-021)
+  # Install kernel + live boot packages (BUG-017, BUG-021, BUG-022)
   chroot $CHROOT_DIR apt-get install -y \
     linux-image-generic \
-    initramfs-tools \
     casper \
+    live-boot \
+    live-boot-initramfs-tools \
+    live-config \
+    live-config-systemd \
+    initramfs-tools \
     os-prober || true \
     2>&1 | tee -a $LOG
+
+  # Regenerate initrd with casper/live-boot hooks (BUG-022)
+  chroot $CHROOT_DIR update-initramfs -u -k all \
+    2>&1 | tee -a $LOG
+
+  # Create required root directories for live boot (BUG-022)
+  mkdir -p $CHROOT_DIR/root/dev
+  mkdir -p $CHROOT_DIR/root/proc
+  mkdir -p $CHROOT_DIR/root/sys
+  mkdir -p $CHROOT_DIR/root/run
+  mkdir -p $CHROOT_DIR/root/tmp
+  mkdir -p $CHROOT_DIR/cdrom
 
   echo "Stage 5 complete" | tee -a $LOG
 }
@@ -274,17 +290,17 @@ set timeout=5
 
 menuentry "Luminos OS" {
   insmod all_video
-  linux /casper/vmlinuz boot=casper quiet splash
+  linux /casper/vmlinuz boot=casper live-media-path=/casper toram quiet splash ---
   initrd /casper/initrd
 }
 
 menuentry "Luminos OS (Safe Graphics)" {
-  linux /casper/vmlinuz boot=casper nomodeset
+  linux /casper/vmlinuz boot=casper live-media-path=/casper nomodeset ---
   initrd /casper/initrd
 }
 
 menuentry "Install Luminos to Disk" {
-  linux /casper/vmlinuz boot=casper only-ubiquity quiet splash
+  linux /casper/vmlinuz boot=casper live-media-path=/casper only-ubiquity quiet splash ---
   initrd /casper/initrd
 }
 GRUBEOF
