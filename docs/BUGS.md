@@ -281,6 +281,16 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-028 — GUI does not auto-start on boot
+- Status: FIXED
+- Severity: HIGH
+- Component: ISO boot / sway config
+- Description: User must manually type sway and launch GUI components after login
+- Root Cause: No sway config, no auto-login, no session script
+- Fix Applied: Auto-login on tty1 via getty override, .bash_profile starts sway on tty1, sway config auto-launches all Luminos GUI components (bar, dock, notifications, session)
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
 ## Open Bugs
 
 (none currently)

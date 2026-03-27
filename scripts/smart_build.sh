@@ -234,14 +234,66 @@ Exec=/usr/local/bin/luminos-session
 Type=Application
 EOF
 
-  # Copy sway config
+  # ---- Sway config (BUG-028: auto-start Luminos GUI) ----
   mkdir -p "$CHROOT_DIR/etc/sway"
-  chroot "$CHROOT_DIR" python3 -c "
-from sys import path
-path.insert(0, '/opt/luminos')
-from src.compositor.compositor_config import write_config
-write_config('/etc/sway/config')
-" 2>/dev/null || echo "WARN: sway config generation failed (non-fatal)"
+  cat > "$CHROOT_DIR/etc/sway/config" << 'SWAYEOF'
+# Luminos OS Sway Config
+set $mod Mod4
+
+# Display output
+output * bg #1c1c1e solid_color
+
+# Auto-start Luminos components
+exec python3 /opt/luminos/src/gui/bar/bar_app.py
+exec python3 /opt/luminos/src/gui/dock/dock_app.py
+exec python3 /opt/luminos/src/gui/notifications/toast_overlay.py
+exec /usr/local/bin/luminos-session
+
+# Key bindings
+bindsym $mod+Return exec foot
+bindsym $mod+q kill
+bindsym $mod+d exec wofi --show run
+bindsym $mod+Shift+e exit
+
+# Window borders
+default_border pixel 2
+gaps inner 8
+
+# Include system config
+include /etc/sway/config.d/*
+SWAYEOF
+
+  # ---- Auto-login on tty1 (BUG-028) ----
+  mkdir -p "$CHROOT_DIR/etc/systemd/system/getty@tty1.service.d/"
+  cat > "$CHROOT_DIR/etc/systemd/system/getty@tty1.service.d/autologin.conf" << 'AUTOEOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin luminos --noclear %I $TERM
+AUTOEOF
+
+  # ---- .bash_profile auto-starts sway on tty1 (BUG-028) ----
+  cat > "$CHROOT_DIR/home/luminos/.bash_profile" << 'BASHEOF'
+if [ -z "$WAYLAND_DISPLAY" ] && [ "$XDG_VTNR" = "1" ]; then
+  exec sway
+fi
+BASHEOF
+  chown 1000:1000 "$CHROOT_DIR/home/luminos/.bash_profile"
+
+  # ---- luminos-session script (BUG-028) ----
+  cat > "$CHROOT_DIR/usr/local/bin/luminos-session" << 'SESSIONEOF'
+#!/bin/bash
+# Start Luminos AI daemon
+python3 /opt/luminos/src/daemon/main.py &
+
+# Wait for daemon socket
+sleep 2
+
+# Check first run
+if [ ! -f ~/.config/luminos/.setup_complete ]; then
+  python3 /opt/luminos/src/gui/firstrun/firstrun_app.py
+fi
+SESSIONEOF
+  chmod +x "$CHROOT_DIR/usr/local/bin/luminos-session"
 
   # Install kernel (BUG-017)
   chroot "$CHROOT_DIR" apt-get install -y \
