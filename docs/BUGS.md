@@ -291,6 +291,16 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-029 — Desktop has no visual styling
+- Status: FIXED
+- Severity: HIGH
+- Component: Desktop environment
+- Description: Raw Sway desktop with no wallpaper, no theme, Waybar unstyled, no app launcher styling
+- Root Cause: No GTK theme, Waybar config, wofi config, or wallpaper configured in stage5
+- Fix Applied: Catppuccin Mocha GTK theme, macOS Sequoia style Waybar (translucent menu bar), Wofi Spotlight-style launcher, custom Sequoia dark gradient wallpaper (PIL-generated), Inter font, full Sway config with macOS-style window colors and keybindings, Papirus-Dark icons
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
 ## Open Bugs
 
 (none currently)

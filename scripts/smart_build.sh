@@ -234,34 +234,379 @@ Exec=/usr/local/bin/luminos-session
 Type=Application
 EOF
 
-  # ---- Sway config (BUG-028: auto-start Luminos GUI) ----
+  # ==================================================================
+  # BUG-029: macOS Sequoia visual styling
+  # ==================================================================
+
+  # ---- Install Inter font ----
+  chroot "$CHROOT_DIR" bash << 'FONTS'
+apt-get install -y fonts-inter 2>/dev/null || \
+(mkdir -p /usr/share/fonts/inter && \
+ wget -q "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip" \
+   -O /tmp/inter.zip && \
+ unzip -q /tmp/inter.zip -d /tmp/inter && \
+ find /tmp/inter -name "*.ttf" -exec cp {} /usr/share/fonts/inter/ \; && \
+ rm -rf /tmp/inter /tmp/inter.zip && \
+ fc-cache -f)
+FONTS
+
+  # ---- Install Pillow and generate Sequoia-style wallpaper ----
+  chroot "$CHROOT_DIR" pip3 install Pillow \
+    --break-system-packages 2>/dev/null || true
+  mkdir -p "$CHROOT_DIR/usr/share/backgrounds"
+  chroot "$CHROOT_DIR" python3 << 'WALLPAPER'
+from PIL import Image, ImageDraw
+import math
+
+w, h = 2560, 1600
+img = Image.new('RGB', (w, h))
+
+# Sequoia Helios dark style gradient
+# Deep purple-blue to dark teal
+for y in range(h):
+  for x in range(w):
+    # Radial + linear blend
+    cx = w * 0.3
+    cy = h * 0.4
+    dist = math.sqrt((x-cx)**2 + (y-cy)**2)
+    t = min(dist / (w * 0.8), 1.0)
+
+    # Color stops: deep blue -> dark teal -> near black
+    r = int(10 + (20 - 10) * t)
+    g = int(15 + (30 - 15) * t * 0.5)
+    b = int(40 + (20 - 40) * t)
+
+    # Add purple accent in top-left
+    px = x / w
+    py = y / h
+    purple = max(0, 1 - (px * 2 + py * 2))
+    r = min(255, r + int(30 * purple))
+    b = min(255, b + int(20 * purple))
+
+    img.putpixel((x, y), (r, g, b))
+
+img.save('/usr/share/backgrounds/luminos-default.png')
+print("Wallpaper created: 2560x1600 Sequoia dark gradient")
+WALLPAPER
+
+  # ---- Install Catppuccin Mocha GTK theme ----
+  chroot "$CHROOT_DIR" bash << 'THEME'
+apt-get install -y gnome-themes-extra gtk2-engines-murrine 2>/dev/null || true
+mkdir -p /usr/share/themes
+cd /tmp
+wget -q https://github.com/catppuccin/gtk/releases/download/v1.0.3/Catppuccin-Mocha-Standard-Blue-Dark.zip \
+  -O catppuccin.zip || true
+unzip -q catppuccin.zip -d /usr/share/themes/ 2>/dev/null || true
+rm -f catppuccin.zip
+THEME
+
+  # ---- GTK3 settings ----
+  mkdir -p "$CHROOT_DIR/home/luminos/.config/gtk-3.0"
+  cat > "$CHROOT_DIR/home/luminos/.config/gtk-3.0/settings.ini" << 'GTK'
+[Settings]
+gtk-theme-name=Catppuccin-Mocha-Standard-Blue-Dark
+gtk-icon-theme-name=Papirus-Dark
+gtk-font-name=Inter 11
+gtk-cursor-theme-name=Adwaita
+gtk-cursor-theme-size=24
+gtk-application-prefer-dark-theme=1
+GTK
+
+  # ---- GTK4 settings ----
+  mkdir -p "$CHROOT_DIR/home/luminos/.config/gtk-4.0"
+  cp "$CHROOT_DIR/home/luminos/.config/gtk-3.0/settings.ini" \
+    "$CHROOT_DIR/home/luminos/.config/gtk-4.0/settings.ini"
+
+  # ---- Waybar config — macOS menu bar style ----
+  mkdir -p "$CHROOT_DIR/home/luminos/.config/waybar"
+  cat > "$CHROOT_DIR/home/luminos/.config/waybar/config" << 'WAYBAR'
+{
+  "layer": "top",
+  "position": "top",
+  "height": 32,
+  "spacing": 4,
+  "margin-top": 0,
+  "margin-left": 0,
+  "margin-right": 0,
+  "modules-left": ["sway/workspaces", "sway/mode"],
+  "modules-center": ["clock"],
+  "modules-right": [
+    "cpu", "memory", "temperature",
+    "battery", "network", "pulseaudio", "tray"
+  ],
+  "sway/workspaces": {
+    "disable-scroll": true,
+    "all-outputs": true,
+    "format": "{name}"
+  },
+  "clock": {
+    "format": "{:%H:%M}",
+    "format-alt": "{:%A, %B %d %Y  %H:%M}",
+    "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>"
+  },
+  "cpu": {
+    "format": " {usage}%",
+    "interval": 5
+  },
+  "memory": {
+    "format": " {percentage}%",
+    "interval": 5
+  },
+  "temperature": {
+    "format": " {temperatureC}°C",
+    "critical-threshold": 85
+  },
+  "battery": {
+    "format": "{icon} {capacity}%",
+    "format-charging": " {capacity}%",
+    "format-plugged": " {capacity}%",
+    "format-icons": ["", "", "", "", ""],
+    "states": {"warning": 30, "critical": 15}
+  },
+  "network": {
+    "format-wifi": " {signalStrength}%",
+    "format-ethernet": " {ifname}",
+    "format-disconnected": " offline",
+    "tooltip-format": "{essid} ({signalStrength}%)"
+  },
+  "pulseaudio": {
+    "format": "{icon} {volume}%",
+    "format-muted": " muted",
+    "format-icons": {"default": ["", "", ""]},
+    "on-click": "pactl set-sink-mute @DEFAULT_SINK@ toggle"
+  },
+  "tray": {"spacing": 8}
+}
+WAYBAR
+
+  cat > "$CHROOT_DIR/home/luminos/.config/waybar/style.css" << 'WAYBARCSS'
+* {
+  font-family: "Inter", "SF Pro Display", sans-serif;
+  font-size: 13px;
+  border: none;
+  border-radius: 0;
+  min-height: 0;
+}
+
+window#waybar {
+  background: rgba(20, 20, 22, 0.92);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  color: #ffffff;
+}
+
+.modules-left, .modules-center, .modules-right {
+  background: transparent;
+}
+
+#workspaces button {
+  padding: 0 10px;
+  color: rgba(255,255,255,0.6);
+  background: transparent;
+  border-radius: 6px;
+  margin: 4px 2px;
+}
+
+#workspaces button.focused {
+  color: #ffffff;
+  background: rgba(255,255,255,0.12);
+}
+
+#workspaces button:hover {
+  background: rgba(255,255,255,0.08);
+  color: #ffffff;
+}
+
+#clock {
+  color: #ffffff;
+  font-weight: 500;
+  padding: 0 12px;
+}
+
+#cpu, #memory, #temperature,
+#battery, #network, #pulseaudio, #tray {
+  padding: 0 10px;
+  color: rgba(255,255,255,0.8);
+}
+
+#battery.warning { color: #ff9f0a; }
+#battery.critical { color: #ff453a; }
+#temperature.critical { color: #ff453a; }
+
+tooltip {
+  background: rgba(28,28,30,0.95);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  color: #ffffff;
+}
+WAYBARCSS
+
+  # ---- Wofi config — Spotlight style ----
+  mkdir -p "$CHROOT_DIR/home/luminos/.config/wofi"
+  cat > "$CHROOT_DIR/home/luminos/.config/wofi/config" << 'WOFI'
+width=560
+height=400
+location=center
+show=drun
+prompt=Search apps...
+filter_rate=100
+allow_markup=true
+no_actions=true
+halign=fill
+orientation=vertical
+content_halign=fill
+insensitive=true
+allow_images=true
+image_size=32
+term=foot
+WOFI
+
+  cat > "$CHROOT_DIR/home/luminos/.config/wofi/style.css" << 'WOFICSS'
+window {
+  background-color: rgba(28, 28, 30, 0.96);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  font-family: "Inter", sans-serif;
+  font-size: 15px;
+}
+
+#input {
+  background-color: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  color: #ffffff;
+  padding: 10px 14px;
+  margin: 12px;
+  font-size: 16px;
+}
+
+#input:focus {
+  border-color: #0a84ff;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10,132,255,0.25);
+}
+
+#scroll {
+  margin: 0 8px 8px 8px;
+}
+
+#entry {
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: rgba(255,255,255,0.85);
+}
+
+#entry:selected {
+  background-color: rgba(10,132,255,0.3);
+  color: #ffffff;
+}
+
+#text {
+  color: #ffffff;
+}
+WOFICSS
+
+  # ---- Full Sway config — macOS Sequoia style (BUG-028 + BUG-029) ----
   mkdir -p "$CHROOT_DIR/etc/sway"
-  cat > "$CHROOT_DIR/etc/sway/config" << 'SWAYEOF'
-# Luminos OS Sway Config
+  cat > "$CHROOT_DIR/etc/sway/config" << 'SWAYCONFIG'
+# Luminos OS — macOS Sequoia Style
 set $mod Mod4
+set $term foot
+set $menu wofi --show drun
 
-# Display output
-output * bg #1c1c1e solid_color
+# Font
+font pango:Inter 11
 
-# Auto-start Luminos components
-exec python3 /opt/luminos/src/gui/bar/bar_app.py
-exec python3 /opt/luminos/src/gui/dock/dock_app.py
-exec python3 /opt/luminos/src/gui/notifications/toast_overlay.py
-exec /usr/local/bin/luminos-session
+# Wallpaper
+output * bg /usr/share/backgrounds/luminos-default.png fill
+
+# Window appearance
+default_border pixel 1
+default_floating_border pixel 1
+gaps inner 8
+gaps outer 4
+smart_gaps on
+smart_borders on
+
+# Colors — macOS dark style
+# class                 border              bg                  text                indicator           child_border
+client.focused          #0a84ff             #1c1c1e             #ffffff             #0a84ff             #0a84ff
+client.unfocused        rgba(255,255,255,0.08) #1c1c1e          rgba(255,255,255,0.6) #1c1c1e           rgba(255,255,255,0.08)
+client.focused_inactive rgba(255,255,255,0.05) #1c1c1e          rgba(255,255,255,0.4) #1c1c1e           rgba(255,255,255,0.05)
+client.urgent           #ff453a             #1c1c1e             #ffffff             #ff453a             #ff453a
+
+# Input
+input "type:keyboard" {
+  xkb_layout us
+  repeat_delay 300
+  repeat_rate 50
+}
+
+input "type:touchpad" {
+  tap enabled
+  natural_scroll enabled
+  dwt enabled
+  scroll_factor 0.8
+}
 
 # Key bindings
-bindsym $mod+Return exec foot
+bindsym $mod+Return exec $term
+bindsym $mod+Space exec $menu
 bindsym $mod+q kill
-bindsym $mod+d exec wofi --show run
+bindsym $mod+Shift+r reload
 bindsym $mod+Shift+e exit
 
-# Window borders
-default_border pixel 2
-gaps inner 8
+# Focus
+bindsym $mod+Left focus left
+bindsym $mod+Right focus right
+bindsym $mod+Up focus up
+bindsym $mod+Down focus down
 
-# Include system config
-include /etc/sway/config.d/*
-SWAYEOF
+# Move
+bindsym $mod+Shift+Left move left
+bindsym $mod+Shift+Right move right
+bindsym $mod+Shift+Up move up
+bindsym $mod+Shift+Down move down
+
+# Workspaces
+bindsym $mod+1 workspace number 1
+bindsym $mod+2 workspace number 2
+bindsym $mod+3 workspace number 3
+bindsym $mod+4 workspace number 4
+bindsym $mod+5 workspace number 5
+
+bindsym $mod+Shift+1 move container to workspace number 1
+bindsym $mod+Shift+2 move container to workspace number 2
+bindsym $mod+Shift+3 move container to workspace number 3
+
+# Layout
+bindsym $mod+f fullscreen toggle
+bindsym $mod+Shift+space floating toggle
+
+# Volume
+bindsym XF86AudioRaiseVolume exec pactl set-sink-volume @DEFAULT_SINK@ +5%
+bindsym XF86AudioLowerVolume exec pactl set-sink-volume @DEFAULT_SINK@ -5%
+bindsym XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
+
+# Brightness
+bindsym XF86MonBrightnessUp exec bash -c \
+  'echo $(($(cat /sys/class/backlight/amdgpu_bl1/brightness)+1000)) | \
+  sudo tee /sys/class/backlight/amdgpu_bl1/brightness'
+bindsym XF86MonBrightnessDown exec bash -c \
+  'echo $(($(cat /sys/class/backlight/amdgpu_bl1/brightness)-1000)) | \
+  sudo tee /sys/class/backlight/amdgpu_bl1/brightness'
+
+# Auto-start
+exec waybar
+exec python3 /opt/luminos/src/daemon/main.py
+
+# Status bar
+bar {
+  swaybar_command waybar
+}
+SWAYCONFIG
+
+  # ---- Set ownership on all user config (BUG-029) ----
+  chroot "$CHROOT_DIR" chown -R luminos:luminos /home/luminos/.config/
 
   # ---- Auto-login on tty1 (BUG-028) ----
   mkdir -p "$CHROOT_DIR/etc/systemd/system/getty@tty1.service.d/"
