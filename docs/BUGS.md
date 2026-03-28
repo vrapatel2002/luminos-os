@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-03-27
+Last Updated: 2026-03-28
 
 ## Format
 Each bug entry:
@@ -357,6 +357,16 @@ Each bug entry:
 - Description: stage_hyprland() completes in 30 seconds instead of 30-60 minutes, says "ecosystem build complete" but Hyprland binary not found. Build silently skips all compilation.
 - Root Cause: Multiple issues: (1) `$?` after pipe (`cmake ... | tail -5`) captures tail exit code (always 0), not cmake exit code — so configure failures never detected. (2) `touch .hyprland_done` was unconditional — marked "done" even when nothing built. (3) All build stderr suppressed with `2>/dev/null`. (4) Hyprland-specific lib packages (hyprlang, hyprutils, hyprcursor, aquamarine, hyprwayland-scanner) not available in Ubuntu 24.04 apt — must be built from source first as Hyprland deps.
 - Fix Applied: Complete rewrite of stage_hyprland(): (1) Added diagnostic test script with pkg-config checks. (2) Used `set -o pipefail` + direct exit code capture (no pipes). (3) Three-method install: PPA → OBS repo → source build. (4) Source build now builds all 5 Hyprland deps from source first (hyprutils → hyprwayland-scanner → hyprlang → hyprcursor → aquamarine → Hyprland). (5) Full verbose output on all build commands. (6) Conditional flag file — only touch .hyprland_done if `/usr/bin/Hyprland` actually exists.
+- Date Found: 2026-03-28
+- Date Fixed: 2026-03-28
+
+### BUG-037 — CMake too old for Hyprland
+- Status: FIXED
+- Severity: CRITICAL
+- Component: Hyprland build
+- Description: Hyprland requires CMake 3.30+ but Ubuntu 24.04 ships CMake 3.28.3
+- Root Cause: Ubuntu LTS ships older toolchain
+- Fix Applied: Install CMake 3.30+ from Kitware official apt repository before Hyprland build
 - Date Found: 2026-03-28
 - Date Fixed: 2026-03-28
 

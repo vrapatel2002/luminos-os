@@ -1440,6 +1440,30 @@ TESTSCRIPT
   # Update linker cache after installing deps
   ldconfig 2>&1 || true
 
+  # ---- Install CMake 3.30+ from Kitware ----
+  echo "--- Installing CMake 3.30+ from Kitware ---"
+  # Check current cmake version
+  cmake --version 2>/dev/null
+
+  # Install Kitware apt repo for newer cmake
+  apt-get install -y ca-certificates gpg wget 2>&1 || true
+
+  wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc \
+    2>/dev/null | gpg --dearmor - \
+    | tee /usr/share/keyrings/kitware-archive-keyring.gpg \
+    >/dev/null
+
+  echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] \
+    https://apt.kitware.com/ubuntu/ noble main" \
+    | tee /etc/apt/sources.list.d/kitware.list
+
+  apt-get update -qq 2>/dev/null
+  apt-get install -y cmake 2>/dev/null
+
+  # Verify new version
+  cmake --version
+  echo "CMake update exit: $?"
+
   # --- Build Hyprland itself ---
   echo "--- Cloning Hyprland ---"
   cd /tmp
@@ -1457,6 +1481,9 @@ TESTSCRIPT
   cd /tmp/Hyprland
   echo "Source directory: $(pwd)"
   echo "Contents: $(ls -la)"
+
+  CMAKE_VER=$(cmake --version 2>/dev/null | head -1 | awk '{print $3}')
+  echo "CMake version: $CMAKE_VER"
 
   echo "--- CMake configure ---"
   cmake -B build \
