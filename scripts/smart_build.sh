@@ -248,6 +248,7 @@ apt-get install -y fonts-inter 2>/dev/null || \
  find /tmp/inter -name "*.ttf" -exec cp {} /usr/share/fonts/inter/ \; && \
  rm -rf /tmp/inter /tmp/inter.zip && \
  fc-cache -f)
+FONTS
 
   # ---- Install Pillow and generate Sequoia-style wallpaper ----
   chroot "$CHROOT_DIR" pip3 install Pillow \
