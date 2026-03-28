@@ -1512,6 +1512,42 @@ TESTSCRIPT
   ls /usr/lib/cmake/glslang/ 2>/dev/null || \
     echo "WARNING: cmake files not found"
 
+  # Build aquamarine from source
+  echo "--- Building aquamarine from source ---"
+  # Install aquamarine deps first
+  apt-get install -y \
+    libdisplay-info-dev \
+    libseat-dev \
+    libinput-dev \
+    libudev-dev \
+    libdrm-dev \
+    libgbm-dev \
+    libegl-dev \
+    libwayland-dev \
+    wayland-protocols \
+    libxkbcommon-dev \
+    2>/dev/null || true
+
+  cd /tmp
+  rm -rf aquamarine
+  git clone --depth 1 --recursive \
+    https://github.com/hyprwm/aquamarine.git
+
+  cd /tmp/aquamarine
+  cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_PREFIX_PATH=/usr \
+    2>&1 | tail -5
+
+  cmake --build build -j$(nproc) 2>&1 | tail -5
+  cmake --install build 2>&1 | tail -5
+
+  # Verify pkg-config can find it
+  pkg-config --modversion aquamarine 2>/dev/null \
+    && echo "aquamarine OK" \
+    || echo "aquamarine pkg-config not found"
+
   cd /tmp/Hyprland
 
   CMAKE_VER=$(cmake --version 2>/dev/null | head -1 | awk '{print $3}')
