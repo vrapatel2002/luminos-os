@@ -340,6 +340,16 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-035 — Hyprland not in Ubuntu 24.04 apt
+- Status: FIXED
+- Severity: CRITICAL
+- Component: Compositor installation
+- Description: Hyprland package not available in Ubuntu 24.04 noble apt repos
+- Root Cause: Hyprland too new for Ubuntu LTS
+- Fix Applied: Build from source inside chroot. Full ecosystem: Hyprland + hyprpaper + hyprlock + hypridle + xdg-desktop-portal-hyprland
+- Date Found: 2026-03-28
+- Date Fixed: 2026-03-28
+
 ## Open Bugs
 
 (none currently)
