@@ -1268,6 +1268,7 @@ TESTSCRIPT
     libegl-dev \
     libgles2-mesa-dev \
     libvulkan-dev \
+    libglslang-dev \
     2>&1 || true
 
   echo "[4/7] Installing input/seat..."
@@ -1313,6 +1314,16 @@ TESTSCRIPT
     libzip-dev \
     libliftoff-dev \
     2>&1 || true
+
+  echo "[7b] Installing extra Hyprland cmake deps..."
+  apt-get install -y \
+    libglslang-dev \
+    glslang-tools \
+    libxxhash-dev \
+    libudis86-dev \
+    libfmt-dev \
+    libspdlog-dev \
+    2>/dev/null || true
 
   # ================================================================
   # METHOD 1: Try PPA install
