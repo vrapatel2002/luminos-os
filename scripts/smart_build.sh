@@ -596,7 +596,7 @@ bindsym XF86MonBrightnessDown exec bash -c \
   sudo tee /sys/class/backlight/amdgpu_bl1/brightness'
 
 # Auto-start
-exec waybar
+exec swaylock -f -c 1c1c1e --indicator-idle-visible
 exec python3 /opt/luminos/src/daemon/main.py
 
 # Status bar
@@ -628,16 +628,6 @@ SWAYR
   # ---- Append swayfx animations + extra bindings to sway config ----
   cat >> "$CHROOT_DIR/etc/sway/config" << 'EXTRA'
 
-# Window animations (swayfx)
-corner_radius 12
-shadows enable
-shadow_blur_radius 20
-default_dim_inactive 0.15
-blur enable
-blur_xray false
-blur_passes 2
-blur_radius 5
-
 # Alt+Tab window switcher using swayr
 bindsym $mod+Tab exec swayr switch-window
 
@@ -651,7 +641,6 @@ bindsym $mod+Print exec grim -g "$(slurp)" ~/screenshot.png
 # Auto-start Luminos GUI components
 exec_always python3 /opt/luminos/src/gui/bar/bar_app.py
 exec_always python3 /opt/luminos/src/gui/dock/dock_app.py
-exec_always waybar
 EXTRA
 
   # ---- Foot terminal — macOS dark style ----

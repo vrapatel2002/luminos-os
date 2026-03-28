@@ -311,6 +311,16 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-031 — Sway config errors + waybar 3x + no lock screen
+- Status: FIXED
+- Severity: HIGH
+- Component: Desktop config
+- Description: Red error bar from swayfx options, waybar running 3 instances, no lock screen on boot
+- Root Cause: swayfx options in regular sway, duplicate exec statements, no swaylock on startup
+- Fix Applied: Removed swayfx options, single waybar via bar{} block only, swaylock on auto-login
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
 ## Open Bugs
 
 (none currently)
