@@ -1176,30 +1176,47 @@ stage_hyprland() {
   ensure_chroot_ready
 
   chroot $CHROOT_DIR bash << 'HYPR'
-  set -e
   export DEBIAN_FRONTEND=noninteractive
 
-  # Install ALL build dependencies
+  # ---- Install build deps in resilient groups ----
+
+  # Core build tools
   apt-get install -y \
     meson cmake ninja-build \
-    pkg-config \
+    pkg-config git curl \
+    re2c glslang-tools \
+    spirv-tools 2>/dev/null || true
+
+  # Wayland core
+  apt-get install -y \
     libwayland-dev \
     libwayland-egl-backend-dev \
     wayland-protocols \
     libxkbcommon-dev \
+    libxkbcommon-x11-dev \
+    2>/dev/null || true
+
+  # Graphics
+  apt-get install -y \
     libpixman-1-dev \
     libdrm-dev \
     libgbm-dev \
     libegl-dev \
-    libgles2 \
+    libgles2-mesa-dev \
     libvulkan-dev \
-    libvulkan-volk-dev \
+    2>/dev/null || true
+
+  # Input/seat
+  apt-get install -y \
     libseat-dev \
     libinput-dev \
     libudev-dev \
     libsystemd-dev \
     libdisplay-info-dev \
-    libtomlplusplus-dev \
+    2>/dev/null || true
+
+  # XCB for Xwayland
+  apt-get install -y \
     libxcb1-dev \
     libxcb-render-util0-dev \
     libxcb-icccm4-dev \
@@ -1212,118 +1229,143 @@ stage_hyprland() {
     libxcb-present-dev \
     libxcb-glx0-dev \
     libxwayland-dev \
-    libpango1.0-dev \
-    libcairo2-dev \
-    hwdata \
-    git \
-    curl \
-    glslang-tools \
-    spirv-tools \
+    2>/dev/null || true
+
+  # Hyprland specific libs
+  apt-get install -y \
+    libtomlplusplus-dev \
     libhyprlang-dev \
     libhyprutils-dev \
     libhyprwayland-scanner-dev \
     libhyprcursor-dev \
     aquamarine-dev \
-    re2c \
     2>/dev/null || true
 
-  # Build and install aquamarine (dependency)
-  cd /tmp
-  git clone --depth 1 --recursive \
-    https://github.com/hyprwm/aquamarine.git \
+  # Rendering
+  apt-get install -y \
+    libpango1.0-dev \
+    libcairo2-dev \
+    hwdata \
     2>/dev/null || true
 
-  if [ -d /tmp/aquamarine ]; then
-    cd /tmp/aquamarine
-    cmake -B build \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_INSTALL_PREFIX=/usr 2>/dev/null
-    cmake --build build -j$(nproc) 2>/dev/null
-    cmake --install build 2>/dev/null
-    cd /tmp
+  # ---- Try PPA first (skip source build if it works) ----
+  add-apt-repository -y \
+    ppa:hyprwm/hyprland-dev 2>/dev/null || \
+  add-apt-repository -y \
+    ppa:hyprwm/hyprland 2>/dev/null || true
+  apt-get update -qq 2>/dev/null || true
+  apt-get install -y hyprland 2>/dev/null || true
+
+  if command -v Hyprland >/dev/null 2>&1; then
+    echo "SUCCESS: Hyprland installed from PPA"
+    Hyprland --version 2>/dev/null || true
+
+    # Still install ecosystem tools from apt if available
+    apt-get install -y hyprpaper hyprlock hypridle \
+      xdg-desktop-portal-hyprland 2>/dev/null || true
+
+    # Cleanup
+    rm -rf /tmp/Hyprland /tmp/hyprpaper \
+      /tmp/hyprlock /tmp/hypridle \
+      /tmp/aquamarine \
+      /tmp/xdg-desktop-portal-hyprland
+    echo "Hyprland ecosystem build complete"
+    exit 0
   fi
 
-  # Build Hyprland
-  cd /tmp
-  git clone --depth 1 --recursive \
-    https://github.com/hyprwm/Hyprland.git \
-    2>/dev/null
+  echo "PPA not available — building from source"
 
+  # ---- Build Hyprland from source ----
+  cd /tmp
+  rm -rf Hyprland
+  git clone --depth 1 --recursive \
+    https://github.com/hyprwm/Hyprland.git
   cd /tmp/Hyprland
 
-  # Use cmake build
+  # Try cmake first
   cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DNO_SYSTEMD=OFF \
-    2>/dev/null || \
-  meson setup build \
-    --prefix=/usr \
-    --buildtype=release \
-    2>/dev/null
+    -DWITH_SYSTEMD=ON \
+    2>&1 | tail -5
 
-  cmake --build build -j$(nproc) 2>/dev/null || \
-  ninja -C build -j$(nproc) 2>/dev/null
-
-  cmake --install build 2>/dev/null || \
-  ninja -C build install 2>/dev/null
-
-  # Verify
-  if command -v Hyprland >/dev/null 2>&1; then
-    echo "SUCCESS: Hyprland installed"
-    Hyprland --version
+  if [ $? -eq 0 ]; then
+    cmake --build build \
+      -j$(nproc) 2>&1 | tail -10
+    cmake --install build
   else
-    echo "FAILED: Hyprland not found after build"
-    exit 1
+    echo "cmake failed trying meson"
+    meson setup build \
+      --prefix=/usr \
+      --buildtype=release \
+      2>&1 | tail -5
+    ninja -C build -j$(nproc) 2>&1 | tail -10
+    ninja -C build install
+  fi
+
+  # Verify immediately after build
+  if command -v Hyprland >/dev/null 2>&1; then
+    echo "SUCCESS: $(Hyprland --version 2>/dev/null)"
+  else
+    echo "FAILED: Hyprland not installed"
+    # Don't exit — continue with Sway fallback
   fi
 
   # Build hyprpaper
   cd /tmp
   git clone --depth 1 \
     https://github.com/hyprwm/hyprpaper.git \
-    2>/dev/null
-  cd /tmp/hyprpaper
-  cmake -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr 2>/dev/null && \
-  cmake --build build -j$(nproc) 2>/dev/null && \
-  cmake --install build 2>/dev/null || true
+    2>/dev/null || true
+  if [ -d /tmp/hyprpaper ]; then
+    cd /tmp/hyprpaper
+    cmake -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr 2>/dev/null && \
+    cmake --build build -j$(nproc) 2>/dev/null && \
+    cmake --install build 2>/dev/null || true
+  fi
 
   # Build hyprlock
   cd /tmp
   git clone --depth 1 \
     https://github.com/hyprwm/hyprlock.git \
-    2>/dev/null
-  cd /tmp/hyprlock
-  cmake -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr 2>/dev/null && \
-  cmake --build build -j$(nproc) 2>/dev/null && \
-  cmake --install build 2>/dev/null || true
+    2>/dev/null || true
+  if [ -d /tmp/hyprlock ]; then
+    cd /tmp/hyprlock
+    cmake -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr 2>/dev/null && \
+    cmake --build build -j$(nproc) 2>/dev/null && \
+    cmake --install build 2>/dev/null || true
+  fi
 
   # Build hypridle
   cd /tmp
   git clone --depth 1 \
     https://github.com/hyprwm/hypridle.git \
-    2>/dev/null
-  cd /tmp/hypridle
-  cmake -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr 2>/dev/null && \
-  cmake --build build -j$(nproc) 2>/dev/null && \
-  cmake --install build 2>/dev/null || true
+    2>/dev/null || true
+  if [ -d /tmp/hypridle ]; then
+    cd /tmp/hypridle
+    cmake -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr 2>/dev/null && \
+    cmake --build build -j$(nproc) 2>/dev/null && \
+    cmake --install build 2>/dev/null || true
+  fi
 
   # Install xdg-desktop-portal-hyprland
   cd /tmp
   git clone --depth 1 \
     https://github.com/hyprwm/xdg-desktop-portal-hyprland.git \
-    2>/dev/null
-  cd /tmp/xdg-desktop-portal-hyprland
-  cmake -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr 2>/dev/null && \
-  cmake --build build -j$(nproc) 2>/dev/null && \
-  cmake --install build 2>/dev/null || true
+    2>/dev/null || true
+  if [ -d /tmp/xdg-desktop-portal-hyprland ]; then
+    cd /tmp/xdg-desktop-portal-hyprland
+    cmake -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr 2>/dev/null && \
+    cmake --build build -j$(nproc) 2>/dev/null && \
+    cmake --install build 2>/dev/null || true
+  fi
 
   # Cleanup build files to save space
   rm -rf /tmp/Hyprland /tmp/hyprpaper \

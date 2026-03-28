@@ -344,9 +344,9 @@ Each bug entry:
 - Status: FIXED
 - Severity: CRITICAL
 - Component: Compositor installation
-- Description: Hyprland package not available in Ubuntu 24.04 noble apt repos
-- Root Cause: Hyprland too new for Ubuntu LTS
-- Fix Applied: Build from source inside chroot. Full ecosystem: Hyprland + hyprpaper + hyprlock + hypridle + xdg-desktop-portal-hyprland
+- Description: Hyprland package not available in Ubuntu 24.04 noble apt repos. Original stage_hyprland() failed silently due to set -e exiting on missing packages.
+- Root Cause: Hyprland too new for Ubuntu LTS. set -e in heredoc caused immediate exit when any dep not found. Several package names wrong for noble (libgles2, libvulkan-volk-dev).
+- Fix Applied: Removed set -e from heredoc. Split apt deps into 7 resilient groups with || true each. Try PPA (ppa:hyprwm/hyprland-dev) first, fall back to source build. Fixed package names (libgles2-mesa-dev, libxkbcommon-x11-dev). Removed hard exit 1 so Sway fallback works. Added directory guards on ecosystem builds.
 - Date Found: 2026-03-28
 - Date Fixed: 2026-03-28
 
