@@ -301,6 +301,16 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-030 — Missing macOS UX features
+- Status: FIXED
+- Severity: MEDIUM
+- Component: Desktop UX
+- Description: No window switcher, no dock auto-start, no animations, no styled terminal, no shell config
+- Root Cause: Not configured in stage5
+- Fix Applied: swayfx animations (corner radius, shadows, blur, dim inactive), swayr Alt+Tab window switcher, grim/slurp screenshot tools, foot terminal with macOS dark colors, .bashrc with styled prompt and aliases, all Luminos GUI components auto-start via exec_always
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
 ## Open Bugs
 
 (none currently)

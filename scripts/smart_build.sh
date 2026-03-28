@@ -605,8 +605,103 @@ bar {
 }
 SWAYCONFIG
 
-  # ---- Set ownership on all user config (BUG-029) ----
-  chroot "$CHROOT_DIR" chown -R luminos:luminos /home/luminos/.config/
+  # ==================================================================
+  # BUG-030: macOS UX features — animations, switcher, terminal, shell
+  # ==================================================================
+
+  # ---- Install swayfx (animated sway fork) ----
+  chroot "$CHROOT_DIR" bash << 'FX'
+apt-get install -y swayfx 2>/dev/null || true
+# Fallback: use regular sway (already installed)
+FX
+
+  # ---- Install swayr (Alt+Tab window switcher) ----
+  chroot "$CHROOT_DIR" bash << 'SWAYR'
+apt-get install -y swayr 2>/dev/null || \
+cargo install swayr 2>/dev/null || true
+SWAYR
+
+  # ---- Install screenshot tools ----
+  chroot "$CHROOT_DIR" apt-get install -y \
+    grim slurp 2>/dev/null || true
+
+  # ---- Append swayfx animations + extra bindings to sway config ----
+  cat >> "$CHROOT_DIR/etc/sway/config" << 'EXTRA'
+
+# Window animations (swayfx)
+corner_radius 12
+shadows enable
+shadow_blur_radius 20
+default_dim_inactive 0.15
+blur enable
+blur_xray false
+blur_passes 2
+blur_radius 5
+
+# Alt+Tab window switcher using swayr
+bindsym $mod+Tab exec swayr switch-window
+
+# Super key shows wofi (like macOS Spotlight)
+bindsym $mod+Space exec wofi --show drun
+
+# Screenshot
+bindsym Print exec grim ~/screenshot.png
+bindsym $mod+Print exec grim -g "$(slurp)" ~/screenshot.png
+
+# Auto-start Luminos GUI components
+exec_always python3 /opt/luminos/src/gui/bar/bar_app.py
+exec_always python3 /opt/luminos/src/gui/dock/dock_app.py
+exec_always waybar
+EXTRA
+
+  # ---- Foot terminal — macOS dark style ----
+  mkdir -p "$CHROOT_DIR/home/luminos/.config/foot"
+  cat > "$CHROOT_DIR/home/luminos/.config/foot/foot.ini" << 'FOOT'
+[main]
+font=Inter Mono:size=13
+pad=12x12
+
+[colors]
+background=1c1c1e
+foreground=e0e0e0
+alpha=0.95
+
+regular0=3a3a3c
+regular1=ff453a
+regular2=32d74b
+regular3=ff9f0a
+regular4=0a84ff
+regular5=bf5af2
+regular6=5ac8fa
+regular7=e0e0e0
+
+bright0=636366
+bright1=ff6961
+bright2=5cdb76
+bright3=ffb340
+bright4=409cff
+bright5=da8fff
+bright6=70d7ff
+bright7=ffffff
+FOOT
+
+  # ---- Shell config (.bashrc) ----
+  cat > "$CHROOT_DIR/home/luminos/.bashrc" << 'BASHRC'
+# Luminos OS shell config
+export PS1='\[\033[38;5;75m\]luminos\[\033[0m\] \[\033[38;5;245m\]\W\[\033[0m\] \[\033[38;5;75m\]❯\[\033[0m\] '
+
+alias ls='ls --color=auto'
+alias ll='ls -la'
+alias grep='grep --color=auto'
+
+# Luminos shortcuts
+alias luminos-status='python3 /opt/luminos/src/daemon/main.py --status'
+
+export PATH="/opt/luminos/src:$PATH"
+BASHRC
+
+  # ---- Set ownership on ALL user files (BUG-029 + BUG-030) ----
+  chroot "$CHROOT_DIR" chown -R luminos:luminos /home/luminos/
 
   # ---- Auto-login on tty1 (BUG-028) ----
   mkdir -p "$CHROOT_DIR/etc/systemd/system/getty@tty1.service.d/"
