@@ -1493,6 +1493,27 @@ TESTSCRIPT
   echo "Source directory: $(pwd)"
   echo "Contents: $(ls -la)"
 
+  # Build glslang from source for cmake config
+  echo "--- Building glslang from source ---"
+  cd /tmp
+  rm -rf glslang
+  git clone --depth 1 \
+    https://github.com/KhronosGroup/glslang.git
+  cd /tmp/glslang
+  python3 update_glslang_sources.py 2>/dev/null || true
+  cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DENABLE_GLSLANG_BINARIES=OFF
+  cmake --build build -j$(nproc)
+  cmake --install build
+  echo "glslang cmake exit: $?"
+  ls /usr/lib/cmake/glslang/ 2>/dev/null || \
+    echo "WARNING: cmake files not found"
+
+  cd /tmp/Hyprland
+
   CMAKE_VER=$(cmake --version 2>/dev/null | head -1 | awk '{print $3}')
   echo "CMake version: $CMAKE_VER"
 
@@ -1500,6 +1521,7 @@ TESTSCRIPT
   cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_PREFIX_PATH=/usr \
     2>&1
   CMAKE_CONF_EXIT=$?
   echo "CMake configure exit: $CMAKE_CONF_EXIT"
