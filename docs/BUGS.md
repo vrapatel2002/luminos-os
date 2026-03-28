@@ -321,6 +321,15 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-032 — Hyprland installation
+- Status: FIXED
+- Severity: IMPROVEMENT
+- Component: Compositor
+- Description: Added Hyprland as primary compositor with full config
+- Fix Applied: Hyprland installed, full config with blur/shadows/animations/rounded corners, hyprlock lock screen, hypridle auto-lock, hyprpaper wallpaper, fallback to Sway
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
 ## Open Bugs
 
 (none currently)

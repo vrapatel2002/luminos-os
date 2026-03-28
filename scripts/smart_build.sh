@@ -643,6 +643,251 @@ exec_always python3 /opt/luminos/src/gui/bar/bar_app.py
 exec_always python3 /opt/luminos/src/gui/dock/dock_app.py
 EXTRA
 
+  # ==================================================================
+  # BUG-032: Hyprland compositor (primary, Sway as fallback)
+  # ==================================================================
+
+  # ---- Install Hyprland ----
+  chroot "$CHROOT_DIR" bash << 'HYPR'
+export DEBIAN_FRONTEND=noninteractive
+
+# Try official Ubuntu package first
+apt-get install -y hyprland hyprpaper \
+  hyprlock hypridle \
+  xdg-desktop-portal-hyprland \
+  xdg-desktop-portal-gtk \
+  qt5-wayland qt6-wayland \
+  libqt5waylandclient5 2>/dev/null || true
+
+# Check if installed
+if command -v Hyprland >/dev/null 2>&1; then
+  echo "Hyprland installed successfully"
+else
+  echo "Hyprland not in apt — keeping Sway as fallback"
+fi
+HYPR
+
+  # ---- Hyprland config ----
+  mkdir -p "$CHROOT_DIR/home/luminos/.config/hypr"
+
+  cat > "$CHROOT_DIR/home/luminos/.config/hypr/hyprland.conf" << 'HYPRCONF'
+monitor=,preferred,auto,1
+
+$terminal = foot
+$menu = wofi --show drun
+
+exec-once = waybar
+exec-once = hyprpaper
+exec-once = hypridle
+exec-once = python3 /opt/luminos/src/daemon/main.py
+exec-once = python3 /opt/luminos/src/gui/bar/bar_app.py
+exec-once = python3 /opt/luminos/src/gui/dock/dock_app.py
+
+general {
+  gaps_in = 8
+  gaps_out = 12
+  border_size = 1
+  col.active_border = rgba(0a84ffee) rgba(5e9effee) 45deg
+  col.inactive_border = rgba(ffffff15)
+  layout = dwindle
+}
+
+decoration {
+  rounding = 12
+  blur {
+    enabled = true
+    size = 8
+    passes = 3
+    new_optimizations = true
+    noise = 0.02
+    contrast = 1.1
+    brightness = 1.0
+    vibrancy = 0.2
+  }
+  drop_shadow = true
+  shadow_range = 20
+  shadow_render_power = 3
+  col.shadow = rgba(00000055)
+  active_opacity = 1.0
+  inactive_opacity = 0.95
+  dim_inactive = true
+  dim_strength = 0.08
+}
+
+animations {
+  enabled = true
+  bezier = overshot, 0.05, 0.9, 0.1, 1.05
+  bezier = smoothIn, 0.25, 1, 0.5, 1
+  bezier = smoothOut, 0.36, 0, 0.66, -0.56
+  bezier = snappy, 0.5, 0, 0.5, 1
+  animation = windows, 1, 4, overshot, slide
+  animation = windowsOut, 1, 3, smoothOut, slide
+  animation = windowsMove, 1, 3, snappy
+  animation = fade, 1, 4, smoothIn
+  animation = fadeOut, 1, 3, smoothOut
+  animation = workspaces, 1, 4, overshot, slidevert
+}
+
+input {
+  kb_layout = us
+  follow_mouse = 1
+  sensitivity = 0
+  touchpad {
+    natural_scroll = true
+    tap-to-click = true
+    disable_while_typing = true
+    scroll_factor = 0.8
+  }
+}
+
+gestures {
+  workspace_swipe = true
+  workspace_swipe_fingers = 3
+}
+
+dwindle {
+  pseudotile = true
+  preserve_split = true
+}
+
+misc {
+  force_default_wallpaper = 0
+  disable_hyprland_logo = true
+  disable_splash_rendering = true
+  animate_manual_resizes = true
+}
+
+$mainMod = SUPER
+
+bind = $mainMod, Return, exec, $terminal
+bind = $mainMod, Space, exec, $menu
+bind = $mainMod, Q, killactive
+bind = $mainMod, F, fullscreen, 0
+bind = $mainMod SHIFT, F, togglefloating
+bind = $mainMod SHIFT, R, exec, hyprctl reload
+bind = $mainMod SHIFT, E, exit
+
+bind = , Print, exec, grim ~/screenshot.png
+bind = $mainMod, Print, exec, grim -g "$(slurp)" ~/screenshot.png
+
+bind = , XF86AudioRaiseVolume, exec, pactl set-sink-volume @DEFAULT_SINK@ +5%
+bind = , XF86AudioLowerVolume, exec, pactl set-sink-volume @DEFAULT_SINK@ -5%
+bind = , XF86AudioMute, exec, pactl set-sink-mute @DEFAULT_SINK@ toggle
+
+bind = , XF86MonBrightnessUp, exec, bash -c 'b=$(cat /sys/class/backlight/amdgpu_bl1/brightness); echo $((b+1000)) | sudo tee /sys/class/backlight/amdgpu_bl1/brightness'
+bind = , XF86MonBrightnessDown, exec, bash -c 'b=$(cat /sys/class/backlight/amdgpu_bl1/brightness); echo $((b>1000?b-1000:100)) | sudo tee /sys/class/backlight/amdgpu_bl1/brightness'
+
+bind = $mainMod, left, movefocus, l
+bind = $mainMod, right, movefocus, r
+bind = $mainMod, up, movefocus, u
+bind = $mainMod, down, movefocus, d
+
+bind = $mainMod SHIFT, left, movewindow, l
+bind = $mainMod SHIFT, right, movewindow, r
+bind = $mainMod SHIFT, up, movewindow, u
+bind = $mainMod SHIFT, down, movewindow, d
+
+bind = ALT, Tab, cyclenext
+bind = ALT SHIFT, Tab, cyclenext, prev
+
+bind = $mainMod, 1, workspace, 1
+bind = $mainMod, 2, workspace, 2
+bind = $mainMod, 3, workspace, 3
+bind = $mainMod, 4, workspace, 4
+bind = $mainMod, 5, workspace, 5
+
+bind = $mainMod SHIFT, 1, movetoworkspace, 1
+bind = $mainMod SHIFT, 2, movetoworkspace, 2
+bind = $mainMod SHIFT, 3, movetoworkspace, 3
+
+bindm = $mainMod, mouse:272, movewindow
+bindm = $mainMod, mouse:273, resizewindow
+
+windowrulev2 = opacity 0.96 0.88, class:^(foot)$
+windowrulev2 = opacity 0.98 0.90, class:^(firefox)$
+HYPRCONF
+
+  # ---- Hyprpaper config ----
+  cat > "$CHROOT_DIR/home/luminos/.config/hypr/hyprpaper.conf" << 'HYPRPAPER'
+preload = /usr/share/backgrounds/luminos-default.png
+wallpaper = ,/usr/share/backgrounds/luminos-default.png
+splash = false
+HYPRPAPER
+
+  # ---- Hyprlock config ----
+  cat > "$CHROOT_DIR/home/luminos/.config/hypr/hyprlock.conf" << 'HYPRLOCK'
+background {
+  monitor =
+  path = /usr/share/backgrounds/luminos-default.png
+  blur_passes = 4
+  blur_size = 10
+  brightness = 0.7
+  vibrancy = 0.2
+}
+
+label {
+  monitor =
+  text = cmd[update:1000] echo "$(date +"%H:%M")"
+  color = rgba(255, 255, 255, 0.92)
+  font_size = 80
+  font_family = Inter
+  position = 0, 120
+  halign = center
+  valign = center
+}
+
+label {
+  monitor =
+  text = cmd[update:60000] echo "$(date +"%A, %B %d")"
+  color = rgba(255, 255, 255, 0.55)
+  font_size = 18
+  font_family = Inter
+  position = 0, 40
+  halign = center
+  valign = center
+}
+
+input-field {
+  monitor =
+  size = 280, 48
+  outline_thickness = 2
+  dots_size = 0.25
+  dots_center = true
+  outer_color = rgba(0a84ffcc)
+  inner_color = rgba(28, 28, 30, 0.85)
+  font_color = rgb(255, 255, 255)
+  fade_on_empty = true
+  placeholder_text = Enter password
+  hide_input = false
+  position = 0, -60
+  halign = center
+  valign = center
+  check_color = rgba(50, 215, 75, 0.9)
+  fail_color = rgba(255, 69, 58, 0.9)
+  fail_text = Incorrect password
+}
+HYPRLOCK
+
+  # ---- Hypridle config ----
+  cat > "$CHROOT_DIR/home/luminos/.config/hypr/hypridle.conf" << 'HYPRIDLE'
+general {
+  lock_cmd = pidof hyprlock || hyprlock
+  before_sleep_cmd = loginctl lock-session
+  after_sleep_cmd = hyprctl dispatch dpms on
+}
+
+listener {
+  timeout = 300
+  on-timeout = loginctl lock-session
+}
+
+listener {
+  timeout = 600
+  on-timeout = hyprctl dispatch dpms off
+  on-resume = hyprctl dispatch dpms on
+}
+HYPRIDLE
+
   # ---- Foot terminal — macOS dark style ----
   mkdir -p "$CHROOT_DIR/home/luminos/.config/foot"
   cat > "$CHROOT_DIR/home/luminos/.config/foot/foot.ini" << 'FOOT'
@@ -689,7 +934,7 @@ alias luminos-status='python3 /opt/luminos/src/daemon/main.py --status'
 export PATH="/opt/luminos/src:$PATH"
 BASHRC
 
-  # ---- Set ownership on ALL user files (BUG-029 + BUG-030) ----
+  # ---- Set ownership on ALL user files (BUG-029 + BUG-030 + BUG-032) ----
   chroot "$CHROOT_DIR" chown -R luminos:luminos /home/luminos/
 
   # ---- Auto-login on tty1 (BUG-028) ----
@@ -700,10 +945,14 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin luminos --noclear %I $TERM
 AUTOEOF
 
-  # ---- .bash_profile auto-starts sway on tty1 (BUG-028) ----
+  # ---- .bash_profile auto-starts Hyprland/Sway on tty1 (BUG-028 + BUG-032) ----
   cat > "$CHROOT_DIR/home/luminos/.bash_profile" << 'BASHEOF'
 if [ -z "$WAYLAND_DISPLAY" ] && [ "$XDG_VTNR" = "1" ]; then
-  exec sway
+  if command -v Hyprland >/dev/null 2>&1; then
+    exec Hyprland
+  else
+    exec sway
+  fi
 fi
 BASHEOF
   chown 1000:1000 "$CHROOT_DIR/home/luminos/.bash_profile"
