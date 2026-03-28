@@ -248,74 +248,61 @@ apt-get install -y fonts-inter 2>/dev/null || \
  find /tmp/inter -name "*.ttf" -exec cp {} /usr/share/fonts/inter/ \; && \
  rm -rf /tmp/inter /tmp/inter.zip && \
  fc-cache -f)
-FONTS
 
   # ---- Install Pillow and generate Sequoia-style wallpaper ----
   chroot "$CHROOT_DIR" pip3 install Pillow \
-    --break-system-packages 2>/dev/null || true
+    --break-system-packages -q 2>/dev/null || true
+  
   mkdir -p "$CHROOT_DIR/usr/share/backgrounds"
   chroot "$CHROOT_DIR" python3 << 'WALLPAPER'
-from PIL import Image, ImageDraw
-import math
+try:
+  from PIL import Image
+  import math
 
-w, h = 2560, 1600
-img = Image.new('RGB', (w, h))
+  w, h = 2560, 1600
+  img = Image.new("RGB", (w, h))
+  pixels = []
 
-# Sequoia Helios dark style gradient
-# Deep purple-blue to dark teal
-for y in range(h):
-  for x in range(w):
-    # Radial + linear blend
-    cx = w * 0.3
-    cy = h * 0.4
-    dist = math.sqrt((x-cx)**2 + (y-cy)**2)
-    t = min(dist / (w * 0.8), 1.0)
+  for y in range(h):
+    for x in range(w):
+      # Base dark background
+      nx = x / w
+      ny = y / h
 
-    # Color stops: deep blue -> dark teal -> near black
-    r = int(10 + (20 - 10) * t)
-    g = int(15 + (30 - 15) * t * 0.5)
-    b = int(40 + (20 - 40) * t)
+      # Deep blue-purple center (top left)
+      d1 = math.sqrt((nx-0.2)**2 + (ny-0.2)**2)
+      # Teal accent (bottom right)
+      d2 = math.sqrt((nx-0.85)**2 + (ny-0.85)**2)
+      # Purple (top right)
+      d3 = math.sqrt((nx-0.9)**2 + (ny-0.1)**2)
 
-    # Add purple accent in top-left
-    px = x / w
-    py = y / h
-    purple = max(0, 1 - (px * 2 + py * 2))
-    r = min(255, r + int(30 * purple))
-    b = min(255, b + int(20 * purple))
+      # Blend colors
+      blue = max(0, min(255,
+        int(20 + 60 * max(0, 1-d1*2.5))))
+      purple = max(0, min(255,
+        int(15 + 40 * max(0, 1-d3*2.5))))
+      teal = max(0, min(255,
+        int(30 * max(0, 1-d2*2))))
 
-    img.putpixel((x, y), (r, g, b))
+      r = max(8, min(40, 8 + purple//2))
+      g = max(8, min(35, 8 + teal//2))
+      b = max(20, min(80, 20 + blue + teal//3))
 
-img.save('/usr/share/backgrounds/luminos-default.png')
-print("Wallpaper created: 2560x1600 Sequoia dark gradient")
+      pixels.append((r, g, b))
+
+  img.putdata(pixels)
+  img.save("/usr/share/backgrounds/luminos-default.png")
+  print("Wallpaper created successfully")
+except Exception as e:
+  print(f"PIL failed: {e} — using fallback")
+  # Fallback: solid dark color
+  import subprocess
+  subprocess.run([
+    "convert", "-size", "2560x1600",
+    "gradient:#0d0d1a-#0a1628",
+    "/usr/share/backgrounds/luminos-default.png"
+  ], capture_output=True)
 WALLPAPER
-
-  # ---- Install Catppuccin Mocha GTK theme ----
-  chroot "$CHROOT_DIR" bash << 'THEME'
-apt-get install -y gnome-themes-extra gtk2-engines-murrine 2>/dev/null || true
-mkdir -p /usr/share/themes
-cd /tmp
-wget -q https://github.com/catppuccin/gtk/releases/download/v1.0.3/Catppuccin-Mocha-Standard-Blue-Dark.zip \
-  -O catppuccin.zip || true
-unzip -q catppuccin.zip -d /usr/share/themes/ 2>/dev/null || true
-rm -f catppuccin.zip
-THEME
-
-  # ---- GTK3 settings ----
-  mkdir -p "$CHROOT_DIR/home/luminos/.config/gtk-3.0"
-  cat > "$CHROOT_DIR/home/luminos/.config/gtk-3.0/settings.ini" << 'GTK'
-[Settings]
-gtk-theme-name=Catppuccin-Mocha-Standard-Blue-Dark
-gtk-icon-theme-name=Papirus-Dark
-gtk-font-name=Inter 11
-gtk-cursor-theme-name=Adwaita
-gtk-cursor-theme-size=24
-gtk-application-prefer-dark-theme=1
-GTK
-
-  # ---- GTK4 settings ----
-  mkdir -p "$CHROOT_DIR/home/luminos/.config/gtk-4.0"
-  cp "$CHROOT_DIR/home/luminos/.config/gtk-3.0/settings.ini" \
-    "$CHROOT_DIR/home/luminos/.config/gtk-4.0/settings.ini"
 
   # ---- Waybar config — macOS menu bar style ----
   mkdir -p "$CHROOT_DIR/home/luminos/.config/waybar"
@@ -324,16 +311,41 @@ GTK
   "layer": "top",
   "position": "top",
   "height": 32,
-  "spacing": 4,
+  "spacing": 0,
   "margin-top": 0,
   "margin-left": 0,
   "margin-right": 0,
-  "modules-left": ["sway/workspaces", "sway/mode"],
+  "exclusive": true,
+  "passthrough": false,
+  "modules-left": [
+    "custom/logo",
+    "sway/workspaces",
+    "sway/mode"
+  ],
   "modules-center": ["clock"],
   "modules-right": [
-    "cpu", "memory", "temperature",
-    "battery", "network", "pulseaudio", "tray"
+    "custom/luminos-ai",
+    "temperature",
+    "cpu",
+    "memory",
+    "battery",
+    "network",
+    "pulseaudio",
+    "tray"
   ],
+  "custom/logo": {
+    "format": "  Luminos",
+    "tooltip": false,
+    "on-click": "wofi --show drun"
+  },
+  "custom/luminos-ai": {
+    "exec": "python3 /opt/luminos/src/gui/waybar/luminos_status.py",
+    "interval": 5,
+    "return-type": "json",
+    "format": "{}",
+    "tooltip": true,
+    "on-click": "python3 /opt/luminos/src/gui/settings/settings_app.py"
+  },
   "sway/workspaces": {
     "disable-scroll": true,
     "all-outputs": true,
@@ -342,19 +354,22 @@ GTK
   "clock": {
     "format": "{:%H:%M}",
     "format-alt": "{:%A, %B %d %Y  %H:%M}",
-    "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>"
+    "tooltip-format": "<big>{:%Y %B}</big>\n<tt>{calendar}</tt>"
   },
   "cpu": {
     "format": " {usage}%",
-    "interval": 5
+    "interval": 5,
+    "tooltip": false
   },
   "memory": {
     "format": " {percentage}%",
-    "interval": 5
+    "interval": 10
   },
   "temperature": {
     "format": " {temperatureC}°C",
-    "critical-threshold": 85
+    "critical-threshold": 85,
+    "format-critical": " {temperatureC}°C",
+    "interval": 5
   },
   "battery": {
     "format": "{icon} {capacity}%",
@@ -440,14 +455,14 @@ tooltip {
 }
 WAYBARCSS
 
-  # ---- Wofi config — Spotlight style ----
+  # ---- Wofi config — Spotlight launcher ----
   mkdir -p "$CHROOT_DIR/home/luminos/.config/wofi"
-  cat > "$CHROOT_DIR/home/luminos/.config/wofi/config" << 'WOFI'
-width=560
-height=400
+  cat > "$CHROOT_DIR/home/luminos/.config/wofi/config" << 'WOFICONF'
+width=580
+height=420
 location=center
 show=drun
-prompt=Search apps...
+prompt=Search apps and commands...
 filter_rate=100
 allow_markup=true
 no_actions=true
@@ -456,54 +471,154 @@ orientation=vertical
 content_halign=fill
 insensitive=true
 allow_images=true
-image_size=32
+image_size=36
 term=foot
-WOFI
+hide_scroll=true
+WOFICONF
 
   cat > "$CHROOT_DIR/home/luminos/.config/wofi/style.css" << 'WOFICSS'
-window {
-  background-color: rgba(28, 28, 30, 0.96);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 14px;
+* {
   font-family: "Inter", sans-serif;
-  font-size: 15px;
+}
+
+window {
+  background-color: rgba(28, 28, 30, 0.94);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
 }
 
 #input {
-  background-color: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
+  background-color: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
   border-radius: 10px;
-  color: #ffffff;
-  padding: 10px 14px;
-  margin: 12px;
+  color: rgba(255,255,255,0.9);
+  padding: 11px 16px;
+  margin: 14px 14px 8px 14px;
   font-size: 16px;
+  caret-color: #0a84ff;
 }
 
 #input:focus {
-  border-color: #0a84ff;
+  border-color: rgba(10,132,255,0.6);
+  background-color: rgba(255,255,255,0.09);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(10,132,255,0.25);
 }
 
 #scroll {
-  margin: 0 8px 8px 8px;
+  margin: 4px 8px 10px 8px;
 }
 
 #entry {
-  padding: 8px 12px;
+  padding: 8px 10px;
   border-radius: 8px;
-  color: rgba(255,255,255,0.85);
+  color: rgba(255,255,255,0.82);
+  margin: 1px 0;
 }
 
 #entry:selected {
-  background-color: rgba(10,132,255,0.3);
-  color: #ffffff;
+  background-color: rgba(10,132,255,0.28);
+  color: rgba(255,255,255,0.96);
+}
+
+#entry:hover {
+  background-color: rgba(255,255,255,0.07);
+}
+
+#img {
+  margin-right: 8px;
 }
 
 #text {
-  color: #ffffff;
+  color: rgba(255,255,255,0.88);
+  font-size: 14px;
 }
 WOFICSS
+
+  # ---- Foot Terminal config — macOS dark colors ----
+  mkdir -p "$CHROOT_DIR/home/luminos/.config/foot"
+  cat > "$CHROOT_DIR/home/luminos/.config/foot/foot.ini" << 'FOOTINI'
+[main]
+font=Inter Mono:size=13
+font-bold=Inter Mono:size=13:weight=Bold
+pad=14x10
+word-delimiters=,│`|:"'()[]{}<>
+selection-target=primary
+
+[scrollback]
+lines=5000
+
+[cursor]
+style=beam
+blink=yes
+
+[colors]
+alpha=0.94
+background=1c1c1e
+foreground=dcdcdc
+
+regular0=3a3a3c
+regular1=ff453a
+regular2=32d74b
+regular3=ffd60a
+regular4=0a84ff
+regular5=bf5af2
+regular6=5ac8fa
+regular7=dcdcdc
+
+bright0=636366
+bright1=ff6961
+bright2=30db5b
+bright3=ffd426
+bright4=409cff
+bright5=da8fff
+bright6=70d7ff
+bright7=f2f2f7
+
+[key-bindings]
+clipboard-copy=Control+c
+clipboard-paste=Control+v
+search-start=Control+r
+FOOTINI
+
+  # ---- GTK3 settings ----
+  mkdir -p "$CHROOT_DIR/home/luminos/.config/gtk-3.0"
+  cat > "$CHROOT_DIR/home/luminos/.config/gtk-3.0/settings.ini" << 'GTK3'
+[Settings]
+gtk-theme-name=Adwaita-dark
+gtk-icon-theme-name=Papirus-Dark
+gtk-font-name=Inter 11
+gtk-cursor-theme-name=Adwaita
+gtk-cursor-theme-size=24
+gtk-application-prefer-dark-theme=1
+gtk-decoration-layout=close,minimize,maximize:
+GTK3
+
+  # ---- GTK4 settings ----
+  mkdir -p "$CHROOT_DIR/home/luminos/.config/gtk-4.0"
+  cat > "$CHROOT_DIR/home/luminos/.config/gtk-4.0/settings.ini" << 'GTK4'
+[Settings]
+gtk-theme-name=Adwaita-dark
+gtk-icon-theme-name=Papirus-Dark
+gtk-font-name=Inter 11
+gtk-cursor-theme-name=Adwaita
+gtk-cursor-theme-size=24
+gtk-application-prefer-dark-theme=1
+gtk-decoration-layout=close,minimize,maximize:
+GTK4
+
+  # ---- Wayland environment variables ----
+  cat >> "$CHROOT_DIR/home/luminos/.bash_profile" << 'ENV'
+export GTK_THEME=Adwaita:dark
+export XCURSOR_THEME=Adwaita
+export XCURSOR_SIZE=24
+export QT_QPA_PLATFORMTHEME=qt5ct
+export QT_AUTO_SCREEN_SCALE_FACTOR=1
+export MOZ_ENABLE_WAYLAND=1
+export ELECTRON_OZONE_PLATFORM_HINT=wayland
+ENV
+
+  # ---- Fix entire luminos home directory ownership ----
+  chroot "$CHROOT_DIR" chown -R luminos:luminos /home/luminos/
 
   # ---- Full Sway config — macOS Sequoia style (BUG-028 + BUG-029) ----
   mkdir -p "$CHROOT_DIR/etc/sway"

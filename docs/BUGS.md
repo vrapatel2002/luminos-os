@@ -330,6 +330,16 @@ Each bug entry:
 - Date Found: 2026-03-27
 - Date Fixed: 2026-03-27
 
+### BUG-033 — Visual styling complete
+- Status: FIXED
+- Severity: HIGH
+- Component: Desktop visual layer
+- Description: No wallpaper gradient, unstyled Waybar, basic Wofi, no terminal colors
+- Root Cause: No CSS/config for visual components
+- Fix Applied: Sequoia dark gradient wallpaper, macOS-style translucent Waybar, Spotlight Wofi, macOS dark terminal, GTK dark theme, Wayland environment variables
+- Date Found: 2026-03-27
+- Date Fixed: 2026-03-27
+
 ## Open Bugs
 
 (none currently)
