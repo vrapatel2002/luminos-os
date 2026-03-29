@@ -1178,7 +1178,12 @@ stage_hyprland() {
   # ---- Main build: all deps in correct order ----
   chroot "$CHROOT_DIR" bash << 'BUILDALL'
 export DEBIAN_FRONTEND=noninteractive
-export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+export PKG_CONFIG_PATH=\
+/usr/local/lib/pkgconfig:\
+/usr/local/lib/x86_64-linux-gnu/pkgconfig:\
+/usr/lib/pkgconfig:\
+/usr/lib/x86_64-linux-gnu/pkgconfig:\
+/usr/share/pkgconfig
 
 # Helper function to build a hyprwm library
 build_hypr_lib() {
@@ -1201,6 +1206,12 @@ build_hypr_lib() {
   cmake --build build -j$(nproc) 2>&1 | tail -3
   cmake --install build 2>&1 | tail -3
   ldconfig 2>/dev/null || true
+  export PKG_CONFIG_PATH=\
+/usr/local/lib/pkgconfig:\
+/usr/local/lib/x86_64-linux-gnu/pkgconfig:\
+/usr/lib/pkgconfig:\
+/usr/lib/x86_64-linux-gnu/pkgconfig:\
+/usr/share/pkgconfig
   [ -n "$verify" ] && \
     pkg-config --modversion $verify 2>/dev/null \
     && echo "OK: $verify" \
@@ -1340,6 +1351,10 @@ build_hypr_lib \
 # ================================================================
 # Step 4: hyprcursor (cursor theme — needs hyprlang, hyprutils)
 # ================================================================
+apt-get install -y \
+  libzip-dev libwebp-dev librsvg2-dev \
+  libcairo2-dev libgdk-pixbuf-2.0-dev \
+  2>/dev/null || true
 build_hypr_lib \
   hyprcursor \
   hyprcursor \
@@ -1363,6 +1378,13 @@ cmake -B build \
   2>&1 | tail -3
 cmake --build build -j$(nproc) 2>&1 | tail -3
 cmake --install build 2>&1 | tail -3
+ldconfig 2>/dev/null || true
+export PKG_CONFIG_PATH=\
+/usr/local/lib/pkgconfig:\
+/usr/local/lib/x86_64-linux-gnu/pkgconfig:\
+/usr/lib/pkgconfig:\
+/usr/lib/x86_64-linux-gnu/pkgconfig:\
+/usr/share/pkgconfig
 ls /usr/lib/cmake/glslang/ 2>/dev/null \
   && echo "OK: glslang cmake files" \
   || echo "WARN: glslang cmake files not found"
@@ -1410,6 +1432,12 @@ cmake --build build -j$(nproc) 2>&1 | tail -10
 cmake --install build 2>&1 | tail -5
 
 ldconfig 2>/dev/null || true
+export PKG_CONFIG_PATH=\
+/usr/local/lib/pkgconfig:\
+/usr/local/lib/x86_64-linux-gnu/pkgconfig:\
+/usr/lib/pkgconfig:\
+/usr/lib/x86_64-linux-gnu/pkgconfig:\
+/usr/share/pkgconfig
 
 if [ -x /usr/bin/Hyprland ] || command -v Hyprland >/dev/null 2>&1; then
   echo "SUCCESS: Hyprland installed"
