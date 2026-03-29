@@ -1172,524 +1172,303 @@ stage_hyprland() {
     echo "--- Hyprland: SKIP (already built) ---"
     return
   fi
-  echo "--- Building Hyprland from source ---"
+  echo "--- Building Hyprland from source (comprehensive) ---"
   ensure_chroot_ready
 
-  # ---- Generate standalone debug test script inside chroot ----
-  cat > "$CHROOT_DIR/tmp/test_hyprland.sh" << 'TESTSCRIPT'
-#!/bin/bash
-set -x
-echo "=== Hyprland Build Diagnostics ==="
-echo "Date: $(date)"
-echo "CPU cores: $(nproc)"
-echo "Disk space: $(df -h / | tail -1)"
-echo "RAM: $(free -h | grep Mem)"
-echo "cmake: $(cmake --version 2>&1 | head -1)"
-echo "meson: $(meson --version 2>&1)"
-echo "git: $(git --version 2>&1)"
-echo "pkg-config: $(pkg-config --version 2>&1)"
+  # ---- Main build: all deps in correct order ----
+  chroot "$CHROOT_DIR" bash << 'BUILDALL'
+export DEBIAN_FRONTEND=noninteractive
+export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
 
-# Check key deps
-for lib in wayland-server wayland-client pixman-1 \
-  libdrm gbm egl libinput libseat xkbcommon; do
-  if pkg-config --exists "$lib" 2>/dev/null; then
-    echo "OK: $lib $(pkg-config --modversion $lib)"
-  else
-    echo "MISSING: $lib"
-  fi
-done
+# Helper function to build a hyprwm library
+build_hypr_lib() {
+  local name=$1
+  local repo=$2
+  local verify=$3
+  echo "=== Building $name ==="
+  cd /tmp && rm -rf $name
+  git clone --depth 1 --recursive \
+    https://github.com/hyprwm/$repo.git $name \
+    2>&1 | tail -2
+  [ ! -d /tmp/$name ] && \
+    echo "FAIL clone $name" && return 1
+  cd /tmp/$name
+  cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_PREFIX_PATH=/usr \
+    2>&1 | grep -iE "error|not found" | head -10
+  cmake --build build -j$(nproc) 2>&1 | tail -3
+  cmake --install build 2>&1 | tail -3
+  ldconfig 2>/dev/null || true
+  [ -n "$verify" ] && \
+    pkg-config --modversion $verify 2>/dev/null \
+    && echo "OK: $verify" \
+    || echo "WARN: $verify not found in pkg-config"
+  echo "=== done: $name ==="
+}
 
-# Test git clone
+echo "========================================"
+echo "  HYPRLAND COMPREHENSIVE BUILD"
+echo "  Build order: 10 steps"
+echo "========================================"
+
+# ---- Install all build deps upfront ----
+echo "[deps] Installing core build tools..."
+apt-get install -y \
+  meson cmake ninja-build \
+  pkg-config git curl \
+  re2c glslang-tools \
+  spirv-tools 2>&1 || true
+
+echo "[deps] Installing Wayland core..."
+apt-get install -y \
+  libwayland-dev \
+  libwayland-egl-backend-dev \
+  wayland-protocols \
+  libxkbcommon-dev \
+  libxkbcommon-x11-dev \
+  2>&1 || true
+
+echo "[deps] Installing graphics libs..."
+apt-get install -y \
+  libpixman-1-dev \
+  libdrm-dev \
+  libgbm-dev \
+  libegl-dev \
+  libgles2-mesa-dev \
+  libvulkan-dev \
+  libglslang-dev \
+  2>&1 || true
+
+echo "[deps] Installing input/seat..."
+apt-get install -y \
+  libseat-dev \
+  libinput-dev \
+  libudev-dev \
+  libsystemd-dev \
+  libdisplay-info-dev \
+  2>&1 || true
+
+echo "[deps] Installing XCB for Xwayland..."
+apt-get install -y \
+  libxcb1-dev \
+  libxcb-render-util0-dev \
+  libxcb-icccm4-dev \
+  libxcb-image0-dev \
+  libxcb-keysyms1-dev \
+  libxcb-randr0-dev \
+  libxcb-xfixes0-dev \
+  libxcb-composite0-dev \
+  libxcb-ewmh-dev \
+  libxcb-present-dev \
+  libxcb-glx0-dev \
+  libxwayland-dev \
+  2>&1 || true
+
+echo "[deps] Installing rendering/extra libs..."
+apt-get install -y \
+  libtomlplusplus-dev \
+  libpango1.0-dev \
+  libcairo2-dev \
+  hwdata \
+  libzip-dev \
+  libliftoff-dev \
+  libxxhash-dev \
+  libudis86-dev \
+  libfmt-dev \
+  libspdlog-dev \
+  libwebp-dev \
+  librsvg2-dev \
+  2>&1 || true
+
+echo "[deps] Installing aquamarine/hyprcursor deps..."
+apt-get install -y \
+  libdisplay-info-dev \
+  libseat-dev libinput-dev \
+  libudev-dev libdrm-dev \
+  libgbm-dev libegl-dev \
+  libwayland-dev wayland-protocols \
+  libxkbcommon-dev \
+  libzip-dev libwebp-dev librsvg2-dev \
+  2>/dev/null || true
+
+echo "[deps] Installing hyprlock deps..."
+apt-get install -y \
+  libpam0g-dev libmagic-dev \
+  2>/dev/null || true
+
+# ---- Install CMake 3.30+ from Kitware ----
+echo ""
+echo "=== Installing CMake 3.30+ from Kitware ==="
+apt-get install -y ca-certificates gpg wget 2>&1 || true
+wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc \
+  2>/dev/null | gpg --dearmor - \
+  | tee /usr/share/keyrings/kitware-archive-keyring.gpg \
+  >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] \
+  https://apt.kitware.com/ubuntu/ noble main" \
+  | tee /etc/apt/sources.list.d/kitware.list
+apt-get update -qq 2>/dev/null
+apt-get install -y cmake 2>/dev/null
+echo "CMake version: $(cmake --version 2>&1 | head -1)"
+
+# ================================================================
+# Step 1: hyprwayland-scanner (code generator — no deps)
+# ================================================================
+build_hypr_lib \
+  hyprwayland-scanner \
+  hyprwayland-scanner \
+  ""
+
+# ================================================================
+# Step 2: hyprutils (utility library)
+# ================================================================
+build_hypr_lib \
+  hyprutils \
+  hyprutils \
+  "hyprutils"
+
+# ================================================================
+# Step 3: hyprlang (config parser — needs hyprutils)
+# ================================================================
+build_hypr_lib \
+  hyprlang \
+  hyprlang \
+  "hyprlang"
+
+# ================================================================
+# Step 4: hyprcursor (cursor theme — needs hyprlang, hyprutils)
+# ================================================================
+build_hypr_lib \
+  hyprcursor \
+  hyprcursor \
+  "hyprcursor"
+
+# ================================================================
+# Step 5: glslang (cmake config files)
+# ================================================================
+echo "=== Building glslang ==="
 cd /tmp
-rm -rf HyprlandTest
-echo "--- Cloning Hyprland ---"
-git clone --depth 1 https://github.com/hyprwm/Hyprland.git HyprlandTest 2>&1
-echo "Git clone exit: $?"
-ls -la /tmp/HyprlandTest/ 2>&1
-
-# Test cmake configure
-cd /tmp/HyprlandTest
-echo "--- Running cmake configure ---"
+rm -rf glslang
+git clone --depth 1 \
+  https://github.com/KhronosGroup/glslang.git 2>&1 | tail -2
+cd /tmp/glslang
+python3 update_glslang_sources.py 2>/dev/null || true
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=/usr \
-  2>&1
-echo "CMake configure exit: $?"
+  -DBUILD_SHARED_LIBS=OFF \
+  -DENABLE_GLSLANG_BINARIES=OFF \
+  2>&1 | tail -3
+cmake --build build -j$(nproc) 2>&1 | tail -3
+cmake --install build 2>&1 | tail -3
+ls /usr/lib/cmake/glslang/ 2>/dev/null \
+  && echo "OK: glslang cmake files" \
+  || echo "WARN: glslang cmake files not found"
+echo "=== done: glslang ==="
 
-# Show missing deps
-echo "--- Missing dependencies ---"
+# ================================================================
+# Step 6: aquamarine (display backend — needs hyprutils, hyprwayland-scanner)
+# ================================================================
+build_hypr_lib \
+  aquamarine \
+  aquamarine \
+  "aquamarine"
+
+# Verify aquamarine before proceeding — it's critical
+pkg-config --modversion aquamarine 2>/dev/null || {
+  echo "FATAL: aquamarine still not found after build"
+  echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+  find /usr -name "aquamarine.pc" 2>/dev/null
+  exit 1
+}
+
+# ================================================================
+# Step 7: Build Hyprland (main compositor)
+# ================================================================
+echo "=== Building Hyprland ==="
+cd /tmp && rm -rf Hyprland
+git clone --depth 1 --recursive \
+  https://github.com/hyprwm/Hyprland.git \
+  2>&1 | tail -2
+
+cd /tmp/Hyprland
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=/usr \
-  2>&1 | grep -iE "not found|missing|error|could not|required"
+  -DCMAKE_PREFIX_PATH=/usr \
+  2>&1 | grep -iE "error|not found|missing" | head -20
 
-rm -rf /tmp/HyprlandTest
-echo "=== Diagnostics complete ==="
-TESTSCRIPT
-  chmod +x "$CHROOT_DIR/tmp/test_hyprland.sh"
+if [ $? -ne 0 ]; then
+  echo "FATAL: Hyprland cmake failed"
+  exit 1
+fi
 
-  # ---- Run diagnostics first ----
-  echo "--- Running Hyprland build diagnostics ---"
-  chroot "$CHROOT_DIR" bash /tmp/test_hyprland.sh \
-    2>&1 | tee "$BUILD_DIR/hyprland_debug.log" || true
+echo "Hyprland cmake OK — compiling..."
+cmake --build build -j$(nproc) 2>&1 | tail -10
+cmake --install build 2>&1 | tail -5
 
-  # ---- Main build heredoc ----
-  chroot "$CHROOT_DIR" bash << 'HYPR'
-  export DEBIAN_FRONTEND=noninteractive
-  set -o pipefail
+ldconfig 2>/dev/null || true
 
-  echo "========================================"
-  echo "  HYPRLAND BUILD — FULL VERBOSE OUTPUT"
-  echo "========================================"
+if [ -x /usr/bin/Hyprland ] || command -v Hyprland >/dev/null 2>&1; then
+  echo "SUCCESS: Hyprland installed"
+  Hyprland --version 2>&1 || true
+else
+  echo "FAILED: Hyprland binary not found"
+  echo "Sway will remain as fallback"
+fi
 
-  # ---- Install build deps in resilient groups ----
+# ================================================================
+# Step 8: hyprpaper (wallpaper)
+# ================================================================
+build_hypr_lib hyprpaper hyprpaper ""
 
-  echo "[1/7] Installing core build tools..."
-  apt-get install -y \
-    meson cmake ninja-build \
-    pkg-config git curl \
-    re2c glslang-tools \
-    spirv-tools 2>&1 || true
+# ================================================================
+# Step 9: hyprlock (lock screen)
+# ================================================================
+build_hypr_lib hyprlock hyprlock ""
 
-  echo "[2/7] Installing Wayland core..."
-  apt-get install -y \
-    libwayland-dev \
-    libwayland-egl-backend-dev \
-    wayland-protocols \
-    libxkbcommon-dev \
-    libxkbcommon-x11-dev \
-    2>&1 || true
+# ================================================================
+# Step 10: hypridle (idle daemon)
+# ================================================================
+build_hypr_lib hypridle hypridle ""
 
-  echo "[3/7] Installing graphics libs..."
-  apt-get install -y \
-    libpixman-1-dev \
-    libdrm-dev \
-    libgbm-dev \
-    libegl-dev \
-    libgles2-mesa-dev \
-    libvulkan-dev \
-    libglslang-dev \
-    2>&1 || true
+# ================================================================
+# Final verification
+# ================================================================
+echo ""
+echo "=== FINAL VERIFICATION ==="
+which Hyprland && Hyprland --version \
+  && echo "SUCCESS: Hyprland installed" \
+  || echo "FAILED: Hyprland not found"
 
-  echo "[4/7] Installing input/seat..."
-  apt-get install -y \
-    libseat-dev \
-    libinput-dev \
-    libudev-dev \
-    libsystemd-dev \
-    libdisplay-info-dev \
-    2>&1 || true
+which hyprpaper && echo "OK: hyprpaper" \
+  || echo "MISSING: hyprpaper"
+which hyprlock && echo "OK: hyprlock" \
+  || echo "MISSING: hyprlock"
+which hypridle && echo "OK: hypridle" \
+  || echo "MISSING: hypridle"
 
-  echo "[5/7] Installing XCB for Xwayland..."
-  apt-get install -y \
-    libxcb1-dev \
-    libxcb-render-util0-dev \
-    libxcb-icccm4-dev \
-    libxcb-image0-dev \
-    libxcb-keysyms1-dev \
-    libxcb-randr0-dev \
-    libxcb-xfixes0-dev \
-    libxcb-composite0-dev \
-    libxcb-ewmh-dev \
-    libxcb-present-dev \
-    libxcb-glx0-dev \
-    libxwayland-dev \
-    2>&1 || true
+# Cleanup build dirs to save space
+rm -rf /tmp/hyprwayland-scanner \
+  /tmp/hyprutils /tmp/hyprlang \
+  /tmp/hyprcursor /tmp/aquamarine \
+  /tmp/Hyprland /tmp/hyprpaper \
+  /tmp/hyprlock /tmp/hypridle \
+  /tmp/glslang
 
-  echo "[6/7] Installing Hyprland specific libs..."
-  apt-get install -y \
-    libtomlplusplus-dev \
-    libhyprlang-dev \
-    libhyprutils-dev \
-    libhyprwayland-scanner-dev \
-    libhyprcursor-dev \
-    aquamarine-dev \
-    2>&1 || true
+echo "=== Hyprland ecosystem complete ==="
+BUILDALL
 
-  echo "[7/7] Installing rendering libs..."
-  apt-get install -y \
-    libpango1.0-dev \
-    libcairo2-dev \
-    hwdata \
-    libzip-dev \
-    libliftoff-dev \
-    2>&1 || true
-
-  echo "[7b] Installing extra Hyprland cmake deps..."
-  apt-get install -y \
-    libglslang-dev \
-    glslang-tools \
-    libxxhash-dev \
-    libudis86-dev \
-    libfmt-dev \
-    libspdlog-dev \
-    2>/dev/null || true
-
-  # ================================================================
-  # METHOD 1: Try PPA install
-  # ================================================================
-  echo ""
-  echo "=== METHOD 1: Trying PPA ==="
-  apt-get install -y software-properties-common 2>&1 || true
-  add-apt-repository -y ppa:hyprwm/hyprland-dev 2>&1 || \
-  add-apt-repository -y ppa:hyprwm/hyprland 2>&1 || true
-  apt-get update -qq 2>&1 || true
-
-  echo "Searching for hyprland packages..."
-  apt-cache search hyprland 2>&1 || true
-
-  apt-get install -y hyprland 2>&1 || true
-
-  if [ -x /usr/bin/Hyprland ] || command -v Hyprland >/dev/null 2>&1; then
-    echo "SUCCESS: Hyprland installed from PPA"
-    Hyprland --version 2>&1 || true
-    apt-get install -y hyprpaper hyprlock hypridle \
-      xdg-desktop-portal-hyprland 2>&1 || true
-    echo "Hyprland ecosystem complete via PPA"
-    exit 0
-  fi
-  echo "PPA method failed"
-
-  # ================================================================
-  # METHOD 2: Try OBS repository
-  # ================================================================
-  echo ""
-  echo "=== METHOD 2: Trying OBS repository ==="
-  echo "deb [trusted=yes] https://ppa.launchpadcontent.net/hyprwm/hyprland/ubuntu noble main" \
-    > /etc/apt/sources.list.d/hyprland-obs.list 2>/dev/null || true
-  apt-get update -qq 2>&1 || true
-  apt-cache search hyprland 2>&1 || true
-
-  for pkg in hyprland hyprland-git hyprland-nvidia hyprland-bin; do
-    echo "Trying: apt-get install $pkg"
-    apt-get install -y "$pkg" 2>&1 && echo "Installed: $pkg" && break
-  done
-
-  if [ -x /usr/bin/Hyprland ] || command -v Hyprland >/dev/null 2>&1; then
-    echo "SUCCESS: Hyprland installed from OBS"
-    Hyprland --version 2>&1 || true
-    apt-get install -y hyprpaper hyprlock hypridle \
-      xdg-desktop-portal-hyprland 2>&1 || true
-    echo "Hyprland ecosystem complete via OBS"
-    exit 0
-  fi
-  echo "OBS method failed"
-  rm -f /etc/apt/sources.list.d/hyprland-obs.list
-
-  # ================================================================
-  # METHOD 3: Build from source
-  # ================================================================
-  echo ""
-  echo "=== METHOD 3: Building from source ==="
-
-  # --- Build Hyprland deps from source if needed ---
-  # Build hyprutils
-  echo "--- Building hyprutils ---"
-  cd /tmp
-  rm -rf hyprutils
-  git clone --depth 1 https://github.com/hyprwm/hyprutils.git 2>&1
-  if [ -d /tmp/hyprutils ]; then
-    cd /tmp/hyprutils
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1
-    cmake --build build -j"$(nproc)" 2>&1
-    cmake --install build 2>&1
-    echo "hyprutils install exit: $?"
-  fi
-
-  # Build hyprwayland-scanner
-  echo "--- Building hyprwayland-scanner ---"
-  cd /tmp
-  rm -rf hyprwayland-scanner
-  git clone --depth 1 https://github.com/hyprwm/hyprwayland-scanner.git 2>&1
-  if [ -d /tmp/hyprwayland-scanner ]; then
-    cd /tmp/hyprwayland-scanner
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1
-    cmake --build build -j"$(nproc)" 2>&1
-    cmake --install build 2>&1
-    echo "hyprwayland-scanner install exit: $?"
-  fi
-
-  # Build hyprlang
-  echo "--- Building hyprlang ---"
-  cd /tmp
-  rm -rf hyprlang
-  git clone --depth 1 https://github.com/hyprwm/hyprlang.git 2>&1
-  if [ -d /tmp/hyprlang ]; then
-    cd /tmp/hyprlang
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1
-    cmake --build build -j"$(nproc)" 2>&1
-    cmake --install build 2>&1
-    echo "hyprlang install exit: $?"
-  fi
-
-  # Build hyprcursor
-  echo "--- Building hyprcursor ---"
-  cd /tmp
-  rm -rf hyprcursor
-  git clone --depth 1 https://github.com/hyprwm/hyprcursor.git 2>&1
-  if [ -d /tmp/hyprcursor ]; then
-    cd /tmp/hyprcursor
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1
-    cmake --build build -j"$(nproc)" 2>&1
-    cmake --install build 2>&1
-    echo "hyprcursor install exit: $?"
-  fi
-
-  # Build aquamarine
-  echo "--- Building aquamarine ---"
-  cd /tmp
-  rm -rf aquamarine
-  git clone --depth 1 https://github.com/hyprwm/aquamarine.git 2>&1
-  if [ -d /tmp/aquamarine ]; then
-    cd /tmp/aquamarine
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1
-    cmake --build build -j"$(nproc)" 2>&1
-    cmake --install build 2>&1
-    echo "aquamarine install exit: $?"
-  fi
-
-  # Update linker cache after installing deps
-  ldconfig 2>&1 || true
-
-  # ---- Install CMake 3.30+ from Kitware ----
-  echo "--- Installing CMake 3.30+ from Kitware ---"
-  # Check current cmake version
-  cmake --version 2>/dev/null
-
-  # Install Kitware apt repo for newer cmake
-  apt-get install -y ca-certificates gpg wget 2>&1 || true
-
-  wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc \
-    2>/dev/null | gpg --dearmor - \
-    | tee /usr/share/keyrings/kitware-archive-keyring.gpg \
-    >/dev/null
-
-  echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] \
-    https://apt.kitware.com/ubuntu/ noble main" \
-    | tee /etc/apt/sources.list.d/kitware.list
-
-  apt-get update -qq 2>/dev/null
-  apt-get install -y cmake 2>/dev/null
-
-  # Verify new version
-  cmake --version
-  echo "CMake update exit: $?"
-
-  # --- Build Hyprland itself ---
-  echo "--- Cloning Hyprland ---"
-  cd /tmp
-  rm -rf Hyprland
-  git clone --depth 1 --recursive \
-    https://github.com/hyprwm/Hyprland.git 2>&1
-  CLONE_EXIT=$?
-  echo "Git clone exit: $CLONE_EXIT"
-
-  if [ $CLONE_EXIT -ne 0 ] || [ ! -d /tmp/Hyprland ]; then
-    echo "FATAL: git clone failed"
-    exit 1
-  fi
-
-  cd /tmp/Hyprland
-  echo "Source directory: $(pwd)"
-  echo "Contents: $(ls -la)"
-
-  # Build glslang from source for cmake config
-  echo "--- Building glslang from source ---"
-  cd /tmp
-  rm -rf glslang
-  git clone --depth 1 \
-    https://github.com/KhronosGroup/glslang.git
-  cd /tmp/glslang
-  python3 update_glslang_sources.py 2>/dev/null || true
-  cmake -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DENABLE_GLSLANG_BINARIES=OFF
-  cmake --build build -j$(nproc)
-  cmake --install build
-  echo "glslang cmake exit: $?"
-  ls /usr/lib/cmake/glslang/ 2>/dev/null || \
-    echo "WARNING: cmake files not found"
-
-  # Build aquamarine from source
-  echo "--- Building aquamarine from source ---"
-  # Install aquamarine deps first
-  apt-get install -y \
-    libdisplay-info-dev \
-    libseat-dev \
-    libinput-dev \
-    libudev-dev \
-    libdrm-dev \
-    libgbm-dev \
-    libegl-dev \
-    libwayland-dev \
-    wayland-protocols \
-    libxkbcommon-dev \
-    2>/dev/null || true
-
-  cd /tmp
-  rm -rf aquamarine
-  git clone --depth 1 --recursive \
-    https://github.com/hyprwm/aquamarine.git
-
-  cd /tmp/aquamarine
-  cmake -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_PREFIX_PATH=/usr \
-    2>&1 | tail -5
-
-  cmake --build build -j$(nproc) 2>&1 | tail -5
-  cmake --install build 2>&1 | tail -5
-
-  # Verify pkg-config can find it
-  pkg-config --modversion aquamarine 2>/dev/null \
-    && echo "aquamarine OK" \
-    || echo "aquamarine pkg-config not found"
-
-  cd /tmp/Hyprland
-
-  CMAKE_VER=$(cmake --version 2>/dev/null | head -1 | awk '{print $3}')
-  echo "CMake version: $CMAKE_VER"
-
-  echo "--- CMake configure ---"
-  cmake -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_PREFIX_PATH=/usr \
-    2>&1
-  CMAKE_CONF_EXIT=$?
-  echo "CMake configure exit: $CMAKE_CONF_EXIT"
-
-  if [ $CMAKE_CONF_EXIT -ne 0 ]; then
-    echo "CMake configure failed — trying meson"
-    meson setup build \
-      --prefix=/usr \
-      --buildtype=release \
-      2>&1
-    MESON_EXIT=$?
-    echo "Meson configure exit: $MESON_EXIT"
-
-    if [ $MESON_EXIT -ne 0 ]; then
-      echo "FATAL: Both cmake and meson configure failed"
-      echo "Cannot build Hyprland — Sway will be fallback"
-      exit 1
-    fi
-
-    echo "--- Ninja build ---"
-    ninja -C build -j"$(nproc)" 2>&1
-    BUILD_EXIT=$?
-    echo "Ninja build exit: $BUILD_EXIT"
-
-    if [ $BUILD_EXIT -eq 0 ]; then
-      echo "--- Ninja install ---"
-      ninja -C build install 2>&1
-      echo "Ninja install exit: $?"
-    fi
-  else
-    echo "--- CMake build ---"
-    cmake --build build -j"$(nproc)" 2>&1
-    BUILD_EXIT=$?
-    echo "CMake build exit: $BUILD_EXIT"
-
-    if [ $BUILD_EXIT -eq 0 ]; then
-      echo "--- CMake install ---"
-      cmake --install build 2>&1
-      echo "CMake install exit: $?"
-    else
-      echo "FATAL: CMake build failed with exit $BUILD_EXIT"
-    fi
-  fi
-
-  ldconfig 2>&1 || true
-
-  echo ""
-  echo "--- Hyprland binary check ---"
-  echo "which Hyprland: $(which Hyprland 2>&1 || echo 'NOT FOUND')"
-  echo "ls /usr/bin/Hyprland: $(ls -la /usr/bin/Hyprland 2>&1 || echo 'NOT FOUND')"
-  echo "ls /usr/local/bin/Hyprland: $(ls -la /usr/local/bin/Hyprland 2>&1 || echo 'NOT FOUND')"
-
-  if [ -x /usr/bin/Hyprland ] || command -v Hyprland >/dev/null 2>&1; then
-    echo "SUCCESS: Hyprland installed from source"
-    Hyprland --version 2>&1 || true
-  else
-    echo "FAILED: Hyprland binary not found after source build"
-    echo "Sway will remain as fallback compositor"
-    # Don't exit 1 — allow ecosystem tools to still try
-  fi
-
-  # ---- Build ecosystem tools (best-effort) ----
-
-  echo "--- Building hyprpaper ---"
-  cd /tmp
-  rm -rf hyprpaper
-  git clone --depth 1 https://github.com/hyprwm/hyprpaper.git 2>&1 || true
-  if [ -d /tmp/hyprpaper ]; then
-    cd /tmp/hyprpaper
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1 && \
-    cmake --build build -j"$(nproc)" 2>&1 && \
-    cmake --install build 2>&1 || echo "hyprpaper build failed (non-fatal)"
-  fi
-
-  echo "--- Building hyprlock ---"
-  cd /tmp
-  rm -rf hyprlock
-  git clone --depth 1 https://github.com/hyprwm/hyprlock.git 2>&1 || true
-  if [ -d /tmp/hyprlock ]; then
-    cd /tmp/hyprlock
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1 && \
-    cmake --build build -j"$(nproc)" 2>&1 && \
-    cmake --install build 2>&1 || echo "hyprlock build failed (non-fatal)"
-  fi
-
-  echo "--- Building hypridle ---"
-  cd /tmp
-  rm -rf hypridle
-  git clone --depth 1 https://github.com/hyprwm/hypridle.git 2>&1 || true
-  if [ -d /tmp/hypridle ]; then
-    cd /tmp/hypridle
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1 && \
-    cmake --build build -j"$(nproc)" 2>&1 && \
-    cmake --install build 2>&1 || echo "hypridle build failed (non-fatal)"
-  fi
-
-  echo "--- Building xdg-desktop-portal-hyprland ---"
-  cd /tmp
-  rm -rf xdg-desktop-portal-hyprland
-  git clone --depth 1 https://github.com/hyprwm/xdg-desktop-portal-hyprland.git 2>&1 || true
-  if [ -d /tmp/xdg-desktop-portal-hyprland ]; then
-    cd /tmp/xdg-desktop-portal-hyprland
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr 2>&1 && \
-    cmake --build build -j"$(nproc)" 2>&1 && \
-    cmake --install build 2>&1 || echo "xdg-portal build failed (non-fatal)"
-  fi
-
-  # Cleanup build files to save space
-  rm -rf /tmp/Hyprland /tmp/hyprpaper \
-    /tmp/hyprlock /tmp/hypridle \
-    /tmp/aquamarine /tmp/hyprutils \
-    /tmp/hyprwayland-scanner /tmp/hyprlang \
-    /tmp/hyprcursor \
-    /tmp/xdg-desktop-portal-hyprland
-
-  echo ""
-  echo "========================================"
-  echo "  HYPRLAND BUILD COMPLETE"
-  echo "========================================"
-HYPR
-
-  # ---- VERIFICATION: Only mark done if binary exists ----
-  echo "--- Verifying Hyprland installation ---"
-  if chroot "$CHROOT_DIR" which Hyprland >/dev/null 2>&1; then
-    echo "VERIFIED: Hyprland installed"
-    chroot "$CHROOT_DIR" Hyprland --version 2>&1 || true
+  # Only mark done if Hyprland actually installed
+  if sudo chroot "$CHROOT_DIR" \
+    which Hyprland >/dev/null 2>&1; then
+    echo "VERIFIED: Hyprland installed successfully"
     touch "$FLAG_HYPRLAND"
   else
-    echo "FAILED: Hyprland still not installed"
-    echo "Keeping Sway as fallback"
-    echo "Debug log at: $BUILD_DIR/hyprland_debug.log"
-    # Do NOT touch .hyprland_done so next run tries again
+    echo "FAILED: Hyprland not installed"
+    echo "Sway will be used as fallback"
   fi
   echo "--- Hyprland stage complete ---"
 }

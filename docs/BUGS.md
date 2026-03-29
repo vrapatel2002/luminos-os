@@ -370,6 +370,16 @@ Each bug entry:
 - Date Found: 2026-03-28
 - Date Fixed: 2026-03-28
 
+### BUG-038 — Hyprland deps built in wrong order / aquamarine not found
+- Status: FIXED
+- Severity: CRITICAL
+- Component: scripts/smart_build.sh stage_hyprland
+- Description: aquamarine pkg-config not found even after cmake install. Piecemeal dep builds were out of order and duplicated across multiple heredocs. aquamarine needs hyprutils and hyprwayland-scanner built first.
+- Root Cause: Dependencies were added incrementally without correct ordering. aquamarine requires hyprutils + hyprwayland-scanner. hyprcursor requires hyprlang + hyprutils. hyprlang requires hyprutils. Build order was not enforced.
+- Fix Applied: Complete rewrite of stage_hyprland() with single chroot heredoc, helper function build_hypr_lib(), and correct 10-step build order: (1) hyprwayland-scanner (2) hyprutils (3) hyprlang (4) hyprcursor (5) glslang (6) aquamarine (7) Hyprland (8) hyprpaper (9) hyprlock (10) hypridle. Each step verifies pkg-config. PKG_CONFIG_PATH exported. ldconfig after each install. Removed PPA/OBS methods (never worked on Ubuntu 24.04).
+- Date Found: 2026-03-28
+- Date Fixed: 2026-03-28
+
 ## Open Bugs
 
 (none currently)
