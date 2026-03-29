@@ -1184,6 +1184,7 @@ export PKG_CONFIG_PATH=\
 /usr/lib/pkgconfig:\
 /usr/lib/x86_64-linux-gnu/pkgconfig:\
 /usr/share/pkgconfig
+export CMAKE_PREFIX_PATH="/usr;/usr/local"
 
 # Helper function to build a hyprwm library
 build_hypr_lib() {
@@ -1201,17 +1202,25 @@ build_hypr_lib() {
   cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_PREFIX_PATH=/usr \
+    -DCMAKE_PREFIX_PATH="/usr;/usr/local" \
     2>&1 | grep -iE "error|not found" | head -10
   cmake --build build -j$(nproc) 2>&1 | tail -3
   cmake --install build 2>&1 | tail -3
   ldconfig 2>/dev/null || true
+  # Symlink any cmake configs from lib/ to arch-specific path for discoverability
+  for f in /usr/lib/cmake/$name*; do
+    [ -d "$f" ] && [ ! -e "/usr/lib/x86_64-linux-gnu/cmake/$(basename $f)" ] && \
+      ln -sf "$f" /usr/lib/x86_64-linux-gnu/cmake/ 2>/dev/null || true
+  done
   export PKG_CONFIG_PATH=\
 /usr/local/lib/pkgconfig:\
 /usr/local/lib/x86_64-linux-gnu/pkgconfig:\
 /usr/lib/pkgconfig:\
 /usr/lib/x86_64-linux-gnu/pkgconfig:\
 /usr/share/pkgconfig
+  export CMAKE_PREFIX_PATH="/usr;/usr/local"
+  echo "Installed cmake configs for $name:"
+  find /usr -path "*/cmake/*$name*" -name "*.cmake" 2>/dev/null | head -5
   [ -n "$verify" ] && \
     pkg-config --modversion $verify 2>/dev/null \
     && echo "OK: $verify" \
@@ -1373,6 +1382,7 @@ python3 update_glslang_sources.py 2>/dev/null || true
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=/usr \
+  -DCMAKE_PREFIX_PATH="/usr;/usr/local" \
   -DBUILD_SHARED_LIBS=OFF \
   -DENABLE_GLSLANG_BINARIES=OFF \
   2>&1 | tail -3
@@ -1385,6 +1395,7 @@ export PKG_CONFIG_PATH=\
 /usr/lib/pkgconfig:\
 /usr/lib/x86_64-linux-gnu/pkgconfig:\
 /usr/share/pkgconfig
+export CMAKE_PREFIX_PATH="/usr;/usr/local"
 ls /usr/lib/cmake/glslang/ 2>/dev/null \
   && echo "OK: glslang cmake files" \
   || echo "WARN: glslang cmake files not found"
@@ -1419,7 +1430,7 @@ cd /tmp/Hyprland
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=/usr \
-  -DCMAKE_PREFIX_PATH=/usr \
+  -DCMAKE_PREFIX_PATH="/usr;/usr/local" \
   2>&1 | grep -iE "error|not found|missing" | head -20
 
 if [ $? -ne 0 ]; then

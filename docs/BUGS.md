@@ -380,6 +380,16 @@ Each bug entry:
 - Date Found: 2026-03-28
 - Date Fixed: 2026-03-28
 
+### BUG-039 — hyprwayland-scanner cmake config not found by aquamarine
+- Status: FIXED
+- Severity: CRITICAL
+- Component: scripts/smart_build.sh stage_hyprland
+- Description: aquamarine cmake configure fails because it cannot find hyprwayland-scanner cmake config files, even though hyprwayland-scanner built and installed successfully.
+- Root Cause: CMAKE_PREFIX_PATH only included /usr but cmake config files may install to /usr/local/lib/cmake/ or /usr/lib/cmake/ (not arch-specific). cmake searches CMAKE_PREFIX_PATH for find_package() — without /usr/local in the path, configs installed there are invisible. Additionally, cmake configs in /usr/lib/cmake/ weren't symlinked to /usr/lib/x86_64-linux-gnu/cmake/ where some projects search.
+- Fix Applied: (1) Changed CMAKE_PREFIX_PATH from "/usr" to "/usr;/usr/local" in all cmake invocations (build_hypr_lib helper, glslang, Hyprland). (2) Set CMAKE_PREFIX_PATH as environment variable at top of BUILDALL heredoc. (3) Added symlink step in build_hypr_lib to link /usr/lib/cmake/$name to /usr/lib/x86_64-linux-gnu/cmake/ for discoverability. (4) Added diagnostic output showing installed cmake config paths after each library.
+- Date Found: 2026-03-28
+- Date Fixed: 2026-03-28
+
 ## Open Bugs
 
 (none currently)
