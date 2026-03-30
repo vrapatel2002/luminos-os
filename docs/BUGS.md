@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-03-28
+Last Updated: 2026-03-29
 
 ## Format
 Each bug entry:
@@ -380,19 +380,26 @@ Each bug entry:
 - Date Found: 2026-03-28
 - Date Fixed: 2026-03-28
 
-### BUG-039 — hyprwayland-scanner cmake config not found by aquamarine
+### BUG-039 — Hyprland build fails: multiple missing deps and wrong compiler
 - Status: FIXED
 - Severity: CRITICAL
 - Component: scripts/smart_build.sh stage_hyprland
-- Description: aquamarine cmake configure fails because it cannot find hyprwayland-scanner cmake config files, even though hyprwayland-scanner built and installed successfully.
-- Root Cause: CMAKE_PREFIX_PATH only included /usr but cmake config files may install to /usr/local/lib/cmake/ or /usr/lib/cmake/ (not arch-specific). cmake searches CMAKE_PREFIX_PATH for find_package() — without /usr/local in the path, configs installed there are invisible. Additionally, cmake configs in /usr/lib/cmake/ weren't symlinked to /usr/lib/x86_64-linux-gnu/cmake/ where some projects search.
-- Fix Applied: (1) Changed CMAKE_PREFIX_PATH from "/usr" to "/usr;/usr/local" in all cmake invocations (build_hypr_lib helper, glslang, Hyprland). (2) Set CMAKE_PREFIX_PATH as environment variable at top of BUILDALL heredoc. (3) Added symlink step in build_hypr_lib to link /usr/lib/cmake/$name to /usr/lib/x86_64-linux-gnu/cmake/ for discoverability. (4) Added diagnostic output showing installed cmake config paths after each library.
+- Description: Hyprland and its entire dependency chain failed to build on Ubuntu 24.04. Multiple cascading failures: hyprwayland-scanner missing pugixml, hyprutils needs C++23 <print> (GCC 14+), hyprcursor missing tomlplusplus, aquamarine needs libinput>=1.26 (Ubuntu has 1.25), Hyprland needs wayland>=1.22.91 (Ubuntu has 1.22.0), xkbcommon>=1.11 (Ubuntu has 1.6), wayland-protocols>=1.47 (Ubuntu has 1.45), xcb-errors (not packaged), re2, lcms2, muparser, and new dep hyprgraphics.
+- Root Cause: Ubuntu 24.04 ships system libraries that are too old for latest Hyprland HEAD. The build script was not using GCC 14 (needed for C++23), was missing pugixml/tomlplusplus deps, and wasn't building system deps from source.
+- Fix Applied: Complete rewrite of stage_hyprland() — (1) Use GCC 14 for all builds. (2) Build wayland, wayland-protocols, xkbcommon, libinput, xcb-errors, sdbus-c++ from source. (3) Upgrade meson via pip. (4) Install pugixml, tomlplusplus, re2, lcms2, muparser. (5) Add hyprgraphics to build chain. (6) Correct build order with all deps. (7) Mark hyprpaper/hyprlock/hypridle as best-effort (need hyprwire which requires GCC 15+ append_range).
 - Date Found: 2026-03-28
-- Date Fixed: 2026-03-28
+- Date Fixed: 2026-03-29
 
 ## Open Bugs
 
-(none currently)
+### BUG-040 — hyprpaper/hyprlock/hypridle fail to build (need GCC 15+)
+- Status: OPEN
+- Severity: LOW
+- Component: scripts/smart_build.sh stage_hyprland ecosystem tools
+- Description: hyprpaper, hyprlock, and hypridle require hyprwire and hyprtoolkit libraries. hyprwire uses C++23 std::vector::append_range which is only available in GCC 15+ (libstdc++). GCC 14 on Ubuntu 24.04 does not support this.
+- Root Cause: Bleeding-edge hyprwm ecosystem tools outpaced Ubuntu 24.04's compiler. append_range was added to libstdc++ in GCC 15.
+- Workaround: Hyprland compositor itself works without these. swaylock/swayidle can be used as alternatives. When Ubuntu ships GCC 15+ or these tools release a compatible version, they can be re-enabled.
+- Date Found: 2026-03-29
 
 ## Known Limitations (not bugs)
 
