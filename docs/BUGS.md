@@ -392,14 +392,19 @@ Each bug entry:
 
 ## Open Bugs
 
+(none)
+
+## Recently Fixed
+
 ### BUG-040 — hyprpaper/hyprlock/hypridle fail to build (need GCC 15+)
-- Status: OPEN
+- Status: FIXED
 - Severity: LOW
 - Component: scripts/smart_build.sh stage_hyprland ecosystem tools
 - Description: hyprpaper, hyprlock, and hypridle require hyprwire and hyprtoolkit libraries. hyprwire uses C++23 std::vector::append_range which is only available in GCC 15+ (libstdc++). GCC 14 on Ubuntu 24.04 does not support this.
 - Root Cause: Bleeding-edge hyprwm ecosystem tools outpaced Ubuntu 24.04's compiler. append_range was added to libstdc++ in GCC 15.
-- Workaround: Hyprland compositor itself works without these. swaylock/swayidle can be used as alternatives. When Ubuntu ships GCC 15+ or these tools release a compatible version, they can be re-enabled.
+- Fix Applied: Installed GCC 15 from ppa:ubuntu-toolchain-r/test, set as default via update-alternatives. Built hyprwire, hyprtoolkit, hyprland-protocols, and iniparser as new deps. Then built hyprpaper, hyprlock, hypridle successfully with GCC 15 + C++23 support.
 - Date Found: 2026-03-29
+- Date Fixed: 2026-03-29
 
 ## Known Limitations (not bugs)
 
