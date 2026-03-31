@@ -35,7 +35,7 @@ CATEGORIES = [
 ]
 
 _SORT_OPTIONS = ["Relevance", "Name", "Size"]
-_FILTER_OPTIONS = ["All", "Flatpak", "apt"]
+_FILTER_OPTIONS = ["All", "Flatpak", "pacman"]
 
 
 if _GTK_AVAILABLE:
@@ -318,7 +318,7 @@ if _GTK_AVAILABLE:
         def _apply_filter(self, pkg: Package) -> bool:
             if self._filter == "Flatpak" and pkg.source != "flatpak":
                 return False
-            if self._filter == "apt" and pkg.source != "apt":
+            if self._filter == "pacman" and pkg.source != "pacman":
                 return False
             return True
 
@@ -401,7 +401,7 @@ if _GTK_AVAILABLE:
             self._detail_icon.set_label(pkg.name[0].upper() if pkg.name else "?")
             version_str = pkg.version or "unknown"
             size_str = f" · {pkg.size_mb:.1f} MB" if pkg.size_mb else ""
-            source_str = "Flatpak (Sandboxed)" if pkg.sandboxed else "apt"
+            source_str = "Flatpak (Sandboxed)" if pkg.sandboxed else "pacman"
             zone_str = {1: "Zone 1 (Native)", 2: "Zone 2 (Wine)", 3: "Zone 3 (VM)"}.get(
                 pkg.predicted_zone, "Zone 1"
             )

@@ -35,13 +35,20 @@ systemctl enable luminos-ai || true
 bash /luminos-build/scripts/install_compatibility.sh
 
 # 6. Install Firecracker
-FIRECRACKER_VER="1.7.0"
-wget -q https://github.com/firecracker-microvm/firecracker/releases/download/v${FIRECRACKER_VER}/firecracker-v${FIRECRACKER_VER}-x86_64.tgz \
-  -O /tmp/firecracker.tgz
-tar -xf /tmp/firecracker.tgz -C /tmp/
-cp /tmp/release-v${FIRECRACKER_VER}-x86_64/firecracker-v${FIRECRACKER_VER}-x86_64 \
-  $LUMINOS_BIN/firecracker
-chmod +x $LUMINOS_BIN/firecracker
+if ! command -v firecracker &>/dev/null; then
+  # Try pacman first (available via archiso profile)
+  pacman -S --noconfirm --needed firecracker 2>/dev/null || {
+    # Fallback: download binary directly
+    FIRECRACKER_VER="1.7.0"
+    wget -q "https://github.com/firecracker-microvm/firecracker/releases/download/v${FIRECRACKER_VER}/firecracker-v${FIRECRACKER_VER}-x86_64.tgz" \
+      -O /tmp/firecracker.tgz
+    tar -xf /tmp/firecracker.tgz -C /tmp/
+    cp "/tmp/release-v${FIRECRACKER_VER}-x86_64/firecracker-v${FIRECRACKER_VER}-x86_64" \
+      "$LUMINOS_BIN/firecracker"
+    chmod +x "$LUMINOS_BIN/firecracker"
+    rm -f /tmp/firecracker.tgz
+  }
+fi
 
 # 7. Create launcher scripts
 create_launcher() {

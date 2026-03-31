@@ -4,7 +4,7 @@ Unified package search + install backend for Luminos Store.
 
 Sources:
   - Flatpak / Flathub  (flatpak search / install)
-  - apt                (apt-cache search / apt install via pkexec)
+  - pacman             (pacman -Ss / pacman -S via pkexec)
 
 The zone classifier runs after every install to determine which execution
 zone the installed app belongs to, and a notification is sent to the daemon.
@@ -30,7 +30,7 @@ class Package:
     name:           str
     description:    str
     version:        str
-    source:         str             # "flatpak" or "apt"
+    source:         str             # "flatpak" or "pacman"
     icon_name:      str             # for icon resolver
     size_mb:        float | None    # None if unknown
     installed:      bool
@@ -62,7 +62,7 @@ _FEATURED: list[Package] = [
     Package("Blender",      "3D creation suite",
             "latest",       "flatpak", "org.blender.Blender",     0.0, False, True,  "Graphics",    "org.blender.Blender",           1),
     Package("LibreOffice",  "Office suite",
-            "latest",       "apt",     "libreoffice",             0.0, False, False, "Office",      None,                            1),
+            "latest",       "pacman",  "libreoffice-fresh",       0.0, False, False, "Office",      None,                            1),
     Package("OBS Studio",   "Screen recorder and streamer",
             "latest",       "flatpak", "com.obsproject.Studio",   0.0, False, True,  "Multimedia",  "com.obsproject.Studio",         1),
 ]
@@ -134,58 +134,75 @@ def _parse_flatpak_output(output: str) -> list[Package]:
     return packages
 
 
-def search_apt(query: str) -> list[Package]:
+def search_pacman(query: str) -> list[Package]:
     """
-    Search apt via `apt-cache search`.
-    Returns [] if apt is not available or the search fails.
+    Search pacman repos via `pacman -Ss`.
+    Returns [] if pacman is not available or the search fails.
     """
     try:
         result = subprocess.run(
-            ["apt-cache", "search", query],
+            ["pacman", "-Ss", query],
             capture_output=True,
             text=True,
             timeout=15,
         )
         if result.returncode != 0 or not result.stdout.strip():
             return []
-        return _parse_apt_output(result.stdout, query)
+        return _parse_pacman_output(result.stdout, query)
     except FileNotFoundError:
-        logger.debug("search_apt: apt-cache not found")
+        logger.debug("search_pacman: pacman not found")
         return []
     except Exception as e:
-        logger.debug(f"search_apt: error — {e}")
+        logger.debug(f"search_pacman: error — {e}")
         return []
 
 
-def _parse_apt_output(output: str, query: str) -> list[Package]:
+def _parse_pacman_output(output: str, query: str) -> list[Package]:
+    """
+    Parse `pacman -Ss` output. Format:
+      repo/package-name version [installed]
+          Description text
+    """
     packages = []
-    for line in output.strip().splitlines()[:30]:
-        if " - " not in line:
-            continue
-        name, _, description = line.partition(" - ")
-        name        = name.strip()
-        description = description.strip()
-        if not name:
-            continue
-        packages.append(Package(
-            name           = name,
-            description    = description,
-            version        = "unknown",
-            source         = "apt",
-            icon_name      = name.lower(),
-            size_mb        = None,
-            installed      = False,
-            sandboxed      = False,
-            category       = "Unknown",
-            flatpak_id     = None,
-            predicted_zone = 1,
-        ))
+    lines = output.strip().splitlines()
+    i = 0
+    while i < len(lines) and len(packages) < 30:
+        line = lines[i]
+        # Header line: "repo/name version [installed]"
+        if line and not line.startswith(" "):
+            parts = line.split()
+            if len(parts) >= 2:
+                repo_name = parts[0]      # e.g. "extra/firefox"
+                version = parts[1]
+                name = repo_name.split("/", 1)[-1] if "/" in repo_name else repo_name
+                installed = "[installed]" in line
+
+                # Next line is the description
+                description = ""
+                if i + 1 < len(lines) and lines[i + 1].startswith("    "):
+                    description = lines[i + 1].strip()
+                    i += 1
+
+                packages.append(Package(
+                    name           = name,
+                    description    = description,
+                    version        = version,
+                    source         = "pacman",
+                    icon_name      = name.lower(),
+                    size_mb        = None,
+                    installed      = installed,
+                    sandboxed      = False,
+                    category       = "Unknown",
+                    flatpak_id     = None,
+                    predicted_zone = 1,
+                ))
+        i += 1
     return packages
 
 
 def search_all(query: str) -> list[Package]:
     """
-    Search both Flatpak and apt in parallel threads.
+    Search both Flatpak and pacman in parallel threads.
 
     Deduplication: if the same app name appears in both sources,
     the Flatpak version wins (sandboxed preferred).
@@ -195,7 +212,7 @@ def search_all(query: str) -> list[Package]:
     Returns at most 30 results.
     """
     flatpak_results: list[Package] = []
-    apt_results:     list[Package] = []
+    pacman_results:  list[Package] = []
     errors: list[str] = []
 
     def _run_flatpak():
@@ -204,14 +221,14 @@ def search_all(query: str) -> list[Package]:
         except Exception as e:
             errors.append(str(e))
 
-    def _run_apt():
+    def _run_pacman():
         try:
-            apt_results.extend(search_apt(query))
+            pacman_results.extend(search_pacman(query))
         except Exception as e:
             errors.append(str(e))
 
     t1 = threading.Thread(target=_run_flatpak, daemon=True)
-    t2 = threading.Thread(target=_run_apt,     daemon=True)
+    t2 = threading.Thread(target=_run_pacman,  daemon=True)
     t1.start(); t2.start()
     t1.join(timeout=20)
     t2.join(timeout=20)
@@ -220,11 +237,10 @@ def search_all(query: str) -> list[Package]:
     seen: dict[str, Package] = {}
     for pkg in flatpak_results:
         seen[pkg.name.lower()] = pkg
-    for pkg in apt_results:
+    for pkg in pacman_results:
         key = pkg.name.lower()
         if key not in seen:
             seen[key] = pkg
-        # else flatpak version already stored — apt version silently dropped
 
     combined = list(seen.values())
 
@@ -257,7 +273,7 @@ def install_package(
     daemon_client=None,
 ) -> dict:
     """
-    Install a package via Flatpak or apt.
+    Install a package via Flatpak or pacman.
 
     Args:
         pkg:           Package to install.
@@ -274,7 +290,7 @@ def install_package(
                         "error": "No flatpak_id available"}
             cmd = ["flatpak", "install", "-y", "flathub", pkg.flatpak_id]
         else:
-            cmd = ["pkexec", "apt", "install", "-y", pkg.name]
+            cmd = ["pkexec", "pacman", "-S", "--noconfirm", pkg.name]
 
         proc = subprocess.Popen(
             cmd,
@@ -311,7 +327,7 @@ def install_package(
 
 def uninstall_package(pkg: Package) -> dict:
     """
-    Uninstall a package via Flatpak or apt.
+    Uninstall a package via Flatpak or pacman.
 
     Returns:
         {"success": bool, "error": str | None}
@@ -322,7 +338,7 @@ def uninstall_package(pkg: Package) -> dict:
                 return {"success": False, "error": "No flatpak_id available"}
             cmd = ["flatpak", "uninstall", "-y", pkg.flatpak_id]
         else:
-            cmd = ["pkexec", "apt", "remove", "-y", pkg.name]
+            cmd = ["pkexec", "pacman", "-R", "--noconfirm", pkg.name]
 
         result = subprocess.run(cmd, capture_output=True, timeout=120)
         if result.returncode == 0:
@@ -352,13 +368,10 @@ def is_installed(pkg: Package) -> bool:
             return pkg.flatpak_id in result.stdout
         else:
             result = subprocess.run(
-                ["dpkg", "-l", pkg.name],
+                ["pacman", "-Qi", pkg.name],
                 capture_output=True, text=True, timeout=10,
             )
-            return any(
-                line.startswith("ii ") and pkg.name in line
-                for line in result.stdout.splitlines()
-            )
+            return result.returncode == 0
     except Exception:
         return False
 

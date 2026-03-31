@@ -1,381 +1,338 @@
 #!/bin/bash
 set -euo pipefail
 
-UBUNTU_VERSION="24.04"
-UBUNTU_CODENAME="noble"
+# ============================================================================
+# Luminos OS — ISO Builder (Arch Linux / archiso)
+# ============================================================================
+# Builds a bootable Luminos OS ISO using archiso.
+# Requires: archiso package installed on the build host.
+# ============================================================================
+
 BUILD_DIR="$(pwd)/build"
-CHROOT_DIR="$BUILD_DIR/chroot"
-ISO_DIR="$BUILD_DIR/iso"
-OUTPUT_ISO="$BUILD_DIR/luminos-os-v0.1.0.iso"
+PROFILE_DIR="$BUILD_DIR/luminos-profile"
+WORK_DIR="$BUILD_DIR/work"
+OUTPUT_DIR="$BUILD_DIR/out"
 LOG="$BUILD_DIR/build.log"
 START_TIME=$(date +%s)
 
-umount_chroot() {
-  local chroot=$1
-  for mnt in \
-    "$chroot/dev/pts" \
-    "$chroot/dev/shm" \
-    "$chroot/dev/mqueue" \
-    "$chroot/dev/hugepages" \
-    "$chroot/dev" \
-    "$chroot/proc" \
-    "$chroot/sys/fs/cgroup" \
-    "$chroot/sys" \
-    "$chroot/run"; do
-    umount -lf "$mnt" 2>/dev/null || true
-  done
-  sleep 2
-}
+echo "=== Luminos OS ISO Builder (Arch) ===" | tee "$LOG"
+echo "Output: $OUTPUT_DIR/" | tee -a "$LOG"
 
-safe_cleanup() {
-  local chroot=$1
-  [ -z "$chroot" ] && return 0
-  [ "$chroot" = "/" ] && return 0
-  [ ! -d "$chroot" ] && return 0
-
-  echo "Cleaning up chroot: $chroot"
-
-  # Step 1: Kill anything running in chroot
-  for pid in $(lsof +D "$chroot" 2>/dev/null \
-    | awk 'NR>1 {print $2}' | sort -u); do
-    kill -9 $pid 2>/dev/null || true
-  done
-  sleep 2
-
-  # Step 2: Lazy force unmount everything
-  # Order matters — children before parents
-  for mnt in \
-    "$chroot/dev/pts" \
-    "$chroot/dev/shm" \
-    "$chroot/dev/mqueue" \
-    "$chroot/dev/hugepages" \
-    "$chroot/dev" \
-    "$chroot/proc" \
-    "$chroot/sys/fs/cgroup" \
-    "$chroot/sys" \
-    "$chroot/run"; do
-    umount -lf "$mnt" 2>/dev/null || true
-  done
-  sleep 2
-
-  # Step 3: Check if proc is really unmounted
-  if mountpoint -q "$chroot/proc" 2>/dev/null
-  then
-    echo "WARNING: proc still mounted, forcing"
-    umount -lf "$chroot/proc" 2>/dev/null || true
-    sleep 3
-  fi
-
-  # Step 4: Remove everything EXCEPT proc/sys/dev
-  # using find with pruning
-  find "$chroot" \
-    -mindepth 1 -maxdepth 1 \
-    ! -name "proc" \
-    ! -name "sys" \
-    ! -name "dev" \
-    -exec rm -rf {} + 2>/dev/null || true
-
-  # Step 5: Now proc/sys/dev should be empty
-  # virtual dirs — safe to rmdir
-  rmdir "$chroot/proc" 2>/dev/null || true
-  rmdir "$chroot/sys" 2>/dev/null || true
-  rmdir "$chroot/dev" 2>/dev/null || true
-  rmdir "$chroot" 2>/dev/null || true
-
-  echo "Cleanup complete"
-}
-
-echo "=== Luminos OS ISO Builder ===" | tee $LOG
-echo "Ubuntu base: $UBUNTU_VERSION ($UBUNTU_CODENAME)"
-echo "Output: $OUTPUT_ISO"
-
+# ---------------------------------------------------------------------------
 # Check dependencies
+# ---------------------------------------------------------------------------
 check_deps() {
-  local deps=(debootstrap squashfs-tools \
-    xorriso grub-pc-bin grub-efi-amd64-bin \
-    mtools dosfstools qemu-utils rsync lsof)
+  local deps=(archiso mtools dosfstools libisoburn squashfs-tools)
   local missing=()
   for dep in "${deps[@]}"; do
-    if ! dpkg -l $dep &>/dev/null; then
-      missing+=($dep)
+    if ! pacman -Qi "$dep" &>/dev/null; then
+      missing+=("$dep")
     fi
   done
   if [ ${#missing[@]} -gt 0 ]; then
     echo "Installing: ${missing[*]}"
-    apt install -y "${missing[@]}"
+    sudo pacman -S --noconfirm --needed "${missing[@]}"
   fi
 }
 
-# Stage 1: Bootstrap Ubuntu base
-stage1_bootstrap() {
-  echo "--- Stage 1: Bootstrap Ubuntu $UBUNTU_CODENAME ---"
-  # Just unmount — never rm -rf at start (BUG-012)
-  umount_chroot $CHROOT_DIR 2>/dev/null || true
-  # debootstrap will overwrite existing chroot
-  mkdir -p $CHROOT_DIR
-  export http_proxy=""
-  export https_proxy=""
-  export no_proxy=""
-  # Remove any cached partial downloads (BUG-015)
-  rm -rf $CHROOT_DIR/debootstrap 2>/dev/null || true
-  debootstrap --arch=amd64 \
-    $UBUNTU_CODENAME \
-    $CHROOT_DIR \
-    http://ca.archive.ubuntu.com/ubuntu/
-  echo "Stage 1 complete" | tee -a $LOG
+# ---------------------------------------------------------------------------
+# Stage 1: Create archiso profile from releng template
+# ---------------------------------------------------------------------------
+stage1_profile() {
+  echo "--- Stage 1: Create archiso profile ---" | tee -a "$LOG"
+
+  if [ -d "$PROFILE_DIR" ]; then
+    echo "Profile exists — refreshing"
+    rm -rf "$PROFILE_DIR"
+  fi
+
+  # Start from the official releng profile
+  cp -r /usr/share/archiso/configs/releng/ "$PROFILE_DIR"
+
+  # Append Luminos packages to the package list
+  cat >> "$PROFILE_DIR/packages.x86_64" << 'PACKAGES'
+
+# --- Luminos OS packages ---
+# Compositor & desktop
+hyprland
+xdg-desktop-portal-hyprland
+xdg-desktop-portal-gtk
+qt5-wayland
+qt6-wayland
+waybar
+wofi
+dunst
+grim
+slurp
+foot
+swww
+
+# Login manager
+greetd
+greetd-tuigreet
+
+# Fonts & themes
+inter-font
+ttf-jetbrains-mono-nerd
+papirus-icon-theme
+adwaita-icon-theme
+
+# ROG hardware tools
+asusctl
+supergfxctl
+power-profiles-daemon
+
+# GPU drivers
+nvidia
+nvidia-utils
+nvidia-settings
+mesa
+vulkan-radeon
+vulkan-icd-loader
+lib32-vulkan-radeon
+lib32-vulkan-icd-loader
+lib32-mesa
+
+# Audio
+pipewire
+pipewire-pulse
+pipewire-alsa
+wireplumber
+
+# Network
+networkmanager
+
+# System
+polkit
+xdg-user-dirs
+python
+python-pip
+python-gobject
+gtk4
+libadwaita
+
+# Wine / compatibility
+wine
+wine-mono
+wine-gecko
+winetricks
+lutris
+
+# Gaming
+steam
+
+# Firecracker
+firecracker
+
+# AI runtime
+llama-cpp
+
+# Misc tools
+rsync
+wget
+curl
+git
+base-devel
+zstd
+unzip
+PACKAGES
+
+  echo "Stage 1 complete" | tee -a "$LOG"
 }
 
-# Stage 2: Prepare chroot
-stage2_prepare() {
-  echo "--- Stage 2: Prepare chroot ---"
-  mount --bind /dev $CHROOT_DIR/dev
-  mount --bind /proc $CHROOT_DIR/proc
-  mount --bind /sys $CHROOT_DIR/sys
-  mount --bind /dev/pts $CHROOT_DIR/dev/pts
+# ---------------------------------------------------------------------------
+# Stage 2: Customize airootfs (configs, users, services)
+# ---------------------------------------------------------------------------
+stage2_customize() {
+  echo "--- Stage 2: Customize airootfs ---" | tee -a "$LOG"
+  local AIROOTFS="$PROFILE_DIR/airootfs"
 
-  # Copy Luminos source into chroot
-  mkdir -p $CHROOT_DIR/luminos-build
-  rsync -a --exclude=build --exclude=.git . $CHROOT_DIR/luminos-build/
+  # ---- Hostname ----
+  echo "luminos-os" > "$AIROOTFS/etc/hostname"
 
-  # Network for apt
-  cp /etc/resolv.conf $CHROOT_DIR/etc/
-  echo "Stage 2 complete" | tee -a $LOG
-}
+  # ---- Locale ----
+  mkdir -p "$AIROOTFS/etc"
+  echo "en_US.UTF-8 UTF-8" > "$AIROOTFS/etc/locale.gen"
+  echo "LANG=en_US.UTF-8" > "$AIROOTFS/etc/locale.conf"
 
-# Stage 3: Strip Ubuntu + install Sway stack
-stage3_strip() {
-  echo "--- Stage 3: Strip Ubuntu ---"
-  chroot $CHROOT_DIR /bin/bash \
-    /luminos-build/scripts/strip_ubuntu.sh \
-    2>&1 | tee -a $LOG
-  echo "Stage 3 complete" | tee -a $LOG
-}
+  # ---- Timezone ----
+  ln -sf /usr/share/zoneinfo/UTC "$AIROOTFS/etc/localtime"
 
-# Stage 4: Install Luminos
-stage4_install() {
-  echo "--- Stage 4: Install Luminos ---"
-  chroot $CHROOT_DIR /bin/bash \
-    /luminos-build/scripts/install_luminos.sh \
-    2>&1 | tee -a $LOG
-  echo "Stage 4 complete" | tee -a $LOG
-}
+  # ---- NVIDIA + Wayland environment ----
+  cat > "$AIROOTFS/etc/environment" << 'ENVFILE'
+LIBVA_DRIVER_NAME=nvidia
+XDG_SESSION_TYPE=wayland
+GBM_BACKEND=nvidia-drm
+__GLX_VENDOR_LIBRARY_NAME=nvidia
+WLR_NO_HARDWARE_CURSORS=1
+MOZ_ENABLE_WAYLAND=1
+ELECTRON_OZONE_PLATFORM_HINT=wayland
+QT_QPA_PLATFORMTHEME=qt5ct
+QT_AUTO_SCREEN_SCALE_FACTOR=1
+GTK_THEME=Adwaita:dark
+XCURSOR_THEME=Adwaita
+XCURSOR_SIZE=24
+ENVFILE
 
-# Stage 5: Configure system
-stage5_configure() {
-  echo "--- Stage 5: Configure system ---"
+  # ---- Create luminos user via systemd-sysusers ----
+  mkdir -p "$AIROOTFS/etc/sysusers.d"
+  cat > "$AIROOTFS/etc/sysusers.d/luminos.conf" << 'SYSUSERS'
+u luminos - "Luminos User" /home/luminos /bin/bash
+m luminos wheel
+m luminos video
+m luminos audio
+m luminos input
+m luminos kvm
+SYSUSERS
 
-  # Hostname
-  echo "luminos-os" > $CHROOT_DIR/etc/hostname
+  # ---- Sudoers for wheel group ----
+  mkdir -p "$AIROOTFS/etc/sudoers.d"
+  echo "%wheel ALL=(ALL:ALL) ALL" > "$AIROOTFS/etc/sudoers.d/wheel"
+  chmod 440 "$AIROOTFS/etc/sudoers.d/wheel"
 
-  # Locale
-  chroot $CHROOT_DIR locale-gen en_US.UTF-8
-  chroot $CHROOT_DIR update-locale \
-    LANG=en_US.UTF-8
+  # ---- Enable services ----
+  mkdir -p "$AIROOTFS/etc/systemd/system/multi-user.target.wants"
+  local WANTS="$AIROOTFS/etc/systemd/system/multi-user.target.wants"
+  ln -sf /usr/lib/systemd/system/NetworkManager.service "$WANTS/"
+  ln -sf /usr/lib/systemd/system/asusd.service "$WANTS/"
+  ln -sf /usr/lib/systemd/system/supergfxd.service "$WANTS/"
+  ln -sf /usr/lib/systemd/system/greetd.service "$WANTS/"
 
-  # Timezone default UTC
-  chroot $CHROOT_DIR ln -sf \
-    /usr/share/zoneinfo/UTC \
-    /etc/localtime
+  # ---- greetd config ----
+  mkdir -p "$AIROOTFS/etc/greetd"
+  cat > "$AIROOTFS/etc/greetd/config.toml" << 'GREETD'
+[terminal]
+vt = 1
 
-  # Create live user (BUG-020: check if exists first)
-  chroot $CHROOT_DIR id luminos &>/dev/null || \
-    chroot $CHROOT_DIR useradd -m -s /bin/bash \
-    -G sudo,video,audio,input,kvm luminos
-  echo "luminos:luminos" | \
-    chroot $CHROOT_DIR chpasswd || true
-  # First run will change this
+[default_session]
+command = "tuigreet --cmd Hyprland --time --remember --asterisks"
+user = "greeter"
+GREETD
 
-  # Auto-login for live session
-  mkdir -p $CHROOT_DIR/etc/lightdm
-  cat > $CHROOT_DIR/etc/lightdm/lightdm.conf << EOF
-[Seat:*]
-autologin-user=luminos
-autologin-user-timeout=0
-user-session=luminos
-EOF
+  # ---- Copy Luminos source into the ISO ----
+  mkdir -p "$AIROOTFS/opt/luminos"
+  rsync -a --exclude=build --exclude=.git --exclude='__pycache__' \
+    "$(pwd)/" "$AIROOTFS/opt/luminos/"
 
-  # Luminos session file
-  mkdir -p $CHROOT_DIR/usr/share/wayland-sessions
-  cat > $CHROOT_DIR/usr/share/wayland-sessions/luminos.desktop << EOF
+  # ---- Copy systemd service ----
+  mkdir -p "$AIROOTFS/etc/systemd/system"
+  cp "$(pwd)/systemd/luminos-ai.service" "$AIROOTFS/etc/systemd/system/"
+  ln -sf /etc/systemd/system/luminos-ai.service "$WANTS/luminos-ai.service"
+
+  # ---- Luminos session desktop entry ----
+  mkdir -p "$AIROOTFS/usr/share/wayland-sessions"
+  cat > "$AIROOTFS/usr/share/wayland-sessions/luminos.desktop" << 'SESSION'
 [Desktop Entry]
 Name=Luminos
 Comment=Luminos OS Desktop
 Exec=/usr/local/bin/luminos-session
 Type=Application
-EOF
+SESSION
 
-  # Copy sway config
-  mkdir -p $CHROOT_DIR/etc/sway
-  chroot $CHROOT_DIR python3 -c "
-from sys import path
-path.insert(0, '/opt/luminos')
-from src.compositor.compositor_config import write_config
-write_config('/etc/sway/config')
-"
+  # ---- Luminos session script ----
+  mkdir -p "$AIROOTFS/usr/local/bin"
+  cat > "$AIROOTFS/usr/local/bin/luminos-session" << 'SESSIONSCRIPT'
+#!/bin/bash
+# Start Luminos AI daemon
+python3 /opt/luminos/src/daemon/main.py &
+sleep 2
 
-  # Install kernel + live boot packages (BUG-017, BUG-021, BUG-022)
-  chroot $CHROOT_DIR apt-get install -y \
-    linux-image-generic \
-    casper \
-    live-boot \
-    live-boot-initramfs-tools \
-    live-config \
-    live-config-systemd \
-    initramfs-tools \
-    os-prober || true \
-    2>&1 | tee -a $LOG
+# Check first run
+if [ ! -f ~/.config/luminos/.setup_complete ]; then
+  python3 /opt/luminos/src/gui/firstrun/firstrun_app.py
+fi
+SESSIONSCRIPT
+  chmod +x "$AIROOTFS/usr/local/bin/luminos-session"
 
-  # Regenerate initrd with casper/live-boot hooks (BUG-022)
-  chroot $CHROOT_DIR update-initramfs -u -k all \
-    2>&1 | tee -a $LOG
+  # ---- Launcher scripts ----
+  for pair in \
+    "luminos-bar:src/gui/bar/bar_app.py" \
+    "luminos-dock:src/gui/dock/dock_app.py" \
+    "luminos-store:src/gui/store/store_app.py" \
+    "luminos-settings:src/gui/settings/settings_app.py" \
+    "luminos-firstrun:src/gui/firstrun/firstrun_app.py" \
+    "luminos-run-windows:src/zone2/wine_runner.py"; do
+    local name="${pair%%:*}"
+    local script="${pair#*:}"
+    cat > "$AIROOTFS/usr/local/bin/$name" << LAUNCHER
+#!/bin/bash
+exec python3 /opt/luminos/src/$script "\$@"
+LAUNCHER
+    chmod +x "$AIROOTFS/usr/local/bin/$name"
+  done
 
-  # Create required root directories for live boot (BUG-022)
-  mkdir -p $CHROOT_DIR/root/dev
-  mkdir -p $CHROOT_DIR/root/proc
-  mkdir -p $CHROOT_DIR/root/sys
-  mkdir -p $CHROOT_DIR/root/run
-  mkdir -p $CHROOT_DIR/root/tmp
-  mkdir -p $CHROOT_DIR/cdrom
+  # ---- Copy Hyprland config ----
+  mkdir -p "$AIROOTFS/etc/skel/.config/hypr"
+  cp -r "$(pwd)/config/hypr/"* "$AIROOTFS/etc/skel/.config/hypr/" 2>/dev/null || true
 
-  echo "Stage 5 complete" | tee -a $LOG
+  # ---- Copy desktop file for .exe handler ----
+  mkdir -p "$AIROOTFS/usr/share/applications"
+  cp "$(pwd)/config/luminos-windows.desktop" "$AIROOTFS/usr/share/applications/" 2>/dev/null || true
+
+  # ---- Lock GPU to hybrid via supergfxctl on first boot ----
+  cat > "$AIROOTFS/usr/local/bin/luminos-gpu-init" << 'GPUINIT'
+#!/bin/bash
+# Set GPU to Hybrid mode — run once at install, never changed
+supergfxctl --mode Hybrid 2>/dev/null || true
+GPUINIT
+  chmod +x "$AIROOTFS/usr/local/bin/luminos-gpu-init"
+
+  mkdir -p "$AIROOTFS/etc/systemd/system"
+  cat > "$AIROOTFS/etc/systemd/system/luminos-gpu-init.service" << 'GPUSERVICE'
+[Unit]
+Description=Luminos GPU Hybrid Mode Init
+After=supergfxd.service
+Requires=supergfxd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-gpu-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+GPUSERVICE
+  ln -sf /etc/systemd/system/luminos-gpu-init.service "$WANTS/"
+
+  echo "Stage 2 complete" | tee -a "$LOG"
 }
 
-# Stage 6: Cleanup chroot
-stage6_cleanup() {
-  echo "--- Stage 6: Cleanup ---"
-  chroot $CHROOT_DIR apt clean
-  chroot $CHROOT_DIR apt autoremove -y
-  rm -rf $CHROOT_DIR/luminos-build
-  rm -rf $CHROOT_DIR/tmp/*
-  rm -f $CHROOT_DIR/etc/resolv.conf
+# ---------------------------------------------------------------------------
+# Stage 3: Build ISO with mkarchiso
+# ---------------------------------------------------------------------------
+stage3_build() {
+  echo "--- Stage 3: Build ISO ---" | tee -a "$LOG"
+  mkdir -p "$WORK_DIR" "$OUTPUT_DIR"
 
-  # Unmount only — chroot files still needed for squashfs
-  umount_chroot $CHROOT_DIR
-  echo "Stage 6 complete" | tee -a $LOG
+  sudo mkarchiso -v \
+    -w "$WORK_DIR" \
+    -o "$OUTPUT_DIR" \
+    "$PROFILE_DIR" \
+    2>&1 | tee -a "$LOG"
+
+  echo "Stage 3 complete" | tee -a "$LOG"
 }
 
-# Stage 7: Build squashfs
-stage7_squashfs() {
-  echo "--- Stage 7: Build squashfs ---"
-  mkdir -p $ISO_DIR/casper
-  mksquashfs $CHROOT_DIR \
-    $ISO_DIR/casper/filesystem.squashfs \
-    -comp xz -b 1M -no-progress \
-    -e $CHROOT_DIR/proc \
-    -e $CHROOT_DIR/sys \
-    -e $CHROOT_DIR/dev \
-    -e $CHROOT_DIR/run \
-    -e $CHROOT_DIR/tmp \
-    2>&1 | tee -a $LOG
-
-  # Filesystem size for installer
-  printf $(du -sx --block-size=1 \
-    $CHROOT_DIR | cut -f1) > \
-    $ISO_DIR/casper/filesystem.size
-
-  echo "Stage 7 complete" | tee -a $LOG
-}
-
-# Stage 8: Build bootable ISO
-stage8_iso() {
-  echo "--- Stage 8: Build ISO ---"
-  mkdir -p $ISO_DIR/boot/grub
-  mkdir -p $ISO_DIR/EFI/boot
-
-  # GRUB config — copy if exists, generate inline if missing (BUG-016)
-  cp build/grub.cfg $ISO_DIR/boot/grub/ 2>/dev/null || \
-  cat > $ISO_DIR/boot/grub/grub.cfg << 'GRUBEOF'
-set default=0
-set timeout=5
-
-menuentry "Luminos OS" {
-  insmod all_video
-  linux /casper/vmlinuz boot=casper live-media-path=/casper toram quiet splash ---
-  initrd /casper/initrd
-}
-
-menuentry "Luminos OS (Safe Graphics)" {
-  linux /casper/vmlinuz boot=casper live-media-path=/casper nomodeset ---
-  initrd /casper/initrd
-}
-
-menuentry "Install Luminos to Disk" {
-  linux /casper/vmlinuz boot=casper live-media-path=/casper only-ubiquity quiet splash ---
-  initrd /casper/initrd
-}
-GRUBEOF
-
-  # Find vmlinuz and initrd wherever they are (BUG-017)
-  VMLINUZ=$(find $CHROOT_DIR/boot -name "vmlinuz*" | head -1)
-  INITRD=$(find $CHROOT_DIR/boot -name "initrd*" | head -1)
-
-  if [ -z "$VMLINUZ" ]; then
-    echo "ERROR: No kernel found in chroot"
-    exit 1
-  fi
-
-  cp $VMLINUZ $ISO_DIR/casper/vmlinuz
-  cp $INITRD $ISO_DIR/casper/initrd
-
-  # Build EFI image
-  grub-mkstandalone \
-    --format=x86_64-efi \
-    --output=$ISO_DIR/EFI/boot/bootx64.efi \
-    --modules="part_gpt fat" \
-    boot/grub/grub.cfg=$ISO_DIR/boot/grub/grub.cfg
-
-  # Build ISO with xorriso
-  xorriso -as mkisofs \
-    -iso-level 3 \
-    -full-iso9660-filenames \
-    -volid "LUMINOS_OS" \
-    -eltorito-boot boot/grub/bios.img \
-    -no-emul-boot -boot-load-size 4 \
-    -boot-info-table --eltorito-catalog \
-      boot/grub/boot.cat \
-    --grub2-boot-info --grub2-mbr \
-      /usr/lib/grub/i386-pc/boot_hybrid.img \
-    -eltorito-alt-boot \
-    -e EFI/boot/efiboot.img \
-    -no-emul-boot \
-    -append_partition 2 0xef \
-      $ISO_DIR/EFI/boot/efiboot.img \
-    -output $OUTPUT_ISO \
-    -graft-points $ISO_DIR \
-    2>&1 | tee -a $LOG
-
-  echo "Stage 8 complete" | tee -a $LOG
-}
-
+# ---------------------------------------------------------------------------
 # Main
-# Only unmount at start — never rm -rf (BUG-012)
-umount_chroot "$CHROOT_DIR" 2>/dev/null || true
-mkdir -p $BUILD_DIR $CHROOT_DIR $ISO_DIR
+# ---------------------------------------------------------------------------
+mkdir -p "$BUILD_DIR"
 
 check_deps
-if [ "${SKIP_STAGE1:-0}" = "1" ] && \
-   [ -d "$CHROOT_DIR/usr" ]; then
-  echo "--- Stage 1: SKIPPED (chroot exists) ---"
-else
-  stage1_bootstrap
-fi
-stage2_prepare
-stage3_strip
-stage4_install
-stage5_configure
-stage7_squashfs
-stage6_cleanup
-stage8_iso
-# Only safe to delete chroot AFTER squashfs + ISO are built (BUG-012)
-safe_cleanup $CHROOT_DIR
+stage1_profile
+stage2_customize
+stage3_build
 
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
-ISO_SIZE=$(du -sh $OUTPUT_ISO | cut -f1)
+ISO_FILE=$(ls -t "$OUTPUT_DIR"/*.iso 2>/dev/null | head -1)
 
 echo ""
 echo "=== BUILD COMPLETE ==="
-echo "ISO: $OUTPUT_ISO"
-echo "Size: $ISO_SIZE"
+if [ -n "$ISO_FILE" ]; then
+  ISO_SIZE=$(du -sh "$ISO_FILE" | cut -f1)
+  echo "ISO: $ISO_FILE"
+  echo "Size: $ISO_SIZE"
+fi
 echo "Time: $((ELAPSED/60))m $((ELAPSED%60))s"
 echo "Log: $LOG"

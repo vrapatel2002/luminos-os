@@ -195,7 +195,7 @@ def launch_windows_app(exe_path: str, env_overrides: dict = {}) -> dict:
         return {
             "success":      False,
             "error":        "Wine/Proton not installed",
-            "install_hint": "sudo apt install wine64",
+            "install_hint": "sudo pacman -S wine",
         }
 
     command_info = build_wine_command(exe_path, wine_info, env_overrides)

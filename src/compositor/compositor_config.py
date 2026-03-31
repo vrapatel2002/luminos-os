@@ -7,7 +7,7 @@ Rules:
 - write_config() is the only file-writing function.
 - Zone 2 XWayland windows get blue borders.
 - Zone 3 windows get red borders + QUARANTINE title marker.
-- Config targets Sway on Ubuntu LTS with luminos-ai.service.
+- Config targets Hyprland on Arch Linux with luminos-ai.service.
 """
 
 import logging

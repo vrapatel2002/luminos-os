@@ -25,9 +25,9 @@ if SRC not in sys.path:
 
 from gui.store.store_backend import (
     Package, get_featured,
-    search_flatpak, search_apt, search_all,
+    search_flatpak, search_pacman, search_all,
     install_package, uninstall_package, is_installed,
-    _parse_flatpak_output, _parse_apt_output,
+    _parse_flatpak_output, _parse_pacman_output,
 )
 from gui.store.package_card import (
     _get_source_label, _get_zone_badge, _get_display_name,
@@ -87,7 +87,7 @@ class TestGetFeatured(unittest.TestCase):
     def test_required_fields_present(self):
         for pkg in get_featured():
             self.assertTrue(pkg.name)
-            self.assertIn(pkg.source, ("flatpak", "apt"))
+            self.assertIn(pkg.source, ("flatpak", "pacman"))
 
     def test_contains_firefox(self):
         names = [p.name for p in get_featured()]
@@ -95,7 +95,7 @@ class TestGetFeatured(unittest.TestCase):
 
 
 # ===========================================================================
-# search_flatpak / search_apt — offline (subprocess mocked)
+# search_flatpak / search_pacman — offline (subprocess mocked)
 # ===========================================================================
 
 class TestSearchFlatpak(unittest.TestCase):
@@ -126,20 +126,20 @@ class TestSearchFlatpak(unittest.TestCase):
         self.assertTrue(pkgs[0].sandboxed)
 
 
-class TestSearchApt(unittest.TestCase):
+class TestSearchPacman(unittest.TestCase):
 
-    def test_apt_not_installed_returns_empty(self):
+    def test_pacman_not_installed_returns_empty(self):
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            result = search_apt("gimp")
+            result = search_pacman("gimp")
         self.assertEqual(result, [])
 
-    def test_parse_apt_output(self):
-        sample = "gimp - GNU Image Manipulation Program\n"
-        pkgs = _parse_apt_output(sample, "gimp")
+    def test_parse_pacman_output(self):
+        sample = "extra/gimp 2.10.36-1\n    GNU Image Manipulation Program\n"
+        pkgs = _parse_pacman_output(sample, "gimp")
         self.assertEqual(len(pkgs), 1)
         self.assertEqual(pkgs[0].name, "gimp")
         self.assertFalse(pkgs[0].sandboxed)
-        self.assertEqual(pkgs[0].source, "apt")
+        self.assertEqual(pkgs[0].source, "pacman")
 
 
 # ===========================================================================
@@ -157,11 +157,11 @@ class TestSearchAll(unittest.TestCase):
         """If same app appears in both sources, flatpak version is kept."""
         flatpak_pkg = _make_pkg(name="GIMP", source="flatpak",
                                 sandboxed=True, flatpak_id="org.gimp.GIMP")
-        apt_pkg     = _make_pkg(name="GIMP", source="apt",
+        pacman_pkg  = _make_pkg(name="GIMP", source="pacman",
                                 sandboxed=False, flatpak_id=None)
 
         with patch("gui.store.store_backend.search_flatpak", return_value=[flatpak_pkg]), \
-             patch("gui.store.store_backend.search_apt",     return_value=[apt_pkg]):
+             patch("gui.store.store_backend.search_pacman",  return_value=[pacman_pkg]):
             results = search_all("gimp")
 
         self.assertEqual(len(results), 1)
@@ -174,7 +174,7 @@ class TestSearchAll(unittest.TestCase):
 
         with patch("gui.store.store_backend.search_flatpak",
                    return_value=[uninstalled, installed]), \
-             patch("gui.store.store_backend.search_apt", return_value=[]):
+             patch("gui.store.store_backend.search_pacman", return_value=[]):
             results = search_all("a")
 
         self.assertEqual(results[0].name, "Alpha")
@@ -183,7 +183,7 @@ class TestSearchAll(unittest.TestCase):
         many = [_make_pkg(name=f"App{i}", flatpak_id=f"org.app.App{i}")
                 for i in range(40)]
         with patch("gui.store.store_backend.search_flatpak", return_value=many), \
-             patch("gui.store.store_backend.search_apt", return_value=[]):
+             patch("gui.store.store_backend.search_pacman", return_value=[]):
             results = search_all("app")
         self.assertLessEqual(len(results), 30)
 
@@ -256,9 +256,9 @@ class TestPackageCardHelpers(unittest.TestCase):
         pkg = _make_pkg(source="flatpak")
         self.assertEqual(_get_source_label(pkg), "Flatpak")
 
-    def test_source_label_apt(self):
-        pkg = _make_pkg(source="apt")
-        self.assertEqual(_get_source_label(pkg), "apt")
+    def test_source_label_pacman(self):
+        pkg = _make_pkg(source="pacman")
+        self.assertEqual(_get_source_label(pkg), "pacman")
 
     def test_zone_badge_zone1_empty(self):
         pkg = _make_pkg(predicted_zone=1)

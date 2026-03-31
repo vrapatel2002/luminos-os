@@ -28,8 +28,8 @@ _DISPLAY_NAME_MAX = 20
 # ---------------------------------------------------------------------------
 
 def _get_source_label(pkg: Package) -> str:
-    """Return the source badge label: 'Flatpak' or 'apt'."""
-    return "Flatpak" if pkg.source == "flatpak" else "apt"
+    """Return the source badge label: 'Flatpak' or 'pacman'."""
+    return "Flatpak" if pkg.source == "flatpak" else "pacman"
 
 
 def _get_zone_badge(pkg: Package) -> str:
@@ -127,7 +127,7 @@ if _GTK_AVAILABLE:
             src_lbl = Gtk.Label(label=_get_source_label(self.pkg))
             src_lbl.add_css_class(
                 "store-badge-flatpak" if self.pkg.sandboxed
-                else "store-badge-apt"
+                else "store-badge-pacman"
             )
             badge_row.append(src_lbl)
 
