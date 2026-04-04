@@ -97,6 +97,44 @@ def _get_hive_models() -> list:
     ]
 
 
+def _get_sentinel_status() -> dict:
+    """
+    Query Sentinel module status for display.
+
+    Returns:
+        Dict with keys: mode, ml_available, ml_backend, log_file.
+    """
+    try:
+        from sentinel import get_sentinel_status
+        return get_sentinel_status()
+    except ImportError:
+        return {"mode": "unavailable", "ml_available": False, "log_file": "—"}
+
+
+def _get_router_status() -> dict:
+    """
+    Query Compatibility Router status for display.
+
+    Returns:
+        Dict with keys: engine, ai_fallback, hardware.
+    """
+    result = {"engine": "8 rules", "ai_fallback": "—", "hardware": "CPU only"}
+
+    try:
+        from classifier.ai_fallback import _find_llama, _MODEL_PATH
+        llama = _find_llama()
+        if llama and os.path.isfile(_MODEL_PATH):
+            result["ai_fallback"] = "llama.cpp (available)"
+        elif llama:
+            result["ai_fallback"] = "llama.cpp (no model)"
+        else:
+            result["ai_fallback"] = "Not available"
+    except ImportError:
+        result["ai_fallback"] = "Module not loaded"
+
+    return result
+
+
 def _get_npu_status() -> dict:
     """
     Probe AMD XDNA NPU availability.
@@ -203,6 +241,53 @@ if _GTK_AVAILABLE:
 
             self.append(Gtk.Separator())
 
+            # ---- Sentinel status ----
+            sentinel_lbl = Gtk.Label(label="Sentinel (Security Monitor)")
+            sentinel_lbl.add_css_class("luminos-settings-section-title")
+            sentinel_lbl.set_halign(Gtk.Align.START)
+            self.append(sentinel_lbl)
+
+            sentinel_grid = Gtk.Grid()
+            sentinel_grid.set_row_spacing(6)
+            sentinel_grid.set_column_spacing(24)
+            self._sentinel_mode    = self._grid_row(sentinel_grid, 0, "Mode")
+            self._sentinel_ml      = self._grid_row(sentinel_grid, 1, "ML backend")
+            self._sentinel_log     = self._grid_row(sentinel_grid, 2, "Log file")
+            self.append(sentinel_grid)
+
+            self.append(Gtk.Separator())
+
+            # ---- Compatibility Router ----
+            router_lbl = Gtk.Label(label="Compatibility Router")
+            router_lbl.add_css_class("luminos-settings-section-title")
+            router_lbl.set_halign(Gtk.Align.START)
+            self.append(router_lbl)
+
+            router_grid = Gtk.Grid()
+            router_grid.set_row_spacing(6)
+            router_grid.set_column_spacing(24)
+            self._router_engine = self._grid_row(router_grid, 0, "Rule engine")
+            self._router_ai     = self._grid_row(router_grid, 1, "AI fallback")
+            self._router_hw     = self._grid_row(router_grid, 2, "Hardware")
+            self.append(router_grid)
+
+            self.append(Gtk.Separator())
+
+            # ---- GPU mode guard ----
+            gpu_lbl = Gtk.Label(label="GPU Mode (supergfxctl)")
+            gpu_lbl.add_css_class("luminos-settings-section-title")
+            gpu_lbl.set_halign(Gtk.Align.START)
+            self.append(gpu_lbl)
+
+            gpu_grid = Gtk.Grid()
+            gpu_grid.set_row_spacing(6)
+            gpu_grid.set_column_spacing(24)
+            self._gpu_mode   = self._grid_row(gpu_grid, 0, "Current mode")
+            self._gpu_status = self._grid_row(gpu_grid, 1, "Status")
+            self.append(gpu_grid)
+
+            self.append(Gtk.Separator())
+
             # ---- Gaming mode ----
             gaming_row = Gtk.Box(
                 orientation=Gtk.Orientation.HORIZONTAL, spacing=0
@@ -229,6 +314,7 @@ if _GTK_AVAILABLE:
             return val
 
         def _refresh_status(self) -> bool:
+            # Daemon + model status
             try:
                 resp = self._client.send({"type": "manager_status"})
                 s = _get_daemon_status(resp)
@@ -244,6 +330,40 @@ if _GTK_AVAILABLE:
             self._status_idle.set_text(
                 f"{idle}s" if idle is not None else "—"
             )
+
+            # Sentinel status
+            sentinel = _get_sentinel_status()
+            self._sentinel_mode.set_text(sentinel.get("mode", "—"))
+            ml_backend = sentinel.get("ml_backend", {})
+            if isinstance(ml_backend, dict):
+                if ml_backend.get("npu_available"):
+                    self._sentinel_ml.set_text("NPU (AMD XDNA)")
+                elif ml_backend.get("cpu_fallback"):
+                    self._sentinel_ml.set_text("CPU (fallback)")
+                else:
+                    self._sentinel_ml.set_text("Rules only")
+            else:
+                self._sentinel_ml.set_text("Rules only")
+            self._sentinel_log.set_text(sentinel.get("log_file", "—"))
+
+            # Router status
+            router = _get_router_status()
+            self._router_engine.set_text(router.get("engine", "—"))
+            self._router_ai.set_text(router.get("ai_fallback", "—"))
+            self._router_hw.set_text(router.get("hardware", "—"))
+
+            # GPU mode guard
+            gpu_mode = resp.get("gpu_mode", {}) if s["online"] else {}
+            mode_str = gpu_mode.get("mode", "—")
+            is_hybrid = gpu_mode.get("is_hybrid", False)
+            self._gpu_mode.set_text(mode_str if mode_str else "—")
+            if gpu_mode.get("supergfxctl_available"):
+                self._gpu_status.set_text(
+                    "Hybrid (correct)" if is_hybrid else f"WARNING: {mode_str}"
+                )
+            else:
+                self._gpu_status.set_text("supergfxctl not available")
+
             return GLib.SOURCE_CONTINUE
 
         def _on_gaming_toggle(self, _switch, state):

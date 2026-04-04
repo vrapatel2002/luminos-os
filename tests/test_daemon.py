@@ -6,7 +6,7 @@ import os
 import subprocess
 import signal
 
-SOCKET_PATH = "/tmp/luminos-test.sock"
+SOCKET_PATH = "/tmp/luminos-ai.sock"
 PID_PATH = "/tmp/luminos-ai.pid"
 DAEMON_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "src", "daemon", "main.py")
 

@@ -186,13 +186,13 @@ class TestGetBestRunner(unittest.TestCase):
         self.assertTrue(result["dxvk"])
         self.assertFalse(result["vkd3d"])
 
-    def test_no_dx_imports_plain_wine(self):
-        """PE with no DX imports → dxvk=False, vkd3d=False, runner=wine64."""
+    def test_no_dx_imports_defaults_to_proton(self):
+        """PE with no DX imports → dxvk=False, vkd3d=False, runner=proton."""
         exe = self._make_exe(b"MZ\x00\x00" + b"kernel32.dll\x00user32.dll\x00")
         result = cm.get_best_runner(exe)
         self.assertFalse(result["dxvk"])
         self.assertFalse(result["vkd3d"])
-        self.assertEqual(result["runner"], "wine64")
+        self.assertEqual(result["runner"], "proton")
 
     def test_d3d12_beats_d3d11_if_both_present(self):
         """d3d12 takes priority over d3d11 in the same binary."""

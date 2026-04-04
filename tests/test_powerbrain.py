@@ -365,36 +365,35 @@ class TestDaemonPowerRouting(unittest.TestCase):
 
     def setUp(self):
         import daemon.main as dm
-        self.route   = dm.route_request
-        self.stub_mm = dm.ModelManager()
+        self.route = dm.route_request
 
     def test_power_set_quiet_returns_mode(self):
-        result = self.route({"type": "power_set", "mode": "quiet"}, self.stub_mm)
+        result = self.route({"type": "power_set", "mode": "quiet"})
         self.assertEqual(result.get("mode"), "quiet")
 
     def test_power_set_auto_returns_mode(self):
-        result = self.route({"type": "power_set", "mode": "auto"}, self.stub_mm)
+        result = self.route({"type": "power_set", "mode": "auto"})
         self.assertEqual(result.get("mode"), "auto")
 
     def test_power_set_missing_mode_returns_error(self):
-        result = self.route({"type": "power_set"}, self.stub_mm)
+        result = self.route({"type": "power_set"})
         self.assertEqual(result.get("status"), "error")
 
     def test_power_set_invalid_mode_returns_error(self):
-        result = self.route({"type": "power_set", "mode": "warp_factor_9"}, self.stub_mm)
+        result = self.route({"type": "power_set", "mode": "warp_factor_9"})
         self.assertIn("error", result)
 
     def test_power_status_returns_required_keys(self):
-        result = self.route({"type": "power_status"}, self.stub_mm)
+        result = self.route({"type": "power_status"})
         for key in ("mode", "ac", "thermal"):
             self.assertIn(key, result)
 
     def test_power_modes_returns_dict(self):
-        result = self.route({"type": "power_modes"}, self.stub_mm)
+        result = self.route({"type": "power_modes"})
         self.assertIsInstance(result, dict)
 
     def test_power_modes_has_all_four(self):
-        result = self.route({"type": "power_modes"}, self.stub_mm)
+        result = self.route({"type": "power_modes"})
         for key in ("auto", "quiet", "balanced", "max"):
             self.assertIn(key, result)
 

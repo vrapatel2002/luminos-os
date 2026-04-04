@@ -365,70 +365,63 @@ class TestDaemonCompositorRouting(unittest.TestCase):
 
     def setUp(self):
         import daemon.main as dm
-        self.route   = dm.route_request
-        self.stub_mm = dm.ModelManager()
+        self.route = dm.route_request
 
     def test_window_register_returns_pid_and_zone(self):
         result = self.route(
-            {"type": "window_register", "pid": 42, "exe": "/app", "zone": 1},
-            self.stub_mm
+            {"type": "window_register", "pid": 42, "exe": "/app", "zone": 1}
         )
         self.assertEqual(result["pid"], 42)
         self.assertEqual(result["zone"], 1)
 
     def test_window_register_zone2_blue_border(self):
         result = self.route(
-            {"type": "window_register", "pid": 43, "exe": "/app.exe", "zone": 2},
-            self.stub_mm
+            {"type": "window_register", "pid": 43, "exe": "/app.exe", "zone": 2}
         )
         self.assertEqual(result["border"], "blue")
 
     def test_window_register_zone3_quarantine(self):
         result = self.route(
-            {"type": "window_register", "pid": 44, "exe": "/danger.exe", "zone": 3},
-            self.stub_mm
+            {"type": "window_register", "pid": 44, "exe": "/danger.exe", "zone": 3}
         )
         self.assertEqual(result["label"], "QUARANTINE")
 
     def test_window_register_missing_pid_returns_error(self):
         result = self.route(
-            {"type": "window_register", "exe": "/app", "zone": 1},
-            self.stub_mm
+            {"type": "window_register", "exe": "/app", "zone": 1}
         )
         self.assertEqual(result.get("status"), "error")
 
     def test_window_list_returns_windows_key(self):
-        result = self.route({"type": "window_list"}, self.stub_mm)
+        result = self.route({"type": "window_list"})
         self.assertIn("windows", result)
 
     def test_window_list_returns_summary_key(self):
-        result = self.route({"type": "window_list"}, self.stub_mm)
+        result = self.route({"type": "window_list"})
         self.assertIn("summary", result)
 
     def test_upscale_set_quality_returns_mode(self):
         result = self.route(
-            {"type": "upscale_set", "mode": "quality"},
-            self.stub_mm
+            {"type": "upscale_set", "mode": "quality"}
         )
         self.assertEqual(result.get("mode"), "quality")
 
     def test_upscale_set_invalid_mode_returns_error_info(self):
         result = self.route(
-            {"type": "upscale_set", "mode": "warp_speed"},
-            self.stub_mm
+            {"type": "upscale_set", "mode": "warp_speed"}
         )
         self.assertIn("error", result)
 
     def test_upscale_set_missing_mode_returns_error(self):
-        result = self.route({"type": "upscale_set"}, self.stub_mm)
+        result = self.route({"type": "upscale_set"})
         self.assertEqual(result.get("status"), "error")
 
     def test_display_status_has_current_mode(self):
-        result = self.route({"type": "display_status"}, self.stub_mm)
+        result = self.route({"type": "display_status"})
         self.assertIn("current_mode", result)
 
     def test_display_status_has_available_modes(self):
-        result = self.route({"type": "display_status"}, self.stub_mm)
+        result = self.route({"type": "display_status"})
         self.assertIn("available_modes", result)
 
 

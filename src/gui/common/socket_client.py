@@ -6,8 +6,7 @@ Rules:
 - Each send() call opens a fresh connection and closes it after the reply.
 - Never raises — all exceptions return an error dict.
 - Timeout default 3s to avoid blocking the GUI event loop.
-- Socket path matches daemon: /tmp/luminos-test.sock (dev)
-  or /run/luminos/ai.sock (production).
+- Socket path matches daemon: /tmp/luminos-ai.sock
 """
 
 import json
@@ -16,8 +15,8 @@ import socket
 
 logger = logging.getLogger("luminos-ai.gui.socket_client")
 
-# Dev socket path — matches src/daemon/main.py SOCKET_PATH
-DEFAULT_SOCKET_PATH = "/tmp/luminos-test.sock"
+# Socket path — matches src/daemon/main.py SOCKET_PATH
+DEFAULT_SOCKET_PATH = "/tmp/luminos-ai.sock"
 _RECV_BUFFER        = 65536   # 64 KB — enough for any daemon response
 
 

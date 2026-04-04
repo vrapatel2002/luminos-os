@@ -5,11 +5,14 @@ Description=Luminos AI Orchestration Daemon
 After=network.target
 
 [Service]
+Type=simple
 ExecStart=/usr/bin/python3 /opt/luminos/src/daemon/main.py
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+Environment=CUDA_VISIBLE_DEVICES=
 
 [Install]
 WantedBy=multi-user.target

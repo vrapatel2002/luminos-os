@@ -36,6 +36,12 @@ except ImportError:
     _ZONE3_AVAILABLE = False
 
 try:
+    from zone4 import run_in_zone4
+    _ZONE4_AVAILABLE = True
+except ImportError:
+    _ZONE4_AVAILABLE = False
+
+try:
     from gpu_manager import (
         get_hardware_status  as _gpu_hardware_status,
         request_model        as _gpu_request_model,
@@ -110,7 +116,7 @@ try:
 except ImportError:
     _LOCKSCREEN_AVAILABLE = False
 
-SOCKET_PATH = "/tmp/luminos-test.sock"
+SOCKET_PATH = "/tmp/luminos-ai.sock"
 PID_PATH = "/tmp/luminos-ai.pid"
 
 logging.basicConfig(
@@ -120,38 +126,6 @@ logging.basicConfig(
 logger = logging.getLogger("luminos-ai")
 
 
-# ---------------------------------------------------------------------------
-# ModelManager — stubs only (no real models loaded yet)
-# ---------------------------------------------------------------------------
-
-class ModelManager:
-    def __init__(self):
-        self._loaded = []
-
-    def load_model(self, name, backend):
-        logger.info(f"MODEL: would load {name} on {backend}")
-        return True
-
-    def unload_model(self, name):
-        logger.info(f"MODEL: would unload {name}")
-        return True
-
-    def get_status(self):
-        return {
-            "loaded_models": list(self._loaded),
-            "backends": {"npu": False, "igpu": False, "nvidia": False},
-        }
-
-    def calculate_gpu_layers(self, model_size_gb, free_vram_mb):
-        free_vram_gb = free_vram_mb / 1024.0
-        if free_vram_gb >= model_size_gb:
-            return 32
-        elif free_vram_gb >= model_size_gb * 0.6:
-            return int(32 * 0.6)
-        elif free_vram_gb >= model_size_gb * 0.3:
-            return int(32 * 0.3)
-        else:
-            return 0
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +158,7 @@ def query_gpu():
 # Request router
 # ---------------------------------------------------------------------------
 
-def route_request(message, model_manager):
+def route_request(message):
     req_type = message.get("type", "unknown")
 
     if req_type == "ping":
@@ -199,16 +173,24 @@ def route_request(message, model_manager):
         try:
             result = classify_binary(binary_path)
             zone = result.get("zone")
+            layer = result.get("layer", "")
             if zone == 2:
                 result["launch_hint"] = (
                     f'{{"type": "launch", "exe": "{binary_path}", "zone": 2}}'
                 )
-            elif zone == 3:
+            elif zone == 3 and layer == "firecracker":
                 result["launch_hint"] = (
                     f'{{"type": "launch", "exe": "{binary_path}", "zone": 3}}'
                 )
                 result["warning"] = (
                     "Zone 3 requires Firecracker + KVM on target system"
+                )
+            elif zone == 3 and layer == "kvm":
+                result["launch_hint"] = (
+                    f'{{"type": "launch", "exe": "{binary_path}", "zone": 4}}'
+                )
+                result["warning"] = (
+                    "Zone 4 requires QEMU/KVM + Windows VM image"
                 )
             return result
         except FileNotFoundError:
@@ -250,6 +232,15 @@ def route_request(message, model_manager):
                 pid = result.get("pid")
                 if pid:
                     result["window"] = _comp_register_window(pid, exe_path, 3)
+            return result
+        elif zone == 4:
+            if not _ZONE4_AVAILABLE:
+                return {"success": False, "error": "Zone 4 runner not available"}
+            result = run_in_zone4(exe_path)
+            if result.get("success") and _COMPOSITOR_AVAILABLE:
+                pid = result.get("pid")
+                if pid:
+                    result["window"] = _comp_register_window(pid, exe_path, 4)
             return result
         return {"status": "error", "message": f"unsupported zone: {zone}"}
 
@@ -560,7 +551,7 @@ def cleanup(server_socket=None, exit_code=0):
     sys.exit(exit_code)
 
 
-def handle_client(client_socket, model_manager):
+def handle_client(client_socket):
     try:
         data = client_socket.recv(4096)
         if not data:
@@ -577,7 +568,7 @@ def handle_client(client_socket, model_manager):
         t0 = time.monotonic()
         logger.info(f"REQUEST type={req_type} from client")
 
-        response = route_request(message, model_manager)
+        response = route_request(message)
 
         elapsed_ms = (time.monotonic() - t0) * 1000
         logger.info(f"RESPONSE type={req_type} result={json.dumps(response)} in {elapsed_ms:.1f}ms")
@@ -590,7 +581,6 @@ def handle_client(client_socket, model_manager):
 
 
 def main():
-    model_manager = ModelManager()
     server_socket = setup_socket()
 
     # Write PID file
@@ -614,12 +604,12 @@ def main():
                      name="luminos-game-watcher").start()
     logger.info("Background threads started: idle-check (60s), game-watcher (10s)")
 
-    logger.info("Luminos AI Daemon started (Phase 1 — stubs)")
+    logger.info("Luminos AI Daemon started")
 
     try:
         while True:
             client_socket, _ = server_socket.accept()
-            handle_client(client_socket, model_manager)
+            handle_client(client_socket)
     except KeyboardInterrupt:
         cleanup(server_socket)
     except Exception as e:

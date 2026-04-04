@@ -412,44 +412,41 @@ class TestDaemonGpuRouting(unittest.TestCase):
     """Test daemon route_request() integration for GPU manager request types."""
 
     def setUp(self):
-        # Import route_request and the daemon's stub ModelManager
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'daemon'))
-        import importlib
         import daemon.main as daemon_main
         self.route = daemon_main.route_request
-        self.stub_mm = daemon_main.ModelManager()
 
     def test_model_request_returns_dict_with_loaded_key(self):
-        result = self.route({"type": "model_request", "model": "nexus"}, self.stub_mm)
+        result = self.route({"type": "model_request", "model": "nexus"})
         self.assertIn("loaded", result)
 
     def test_model_request_missing_model_returns_error(self):
-        result = self.route({"type": "model_request"}, self.stub_mm)
+        result = self.route({"type": "model_request"})
         self.assertEqual(result.get("status"), "error")
 
     def test_model_release_returns_dict_with_unloaded_key(self):
-        result = self.route({"type": "model_release"}, self.stub_mm)
+        result = self.route({"type": "model_release"})
         self.assertIn("unloaded", result)
 
     def test_gaming_mode_true_returns_message(self):
-        result = self.route({"type": "gaming_mode", "active": True}, self.stub_mm)
+        result = self.route({"type": "gaming_mode", "active": True})
         self.assertIn("message", result)
 
     def test_gaming_mode_false_returns_message(self):
-        result = self.route({"type": "gaming_mode", "active": False}, self.stub_mm)
+        result = self.route({"type": "gaming_mode", "active": False})
         self.assertIn("message", result)
 
     def test_gaming_mode_missing_active_returns_error(self):
-        result = self.route({"type": "gaming_mode"}, self.stub_mm)
+        result = self.route({"type": "gaming_mode"})
         self.assertEqual(result.get("status"), "error")
 
     def test_manager_status_returns_status_keys(self):
-        result = self.route({"type": "manager_status"}, self.stub_mm)
+        result = self.route({"type": "manager_status"})
         self.assertIn("active_model", result)
         self.assertIn("nvidia_active", result)
 
     def test_gpu_query_returns_hardware_dict(self):
-        result = self.route({"type": "gpu_query"}, self.stub_mm)
+        result = self.route({"type": "gpu_query"})
         # Should now return full hardware status (nvidia + amd_igpu + npu + timestamp)
         self.assertIn("nvidia", result)
         self.assertIn("npu", result)

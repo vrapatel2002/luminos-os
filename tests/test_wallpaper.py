@@ -272,11 +272,10 @@ class TestWallpaperManagerApply(unittest.TestCase):
 class TestDaemonWallpaperRouting(unittest.TestCase):
 
     def _route(self, message):
-        """Import and call route_request with a dummy ModelManager."""
+        """Import and call route_request."""
         sys.path.insert(0, os.path.join(SRC, ".."))
         from daemon.main import route_request
-        mm = MagicMock()
-        return route_request(message, mm)
+        return route_request(message)
 
     def test_wallpaper_set_response_shape(self):
         with patch("daemon.main._WALLPAPER_AVAILABLE", True), \

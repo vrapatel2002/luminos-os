@@ -243,8 +243,7 @@ class TestDaemonLockRouting(unittest.TestCase):
     def _route(self, message):
         sys.path.insert(0, os.path.join(SRC, ".."))
         from daemon.main import route_request
-        mm = MagicMock()
-        return route_request(message, mm)
+        return route_request(message)
 
     def test_lock_request_response_shape(self):
         with patch("daemon.main._LOCKSCREEN_AVAILABLE", True), \
