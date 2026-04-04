@@ -135,6 +135,8 @@ if _GTK_AVAILABLE:
                 LayerShell.init_for_window(self)
                 LayerShell.set_layer(self, LayerShell.Layer.TOP)
                 LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, True)
+                LayerShell.set_anchor(self, LayerShell.Edge.LEFT,   True)
+                LayerShell.set_anchor(self, LayerShell.Edge.RIGHT,  True)
                 LayerShell.set_exclusive_zone(self, DOCK_HEIGHT + DOCK_MARGIN)
                 LayerShell.set_margin(self, LayerShell.Edge.BOTTOM, DOCK_MARGIN)
                 logger.info("gtk4-layer-shell pinned dock to bottom edge")

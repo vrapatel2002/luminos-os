@@ -4,6 +4,16 @@ Full-screen Wayland lock screen window.
 
 Uses gtk4-layer-shell OVERLAY + KEYBOARD_MODE_EXCLUSIVE to grab all input.
 States: clock → auth → error → locked_out
+
+Visual spec (matches greeter):
+- Full screen, dark background (#0d0d12)
+- Large clock center screen (HH:MM, updates every second)
+- Date below clock (Tuesday, March 31 2026)
+- Press Enter → slide in password input field
+- No username list visible
+- No visible input field until Enter is pressed
+- Clean, minimal, dark
+
 GTK class guarded by _GTK_AVAILABLE for headless test compatibility.
 """
 
@@ -39,8 +49,8 @@ def _format_clock_time(dt) -> str:
 
 
 def _format_clock_date(dt) -> str:
-    """Format a datetime as 'Weekday, Month Day' for the date line."""
-    return dt.strftime("%A, %B %-d")
+    """Format a datetime as 'Tuesday, March 31 2026'."""
+    return dt.strftime("%A, %B %-d %Y")
 
 
 def _get_initials(username: str) -> str:
@@ -57,6 +67,96 @@ def _get_initials(username: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# CSS
+# ---------------------------------------------------------------------------
+
+_LOCK_CSS = """
+.lock-bg {
+    background-color: #0d0d12;
+}
+
+.lock-time {
+    font-size: 96px;
+    font-weight: 200;
+    font-family: "Inter", "Helvetica Neue", sans-serif;
+    color: rgba(255, 255, 255, 0.92);
+    letter-spacing: -2px;
+}
+
+.lock-date {
+    font-size: 22px;
+    font-weight: 400;
+    font-family: "Inter", "Helvetica Neue", sans-serif;
+    color: rgba(255, 255, 255, 0.50);
+    margin-top: 4px;
+}
+
+.lock-hint {
+    font-size: 14px;
+    font-family: "Inter", sans-serif;
+    color: rgba(255, 255, 255, 0.25);
+    margin-top: 48px;
+}
+
+.lock-password-entry {
+    font-size: 16px;
+    font-family: "Inter", sans-serif;
+    min-width: 300px;
+    padding: 12px 18px;
+    border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.92);
+    caret-color: #0a84ff;
+    margin-top: 32px;
+}
+
+.lock-password-entry:focus {
+    border-color: rgba(10, 132, 255, 0.6);
+    background-color: rgba(255, 255, 255, 0.08);
+    outline: none;
+}
+
+.lock-error-label {
+    font-size: 14px;
+    font-family: "Inter", sans-serif;
+    color: #ff453a;
+    margin-top: 12px;
+}
+
+.lock-lockout-title {
+    font-size: 20px;
+    font-family: "Inter", sans-serif;
+    color: rgba(255, 255, 255, 0.80);
+    margin-top: 16px;
+}
+
+.lock-countdown {
+    font-size: 16px;
+    font-family: "Inter", sans-serif;
+    color: rgba(255, 255, 255, 0.40);
+    margin-top: 8px;
+}
+
+.lock-lockout-icon {
+    font-size: 48px;
+}
+
+.lock-password-shake {
+    animation: shake 0.4s ease-in-out;
+}
+
+@keyframes shake {
+    0%, 100% { margin-left: 0; }
+    20% { margin-left: -12px; }
+    40% { margin-left: 10px; }
+    60% { margin-left: -8px; }
+    80% { margin-left: 6px; }
+}
+"""
+
+
+# ---------------------------------------------------------------------------
 # GTK lock screen window
 # ---------------------------------------------------------------------------
 
@@ -70,10 +170,10 @@ if _GTK_AVAILABLE:
 
         States
         ------
-        "clock"      — idle display: large clock + hint
-        "auth"       — password entry visible
-        "error"      — shake + wrong-password label
-        "locked_out" — countdown to next attempt
+        "clock"      — large clock + date + hint. No input visible.
+        "auth"       — password entry visible.
+        "error"      — wrong-password label shown.
+        "locked_out" — countdown to next attempt.
         """
 
         STATES = ["clock", "auth", "error", "locked_out"]
@@ -90,8 +190,6 @@ if _GTK_AVAILABLE:
             self.state    = "clock"
             self.pam      = PAMAuth()
             self.username = self.pam.get_current_user()
-            self._initials = _get_initials(self.username)
-            self._hint_visible = True
 
             # Layer shell — grab all input
             if _LAYER_SHELL:
@@ -107,13 +205,17 @@ if _GTK_AVAILABLE:
                 ):
                     LayerShell.set_anchor(self, edge, True)
 
+            # Apply CSS
+            css_provider = Gtk.CssProvider()
+            css_provider.load_from_string(_LOCK_CSS)
+            Gtk.StyleContext.add_provider_for_display(
+                Gdk.Display.get_default(),
+                css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+            )
+
             self._build()
             self._start_clock()
-
-            # Click anywhere → show auth
-            click = Gtk.GestureClick()
-            click.connect("pressed", self._on_click)
-            self.add_controller(click)
 
             # Key press → show auth + capture input
             key_ctrl = Gtk.EventControllerKey()
@@ -125,31 +227,21 @@ if _GTK_AVAILABLE:
         # -------------------------------------------------------------------
 
         def _build(self):
-            """Build the overlay stack: wallpaper → dim → content."""
-            root = Gtk.Overlay()
+            """Build the full-screen dark layout with clock and hidden password."""
+            root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            root.set_hexpand(True)
+            root.set_vexpand(True)
+            root.add_css_class("lock-bg")
             self.set_child(root)
 
-            # Bottom layer: blurred wallpaper placeholder
-            self._wallpaper_pic = Gtk.Picture()
-            self._wallpaper_pic.set_hexpand(True)
-            self._wallpaper_pic.set_vexpand(True)
-            self._wallpaper_pic.add_css_class("lock-wallpaper")
-            root.set_child(self._wallpaper_pic)
-
-            # Dim overlay
-            dim_box = Gtk.Box()
-            dim_box.set_hexpand(True)
-            dim_box.set_vexpand(True)
-            dim_box.add_css_class("lock-dim")
-            root.add_overlay(dim_box)
-
-            # Content stack (clock / auth / error / locked_out)
+            # Content stack (clock / auth / locked_out)
             self._stack = Gtk.Stack()
             self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
             self._stack.set_transition_duration(200)
             self._stack.set_halign(Gtk.Align.CENTER)
             self._stack.set_valign(Gtk.Align.CENTER)
-            root.add_overlay(self._stack)
+            self._stack.set_vexpand(True)
+            root.append(self._stack)
 
             self._build_clock_page()
             self._build_auth_page()
@@ -157,22 +249,10 @@ if _GTK_AVAILABLE:
 
             self._stack.set_visible_child_name("clock")
 
-        def _avatar_label(self) -> Gtk.Label:
-            lbl = Gtk.Label(label=self._initials)
-            lbl.add_css_class("lock-avatar")
-            return lbl
-
         def _build_clock_page(self):
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
             box.set_halign(Gtk.Align.CENTER)
             box.set_valign(Gtk.Align.CENTER)
-            box.add_css_class("lock-clock-page")
-
-            box.append(self._avatar_label())
-
-            self._clock_user_lbl = Gtk.Label(label=self.username)
-            self._clock_user_lbl.add_css_class("lock-username")
-            box.append(self._clock_user_lbl)
 
             self._time_lbl = Gtk.Label(label="00:00")
             self._time_lbl.add_css_class("lock-time")
@@ -182,41 +262,34 @@ if _GTK_AVAILABLE:
             self._date_lbl.add_css_class("lock-date")
             box.append(self._date_lbl)
 
-            self._hint_lbl = Gtk.Label(label="Click to unlock")
+            self._hint_lbl = Gtk.Label(label="Press Enter to unlock")
             self._hint_lbl.add_css_class("lock-hint")
             box.append(self._hint_lbl)
 
             self._stack.add_named(box, "clock")
 
         def _build_auth_page(self):
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
             box.set_halign(Gtk.Align.CENTER)
             box.set_valign(Gtk.Align.CENTER)
-            box.add_css_class("lock-auth-page")
-
-            box.append(self._avatar_label())
-
-            user_lbl = Gtk.Label(label=self.username)
-            user_lbl.add_css_class("lock-username")
-            box.append(user_lbl)
 
             self._auth_time_lbl = Gtk.Label(label="00:00")
-            self._auth_time_lbl.add_css_class("lock-time-small")
+            self._auth_time_lbl.add_css_class("lock-time")
             box.append(self._auth_time_lbl)
 
-            # Password entry row
-            entry_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-            entry_row.set_halign(Gtk.Align.CENTER)
-            entry_row.add_css_class("lock-entry-row")
+            auth_date_lbl = Gtk.Label(label="")
+            auth_date_lbl.add_css_class("lock-date")
+            self._auth_date_lbl = auth_date_lbl
+            box.append(auth_date_lbl)
 
+            # Password entry
             self._pw_entry = Gtk.PasswordEntry()
-            self._pw_entry.set_placeholder_text("Enter password")
+            self._pw_entry.set_placeholder_text("Password")
             self._pw_entry.set_size_request(300, -1)
             self._pw_entry.add_css_class("lock-password-entry")
             self._pw_entry.set_show_peek_icon(True)
             self._pw_entry.connect("activate", self._on_entry_activate)
-            entry_row.append(self._pw_entry)
-            box.append(entry_row)
+            box.append(self._pw_entry)
 
             # Error message label (hidden by default)
             self._error_lbl = Gtk.Label(label="")
@@ -224,20 +297,12 @@ if _GTK_AVAILABLE:
             self._error_lbl.set_visible(False)
             box.append(self._error_lbl)
 
-            # Cancel button
-            cancel_btn = Gtk.Button(label="Cancel")
-            cancel_btn.add_css_class("lock-cancel-btn")
-            cancel_btn.set_halign(Gtk.Align.CENTER)
-            cancel_btn.connect("clicked", self._on_cancel)
-            box.append(cancel_btn)
-
             self._stack.add_named(box, "auth")
 
         def _build_locked_out_page(self):
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
             box.set_halign(Gtk.Align.CENTER)
             box.set_valign(Gtk.Align.CENTER)
-            box.add_css_class("lock-lockedout-page")
 
             lock_icon = Gtk.Label(label="🔒")
             lock_icon.add_css_class("lock-lockout-icon")
@@ -254,7 +319,7 @@ if _GTK_AVAILABLE:
             self._stack.add_named(box, "locked_out")
 
         # -------------------------------------------------------------------
-        # Clock + countdown timer
+        # Clock timer
         # -------------------------------------------------------------------
 
         def _start_clock(self):
@@ -271,6 +336,7 @@ if _GTK_AVAILABLE:
                 self._time_lbl.set_label(time_str)
                 self._date_lbl.set_label(date_str)
                 self._auth_time_lbl.set_label(time_str)
+                self._auth_date_lbl.set_label(date_str)
             except Exception:
                 pass
 
@@ -282,13 +348,7 @@ if _GTK_AVAILABLE:
                         f"Try again in {lo['wait_seconds']}s"
                     )
                 else:
-                    # Lockout expired — return to auth
                     self._set_state("auth")
-
-            # Hint blink
-            if self.state == "clock":
-                self._hint_visible = not self._hint_visible
-                self._hint_lbl.set_opacity(1.0 if self._hint_visible else 0.0)
 
             return True   # GLib.SOURCE_CONTINUE
 
@@ -303,7 +363,6 @@ if _GTK_AVAILABLE:
                 self._error_lbl.set_visible(False)
                 self._error_lbl.set_label("")
                 self._pw_entry.set_text("")
-                self._pw_entry.add_css_class("lock-password-entry")
                 self._pw_entry.remove_css_class("lock-password-shake")
                 GLib.idle_add(self._pw_entry.grab_focus)
 
@@ -311,39 +370,26 @@ if _GTK_AVAILABLE:
         # Input handlers
         # -------------------------------------------------------------------
 
-        def _on_click(self, *_):
-            if self.state == "clock":
-                self._set_state("auth")
-            elif self.state == "error":
-                self._set_state("auth")
-
         def _on_key(self, ctrl, keyval, keycode, state) -> bool:
             if self.state == "clock":
-                # Any printable key shows auth and feeds the keypress
-                self._set_state("auth")
+                if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+                    self._set_state("auth")
                 return True
 
             if self.state in ("auth", "error"):
-                if keyval == Gdk.KEY_Return or keyval == Gdk.KEY_KP_Enter:
-                    self._try_auth()
-                    return True
                 if keyval == Gdk.KEY_Escape:
-                    # Clear password and return to clock view
                     self._pw_entry.set_text("")
                     self._set_state("clock")
                     return True
+                return False  # let entry handle keys
 
             if self.state == "locked_out":
                 return True   # consume all input during lockout
 
-            return True       # ALWAYS consume — no bypass
+            return True
 
         def _on_entry_activate(self, *_):
             self._try_auth()
-
-        def _on_cancel(self, *_):
-            self._pw_entry.set_text("")
-            self._set_state("clock")
 
         # -------------------------------------------------------------------
         # Authentication
@@ -374,7 +420,7 @@ if _GTK_AVAILABLE:
                 return
 
             self._error_lbl.set_label(
-                f"Wrong password  (attempt {attempts})"
+                f"Incorrect password  (attempt {attempts})"
             )
             self._error_lbl.set_visible(True)
             self._pw_entry.set_text("")
@@ -397,7 +443,7 @@ if _GTK_AVAILABLE:
             logger.info("Lock screen: unlocked")
 
         # -------------------------------------------------------------------
-        # Pure-logic mirrors (for symmetry / test hooks)
+        # Pure-logic mirrors (for test hooks)
         # -------------------------------------------------------------------
 
         @staticmethod

@@ -69,7 +69,6 @@ swww
 
 # Login manager
 greetd
-greetd-tuigreet
 
 # Fonts & themes
 inter-font
@@ -205,7 +204,7 @@ SYSUSERS
 vt = 1
 
 [default_session]
-command = "tuigreet --cmd Hyprland --time --remember --asterisks"
+command = "luminos-greeter"
 user = "greeter"
 GREETD
 
@@ -251,7 +250,8 @@ SESSIONSCRIPT
     "luminos-store:src/gui/store/store_app.py" \
     "luminos-settings:src/gui/settings/settings_app.py" \
     "luminos-firstrun:src/gui/firstrun/firstrun_app.py" \
-    "luminos-run-windows:src/zone2/wine_runner.py"; do
+    "luminos-run-windows:src/zone2/wine_runner.py" \
+    "luminos-greeter:src/gui/greeter/greeter_app.py"; do
     local name="${pair%%:*}"
     local script="${pair#*:}"
     cat > "$AIROOTFS/usr/local/bin/$name" << LAUNCHER

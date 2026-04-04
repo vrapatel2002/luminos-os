@@ -21,7 +21,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from compositor.window_manager    import WindowManager, ZONE_WINDOW_RULES
 from compositor.upscale_manager   import UpscaleManager, UPSCALE_MODES, detect_display
 from compositor.compositor_config import (
-    generate_sway_config, write_config, generate_waybar_config
+    generate_hyprland_config, generate_sway_config,
+    write_config, generate_waybar_config,
 )
 import compositor as comp
 
@@ -246,36 +247,47 @@ class TestUpscaleManagerStatus(unittest.TestCase):
 # compositor_config — generate_sway_config
 # ---------------------------------------------------------------------------
 
-class TestGenerateSwayCo(unittest.TestCase):
+class TestGenerateHyprlandConfig(unittest.TestCase):
 
     def test_returns_string(self):
-        self.assertIsInstance(generate_sway_config(), str)
+        self.assertIsInstance(generate_hyprland_config(), str)
 
     def test_contains_exec_luminos_ai(self):
-        self.assertIn("exec luminos-ai", generate_sway_config())
+        self.assertIn("exec-once = luminos-ai", generate_hyprland_config())
 
     def test_contains_quarantine(self):
-        self.assertIn("QUARANTINE", generate_sway_config())
+        self.assertIn("QUARANTINE", generate_hyprland_config())
 
     def test_contains_output_name(self):
-        cfg = generate_sway_config("HDMI-A-1")
+        cfg = generate_hyprland_config("HDMI-A-1")
         self.assertIn("HDMI-A-1", cfg)
 
     def test_default_output_name_is_edp1(self):
-        cfg = generate_sway_config()
+        cfg = generate_hyprland_config()
         self.assertIn("eDP-1", cfg)
 
     def test_contains_xwayland_rule(self):
-        self.assertIn("xwayland", generate_sway_config())
+        self.assertIn("xwayland", generate_hyprland_config())
 
     def test_contains_key_binding_super_q(self):
-        self.assertIn("$mod+q", generate_sway_config())
+        self.assertIn("$mod, Q", generate_hyprland_config())
 
     def test_contains_key_binding_super_enter(self):
-        self.assertIn("$mod+Return", generate_sway_config())
+        self.assertIn("$mod, Return", generate_hyprland_config())
 
     def test_contains_gaps(self):
-        self.assertIn("gaps inner", generate_sway_config())
+        self.assertIn("gaps_in", generate_hyprland_config())
+
+    def test_shadow_uses_block_not_flat(self):
+        cfg = generate_hyprland_config()
+        self.assertIn("shadow {", cfg)
+        self.assertNotIn("drop_shadow", cfg)
+        self.assertNotIn("shadow_range", cfg)
+        self.assertNotIn("shadow_render_power", cfg)
+        self.assertNotIn("col.shadow", cfg)
+
+    def test_backward_compat_alias(self):
+        self.assertEqual(generate_sway_config(), generate_hyprland_config())
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +344,7 @@ class TestGenerateWaybarConfig(unittest.TestCase):
 
     def test_left_contains_workspaces(self):
         cfg = generate_waybar_config()
-        self.assertIn("sway/workspaces", cfg["modules-left"])
+        self.assertIn("hyprland/workspaces", cfg["modules-left"])
 
     def test_center_contains_clock(self):
         cfg = generate_waybar_config()
