@@ -13,7 +13,7 @@ Usage:
 
 from .window_manager    import WindowManager
 from .upscale_manager   import UpscaleManager
-from .compositor_config import generate_sway_config, write_config, generate_waybar_config
+from .compositor_config import generate_sway_config, write_config
 
 # Module-level singletons — one instance per daemon lifetime
 _wm  = WindowManager()

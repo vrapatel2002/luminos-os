@@ -1,10 +1,11 @@
 """
 compositor_config.py
-Generates Hyprland and Waybar configuration for Luminos compositor layer.
+Generates Hyprland configuration for Luminos compositor layer.
 
 Rules:
 - generate_hyprland_config() is pure — returns a string, touches no files.
 - write_config() is the only file-writing function.
+- All visual values match LUMINOS_DESIGN_SYSTEM.md exactly.
 - Zone 2 XWayland windows get blue borders.
 - Zone 3 windows get red borders + QUARANTINE title marker.
 - Config targets Hyprland on Arch Linux with luminos-ai.service.
@@ -49,41 +50,48 @@ input {{
 
 # --- Appearance ---
 general {{
-    gaps_in = 8
-    gaps_out = 4
-    border_size = 2
-    col.active_border = rgba(0a84ffee) rgba(5e9effee) 45deg
-    col.inactive_border = rgba(ffffff15)
+    gaps_in = 4
+    gaps_out = 8
+    border_size = 1
+    col.active_border = rgba(0080FFaa)
+    col.inactive_border = rgba(ffffff10)
     layout = dwindle
 }}
 
 decoration {{
     rounding = 12
+
     blur {{
-        enabled = true
+        enabled = yes
         size = 8
-        passes = 3
-        new_optimizations = true
+        passes = 2
+        new_optimizations = yes
+        xray = no
     }}
+
     shadow {{
         enabled = yes
-        range = 4
+        range = 20
         render_power = 3
-        color = rgba(1a1a1aee)
+        color = rgba(0033660d)
     }}
+
     active_opacity = 1.0
     inactive_opacity = 0.95
-    dim_inactive = true
-    dim_strength = 0.08
+    dim_inactive = false
 }}
 
 animations {{
-    enabled = true
-    bezier = overshot, 0.05, 0.9, 0.1, 1.05
-    bezier = smoothIn, 0.25, 1, 0.5, 1
-    animation = windows, 1, 4, overshot, slide
-    animation = fade, 1, 4, smoothIn
-    animation = workspaces, 1, 4, overshot, slidevert
+    enabled = yes
+
+    bezier = luminos, 0.4, 0, 0.2, 1
+    bezier = luminosEnter, 0.0, 0, 0.2, 1
+    bezier = luminosExit, 0.4, 0, 1, 1
+
+    animation = windows, 1, 2, luminos, slide
+    animation = windowsOut, 1, 1.5, luminosExit, slide
+    animation = fade, 1, 2, luminos
+    animation = workspaces, 1, 2.5, luminos, slidevert
 }}
 
 dwindle {{
@@ -97,15 +105,23 @@ misc {{
     disable_splash_rendering = true
 }}
 
-# --- Zone 2: Wine/XWayland windows (blue border) ---
-windowrulev2 = bordercolor rgba(0055ffee), xwayland:1
+# --- Window rules: maximized (no rounding, no border) ---
+windowrulev2 = rounding 0, fullscreen:1
+windowrulev2 = noborder, fullscreen:1
 
-# --- Zone 3: Quarantine VM windows (red border + thick) ---
-windowrulev2 = bordercolor rgba(ff0000ee), title:^(.*QUARANTINE.*)$
-windowrulev2 = bordersize 4, title:^(.*QUARANTINE.*)$
+# --- Zone 2: Wine/XWayland windows (accent blue border) ---
+windowrulev2 = bordercolor rgba(0080FFee), xwayland:1
+
+# --- Zone 3: Quarantine VM windows (error red border + thick) ---
+windowrulev2 = bordercolor rgba(FF4455ee), title:^(.*QUARANTINE.*)$
+windowrulev2 = bordersize 3, title:^(.*QUARANTINE.*)$
 
 # --- Luminos AI Daemon ---
 exec-once = luminos-ai
+
+# --- Luminos Bar + Dock ---
+exec-once = luminos-bar
+exec-once = luminos-dock
 
 # --- Key bindings ---
 $mod = SUPER
@@ -121,10 +137,12 @@ bind = $mod, 1, workspace, 1
 bind = $mod, 2, workspace, 2
 bind = $mod, 3, workspace, 3
 bind = $mod, 4, workspace, 4
+bind = $mod, 5, workspace, 5
 bind = $mod SHIFT, 1, movetoworkspace, 1
 bind = $mod SHIFT, 2, movetoworkspace, 2
 bind = $mod SHIFT, 3, movetoworkspace, 3
 bind = $mod SHIFT, 4, movetoworkspace, 4
+bind = $mod SHIFT, 5, movetoworkspace, 5
 
 # --- Window movement ---
 bind = $mod, left, movefocus, l
@@ -136,8 +154,8 @@ bind = $mod SHIFT, right, movewindow, r
 bind = $mod SHIFT, up, movewindow, u
 bind = $mod SHIFT, down, movewindow, d
 
-# --- Status bar ---
-exec-once = waybar
+# --- Fullscreen ---
+bind = $mod, F, fullscreen, 1
 """
 
 
@@ -166,42 +184,3 @@ def write_config(path: str = "~/.config/hypr/hyprland.conf") -> dict:
     except OSError as e:
         logger.error(f"Failed to write Hyprland config to {expanded}: {e}")
         return {"success": False, "path": expanded, "error": str(e)}
-
-
-def generate_waybar_config() -> dict:
-    """
-    Generate a minimal Waybar config dict for Luminos.
-
-    Returns:
-        Waybar JSON-serialisable config dict with left/center/right modules.
-    """
-    return {
-        "layer":    "top",
-        "position": "top",
-        "height":   30,
-        "modules-left":   ["hyprland/workspaces"],
-        "modules-center": ["clock"],
-        "modules-right":  [
-            "luminos/ai-status",
-            "cpu",
-            "memory",
-            "battery",
-        ],
-        "clock": {
-            "format": "%Y-%m-%d %H:%M",
-            "tooltip": False,
-        },
-        "cpu": {
-            "format": "CPU {usage}%",
-            "interval": 5,
-        },
-        "memory": {
-            "format": "RAM {}%",
-            "interval": 10,
-        },
-        "battery": {
-            "format":          "BAT {capacity}%",
-            "format-charging": "CHG {capacity}%",
-            "states": {"warning": 20, "critical": 10},
-        },
-    }

@@ -207,22 +207,58 @@ If temps spike: AI Router delays heavy tasks until temps drop
 
 ## FEATURE 5 — AI LAYER (Infrastructure, Not Product)
 
-### Hardware Assignment (Locked)
+### Hardware Assignment (Locked — No Fallbacks, No Exceptions)
 ```
-CPU (16 TFLOPS):
-  Compatibility Router model
-  Resource scheduling
-  General orchestration
+CPU (AMD x86 general cores):
+  OS, apps, file manager, terminal, settings, everything normal
+  Kept FREE for actual user work — this is the goal
+  NEVER used for AI inference
+  NEVER used as fallback for NPU tasks
 
-NPU (AMD XDNA):
-  Sentinel security (always on, always passive)
-  Lightweight HIVE tasks
-  Thermal monitoring decisions
+iGPU (AMD RDNA3 — integrated):
+  Hyprland compositor — all desktop rendering
+  UI animations, dock, bar, panels, settings
+  Video playback
+  Live wallpaper (light shader workload)
+  Everything visual that is not a game or heavy task
+  Frees the NVIDIA for real work
 
-GPU (RTX 4050 6GB):
+NPU (AMD XDNA — 16 TFLOPS dedicated AI cores):
+  Sentinel security — always on, continuous, low intensity
+  Compatibility Router — burst on demand, then idle
+  Both share NPU via queue:
+    Sentinel runs continuously at low priority
+    Router needs NPU → Sentinel pauses 2-3 seconds
+    Router finishes → Sentinel resumes immediately
+  If NPU unavailable: Router and Sentinel WAIT
+  NEVER reroute to CPU or GPU — no fallbacks ever
+
+dGPU (NVIDIA RTX 4050 6GB):
+  Games
+  HIVE agents (Nexus, Bolt, Nova, Eye)
   Heavy AI inference
-  Image/code generation
-  Overflow from CPU/NPU
+  Coding and dev GPU tasks
+  Video encoding
+  Anything iGPU or NPU cannot handle
+  Only wakes up for real heavy tasks — idle otherwise
+```
+
+### NPU Abstraction Layer (Implementation Approach)
+```
+Why:
+  XDNA driver on Linux is still maturing (2025)
+  Direct NPU calls scattered everywhere = hard to fix if driver changes
+  Abstract it = fix one place, everything works
+
+How:
+  All NPU calls go through a single interface: npu_interface.py
+  Sentinel calls: npu_interface.run_sentinel(data)
+  Router calls:   npu_interface.run_router(exe_data)
+  Interface handles: driver loading, ONNX runtime, memory management
+  If driver API changes: update npu_interface.py only
+  Nothing else in the codebase knows how the NPU works internally
+
+Test in Phase 5.4 on actual G14 hardware before depending on it
 ```
 
 ### Sentinel Security (Core — Always Running)

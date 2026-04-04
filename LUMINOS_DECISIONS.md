@@ -262,3 +262,75 @@ or a full QEMU/KVM VM.
 - Pros: Complete Windows environment
 - Cons: 30-60 second boot time, high RAM overhead. Too heavy for frequent use.
   Reserved for last resort (Layer 3) only.
+
+---
+
+## DECISION 8 — Four-Way Hardware Split (CPU / iGPU / NPU / dGPU)
+Date: Session 3
+Made by: Sam
+
+### What We Decided
+Each piece of silicon has exactly one job. Nothing shares unless necessary.
+
+```
+CPU cores  → OS and apps only. Never AI.
+iGPU       → All UI rendering. Frees NVIDIA completely for heavy tasks.
+NPU        → All AI inference (Router + Sentinel). No fallbacks.
+dGPU       → Games, HIVE, heavy GPU tasks only.
+```
+
+### Why
+
+The goal is to keep CPU cores free for actual user work.
+Every other OS wastes CPU on AI tasks because they have no NPU strategy.
+The Ryzen AI chip has three separate compute engines built in —
+using all three independently is the right architecture.
+
+iGPU for UI specifically:
+  Hyprland compositor runs fine on AMD RDNA3 integrated graphics.
+  No reason to waste NVIDIA power on rendering a dock or settings panel.
+  iGPU handles UI at full speed with minimal power draw.
+  NVIDIA stays idle until a game or heavy task actually needs it.
+
+NPU for AI specifically:
+  XDNA is dedicated silicon — running AI there does NOT slow down CPU.
+  This is the entire point of having an NPU.
+  Windows barely uses NPUs for anything meaningful.
+  Luminos uses it as real infrastructure.
+
+### What We Rejected
+
+**CPU as AI fallback**
+  Pros: Simple, always available
+  Cons: Defeats the entire purpose of keeping CPU free.
+  If Router ran on CPU it would slow down whatever the user is doing.
+
+**GPU as AI fallback**
+  Pros: Powerful, fast
+  Cons: GPU needed for games. Can't use it for routing when a game is running.
+  Also wastes serious power for a task NPU handles fine.
+
+---
+
+## DECISION 9 — NPU Abstraction Interface
+Date: Session 3
+Made by: Sam + Claude
+
+### What We Decided
+All NPU calls go through a single abstraction layer: npu_interface.py
+Nothing else in the codebase talks to the NPU directly.
+
+### Why
+AMD XDNA driver on Linux is actively being developed.
+The API may change. Driver bugs may exist on specific hardware.
+If NPU calls are scattered across 20 files, a driver change breaks 20 files.
+If they all go through npu_interface.py, a driver change breaks one file.
+
+This is standard engineering practice for hardware that is still maturing.
+Test on actual G14 hardware in Phase 5.4 before depending on NPU behavior.
+
+### What We Rejected
+
+**Direct NPU calls everywhere**
+  Pros: Slightly less code
+  Cons: Unmaintainable. One driver update breaks everything.

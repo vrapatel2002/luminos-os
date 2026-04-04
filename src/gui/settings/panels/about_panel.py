@@ -1,7 +1,6 @@
 """
 src/gui/settings/panels/about_panel.py
-AboutPanel — Luminos identity, hardware summary, system info, licenses,
-             export diagnostics.
+AboutPanel — Luminos identity, hardware summary, software info, legal.
 
 Pure helpers:
     _get_kernel_version()     → str
@@ -30,6 +29,17 @@ except (ImportError, ValueError):
 _SRC = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
+
+from gui.theme.luminos_theme import (
+    BG_ELEVATED, BG_OVERLAY,
+    ACCENT,
+    TEXT_PRIMARY, TEXT_SECONDARY,
+    BORDER_SUBTLE,
+    FONT_FAMILY, FONT_H1, FONT_BODY, FONT_BODY_SMALL,
+    SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8,
+    RADIUS_MD,
+    SETTINGS_PADDING,
+)
 
 _LUMINOS_VERSION = "0.9.0-alpha"
 
@@ -74,12 +84,20 @@ def _get_system_info() -> dict:
     Return OS / compositor / uptime info.
 
     Returns:
-        Dict with keys: os, kernel, compositor, uptime_s.
+        Dict with keys: os, kernel, compositor, python, uptime_s.
     """
+    compositor = "Hyprland"
     try:
-        compositor = os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY") or "unknown"
+        result = subprocess.run(
+            ["hyprctl", "version", "-j"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            import json
+            data = json.loads(result.stdout)
+            compositor = f"Hyprland {data.get('tag', '')}"
     except Exception:
-        compositor = "unknown"
+        pass
 
     try:
         with open("/proc/uptime") as f:
@@ -91,6 +109,7 @@ def _get_system_info() -> dict:
         "os":         "Luminos OS",
         "kernel":     _get_kernel_version(),
         "compositor": compositor,
+        "python":     platform.python_version(),
         "uptime_s":   uptime_s,
     }
 
@@ -127,6 +146,7 @@ def _export_report(path: str | None = None) -> str:
         f"OS        : {sys_['os']}",
         f"Kernel    : {sys_['kernel']}",
         f"Compositor: {sys_['compositor']}",
+        f"Python    : {sys_['python']}",
         f"Uptime    : {sys_['uptime_s']:.0f}s",
     ]
 
@@ -209,6 +229,63 @@ def _format_uptime(seconds: float) -> str:
 
 
 # ===========================================================================
+# CSS
+# ===========================================================================
+
+_ABOUT_CSS = f"""
+.luminos-about-logo {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: 48px;
+    font-weight: 700;
+    color: {ACCENT};
+}}
+
+.luminos-about-name {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: {FONT_H1}px;
+    font-weight: 600;
+    color: {TEXT_PRIMARY};
+}}
+
+.luminos-about-version {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: {FONT_BODY}px;
+    color: {TEXT_SECONDARY};
+}}
+
+.luminos-about-arch {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: {FONT_BODY_SMALL}px;
+    color: {TEXT_SECONDARY};
+}}
+
+.luminos-info-grid {{
+    margin-top: {SPACE_3}px;
+}}
+
+.luminos-info-key {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: {FONT_BODY}px;
+    color: {TEXT_SECONDARY};
+    min-width: 100px;
+}}
+
+.luminos-info-val {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: {FONT_BODY}px;
+    color: {TEXT_PRIMARY};
+}}
+
+.luminos-legal {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: {FONT_BODY_SMALL}px;
+    color: {TEXT_SECONDARY};
+    margin-top: {SPACE_8}px;
+}}
+"""
+
+
+# ===========================================================================
 # GTK Panel
 # ===========================================================================
 
@@ -217,104 +294,143 @@ if _GTK_AVAILABLE:
     class AboutPanel(Gtk.Box):
         """
         About Luminos panel.
-
-        Shows: version, hardware summary, system info, licenses,
-        export diagnostics button.
+        Shows: identity block, hardware, software, legal.
         """
 
         def __init__(self):
-            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=20)
-            self.set_margin_top(24)
-            self.set_margin_bottom(24)
-            self.set_margin_start(32)
-            self.set_margin_end(32)
+            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            self.set_margin_top(SETTINGS_PADDING)
+            self.set_margin_bottom(SETTINGS_PADDING)
+            self.set_margin_start(SETTINGS_PADDING)
+            self.set_margin_end(SETTINGS_PADDING)
+
+            css_provider = Gtk.CssProvider()
+            css_provider.load_from_string(_ABOUT_CSS)
+            self._css_provider = css_provider
+            self.connect("realize", lambda w: self._ensure_css())
+
             self._build()
 
+        def _ensure_css(self):
+            try:
+                Gtk.StyleContext.add_provider_for_display(
+                    self.get_display(), self._css_provider,
+                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+                )
+            except Exception:
+                pass
+
         def _build(self):
-            # ---- Identity ----
-            logo_lbl = Gtk.Label(label="◉ Luminos")
-            logo_lbl.add_css_class("luminos-bar-logo")
-            logo_lbl.set_halign(Gtk.Align.START)
-            self.append(logo_lbl)
+            # ---- Identity block ----
+            identity = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=SPACE_2
+            )
+            identity.set_halign(Gtk.Align.START)
+            identity.set_margin_bottom(SPACE_8)
 
-            ver_lbl = Gtk.Label(label=f"Version {_LUMINOS_VERSION}")
-            ver_lbl.add_css_class("luminos-qs-dim")
-            ver_lbl.set_halign(Gtk.Align.START)
-            self.append(ver_lbl)
+            # Logo placeholder — "L" in accent
+            logo = Gtk.Label(label="L")
+            logo.add_css_class("luminos-about-logo")
+            logo.set_halign(Gtk.Align.START)
+            identity.append(logo)
 
-            self.append(Gtk.Separator())
+            name = Gtk.Label(label="Luminos")
+            name.add_css_class("luminos-about-name")
+            name.set_halign(Gtk.Align.START)
+            identity.append(name)
 
-            # ---- Hardware summary ----
-            hw_lbl = Gtk.Label(label="Hardware")
-            hw_lbl.add_css_class("luminos-settings-section-title")
-            hw_lbl.set_halign(Gtk.Align.START)
-            self.append(hw_lbl)
+            version = Gtk.Label(label=f"Version {_LUMINOS_VERSION}")
+            version.add_css_class("luminos-about-version")
+            version.set_halign(Gtk.Align.START)
+            identity.append(version)
+
+            arch = Gtk.Label(label="Built on Arch Linux")
+            arch.add_css_class("luminos-about-arch")
+            arch.set_halign(Gtk.Align.START)
+            identity.append(arch)
+
+            self.append(identity)
+
+            div1 = Gtk.Box()
+            div1.add_css_class("luminos-section-divider")
+            self.append(div1)
+
+            # ---- Hardware section ----
+            hw_title = Gtk.Label(label="This Device")
+            hw_title.add_css_class("luminos-section-title")
+            hw_title.set_halign(Gtk.Align.START)
+            self.append(hw_title)
 
             hw = _get_hardware_info()
             hw_grid = Gtk.Grid()
-            hw_grid.set_row_spacing(6)
-            hw_grid.set_column_spacing(24)
-            for row, (key, val) in enumerate((
+            hw_grid.set_row_spacing(8)
+            hw_grid.set_column_spacing(SPACE_6)
+            hw_grid.add_css_class("luminos-info-grid")
+
+            hw_items = [
+                ("Device", "ASUS ROG Zephyrus G14"),
                 ("CPU",     hw["cpu"]),
-                ("RAM",     f"{hw['ram_gb']} GB"),
-                ("iGPU",    hw["igpu"]),
                 ("GPU",     hw["gpu"]),
                 ("NPU",     hw["npu"]),
+                ("RAM",     f"{hw['ram_gb']} GB"),
                 ("Storage", f"{hw['storage_gb']:.0f} GB"),
-            )):
+            ]
+
+            for row, (key, val) in enumerate(hw_items):
                 k = Gtk.Label(label=key)
-                k.add_css_class("luminos-qs-dim")
+                k.add_css_class("luminos-info-key")
                 k.set_halign(Gtk.Align.START)
                 hw_grid.attach(k, 0, row, 1, 1)
                 v = Gtk.Label(label=str(val))
+                v.add_css_class("luminos-info-val")
                 v.set_halign(Gtk.Align.START)
                 v.set_selectable(True)
                 hw_grid.attach(v, 1, row, 1, 1)
+
             self.append(hw_grid)
 
-            self.append(Gtk.Separator())
+            div2 = Gtk.Box()
+            div2.add_css_class("luminos-section-divider")
+            self.append(div2)
 
-            # ---- System info ----
-            sys_lbl = Gtk.Label(label="System")
-            sys_lbl.add_css_class("luminos-settings-section-title")
-            sys_lbl.set_halign(Gtk.Align.START)
-            self.append(sys_lbl)
+            # ---- Software section ----
+            sw_title = Gtk.Label(label="Software")
+            sw_title.add_css_class("luminos-section-title")
+            sw_title.set_halign(Gtk.Align.START)
+            self.append(sw_title)
 
             sys_info = _get_system_info()
-            sys_grid = Gtk.Grid()
-            sys_grid.set_row_spacing(6)
-            sys_grid.set_column_spacing(24)
-            for row, (key, val) in enumerate((
+            sw_grid = Gtk.Grid()
+            sw_grid.set_row_spacing(8)
+            sw_grid.set_column_spacing(SPACE_6)
+            sw_grid.add_css_class("luminos-info-grid")
+
+            sw_items = [
                 ("Kernel",      sys_info["kernel"]),
                 ("Compositor",  sys_info["compositor"]),
-                ("Uptime",      _format_uptime(sys_info["uptime_s"])),
-            )):
+                ("Python",      sys_info["python"]),
+            ]
+
+            for row, (key, val) in enumerate(sw_items):
                 k = Gtk.Label(label=key)
-                k.add_css_class("luminos-qs-dim")
+                k.add_css_class("luminos-info-key")
                 k.set_halign(Gtk.Align.START)
-                sys_grid.attach(k, 0, row, 1, 1)
+                sw_grid.attach(k, 0, row, 1, 1)
                 v = Gtk.Label(label=str(val))
+                v.add_css_class("luminos-info-val")
                 v.set_halign(Gtk.Align.START)
-                sys_grid.attach(v, 1, row, 1, 1)
-            self.append(sys_grid)
+                v.set_selectable(True)
+                sw_grid.attach(v, 1, row, 1, 1)
 
-            self.append(Gtk.Separator())
+            self.append(sw_grid)
 
-            # ---- Export diagnostics ----
-            export_btn = Gtk.Button(label="Export Diagnostics Report…")
-            export_btn.add_css_class("luminos-btn")
-            export_btn.set_halign(Gtk.Align.START)
-            export_btn.connect("clicked", self._on_export)
-            self.append(export_btn)
-
-            self._export_status = Gtk.Label(label="")
-            self._export_status.set_halign(Gtk.Align.START)
-            self._export_status.add_css_class("luminos-qs-dim")
-            self.append(self._export_status)
-
-        def _on_export(self, *_):
-            path = _export_report()
-            self._export_status.set_text(f"Saved: {path}")
+            # ---- Legal ----
+            legal = Gtk.Label(
+                label="Open source. Privacy first. No telemetry."
+            )
+            legal.add_css_class("luminos-legal")
+            legal.set_halign(Gtk.Align.CENTER)
+            self.append(legal)
 
 else:
     class AboutPanel:  # type: ignore[no-redef]

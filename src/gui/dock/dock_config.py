@@ -17,11 +17,11 @@ logger = logging.getLogger("luminos-ai.gui.dock.config")
 CONFIG_PATH = os.path.expanduser("~/.config/luminos/dock.json")
 
 DEFAULT_PINNED: list[dict] = [
-    {"name": "Files",    "exec": "nautilus",                  "icon": "system-file-manager"},
-    {"name": "Terminal", "exec": "alacritty",                  "icon": "terminal"},
-    {"name": "Firefox",  "exec": "firefox",                    "icon": "firefox"},
-    {"name": "Store",    "exec": "luminos-store",              "icon": "system-software-install"},
-    {"name": "Settings", "exec": "luminos-settings",           "icon": "preferences-system"},
+    {"name": "Files",    "exec": "nautilus",         "icon": "system-file-manager"},
+    {"name": "Terminal", "exec": "foot",             "icon": "terminal"},
+    {"name": "Firefox",  "exec": "firefox",          "icon": "firefox"},
+    {"name": "Store",    "exec": "luminos-store",    "icon": "system-software-install"},
+    {"name": "Settings", "exec": "luminos-settings", "icon": "preferences-system"},
 ]
 
 

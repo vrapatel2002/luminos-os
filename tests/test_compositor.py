@@ -22,7 +22,7 @@ from compositor.window_manager    import WindowManager, ZONE_WINDOW_RULES
 from compositor.upscale_manager   import UpscaleManager, UPSCALE_MODES, detect_display
 from compositor.compositor_config import (
     generate_hyprland_config, generate_sway_config,
-    write_config, generate_waybar_config,
+    write_config,
 )
 import compositor as comp
 
@@ -322,39 +322,6 @@ class TestWriteConfig(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# compositor_config — generate_waybar_config
-# ---------------------------------------------------------------------------
-
-class TestGenerateWaybarConfig(unittest.TestCase):
-
-    def test_returns_dict(self):
-        self.assertIsInstance(generate_waybar_config(), dict)
-
-    def test_has_left_modules(self):
-        cfg = generate_waybar_config()
-        self.assertIn("modules-left", cfg)
-
-    def test_has_center_modules(self):
-        cfg = generate_waybar_config()
-        self.assertIn("modules-center", cfg)
-
-    def test_has_right_modules(self):
-        cfg = generate_waybar_config()
-        self.assertIn("modules-right", cfg)
-
-    def test_left_contains_workspaces(self):
-        cfg = generate_waybar_config()
-        self.assertIn("hyprland/workspaces", cfg["modules-left"])
-
-    def test_center_contains_clock(self):
-        cfg = generate_waybar_config()
-        self.assertIn("clock", cfg["modules-center"])
-
-    def test_right_contains_cpu_and_memory(self):
-        cfg = generate_waybar_config()
-        right = cfg["modules-right"]
-        self.assertIn("cpu", right)
-        self.assertIn("memory", right)
 
 
 # ---------------------------------------------------------------------------

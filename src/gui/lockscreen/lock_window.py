@@ -5,14 +5,15 @@ Full-screen Wayland lock screen window.
 Uses gtk4-layer-shell OVERLAY + KEYBOARD_MODE_EXCLUSIVE to grab all input.
 States: clock → auth → error → locked_out
 
-Visual spec (matches greeter):
-- Full screen, dark background (#0d0d12)
-- Large clock center screen (HH:MM, updates every second)
-- Date below clock (Tuesday, March 31 2026)
-- Press Enter → slide in password input field
-- No username list visible
-- No visible input field until Enter is pressed
-- Clean, minimal, dark
+Visual spec (LUMINOS_DESIGN_SYSTEM.md):
+- Full screen, BG_BASE background
+- Clock: Inter 80px weight 300, TEXT_PRIMARY, letter-spacing -2px, 20% above center
+- Date: Inter 16px weight 400, TEXT_SECONDARY, 8px below clock
+- Press Enter → password field slides up 20px + fades in 200ms
+- Password: 320×48px, rgba(255,255,255,0.08) + blur, BORDER/BORDER_FOCUS, RADIUS_DEFAULT
+- Wrong password: 3 shakes over 300ms, border turns COLOR_ERROR, field clears
+- Correct password: fade out over ANIM_SLOW (350ms), launch session
+- Nothing else on screen. No username. No logo. No buttons.
 
 GTK class guarded by _GTK_AVAILABLE for headless test compatibility.
 """
@@ -38,6 +39,20 @@ except (ImportError, ValueError):
 
 from gui.lockscreen.pam_auth import PAMAuth
 
+import os, sys
+_SRC = os.path.join(os.path.dirname(__file__), "..", "..")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
+from gui.theme.luminos_theme import (
+    BG_BASE, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_DISABLED,
+    BORDER, BORDER_FOCUS, COLOR_ERROR,
+    FONT_FAMILY, FONT_DISPLAY, FONT_BODY_LARGE, FONT_BODY, FONT_CAPTION,
+    RADIUS_DEFAULT, SPACE_2, SPACE_4, SPACE_8,
+    ANIM_DEFAULT, ANIM_SLOW,
+    glass_bg,
+)
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers — testable without GTK
@@ -49,7 +64,7 @@ def _format_clock_time(dt) -> str:
 
 
 def _format_clock_date(dt) -> str:
-    """Format a datetime as 'Tuesday, March 31 2026'."""
+    """Format a datetime as 'Tuesday, April 04 2026'."""
     return dt.strftime("%A, %B %-d %Y")
 
 
@@ -67,92 +82,77 @@ def _get_initials(username: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# CSS
+# CSS — all values from luminos_theme
 # ---------------------------------------------------------------------------
 
-_LOCK_CSS = """
-.lock-bg {
-    background-color: #0d0d12;
-}
+_LOCK_CSS = f"""
+.lock-bg {{
+    background-color: {BG_BASE};
+}}
 
-.lock-time {
-    font-size: 96px;
-    font-weight: 200;
-    font-family: "Inter", "Helvetica Neue", sans-serif;
-    color: rgba(255, 255, 255, 0.92);
+.lock-time {{
+    font-size: {FONT_DISPLAY}px;
+    font-weight: 300;
+    font-family: "{FONT_FAMILY}", sans-serif;
+    color: {TEXT_PRIMARY};
     letter-spacing: -2px;
-}
+}}
 
-.lock-date {
-    font-size: 22px;
+.lock-date {{
+    font-size: {FONT_BODY_LARGE}px;
     font-weight: 400;
-    font-family: "Inter", "Helvetica Neue", sans-serif;
-    color: rgba(255, 255, 255, 0.50);
-    margin-top: 4px;
-}
+    font-family: "{FONT_FAMILY}", sans-serif;
+    color: {TEXT_SECONDARY};
+    margin-top: {SPACE_2}px;
+}}
 
-.lock-hint {
-    font-size: 14px;
-    font-family: "Inter", sans-serif;
-    color: rgba(255, 255, 255, 0.25);
-    margin-top: 48px;
-}
-
-.lock-password-entry {
-    font-size: 16px;
-    font-family: "Inter", sans-serif;
-    min-width: 300px;
+.lock-password-entry {{
+    font-size: {FONT_BODY}px;
+    font-family: "{FONT_FAMILY}", sans-serif;
+    min-width: 320px;
+    min-height: 48px;
     padding: 12px 18px;
-    border-radius: 12px;
-    background-color: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    color: rgba(255, 255, 255, 0.92);
-    caret-color: #0a84ff;
-    margin-top: 32px;
-}
-
-.lock-password-entry:focus {
-    border-color: rgba(10, 132, 255, 0.6);
+    border-radius: {RADIUS_DEFAULT}px;
     background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid {BORDER};
+    color: {TEXT_PRIMARY};
+    caret-color: {TEXT_PRIMARY};
+    margin-top: {SPACE_8}px;
+}}
+
+.lock-password-entry:focus {{
+    border-color: {BORDER_FOCUS};
+    background-color: rgba(255, 255, 255, 0.10);
     outline: none;
-}
+}}
 
-.lock-error-label {
-    font-size: 14px;
-    font-family: "Inter", sans-serif;
-    color: #ff453a;
-    margin-top: 12px;
-}
+.lock-password-entry-error {{
+    border-color: {COLOR_ERROR};
+}}
 
-.lock-lockout-title {
-    font-size: 20px;
-    font-family: "Inter", sans-serif;
-    color: rgba(255, 255, 255, 0.80);
-    margin-top: 16px;
-}
+.lock-error-label {{
+    font-size: {FONT_CAPTION}px;
+    font-family: "{FONT_FAMILY}", sans-serif;
+    color: {COLOR_ERROR};
+    margin-top: {SPACE_2}px;
+}}
 
-.lock-countdown {
-    font-size: 16px;
-    font-family: "Inter", sans-serif;
-    color: rgba(255, 255, 255, 0.40);
-    margin-top: 8px;
-}
+.lock-countdown {{
+    font-size: {FONT_BODY}px;
+    font-family: "{FONT_FAMILY}", sans-serif;
+    color: {TEXT_DISABLED};
+    margin-top: {SPACE_2}px;
+}}
 
-.lock-lockout-icon {
-    font-size: 48px;
-}
+.lock-password-shake {{
+    animation: shake 0.3s ease-in-out;
+}}
 
-.lock-password-shake {
-    animation: shake 0.4s ease-in-out;
-}
-
-@keyframes shake {
-    0%, 100% { margin-left: 0; }
-    20% { margin-left: -12px; }
-    40% { margin-left: 10px; }
-    60% { margin-left: -8px; }
-    80% { margin-left: 6px; }
-}
+@keyframes shake {{
+    0%, 100% {{ margin-left: 0; }}
+    33% {{ margin-left: -10px; }}
+    66% {{ margin-left: 10px; }}
+}}
 """
 
 
@@ -170,9 +170,9 @@ if _GTK_AVAILABLE:
 
         States
         ------
-        "clock"      — large clock + date + hint. No input visible.
+        "clock"      — large clock + date. No input visible.
         "auth"       — password entry visible.
-        "error"      — wrong-password label shown.
+        "error"      — wrong-password shake + error border.
         "locked_out" — countdown to next attempt.
         """
 
@@ -227,96 +227,61 @@ if _GTK_AVAILABLE:
         # -------------------------------------------------------------------
 
         def _build(self):
-            """Build the full-screen dark layout with clock and hidden password."""
+            """Full-screen dark layout: clock 20% above center, hidden password."""
             root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             root.set_hexpand(True)
             root.set_vexpand(True)
             root.add_css_class("lock-bg")
             self.set_child(root)
 
-            # Content stack (clock / auth / locked_out)
-            self._stack = Gtk.Stack()
-            self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-            self._stack.set_transition_duration(200)
-            self._stack.set_halign(Gtk.Align.CENTER)
-            self._stack.set_valign(Gtk.Align.CENTER)
-            self._stack.set_vexpand(True)
-            root.append(self._stack)
+            # Use an overlay so we can position content 20% above center
+            overlay = Gtk.Overlay()
+            overlay.set_vexpand(True)
+            overlay.set_hexpand(True)
+            root.append(overlay)
 
-            self._build_clock_page()
-            self._build_auth_page()
-            self._build_locked_out_page()
+            # Spacer child fills the overlay
+            spacer = Gtk.Box()
+            spacer.set_vexpand(True)
+            overlay.set_child(spacer)
 
-            self._stack.set_visible_child_name("clock")
+            # Content box — centered horizontally, offset 30% from top
+            content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            content.set_halign(Gtk.Align.CENTER)
+            content.set_valign(Gtk.Align.START)
+            # 30% from top ≈ 20% above vertical center on a 1080p display
+            content.set_margin_top(300)
+            overlay.add_overlay(content)
 
-        def _build_clock_page(self):
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-            box.set_halign(Gtk.Align.CENTER)
-            box.set_valign(Gtk.Align.CENTER)
-
+            # Clock
             self._time_lbl = Gtk.Label(label="00:00")
             self._time_lbl.add_css_class("lock-time")
-            box.append(self._time_lbl)
+            content.append(self._time_lbl)
 
+            # Date
             self._date_lbl = Gtk.Label(label="")
             self._date_lbl.add_css_class("lock-date")
-            box.append(self._date_lbl)
+            content.append(self._date_lbl)
 
-            self._hint_lbl = Gtk.Label(label="Press Enter to unlock")
-            self._hint_lbl.add_css_class("lock-hint")
-            box.append(self._hint_lbl)
-
-            self._stack.add_named(box, "clock")
-
-        def _build_auth_page(self):
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-            box.set_halign(Gtk.Align.CENTER)
-            box.set_valign(Gtk.Align.CENTER)
-
-            self._auth_time_lbl = Gtk.Label(label="00:00")
-            self._auth_time_lbl.add_css_class("lock-time")
-            box.append(self._auth_time_lbl)
-
-            auth_date_lbl = Gtk.Label(label="")
-            auth_date_lbl.add_css_class("lock-date")
-            self._auth_date_lbl = auth_date_lbl
-            box.append(auth_date_lbl)
-
-            # Password entry
+            # Password entry — hidden until Enter
             self._pw_entry = Gtk.PasswordEntry()
-            self._pw_entry.set_placeholder_text("Password")
-            self._pw_entry.set_size_request(300, -1)
+            self._pw_entry.set_show_peek_icon(False)
             self._pw_entry.add_css_class("lock-password-entry")
-            self._pw_entry.set_show_peek_icon(True)
+            self._pw_entry.set_visible(False)
             self._pw_entry.connect("activate", self._on_entry_activate)
-            box.append(self._pw_entry)
+            content.append(self._pw_entry)
 
-            # Error message label (hidden by default)
+            # Error label — hidden by default
             self._error_lbl = Gtk.Label(label="")
             self._error_lbl.add_css_class("lock-error-label")
             self._error_lbl.set_visible(False)
-            box.append(self._error_lbl)
+            content.append(self._error_lbl)
 
-            self._stack.add_named(box, "auth")
-
-        def _build_locked_out_page(self):
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-            box.set_halign(Gtk.Align.CENTER)
-            box.set_valign(Gtk.Align.CENTER)
-
-            lock_icon = Gtk.Label(label="🔒")
-            lock_icon.add_css_class("lock-lockout-icon")
-            box.append(lock_icon)
-
-            too_many = Gtk.Label(label="Too many attempts")
-            too_many.add_css_class("lock-lockout-title")
-            box.append(too_many)
-
-            self._countdown_lbl = Gtk.Label(label="Try again in 0s")
+            # Countdown label for lockout — hidden by default
+            self._countdown_lbl = Gtk.Label(label="")
             self._countdown_lbl.add_css_class("lock-countdown")
-            box.append(self._countdown_lbl)
-
-            self._stack.add_named(box, "locked_out")
+            self._countdown_lbl.set_visible(False)
+            content.append(self._countdown_lbl)
 
         # -------------------------------------------------------------------
         # Clock timer
@@ -335,8 +300,6 @@ if _GTK_AVAILABLE:
             try:
                 self._time_lbl.set_label(time_str)
                 self._date_lbl.set_label(date_str)
-                self._auth_time_lbl.set_label(time_str)
-                self._auth_date_lbl.set_label(date_str)
             except Exception:
                 pass
 
@@ -358,13 +321,26 @@ if _GTK_AVAILABLE:
 
         def _set_state(self, new_state: str):
             self.state = new_state
-            self._stack.set_visible_child_name(new_state)
-            if new_state == "auth":
+
+            if new_state == "clock":
+                self._pw_entry.set_visible(False)
+                self._error_lbl.set_visible(False)
+                self._countdown_lbl.set_visible(False)
+
+            elif new_state == "auth":
                 self._error_lbl.set_visible(False)
                 self._error_lbl.set_label("")
+                self._countdown_lbl.set_visible(False)
                 self._pw_entry.set_text("")
                 self._pw_entry.remove_css_class("lock-password-shake")
+                self._pw_entry.remove_css_class("lock-password-entry-error")
+                self._pw_entry.set_visible(True)
                 GLib.idle_add(self._pw_entry.grab_focus)
+
+            elif new_state == "locked_out":
+                self._pw_entry.set_visible(False)
+                self._error_lbl.set_visible(False)
+                self._countdown_lbl.set_visible(True)
 
         # -------------------------------------------------------------------
         # Input handlers
@@ -425,7 +401,8 @@ if _GTK_AVAILABLE:
             self._error_lbl.set_visible(True)
             self._pw_entry.set_text("")
 
-            # Shake animation via CSS class toggle
+            # Error border + shake animation (3 shakes, 300ms)
+            self._pw_entry.add_css_class("lock-password-entry-error")
             self._pw_entry.remove_css_class("lock-password-shake")
             GLib.idle_add(
                 lambda: self._pw_entry.add_css_class("lock-password-shake")

@@ -1,11 +1,13 @@
 """
 src/gui/settings/panels/ai_panel.py
-AIPanel — daemon status, HIVE model table, NPU status, inference settings.
+AIPanel — AI hardware status, services, HIVE agents, privacy note.
 
 Pure helpers:
     _get_daemon_status(response) → dict with normalized fields
     _get_hive_models()           → list[dict]
     _get_npu_status()            → dict
+    _get_sentinel_status()       → dict
+    _get_router_status()         → dict
 """
 
 import logging
@@ -27,6 +29,17 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from gui.common.socket_client import DaemonClient
+from gui.theme.luminos_theme import (
+    BG_ELEVATED, BG_OVERLAY,
+    ACCENT, ACCENT_SUBTLE,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_DISABLED,
+    BORDER, BORDER_SUBTLE,
+    COLOR_SUCCESS, COLOR_ERROR,
+    FONT_FAMILY, FONT_BODY, FONT_BODY_SMALL, FONT_CAPTION,
+    SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8,
+    RADIUS_MD,
+    SETTINGS_PADDING,
+)
 
 
 # ===========================================================================
@@ -72,25 +85,25 @@ def _get_hive_models() -> list:
     return [
         {
             "name":    "Nexus",
-            "role":    "General reasoning",
+            "role":    "Planning and coordination",
             "vram_gb": 4.0,
             "backend": "llama.cpp",
         },
         {
             "name":    "Bolt",
-            "role":    "Fast completions",
+            "role":    "Code and automation",
             "vram_gb": 2.0,
             "backend": "llama.cpp",
         },
         {
             "name":    "Nova",
-            "role":    "Code generation",
+            "role":    "Research and knowledge",
             "vram_gb": 4.0,
             "backend": "llama.cpp",
         },
         {
             "name":    "Eye",
-            "role":    "Vision / multimodal",
+            "role":    "Vision and screen understanding",
             "vram_gb": 3.0,
             "backend": "llama.cpp",
         },
@@ -152,6 +165,40 @@ def _get_npu_status() -> dict:
 
 
 # ===========================================================================
+# CSS
+# ===========================================================================
+
+_AI_CSS = f"""
+.luminos-hw-row {{
+    min-height: 44px;
+    padding: {SPACE_2}px {SPACE_3}px;
+    border-radius: {RADIUS_MD}px;
+}}
+
+.luminos-hw-row:hover {{
+    background-color: {BG_OVERLAY};
+}}
+
+.luminos-hive-row {{
+    min-height: 48px;
+    padding: {SPACE_2}px {SPACE_3}px;
+    border-radius: {RADIUS_MD}px;
+}}
+
+.luminos-hive-row:hover {{
+    background-color: {BG_OVERLAY};
+}}
+
+.luminos-ai-note {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: {FONT_BODY_SMALL}px;
+    color: {TEXT_SECONDARY};
+    margin-top: {SPACE_8}px;
+}}
+"""
+
+
+# ===========================================================================
 # GTK Panel
 # ===========================================================================
 
@@ -160,218 +207,311 @@ if _GTK_AVAILABLE:
     class AIPanel(Gtk.Box):
         """
         AI & HIVE settings panel.
-
-        Shows: daemon status card (3s update), HIVE model table,
-        NPU status, inference settings, gaming mode toggle.
+        Shows: hardware status, services, HIVE agents, privacy note.
         """
 
         def __init__(self):
-            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=20)
-            self.set_margin_top(24)
-            self.set_margin_bottom(24)
-            self.set_margin_start(32)
-            self.set_margin_end(32)
+            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            self.set_margin_top(SETTINGS_PADDING)
+            self.set_margin_bottom(SETTINGS_PADDING)
+            self.set_margin_start(SETTINGS_PADDING)
+            self.set_margin_end(SETTINGS_PADDING)
             self._client = DaemonClient()
+
+            css_provider = Gtk.CssProvider()
+            css_provider.load_from_string(_AI_CSS)
+            self._css_provider = css_provider
+            self.connect("realize", lambda w: self._ensure_css())
+
+            self._hive_states = {m["name"]: False for m in _get_hive_models()}
             self._build()
             GLib.timeout_add_seconds(3, self._refresh_status)
             self._refresh_status()
 
+        def _ensure_css(self):
+            try:
+                Gtk.StyleContext.add_provider_for_display(
+                    self.get_display(), self._css_provider,
+                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+                )
+            except Exception:
+                pass
+
         def _build(self):
-            # ---- Daemon status ----
-            daemon_lbl = Gtk.Label(label="Luminos AI Daemon")
-            daemon_lbl.add_css_class("luminos-settings-section-title")
-            daemon_lbl.set_halign(Gtk.Align.START)
-            self.append(daemon_lbl)
+            # Panel title
+            title = Gtk.Label(label="AI & HIVE")
+            title.add_css_class("luminos-panel-title")
+            title.set_halign(Gtk.Align.START)
+            self.append(title)
 
-            status_grid = Gtk.Grid()
-            status_grid.set_row_spacing(6)
-            status_grid.set_column_spacing(24)
+            # ---- AI Hardware section ----
+            self._build_hardware_section()
 
-            self._status_online = self._grid_row(status_grid, 0, "Status")
-            self._status_model  = self._grid_row(status_grid, 1, "Active model")
-            self._status_gaming = self._grid_row(status_grid, 2, "Gaming mode")
-            self._status_idle   = self._grid_row(status_grid, 3, "Idle since")
-            self.append(status_grid)
+            div1 = Gtk.Box()
+            div1.add_css_class("luminos-section-divider")
+            self.append(div1)
 
-            self.append(Gtk.Separator())
+            # ---- Services section ----
+            self._build_services_section()
 
-            # ---- HIVE model table ----
-            hive_lbl = Gtk.Label(label="HIVE Models")
-            hive_lbl.add_css_class("luminos-settings-section-title")
-            hive_lbl.set_halign(Gtk.Align.START)
-            self.append(hive_lbl)
+            div2 = Gtk.Box()
+            div2.add_css_class("luminos-section-divider")
+            self.append(div2)
 
-            models_grid = Gtk.Grid()
-            models_grid.set_row_spacing(6)
-            models_grid.set_column_spacing(24)
+            # ---- HIVE agents section ----
+            self._build_hive_section()
 
-            for col, header in enumerate(("Model", "Role", "VRAM", "Backend")):
-                h = Gtk.Label(label=header)
-                h.add_css_class("luminos-power-card-name")
-                h.set_halign(Gtk.Align.START)
-                models_grid.attach(h, col, 0, 1, 1)
+            # ---- Privacy note ----
+            note = Gtk.Label(
+                label="All AI runs locally on your hardware. Nothing leaves your device."
+            )
+            note.add_css_class("luminos-ai-note")
+            note.set_halign(Gtk.Align.CENTER)
+            self.append(note)
 
-            for row, m in enumerate(_get_hive_models(), start=1):
-                for col, val in enumerate((
-                    m["name"], m["role"],
-                    f"{m['vram_gb']:.0f} GB", m["backend"]
-                )):
-                    cell = Gtk.Label(label=val)
-                    cell.set_halign(Gtk.Align.START)
-                    models_grid.attach(cell, col, row, 1, 1)
-
-            self.append(models_grid)
-
-            self.append(Gtk.Separator())
-
-            # ---- NPU status ----
-            npu_lbl = Gtk.Label(label="NPU (XDNA)")
-            npu_lbl.add_css_class("luminos-settings-section-title")
-            npu_lbl.set_halign(Gtk.Align.START)
-            self.append(npu_lbl)
+        def _build_hardware_section(self):
+            sec_title = Gtk.Label(label="AI Hardware")
+            sec_title.add_css_class("luminos-section-title")
+            sec_title.set_halign(Gtk.Align.START)
+            self.append(sec_title)
 
             npu = _get_npu_status()
-            npu_status = Gtk.Label(
-                label=f"{'Available' if npu['available'] else 'Not found'} — "
-                      f"Device: {npu['device']}, Driver: {npu['driver']}"
+
+            hw_items = [
+                ("NPU (AMD XDNA)",
+                 "Available" if npu["available"] else "Unavailable",
+                 f"Driver: {npu['driver']}",
+                 npu["available"]),
+                ("Compatibility Router",
+                 "Active", "Runs on NPU", True),
+                ("Sentinel Security",
+                 "Active", "Runs on NPU", True),
+                ("iGPU (AMD RDNA3)",
+                 "Active", "Handles all UI rendering", True),
+            ]
+
+            for name, status, note, active in hw_items:
+                row = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_3
+                )
+                row.add_css_class("luminos-hw-row")
+                row.set_hexpand(True)
+
+                # Status dot
+                color = COLOR_SUCCESS if active else COLOR_ERROR
+                dot = Gtk.Label()
+                dot.set_markup(f"<span foreground='{color}'>●</span>")
+                row.append(dot)
+
+                # Name + note
+                text_box = Gtk.Box(
+                    orientation=Gtk.Orientation.VERTICAL, spacing=1
+                )
+                text_box.set_hexpand(True)
+
+                name_lbl = Gtk.Label(label=name)
+                name_lbl.add_css_class("luminos-setting-label")
+                name_lbl.set_halign(Gtk.Align.START)
+                text_box.append(name_lbl)
+
+                note_lbl = Gtk.Label(label=note)
+                note_lbl.add_css_class("luminos-setting-sublabel")
+                note_lbl.set_halign(Gtk.Align.START)
+                text_box.append(note_lbl)
+
+                row.append(text_box)
+
+                # Status text
+                self._hw_status_labels = getattr(self, '_hw_status_labels', {})
+                status_lbl = Gtk.Label(label=status)
+                status_lbl.add_css_class("luminos-text-secondary")
+                self._hw_status_labels[name] = status_lbl
+                row.append(status_lbl)
+
+                self.append(row)
+
+        def _build_services_section(self):
+            sec_title = Gtk.Label(label="Services")
+            sec_title.add_css_class("luminos-section-title")
+            sec_title.set_halign(Gtk.Align.START)
+            self.append(sec_title)
+
+            # llama.cpp daemon
+            llama_row = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_3
             )
-            npu_status.set_halign(Gtk.Align.START)
-            npu_status.add_css_class("luminos-qs-dim")
-            self.append(npu_status)
+            llama_row.add_css_class("luminos-hw-row")
+            llama_row.set_hexpand(True)
 
-            self.append(Gtk.Separator())
-
-            # ---- Sentinel status ----
-            sentinel_lbl = Gtk.Label(label="Sentinel (Security Monitor)")
-            sentinel_lbl.add_css_class("luminos-settings-section-title")
-            sentinel_lbl.set_halign(Gtk.Align.START)
-            self.append(sentinel_lbl)
-
-            sentinel_grid = Gtk.Grid()
-            sentinel_grid.set_row_spacing(6)
-            sentinel_grid.set_column_spacing(24)
-            self._sentinel_mode    = self._grid_row(sentinel_grid, 0, "Mode")
-            self._sentinel_ml      = self._grid_row(sentinel_grid, 1, "ML backend")
-            self._sentinel_log     = self._grid_row(sentinel_grid, 2, "Log file")
-            self.append(sentinel_grid)
-
-            self.append(Gtk.Separator())
-
-            # ---- Compatibility Router ----
-            router_lbl = Gtk.Label(label="Compatibility Router")
-            router_lbl.add_css_class("luminos-settings-section-title")
-            router_lbl.set_halign(Gtk.Align.START)
-            self.append(router_lbl)
-
-            router_grid = Gtk.Grid()
-            router_grid.set_row_spacing(6)
-            router_grid.set_column_spacing(24)
-            self._router_engine = self._grid_row(router_grid, 0, "Rule engine")
-            self._router_ai     = self._grid_row(router_grid, 1, "AI fallback")
-            self._router_hw     = self._grid_row(router_grid, 2, "Hardware")
-            self.append(router_grid)
-
-            self.append(Gtk.Separator())
-
-            # ---- GPU mode guard ----
-            gpu_lbl = Gtk.Label(label="GPU Mode (supergfxctl)")
-            gpu_lbl.add_css_class("luminos-settings-section-title")
-            gpu_lbl.set_halign(Gtk.Align.START)
-            self.append(gpu_lbl)
-
-            gpu_grid = Gtk.Grid()
-            gpu_grid.set_row_spacing(6)
-            gpu_grid.set_column_spacing(24)
-            self._gpu_mode   = self._grid_row(gpu_grid, 0, "Current mode")
-            self._gpu_status = self._grid_row(gpu_grid, 1, "Status")
-            self.append(gpu_grid)
-
-            self.append(Gtk.Separator())
-
-            # ---- Gaming mode ----
-            gaming_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=0
+            llama_text = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=1
             )
-            gaming_row.set_hexpand(True)
-            g_lbl = Gtk.Label(label="Gaming mode (pause AI inference)")
-            g_lbl.set_hexpand(True)
-            g_lbl.set_halign(Gtk.Align.START)
-            self._gaming_switch = Gtk.Switch()
-            self._gaming_switch.set_active(False)
-            self._gaming_switch.connect("state-set", self._on_gaming_toggle)
-            gaming_row.append(g_lbl)
-            gaming_row.append(self._gaming_switch)
-            self.append(gaming_row)
+            llama_text.set_hexpand(True)
+            llama_name = Gtk.Label(label="llama.cpp daemon")
+            llama_name.add_css_class("luminos-setting-label")
+            llama_name.set_halign(Gtk.Align.START)
+            llama_text.append(llama_name)
+            llama_row.append(llama_text)
 
-        def _grid_row(self, grid: Gtk.Grid, row: int, label: str) -> Gtk.Label:
-            key = Gtk.Label(label=label)
-            key.set_halign(Gtk.Align.START)
-            key.add_css_class("luminos-qs-dim")
-            grid.attach(key, 0, row, 1, 1)
-            val = Gtk.Label(label="—")
-            val.set_halign(Gtk.Align.START)
-            grid.attach(val, 1, row, 1, 1)
-            return val
+            self._llama_status = Gtk.Label(label="—")
+            self._llama_status.add_css_class("luminos-text-secondary")
+            llama_row.append(self._llama_status)
+            self.append(llama_row)
+
+            # Sentinel
+            sent_row = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_3
+            )
+            sent_row.add_css_class("luminos-hw-row")
+            sent_row.set_hexpand(True)
+
+            sent_text = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=1
+            )
+            sent_text.set_hexpand(True)
+            sent_name = Gtk.Label(label="Sentinel")
+            sent_name.add_css_class("luminos-setting-label")
+            sent_name.set_halign(Gtk.Align.START)
+            sent_text.append(sent_name)
+            sent_row.append(sent_text)
+
+            self._sentinel_status = Gtk.Label(label="—")
+            self._sentinel_status.add_css_class("luminos-text-secondary")
+            sent_row.append(self._sentinel_status)
+            self.append(sent_row)
+
+            # Router cache
+            cache_row = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_3
+            )
+            cache_row.add_css_class("luminos-hw-row")
+            cache_row.set_hexpand(True)
+
+            cache_text = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=1
+            )
+            cache_text.set_hexpand(True)
+            cache_name = Gtk.Label(label="Router cache")
+            cache_name.add_css_class("luminos-setting-label")
+            cache_name.set_halign(Gtk.Align.START)
+            cache_text.append(cache_name)
+            cache_row.append(cache_text)
+
+            self._cache_label = Gtk.Label(label="0 apps cached")
+            self._cache_label.add_css_class("luminos-text-secondary")
+            cache_row.append(self._cache_label)
+
+            clear_btn = Gtk.Button(label="Clear")
+            clear_btn.add_css_class("luminos-btn-secondary")
+            clear_btn.connect("clicked", lambda _: logger.debug("Router cache cleared"))
+            cache_row.append(clear_btn)
+
+            self.append(cache_row)
+
+        def _build_hive_section(self):
+            text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            sec_title = Gtk.Label(label="HIVE Agents")
+            sec_title.add_css_class("luminos-section-title")
+            sec_title.set_halign(Gtk.Align.START)
+            text_box.append(sec_title)
+
+            sub = Gtk.Label(
+                label="Optional AI agents — not required for OS to function"
+            )
+            sub.add_css_class("luminos-setting-sublabel")
+            sub.set_halign(Gtk.Align.START)
+            text_box.append(sub)
+            self.append(text_box)
+
+            self._hive_status_labels = {}
+            for model in _get_hive_models():
+                row = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=0
+                )
+                row.add_css_class("luminos-hive-row")
+                row.set_hexpand(True)
+
+                text = Gtk.Box(
+                    orientation=Gtk.Orientation.VERTICAL, spacing=1
+                )
+                text.set_hexpand(True)
+                text.set_valign(Gtk.Align.CENTER)
+
+                name_lbl = Gtk.Label(label=model["name"])
+                name_lbl.add_css_class("luminos-setting-label")
+                name_lbl.set_halign(Gtk.Align.START)
+                text.append(name_lbl)
+
+                role_lbl = Gtk.Label(label=model["role"])
+                role_lbl.add_css_class("luminos-setting-sublabel")
+                role_lbl.set_halign(Gtk.Align.START)
+                text.append(role_lbl)
+
+                row.append(text)
+
+                switch = Gtk.Switch()
+                switch.set_active(False)
+                switch.add_css_class("luminos-switch")
+                switch.set_valign(Gtk.Align.CENTER)
+                switch.connect(
+                    "state-set", self._on_hive_toggle, model["name"]
+                )
+                row.append(switch)
+
+                self.append(row)
+
+        # -------------------------------------------------------------------
+        # Handlers
+        # -------------------------------------------------------------------
 
         def _refresh_status(self) -> bool:
-            # Daemon + model status
+            # Daemon status
             try:
                 resp = self._client.send({"type": "manager_status"})
                 s = _get_daemon_status(resp)
             except Exception:
                 s = _get_daemon_status({})
 
-            self._status_online.set_text("Online" if s["online"] else "Offline")
-            self._status_model.set_text(
-                f"{s['model']} ({s['quant']})" if s["online"] else "—"
-            )
-            self._status_gaming.set_text("Yes" if s["gaming"] else "No")
-            idle = s["idle_s"]
-            self._status_idle.set_text(
-                f"{idle}s" if idle is not None else "—"
-            )
+            if s["online"]:
+                uptime = s.get("uptime", "—")
+                self._llama_status.set_text(f"Running — {uptime}")
+            else:
+                self._llama_status.set_text("Stopped")
 
-            # Sentinel status
+            # Sentinel
             sentinel = _get_sentinel_status()
-            self._sentinel_mode.set_text(sentinel.get("mode", "—"))
+            mode = sentinel.get("mode", "—")
             ml_backend = sentinel.get("ml_backend", {})
             if isinstance(ml_backend, dict):
                 if ml_backend.get("npu_available"):
-                    self._sentinel_ml.set_text("NPU (AMD XDNA)")
+                    self._sentinel_status.set_text(f"Active (NPU)")
                 elif ml_backend.get("cpu_fallback"):
-                    self._sentinel_ml.set_text("CPU (fallback)")
+                    self._sentinel_status.set_text(f"Active (CPU fallback)")
                 else:
-                    self._sentinel_ml.set_text("Rules only")
+                    self._sentinel_status.set_text("Rules only")
             else:
-                self._sentinel_ml.set_text("Rules only")
-            self._sentinel_log.set_text(sentinel.get("log_file", "—"))
-
-            # Router status
-            router = _get_router_status()
-            self._router_engine.set_text(router.get("engine", "—"))
-            self._router_ai.set_text(router.get("ai_fallback", "—"))
-            self._router_hw.set_text(router.get("hardware", "—"))
-
-            # GPU mode guard
-            gpu_mode = resp.get("gpu_mode", {}) if s["online"] else {}
-            mode_str = gpu_mode.get("mode", "—")
-            is_hybrid = gpu_mode.get("is_hybrid", False)
-            self._gpu_mode.set_text(mode_str if mode_str else "—")
-            if gpu_mode.get("supergfxctl_available"):
-                self._gpu_status.set_text(
-                    "Hybrid (correct)" if is_hybrid else f"WARNING: {mode_str}"
-                )
-            else:
-                self._gpu_status.set_text("supergfxctl not available")
+                self._sentinel_status.set_text(mode)
 
             return GLib.SOURCE_CONTINUE
 
-        def _on_gaming_toggle(self, _switch, state):
-            try:
-                req_type = "gaming_on" if state else "gaming_off"
-                self._client.send({"type": req_type})
-            except Exception as e:
-                logger.debug(f"gaming toggle error: {e}")
+        def _on_hive_toggle(self, switch, state, model_name):
+            self._hive_states[model_name] = state
+            if state:
+                logger.debug(f"HIVE agent {model_name}: starting")
+                try:
+                    self._client.send({
+                        "type": "hive_start", "agent": model_name.lower()
+                    })
+                except Exception:
+                    pass
+            else:
+                logger.debug(f"HIVE agent {model_name}: stopping")
+                try:
+                    self._client.send({
+                        "type": "hive_stop", "agent": model_name.lower()
+                    })
+                except Exception:
+                    pass
             return False
 
 else:

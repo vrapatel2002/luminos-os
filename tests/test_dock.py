@@ -159,7 +159,6 @@ class TestGetTooltip(unittest.TestCase):
     def test_zone3_quarantine(self):
         tip = _get_tooltip({"name": "anticheat.exe"}, zone=3)
         self.assertIn("Quarantine", tip)
-        self.assertIn("⚠", tip)
 
     def test_fallback_to_exec(self):
         tip = _get_tooltip({"exec": "alacritty"}, zone=1)

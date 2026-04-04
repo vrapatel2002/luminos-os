@@ -50,22 +50,22 @@ from gui.common.subprocess_helpers import (
 class TestFormatClock(unittest.TestCase):
 
     def test_24h_zero_padding(self):
-        self.assertEqual(format_clock(9, 5, 3), "09:05:03")
+        self.assertEqual(format_clock(9, 5), "09:05")
 
     def test_24h_noon(self):
-        self.assertEqual(format_clock(12, 0, 0), "12:00:00")
+        self.assertEqual(format_clock(12, 0), "12:00")
 
     def test_24h_midnight(self):
-        self.assertEqual(format_clock(0, 0, 0), "00:00:00")
+        self.assertEqual(format_clock(0, 0), "00:00")
 
     def test_12h_am(self):
-        self.assertEqual(format_clock(9, 5, 3, use_24h=False), "9:05:03 AM")
+        self.assertEqual(format_clock(9, 5, use_24h=False), "9:05 AM")
 
     def test_12h_pm(self):
-        self.assertEqual(format_clock(15, 30, 0, use_24h=False), "3:30:00 PM")
+        self.assertEqual(format_clock(15, 30, use_24h=False), "3:30 PM")
 
     def test_12h_midnight(self):
-        self.assertEqual(format_clock(0, 0, 0, use_24h=False), "12:00:00 AM")
+        self.assertEqual(format_clock(0, 0, use_24h=False), "12:00 AM")
 
 
 class TestFormatDate(unittest.TestCase):

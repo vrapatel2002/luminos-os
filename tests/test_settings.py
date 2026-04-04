@@ -172,15 +172,15 @@ class TestZonesPanelHelpers(unittest.TestCase):
     def test_zone_color_zone1_green(self):
         color = _get_zone_color(1)
         self.assertTrue(color.startswith("#"))
-        self.assertEqual(color.lower(), "#26a269")
+        self.assertEqual(color.lower(), "#00c896")
 
-    def test_zone_color_zone2_yellow(self):
+    def test_zone_color_zone2_accent(self):
         color = _get_zone_color(2)
-        self.assertEqual(color.lower(), "#f5c211")
+        self.assertEqual(color.lower(), "#0080ff")
 
     def test_zone_color_zone3_red(self):
         color = _get_zone_color(3)
-        self.assertEqual(color.lower(), "#e01b24")
+        self.assertEqual(color.lower(), "#ff4455")
 
     def test_zone_color_unknown_grey(self):
         color = _get_zone_color(99)
