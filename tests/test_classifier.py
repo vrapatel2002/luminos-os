@@ -119,9 +119,10 @@ class TestZoneRules(unittest.TestCase):
         }
         result = classify(features)
         self.assertEqual(result['zone'], 3)
-        self.assertEqual(result['confidence'], 0.95)
+        self.assertEqual(result['layer'], 'firecracker')
+        self.assertEqual(result['confidence'], 0.92)
 
-    def test_pe_anticheat_is_zone3(self):
+    def test_pe_anticheat_is_zone3_kvm(self):
         features = {
             'is_elf': False, 'is_pe': True,
             'has_win32_imports': False, 'has_kernel_driver_imports': False,
@@ -129,9 +130,10 @@ class TestZoneRules(unittest.TestCase):
         }
         result = classify(features)
         self.assertEqual(result['zone'], 3)
-        self.assertEqual(result['confidence'], 0.90)
+        self.assertEqual(result['layer'], 'kvm')
+        self.assertEqual(result['confidence'], 0.95)
 
-    def test_pe_win32_is_zone2(self):
+    def test_pe_win32_is_zone2_proton(self):
         features = {
             'is_elf': False, 'is_pe': True,
             'has_win32_imports': True, 'has_kernel_driver_imports': False,
@@ -139,7 +141,8 @@ class TestZoneRules(unittest.TestCase):
         }
         result = classify(features)
         self.assertEqual(result['zone'], 2)
-        self.assertEqual(result['confidence'], 0.85)
+        self.assertEqual(result['layer'], 'proton')
+        self.assertEqual(result['confidence'], 0.80)
 
     def test_pe_no_imports_is_zone2(self):
         features = {
@@ -149,7 +152,8 @@ class TestZoneRules(unittest.TestCase):
         }
         result = classify(features)
         self.assertEqual(result['zone'], 2)
-        self.assertEqual(result['confidence'], 0.70)
+        self.assertEqual(result['layer'], 'proton')
+        self.assertEqual(result['confidence'], 0.60)
 
     def test_unknown_is_zone1_fallback(self):
         features = {
@@ -159,10 +163,10 @@ class TestZoneRules(unittest.TestCase):
         }
         result = classify(features)
         self.assertEqual(result['zone'], 1)
-        self.assertEqual(result['confidence'], 0.50)
+        self.assertEqual(result['confidence'], 0.40)
 
-    def test_kernel_driver_takes_priority_over_anticheat(self):
-        """Kernel driver rule (Zone 3, 0.95) must fire before anticheat rule."""
+    def test_anticheat_takes_priority_over_kernel_driver(self):
+        """Anticheat rule fires before kernel driver — both go to zone 3."""
         features = {
             'is_elf': False, 'is_pe': True,
             'has_win32_imports': True, 'has_kernel_driver_imports': True,
@@ -170,7 +174,29 @@ class TestZoneRules(unittest.TestCase):
         }
         result = classify(features)
         self.assertEqual(result['zone'], 3)
+        self.assertEqual(result['layer'], 'kvm')
         self.assertEqual(result['confidence'], 0.95)
+
+    def test_dx12_is_proton(self):
+        features = {
+            'is_elf': False, 'is_pe': True,
+            'has_win32_imports': True, 'has_kernel_driver_imports': False,
+            'has_anticheat_strings': False, 'has_dx12': True,
+        }
+        result = classify(features)
+        self.assertEqual(result['layer'], 'proton')
+        self.assertEqual(result['confidence'], 0.90)
+
+    def test_dotnet_only_is_wine(self):
+        features = {
+            'is_elf': False, 'is_pe': True,
+            'has_win32_imports': True, 'has_kernel_driver_imports': False,
+            'has_anticheat_strings': False, 'has_dotnet': True,
+            'has_dx9': False, 'has_dx10': False, 'has_dx11': False, 'has_dx12': False,
+        }
+        result = classify(features)
+        self.assertEqual(result['layer'], 'wine')
+        self.assertEqual(result['confidence'], 0.85)
 
 
 class TestClassifyBinaryEndToEnd(unittest.TestCase):
@@ -212,9 +238,8 @@ class TestClassifyBinaryEndToEnd(unittest.TestCase):
         path = _make_binary(b'\x7fELF' + b'\x00' * 64)
         try:
             result = classify_binary(path)
-            self.assertIn('zone', result)
-            self.assertIn('confidence', result)
-            self.assertIn('reason', result)
+            for key in ('zone', 'layer', 'confidence', 'reason'):
+                self.assertIn(key, result)
         finally:
             os.unlink(path)
 

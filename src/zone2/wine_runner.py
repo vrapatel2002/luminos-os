@@ -34,11 +34,19 @@ _WINE_CANDIDATES = [
     "/usr/local/bin/wine",
 ]
 
-# Glob patterns for Steam Proton installations
+# Glob patterns for Steam Proton and Proton-GE (AUR: proton-ge-custom)
 _PROTON_GLOBS = [
     os.path.expanduser("~/.steam/steam/steamapps/common/Proton*/proton"),
     os.path.expanduser("~/.steam/root/steamapps/common/Proton*/proton"),
     "/usr/share/steam/steamapps/common/Proton*/proton",
+    os.path.expanduser("~/.steam/steam/compatibilitytools.d/GE-Proton*/proton"),
+    os.path.expanduser("~/.local/share/Steam/compatibilitytools.d/GE-Proton*/proton"),
+]
+
+# Lutris binary search paths
+_LUTRIS_CANDIDATES = [
+    "/usr/bin/lutris",
+    "/usr/local/bin/lutris",
 ]
 
 
@@ -72,6 +80,19 @@ def _find_proton() -> tuple[str, str] | tuple[None, None]:
     # Derive a version label from directory name, e.g. "Proton 8.0"
     parent = os.path.basename(os.path.dirname(proton_path))
     return proton_path, parent
+
+
+def detect_lutris() -> dict:
+    """
+    Probe for Lutris in standard locations.
+
+    Returns:
+        {"available": bool, "path": str | None}
+    """
+    for candidate in _LUTRIS_CANDIDATES:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return {"available": True, "path": candidate}
+    return {"available": False, "path": None}
 
 
 def detect_wine() -> dict:
@@ -169,9 +190,13 @@ def build_wine_command(exe_path: str, wine_info: dict, env_overrides: dict = {})
     else:
         # Legacy fallback — same defaults as before Phase 8.12
         env = dict(os.environ)
-        env.setdefault("WINEPREFIX", os.path.expanduser("~/.luminos/prefixes/default"))
+        prefix = os.path.expanduser("~/.luminos/prefixes/default")
+        env.setdefault("WINEPREFIX", prefix)
         env["WINEDEBUG"] = "-all"   # suppress Wine debug noise
         env["DXVK_HUD"]  = "0"     # no DXVK overlay by default
+        # Sandbox: redirect HOME so apps cannot access real home directory
+        env["HOME"] = prefix
+        env["WINEDLLOVERRIDES"] = "winemenubuilder.exe=d"
 
     env.update(env_overrides)
 
@@ -223,3 +248,48 @@ def launch_windows_app(exe_path: str, env_overrides: dict = {}) -> dict:
             "success": False,
             "error":   f"OS error launching process: {e}",
         }
+
+
+def launch_with_lutris(exe_path: str) -> dict:
+    """
+    Launch a Windows exe via Lutris.
+
+    Lutris manages its own Wine prefixes and runner selection. Used as a
+    fallback when direct Wine/Proton launch is not ideal (e.g. games
+    requiring specific Lutris runner configs).
+
+    Returns:
+        On success: {"success": True, "pid": int, "runner": "lutris", "cmd": list}
+        On failure: {"success": False, "error": str}
+    """
+    lutris_info = detect_lutris()
+    if not lutris_info["available"]:
+        return {
+            "success":      False,
+            "error":        "Lutris not installed",
+            "install_hint": "sudo pacman -S lutris",
+        }
+
+    cmd = [lutris_info["path"], "-e", exe_path]
+    env = dict(os.environ)
+    # Sandbox HOME for Lutris-launched apps
+    sandbox_home = os.path.expanduser("~/.luminos/prefixes/lutris")
+    os.makedirs(sandbox_home, exist_ok=True)
+    env["HOME"] = sandbox_home
+
+    try:
+        proc = subprocess.Popen(
+            cmd, env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return {
+            "success": True,
+            "pid":     proc.pid,
+            "runner":  "lutris",
+            "cmd":     cmd,
+        }
+    except FileNotFoundError:
+        return {"success": False, "error": f"Executable not found: {exe_path}"}
+    except OSError as e:
+        return {"success": False, "error": f"OS error: {e}"}

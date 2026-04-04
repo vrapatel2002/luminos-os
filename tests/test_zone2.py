@@ -142,12 +142,12 @@ class TestLaunchWindowsApp(unittest.TestCase):
         self.assertIn("error", result)
         self.assertIn("install_hint", result)
 
-    def test_install_hint_mentions_wine64(self):
+    def test_install_hint_mentions_pacman(self):
         info = detect_wine()
         if info["available"]:
             self.skipTest("Wine is installed")
         result = launch_windows_app("/fake/app.exe")
-        self.assertIn("wine64", result["install_hint"])
+        self.assertIn("pacman", result["install_hint"])
 
     def test_success_result_has_required_keys(self):
         """Validate shape of a success response via mock — just check keys exist."""

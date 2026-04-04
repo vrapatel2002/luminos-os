@@ -214,33 +214,43 @@ def get_best_runner(exe_path: str) -> dict:
     has_d3d10 = b"d3d10" in lower
     has_d3d9  = b"d3d9"  in lower
 
+    # Check for .NET-only apps (no DirectX) — plain Wine is best
+    has_dotnet = b"mscoree.dll" in lower or b"mscorlib" in lower
+
     if has_d3d12:
         return {
-            "runner": "wine64",
+            "runner": "proton",
             "dxvk":   False,
             "vkd3d":  True,
-            "reason": "DX12 imports detected — VKD3D-Proton recommended",
+            "reason": "DX12 imports detected — Proton + VKD3D-Proton recommended",
         }
     elif has_d3d11 or has_d3d10:
         return {
-            "runner": "wine64",
+            "runner": "proton",
             "dxvk":   True,
             "vkd3d":  False,
-            "reason": "DX11/DX10 imports detected — DXVK recommended",
+            "reason": "DX11/DX10 imports detected — Proton + DXVK recommended",
         }
     elif has_d3d9:
         return {
             "runner": "wine64",
             "dxvk":   True,
             "vkd3d":  False,
-            "reason": "DX9 imports detected — DXVK recommended",
+            "reason": "DX9 imports detected — Wine + DXVK recommended",
         }
-    else:
+    elif has_dotnet:
         return {
             "runner": "wine64",
             "dxvk":   False,
             "vkd3d":  False,
-            "reason": "No DirectX 9/10/11/12 imports detected — plain Wine recommended",
+            "reason": ".NET application — plain Wine recommended",
+        }
+    else:
+        return {
+            "runner": "proton",
+            "dxvk":   False,
+            "vkd3d":  False,
+            "reason": "No special APIs detected — Proton (default)",
         }
 
 
@@ -268,6 +278,12 @@ def build_compat_env(prefix_path: str, runner_config: dict) -> dict:
     # Performance: esync/fsync reduce kernel overhead for synchronization objects
     env["WINEESYNC"] = "1"
     env["WINEFSYNC"] = "1"
+
+    # Sandbox: redirect HOME so Wine apps cannot access real home directory.
+    # The prefix itself becomes the app's home. Z: drive mapping is disabled
+    # via WINEDLLOVERRIDES to prevent Wine's default / mount.
+    env["HOME"] = prefix_path
+    env["WINEDLLOVERRIDES"] = "winemenubuilder.exe=d"
 
     if runner_config.get("dxvk"):
         env["DXVK_STATE_CACHE_PATH"] = prefix_path

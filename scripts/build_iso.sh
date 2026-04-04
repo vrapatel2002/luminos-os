@@ -250,7 +250,7 @@ SESSIONSCRIPT
     "luminos-store:src/gui/store/store_app.py" \
     "luminos-settings:src/gui/settings/settings_app.py" \
     "luminos-firstrun:src/gui/firstrun/firstrun_app.py" \
-    "luminos-run-windows:src/zone2/wine_runner.py" \
+    "luminos-run-windows:src/classifier/launch.py" \
     "luminos-greeter:src/gui/greeter/greeter_app.py"; do
     local name="${pair%%:*}"
     local script="${pair#*:}"

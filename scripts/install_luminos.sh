@@ -65,7 +65,7 @@ create_launcher "luminos-dock" "src/gui/dock/dock_app.py"
 create_launcher "luminos-store" "src/gui/store/store_app.py"
 create_launcher "luminos-settings" "src/gui/settings/settings_app.py"
 create_launcher "luminos-firstrun" "src/gui/firstrun/firstrun_app.py"
-create_launcher "luminos-run-windows" "src/zone2/wine_runner.py"
+create_launcher "luminos-run-windows" "src/classifier/launch.py"
 
 # 8. Register MIME handler
 cp $LUMINOS_SRC/config/luminos-windows.desktop \
