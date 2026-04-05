@@ -35,6 +35,35 @@ if [ ! -f "${LUMINOS_FLAG}" ]; then
 fi
 
 # ----------------------------------------------------------------
+# 1b. GPU guard — assert Hybrid mode before anything else
+# ----------------------------------------------------------------
+log "Checking GPU mode..."
+python3 -c "
+import sys; sys.path.insert(0, '${SRC_DIR}')
+from hardware.gpu_guard import assert_hybrid_mode
+result = assert_hybrid_mode()
+if result['is_hybrid']:
+    print('[gpu_guard] Hybrid mode verified')
+elif result['available']:
+    print('[gpu_guard] WARNING: GPU mode is not Hybrid')
+else:
+    print('[gpu_guard] supergfxctl not available')
+" 2>&1 | while read -r line; do log "$line"; done
+
+# ----------------------------------------------------------------
+# 1c. Apply default fan curve and battery charge limit
+# ----------------------------------------------------------------
+log "Applying hardware defaults..."
+python3 -c "
+import sys; sys.path.insert(0, '${SRC_DIR}')
+from hardware.asus_controller import AsusController, DEFAULT_FAN_CURVE
+asus = AsusController()
+asus.set_fan_curve(DEFAULT_FAN_CURVE)
+asus.set_battery_limit(80)
+print('Hardware defaults applied')
+" 2>&1 | while read -r line; do log "$line"; done || true
+
+# ----------------------------------------------------------------
 # 2. Start AI daemon if not running
 # ----------------------------------------------------------------
 if [ ! -S "${LUMINOS_SOCK}" ]; then

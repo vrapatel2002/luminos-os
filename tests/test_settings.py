@@ -51,11 +51,11 @@ from gui.settings.panels.about_panel import (
 
 class TestCategoriesList(unittest.TestCase):
 
-    def test_has_11_categories(self):
-        self.assertEqual(len(CATEGORIES), 11)
+    def test_has_12_categories(self):
+        self.assertEqual(len(CATEGORIES), 12)
 
     def test_required_ids_present(self):
-        for required in ("appearance", "display", "power", "zones", "ai", "about"):
+        for required in ("appearance", "keyboard", "display", "power", "zones", "ai", "about"):
             self.assertIn(required, CATEGORY_IDS)
 
     def test_each_category_has_required_keys(self):

@@ -43,10 +43,12 @@ except (OSError, PermissionError):
 _ml_available = False
 try:
     from .npu_classifier import classify_behavior, get_backend_status
+    from npu import NPUUnavailableError
     _ml_available = True
 except ImportError:
     classify_behavior = None
     get_backend_status = None
+    NPUUnavailableError = None
 
 
 def assess_process(pid: int) -> dict:
@@ -82,7 +84,7 @@ def assess_process(pid: int) -> dict:
     # Stage 1: Rule-based classification
     result = assess(signals)
 
-    # Stage 2: ML classification (NPU with CPU fallback)
+    # Stage 2: ML classification on NPU (no CPU fallback)
     if _ml_available and classify_behavior is not None:
         try:
             ml_result = classify_behavior(signals)
@@ -99,8 +101,14 @@ def assess_process(pid: int) -> dict:
                     result["status"] = "dangerous"
                     result["confidence"] = max(result["confidence"], ml_result["confidence"])
                     result["flags"].append("ml_upgrade")
-        except Exception:
-            pass
+        except Exception as e:
+            # NPUUnavailableError: log and skip ML — sentinel continues with rules only
+            if NPUUnavailableError and isinstance(e, NPUUnavailableError):
+                _sentinel_logger.info(
+                    "NPU unavailable, sentinel ML paused — using rules only"
+                )
+            else:
+                pass
 
     result["pid"] = pid
     result["process_name"] = signals.get("process_name", "unknown")

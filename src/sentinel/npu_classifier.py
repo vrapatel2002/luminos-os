@@ -1,145 +1,117 @@
 """
 sentinel/npu_classifier.py
-ML-based process threat classifier targeting AMD XDNA NPU with CPU fallback.
+ML-based process threat classifier via the NPU abstraction layer.
 
-Architecture:
-  - Primary: ONNX model on AMD NPU via onnxruntime (/dev/accel/accel0 + amdxdna)
-  - Fallback: Same ONNX model on CPU via onnxruntime
-  - Last resort: Skip ML classification, return None (rule engine handles it)
+All NPU access goes through npu.NPUInterface — no direct ONNX or driver calls.
+If NPU is unavailable, raises NPUUnavailableError. Sentinel waits and retries.
+No CPU fallback — the NPU is the only backend.
 
 Model: SmolLM2-360M or DistilBERT (deployed at /opt/luminos/models/sentinel.onnx)
 The model classifies process behavior vectors into: safe, suspicious, dangerous.
-
-Pure inference — no training, no fine-tuning at runtime.
 """
 
 import logging
 import os
+import sys
 
 logger = logging.getLogger("luminos-ai.sentinel.npu")
 
+_SRC = os.path.join(os.path.dirname(__file__), "..")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
+from npu import NPUInterface, NPUUnavailableError, NPUModelNotLoadedError
+
 _MODEL_PATH = "/opt/luminos/models/sentinel.onnx"
-_NPU_AVAILABLE = False
-_CPU_AVAILABLE = False
-_session = None
+
+# Module-level NPU interface — shared across all calls
+_npu = NPUInterface()
+_model_loaded = False
 
 
-def _detect_npu() -> bool:
-    """Check if AMD XDNA NPU is available."""
-    if not os.path.exists("/dev/accel/accel0"):
-        return False
-    try:
-        with open("/proc/modules", "r") as f:
-            modules = f.read()
-        return "amdxdna" in modules
-    except OSError:
-        return False
-
-
-def _init_session():
-    """Initialize ONNX runtime session — NPU preferred, CPU fallback."""
-    global _session, _NPU_AVAILABLE, _CPU_AVAILABLE
-
-    if _session is not None:
-        return _session
-
-    if not os.path.isfile(_MODEL_PATH):
-        logger.debug(f"Sentinel model not found at {_MODEL_PATH} — ML classification disabled")
-        return None
-
-    try:
-        import onnxruntime as ort
-    except ImportError:
-        logger.debug("onnxruntime not installed — ML classification disabled")
-        return None
-
-    # Try NPU first
-    if _detect_npu():
-        try:
-            _session = ort.InferenceSession(
-                _MODEL_PATH,
-                providers=["VitisAIExecutionProvider"],
-            )
-            _NPU_AVAILABLE = True
-            logger.info("Sentinel ML: running on AMD NPU")
-            return _session
-        except Exception as e:
-            logger.debug(f"NPU init failed ({e}) — falling back to CPU")
-
-    # CPU fallback
-    try:
-        _session = ort.InferenceSession(
-            _MODEL_PATH,
-            providers=["CPUExecutionProvider"],
-        )
-        _CPU_AVAILABLE = True
-        logger.info("Sentinel ML: running on CPU (NPU not available)")
-        return _session
-    except Exception as e:
-        logger.debug(f"CPU ONNX init failed: {e}")
-        return None
+def _ensure_model():
+    """Load sentinel model onto NPU if not already loaded."""
+    global _model_loaded
+    if _model_loaded:
+        return
+    if _npu.is_available() and os.path.isfile(_MODEL_PATH):
+        _model_loaded = _npu.load_model(_MODEL_PATH, "sentinel")
+        if _model_loaded:
+            logger.info(f"Sentinel ML model loaded on NPU: {_MODEL_PATH}")
+        else:
+            logger.warning("Sentinel ML model failed to load on NPU")
+    elif not os.path.isfile(_MODEL_PATH):
+        logger.debug(f"Sentinel model not found at {_MODEL_PATH}")
 
 
 def classify_behavior(signals: dict) -> dict | None:
     """
-    Run ML classification on process behavioral signals.
+    Run ML classification on process behavioral signals via NPU.
 
     Args:
         signals: Dict from process_monitor.get_process_signals()
 
     Returns:
-        {"status": str, "confidence": float, "ml_backend": str} or None if unavailable.
+        {"status": str, "confidence": float, "ml_backend": str}
+
+    Raises:
+        NPUUnavailableError: if NPU is not available (caller must wait)
     """
-    session = _init_session()
-    if session is None:
+    _ensure_model()
+
+    if not _npu.is_available():
+        raise NPUUnavailableError("NPU unavailable — sentinel ML paused")
+
+    if not _model_loaded:
         return None
 
-    # Build feature vector from signals
-    import numpy as np
-
-    features = np.array([[
-        signals.get("cpu_percent", 0.0),
-        signals.get("memory_mb", 0.0),
-        signals.get("open_files_count", 0),
-        signals.get("network_connections", 0),
-        signals.get("child_process_count", 0),
-        1.0 if signals.get("is_elevated", False) else 0.0,
-        1.0 if signals.get("cmdline_has_suspicious", False) else 0.0,
-    ]], dtype=np.float32)
+    # Build data dict for NPU interface
+    data = {
+        "syscalls": [],  # populated by process_monitor in real pipeline
+        "process": signals.get("process_name", "unknown"),
+        "pid": signals.get("pid", 0),
+        "is_elevated": signals.get("is_elevated", False),
+        "cpu_percent": signals.get("cpu_percent", 0.0),
+        "memory_mb": signals.get("memory_mb", 0.0),
+        "open_files_count": signals.get("open_files_count", 0),
+        "network_connections": signals.get("network_connections", 0),
+        "child_process_count": signals.get("child_process_count", 0),
+    }
 
     try:
-        input_name = session.get_inputs()[0].name
-        outputs = session.run(None, {input_name: features})
+        result = _npu.run_sentinel(data)
 
-        # Model output: [batch, 3] logits for [safe, suspicious, dangerous]
-        logits = outputs[0][0]
-        probs = _softmax(logits)
-        labels = ["safe", "suspicious", "dangerous"]
-        idx = int(probs.argmax())
-
-        backend = "npu" if _NPU_AVAILABLE else "cpu"
-        return {
-            "status": labels[idx],
-            "confidence": round(float(probs[idx]), 3),
-            "ml_backend": backend,
+        # Map NPU output to sentinel's expected format
+        classification = result.get("classification", "normal")
+        status_map = {
+            "normal": "safe",
+            "suspicious": "suspicious",
+            "block": "dangerous",
         }
-    except Exception as e:
-        logger.debug(f"ML inference failed: {e}")
+
+        return {
+            "status": status_map.get(classification, "safe"),
+            "confidence": result.get("confidence", 0.5),
+            "ml_backend": "npu",
+        }
+    except NPUUnavailableError:
+        raise  # propagate — caller must wait
+    except NPUModelNotLoadedError:
+        logger.debug("Sentinel model not loaded on NPU")
         return None
-
-
-def _softmax(x):
-    """Stable softmax."""
-    import numpy as np
-    e = np.exp(x - np.max(x))
-    return e / e.sum()
+    except Exception as e:
+        logger.debug(f"Sentinel NPU inference failed: {e}")
+        return None
 
 
 def get_backend_status() -> dict:
     """Return current ML backend status for the settings panel."""
+    status = _npu.status()
     return {
-        "npu_available": _NPU_AVAILABLE or _detect_npu(),
-        "cpu_fallback": _CPU_AVAILABLE,
-        "model_loaded": _session is not None,
+        "npu_available": status["available"],
+        "cpu_fallback": False,  # no CPU fallback — NPU only
+        "model_loaded": _model_loaded,
         "model_path": _MODEL_PATH,
+        "driver": status["driver"],
+        "current_task": status["current_task"],
     }

@@ -51,10 +51,12 @@ CATEGORIES: list[dict] = [
     # --- General ---
     {"id": "appearance",    "label": "Appearance",    "icon": "preferences-desktop-theme",          "group": "General"},
     {"id": "wallpaper",     "label": "Wallpaper",     "icon": "preferences-desktop-wallpaper",      "group": "General"},
-    {"id": "display",       "label": "Display",       "icon": "video-display",                      "group": "General"},
     {"id": "sound",         "label": "Sound",         "icon": "audio-card",                         "group": "General"},
     {"id": "network",       "label": "Network",       "icon": "network-wireless",                   "group": "General"},
     {"id": "notifications", "label": "Notifications", "icon": "preferences-system-notifications",   "group": "General"},
+    # --- Hardware ---
+    {"id": "keyboard",      "label": "Keyboard",      "icon": "input-keyboard",                     "group": "Hardware"},
+    {"id": "display",       "label": "Display",       "icon": "video-display",                      "group": "Hardware"},
     # --- System ---
     {"id": "power",         "label": "Power",         "icon": "battery",                            "group": "System"},
     {"id": "privacy",       "label": "Privacy",       "icon": "security-high",                      "group": "System"},
@@ -237,6 +239,7 @@ if _GTK_AVAILABLE:
     from gui.settings.panels.network_panel      import NetworkPanel
     from gui.settings.panels.notifications_panel import NotificationsPanel
     from gui.settings.panels.privacy_panel      import PrivacyPanel
+    from gui.settings.panels.keyboard_panel     import KeyboardPanel
 
     _WIN_W = 900
     _WIN_H = 600
@@ -292,10 +295,11 @@ if _GTK_AVAILABLE:
             self._panels = {
                 "appearance":    AppearancePanel(),
                 "wallpaper":     WallpaperPanel(),
-                "display":       DisplayPanel(),
                 "sound":         SoundPanel(),
                 "network":       NetworkPanel(),
                 "notifications": NotificationsPanel(),
+                "keyboard":      KeyboardPanel(),
+                "display":       DisplayPanel(),
                 "power":         PowerPanel(),
                 "privacy":       PrivacyPanel(),
                 "zones":         ZonesPanel(),
