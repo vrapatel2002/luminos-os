@@ -1,14 +1,15 @@
 """
 tests/test_quick_settings.py
-Phase 8.4 — Quick Settings Panel test suite.
+Quick Settings Panel test suite.
 
 Covers:
   - brightness_ctrl: get/set/up/down              (7 tests)
   - wifi_panel: get_networks, active, disconnect   (3 tests)
   - bt_panel: get_devices, set_power, toggle       (3 tests)
-  - quick_panel pure logic: greeting, power, ai    (7 tests)
+  - quick_panel pure logic: greeting, power, ai,
+    username, battery status, power mode text      (12 tests)
 
-Total: 20 tests
+Total: 25 tests
 All run headless — no GTK display required.
 """
 
@@ -35,6 +36,7 @@ from gui.quick_settings.bt_panel import (
 )
 from gui.quick_settings.quick_panel import (
     get_greeting, get_power_mode_label, build_ai_summary,
+    get_username, get_battery_status_text, get_power_mode_text,
 )
 
 
@@ -291,6 +293,49 @@ class TestBuildAiSummary(unittest.TestCase):
     def test_no_model_shows_none(self):
         summary = build_ai_summary({"active_model": None})
         self.assertIn("none", summary.lower())
+
+
+class TestGetUsername(unittest.TestCase):
+
+    def test_returns_string(self):
+        result = get_username()
+        self.assertIsInstance(result, str)
+        self.assertGreater(len(result), 0)
+
+
+class TestGetBatteryStatusText(unittest.TestCase):
+
+    @patch("hardware.battery_monitor.read_battery_level", return_value=75)
+    @patch("hardware.battery_monitor.read_battery_status", return_value="Discharging")
+    def test_discharging(self, _s, _l):
+        result = get_battery_status_text()
+        self.assertEqual(result, "75%")
+
+    @patch("hardware.battery_monitor.read_battery_level", return_value=80)
+    @patch("hardware.battery_monitor.read_battery_status", return_value="Charging")
+    def test_charging(self, _s, _l):
+        result = get_battery_status_text()
+        self.assertIn("Charging", result)
+        self.assertIn("80%", result)
+
+    @patch("hardware.battery_monitor.read_battery_level", return_value=None)
+    @patch("hardware.battery_monitor.read_battery_status", return_value="Unknown")
+    def test_no_battery(self, _s, _l):
+        result = get_battery_status_text()
+        self.assertEqual(result, "No battery")
+
+
+class TestGetPowerModeText(unittest.TestCase):
+
+    @patch("hardware.asus_controller.AsusController.is_plugged_in", return_value=True)
+    def test_plugged_in(self, _mock):
+        result = get_power_mode_text()
+        self.assertEqual(result, "Performance Mode")
+
+    @patch("hardware.asus_controller.AsusController.is_plugged_in", return_value=False)
+    def test_on_battery(self, _mock):
+        result = get_power_mode_text()
+        self.assertEqual(result, "Battery Mode")
 
 
 if __name__ == "__main__":

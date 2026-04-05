@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""
+scripts/luminos-quick-settings-toggle
+Toggle the Quick Settings panel via D-Bus or direct import.
+Called from Hyprland keybinding: Super+S.
+"""
+
+import os
+import sys
+
+SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+if SRC not in sys.path:
+    sys.path.insert(0, SRC)
+
+try:
+    from gui.quick_settings import toggle_panel
+    toggle_panel()
+except Exception as e:
+    # Fallback: send signal to running bar process
+    import subprocess
+    subprocess.run(
+        ["dbus-send", "--session", "--type=method_call",
+         "--dest=io.luminos.bar", "/io/luminos/bar",
+         "io.luminos.bar.ToggleQuickSettings"],
+        capture_output=True, timeout=3,
+    )

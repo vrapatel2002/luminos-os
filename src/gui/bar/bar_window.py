@@ -291,6 +291,11 @@ if _GTK_AVAILABLE:
             vol_click.connect("pressed", self._on_volume_click)
             self._volume_icon.add_controller(vol_click)
 
+            # Click on tray area → open quick settings
+            tray_click = Gtk.GestureClick()
+            tray_click.connect("pressed", self._on_tray_click)
+            right.add_controller(tray_click)
+
             root.append(right)
             overlay.set_child(root)
 
@@ -400,6 +405,14 @@ if _GTK_AVAILABLE:
         # -------------------------------------------------------------------
         # Volume controls
         # -------------------------------------------------------------------
+
+        def _on_tray_click(self, *_):
+            """Open/close quick settings panel on tray click."""
+            try:
+                from gui.quick_settings import toggle_panel
+                toggle_panel()
+            except Exception as e:
+                logger.debug(f"Quick settings toggle error: {e}")
 
         def _on_volume_scroll(self, _ctrl, _dx, dy):
             vol = get_volume()
