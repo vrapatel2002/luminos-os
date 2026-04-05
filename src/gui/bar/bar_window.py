@@ -171,6 +171,23 @@ _BAR_CSS = f"""
     border-radius: 9999px;
     background: {ACCENT};
 }}
+
+.luminos-bar-bell {{
+    font-size: 16px;
+    color: {TEXT_SECONDARY};
+}}
+
+.luminos-bar-badge {{
+    font-family: {FONT_FAMILY};
+    font-size: 9px;
+    font-weight: 700;
+    color: {TEXT_PRIMARY};
+    background-color: {ACCENT};
+    border-radius: 9999px;
+    min-width: 14px;
+    min-height: 14px;
+    padding: 0 2px;
+}}
 """
 
 
@@ -260,6 +277,24 @@ if _GTK_AVAILABLE:
             right.set_halign(Gtk.Align.END)
             right.set_valign(Gtk.Align.CENTER)
             right.set_hexpand(True)
+
+            # Bell icon (notification center)
+            bell_box = Gtk.Overlay()
+            self._bell_icon = Gtk.Label(label="󰂚")
+            self._bell_icon.add_css_class("luminos-bar-bell")
+            bell_box.set_child(self._bell_icon)
+
+            self._bell_badge = Gtk.Label(label="")
+            self._bell_badge.add_css_class("luminos-bar-badge")
+            self._bell_badge.set_halign(Gtk.Align.END)
+            self._bell_badge.set_valign(Gtk.Align.START)
+            self._bell_badge.set_visible(False)
+            bell_box.add_overlay(self._bell_badge)
+
+            bell_click = Gtk.GestureClick()
+            bell_click.connect("pressed", self._on_bell_click)
+            bell_box.add_controller(bell_click)
+            right.append(bell_box)
 
             # WiFi icon
             self._wifi_icon = Gtk.Label(label="󰤨")
@@ -400,11 +435,44 @@ if _GTK_AVAILABLE:
             except Exception:
                 pass
 
+            # Notification badge
+            try:
+                from gui.notifications import get_unread_count
+                count = get_unread_count()
+                if count > 0:
+                    self._bell_badge.set_text(str(min(count, 99)))
+                    self._bell_badge.set_visible(True)
+                else:
+                    self._bell_badge.set_visible(False)
+            except Exception:
+                pass
+
             return GLib.SOURCE_CONTINUE
 
         # -------------------------------------------------------------------
         # Volume controls
         # -------------------------------------------------------------------
+
+        def _on_bell_click(self, *_):
+            """Open/close notification center on bell click."""
+            try:
+                from gui.notifications.notification_center_panel import NotificationCenterPanel
+                if not hasattr(self, "_notif_panel") or self._notif_panel is None:
+                    # Get the notification center from the overlay singleton
+                    center = None
+                    try:
+                        from gui.notifications import _get_overlay
+                        overlay = _get_overlay()
+                        if overlay:
+                            center = overlay.get_center()
+                    except Exception:
+                        pass
+                    self._notif_panel = NotificationCenterPanel(
+                        notification_center=center
+                    )
+                self._notif_panel.toggle()
+            except Exception as e:
+                logger.debug(f"Notification center toggle error: {e}")
 
         def _on_tray_click(self, *_):
             """Open/close quick settings panel on tray click."""

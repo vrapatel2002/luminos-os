@@ -1,6 +1,6 @@
 """
 tests/test_notifications.py
-Phase 8.6 — Notification System test suite.
+Notification System test suite.
 
 Covers:
   - notification_model: Notification dataclass, enums, constructors  (7 tests)
@@ -8,8 +8,11 @@ Covers:
                              _level_icon
   - notification_center: enqueue, dismiss, queue, history, actions   (5 tests)
   - notifications.__init__: headless send / get_unread_count         (1 test)
+  - notification_daemon: pure helpers, store, history                (6 tests)
+  - notification_center_panel: format_notification_time              (3 tests)
+  - system_notifier: notification builders                           (5 tests)
 
-Total: 18 tests
+Total: 32 tests
 All run headless — no GTK display required.
 """
 
@@ -206,6 +209,115 @@ class TestNotifPackageHeadless(unittest.TestCase):
             self.assertIsInstance(count, int)
         except Exception as e:
             self.fail(f"notif_pkg raised unexpectedly: {e}")
+
+
+# ===========================================================================
+# notification_daemon pure helpers
+# ===========================================================================
+
+from notifications.notification_daemon import (
+    map_urgency, build_notification, get_auto_dismiss_ms,
+    store_notification, get_history, close_notification,
+    clear_all, get_unread_count as daemon_unread_count,
+)
+
+
+class TestNotificationDaemon(unittest.TestCase):
+
+    def setUp(self):
+        clear_all()
+
+    def test_map_urgency_low(self):
+        self.assertEqual(map_urgency({"urgency": 0}), "low")
+
+    def test_map_urgency_critical(self):
+        self.assertEqual(map_urgency({"urgency": 2}), "critical")
+
+    def test_map_urgency_default_normal(self):
+        self.assertEqual(map_urgency({}), "normal")
+
+    def test_build_notification_shape(self):
+        notif = build_notification("Firefox", "Hello", "World", {}, -1)
+        self.assertEqual(notif["app_name"], "Firefox")
+        self.assertEqual(notif["summary"], "Hello")
+        self.assertEqual(notif["body"], "World")
+        self.assertEqual(notif["timeout_ms"], 5000)  # default for normal
+
+    def test_store_and_get_history(self):
+        notif = build_notification("Test", "Title", "Body", {}, 3000)
+        nid = store_notification(notif)
+        self.assertGreater(nid, 0)
+        history = get_history()
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["id"], nid)
+
+    def test_close_notification(self):
+        notif = build_notification("Test", "Title", "Body", {}, 3000)
+        nid = store_notification(notif)
+        result = close_notification(nid)
+        self.assertTrue(result)
+
+
+# ===========================================================================
+# notification_center_panel pure helpers
+# ===========================================================================
+
+from gui.notifications.notification_center_panel import format_notification_time
+
+
+class TestFormatNotificationTime(unittest.TestCase):
+
+    def test_just_now(self):
+        import time
+        self.assertEqual(format_notification_time(time.time()), "Just now")
+
+    def test_minutes_ago(self):
+        import time
+        self.assertIn("m ago", format_notification_time(time.time() - 300))
+
+    def test_hours_ago(self):
+        import time
+        self.assertIn("h ago", format_notification_time(time.time() - 7200))
+
+
+# ===========================================================================
+# system_notifier pure helpers
+# ===========================================================================
+
+from notifications.system_notifier import (
+    battery_notification, wifi_notification,
+    sentinel_notification, app_error_notification,
+)
+
+
+class TestSystemNotifier(unittest.TestCase):
+
+    def test_battery_20_percent(self):
+        notif = battery_notification(20)
+        self.assertIsNotNone(notif)
+        self.assertIn("Low", notif["title"])
+        self.assertEqual(notif["urgency"], "normal")
+
+    def test_battery_5_percent(self):
+        notif = battery_notification(5)
+        self.assertIsNotNone(notif)
+        self.assertIn("Suspending", notif["title"])
+        self.assertEqual(notif["urgency"], "critical")
+
+    def test_battery_50_percent_returns_none(self):
+        self.assertIsNone(battery_notification(50))
+
+    def test_wifi_connected(self):
+        notif = wifi_notification(True, "HomeNet")
+        self.assertEqual(notif["title"], "Connected")
+        self.assertEqual(notif["body"], "HomeNet")
+        self.assertEqual(notif["urgency"], "low")
+
+    def test_sentinel_alert(self):
+        notif = sentinel_notification("evil.exe", "ransomware")
+        self.assertEqual(notif["title"], "Security Alert")
+        self.assertEqual(notif["urgency"], "critical")
+        self.assertIn("evil.exe", notif["body"])
 
 
 if __name__ == "__main__":
