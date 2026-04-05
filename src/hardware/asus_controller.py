@@ -9,16 +9,25 @@ All commands go through asusctl / sysfs. Graceful on missing hardware.
 """
 
 import glob
+import json
 import logging
+import os
 import subprocess
 
 logger = logging.getLogger("luminos-ai.hardware.asus")
+
+_HARDWARE_CONFIG_PATH = os.path.expanduser("~/.config/luminos/hardware.json")
 
 _VALID_CHARGE_LIMITS = (60, 80, 100)
 
 DEFAULT_FAN_CURVE = {
     "cpu": [(0, 0), (60, 20), (75, 60), (85, 90), (95, 100)],
     "gpu": [(0, 0), (60, 20), (75, 60), (85, 90), (95, 100)],
+}
+
+BATTERY_FAN_CURVE = {
+    "cpu": [(0, 0), (70, 20), (80, 50), (85, 80), (95, 100)],
+    "gpu": [(0, 0), (70, 20), (80, 50), (85, 80), (95, 100)],
 }
 
 _VALID_EFFECTS = ("static", "breathe", "reactive")
@@ -307,3 +316,58 @@ class AsusController:
                 except OSError:
                     continue
         return True  # assume plugged if unknown
+
+    # ------------------------------------------------------------------
+    # Boot-time defaults
+    # ------------------------------------------------------------------
+
+    def apply_boot_defaults(self) -> dict:
+        """
+        Apply saved hardware config on boot.
+
+        Reads ~/.config/luminos/hardware.json for battery_limit.
+        Applies default fan curve. Returns summary of actions taken.
+        """
+        config = load_hardware_config()
+        result = {"battery_limit": False, "fan_curve": False}
+
+        # Battery charge limit
+        limit = config.get("battery_limit", 80)
+        if limit not in _VALID_CHARGE_LIMITS:
+            limit = 80
+        if self.set_battery_limit(limit):
+            result["battery_limit"] = True
+            logger.info(f"Boot: battery limit → {limit}%")
+
+        # Default fan curve (AC curve — thermal_monitor will switch if on battery)
+        if self.set_fan_curve(DEFAULT_FAN_CURVE):
+            result["fan_curve"] = True
+            logger.info("Boot: default fan curve applied")
+
+        return result
+
+
+def load_hardware_config() -> dict:
+    """
+    Load hardware config from ~/.config/luminos/hardware.json.
+
+    Returns dict with at least "battery_limit" key. Defaults to 80 if
+    file missing or unreadable.
+    """
+    try:
+        with open(_HARDWARE_CONFIG_PATH) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"battery_limit": 80}
+
+
+def save_hardware_config(config: dict) -> bool:
+    """Save hardware config to ~/.config/luminos/hardware.json."""
+    try:
+        os.makedirs(os.path.dirname(_HARDWARE_CONFIG_PATH), exist_ok=True)
+        with open(_HARDWARE_CONFIG_PATH, "w") as f:
+            json.dump(config, f, indent=2)
+        return True
+    except OSError as e:
+        logger.warning(f"Could not save hardware config: {e}")
+        return False

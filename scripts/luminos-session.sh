@@ -51,16 +51,15 @@ else:
 " 2>&1 | while read -r line; do log "$line"; done
 
 # ----------------------------------------------------------------
-# 1c. Apply default fan curve and battery charge limit
+# 1c. Apply hardware boot defaults (fan curve + battery limit)
 # ----------------------------------------------------------------
-log "Applying hardware defaults..."
+log "Applying hardware boot defaults..."
 python3 -c "
 import sys; sys.path.insert(0, '${SRC_DIR}')
-from hardware.asus_controller import AsusController, DEFAULT_FAN_CURVE
+from hardware.asus_controller import AsusController
 asus = AsusController()
-asus.set_fan_curve(DEFAULT_FAN_CURVE)
-asus.set_battery_limit(80)
-print('Hardware defaults applied')
+result = asus.apply_boot_defaults()
+print(f'Hardware defaults applied: {result}')
 " 2>&1 | while read -r line; do log "$line"; done || true
 
 # ----------------------------------------------------------------
@@ -105,6 +104,44 @@ if command -v swww-daemon &>/dev/null; then
         fi
     fi
 fi
+
+# ----------------------------------------------------------------
+# 4. Start power & thermal wiring
+# ----------------------------------------------------------------
+log "Starting power and thermal wiring..."
+python3 -c "
+import sys; sys.path.insert(0, '${SRC_DIR}')
+from hardware.asus_controller import AsusController
+from hardware.thermal_monitor import ThermalMonitor
+from hardware.power_events import PowerEventBus
+from hardware.battery_monitor import BatteryMonitor
+from hardware.display_manager import DisplayManager
+
+asus = AsusController()
+thermal = ThermalMonitor(asus_controller=asus)
+power_bus = PowerEventBus(thermal_monitor=thermal)
+battery = BatteryMonitor()
+display = DisplayManager()
+
+thermal.start()
+power_bus.start()
+battery.start()
+display.start()
+print('Power, thermal, battery, and display managers started')
+
+# Block — these are daemon threads, keep the process alive
+import signal, threading
+evt = threading.Event()
+signal.signal(signal.SIGTERM, lambda *_: evt.set())
+signal.signal(signal.SIGINT, lambda *_: evt.set())
+evt.wait()
+
+thermal.stop()
+power_bus.stop()
+battery.stop()
+display.stop()
+print('Power subsystems stopped')
+" 2>&1 | while read -r line; do log "$line"; done &
 
 log "Session ready."
 

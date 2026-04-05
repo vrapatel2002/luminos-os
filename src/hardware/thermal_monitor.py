@@ -237,13 +237,10 @@ class ThermalMonitor:
     # ------------------------------------------------------------------
 
     def _apply_quiet_curve(self):
-        """Battery mode — quiet fan curve."""
+        """Battery mode — quiet fan curve from asus_controller."""
         if self._asus:
-            quiet_curve = {
-                "cpu": [(0, 0), (60, 10), (75, 30), (85, 60), (95, 100)],
-                "gpu": [(0, 0), (60, 10), (75, 30), (85, 60), (95, 100)],
-            }
-            self._asus.set_fan_curve(quiet_curve)
+            from .asus_controller import BATTERY_FAN_CURVE
+            self._asus.set_fan_curve(BATTERY_FAN_CURVE)
 
     def _restore_normal_curve(self):
         """AC mode — default Luminos fan curve."""

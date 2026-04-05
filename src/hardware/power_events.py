@@ -5,6 +5,9 @@ Central event bus for power state changes.
 Monitors AC plug state and fullscreen app detection.
 Broadcasts events to all subscribers when state changes.
 
+On unplug: CPU → powersave, wallpaper pause, quiet fans. Immediate.
+On plug in: CPU → performance, wallpaper resume, performance fans. Immediate.
+
 Subscribers:
   - wallpaper_manager (pause/resume video + live wallpaper)
   - thermal_monitor (switch fan curve)
@@ -37,15 +40,26 @@ class PowerEventBus:
 
     Monitors AC state (2s poll) and fullscreen detection (1s poll).
     Dispatches events to registered callbacks.
+
+    Owns the auto power mode switch:
+      - On unplug: CPU powersave, wallpaper pause, quiet fans
+      - On plug in: CPU performance, wallpaper resume, performance fans
     """
 
-    def __init__(self):
+    def __init__(self, thermal_monitor=None, wallpaper_manager=None):
+        """
+        Args:
+            thermal_monitor: ThermalMonitor instance (optional).
+            wallpaper_manager: WallpaperManager instance (optional).
+        """
         self._subscribers: dict[str, list[callable]] = {e: [] for e in EVENTS}
         self._running = False
         self._threads: list[threading.Thread] = []
         self._last_plugged = None
         self._last_fullscreen = False
         self._lock = threading.Lock()
+        self._thermal = thermal_monitor
+        self._wallpaper = wallpaper_manager
 
     # ------------------------------------------------------------------
     # Subscribe / emit
@@ -127,6 +141,18 @@ class PowerEventBus:
         logger.info("Power event bus stopped")
 
     # ------------------------------------------------------------------
+    # Setters for late binding
+    # ------------------------------------------------------------------
+
+    def set_thermal_monitor(self, thermal_monitor):
+        """Set or replace the thermal monitor reference."""
+        self._thermal = thermal_monitor
+
+    def set_wallpaper_manager(self, wallpaper_manager):
+        """Set or replace the wallpaper manager reference."""
+        self._wallpaper = wallpaper_manager
+
+    # ------------------------------------------------------------------
     # AC state monitor
     # ------------------------------------------------------------------
 
@@ -137,13 +163,83 @@ class PowerEventBus:
                 plugged = self._read_ac_state()
                 if self._last_plugged is not None and plugged != self._last_plugged:
                     if plugged:
+                        self._switch_to_performance()
                         self.emit("ac", {"plugged_in": True})
                     else:
+                        self._switch_to_battery()
                         self.emit("battery", {"plugged_in": False})
                 self._last_plugged = plugged
             except Exception as e:
                 logger.debug(f"AC monitor error: {e}")
             time.sleep(2.0)
+
+    # ------------------------------------------------------------------
+    # Power mode switching — immediate, no delay
+    # ------------------------------------------------------------------
+
+    def _switch_to_battery(self):
+        """Unplug detected — battery mode. Must complete < 500ms."""
+        logger.info("Switched to battery mode")
+
+        # CPU governor → powersave
+        try:
+            from power_manager.power_writer import set_cpu_governor
+            set_cpu_governor("powersave")
+        except Exception as e:
+            logger.debug(f"Could not set powersave governor: {e}")
+
+        # Wallpaper pause (video + live)
+        if self._wallpaper:
+            try:
+                wtype = self._wallpaper.config.get("type", "color")
+                if wtype == "video" and self._wallpaper.video.is_running():
+                    self._wallpaper.video.pause()
+                    logger.debug("Paused video wallpaper on battery")
+                elif wtype == "live":
+                    from gui.wallpaper.wallpaper_manager import _send_live_command
+                    _send_live_command({"cmd": "pause"})
+                    logger.debug("Paused live wallpaper on battery")
+            except Exception as e:
+                logger.debug(f"Wallpaper pause error: {e}")
+
+        # Thermal → quiet fan curve
+        if self._thermal:
+            try:
+                self._thermal.set_power_mode(on_battery=True)
+            except Exception as e:
+                logger.debug(f"Thermal battery switch error: {e}")
+
+    def _switch_to_performance(self):
+        """Plug in detected — performance mode. Must complete < 500ms."""
+        logger.info("Switched to performance mode")
+
+        # CPU governor → performance
+        try:
+            from power_manager.power_writer import set_cpu_governor
+            set_cpu_governor("performance")
+        except Exception as e:
+            logger.debug(f"Could not set performance governor: {e}")
+
+        # Wallpaper resume
+        if self._wallpaper:
+            try:
+                wtype = self._wallpaper.config.get("type", "color")
+                if wtype == "video" and self._wallpaper.video.paused:
+                    self._wallpaper.video.resume()
+                    logger.debug("Resumed video wallpaper on AC")
+                elif wtype == "live":
+                    from gui.wallpaper.wallpaper_manager import _send_live_command
+                    _send_live_command({"cmd": "resume"})
+                    logger.debug("Resumed live wallpaper on AC")
+            except Exception as e:
+                logger.debug(f"Wallpaper resume error: {e}")
+
+        # Thermal → performance fan curve
+        if self._thermal:
+            try:
+                self._thermal.set_power_mode(on_battery=False)
+            except Exception as e:
+                logger.debug(f"Thermal AC switch error: {e}")
 
     @staticmethod
     def _read_ac_state() -> bool:
