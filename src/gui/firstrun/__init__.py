@@ -1,6 +1,6 @@
 """
 src/gui/firstrun/__init__.py
-Public API for the Luminos First Run Setup wizard.
+Public API for the Luminos First Run Experience (Phase 5.9).
 
 Usage:
     from gui.firstrun import should_show_firstrun, launch_firstrun
@@ -8,27 +8,21 @@ Usage:
         launch_firstrun()
 """
 
-from gui.firstrun.firstrun_state import is_setup_complete
+from gui.firstrun.firstrun_state import is_complete
 
 
 def should_show_firstrun() -> bool:
-    """
-    Return True if the first-run setup wizard should be shown.
-
-    Returns:
-        True when the setup flag file does not exist.
-    """
-    return not is_setup_complete()
+    """Return True when first_run_complete flag does not exist."""
+    return not is_complete()
 
 
 def launch_firstrun() -> None:
-    """Launch the First Run Setup wizard application."""
+    """Launch the First Run wizard application."""
     try:
-        from gui.firstrun.firstrun_app import FirstRunApp
-        app = FirstRunApp()
-        app.run([])
+        from gui.firstrun.firstrun_app import main
+        main()
     except Exception as e:
         import logging
-        logging.getLogger("luminos-ai.gui.firstrun").warning(
+        logging.getLogger("luminos.firstrun").warning(
             f"Failed to launch firstrun: {e}"
         )

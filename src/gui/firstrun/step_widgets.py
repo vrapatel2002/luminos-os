@@ -1,16 +1,17 @@
 """
 src/gui/firstrun/step_widgets.py
-One GTK widget class per First Run Setup step.
+Phase 5.9 — Four first-run screens.
 
-Pure static methods are extracted for headless testing:
-  WelcomeStep._get_tagline()
-  AccountStep._generate_username(full_name)
-  AccountStep._check_password_strength(pw)
-  AccountStep._validate_account(name, user, pw, confirm)
-  DoneStep._build_summary(state)
+Screens:
+  WelcomeScreen   — wordmark + tagline + "Get Started"
+  AccountScreen   — name + optional password
+  WallpaperScreen — 6 thumbnail grid (3×2)
+  ReadyScreen     — animated checkmark + staggered text
 
-GTK guard: all widget classes defined only when _GTK_AVAILABLE.
-Headless stubs allow import without display server.
+Pure helpers are headless-testable:
+  validate_account(name, pw, confirm) → (bool, str)
+
+GTK guard: widget classes defined only when _GTK_AVAILABLE.
 """
 
 import logging
@@ -18,12 +19,12 @@ import os
 import re
 import sys
 
-logger = logging.getLogger("luminos-ai.gui.firstrun.steps")
+logger = logging.getLogger("luminos.firstrun.steps")
 
 try:
     import gi
     gi.require_version("Gtk", "4.0")
-    from gi.repository import Gtk, GLib, Pango
+    from gi.repository import Gtk, GLib, Gdk, Pango
     _GTK_AVAILABLE = True
 except (ImportError, ValueError):
     _GTK_AVAILABLE = False
@@ -32,895 +33,615 @@ _SRC = os.path.join(os.path.dirname(__file__), "..", "..")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from gui.firstrun.firstrun_state import SetupState, SETUP_STEPS
+from gui.firstrun.firstrun_state import FirstRunState, SCREENS
+from gui.theme import (
+    BG_BASE, BG_SURFACE, BG_ELEVATED, BG_OVERLAY,
+    ACCENT, ACCENT_HOVER, ACCENT_PRESSED, ACCENT_SUBTLE,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_DISABLED,
+    BORDER, BORDER_FOCUS,
+    COLOR_ERROR, COLOR_SUCCESS,
+    FONT_FAMILY,
+    SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, SPACE_12,
+)
 
 
 # ===========================================================================
-# Pure helpers — testable without GTK
+# Pure helpers
 # ===========================================================================
 
-def _get_tagline() -> str:
-    """Return the Luminos tagline shown on the Welcome step."""
-    return "AI-native. Security-first. Yours."
-
-
-def _generate_username(full_name: str) -> str:
+def validate_account(name: str, password: str, confirm: str) -> tuple:
     """
-    Auto-generate a Unix username from a full name.
-
-    Converts to lowercase, removes non-alphanumeric characters,
-    collapses spaces. Falls back to 'luminos' if empty.
+    Validate account screen inputs.
 
     Args:
-        full_name: Display name entered by the user.
+        name:     Display name entered by user.
+        password: Password string (may be empty — it's optional).
+        confirm:  Confirm password string.
 
     Returns:
-        Sanitized lowercase username string.
+        (valid: bool, error_msg: str)
     """
-    name = full_name.strip().lower()
-    # Take first word as username base
-    first = name.split()[0] if name.split() else ""
-    # Remove non-alphanumeric
-    sanitized = re.sub(r"[^a-z0-9]", "", first)
-    return sanitized or "luminos"
-
-
-def _check_password_strength(password: str) -> str:
-    """
-    Rate password strength based on length and complexity.
-
-    Args:
-        password: The password string to evaluate.
-
-    Returns:
-        One of: "Weak", "Fair", "Strong", "Very Strong".
-    """
-    length  = len(password)
-    has_upper  = bool(re.search(r"[A-Z]", password))
-    has_lower  = bool(re.search(r"[a-z]", password))
-    has_digit  = bool(re.search(r"\d",    password))
-    has_symbol = bool(re.search(r"[^A-Za-z0-9]", password))
-
-    complexity = sum([has_upper, has_lower, has_digit, has_symbol])
-
-    if length < 6 or complexity < 2:
-        return "Weak"
-    # Fair: short and not all complexity types present
-    if complexity < 4 and length < 8:
-        return "Fair"
-    # Very Strong: long and maximally complex
-    if length >= 12 and complexity >= 4:
-        return "Very Strong"
-    # Strong: long enough OR all 4 complexity types
-    if length >= 8 or complexity >= 4:
-        return "Strong"
-    return "Fair"
-
-
-def _validate_account(full_name: str, username: str,
-                       password: str, confirm: str) -> tuple:
-    """
-    Validate account step inputs.
-
-    Args:
-        full_name: User's display name.
-        username:  Unix username.
-        password:  Password.
-        confirm:   Password confirmation.
-
-    Returns:
-        Tuple of (valid: bool, error_msg: str).
-    """
-    if not full_name.strip():
-        return (False, "Full name cannot be empty.")
-    if not username.strip():
-        return (False, "Username cannot be empty.")
-    if re.search(r"[^a-z0-9_-]", username):
-        return (False, "Username may only contain lowercase letters, digits, _ and -.")
-    if len(password) < 6:
-        return (False, "Password must be at least 6 characters.")
-    if password != confirm:
-        return (False, "Passwords do not match.")
+    if not name.strip():
+        return (False, "Please enter your name.")
+    if password and password != confirm:
+        return (False, "Passwords don't match.")
     return (True, "")
 
 
-def _build_summary(state: SetupState) -> str:
-    """
-    Build the completion summary text shown on the Done step.
-
-    Args:
-        state: The final SetupState with all user choices.
-
-    Returns:
-        Multi-line summary string.
-    """
-    grade = getattr(state, "_hw_grade", "B")
-    lines = [
-        f"Account:     {state.username or '(not set)'}",
-        f"Theme:       {state.dark_mode.capitalize()}",
-        f"Accent:      {state.accent_color}",
-        f"Scaling:     {state.scaling}",
-        f"HIVE AI:     {'Enabled' if state.hive_enabled else 'Disabled'}",
-        f"Telemetry:   {'On' if state.telemetry_enabled else 'Off (recommended)'}",
-        f"NPU:         {'Detected' if state.npu_detected else 'Not found'}",
-        f"GPU:         {'Detected' if state.nvidia_detected else 'Not found'}",
-        f"HW Grade:    {grade}",
-    ]
-    return "\n".join(lines)
-
-
 # ===========================================================================
-# Accent color presets (shared across Appearance and Account steps)
+# Wallpaper definitions (6 items shown in 3×2 grid)
 # ===========================================================================
 
-_ACCENT_PRESETS = [
-    "#0a84ff", "#30d158", "#ff453a", "#ff9f0a",
-    "#bf5af2", "#64d2ff", "#ff375f", "#ffd60a",
+_WALLPAPER_ITEMS = [
+    {
+        "label": "Dark Space",
+        "type":  "static",
+        "value": "/usr/share/luminos/wallpapers/dark_space.jpg",
+        "color": "#0A0A1F",
+    },
+    {
+        "label": "Minimal Dark",
+        "type":  "static",
+        "value": "/usr/share/luminos/wallpapers/minimal_dark.jpg",
+        "color": "#0F0F0F",
+    },
+    {
+        "label": "Ocean Drift",
+        "type":  "video",
+        "value": "/usr/share/luminos/wallpapers/ocean_drift.mp4",
+        "color": "#003355",
+    },
+    {
+        "label": "City Night",
+        "type":  "video",
+        "value": "/usr/share/luminos/wallpapers/city_night.mp4",
+        "color": "#1A1A2E",
+    },
+    {
+        "label": "Geometric",
+        "type":  "live",
+        "value": "geometric",
+        "color": "#0A1628",
+    },
+    {
+        "label": "Aurora",
+        "type":  "live",
+        "value": "aurora",
+        "color": "#051A12",
+    },
 ]
 
-_AVATAR_COLORS = [
-    "#0a84ff", "#30d158", "#ff453a", "#ff9f0a",
-    "#bf5af2", "#64d2ff", "#ac8e68", "#6c6c70",
-]
+_TYPE_BADGE = {
+    "static": "",
+    "video":  "▶",
+    "live":   "◈",
+}
 
 
 # ===========================================================================
-# GTK Widgets
+# CSS for first-run screens
 # ===========================================================================
+
+FIRSTRUN_CSS = f"""
+/* ---- First Run Window ---- */
+.fr-root {{
+    background-color: {BG_BASE};
+    color: {TEXT_PRIMARY};
+    font-family: "Inter", system-ui, sans-serif;
+}}
+
+/* ---- Welcome Screen ---- */
+.fr-wordmark {{
+    color: {TEXT_PRIMARY};
+    font-family: "Inter", system-ui, sans-serif;
+    font-size: 48px;
+    font-weight: 300;
+    letter-spacing: -1px;
+}}
+
+.fr-tagline {{
+    color: {TEXT_SECONDARY};
+    font-size: 16px;
+    font-weight: 400;
+}}
+
+/* ---- Screen Titles ---- */
+.fr-title {{
+    color: {TEXT_PRIMARY};
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+}}
+
+/* ---- Buttons ---- */
+.fr-btn-primary {{
+    background-color: {ACCENT};
+    color: #FFFFFF;
+    border-radius: 8px;
+    border: none;
+    padding: 10px 32px;
+    font-size: 15px;
+    font-weight: 500;
+    min-height: 40px;
+    transition: background-color 100ms ease;
+}}
+.fr-btn-primary:hover {{
+    background-color: {ACCENT_HOVER};
+}}
+.fr-btn-primary:active {{
+    background-color: {ACCENT_PRESSED};
+}}
+
+.fr-btn-secondary {{
+    background-color: rgba(255,255,255,0.06);
+    color: {TEXT_PRIMARY};
+    border-radius: 8px;
+    border: 1px solid {BORDER};
+    padding: 10px 24px;
+    font-size: 15px;
+    font-weight: 400;
+    min-height: 40px;
+    transition: background-color 100ms ease;
+}}
+.fr-btn-secondary:hover {{
+    background-color: rgba(255,255,255,0.10);
+}}
+
+/* ---- Inputs ---- */
+.fr-input {{
+    background-color: rgba(255,255,255,0.06);
+    color: {TEXT_PRIMARY};
+    border-radius: 8px;
+    border: 1px solid {BORDER};
+    padding: 0 12px;
+    font-size: 14px;
+    min-height: 42px;
+    transition: border-color 150ms ease;
+}}
+.fr-input:focus {{
+    border-color: {BORDER_FOCUS};
+}}
+
+/* ---- Skip link ---- */
+.fr-skip {{
+    color: {TEXT_SECONDARY};
+    font-size: 13px;
+    background: none;
+    border: none;
+    padding: 4px 8px;
+    text-decoration: underline;
+    cursor: pointer;
+}}
+.fr-skip:hover {{
+    color: {TEXT_PRIMARY};
+}}
+
+/* ---- Error label ---- */
+.fr-error {{
+    color: {COLOR_ERROR};
+    font-size: 13px;
+}}
+
+/* ---- Wallpaper thumbnail ---- */
+.fr-thumb {{
+    border-radius: 10px;
+    border: 2px solid transparent;
+    transition: border-color 150ms ease;
+    overflow: hidden;
+    cursor: pointer;
+}}
+.fr-thumb-selected {{
+    border-color: {ACCENT};
+}}
+.fr-thumb-label {{
+    color: {TEXT_SECONDARY};
+    font-size: 12px;
+    font-weight: 400;
+    margin-top: 4px;
+}}
+
+/* ---- Progress dots ---- */
+.fr-dot {{
+    font-size: 8px;
+    color: {TEXT_DISABLED};
+    transition: color 200ms ease;
+}}
+.fr-dot-current {{
+    color: {ACCENT};
+    font-size: 10px;
+}}
+.fr-dot-done {{
+    color: {TEXT_SECONDARY};
+}}
+
+/* ---- Ready screen ---- */
+.fr-checkmark {{
+    color: {ACCENT};
+    font-size: 72px;
+    font-weight: 300;
+}}
+.fr-ready-title {{
+    color: {TEXT_PRIMARY};
+    font-size: 32px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+}}
+.fr-ready-line {{
+    color: {TEXT_SECONDARY};
+    font-size: 15px;
+    font-weight: 400;
+}}
+"""
+
 
 if _GTK_AVAILABLE:
 
-    # -----------------------------------------------------------------------
-    # WelcomeStep
-    # -----------------------------------------------------------------------
+    # =======================================================================
+    # Screen 1 — Welcome
+    # =======================================================================
 
-    class WelcomeStep(Gtk.Box):
+    class WelcomeScreen(Gtk.Box):
         """
-        Step 1 — Full-screen welcome with Luminos branding.
+        Welcome screen — wordmark, tagline, Get Started button.
+        Background: solid dark (live wallpaper runs behind window if available).
         """
 
-        @staticmethod
-        def _get_tagline() -> str:
-            return _get_tagline()
-
-        def __init__(self, on_continue):
-            super().__init__(
-                orientation=Gtk.Orientation.VERTICAL, spacing=24
-            )
+        def __init__(self, on_get_started):
+            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
             self.set_halign(Gtk.Align.CENTER)
             self.set_valign(Gtk.Align.CENTER)
-            self.set_margin_top(60)
-            self.set_margin_bottom(60)
+            self.set_hexpand(True)
+            self.set_vexpand(True)
 
-            # Logo
-            logo = Gtk.Label(label="◉")
-            logo.add_css_class("luminos-firstrun-logo")
-            self.append(logo)
-
-            # Title
-            title = Gtk.Label(label="Welcome to Luminos")
-            title.add_css_class("luminos-firstrun-title")
-            self.append(title)
+            # Wordmark — "luminos" in Inter 48px weight 300
+            wordmark = Gtk.Label(label="luminos")
+            wordmark.add_css_class("fr-wordmark")
+            wordmark.set_margin_bottom(SPACE_3)
+            self.append(wordmark)
 
             # Tagline
-            tag = Gtk.Label(label=_get_tagline())
-            tag.add_css_class("luminos-firstrun-tagline")
-            self.append(tag)
-
-            # Body
-            body = Gtk.Label(
-                label=(
-                    "Luminos is an AI-native operating system built for\n"
-                    "security, performance, and total user control.\n"
-                    "Let's take a few minutes to set things up your way."
-                )
+            tagline = Gtk.Label(
+                label="Everything works. Nothing gets in the way."
             )
-            body.set_justify(Gtk.Justification.CENTER)
-            body.add_css_class("luminos-firstrun-body")
-            self.append(body)
+            tagline.add_css_class("fr-tagline")
+            tagline.set_margin_bottom(SPACE_12)
+            self.append(tagline)
 
-            # CTA button
-            btn = Gtk.Button(label="Get Started →")
-            btn.add_css_class("luminos-firstrun-cta")
+            # Get Started button
+            btn = Gtk.Button(label="Get Started")
+            btn.add_css_class("fr-btn-primary")
             btn.set_halign(Gtk.Align.CENTER)
-            btn.connect("clicked", lambda *_: on_continue())
+            btn.connect("clicked", lambda *_: on_get_started())
             self.append(btn)
 
-    # -----------------------------------------------------------------------
-    # HardwareStep
-    # -----------------------------------------------------------------------
 
-    class HardwareStep(Gtk.Box):
+    # =======================================================================
+    # Screen 2 — Account
+    # =======================================================================
+
+    class AccountScreen(Gtk.Box):
         """
-        Step 2 — Hardware detection with progress spinner then results grid.
+        Account screen — name + optional password with confirm.
         """
 
-        def __init__(self, state: SetupState, on_continue):
-            super().__init__(
-                orientation=Gtk.Orientation.VERTICAL, spacing=20
-            )
+        def __init__(self, state: FirstRunState):
+            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE_4)
+            self._state = state
             self.set_halign(Gtk.Align.CENTER)
             self.set_valign(Gtk.Align.CENTER)
-            self._state = state
-            self._hw    = None
-            self._on_continue = on_continue
-            self._build_scanning_view()
+            self.set_hexpand(True)
+            self.set_vexpand(True)
+            self.set_size_request(400, -1)
 
-        def _build_scanning_view(self):
-            self._spinner_box = Gtk.Box(
-                orientation=Gtk.Orientation.VERTICAL, spacing=16
-            )
-            self._spinner_box.set_halign(Gtk.Align.CENTER)
-
-            self._spinner = Gtk.Spinner()
-            self._spinner.set_size_request(48, 48)
-            self._spinner.start()
-            self._spinner_box.append(self._spinner)
-
-            scanning_lbl = Gtk.Label(label="Detecting your hardware…")
-            scanning_lbl.add_css_class("luminos-firstrun-subtitle")
-            self._spinner_box.append(scanning_lbl)
-
-            self.append(self._spinner_box)
-            self._results_box = Gtk.Box(
-                orientation=Gtk.Orientation.VERTICAL, spacing=12
-            )
-            self._results_box.set_visible(False)
-            self.append(self._results_box)
-
-            # Start detection in background thread
-            import threading
-            t = threading.Thread(target=self._do_detect, daemon=True)
-            t.start()
-
-        def _do_detect(self):
-            from gui.firstrun.hardware_detector import detect_all, get_readiness_score
-            hw    = detect_all()
-            score = get_readiness_score(hw)
-            GLib.idle_add(self._show_results, hw, score)
-
-        def _show_results(self, hw: dict, score: dict):
-            self._hw = hw
-            self._spinner.stop()
-            self._spinner_box.set_visible(False)
-
-            # Update state
-            self._state.npu_detected    = score["npu_ready"]
-            self._state.nvidia_detected = score["ai_ready"]
-            setattr(self._state, "_hw_grade", score["grade"])
-
-            title = Gtk.Label(label="Hardware Detected")
-            title.add_css_class("luminos-firstrun-subtitle")
+            # Title
+            title = Gtk.Label(label="Who's using this?")
+            title.add_css_class("fr-title")
             title.set_halign(Gtk.Align.START)
-            self._results_box.append(title)
-
-            grid = Gtk.Grid()
-            grid.set_row_spacing(8)
-            grid.set_column_spacing(32)
-
-            rows = [
-                ("CPU",    hw["cpu"]["name"],
-                 f"{hw['cpu']['cores']} cores",    True),
-                ("RAM",    f"{hw['ram']['total_gb']} GB", "", True),
-                ("NPU",    hw["npu"]["name"] or "Not found",
-                 f"{hw['npu']['tops']} TOPS" if hw["npu"]["detected"] else "",
-                 hw["npu"]["detected"]),
-                ("iGPU",   hw["igpu"]["name"] or "Not found",
-                 hw["igpu"]["driver"] or "", hw["igpu"]["detected"]),
-                ("GPU",    hw["nvidia"]["name"] or "Not found",
-                 f"{hw['nvidia']['vram_gb']} GB" if hw["nvidia"]["detected"] else "",
-                 hw["nvidia"]["detected"]),
-                ("Storage",f"{hw['storage']['total_gb']} GB ({hw['storage']['type']})",
-                 f"{hw['storage']['free_gb']} GB free", True),
-                ("Zone 2", "Wine64 ready" if hw["wine_available"] else "Not available",
-                 "", hw["wine_available"]),
-                ("Zone 3", "KVM + Firecracker" if hw["zone3_ready"] else "Not available",
-                 "", hw.get("zone3_ready", False)),
-            ]
-
-            # Patch zone3_ready into hw for the row lookup
-            hw["zone3_ready"] = score["zone3_ready"]
-            rows[-1] = ("Zone 3",
-                        "KVM + Firecracker" if score["zone3_ready"] else "Not available",
-                        "", score["zone3_ready"])
-
-            for r, (label, value, detail, ok) in enumerate(rows):
-                key_lbl = Gtk.Label(label=label)
-                key_lbl.add_css_class("luminos-qs-dim")
-                key_lbl.set_halign(Gtk.Align.START)
-                grid.attach(key_lbl, 0, r, 1, 1)
-
-                val_text = value + (f"  {detail}" if detail else "")
-                val_lbl = Gtk.Label(label=val_text)
-                val_lbl.set_halign(Gtk.Align.START)
-                grid.attach(val_lbl, 1, r, 1, 1)
-
-                badge = Gtk.Label(label="✓" if ok else "✗")
-                badge.add_css_class("luminos-firstrun-ok" if ok else "luminos-firstrun-warn")
-                grid.attach(badge, 2, r, 1, 1)
-
-            self._results_box.append(grid)
-
-            # Grade badge
-            grade_lbl = Gtk.Label(
-                label=f"Hardware Grade: {score['grade']}  (Score: {score['score']}/100)"
-            )
-            grade_lbl.add_css_class("luminos-firstrun-grade")
-            grade_lbl.set_halign(Gtk.Align.START)
-            self._results_box.append(grade_lbl)
-
-            # Issues
-            if score["issues"]:
-                issues_lbl = Gtk.Label(
-                    label="\n".join(f"⚠ {i}" for i in score["issues"])
-                )
-                issues_lbl.add_css_class("luminos-firstrun-warn")
-                issues_lbl.set_halign(Gtk.Align.START)
-                self._results_box.append(issues_lbl)
-
-            self._results_box.set_visible(True)
-
-    # -----------------------------------------------------------------------
-    # DisplayStep
-    # -----------------------------------------------------------------------
-
-    class DisplayStep(Gtk.Box):
-        """Step 3 — Brightness and scaling setup."""
-
-        def __init__(self, state: SetupState):
-            super().__init__(
-                orientation=Gtk.Orientation.VERTICAL, spacing=20
-            )
-            self.set_halign(Gtk.Align.CENTER)
-            self.set_valign(Gtk.Align.CENTER)
-            self._state = state
-            self._build()
-
-        def _build(self):
-            title = Gtk.Label(label="Display Setup")
-            title.add_css_class("luminos-firstrun-subtitle")
-            title.set_halign(Gtk.Align.START)
+            title.set_margin_bottom(SPACE_2)
             self.append(title)
 
-            # Brightness
-            bright_lbl = Gtk.Label(label="Brightness")
-            bright_lbl.set_halign(Gtk.Align.START)
-            self.append(bright_lbl)
-
-            bright_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=12
-            )
-            self._bright_slider = Gtk.Scale.new_with_range(
-                Gtk.Orientation.HORIZONTAL, 5, 100, 1
-            )
-            self._bright_slider.set_value(self._state.brightness)
-            self._bright_slider.set_hexpand(True)
-            self._bright_slider.set_draw_value(True)
-            self._bright_slider.connect("value-changed", self._on_bright)
-            bright_row.append(self._bright_slider)
-            self.append(bright_row)
-
-            self.append(Gtk.Separator())
-
-            # Scaling
-            scale_lbl = Gtk.Label(label="Display Scaling")
-            scale_lbl.set_halign(Gtk.Align.START)
-            self.append(scale_lbl)
-
-            scale_opts = ["100%", "125%", "150%", "200%"]
-            scale_row  = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=8
-            )
-            self._scale_btns: dict[str, Gtk.Button] = {}
-            for opt in scale_opts:
-                btn = Gtk.Button(label=opt)
-                btn.add_css_class(
-                    "luminos-btn-accent"
-                    if opt == self._state.scaling
-                    else "luminos-btn"
-                )
-                btn.connect("clicked", self._on_scale, opt)
-                scale_row.append(btn)
-                self._scale_btns[opt] = btn
-            self.append(scale_row)
-
-            self.append(Gtk.Separator())
-
-            # Night light placeholder
-            night_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=0
-            )
-            night_row.set_hexpand(True)
-            night_lbl = Gtk.Label(label="Night Light")
-            night_lbl.set_hexpand(True)
-            night_lbl.set_halign(Gtk.Align.START)
-            night_sw = Gtk.Switch()
-            night_sw.set_active(False)
-            night_sw.set_sensitive(False)
-            night_sw.set_tooltip_text("Coming soon")
-            night_row.append(night_lbl)
-            night_row.append(night_sw)
-            self.append(night_row)
-
-        def _on_bright(self, slider):
-            self._state.brightness = int(slider.get_value())
-
-        def _on_scale(self, _btn, opt: str):
-            self._state.scaling = opt
-            for o, btn in self._scale_btns.items():
-                if o == opt:
-                    btn.remove_css_class("luminos-btn")
-                    btn.add_css_class("luminos-btn-accent")
-                else:
-                    btn.remove_css_class("luminos-btn-accent")
-                    btn.add_css_class("luminos-btn")
-
-    # -----------------------------------------------------------------------
-    # AccountStep
-    # -----------------------------------------------------------------------
-
-    class AccountStep(Gtk.Box):
-        """Step 4 — User account creation with avatar, username, password."""
-
-        @staticmethod
-        def _generate_username(full_name: str) -> str:
-            return _generate_username(full_name)
-
-        @staticmethod
-        def _check_password_strength(pw: str) -> str:
-            return _check_password_strength(pw)
-
-        @staticmethod
-        def _validate_account(full_name, username, password, confirm):
-            return _validate_account(full_name, username, password, confirm)
-
-        def __init__(self, state: SetupState):
-            super().__init__(
-                orientation=Gtk.Orientation.VERTICAL, spacing=16
-            )
-            self.set_halign(Gtk.Align.CENTER)
-            self.set_valign(Gtk.Align.CENTER)
-            self._state = state
-            self._build()
-
-        def _build(self):
-            title = Gtk.Label(label="Create Your Account")
-            title.add_css_class("luminos-firstrun-subtitle")
-            title.set_halign(Gtk.Align.START)
-            self.append(title)
-
-            # Avatar color picker + initials preview
-            avatar_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=16
-            )
-            self._avatar_preview = Gtk.Label(label="?")
-            self._avatar_preview.set_size_request(72, 72)
-            self._avatar_preview.add_css_class("luminos-firstrun-avatar")
-            avatar_row.append(self._avatar_preview)
-
-            color_grid = Gtk.FlowBox()
-            color_grid.set_max_children_per_line(4)
-            color_grid.set_selection_mode(Gtk.SelectionMode.NONE)
-            for color in _AVATAR_COLORS:
-                swatch = Gtk.Button()
-                swatch.set_size_request(28, 28)
-                swatch.set_tooltip_text(color)
-                swatch.add_css_class("luminos-accent-swatch")
-                swatch._color = color
-                swatch.connect("clicked", self._on_avatar_color, color)
-                color_grid.append(swatch)
-            avatar_row.append(color_grid)
-            self.append(avatar_row)
-
-            # Full name
+            # Name input
             self._name_entry = Gtk.Entry()
-            self._name_entry.set_placeholder_text("Full Name")
-            self._name_entry.connect("changed", self._on_name_changed)
+            self._name_entry.set_placeholder_text("Your name")
+            self._name_entry.add_css_class("fr-input")
+            self._name_entry.set_hexpand(True)
+            if state.username:
+                self._name_entry.set_text(state.username)
             self.append(self._name_entry)
 
-            # Username
-            self._user_entry = Gtk.Entry()
-            self._user_entry.set_placeholder_text("Username")
-            self._user_entry.connect("changed", self._on_user_changed)
-            self.append(self._user_entry)
-
-            # Password
-            self._pw_entry = Gtk.PasswordEntry()
-            self._pw_entry.set_show_peek_icon(True)
-            self._pw_entry.set_placeholder_text("Password")
-            self._pw_entry.connect("changed", self._on_pw_changed)
+            # Password input
+            self._pw_entry = Gtk.Entry()
+            self._pw_entry.set_placeholder_text("Password (optional)")
+            self._pw_entry.set_visibility(False)
+            self._pw_entry.add_css_class("fr-input")
+            self._pw_entry.set_hexpand(True)
+            if state.password:
+                self._pw_entry.set_text(state.password)
             self.append(self._pw_entry)
 
-            # Password confirm
-            self._confirm_entry = Gtk.PasswordEntry()
-            self._confirm_entry.set_show_peek_icon(True)
-            self._confirm_entry.set_placeholder_text("Confirm Password")
+            # Confirm password — hidden until password has content
+            self._confirm_entry = Gtk.Entry()
+            self._confirm_entry.set_placeholder_text("Confirm password")
+            self._confirm_entry.set_visibility(False)
+            self._confirm_entry.add_css_class("fr-input")
+            self._confirm_entry.set_hexpand(True)
+            self._confirm_entry.set_visible(bool(state.password))
             self.append(self._confirm_entry)
 
-            # Password strength
-            self._strength_lbl = Gtk.Label(label="")
-            self._strength_lbl.set_halign(Gtk.Align.START)
-            self._strength_lbl.add_css_class("luminos-qs-dim")
-            self.append(self._strength_lbl)
+            # Show/hide confirm on password text change
+            self._pw_entry.connect("changed", self._on_pw_changed)
 
             # Error label
             self._error_lbl = Gtk.Label(label="")
+            self._error_lbl.add_css_class("fr-error")
             self._error_lbl.set_halign(Gtk.Align.START)
-            self._error_lbl.add_css_class("luminos-firstrun-warn")
+            self._error_lbl.set_visible(False)
             self.append(self._error_lbl)
 
-        def _on_avatar_color(self, _btn, color: str):
-            self._state.avatar_color = color
-
-        def _on_name_changed(self, entry):
-            name = entry.get_text()
-            self._state.username = _generate_username(name)
-            self._user_entry.set_text(self._state.username)
-            self._update_avatar_initials(name)
-
-        def _update_avatar_initials(self, name: str):
-            parts = name.strip().split()
-            if len(parts) >= 2:
-                initials = parts[0][0].upper() + parts[-1][0].upper()
-            elif parts:
-                initials = parts[0][0].upper()
-            else:
-                initials = "?"
-            self._avatar_preview.set_text(initials)
-
-        def _on_user_changed(self, entry):
-            text = entry.get_text()
-            # Enforce lowercase/no spaces
-            cleaned = re.sub(r"[^a-z0-9_-]", "", text.lower())
-            if cleaned != text:
-                entry.set_text(cleaned)
-                entry.set_position(-1)
-            self._state.username = cleaned
+            # Skip link
+            skip_btn = Gtk.Button(label="Skip — I'll set one later")
+            skip_btn.add_css_class("fr-skip")
+            skip_btn.set_halign(Gtk.Align.START)
+            skip_btn.connect("clicked", self._on_skip)
+            self.append(skip_btn)
 
         def _on_pw_changed(self, entry):
-            pw = entry.get_text()
-            strength = _check_password_strength(pw)
-            self._strength_lbl.set_text(f"Strength: {strength}")
+            has_text = bool(entry.get_text())
+            self._confirm_entry.set_visible(has_text)
 
-        def show_error(self, msg: str):
-            self._error_lbl.set_text(msg)
-
-        def clear_error(self):
-            self._error_lbl.set_text("")
+        def _on_skip(self, *_):
+            self._pw_entry.set_text("")
+            self._confirm_entry.set_text("")
+            self._confirm_entry.set_visible(False)
 
         def collect(self) -> tuple:
-            """Return (full_name, username, password, confirm) from entries."""
+            """Return (name, password, confirm)."""
             return (
-                self._name_entry.get_text(),
-                self._user_entry.get_text(),
+                self._name_entry.get_text().strip(),
                 self._pw_entry.get_text(),
                 self._confirm_entry.get_text(),
             )
 
-    # -----------------------------------------------------------------------
-    # AppearanceStep
-    # -----------------------------------------------------------------------
+        def show_error(self, msg: str) -> None:
+            self._error_lbl.set_text(msg)
+            self._error_lbl.set_visible(bool(msg))
 
-    class AppearanceStep(Gtk.Box):
-        """Step 5 — Dark/light/auto theme + accent color."""
+        def clear_error(self) -> None:
+            self._error_lbl.set_text("")
+            self._error_lbl.set_visible(False)
 
-        def __init__(self, state: SetupState):
-            super().__init__(
-                orientation=Gtk.Orientation.VERTICAL, spacing=20
-            )
+
+    # =======================================================================
+    # Screen 3 — Wallpaper
+    # =======================================================================
+
+    class WallpaperScreen(Gtk.Box):
+        """
+        Wallpaper picker — 3×2 grid of 6 thumbnails.
+        Applies the selection to desktop immediately via swww/live-wallpaper.
+        """
+
+        def __init__(self, state: FirstRunState):
+            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE_4)
+            self._state = state
+            self._selected = state.wallpaper_index
+            self._thumb_frames: list[Gtk.Frame] = []
+
             self.set_halign(Gtk.Align.CENTER)
             self.set_valign(Gtk.Align.CENTER)
-            self._state = state
-            self._build()
-
-        def _build(self):
-            title = Gtk.Label(label="Choose Your Look")
-            title.add_css_class("luminos-firstrun-subtitle")
-            title.set_halign(Gtk.Align.START)
-            self.append(title)
-
-            # Mode cards
-            cards_box = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=16
-            )
-            self._mode_btns: dict[str, Gtk.Button] = {}
-            for icon, label, mode_id in (
-                ("🌙", "Dark",  "dark"),
-                ("☀",  "Light", "light"),
-                ("🔄", "Auto",  "auto"),
-            ):
-                btn = self._make_mode_card(icon, label, mode_id)
-                cards_box.append(btn)
-                self._mode_btns[mode_id] = btn
-            self.append(cards_box)
-            self._select_mode(self._state.dark_mode)
-
-            self.append(Gtk.Separator())
-
-            # Accent colors
-            accent_lbl = Gtk.Label(label="Accent Color")
-            accent_lbl.set_halign(Gtk.Align.START)
-            self.append(accent_lbl)
-
-            accent_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=8
-            )
-            for color in _ACCENT_PRESETS:
-                swatch = Gtk.Button()
-                swatch.set_size_request(32, 32)
-                swatch.set_tooltip_text(color)
-                swatch.add_css_class("luminos-accent-swatch")
-                swatch.connect("clicked", self._on_accent, color)
-                accent_row.append(swatch)
-            self.append(accent_row)
-
-        def _make_mode_card(self, icon: str, label: str, mode_id: str) -> Gtk.Button:
-            btn = Gtk.Button()
-            btn.add_css_class("luminos-power-card")
-            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-            inner.set_margin_top(20)
-            inner.set_margin_bottom(20)
-            inner.set_margin_start(20)
-            inner.set_margin_end(20)
-            icon_lbl = Gtk.Label(label=icon)
-            name_lbl = Gtk.Label(label=label)
-            name_lbl.add_css_class("luminos-power-card-name")
-            inner.append(icon_lbl)
-            inner.append(name_lbl)
-            btn.set_child(inner)
-            btn.connect("clicked", self._on_mode, mode_id)
-            return btn
-
-        def _select_mode(self, mode_id: str):
-            self._state.dark_mode = mode_id
-            for mid, btn in self._mode_btns.items():
-                if mid == mode_id:
-                    btn.add_css_class("luminos-btn-accent")
-                else:
-                    btn.remove_css_class("luminos-btn-accent")
-
-        def _on_mode(self, _btn, mode_id: str):
-            self._select_mode(mode_id)
-
-        def _on_accent(self, _btn, color: str):
-            self._state.accent_color = color
-
-    # -----------------------------------------------------------------------
-    # PrivacyStep
-    # -----------------------------------------------------------------------
-
-    class PrivacyStep(Gtk.Box):
-        """Step 6 — Privacy principles + opt-in telemetry toggle."""
-
-        def __init__(self, state: SetupState):
-            super().__init__(
-                orientation=Gtk.Orientation.VERTICAL, spacing=16
-            )
-            self.set_halign(Gtk.Align.CENTER)
-            self.set_valign(Gtk.Align.CENTER)
-            self._state = state
-            self._build()
-
-        def _build(self):
-            title = Gtk.Label(label="Your Privacy Is Protected")
-            title.add_css_class("luminos-firstrun-subtitle")
-            title.set_halign(Gtk.Align.START)
-            self.append(title)
-
-            principles = [
-                "✓ Zero telemetry — nothing is sent anywhere",
-                "✓ No account required — ever",
-                "✓ AI runs locally — never cloud, never shared",
-                "✓ Open source — audit every line",
-            ]
-            for p in principles:
-                lbl = Gtk.Label(label=p)
-                lbl.set_halign(Gtk.Align.START)
-                lbl.add_css_class("luminos-firstrun-principle")
-                self.append(lbl)
-
-            self.append(Gtk.Separator())
-
-            # Opt-in telemetry
-            toggle_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=0
-            )
-            toggle_row.set_hexpand(True)
-            tel_lbl = Gtk.Label(
-                label="Help improve Luminos\n(crash reports only — anonymous)"
-            )
-            tel_lbl.set_hexpand(True)
-            tel_lbl.set_halign(Gtk.Align.START)
-            self._telemetry_switch = Gtk.Switch()
-            self._telemetry_switch.set_active(False)  # off by default
-            self._telemetry_switch.connect("state-set", self._on_telemetry)
-            toggle_row.append(tel_lbl)
-            toggle_row.append(self._telemetry_switch)
-            self.append(toggle_row)
-
-            # Source code note
-            note = Gtk.Label(label="We mean it — verify our source code on GitHub")
-            note.add_css_class("luminos-qs-dim")
-            note.set_halign(Gtk.Align.START)
-            self.append(note)
-
-        def _on_telemetry(self, _sw, state: bool) -> bool:
-            self._state.telemetry_enabled = state
-            return False
-
-    # -----------------------------------------------------------------------
-    # AISetupStep
-    # -----------------------------------------------------------------------
-
-    class AISetupStep(Gtk.Box):
-        """Step 7 — NPU status + HIVE AI toggle."""
-
-        def __init__(self, state: SetupState):
-            super().__init__(
-                orientation=Gtk.Orientation.VERTICAL, spacing=20
-            )
-            self.set_halign(Gtk.Align.CENTER)
-            self.set_valign(Gtk.Align.CENTER)
-            self._state = state
-            self._build()
-
-        def _build(self):
-            title = Gtk.Label(label="AI & Intelligence Setup")
-            title.add_css_class("luminos-firstrun-subtitle")
-            title.set_halign(Gtk.Align.START)
-            self.append(title)
-
-            # NPU status card
-            npu_card = Gtk.Box(
-                orientation=Gtk.Orientation.VERTICAL, spacing=6
-            )
-            npu_card.add_css_class("luminos-power-card")
-            npu_card.set_margin_top(4)
-            npu_card.set_margin_bottom(4)
-
-            npu_title = Gtk.Label(
-                label="AMD XDNA NPU" if self._state.npu_detected else "NPU"
-            )
-            npu_title.add_css_class("luminos-power-card-name")
-            npu_title.set_halign(Gtk.Align.START)
-            npu_card.append(npu_title)
-
-            if self._state.npu_detected:
-                npu_body = (
-                    "Detected — Sentinel + Classifier will run at ~5W, always on."
-                )
-            else:
-                npu_body = (
-                    "Not detected — AI classification will use CPU (slower)."
-                )
-            npu_desc = Gtk.Label(label=npu_body)
-            npu_desc.add_css_class("luminos-qs-dim")
-            npu_desc.set_wrap(True)
-            npu_desc.set_halign(Gtk.Align.START)
-            npu_card.append(npu_desc)
-            self.append(npu_card)
-
-            self.append(Gtk.Separator())
-
-            # HIVE toggle
-            hive_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=0
-            )
-            hive_row.set_hexpand(True)
-
-            hive_text = "Enable HIVE AI models (requires 4 GB+ VRAM)"
-            if self._state.nvidia_detected:
-                hive_text += " ✓"
-            hive_lbl = Gtk.Label(label=hive_text)
-            hive_lbl.set_hexpand(True)
-            hive_lbl.set_halign(Gtk.Align.START)
-
-            self._hive_switch = Gtk.Switch()
-            self._hive_switch.set_active(self._state.hive_enabled)
-            self._hive_switch.set_sensitive(self._state.nvidia_detected)
-            self._hive_switch.connect("state-set", self._on_hive)
-            hive_row.append(hive_lbl)
-            hive_row.append(self._hive_switch)
-            self.append(hive_row)
-
-            note = Gtk.Label(
-                label="AI models load on demand — zero VRAM usage when idle."
-            )
-            note.add_css_class("luminos-qs-dim")
-            note.set_halign(Gtk.Align.START)
-            self.append(note)
-
-        def _on_hive(self, _sw, state: bool) -> bool:
-            self._state.hive_enabled = state
-            return False
-
-    # -----------------------------------------------------------------------
-    # DoneStep
-    # -----------------------------------------------------------------------
-
-    class DoneStep(Gtk.Box):
-        """Step 8 — Completion screen with summary and launch button."""
-
-        @staticmethod
-        def _build_summary(state: SetupState) -> str:
-            return _build_summary(state)
-
-        def __init__(self, state: SetupState, on_launch):
-            super().__init__(
-                orientation=Gtk.Orientation.VERTICAL, spacing=20
-            )
-            self.set_halign(Gtk.Align.CENTER)
-            self.set_valign(Gtk.Align.CENTER)
-            self._state = state
-            self._build(on_launch)
-
-        def _build(self, on_launch):
-            # Checkmark
-            check = Gtk.Label(label="✓")
-            check.add_css_class("luminos-firstrun-checkmark")
-            self.append(check)
+            self.set_hexpand(True)
+            self.set_vexpand(True)
+            self.set_size_request(540, -1)
 
             # Title
-            name_str = self._state.username or "there"
-            title = Gtk.Label(label=f"You're all set, {name_str}!")
-            title.add_css_class("luminos-firstrun-subtitle")
+            title = Gtk.Label(label="Make it yours")
+            title.add_css_class("fr-title")
+            title.set_halign(Gtk.Align.START)
+            title.set_margin_bottom(SPACE_2)
             self.append(title)
 
-            # Summary
-            summary_text = _build_summary(self._state)
-            summary_lbl = Gtk.Label(label=summary_text)
-            summary_lbl.add_css_class("luminos-qs-dim")
-            summary_lbl.set_halign(Gtk.Align.START)
-            summary_lbl.set_selectable(True)
-            self.append(summary_lbl)
+            # 3×2 grid
+            grid = Gtk.Grid()
+            grid.set_row_spacing(SPACE_4)
+            grid.set_column_spacing(SPACE_4)
+            grid.set_hexpand(True)
+            self.append(grid)
 
-            # Launch button
-            btn = Gtk.Button(label="Launch Luminos →")
-            btn.add_css_class("luminos-firstrun-cta")
-            btn.set_halign(Gtk.Align.CENTER)
-            btn.connect("clicked", lambda *_: on_launch())
-            self.append(btn)
+            for i, item in enumerate(_WALLPAPER_ITEMS):
+                col = i % 3
+                row = i // 3
+                card = self._make_thumb(i, item)
+                grid.attach(card, col, row, 1, 1)
+
+            # Skip link
+            skip_btn = Gtk.Button(label="Skip — I'll choose later")
+            skip_btn.add_css_class("fr-skip")
+            skip_btn.set_halign(Gtk.Align.START)
+            skip_btn.connect("clicked", self._on_skip)
+            self.append(skip_btn)
+
+        def _make_thumb(self, idx: int, item: dict) -> Gtk.Box:
+            """Build one thumbnail card (colored box + label)."""
+            outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE_2)
+            outer.set_hexpand(True)
+
+            # Frame for border selection
+            frame = Gtk.Frame()
+            frame.add_css_class("fr-thumb")
+            if idx == self._selected:
+                frame.add_css_class("fr-thumb-selected")
+            self._thumb_frames.append(frame)
+
+            # Colored drawing area as preview
+            da = Gtk.DrawingArea()
+            da.set_size_request(160, 100)
+            da.set_hexpand(True)
+
+            # Parse color for Cairo
+            color_hex = item["color"].lstrip("#")
+            r = int(color_hex[0:2], 16) / 255
+            g = int(color_hex[2:4], 16) / 255
+            b = int(color_hex[4:6], 16) / 255
+
+            badge = _TYPE_BADGE.get(item["type"], "")
+            label_text = item["label"]
+
+            def draw_fn(widget, cr, w, h, _r=r, _g=g, _b=b, _badge=badge, _label=label_text):
+                # Background
+                cr.set_source_rgb(_r, _g, _b)
+                cr.rectangle(0, 0, w, h)
+                cr.fill()
+                # Badge icon (video/live indicator)
+                if _badge:
+                    cr.set_source_rgba(1, 1, 1, 0.6)
+                    cr.select_font_face("Inter", 0, 0)
+                    cr.set_font_size(18)
+                    cr.move_to(8, 24)
+                    cr.show_text(_badge)
+                # Label text centered
+                cr.set_source_rgba(1, 1, 1, 0.7)
+                cr.select_font_face("Inter", 0, 0)
+                cr.set_font_size(12)
+                ext = cr.text_extents(_label)
+                cr.move_to((w - ext.width) / 2, h - 10)
+                cr.show_text(_label)
+
+            da.set_draw_func(draw_fn)
+            frame.set_child(da)
+
+            # Click via gesture
+            click = Gtk.GestureClick()
+            click.connect("pressed", lambda *a, i=idx: self._on_select(i))
+            frame.add_controller(click)
+
+            outer.append(frame)
+            return outer
+
+        def _on_select(self, idx: int) -> None:
+            # Update border on previously selected
+            if self._selected >= 0 and self._selected < len(self._thumb_frames):
+                self._thumb_frames[self._selected].remove_css_class("fr-thumb-selected")
+            self._selected = idx
+            self._thumb_frames[idx].add_css_class("fr-thumb-selected")
+
+            # Update state
+            item = _WALLPAPER_ITEMS[idx]
+            self._state.wallpaper_index = idx
+            self._state.wallpaper_type  = item["type"]
+            self._state.wallpaper_value = item["value"]
+
+            # Apply immediately in background
+            self._apply_wallpaper(item)
+
+        def _on_skip(self, *_) -> None:
+            # Clear selection
+            if self._selected >= 0 and self._selected < len(self._thumb_frames):
+                self._thumb_frames[self._selected].remove_css_class("fr-thumb-selected")
+            self._selected = -1
+            self._state.wallpaper_index = -1
+
+        def _apply_wallpaper(self, item: dict) -> None:
+            """Apply selected wallpaper to desktop immediately (best-effort)."""
+            import subprocess
+            try:
+                if item["type"] == "static" and os.path.isfile(item["value"]):
+                    subprocess.Popen(
+                        ["swww", "img", item["value"],
+                         "--transition-type", "fade",
+                         "--transition-duration", "1"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                elif item["type"] == "live":
+                    subprocess.Popen(
+                        ["luminos-live-wallpaper", "--preset", item["value"],
+                         "--intensity", "low"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                elif item["type"] == "video" and os.path.isfile(item["value"]):
+                    subprocess.Popen(
+                        ["mpvpaper", "-o", "loop", "*", item["value"]],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+            except Exception as e:
+                logger.debug(f"Wallpaper apply error: {e}")
 
 
-# ===========================================================================
-# Headless stubs
-# ===========================================================================
+    # =======================================================================
+    # Screen 4 — Ready
+    # =======================================================================
 
-else:
-    class WelcomeStep:  # type: ignore[no-redef]
-        @staticmethod
-        def _get_tagline() -> str:
-            return _get_tagline()
+    class ReadyScreen(Gtk.Box):
+        """
+        Ready screen — animated checkmark + staggered text lines.
+        Checkmark draws itself in via scale animation over 600ms.
+        """
 
-    class HardwareStep:  # type: ignore[no-redef]
-        pass
+        _LINES = [
+            "Your Windows apps open automatically.",
+            "AI runs in the background — not in your face.",
+            "Everything is private. Always.",
+        ]
 
-    class DisplayStep:  # type: ignore[no-redef]
-        pass
+        def __init__(self, on_go_to_desktop):
+            super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE_4)
+            self.set_halign(Gtk.Align.CENTER)
+            self.set_valign(Gtk.Align.CENTER)
+            self.set_hexpand(True)
+            self.set_vexpand(True)
+            self._on_go = on_go_to_desktop
+            self._line_labels: list[Gtk.Label] = []
+            self._build()
 
-    class AccountStep:  # type: ignore[no-redef]
-        @staticmethod
-        def _generate_username(full_name: str) -> str:
-            return _generate_username(full_name)
+        def _build(self):
+            # Checkmark
+            self._check_lbl = Gtk.Label(label="✓")
+            self._check_lbl.add_css_class("fr-checkmark")
+            self._check_lbl.set_halign(Gtk.Align.CENTER)
+            self._check_lbl.set_opacity(0.0)
+            self._check_lbl.set_margin_bottom(SPACE_4)
+            self.append(self._check_lbl)
 
-        @staticmethod
-        def _check_password_strength(pw: str) -> str:
-            return _check_password_strength(pw)
+            # Title
+            self._title_lbl = Gtk.Label(label="You're ready.")
+            self._title_lbl.add_css_class("fr-ready-title")
+            self._title_lbl.set_halign(Gtk.Align.CENTER)
+            self._title_lbl.set_opacity(0.0)
+            self._title_lbl.set_margin_bottom(SPACE_4)
+            self.append(self._title_lbl)
 
-        @staticmethod
-        def _validate_account(full_name, username, password, confirm):
-            return _validate_account(full_name, username, password, confirm)
+            # Three lines
+            for line in self._LINES:
+                lbl = Gtk.Label(label=line)
+                lbl.add_css_class("fr-ready-line")
+                lbl.set_halign(Gtk.Align.CENTER)
+                lbl.set_opacity(0.0)
+                self._line_labels.append(lbl)
+                self.append(lbl)
 
-    class AppearanceStep:  # type: ignore[no-redef]
-        pass
+            # Go to Desktop button
+            self._go_btn = Gtk.Button(label="Go to Desktop")
+            self._go_btn.add_css_class("fr-btn-primary")
+            self._go_btn.set_halign(Gtk.Align.CENTER)
+            self._go_btn.set_opacity(0.0)
+            self._go_btn.set_margin_top(SPACE_6)
+            self._go_btn.connect("clicked", lambda *_: self._on_go())
+            self.append(self._go_btn)
 
-    class PrivacyStep:  # type: ignore[no-redef]
-        pass
+        def start_animations(self):
+            """Call when this screen becomes visible to start animations."""
+            # Checkmark fades+scales in over 600ms
+            GLib.timeout_add(50,  self._fade_in, self._check_lbl)
+            GLib.timeout_add(200, self._fade_in, self._title_lbl)
+            # Three lines staggered: 400, 600, 800ms
+            for i, lbl in enumerate(self._line_labels):
+                GLib.timeout_add(400 + i * 200, self._fade_in, lbl)
+            GLib.timeout_add(1200, self._fade_in, self._go_btn)
 
-    class AISetupStep:  # type: ignore[no-redef]
-        pass
-
-    class DoneStep:  # type: ignore[no-redef]
-        @staticmethod
-        def _build_summary(state: SetupState) -> str:
-            return _build_summary(state)
+        def _fade_in(self, widget: Gtk.Widget) -> bool:
+            """Smooth fade-in using GLib timer steps."""
+            current = widget.get_opacity()
+            if current >= 1.0:
+                widget.set_opacity(1.0)
+                return GLib.SOURCE_REMOVE
+            widget.set_opacity(min(current + 0.08, 1.0))
+            return GLib.SOURCE_CONTINUE

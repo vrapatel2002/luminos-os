@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-LUMINOS_FLAG="${HOME}/.config/luminos/.setup_complete"
+LUMINOS_FLAG="${HOME}/.config/luminos/first_run_complete"
 LUMINOS_SOCK="/run/luminos/ai.sock"
 SRC_DIR="$(dirname "$(readlink -f "$0")")/../src"
 

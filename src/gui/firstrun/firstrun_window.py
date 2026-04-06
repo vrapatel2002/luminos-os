@@ -1,16 +1,20 @@
 """
 src/gui/firstrun/firstrun_window.py
-FirstRunWindow — full-screen macOS Setup Assistant style wizard.
+Phase 5.9 — First Run Experience window.
+
+Four screens: welcome → account → wallpaper → ready
+Transitions:  forward = slide-left 300ms, back = slide-right
+Progress:     4 dots at bottom, current highlighted in ACCENT
+Close:        not allowed until "Go to Desktop" is pressed
 
 Architecture:
-- Gtk.Window, no decoration, fullscreen.
+- Gtk.Window, fullscreen, no decoration.
 - Layer-shell OVERLAY when available (Wayland).
-- Progress dots at top: 8 dots for 8 steps.
-- Gtk.Stack with fade transitions (200ms) for step content.
-- Bottom nav: ← Back | Continue →
-- Back hidden on step 1. Continue disabled until step is valid.
-- Can NOT skip the Hardware Detection step (info-only, always passes).
-- _validate_step() is the gate — headless-testable.
+- Gtk.Stack with SLIDE_LEFT/SLIDE_RIGHT transitions.
+- Bottom nav: Back (secondary) on left, Continue (primary) on right.
+- Screen 1: no back, no skip.
+- Screen 4: no back, "Go to Desktop" instead of Continue.
+- On completion: create ~/.config/luminos/first_run_complete, launch desktop.
 """
 
 import logging
@@ -18,7 +22,7 @@ import os
 import subprocess
 import sys
 
-logger = logging.getLogger("luminos-ai.gui.firstrun.window")
+logger = logging.getLogger("luminos.firstrun.window")
 
 try:
     import gi
@@ -42,63 +46,58 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from gui.firstrun.firstrun_state import (
-    SetupState, SETUP_STEPS,
-    save_setup_state, mark_setup_complete,
+    FirstRunState, SCREENS,
+    is_complete, mark_complete, save_state, load_state,
 )
-from gui.theme import mode, generate_css
+from gui.firstrun.step_widgets import (
+    FIRSTRUN_CSS,
+    WelcomeScreen, AccountScreen, WallpaperScreen, ReadyScreen,
+    validate_account,
+)
 
 
 # ===========================================================================
-# Pure validation — testable without GTK
+# Validation — headless testable
 # ===========================================================================
 
-def _validate_step(step: str, state: SetupState) -> tuple:
+def check_can_advance(screen: str, state: FirstRunState,
+                      account_ref=None) -> tuple:
     """
-    Validate a step before advancing.
+    Return (can_advance: bool, error_msg: str) for a given screen.
 
     Args:
-        step:  Current step ID string.
-        state: Current SetupState.
+        screen:      Current screen ID.
+        state:       Current FirstRunState.
+        account_ref: AccountScreen widget reference (may be None).
 
     Returns:
-        (valid: bool, error_msg: str)
+        (True, "") if can advance, (False, error_msg) otherwise.
     """
-    # Hardware is info-only — cannot be skipped but always passes
-    if step in ("welcome", "hardware", "display",
-                "appearance", "privacy", "ai_setup", "done"):
+    if screen in ("welcome", "wallpaper", "ready"):
         return (True, "")
 
-    if step == "account":
-        from gui.firstrun.step_widgets import _validate_account
-        return _validate_account(
-            state.username,   # full_name stored during typing
-            state.username,
-            state.password,
-            state.password,   # confirmation checked in widget
-        )
+    if screen == "account":
+        if account_ref is not None:
+            name, pw, confirm = account_ref.collect()
+        else:
+            name, pw, confirm = state.username, state.password, state.password
+        return validate_account(name, pw, confirm)
 
     return (True, "")
 
 
 # ===========================================================================
-# GTK Window
+# Window
 # ===========================================================================
 
 if _GTK_AVAILABLE:
-    from gui.firstrun.step_widgets import (
-        WelcomeStep, HardwareStep, DisplayStep, AccountStep,
-        AppearanceStep, PrivacyStep, AISetupStep, DoneStep,
-    )
 
-    _DOT_SIZE    = 10
-    _DOT_GAP     = 8
-    _MAX_CONTENT = 640
+    _DOT_COUNT = len(SCREENS)
 
     class FirstRunWindow(Gtk.Window):
         """
-        Full-screen first-run wizard window.
-
-        Cannot be closed by the user until setup is completed.
+        Full-screen first-run wizard — 4 screens, slide transitions.
+        Cannot be closed by the user until "Go to Desktop" is pressed.
         """
 
         def __init__(self):
@@ -106,270 +105,279 @@ if _GTK_AVAILABLE:
             self.set_decorated(False)
             self.set_resizable(False)
             self.fullscreen()
-            self.add_css_class("luminos-firstrun")
 
-            # Theme CSS
-            css_provider = Gtk.CssProvider()
-            css_provider.load_from_string(generate_css(mode.get_mode()))
+            # Block close until done
+            self.connect("close-request", self._block_close)
+
+            # Apply CSS
+            css = Gtk.CssProvider()
+            css.load_from_string(FIRSTRUN_CSS)
             Gtk.StyleContext.add_provider_for_display(
-                self.get_display(),
-                css_provider,
+                self.get_display(), css,
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
             )
 
-            # Layer-shell
+            # Layer-shell — OVERLAY so it sits above everything
             if _LAYER_SHELL_AVAILABLE:
                 LayerShell.init_for_window(self)
                 LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
                 LayerShell.set_keyboard_mode(
                     self, LayerShell.KeyboardMode.ON_DEMAND
                 )
-                LayerShell.set_anchor(self, LayerShell.Edge.TOP,    True)
-                LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, True)
-                LayerShell.set_anchor(self, LayerShell.Edge.LEFT,   True)
-                LayerShell.set_anchor(self, LayerShell.Edge.RIGHT,  True)
+                for edge in (
+                    LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM,
+                    LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT,
+                ):
+                    LayerShell.set_anchor(self, edge, True)
 
-            self.state = SetupState()
-            self._step_cache: dict[str, Gtk.Widget] = {}
-            self._account_step_ref = None   # keep reference for validation
-            self._build()
-            self._show_step("welcome")
+            self.state = FirstRunState()
+            self._screen_cache: dict[str, Gtk.Widget] = {}
+            self._account_ref = None   # AccountScreen ref for validation
+            self._done = False
+
+            self._build_ui()
+            self._show_screen("welcome")
 
         # -------------------------------------------------------------------
         # Layout
         # -------------------------------------------------------------------
 
-        def _build(self):
+        def _build_ui(self):
             root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            root.add_css_class("fr-root")
+            root.set_hexpand(True)
+            root.set_vexpand(True)
             self.set_child(root)
 
-            # Progress dots
-            self._dots_box = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL,
-                spacing=_DOT_GAP
-            )
-            self._dots_box.set_halign(Gtk.Align.CENTER)
-            self._dots_box.set_margin_top(20)
-            self._dots_box.set_margin_bottom(8)
-            root.append(self._dots_box)
-
-            self._dot_labels: list[Gtk.Label] = []
-            for _ in SETUP_STEPS:
-                dot = Gtk.Label(label="●")
-                dot.set_size_request(_DOT_SIZE, _DOT_SIZE)
-                dot.add_css_class("luminos-firstrun-dot-future")
-                self._dots_box.append(dot)
-                self._dot_labels.append(dot)
-
-            # Content area (centered, max width)
-            content_outer = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL
-            )
-            content_outer.set_hexpand(True)
-            content_outer.set_vexpand(True)
-
-            content_center = Gtk.Box(
-                orientation=Gtk.Orientation.VERTICAL
-            )
-            content_center.set_hexpand(True)
-            content_center.set_vexpand(True)
-            content_center.set_halign(Gtk.Align.CENTER)
-            content_center.set_size_request(_MAX_CONTENT, -1)
-            content_outer.append(content_center)
-            root.append(content_outer)
-
-            # Stack
+            # Content stack (takes all space above nav)
             self._stack = Gtk.Stack()
-            self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-            self._stack.set_transition_duration(200)
+            self._stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
+            self._stack.set_transition_duration(300)
             self._stack.set_hexpand(True)
             self._stack.set_vexpand(True)
-            content_center.append(self._stack)
+            root.append(self._stack)
 
-            # Bottom navigation
-            nav_box = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=0
+            # Bottom area: progress dots + nav buttons
+            bottom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE_4)
+            bottom.set_margin_start(40)
+            bottom.set_margin_end(40)
+            bottom.set_margin_bottom(32)
+            bottom.set_margin_top(16)
+            root.append(bottom)
+
+            # Progress dots (4 dots, centered)
+            self._dots_box = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8
             )
-            nav_box.set_margin_top(16)
-            nav_box.set_margin_bottom(24)
-            nav_box.set_margin_start(32)
-            nav_box.set_margin_end(32)
-            nav_box.set_hexpand(True)
+            self._dots_box.set_halign(Gtk.Align.CENTER)
+            self._dot_labels: list[Gtk.Label] = []
+            for _ in range(_DOT_COUNT):
+                dot = Gtk.Label(label="●")
+                dot.add_css_class("fr-dot")
+                self._dots_box.append(dot)
+                self._dot_labels.append(dot)
+            bottom.append(self._dots_box)
+
+            # Nav row: back (left) | error (center) | continue (right)
+            nav = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+            nav.set_hexpand(True)
+            bottom.append(nav)
 
             self._back_btn = Gtk.Button(label="← Back")
-            self._back_btn.add_css_class("luminos-btn")
+            self._back_btn.add_css_class("fr-btn-secondary")
             self._back_btn.set_visible(False)
             self._back_btn.connect("clicked", self._on_back)
-            nav_box.append(self._back_btn)
+            nav.append(self._back_btn)
 
             spacer = Gtk.Box()
             spacer.set_hexpand(True)
-            nav_box.append(spacer)
+            nav.append(spacer)
 
             self._error_lbl = Gtk.Label(label="")
-            self._error_lbl.add_css_class("luminos-firstrun-warn")
-            nav_box.append(self._error_lbl)
+            self._error_lbl.add_css_class("fr-error")
+            self._error_lbl.set_halign(Gtk.Align.CENTER)
+            self._error_lbl.set_hexpand(True)
+            nav.append(self._error_lbl)
 
-            self._continue_btn = Gtk.Button(label="Continue →")
-            self._continue_btn.add_css_class("luminos-btn-accent")
+            spacer2 = Gtk.Box()
+            spacer2.set_hexpand(True)
+            nav.append(spacer2)
+
+            self._continue_btn = Gtk.Button(label="Continue")
+            self._continue_btn.add_css_class("fr-btn-primary")
             self._continue_btn.connect("clicked", self._on_continue)
-            nav_box.append(self._continue_btn)
-
-            root.append(nav_box)
+            nav.append(self._continue_btn)
 
         # -------------------------------------------------------------------
-        # Step navigation
+        # Screen navigation
         # -------------------------------------------------------------------
 
-        def _show_step(self, step_id: str):
-            if step_id not in SETUP_STEPS:
+        def _show_screen(self, screen_id: str):
+            if screen_id not in SCREENS:
                 return
 
-            self.state.current_step = step_id
-            idx = SETUP_STEPS.index(step_id)
+            self.state.current_screen = screen_id
+            idx = SCREENS.index(screen_id)
 
             # Build widget if not cached
-            if step_id not in self._step_cache:
-                widget = self._make_step_widget(step_id)
-                scroll = Gtk.ScrolledWindow()
-                scroll.set_policy(
-                    Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC
-                )
-                scroll.set_child(widget)
-                self._stack.add_named(scroll, step_id)
-                self._step_cache[step_id] = scroll
+            if screen_id not in self._screen_cache:
+                widget = self._make_screen(screen_id)
+                self._stack.add_named(widget, screen_id)
+                self._screen_cache[screen_id] = widget
 
-            self._stack.set_visible_child_name(step_id)
+            self._stack.set_visible_child_name(screen_id)
 
-            # Progress dots
+            # Fire ready-screen animations
+            if screen_id == "ready":
+                w = self._screen_cache["ready"]
+                if isinstance(w, ReadyScreen):
+                    w.start_animations()
+
+            # Update dots
             for i, dot in enumerate(self._dot_labels):
-                dot.remove_css_class("luminos-firstrun-dot-done")
-                dot.remove_css_class("luminos-firstrun-dot-current")
-                dot.remove_css_class("luminos-firstrun-dot-future")
+                dot.remove_css_class("fr-dot")
+                dot.remove_css_class("fr-dot-current")
+                dot.remove_css_class("fr-dot-done")
                 if i < idx:
-                    dot.add_css_class("luminos-firstrun-dot-done")
+                    dot.add_css_class("fr-dot-done")
                 elif i == idx:
-                    dot.add_css_class("luminos-firstrun-dot-current")
+                    dot.add_css_class("fr-dot-current")
                 else:
-                    dot.add_css_class("luminos-firstrun-dot-future")
+                    dot.add_css_class("fr-dot")
 
-            # Nav button visibility
-            self._back_btn.set_visible(idx > 0)
-            is_last = step_id == SETUP_STEPS[-1]
-            self._continue_btn.set_visible(not is_last)
+            # Nav visibility
+            is_welcome = screen_id == "welcome"
+            is_ready   = screen_id == "ready"
+
+            self._back_btn.set_visible(not is_welcome and not is_ready)
+            self._continue_btn.set_visible(not is_ready)
             self._error_lbl.set_text("")
 
-        def _make_step_widget(self, step_id: str) -> Gtk.Widget:
-            if step_id == "welcome":
-                return WelcomeStep(on_continue=self._on_continue)
-            if step_id == "hardware":
-                return HardwareStep(self.state, on_continue=self._on_continue)
-            if step_id == "display":
-                return DisplayStep(self.state)
-            if step_id == "account":
-                w = AccountStep(self.state)
-                self._account_step_ref = w
+        def _make_screen(self, screen_id: str) -> Gtk.Widget:
+            if screen_id == "welcome":
+                return WelcomeScreen(on_get_started=self._on_continue)
+            if screen_id == "account":
+                w = AccountScreen(self.state)
+                self._account_ref = w
                 return w
-            if step_id == "appearance":
-                return AppearanceStep(self.state)
-            if step_id == "privacy":
-                return PrivacyStep(self.state)
-            if step_id == "ai_setup":
-                return AISetupStep(self.state)
-            if step_id == "done":
-                return DoneStep(self.state, on_launch=self.apply_all_settings)
-            return Gtk.Label(label=f"Step: {step_id}")
+            if screen_id == "wallpaper":
+                return WallpaperScreen(self.state)
+            if screen_id == "ready":
+                return ReadyScreen(on_go_to_desktop=self._on_complete)
+            return Gtk.Label(label=screen_id)
 
         def _on_continue(self, *_):
-            step = self.state.current_step
-            idx  = SETUP_STEPS.index(step)
+            screen = self.state.current_screen
+            idx    = SCREENS.index(screen)
 
-            # Collect account fields if on account step
-            if step == "account" and self._account_step_ref:
-                name, user, pw, confirm = self._account_step_ref.collect()
-                self.state.username = user
-                self.state.password = pw
-                valid, msg = _validate_step_account(name, user, pw, confirm)
+            # Collect + validate account screen
+            if screen == "account" and self._account_ref:
+                name, pw, confirm = self._account_ref.collect()
+                valid, msg = validate_account(name, pw, confirm)
                 if not valid:
                     self._error_lbl.set_text(msg)
-                    if hasattr(self._account_step_ref, "show_error"):
-                        self._account_step_ref.show_error(msg)
+                    self._account_ref.show_error(msg)
                     return
-                if hasattr(self._account_step_ref, "clear_error"):
-                    self._account_step_ref.clear_error()
+                self._account_ref.clear_error()
+                self.state.username = name
+                self.state.password = pw
             else:
-                valid, msg = (True, "")
+                valid = True
 
-            if not valid:
-                self._error_lbl.set_text(msg)
-                return
+            self._error_lbl.set_text("")
+            save_state(self.state)
 
-            # Mark step done
-            if step not in self.state.completed_steps:
-                self.state.completed_steps.append(step)
-            save_setup_state(self.state)
-
-            # Advance
-            if idx + 1 < len(SETUP_STEPS):
-                self._show_step(SETUP_STEPS[idx + 1])
+            # Slide to next screen
+            if idx + 1 < len(SCREENS):
+                self._stack.set_transition_type(
+                    Gtk.StackTransitionType.SLIDE_LEFT
+                )
+                self._show_screen(SCREENS[idx + 1])
 
         def _on_back(self, *_):
-            step = self.state.current_step
-            idx  = SETUP_STEPS.index(step)
+            screen = self.state.current_screen
+            idx    = SCREENS.index(screen)
             if idx > 0:
-                self._show_step(SETUP_STEPS[idx - 1])
+                self._stack.set_transition_type(
+                    Gtk.StackTransitionType.SLIDE_RIGHT
+                )
+                self._show_screen(SCREENS[idx - 1])
 
         # -------------------------------------------------------------------
         # Completion
         # -------------------------------------------------------------------
 
-        def apply_all_settings(self):
-            """Apply all collected settings and launch the desktop."""
-            # Theme
-            try:
-                if self.state.dark_mode == "dark":
-                    mode.set_manual(True)
-                elif self.state.dark_mode == "light":
-                    mode.set_manual(False)
-                else:
-                    mode.set_auto()
-            except Exception as e:
-                logger.debug(f"Theme apply error: {e}")
+        def _on_complete(self):
+            """Called by ReadyScreen 'Go to Desktop' button."""
+            self._done = True
 
-            # Brightness
-            try:
-                from gui.quick_settings.brightness_ctrl import set_brightness
-                set_brightness(self.state.brightness)
-            except Exception as e:
-                logger.debug(f"Brightness apply error: {e}")
+            # Apply chosen wallpaper permanently
+            self._apply_wallpaper_permanent()
 
-            # Create user account (best-effort via pkexec)
-            if self.state.username:
-                try:
+            # Save username/password
+            self._create_user()
+
+            # Write completion flag
+            mark_complete()
+            save_state(self.state)
+
+            # Fade out wizard, start desktop
+            self._fade_out_and_launch()
+
+        def _apply_wallpaper_permanent(self):
+            """Save wallpaper config so session script can apply it."""
+            if not self.state.wallpaper_value:
+                return
+            try:
+                from gui.wallpaper.wallpaper_config import save_config
+                wp_type = self.state.wallpaper_type
+                wp_val  = self.state.wallpaper_value
+                if wp_type == "static":
+                    save_config({"type": "image", "value": wp_val})
+                elif wp_type == "video":
+                    save_config({"type": "video", "value": wp_val})
+                elif wp_type == "live":
+                    save_config({"type": "live", "value": wp_val})
+            except Exception as e:
+                logger.debug(f"Wallpaper save error: {e}")
+
+        def _create_user(self):
+            """Create OS user account if name was provided (best-effort)."""
+            if not self.state.username:
+                return
+            try:
+                subprocess.run(
+                    ["pkexec", "useradd", "-m", self.state.username],
+                    timeout=10, check=False,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                if self.state.password:
+                    inp = f"{self.state.username}:{self.state.password}\n"
                     subprocess.run(
-                        ["pkexec", "useradd", "-m", self.state.username],
-                        timeout=10, check=False,
+                        ["pkexec", "chpasswd"],
+                        input=inp.encode(), timeout=10, check=False,
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     )
-                    if self.state.password:
-                        inp = f"{self.state.username}:{self.state.password}\n"
-                        subprocess.run(
-                            ["pkexec", "chpasswd"],
-                            input=inp.encode(), timeout=10, check=False,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        )
-                except Exception as e:
-                    logger.debug(f"useradd error (may need root): {e}")
+            except Exception as e:
+                logger.debug(f"User creation error: {e}")
 
-            # Save config
-            save_setup_state(self.state)
-            mark_setup_complete()
+        def _fade_out_and_launch(self):
+            """Fade out this window then launch desktop components."""
+            self._fade_opacity = 1.0
+            GLib.timeout_add(16, self._fade_step)
 
-            # Launch desktop components
-            for cmd in (
-                ["luminos-bar"],
-                ["luminos-dock"],
-            ):
+        def _fade_step(self) -> bool:
+            self._fade_opacity -= 0.06
+            if self._fade_opacity <= 0.0:
+                self.set_opacity(0.0)
+                self._launch_desktop()
+                self.close()
+                return GLib.SOURCE_REMOVE
+            self.set_opacity(self._fade_opacity)
+            return GLib.SOURCE_CONTINUE
+
+        def _launch_desktop(self):
+            for cmd in (["luminos-bar"], ["luminos-dock"]):
                 try:
                     subprocess.Popen(cmd)
                 except FileNotFoundError:
@@ -377,9 +385,13 @@ if _GTK_AVAILABLE:
                 except Exception as e:
                     logger.debug(f"Launch {cmd[0]} error: {e}")
 
-            self.close()
+        def _block_close(self, *_) -> bool:
+            """Prevent window close until setup is done."""
+            return not self._done
 
 
-def _validate_step_account(full_name, username, password, confirm):
-    from gui.firstrun.step_widgets import _validate_account
-    return _validate_account(full_name, username, password, confirm)
+# Spacing constant used in _build_ui (imported after module-level constants)
+try:
+    from gui.theme import SPACE_4
+except ImportError:
+    SPACE_4 = 16
