@@ -203,7 +203,7 @@ class TestZonesPanelHelpers(unittest.TestCase):
                 ok = _save_zone_override("myapp", 2)
                 self.assertTrue(ok)
                 loaded = _load_zone_overrides()
-            self.assertEqual(loaded.get("myapp"), 2)
+            self.assertEqual(str(loaded.get("myapp")), "2")
 
 
 # ===========================================================================

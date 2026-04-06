@@ -19,7 +19,7 @@ logger = logging.getLogger("luminos-ai.gui.settings.zones")
 try:
     import gi
     gi.require_version("Gtk", "4.0")
-    from gi.repository import Gtk, GLib
+    from gi.repository import Gtk, GLib, Gio
     _GTK_AVAILABLE = True
 except (ImportError, ValueError):
     _GTK_AVAILABLE = False
@@ -28,7 +28,7 @@ _SRC = os.path.join(os.path.dirname(__file__), "..", "..", "..")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-_OVERRIDES_PATH = os.path.expanduser("~/.config/luminos/zones.json")
+_OVERRIDES_PATH = os.path.expanduser("~/.config/luminos/app_overrides.json")
 
 from gui.theme.luminos_theme import (
     BG_ELEVATED, BG_OVERLAY,
@@ -80,20 +80,20 @@ def _load_zone_overrides() -> dict:
     return {}
 
 
-def _save_zone_override(app_name: str, zone: int) -> bool:
+def _save_zone_override(app_name: str, layer) -> bool:
     """
-    Save a per-app zone override to the config file.
+    Save a per-app layer override to ~/.config/luminos/app_overrides.json.
 
     Args:
-        app_name: Application name or binary.
-        zone: Target zone (1, 2, or 3).
+        app_name: Application .exe basename (e.g. "notepad.exe").
+        layer:    Layer string (proton/wine/firecracker/kvm) or int (legacy).
 
     Returns:
         True on success, False on error.
     """
     try:
         overrides = _load_zone_overrides()
-        overrides[app_name] = zone
+        overrides[app_name] = str(layer)
         os.makedirs(os.path.dirname(_OVERRIDES_PATH), exist_ok=True)
         with open(_OVERRIDES_PATH, "w", encoding="utf-8") as f:
             json.dump(overrides, f, indent=2)
@@ -294,13 +294,21 @@ if _GTK_AVAILABLE:
             cache_lbl.set_margin_top(SPACE_2)
             self.append(cache_lbl)
 
-            # Clear cache button
+            # Button row: Clear Cache + View Log
+            btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_3)
+            btn_row.set_margin_top(SPACE_3)
+
             clear_btn = Gtk.Button(label="Clear Cache")
             clear_btn.add_css_class("luminos-btn-secondary")
-            clear_btn.set_halign(Gtk.Align.START)
-            clear_btn.set_margin_top(SPACE_3)
             clear_btn.connect("clicked", self._on_clear_cache)
-            self.append(clear_btn)
+            btn_row.append(clear_btn)
+
+            log_btn = Gtk.Button(label="View Log")
+            log_btn.add_css_class("luminos-btn-secondary")
+            log_btn.connect("clicked", self._on_view_log)
+            btn_row.append(log_btn)
+
+            self.append(btn_row)
 
         def _build_recent_section(self):
             sec_title = Gtk.Label(label="Recent")
@@ -392,33 +400,55 @@ if _GTK_AVAILABLE:
                 self._overrides_box.append(row)
 
         def _on_add_override(self, _btn):
-            dialog = Gtk.Dialog(
-                title="Add App Override",
+            # File picker for .exe
+            file_dialog = Gtk.FileDialog()
+            file_dialog.set_title("Select Windows Application")
+
+            exe_filter = Gtk.FileFilter()
+            exe_filter.set_name("Windows Executables")
+            exe_filter.add_pattern("*.exe")
+            exe_filter.add_pattern("*.EXE")
+
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(exe_filter)
+            file_dialog.set_filters(filters)
+
+            file_dialog.open(self.get_root(), None, self._on_exe_picked)
+
+        def _on_exe_picked(self, dialog, result):
+            try:
+                file = dialog.open_finish(result)
+                if file is None:
+                    return
+                exe_path = file.get_path()
+            except Exception:
+                return
+
+            # Now ask which layer
+            self._show_layer_dialog(exe_path)
+
+        def _show_layer_dialog(self, exe_path: str):
+            layer_dialog = Gtk.Dialog(
+                title="Choose Compatibility Layer",
                 transient_for=self.get_root(),
             )
-            dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
-            dialog.add_button("Add", Gtk.ResponseType.OK)
+            layer_dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+            layer_dialog.add_button("Save", Gtk.ResponseType.OK)
 
-            content = dialog.get_content_area()
+            content = layer_dialog.get_content_area()
             content.set_margin_top(SPACE_6)
             content.set_margin_bottom(SPACE_6)
             content.set_margin_start(SPACE_6)
             content.set_margin_end(SPACE_6)
             content.set_spacing(SPACE_4)
 
-            # App name
-            app_lbl = Gtk.Label(label="Application (.exe path)")
+            app_lbl = Gtk.Label(label=os.path.basename(exe_path))
             app_lbl.add_css_class("luminos-setting-label")
             app_lbl.set_halign(Gtk.Align.START)
             content.append(app_lbl)
 
-            app_entry = Gtk.Entry()
-            app_entry.set_placeholder_text("e.g. notepad.exe")
-            content.append(app_entry)
-
-            # Layer selector
             layer_lbl = Gtk.Label(label="Layer")
-            layer_lbl.add_css_class("luminos-setting-label")
+            layer_lbl.add_css_class("luminos-setting-sublabel")
             layer_lbl.set_halign(Gtk.Align.START)
             content.append(layer_lbl)
 
@@ -427,18 +457,19 @@ if _GTK_AVAILABLE:
             layer_combo.set_selected(0)
             content.append(layer_combo)
 
-            dialog.connect(
-                "response", self._on_override_response, app_entry, layer_combo
+            layer_dialog.connect(
+                "response", self._on_layer_dialog_response, exe_path, layer_combo
             )
-            dialog.present()
+            layer_dialog.present()
 
-        def _on_override_response(self, dialog, response, app_entry, layer_combo):
+        def _on_layer_dialog_response(self, dialog, response, exe_path, layer_combo):
             if response == Gtk.ResponseType.OK:
-                app = app_entry.get_text().strip()
-                layer_map = {0: 0, 1: 1, 2: 1, 3: 2, 4: 3}
-                zone = layer_map.get(layer_combo.get_selected(), 0)
-                if app and zone > 0:
-                    _save_zone_override(app, zone)
+                layer_map = {0: "auto", 1: "proton", 2: "wine",
+                             3: "firecracker", 4: "kvm"}
+                layer = layer_map.get(layer_combo.get_selected(), "auto")
+                if layer != "auto":
+                    app_name = os.path.basename(exe_path)
+                    _save_zone_override(app_name, layer)
                     self._refresh_overrides()
             dialog.close()
 
@@ -454,7 +485,19 @@ if _GTK_AVAILABLE:
             self._refresh_overrides()
 
         def _on_clear_cache(self, _btn):
-            logger.debug("Router cache cleared")
+            try:
+                from classifier.cache import clear_cache
+                clear_cache()
+                logger.debug("Router cache cleared")
+            except Exception as e:
+                logger.debug(f"Cache clear error: {e}")
+
+        def _on_view_log(self, _btn):
+            try:
+                from gui.compat_log_viewer import open_compat_log_viewer
+                open_compat_log_viewer(parent=self.get_root())
+            except Exception as e:
+                logger.warning(f"Could not open log viewer: {e}")
 
 else:
     class ZonesPanel:  # type: ignore[no-redef]
