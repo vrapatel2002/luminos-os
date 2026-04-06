@@ -114,7 +114,8 @@ if _GTK_AVAILABLE:
 
         def _build(self):
             self.set_halign(Gtk.Align.CENTER)
-            self.set_size_request(80, -1)
+            self.set_size_request(96, -1)
+            self.add_css_class("luminos-launcher-item")
 
             # Icon overlay (badge sits bottom-right)
             overlay = Gtk.Overlay()
@@ -132,13 +133,14 @@ if _GTK_AVAILABLE:
             # Zone badge
             if self.zone == 2:
                 badge = Gtk.Label(label="W")
-                badge.add_css_class("zone-badge-2")
+                badge.add_css_class("luminos-launcher-zone-badge")
                 badge.set_halign(Gtk.Align.END)
                 badge.set_valign(Gtk.Align.END)
                 overlay.add_overlay(badge)
             elif self.zone == 3:
                 badge = Gtk.Label(label="⚠")
-                badge.add_css_class("zone-badge-3")
+                badge.add_css_class("luminos-launcher-zone-badge")
+                badge.add_css_class("luminos-launcher-zone-badge-warn")
                 badge.set_halign(Gtk.Align.END)
                 badge.set_valign(Gtk.Align.END)
                 overlay.add_overlay(badge)
@@ -149,7 +151,7 @@ if _GTK_AVAILABLE:
             name_lbl = Gtk.Label(
                 label=_get_display_name(self.app.get("name", ""))
             )
-            name_lbl.add_css_class("launcher-item-name")
+            name_lbl.add_css_class("luminos-launcher-item-name")
             name_lbl.set_halign(Gtk.Align.CENTER)
             self.append(name_lbl)
 
@@ -157,9 +159,7 @@ if _GTK_AVAILABLE:
             hint = _get_zone_hint(self.zone)
             if hint:
                 hint_lbl = Gtk.Label(label=hint)
-                css = "zone-badge-2" if self.zone == 2 else "zone-badge-3"
-                hint_lbl.add_css_class(css)
-                hint_lbl.add_css_class("launcher-item-hint")
+                hint_lbl.add_css_class("luminos-launcher-item-hint")
                 hint_lbl.set_halign(Gtk.Align.CENTER)
                 self.append(hint_lbl)
 
