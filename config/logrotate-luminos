@@ -1,0 +1,31 @@
+# /etc/logrotate.d/luminos
+# Phase 5.12 Task 5 — Log rotation for Luminos OS logs.
+# Install: sudo cp this /etc/logrotate.d/luminos
+
+/var/log/luminos/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    maxsize 10M
+    create 0644 root root
+    sharedscripts
+    postrotate
+        systemctl --quiet reload luminos-sentinel 2>/dev/null || true
+    endscript
+}
+
+# User-level logs
+/home/*/.local/share/luminos/*.log {
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    maxsize 5M
+    su root root
+    create 0644 root root
+}

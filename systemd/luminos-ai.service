@@ -1,16 +1,33 @@
-# Install: sudo cp this /etc/systemd/system/ then sudo systemctl enable luminos-ai
+# luminos-ai.service
+# Phase 5.12 — Hardened with restart policy + watchdog.
+# Install: sudo cp this /etc/systemd/system/
+# Enable:  sudo systemctl enable luminos-ai
+# Start:   sudo systemctl start luminos-ai
 
 [Unit]
 Description=Luminos AI Orchestration Daemon
 After=network.target
+Wants=network.target
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 /opt/luminos/src/daemon/main.py
+ExecStop=/bin/kill -SIGTERM $MAINPID
+
+# Phase 5.12: restart policy
 Restart=on-failure
-RestartSec=5
+RestartSec=3
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Phase 5.12: watchdog — daemon must pong within 30s
+WatchdogSec=30
+
+# Logging
 StandardOutput=journal
 StandardError=journal
+
+# Environment
 Environment=PYTHONUNBUFFERED=1
 Environment=CUDA_VISIBLE_DEVICES=
 

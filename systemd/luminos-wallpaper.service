@@ -1,0 +1,32 @@
+# luminos-wallpaper.service
+# Phase 5.12 — Live wallpaper / swww daemon.
+# Install: sudo cp this /etc/systemd/user/
+# Enable:  systemctl --user enable luminos-wallpaper
+# Start:   systemctl --user start luminos-wallpaper
+#
+# This is a user service (--user) since wallpaper requires a display session.
+
+[Unit]
+Description=Luminos Wallpaper Daemon
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/swww-daemon
+ExecStop=/usr/bin/swww kill
+
+# Phase 5.12: restart policy
+Restart=on-failure
+RestartSec=3
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+Environment=WAYLAND_DISPLAY=wayland-1
+
+[Install]
+WantedBy=graphical-session.target

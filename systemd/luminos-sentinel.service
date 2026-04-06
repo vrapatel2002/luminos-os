@@ -1,0 +1,45 @@
+# luminos-sentinel.service
+# Phase 5.12 — Sentinel security daemon.
+# Install: sudo cp this /etc/systemd/system/
+# Enable:  sudo systemctl enable luminos-sentinel
+# Start:   sudo systemctl start luminos-sentinel
+
+[Unit]
+Description=Luminos Sentinel Security Monitor
+After=luminos-ai.service
+Wants=luminos-ai.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -c "\
+import sys; sys.path.insert(0, '/opt/luminos/src'); \
+from sentinel.sentinel_daemon import get_daemon; \
+import signal, threading; \
+d = get_daemon(); d.start(); \
+evt = threading.Event(); \
+signal.signal(signal.SIGTERM, lambda *_: evt.set()); \
+evt.wait(); \
+d.stop()"
+ExecStop=/bin/kill -SIGTERM $MAINPID
+
+# Phase 5.12: restart policy
+Restart=on-failure
+RestartSec=3
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Phase 5.12: watchdog
+WatchdogSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+# Sentinel needs permission to read /proc
+AmbientCapabilities=CAP_SYS_PTRACE
+NoNewPrivileges=true
+
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

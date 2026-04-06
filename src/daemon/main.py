@@ -170,6 +170,8 @@ def route_request(message):
             return {"status": "error", "message": "missing 'binary' field"}
         if not _CLASSIFIER_AVAILABLE:
             return {"zone": 1, "confidence": 0.99, "reason": "stub - classifier not loaded"}
+        _ensure_model_loaded()
+        _record_inference()
         try:
             result = classify_binary(binary_path)
             zone = result.get("zone")
@@ -201,6 +203,7 @@ def route_request(message):
     elif req_type == "security":
         if not _SENTINEL_AVAILABLE:
             return {"status": "safe", "confidence": 0.99, "note": "stub - sentinel not loaded"}
+        _record_inference()
         pid = message.get("pid")
         if pid is None:
             return {"status": "error", "message": "missing 'pid' field"}
@@ -507,6 +510,101 @@ def _game_watcher_loop():
 
 
 # ---------------------------------------------------------------------------
+# Phase 5.12 Task 6 — Model memory management
+# ---------------------------------------------------------------------------
+
+# Track last inference request time (updated by route_request)
+_last_inference_time: float = time.time()
+_model_loaded: bool = True   # optimistic default — start assuming loaded
+_MODEL_IDLE_TIMEOUT: int = 300   # 5 minutes in seconds
+_model_lock = threading.Lock()
+
+
+def _record_inference():
+    """Call this whenever an inference request is processed."""
+    global _last_inference_time
+    _last_inference_time = time.time()
+
+
+def _model_idle_loop():
+    """
+    Background thread: unload llama.cpp model from RAM after 5 minutes idle.
+    Reload on next request (3-5s delay is acceptable).
+    Checks every 60 seconds.
+    """
+    global _model_loaded
+    while True:
+        time.sleep(60)
+        with _model_lock:
+            idle_secs = time.time() - _last_inference_time
+            if _model_loaded and idle_secs >= _MODEL_IDLE_TIMEOUT:
+                _unload_model()
+            elif not _model_loaded and idle_secs < _MODEL_IDLE_TIMEOUT:
+                # Model was unloaded but a request just came in — will reload on demand
+                pass
+
+
+def _unload_model() -> bool:
+    """
+    Unload the llama.cpp model weights from RAM.
+    Keeps the daemon binary running — just frees model memory.
+
+    Returns True if successfully unloaded.
+    """
+    global _model_loaded
+    try:
+        # Signal llama.cpp server to unload (if running as subprocess)
+        # Primary path: GPU manager handles this
+        if _GPU_MANAGER_AVAILABLE:
+            result = _gpu_release_model("llama_idle_unload")
+            if result:
+                _model_loaded = False
+                logger.info("[MODEL] Unloaded from RAM after 5 minutes idle")
+                return True
+
+        # Fallback: find and signal llama-server process
+        import subprocess
+        result = subprocess.run(
+            ["pkill", "-USR1", "-f", "llama-server"],
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            _model_loaded = False
+            logger.info("[MODEL] Sent SIGUSR1 to llama-server — unloading model")
+            return True
+    except Exception as e:
+        logger.debug(f"Model unload error: {e}")
+    return False
+
+
+def _ensure_model_loaded() -> bool:
+    """
+    Reload model if it was unloaded due to idle timeout.
+    Called before any inference request.
+
+    Returns True when model is ready (may block briefly on reload).
+    """
+    global _model_loaded
+    with _model_lock:
+        if _model_loaded:
+            return True
+        # Reload
+        logger.info("[MODEL] Reloading after idle unload...")
+        try:
+            if _GPU_MANAGER_AVAILABLE:
+                result = _gpu_request_model("llama_reload")
+                if result:
+                    _model_loaded = True
+                    logger.info("[MODEL] Reloaded")
+                    return True
+        except Exception as e:
+            logger.debug(f"Model reload error: {e}")
+        # Even if reload fails, mark loaded to avoid stuck state
+        _model_loaded = True
+        return True
+
+
+# ---------------------------------------------------------------------------
 # Socket server
 # ---------------------------------------------------------------------------
 
@@ -602,7 +700,9 @@ def main():
                      name="luminos-idle-check").start()
     threading.Thread(target=_game_watcher_loop, daemon=True,
                      name="luminos-game-watcher").start()
-    logger.info("Background threads started: idle-check (60s), game-watcher (10s)")
+    threading.Thread(target=_model_idle_loop, daemon=True,
+                     name="luminos-model-idle").start()
+    logger.info("Background threads started: idle-check (60s), game-watcher (10s), model-idle (60s)")
 
     logger.info("Luminos AI Daemon started")
 
