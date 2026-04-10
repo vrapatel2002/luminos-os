@@ -452,7 +452,7 @@ stage5_build() {
     log "--- Stage 5: Build ISO ---"
     mkdir -p "$WORK_DIR" "$OUTPUT_DIR"
 
-    sudo mkarchiso -v \
+    mkarchiso -v \
         -w "$WORK_DIR" \
         -o "$OUTPUT_DIR" \
         "$PROFILE_DIR" \
