@@ -105,16 +105,12 @@ misc {{
     disable_splash_rendering = true
 }}
 
-# --- Window rules: maximized (no rounding, no border) ---
-windowrulev2 = rounding 0, fullscreen:1
-windowrulev2 = noborder, fullscreen:1
-
-# --- Zone 2: Wine/XWayland windows (accent blue border) ---
-windowrulev2 = bordercolor rgba(0080FFee), xwayland:1
-
-# --- Zone 3: Quarantine VM windows (error red border + thick) ---
-windowrulev2 = bordercolor rgba(FF4455ee), title:^(.*QUARANTINE.*)$
-windowrulev2 = bordersize 3, title:^(.*QUARANTINE.*)$
+# --- Window rules (Hyprland 0.54.3+ syntax) ---
+windowrule = noblur, fullscreen:1
+windowrule = noborder, fullscreen:1
+windowrule = bordercolor rgba(0080FFee), xwayland:1
+windowrule = bordercolor rgba(FF4455ee), title:^(.*QUARANTINE.*)$
+windowrule = bordersize 3, title:^(.*QUARANTINE.*)$
 
 # --- Luminos AI Daemon ---
 exec-once = luminos-ai
