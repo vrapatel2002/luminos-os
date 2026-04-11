@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# luminos-dock — Launch the Luminos GTK4 dock
+exec /opt/luminos/venv/bin/python3 -m gui.dock.dock_app "$@"
