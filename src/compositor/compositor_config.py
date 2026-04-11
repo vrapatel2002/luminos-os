@@ -112,6 +112,12 @@ windowrule = bordercolor rgba(0080FFee), xwayland:1
 windowrule = bordercolor rgba(FF4455ee), title:^(.*QUARANTINE.*)$
 windowrule = bordersize 3, title:^(.*QUARANTINE.*)$
 
+# Suppress maximize requests from all apps
+windowrule = suppressevent maximize, class:.*
+
+# Fix XWayland drag issues
+windowrule = nofocus, xwayland:1, floating:1, class:^$, title:^$
+
 # --- Luminos AI Daemon ---
 exec-once = luminos-ai
 
