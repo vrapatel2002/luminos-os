@@ -106,15 +106,15 @@ misc {{
 }}
 
 # --- Window rules: maximized (no rounding, no border) ---
-windowrule = rounding 0, fullscreen:1
-windowrule = noborder, fullscreen:1
+windowrulev2 = rounding 0, fullscreen:1
+windowrulev2 = noborder, fullscreen:1
 
 # --- Zone 2: Wine/XWayland windows (accent blue border) ---
-windowrule = bordercolor rgba(0080FFee), xwayland:1
+windowrulev2 = bordercolor rgba(0080FFee), xwayland:1
 
 # --- Zone 3: Quarantine VM windows (error red border + thick) ---
-windowrule = bordercolor rgba(FF4455ee), title:^(.*QUARANTINE.*)$
-windowrule = bordersize 3, title:^(.*QUARANTINE.*)$
+windowrulev2 = bordercolor rgba(FF4455ee), title:^(.*QUARANTINE.*)$
+windowrulev2 = bordersize 3, title:^(.*QUARANTINE.*)$
 
 # --- Luminos AI Daemon ---
 exec-once = luminos-ai
