@@ -1,5 +1,5 @@
 # Luminos System Status
-Last updated: 2026-04-11 (all tasks complete except greetd login screen)
+Last updated: 2026-04-11 (all tasks complete)
 
 ## Environment
 - Machine: ASUS ROG G14
@@ -20,11 +20,11 @@ Last updated: 2026-04-11 (all tasks complete except greetd login screen)
 | Deploy code to /opt/luminos | ✅ | src/ copied; venv created |
 | Install scripts to PATH | ✅ | luminos-launcher-toggle + luminos-quick-settings-toggle → /usr/local/bin |
 | Install systemd services | ✅ | luminos-ai + luminos-sentinel enabled (system); luminos-wallpaper enabled (user) |
-| Rewrite hyprland.conf | ✅ | Luminos theme, Luminos colors, ROG keys, touchpad gestures, autostart bar+dock+swww |
+| Rewrite hyprland.conf | ✅ | Luminos theme, Luminos colors, ROG keys, touchpad gestures (gesture = 3, horizontal, workspace), autostart bar+dock+swww |
 | Create waybar config | ✅ | Bar is Luminos GTK4 app (luminos-bar) — waybar not used; luminos-bar + luminos-dock scripts installed |
 | Set supergfxctl Hybrid | ✅ | asusd + supergfxd enabled; mode confirmed Hybrid |
-| Set up greetd login screen | 🔲 | greetd installed; login screen UI not wired yet |
-| Push all changes to git | 🔄 | Blocked on GitHub auth — commit exists locally (4f3eb89) |
+| Set up greetd login screen | ✅ | greetd enabled (replaced sddm); luminos-greeter script via cage; GTK4+python-gobject installed; greeter user in video/input/seat groups |
+| Push all changes to git | 🔄 | Blocked on GitHub auth — commits exist locally |
 
 ## Legend
 🔲 Not started | 🔄 In progress | ✅ Done | ❌ Blocked

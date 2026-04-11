@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# luminos-greeter — Launch the Luminos GTK4 greetd greeter under cage
+#
+# cage provides a minimal Wayland compositor so the GTK4/layer-shell greeter
+# has a display to render on. -s passes the seat from greetd through.
+exec cage -s -- /opt/luminos/venv/bin/python3 /opt/luminos/src/gui/greeter/greeter_app.py
