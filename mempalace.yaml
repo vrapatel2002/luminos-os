@@ -1,0 +1,35 @@
+wing: luminos_os
+rooms:
+- name: systemd
+  description: Files from systemd/
+  keywords:
+  - systemd
+  - systemd
+- name: testing
+  description: Files from tests/
+  keywords:
+  - testing
+  - tests
+- name: documentation
+  description: Files from docs/
+  keywords:
+  - documentation
+  - docs
+- name: src
+  description: Files from src/
+  keywords:
+  - src
+  - src
+- name: configuration
+  description: Files from config/
+  keywords:
+  - configuration
+  - config
+- name: scripts
+  description: Files from scripts/
+  keywords:
+  - scripts
+  - scripts
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []
