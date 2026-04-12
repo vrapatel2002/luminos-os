@@ -197,12 +197,12 @@ if _GTK_AVAILABLE:
             if _LAYER_SHELL_AVAILABLE:
                 LayerShell.init_for_window(self)
                 LayerShell.set_namespace(self, "luminos-dock")
-                LayerShell.set_layer(self, LayerShell.Layer.BOTTOM)
+                LayerShell.set_layer(self, LayerShell.Layer.TOP)
                 LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, True)
                 LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
                 LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
                 LayerShell.set_anchor(self, LayerShell.Edge.TOP, False)
-                LayerShell.set_exclusive_zone(self, -1)
+                LayerShell.auto_exclusive_zone_enable(self)
                 LayerShell.set_margin(self, LayerShell.Edge.BOTTOM, DOCK_BOTTOM_MARGIN)
                 logger.info("gtk4-layer-shell: dock pinned to bottom edge")
             else:

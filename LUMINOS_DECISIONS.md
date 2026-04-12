@@ -334,3 +334,40 @@ Test on actual G14 hardware in Phase 5.4 before depending on NPU behavior.
 **Direct NPU calls everywhere**
   Pros: Slightly less code
   Cons: Unmaintainable. One driver update breaks everything.
+
+---
+
+## DECISION 10 — Custom GTK4 Bar/Dock (Not Waybar)
+Date: Session 6
+Made by: Sam + Claude
+
+### What We Decided
+Luminos keeps its custom GTK4 bar and dock (luminos-bar, luminos-dock).
+We are not switching to Waybar or any other existing bar.
+
+### Why
+1. HyprYou (hyprland-material-you) proves GTK4 + Hyprland works perfectly
+   for custom bars and docks. Their bar.py uses the exact same GTK4LayerShell
+   API we use. The tech stack is validated.
+
+2. Our bugs were:
+   - venv not including system site-packages (GTK4/PyGObject invisible) — FIXED
+   - Wrong layer shell anchors (Layer.BOTTOM for dock, manual exclusive_zone) — FIXED
+   Both were implementation bugs, not architectural problems.
+
+3. Custom GTK4 gives full Luminos integration:
+   - Direct access to the AI daemon via Unix socket
+   - NPU/Sentinel awareness (bar can reflect system state)
+   - Consistent theming via luminos_theme.py
+   - AI-driven workspace and app routing — impossible with Waybar
+
+4. Waybar is JSON-configured and requires shell scripts for any dynamic behavior.
+   Our bar can run native Python logic — GPU state, thermal alerts, zone badges.
+
+### What We Rejected
+
+**Waybar**
+  Pros: Mature, battle-tested, less code to maintain
+  Cons: JSON config only, no native Python integration, cannot talk to AI daemon.
+    Loses Luminos-specific features (zone badges, NPU alerts, smart workspace routing).
+    HyprYou proves GTK4 is the better path for a fully integrated desktop.

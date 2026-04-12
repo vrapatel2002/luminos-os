@@ -299,11 +299,12 @@ if _GTK_AVAILABLE:
 
             LayerShell.init_for_window(self)
             LayerShell.set_namespace(self, "luminos-bar")
-            LayerShell.set_layer(self, LayerShell.Layer.TOP)
+            LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
             LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
             LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
             LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
-            LayerShell.set_exclusive_zone(self, BAR_HEIGHT)
+            LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, False)
+            LayerShell.auto_exclusive_zone_enable(self)
             LayerShell.set_keyboard_mode(
                 self, LayerShell.KeyboardMode.ON_DEMAND
             )
