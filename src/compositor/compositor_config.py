@@ -105,6 +105,31 @@ misc {{
     disable_splash_rendering = true
 }}
 
+# --- Layer Rules (Luminos UI surfaces — blur via compositor) ---
+layerrule {{
+    name = blur-bar
+    match:namespace = ^luminos-bar$
+    blur = true
+}}
+
+layerrule {{
+    name = blur-quick-settings
+    match:namespace = ^luminos-quick-settings$
+    blur = true
+}}
+
+layerrule {{
+    name = blur-notification-center
+    match:namespace = ^luminos-notification-center$
+    blur = true
+}}
+
+layerrule {{
+    name = blur-calendar
+    match:namespace = ^luminos-calendar$
+    blur = true
+}}
+
 # --- Window rules: maximized (no rounding, no border) ---
 windowrulev2 = rounding 0, fullscreen:1
 windowrulev2 = noborder, fullscreen:1
