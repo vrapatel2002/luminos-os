@@ -38,7 +38,14 @@ def get_panel():
 
 
 def toggle_panel():
-    """Show the panel if hidden, hide if visible. No-op if GTK unavailable."""
+    """Show the panel if hidden, hide if visible. Closes notification panel first."""
+    try:
+        from gui.notifications import get_panel as get_notif_panel
+        notif = get_notif_panel()
+        if notif and notif.get_visible():
+            notif.hide()
+    except Exception:
+        pass
     panel = get_panel()
     if panel is not None:
         panel.toggle()

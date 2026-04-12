@@ -35,6 +35,15 @@ try:
 except (ImportError, ValueError):
     _GTK_AVAILABLE = False
 
+_LAYER_SHELL_AVAILABLE = False
+if _GTK_AVAILABLE:
+    try:
+        gi.require_version("Gtk4LayerShell", "1.0")
+        from gi.repository import Gtk4LayerShell as LayerShell
+        _LAYER_SHELL_AVAILABLE = True
+    except (ImportError, ValueError):
+        pass
+
 _SRC = os.path.join(os.path.dirname(__file__), "..", "..")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
@@ -46,7 +55,7 @@ from gui.theme.luminos_theme import (
     BORDER, BORDER_SUBTLE,
     FONT_FAMILY, FONT_H3, FONT_BODY, FONT_BODY_SMALL, FONT_CAPTION,
     SPACE_2, SPACE_3, SPACE_4, SPACE_6,
-    RADIUS_MD,
+    RADIUS_MD, BAR_HEIGHT,
     SHADOW_PANEL,
     glass_bg,
 )
@@ -88,8 +97,9 @@ _PANEL_WIDTH = 380
 
 _CENTER_CSS = f"""
 .luminos-notif-center {{
-    background: {glass_bg(0.92)};
-    border-left: 1px solid {BORDER};
+    background: {glass_bg(0.25)};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_MD}px;
     box-shadow: {SHADOW_PANEL};
 }}
 
@@ -204,6 +214,20 @@ if _GTK_AVAILABLE:
             self.set_decorated(False)
             self.set_resizable(False)
             self.set_default_size(_PANEL_WIDTH, -1)
+
+            # Layer shell — pin to top-right, full height, below bar
+            if _LAYER_SHELL_AVAILABLE:
+                LayerShell.init_for_window(self)
+                LayerShell.set_namespace(self, "luminos-notification-center")
+                LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
+                LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
+                LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
+                LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, True)
+                LayerShell.set_margin(self, LayerShell.Edge.TOP, 3)
+                LayerShell.set_margin(self, LayerShell.Edge.RIGHT, 3)
+                LayerShell.set_keyboard_mode(
+                    self, LayerShell.KeyboardMode.ON_DEMAND
+                )
 
             # CSS
             css_provider = Gtk.CssProvider()
@@ -407,7 +431,13 @@ if _GTK_AVAILABLE:
             self._refresh()
             if self._center:
                 self._center.mark_all_read()
+            self._just_shown = True
+            GLib.timeout_add(400, self._clear_just_shown)
             self.present()
+
+        def _clear_just_shown(self):
+            self._just_shown = False
+            return False
 
         def toggle(self):
             """Show if hidden, hide if visible."""
@@ -417,7 +447,7 @@ if _GTK_AVAILABLE:
                 self.show_panel()
 
         def _on_active_changed(self, window, _param):
-            if not window.is_active():
+            if not window.is_active() and not getattr(self, "_just_shown", False):
                 self.hide()
 
         def _on_key_pressed(self, _ctrl, keyval, _keycode, _state):

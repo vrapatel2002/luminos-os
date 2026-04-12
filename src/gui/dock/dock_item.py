@@ -102,12 +102,9 @@ if _GTK_AVAILABLE:
             icon_overlay = Gtk.Overlay()
 
             icon_name = self.app_info.get("icon", "application-x-executable")
-            icon_path = find_icon(icon_name, DOCK_ICON_SIZE)
-
-            if icon_path:
-                self._icon = Gtk.Image.new_from_file(icon_path)
-            else:
-                self._icon = Gtk.Image.new_from_icon_name(icon_name)
+            # Use new_from_icon_name so set_pixel_size is respected for correct
+            # 48px sizing. new_from_file ignores set_pixel_size (GTK4 limitation).
+            self._icon = Gtk.Image.new_from_icon_name(icon_name)
             self._icon.set_pixel_size(DOCK_ICON_SIZE)
             self._icon.add_css_class("luminos-dock-icon")
 

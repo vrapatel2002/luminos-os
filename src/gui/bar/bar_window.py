@@ -50,9 +50,7 @@ from gui.theme.luminos_theme import (
     glass_bg,
 )
 from gui.common.socket_client import DaemonClient
-from gui.common.subprocess_helpers import (
-    get_wifi_info, get_volume, set_volume, toggle_mute,
-)
+from gui.common.subprocess_helpers import get_wifi_info
 
 # Phosphor SVG icon directory
 PHOSPHOR_DIR = "/opt/luminos/assets/icons/phosphor"
@@ -111,6 +109,29 @@ def get_workspace_count() -> int:
     return 5
 
 
+def get_network_info() -> dict:
+    """Return network connection type and status."""
+    # Check for active ethernet first
+    try:
+        for iface in sorted(os.listdir('/sys/class/net/')):
+            if iface.startswith('e'):  # eth0, enp*, etc.
+                carrier = f'/sys/class/net/{iface}/carrier'
+                if os.path.exists(carrier):
+                    with open(carrier) as f:
+                        if f.read().strip() == '1':
+                            return {"type": "ethernet", "connected": True}
+    except OSError:
+        pass
+    # Fall back to wifi
+    try:
+        from gui.common.subprocess_helpers import get_wifi_info
+        info = get_wifi_info()
+        return {"type": "wifi", "connected": info.get("connected", False)}
+    except Exception:
+        pass
+    return {"type": "wifi", "connected": False}
+
+
 def get_battery_info() -> dict:
     """Read battery percentage and charging status from sysfs."""
     result = {"percent": None, "charging": False}
@@ -138,8 +159,12 @@ def _phosphor(name: str) -> str:
 # ===========================================================================
 
 _BAR_CSS = f"""
+window {{
+    background: transparent;
+}}
+
 .luminos-bar-surface {{
-    background: {glass_bg(0.75)};
+    background: {glass_bg(0.25)};
     border-bottom: 1px solid {BORDER_SUBTLE};
     min-height: {BAR_HEIGHT}px;
     min-width: 100%;
@@ -273,6 +298,7 @@ if _GTK_AVAILABLE:
                 sys.exit(1)
 
             LayerShell.init_for_window(self)
+            LayerShell.set_namespace(self, "luminos-bar")
             LayerShell.set_layer(self, LayerShell.Layer.TOP)
             LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
             LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
@@ -343,7 +369,7 @@ if _GTK_AVAILABLE:
             bell_box.add_controller(bell_click)
             right.append(bell_box)
 
-            # WiFi icon — Phosphor wifi-high.svg / wifi-slash.svg
+            # WiFi/Ethernet icon — display only, not clickable
             self._wifi_icon = _make_svg_image("wifi-high")
             self._wifi_icon.add_css_class("luminos-bar-icon")
             right.append(self._wifi_icon)
@@ -357,26 +383,14 @@ if _GTK_AVAILABLE:
             self._battery_text.add_css_class("luminos-bar-battery-text")
             right.append(self._battery_text)
 
-            # Volume icon — Phosphor speaker-high.svg / speaker-x.svg
-            self._volume_icon = _make_svg_image("speaker-high")
-            self._volume_icon.add_css_class("luminos-bar-icon")
-            right.append(self._volume_icon)
+            # Quick settings button — gear icon, opens quick settings panel
+            self._qs_icon = _make_svg_image("gear")
+            self._qs_icon.add_css_class("luminos-bar-icon")
+            right.append(self._qs_icon)
 
-            # Volume scroll control
-            scroll = Gtk.EventControllerScroll(
-                flags=Gtk.EventControllerScrollFlags.VERTICAL
-            )
-            scroll.connect("scroll", self._on_volume_scroll)
-            self._volume_icon.add_controller(scroll)
-
-            vol_click = Gtk.GestureClick()
-            vol_click.connect("pressed", self._on_volume_click)
-            self._volume_icon.add_controller(vol_click)
-
-            # Click on tray area → open quick settings
-            tray_click = Gtk.GestureClick()
-            tray_click.connect("pressed", self._on_tray_click)
-            right.add_controller(tray_click)
+            qs_click = Gtk.GestureClick()
+            qs_click.connect("pressed", self._on_tray_click)
+            self._qs_icon.add_controller(qs_click)
 
             root.append(right)
             overlay.set_child(root)
@@ -387,11 +401,14 @@ if _GTK_AVAILABLE:
             )
             clock_box.set_halign(Gtk.Align.CENTER)
             clock_box.set_valign(Gtk.Align.CENTER)
-            clock_box.set_can_target(False)
 
             self._clock_label = Gtk.Label(label="00:00")
             self._clock_label.add_css_class("luminos-bar-clock")
             clock_box.append(self._clock_label)
+
+            clock_click = Gtk.GestureClick()
+            clock_click.connect("pressed", self._on_clock_click)
+            clock_box.add_controller(clock_click)
 
             overlay.add_overlay(clock_box)
 
@@ -442,10 +459,14 @@ if _GTK_AVAILABLE:
                 widget.set_from_paintable(texture)
 
         def _poll_tray(self) -> bool:
-            # WiFi — swap SVG based on connected state
+            # Network — show ethernet or wifi icon based on active connection
             try:
-                info = get_wifi_info()
-                if info.get("connected"):
+                net = get_network_info()
+                if net["type"] == "ethernet":
+                    self._set_icon(self._wifi_icon, "ethernet")
+                    self._wifi_icon.remove_css_class("luminos-bar-icon-muted")
+                    self._wifi_icon.add_css_class("luminos-bar-icon")
+                elif net["connected"]:
                     self._set_icon(self._wifi_icon, "wifi-high")
                     self._wifi_icon.remove_css_class("luminos-bar-icon-muted")
                     self._wifi_icon.add_css_class("luminos-bar-icon")
@@ -473,21 +494,6 @@ if _GTK_AVAILABLE:
             except Exception:
                 pass
 
-            # Volume — swap SVG based on muted state
-            try:
-                vol = get_volume()
-                muted = vol.get("muted", False)
-                if muted:
-                    self._set_icon(self._volume_icon, "speaker-x")
-                    self._volume_icon.remove_css_class("luminos-bar-icon")
-                    self._volume_icon.add_css_class("luminos-bar-icon-muted")
-                else:
-                    self._set_icon(self._volume_icon, "speaker-high")
-                    self._volume_icon.remove_css_class("luminos-bar-icon-muted")
-                    self._volume_icon.add_css_class("luminos-bar-icon")
-            except Exception:
-                pass
-
             # Notification badge
             try:
                 from gui.notifications import get_unread_count
@@ -506,40 +512,50 @@ if _GTK_AVAILABLE:
         # Volume controls
         # -------------------------------------------------------------------
 
-        def _on_bell_click(self, *_):
+        def _on_bell_click(self, gesture, *_):
             """Open/close notification center on bell click."""
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
             try:
-                from gui.notifications.notification_center_panel import NotificationCenterPanel
-                if not hasattr(self, "_notif_panel") or self._notif_panel is None:
-                    center = None
-                    try:
-                        from gui.notifications import _get_overlay
-                        overlay = _get_overlay()
-                        if overlay:
-                            center = overlay.get_center()
-                    except Exception:
-                        pass
-                    self._notif_panel = NotificationCenterPanel(
-                        notification_center=center
-                    )
-                self._notif_panel.toggle()
+                from gui.quick_settings import get_panel as get_qs_panel
+                qs = get_qs_panel()
+                if qs and qs.get_visible():
+                    qs.hide()
+            except Exception:
+                pass
+            try:
+                from gui.notifications import toggle_panel
+                toggle_panel()
             except Exception as e:
                 logger.debug(f"Notification center toggle error: {e}")
 
-        def _on_tray_click(self, *_):
-            """Open/close quick settings panel on tray click."""
+        def _on_clock_click(self, gesture, *_):
+            """Open/close calendar popup on clock click."""
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            try:
+                from gui.quick_settings import get_panel as get_qs
+                qs = get_qs()
+                if qs and qs.get_visible():
+                    qs.hide()
+            except Exception:
+                pass
+            try:
+                from gui.notifications import get_panel as get_notif
+                notif = get_notif()
+                if notif and notif.get_visible():
+                    notif.hide()
+            except Exception:
+                pass
+            try:
+                from gui.bar.calendar_popup import toggle_calendar
+                toggle_calendar()
+            except Exception as e:
+                logger.debug(f"Calendar toggle error: {e}")
+
+        def _on_tray_click(self, gesture, *_):
+            """Open/close quick settings panel on gear click."""
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
             try:
                 from gui.quick_settings import toggle_panel
                 toggle_panel()
             except Exception as e:
                 logger.debug(f"Quick settings toggle error: {e}")
-
-        def _on_volume_scroll(self, _ctrl, _dx, dy):
-            vol = get_volume()
-            new_pct = max(0, min(100, vol["percent"] - int(dy * 5)))
-            set_volume(new_pct)
-            self._poll_tray()
-
-        def _on_volume_click(self, *_):
-            toggle_mute()
-            self._poll_tray()

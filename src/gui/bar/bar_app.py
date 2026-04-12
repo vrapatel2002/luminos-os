@@ -71,7 +71,11 @@ if _GTK_AVAILABLE:
             """Called once on startup. Set up SIGINT/SIGTERM handlers."""
             Gtk.Application.do_startup(self)
 
-            # Allow Ctrl+C to quit the GTK app cleanly
+            # Keep the application alive even if the window is somehow closed;
+            # the bar must never disappear unless explicitly killed.
+            self.hold()
+
+            # Allow Ctrl+C / SIGTERM to quit the GTK app cleanly
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT,
                                  self._on_signal)
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM,
@@ -102,12 +106,14 @@ def main(argv: list | None = None) -> int:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    import socket as _socket
     socket_path = None
-    # Use production socket if running as the real daemon user
-    prod_path = "/run/luminos/ai.sock"
-    if os.path.exists(prod_path):
-        socket_path = prod_path
+    # Only use the production socket if it exists AND is accessible to this
+    # user.  The daemon runs as root; if we can't connect we leave socket_path
+    # as None and let DaemonClient use its default (/tmp/luminos-ai.sock).
+    for candidate in ("/run/luminos/ai.sock", "/tmp/luminos-ai.sock"):
+        if os.path.exists(candidate) and os.access(candidate, os.W_OK):
+            socket_path = candidate
+            break
 
     app = LuminosBarApp(socket_path=socket_path)
     return app.run(argv or sys.argv)

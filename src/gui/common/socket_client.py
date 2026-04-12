@@ -68,20 +68,18 @@ class DaemonClient:
                 data = b"".join(chunks)
                 return json.loads(data.decode("utf-8"))
 
-        except FileNotFoundError:
-            logger.debug(f"Daemon socket not found: {self.socket_path}")
+        except (FileNotFoundError, ConnectionRefusedError, PermissionError) as e:
+            # Daemon not running, socket missing, or not accessible — silent.
+            logger.debug("Daemon unavailable at %s: %s", self.socket_path, e)
             return {"error": "daemon not running", "available": False}
-        except ConnectionRefusedError:
-            logger.debug("Daemon connection refused")
-            return {"error": "connection refused", "available": False}
         except socket.timeout:
-            logger.debug("Daemon request timed out")
+            logger.debug("Daemon request timed out: %s", self.socket_path)
             return {"error": "timeout", "available": False}
         except json.JSONDecodeError as e:
-            logger.warning(f"Invalid JSON from daemon: {e}")
+            logger.debug("Invalid JSON from daemon: %s", e)
             return {"error": f"invalid response: {e}", "available": False}
         except Exception as e:
-            logger.warning(f"Daemon client error: {e}")
+            logger.debug("Daemon client error: %s", e)
             return {"error": str(e), "available": False}
 
     def ping(self) -> bool:

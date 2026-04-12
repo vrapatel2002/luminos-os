@@ -62,6 +62,11 @@ if _GTK_AVAILABLE:
 
         def do_startup(self):
             Gtk.Application.do_startup(self)
+
+            # Keep the application alive even if the window is somehow closed;
+            # the dock must never disappear unless explicitly killed.
+            self.hold()
+
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT,
                                  self._on_signal)
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM,

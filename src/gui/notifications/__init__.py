@@ -41,6 +41,33 @@ from gui.notifications.notification_model import (
 # ---------------------------------------------------------------------------
 
 _overlay = None
+_panel = None
+
+
+def get_panel():
+    """Return the singleton NotificationCenterPanel, creating it on first call."""
+    global _panel
+    if not _GTK_AVAILABLE:
+        return None
+    if _panel is None:
+        try:
+            from gui.notifications.notification_center_panel import NotificationCenterPanel
+            center = None
+            overlay = _get_overlay()
+            if overlay:
+                center = overlay.get_center()
+            _panel = NotificationCenterPanel(notification_center=center)
+        except Exception as e:
+            logger.debug(f"NotificationCenterPanel init failed: {e}")
+            return None
+    return _panel
+
+
+def toggle_panel():
+    """Show the panel if hidden, hide if visible."""
+    panel = get_panel()
+    if panel is not None:
+        panel.toggle()
 
 
 def _get_overlay():

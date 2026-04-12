@@ -88,12 +88,16 @@ def build_app_info_from_window(window_info: dict) -> dict:
 # ===========================================================================
 
 _DOCK_CSS = f"""
+window.luminos-dock-window {{
+    background: transparent;
+}}
+
 .luminos-dock-surface {{
     background: transparent;
 }}
 
 .luminos-dock-pill {{
-    background: {glass_bg(0.8)};
+    background: {glass_bg(0.25)};
     border: 1px solid {BORDER};
     border-radius: {RADIUS_LG}px;
     padding: {SPACE_2}px {SPACE_3}px;
@@ -177,7 +181,7 @@ if _GTK_AVAILABLE:
             # Window setup
             self.set_title("luminos-dock")
             self.set_decorated(False)
-            self.set_resizable(False)
+            self.add_css_class("luminos-dock-window")
 
             # Load CSS
             css_provider = Gtk.CssProvider()
@@ -192,6 +196,7 @@ if _GTK_AVAILABLE:
             # Pill itself is halign=CENTER inside
             if _LAYER_SHELL_AVAILABLE:
                 LayerShell.init_for_window(self)
+                LayerShell.set_namespace(self, "luminos-dock")
                 LayerShell.set_layer(self, LayerShell.Layer.BOTTOM)
                 LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, True)
                 LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)

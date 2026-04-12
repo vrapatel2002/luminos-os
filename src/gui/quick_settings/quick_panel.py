@@ -184,28 +184,29 @@ def get_power_mode_text() -> str:
 # CSS — all values from luminos_theme
 # ===========================================================================
 
-_QS_WIDTH = 320
+_QS_WIDTH = 300
 
 _QS_CSS = f"""
+window {{
+    background: transparent;
+}}
+
 .luminos-qs {{
-    background: {glass_bg(0.9)};
+    background: {glass_bg(0.25)};
     border: 1px solid {BORDER};
-    border-radius: 0 0 {RADIUS_DEFAULT}px {RADIUS_DEFAULT}px;
+    border-radius: {RADIUS_DEFAULT}px;
     box-shadow: {SHADOW_PANEL};
 }}
 
-.luminos-qs-user-row {{
-    min-height: 56px;
-}}
-
+/* ── User row ── */
 .luminos-qs-avatar {{
-    min-width: 40px;
-    min-height: 40px;
+    min-width: 36px;
+    min-height: 36px;
     border-radius: {RADIUS_FULL}px;
-    background-color: {ACCENT_SUBTLE};
+    background-color: rgba(0,128,255,0.18);
     font-family: "{FONT_FAMILY}", sans-serif;
     font-size: {FONT_BODY}px;
-    font-weight: 600;
+    font-weight: 700;
     color: {ACCENT};
 }}
 
@@ -218,32 +219,47 @@ _QS_CSS = f"""
 
 .luminos-qs-subtitle {{
     font-family: "{FONT_FAMILY}", sans-serif;
-    font-size: {FONT_BODY_SMALL}px;
+    font-size: {FONT_CAPTION}px;
     color: {TEXT_SECONDARY};
 }}
 
+/* ── Section label ── */
+.luminos-qs-section-title {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: {TEXT_DISABLED};
+}}
+
+/* ── Toggle cards (wifi / bt) ── */
 .luminos-qs-toggle-card {{
-    background-color: {BG_ELEVATED};
+    background-color: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
     border-radius: {RADIUS_MD}px;
-    padding: {SPACE_2}px {SPACE_3}px;
-    min-height: 48px;
+    min-height: 52px;
+    padding: 0 {SPACE_3}px;
 }}
 
 .luminos-qs-toggle-card:hover {{
-    background-color: {BG_OVERLAY};
+    background-color: rgba(255,255,255,0.09);
+    border-color: rgba(255,255,255,0.14);
 }}
 
 .luminos-qs-toggle-card-active {{
-    background-color: {ACCENT_SUBTLE};
+    background-color: rgba(0,128,255,0.18);
+    border-color: rgba(0,128,255,0.35);
 }}
 
 .luminos-qs-toggle-card-active:hover {{
-    background-color: {ACCENT_SUBTLE};
+    background-color: rgba(0,128,255,0.24);
 }}
 
 .luminos-qs-toggle-label {{
     font-family: "{FONT_FAMILY}", sans-serif;
     font-size: {FONT_BODY_SMALL}px;
+    font-weight: 500;
     color: {TEXT_PRIMARY};
 }}
 
@@ -253,75 +269,105 @@ _QS_CSS = f"""
     color: {TEXT_SECONDARY};
 }}
 
-.luminos-qs-slider-label {{
-    font-family: "{FONT_FAMILY}", sans-serif;
-    font-size: {FONT_BODY_SMALL}px;
-    color: {TEXT_SECONDARY};
-    min-width: 36px;
-}}
-
-.luminos-qs-status-label {{
-    font-family: "{FONT_FAMILY}", sans-serif;
-    font-size: {FONT_BODY_SMALL}px;
-    color: {TEXT_SECONDARY};
-}}
-
-.luminos-qs-status-dot {{
-    min-width: 6px;
-    min-height: 6px;
-    border-radius: {RADIUS_FULL}px;
-    background-color: {COLOR_SUCCESS};
-}}
-
-.luminos-qs-status-dot-accent {{
-    min-width: 6px;
-    min-height: 6px;
-    border-radius: {RADIUS_FULL}px;
-    background-color: {ACCENT};
-}}
-
-.luminos-qs-section-title {{
-    font-family: "{FONT_FAMILY}", sans-serif;
-    font-size: {FONT_LABEL}px;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: {TEXT_DISABLED};
-}}
-
-.luminos-qs-pill-toggle {{
-    background-color: {BG_ELEVATED};
-    border-radius: {RADIUS_FULL}px;
+/* ── Sliders ── */
+.luminos-qs-slider-row {{
+    background-color: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: {RADIUS_MD}px;
     padding: {SPACE_2}px {SPACE_3}px;
+}}
+
+.luminos-qs-slider-icon {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: 13px;
+    color: {TEXT_SECONDARY};
+    min-width: 20px;
+}}
+
+.luminos-qs-slider-value {{
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: {FONT_CAPTION}px;
+    color: {TEXT_SECONDARY};
+    min-width: 30px;
+}}
+
+scale trough {{
+    background-color: rgba(255,255,255,0.12);
+    border-radius: 4px;
+    min-height: 4px;
+}}
+
+scale trough highlight {{
+    background-color: {ACCENT};
+    border-radius: 4px;
+}}
+
+scale slider {{
+    background-color: white;
+    border-radius: {RADIUS_FULL}px;
+    min-width: 14px;
+    min-height: 14px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}}
+
+/* ── Status chips ── */
+.luminos-qs-chip {{
+    background-color: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: {RADIUS_FULL}px;
+    padding: 3px {SPACE_3}px;
+    font-family: "{FONT_FAMILY}", sans-serif;
+    font-size: {FONT_CAPTION}px;
+    color: {TEXT_SECONDARY};
+}}
+
+/* ── Pill toggles (DND / Night light) ── */
+.luminos-qs-pill-toggle {{
+    background-color: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: {RADIUS_FULL}px;
+    padding: {SPACE_2}px {SPACE_4}px;
     font-family: "{FONT_FAMILY}", sans-serif;
     font-size: {FONT_BODY_SMALL}px;
     color: {TEXT_SECONDARY};
-    border: none;
+}}
+
+.luminos-qs-pill-toggle:hover {{
+    background-color: rgba(255,255,255,0.09);
 }}
 
 .luminos-qs-pill-toggle-active {{
-    background-color: {ACCENT_SUBTLE};
+    background-color: rgba(0,128,255,0.18);
+    border-color: rgba(0,128,255,0.35);
     color: {ACCENT};
 }}
 
-.luminos-qs-settings-btn {{
+/* ── Settings button ── */
+.luminos-qs-power-btn {{
     font-family: "{FONT_FAMILY}", sans-serif;
-    font-size: {FONT_BODY}px;
+    font-size: {FONT_BODY_SMALL}px;
+    font-weight: 500;
     color: {TEXT_SECONDARY};
-    background: transparent;
-    border: 1px solid {BORDER_SUBTLE};
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
     border-radius: {RADIUS_MD}px;
-    min-height: 40px;
-    padding: 0 {SPACE_4}px;
+    min-height: 36px;
+    padding: 0 {SPACE_3}px;
 }}
 
-.luminos-qs-settings-btn:hover {{
-    background-color: {BG_OVERLAY};
+.luminos-qs-power-btn:hover {{
+    background-color: rgba(255,255,255,0.10);
     color: {TEXT_PRIMARY};
 }}
 
+.luminos-qs-power-btn-danger:hover {{
+    background-color: rgba(220,50,50,0.18);
+    border-color: rgba(220,50,50,0.35);
+    color: #FF5555;
+}}
+
 .luminos-qs-divider {{
-    background-color: {BORDER_SUBTLE};
+    background-color: rgba(255,255,255,0.07);
     min-height: 1px;
 }}
 """
@@ -357,11 +403,12 @@ if _GTK_AVAILABLE:
             # the mouse moves away from the bar button.
             if _LAYER_SHELL_AVAILABLE:
                 LayerShell.init_for_window(self)
+                LayerShell.set_namespace(self, "luminos-quick-settings")
                 LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
                 LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
                 LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
-                LayerShell.set_margin(self, LayerShell.Edge.TOP, BAR_HEIGHT)
-                LayerShell.set_margin(self, LayerShell.Edge.RIGHT, 0)
+                LayerShell.set_margin(self, LayerShell.Edge.TOP, 3)
+                LayerShell.set_margin(self, LayerShell.Edge.RIGHT, 3)
                 LayerShell.set_keyboard_mode(
                     self, LayerShell.KeyboardMode.ON_DEMAND
                 )
@@ -371,6 +418,7 @@ if _GTK_AVAILABLE:
             css_provider.load_from_string(_QS_CSS)
             self._css_provider = css_provider
             self.connect("realize", lambda w: self._ensure_css())
+            self.connect("notify::is-active", self._on_active_changed)
 
             self.add_css_class("luminos-qs")
 
@@ -419,47 +467,50 @@ if _GTK_AVAILABLE:
         def _build(self):
             scroll = Gtk.ScrolledWindow()
             scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            scroll.set_max_content_height(600)
+            scroll.set_max_content_height(560)
             scroll.set_propagate_natural_height(True)
             self.set_child(scroll)
 
-            root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=SPACE_3)
             root.set_margin_top(SPACE_4)
             root.set_margin_bottom(SPACE_4)
             root.set_margin_start(SPACE_4)
             root.set_margin_end(SPACE_4)
             scroll.set_child(root)
 
-            # ---- Section 1: User row ----
+            # User row
             self._build_user_row(root)
-
             root.append(self._make_divider())
 
-            # ---- Section 2: Connectivity toggles ----
+            # Connectivity
+            self._build_section_title(root, "Connectivity")
             self._build_connectivity_row(root)
 
-            # ---- Section 3: Sliders ----
+            # Sliders
+            self._build_section_title(root, "Controls")
             self._build_sliders(root)
 
             root.append(self._make_divider())
 
-            # ---- Section 4: Status row ----
+            # Status chips
+            self._build_section_title(root, "Status")
             self._build_status_row(root)
 
             root.append(self._make_divider())
 
-            # ---- Section 5: Toggle pills ----
+            # Toggle pills
             self._build_toggles(root)
 
             root.append(self._make_divider())
 
-            # ---- Section 6: Settings button ----
-            settings_btn = Gtk.Button(label="Settings")
-            settings_btn.add_css_class("luminos-qs-settings-btn")
-            settings_btn.set_hexpand(True)
-            settings_btn.connect("clicked", self._on_open_settings)
-            settings_btn.set_margin_top(SPACE_2)
-            root.append(settings_btn)
+            # Power row
+            self._build_power_row(root)
+
+        def _build_section_title(self, root, text: str):
+            lbl = Gtk.Label(label=text.upper())
+            lbl.add_css_class("luminos-qs-section-title")
+            lbl.set_halign(Gtk.Align.START)
+            root.append(lbl)
 
         def _make_divider(self) -> Gtk.Box:
             div = Gtk.Box()
@@ -565,54 +616,36 @@ if _GTK_AVAILABLE:
         # Section 3: Sliders (brightness + volume)
         # -------------------------------------------------------------------
 
+        def _make_slider_row(self, icon: str, low: float, high: float) -> tuple:
+            """Return (row_widget, slider, value_label)."""
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_2)
+            row.add_css_class("luminos-qs-slider-row")
+            row.set_hexpand(True)
+
+            icon_lbl = Gtk.Label(label=icon)
+            icon_lbl.add_css_class("luminos-qs-slider-icon")
+            row.append(icon_lbl)
+
+            slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, low, high, 1)
+            slider.set_hexpand(True)
+            slider.set_draw_value(False)
+            row.append(slider)
+
+            val_lbl = Gtk.Label(label="--")
+            val_lbl.add_css_class("luminos-qs-slider-value")
+            row.append(val_lbl)
+
+            return row, slider, val_lbl
+
         def _build_sliders(self, root):
-            # Brightness
-            bright_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_2
-            )
-            bright_row.set_margin_top(SPACE_3)
-            bright_row.set_hexpand(True)
-
-            bright_icon = Gtk.Label(label="")
-            bright_icon.add_css_class("luminos-qs-slider-label")
-            bright_row.append(bright_icon)
-
-            self._bright_slider = Gtk.Scale.new_with_range(
-                Gtk.Orientation.HORIZONTAL, 5, 100, 1
-            )
-            self._bright_slider.set_hexpand(True)
-            self._bright_slider.set_draw_value(False)
+            bright_row, self._bright_slider, self._bright_label = \
+                self._make_slider_row("☀", 5, 100)
             self._bright_slider.connect("value-changed", self._on_bright_changed)
-            bright_row.append(self._bright_slider)
-
-            self._bright_label = Gtk.Label(label="--")
-            self._bright_label.add_css_class("luminos-qs-slider-label")
-            bright_row.append(self._bright_label)
             root.append(bright_row)
 
-            # Volume
-            vol_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_2
-            )
-            vol_row.set_margin_top(SPACE_2)
-            vol_row.set_hexpand(True)
-
-            vol_icon_btn = Gtk.Button(label="")
-            vol_icon_btn.add_css_class("luminos-qs-slider-label")
-            vol_icon_btn.connect("clicked", lambda *_: self._on_mute_toggle())
-            vol_row.append(vol_icon_btn)
-
-            self._vol_slider = Gtk.Scale.new_with_range(
-                Gtk.Orientation.HORIZONTAL, 0, 100, 1
-            )
-            self._vol_slider.set_hexpand(True)
-            self._vol_slider.set_draw_value(False)
+            vol_row, self._vol_slider, self._vol_label = \
+                self._make_slider_row("♪", 0, 100)
             self._vol_slider.connect("value-changed", self._on_vol_changed)
-            vol_row.append(self._vol_slider)
-
-            self._vol_label = Gtk.Label(label="--")
-            self._vol_label.add_css_class("luminos-qs-slider-label")
-            vol_row.append(self._vol_label)
             root.append(vol_row)
 
         # -------------------------------------------------------------------
@@ -620,55 +653,22 @@ if _GTK_AVAILABLE:
         # -------------------------------------------------------------------
 
         def _build_status_row(self, root):
-            status_box = Gtk.Box(
-                orientation=Gtk.Orientation.VERTICAL, spacing=SPACE_2
-            )
+            chip_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_2)
+            chip_row.set_hexpand(True)
 
-            # Battery
-            bat_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_2
-            )
-            bat_icon = Gtk.Label(label="")
-            bat_icon.add_css_class("luminos-qs-status-label")
-            bat_row.append(bat_icon)
+            self._battery_status = Gtk.Label(label="🔋 --%")
+            self._battery_status.add_css_class("luminos-qs-chip")
+            chip_row.append(self._battery_status)
 
-            self._battery_status = Gtk.Label(label="--")
-            self._battery_status.add_css_class("luminos-qs-status-label")
-            self._battery_status.set_halign(Gtk.Align.START)
-            bat_row.append(self._battery_status)
-            status_box.append(bat_row)
+            self._power_mode_label = Gtk.Label(label="⚡ --")
+            self._power_mode_label.add_css_class("luminos-qs-chip")
+            chip_row.append(self._power_mode_label)
 
-            # Power mode
-            power_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_2
-            )
-            power_dot = Gtk.Box()
-            power_dot.add_css_class("luminos-qs-status-dot")
-            power_dot.set_valign(Gtk.Align.CENTER)
-            power_row.append(power_dot)
+            gpu_chip = Gtk.Label(label="GPU Hybrid")
+            gpu_chip.add_css_class("luminos-qs-chip")
+            chip_row.append(gpu_chip)
 
-            self._power_mode_label = Gtk.Label(label="--")
-            self._power_mode_label.add_css_class("luminos-qs-status-label")
-            self._power_mode_label.set_halign(Gtk.Align.START)
-            power_row.append(self._power_mode_label)
-            status_box.append(power_row)
-
-            # GPU
-            gpu_row = Gtk.Box(
-                orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_2
-            )
-            gpu_dot = Gtk.Box()
-            gpu_dot.add_css_class("luminos-qs-status-dot-accent")
-            gpu_dot.set_valign(Gtk.Align.CENTER)
-            gpu_row.append(gpu_dot)
-
-            gpu_label = Gtk.Label(label="GPU: Hybrid")
-            gpu_label.add_css_class("luminos-qs-status-label")
-            gpu_label.set_halign(Gtk.Align.START)
-            gpu_row.append(gpu_label)
-            status_box.append(gpu_row)
-
-            root.append(status_box)
+            root.append(chip_row)
 
         # -------------------------------------------------------------------
         # Section 5: Toggle pills (DND, Night Light)
@@ -747,10 +747,10 @@ if _GTK_AVAILABLE:
                 pass
 
             # Battery status
-            self._battery_status.set_text(get_battery_status_text())
+            self._battery_status.set_text(f"🔋 {get_battery_status_text()}")
 
             # Power mode
-            self._power_mode_label.set_text(get_power_mode_text())
+            self._power_mode_label.set_text(f"⚡ {get_power_mode_text()}")
 
         # -------------------------------------------------------------------
         # Toggle handlers
@@ -841,14 +841,54 @@ if _GTK_AVAILABLE:
                 except Exception:
                     pass
 
-        def _on_open_settings(self, *_):
-            """Launch the full Luminos Settings app."""
+        # -------------------------------------------------------------------
+        # Section 6: Power row
+        # -------------------------------------------------------------------
+
+        def _build_power_row(self, root):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=SPACE_2)
+            row.set_hexpand(True)
+
+            actions = [
+                ("⏾  Sleep",     self._on_sleep,    False),
+                ("↩  Logout",    self._on_logout,   False),
+                ("↺  Reboot",    self._on_reboot,   True),
+                ("⏻  Power off", self._on_poweroff, True),
+            ]
+            for label, handler, danger in actions:
+                btn = Gtk.Button(label=label)
+                btn.add_css_class("luminos-qs-power-btn")
+                if danger:
+                    btn.add_css_class("luminos-qs-power-btn-danger")
+                btn.set_hexpand(True)
+                btn.connect("clicked", handler)
+                row.append(btn)
+
+            root.append(row)
+
+        def _on_sleep(self, *_):
+            self.hide()
+            subprocess.run(["systemctl", "suspend"], check=False)
+
+        def _on_logout(self, *_):
             self.hide()
             try:
-                from gui.settings import launch_settings
-                launch_settings()
+                hypr_dir = f"/run/user/{os.getuid()}/hypr"
+                sig = next(iter(os.listdir(hypr_dir)), "")
+                env = {**os.environ, "HYPRLAND_INSTANCE_SIGNATURE": sig}
+                subprocess.run(
+                    ["hyprctl", "dispatch", "exit"], env=env, check=False
+                )
             except Exception as e:
-                logger.debug(f"Settings launch error: {e}")
+                logger.debug(f"Logout error: {e}")
+
+        def _on_reboot(self, *_):
+            self.hide()
+            subprocess.run(["systemctl", "reboot"], check=False)
+
+        def _on_poweroff(self, *_):
+            self.hide()
+            subprocess.run(["systemctl", "poweroff"], check=False)
 
         # -------------------------------------------------------------------
         # Show / hide / keyboard
@@ -857,17 +897,25 @@ if _GTK_AVAILABLE:
         def show_panel(self):
             """Refresh data and present the panel."""
             self._refresh()
+            self._just_shown = True
+            GLib.timeout_add(400, self._clear_just_shown)
             self.present()
 
+        def _clear_just_shown(self):
+            self._just_shown = False
+            return False
+
         def toggle(self):
-            """Show if hidden, hide if visible."""
             if self.get_visible():
                 self.hide()
             else:
                 self.show_panel()
 
+        def _on_active_changed(self, window, _param):
+            if not window.is_active() and not getattr(self, "_just_shown", False):
+                self.hide()
+
         def _on_key_pressed(self, _ctrl, keyval, _keycode, _state):
-            """Hide on Escape."""
             if keyval == Gdk.KEY_Escape:
                 self.hide()
                 return True
