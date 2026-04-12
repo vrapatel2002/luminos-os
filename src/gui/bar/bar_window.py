@@ -221,20 +221,26 @@ if _GTK_AVAILABLE:
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
             )
 
+            self.set_hide_on_close(False)
+
             # Layer shell — full width, top edge, no rounded corners
-            if _LAYER_SHELL_AVAILABLE:
-                LayerShell.init_for_window(self)
-                LayerShell.set_layer(self, LayerShell.Layer.TOP)
-                LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
-                LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
-                LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
-                LayerShell.set_exclusive_zone(self, BAR_HEIGHT)
-                LayerShell.set_keyboard_mode(
-                    self, LayerShell.KeyboardMode.ON_DEMAND
+            if not _LAYER_SHELL_AVAILABLE:
+                logger.error(
+                    "gtk4-layer-shell is not available. "
+                    "Install it with: sudo pacman -S gtk4-layer-shell"
                 )
-                logger.info("gtk4-layer-shell: bar pinned to top edge")
-            else:
-                self.set_default_size(1920, BAR_HEIGHT)
+                sys.exit(1)
+
+            LayerShell.init_for_window(self)
+            LayerShell.set_layer(self, LayerShell.Layer.TOP)
+            LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
+            LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
+            LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
+            LayerShell.set_exclusive_zone(self, BAR_HEIGHT)
+            LayerShell.set_keyboard_mode(
+                self, LayerShell.KeyboardMode.ON_DEMAND
+            )
+            logger.info("gtk4-layer-shell: bar pinned to top edge")
 
             # Build layout using overlay for true center clock
             self._build_layout()
