@@ -10,7 +10,7 @@ Visual spec (from LUMINOS_DESIGN_SYSTEM.md):
 
   Left: workspace dots (6px inactive, 8px active)
   Center: clock HH:MM, absolutely centered
-  Right: wifi + battery + volume icons (16px each)
+  Right: wifi + battery + volume icons using Phosphor SVGs (16px each)
 """
 
 import datetime
@@ -24,7 +24,8 @@ logger = logging.getLogger("luminos-ai.gui.bar.window")
 try:
     import gi
     gi.require_version("Gtk", "4.0")
-    from gi.repository import Gtk, Gdk, GLib
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import Gtk, Gdk, GLib, GdkPixbuf
     _GTK_AVAILABLE = True
 except (ImportError, ValueError):
     _GTK_AVAILABLE = False
@@ -52,6 +53,9 @@ from gui.common.socket_client import DaemonClient
 from gui.common.subprocess_helpers import (
     get_wifi_info, get_volume, set_volume, toggle_mute,
 )
+
+# Phosphor SVG icon directory
+PHOSPHOR_DIR = "/opt/luminos/assets/icons/phosphor"
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +128,11 @@ def get_battery_info() -> dict:
     return result
 
 
+def _phosphor(name: str) -> str:
+    """Return the full path to a Phosphor SVG icon."""
+    return os.path.join(PHOSPHOR_DIR, f"{name}.svg")
+
+
 # ===========================================================================
 # CSS — all values from luminos_theme
 # ===========================================================================
@@ -133,6 +142,7 @@ _BAR_CSS = f"""
     background: {glass_bg(0.75)};
     border-bottom: 1px solid {BORDER_SUBTLE};
     min-height: {BAR_HEIGHT}px;
+    min-width: 100%;
 }}
 
 .luminos-bar-clock {{
@@ -143,13 +153,13 @@ _BAR_CSS = f"""
 }}
 
 .luminos-bar-icon {{
-    font-size: 16px;
     color: {TEXT_SECONDARY};
+    -gtk-icon-style: symbolic;
 }}
 
 .luminos-bar-icon-muted {{
-    font-size: 16px;
     color: {TEXT_DISABLED};
+    -gtk-icon-style: symbolic;
 }}
 
 .luminos-bar-battery-text {{
@@ -173,8 +183,13 @@ _BAR_CSS = f"""
 }}
 
 .luminos-bar-bell {{
-    font-size: 16px;
     color: {TEXT_SECONDARY};
+    -gtk-icon-style: symbolic;
+}}
+
+.luminos-bar-bell-muted {{
+    color: {TEXT_DISABLED};
+    -gtk-icon-style: symbolic;
 }}
 
 .luminos-bar-badge {{
@@ -195,7 +210,31 @@ _BAR_CSS = f"""
 # GTK Window
 # ===========================================================================
 
+def _load_svg_texture(svg_name: str, size: int = 16) -> "Gdk.Texture | None":
+    """
+    Load a Phosphor SVG scaled to size×size and return a Gdk.Texture.
+    Uses GdkPixbuf so the SVG is rasterised at exactly the right pixel size.
+    """
+    try:
+        path = _phosphor(svg_name)
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
+        return Gdk.Texture.new_for_pixbuf(pixbuf)
+    except Exception as e:
+        logger.debug(f"SVG load failed for {svg_name}: {e}")
+        return None
+
+
 if _GTK_AVAILABLE:
+
+    def _make_svg_image(svg_name: str, size: int = 16) -> "Gtk.Image":
+        """Create a Gtk.Image from a Phosphor SVG, pre-scaled to size×size."""
+        texture = _load_svg_texture(svg_name, size)
+        if texture is not None:
+            img = Gtk.Image.new_from_paintable(texture)
+        else:
+            img = Gtk.Image()
+        img.set_size_request(size, size)
+        return img
 
     class LuminosBar(Gtk.ApplicationWindow):
         """
@@ -210,7 +249,9 @@ if _GTK_AVAILABLE:
 
             self.set_title("luminos-bar")
             self.set_decorated(False)
-            self.set_resizable(False)
+            # Do NOT call set_resizable(False) — layer-shell owns the window size.
+            # Calling it caps the window at its natural content width and prevents
+            # the Wayland compositor from stretching it to full screen width.
 
             # Load CSS
             css_provider = Gtk.CssProvider()
@@ -284,9 +325,9 @@ if _GTK_AVAILABLE:
             right.set_valign(Gtk.Align.CENTER)
             right.set_hexpand(True)
 
-            # Bell icon (notification center)
+            # Bell icon (notification center) — Phosphor bell.svg
             bell_box = Gtk.Overlay()
-            self._bell_icon = Gtk.Label(label="󰂚")
+            self._bell_icon = _make_svg_image("bell")
             self._bell_icon.add_css_class("luminos-bar-bell")
             bell_box.set_child(self._bell_icon)
 
@@ -302,13 +343,13 @@ if _GTK_AVAILABLE:
             bell_box.add_controller(bell_click)
             right.append(bell_box)
 
-            # WiFi icon
-            self._wifi_icon = Gtk.Label(label="󰤨")
+            # WiFi icon — Phosphor wifi-high.svg / wifi-slash.svg
+            self._wifi_icon = _make_svg_image("wifi-high")
             self._wifi_icon.add_css_class("luminos-bar-icon")
             right.append(self._wifi_icon)
 
-            # Battery icon + percentage
-            self._battery_icon = Gtk.Label(label="󰁹")
+            # Battery icon — Phosphor battery-full.svg
+            self._battery_icon = _make_svg_image("battery-full")
             self._battery_icon.add_css_class("luminos-bar-icon")
             right.append(self._battery_icon)
 
@@ -316,8 +357,8 @@ if _GTK_AVAILABLE:
             self._battery_text.add_css_class("luminos-bar-battery-text")
             right.append(self._battery_text)
 
-            # Volume icon
-            self._volume_icon = Gtk.Label(label="󰕾")
+            # Volume icon — Phosphor speaker-high.svg / speaker-x.svg
+            self._volume_icon = _make_svg_image("speaker-high")
             self._volume_icon.add_css_class("luminos-bar-icon")
             right.append(self._volume_icon)
 
@@ -394,48 +435,54 @@ if _GTK_AVAILABLE:
         # System tray polling
         # -------------------------------------------------------------------
 
+        def _set_icon(self, widget: "Gtk.Image", svg_name: str, size: int = 16):
+            """Swap the paintable on an existing image widget."""
+            texture = _load_svg_texture(svg_name, size)
+            if texture is not None:
+                widget.set_from_paintable(texture)
+
         def _poll_tray(self) -> bool:
-            # WiFi
+            # WiFi — swap SVG based on connected state
             try:
                 info = get_wifi_info()
                 if info.get("connected"):
-                    self._wifi_icon.set_text("󰤨")
+                    self._set_icon(self._wifi_icon, "wifi-high")
                     self._wifi_icon.remove_css_class("luminos-bar-icon-muted")
                     self._wifi_icon.add_css_class("luminos-bar-icon")
                 else:
-                    self._wifi_icon.set_text("󰤭")
+                    self._set_icon(self._wifi_icon, "wifi-slash")
                     self._wifi_icon.remove_css_class("luminos-bar-icon")
                     self._wifi_icon.add_css_class("luminos-bar-icon-muted")
             except Exception:
                 pass
 
-            # Battery
+            # Battery — swap SVG based on charging/low state
             try:
                 bat = get_battery_info()
                 pct = bat.get("percent")
                 charging = bat.get("charging", False)
                 if charging:
-                    self._battery_icon.set_text("󰂄")
+                    self._set_icon(self._battery_icon, "battery-charging")
                 elif pct is not None and pct <= 20:
-                    self._battery_icon.set_text("󰁺")
+                    self._set_icon(self._battery_icon, "battery-low")
                 else:
-                    self._battery_icon.set_text("󰁹")
+                    self._set_icon(self._battery_icon, "battery-full")
                 self._battery_text.set_text(
                     f"{pct}%" if pct is not None else "--%"
                 )
             except Exception:
                 pass
 
-            # Volume
+            # Volume — swap SVG based on muted state
             try:
                 vol = get_volume()
                 muted = vol.get("muted", False)
                 if muted:
-                    self._volume_icon.set_text("󰖁")
+                    self._set_icon(self._volume_icon, "speaker-x")
                     self._volume_icon.remove_css_class("luminos-bar-icon")
                     self._volume_icon.add_css_class("luminos-bar-icon-muted")
                 else:
-                    self._volume_icon.set_text("󰕾")
+                    self._set_icon(self._volume_icon, "speaker-high")
                     self._volume_icon.remove_css_class("luminos-bar-icon-muted")
                     self._volume_icon.add_css_class("luminos-bar-icon")
             except Exception:
@@ -464,7 +511,6 @@ if _GTK_AVAILABLE:
             try:
                 from gui.notifications.notification_center_panel import NotificationCenterPanel
                 if not hasattr(self, "_notif_panel") or self._notif_panel is None:
-                    # Get the notification center from the overlay singleton
                     center = None
                     try:
                         from gui.notifications import _get_overlay

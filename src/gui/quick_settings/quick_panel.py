@@ -44,6 +44,15 @@ try:
 except (ImportError, ValueError):
     _GTK_AVAILABLE = False
 
+_LAYER_SHELL_AVAILABLE = False
+if _GTK_AVAILABLE:
+    try:
+        gi.require_version("Gtk4LayerShell", "1.0")
+        from gi.repository import Gtk4LayerShell as LayerShell
+        _LAYER_SHELL_AVAILABLE = True
+    except (ImportError, ValueError):
+        pass
+
 _SRC = os.path.join(os.path.dirname(__file__), "..", "..")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
@@ -342,6 +351,21 @@ if _GTK_AVAILABLE:
             self.set_resizable(False)
             self.set_default_size(_QS_WIDTH, -1)
 
+            # Layer shell — pin to top-right, just below the bar.
+            # This makes the panel a proper Wayland surface so pointer
+            # events work correctly and the panel doesn't vanish when
+            # the mouse moves away from the bar button.
+            if _LAYER_SHELL_AVAILABLE:
+                LayerShell.init_for_window(self)
+                LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
+                LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
+                LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
+                LayerShell.set_margin(self, LayerShell.Edge.TOP, BAR_HEIGHT)
+                LayerShell.set_margin(self, LayerShell.Edge.RIGHT, 0)
+                LayerShell.set_keyboard_mode(
+                    self, LayerShell.KeyboardMode.ON_DEMAND
+                )
+
             # Apply CSS
             css_provider = Gtk.CssProvider()
             css_provider.load_from_string(_QS_CSS)
@@ -349,9 +373,6 @@ if _GTK_AVAILABLE:
             self.connect("realize", lambda w: self._ensure_css())
 
             self.add_css_class("luminos-qs")
-
-            # Hide on focus-out
-            self.connect("notify::is-active", self._on_active_changed)
 
             # Escape key closes
             key_ctrl = Gtk.EventControllerKey()
@@ -844,11 +865,6 @@ if _GTK_AVAILABLE:
                 self.hide()
             else:
                 self.show_panel()
-
-        def _on_active_changed(self, window, _param):
-            """Hide when the window loses focus."""
-            if not window.is_active():
-                self.hide()
 
         def _on_key_pressed(self, _ctrl, keyval, _keycode, _state):
             """Hide on Escape."""
