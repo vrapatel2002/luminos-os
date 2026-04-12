@@ -40,6 +40,14 @@ Root cause: Arch ships Python 3.14, pydantic v1 not updated yet
 Fix: uv + Python 3.12 venv at ~/mempalace-venv
 Files: ~/mempalace-venv/
 
+## BUG-007 — Bar/dock services running but nothing visible on screen
+Date: April 2026
+Status: FIXED
+Problem: luminos-bar and luminos-dock systemd services showed as active/running but bar and dock were invisible; services were crash-looping with "ERROR: GTK4 not available"
+Root cause: /opt/luminos/venv/pyvenv.cfg had include-system-site-packages = false. PyGObject (the `gi` module) is a system package and cannot be pip-installed into a venv; the venv Python could not import it, so the GTK4 availability check failed immediately on every launch
+Fix: Set include-system-site-packages = true in /opt/luminos/venv/pyvenv.cfg — one line change, no rebuild required
+Files: /opt/luminos/venv/pyvenv.cfg
+
 ## BUG-006 — MemPalace normalize.py sender field
 Date: April 2026
 Status: FIXED
