@@ -29,6 +29,9 @@ Last updated: 2026-04-12
 | MemPalace installed | ✅ | Python 3.12 venv (uv-managed), MCP registered, 2544 drawers indexed |
 | code-review-graph installed | ✅ | MCP registered, graph built (2518 nodes, 17246 edges, 182 files) |
 | Push all changes to git | ✅ | Unblocked — all commits pushed to main |
+| WhiteSur icon + cursor themes | ✅ | whitesur-icon-theme-git + whitesur-cursor-theme-git installed; gsettings applied |
+| WhiteSur GTK theme | ✅ | whitesur-gtk-theme-git installed (PKGBUILD patched for missing plank/firefox dirs); gsettings applied |
+| macOS-style Hyprland aesthetics | ✅ | macOS bezier, popin 80% animations, blur passes=3+noise+contrast+brightness, shadow rgba(00000066), gtk4-layer-shell layerrules |
 | Bar/dock positioning (anchors) | 🔄 | Layer.OVERLAY+auto_exclusive_zone (bar), Layer.TOP+auto_exclusive_zone (dock) — awaiting reboot test |
 | Bar icons and widgets | 🔄 | Phosphor SVG icons in bar — quick-settings popup working |
 | Login screen | 🔲 | Not started |
