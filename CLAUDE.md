@@ -1,3 +1,13 @@
+## MEMORY TOOLS — USE THESE EVERY SESSION
+
+1. **Start every session**: Run `mempalace search` for the current task topic
+2. **Before editing any file**: Run `code-review-graph get_minimal_context`
+3. **Before finishing any session**: Save key decisions to `mempalace`
+
+This makes both tools automatic from now on.
+
+---
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
