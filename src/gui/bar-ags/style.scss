@@ -7,7 +7,7 @@ window.Bar {
   font-size: 13px;
   font-weight: 500;
 
-  > centerbox {
+  .bar-inner {
     background: rgba(0, 0, 0, 0.78);
     min-height: 25px;
     padding: 0 4px;
@@ -23,28 +23,14 @@ window.Bar {
   }
 
   // --- Workspace dots ---
-  .ws-dots {
-    margin-left: 4px;
-    padding: 0 4px;
-  }
-
-  .ws-dot {
+  .ws-btn {
     all: unset;
-    padding: 0 3px;
-    min-width: 0;
-    min-height: 0;
+    padding: 0 8px;
+    margin-left: 4px;
 
-    label {
-      font-size: 10px;
-      color: rgba(255, 255, 255, 0.45);
-      transition: color 150ms ease;
-    }
-
-    &.active label {
-      color: white;
-    }
-
-    &:hover label {
+    .workspaces {
+      font-size: 11px;
+      letter-spacing: 1px;
       color: rgba(255, 255, 255, 0.8);
     }
   }
@@ -88,7 +74,7 @@ window.Bar {
     }
   }
 
-  // --- Popovers ---
+  // --- Popover dropdowns ---
   popover {
     background: rgba(30, 30, 30, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -105,97 +91,5 @@ window.Bar {
       color: white;
       font-size: 12px;
     }
-  }
-}
-
-// --- Popover content shared ---
-.popover-content {
-  min-width: 220px;
-  padding: 12px;
-}
-
-.popover-row {
-  min-height: 24px;
-
-  image {
-    -gtk-icon-size: 18px;
-    color: rgba(255, 255, 255, 0.9);
-  }
-}
-
-.popover-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: white;
-}
-
-.popover-value {
-  font-size: 13px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.75);
-}
-
-.popover-detail {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
-}
-
-.popover-slider {
-  margin-top: 2px;
-  min-height: 20px;
-
-  trough {
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 4px;
-    min-height: 4px;
-  }
-
-  highlight {
-    background: white;
-    border-radius: 4px;
-    min-height: 4px;
-  }
-
-  slider {
-    background: white;
-    border-radius: 50%;
-    min-width: 14px;
-    min-height: 14px;
-    margin: -5px 0;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  }
-}
-
-.popover-action-btn {
-  all: unset;
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  transition: background 150ms ease;
-
-  label {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.15);
-  }
-}
-
-.battery-level {
-  margin-top: 4px;
-  min-height: 6px;
-  border-radius: 3px;
-
-  trough {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 3px;
-    min-height: 6px;
-  }
-
-  block.filled {
-    background: #28c840;
-    border-radius: 3px;
   }
 }

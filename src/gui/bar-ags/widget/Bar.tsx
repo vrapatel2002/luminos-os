@@ -36,47 +36,23 @@ function getVolume(): number {
   }
 }
 
-function getBattery(): { pct: number; charging: boolean; timeLeft: string } {
+function getBattery(): { pct: number; charging: boolean } {
   try {
     const pct = parseInt(exec("cat /sys/class/power_supply/BAT0/capacity").trim())
     const st = exec("cat /sys/class/power_supply/BAT0/status").trim()
-    const charging = st === "Charging" || st === "Full"
-
-    let timeLeft = ""
-    try {
-      const energyNow = parseInt(exec("cat /sys/class/power_supply/BAT0/energy_now").trim())
-      const powerNow = parseInt(exec("cat /sys/class/power_supply/BAT0/power_now").trim())
-      if (powerNow > 0) {
-        const hours = Math.floor(energyNow / powerNow)
-        const mins = Math.round(((energyNow / powerNow) - hours) * 60)
-        timeLeft = `${hours}h ${mins}m remaining`
-      }
-    } catch {}
-
-    return { pct, charging, timeLeft }
+    return { pct, charging: st === "Charging" || st === "Full" }
   } catch {
-    return { pct: -1, charging: false, timeLeft: "" }
+    return { pct: -1, charging: false }
   }
 }
 
-function getWifiInfo(): { icon: string; ssid: string; strength: number } {
+function getWifiIcon(): string {
   try {
     const network = Network.get_default()
     const wifi = network.get_wifi()
-    if (wifi) {
-      const ssid = wifi.get_ssid() || ""
-      const strength = wifi.get_strength()
-      let icon = "network-wireless-offline-symbolic"
-      if (ssid) {
-        if (strength > 75) icon = "network-wireless-signal-excellent-symbolic"
-        else if (strength > 50) icon = "network-wireless-signal-good-symbolic"
-        else if (strength > 25) icon = "network-wireless-signal-ok-symbolic"
-        else icon = "network-wireless-signal-weak-symbolic"
-      }
-      return { icon, ssid, strength }
-    }
+    if (wifi && wifi.get_ssid()) return "network-wireless-signal-excellent-symbolic"
   } catch {}
-  return { icon: "network-wireless-offline-symbolic", ssid: "", strength: 0 }
+  return "network-wireless-offline-symbolic"
 }
 
 function getBatteryIcon(pct: number, charging: boolean): string {
@@ -94,172 +70,18 @@ function getVolumeIcon(vol: number): string {
   return "audio-volume-high-symbolic"
 }
 
-// ─── Workspace Dots ──────────────────────────────────────────────────
-function WorkspaceDots() {
-  const wsState = createPoll(
-    JSON.stringify({ active: 1, max: 5 }),
-    500,
-    () => JSON.stringify(getWorkspaceState()),
-  )
-
-  return (
-    <box class="ws-dots" halign={Gtk.Align.START} valign={Gtk.Align.CENTER}>
-      {wsState.as((json: string) => {
-        const s = JSON.parse(json)
-        const dots = []
-        for (let i = 1; i <= s.max; i++) {
-          const active = i === s.active
-          const ws = i
-          dots.push(
-            <button
-              class={active ? "ws-dot active" : "ws-dot"}
-              onClicked={() => execAsync(["hyprctl", "dispatch", "workspace", String(ws)])}
-            >
-              <label label={active ? "●" : "○"} />
-            </button>,
-          )
-        }
-        return dots
-      })}
-    </box>
-  )
-}
-
-// ─── Brightness Popover ──────────────────────────────────────────────
-function BrightnessPopover() {
-  const briVal = createPoll("", 3000, () => {
-    const b = getBrightness()
-    return b >= 0 ? `${b}%` : "N/A"
-  })
-
-  return (
-    <box orientation={Gtk.Orientation.VERTICAL} class="popover-content">
-      <box class="popover-row" marginBottom={4}>
-        <image iconName="display-brightness-symbolic" marginEnd={8} />
-        <label label="Display" class="popover-title" hexpand halign={Gtk.Align.START} />
-        <label label={briVal} class="popover-value" />
-      </box>
-      <Gtk.Scale
-        class="popover-slider"
-        hexpand
-        drawValue={false}
-        adjustment={
-          new Gtk.Adjustment({
-            lower: 0,
-            upper: 100,
-            value: Math.max(0, getBrightness()),
-            stepIncrement: 5,
-            pageIncrement: 10,
-          })
-        }
-        onChangeValue={(_self: any, _scroll: any, value: number) => {
-          const clamped = Math.round(Math.max(0, Math.min(100, value)))
-          execAsync(["brightnessctl", "s", `${clamped}%`])
-          return false
-        }}
-      />
-    </box>
-  )
-}
-
-// ─── Volume Popover ──────────────────────────────────────────────────
-function VolumePopover() {
-  const volVal = createPoll("", 3000, () => {
-    const v = getVolume()
-    return v >= 0 ? `${v}%` : "N/A"
-  })
-  const volIcn = createPoll("audio-volume-high-symbolic", 3000, () => getVolumeIcon(getVolume()))
-
-  return (
-    <box orientation={Gtk.Orientation.VERTICAL} class="popover-content">
-      <box class="popover-row" marginBottom={4}>
-        <image iconName={volIcn} marginEnd={8} />
-        <label label="Sound" class="popover-title" hexpand halign={Gtk.Align.START} />
-        <label label={volVal} class="popover-value" />
-      </box>
-      <Gtk.Scale
-        class="popover-slider"
-        hexpand
-        drawValue={false}
-        adjustment={
-          new Gtk.Adjustment({
-            lower: 0,
-            upper: 100,
-            value: Math.max(0, getVolume()),
-            stepIncrement: 5,
-            pageIncrement: 10,
-          })
-        }
-        onChangeValue={(_self: any, _scroll: any, value: number) => {
-          const clamped = Math.round(Math.max(0, Math.min(100, value))) / 100
-          execAsync(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", String(clamped)])
-          return false
-        }}
-      />
-    </box>
-  )
-}
-
-// ─── Wi-Fi Popover ───────────────────────────────────────────────────
-function WifiPopover() {
-  const wifiDetail = createPoll("Not connected", 10000, () => {
-    const i = getWifiInfo()
-    return i.ssid ? `${i.ssid}  (${i.strength}%)` : "Not connected"
-  })
-
-  return (
-    <box orientation={Gtk.Orientation.VERTICAL} class="popover-content">
-      <box class="popover-row">
-        <image iconName="network-wireless-signal-excellent-symbolic" marginEnd={8} />
-        <label label="Wi-Fi" class="popover-title" hexpand halign={Gtk.Align.START} />
-      </box>
-      <box class="popover-row" marginTop={4}>
-        <label class="popover-detail" halign={Gtk.Align.START} label={wifiDetail} />
-      </box>
-      <button
-        class="popover-action-btn"
-        marginTop={8}
-        onClicked={() => execAsync(["nm-connection-editor"])}
-      >
-        <label label="Network Settings..." />
-      </button>
-    </box>
-  )
-}
-
-// ─── Battery Popover ─────────────────────────────────────────────────
-function BatteryPopover() {
-  const batPct = createPoll("", 15000, () => {
-    const b = getBattery()
-    return b.pct >= 0 ? `${b.pct}%` : "N/A"
-  })
-  const batIcn = createPoll("battery-missing-symbolic", 15000, () => {
-    const b = getBattery()
-    return getBatteryIcon(b.pct, b.charging)
-  })
-  const batStatus = createPoll("", 15000, () => {
-    const b = getBattery()
-    if (b.charging) return "Charging"
-    return b.timeLeft || "On battery"
-  })
-
-  return (
-    <box orientation={Gtk.Orientation.VERTICAL} class="popover-content">
-      <box class="popover-row">
-        <image iconName={batIcn} marginEnd={8} />
-        <label label="Battery" class="popover-title" hexpand halign={Gtk.Align.START} />
-        <label class="popover-value" label={batPct} />
-      </box>
-      <label class="popover-detail" halign={Gtk.Align.START} marginTop={4} label={batStatus} />
-    </box>
-  )
-}
-
 // ─── Bar ──────────────────────────────────────────────────────────────
 export default function Bar(gdkmonitor: Gdk.Monitor) {
   const { TOP, LEFT, RIGHT } = Astal.WindowAnchor
 
-  // --- Reactive polls for bar icons ---
+  // Reactive polls
+  const wsDots = createPoll("●  ○  ○  ○  ○", 500, () => {
+    const s = getWorkspaceState()
+    const dots: string[] = []
+    for (let i = 1; i <= s.max; i++) dots.push(i === s.active ? "●" : "○")
+    return dots.join("  ")
+  })
+
   const clock = createPoll("--:--", 1000, () => {
     const n = new Date()
     return `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`
@@ -272,7 +94,7 @@ export default function Bar(gdkmonitor: Gdk.Monitor) {
     return `${days[n.getDay()]} ${months[n.getMonth()]} ${n.getDate()}`
   })
 
-  const wifiIcon = createPoll("network-wireless-offline-symbolic", 10000, () => getWifiInfo().icon)
+  const wifiIcon = createPoll("network-wireless-offline-symbolic", 10000, getWifiIcon)
   const briText = createPoll("", 5000, () => {
     const b = getBrightness()
     return b >= 0 ? `${b}%` : ""
@@ -298,13 +120,19 @@ export default function Bar(gdkmonitor: Gdk.Monitor) {
       anchor={TOP | LEFT | RIGHT}
       application={app}
     >
-      <centerbox cssName="centerbox">
-        {/* LEFT: workspace dots — click individual to switch */}
-        <box $type="start">
-          <WorkspaceDots />
-        </box>
+      <centerbox class="bar-inner">
+        {/* LEFT: workspace dots */}
+        <button
+          $type="start"
+          class="ws-btn"
+          halign={Gtk.Align.START}
+          valign={Gtk.Align.CENTER}
+          onClicked={() => execAsync(["hyprctl", "dispatch", "workspace", "+1"])}
+        >
+          <label class="workspaces" label={wsDots} />
+        </button>
 
-        {/* CENTER: clock + date — click for calendar */}
+        {/* CENTER: clock + date */}
         <menubutton $type="center" class="clock-btn" halign={Gtk.Align.CENTER} valign={Gtk.Align.CENTER}>
           <box>
             <label class="clock" label={clock} />
@@ -315,13 +143,15 @@ export default function Bar(gdkmonitor: Gdk.Monitor) {
           </popover>
         </menubutton>
 
-        {/* RIGHT: system icons */}
+        {/* RIGHT: system tray icons */}
         <box $type="end" halign={Gtk.Align.END} valign={Gtk.Align.CENTER} marginEnd={8}>
           {/* Wi-Fi */}
           <menubutton class="tray-btn" valign={Gtk.Align.CENTER}>
             <image iconName={wifiIcon} />
             <popover>
-              <WifiPopover />
+              <box marginTop={8} marginBottom={8} marginStart={12} marginEnd={12}>
+                <label label="Wi-Fi Networks" />
+              </box>
             </popover>
           </menubutton>
 
@@ -332,7 +162,9 @@ export default function Bar(gdkmonitor: Gdk.Monitor) {
               <label class="tray-text" label={briText} />
             </box>
             <popover>
-              <BrightnessPopover />
+              <box marginTop={8} marginBottom={8} marginStart={12} marginEnd={12}>
+                <label label="Brightness" />
+              </box>
             </popover>
           </menubutton>
 
@@ -340,7 +172,9 @@ export default function Bar(gdkmonitor: Gdk.Monitor) {
           <menubutton class="tray-btn" valign={Gtk.Align.CENTER}>
             <image iconName={volIcon} />
             <popover>
-              <VolumePopover />
+              <box marginTop={8} marginBottom={8} marginStart={12} marginEnd={12}>
+                <label label="Volume" />
+              </box>
             </popover>
           </menubutton>
 
@@ -351,7 +185,9 @@ export default function Bar(gdkmonitor: Gdk.Monitor) {
               <label class="tray-text" label={batText} />
             </box>
             <popover>
-              <BatteryPopover />
+              <box marginTop={8} marginBottom={8} marginStart={12} marginEnd={12}>
+                <label label="Power" />
+              </box>
             </popover>
           </menubutton>
         </box>
