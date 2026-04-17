@@ -1,5 +1,5 @@
 # Luminos System Status
-Last updated: 2026-04-12
+Last updated: 2026-04-17
 
 ## Environment
 - Machine: ASUS ROG G14
@@ -32,15 +32,21 @@ Last updated: 2026-04-12
 | WhiteSur icon + cursor themes | ✅ | whitesur-icon-theme-git + whitesur-cursor-theme-git installed; gsettings applied |
 | WhiteSur GTK theme | ✅ | whitesur-gtk-theme-git installed (PKGBUILD patched for missing plank/firefox dirs); gsettings applied |
 | macOS-style Hyprland aesthetics | ✅ | macOS bezier, popin 80% animations, blur passes=3+noise+contrast+brightness, shadow rgba(00000066), gtk4-layer-shell layerrules |
-| Bar/dock positioning (anchors) | 🔄 | Layer.OVERLAY+auto_exclusive_zone (bar), Layer.TOP+auto_exclusive_zone (dock) — awaiting reboot test |
-| Bar icons and widgets | 🔄 | Phosphor SVG icons in bar — quick-settings popup working |
+| Bar/dock positioning (anchors) | ✅ | AGS bar: Astal.Exclusivity.EXCLUSIVE; dock: Layer.TOP+exclusive_zone |
+| AGS (aylurs-gtk-shell) installed | ✅ | v3.1.0 via yay; libastal-battery/network/hyprland/wireplumber/tray/notifd |
+| AGS bar — basic render | ✅ | Bar.tsx + app.ts + style.scss; workspace dots, clock, system tray |
+| AGS bar — rich popovers | ✅ | Vol/brightness sliders, Wi-Fi SSID, battery details with time remaining |
+| AGS bar wired into Hyprland | ✅ | exec-once ags run in hyprland.conf; old Python service disabled |
+| macOS deco buttons | ✅ | Traffic-light close/min/max overlay; polls activewindow, repositions |
+| Bar/dock auto-hide | ✅ | Opacity fade on mouse leave/enter; exclusive_zone stays constant |
+| Bar icons and widgets | ✅ | Phosphor SVG icons in bar — quick-settings popup working |
 | Login screen | 🔲 | Not started |
 | Settings accent color swatches | 🔲 | Not rendering — not started |
 
 ## Active Bugs
 | Bug | Status |
 |-----|--------|
-| Bar shifting to right side on reboot | 🔄 Fixing — anchor pattern updated to match HyprYou |
+| Bar shifting to right side on reboot | ✅ Fixed — AGS bar uses Astal anchors (TOP|LEFT|RIGHT) |
 | Blur lost on reboot | ✅ Fixed — layerules now in repo + compositor_config.py |
 | Dock below windows (Layer.BOTTOM) | ✅ Fixed — changed to Layer.TOP |
 | Dock exclusive_zone=-1 | ✅ Fixed — auto_exclusive_zone_enable |
@@ -49,7 +55,8 @@ Last updated: 2026-04-12
 ## Current Phase: Stack Migration
 | Migration Task | Status | Notes |
 |----------------|--------|-------|
-| Python bar/dock → AGS/JavaScript | 🔄 | IN PROGRESS — replacing Python GTK4 bar/dock with AGS/Astal |
+| Python bar → AGS/JavaScript | ✅ | Bar migrated — AGS bar with popovers, sliders, workspace dots |
+| Python dock → AGS/JavaScript | 🔲 | PLANNED — dock still runs as Python GTK4 |
 | Python settings → Go + libadwaita | 🔲 | PLANNED |
 | Python login screen → Go + libadwaita | 🔲 | PLANNED |
 | Go daemons for NPU/AI/compat | 🔲 | PLANNED — replacing Python daemon code with Go single binaries |
