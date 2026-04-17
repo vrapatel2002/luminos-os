@@ -1,0 +1,101 @@
+// Luminos Bar — macOS Sequoia style
+$fg-color: #{"@theme_fg_color"};
+$bg-color: #{"@theme_bg_color"};
+
+window.Bar {
+  background: transparent;
+  color: white;
+  font-family: "Inter", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+
+  > centerbox {
+    background: rgba(0, 0, 0, 0.78);
+    min-height: 25px;
+    padding: 0 4px;
+  }
+
+  label {
+    color: white;
+  }
+
+  image {
+    color: rgba(255, 255, 255, 0.9);
+    -gtk-icon-size: 16px;
+  }
+
+  // --- Workspace dots ---
+  .ws-btn {
+    all: unset;
+    padding: 0 8px;
+    margin-left: 4px;
+
+    .workspaces {
+      font-size: 11px;
+      letter-spacing: 1px;
+      color: rgba(255, 255, 255, 0.8);
+    }
+  }
+
+  // --- Clock + date ---
+  .clock-btn {
+    all: unset;
+    padding: 0 6px;
+
+    > box {
+      // child box holding clock + date
+    }
+
+    .clock {
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .date {
+      font-size: 13px;
+      font-weight: 400;
+      color: rgba(255, 255, 255, 0.75);
+    }
+  }
+
+  // --- System tray buttons ---
+  .tray-btn {
+    all: unset;
+    padding: 0 6px;
+    border-radius: 4px;
+    transition: background 150ms ease;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .tray-text {
+      font-size: 12px;
+      margin-left: 3px;
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    image {
+      margin: 0 1px;
+    }
+  }
+
+  // --- Popover dropdowns ---
+  popover {
+    background: rgba(30, 30, 30, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 4px;
+
+    label {
+      color: white;
+      font-size: 13px;
+    }
+
+    calendar {
+      background: transparent;
+      color: white;
+      font-size: 12px;
+    }
+  }
+}
