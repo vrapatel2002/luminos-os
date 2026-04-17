@@ -299,16 +299,26 @@ if _GTK_AVAILABLE:
 
             LayerShell.init_for_window(self)
             LayerShell.set_namespace(self, "luminos-bar")
-            LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
+            LayerShell.set_layer(self, LayerShell.Layer.TOP)
             LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
             LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
             LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
             LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, False)
-            LayerShell.auto_exclusive_zone_enable(self)
+            LayerShell.set_exclusive_zone(self, BAR_HEIGHT)
             LayerShell.set_keyboard_mode(
                 self, LayerShell.KeyboardMode.ON_DEMAND
             )
             logger.info("gtk4-layer-shell: bar pinned to top edge")
+
+            # Auto-hide state — exclusive zone never changes (avoids retiling)
+            self._bar_revealed = True
+            self._hide_timer_id = None
+
+            # Motion controller — reveal on enter, schedule hide on leave
+            motion = Gtk.EventControllerMotion()
+            motion.connect("enter", self._on_mouse_enter)
+            motion.connect("leave", self._on_mouse_leave)
+            self.add_controller(motion)
 
             # Build layout using overlay for true center clock
             self._build_layout()
@@ -321,8 +331,12 @@ if _GTK_AVAILABLE:
             self._poll_workspaces()
             self._poll_tray()
 
+            # Auto-hide: fade out 3s after startup
+            GLib.timeout_add_seconds(3, self._initial_hide)
+
         def _build_layout(self):
             overlay = Gtk.Overlay()
+            self._content = overlay          # opacity target — window stays opaque for events
             self.set_child(overlay)
 
             # Root box for left + right sections
@@ -560,3 +574,44 @@ if _GTK_AVAILABLE:
                 toggle_panel()
             except Exception as e:
                 logger.debug(f"Quick settings toggle error: {e}")
+
+        # -------------------------------------------------------------------
+        # Auto-hide — opacity fade, exclusive_zone stays constant so
+        # Hyprland never retiles open windows when bar appears/disappears
+        # -------------------------------------------------------------------
+
+        def _reveal_bar(self):
+            if not self._bar_revealed:
+                self._bar_revealed = True
+                self._content.set_opacity(1.0)
+                logger.debug("bar: revealed")
+
+        def _hide_bar(self) -> bool:
+            if self._bar_revealed:
+                self._bar_revealed = False
+                self._content.set_opacity(0.0)
+                logger.debug("bar: hidden")
+            self._hide_timer_id = None
+            return GLib.SOURCE_REMOVE
+
+        def _schedule_hide(self):
+            if self._hide_timer_id is not None:
+                GLib.source_remove(self._hide_timer_id)
+            self._hide_timer_id = GLib.timeout_add_seconds(2, self._hide_bar)
+
+        def _cancel_hide(self):
+            if self._hide_timer_id is not None:
+                GLib.source_remove(self._hide_timer_id)
+                self._hide_timer_id = None
+
+        def _initial_hide(self) -> bool:
+            """Kick off auto-hide 3s after startup."""
+            self._schedule_hide()
+            return GLib.SOURCE_REMOVE
+
+        def _on_mouse_enter(self, *_):
+            self._cancel_hide()
+            self._reveal_bar()
+
+        def _on_mouse_leave(self, *_):
+            self._schedule_hide()

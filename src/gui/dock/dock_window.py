@@ -209,6 +209,16 @@ if _GTK_AVAILABLE:
                 logger.warning("gtk4-layer-shell not available — dock as normal window")
                 self.set_default_size(700, DOCK_HEIGHT + DOCK_BOTTOM_MARGIN * 2)
 
+            # Auto-hide state
+            self._dock_revealed = True
+            self._hide_timer_id = None
+
+            # Motion controller — reveal on enter, schedule hide on leave
+            motion = Gtk.EventControllerMotion()
+            motion.connect("enter", self._on_mouse_enter)
+            motion.connect("leave", self._on_mouse_leave)
+            self.add_controller(motion)
+
             # Load pinned apps
             self.pinned_apps = load_pinned()
 
@@ -218,6 +228,9 @@ if _GTK_AVAILABLE:
             # Poll daemon every 3s
             GLib.timeout_add_seconds(3, self._poll_windows)
             self._poll_windows()
+
+            # Auto-hide: fade out 3s after startup
+            GLib.timeout_add_seconds(3, self._initial_hide)
 
         # -------------------------------------------------------------------
         # Layout
@@ -231,6 +244,7 @@ if _GTK_AVAILABLE:
             outer.set_halign(Gtk.Align.CENTER)
             outer.set_valign(Gtk.Align.END)
             outer.add_css_class("luminos-dock-surface")
+            self._content = outer            # opacity target — window stays opaque for events
             self.set_child(outer)
 
             # Pill container
@@ -359,3 +373,42 @@ if _GTK_AVAILABLE:
                     logger.info(f"Dock: launched {exec_cmd!r}")
                 except Exception as e:
                     logger.warning(f"Dock: failed to launch {exec_cmd!r}: {e}")
+
+        # -------------------------------------------------------------------
+        # Auto-hide — opacity on content only so window keeps receiving events
+        # -------------------------------------------------------------------
+
+        def _reveal_dock(self):
+            if not self._dock_revealed:
+                self._dock_revealed = True
+                self._content.set_opacity(1.0)
+                logger.debug("dock: revealed")
+
+        def _hide_dock(self) -> bool:
+            if self._dock_revealed:
+                self._dock_revealed = False
+                self._content.set_opacity(0.0)
+                logger.debug("dock: hidden")
+            self._hide_timer_id = None
+            return GLib.SOURCE_REMOVE
+
+        def _schedule_hide(self):
+            if self._hide_timer_id is not None:
+                GLib.source_remove(self._hide_timer_id)
+            self._hide_timer_id = GLib.timeout_add_seconds(2, self._hide_dock)
+
+        def _cancel_hide(self):
+            if self._hide_timer_id is not None:
+                GLib.source_remove(self._hide_timer_id)
+                self._hide_timer_id = None
+
+        def _initial_hide(self) -> bool:
+            self._schedule_hide()
+            return GLib.SOURCE_REMOVE
+
+        def _on_mouse_enter(self, *_):
+            self._cancel_hide()
+            self._reveal_dock()
+
+        def _on_mouse_leave(self, *_):
+            self._schedule_hide()
