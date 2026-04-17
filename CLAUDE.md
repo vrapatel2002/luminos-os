@@ -1,14 +1,30 @@
-## MEMORY TOOLS — USE THESE EVERY SESSION
+## MANDATORY RULES — READ BEFORE EVERY TASK
 
-1. **Start every session**: Run `mempalace search` for the current task topic
-2. **Before editing any file**: Run `code-review-graph get_minimal_context`
-3. **Before finishing any session**: Save key decisions to `mempalace`
+### Memory Tools — Use Every Session
+1. **START every session**: search mempalace for current task topic
+2. **BEFORE editing code**: run `code-review-graph get_minimal_context`
+3. **BEFORE finishing**: save key decisions to mempalace
+4. **NEVER** repeat something mempalace says already failed
 
-This makes both tools automatic from now on.
+### Tech Stack (LOCKED)
+- **Bar/Dock**: AGS (Astal) + JavaScript + CSS
+- **Apps/Settings/Login**: Go + GTK4 + libadwaita + CSS
+- **Daemons**: Go
+- **Window manager**: Hyprland
+- **NO new Python UI code**
+
+### Persistence Rule
+`/opt/luminos/src` must always be symlinked to `~/luminos-os/src`.
+If not symlinked, fix it before any other work:
+```bash
+sudo rm -rf /opt/luminos/src && sudo ln -sf /home/shawn/luminos-os/src /opt/luminos/src
+```
+
+### Git Rule
+Commit and push after every completed task.
 
 ---
 
-<!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
 **IMPORTANT: This project has a knowledge graph. ALWAYS use the

@@ -51,6 +51,23 @@ AI Runtime:    llama.cpp via Unix socket daemon
 Security:      Sentinel on NPU
 ```
 
+## TECH STACK (LOCKED — April 2026)
+```
+Bar + Dock:              AGS (Astal) + JavaScript + CSS
+Settings + Login Screen: Go + GTK4 + libadwaita + CSS
+AI Daemon / NPU / Compat Router: Go
+Window Manager:          Hyprland (locked forever)
+Drawing Engine:          GTK4 (locked forever)
+Styling:                 CSS + libadwaita
+```
+
+### Legacy / Deprecated
+```
+Python GTK4:  DEPRECATED for all UI work. Existing Python bar/dock code
+              is being migrated to AGS/JS. No new Python UI code allowed.
+              Python remains acceptable for build scripts and tooling only.
+```
+
 ### Why Arch (Short Version)
 - No Casper, no hardcoded usernames, no Ubuntu bloat
 - Hyprland, asusctl, supergfxctl all native in AUR

@@ -48,6 +48,14 @@ Root cause: /opt/luminos/venv/pyvenv.cfg had include-system-site-packages = fals
 Fix: Set include-system-site-packages = true in /opt/luminos/venv/pyvenv.cfg — one line change, no rebuild required
 Files: /opt/luminos/venv/pyvenv.cfg
 
+## BUG-008 — Python venv system packages missing
+Date: April 2026
+Status: RESOLVED (root cause retired)
+Problem: Multiple UI bugs traced back to Python venv not finding system packages (GTK4, PyGObject)
+Root cause: Python venv packaging is fundamentally fragile — include-system-site-packages, Python 3.14 breaking pydantic, pip vs system package conflicts
+Fix: Retired Python for all UI work. Stack migrated to AGS/JS (bar/dock) and Go + libadwaita (settings/login). Prevents recurrence entirely.
+Files: All src/gui/ Python files — being replaced
+
 ## BUG-006 — MemPalace normalize.py sender field
 Date: April 2026
 Status: FIXED

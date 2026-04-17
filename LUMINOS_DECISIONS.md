@@ -340,6 +340,7 @@ Test on actual G14 hardware in Phase 5.4 before depending on NPU behavior.
 ## DECISION 10 — Custom GTK4 Bar/Dock (Not Waybar)
 Date: Session 6
 Made by: Sam + Claude
+**Status: SUPERSEDED by Decision 11**
 
 ### What We Decided
 Luminos keeps its custom GTK4 bar and dock (luminos-bar, luminos-dock).
@@ -371,3 +372,51 @@ We are not switching to Waybar or any other existing bar.
   Cons: JSON config only, no native Python integration, cannot talk to AI daemon.
     Loses Luminos-specific features (zone badges, NPU alerts, smart workspace routing).
     HyprYou proves GTK4 is the better path for a fully integrated desktop.
+
+---
+
+## DECISION 11 — Stack Migration: AGS/JS + Go Replaces Python UI
+Date: April 2026
+Made by: Sam
+
+### What We Decided
+DECISION: Stack changed from Python GTK4 to AGS/JS + Go + libadwaita
+
+- **Bar + Dock**: AGS (Astal) + JavaScript + CSS
+- **Settings + Login screen**: Go + GTK4 + libadwaita + CSS
+- **AI daemon + NPU + Compat Router**: Go
+- **Window manager**: Hyprland (locked forever)
+- **Drawing engine**: GTK4 (locked forever)
+- **Styling**: CSS + libadwaita
+
+### Why
+1. Python caused venv issues, slow startup, bad aesthetic out of the box.
+   BUG-005 (Python 3.14 incompatibility), BUG-007 (venv system packages missing)
+   both traced back to Python packaging fragility.
+
+2. AGS/JS chosen for bar/dock — proven Mac-like results on Hyprland.
+   The best macOS-inspired Hyprland desktops all use AGS. Fastest UI dev cycle.
+
+3. Go chosen for all daemons and apps — fast, single binary, no deps.
+   No venv, no pip, no Python version issues. Single static binary deployment.
+
+4. libadwaita chosen for instant beautiful GTK4 styling.
+   CSS + libadwaita gives GNOME-quality aesthetics with zero custom theming code.
+
+### What We Rejected
+
+**Staying on Python GTK4**
+  Pros: Existing code, familiar
+  Cons: venv hell, Python 3.14 breaks dependencies, slow startup,
+    poor aesthetics without heavy custom CSS. Every session hit a new
+    Python packaging bug.
+
+**Rust for daemons**
+  Pros: Performance, memory safety
+  Cons: Slower development cycle, steeper learning curve. Go is fast enough
+    and compiles to single binaries just as easily.
+
+### What This Supersedes
+Decision 10 (Custom GTK4 Bar/Dock). The bar and dock are still custom-built
+for Luminos — but now in AGS/JavaScript instead of Python GTK4.
+Python is deprecated for all UI work. No new Python UI code.

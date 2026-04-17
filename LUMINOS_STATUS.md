@@ -46,5 +46,13 @@ Last updated: 2026-04-12
 | Dock exclusive_zone=-1 | ✅ Fixed — auto_exclusive_zone_enable |
 | Settings accent swatches not rendering | 🔲 Not started |
 
+## Current Phase: Stack Migration
+| Migration Task | Status | Notes |
+|----------------|--------|-------|
+| Python bar/dock → AGS/JavaScript | 🔄 | IN PROGRESS — replacing Python GTK4 bar/dock with AGS/Astal |
+| Python settings → Go + libadwaita | 🔲 | PLANNED |
+| Python login screen → Go + libadwaita | 🔲 | PLANNED |
+| Go daemons for NPU/AI/compat | 🔲 | PLANNED — replacing Python daemon code with Go single binaries |
+
 ## Legend
 🔲 Not started | 🔄 In progress | ✅ Done | ❌ Blocked
