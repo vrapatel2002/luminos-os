@@ -1,26 +1,53 @@
-#!/usr/bin/env python3
-"""
-scripts/luminos-quick-settings-toggle
-Toggle the Quick Settings panel via D-Bus or direct import.
-Called from Hyprland keybinding: Super+S.
-"""
+#!/usr/bin/env bash
+# Luminos Quick Settings — wofi-based quick control panel
+# Bound to Super+S in hyprland.conf
 
-import os
-import sys
+# Gather current state
+vol=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk '{printf "%.0f", $2*100}')
+muted=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | grep -q MUTED && echo " [MUTED]" || echo "")
+brightness=$(brightnessctl -m 2>/dev/null | awk -F, '{print $4}' | tr -d '%')
+wifi_status=$(nmcli -t -f WIFI g 2>/dev/null)
+wifi_ssid=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2)
+bt_status=$(bluetoothctl show 2>/dev/null | grep "Powered:" | awk '{print $2}')
 
-SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
-if SRC not in sys.path:
-    sys.path.insert(0, SRC)
+# Build menu
+entries=""
+entries+="  Volume: ${vol}%${muted}\n"
+entries+="  Brightness: ${brightness}%\n"
+if [ "$wifi_status" = "enabled" ]; then
+    entries+="  Wi-Fi: ON (${wifi_ssid:-not connected})\n"
+else
+    entries+="  Wi-Fi: OFF\n"
+fi
+if [ "$bt_status" = "yes" ]; then
+    entries+="  Bluetooth: ON\n"
+else
+    entries+="  Bluetooth: OFF\n"
+fi
+entries+="  Volume Mixer\n"
+entries+="  Volume Up (+10%)\n"
+entries+="  Volume Down (-10%)\n"
+entries+="  Mute Toggle\n"
+entries+="  Brightness Up (+10%)\n"
+entries+="  Brightness Down (-10%)\n"
+entries+="  Wi-Fi Settings\n"
+entries+="  Bluetooth Settings"
 
-try:
-    from gui.quick_settings import toggle_panel
-    toggle_panel()
-except Exception as e:
-    # Fallback: send signal to running bar process
-    import subprocess
-    subprocess.run(
-        ["dbus-send", "--session", "--type=method_call",
-         "--dest=io.luminos.bar", "/io/luminos/bar",
-         "io.luminos.bar.ToggleQuickSettings"],
-        capture_output=True, timeout=3,
-    )
+chosen=$(echo -e "$entries" | wofi --dmenu --prompt "Quick Settings" \
+    --width 380 --height 440 --location 3 \
+    --cache-file /dev/null --insensitive 2>/dev/null)
+
+case "$chosen" in
+    *"Volume Mixer"*)     pavucontrol & ;;
+    *"Volume Up"*)        wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 10%+ ;;
+    *"Volume Down"*)      wpctl set-volume @DEFAULT_AUDIO_SINK@ 10%- ;;
+    *"Mute Toggle"*)      wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle ;;
+    *"Brightness Up"*)    brightnessctl -e4 -n2 set 10%+ ;;
+    *"Brightness Down"*)  brightnessctl -e4 -n2 set 10%- ;;
+    *"Wi-Fi: ON"*)        nmcli radio wifi off ;;
+    *"Wi-Fi: OFF"*)       nmcli radio wifi on ;;
+    *"Wi-Fi Settings"*)   kitty -e nmtui & ;;
+    *"Bluetooth: ON"*)    bluetoothctl power off ;;
+    *"Bluetooth: OFF"*)   bluetoothctl power on ;;
+    *"Bluetooth Settings"*) kitty -e bluetoothctl & ;;
+esac
