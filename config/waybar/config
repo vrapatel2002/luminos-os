@@ -39,7 +39,7 @@
     },
     "custom/os_button": {
         "format": "",
-        "on-click": "pkill wofi || wofi --show drun",
+        "on-click": "wofi-toggle",
         "tooltip": false
     },
     "cpu": {
