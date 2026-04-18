@@ -1,5 +1,5 @@
 # Luminos System Status
-Last updated: 2026-04-17
+Last updated: 2026-04-18
 
 ## Environment
 - Machine: ASUS ROG G14
@@ -9,7 +9,7 @@ Last updated: 2026-04-17
 ## Task Tracker
 | Task | Status | Notes |
 |------|--------|-------|
-| Install waybar | ✅ | v0.15.0 via pacman (reference only — luminos-bar used instead) |
+| Install waybar | ✅ | v0.15.0 — Windows 11 style taskbar (bottom, height 41, accent #0080FF) |
 | Install swww | ✅ | v0.12.0 via pacman |
 | Install brightnessctl | ✅ | v0.5.1 via pacman |
 | Install playerctl | ✅ | v2.4.1 via pacman |
@@ -21,45 +21,47 @@ Last updated: 2026-04-17
 | Deploy code to /opt/luminos | ✅ | /opt/luminos/src symlinked → ~/luminos-os/src (always in sync) |
 | Install scripts to PATH | ✅ | luminos-launcher-toggle + luminos-quick-settings-toggle → /usr/local/bin |
 | Install systemd services (system) | ✅ | luminos-ai + luminos-sentinel enabled |
-| Install systemd services (user) | ✅ | luminos-bar + luminos-dock + luminos-wallpaper enabled and running |
-| Rewrite hyprland.conf | ✅ | Luminos theme, ROG keys, touchpad gestures, layerules for blur |
-| Hyprland blur layerules | ✅ | luminos-bar/dock/quick-settings/calendar blur via layerrule — synced to repo + compositor_config.py |
+| Rewrite hyprland.conf | ✅ | Luminos theme, ROG keys, touchpad gestures, waybar blur layerrules |
+| Hyprland blur layerules | ✅ | waybar blur via layerrule — synced to repo |
 | Set supergfxctl Hybrid | ✅ | asusd + supergfxd enabled; mode confirmed Hybrid |
 | Set up greetd login screen | ✅ | greetd enabled; luminos-greeter via cage; GTK4+python-gobject installed |
 | MemPalace installed | ✅ | Python 3.12 venv (uv-managed), MCP registered, 2544 drawers indexed |
-| code-review-graph installed | ✅ | MCP registered, graph built (2518 nodes, 17246 edges, 182 files) |
+| code-review-graph installed | ✅ | MCP registered, graph built (2560 nodes, 17478 edges, 187 files) |
 | Push all changes to git | ✅ | Unblocked — all commits pushed to main |
 | WhiteSur icon + cursor themes | ✅ | whitesur-icon-theme-git + whitesur-cursor-theme-git installed; gsettings applied |
-| WhiteSur GTK theme | ✅ | whitesur-gtk-theme-git installed (PKGBUILD patched for missing plank/firefox dirs); gsettings applied |
-| macOS-style Hyprland aesthetics | ✅ | macOS bezier, popin 80% animations, blur passes=3+noise+contrast+brightness, shadow rgba(00000066), gtk4-layer-shell layerrules |
-| Bar/dock positioning (anchors) | ✅ | AGS bar: Astal.Exclusivity.EXCLUSIVE; dock: Layer.TOP+exclusive_zone |
-| AGS (aylurs-gtk-shell) installed | ✅ | v3.1.0 via yay; libastal-battery/network/hyprland/wireplumber/tray/notifd |
-| AGS bar — basic render | ✅ | Bar.tsx + app.ts + style.scss; workspace dots, clock, system tray |
-| AGS bar — rich popovers | ✅ | Vol/brightness sliders, Wi-Fi SSID, battery details with time remaining |
-| AGS bar wired into Hyprland | ✅ | exec-once ags run in hyprland.conf; old Python service disabled |
-| macOS deco buttons | ✅ | Traffic-light close/min/max overlay; polls activewindow, repositions |
-| Bar/dock auto-hide | ✅ | Opacity fade on mouse leave/enter; exclusive_zone stays constant |
-| Bar icons and widgets | ✅ | Phosphor SVG icons in bar — quick-settings popup working |
+| WhiteSur GTK theme | ✅ | whitesur-gtk-theme-git installed; gsettings applied |
+| macOS-style Hyprland aesthetics | ✅ | macOS bezier, popin 95% animations, shadow rgba(00000066) |
+| Hyprbars traffic light buttons | ✅ | Red/yellow/green window buttons via hyprbars plugin |
+| Windows 11 waybar | ✅ | Win10-style-waybar config, bottom taskbar, #0080FF accent, blur |
 | Login screen | 🔲 | Not started |
 | Settings accent color swatches | 🔲 | Not rendering — not started |
 
 ## Active Bugs
 | Bug | Status |
 |-----|--------|
-| Bar shifting to right side on reboot | ✅ Fixed — AGS bar uses Astal anchors (TOP|LEFT|RIGHT) |
-| Blur lost on reboot | ✅ Fixed — layerules now in repo + compositor_config.py |
-| Dock below windows (Layer.BOTTOM) | ✅ Fixed — changed to Layer.TOP |
-| Dock exclusive_zone=-1 | ✅ Fixed — auto_exclusive_zone_enable |
+| Bar shifting to right side on reboot | ✅ Fixed — replaced with waybar |
+| Blur lost on reboot | ✅ Fixed — layerules in hyprland.conf |
 | Settings accent swatches not rendering | 🔲 Not started |
 
 ## Current Phase: Stack Migration
 | Migration Task | Status | Notes |
 |----------------|--------|-------|
-| Python bar → AGS/JavaScript | ✅ | Bar migrated — AGS bar with popovers, sliders, workspace dots |
-| Python dock → AGS/JavaScript | 🔲 | PLANNED — dock still runs as Python GTK4 |
+| Python bar → Waybar | ✅ | Windows 11 style waybar replaces both AGS and Python bar |
+| Python dock → Waybar taskbar | ✅ | wlr/taskbar module in waybar replaces Python dock |
+| AGS bar → Waybar | ✅ | AGS bar retired — waybar is the single bar solution |
 | Python settings → Go + libadwaita | 🔲 | PLANNED |
 | Python login screen → Go + libadwaita | 🔲 | PLANNED |
 | Go daemons for NPU/AI/compat | 🔲 | PLANNED — replacing Python daemon code with Go single binaries |
+
+## Retired Components
+| Component | Replaced By | Date |
+|-----------|------------|------|
+| Python bar (bar_app.py) | Waybar | 2026-04-17 |
+| Python dock (dock_app.py) | Waybar wlr/taskbar | 2026-04-17 |
+| AGS bar (Bar.tsx) | Waybar | 2026-04-17 |
+| luminos-bar.service | waybar exec-once | 2026-04-17 |
+| luminos-dock.service | waybar exec-once | 2026-04-17 |
+| luminos-deco.service | hyprbars plugin | 2026-04-17 |
 
 ## Legend
 🔲 Not started | 🔄 In progress | ✅ Done | ❌ Blocked
