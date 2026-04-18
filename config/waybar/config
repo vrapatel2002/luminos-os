@@ -39,7 +39,7 @@
     },
     "custom/os_button": {
         "format": "",
-        "on-click": "wofi --show drun",
+        "on-click": "pkill wofi || wofi --show drun",
         "tooltip": false
     },
     "cpu": {
@@ -119,7 +119,7 @@
             "󰤨 "
         ],
         "tooltip-format-wifi": "{essid} ({signalStrength}%)",
-        "on-click": "kitty -e nmtui"
+        "on-click": "nm-connection-editor"
     },
     "battery": {
         "states": {
