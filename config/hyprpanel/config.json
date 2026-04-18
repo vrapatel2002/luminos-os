@@ -73,7 +73,9 @@
 						"menu_icon_size": 20,
 						"auto_hide_statuses": [],
 						"auto_hide_delay": "4s",
-						"pinned": [],
+						"pinned": [
+							"nm-applet"
+						],
 						"modules": [
 							{
 								"audio": {
@@ -90,6 +92,12 @@
 								}
 							}
 						]
+					}
+				},
+				{
+					"spacer": {
+						"size": 4,
+						"expand": false
 					}
 				},
 				{
@@ -133,6 +141,12 @@
 						"command_reboot": "systemctl reboot",
 						"command_suspend": "systemctl suspend",
 						"command_shutdown": "systemctl poweroff"
+					}
+				},
+				{
+					"spacer": {
+						"size": 8,
+						"expand": false
 					}
 				},
 				{
