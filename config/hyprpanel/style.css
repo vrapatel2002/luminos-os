@@ -1,0 +1,185 @@
+/* Luminos HyprPanel — Windows 11 floating taskbar */
+
+/* === Panel window — floating rounded bar === */
+window {
+    background-color: transparent;
+    color: #ffffff;
+    font-family: "Segoe UI Variable Static Small", "Inter", sans-serif;
+    font-size: 13px;
+}
+
+window > * {
+    background-color: rgba(30, 30, 30, 0.88);
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    margin: 6px 8px;
+    padding: 0 4px;
+}
+
+/* === Module base === */
+.module {
+    padding: 0 6px;
+    margin: 4px 1px;
+    border-radius: 8px;
+    transition: background-color 150ms ease;
+}
+
+.module:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* === Workspace pager === */
+.workspace {
+    min-width: 20px;
+    min-height: 4px;
+    margin: 0 2px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.06);
+    transition: all 200ms ease;
+}
+
+.workspace:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.workspace.active {
+    background-color: rgba(0, 128, 255, 0.85);
+    min-width: 24px;
+}
+
+.workspaceLabel {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.workspace.active .workspaceLabel {
+    color: #ffffff;
+}
+
+/* === Taskbar icons === */
+.icon {
+    border-radius: 8px;
+    padding: 4px;
+    transition: background-color 150ms ease;
+}
+
+.icon:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Active app indicator dot */
+.indicator {
+    background-color: rgba(0, 128, 255, 0.9);
+    border-radius: 2px;
+    min-width: 14px;
+    min-height: 3px;
+    margin-top: 1px;
+}
+
+/* === Labels === */
+.label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* === Clock === */
+.clock {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.95);
+    padding: 0 4px;
+}
+
+/* === Power / battery === */
+.power {
+    padding: 0 2px;
+}
+
+/* === Session button === */
+.sessionState {
+    padding: 0 4px;
+    border-radius: 8px;
+}
+
+.sessionState:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* === Separator === */
+.separator {
+    background-color: rgba(255, 255, 255, 0.08);
+    min-width: 1px;
+    margin: 10px 4px;
+}
+
+/* === Notifications popup === */
+.notification {
+    background-color: rgba(40, 40, 40, 0.95);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin: 4px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.notification:hover {
+    background-color: rgba(50, 50, 50, 0.95);
+}
+
+.notification button {
+    border-radius: 6px;
+    padding: 6px 12px;
+    background-color: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+    border: none;
+}
+
+.notification button:hover {
+    background-color: rgba(0, 128, 255, 0.4);
+}
+
+.notificationSummary {
+    font-weight: 600;
+    font-size: 13px;
+    color: #ffffff;
+}
+
+.notificationBody {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.notificationIcon {
+    border-radius: 8px;
+}
+
+/* === HUD (volume/brightness OSD) === */
+.hudNotification {
+    background-color: rgba(40, 40, 40, 0.92);
+    border-radius: 16px;
+    padding: 16px 24px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.hudTitle {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.hudPercent {
+    font-size: 20px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.hudIcon {
+    color: rgba(0, 128, 255, 0.9);
+}
+
+/* === Error label === */
+.labelError {
+    color: rgba(255, 80, 80, 0.9);
+    font-size: 11px;
+}

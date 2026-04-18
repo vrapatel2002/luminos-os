@@ -34,8 +34,13 @@ Last updated: 2026-04-18
 | Hyprbars traffic light buttons | ✅ | Red/yellow/green window buttons via hyprbars plugin |
 | Windows 11 waybar | ✅ | Win10-style-waybar config, bottom taskbar, #0080FF accent, blur |
 | HyprPanel installed | ✅ | Replaces waybar — bottom bar, grouped wifi/battery/volume, notifications built-in |
+| HyprPanel floating bar + CSS | ✅ | Rounded edges, floating with margin, dark translucent bg, blur layerrule |
+| HyprPanel pinned apps | ✅ | Menu (wofi launcher), Firefox, Dolphin, Kitty pinned to taskbar |
+| HyprPanel launcher button | ✅ | luminos-launcher.desktop → wofi toggle, pinned first in taskbar |
+| Icon theme fix for HyprPanel | ✅ | Switched to Adwaita icons for GTK4 compatibility (WhiteSur-Dark broke symbolic icons) |
 | pipewire-pulse | ✅ | Installed for HyprPanel audio support |
 | dunst masked | ✅ | Masked to avoid D-Bus notification conflict with HyprPanel |
+| HyprPanel right-side layout | 🔄 | Volume/battery/wifi icons need grouping, clock needs time-over-date, spacing fixes |
 | Login screen | 🔲 | Not started |
 | Settings accent color swatches | 🔲 | Not rendering — not started |
 
@@ -47,6 +52,7 @@ Last updated: 2026-04-18
 | Old Python bar/dock reappearing after reboot | ✅ Fixed — luminos-session bar/dock launch commented out |
 | swww typo (awww) in hyprland.conf | ✅ Fixed — corrected to swww |
 | Settings accent swatches not rendering | 🔲 Not started |
+| HyprPanel right-side icons misaligned | 🔄 Volume not centered, needs grouped box with wifi+battery+volume |
 
 ## Current Phase: Stack Migration
 | Migration Task | Status | Notes |

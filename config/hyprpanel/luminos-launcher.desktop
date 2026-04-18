@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Menu
+Comment=Open App Launcher
+Exec=sh -c 'pkill wofi || wofi --show drun --prompt "Search apps..." --width 600 --height 400 --location center --allow-images --insensitive'
+Icon=view-app-grid-symbolic
+Type=Application
+Categories=System;
+NoDisplay=true

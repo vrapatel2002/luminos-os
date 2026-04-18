@@ -40,72 +40,44 @@
 		{
 			"id": "panel0",
 			"edge": "EDGE_BOTTOM",
-			"size": 44,
+			"size": 48,
 			"monitor": "",
 			"modules": [
 				{
-					"pager": {
-						"icon_size": 12,
-						"active_monitor_only": false,
-						"scroll_wrap_workspaces": true,
-						"scroll_include_inactive": true,
-						"enable_workspace_names": false,
-						"pinned": [
-							1,
-							2,
-							3,
-							4,
-							5,
-							6
-						],
-						"ignore_windows": [],
-						"preview_width": 256,
-						"follow_window_on_move": false
-					}
-				},
-				{
-					"spacer": {
-						"size": 16,
-						"expand": false
-					}
-				},
-				{
 					"taskbar": {
-						"icon_size": 32,
-						"active_workspace_only": true,
-						"active_monitor_only": true,
+						"icon_size": 28,
+						"active_workspace_only": false,
+						"active_monitor_only": false,
 						"group_tasks": true,
 						"hide_indicators": false,
 						"expand": true,
 						"max_size": 0,
-						"pinned": [],
+						"pinned": [
+							"luminos-launcher",
+							"firefox",
+							"org.kde.dolphin",
+							"kitty"
+						],
 						"preview_width": 256
 					}
 				},
 				{
 					"spacer": {
-						"size": 16,
+						"size": 8,
 						"expand": false
 					}
 				},
 				{
 					"systray": {
-						"icon_size": 22,
-						"menu_icon_size": 22,
-						"auto_hide_statuses": [
-							"STATUS_UNSPECIFIED",
-							"STATUS_PASSIVE",
-							"STATUS_ACTIVE"
-						],
+						"icon_size": 20,
+						"menu_icon_size": 20,
+						"auto_hide_statuses": [],
 						"auto_hide_delay": "4s",
-						"pinned": [
-							"nm-applet",
-							"chrome_status_icon_1"
-						],
+						"pinned": [],
 						"modules": [
 							{
 								"power": {
-									"icon_size": 22,
+									"icon_size": 20,
 									"icon_symbolic": true
 								}
 							}
@@ -113,66 +85,47 @@
 					}
 				},
 				{
+					"audio": {
+						"icon_size": 20,
+						"icon_symbolic": true,
+						"command_mixer": "pavucontrol",
+						"enable_source": false
+					}
+				},
+				{
 					"notifications": {
-						"icon_size": 24,
+						"icon_size": 20,
 						"notification_icon_size": 48,
 						"default_timeout": "7s",
 						"position": "POSITION_TOP_RIGHT",
-						"margin": 24,
+						"margin": 12,
 						"persistent": []
 					}
 				},
 				{
-					"hud": {
-						"notification_icon_size": 64,
-						"timeout": "2s",
-						"position": "POSITION_BOTTOM",
-						"margin": 256
-					}
-				},
-				{
 					"spacer": {
-						"size": 16,
-						"expand": false
-					}
-				},
-				{
-					"audio": {
-						"icon_size": 22,
-						"icon_symbolic": true,
-						"command_mixer": "pavucontrol",
-						"enable_source": true
-					}
-				},
-				{
-					"spacer": {
-						"size": 16,
+						"size": 6,
 						"expand": false
 					}
 				},
 				{
 					"clock": {
-						"time_format": "15:04",
-						"date_format": "2006-01-02",
-						"tooltip_time_format": "15:04",
-						"tooltip_date_format": "Mon, 02 Jan 2006 MST",
-						"additional_regions": [
-							"America/Los_Angeles",
-							"America/Chicago",
-							"America/New_York",
-							"Europe/London"
-						]
+						"time_format": "3:04 PM",
+						"date_format": "Mon, Jan 2",
+						"tooltip_time_format": "3:04 PM",
+						"tooltip_date_format": "Monday, January 2, 2006",
+						"additional_regions": []
 					}
 				},
 				{
 					"spacer": {
-						"size": 16,
+						"size": 6,
 						"expand": false
 					}
 				},
 				{
 					"session": {
-						"icon_size": 22,
+						"icon_size": 20,
 						"icon_symbolic": true,
 						"overlay_icon_size": 64,
 						"overlay_icon_symbolic": true,
@@ -183,9 +136,11 @@
 					}
 				},
 				{
-					"spacer": {
-						"size": 16,
-						"expand": false
+					"hud": {
+						"notification_icon_size": 64,
+						"timeout": "2s",
+						"position": "POSITION_BOTTOM",
+						"margin": 64
 					}
 				}
 			]
