@@ -71,7 +71,11 @@
 					"systray": {
 						"icon_size": 20,
 						"menu_icon_size": 20,
-						"auto_hide_statuses": [],
+						"auto_hide_statuses": [
+							"STATUS_UNSPECIFIED",
+							"STATUS_PASSIVE",
+							"STATUS_ACTIVE"
+						],
 						"auto_hide_delay": "4s",
 						"pinned": [
 							"nm-applet"

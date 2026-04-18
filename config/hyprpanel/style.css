@@ -84,15 +84,16 @@ window > * {
     color: rgba(255, 255, 255, 0.9);
 }
 
-/* === Clock — time on top, date underneath (both in clockTime via \n) === */
+/* === Clock — time on top, date underneath, center aligned === */
 #clock {
-    padding: 2px 8px;
+    padding: 2px 6px;
 }
 
 #clockTime {
     font-size: 11px;
     font-weight: 500;
     color: rgba(255, 255, 255, 0.92);
+    letter-spacing: 0.3px;
 }
 
 #clockDate {
