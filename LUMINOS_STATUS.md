@@ -40,7 +40,8 @@ Last updated: 2026-04-18
 | Icon theme fix for HyprPanel | ✅ | Switched to Adwaita icons for GTK4 compatibility (WhiteSur-Dark broke symbolic icons) |
 | pipewire-pulse | ✅ | Installed for HyprPanel audio support |
 | dunst masked | ✅ | Masked to avoid D-Bus notification conflict with HyprPanel |
-| HyprPanel right-side layout | 🔄 | Volume/battery/wifi icons need grouping, clock needs time-over-date, spacing fixes |
+| HyprPanel right-side layout | 🔄 | Audio+battery grouped in systray box, clock time-over-date, session padding — needs reboot verify |
+| nm-applet installed | ✅ | network-manager-applet for wifi systray icon, exec-once in hyprland.conf |
 | Login screen | 🔲 | Not started |
 | Settings accent color swatches | 🔲 | Not rendering — not started |
 
@@ -52,7 +53,7 @@ Last updated: 2026-04-18
 | Old Python bar/dock reappearing after reboot | ✅ Fixed — luminos-session bar/dock launch commented out |
 | swww typo (awww) in hyprland.conf | ✅ Fixed — corrected to swww |
 | Settings accent swatches not rendering | 🔲 Not started |
-| HyprPanel right-side icons misaligned | 🔄 Volume not centered, needs grouped box with wifi+battery+volume |
+| HyprPanel right-side icons misaligned | 🔄 Audio moved inside systray modules, CSS fixes applied — needs reboot verify |
 
 ## Current Phase: Stack Migration
 | Migration Task | Status | Notes |

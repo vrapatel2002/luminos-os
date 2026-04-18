@@ -16,7 +16,7 @@ window > * {
     padding: 0 4px;
 }
 
-/* === Module base === */
+/* === Module base — vertically centered === */
 .module {
     padding: 0 6px;
     margin: 4px 1px;
@@ -84,22 +84,49 @@ window > * {
     color: rgba(255, 255, 255, 0.9);
 }
 
-/* === Clock === */
-.clock {
+/* === Clock — time on top, date underneath === */
+#clock {
+    padding: 2px 8px;
+}
+
+#clockTime {
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 600;
     color: rgba(255, 255, 255, 0.95);
+}
+
+#clockDate {
+    font-size: 10px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* === Systray group box (wifi + volume + battery) === */
+#panel > * > .module:nth-child(3) {
+    background-color: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
     padding: 0 4px;
+    margin: 4px 2px;
+}
+
+#panel > * > .module:nth-child(3):hover {
+    background-color: rgba(255, 255, 255, 0.10);
 }
 
 /* === Power / battery === */
 .power {
-    padding: 0 2px;
+    padding: 0 4px;
 }
 
-/* === Session button === */
-.sessionState {
+/* === Audio icon vertical centering === */
+#audio {
     padding: 0 4px;
+}
+
+/* === Session button — right-edge padding === */
+.sessionState {
+    padding: 0 8px;
+    margin-right: 6px;
     border-radius: 8px;
 }
 

@@ -76,20 +76,20 @@
 						"pinned": [],
 						"modules": [
 							{
+								"audio": {
+									"icon_size": 20,
+									"icon_symbolic": true,
+									"command_mixer": "pavucontrol",
+									"enable_source": false
+								}
+							},
+							{
 								"power": {
 									"icon_size": 20,
 									"icon_symbolic": true
 								}
 							}
 						]
-					}
-				},
-				{
-					"audio": {
-						"icon_size": 20,
-						"icon_symbolic": true,
-						"command_mixer": "pavucontrol",
-						"enable_source": false
 					}
 				},
 				{
