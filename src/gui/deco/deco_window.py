@@ -23,10 +23,10 @@ import sys
 
 logger = logging.getLogger("luminos-ai.gui.deco.window")
 
-_BUTTON_SIZE    = 14      # px diameter
+_BUTTON_SIZE    = 13      # px diameter (macOS standard)
 _BUTTON_SPACING = 8       # px between buttons
-_TOP_OFFSET     = 14      # px down from window top edge
-_LEFT_OFFSET    = 14      # px in from window left edge
+_TOP_OFFSET     = 8       # px down from window top edge
+_LEFT_OFFSET    = 8       # px in from window left edge
 
 # Classes that should never get decoration buttons
 _SKIP_CLASSES = {
@@ -41,8 +41,8 @@ _CSS = """
     border-radius: 50%;
     border: none;
     padding: 0;
-    min-width: 0;
-    min-height: 0;
+    min-width: 13px;
+    min-height: 13px;
     box-shadow: none;
     outline: none;
 }
@@ -54,6 +54,12 @@ _CSS = """
 .deco-minimize:hover { background: #D99A1A; }
 .deco-maximize { background: #28C840; }
 .deco-maximize:hover { background: #1DAA31; }
+
+.deco-pill {
+    background: rgba(30, 30, 30, 0.85);
+    border-radius: 20px;
+    padding: 5px 8px;
+}
 
 window.deco-window {
     background: transparent;
@@ -125,13 +131,10 @@ if _GTK_AVAILABLE:
             LayerShell.set_margin(self, LayerShell.Edge.TOP, _TOP_OFFSET)
             LayerShell.set_margin(self, LayerShell.Edge.LEFT, _LEFT_OFFSET)
 
-            # Build button row
+            # Build button row inside a dark pill for visibility
             box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                           spacing=_BUTTON_SPACING)
-            box.set_margin_top(2)
-            box.set_margin_bottom(2)
-            box.set_margin_start(2)
-            box.set_margin_end(2)
+            box.add_css_class("deco-pill")
 
             self._close_btn = _make_button("deco-close")
             self._close_btn.connect("clicked", self._on_close)
@@ -177,12 +180,12 @@ if _GTK_AVAILABLE:
                 data = json.loads(result.stdout)
                 addr = data.get("address", "")
                 wclass = data.get("class", "").lower()
-                fullscreen = data.get("fullscreen", False)
+                over_fullscreen = data.get("overFullscreen", False)
                 at   = data.get("at",   [0, 0])
                 size = data.get("size", [0, 0])
 
-                # Hide for our own surfaces, fullscreen, or empty addr
-                if not addr or fullscreen or wclass in _SKIP_CLASSES:
+                # Hide for our own surfaces or when window covers the entire screen
+                if not addr or over_fullscreen or wclass in _SKIP_CLASSES:
                     self.set_visible(False)
                     return GLib.SOURCE_CONTINUE
 
