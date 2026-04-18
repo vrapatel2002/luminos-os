@@ -33,22 +33,28 @@ Last updated: 2026-04-18
 | macOS-style Hyprland aesthetics | ✅ | macOS bezier, popin 95% animations, shadow rgba(00000066) |
 | Hyprbars traffic light buttons | ✅ | Red/yellow/green window buttons via hyprbars plugin |
 | Windows 11 waybar | ✅ | Win10-style-waybar config, bottom taskbar, #0080FF accent, blur |
+| HyprPanel installed | ✅ | Replaces waybar — bottom bar, grouped wifi/battery/volume, notifications built-in |
+| pipewire-pulse | ✅ | Installed for HyprPanel audio support |
+| dunst masked | ✅ | Masked to avoid D-Bus notification conflict with HyprPanel |
 | Login screen | 🔲 | Not started |
 | Settings accent color swatches | 🔲 | Not rendering — not started |
 
 ## Active Bugs
 | Bug | Status |
 |-----|--------|
-| Bar shifting to right side on reboot | ✅ Fixed — replaced with waybar |
+| Bar shifting to right side on reboot | ✅ Fixed — replaced with HyprPanel |
 | Blur lost on reboot | ✅ Fixed — layerules in hyprland.conf |
+| Old Python bar/dock reappearing after reboot | ✅ Fixed — luminos-session bar/dock launch commented out |
+| swww typo (awww) in hyprland.conf | ✅ Fixed — corrected to swww |
 | Settings accent swatches not rendering | 🔲 Not started |
 
 ## Current Phase: Stack Migration
 | Migration Task | Status | Notes |
 |----------------|--------|-------|
-| Python bar → Waybar | ✅ | Windows 11 style waybar replaces both AGS and Python bar |
-| Python dock → Waybar taskbar | ✅ | wlr/taskbar module in waybar replaces Python dock |
-| AGS bar → Waybar | ✅ | AGS bar retired — waybar is the single bar solution |
+| Python bar → HyprPanel | ✅ | HyprPanel replaces Python bar, waybar, and AGS |
+| Python dock → HyprPanel taskbar | ✅ | HyprPanel taskbar module replaces Python dock |
+| AGS bar → HyprPanel | ✅ | AGS bar retired — HyprPanel is the single bar solution |
+| Waybar → HyprPanel | ✅ | Waybar retired — HyprPanel has grouped quick settings |
 | Python settings → Go + libadwaita | 🔲 | PLANNED |
 | Python login screen → Go + libadwaita | 🔲 | PLANNED |
 | Go daemons for NPU/AI/compat | 🔲 | PLANNED — replacing Python daemon code with Go single binaries |
@@ -62,6 +68,9 @@ Last updated: 2026-04-18
 | luminos-bar.service | waybar exec-once | 2026-04-17 |
 | luminos-dock.service | waybar exec-once | 2026-04-17 |
 | luminos-deco.service | hyprbars plugin | 2026-04-17 |
+| Waybar | HyprPanel | 2026-04-18 |
+| dunst | HyprPanel notifications | 2026-04-18 |
+| luminos-launcher-toggle (Python) | wofi via keybind | 2026-04-18 |
 
 ## Legend
 🔲 Not started | 🔄 In progress | ✅ Done | ❌ Blocked

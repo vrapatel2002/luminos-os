@@ -7,7 +7,7 @@
 4. **NEVER** repeat something mempalace says already failed
 
 ### Tech Stack (LOCKED)
-- **Bar/Dock**: AGS (Astal) + JavaScript + CSS
+- **Bar/Dock**: HyprPanel (Go-based, built for Hyprland)
 - **Apps/Settings/Login**: Go + GTK4 + libadwaita + CSS
 - **Daemons**: Go
 - **Window manager**: Hyprland

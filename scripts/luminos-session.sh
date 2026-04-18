@@ -106,17 +106,17 @@ except Exception: pass
 # ----------------------------------------------------------------
 log "Starting Luminos desktop components."
 
-if command -v luminos-bar &>/dev/null; then
-    luminos-bar &
-else
-    log "luminos-bar not found (install or build first)."
-fi
-
-if command -v luminos-dock &>/dev/null; then
-    luminos-dock &
-else
-    log "luminos-dock not found (install or build first)."
-fi
+# RETIRED: if command -v luminos-bar &>/dev/null; then
+# RETIRED:     luminos-bar &
+# RETIRED: else
+# RETIRED:     log "luminos-bar not found (install or build first)."
+# RETIRED: fi
+# RETIRED: 
+# RETIRED: if command -v luminos-dock &>/dev/null; then
+# RETIRED:     luminos-dock &
+# RETIRED: else
+# RETIRED:     log "luminos-dock not found (install or build first)."
+# RETIRED: fi
 
 # Wallpaper
 if command -v swww-daemon &>/dev/null; then
