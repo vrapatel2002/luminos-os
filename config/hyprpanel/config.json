@@ -118,8 +118,8 @@
 				},
 				{
 					"clock": {
-						"time_format": "3:04 PM",
-						"date_format": "Mon, Jan 2",
+						"time_format": "3:04 PM\nMon, Jan 2",
+						"date_format": "",
 						"tooltip_time_format": "3:04 PM",
 						"tooltip_date_format": "Monday, January 2, 2006",
 						"additional_regions": []

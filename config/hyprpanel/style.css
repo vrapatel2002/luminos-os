@@ -84,21 +84,23 @@ window > * {
     color: rgba(255, 255, 255, 0.9);
 }
 
-/* === Clock — time on top, date underneath === */
+/* === Clock — time on top, date underneath (both in clockTime via \n) === */
 #clock {
     padding: 2px 8px;
 }
 
 #clockTime {
-    font-size: 12px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.92);
 }
 
 #clockDate {
-    font-size: 10px;
-    font-weight: 400;
-    color: rgba(255, 255, 255, 0.6);
+    font-size: 0;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    margin: 0;
 }
 
 /* === Systray group box (wifi + volume + battery) === */
