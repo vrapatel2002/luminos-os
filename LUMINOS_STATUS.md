@@ -12,7 +12,7 @@
 | Component | Status | Last Updated | Notes |
 |-----------|--------|-------------|-------|
 | Arch Linux base | ✅ Working | — | Triple boot on G14 alongside Windows + default Arch |
-| Hyprland 0.54.3 | ✅ Working | 2026-04-19 | Config errors fixed. windowrulev2 migrated to block-style. Window decorations (hyprbars) enabled and configured. Minimize buttons fixed. |
+| Hyprland 0.54.3 | ✅ Working | 2026-04-19 | Config errors fixed. windowrulev2 migrated to block-style. Window decorations (hyprbars) enabled and configured. Minimize buttons removed from hyprbars (handled by taskbar). |
 | swww-daemon | ⚠️ Partial | 2026-04-12 | Autostart via exec-once works. Wallpaper not set on boot. |
 | Triple boot | ✅ Working | — | GRUB boots all three. GPT mismatch warning on boot (cosmetic, auto-corrects) |
 
