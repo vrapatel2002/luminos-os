@@ -105,7 +105,7 @@
 | 2026-04-19 | antigravity | Fix HyprPanel taskbar input | 🔧 xray=true layerrule, removed orphaned plugin config — needs reboot verify |
 | 2026-04-19 | gemini-cli | Fix HyprPanel input & window buttons | ✅ Removed hyprbars, added interactivity layerrule, disabled kitty CSD |
 | 2026-04-19 | gemini-cli | Fix HyprPanel crash & Aura backlight | ✅ Fixed config.json invalid schema keys, added asusctl exec-once |
-| 2026-04-19 | gemini-cli | Fix HyprPanel taskbar click passthrough | ✅ Changed ignore_alpha to 0.0, removed invalid interactivity rule |
+| 2026-04-19 | gemini-cli | Fix HyprPanel taskbar click passthrough | ✅ Corrected layerrule syntax, ignore_alpha 0.5, and enabled xray on |
 
 ---
 
@@ -137,3 +137,4 @@ before the project migrated to Arch Linux on the actual ROG G14 hardware.
 
 ## Legend
 📋 Not started | 🔧 In Progress | ✅ Done | ❌ Blocked | ⚠️ Partial
+ ❌ Blocked | ⚠️ Partial
