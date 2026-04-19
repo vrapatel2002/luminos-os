@@ -66,8 +66,8 @@ python3 -m mempalace search "hyprland windowrule"
 **Update MemPalace AFTER completing any task:**
 ```bash
 source ~/.mempalace-venv/bin/activate
-python3 -m mempalace add --tag "component:dock" "Fixed dock alignment by setting gravity=SOUTH in layer-shell anchor"
-python3 -m mempalace add --tag "decision" "Chose greetd over SDDM because lighter, better Wayland support"
+# Re-mine the project to index new/changed files:
+python3 -m mempalace mine ~/luminos-os
 ```
 
 MemPalace entries should be short (1-3 sentences), factual, and tagged. Don't store code — store decisions and outcomes.

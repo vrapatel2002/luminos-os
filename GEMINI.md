@@ -37,7 +37,7 @@ Constraints:
 - Add # [CHANGE: gemini-cli | date] comments to anything you modify
 
 When done:
-- source ~/.mempalace-venv/bin/activate && python3 -m mempalace add '<summary of what was done>'
+- source ~/.mempalace-venv/bin/activate && python3 -m mempalace mine ~/luminos-os
 - Update ~/luminos-os/LUMINOS_STATUS.md if a component status changed
 - git commit -m 'type(scope): description' and push
 "
