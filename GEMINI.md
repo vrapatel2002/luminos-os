@@ -2,8 +2,8 @@
 
 ### Mandatory — Before Every Task
 - Read `LUMINOS_PROJECT_SCOPE.md` and `LUMINOS_STATUS.md` before every task
-- Query MemPalace before starting: `python3 -m mempalace query "<topic>"`
-  - **NOTE 2026-04-19: MemPalace is currently broken on Python 3.14 due to chromadb/pydantic incompatibility. Skip MemPalace steps until further notice. Use LUMINOS_STATUS.md and LUMINOS_DECISIONS.md for project context instead.**
+- Query MemPalace before starting: `source ~/.mempalace-venv/bin/activate && python3 -m mempalace search "<topic>"`
+  - **[CHANGE: antigravity | 2026-04-19] MemPalace fixed. Must activate venv first: `source ~/.mempalace-venv/bin/activate`**
 - Minimal changes only — do not touch working components
 - Add `[CHANGE: gemini-cli | date]` tags to every modified block
 - Update docs and commit after every task (see `docs/WORKFLOW.md`)
@@ -20,7 +20,7 @@ gemini "
 Before doing anything:
 1. Read ~/luminos-os/AGENTS.md (project rules)
 2. Read ~/luminos-os/LUMINOS_STATUS.md (current component state)
-3. Query MemPalace: python3 -m mempalace query '<TOPIC>'
+3. Query MemPalace: source ~/.mempalace-venv/bin/activate && python3 -m mempalace search '<TOPIC>'
 
 About this project:
 Luminos OS is a custom Arch Linux distro on an ASUS ROG G14.
@@ -37,7 +37,7 @@ Constraints:
 - Add # [CHANGE: gemini-cli | date] comments to anything you modify
 
 When done:
-- python3 -m mempalace add '<summary of what was done>'
+- source ~/.mempalace-venv/bin/activate && python3 -m mempalace add '<summary of what was done>'
 - Update ~/luminos-os/LUMINOS_STATUS.md if a component status changed
 - git commit -m 'type(scope): description' and push
 "

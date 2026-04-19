@@ -48,22 +48,24 @@ Luminos OS is a custom Arch Linux distribution built on:
 ## 3. Memory & Knowledge Tools
 
 ### 3.1 MemPalace — USE IT
-> **NOTE 2026-04-19: MemPalace is currently broken on Python 3.14 due to chromadb/pydantic incompatibility. Skip MemPalace steps until further notice. Use LUMINOS_STATUS.md and LUMINOS_DECISIONS.md for project context instead.**
+> **[CHANGE: antigravity | 2026-04-19] MemPalace is fixed. Uses a dedicated Python 3.12 venv at `~/.mempalace-venv` to avoid Python 3.14 incompatibility with chromadb/pydantic. MCP also registered in `.mcp.json`.**
 
 MemPalace is the project's persistent memory store. It holds decisions, architecture notes, and history from all past sessions.
 
 **Query MemPalace BEFORE starting any task:**
 ```bash
 cd ~/luminos-os
-python3 -m mempalace query "<your task topic>"
+source ~/.mempalace-venv/bin/activate
+python3 -m mempalace search "<your task topic>"
 # Examples:
-python3 -m mempalace query "dock alignment"
-python3 -m mempalace query "login screen design"
-python3 -m mempalace query "hyprland windowrule"
+python3 -m mempalace search "dock alignment"
+python3 -m mempalace search "login screen design"
+python3 -m mempalace search "hyprland windowrule"
 ```
 
 **Update MemPalace AFTER completing any task:**
 ```bash
+source ~/.mempalace-venv/bin/activate
 python3 -m mempalace add --tag "component:dock" "Fixed dock alignment by setting gravity=SOUTH in layer-shell anchor"
 python3 -m mempalace add --tag "decision" "Chose greetd over SDDM because lighter, better Wayland support"
 ```

@@ -6,6 +6,15 @@
         "serve"
       ],
       "type": "stdio"
+    },
+    "mempalace": {
+      "command": "/home/shawn/.mempalace-venv/bin/python3",
+      "args": [
+        "-m",
+        "mempalace",
+        "mcp"
+      ],
+      "type": "stdio"
     }
   }
 }

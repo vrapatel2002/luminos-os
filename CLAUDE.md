@@ -1,6 +1,6 @@
 ## LUMINOS OS — AGENT RULES
 Read docs/WORKFLOW.md and LUMINOS_STATUS.md at the start of every session.
-Query MemPalace: python3 -m mempalace query '<topic>'
+Query MemPalace: source ~/.mempalace-venv/bin/activate && python3 -m mempalace search '<topic>'
 Minimal changes only. Add [CHANGE: claude-code | date] tags to modified blocks.
 Update LUMINOS_STATUS.md and LUMINOS_DECISIONS.md when relevant.
 Commit format: type(scope): description — see AGENTS.md §5

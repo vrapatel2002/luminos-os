@@ -36,7 +36,7 @@
 |-----------|--------|-------------|-------|
 | asusctl + supergfxctl | ✅ Working | 2026-04-17 | asusd + supergfxd enabled; mode confirmed Hybrid |
 | greetd | ✅ Installed | 2026-04-17 | greetd enabled; luminos-greeter via cage |
-| MemPalace | ✅ Available | 2026-04-18 | Python 3.12 venv (uv-managed), MCP registered, 2544 drawers |
+| MemPalace | ✅ Working | 2026-04-19 | Fixed: Python 3.12 venv at ~/.mempalace-venv, chromadb 0.6.3, mempalace 3.3.1. MCP registered. Activate venv before use. |
 | code-review-graph | ✅ Available | 2026-04-18 | MCP registered, graph built (2560 nodes, 17478 edges, 187 files) |
 | nm-applet | ✅ Working | 2026-04-18 | network-manager-applet for wifi systray icon |
 | pipewire-pulse | ✅ Working | 2026-04-18 | Installed for HyprPanel audio support |
