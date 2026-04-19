@@ -48,6 +48,8 @@ Luminos OS is a custom Arch Linux distribution built on:
 ## 3. Memory & Knowledge Tools
 
 ### 3.1 MemPalace — USE IT
+> **NOTE 2026-04-19: MemPalace is currently broken on Python 3.14 due to chromadb/pydantic incompatibility. Skip MemPalace steps until further notice. Use LUMINOS_STATUS.md and LUMINOS_DECISIONS.md for project context instead.**
+
 MemPalace is the project's persistent memory store. It holds decisions, architecture notes, and history from all past sessions.
 
 **Query MemPalace BEFORE starting any task:**

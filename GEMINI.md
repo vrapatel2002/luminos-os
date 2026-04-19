@@ -3,6 +3,7 @@
 ### Mandatory — Before Every Task
 - Read `LUMINOS_PROJECT_SCOPE.md` and `LUMINOS_STATUS.md` before every task
 - Query MemPalace before starting: `python3 -m mempalace query "<topic>"`
+  - **NOTE 2026-04-19: MemPalace is currently broken on Python 3.14 due to chromadb/pydantic incompatibility. Skip MemPalace steps until further notice. Use LUMINOS_STATUS.md and LUMINOS_DECISIONS.md for project context instead.**
 - Minimal changes only — do not touch working components
 - Add `[CHANGE: gemini-cli | date]` tags to every modified block
 - Update docs and commit after every task (see `docs/WORKFLOW.md`)
