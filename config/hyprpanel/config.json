@@ -39,6 +39,10 @@
 	"panels": [
 		{
 			"id": "panel0",
+			"layer": "top",
+			"exclusive_zone": true,
+			"passthrough": false,
+			"_comment_layer": "[CHANGE: gemini-cli | 2026-04-19] Added layer, exclusive_zone, passthrough to fix taskbar clicks",
 			"edge": "EDGE_BOTTOM",
 			"size": 48,
 			"monitor": "",
