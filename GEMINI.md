@@ -30,7 +30,7 @@ Your task:
 <TASK>
 
 Constraints:
-- Do not touch bar_app.py or dock_app.py (they are working)
+- Do not touch HyprPanel config (~/.config/hypr/hyprpanel/) unless the task explicitly requires it
 - Do not touch hyprland.conf unless the task explicitly requires it
 - Only stage files you actually changed (git add -p, not git add .)
 - Add # [CHANGE: gemini-cli | date] comments to anything you modify

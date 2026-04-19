@@ -7,7 +7,7 @@
 
 Luminos OS is a custom Arch Linux distribution built on:
 - **Hyprland 0.54.3** as the Wayland compositor/desktop
-- **Python (GTK4 + layer-shell)** for the bar, dock, and GUI components
+- **HyprPanel** for the bar and dock (runs via `hyprpanel` + `hyprpanel-client`)
 - **greetd** (planned) for the login screen
 - **swww** for wallpaper
 - **Triple-boot** setup on ASUS ROG G14 (Windows / Default Arch / Luminos)
@@ -16,8 +16,7 @@ Luminos OS is a custom Arch Linux distribution built on:
 
 ### Key file locations
 ```
-/opt/luminos/src/gui/bar/         → Top bar (Python/GTK4)
-/opt/luminos/src/gui/dock/        → Bottom dock (Python/GTK4)
+~/.config/hypr/hyprpanel/         → HyprPanel config (bar+dock — do NOT touch unless task requires it)
 /opt/luminos/src/gui/login/       → Login screen (WIP)
 ~/.config/hypr/hyprland.conf      → Hyprland config
 ~/luminos-os/                     → Repo root (all .md docs live here)
@@ -36,7 +35,7 @@ Luminos OS is a custom Arch Linux distribution built on:
 - If a fix requires touching more files than expected → STOP, explain why, and ask before proceeding
 
 ### 2.2 Never Break the Running System
-- The bar, dock, and Hyprland config are currently working. Do not touch them unless your task involves them.
+- HyprPanel (bar+dock) and Hyprland config are currently working. Do not touch them unless your task involves them.
 - Before editing any running component, check: *"Could this change crash the session?"*
 - If yes → propose the change as a diff/comment first, don't apply it
 
@@ -74,8 +73,8 @@ Before asking "where does X connect to Y", query CodeGraph:
 ```bash
 cd ~/luminos-os
 python3 -m codegraph query "DaemonClient"
-python3 -m codegraph query "bar_app imports"
-python3 -m codegraph show-deps /opt/luminos/src/gui/dock/dock_app.py
+python3 -m codegraph query "login_screen imports"
+python3 -m codegraph show-deps /opt/luminos/src/gui/login/
 ```
 
 **Update CodeGraph when you add new files or change imports:**
@@ -287,10 +286,10 @@ When you finish a task and another agent will continue:
 
 See `LUMINOS_STATUS.md` for the full list. Top priorities:
 
-1. **Login screen** — Big clock display, Enter → password or desktop flow
-2. **Boot errors** — GPT mismatch warning, missing Casper user references  
-3. **Dock alignment** — Centering/positioning still needs work
-4. **Wallpaper** — swww-daemon runs but wallpaper not set on startup
+1. **Login screen** — Go + GTK4 + libadwaita, fullscreen clock, Enter → password or desktop
+2. **HyprPanel right-side layout** — Audio+battery systray grouping, clock time-over-date — needs reboot verify
+3. **Settings app** — Go + GTK4 + libadwaita (Python settings code deprecated)
+4. **Boot errors** — GPT mismatch warning (cosmetic, auto-corrects)
 
 ---
 
