@@ -85,7 +85,7 @@
 |-----|--------|
 | Settings accent swatches not rendering | 📋 Not started |
 | HyprPanel right-side icons misaligned | 🔧 CSS fixes applied — needs reboot verify |
-| HyprPanel taskbar input unresponsive | 🔧 xray=true layerrule fix applied — needs reboot verify |
+| HyprPanel taskbar input unresponsive | ✅ Fixed with block layerrule and config.json input keys |
 
 ---
 

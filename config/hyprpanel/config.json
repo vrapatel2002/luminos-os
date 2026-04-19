@@ -42,7 +42,7 @@
 			"layer": "top",
 			"exclusive_zone": true,
 			"passthrough": false,
-			"_comment_layer": "[CHANGE: gemini-cli | 2026-04-19] Added layer, exclusive_zone, passthrough to fix taskbar clicks",
+			"_comment_layer": "[CHANGE: gemini-cli | 2026-04-19] Add missing input keys",
 			"edge": "EDGE_BOTTOM",
 			"size": 48,
 			"monitor": "",
@@ -62,9 +62,7 @@
 							"org.kde.dolphin",
 							"kitty"
 						],
-						"preview_width": 256,
-						"minimize_on_click": true,
-						"_comment": "[CHANGE: gemini-cli | 2026-04-19] Enable minimize on click"
+						"preview_width": 256
 					}
 				},
 				{
