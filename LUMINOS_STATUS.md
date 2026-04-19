@@ -22,7 +22,7 @@
 
 | Component | Status | Last Updated | Notes |
 |-----------|--------|-------------|-------|
-| HyprPanel (bar+dock) | ⚠️ Partial fix | 2026-04-19 | Added xray=true to layerrule, removed orphaned hyprbars plugin config + dead hyprpm reload. Taskbar input fix applied — verify after reboot. |
+| HyprPanel (bar+dock) | ✅ Working | 2026-04-19 | Config JSON corruption fixed. Taskbar input fixed (ignore_alpha 0.0). |
 | HyprPanel right-side layout | 🔧 In Progress | 2026-04-18 | Audio+battery grouped in systray, clock time-over-date — needs reboot verify |
 | Login screen | 📋 Not Started | — | Design: fullscreen, big clock+date, Enter → password or desktop. greetd backend planned. |
 | Settings app | 📋 Not Started | — | Go + GTK4 + libadwaita. Python settings code exists but deprecated. |
@@ -105,6 +105,7 @@
 | 2026-04-19 | antigravity | Fix HyprPanel taskbar input | 🔧 xray=true layerrule, removed orphaned plugin config — needs reboot verify |
 | 2026-04-19 | gemini-cli | Fix HyprPanel input & window buttons | ✅ Removed hyprbars, added interactivity layerrule, disabled kitty CSD |
 | 2026-04-19 | gemini-cli | Fix HyprPanel crash & Aura backlight | ✅ Fixed config.json invalid schema keys, added asusctl exec-once |
+| 2026-04-19 | gemini-cli | Fix HyprPanel taskbar click passthrough | ✅ Changed ignore_alpha to 0.0, removed invalid interactivity rule |
 
 ---
 
