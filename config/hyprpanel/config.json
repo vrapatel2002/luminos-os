@@ -58,7 +58,9 @@
 							"org.kde.dolphin",
 							"kitty"
 						],
-						"preview_width": 256
+						"preview_width": 256,
+						"minimize_on_click": true,
+						"_comment": "[CHANGE: gemini-cli | 2026-04-19] Enable minimize on click"
 					}
 				},
 				{

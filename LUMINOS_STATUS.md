@@ -12,7 +12,7 @@
 | Component | Status | Last Updated | Notes |
 |-----------|--------|-------------|-------|
 | Arch Linux base | ✅ Working | — | Triple boot on G14 alongside Windows + default Arch |
-| Hyprland 0.54.3 | ✅ Working | 2026-04-12 | Config errors fixed. windowrulev2 migrated to block-style windowrule {} |
+| Hyprland 0.54.3 | ✅ Working | 2026-04-19 | Config errors fixed. windowrulev2 migrated to block-style. Window decorations (hyprbars) enabled and configured. |
 | swww-daemon | ⚠️ Partial | 2026-04-12 | Autostart via exec-once works. Wallpaper not set on boot. |
 | Triple boot | ✅ Working | — | GRUB boots all three. GPT mismatch warning on boot (cosmetic, auto-corrects) |
 
@@ -22,7 +22,7 @@
 
 | Component | Status | Last Updated | Notes |
 |-----------|--------|-------------|-------|
-| HyprPanel (bar+dock) | ✅ Working | 2026-04-18 | Replaces Python bar, waybar, AGS. Floating, dark translucent, blur layerrule. |
+| HyprPanel (bar+dock) | ✅ Working | 2026-04-19 | Replaces Python bar, waybar, AGS. Taskbar minimize-on-click enabled. |
 | HyprPanel right-side layout | 🔧 In Progress | 2026-04-18 | Audio+battery grouped in systray, clock time-over-date — needs reboot verify |
 | Login screen | 📋 Not Started | — | Design: fullscreen, big clock+date, Enter → password or desktop. greetd backend planned. |
 | Settings app | 📋 Not Started | — | Go + GTK4 + libadwaita. Python settings code exists but deprecated. |
