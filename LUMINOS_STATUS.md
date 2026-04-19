@@ -103,6 +103,7 @@
 | 2026-04-19 | claude-code | Full docs reorganization | ✅ Merged/archived/deleted obsolete docs |
 | 2026-04-19 | antigravity | Fix MemPalace Python 3.14 incompatibility | ✅ pyenv + Python 3.12 venv, chromadb 0.6.3, mempalace 3.3.1 |
 | 2026-04-19 | antigravity | Fix HyprPanel taskbar input | 🔧 xray=true layerrule, removed orphaned plugin config — needs reboot verify |
+| 2026-04-19 | gemini-cli | Fix HyprPanel input & window buttons | ✅ Removed hyprbars, added interactivity layerrule, disabled kitty CSD |
 
 ---
 
