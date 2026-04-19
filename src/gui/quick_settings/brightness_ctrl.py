@@ -15,7 +15,19 @@ import subprocess
 
 logger = logging.getLogger("luminos-ai.gui.quick_settings.brightness")
 
-BACKLIGHT_PATH = "/sys/class/backlight/amdgpu_bl1"
+def _find_backlight_path():
+    """Auto-detect the best backlight device."""
+    base = "/sys/class/backlight"
+    if not os.path.isdir(base):
+        return None
+    # Prefer amdgpu devices, then any available
+    candidates = sorted(os.listdir(base))
+    for c in candidates:
+        if c.startswith("amdgpu"):
+            return os.path.join(base, c)
+    return os.path.join(base, candidates[0]) if candidates else None
+
+BACKLIGHT_PATH = _find_backlight_path() or "/sys/class/backlight/amdgpu_bl2"
 
 _BRIGHTNESS_FILE     = "brightness"
 _MAX_BRIGHTNESS_FILE = "max_brightness"
@@ -89,31 +101,28 @@ def set_brightness(percent: int) -> bool:
     value = round(percent / 100 * maximum)
     value = max(1, value)   # sysfs value must be ≥ 1
 
-    # Direct write attempt
+    # Use brightnessctl (handles permissions via udev rules)
+    try:
+        result = subprocess.run(
+            ["brightnessctl", "-e4", "-n2", "set", f"{percent}%"],
+            capture_output=True, text=True, timeout=5.0,
+        )
+        if result.returncode == 0:
+            return True
+        logger.debug(f"brightnessctl returned {result.returncode}: {result.stderr}")
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+        logger.debug(f"brightnessctl failed: {e}")
+
+    # Direct write fallback
     try:
         with open(brightness_path, "w") as f:
             f.write(str(value))
         return True
     except PermissionError:
-        pass   # fall through to pkexec
+        pass
     except OSError as e:
         logger.debug(f"set_brightness direct write failed: {e}")
         return False
-
-    # pkexec tee fallback (prompts polkit once per session)
-    try:
-        result = subprocess.run(
-            ["pkexec", "tee", brightness_path],
-            input=str(value),
-            capture_output=True,
-            text=True,
-            timeout=10.0,
-        )
-        if result.returncode == 0:
-            return True
-        logger.debug(f"pkexec tee returned {result.returncode}")
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
-        logger.debug(f"pkexec brightness fallback failed: {e}")
 
     return False
 

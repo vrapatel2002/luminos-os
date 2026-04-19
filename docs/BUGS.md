@@ -406,6 +406,92 @@ Each bug entry:
 - Date Found: 2026-03-29
 - Date Fixed: 2026-03-29
 
+---
+
+## UI/Desktop Bugs (merged from LUMINOS_BUG_LOG.md on 2026-04-19)
+
+### BUG-UI-001 — Dock center screen positioning
+- Status: FIXED
+- Severity: HIGH
+- Component: src/gui/dock/dock_window.py
+- Description: Dock appeared center screen instead of bottom center
+- Root Cause: Missing LEFT and RIGHT layer-shell anchors
+- Fix Applied: Added GtkLayerShell.set_anchor LEFT=True RIGHT=True
+- Date Found: April 2026
+- Date Fixed: April 2026
+
+### BUG-UI-002 — Dock layer wrong (TOP instead of BOTTOM)
+- Status: FIXED
+- Severity: HIGH
+- Component: src/gui/dock/dock_window.py
+- Description: Dock set to Layer.TOP, causing it to render above all windows and reserve screen space
+- Root Cause: Layer.TOP was used instead of Layer.BOTTOM; exclusive_zone was DOCK_HEIGHT+DOCK_BOTTOM_MARGIN instead of -1
+- Fix Applied: Set Layer.BOTTOM and exclusive_zone=-1 (floating pill, no reserved zone)
+- Date Found: April 2026
+- Date Fixed: April 2026
+
+### BUG-UI-003 — Bar/dock not autostarting
+- Status: FIXED
+- Severity: HIGH
+- Component: systemd user services
+- Description: Bar and dock not launching reliably on boot
+- Root Cause: exec-once without env vars — GTK/Wayland init fails silently when WAYLAND_DISPLAY not set
+- Fix Applied: Systemd user services with explicit Environment= vars; dock delayed 2s after bar
+- Date Found: April 2026
+- Date Fixed: April 2026
+
+### BUG-UI-004 — Wrong apps pinned to dock
+- Status: FIXED
+- Severity: MEDIUM
+- Component: src/gui/dock/dock_config.py
+- Description: Dock defaulted to nautilus/foot/luminos-store which are not installed on target hardware
+- Root Cause: DEFAULT_PINNED not updated for ROG G14 target environment
+- Fix Applied: Updated DEFAULT_PINNED to dolphin, firefox, kitty, settings_app.py
+- Date Found: April 2026
+- Date Fixed: April 2026
+
+### BUG-UI-005 — MemPalace Python 3.14 incompatibility
+- Status: FIXED
+- Severity: HIGH
+- Component: MemPalace / chromadb
+- Description: chromadb pydantic v1 broken on Python 3.14
+- Root Cause: Arch ships Python 3.14, pydantic v1 not updated yet
+- Fix Applied: uv + Python 3.12 venv at ~/mempalace-venv
+- Date Found: April 2026
+- Date Fixed: April 2026
+
+### BUG-UI-006 — MemPalace normalize.py sender field
+- Status: FIXED
+- Severity: MEDIUM
+- Component: ~/mempalace/mempalace/normalize.py
+- Description: Only 3 drawers mined instead of 837 from Claude.ai export
+- Root Cause: Claude.ai privacy exports use "sender" field not "role"; _try_claude_ai_json only checked "role"
+- Fix Applied: Added sender fallback: item.get("role", "") or item.get("sender", "")
+- Date Found: April 2026
+- Date Fixed: April 2026
+
+### BUG-UI-007 — Bar/dock services running but nothing visible on screen
+- Status: FIXED
+- Severity: CRITICAL
+- Component: /opt/luminos/venv/pyvenv.cfg
+- Description: luminos-bar and luminos-dock systemd services showed as active/running but bar and dock were invisible; services were crash-looping with "ERROR: GTK4 not available"
+- Root Cause: /opt/luminos/venv/pyvenv.cfg had include-system-site-packages = false. PyGObject (the `gi` module) is a system package and cannot be pip-installed into a venv
+- Fix Applied: Set include-system-site-packages = true in pyvenv.cfg
+- Date Found: April 2026
+- Date Fixed: April 2026
+
+### BUG-UI-008 — Python venv system packages missing
+- Status: RESOLVED (root cause retired)
+- Severity: HIGH
+- Component: All src/gui/ Python files
+- Description: Multiple UI bugs traced back to Python venv not finding system packages (GTK4, PyGObject)
+- Root Cause: Python venv packaging is fundamentally fragile
+- Fix Applied: Retired Python for all UI work. Stack migrated to AGS/JS (bar/dock) and Go + libadwaita (settings/login). Then further migrated to HyprPanel.
+- Date Found: April 2026
+- Date Fixed: April 2026
+
+---
+
 ## Known Limitations (not bugs)
 
 - NPU classifier: stubbed, needs ONNX models on real AMD XDNA hardware

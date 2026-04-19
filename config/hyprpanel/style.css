@@ -28,36 +28,6 @@ window > * {
     background-color: rgba(255, 255, 255, 0.08);
 }
 
-/* === Workspace pager === */
-.workspace {
-    min-width: 20px;
-    min-height: 4px;
-    margin: 0 2px;
-    padding: 4px 6px;
-    border-radius: 6px;
-    background-color: rgba(255, 255, 255, 0.06);
-    transition: all 200ms ease;
-}
-
-.workspace:hover {
-    background-color: rgba(255, 255, 255, 0.12);
-}
-
-.workspace.active {
-    background-color: rgba(0, 128, 255, 0.85);
-    min-width: 24px;
-}
-
-.workspaceLabel {
-    font-size: 11px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.7);
-}
-
-.workspace.active .workspaceLabel {
-    color: #ffffff;
-}
-
 /* === Taskbar icons === */
 .icon {
     border-radius: 8px;
@@ -84,36 +54,65 @@ window > * {
     color: rgba(255, 255, 255, 0.9);
 }
 
-/* === Clock — time on top, date underneath, center aligned === */
+/* === Clock — pyramid: narrow time on top, wider date below, centered === */
 #clock {
-    padding: 2px 6px;
+    padding: 2px 8px;
 }
 
-#clockTime {
+#clock label {
     font-size: 11px;
     font-weight: 500;
     color: rgba(255, 255, 255, 0.92);
-    letter-spacing: 0.3px;
+    text-align: center;
+}
+
+#clockTime {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    text-align: center;
+    letter-spacing: 0.5px;
 }
 
 #clockDate {
-    font-size: 0;
-    min-width: 0;
-    min-height: 0;
-    padding: 0;
-    margin: 0;
+    font-size: 10px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.6);
+    text-align: center;
+    letter-spacing: 1px;
 }
 
-/* === Systray group box (wifi + volume + battery) === */
-#panel > * > .module:nth-child(3) {
-    background-color: rgba(255, 255, 255, 0.04);
+/* === Systray — grouped wifi/volume/battery box === */
+#systray,
+.systray {
+    background-color: rgba(255, 255, 255, 0.05);
     border-radius: 8px;
     padding: 0 4px;
-    margin: 4px 2px;
+    margin: 5px 2px;
 }
 
-#panel > * > .module:nth-child(3):hover {
+#systray:hover,
+.systray:hover {
     background-color: rgba(255, 255, 255, 0.10);
+}
+
+/* HIDE the systray expand/collapse reveal button completely */
+#systray > button,
+.systray > button,
+#systray button:not(.flat),
+.module > button {
+    min-width: 0;
+    min-height: 0;
+    max-width: 0;
+    max-height: 0;
+    padding: 0;
+    margin: 0;
+    opacity: 0;
+    -gtk-icon-size: 0;
+    font-size: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
 }
 
 /* === Power / battery === */
@@ -121,7 +120,7 @@ window > * {
     padding: 0 4px;
 }
 
-/* === Audio icon vertical centering === */
+/* === Audio icon === */
 #audio {
     padding: 0 4px;
 }

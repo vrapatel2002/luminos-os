@@ -77,15 +77,13 @@
 							"STATUS_ACTIVE"
 						],
 						"auto_hide_delay": "4s",
-						"pinned": [
-							"nm-applet"
-						],
+						"pinned": [],
 						"modules": [
 							{
 								"audio": {
 									"icon_size": 20,
 									"icon_symbolic": true,
-									"command_mixer": "pavucontrol",
+									"command_mixer": "luminos-quick-settings-toggle",
 									"enable_source": false
 								}
 							},
@@ -122,7 +120,7 @@
 				},
 				{
 					"clock": {
-						"time_format": "3:04 PM\nMon, Jan 2",
+						"time_format": "3:04\nMon, Jan 2",
 						"date_format": "",
 						"tooltip_time_format": "3:04 PM",
 						"tooltip_date_format": "Monday, January 2, 2006",

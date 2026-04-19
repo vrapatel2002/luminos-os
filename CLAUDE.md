@@ -1,3 +1,10 @@
+## LUMINOS OS — AGENT RULES
+Read docs/WORKFLOW.md and LUMINOS_STATUS.md at the start of every session.
+Query MemPalace: python3 -m mempalace query '<topic>'
+Minimal changes only. Add [CHANGE: claude-code | date] tags to modified blocks.
+Update LUMINOS_STATUS.md and LUMINOS_DECISIONS.md when relevant.
+Commit format: type(scope): description — see AGENTS.md §5
+
 ## MANDATORY RULES — READ BEFORE EVERY TASK
 
 ### Memory Tools — Use Every Session

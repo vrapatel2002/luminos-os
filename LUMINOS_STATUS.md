@@ -1,83 +1,133 @@
-# Luminos System Status
-Last updated: 2026-04-18
+# LUMINOS_STATUS.md — Current State of All Components
 
-## Environment
-- Machine: ASUS ROG G14
-- OS: Arch Linux
-- Hyprland: installed and running
+> Updated by every agent after every task. If you're an agent, update this before committing.
+> Format: component name, status emoji, last updated, brief notes.
 
-## Task Tracker
-| Task | Status | Notes |
-|------|--------|-------|
-| Install waybar | ✅ | v0.15.0 — Windows 11 style taskbar (bottom, height 41, accent #0080FF) |
-| Install swww | ✅ | v0.12.0 via pacman |
-| Install brightnessctl | ✅ | v0.5.1 via pacman |
-| Install playerctl | ✅ | v2.4.1 via pacman |
-| Install greetd | ✅ | v0.10.3 via pacman |
-| Install asusctl (AUR) | ✅ | via yay |
-| Install supergfxctl (AUR) | ✅ | via yay |
-| Install Python deps | ✅ | venv at /opt/luminos/venv — llama-cpp-python 0.3.20, onnxruntime 1.24.4, psutil 7.2.2 |
-| venv system site-packages fix | ✅ | include-system-site-packages = true — GTK4/PyGObject now visible in venv |
-| Deploy code to /opt/luminos | ✅ | /opt/luminos/src symlinked → ~/luminos-os/src (always in sync) |
-| Install scripts to PATH | ✅ | luminos-launcher-toggle + luminos-quick-settings-toggle → /usr/local/bin |
-| Install systemd services (system) | ✅ | luminos-ai + luminos-sentinel enabled |
-| Rewrite hyprland.conf | ✅ | Luminos theme, ROG keys, touchpad gestures, waybar blur layerrules |
-| Hyprland blur layerules | ✅ | waybar blur via layerrule — synced to repo |
-| Set supergfxctl Hybrid | ✅ | asusd + supergfxd enabled; mode confirmed Hybrid |
-| Set up greetd login screen | ✅ | greetd enabled; luminos-greeter via cage; GTK4+python-gobject installed |
-| MemPalace installed | ✅ | Python 3.12 venv (uv-managed), MCP registered, 2544 drawers indexed |
-| code-review-graph installed | ✅ | MCP registered, graph built (2560 nodes, 17478 edges, 187 files) |
-| Push all changes to git | ✅ | Unblocked — all commits pushed to main |
-| WhiteSur icon + cursor themes | ✅ | whitesur-icon-theme-git + whitesur-cursor-theme-git installed; gsettings applied |
-| WhiteSur GTK theme | ✅ | whitesur-gtk-theme-git installed; gsettings applied |
-| macOS-style Hyprland aesthetics | ✅ | macOS bezier, popin 95% animations, shadow rgba(00000066) |
-| Hyprbars traffic light buttons | ✅ | Red/yellow/green window buttons via hyprbars plugin |
-| Windows 11 waybar | ✅ | Win10-style-waybar config, bottom taskbar, #0080FF accent, blur |
-| HyprPanel installed | ✅ | Replaces waybar — bottom bar, grouped wifi/battery/volume, notifications built-in |
-| HyprPanel floating bar + CSS | ✅ | Rounded edges, floating with margin, dark translucent bg, blur layerrule |
-| HyprPanel pinned apps | ✅ | Menu (wofi launcher), Firefox, Dolphin, Kitty pinned to taskbar |
-| HyprPanel launcher button | ✅ | luminos-launcher.desktop → wofi toggle, pinned first in taskbar |
-| Icon theme fix for HyprPanel | ✅ | Switched to Adwaita icons for GTK4 compatibility (WhiteSur-Dark broke symbolic icons) |
-| pipewire-pulse | ✅ | Installed for HyprPanel audio support |
-| dunst masked | ✅ | Masked to avoid D-Bus notification conflict with HyprPanel |
-| HyprPanel right-side layout | 🔄 | Audio+battery grouped in systray box, clock time-over-date, session padding — needs reboot verify |
-| nm-applet installed | ✅ | network-manager-applet for wifi systray icon, exec-once in hyprland.conf |
-| Login screen | 🔲 | Not started |
-| Settings accent color swatches | 🔲 | Not rendering — not started |
+**Status key:** ✅ Working | 🔧 In Progress | ❌ Broken | 📋 Not Started | ⚠️ Working with caveats
 
-## Active Bugs
-| Bug | Status |
-|-----|--------|
-| Bar shifting to right side on reboot | ✅ Fixed — replaced with HyprPanel |
-| Blur lost on reboot | ✅ Fixed — layerules in hyprland.conf |
-| Old Python bar/dock reappearing after reboot | ✅ Fixed — luminos-session bar/dock launch commented out |
-| swww typo (awww) in hyprland.conf | ✅ Fixed — corrected to swww |
-| Settings accent swatches not rendering | 🔲 Not started |
-| HyprPanel right-side icons misaligned | 🔄 Audio moved inside systray modules, CSS fixes applied — needs reboot verify |
+---
 
-## Current Phase: Stack Migration
+## Core System
+
+| Component | Status | Last Updated | Notes |
+|-----------|--------|-------------|-------|
+| Arch Linux base | ✅ Working | — | Triple boot on G14 alongside Windows + default Arch |
+| Hyprland 0.54.3 | ✅ Working | 2026-04-12 | Config errors fixed. windowrulev2 migrated to block-style windowrule {} |
+| swww-daemon | ⚠️ Partial | 2026-04-12 | Autostart via exec-once works. Wallpaper not set on boot. |
+| Triple boot | ✅ Working | — | GRUB boots all three. GPT mismatch warning on boot (cosmetic, auto-corrects) |
+
+---
+
+## GUI Components
+
+| Component | Status | Last Updated | Notes |
+|-----------|--------|-------------|-------|
+| HyprPanel (bar+dock) | ✅ Working | 2026-04-18 | Replaces Python bar, waybar, AGS. Floating, dark translucent, blur layerrule. |
+| HyprPanel right-side layout | 🔧 In Progress | 2026-04-18 | Audio+battery grouped in systray, clock time-over-date — needs reboot verify |
+| Login screen | 📋 Not Started | — | Design: fullscreen, big clock+date, Enter → password or desktop. greetd backend planned. |
+| Settings app | 📋 Not Started | — | Go + GTK4 + libadwaita. Python settings code exists but deprecated. |
+| App launcher | ⚠️ Partial | 2026-04-18 | wofi toggle via keybind, pinned in HyprPanel taskbar |
+
+---
+
+## Environment & Tooling
+
+| Component | Status | Last Updated | Notes |
+|-----------|--------|-------------|-------|
+| asusctl + supergfxctl | ✅ Working | 2026-04-17 | asusd + supergfxd enabled; mode confirmed Hybrid |
+| greetd | ✅ Installed | 2026-04-17 | greetd enabled; luminos-greeter via cage |
+| MemPalace | ✅ Available | 2026-04-18 | Python 3.12 venv (uv-managed), MCP registered, 2544 drawers |
+| code-review-graph | ✅ Available | 2026-04-18 | MCP registered, graph built (2560 nodes, 17478 edges, 187 files) |
+| nm-applet | ✅ Working | 2026-04-18 | network-manager-applet for wifi systray icon |
+| pipewire-pulse | ✅ Working | 2026-04-18 | Installed for HyprPanel audio support |
+
+---
+
+## Boot & System Issues
+
+| Issue | Status | Notes |
+|-------|--------|-------|
+| GPT mismatch warning | ⚠️ Known/cosmetic | Auto-corrects on boot. Not urgent. |
+| greetd GTK4 gl module error | ❌ Blocking login screen | GTK4 renderer fails in greetd environment. Needs investigation. |
+
+---
+
+## Stack Migration Status
+
 | Migration Task | Status | Notes |
 |----------------|--------|-------|
 | Python bar → HyprPanel | ✅ | HyprPanel replaces Python bar, waybar, and AGS |
 | Python dock → HyprPanel taskbar | ✅ | HyprPanel taskbar module replaces Python dock |
-| AGS bar → HyprPanel | ✅ | AGS bar retired — HyprPanel is the single bar solution |
-| Waybar → HyprPanel | ✅ | Waybar retired — HyprPanel has grouped quick settings |
-| Python settings → Go + libadwaita | 🔲 | PLANNED |
-| Python login screen → Go + libadwaita | 🔲 | PLANNED |
-| Go daemons for NPU/AI/compat | 🔲 | PLANNED — replacing Python daemon code with Go single binaries |
+| AGS bar → HyprPanel | ✅ | AGS bar retired |
+| Waybar → HyprPanel | ✅ | Waybar retired |
+| Python settings → Go + libadwaita | 📋 | PLANNED |
+| Python login screen → Go + libadwaita | 📋 | PLANNED |
+| Go daemons for NPU/AI/compat | 📋 | PLANNED |
+
+---
 
 ## Retired Components
+
 | Component | Replaced By | Date |
 |-----------|------------|------|
-| Python bar (bar_app.py) | Waybar | 2026-04-17 |
-| Python dock (dock_app.py) | Waybar wlr/taskbar | 2026-04-17 |
-| AGS bar (Bar.tsx) | Waybar | 2026-04-17 |
-| luminos-bar.service | waybar exec-once | 2026-04-17 |
-| luminos-dock.service | waybar exec-once | 2026-04-17 |
-| luminos-deco.service | hyprbars plugin | 2026-04-17 |
+| Python bar (bar_app.py) | Waybar → HyprPanel | 2026-04-17 |
+| Python dock (dock_app.py) | Waybar → HyprPanel | 2026-04-17 |
+| AGS bar (Bar.tsx) | HyprPanel | 2026-04-17 |
 | Waybar | HyprPanel | 2026-04-18 |
 | dunst | HyprPanel notifications | 2026-04-18 |
 | luminos-launcher-toggle (Python) | wofi via keybind | 2026-04-18 |
 
+---
+
+## Active Bugs
+
+| Bug | Status |
+|-----|--------|
+| Settings accent swatches not rendering | 📋 Not started |
+| HyprPanel right-side icons misaligned | 🔧 CSS fixes applied — needs reboot verify |
+
+---
+
+## Agent Activity Log
+
+| Date | Agent | Task | Outcome |
+|------|-------|------|---------|
+| 2026-04-12 | claude-code | Fix socket PermissionError in bar/dock | ✅ os.access() fix applied |
+| 2026-04-12 | claude-code | Autostart bar + dock via exec-once | ✅ Working with env vars |
+| 2026-04-12 | claude-chat | Debug Hyprland 0.54.3 windowrule syntax | ✅ Migrated to block-style |
+| 2026-04-17 | claude-code | Replace Python bar/dock with Waybar | ✅ Waybar working |
+| 2026-04-18 | claude-code | Replace Waybar with HyprPanel | ✅ HyprPanel verified after reboot |
+| 2026-04-18 | claude-code | HyprPanel floating bar + CSS + systray | ✅ Grouped wifi/vol/bat |
+| 2026-04-19 | claude-chat | Design multi-agent workflow | ✅ AGENTS.md, WORKFLOW.md, PROMPTS.md |
+| 2026-04-19 | claude-code | Full docs reorganization | ✅ Merged/archived/deleted obsolete docs |
+
+---
+
+## Historical Notes (from STATE.md)
+
+The following is preserved from the original `docs/STATE.md` (last updated 2026-03-21) which tracked
+development during the Ubuntu/Firebase Studio era. This code was written on a Windows 11 dev machine
+before the project migrated to Arch Linux on the actual ROG G14 hardware.
+
+### Pre-Migration Development Summary (March 2026)
+- All phases 0–9 were completed on Ubuntu LTS base (757/757 tests passing)
+- ISO build scripts were created for Ubuntu (now obsolete — Arch uses archiso)
+- Development machine was Windows 11 with Firebase Studio (browser IDE)
+- Architecture decisions at that time used Ubuntu LTS as base (since changed to Arch)
+- AI daemon, classifier, sentinel, zone2/zone3, GPU manager, power manager, compositor,
+  theme, bar, dock, launcher, quick settings, notifications, wallpaper, lock screen,
+  store, settings, first run wizard, and wine/proton integration were all built in Python
+- All Python GUI code is now deprecated in favor of Go + GTK4 + libadwaita (settings/login)
+  and HyprPanel (bar/dock)
+
+### Key Architecture Notes from Ubuntu Era
+- AI inference: llama.cpp direct (no Ollama), CUDA + Vulkan + ONNX backends
+- IPC: Unix socket at /run/luminos/ai.sock
+- Zone 3 VM: Firecracker microVM (not QEMU)
+- NPU: ONNX Runtime VitisAI provider (untested on real hardware)
+- All 757 tests were pure Python headless tests — no display server required
+
+---
+
 ## Legend
-🔲 Not started | 🔄 In progress | ✅ Done | ❌ Blocked
+📋 Not started | 🔧 In Progress | ✅ Done | ❌ Blocked | ⚠️ Partial

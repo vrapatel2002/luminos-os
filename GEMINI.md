@@ -1,3 +1,49 @@
+## LUMINOS OS — GEMINI CLI AGENT RULES
+
+### Mandatory — Before Every Task
+- Read `LUMINOS_PROJECT_SCOPE.md` and `LUMINOS_STATUS.md` before every task
+- Query MemPalace before starting: `python3 -m mempalace query "<topic>"`
+- Minimal changes only — do not touch working components
+- Add `[CHANGE: gemini-cli | date]` tags to every modified block
+- Update docs and commit after every task (see `docs/WORKFLOW.md`)
+- Keep the existing MCP tools block at the bottom
+
+---
+
+## Gemini CLI — Session Start Prompt
+
+```bash
+gemini "
+[LUMINOS OS — AGENT TASK]
+
+Before doing anything:
+1. Read ~/luminos-os/AGENTS.md (project rules)
+2. Read ~/luminos-os/LUMINOS_STATUS.md (current component state)
+3. Query MemPalace: python3 -m mempalace query '<TOPIC>'
+
+About this project:
+Luminos OS is a custom Arch Linux distro on an ASUS ROG G14.
+Hyprland 0.54.3 compositor. Python/GTK4 for GUI. greetd for login (WIP).
+Repo at ~/luminos-os/. GUI at /opt/luminos/src/gui/.
+
+Your task:
+<TASK>
+
+Constraints:
+- Do not touch bar_app.py or dock_app.py (they are working)
+- Do not touch hyprland.conf unless the task explicitly requires it
+- Only stage files you actually changed (git add -p, not git add .)
+- Add # [CHANGE: gemini-cli | date] comments to anything you modify
+
+When done:
+- python3 -m mempalace add '<summary of what was done>'
+- Update ~/luminos-os/LUMINOS_STATUS.md if a component status changed
+- git commit -m 'type(scope): description' and push
+"
+```
+
+---
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 

@@ -405,10 +405,10 @@ if _GTK_AVAILABLE:
                 LayerShell.init_for_window(self)
                 LayerShell.set_namespace(self, "luminos-quick-settings")
                 LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
-                LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
+                LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, True)
                 LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
-                LayerShell.set_margin(self, LayerShell.Edge.TOP, 3)
-                LayerShell.set_margin(self, LayerShell.Edge.RIGHT, 3)
+                LayerShell.set_margin(self, LayerShell.Edge.BOTTOM, 56)
+                LayerShell.set_margin(self, LayerShell.Edge.RIGHT, 8)
                 LayerShell.set_keyboard_mode(
                     self, LayerShell.KeyboardMode.ON_DEMAND
                 )
@@ -500,11 +500,6 @@ if _GTK_AVAILABLE:
 
             # Toggle pills
             self._build_toggles(root)
-
-            root.append(self._make_divider())
-
-            # Power row
-            self._build_power_row(root)
 
         def _build_section_title(self, root, text: str):
             lbl = Gtk.Label(label=text.upper())
