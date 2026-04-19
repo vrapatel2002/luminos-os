@@ -22,7 +22,7 @@
 
 | Component | Status | Last Updated | Notes |
 |-----------|--------|-------------|-------|
-| HyprPanel (bar+dock) | ✅ Working | 2026-04-19 | Replaces Python bar, waybar, AGS. Taskbar minimize-on-click enabled. |
+| HyprPanel (bar+dock) | ⚠️ Partial fix | 2026-04-19 | Added xray=true to layerrule, removed orphaned hyprbars plugin config + dead hyprpm reload. Taskbar input fix applied — verify after reboot. |
 | HyprPanel right-side layout | 🔧 In Progress | 2026-04-18 | Audio+battery grouped in systray, clock time-over-date — needs reboot verify |
 | Login screen | 📋 Not Started | — | Design: fullscreen, big clock+date, Enter → password or desktop. greetd backend planned. |
 | Settings app | 📋 Not Started | — | Go + GTK4 + libadwaita. Python settings code exists but deprecated. |
@@ -85,6 +85,7 @@
 |-----|--------|
 | Settings accent swatches not rendering | 📋 Not started |
 | HyprPanel right-side icons misaligned | 🔧 CSS fixes applied — needs reboot verify |
+| HyprPanel taskbar input unresponsive | 🔧 xray=true layerrule fix applied — needs reboot verify |
 
 ---
 
@@ -100,6 +101,8 @@
 | 2026-04-18 | claude-code | HyprPanel floating bar + CSS + systray | ✅ Grouped wifi/vol/bat |
 | 2026-04-19 | claude-chat | Design multi-agent workflow | ✅ AGENTS.md, WORKFLOW.md, PROMPTS.md |
 | 2026-04-19 | claude-code | Full docs reorganization | ✅ Merged/archived/deleted obsolete docs |
+| 2026-04-19 | antigravity | Fix MemPalace Python 3.14 incompatibility | ✅ pyenv + Python 3.12 venv, chromadb 0.6.3, mempalace 3.3.1 |
+| 2026-04-19 | antigravity | Fix HyprPanel taskbar input | 🔧 xray=true layerrule, removed orphaned plugin config — needs reboot verify |
 
 ---
 
