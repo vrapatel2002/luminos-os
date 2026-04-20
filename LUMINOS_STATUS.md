@@ -12,10 +12,10 @@
 | Component | Status | Last Updated | Notes |
 |-----------|--------|-------------|-------|
 | Arch Linux base | ✅ Working | — | Triple boot on G14 alongside Windows + default Arch |
-| Hyprland 0.54.3 | 🚫 Retired | 2026-04-19 | Permanently retired. Replaced by KDE Plasma. See Decision 12. |
-| swww-daemon | 🚫 Retired | 2026-04-19 | Replaced by KDE wallpaper manager. |
+| Hyprland 0.54.3 | 🚫 Uninstalled | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] Fully uninstalled per Decision 12. |
+| swww-daemon | 🚫 Uninstalled | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] Fully uninstalled. |
 | Triple boot | ✅ Working | — | GRUB boots all three. GPT mismatch warning on boot (cosmetic, auto-corrects) |
-| KDE Plasma (Wayland) | 📋 Next Task | 2026-04-19 | Install: plasma-desktop plasma-wayland-session sddm kde-gtk-config |
+| KDE Plasma (Wayland) | ✅ Working (6.6.4) | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] Installed, SDDM enabled, and verified working. |
 
 ---
 
@@ -23,10 +23,10 @@
 
 | Component | Status | Last Updated | Notes |
 |-----------|--------|-------------|-------|
-| HyprPanel (bar+dock) | 🚫 Retired | 2026-04-19 | Permanently retired with Hyprland. See Decision 12. |
-| GTK4 UI (all) | 🚫 Retired | 2026-04-19 | GTK4/PyGObject/Python UI retired permanently. New stack: Qt/QML. |
-| KDE Plasma desktop | 📋 Next Task | 2026-04-19 | Install KDE, configure SDDM, set Luminos theme. |
-| SDDM login screen | 📋 Next Task | — | KDE theme for SDDM. Replaces greetd. |
+| HyprPanel (bar+dock) | 🚫 Uninstalled | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] Fully uninstalled. |
+| GTK4 UI (all) | 🚫 Uninstalled | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] GTK4 UI stack retired; packages removed where safe. |
+| KDE Plasma desktop | ✅ Working | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] Installed. Ready for theme config. |
+| SDDM login screen | 🔧 In Progress | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] SDDM enabled. Replaced greetd. Needs Luminos theme. |
 | Settings app | 📋 Not Started | — | Qt/QML + Go backend. |
 | Zone indicator widget | 📋 Not Started | — | KDE Plasma widget dot on window corner (blue/orange/red/none per zone). |
 | App launcher | 📋 Not Started | — | KDE built-in launcher. |
@@ -63,28 +63,28 @@
 | Python dock → HyprPanel taskbar | ✅ | Complete — both now retired |
 | AGS bar → HyprPanel | ✅ | Complete — both now retired |
 | Waybar → HyprPanel | ✅ | Complete — both now retired |
-| Hyprland+GTK4+HyprPanel → KDE Plasma | 📋 **NEXT TASK** | Install KDE Plasma, SDDM, configure Luminos theme |
+| Hyprland+GTK4+HyprPanel → KDE Plasma | ✅ | [CHANGE: gemini-cli | 2026-04-19] Installed KDE and SDDM. Next: Theme and widgets. |
 | Python settings → Qt/QML + Go | 📋 | After KDE install |
-| Python login → SDDM theme | 📋 | After KDE install |
+| Python login → SDDM theme | 🔧 | [CHANGE: gemini-cli | 2026-04-19] In progress. |
 | Go daemons for NPU/AI/compat | 📋 | After KDE install |
 
 ---
 
-## Retired Components
+## Retired / Uninstalled Components
 
-| Component | Replaced By | Date |
-|-----------|------------|------|
-| Python bar (bar_app.py) | KDE Plasma taskbar | 2026-04-19 |
-| Python dock (dock_app.py) | KDE Plasma taskbar | 2026-04-19 |
-| AGS bar (Bar.tsx) | KDE Plasma | 2026-04-19 |
-| Waybar | KDE Plasma | 2026-04-19 |
-| HyprPanel | KDE Plasma | 2026-04-19 |
-| Hyprland | KDE Plasma + KWin | 2026-04-19 |
-| GTK4 / PyGObject / Python UI | Qt/QML + Go | 2026-04-19 |
-| gtk4-layer-shell | KDE native layer handling | 2026-04-19 |
-| greetd / hyprlock / swww | SDDM + KDE | 2026-04-19 |
-| dunst | KDE notification system | 2026-04-19 |
-| wofi / luminos-launcher-toggle | KDE built-in launcher | 2026-04-19 |
+| Component | Status | Date |
+|-----------|--------|------|
+| Python bar (bar_app.py) | 🚫 Uninstalled | 2026-04-19 |
+| Python dock (dock_app.py) | 🚫 Uninstalled | 2026-04-19 |
+| AGS bar (Bar.tsx) | 🚫 Uninstalled | 2026-04-19 |
+| Waybar | 🚫 Uninstalled | 2026-04-19 |
+| HyprPanel | 🚫 Uninstalled | 2026-04-19 |
+| Hyprland | 🚫 Uninstalled | 2026-04-19 |
+| GTK4 / PyGObject / Python UI | 🚫 Retired/Cleaned | 2026-04-19 |
+| gtk4-layer-shell | 🚫 Retired/Cleaned | 2026-04-19 |
+| greetd / hyprlock / swww | 🚫 Uninstalled | 2026-04-19 |
+| dunst | 🚫 Uninstalled | 2026-04-19 |
+| wofi / luminos-launcher-toggle | 🚫 Uninstalled | 2026-04-19 |
 
 ---
 
@@ -92,7 +92,7 @@
 
 | Bug | Status |
 |-----|--------|
-| KDE Plasma not yet installed | 📋 Next Task — see Stack Migration |
+| GPT mismatch warning | ⚠️ Known/cosmetic |
 
 ---
 
@@ -113,6 +113,7 @@
 | 2026-04-19 | gemini-cli | Fix HyprPanel input & window buttons | ✅ Removed hyprbars, added interactivity layerrule, disabled kitty CSD |
 | 2026-04-19 | gemini-cli | Fix HyprPanel crash & Aura backlight | ✅ Fixed config.json invalid schema keys, added asusctl exec-once |
 | 2026-04-19 | gemini-cli | Fix HyprPanel taskbar click passthrough | ✅ Corrected layerrule syntax, ignore_alpha 0.5, and enabled xray on |
+| 2026-04-19 | gemini-cli | Uninstall Hyprland and GTK4 UI | ✅ Removed packages and configs per Decision 12 |
 
 ---
 
