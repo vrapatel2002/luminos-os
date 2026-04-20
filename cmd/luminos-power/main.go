@@ -182,33 +182,17 @@ func readCPUTemp() float64 {
 // applyPowerState compares current readings to prevState and calls asusctl only when
 // something changed. This avoids hammering asusctl 30 times a minute when nothing changes.
 func applyPowerState(onAC bool, tempC float64) {
-	fanMode := fanModeForTemp(tempC)
+	// [CHANGE: gemini-cli | 2026-04-20] In asusctl 6.3.6, fan curves are tied to profiles.
+	// We select the profile based on AC state and temperature.
 	profile := "Quiet"
 	if onAC {
-		profile = "Performance"
-	}
-
-	acChanged := onAC != prevState.OnAC
-	fanChanged := fanMode != prevState.FanMode
-	profileChanged := profile != prevState.Profile
-
-	if !acChanged && !fanChanged && !profileChanged {
-		return // Nothing changed — skip asusctl execs entirely.
-	}
-
-	lg.Info("state change: ac=%v temp=%.1f°C fan=%s profile=%s", onAC, tempC, fanMode, profile)
-
-	// Apply the new profile via asusctl. supergfxctl is never touched (always Hybrid).
-	if profileChanged || acChanged {
-		if err := runCmd("asusctl", "profile", "-P", profile); err != nil {
-			lg.Error("asusctl profile %s: %v", profile, err)
-		}
-	}
-
-	// Apply the fan curve via asusctl.
-	if fanChanged {
-		if err := runCmd("asusctl", "fan-curve", "-m", fanMode); err != nil {
-			lg.Error("asusctl fan-curve %s: %v", fanMode, err)
+		switch {
+		case tempC >= 75.0:
+			profile = "Performance"
+		case tempC >= 60.0:
+			profile = "Balanced"
+		default:
+			profile = "Quiet"
 		}
 	}
 
@@ -216,15 +200,30 @@ func applyPowerState(onAC bool, tempC float64) {
 	// to protect hardware before the kernel's thermal throttle kicks in.
 	if tempC > 85.0 {
 		lg.Warn("CPU temp %.1f°C > 85°C — forcing Quiet profile to protect hardware", tempC)
-		if err := runCmd("asusctl", "profile", "-P", "Quiet"); err != nil {
-			lg.Error("asusctl emergency throttle: %v", err)
+		profile = "Quiet"
+	}
+
+	acChanged := onAC != prevState.OnAC
+	profileChanged := profile != prevState.Profile
+
+	if !acChanged && !profileChanged {
+		return // Nothing changed — skip asusctl execs entirely.
+	}
+
+	lg.Info("state change: ac=%v temp=%.1f°C profile=%s", onAC, tempC, profile)
+
+	// [CHANGE: gemini-cli | 2026-04-20] Updated to asusctl 6.3.6 'profile set <name>' syntax.
+	// Independent fan-curve mode calls are removed as they are part of the profile.
+	if profileChanged || acChanged {
+		if err := runCmd("asusctl", "profile", "set", profile); err != nil {
+			lg.Error("asusctl profile set %s: %v", profile, err)
 		}
 	}
 
 	prevState = PowerState{
 		OnAC:      onAC,
 		CPUTempC:  tempC,
-		FanMode:   fanMode,
+		FanMode:   profile, // Storing profile as 'fanMode' for legacy compatibility in JSON
 		Profile:   profile,
 		UpdatedAt: time.Now(),
 	}
@@ -232,22 +231,7 @@ func applyPowerState(onAC bool, tempC float64) {
 	// Notify luminos-ai so the central status endpoint stays accurate.
 	reportToAI()
 }
-
-// fanModeForTemp implements the fan curve from LUMINOS_PROJECT_SCOPE.md §Feature 4.
-// Thresholds: <60°C quiet, 60-75°C balanced, 75-85°C performance, >85°C max.
-func fanModeForTemp(c float64) string {
-	switch {
-	case c >= 85.0:
-		return "max"
-	case c >= 75.0:
-		return "performance"
-	case c >= 60.0:
-		return "balanced"
-	default:
-		return "quiet"
-	}
-}
-
+// [CHANGE: gemini-cli | 2026-04-20] fanModeForTemp removed; logic integrated into applyPowerState.
 // runCmd executes a command and returns a descriptive error on non-zero exit.
 func runCmd(name string, args ...string) error {
 	out, err := exec.Command(name, args...).CombinedOutput()
