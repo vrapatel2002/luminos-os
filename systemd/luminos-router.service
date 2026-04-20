@@ -1,0 +1,23 @@
+[Unit]
+Description=Luminos OS — .exe Compatibility Zone Classifier
+Documentation=https://github.com/luminos-os/luminos
+After=network.target luminos-ai.service
+
+[Service]
+# Router runs as the logged-in user (not root) because:
+#   1. It needs XDG_RUNTIME_DIR for the socket path.
+#   2. It caches results in ~/.cache/luminos/router.
+#   3. User-launched .exe files are classified on the user's behalf.
+# Change User= to your login user, or convert to a systemd user service.
+Type=simple
+ExecStart=/usr/local/bin/luminos-router
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=luminos-router
+RuntimeDirectory=luminos
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

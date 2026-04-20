@@ -1,45 +1,29 @@
-# luminos-sentinel.service
-# Phase 5.12 — Sentinel security daemon.
-# Install: sudo cp this /etc/systemd/system/
-# Enable:  sudo systemctl enable luminos-sentinel
-# Start:   sudo systemctl start luminos-sentinel
+# luminos-sentinel.service — Luminos OS security process scanner (Go, Phase 1)
+# Replaces: old Python sentinel_daemon service (Decision 13 — Go rewrite)
+# Install: sudo cp this /etc/systemd/system/ && sudo systemctl daemon-reload
+# Enable:  sudo systemctl enable --now luminos-sentinel
+# [CHANGE: claude-code | 2026-04-20] Phase 1 Go foundation — replaced Python service.
 
 [Unit]
-Description=Luminos Sentinel Security Monitor
-After=luminos-ai.service
-Wants=luminos-ai.service
+Description=Luminos OS — Rule-Based Security Process Scanner (Go)
+Documentation=https://github.com/luminos-os/luminos
+After=network.target luminos-ai.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 -c "\
-import sys; sys.path.insert(0, '/opt/luminos/src'); \
-from sentinel.sentinel_daemon import get_daemon; \
-import signal, threading; \
-d = get_daemon(); d.start(); \
-evt = threading.Event(); \
-signal.signal(signal.SIGTERM, lambda *_: evt.set()); \
-evt.wait(); \
-d.stop()"
-ExecStop=/bin/kill -SIGTERM $MAINPID
-
-# Phase 5.12: restart policy
-Restart=on-failure
+ExecStart=/usr/local/bin/luminos-sentinel
+Restart=always
 RestartSec=3
 StartLimitIntervalSec=60
 StartLimitBurst=5
-
-# Phase 5.12: watchdog
-WatchdogSec=30
-
-# Logging
 StandardOutput=journal
 StandardError=journal
-
-# Sentinel needs permission to read /proc
+SyslogIdentifier=luminos-sentinel
+# CAP_SYS_PTRACE lets the sentinel read /proc/[pid]/exe for non-owned processes.
 AmbientCapabilities=CAP_SYS_PTRACE
-NoNewPrivileges=true
-
-Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=false
+RuntimeDirectory=luminos
+RuntimeDirectoryMode=0755
 
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=Luminos OS — Automatic Power & Thermal Manager
+Documentation=https://github.com/luminos-os/luminos
+After=network.target
+# Power daemon should start before luminos-ai so the initial AC state is applied at boot.
+Before=luminos-ai.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/luminos-power
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=luminos-power
+# Needs access to /sys/class/power_supply and /sys/class/hwmon.
+RuntimeDirectory=luminos
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

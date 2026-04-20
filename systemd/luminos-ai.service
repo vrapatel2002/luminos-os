@@ -1,35 +1,28 @@
-# luminos-ai.service
-# Phase 5.12 — Hardened with restart policy + watchdog.
-# Install: sudo cp this /etc/systemd/system/
-# Enable:  sudo systemctl enable luminos-ai
-# Start:   sudo systemctl start luminos-ai
+# luminos-ai.service — Luminos OS central IPC daemon (Go, Phase 1)
+# Replaces: old Python daemon/main.py service (Decision 13 — Go rewrite)
+# Install: sudo cp this /etc/systemd/system/ && sudo systemctl daemon-reload
+# Enable:  sudo systemctl enable --now luminos-ai
+# [CHANGE: claude-code | 2026-04-20] Phase 1 Go foundation — replaced Python service.
 
 [Unit]
-Description=Luminos AI Orchestration Daemon
+Description=Luminos OS — Central AI Router Daemon (Go)
+Documentation=https://github.com/luminos-os/luminos
 After=network.target
-Wants=network.target
+Wants=luminos-power.service luminos-sentinel.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/luminos/src/daemon/main.py
-ExecStop=/bin/kill -SIGTERM $MAINPID
-
-# Phase 5.12: restart policy
-Restart=on-failure
+ExecStart=/usr/local/bin/luminos-ai
+Restart=always
 RestartSec=3
 StartLimitIntervalSec=60
 StartLimitBurst=5
-
-# Phase 5.12: watchdog — daemon must pong within 30s
-WatchdogSec=30
-
-# Logging
 StandardOutput=journal
 StandardError=journal
-
-# Environment
-Environment=PYTHONUNBUFFERED=1
-Environment=CUDA_VISIBLE_DEVICES=
+SyslogIdentifier=luminos-ai
+# RuntimeDirectory creates /run/luminos at service start so sub-daemons can bind sockets.
+RuntimeDirectory=luminos
+RuntimeDirectoryMode=0755
 
 [Install]
 WantedBy=multi-user.target
