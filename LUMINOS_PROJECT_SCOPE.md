@@ -21,7 +21,7 @@ Windows can, but smarter, cleaner, and with AI woven into its core.
 
 ## WHAT THIS IS NOT
 - Not a Linux distro with a pretty face
-- Not Ubuntu with Hyprland slapped on
+- Not Ubuntu with anything slapped on
 - Not an AI assistant OS (AI is infrastructure, not the product)
 - Not complicated — no manual tuning required from the user ever
 
@@ -41,8 +41,9 @@ Storage: NVMe SSD
 ## BASE OS (LOCKED — DO NOT CHANGE)
 ```
 Base:          Arch Linux
-Compositor:    Hyprland
-Login Manager: greetd (custom Luminos theme)
+Shell:         KDE Plasma (Wayland session)
+Compositor:    KWin (KDE's compositor)
+Login Manager: SDDM with KDE theme
 Shell:         bash / zsh
 Package Mgr:   pacman + AUR (yay or paru)
 GPU Control:   supergfxctl (always hybrid, never changed)
@@ -53,30 +54,39 @@ Security:      Sentinel on NPU
 
 ## TECH STACK (LOCKED — April 2026)
 ```
-Bar + Dock:              AGS (Astal) + JavaScript + CSS
-Settings + Login Screen: Go + GTK4 + libadwaita + CSS
+Desktop Shell:           KDE Plasma (Wayland)
+Compositor:              KWin
+Custom Widgets:          Qt/QML + JavaScript
+Settings + Login Screen: Qt/QML + Go backend (or KDialog for simple dialogs)
 AI Daemon / NPU / Compat Router: Go
-Window Manager:          Hyprland (locked forever)
-Drawing Engine:          GTK4 (locked forever)
-Styling:                 CSS + libadwaita
+Login Manager:           SDDM
+Styling:                 KDE themes + CSS for GTK app theming
 ```
 
-### Legacy / Deprecated
+### BANNED — Never Use These
 ```
-Python GTK4:  DEPRECATED for all UI work. Existing Python bar/dock code
-              is being migrated to AGS/JS. No new Python UI code allowed.
-              Python remains acceptable for build scripts and tooling only.
+Hyprland:       RETIRED permanently — Decision 12
+GTK4:           RETIRED permanently — Decision 12
+HyprPanel:      RETIRED permanently — Decision 12
+PyGObject:      RETIRED permanently — Decision 12
+Python UI code: RETIRED permanently — Decision 12
+AGS/Astal:      RETIRED permanently — never fully implemented
+Waybar:         RETIRED permanently
+gtk4-layer-shell: RETIRED permanently
+greetd:         RETIRED permanently — replaced by SDDM
+swww / hyprlock: RETIRED permanently — replaced by KDE
 ```
 
 ### Why Arch (Short Version)
 - No Casper, no hardcoded usernames, no Ubuntu bloat
-- Hyprland, asusctl, supergfxctl all native in AUR
+- KDE Plasma, asusctl, supergfxctl all native in AUR
 - Rolling release — NPU drivers, NVIDIA, ML packages always current
 - SteamOS (best gaming Linux) is also Arch-based
 - Full reasoning in LUMINOS_DECISIONS.md
 
 ### What Was Abandoned
 - Ubuntu 24.04 base — caused 6+ boot errors, fought the project at every step
+- Hyprland + GTK4 — cost 6+ weeks on shell bugs, retired April 2026
 - Full reasoning in LUMINOS_DECISIONS.md
 
 ---
@@ -188,7 +198,7 @@ Set at install, never changed by OS or user
 
 ### What Hybrid Means
 ```
-AMD RDNA3:       Desktop, UI, Hyprland, video, light tasks
+AMD RDNA3:       Desktop, UI, KDE Plasma, video, light tasks
 NVIDIA RTX 4050: Games, AI inference, rendering, GPU-heavy tasks
 OS decides routing automatically — user never sees a GPU switcher
 ```
@@ -233,8 +243,8 @@ CPU (AMD x86 general cores):
   NEVER used as fallback for NPU tasks
 
 iGPU (AMD RDNA3 — integrated):
-  Hyprland compositor — all desktop rendering
-  UI animations, dock, bar, panels, settings
+  KDE Plasma compositor (KWin) — all desktop rendering
+  UI animations, taskbar, panels, settings
   Video playback
   Live wallpaper (light shader workload)
   Everything visual that is not a game or heavy task
@@ -320,31 +330,21 @@ Remove: Any Ubuntu/Canonical specific settings
 
 ### Desktop
 ```
-Hyprland compositor
-macOS-inspired, not a copy
-Center bottom dock
-Top bar: clock, system tray, status
-No Windows-style taskbar
+KDE Plasma compositor (KWin)
+Clean, minimal, intentional — Luminos style
+Bottom taskbar (KDE native, Windows 11-inspired layout)
+Zone indicator: small dot widget on window corner (blue/orange/red/none)
+No custom bar built from scratch
 ```
 
 ---
 
 ## ACTIVE BUGS (Fix Before Any New Features)
 
-### Hyprland Config
-```
-decoration:drop_shadow deprecated     → Move to shadow {} block
-decoration:shadow_range deprecated    → Move to shadow {} block
-decoration:shadow_render_power        → Move to shadow {} block
-decoration:col.shadow deprecated      → Move to shadow {} block
-```
-
 ### UI
 ```
-Login screen missing
-Dock alignment issues
-Settings accent color swatches not rendering
-Floating dock not centered properly
+KDE Plasma not yet installed — this is the current top priority task.
+After KDE install: SDDM theme, zone widget, settings app.
 ```
 
 ---

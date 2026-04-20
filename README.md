@@ -1,7 +1,7 @@
 # Luminos OS
 
 An AI-native, security-first Linux operating
-system. Built from scratch on Ubuntu LTS.
+system. Built on Arch Linux with KDE Plasma.
 
 ## What Makes Luminos Different
 
@@ -30,18 +30,14 @@ Recommended (full feature set):
 - GPU: NVIDIA (6GB+ VRAM) for HIVE models
 - iGPU: AMD RDNA for display + upscaling
 
-## Building the ISO
+## Tech Stack
 
-Requires Ubuntu host with sudo:
-
-git clone https://github.com/[your-repo]/luminos
-cd luminos
-sudo bash scripts/build_iso.sh
-sudo bash scripts/verify_iso.sh \
-  build/luminos-os-v0.1.0.iso
-
-Build time: ~45-90 minutes depending on hardware.
-Output: build/luminos-os-v0.1.0.iso (~3GB)
+- **Desktop**: KDE Plasma (Wayland) + KWin
+- **Login**: SDDM
+- **Custom widgets**: Qt/QML + JavaScript
+- **Backend daemons**: Go
+- **Base OS**: Arch Linux
+- **Hardware target**: ASUS ROG G14 (AMD Ryzen AI + NVIDIA RTX 4050)
 
 ## Testing in VirtualBox
 

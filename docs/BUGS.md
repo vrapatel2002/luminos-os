@@ -408,6 +408,20 @@ Each bug entry:
 
 ---
 
+## Architecture Decision Bugs
+
+### BUG-ARCH-001 — Custom shell on Hyprland+GTK4 cost 6+ weeks with no stable result
+- Status: FIXED
+- Severity: CRITICAL (project risk)
+- Component: Entire UI stack (bar, dock, login, settings)
+- Description: 6+ weeks spent on shell bugs: gtk4-layer-shell anchors, WAYLAND_DISPLAY propagation, Python venv fragility, taskbar input passthrough, minimize button broken on all apps, dock center-screen positioning, greetd GTK4 gl failures. No stable result achieved.
+- Root Cause: Building a full desktop environment from scratch on Hyprland required gtk4-layer-shell (third-party library to pin windows to screen edges). KDE Plasma does this natively. We were recreating what KDE does natively, from scratch, with a third-party library, in Python. AI cannot do visual fine-tuning — custom shell requires human designer iteration.
+- Fix Applied: Complete permanent move to KDE Plasma. All Hyprland, GTK4, HyprPanel, PyGObject, Python UI, greetd, swww retired. New stack: KDE Plasma + KWin + Qt/QML + Go. See LUMINOS_DECISIONS.md Decision 12.
+- Date Found: April 2026 (accumulated)
+- Date Fixed: 2026-04-19
+
+---
+
 ## UI/Desktop Bugs (merged from LUMINOS_BUG_LOG.md on 2026-04-19)
 
 ### BUG-UI-001 — Dock center screen positioning

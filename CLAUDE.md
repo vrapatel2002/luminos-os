@@ -1,3 +1,9 @@
+## LOCKED STACK: KDE Plasma, KWin, Qt/QML, Go
+**BANNED: Hyprland, GTK4, PyGObject, Python UI, HyprPanel**
+Never write code for banned components. See LUMINOS_DECISIONS.md Decision 12.
+
+---
+
 ## LUMINOS OS — AGENT RULES
 Read docs/WORKFLOW.md and LUMINOS_STATUS.md at the start of every session.
 Query MemPalace: source ~/.mempalace-venv/bin/activate && python3 -m mempalace search '<topic>'
@@ -14,11 +20,12 @@ Commit format: type(scope): description — see AGENTS.md §5
 4. **NEVER** repeat something mempalace says already failed
 
 ### Tech Stack (LOCKED)
-- **Bar/Dock**: HyprPanel (Go-based, built for Hyprland)
-- **Apps/Settings/Login**: Go + GTK4 + libadwaita + CSS
+- **Shell**: KDE Plasma (Wayland)
+- **Compositor**: KWin
+- **Custom widgets**: Qt/QML + JavaScript
+- **Apps/Settings/Login**: Qt/QML or KDialog + Go backend
 - **Daemons**: Go
-- **Window manager**: Hyprland
-- **NO new Python UI code**
+- **BANNED**: Hyprland, GTK4, HyprPanel, PyGObject, Python UI
 
 ### Persistence Rule
 `/opt/luminos/src` must always be symlinked to `~/luminos-os/src`.

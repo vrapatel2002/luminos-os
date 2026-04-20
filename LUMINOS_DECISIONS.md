@@ -6,6 +6,61 @@
 
 ---
 
+## DECISION 12 — Complete Permanent Move To KDE Plasma
+Date: April 2026
+Made by: Sam
+**Status: FINAL — No going back. Hyprland and GTK4 completely removed.**
+
+### What We Decided
+Retire Hyprland, GTK4, HyprPanel, PyGObject, and all Python UI code permanently.
+New stack: KDE Plasma + KWin + Qt/QML + Go.
+There are no plans to return to Hyprland under any circumstances.
+
+### Why
+6+ weeks were lost fighting gtk4-layer-shell anchor bugs, WAYLAND_DISPLAY propagation,
+Python venv fragility, and taskbar input failures. Every problem existed only because we
+were building a full desktop environment from scratch on Hyprland with a third-party
+layer-shell library. KDE does this natively.
+
+Key comparison:
+
+| Requirement | Hyprland+GTK4 | KDE Plasma |
+|-------------|---------------|------------|
+| Wayland native | YES | YES |
+| Lightweight | 150MB | 300MB |
+| Animations/blur | YES | YES — Better |
+| Window buttons all apps | BROKEN | WORKS |
+| Taskbar | BUGGY | WORKS |
+| Minimize button | BROKEN | WORKS |
+| App launcher | Manual setup | Built in |
+| Time to implement | Months | 1 install |
+
+The product is AI/NPU/compat router — not the shell.
+AI cannot do visual fine-tuning. Custom shell needs human designer.
+A human designer would use established tools, not custom GTK4.
+
+### Zone Indicators — New Approach
+Dropped: colored window borders per zone.
+New: Small KDE Plasma widget dot on window corner.
+  Blue dot = Zone 2 (Wine/Proton), Orange = Zone 3 (Firecracker),
+  Red = Zone 4 (KVM), No dot = native Linux app.
+
+### What Was Removed Entirely
+Hyprland, GTK4, gtk4-layer-shell, PyGObject, all Python UI,
+AGS/Astal, Waybar, HyprPanel, swww, hyprlock, all systemd user UI services.
+
+### New Stack
+Shell: KDE Plasma (Wayland) | Compositor: KWin | Custom widgets: Qt/QML + JavaScript
+Login: SDDM | Backend: Go (unchanged) | Styling: KDE themes
+
+### What We Rejected
+**Keeping Hyprland as "future advanced mode"**
+- Every feature Hyprland has that we need, KDE also has.
+- Coming back means rebuilding the shell from scratch again.
+- AI cannot do visual fine-tuning — this was proven over 6 weeks.
+
+---
+
 ## DECISION 1 — Base OS: Arch Linux (not Ubuntu)
 Date: Session 2
 Made by: Sam

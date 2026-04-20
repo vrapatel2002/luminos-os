@@ -1,3 +1,9 @@
+## LOCKED STACK: KDE Plasma, KWin, Qt/QML, Go
+**BANNED: Hyprland, GTK4, PyGObject, Python UI, HyprPanel**
+Never write code for banned components. See LUMINOS_DECISIONS.md Decision 12.
+
+---
+
 ## LUMINOS OS — GEMINI CLI AGENT RULES
 
 ### Mandatory — Before Every Task

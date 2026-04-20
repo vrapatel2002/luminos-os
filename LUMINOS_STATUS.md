@@ -12,9 +12,10 @@
 | Component | Status | Last Updated | Notes |
 |-----------|--------|-------------|-------|
 | Arch Linux base | ✅ Working | — | Triple boot on G14 alongside Windows + default Arch |
-| Hyprland 0.54.3 | ✅ Working | 2026-04-19 | Config errors fixed. windowrulev2 migrated to block-style. Window decorations (hyprbars) removed in favor of native GTK decorations. Added robust window controls. |
-| swww-daemon | ⚠️ Partial | 2026-04-12 | Autostart via exec-once works. Wallpaper not set on boot. |
+| Hyprland 0.54.3 | 🚫 Retired | 2026-04-19 | Permanently retired. Replaced by KDE Plasma. See Decision 12. |
+| swww-daemon | 🚫 Retired | 2026-04-19 | Replaced by KDE wallpaper manager. |
 | Triple boot | ✅ Working | — | GRUB boots all three. GPT mismatch warning on boot (cosmetic, auto-corrects) |
+| KDE Plasma (Wayland) | 📋 Next Task | 2026-04-19 | Install: plasma-desktop plasma-wayland-session sddm kde-gtk-config |
 
 ---
 
@@ -22,11 +23,13 @@
 
 | Component | Status | Last Updated | Notes |
 |-----------|--------|-------------|-------|
-| HyprPanel (bar+dock) | ✅ Working | 2026-04-19 | Config JSON corruption fixed. Taskbar input fixed (ignore_alpha 0.0). |
-| HyprPanel right-side layout | 🔧 In Progress | 2026-04-18 | Audio+battery grouped in systray, clock time-over-date — needs reboot verify |
-| Login screen | 📋 Not Started | — | Design: fullscreen, big clock+date, Enter → password or desktop. greetd backend planned. |
-| Settings app | 📋 Not Started | — | Go + GTK4 + libadwaita. Python settings code exists but deprecated. |
-| App launcher | ⚠️ Partial | 2026-04-18 | wofi toggle via keybind, pinned in HyprPanel taskbar |
+| HyprPanel (bar+dock) | 🚫 Retired | 2026-04-19 | Permanently retired with Hyprland. See Decision 12. |
+| GTK4 UI (all) | 🚫 Retired | 2026-04-19 | GTK4/PyGObject/Python UI retired permanently. New stack: Qt/QML. |
+| KDE Plasma desktop | 📋 Next Task | 2026-04-19 | Install KDE, configure SDDM, set Luminos theme. |
+| SDDM login screen | 📋 Next Task | — | KDE theme for SDDM. Replaces greetd. |
+| Settings app | 📋 Not Started | — | Qt/QML + Go backend. |
+| Zone indicator widget | 📋 Not Started | — | KDE Plasma widget dot on window corner (blue/orange/red/none per zone). |
+| App launcher | 📋 Not Started | — | KDE built-in launcher. |
 
 ---
 
@@ -35,11 +38,11 @@
 | Component | Status | Last Updated | Notes |
 |-----------|--------|-------------|-------|
 | asusctl + supergfxctl | ✅ Working | 2026-04-17 | asusd + supergfxd enabled; mode confirmed Hybrid |
-| greetd | ✅ Installed | 2026-04-17 | greetd enabled; luminos-greeter via cage |
+| greetd | 🚫 Retired | 2026-04-19 | Replaced by SDDM with KDE Plasma. |
 | MemPalace | ✅ Working | 2026-04-19 | Fixed: Python 3.12 venv at ~/.mempalace-venv, chromadb 0.6.3, mempalace 3.3.1. MCP registered. Activate venv before use. |
-| code-review-graph | ✅ Available | 2026-04-18 | MCP registered, graph built (2560 nodes, 17478 edges, 187 files) |
-| nm-applet | ✅ Working | 2026-04-18 | network-manager-applet for wifi systray icon |
-| pipewire-pulse | ✅ Working | 2026-04-18 | Installed for HyprPanel audio support |
+| code-review-graph | ✅ Working | 2026-04-19 | MCP registered, graph built (2593 nodes, 17829 edges, 189 files) |
+| nm-applet | ✅ Working | 2026-04-18 | Will be replaced by KDE plasma-nm |
+| pipewire-pulse | ✅ Working | 2026-04-18 | Compatible with KDE audio (plasma-pa) |
 
 ---
 
@@ -48,7 +51,7 @@
 | Issue | Status | Notes |
 |-------|--------|-------|
 | GPT mismatch warning | ⚠️ Known/cosmetic | Auto-corrects on boot. Not urgent. |
-| greetd GTK4 gl module error | ❌ Blocking login screen | GTK4 renderer fails in greetd environment. Needs investigation. |
+| greetd GTK4 gl module error | 🚫 Retired/Resolved | greetd replaced by SDDM. GTK4 retired entirely. |
 
 ---
 
@@ -56,13 +59,14 @@
 
 | Migration Task | Status | Notes |
 |----------------|--------|-------|
-| Python bar → HyprPanel | ✅ | HyprPanel replaces Python bar, waybar, and AGS |
-| Python dock → HyprPanel taskbar | ✅ | HyprPanel taskbar module replaces Python dock |
-| AGS bar → HyprPanel | ✅ | AGS bar retired |
-| Waybar → HyprPanel | ✅ | Waybar retired |
-| Python settings → Go + libadwaita | 📋 | PLANNED |
-| Python login screen → Go + libadwaita | 📋 | PLANNED |
-| Go daemons for NPU/AI/compat | 📋 | PLANNED |
+| Python bar → HyprPanel | ✅ | Complete — both now retired (see below) |
+| Python dock → HyprPanel taskbar | ✅ | Complete — both now retired |
+| AGS bar → HyprPanel | ✅ | Complete — both now retired |
+| Waybar → HyprPanel | ✅ | Complete — both now retired |
+| Hyprland+GTK4+HyprPanel → KDE Plasma | 📋 **NEXT TASK** | Install KDE Plasma, SDDM, configure Luminos theme |
+| Python settings → Qt/QML + Go | 📋 | After KDE install |
+| Python login → SDDM theme | 📋 | After KDE install |
+| Go daemons for NPU/AI/compat | 📋 | After KDE install |
 
 ---
 
@@ -70,12 +74,17 @@
 
 | Component | Replaced By | Date |
 |-----------|------------|------|
-| Python bar (bar_app.py) | Waybar → HyprPanel | 2026-04-17 |
-| Python dock (dock_app.py) | Waybar → HyprPanel | 2026-04-17 |
-| AGS bar (Bar.tsx) | HyprPanel | 2026-04-17 |
-| Waybar | HyprPanel | 2026-04-18 |
-| dunst | HyprPanel notifications | 2026-04-18 |
-| luminos-launcher-toggle (Python) | wofi via keybind | 2026-04-18 |
+| Python bar (bar_app.py) | KDE Plasma taskbar | 2026-04-19 |
+| Python dock (dock_app.py) | KDE Plasma taskbar | 2026-04-19 |
+| AGS bar (Bar.tsx) | KDE Plasma | 2026-04-19 |
+| Waybar | KDE Plasma | 2026-04-19 |
+| HyprPanel | KDE Plasma | 2026-04-19 |
+| Hyprland | KDE Plasma + KWin | 2026-04-19 |
+| GTK4 / PyGObject / Python UI | Qt/QML + Go | 2026-04-19 |
+| gtk4-layer-shell | KDE native layer handling | 2026-04-19 |
+| greetd / hyprlock / swww | SDDM + KDE | 2026-04-19 |
+| dunst | KDE notification system | 2026-04-19 |
+| wofi / luminos-launcher-toggle | KDE built-in launcher | 2026-04-19 |
 
 ---
 
@@ -83,9 +92,7 @@
 
 | Bug | Status |
 |-----|--------|
-| Settings accent swatches not rendering | 📋 Not started |
-| HyprPanel right-side icons misaligned | 🔧 CSS fixes applied — needs reboot verify |
-| HyprPanel taskbar input unresponsive | ✅ Fixed with block layerrule and config.json input keys |
+| KDE Plasma not yet installed | 📋 Next Task — see Stack Migration |
 
 ---
 
