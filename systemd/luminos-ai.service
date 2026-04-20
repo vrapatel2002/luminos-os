@@ -9,14 +9,14 @@ Description=Luminos OS — Central AI Router Daemon (Go)
 Documentation=https://github.com/luminos-os/luminos
 After=network.target
 Wants=luminos-power.service luminos-sentinel.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/luminos-ai
 Restart=always
 RestartSec=3
-StartLimitIntervalSec=60
-StartLimitBurst=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=luminos-ai

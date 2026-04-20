@@ -8,14 +8,14 @@
 Description=Luminos OS — Rule-Based Security Process Scanner (Go)
 Documentation=https://github.com/luminos-os/luminos
 After=network.target luminos-ai.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/luminos-sentinel
 Restart=always
 RestartSec=3
-StartLimitIntervalSec=60
-StartLimitBurst=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=luminos-sentinel

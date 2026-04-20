@@ -69,16 +69,16 @@ func ClassifyEXE(path string) (int, string, string, error) {
 	}
 
 	// Not an MZ (PE) file — cannot do import analysis.
-	// Default to Wine as the least-invasive option; Phase 2 ML will handle edge cases.
+	// [CHANGE: gemini-cli | 2026-04-20] Return uncertain (0) so Phase 2 Python classifier can refine.
 	if len(header) < 2 || header[0] != 'M' || header[1] != 'Z' {
-		return 2, "wine", "non-PE binary format — defaulting to Wine (Phase 2 ML will refine this)", nil
+		return 0, "uncertain", "non-PE binary format — handover to Python classifier", nil
 	}
 
 	// Parse PE imports for anticheat and DX12/Xbox API detection.
 	imports, err := parsePEImports(path)
 	if err != nil {
-		// PE parse failure (truncated file, non-standard PE) — default to Wine.
-		return 2, "wine", fmt.Sprintf("PE parse error (%v) — defaulting to Wine", err), nil
+		// PE parse failure (truncated file, non-standard PE) — handover to Python.
+		return 0, "uncertain", fmt.Sprintf("PE parse error (%v) — handover to Python", err), nil
 	}
 
 	// Zone 4: Anticheat detected — must use full KVM with GPU passthrough.
@@ -97,9 +97,9 @@ func ClassifyEXE(path string) (int, string, string, error) {
 	}
 
 	// Zone 2: Standard Windows PE with no known incompatibilities — Wine should work.
-	return 2, "wine", "standard Windows PE — Wine/Proton compatible", nil
-}
-
+	// [CHANGE: gemini-cli | 2026-04-20] Return uncertain so Python heuristics can verify.
+	return 0, "uncertain", "standard Windows PE — handover to Python for final verification", nil
+	}
 // readHeader reads the first n bytes of a file for magic number identification.
 func readHeader(path string, n int) ([]byte, error) {
 	f, err := os.Open(path)

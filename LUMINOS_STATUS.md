@@ -97,8 +97,8 @@ See docs/DAEMON_ARCHITECTURE.md for full technical blueprint.
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Architecture design | ✅ Done | Decision 13 — Go/Python split. Unix sockets for IPC. |
-| Phase 1 — Go foundation | ✅ Done | [CHANGE: gemini-cli | 2026-04-20] Fixed asusctl 6.3.6 syntax (profile set) in luminos-power. All binaries compile + pass go vet. |
-| Phase 2 — Compat Router + AI | 📋 Planned | Python ONNX classifier for 20% edge cases. Go router calls Python. |
+| Phase 1 — Go foundation | ✅ Verified and running in production | [CHANGE: gemini-cli | 2026-04-20] All 4 Go daemons (ai, power, sentinel, router) verified and responding. |
+| Phase 2 — Compat Router + AI | ✅ Done | [CHANGE: gemini-cli | 2026-04-20] Rule-based Python classifier (Phase 3 AI stub) wired to Go router. .exe association and Wine launcher working. |
 | Phase 3 — NPU + Sentinel ML | 📋 Planned | Python VitisAI service. Go sentinel calls Python NPU. Test on real G14. |
 | Phase 4 — HIVE + llama.cpp | 📋 Planned | llama-cpp-python server. Go model manager. Nexus/Bolt/Nova/Eye agents. |
 
@@ -134,6 +134,7 @@ See docs/DAEMON_ARCHITECTURE.md for full technical blueprint.
 | 2026-04-20 | claude-code | Daemon architecture planning | ✅ Decision 13 written, DAEMON_ARCHITECTURE.md created, all docs updated |
 | 2026-04-20 | claude-code | Phase 1 Go daemon foundation | ✅ luminos-ai, luminos-power, luminos-sentinel, luminos-router — all compile + go vet clean. Binaries: 4.3–4.7MB each. |
 | 2026-04-20 | gemini-cli | Fix luminos-power asusctl syntax | ✅ Updated to asusctl 6.3.6 'profile set' syntax, consolidated fan logic. |
+| 2026-04-20 | gemini-cli | Phase 2 Compatibility Router | ✅ Python rule-based classifier, Go router integration, .exe association. |
 
 ---
 

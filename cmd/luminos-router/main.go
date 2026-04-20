@@ -12,10 +12,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -25,7 +27,6 @@ import (
 	"github.com/luminos-os/luminos/internal/logger"
 	"github.com/luminos-os/luminos/internal/socket"
 )
-
 // ClassifyRequest is the payload sent by clients asking for a zone decision.
 type ClassifyRequest struct {
 	Path string `json:"path"`
@@ -134,6 +135,27 @@ func handleClassify(msg socket.Message) socket.Message {
 		return replyError(msg, fmt.Sprintf("classify %s: %v", req.Path, err))
 	}
 
+	// [CHANGE: gemini-cli | 2026-04-20] Phase 2: if Go rules are uncertain, call Python classifier.
+	if zone == 0 {
+		lg.Debug("Go rules uncertain for %s, calling Python classifier...", req.Path)
+		pZone, pReason, pErr := callPythonClassifier(req.Path)
+		if pErr == nil {
+			zone = pZone
+			reason = "Python: " + pReason
+		} else {
+			lg.Error("Python classifier failed: %v — falling back to Zone 2", pErr)
+			zone = 2
+			reason = "Python failure (" + pErr.Error() + ") — falling back to Wine"
+		}
+	}
+
+	// [CHANGE: gemini-cli | 2026-04-20] Map zone number to display name.
+	zoneNames := map[int]string{1: "native", 2: "wine", 3: "firecracker", 4: "kvm"}
+	zoneName = zoneNames[zone]
+	if zoneName == "" {
+		zoneName = "unknown"
+	}
+
 	resp := ClassifyResponse{
 		Path:       req.Path,
 		Zone:       zone,
@@ -142,7 +164,6 @@ func handleClassify(msg socket.Message) socket.Message {
 		FromCache:  false,
 		DurationMs: time.Since(start).Milliseconds(),
 	}
-
 	// Persist result so the second call for any given .exe is instant.
 	saveCache(cfg.Router.CacheDir, req.Path, resp)
 
@@ -196,3 +217,46 @@ func replyError(req socket.Message, errMsg string) socket.Message {
 		Source:    "luminos-router",
 	}
 }
+
+// callPythonClassifier runs the rule-based Python classifier for edge cases.
+// Phase 3 will replace this with Phi-3-mini Q4 ONNX inference.
+// [CHANGE: gemini-cli | 2026-04-20]
+func callPythonClassifier(exePath string) (int, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Path to Python classifier — must be in /opt/luminos or accessible path.
+	pythonPath := "/opt/luminos/classifier/onnx_classifier.py"
+	if _, err := os.Stat(pythonPath); os.IsNotExist(err) {
+		// Fallback to local dev path if /opt not yet populated.
+		pythonPath = "src/classifier/onnx_classifier.py"
+	}
+
+	req := map[string]string{"path": exePath}
+	input, _ := json.Marshal(req)
+
+	cmd := exec.CommandContext(ctx, "python3", pythonPath)
+	cmd.Stdin = bytes.NewReader(input)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	if err := cmd.Run(); err != nil {
+		return 0, "", fmt.Errorf("python run: %w (output: %s)", err, out.String())
+	}
+
+	var resp struct {
+		Zone   int    `json:"zone"`
+		Reason string `json:"reason"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
+		return 0, "", fmt.Errorf("parse python output: %w (output: %s)", err, out.String())
+	}
+
+	if resp.Error != "" {
+		return 0, "", fmt.Errorf("python error: %s", resp.Error)
+	}
+
+	return resp.Zone, resp.Reason, nil
+}
+
