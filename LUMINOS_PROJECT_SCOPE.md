@@ -58,10 +58,27 @@ Desktop Shell:           KDE Plasma (Wayland)
 Compositor:              KWin
 Custom Widgets:          Qt/QML + JavaScript
 Settings + Login Screen: Qt/QML + Go backend (or KDialog for simple dialogs)
-AI Daemon / NPU / Compat Router: Go
 Login Manager:           SDDM
 Styling:                 KDE themes + CSS for GTK app theming
+
+System Daemons (Go):
+  luminos-ai       Unix socket server, request routing, session management
+  luminos-power    AC/thermal monitoring, CPU governor, NVIDIA power limit
+  luminos-sentinel /proc scanner, threat rules, process kill, notification dispatch
+  luminos-router   PE header analysis, rule-based compat classification (80% of cases)
+  GPU lifecycle    VRAM state, gaming mode eviction, idle timeout policy
+
+AI Inference Layer (Python — ONNX/llama.cpp only):
+  NPU service      ONNX Runtime VitisAI provider — sentinel + router models on AMD XDNA
+  Router ML        Quantized model for 20% edge cases rules can't resolve
+  HIVE serving     llama-cpp-python for Nexus/Bolt/Nova/Eye on NVIDIA dGPU
+
+IPC:
+  Unix sockets (JSON) between Go daemons and Python inference services
+  Go = stable system layer | Python = inference-only, never system logic
 ```
+
+See Decision 13 in LUMINOS_DECISIONS.md for full rationale.
 
 ### BANNED — Never Use These
 ```

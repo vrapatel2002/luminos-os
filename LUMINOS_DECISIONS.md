@@ -6,6 +6,69 @@
 
 ---
 
+## DECISION 13 — Go/Python Split Architecture For All Daemons
+Date: April 2026
+Made by: Sam + Claude Code (claude-code)
+**Status: FINAL — Governs all daemon development going forward.**
+
+### What We Decided
+Split daemon layer into two tiers based on workload type:
+- **Go** handles all system daemon logic (socket servers, routing, rules, power, process monitoring)
+- **Python** handles all AI inference (ONNX/VitisAI NPU, llama.cpp, HIVE models)
+- **IPC**: Unix sockets between Go and Python tiers (JSON protocol)
+
+### Go handles
+- `luminos-ai` — main Unix socket server, request routing, session management
+- `luminos-power` — AC/thermal monitoring, CPU governor writer, 10s auto-apply loop
+- `luminos-sentinel` — /proc scanner, threat rule engine, notification dispatch, process kill
+- `luminos-router` — PE header analysis, rule-based compatibility classification (80% of cases)
+- GPU lifecycle manager — VRAM state, gaming mode eviction, idle timeout policy
+
+### Python handles
+- NPU inference service — ONNX VitisAI provider for sentinel + router models on AMD XDNA
+- AI router edge-case inference — quantized model for the 20% cases rules can't resolve
+- llama.cpp / HIVE model serving — llama-cpp-python for Nexus/Bolt/Nova/Eye on NVIDIA dGPU
+
+### Why
+Code analysis of the existing Python daemons reveals a clear split:
+
+| Component | ML inference? | Right language |
+|-----------|--------------|----------------|
+| main.py socket server | No | Go |
+| powerbrain.py | No (pure rules) | Go |
+| sentinel_daemon.py process scanning | No | Go |
+| sentinel npu_classifier call | Yes (ONNX) | Python |
+| router_daemon.py socket + cache | No | Go |
+| router classify_binary rules | No | Go |
+| router AI edge cases | Yes (ONNX) | Python |
+| npu_interface.py | Yes (VitisAI) | Python |
+| model_manager.py state machine | No | Go |
+| llama.cpp actual inference | Yes | Python |
+
+**Go rationale**: Single static binary, no venv, no pip, no Python version fragility.
+Fast startup, low memory, goroutine concurrency maps perfectly to socket servers
+and background polling loops. Pure-rule logic has no benefit from Python.
+
+**Python rationale**: ONNX Runtime VitisAI provider has no mature Go bindings.
+llama-cpp-python is the standard llama.cpp Python interface — no equivalent in Go.
+numpy is required for inference tensor operations. Python wins only where ML is mandatory.
+
+### What We Rejected
+
+**All-Go (including inference)**
+- Pros: Single language, no subprocess management
+- Cons: ONNX Runtime Go bindings are immature; no VitisAI support; no llama.cpp Go binding
+  that matches llama-cpp-python quality. Would require building C bridges manually.
+
+**All-Python (keep existing code)**
+- Pros: Existing code, no rewrite needed
+- Cons: venv fragility (the reason we moved away from Python for UI).
+  Python global interpreter lock limits true concurrency in socket servers.
+  Known failure mode: Python 3.14 broke chromadb, onnxruntime had version conflicts.
+  System daemons should not depend on pip.
+
+---
+
 ## DECISION 12 — Complete Permanent Move To KDE Plasma
 Date: April 2026
 Made by: Sam
