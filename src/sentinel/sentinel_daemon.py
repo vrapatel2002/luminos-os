@@ -170,6 +170,47 @@ def notify_sentinel_alert(entry: dict) -> None:
 # Sentinel daemon loop
 # ===========================================================================
 
+# [CHANGE: gemini-cli | 2026-04-20] Phase 3 — Shared SmolLM2-135M model instance.
+def load_smollm2_shared():
+    """Return the shared model instance from the classifier module."""
+    try:
+        from classifier.onnx_classifier import get_ai_resources
+        return get_ai_resources()
+    except ImportError:
+        return None, None
+
+def classify_behavior_ai(process_name, file_path):
+    """Run AI classification for system process behavior."""
+    sess, tokenizer = load_smollm2_shared()
+    if sess is None:
+        return "normal"
+
+    prompt = (
+        "System process behavior classification.\n"
+        f"Process: {process_name} accessing {file_path}\n"
+        "Is this: normal suspicious or block\n"
+        "Answer:"
+    )
+    
+    try:
+        import numpy as np
+        inputs = tokenizer(prompt, return_tensors="np")
+        ort_inputs = {
+            "input_ids": inputs["input_ids"].astype(np.int64),
+            "attention_mask": inputs["attention_mask"].astype(np.int64)
+        }
+        # Simplified inference (first token)
+        outputs = sess.run(None, ort_inputs)
+        next_token_id = np.argmax(outputs[0][0, -1, :])
+        token_str = tokenizer.decode([next_token_id]).strip().lower()
+        
+        if "block" in token_str: return "block"
+        if "suspicious" in token_str: return "suspicious"
+        return "normal"
+    except Exception as e:
+        logger.debug(f"Sentinel AI inference failed: {e}")
+        return "normal"
+
 class SentinelDaemon:
     """
     Daemon that runs the Sentinel monitor and handles alert dispatch.
@@ -233,6 +274,16 @@ class SentinelDaemon:
                 signals        = get_signals_fn(pid)
                 rule_result    = rules_fn(signals)
                 classification = rule_result.get("classification", "normal")
+
+                # [CHANGE: gemini-cli | 2026-04-20] If rules are normal, ask AI for second opinion
+                if classification == CLASSIFICATION_NORMAL:
+                    ai_cls = classify_behavior_ai(
+                        signals.get("process_name", "unknown"),
+                        signals.get("last_file_access", "none")
+                    )
+                    if ai_cls != "normal":
+                        classification = ai_cls
+                        rule_result["reason"] = f"AI flagged as {ai_cls}"
 
                 if classification in (CLASSIFICATION_SUSPICIOUS,
                                       CLASSIFICATION_BLOCK):

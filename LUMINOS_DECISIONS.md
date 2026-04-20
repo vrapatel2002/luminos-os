@@ -11,6 +11,18 @@ Date: April 2026
 Made by: Sam + Claude Code (claude-code)
 **Status: FINAL — Governs all daemon development going forward.**
 
+### Decision 13 Update: Model Selection Locked (April 2026)
+- **MODEL**: SMOLLM2-135M INT8 ONNX (HuggingFaceTB)
+- **SIZE**: ~140MB MODEL, <300MB TOTAL WITH RUNTIME
+- **Why this model and no other**:
+  * RAM LIMIT ADJUSTED: 300MB SOFT LIMIT, 800MB HARD LIMIT.
+  * REVERTED TO 135M TO KEEP BASE FOOTPRINT EXTREMELY SMALL.
+  * GGUF format rejected — llama.cpp has no NPU backend
+  * Only ONNX works with AMD XDNA VitisAI EP
+  * Router and Sentinel SHARE one loaded instance
+  * HIVE agents (Phase 4) use separate GGUF on dGPU
+- **This decision is final. Do not reopen.**
+
 ### What We Decided
 Split daemon layer into two tiers based on workload type:
 - **Go** handles all system daemon logic (socket servers, routing, rules, power, process monitoring)
