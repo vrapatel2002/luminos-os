@@ -8,7 +8,6 @@ CONFIG=~/.config
 # Apply all KDE configs
 cp $REPO/kdeglobals $CONFIG/
 cp $REPO/kwinrc $CONFIG/
-cp $REPO/plasmashellrc $CONFIG/
 cp $REPO/plasma-org.kde.plasma.desktop-appletsrc $CONFIG/
 
 # Apply wallpaper
@@ -20,9 +19,6 @@ plasma-apply-wallpaperimage \
 kwriteconfig6 --file kdeglobals \
   --group Icons --key Theme "MacTahoe-dark"
 
-# Restart plasmashell to apply
-kquitapp6 plasmashell 2>/dev/null || true
 sleep 2
-plasmashell &>/dev/null &
 
 echo "Luminos KDE config applied successfully"
