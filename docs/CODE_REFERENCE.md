@@ -1,8 +1,16 @@
 # CODE_REFERENCE.md
 # Project Luminos — File Map & Architecture Reference
-Last Updated: 2026-03-22 (Phase 8.12 — Wine/Proton OS Integration complete)
+
+## Stack as of April 2026 [CHANGE: gemini-cli | 2026-04-19]
+Shell: KDE Plasma + KWin
+Widgets: Qt/QML
+Backend: Go
+Archived: Hyprland configs → archive/hyprland/
+Archived: GTK4 Python UI → archive/gtk4-ui/
 
 ---
+
+Last Updated: 2026-04-19 (Decision 12 — Hyprland/GTK4 Retired)
 
 ## CURRENT FILE MAP
 
