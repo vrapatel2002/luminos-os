@@ -7,11 +7,13 @@ panelVisibility=1
 
 [PlasmaViews][Panel 2][Defaults]
 floating=1
-thickness=44
+thickness=24
 
 [PlasmaViews][Panel 4]
 floating=1
+floatingApplets=1
 panelLengthMode=1
+panelOpacity=2
 panelVisibility=2
 
 [PlasmaViews][Panel 4][Defaults]

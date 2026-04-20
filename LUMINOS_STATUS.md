@@ -25,7 +25,7 @@
 |-----------|--------|-------------|-------|
 | HyprPanel (bar+dock) | 🚫 Uninstalled | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] Fully uninstalled. |
 | GTK4 UI (all) | 🚫 Uninstalled | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] GTK4 UI stack retired; packages removed where safe. |
-| KDE Plasma desktop | ✅ Working | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] Installed. Ready for theme config. |
+| KDE Plasma desktop | ✅ Working | 2026-04-20 | [CHANGE: gemini-cli | 2026-04-20] Fixed bottom dock (Panel 4) opacity and floating state to match top bar (Panel 2). |
 | SDDM login screen | 🔧 In Progress | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] SDDM enabled. Replaced greetd. Needs Luminos theme. |
 | Settings app | 📋 Not Started | — | Qt/QML + Go backend. |
 | Zone indicator widget | 📋 Not Started | — | KDE Plasma widget dot on window corner (blue/orange/red/none per zone). |
