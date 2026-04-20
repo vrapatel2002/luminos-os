@@ -29,7 +29,8 @@
 | SDDM login screen | 🔧 In Progress | 2026-04-19 | [CHANGE: gemini-cli | 2026-04-19] SDDM enabled. Replaced greetd. Needs Luminos theme. |
 | Settings app | 📋 Not Started | — | Qt/QML + Go backend. |
 | Zone indicator widget | 📋 Not Started | — | KDE Plasma widget dot on window corner (blue/orange/red/none per zone). |
-| App launcher | 📋 Not Started | — | KDE built-in launcher. |
+| App launcher | ✅ Working | 2026-04-20 | [CHANGE: gemini-cli | 2026-04-20] Set launcher to Application Dashboard (kickerdash) with view-app-grid icon. |
+| KDE config persistence | ✅ Working | 2026-04-20 | [CHANGE: claude-code | 2026-04-20] kdeglobals, kwinrc, plasmashellrc, appletsrc saved to repo. Auto-apply script runs on login via KDE autostart. |
 
 ---
 
@@ -114,6 +115,7 @@
 | 2026-04-19 | gemini-cli | Fix HyprPanel crash & Aura backlight | ✅ Fixed config.json invalid schema keys, added asusctl exec-once |
 | 2026-04-19 | gemini-cli | Fix HyprPanel taskbar click passthrough | ✅ Corrected layerrule syntax, ignore_alpha 0.5, and enabled xray on |
 | 2026-04-19 | gemini-cli | Uninstall Hyprland and GTK4 UI | ✅ Removed packages and configs per Decision 12 |
+| 2026-04-20 | claude-code | Save KDE config to repo + autostart | ✅ Config files saved, apply-kde-config.sh created, wallpaper applied |
 
 ---
 
