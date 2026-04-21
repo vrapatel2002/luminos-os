@@ -99,7 +99,7 @@ See docs/DAEMON_ARCHITECTURE.md for full technical blueprint.
 | Architecture design | ✅ Done | Decision 13 — Go/Python split. Unix sockets for IPC. |
 | Phase 1 — Go foundation | ✅ Verified and running in production | [CHANGE: gemini-cli | 2026-04-20] All 4 Go daemons (ai, power, sentinel, router) verified and responding. |
 | Phase 2 — Compat Router + AI | ✅ Done | [CHANGE: gemini-cli | 2026-04-20] Rule-based Python classifier (Phase 3 AI stub) wired to Go router. .exe association and Wine launcher working. |
-| Phase 3 — NPU + Sentinel ML | 🔧 In Progress | [CHANGE: gemini-cli | 2026-04-20] SmolLM2-135M INT8 ONNX deployed. RAM: ~266MB. NPU Setup: Kernel 6.19 ✅, xrt/plugin installed ✅, Firmware ✅, render group ✅, IOMMU in GRUB ✅. Reboot required. |
+| Phase 3 — NPU + Sentinel ML | ⚠️ Partial | [CHANGE: gemini-cli | 2026-04-21] NPU persistence fixed via udev/systemd. VitisAI EP missing in ONNX Runtime (needs specific AMD wheels). NPU confirmed active via xrt-smi. |
 | Phase 4 — HIVE + llama.cpp | 📋 Planned | llama-cpp-python server. Go model manager. Nexus/Bolt/Nova/Eye agents. |
 
 ---
@@ -116,7 +116,8 @@ See docs/DAEMON_ARCHITECTURE.md for full technical blueprint.
 
 | Date | Agent | Task | Outcome |
 |------|-------|------|---------|
-| 2026-04-12 | claude-code | Fix socket PermissionError in bar/dock | ✅ os.access() fix applied |
+| 2026-04-21 | gemini-cli | Fix NPU persistence & verify VitisAI EP | ✅ /dev/accel0 persistent; ❌ VitisAI EP missing |
+| 2026-04-20 | claude-code | Fix socket PermissionError in bar/dock | ✅ os.access() fix applied |
 | 2026-04-12 | claude-code | Autostart bar + dock via exec-once | ✅ Working with env vars |
 | 2026-04-12 | claude-chat | Debug Hyprland 0.54.3 windowrule syntax | ✅ Migrated to block-style |
 | 2026-04-17 | claude-code | Replace Python bar/dock with Waybar | ✅ Waybar working |

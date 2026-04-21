@@ -1,0 +1,13 @@
+[Unit]
+Description=AMD XDNA NPU device node setup
+After=systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/udevadm trigger --subsystem-match=accel
+ExecStartPost=/bin/sleep 1
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
