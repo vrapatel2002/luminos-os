@@ -1,12 +1,14 @@
 """
 onnx_classifier.py
-Luminos OS .exe classifier (Phase 3: SmolLM2-135M AI-based).
+Luminos OS .exe classifier (Phase 3: MobileLLM-R1-140M AI-based).
 Accepts JSON input via stdin, extracts PE features, and returns JSON decision.
 
-# MODEL: SMOLLM2-135M INT8 ONNX (~140MB + ~60MB runtime)
-# RAM LIMIT: SOFT 300MB / HARD 800MB
-# NPU: VitisAI EP if available, CPU fallback
+# MODEL: MobileLLM-R1-140M INT8 ONNX
+# ARCHITECTURE: HATS (Host-Assisted Tile-Streaming)
+# NPU: npu1 (AIE2) via Triton-XDNA kernels
+# CPU: Host (logic, BO management, fallback)
 # [CHANGE: gemini-cli | 2026-04-20]
+# [CHANGE: gemini-cli | 2026-04-22] Transition to HATS / MobileLLM-R1-140M
 """
 
 import sys
@@ -31,16 +33,34 @@ except ImportError:
 logger = logging.getLogger("onnx_classifier")
 
 # Model Paths
-MODEL_DIR = os.path.expanduser("~/.local/share/luminos/models/smollm2-135m")
-ONNX_PATH = os.path.join(MODEL_DIR, "onnx/model_int8.onnx")
+# [CHANGE: gemini-cli | 2026-04-22] Migrating to MobileLLM-R1-140M
+MODEL_DIR = os.path.expanduser("~/.local/share/luminos/models/mobilellm-r1-140m")
+ONNX_PATH = os.path.join(MODEL_DIR, "model.onnx")
+
+class HATSEngine:
+    """
+    Placeholder for Host-Assisted Tile-Streaming (HATS) engine.
+    This will eventually manage XRT calls and Triton-XDNA kernels.
+    """
+    def __init__(self, model_path):
+        self.model_path = model_path
+        self.is_ready = False
+        # TODO(gemini-cli): Initialize XRT context and load .xclbin kernels
+        logger.info("HATSEngine initialized (Awaiting Triton kernel integration)")
+
+    def run_inference(self, input_ids, attention_mask):
+        """Execute inference on NPU tiles."""
+        # TODO(gemini-cli): Implement tile-streaming logic via XRT
+        return None
 
 # Global session singleton
 _SESSION = None
 _TOKENIZER = None
+_HATS_ENGINE = None
 
 def get_ai_resources():
     """Load and return the ONNX session and tokenizer (singleton)."""
-    global _SESSION, _TOKENIZER
+    global _SESSION, _TOKENIZER, _HATS_ENGINE
     if not HAS_AI:
         return None, None
     
@@ -50,11 +70,17 @@ def get_ai_resources():
             return None, None
             
         try:
-            # Try VitisAI EP first, then CPU
-            providers = ["VitisAIExecutionProvider", "CPUExecutionProvider"]
+            # Initialize HATS Engine (Phase 4 development)
+            _HATS_ENGINE = HATSEngine(ONNX_PATH)
+            
+            # [CHANGE: gemini-cli | 2026-04-22] Primary engine is still ONNX CPU/ROCm 
+            # until Triton kernels are fully integrated into HATS.
+            providers = ["VitisAIExecutionProvider", "ROCMExecutionProvider", "CPUExecutionProvider"]
             _SESSION = ort.InferenceSession(ONNX_PATH, providers=providers)
+            
+            # Note: MobileLLM might require a specific tokenizer if not in the model dir
             _TOKENIZER = AutoTokenizer.from_pretrained(MODEL_DIR)
-            logger.info(f"Loaded SmolLM2-135M via {_SESSION.get_providers()[0]}")
+            logger.info(f"Loaded MobileLLM-R1-140M via {_SESSION.get_providers()[0]}")
         except Exception as e:
             logger.error(f"Failed to load AI resources: {e}")
             _SESSION = None

@@ -6,6 +6,31 @@
 
 ---
 
+## DECISION 15 — HATS Architecture: Host-Assisted Tile-Streaming
+Date: April 22, 2026
+Made by: gemini-cli
+**Status: FINAL — Transitioning from ROCm iGPU to NPU-native execution.**
+
+### What We Decided
+Formally adopt the **HATS (Host-Assisted Tile-Streaming)** architecture for all Luminos OS AI workloads. This follows the successful verification of the Triton-XDNA compiler stack on April 22, 2026, which proved we can generate valid `.xclbin` binaries for the `npu1` (Phoenix/Hawk Point) architecture.
+
+### The HATS Model
+1. **CPU as Host (The "Brain")**: Manages logic, XRT Buffer Object (BO) allocation, DMA scheduling, and synchronization.
+2. **NPU as Accelerator (The "Muscles")**: Executes raw tiled math via the AIE2 tile array.
+3. **Tile-Streaming**: Large models (like MobileLLM) are decomposed into Triton kernels that stream weights and activations through NPU tiles in a coordinated "Host-Assisted" dance.
+
+### Why
+- **Efficiency**: Offloading matmul and activations to the NPU preserves iGPU cycles for the KDE Plasma UI and CPU cycles for system daemons.
+- **Privacy**: Local NPU execution ensures zero data leakage while maintaining high performance.
+- **Proven Path**: Triton-XDNA removes the "black box" of the VitisAI VOE compiler, allowing us to tune kernels specifically for SmolLM2 and MobileLLM architectures.
+
+### What We Rejected
+**Continued reliance on ROCm iGPU (Phase 3 fallback)**
+- Pros: Stable and easy.
+- Cons: Competes with the desktop compositor (KWin) and increases thermal pressure on the shared CPU/GPU heatpipe. The NPU is dedicated silicon sitting idle; HATS puts it to work.
+
+---
+
 ## DECISION 13 — Go/Python Split Architecture For All Daemons
 Date: April 2026
 Made by: Sam + Claude Code (claude-code)
