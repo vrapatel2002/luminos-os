@@ -1,0 +1,1195 @@
+{
+  "model": {
+    "name": "MobileLLM-R1-140M",
+    "hidden_dim": 576,
+    "intermediate_dim": 2048,
+    "layers": 15
+  },
+  "layers": {
+    "attn_k_proj": {
+      "scale": 0.0022356680128723383,
+      "shape": [
+        576,
+        192
+      ]
+    },
+    "attn_q_proj": {
+      "scale": 0.001803048886358738,
+      "shape": [
+        576,
+        576
+      ]
+    },
+    "ffn_down_proj": {
+      "scale": 0.007108508609235287,
+      "shape": [
+        2048,
+        576
+      ]
+    },
+    "ffn_gate_proj": {
+      "scale": 0.0029458466451615095,
+      "shape": [
+        576,
+        2048
+      ]
+    }
+  },
+  "all_weights": [
+    {
+      "name": "model.layers.0.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_0_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_0_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.0.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_0_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_0_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.0.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_0_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_0_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.0.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_0_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_0_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.0.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_0_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_0_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.0.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_0_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_0_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.0.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_0_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_0_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.1.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_1_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_1_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.1.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_1_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_1_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.1.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_1_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_1_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.1.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_1_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_1_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.1.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_1_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_1_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.1.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_1_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_1_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.1.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_1_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_1_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.10.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_10_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_10_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.10.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_10_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_10_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.10.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_10_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_10_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.10.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_10_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_10_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.10.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_10_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_10_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.10.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_10_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_10_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.10.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_10_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_10_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.11.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_11_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_11_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.11.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_11_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_11_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.11.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_11_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_11_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.11.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_11_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_11_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.11.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_11_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_11_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.11.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_11_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_11_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.11.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_11_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_11_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.12.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_12_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_12_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.12.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_12_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_12_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.12.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_12_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_12_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.12.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_12_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_12_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.12.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_12_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_12_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.12.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_12_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_12_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.12.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_12_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_12_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.13.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_13_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_13_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.13.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_13_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_13_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.13.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_13_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_13_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.13.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_13_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_13_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.13.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_13_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_13_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.13.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_13_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_13_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.13.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_13_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_13_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.14.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_14_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_14_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.14.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_14_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_14_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.14.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_14_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_14_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.14.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_14_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_14_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.14.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_14_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_14_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.14.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_14_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_14_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.14.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_14_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_14_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.2.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_2_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_2_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.2.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_2_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_2_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.2.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_2_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_2_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.2.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_2_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_2_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.2.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_2_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_2_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.2.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_2_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_2_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.2.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_2_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_2_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.3.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_3_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_3_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.3.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_3_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_3_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.3.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_3_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_3_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.3.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_3_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_3_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.3.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_3_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_3_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.3.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_3_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_3_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.3.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_3_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_3_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.4.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_4_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_4_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.4.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_4_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_4_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.4.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_4_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_4_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.4.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_4_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_4_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.4.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_4_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_4_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.4.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_4_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_4_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.4.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_4_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_4_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.5.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_5_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_5_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.5.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_5_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_5_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.5.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_5_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_5_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.5.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_5_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_5_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.5.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_5_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_5_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.5.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_5_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_5_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.5.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_5_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_5_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.6.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_6_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_6_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.6.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_6_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_6_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.6.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_6_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_6_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.6.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_6_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_6_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.6.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_6_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_6_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.6.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_6_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_6_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.6.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_6_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_6_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.7.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_7_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_7_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.7.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_7_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_7_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.7.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_7_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_7_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.7.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_7_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_7_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.7.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_7_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_7_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.7.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_7_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_7_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.7.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_7_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_7_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.8.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_8_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_8_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.8.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_8_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_8_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.8.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_8_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_8_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.8.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_8_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_8_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.8.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_8_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_8_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.8.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_8_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_8_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.8.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_8_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_8_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.9.attn.k_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_9_attn_k_proj_MatMul_weight.bin",
+      "scale": "model_layers_9_attn_k_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.9.attn.o_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_9_attn_o_proj_MatMul_weight.bin",
+      "scale": "model_layers_9_attn_o_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.9.attn.q_proj.MatMul.weight",
+      "shape": [
+        576,
+        576
+      ],
+      "bin": "model_layers_9_attn_q_proj_MatMul_weight.bin",
+      "scale": "model_layers_9_attn_q_proj_MatMul_weight.scale",
+      "original_size_bytes": 1327104,
+      "quantized_size_bytes": 331776
+    },
+    {
+      "name": "model.layers.9.attn.v_proj.MatMul.weight",
+      "shape": [
+        576,
+        192
+      ],
+      "bin": "model_layers_9_attn_v_proj_MatMul_weight.bin",
+      "scale": "model_layers_9_attn_v_proj_MatMul_weight.scale",
+      "original_size_bytes": 442368,
+      "quantized_size_bytes": 110592
+    },
+    {
+      "name": "model.layers.9.mlp.down_proj.MatMul.weight",
+      "shape": [
+        2048,
+        576
+      ],
+      "bin": "model_layers_9_mlp_down_proj_MatMul_weight.bin",
+      "scale": "model_layers_9_mlp_down_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.9.mlp.gate_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_9_mlp_gate_proj_MatMul_weight.bin",
+      "scale": "model_layers_9_mlp_gate_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    },
+    {
+      "name": "model.layers.9.mlp.up_proj.MatMul.weight",
+      "shape": [
+        576,
+        2048
+      ],
+      "bin": "model_layers_9_mlp_up_proj_MatMul_weight.bin",
+      "scale": "model_layers_9_mlp_up_proj_MatMul_weight.scale",
+      "original_size_bytes": 4718592,
+      "quantized_size_bytes": 1179648
+    }
+  ]
+}

@@ -37,55 +37,23 @@ logger = logging.getLogger("onnx_classifier")
 MODEL_DIR = os.path.expanduser("~/.local/share/luminos/models/mobilellm-r1-140m")
 ONNX_PATH = os.path.join(MODEL_DIR, "model.onnx")
 
-class HATSEngine:
-    """
-    Placeholder for Host-Assisted Tile-Streaming (HATS) engine.
-    This will eventually manage XRT calls and Triton-XDNA kernels.
-    """
-    def __init__(self, model_path):
-        self.model_path = model_path
-        self.is_ready = False
-        # TODO(gemini-cli): Initialize XRT context and load .xclbin kernels
-        logger.info("HATSEngine initialized (Awaiting Triton kernel integration)")
-
-    def run_inference(self, input_ids, attention_mask):
-        """Execute inference on NPU tiles."""
-        # TODO(gemini-cli): Implement tile-streaming logic via XRT
-        return None
-
-# Global session singleton
-_SESSION = None
-_TOKENIZER = None
-_HATS_ENGINE = None
+# [CHANGE: claude-code | 2026-04-24] Replaced HATSEngine stub with live HATS kernel.
+# VitisAI EP is broken on Linux — HATS bypasses it via triton-xdna directly.
+# get_ai_resources() retained for sentinel_daemon backward compat.
 
 def get_ai_resources():
-    """Load and return the ONNX session and tokenizer (singleton)."""
-    global _SESSION, _TOKENIZER, _HATS_ENGINE
-    if not HAS_AI:
+    """
+    Return HATS sentinel singleton (replaces ONNX session tuple).
+    Returns (sentinel, None) — callers that use (sess, tokenizer) pattern
+    receive sentinel as sess; second element is unused for HATS path.
+    """
+    try:
+        from npu.hats_kernel import get_hats_sentinel
+        sentinel = get_hats_sentinel()
+        return sentinel, None
+    except Exception as e:
+        logger.error(f"Failed to load HATS resources: {e}")
         return None, None
-    
-    if _SESSION is None:
-        if not os.path.exists(ONNX_PATH):
-            logger.error(f"Model not found at {ONNX_PATH}")
-            return None, None
-            
-        try:
-            # Initialize HATS Engine (Phase 4 development)
-            _HATS_ENGINE = HATSEngine(ONNX_PATH)
-            
-            # [CHANGE: gemini-cli | 2026-04-22] Primary engine is still ONNX CPU/ROCm 
-            # until Triton kernels are fully integrated into HATS.
-            providers = ["VitisAIExecutionProvider", "ROCMExecutionProvider", "CPUExecutionProvider"]
-            _SESSION = ort.InferenceSession(ONNX_PATH, providers=providers)
-            
-            # Note: MobileLLM might require a specific tokenizer if not in the model dir
-            _TOKENIZER = AutoTokenizer.from_pretrained(MODEL_DIR)
-            logger.info(f"Loaded MobileLLM-R1-140M via {_SESSION.get_providers()[0]}")
-        except Exception as e:
-            logger.error(f"Failed to load AI resources: {e}")
-            _SESSION = None
-            
-    return _SESSION, _TOKENIZER
 
 def classify_rules(features: dict) -> dict:
     """
@@ -131,55 +99,38 @@ def classify_rules(features: dict) -> dict:
     }
 
 def classify_ai(features: dict) -> dict:
-    """Run SmolLM2-135M inference for refined classification."""
-    sess, tokenizer = get_ai_resources()
-    if sess is None:
-        return {"zone": 2, "confidence": 0.5, "reason": "AI unavailable, fallback to Wine"}
-
-    prompt = (
-        "Windows app classification task.\n"
-        f"Features: {json.dumps(features)}\n"
-        "Choose one label: Zone2_Wine Zone3_Firecracker Zone4_KVM\n"
-        "Label:"
-    )
-    
+    """
+    Run HATS MobileLLM-R1-140M INT8 inference for edge-case .exe routing.
+    [CHANGE: claude-code | 2026-04-24] Replaced ONNX/SmolLM2 with HATS kernel.
+    """
     try:
-        inputs = tokenizer(prompt, return_tensors="np")
-        # Align inputs with ONNX names
-        ort_inputs = {
-            "input_ids": inputs["input_ids"].astype(np.int64),
-            "attention_mask": inputs["attention_mask"].astype(np.int64)
-        }
-        
-        # Add dummy position_ids if required by model
-        for inp in sess.get_inputs():
-            if inp.name == "position_ids":
-                ort_inputs[inp.name] = np.arange(ort_inputs["input_ids"].shape[1]).reshape(1, -1).astype(np.int64)
-            elif inp.name.startswith("past_key_values"):
-                # Handle KV cache stubs if present (empty input for first pass)
-                shape = [1 if (s == "batch_size" or isinstance(s, str)) else s for s in inp.shape]
-                shape = [s if s is not None else 0 for s in shape]
-                ort_inputs[inp.name] = np.zeros(shape, dtype=np.float32)
+        from npu.hats_kernel import get_hats_sentinel
+        sentinel = get_hats_sentinel()
+        prompt = (
+            f"Classify Windows .exe: {json.dumps(features)}"
+            " Choose: Zone2_Wine Zone3_Firecracker Zone4_KVM"
+        )
+        result = sentinel.classify_zone(prompt)
+        zone = result.get("zone", 2)
+        confidence = result.get("confidence", 0.5)
+        backend = result.get("backend", "unknown")
 
-        outputs = sess.run(None, ort_inputs)
-        # Parse first token of output (logits -> argmax)
-        # For simplicity in Phase 3, we just take the highest logit of the first new token
-        logits = outputs[0]
-        next_token_id = np.argmax(logits[0, -1, :])
-        token_str = tokenizer.decode([next_token_id]).strip().lower()
-        
-        zone = 2
-        if "zone3" in token_str: zone = 3
-        elif "zone4" in token_str: zone = 4
-        
+        # Fall back to Zone2 if confidence too low
+        if confidence < 0.5:
+            return {
+                "zone": 2,
+                "confidence": confidence,
+                "reason": f"HATS low confidence ({confidence:.2f}), defaulting to Wine",
+            }
+
         return {
             "zone": zone,
-            "confidence": 0.80,
-            "reason": f"AI classified as {token_str}"
+            "confidence": confidence,
+            "reason": f"HATS ({backend}) zone={zone} conf={confidence:.2f}",
         }
     except Exception as e:
-        logger.error(f"AI inference failed: {e}")
-        return {"zone": 2, "confidence": 0.5, "reason": f"AI error: {str(e)}"}
+        logger.error(f"HATS classify_ai failed: {e}")
+        return {"zone": 2, "confidence": 0.5, "reason": f"HATS error: {e}"}
 
 def main():
     try:

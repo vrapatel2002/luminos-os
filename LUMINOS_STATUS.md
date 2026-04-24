@@ -99,7 +99,7 @@ See docs/DAEMON_ARCHITECTURE.md for full technical blueprint.
 | Architecture design | ✅ Done | Decision 13 — Go/Python split. Unix sockets for IPC. |
 | Phase 1 — Go foundation | ✅ Verified and running in production | [CHANGE: gemini-cli | 2026-04-20] All 4 Go daemons (ai, power, sentinel, router) verified and responding. |
 | Phase 2 — Compat Router + AI | ✅ Done | [CHANGE: gemini-cli | 2026-04-20] Rule-based Python classifier (Phase 3 AI stub) wired to Go router. .exe association and Wine launcher working. |
-| Phase 3 — NPU + Sentinel ML | ⚠️ Partial | [CHANGE: gemini-cli | 2026-04-21] NPU persistence fixed via udev/systemd. VitisAI EP missing in ONNX Runtime (needs specific AMD wheels). NPU confirmed active via xrt-smi. |
+| Phase 3 — NPU + Sentinel ML | 🔧 In Progress | [CHANGE: claude-code | 2026-04-24] HATS architecture complete. triton-xdna 3.6.0 ✅, MobileLLM-R1-140M INT8 quantized (64MB) ✅, hats_kernel.py ✅, sentinel wired ✅, classifier wired ✅, memory 312.7MB/800MB ✅, inference 1.6–22ms ✅. Pending: NPU silicon validation + model fine-tuning for sentinel/compat tasks. |
 | Phase 4 — HIVE + llama.cpp | 📋 Planned | llama-cpp-python server. Go model manager. Nexus/Bolt/Nova/Eye agents. |
 
 ---
@@ -137,6 +137,9 @@ See docs/DAEMON_ARCHITECTURE.md for full technical blueprint.
 | 2026-04-20 | gemini-cli | Fix luminos-power asusctl syntax | ✅ Updated to asusctl 6.3.6 'profile set' syntax, consolidated fan logic. |
 | 2026-04-20 | gemini-cli | Phase 2 Compatibility Router | ✅ Python rule-based classifier, Go router integration, .exe association. |
 | 2026-04-20 | gemini-cli | Enable AMD XDNA NPU | ✅ Kernel check, XRT stack install, render group, IOMMU GRUB config. |
+| 2026-04-22 | antigravity | Deep research: XDNA 1 NPU inference paths | ✅ IRON/Triton-XDNA confirmed viable. Decision 14 recorded. XDNA1_DEEP_RESEARCH.md written. |
+| 2026-04-22 | antigravity | Write HATS INT8 GEMV kernel | ✅ `src/kernels/npu_int8_gemv.py` + `transform_aie2_int8_gemv.mlir` + `weight_manifest.json`. CPU self-test passes. NPU execution pending Triton-XDNA install. |
+| 2026-04-24 | claude-code | Complete HATS implementation | ✅ hats_kernel.py + quantize_int8.py created. Sentinel + classifier wired to HATS. triton-xdna 3.6.0 active. Memory 312.7MB / 800MB budget. Inference 1.6-22ms. |
 
 ---
 

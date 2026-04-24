@@ -170,45 +170,30 @@ def notify_sentinel_alert(entry: dict) -> None:
 # Sentinel daemon loop
 # ===========================================================================
 
-# [CHANGE: gemini-cli | 2026-04-20] Phase 3 — Shared SmolLM2-135M model instance.
-def load_smollm2_shared():
-    """Return the shared model instance from the classifier module."""
+# [CHANGE: claude-code | 2026-04-24] Phase 3 — HATS MobileLLM-R1-140M INT8.
+# Replaced SmolLM2 ONNX path with HATS kernel (VitisAI EP broken on Linux).
+# Logs which backend was used (triton-npu vs cpu-fallback).
+def classify_behavior_ai(process_name: str, file_path: str) -> str:
+    """
+    Run HATS INT8 inference for system process behavior classification.
+    Uses MobileLLM-R1-140M INT8 via HATS on XDNA 1 NPU (or CPU fallback).
+    Returns: "normal" | "suspicious" | "block"
+    """
     try:
-        from classifier.onnx_classifier import get_ai_resources
-        return get_ai_resources()
-    except ImportError:
-        return None, None
-
-def classify_behavior_ai(process_name, file_path):
-    """Run AI classification for system process behavior."""
-    sess, tokenizer = load_smollm2_shared()
-    if sess is None:
-        return "normal"
-
-    prompt = (
-        "System process behavior classification.\n"
-        f"Process: {process_name} accessing {file_path}\n"
-        "Is this: normal suspicious or block\n"
-        "Answer:"
-    )
-    
-    try:
-        import numpy as np
-        inputs = tokenizer(prompt, return_tensors="np")
-        ort_inputs = {
-            "input_ids": inputs["input_ids"].astype(np.int64),
-            "attention_mask": inputs["attention_mask"].astype(np.int64)
-        }
-        # Simplified inference (first token)
-        outputs = sess.run(None, ort_inputs)
-        next_token_id = np.argmax(outputs[0][0, -1, :])
-        token_str = tokenizer.decode([next_token_id]).strip().lower()
-        
-        if "block" in token_str: return "block"
-        if "suspicious" in token_str: return "suspicious"
-        return "normal"
+        from npu.hats_kernel import get_hats_sentinel
+        sentinel = get_hats_sentinel()
+        text = f"Process: {process_name} accessing {file_path}"
+        result = sentinel.classify(text)
+        label = result.get("label", "normal")
+        backend = result.get("backend", "unknown")
+        logger.debug(
+            f"HATS classify {process_name}: {label} "
+            f"(conf={result.get('confidence', 0):.2f}, "
+            f"ms={result.get('inference_ms', 0):.1f}, backend={backend})"
+        )
+        return label
     except Exception as e:
-        logger.debug(f"Sentinel AI inference failed: {e}")
+        logger.debug(f"HATS inference failed, defaulting to normal: {e}")
         return "normal"
 
 class SentinelDaemon:
