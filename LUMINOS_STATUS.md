@@ -99,8 +99,8 @@ See docs/DAEMON_ARCHITECTURE.md for full technical blueprint.
 | Architecture design | ✅ Done | Decision 13 — Go/Python split. Unix sockets for IPC. |
 | Phase 1 — Go foundation | ✅ Verified and running in production | [CHANGE: gemini-cli | 2026-04-20] All 4 Go daemons (ai, power, sentinel, router) verified and responding. |
 | Phase 2 — Compat Router + AI | ✅ Done | [CHANGE: gemini-cli | 2026-04-20] Rule-based Python classifier (Phase 3 AI stub) wired to Go router. .exe association and Wine launcher working. |
-| Phase 3 — NPU + Sentinel ML | 🔧 In Progress | [CHANGE: claude-code | 2026-04-24] HATS architecture complete. triton-xdna 3.6.0 ✅, MobileLLM-R1-140M INT8 quantized (64MB) ✅, hats_kernel.py ✅, sentinel wired ✅, classifier wired ✅, memory 312.7MB/800MB ✅, inference 1.6–22ms ✅. Pending: NPU silicon validation + model fine-tuning for sentinel/compat tasks. |
-| Phase 4 — HIVE + llama.cpp | 📋 Planned | llama-cpp-python server. Go model manager. Nexus/Bolt/Nova/Eye agents. |
+| Phase 3 — NPU + Sentinel ML | 🔧 In Progress | [CHANGE: claude-code | 2026-04-24] HATS complete. [CHANGE: gemini-cli | 2026-04-23] Option B (confidence threshold 0.7): ✅ Done. Option A (training data collector): ✅ Done. |
+| Phase 4 — HIVE + llama.cpp | 🔧 In Progress | [CHANGE: gemini-cli | 2026-04-23] HIVE stubs (Phase 4 prep): ✅ Done. Nexus/Bolt/Nova/Eye stubs created. |
 
 ---
 

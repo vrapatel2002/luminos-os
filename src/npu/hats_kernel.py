@@ -277,6 +277,45 @@ class HATSSentinel:
             "reason": f"HATS classified as {result['label']}",
         }
 
+    def classify_with_threshold(self, text, 
+                                threshold=0.7, 
+                                task="sentinel"):
+        result = self.classify(text)
+        if result['confidence'] >= threshold:
+            result['source'] = 'npu'
+            return result
+        result['source'] = 'rules'
+        if task == "sentinel":
+            result['label'] = self._sentinel_rules(text)
+        elif task == "router":
+            result['label'] = self._router_rules(text)
+        result['confidence'] = 1.0
+        return result
+
+    def _sentinel_rules(self, text):
+        dangerous = ["ssh","gnupg","passwd","shadow",
+                     "private_key","id_rsa","wallet",
+                     ".aws","credentials"]
+        suspicious = ["wine","proton","exe","dll",
+                      "registry","system32"]
+        t = text.lower()
+        if any(d in t for d in dangerous):
+            return "block"
+        if any(s in t for s in suspicious):
+            return "suspicious"
+        return "normal"
+
+    def _router_rules(self, text):
+        t = text.lower()
+        anticheat = ["easyanticheat","battleye",
+                     "vanguard","faceit"]
+        zone3 = ["kernel32_advanced","dxgi","nvapi","d3d12"]
+        if any(a in t for a in anticheat):
+            return "Zone4_KVM"
+        if any(z in t for z in zone3):
+            return "Zone3_Firecracker"
+        return "Zone2_Wine"
+
 
 # Module-level singleton — shared between sentinel and compat router.
 # WHY: both callers load the same 64MB of weights; sharing saves 64MB RAM.

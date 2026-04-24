@@ -181,9 +181,15 @@ def classify_behavior_ai(process_name: str, file_path: str) -> str:
     """
     try:
         from npu.hats_kernel import get_hats_sentinel
+        from npu.training_collector import log_sentinel
         sentinel = get_hats_sentinel()
         text = f"Process: {process_name} accessing {file_path}"
-        result = sentinel.classify(text)
+        result = sentinel.classify_with_threshold(
+            text=f"{process_name} {file_path}",
+            threshold=0.7, task="sentinel")
+        log_sentinel(process_name, file_path,
+            result['label'], result['source'],
+            result['confidence'])
         label = result.get("label", "normal")
         backend = result.get("backend", "unknown")
         logger.debug(

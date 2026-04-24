@@ -105,15 +105,20 @@ def classify_ai(features: dict) -> dict:
     """
     try:
         from npu.hats_kernel import get_hats_sentinel
+        from npu.training_collector import log_router
         sentinel = get_hats_sentinel()
-        prompt = (
-            f"Classify Windows .exe: {json.dumps(features)}"
-            " Choose: Zone2_Wine Zone3_Firecracker Zone4_KVM"
-        )
-        result = sentinel.classify_zone(prompt)
-        zone = result.get("zone", 2)
+        result = sentinel.classify_with_threshold(
+            text=str(features), threshold=0.7, task="router")
+        log_router(features.get('exe_path', 'unknown'), str(features),
+            result['label'], result['source'],
+            result['confidence'])
+        
+        label = result.get("label", "Zone2_Wine")
         confidence = result.get("confidence", 0.5)
         backend = result.get("backend", "unknown")
+        
+        zone_map = {"Zone2_Wine": 2, "Zone3_Firecracker": 3, "Zone4_KVM": 4}
+        zone = zone_map.get(label, 2)
 
         # Fall back to Zone2 if confidence too low
         if confidence < 0.5:

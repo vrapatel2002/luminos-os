@@ -6,6 +6,11 @@
 
 ---
 
+## Decision 15: Three-Phase AI Maturity
+- B: 0.7 threshold gates NPU, rules fallback
+- A: Auto-collect rule decisions as training data
+- C: HIVE Phase 4 on dGPU after fine-tuning
+
 ## DECISION 15 — HATS Architecture: Host-Assisted Tile-Streaming
 Date: April 22, 2026 | Updated: April 24, 2026
 Made by: gemini-cli | Updated by: claude-code
