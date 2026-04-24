@@ -66,3 +66,21 @@
 
 Agent: gemini-cli
 Task: HIVE architecture audit
+## Corrected Memory Architecture (April 2026)
+
+### Loading Strategy: On-Demand GPU Only
+IDLE: dGPU off, NPU=Sentinel, iGPU=desktop, RAM=OS only
+AI MODE: dGPU loads one model on demand (~4.6GB VRAM)
+NOVA MODE: explicit user request only → CPU/RAM load
+GAMING: dGPU fully evicted, HIVE suspended
+
+### TurboQuant Integration (Planned)
+Google TurboQuant (ICLR 2026) compresses KV cache 6x.
+Use --ctk q8_0 --ctv turbo4 flags in llama.cpp when stable.
+Benefit: longer conversations before VRAM exhausted.
+Status: llama.cpp implementation in review, add when merged.
+
+### Models — No Docker, No Ollama
+All models as GGUF via llama.cpp direct.
+No Docker. No Ollama. No separate server processes.
+Each model loaded on demand, evicted when not needed.
