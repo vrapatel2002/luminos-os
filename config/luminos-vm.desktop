@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Run in Windows VM
+Icon=computer
+Exec=/usr/local/bin/luminos-vm-launch %f
+MimeType=application/x-ms-dos-executable;
+NoDisplay=true

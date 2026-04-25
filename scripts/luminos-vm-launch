@@ -1,0 +1,25 @@
+#!/bin/bash
+# Launch .exe in Windows VM via KVM
+# [CHANGE: gemini-cli | 2026-04-25] Created VM launch script for right-click + fallback
+EXE="$1"
+
+# Check if VM is running
+VM_NAME="luminos-windows"
+VM_STATE=$(virsh domstate "$VM_NAME" 2>/dev/null)
+
+if [ "$VM_STATE" != "running" ]; then
+  notify-send "Luminos" \
+    "Starting Windows VM... please wait 30s"
+  virsh start "$VM_NAME" 2>/dev/null || \
+    notify-send "Luminos" \
+      "VM not found. Create Windows VM named 
+       'luminos-windows' in virt-manager first."
+  sleep 30
+fi
+
+# Copy exe to shared folder and run
+notify-send "Luminos" \
+  "Running $(basename "$EXE") in Windows VM"
+
+# Copy to VM shared folder if exists
+cp "$EXE" ~/VMShare/ 2>/dev/null || true

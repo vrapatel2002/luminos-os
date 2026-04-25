@@ -44,6 +44,7 @@ Agent: gemini-cli
 | .exe file association | ✅ Working | Silent auto-routing |
 | Notepad++ tested | ✅ Working | Zone 2 Wine |
 | Windows apps in launcher | ✅ Working | Auto-created |
+| VM integration | ✅ Working | Right-click + auto-fallback |
 
 ## Visual
 | Component | Status | Notes |

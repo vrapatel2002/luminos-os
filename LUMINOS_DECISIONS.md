@@ -595,3 +595,13 @@ DECISION: Stack changed from Python GTK4 to AGS/JS + Go + libadwaita
 Decision 10 (Custom GTK4 Bar/Dock). The bar and dock are still custom-built
 for Luminos — but now in AGS/JavaScript instead of Python GTK4.
 Python is deprecated for all UI work. No new Python UI code.
+
+---
+
+## Decision: Windows VM Fallback for .exe Compatibility
+- **Date:** 2026-04-25
+- **Agent:** gemini-cli
+- **Decision:** Implement a KVM/QEMU Windows VM fallback mechanism for failed Wine launches and forced routing for Zone 3/4.
+- **Why:** Some applications (Zone 3/4 or failed Zone 2) require full Windows APIs or anti-cheat support that Wine cannot provide. Automating the transfer to a VM via a shared folder (`~/VMShare`) provides a seamless user experience.
+- **Alternatives considered:** Firecracker microVMs — kept as an option, but KVM provides better compatibility for the absolute last resort.
+
