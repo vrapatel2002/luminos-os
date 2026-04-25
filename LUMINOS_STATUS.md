@@ -83,5 +83,12 @@
 |-----------|--------|-------------|-------|
 | Wine DPI fix | ✅ Done | 2026-04-24 | Set to 192 DPI for G14 HiDPI screen |
 | Adobe app menu | ❌ Failed | 2026-04-24 | No Adobe executables found in Wine prefix |
-| TurboQuant | 📋 Planned | 2026-04-24 | llama.cpp integration pending (KV cache compression) |
+| TurboQuant | ✅ Working | 2026-04-24 | llama.cpp integration done |
 | HIVE loading strategy | ✅ Documented | 2026-04-24 | On-demand GPU only, no Docker, no Ollama |
+
+**Recent Confirmations:**
+- NVIDIA driver (595.58.03): ✅ Working
+- RTX 4050 VRAM: 6141MB confirmed
+- llama.cpp TurboQuant build: ✅
+- TurboQuant flags (turbo4): ✅
+- llama-cpp-python CUDA: ✅
