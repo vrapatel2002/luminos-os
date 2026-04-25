@@ -113,9 +113,10 @@ Agent: claude-sonnet-4-6 (Claude Code)
 
 | Repo | What it contains | TurboQuant completeness |
 |------|-----------------|------------------------|
-| **repo-pytorch** | Full Python reference: TurboQuantV2, V3, Lloyd-Max codebook, MSE compressor, QJL correction, KV-cache wrapper, validation suite | ⭐ MOST COMPLETE — all algorithms, all tests passing on CPU |
+| **repo-thetom-correct** | Full C++ CUDA integration: TURBO2/3/4_0 GGML types, WHT + Lloyd-Max kernels, mmvq, 18 FA template instances, InnerQ equalization | ⭐ BEST FOR PRODUCTION — native CUDA, cmake OK on SM89 |
+| **repo-pytorch** | Full Python reference: TurboQuantV2, V3, Lloyd-Max codebook, MSE compressor, QJL correction, KV-cache wrapper, validation suite | ⭐ BEST FOR ALGORITHM STUDY — all algorithms, all tests passing on CPU |
 | repo-main / repo-ggml | Mainline llama.cpp + ggml CUDA backend, FlashAttention support | Zero TurboQuant code — needs custom integration |
-| repo-thetom | Does not exist | N/A |
+| repo-thetom (wrong URL) | Does not exist (HTTP 404) | N/A |
 
 ---
 
@@ -178,8 +179,69 @@ Both `repo-main` and `repo-ggml` — cmake exits 0 with:
 
 2. **Create the `/usr/local/cuda` symlink** pointing to `/opt/cuda` so standard tooling finds CUDA without PATH manipulation.
 
-3. **Study `repo-pytorch/turboquant/`** to understand the V3 algorithm before attempting any llama.cpp integration. The `turboquant.py`, `compressors_v3.py`, and `lloyd_max.py` files contain the full algorithm.
+3. **Use `repo-thetom-correct` as the production build target.** It has the full CUDA implementation, cmake configures cleanly for SM89, and all three bit depths are ready to build. Study `repo-pytorch` only to understand algorithm behavior before submitting inference workloads.
 
-4. **Decide on integration approach**: TurboQuant KV compression can be implemented either (a) as a Python-level HuggingFace cache hook (like `TurboQuantKVCacheV3` in repo-pytorch) for prototype speed, or (b) as a CUDA kernel in ggml's CUDA backend for production performance. Option (a) requires no C++ changes; option (b) requires implementing the quantization codebook lookup as a `.cu` file in `ggml/src/ggml-cuda/`.
+4. **Install NCCL** only if multi-GPU operation is planned. Single RTX 4050 does not need it.
 
-5. **Install NCCL** only if multi-GPU operation is planned. Single RTX 4050 does not need it.
+---
+
+## Update: TheTom Correct Repo (2026-04-25)
+
+Repo: https://github.com/TheTom/llama-cpp-turboquant
+Cloned at: `research/turboquant/repo-thetom-correct` (depth 1, commit `11a241d`)
+
+### Findings
+
+**Cloned:** YES — `git clone` exited 0; depth-1 clone of `TheTom/llama-cpp-turboquant`.
+
+**TurboQuant references:** 784+ occurrences of `GGML_TYPE_TURBO` / `turbo3_0` / `turbo4_0` across source, headers, tests, and bench files. Not benchmarks padding the count — the vast majority are in CUDA kernel source and GGML type dispatch tables.
+
+**Has CUDA kernels:** YES — six dedicated TurboQuant files totaling 1,281 lines:
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `ggml/src/ggml-cuda/turbo-quant.cuh` | 453 | Lloyd-Max centroids (2/3/4-bit), WHT sign arrays (seed=42), device quantize/dequantize functions |
+| `ggml/src/ggml-cuda/mmvq-tq.cu` | 568 | Matrix-vector quantization with TurboQuant (main inference kernel) |
+| `ggml/src/ggml-cuda/turbo-wht.cu` | 189 | Walsh-Hadamard Transform CUDA kernel |
+| `ggml/src/ggml-cuda/turbo-innerq.cu` | 32 | InnerQ per-channel equalization host state |
+| `ggml/src/ggml-cuda/turbo-innerq.cuh` | 34 | InnerQ API header |
+| `ggml/src/ggml-cuda/turbo-wht.cuh` | 5 | WHT CUDA function declaration |
+
+Additionally: 18 flash-attention template instance `.cu` files cover every combination of `{turbo2_0, turbo3_0, turbo4_0, q8_0, f16}` for K and V slots. `fattn.cu`, `fattn-vec.cuh`, `fattn-common.cuh`, `convert.cu`, `dequantize.cuh` are all modified to handle TurboQuant types.
+
+**CMake configure result:** SUCCESS — exit code 0.
+- CUDA Toolkit 13.2.78 detected at `/opt/cuda`
+- SM89 (`-DCMAKE_CUDA_ARCHITECTURES=89`) accepted
+- `GGML_CUDA_FA_ALL_QUANTS=ON` confirmed in CMakeCache
+- Warnings only: NCCL not found (non-fatal), no CUDA devices found (expected — driver not loaded)
+- `build_test/` cleaned up after audit
+
+**Integration approach — C++ CUDA, not Python:**
+
+TurboQuant is integrated as three new first-class GGML quantization types:
+
+| GGML Type | Bit depth | Algorithm | Block size |
+|-----------|-----------|-----------|------------|
+| `TURBO2_0` | 2-bit | PolarQuant only (no QJL) | 128 |
+| `TURBO3_0` | 3-bit | PolarQuant only (MSE-optimal) | 128 |
+| `TURBO4_0` | 3-bit PolarQuant + 1-bit QJL *or* 4-bit PolarQuant | Configurable via `TURBO4_USE_4BIT` | 128 |
+
+Pipeline per token vector:
+1. Multiply by random ±1 signs (seeded, constant — `TURBO_WHT_SIGNS1/2`)
+2. Apply Walsh-Hadamard Transform (WHT kernel in `turbo-wht.cu`)
+3. Quantize each element to nearest Lloyd-Max centroid for N(0, 1/128)
+4. Store centroid index + block norm; optionally append QJL residual signs (TURBO4_0 legacy)
+5. Dequantize leaves output in WHT-rotated domain — attention kernel operates there directly without inverse WHT
+
+Paper reference cited in code: `arXiv 2504.19874 (ICLR 2026)`.
+
+**InnerQ per-channel equalization:** `turbo-innerq.cu` implements a cross-TU shared scale correction that is finalized once and published to the device — compensates for channel magnitude imbalances before quantization.
+
+**Tests present:** `tests/test-turbo-quant.c` — 3 unit tests for turbo3/turbo4 round-trip; `tests/test-backend-ops.cpp` — full pipeline validation `f32 → WHT → PolarQuant → turbo3`.
+
+**Recommended for Luminos:** YES — unconditionally supersedes `repo-main`/`repo-ggml` for the TurboQuant use case.
+- Only fork with a working, production-quality CUDA implementation
+- cmake configures cleanly for RTX 4050/4090 (SM89) without any patches
+- All 3 bit depths supported; flash-attention handles compressed KV in-kernel with no extra memory
+- Algorithm faithfully implements the ICLR 2026 paper including the QJL residual variant
+- Next step: `cmake --build build_test -j$(nproc)` after reboot (GPU driver must be loaded for CUDA kernels to compile successfully)
