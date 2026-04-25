@@ -1,6 +1,6 @@
 # Luminos OS — System Status
 Last updated: 2026-04-25
-Agent: claude-code
+Agent: gemini-cli
 
 ## System
 | Component | Status | Notes |
@@ -41,7 +41,7 @@ Agent: claude-code
 | Component | Status | Notes |
 |---|---|---|
 | Wine 11.6 | ✅ Working | .exe launches |
-| .exe file association | ✅ Working | Auto-routes |
+| .exe file association | ✅ Working | Silent auto-routing |
 | Notepad++ tested | ✅ Working | Zone 2 Wine |
 | Windows apps in launcher | ✅ Working | Auto-created |
 
