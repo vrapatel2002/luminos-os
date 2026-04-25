@@ -1,0 +1,33 @@
+{
+    "env": {
+        "ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1",
+        "ANTHROPIC_API_KEY": "sk-or-98117e729f602d5c8bac98aedf270837ccb76f8f2a28e754a020228f5785eff8"
+    },
+    "model": "deepseek/deepseek-r1",
+    "hooks": {
+        "PostToolUse": [
+            {
+                "matcher": "Edit|Write|Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "code-review-graph update --skip-flows",
+                        "timeout": 30
+                    }
+                ]
+            }
+        ],
+        "SessionStart": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "code-review-graph status",
+                        "timeout": 10
+                    }
+                ]
+            }
+        ]
+    }
+}
