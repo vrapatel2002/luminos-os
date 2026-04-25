@@ -1,72 +1,46 @@
 # STATE.md — HIVE Project Current State
 # FOR AI AGENTS ONLY — updated after every change
-# Last Updated: 2026-03-06
+# Last Updated: 2026-04-25 (Fixes applied)
 
 ---
 
 ## PROJECT
 Name: HIVE — Multi-model local AI orchestrator
-Root: C:\Users\vrati\VSCODE\New folder\LLMS\
+Root: /home/shawn/luminos-os/
 Phase: PHASE 1 — Dataset Creation (in progress)
+UX: macOS visual transformation applied ✅
 
 ---
 
 ## FOLDER STRUCTURE
 ```
-LLMS/
-├── main.py                        # Entry point, wires everything, starts server
+luminos-os/
 ├── hive_orchestrator.py           # LIVE orchestrator v1.1 (32KB) — DO NOT TOUCH
-├── config.yaml                    # Main config (8.7KB)
+├── config.yaml                    # Main config
 ├── requirements.txt               # Dependencies
-├── start_hive.bat                 # Startup script
-├── .env                           # Credentials — DO NOT TOUCH
-├── searxng_settings.yml           # SearXNG config — DO NOT TOUCH
+├── AGENT_PROTOCOL.md              # Rules for agents
+├── FOCUS.md                       # Focus areas
 ├── HIVE_ARCHITECTURE.md           # Architecture reference
 ├── HIVE_README.md                 # Project readme
-├── docs/
-│   └── MASTER_PLAN.md             # Master plan tracker
-├── agents/
-│   ├── base.py                    # Base agent class
-│   ├── chat.py                    # Chat agent (Nexus)
-│   ├── coder.py                   # Coder agent (Bolt)
-│   ├── planner.py                 # Planner agent (Nova)
-│   └── vision.py                  # Vision agent (Eye)
-├── orchestrator/
-│   ├── brain.py                   # Core orchestrator logic (22KB) — CRITICAL
-│   ├── ollama_client.py           # Ollama API client
-│   ├── router.py                  # Routing logic
-│   └── vram_manager.py            # VRAM management
-├── memory/
-│   ├── db.py                      # Database operations (16KB)
-│   ├── embeddings.py              # Embedding generation
-│   ├── retriever.py               # RAG retrieval
-│   └── schema.sql                 # DB schema
-├── proxy/
-│   ├── server.py                  # Proxy server (12KB)
-│   ├── middleware.py              # Middleware
-│   └── openai_compat.py           # OpenAI compatibility layer
-├── tools/
-│   ├── file_tools.py              # File operations
-│   ├── terminal.py                # Terminal tool (6KB)
-│   ├── pdf_ingest.py              # PDF ingestion (15KB)
-│   ├── ocr.py                     # OCR tool
-│   └── screenshot.py              # Screenshot tool
-├── telegram/
-│   ├── bot.py                     # Telegram bot
-│   └── monitor.py                 # Monitor
-├── modelfiles/
-│   ├── Nexus.modelfile            # Nexus model config (13KB)
-│   ├── Nova.modelfile             # Nova model config
-│   ├── Bolt.modelfile             # Bolt model config
-│   └── Eye.modelfile              # Eye model config
-├── training/
-│   └── export_data.py             # Training data export script
-├── training_dataset/              # ALL TRAINING DATA LIVES HERE
-│   ├── nexus_routing.jsonl        # LOCKED ✅ (100 examples, 33KB)
-│   ├── nexus_web_decision.jsonl   # LOCKED ✅ (150 examples, 123KB)
-│   └── nexus_web_grounding.jsonl  # IN PROGRESS 🔥 (250 target, 237KB current)
-└── data/
-    └── hive.db                    # SQLite database — DO NOT TOUCH
+├── LUMINOS_STATUS.md              # Luminos OS status
+├── STATE.md                       # THIS FILE
+├── agents/                        # Agent implementations
+│   ├── base.py
+│   ├── chat.py
+│   ├── coder.py
+│   ├── planner.py
+│   └── vision.py
+├── config/                        # System configurations (NEW)
+│   ├── starship.toml              # macOS style prompt config
+│   ├── zshrc                      # ZSH configuration
+│   └── hyprland/                  # Hyprland configs
+├── docs/                          # Documentation
+├── memory/                        # Database and RAG memory
+├── modelfiles/                    # Ollama model files
+├── orchestrator/                  # Core orchestrator logic
+├── src/                           # Source code (various modules)
+├── tools/                         # Tool implementations
+└── training_dataset/              # ALL TRAINING DATA LIVES HERE
 ```
 
 ---
@@ -117,26 +91,5 @@ Nexus: uses none — uses WEB_SEARCH/WEB_NONE instead
 | nexus_web_decision.jsonl    | 150    | ✅ LOCKED (audited) |
 | nexus_web_grounding.jsonl   | 250    | 🔥 IN PROGRESS      |
 | nova_reasoning.jsonl        | 200    | ⬜ NOT STARTED      |
-| nova_bookmarks.jsonl        | 150    | ⬜ NOT STARTED      |
-| nova_calculator.jsonl       | 100    | ⬜ NOT STARTED      |
-| nova_planning.jsonl         | 50     | ⬜ NOT STARTED      |
-| nova_honesty.jsonl          | 50     | ⬜ NOT STARTED      |
-| bolt_error_parsing.jsonl    | 150    | ⬜ NOT STARTED      |
-| bolt_iterative.jsonl        | 100    | ⬜ NOT STARTED      |
-| bolt_code_gen.jsonl         | 100    | ⬜ NOT STARTED      |
-| bolt_planning.jsonl         | 50     | ⬜ NOT STARTED      |
-
----
-
-## CRITICAL DO-NOT-TOUCH FILES
-- hive_orchestrator.py — live orchestrator, only edit via Open WebUI
-- .env — credentials
-- data/hive.db — database
-- searxng_settings.yml — SearXNG config
-- Any LOCKED training_dataset files
-
----
-
-## PENDING HOUSEKEEPING
-- Docker image re-commit pending: `docker commit open-webui open-webui-custom:latest`
-- hive_orchestrator.py on disk is OUTDATED — live version is in Open WebUI
+...
+```
