@@ -1,0 +1,22 @@
+# Luminos ZSH config
+# [CHANGE: gemini-cli | 2026-04-25]
+
+# History
+HISTSIZE=10000
+SAVEHIST=10000
+HISTFILE=~/.zsh_history
+setopt SHARE_HISTORY
+setopt HIST_IGNORE_DUPS
+
+# Auto-completion
+autoload -Uz compinit && compinit
+
+# Aliases
+alias ls='ls --color=auto'
+alias ll='ls -lah'
+alias grep='grep --color=auto'
+alias update='sudo pacman -Syu'
+alias hive='python3 ~/luminos-os/src/hive/orchestrator.py'
+
+# Starship prompt
+eval "$(starship init zsh)"
