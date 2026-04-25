@@ -1,6 +1,6 @@
 # STATE.md — HIVE Project Current State
 # FOR AI AGENTS ONLY — updated after every change
-# Last Updated: 2026-04-25 (Fixes applied)
+# Last Updated: 2026-04-25 (project wrap-up, hive-import merged to main)
 
 ---
 
@@ -8,7 +8,7 @@
 Name: HIVE — Multi-model local AI orchestrator
 Root: /home/shawn/luminos-os/
 Phase: PHASE 1 — Dataset Creation (in progress)
-UX: macOS visual transformation applied ✅
+UX: macOS visual transformation applied ✅ (Dock + Global Menu + Window Title)
 
 ---
 
