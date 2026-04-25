@@ -83,12 +83,13 @@ LLMS/
 ---
 
 ## MODELS
-| Model | Base         | Port  | Role                    |
-|-------|-------------|-------|-------------------------|
-| Nexus | dolphin3:8b  | 11434 | Router + chat + web     |
-| Nova  | deepseek-r1:7b | 11435 | Deep reasoning, math  |
-| Bolt  | qwen2.5-coder:7b | 11434 | Coding + debugging   |
-| Eye   | llava:7b     | 11434 | Vision                  |
+| Model | Base         | Port  | Role                    | Status              |
+|-------|-------------|-------|-------------------------|---------------------|
+| Nexus | llama3.1:8b | 11434 | Router + chat + web     | ✅ Available (4.6GB) |
+| Nova  | deepseek-r1:7b | 11435 | Deep reasoning, math  | ✅ Available (4.4GB) |
+| Bolt  | qwen2.5-coder:7b | 11434 | Coding + debugging   | ✅ Available (4.4GB) |
+| Eye   | llava:7b     | 11434 | Vision                  | 📋 Not Started      |
+| Embed | nomic-embed | CPU   | Embeddings              | ✅ Available (81MB) |
 
 ---
 

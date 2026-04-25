@@ -69,10 +69,11 @@
 | 2026-04-12 | claude-chat | Debug Hyprland 0.54.3 windowrule syntax | ✅ Migrated to block-style windowrule {} format |
 | 2026-04-19 | claude-chat | Design multi-agent workflow (AGENTS.md, WORKFLOW.md, PROMPTS.md) | ✅ Created — pending copy to repo |
 | 2026-04-24 | gemini-cli | Wine DPI fix, Adobe entry attempt, Phase 4 docs update | ✅/❌ DPI & docs done, Adobe failed |
+| 2026-04-25 | gemini-cli | Find/download Nexus model + test Bolt/Nova | ✅ Models ready, tests passing |
 
 ---
 
-*Last updated: 2026-04-24 | By: gemini-cli*
+*Last updated: 2026-04-25 | By: gemini-cli*
 *Next update due: After login screen task begins*
 
 ---
@@ -85,6 +86,7 @@
 | Adobe app menu | ❌ Failed | 2026-04-24 | No Adobe executables found in Wine prefix |
 | TurboQuant | ✅ Working | 2026-04-24 | llama.cpp integration done |
 | HIVE loading strategy | ✅ Documented | 2026-04-24 | On-demand GPU only, no Docker, no Ollama |
+| HIVE Models | ✅ Ready | 2026-04-25 | 4/4 models available (Nexus, Bolt, Nova, Embed) |
 
 **Recent Confirmations:**
 - NVIDIA driver (595.58.03): ✅ Working
@@ -92,3 +94,7 @@
 - llama.cpp TurboQuant build: ✅
 - TurboQuant flags (turbo4): ✅
 - llama-cpp-python CUDA: ✅
+- Bolt (Qwen2.5-Coder): ✅ 38.0 t/s (GPU)
+- Nova (DeepSeek-R1): ✅ 1.0 t/s (CPU)
+- Nexus (Llama-3.1-8B): ✅ Downloaded (4.6GB)
+- nomic-embed: ✅ 81MB CPU
