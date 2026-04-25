@@ -1,0 +1,34 @@
+#!/bin/bash
+# Launch app inside Windows VM
+# Usage: luminos-vm-app <app-name>
+# [CHANGE: gemini-cli | 2026-04-25] Created VM app launcher script
+
+APP="$1"
+VM_NAME="luminos-windows"
+
+# Check VM state
+VM_STATE=$(virsh domstate "$VM_NAME" 2>/dev/null)
+
+if [ "$VM_STATE" != "running" ]; then
+  notify-send "Luminos" \
+    "Starting Windows VM... (~30 seconds)"
+  virsh start "$VM_NAME" 2>/dev/null
+  if [ $? -ne 0 ]; then
+    kdialog --error \
+      "Windows VM 'luminos-windows' not found.
+Create it in virt-manager first:
+1. Open virt-manager
+2. New VM → Windows ISO
+3. Name it 'luminos-windows'
+4. Install your Windows apps inside it"
+    exit 1
+  fi
+  sleep 25
+fi
+
+# Open VM window
+virt-viewer --connect qemu:///system \
+  "$VM_NAME" &
+
+notify-send "Luminos" \
+  "Windows VM ready — find $APP inside"

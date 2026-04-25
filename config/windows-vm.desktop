@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Windows VM
+Comment=Open Windows virtual machine
+Exec=virt-manager
+Icon=computer
+Type=Application
+Categories=System;
+Keywords=windows;vm;virtual;

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Adobe Reader (Windows VM)
+Comment=Run Adobe Reader in Windows VM
+Exec=/usr/local/bin/luminos-vm-app adobe
+Icon=application-pdf
+Type=Application
+Categories=Office;Viewer;
+Keywords=pdf;adobe;reader;
