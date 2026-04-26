@@ -80,11 +80,9 @@ KCMUtils.SimpleKCM {
                 {text: qsTr("Rain (auto)"),               value: "rain"},
                 {text: qsTr("Off"),                       value: "none"}
             ]
-            textRole: "value"
-            displayText: model[currentIndex] ? model[currentIndex].text : ""
-            currentIndex: { for (var i=0; i<model.length; i++) if (model[i].value===kcm.mode) return i; return 0 }
+            textRole: "text"
+            currentIndex: { for (var i = 0; i < model.length; i++) if (model[i].value === kcm.mode) return i; return 0 }
             onActivated: kcm.mode = model[currentIndex].value
-            contentItem: QQC2.Label { text: modeCombo.displayText; verticalAlignment: Text.AlignVCenter; leftPadding: Kirigami.Units.smallSpacing * 2 }
         }
 
         // ════════════════════════════════════════════════════════════
