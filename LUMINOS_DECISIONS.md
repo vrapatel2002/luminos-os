@@ -605,3 +605,25 @@ Python is deprecated for all UI work. No new Python UI code.
 - **Why:** Some applications (Zone 3/4 or failed Zone 2) require full Windows APIs or anti-cheat support that Wine cannot provide. Automating the transfer to a VM via a shared folder (`~/VMShare`) provides a seamless user experience.
 - **Alternatives considered:** Firecracker microVMs — kept as an option, but KVM provides better compatibility for the absolute last resort.
 
+---
+
+## DECISION 16 — Model Upgrades April 2026
+Date: April 26, 2026
+Made by: gemini-cli
+**Status: FINAL**
+
+### What We Decided
+Upgrade core HIVE models to latest 2026 standards and implement "AI Mode" for concurrent CPU/GPU inference.
+
+- **Nexus:** Llama3.1-8B → **Dolphin3-Llama3.1-8B**
+  * Why: Uncensored, follows instructions precisely, no refusals for OS-level tasks.
+- **Nova:** DeepSeek-R1-Distill-7B → **R1-0528-Qwen3-8B**
+  * Why: Massive reasoning jump, matches O3, surpasses Qwen3-235B-thinking on AIME 2024 benchmarks.
+- **Bolt:** Qwen2.5-Coder-7B (Kept)
+  * Why: Still the most reliable 7B coding model available.
+- **TurboQuant:** Enable turbo4 KV cache compression (type_k=12, type_v=12) on all GPU models.
+- **AI Mode:** Allow Nova to run on CPU (n_gpu_layers=0) alongside a GPU model to bypass the "one model at a time" VRAM limit for reasoning tasks.
+
+### Why
+The previous stack was based on early 2025 distillations. The April 2026 releases (Dolphin3 and R1-0528) provide significant intelligence gains without increasing VRAM footprint. AI Mode maximizes the Ryzen 7's CPU overhead for background reasoning while keeping the RTX 4050 free for UI-latency sensitive tasks.
+

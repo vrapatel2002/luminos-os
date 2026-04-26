@@ -34,3 +34,24 @@ Agent: claude-code
 Task: [what was asked]"
 git push origin main
 ```
+
+Rule: MemPalace Usage (mandatory)
+BEFORE every task:
+  source ~/.mempalace-venv/bin/activate
+  python3 -m mempalace search "<task topic>"
+  This searches existing project knowledge.
+
+AFTER every task:
+  python3 -m mempalace mine ~/luminos-os/
+  This indexes new changes into MemPalace.
+
+Rule: CodeGraph Usage (mandatory)
+BEFORE modifying any Python or Go file:
+  Use code-review-graph MCP tool to check dependencies.
+
+AFTER adding new files or changing imports:
+  Use code-review-graph MCP to update the graph.
+
+Rule: Doc Updates (mandatory)
+After EVERY task check these and update if relevant:
+  LUMINOS_STATUS.md, LUMINOS_DECISIONS.md, docs/BUGS.md, docs/CODE_REFERENCE.md.

@@ -96,3 +96,31 @@ REPLY TO MANAGEMENT:
   - MemPalace updated: [yes/no]
   - Ready for: [what comes next]
 ```
+
+Rule: MemPalace Usage (mandatory)
+BEFORE every task:
+  source ~/.mempalace-venv/bin/activate
+  python3 -m mempalace search "<task topic>"
+  This searches existing project knowledge.
+  Never start a task without checking MemPalace first.
+
+AFTER every task:
+  python3 -m mempalace mine ~/luminos-os/
+  This indexes new changes into MemPalace.
+  Never complete a task without mining MemPalace.
+
+Rule: CodeGraph Usage (mandatory)
+BEFORE modifying any Python or Go file:
+  Use code-review-graph MCP tool to understand
+  what imports and depends on the file you will edit.
+  Never modify code without checking dependencies first.
+
+AFTER adding new files or changing imports:
+  Use code-review-graph MCP to update the graph.
+
+Rule: Doc Updates (mandatory)
+After EVERY task check these and update if relevant:
+  LUMINOS_STATUS.md — component status changes
+  LUMINOS_DECISIONS.md — any architectural decisions
+  docs/BUGS.md — bugs found or fixed
+  docs/CODE_REFERENCE.md — new files added

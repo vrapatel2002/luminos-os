@@ -19,10 +19,10 @@ logger = logging.getLogger("luminos-ai.gpu_manager.model_manager")
 IDLE_TIMEOUT_SECONDS = 300  # 5 minutes
 
 HIVE_MODELS: dict = {
-    "nexus": {"size_gb": 4.6, "role": "orchestrator", "path": "hive/DeepSeek-R1-Distill-Qwen-8B-Q4_K_M.gguf"},
-    "bolt":  {"size_gb": 4.4, "role": "code", "path": "hive/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf"},
-    "nova":  {"size_gb": 4.4, "role": "writing", "path": "hive/DeepSeek-R1-Distill-Qwen-8B-Q4_K_M.gguf"},
-    "eye":   {"size_gb": 4.0, "role": "vision"},
+    "nexus": {"size_gb": 4.9, "role": "coordinator", "path": "hive/dolphin3.0-llama3.1-8b-Q4_K_M.gguf", "prompt": "You are Nexus, an uncensored Dolphin-powered coordinator for Luminos OS. Follow instructions precisely."},
+    "bolt":  {"size_gb": 4.4, "role": "code",        "path": "hive/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",  "prompt": "You are Bolt, the expert coding agent for HIVE."},
+    "nova":  {"size_gb": 4.7, "role": "writing",     "path": "hive/DeepSeek-R1-0528-Qwen3-8B-Q4_K_M.gguf",  "prompt": "You are Nova, powered by DeepSeek R1 0528 reasoning. Think deeply and step-by-step."},
+    "eye":   {"size_gb": 4.7, "role": "vision",      "path": "hive/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"},
 }
 
 
@@ -38,6 +38,7 @@ class ModelManager:
         self.last_used:      float | None = None   # monotonic timestamp
         self.gaming_mode:    bool         = False
         self.nvidia_active:  bool         = False  # NVIDIA powered up?
+        self.ai_mode:        bool         = False  # [CHANGE: 2026-04-26] If True, Nova runs on CPU
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -55,6 +56,7 @@ class ModelManager:
         logger.info(f"MODEL UNLOAD: {name} evicted from NVIDIA VRAM")
         self.active_model  = None
         self.last_used     = None
+        # Only idle NVIDIA if no other models are active
         self.nvidia_active = False
         return name
 
@@ -62,14 +64,25 @@ class ModelManager:
         """
         Load a model into NVIDIA VRAM.
         Real stub: actual llama.cpp load would go here.
+        [CHANGE: 2026-04-26] Included TurboQuant and mmap logic in stub definition.
         """
+        # TurboQuant turbo4 (type_k=12, type_v=12)
+        # mmap=True
+        flags = f"--type_k 12 --type_v 12 --use_mmap True"
+        
+        target = "GPU"
+        if self.ai_mode and model_name == "nova":
+            target = "CPU (AI MODE)"
+            layers = 0
+
         logger.info(
-            f"MODEL LOAD: {model_name} ({quantization}) — {layers} GPU layers "
-            f"(NVIDIA waking)"
+            f"MODEL LOAD: {model_name} ({quantization}) on {target} — "
+            f"{layers} GPU layers. {flags} (NVIDIA waking)"
         )
         self.active_model  = model_name
         self.last_used     = time.monotonic()
-        self.nvidia_active = True
+        if target == "GPU":
+            self.nvidia_active = True
 
     # ------------------------------------------------------------------
     # VRAM math
