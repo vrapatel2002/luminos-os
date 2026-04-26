@@ -292,12 +292,16 @@ KCMUtils.SimpleKCM {
                         color: root.colorSwatch(modelData)
                         border.color: Kirigami.Theme.separatorColor; border.width: 1
 
-                        QQC2.Label {
-                            anchors { top: parent.top; right: parent.right; margins: -2 }
-                            text: "×"
-                            font.pixelSize: 11; font.bold: true
-                            color: "white"
-                            style: Text.Outline; styleColor: "black"
+                        Rectangle {
+                            anchors { top: parent.top; right: parent.right; margins: -3 }
+                            width: 14; height: 14; radius: 7
+                            color: "#cc0000"
+                            QQC2.Label {
+                                anchors.centerIn: parent
+                                text: "×"
+                                font.pixelSize: 10; font.bold: true
+                                color: "white"
+                            }
                             MouseArea { anchors.fill: parent; onClicked: kcm.removeAutoColor(index) }
                         }
                     }
@@ -306,7 +310,7 @@ KCMUtils.SimpleKCM {
                 Rectangle {
                     width: 32; height: 32; radius: 6
                     color: "transparent"
-                    border.color: Kirigami.Theme.separatorColor; border.width: 2; border.style: Qt.DashLine
+                    border.color: Kirigami.Theme.separatorColor; border.width: 2
                     Kirigami.Icon { anchors.centerIn: parent; source: "list-add"; width: 18; height: 18; opacity: 0.6 }
                     MouseArea { anchors.fill: parent; onClicked: autoColorDialog.open() }
                 }
