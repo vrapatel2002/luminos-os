@@ -128,13 +128,13 @@ KCMUtils.SimpleKCM {
                 Kirigami.Icon { anchors.centerIn: parent; source: "color-picker"; width: 16; height: 16; opacity: 0.5 }
             }
 
+            QQC2.Label { text: "#"; opacity: 0.6 }
             QQC2.TextField {
                 id: colorHex1
                 text: kcm.color
                 maximumLength: 6
                 implicitWidth: Kirigami.Units.gridUnit * 5
                 onEditingFinished: if (text.length === 6) kcm.color = text
-                QQC2.Label { anchors { left: parent.left; leftMargin: -Kirigami.Units.smallSpacing * 3; verticalCenter: parent.verticalCenter }; text: "#"; opacity: 0.6 }
             }
 
             QQC2.Button { text: qsTr("Pick Color"); icon.name: "color-management"; onClicked: colorDialog1.open() }
