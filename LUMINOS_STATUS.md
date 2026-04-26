@@ -39,7 +39,7 @@ Agent: antigravity
 | llama.cpp TurboQuant | ✅ Working | turbo4 (type_k=12, type_v=12) |
 | HIVE Orchestrator | ✅ Working | Native Python reasoning layer (systemd active) |
 | llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
-| HIVE popup (SUPER+SPACE) | ✅ Working | Standalone (llama-cli), Albert Alt+Space |
+| HIVE popup (SUPER+SPACE) | ✅ Working | Native GTK4/Adwaita Python UI |
 | HIVE Settings in KDE | ✅ Working | Native KCM plugin (kcm_luminos_hive.so) |
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
 | AI Mode | ✅ Active | Nova on CPU alongside GPU model |
