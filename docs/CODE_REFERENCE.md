@@ -30,8 +30,9 @@ Last Updated: 2026-04-26 (Cleanup — Windows HIVE archived, Ollama removed)
 - `src/hive/nova.py` — Reasoning (DeepSeek-R1-7B)
 - `src/hive/eye.py` — Vision (Qwen2.5-VL-7B, pending)
 
-### KDE KCM Plugin (src/kcms/)
+### KDE KCM Plugins (src/kcms/)
 - `src/kcms/kcm_luminos_keyboard/` — Keyboard backlight C++/QML KCM
+- `src/kcms/kcm_luminos_hive/` — HIVE AI Settings C++/QML KCM (mode toggle, model roster, VRAM, shortcut)
 
 ### Python NPU (src/npu/)
 - `src/npu/hats_kernel.py` — HATS NPU inference

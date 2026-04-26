@@ -1,6 +1,6 @@
 # Luminos OS — System Status
 Last updated: 2026-04-26
-Agent: gemini-cli
+Agent: antigravity
 
 ## System
 | Component | Status | Notes |
@@ -38,8 +38,8 @@ Agent: gemini-cli
 | VRAM Watchdog | ✅ Working | Auto-evict if >90% usage |
 | llama.cpp TurboQuant | ✅ Working | turbo4 (type_k=12, type_v=12) |
 | HIVE Orchestrator | ✅ Working | Native Python reasoning layer |
-| HIVE popup (SUPER+SPACE) | ✅ Working | kdialog based chat UI |
-| HIVE Settings in KDE | ✅ Working | AI/Normal mode toggle |
+| HIVE popup (SUPER+SPACE) | ✅ Working | kdialog UI, Albert moved to Alt+Space |
+| HIVE Settings in KDE | ✅ Working | Native KCM plugin (kcm_luminos_hive.so) |
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
 | AI Mode | ✅ Active | Nova on CPU alongside GPU model |
 | Codebase Cleanup | ✅ Phase 2 Done | Doc merge & Linux rewrite |
@@ -92,7 +92,7 @@ Agent: gemini-cli
 | Inter + JetBrains Mono | ✅ Installed | |
 | KWin blur + animations | ✅ Working | Magic Lamp on |
 | ZSH + Starship | ✅ Working | macOS style prompt |
-| Albert launcher | ✅ Working | Meta+Space |
+| Albert launcher | ✅ Working | Alt+Space (Meta+Space → HIVE) |
 | Floating panel | 🔧 In Progress | Layout needs polish |
 | Firefox WhiteSur | 📋 Pending | Profile issue |
 

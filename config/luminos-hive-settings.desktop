@@ -1,10 +1,9 @@
 [Desktop Entry]
+Type=Application
+NoDisplay=true
+X-KDE-AliasFor=systemsettings
+Exec=systemsettings kcm_luminos_hive
+Icon=preferences-system-network
 Name=HIVE AI Settings
 Comment=Configure Luminos HIVE AI system
-Exec=/usr/local/bin/luminos-hive-settings
-Icon=dialog-information
-Type=Application
-Categories=Qt;KDE;Settings;
 Keywords=hive;ai;mode;luminos;settings;
-X-KDE-System-Settings-Parent-Category=system
-X-KDE-AliasFor=systemsettings

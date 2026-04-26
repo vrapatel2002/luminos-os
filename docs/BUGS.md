@@ -394,6 +394,27 @@ Each bug entry:
 
 (none)
 
+### BUG-041 — SUPER+SPACE not triggering HIVE popup
+- Status: FIXED
+- Severity: HIGH
+- Component: KDE global shortcuts / Albert launcher
+- Description: Meta+Space (SUPER+SPACE) shortcut registered in kglobalshortcutsrc for HIVE popup but never triggered. 3 previous fix attempts failed.
+- Root Cause: Albert launcher had `hotkey=Meta+Space` in `~/.config/albert/albert.conf` with `autostart=true`. Albert uses Wayland input-method protocols to grab the key at the compositor level BEFORE kglobalaccel can process it. The shortcut was properly registered in kglobalaccel, but Albert's grab always won on Wayland.
+- Fix Applied: Changed Albert hotkey from `Meta+Space` to `Alt+Space` in albert.conf, restarted Albert, and toggled kglobalaccel block/unblock to force re-registration. Meta+Space now free for HIVE.
+- Date Found: 2026-04-26
+- Date Fixed: 2026-04-26
+
+### BUG-042 — HIVE Settings not appearing in KDE System Settings
+- Status: FIXED
+- Severity: HIGH
+- Component: KDE System Settings / KCM registration
+- Description: "HIVE Settings" never appeared in KDE System Settings despite multiple .desktop file attempts. Searching "HIVE" in System Settings returned nothing.
+- Root Cause: The desktop file at `/usr/share/applications/luminos-hive-settings.desktop` used `Type=Application` with `X-KDE-AliasFor=systemsettings` — this only creates an app launcher redirect, NOT a System Settings module. Plasma 6 requires a compiled Qt6 KCM plugin (`.so` in `/usr/lib/qt6/plugins/plasma/kcms/systemsettings/`) with matching JSON metadata embedding `X-KDE-ParentApp: kcontrol`. The previous `Type=Service` + `X-KDE-ServiceTypes=KCModule` approach (Plasma 5 pattern) does NOT work in Plasma 6 without a compiled plugin.
+- Fix Applied: Created proper KCM plugin `kcm_luminos_hive` with C++ backend (reads luminos-hive.conf, queries nvidia-smi/pgrep for model status), QML UI (mode toggle, model roster, VRAM bar, shortcut display), and CMake build system. Compiled and installed to `/usr/lib/qt6/plugins/plasma/kcms/systemsettings/kcm_luminos_hive.so`. Module now appears in `kcmshell6 --list` and KDE System Settings.
+- Date Found: 2026-04-26
+- Date Fixed: 2026-04-26
+
+
 ## Recently Fixed
 
 ### BUG-040 — hyprpaper/hyprlock/hypridle fail to build (need GCC 15+)

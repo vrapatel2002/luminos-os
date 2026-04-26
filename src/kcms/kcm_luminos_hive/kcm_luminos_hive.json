@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Authors": [{"Name": "Luminos OS"}],
+        "Description": "Configure HIVE AI system — mode toggle, model status, shortcuts",
+        "Icon": "preferences-system-network",
+        "Id": "kcm_luminos_hive",
+        "License": "GPL",
+        "Name": "HIVE AI Settings",
+        "Version": "1.0"
+    },
+    "X-KDE-ParentApp": "kcontrol",
+    "X-KDE-System-Settings-Parent-Category": "system-administration",
+    "X-KDE-System-Settings-Category": "system",
+    "X-KDE-Keywords": "hive,ai,mode,luminos,settings,model,gpu,vram,chat,nexus,bolt,nova"
+}

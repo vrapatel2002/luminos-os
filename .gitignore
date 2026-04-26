@@ -27,3 +27,5 @@ research/turboquant/repo-ggml/build/
 # IDE configs
 .cursorrules
 .opencode.json
+src/kcms/kcm_luminos_hive/build/
+CMakeFiles/
