@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Authors": [{"Name": "Luminos OS"}],
+        "Description": "Control ASUS ROG keyboard backlight color, brightness and animation mode",
+        "Icon": "input-keyboard",
+        "Id": "kcm_luminos_keyboard",
+        "License": "GPL",
+        "Name": "Keyboard Backlight",
+        "Version": "1.0"
+    },
+    "X-KDE-ParentApp": "kcontrol",
+    "X-KDE-System-Settings-Parent-Category": "input-devices",
+    "X-KDE-System-Settings-Category": "keyboard",
+    "X-KDE-Keywords": "keyboard,backlight,aura,brightness,color,asus,rog,light"
+}
