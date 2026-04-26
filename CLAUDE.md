@@ -1,78 +1,36 @@
-## LOCKED STACK: KDE Plasma, KWin, Qt/QML, Go
-**BANNED: Hyprland, GTK4, PyGObject, Python UI, HyprPanel**
-Never write code for banned components. See LUMINOS_DECISIONS.md Decision 12.
+# CLAUDE.md — Agent Quickstart
+# [CHANGE: claude-code | 2026-04-26]
 
----
+## Project: Luminos OS
+- **OS**: Arch Linux on ASUS ROG G14
+- **Core**: Go daemons, KDE Plasma, Qt/QML
+- **AI**: MobileLLM on NPU (Driver), HIVE on GPU/CPU (llama.cpp TurboQuant)
+- **Constraint**: 4.6GB Safe VRAM (6GB Total)
+- **Rules**: NO DOCKER, NO OLLAMA, IDENTITY TAGS MANDATORY.
 
-## LUMINOS OS — AGENT RULES
-Read docs/WORKFLOW.md and LUMINOS_STATUS.md at the start of every session.
-Query MemPalace: source ~/.mempalace-venv/bin/activate && python3 -m mempalace search '<topic>'
-Minimal changes only. Add [CHANGE: claude-code | date] tags to modified blocks.
-Update LUMINOS_STATUS.md and LUMINOS_DECISIONS.md when relevant.
-Commit format: type(scope): description — see AGENTS.md §5
+## HIVE Models (llama.cpp GGUF — NOT Ollama)
+- **Nexus**: Llama-3.1-8B-Instruct-Q4_K_M.gguf (GPU)
+- **Bolt**: Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf (GPU)
+- **Nova**: DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf (CPU)
+- **Sentinel**: MobileLLM-R1-140M-INT8.onnx (NPU via HATS)
 
-## MANDATORY RULES — READ BEFORE EVERY TASK
+## Workflow
+1. Read AGENTS.md fully
+2. Search MemPalace: `source ~/.mempalace-venv/bin/activate && python3 -m mempalace search "<topic>"`
+3. Execute surgical changes with `[CHANGE: claude-code | date]` tags
+4. Update LUMINOS_STATUS.md if component status changed
+5. Update LUMINOS_DECISIONS.md if architectural decision made
+6. Mine MemPalace: `python3 -m mempalace mine ~/luminos-os/`
+7. Commit and push
 
-### Memory Tools — Use Every Session
-1. **START every session**: search mempalace for current task topic
-2. **BEFORE editing code**: run `code-review-graph get_minimal_context`
-3. **BEFORE finishing**: save key decisions to mempalace
-4. **NEVER** repeat something mempalace says already failed
-
-### Tech Stack (LOCKED)
-- **Shell**: KDE Plasma (Wayland)
-- **Compositor**: KWin
-- **Custom widgets**: Qt/QML + JavaScript
-- **Apps/Settings/Login**: Qt/QML or KDialog + Go backend
-- **Daemons**: Go
-- **BANNED**: Hyprland, GTK4, HyprPanel, PyGObject, Python UI
-
-### Persistence Rule
-`/opt/luminos/src` must always be symlinked to `~/luminos-os/src`.
-If not symlinked, fix it before any other work:
+## Mandatory After Every Task
 ```bash
-sudo rm -rf /opt/luminos/src && sudo ln -sf /home/shawn/luminos-os/src /opt/luminos/src
+source ~/.mempalace-venv/bin/activate
+python3 -m mempalace mine ~/luminos-os/
+git add -A
+git commit -m "type(scope): description
+
+Agent: claude-code
+Task: [what was asked]"
+git push origin main
 ```
-
-### Git Rule
-Commit and push after every completed task.
-
----
-
-## MCP Tools: code-review-graph
-
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
-
-### When to use graph tools FIRST
-
-- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
-- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
-- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
-- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
-- **Architecture questions**: `get_architecture_overview` + `list_communities`
-
-Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
-
-### Key Tools
-
-| Tool | Use when |
-|------|----------|
-| `detect_changes` | Reviewing code changes — gives risk-scored analysis |
-| `get_review_context` | Need source snippets for review — token-efficient |
-| `get_impact_radius` | Understanding blast radius of a change |
-| `get_affected_flows` | Finding which execution paths are impacted |
-| `query_graph` | Tracing callers, callees, imports, tests, dependencies |
-| `semantic_search_nodes` | Finding functions/classes by name or keyword |
-| `get_architecture_overview` | Understanding high-level codebase structure |
-| `refactor_tool` | Planning renames, finding dead code |
-
-### Workflow
-
-1. The graph auto-updates on file changes (via hooks).
-2. Use `detect_changes` for code review.
-3. Use `get_affected_flows` to understand impact.
-4. Use `query_graph` pattern="tests_for" to check coverage.

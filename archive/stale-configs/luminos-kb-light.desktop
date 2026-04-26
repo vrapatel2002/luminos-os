@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Keyboard Light
+Comment=Control ASUS keyboard backlight
+Exec=/usr/local/bin/luminos-kb-settings
+Icon=preferences-desktop-keyboard
+Type=Application
+Categories=Settings;HardwareSettings;
+Keywords=keyboard;light;backlight;aura;asus;

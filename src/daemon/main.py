@@ -49,6 +49,7 @@ try:
         enter_gaming_mode    as _gpu_enter_gaming,
         exit_gaming_mode     as _gpu_exit_gaming,
         check_idle_timeout   as _gpu_check_idle_timeout,
+        check_vram_pressure  as _gpu_check_vram_pressure,
         get_status           as _gpu_get_status,
         scan_running_games   as _gpu_scan_games,
     )
@@ -450,15 +451,20 @@ def route_request(message):
 
 def _idle_timeout_loop():
     """P6-06: Check GPU idle timeout every 60s. PowerBrain auto-detects mode change.
+    [CHANGE: gemini-cli | 2026-04-26] Added VRAM pressure watchdog.
     Also locks screen on critical battery (<5%)."""
     while True:
         time.sleep(60)
         if _GPU_MANAGER_AVAILABLE:
-            result = _gpu_check_idle_timeout()
-            if result.get("unloaded") is not None:
-                logger.info("[IDLE CHECK] model unloaded")
-            else:
-                logger.info("[IDLE CHECK] no action needed")
+            # Check idle timeout first
+            idle_result = _gpu_check_idle_timeout()
+            if idle_result.get("unloaded") is not None:
+                logger.info("[IDLE CHECK] model unloaded due to timeout")
+            
+            # Check VRAM pressure watchdog
+            vram_result = _gpu_check_vram_pressure()
+            if vram_result.get("unloaded") is not None:
+                logger.warning(f"[VRAM PRESSURE] model unloaded: {vram_result['reason']}")
 
         # Critical battery → lock screen
         if _LOCKSCREEN_AVAILABLE and not _lock_is_locked():

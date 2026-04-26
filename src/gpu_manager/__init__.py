@@ -128,6 +128,15 @@ def exit_gaming_mode() -> dict:
     return _manager.exit_gaming_mode()
 
 
+def check_vram_pressure() -> dict:
+    """
+    [CHANGE: gemini-cli | 2026-04-26]
+    Check for VRAM pressure (>90%) and evict models if needed.
+    """
+    nvidia_info = get_nvidia_vram()
+    return _manager.check_vram_pressure(nvidia_info)
+
+
 # ---------------------------------------------------------------------------
 # Status
 # ---------------------------------------------------------------------------

@@ -139,10 +139,12 @@ KCMUtils.SimpleKCM {
             implicitWidth: Kirigami.Units.gridUnit * 18
             model: [
                 { value: "static",    text: qsTr("Static"),    desc: qsTr("Solid single color. Use Auto Cycle below to rotate through colors automatically.") },
-                { value: "breathe",   text: qsTr("Breathe"),   desc: qsTr("Color fades in and out. Single color or enable dual mode for two-color crossfade. Adjustable speed.") },
                 { value: "pulse",     text: qsTr("Pulse"),     desc: qsTr("Single color pulses in a rhythm. Choose color below.") },
+                { value: "breathe",   text: qsTr("Breathe"),   desc: qsTr("Color fades in and out. Single color or enable dual mode for two-color crossfade. Adjustable speed.") },
                 { value: "highlight", text: qsTr("Highlight"), desc: qsTr("Keys light up with a highlight effect. Choose color below.") },
                 { value: "laser",     text: qsTr("Laser"),     desc: qsTr("Laser sweep effect across keys. Choose color below.") },
+                { value: "rainbow-cycle", text: qsTr("Rainbow Cycle"), desc: qsTr("Continuous rainbow cycle across the keyboard. Adjustable speed.") },
+                { value: "rainbow-wave",  text: qsTr("Rainbow Wave"),  desc: qsTr("Rainbow wave effect with adjustable speed and direction.") },
                 { value: "none",      text: qsTr("Off"),       desc: qsTr("Turn off the keyboard backlight.") }
             ]
             textRole: "text"
@@ -166,6 +168,23 @@ KCMUtils.SimpleKCM {
             font.italic: true
             opacity: 0.65
             Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+        }
+
+        // Direction selector — rainbow-wave only
+        QQC2.ComboBox {
+            id: directionCombo
+            Kirigami.FormData.label: qsTr("Direction:")
+            visible: kcm.hasDirection
+            implicitWidth: Kirigami.Units.gridUnit * 10
+            model: ["Right", "Left", "Up", "Down"]
+            currentIndex: {
+                var idx = model.indexOf(kcm.direction)
+                return idx >= 0 ? idx : 0
+            }
+            onActivated: {
+                kcm.direction = model[currentIndex]
+                kcm.preview()
+            }
         }
 
         // Dual-color toggle — breathe only

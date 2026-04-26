@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=Keyboard Backlight
-Comment=Control ASUS ROG keyboard light
-Exec=/usr/local/bin/luminos-kb-settings
-Icon=preferences-desktop-keyboard
-Type=Application
-Categories=Settings;HardwareSettings;
-Keywords=keyboard;light;backlight;color;brightness;
-X-KDE-System-Settings-Parent-Category=hardware

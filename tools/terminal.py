@@ -14,38 +14,34 @@ class TerminalTool(Tool):
     """Executes whitelisted terminal commands with user confirmation."""
     
     name = "terminal"
-    description = "Run terminal commands (pip install, dir, mkdir, git, etc.)"
+    description = "Run terminal commands (pip install, ls, mkdir, git, etc.)"
 
     # A. WHITELISTED COMMAND PREFIXES
+    # [CHANGE: gemini-cli | 2026-04-26] Purged Windows-only commands (dir, type, cls)
     _WHITELIST = [
         "pip install", "pip uninstall", "pip list", "pip freeze", "pip show",
-        "conda list", "conda info",
-        "mkdir", "dir", "ls", "cat", "type", "echo",
+        "mkdir", "ls", "cat", "echo",
         "cd",
         "git status", "git log", "git diff", "git add", "git commit",
-        "python",
+        "python3", "python",
         "ollama list", "ollama ps", "ollama pull",
         "aider --version",
-        "cls", "clear",
+        "clear",
         "tesseract --version",
     ]
 
     # B. BLACKLISTED PATTERNS
+    # [CHANGE: gemini-cli | 2026-04-26] Purged Windows-only patterns (del, rmdir /s, reg, net, powershell)
     _BLACKLIST = [
-        "rm -rf", "del /s", "del /q", "del *", "rmdir /s",
-        "format", "shutdown", "restart", "taskkill",
-        "reg add", "reg delete", "regedit",
-        "netsh", "net user", "net stop",
-        "powershell -encodedcommand",
-        ".exe",  # Generic exe block
+        "rm -rf",
+        "format", "shutdown", "restart",
         "|", ">", ">>",  # Pipe/redirect
-        "sudo", "runas", "admin",
+        "sudo",
     ]
-    
-    _EXE_EXCEPTIONS = ["python.exe", "pip.exe", "git.exe", "ollama.exe", "tesseract.exe"]
 
     # C. ALLOWED DIRECTORIES
-    _ALLOWED_ROOT = pathlib.Path("C:/Users/vrati/VSCODE").resolve()
+    # [CHANGE: gemini-cli | 2026-04-26] Updated to native Linux home path
+    _ALLOWED_ROOT = pathlib.Path("/home/shawn/luminos-os").resolve()
 
     def __init__(self, config: dict):
         super().__init__(config)
@@ -70,14 +66,7 @@ class TerminalTool(Tool):
         
         # Check explicit blacklist patterns
         for pattern in self._BLACKLIST:
-            if pattern == ".exe":
-                # Special handling for .exe to allow exceptions
-                if ".exe" in cmd_lower:
-                    # Check if allowed exception
-                    is_exception = any(exc in cmd_lower for exc in self._EXE_EXCEPTIONS)
-                    if not is_exception:
-                        return True, f"Blocked pattern: .exe (only specific tools allowed)"
-            elif pattern in cmd_lower:
+            if pattern in cmd_lower:
                 return True, f"Blocked pattern: {pattern}"
 
         return False, ""
@@ -91,7 +80,7 @@ class TerminalTool(Tool):
 
     def get_risk_level(self, command: str) -> str:
         cmd_lower = command.lower()
-        if any(x in cmd_lower for x in ["pip uninstall", "del", "rmdir"]):
+        if any(x in cmd_lower for x in ["pip uninstall", "rm"]):
             return "high"
         if any(x in cmd_lower for x in ["pip install", "mkdir", "git commit"]):
             return "medium"

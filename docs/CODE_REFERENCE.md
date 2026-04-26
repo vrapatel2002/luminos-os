@@ -1,16 +1,62 @@
 # CODE_REFERENCE.md
 # Project Luminos — File Map & Architecture Reference
+# [CHANGE: claude-code | 2026-04-26] Full cleanup pass — Windows HIVE archived
 
-## Stack as of April 2026 [CHANGE: gemini-cli | 2026-04-19]
-Shell: KDE Plasma + KWin
-Widgets: Qt/QML
-Backend: Go
-Archived: Hyprland configs → archive/hyprland/
-Archived: GTK4 Python UI → archive/gtk4-ui/
+## Stack as of April 2026
+- Shell: KDE Plasma 6.6.4 + KWin (Wayland)
+- Widgets: Qt/QML
+- Backend: Go daemons (cmd/)
+- AI: llama.cpp TurboQuant (NOT Ollama) + HATS NPU
+- Archived: Hyprland → archive/hyprland/
+- Archived: GTK4 Python UI → archive/gtk4-ui/
+- Archived: Windows HIVE (Ollama) → archive/windows-hive-2026/
 
 ---
 
-Last Updated: 2026-04-19 (Decision 12 — Hyprland/GTK4 Retired)
+Last Updated: 2026-04-26 (Cleanup — Windows HIVE archived, Ollama removed)
+
+## Current Active Structure
+
+### Go Daemons (cmd/)
+- `cmd/luminos-ai/` — Unix socket IPC server
+- `cmd/luminos-power/` — Auto power profile switching
+- `cmd/luminos-sentinel/` — Process security monitoring
+- `cmd/luminos-router/` — .exe compatibility classifier
+
+### Python HIVE (src/hive/)
+- `src/hive/agent_base.py` — Base agent class
+- `src/hive/nexus.py` — Coordinator (Llama-3.1-8B)
+- `src/hive/bolt.py` — Coder (Qwen2.5-Coder-7B)
+- `src/hive/nova.py` — Reasoning (DeepSeek-R1-7B)
+- `src/hive/eye.py` — Vision (Qwen2.5-VL-7B, pending)
+
+### KDE KCM Plugin (src/kcms/)
+- `src/kcms/kcm_luminos_keyboard/` — Keyboard backlight C++/QML KCM
+
+### Python NPU (src/npu/)
+- `src/npu/hats_kernel.py` — HATS NPU inference
+- `src/npu/quantize_int8.py` — INT8 quantization
+
+### Python Classifier (src/classifier/)
+- `src/classifier/onnx_classifier.py` — Zone classifier
+- `src/classifier/router_daemon.py` — Zone routing daemon
+
+### Config (config/)
+- `config/kde/` — KDE config backups (kdeglobals, kwinrc, plasmashell)
+- `config/sddm-hidpi.conf` — SDDM HiDPI scaling
+- `config/luminos.conf` — Main Luminos config
+- `config/starship.toml` — Shell prompt
+
+### Scripts (scripts/)
+- `scripts/luminos-kb-settings` — Keyboard light settings UI
+- `scripts/luminos-keyboard-smart` — Smart keyboard daemon
+
+### Archive (archive/)
+- `archive/windows-hive-2026/` — Old Windows HIVE (Ollama/Docker) — DO NOT RESTORE
+- `archive/gtk4-ui/` — Retired GTK4/Python UI
+- `archive/hyprland/` — Retired Hyprland configs
+- `archive/stale-configs/` — Old .desktop and .bak files
+- `archive/research-scripts/` — One-off experiment scripts
 
 ## CURRENT FILE MAP
 

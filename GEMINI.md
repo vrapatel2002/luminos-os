@@ -1,6 +1,7 @@
 ## LOCKED STACK: KDE Plasma, KWin, Qt/QML, Go
-**BANNED: Hyprland, GTK4, PyGObject, Python UI, HyprPanel**
+**BANNED: Hyprland, GTK4, PyGObject, Python UI, HyprPanel, Docker, Ollama**
 Never write code for banned components. See LUMINOS_DECISIONS.md Decision 12.
+# [CHANGE: claude-code | 2026-04-26]
 
 ---
 
@@ -30,22 +31,23 @@ Before doing anything:
 
 About this project:
 Luminos OS is a custom Arch Linux distro on an ASUS ROG G14.
-Hyprland 0.54.3 compositor. Python/GTK4 for GUI. greetd for login (WIP).
-Repo at ~/luminos-os/. GUI at /opt/luminos/src/gui/.
+KDE Plasma 6.6.4 Wayland. Go daemons. llama.cpp TurboQuant for HIVE (NO Ollama).
+Repo at ~/luminos-os/.
 
 Your task:
 <TASK>
 
 Constraints:
-- Do not touch HyprPanel config (~/.config/hypr/hyprpanel/) unless the task explicitly requires it
-- Do not touch hyprland.conf unless the task explicitly requires it
+- Do not touch KDE Plasma config unless the task explicitly requires it
 - Only stage files you actually changed (git add -p, not git add .)
 - Add # [CHANGE: gemini-cli | date] comments to anything you modify
+- Never use Docker, Ollama, or any banned dep
 
 When done:
-- source ~/.mempalace-venv/bin/activate && python3 -m mempalace mine ~/luminos-os
+- source ~/.mempalace-venv/bin/activate && python3 -m mempalace mine ~/luminos-os/
 - Update ~/luminos-os/LUMINOS_STATUS.md if a component status changed
-- git commit -m 'type(scope): description' and push
+- Update ~/luminos-os/LUMINOS_DECISIONS.md if an architectural decision was made
+- git commit -m 'type(scope): description\n\nAgent: gemini-cli\nTask: <task>' and push
 "
 ```
 

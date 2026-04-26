@@ -19,9 +19,9 @@ logger = logging.getLogger("luminos-ai.gpu_manager.model_manager")
 IDLE_TIMEOUT_SECONDS = 300  # 5 minutes
 
 HIVE_MODELS: dict = {
-    "nexus": {"size_gb": 4.0, "role": "orchestrator"},
-    "bolt":  {"size_gb": 4.0, "role": "code"},
-    "nova":  {"size_gb": 4.0, "role": "writing"},
+    "nexus": {"size_gb": 4.6, "role": "orchestrator", "path": "hive/DeepSeek-R1-Distill-Qwen-8B-Q4_K_M.gguf"},
+    "bolt":  {"size_gb": 4.4, "role": "code", "path": "hive/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf"},
+    "nova":  {"size_gb": 4.4, "role": "writing", "path": "hive/DeepSeek-R1-Distill-Qwen-8B-Q4_K_M.gguf"},
     "eye":   {"size_gb": 4.0, "role": "vision"},
 }
 
@@ -236,6 +236,29 @@ class ModelManager:
         self.gaming_mode = False
         logger.info("GAMING MODE: exited — NVIDIA idle until needed")
         return {"message": "Gaming mode off — NVIDIA idle until needed"}
+
+    def check_vram_pressure(self, nvidia_status: dict) -> dict:
+        """
+        [CHANGE: gemini-cli | 2026-04-26]
+        Check for high VRAM pressure. If > 90% and a model is loaded,
+        emergency-evict the model to prevent system instability.
+        """
+        if not nvidia_status.get("available", False):
+            return {"unloaded": None, "reason": "nvidia unavailable"}
+
+        total_mb = nvidia_status.get("total_mb", 1)
+        used_mb  = nvidia_status.get("used_mb", 0)
+        vram_pct = (used_mb / total_mb) * 100
+
+        if vram_pct > 90 and self.active_model is not None:
+            logger.warning(
+                f"[VRAM WATCHDOG] High pressure ({vram_pct:.1f}%) — "
+                f"evicting {self.active_model} immediately"
+            )
+            unloaded = self._unload_current()
+            return {"unloaded": unloaded, "reason": f"VRAM pressure {vram_pct:.1f}%"}
+
+        return {"unloaded": None, "vram_pct": vram_pct}
 
     # ------------------------------------------------------------------
     # Status

@@ -14,3 +14,16 @@ wget-log*
 .code-review-graph/
 .python-version
 .triton_venv/
+
+# Build artifacts
+bin/
+__pycache__/
+
+# Research build artifacts
+research/turboquant/repo-thetom-correct/build/
+research/turboquant/repo-main/build/
+research/turboquant/repo-ggml/build/
+
+# IDE configs
+.cursorrules
+.opencode.json
