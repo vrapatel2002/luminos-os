@@ -1,0 +1,46 @@
+#!/bin/bash
+# HIVE popup chat — triggered by SUPER+SPACE
+# [CHANGE: gemini-cli | 2026-04-26]
+
+# Check if orchestrator is running
+if ! pgrep -f "hive/orchestrator" > /dev/null; then
+  # Start orchestrator in background
+  cd ~/luminos-os
+  source src/hive/.venv/bin/activate \
+    2>/dev/null || true
+  python3 src/hive/orchestrator.py &>/tmp/hive.log &
+  sleep 2
+fi
+
+# Get user input via kdialog
+INPUT=$(kdialog \
+  --title "HIVE — Luminos AI" \
+  --inputbox "Ask HIVE anything:" \
+  "" 2>/dev/null)
+
+[ $? -ne 0 ] && exit 0
+[ -z "$INPUT" ] && exit 0
+
+# Send to HIVE and show response
+notify-send "HIVE" "Thinking..." \
+  --icon=dialog-information
+
+RESPONSE=$(python3 - << PYEOF
+import sys
+import os
+sys.path.insert(0, '/home/shawn/luminos-os/src')
+try:
+    from hive.orchestrator import HIVEOrchestrator
+    hive = HIVEOrchestrator()
+    result = hive.chat("$INPUT")
+    print(result['response'][:500])
+    print(f"\n[{result['model_used']} | {result['tokens_per_sec']} t/s]")
+except Exception as e:
+    print(f"HIVE error: {e}")
+PYEOF
+)
+
+# Show response
+kdialog \
+  --title "HIVE Response" \
+  --msgbox "$RESPONSE" 2>/dev/null

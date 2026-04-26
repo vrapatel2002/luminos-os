@@ -38,6 +38,9 @@ Agent: gemini-cli
 | VRAM Watchdog | ✅ Working | Auto-evict if >90% usage |
 | llama.cpp TurboQuant | ✅ Working | turbo4 (type_k=12, type_v=12) |
 | HIVE Orchestrator | ✅ Working | Native Python reasoning layer |
+| HIVE popup (SUPER+SPACE) | ✅ Working | kdialog based chat UI |
+| HIVE Settings in KDE | ✅ Working | AI/Normal mode toggle |
+| AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
 | AI Mode | ✅ Active | Nova on CPU alongside GPU model |
 | Codebase Cleanup | ✅ Phase 2 Done | Doc merge & Linux rewrite |
 

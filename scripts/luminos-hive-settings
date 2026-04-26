@@ -1,0 +1,91 @@
+#!/bin/bash
+# HIVE Settings — AI Mode toggle
+# [CHANGE: gemini-cli | 2026-04-26]
+
+CONFIG="$HOME/.config/luminos-hive.conf"
+[ -f "$CONFIG" ] && source "$CONFIG"
+HIVE_MODE="${HIVE_MODE:-normal}"
+
+while true; do
+  CURRENT_MODE="$HIVE_MODE"
+  
+  CHOICE=$(kdialog \
+    --title "HIVE AI Settings — Luminos OS" \
+    --menu "Current mode: $CURRENT_MODE" \
+    mode "🔄  Switch AI Mode (current: $CURRENT_MODE)" \
+    shortcut "⌨️   Change Shortcut (current: SUPER+SPACE)" \
+    status "📊  Show HIVE Status" \
+    exit "❌  Close")
+
+  [ $? -ne 0 ] && break
+  [ "$CHOICE" = "exit" ] && break
+
+  case "$CHOICE" in
+    mode)
+      if [ "$HIVE_MODE" = "normal" ]; then
+        HIVE_MODE="ai"
+        kdialog --msgbox \
+          "AI Mode ON:
+- Nova (DeepSeek R1-0528) loads on CPU
+- Nexus/Bolt/Eye load on GPU as needed
+- Nova available for deep reasoning
+- Uses extra ~4.7GB RAM for Nova
+
+Use !nova in HIVE chat to trigger Nova." \
+          --title "AI Mode Enabled"
+      else
+        HIVE_MODE="normal"
+        kdialog --msgbox \
+          "Normal Mode ON:
+- All models load on GPU when needed
+- One model at a time (6GB VRAM)
+- Nova also uses GPU (swaps with others)
+- Lower RAM usage" \
+          --title "Normal Mode Enabled"
+      fi
+      # Save config
+      cat > "$CONFIG" << CONF
+HIVE_MODE="$HIVE_MODE"
+CONF
+      # Signal running orchestrator
+      pkill -USR1 -f "hive/orchestrator" \
+        2>/dev/null || true
+      notify-send "HIVE" \
+        "Mode changed to: $HIVE_MODE" \
+        --icon=dialog-information
+      ;;
+    shortcut)
+      NEW_KEY=$(kdialog \
+        --title "HIVE Shortcut" \
+        --inputbox \
+        "Enter shortcut (e.g. Meta+Space, Meta+H):" \
+        "Meta+Space")
+      [ $? -eq 0 ] && [ -n "$NEW_KEY" ] && {
+        kwriteconfig6 \
+          --file ~/.config/kglobalshortcutsrc \
+          --group "luminos-hive.desktop" \
+          --key "_launch" \
+          "$NEW_KEY,none,HIVE Chat"
+        # Attempt reload
+        qdbus6 org.kde.kglobalaccel /kglobalaccel org.kde.KGlobalAccel.reloadConfig 2>/dev/null
+        notify-send "HIVE" \
+          "Shortcut set to: $NEW_KEY"
+      }
+      ;;
+    status)
+      # Show HIVE status
+      MODELS=$(ls ~/.local/share/luminos/models/hive/*.gguf 2>/dev/null | xargs -I{} basename {} | tr '\n' '\n')
+      VRAM=$(nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader 2>/dev/null)
+      kdialog --msgbox \
+        "HIVE Status:
+Mode: $HIVE_MODE
+Shortcut: SUPER+SPACE
+
+Models available:
+$MODELS
+
+GPU VRAM: $VRAM" \
+        --title "HIVE Status"
+      ;;
+  esac
+done

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=HIVE AI Settings
+Comment=Configure Luminos HIVE AI system
+Exec=/usr/local/bin/luminos-hive-settings
+Icon=dialog-information
+Type=Application
+Categories=Settings;
+Keywords=hive;ai;mode;luminos;settings;
+X-KDE-System-Settings-Parent-Category=personalization
