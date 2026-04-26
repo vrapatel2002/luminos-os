@@ -38,7 +38,7 @@ Agent: antigravity
 | VRAM Watchdog | ✅ Working | Auto-evict if >90% usage |
 | llama.cpp TurboQuant | ✅ Working | turbo4 (type_k=12, type_v=12) |
 | HIVE Orchestrator | ✅ Working | Native Python reasoning layer |
-| HIVE popup (SUPER+SPACE) | ✅ Working | kdialog UI, Albert moved to Alt+Space |
+| HIVE popup (SUPER+SPACE) | ✅ Working | Standalone (llama-cli), Albert Alt+Space |
 | HIVE Settings in KDE | ✅ Working | Native KCM plugin (kcm_luminos_hive.so) |
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
 | AI Mode | ✅ Active | Nova on CPU alongside GPU model |
