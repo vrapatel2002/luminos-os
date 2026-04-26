@@ -1,0 +1,15 @@
+#!/bin/bash
+# Luminos keyboard backlight control
+# Usage: luminos-keyboard-light [color] [mode]
+# [CHANGE: gemini-cli | 2026-04-25]
+
+COLOR="${1:-ffffff}"
+MODE="${2:-static}"
+
+case "$MODE" in
+  off)    asusctl aura effect static -c 000000 ;;
+  static) asusctl aura effect static -c "$COLOR" ;;
+  breathe) asusctl aura effect breathe -c "$COLOR" ;;
+  rainbow) asusctl aura effect rainbow-cycle ;;
+  pulse)  asusctl aura effect pulse -c "$COLOR" ;;
+esac

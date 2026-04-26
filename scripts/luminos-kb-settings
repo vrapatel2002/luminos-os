@@ -1,0 +1,32 @@
+#!/bin/bash
+# [CHANGE: gemini-cli | 2026-04-25]
+CHOICE=$(kdialog \
+  --title "Luminos Keyboard Light" \
+  --menu "Select keyboard backlight:" \
+  1 "⬜ White — Full brightness" \
+  2 "🔵 Blue (Luminos color)" \
+  3 "🌈 Rainbow cycle" \
+  4 "💫 Breathe white" \
+  5 "⚫ Off")
+
+case $CHOICE in
+  1) 
+    asusctl aura effect static -c ffffff 
+    asusctl leds set high
+    ;;
+  2) 
+    asusctl aura effect static -c 0080FF 
+    asusctl leds set med
+    ;;
+  3) 
+    asusctl aura effect rainbow-cycle 
+    asusctl leds set med
+    ;;
+  4) 
+    asusctl aura effect breathe -c ffffff 
+    asusctl leds set med
+    ;;
+  5) 
+    asusctl leds set off 
+    ;;
+esac

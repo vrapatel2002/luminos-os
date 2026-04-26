@@ -12,7 +12,7 @@ Agent: gemini-cli
 | AMD iGPU (Radeon 780M) | ✅ Working | Desktop rendering |
 | RTX 4050 6GB | ✅ Working | AI + gaming |
 | asusctl + supergfxctl | ✅ Working | Hybrid mode locked |
-| Keyboard backlight | ✅ Working | Autostart on login |
+| Keyboard backlight | ✅ Working | Smart power daemon + KDE settings menu |
 | NPU (RyzenAI-npu1) | ✅ Working | /dev/accel0 active |
 
 ## AI Stack

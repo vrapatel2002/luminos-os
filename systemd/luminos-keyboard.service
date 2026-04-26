@@ -1,0 +1,11 @@
+[Unit]
+Description=Luminos Keyboard Smart Light
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/local/bin/luminos-keyboard-smart
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

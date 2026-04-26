@@ -1,0 +1,34 @@
+#!/bin/bash
+# Smart keyboard light — on when plugged in
+# [CHANGE: gemini-cli | 2026-04-25]
+
+check_and_set() {
+  # Check ACAD, ADP1, or similar
+  AC=$(cat /sys/class/power_supply/AC*/online 2>/dev/null | head -n1)
+  [ -z "$AC" ] && AC=$(cat /sys/class/power_supply/ADP*/online 2>/dev/null | head -n1)
+  [ -z "$AC" ] && AC="1" # Default to 1 if unknown
+  
+  if [ "$AC" = "1" ]; then
+    asusctl aura effect static -c ffffff
+    asusctl leds set med
+  else
+    asusctl leds set off
+  fi
+}
+
+# Set on startup
+check_and_set
+
+# Watch for power changes if inotifywait is available
+if command -v inotifywait >/dev/null; then
+  while true; do
+    inotifywait -q -e modify /sys/class/power_supply/AC*/online 2>/dev/null || sleep 10
+    check_and_set
+  done
+else
+  # Fallback to polling
+  while true; do
+    sleep 60
+    check_and_set
+  done
+fi
