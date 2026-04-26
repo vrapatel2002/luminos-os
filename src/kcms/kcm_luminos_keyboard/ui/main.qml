@@ -138,14 +138,12 @@ KCMUtils.SimpleKCM {
             Kirigami.FormData.label: qsTr("Mode:")
             implicitWidth: Kirigami.Units.gridUnit * 18
             model: [
-                { value: "static",        text: qsTr("Static"),        desc: qsTr("Solid single color. Combine with Auto Cycle below to rotate colors automatically.") },
-                { value: "breathe",       text: qsTr("Breathe"),       desc: qsTr("Two colors fade in and out slowly. Choose both colors and set speed.") },
-                { value: "stars",         text: qsTr("Stars"),         desc: qsTr("Two colors sparkle randomly across keys. Choose both colors and set speed.") },
-                { value: "pulse",         text: qsTr("Pulse"),         desc: qsTr("Single color pulses in a heartbeat rhythm. Choose color below.") },
-                { value: "rainbow-cycle", text: qsTr("Rainbow"),       desc: qsTr("Full color spectrum cycles automatically — no color needed. Adjust speed only.") },
-                { value: "ripple",        text: qsTr("Ripple"),        desc: qsTr("Color ripples outward from each keypress. Choose color and set speed.") },
-                { value: "rain",          text: qsTr("Rain"),          desc: qsTr("Falling rain animation across the keyboard. Adjust speed only.") },
-                { value: "none",          text: qsTr("Off"),           desc: qsTr("Turn off the keyboard backlight completely.") }
+                { value: "static",    text: qsTr("Static"),    desc: qsTr("Solid single color. Use Auto Cycle below to rotate through colors automatically.") },
+                { value: "breathe",   text: qsTr("Breathe"),   desc: qsTr("Color fades in and out. Single color or enable dual mode for two-color crossfade. Adjustable speed.") },
+                { value: "pulse",     text: qsTr("Pulse"),     desc: qsTr("Single color pulses in a rhythm. Choose color below.") },
+                { value: "highlight", text: qsTr("Highlight"), desc: qsTr("Keys light up with a highlight effect. Choose color below.") },
+                { value: "laser",     text: qsTr("Laser"),     desc: qsTr("Laser sweep effect across keys. Choose color below.") },
+                { value: "none",      text: qsTr("Off"),       desc: qsTr("Turn off the keyboard backlight.") }
             ]
             textRole: "text"
             currentIndex: {
@@ -168,6 +166,15 @@ KCMUtils.SimpleKCM {
             font.italic: true
             opacity: 0.65
             Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+        }
+
+        // Dual-color toggle — breathe only
+        QQC2.CheckBox {
+            Kirigami.FormData.label: qsTr("Dual color:")
+            visible: kcm.mode === "breathe"
+            text: qsTr("Enable two-color crossfade")
+            checked: kcm.breatheDual
+            onToggled: { kcm.breatheDual = checked; kcm.preview() }
         }
 
         // ════════════════════════════════════════════════════════════

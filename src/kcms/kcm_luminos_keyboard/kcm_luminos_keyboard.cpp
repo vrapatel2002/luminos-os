@@ -10,14 +10,9 @@
 #include <QTextStream>
 #include <QTimer>
 
-// Effects that take -c <color>
-static const QStringList COLOR1_EFFECTS  = {QStringLiteral("static"),QStringLiteral("pulse"),QStringLiteral("comet"),QStringLiteral("flash"),QStringLiteral("highlight"),QStringLiteral("laser"),QStringLiteral("ripple")};
-// Effects that take --colour <c1> --colour2 <c2> --speed
-static const QStringList COLOR2_EFFECTS  = {QStringLiteral("breathe"),QStringLiteral("stars")};
-// Effects that take only --speed (no color)
-static const QStringList SPEEDONLY_EFFECTS = {QStringLiteral("rainbow-cycle"),QStringLiteral("rainbow-wave"),QStringLiteral("rain")};
-// Effects that take -c <color> AND --speed
-static const QStringList COLOR1SPEED_EFFECTS = {QStringLiteral("highlight"),QStringLiteral("laser"),QStringLiteral("ripple")};
+// GA403UU supported: static, pulse, highlight, laser (-c only), breathe (--colour --colour2 --speed)
+// highlight and laser reject --speed on this hardware — color only
+static const QStringList COLOR1_EFFECTS = {QStringLiteral("static"),QStringLiteral("pulse"),QStringLiteral("highlight"),QStringLiteral("laser")};
 
 class LuminosKeyboardKcm : public KQuickManagedConfigModule
 {
@@ -30,10 +25,11 @@ class LuminosKeyboardKcm : public KQuickManagedConfigModule
     Q_PROPERTY(bool    autoColorEnabled  READ autoColorEnabled  WRITE setAutoColorEnabled  NOTIFY autoColorEnabledChanged)
     Q_PROPERTY(int     autoColorInterval READ autoColorInterval WRITE setAutoColorInterval NOTIFY autoColorIntervalChanged)
     Q_PROPERTY(QStringList autoColors   READ autoColors   WRITE setAutoColors   NOTIFY autoColorsChanged)
+    Q_PROPERTY(bool    breatheDual READ breatheDual WRITE setBreatheDual NOTIFY breatheDualChanged)
 
     // Read-only helpers for QML show/hide logic
     Q_PROPERTY(bool hasColor  READ hasColor  NOTIFY modeChanged)
-    Q_PROPERTY(bool hasColor2 READ hasColor2 NOTIFY modeChanged)
+    Q_PROPERTY(bool hasColor2 READ hasColor2 NOTIFY hasColor2Changed)
     Q_PROPERTY(bool hasSpeed  READ hasSpeed  NOTIFY modeChanged)
 
 public:
@@ -55,16 +51,18 @@ public:
     int autoColorInterval()  const { return m_autoInterval; }
     QStringList autoColors() const { return m_autoColors; }
 
-    bool hasColor()  const { return COLOR1_EFFECTS.contains(m_mode) || COLOR2_EFFECTS.contains(m_mode); }
-    bool hasColor2() const { return COLOR2_EFFECTS.contains(m_mode); }
-    bool hasSpeed()  const { return COLOR2_EFFECTS.contains(m_mode) || SPEEDONLY_EFFECTS.contains(m_mode) || COLOR1SPEED_EFFECTS.contains(m_mode); }
+    bool breatheDual() const { return m_breatheDual; }
+    bool hasColor()   const { return COLOR1_EFFECTS.contains(m_mode) || m_mode == QStringLiteral("breathe"); }
+    bool hasColor2()  const { return m_mode == QStringLiteral("breathe") && m_breatheDual; }
+    bool hasSpeed()   const { return m_mode == QStringLiteral("breathe"); }
 
     // --- property setters ---
     void setColor(const QString &v)  { if (m_color  != v) { m_color  = v; Q_EMIT colorChanged();  setNeedsSave(true); } }
     void setColor2(const QString &v) { if (m_color2 != v) { m_color2 = v; Q_EMIT color2Changed(); setNeedsSave(true); } }
     void setBrightness(int v)        { if (m_brightness != v) { m_brightness = v; Q_EMIT brightnessChanged(); setNeedsSave(true); } }
-    void setMode(const QString &v)   { if (m_mode   != v) { m_mode   = v; Q_EMIT modeChanged();   setNeedsSave(true); } }
+    void setMode(const QString &v)   { if (m_mode   != v) { m_mode   = v; Q_EMIT modeChanged(); Q_EMIT hasColor2Changed(); setNeedsSave(true); } }
     void setSpeed(int v)             { if (m_speed  != v) { m_speed  = v; Q_EMIT speedChanged();  setNeedsSave(true); } }
+    void setBreatheDual(bool v)      { if (m_breatheDual != v) { m_breatheDual = v; Q_EMIT breatheDualChanged(); Q_EMIT hasColor2Changed(); setNeedsSave(true); } }
     void setAutoColorEnabled(bool v) { if (m_autoEnabled  != v) { m_autoEnabled  = v; Q_EMIT autoColorEnabledChanged(); setNeedsSave(true); updateAutoTimer(); } }
     void setAutoColorInterval(int v) { if (m_autoInterval != v) { m_autoInterval = v; Q_EMIT autoColorIntervalChanged(); setNeedsSave(true); updateAutoTimer(); } }
     void setAutoColors(const QStringList &v) { if (m_autoColors != v) { m_autoColors = v; Q_EMIT autoColorsChanged(); setNeedsSave(true); } }
@@ -107,6 +105,7 @@ public:
                 if (key == QLatin1String("KB_AUTO_INTERVAL")) m_autoInterval = val.toInt();
                 if (key == QLatin1String("KB_AUTO_COLORS") && !val.isEmpty())
                     m_autoColors = val.split(QLatin1Char(','), Qt::SkipEmptyParts);
+                if (key == QLatin1String("KB_BREATHE_DUAL")) m_breatheDual = (val == QLatin1String("true"));
             }
         }
         // Guard defaults
@@ -118,7 +117,7 @@ public:
         if (m_autoColors.isEmpty()) m_autoColors = {QStringLiteral("ff0000"),QStringLiteral("00ff00"),QStringLiteral("0000ff"),QStringLiteral("ffff00"),QStringLiteral("ff00ff"),QStringLiteral("00ffff")};
 
         Q_EMIT colorChanged(); Q_EMIT color2Changed(); Q_EMIT brightnessChanged();
-        Q_EMIT modeChanged(); Q_EMIT speedChanged();
+        Q_EMIT modeChanged(); Q_EMIT speedChanged(); Q_EMIT breatheDualChanged(); Q_EMIT hasColor2Changed();
         Q_EMIT autoColorEnabledChanged(); Q_EMIT autoColorIntervalChanged(); Q_EMIT autoColorsChanged();
         setNeedsSave(false);
         updateAutoTimer();
@@ -138,6 +137,7 @@ public:
             out << "KB_AUTO_ENABLED=\""  << (m_autoEnabled ? "true" : "false") << "\"\n";
             out << "KB_AUTO_INTERVAL=\"" << QString::number(m_autoInterval) << "\"\n";
             out << "KB_AUTO_COLORS=\""   << m_autoColors.join(QLatin1Char(',')) << "\"\n";
+            out << "KB_BREATHE_DUAL=\""  << (m_breatheDual ? "true" : "false") << "\"\n";
         }
         QProcess::startDetached(QStringLiteral("systemctl"),
             {QStringLiteral("--user"), QStringLiteral("restart"),
@@ -155,6 +155,7 @@ public:
         setAutoColorEnabled(false);
         setAutoColorInterval(5);
         setAutoColors({QStringLiteral("ff0000"),QStringLiteral("00ff00"),QStringLiteral("0000ff"),QStringLiteral("ffff00"),QStringLiteral("ff00ff"),QStringLiteral("00ffff")});
+        setBreatheDual(false);
     }
 
 Q_SIGNALS:
@@ -163,6 +164,8 @@ Q_SIGNALS:
     void brightnessChanged();
     void modeChanged();
     void speedChanged();
+    void breatheDualChanged();
+    void hasColor2Changed();
     void autoColorEnabledChanged();
     void autoColorIntervalChanged();
     void autoColorsChanged();
@@ -175,19 +178,14 @@ private:
     void applyToHardware() {
         QStringList args{QStringLiteral("aura"), QStringLiteral("effect"), m_mode};
 
-        if (COLOR2_EFFECTS.contains(m_mode)) {
-            // breathe / stars: --colour c1 --colour2 c2 --speed spd
+        if (m_mode == QStringLiteral("breathe")) {
+            // dual: two different colors; single: repeat color1 for both
+            const QString c2 = m_breatheDual ? m_color2 : m_color;
             args << QStringLiteral("--colour") << m_color
-                 << QStringLiteral("--colour2") << m_color2
+                 << QStringLiteral("--colour2") << c2
                  << QStringLiteral("--speed") << speedName();
-        } else if (SPEEDONLY_EFFECTS.contains(m_mode)) {
-            // rainbow-cycle / rainbow-wave / rain: --speed only
-            args << QStringLiteral("--speed") << speedName();
-        } else if (COLOR1SPEED_EFFECTS.contains(m_mode)) {
-            // highlight / laser / ripple: -c color --speed
-            args << QStringLiteral("-c") << m_color << QStringLiteral("--speed") << speedName();
         } else if (COLOR1_EFFECTS.contains(m_mode)) {
-            // static / pulse / comet / flash: -c color
+            // static, pulse, highlight, laser: color only (highlight/laser reject --speed)
             args << QStringLiteral("-c") << m_color;
         }
         // "none" → no extra args
@@ -232,6 +230,7 @@ private:
     bool        m_autoEnabled  = false;
     int         m_autoInterval = 5;     // seconds
     QStringList m_autoColors   = {QStringLiteral("ff0000"),QStringLiteral("00ff00"),QStringLiteral("0000ff"),QStringLiteral("ffff00"),QStringLiteral("ff00ff"),QStringLiteral("00ffff")};
+    bool        m_breatheDual    = false;
     int         m_autoColorIndex = 0;
     QTimer     *m_autoTimer;
 };
