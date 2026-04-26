@@ -37,7 +37,8 @@ Agent: antigravity
 | MobileLLM-R1-140M INT8 | ✅ Working | 64MB, 800MB budget |
 | VRAM Watchdog | ✅ Working | Auto-evict if >90% usage |
 | llama.cpp TurboQuant | ✅ Working | turbo4 (type_k=12, type_v=12) |
-| HIVE Orchestrator | ✅ Working | Native Python reasoning layer |
+| HIVE Orchestrator | ✅ Working | Native Python reasoning layer (systemd active) |
+| llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
 | HIVE popup (SUPER+SPACE) | ✅ Working | Standalone (llama-cli), Albert Alt+Space |
 | HIVE Settings in KDE | ✅ Working | Native KCM plugin (kcm_luminos_hive.so) |
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
