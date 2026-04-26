@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=HIVE Chat
+Comment=Open Luminos HIVE AI chat
+Exec=/usr/local/bin/luminos-hive-popup
+Icon=dialog-information
+Type=Application
+Categories=Utility;
+Keywords=hive;ai;chat;luminos;
+OnlyShowIn=KDE;
