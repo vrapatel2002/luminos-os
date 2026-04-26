@@ -1,41 +1,30 @@
 #!/bin/bash
-# Smart keyboard light with brightness control
-# Auto: full brightness plugged, off on battery
-# [CHANGE: gemini-cli | 2026-04-25]
+# Luminos keyboard light — always on
+# Battery no longer turns off light
+# [CHANGE: gemini-cli | 2026-04-26]
 
-BRIGHT_PATH=$(ls /sys/class/leds/ 2>/dev/null | grep -i "kbd_backlight" | head -1)
+BRIGHT_PATH="/sys/class/leds/asus::kbd_backlight"
 
-set_light() {
-  # Check ACAD, ADP1, or similar
-  AC=$(cat /sys/class/power_supply/AC*/online 2>/dev/null | head -n1)
-  [ -z "$AC" ] && AC=$(cat /sys/class/power_supply/ADP*/online 2>/dev/null | head -n1)
-  [ -z "$AC" ] && AC="1"
-  
-  if [ "$AC" = "1" ]; then
-    # Plugged in — full brightness white
-    asusctl aura effect static -c ffffff 2>/dev/null
-    if [ -n "$BRIGHT_PATH" ]; then
-      echo 3 | sudo tee /sys/class/leds/$BRIGHT_PATH/brightness 2>/dev/null || true
-    fi
-  else
-    # On battery — light off
-    if [ -n "$BRIGHT_PATH" ]; then
-      echo 0 | sudo tee /sys/class/leds/$BRIGHT_PATH/brightness 2>/dev/null || true
-    fi
-  fi
-}
-
-set_light
-
-# Watch for power changes
-if command -v inotifywait >/dev/null; then
-  while true; do
-    inotifywait -q -e modify /sys/class/power_supply/AC*/online 2>/dev/null || sleep 15
-    set_light
-  done
+# Load saved settings or use defaults
+CONFIG=~/.config/luminos-keyboard.conf
+if [ -f "$CONFIG" ]; then
+  source "$CONFIG"
 else
-  while true; do
-    sleep 60
-    set_light
-  done
+  KB_COLOR="ffffff"
+  KB_MODE="static"
+  KB_BRIGHTNESS="3"
 fi
+
+# Apply settings
+asusctl aura effect $KB_MODE -c "$KB_COLOR" 2>/dev/null
+echo "$KB_BRIGHTNESS" | sudo tee \
+  $BRIGHT_PATH/brightness 2>/dev/null || true
+
+# Keep running — reapply on wake from sleep
+while true; do
+  inotifywait -q -e modify \
+    /sys/class/power_supply/ACAD/online \
+    2>/dev/null || sleep 30
+  asusctl aura effect $KB_MODE \
+    -c "$KB_COLOR" 2>/dev/null
+done

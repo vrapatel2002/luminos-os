@@ -1,33 +1,65 @@
 #!/bin/bash
-# Luminos keyboard backlight settings
-# Called from KDE System Settings or CLI
-# [CHANGE: gemini-cli | 2026-04-25]
+# Luminos Keyboard Settings UI
+# [CHANGE: gemini-cli | 2026-04-26]
 
-ACTION="$1"
-VALUE="$2"
+CONFIG=~/.config/luminos-keyboard.conf
+source "$CONFIG" 2>/dev/null || true
+KB_COLOR="${KB_COLOR:-ffffff}"
+KB_BRIGHTNESS="${KB_BRIGHTNESS:-3}"
+KB_MODE="${KB_MODE:-static}"
 
-case "$ACTION" in
-  color)
-    asusctl aura effect static -c "${VALUE#\#}" ;;
-  brightness)
-    # brightness via asusctl (if supported)
-    asusctl leds set "$VALUE" 2>/dev/null || \
-    # fallback via sysfs
-    echo "$VALUE" | sudo tee /sys/class/leds/asus::kbd_backlight/brightness 2>/dev/null ;;
-  mode)
-    case "$VALUE" in
-      static)  asusctl aura effect static -c ffffff ;;
-      breathe) asusctl aura effect breathe -c ffffff ;;
-      rainbow) asusctl aura effect rainbow-cycle ;;
-      off)     asusctl aura effect static -c 000000 ;;
-    esac ;;
-  auto)
-    # Auto mode — on when plugged, off on battery
-    AC=$(cat /sys/class/power_supply/ACAD/online 2>/dev/null | head -1)
-    if [ "$AC" = "1" ]; then
-      asusctl aura effect static -c ffffff
-      echo 3 | sudo tee /sys/class/leds/asus::kbd_backlight/brightness
-    else
-      echo 0 | sudo tee /sys/class/leds/asus::kbd_backlight/brightness
-    fi ;;
+# Show settings dialog
+CHOICE=$(kdialog \
+  --title "Keyboard Light Settings" \
+  --menu "Current: $KB_MODE #$KB_COLOR brightness $KB_BRIGHTNESS" \
+  1 "🎨 Change Color" \
+  2 "💡 Change Brightness" \
+  3 "✨ Change Animation" \
+  4 "💾 Save & Apply")
+
+case $CHOICE in
+  1)
+    COLOR=$(kdialog --title "Pick Color" \
+      --inputbox "Enter hex color (without #):" \
+      "$KB_COLOR")
+    [ -n "$COLOR" ] && KB_COLOR="$COLOR"
+    asusctl aura effect static -c "$KB_COLOR" \
+      2>/dev/null
+    ;;
+  2)
+    BRIGHT=$(kdialog --title "Brightness" \
+      --menu "Select brightness:" \
+      1 "Low (1)" \
+      2 "Medium (2)" \
+      3 "High (3 - Max)")
+    [ -n "$BRIGHT" ] && KB_BRIGHTNESS="$BRIGHT"
+    echo "$KB_BRIGHTNESS" | sudo tee \
+      /sys/class/leds/asus::kbd_backlight/brightness \
+      2>/dev/null
+    ;;
+  3)
+    MODE=$(kdialog --title "Animation" \
+      --menu "Select mode:" \
+      static "⬜ Static" \
+      breathe "💫 Breathe" \
+      rainbow-cycle "🌈 Rainbow" \
+      pulse "🔵 Pulse" \
+      none "⚫ Off")
+    [ -n "$MODE" ] && KB_MODE="$MODE"
+    asusctl aura effect "$KB_MODE" \
+      -c "$KB_COLOR" 2>/dev/null
+    ;;
+  4)
+    # Save config
+    cat > "$CONFIG" << EOF
+KB_COLOR="$KB_COLOR"
+KB_BRIGHTNESS="$KB_BRIGHTNESS"
+KB_MODE="$KB_MODE"
+EOF
+    # Restart daemon to apply
+    systemctl --user restart \
+      luminos-keyboard.service
+    notify-send "Luminos" \
+      "Keyboard settings saved and applied!"
+    ;;
 esac
