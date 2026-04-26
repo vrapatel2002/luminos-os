@@ -6,4 +6,4 @@ Icon=dialog-information
 Type=Application
 Categories=Settings;
 Keywords=hive;ai;mode;luminos;settings;
-X-KDE-System-Settings-Parent-Category=personalization
+X-KDE-System-Settings-Parent-Category=system
