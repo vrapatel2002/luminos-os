@@ -1,32 +1,33 @@
 #!/bin/bash
+# Luminos keyboard backlight settings
+# Called from KDE System Settings or CLI
 # [CHANGE: gemini-cli | 2026-04-25]
-CHOICE=$(kdialog \
-  --title "Luminos Keyboard Light" \
-  --menu "Select keyboard backlight:" \
-  1 "⬜ White — Full brightness" \
-  2 "🔵 Blue (Luminos color)" \
-  3 "🌈 Rainbow cycle" \
-  4 "💫 Breathe white" \
-  5 "⚫ Off")
 
-case $CHOICE in
-  1) 
-    asusctl aura effect static -c ffffff 
-    asusctl leds set high
-    ;;
-  2) 
-    asusctl aura effect static -c 0080FF 
-    asusctl leds set med
-    ;;
-  3) 
-    asusctl aura effect rainbow-cycle 
-    asusctl leds set med
-    ;;
-  4) 
-    asusctl aura effect breathe -c ffffff 
-    asusctl leds set med
-    ;;
-  5) 
-    asusctl leds set off 
-    ;;
+ACTION="$1"
+VALUE="$2"
+
+case "$ACTION" in
+  color)
+    asusctl aura effect static -c "${VALUE#\#}" ;;
+  brightness)
+    # brightness via asusctl (if supported)
+    asusctl leds set "$VALUE" 2>/dev/null || \
+    # fallback via sysfs
+    echo "$VALUE" | sudo tee /sys/class/leds/asus::kbd_backlight/brightness 2>/dev/null ;;
+  mode)
+    case "$VALUE" in
+      static)  asusctl aura effect static -c ffffff ;;
+      breathe) asusctl aura effect breathe -c ffffff ;;
+      rainbow) asusctl aura effect rainbow-cycle ;;
+      off)     asusctl aura effect static -c 000000 ;;
+    esac ;;
+  auto)
+    # Auto mode — on when plugged, off on battery
+    AC=$(cat /sys/class/power_supply/ACAD/online 2>/dev/null | head -1)
+    if [ "$AC" = "1" ]; then
+      asusctl aura effect static -c ffffff
+      echo 3 | sudo tee /sys/class/leds/asus::kbd_backlight/brightness
+    else
+      echo 0 | sudo tee /sys/class/leds/asus::kbd_backlight/brightness
+    fi ;;
 esac
