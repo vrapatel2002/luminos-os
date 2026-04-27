@@ -83,11 +83,23 @@ import os
 import subprocess
 import time
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QTextEdit, QLineEdit, QPushButton)
+                             QHBoxLayout, QTextEdit, QLineEdit, QPushButton, QLabel,
+                             QFrame, QSizePolicy)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 MODEL_PATH = os.environ.get("MODEL_PATH", "")
 LLAMA_CLI = os.environ.get("LLAMA_CLI", "")
+
+# Theme Variables matching gemini-code-1777263963106.html
+BG_SIDEBAR = "#1e1e1e"
+BG_MAIN = "#252525"
+BG_INPUT = "#333333"
+BG_HOVER = "#2c2c2c"
+TEXT_PRIMARY = "#ececec"
+TEXT_SECONDARY = "#9e9e9e"
+TEXT_ACCENT = "#c48b71"
+BORDER_COLOR = "#424242"
+FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
 
 class InferenceThread(QThread):
     response_ready = pyqtSignal(str, float)
@@ -142,79 +154,152 @@ class ChatWindow(QMainWindow):
         
     def initUI(self):
         self.setWindowTitle('HIVE — Luminos AI')
-        self.setMinimumSize(800, 600)
-        self.setStyleSheet("background-color: #0A0A0F; color: #E0E0E0;")
+        self.resize(1000, 700)
+        self.setStyleSheet(f"background-color: {BG_MAIN}; color: {TEXT_PRIMARY}; font-family: {FONT_FAMILY};")
         
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(15)
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # --- Sidebar ---
+        sidebar = QFrame()
+        sidebar.setFixedWidth(260)
+        sidebar.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG_SIDEBAR};
+                border-right: 1px solid {BORDER_COLOR};
+            }}
+        """)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(16, 16, 16, 16)
+        sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        sidebar_header = QLabel("Claude")
+        sidebar_header.setStyleSheet(f"font-size: 1.2rem; font-weight: 600; color: {TEXT_PRIMARY}; border: none;")
+        sidebar_layout.addWidget(sidebar_header)
+        sidebar_layout.addSpacing(20)
+        
+        nav_items = ["+ New chat", "🔍 Search", "💬 Chats", "📁 Projects", "</> Code", "⚙ Customize", "✨ Design"]
+        for item in nav_items:
+            btn = QPushButton(item)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent;
+                    color: {TEXT_PRIMARY};
+                    text-align: left;
+                    padding: 8px 12px;
+                    border-radius: 6px;
+                    border: none;
+                    font-size: 0.9rem;
+                }}
+                QPushButton:hover {{
+                    background-color: {BG_HOVER};
+                }}
+            """)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            sidebar_layout.addWidget(btn)
+            
+        sidebar_layout.addSpacing(20)
+        
+        starred_lbl = QLabel("STARRED")
+        starred_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 0.75rem; border: none; padding-left: 12px; letter-spacing: 0.05em;")
+        sidebar_layout.addWidget(starred_lbl)
+        sidebar_layout.addSpacing(10)
+        
+        history_items = ["Reviewing recent conversation h...", "Reviving forex trading bot project", "Login screen and boot issues de..."]
+        for item in history_items:
+            btn = QPushButton(item)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent;
+                    color: {TEXT_SECONDARY};
+                    text-align: left;
+                    padding: 8px 12px;
+                    border-radius: 6px;
+                    border: none;
+                    font-size: 0.85rem;
+                }}
+                QPushButton:hover {{
+                    background-color: {BG_HOVER};
+                    color: {TEXT_PRIMARY};
+                }}
+            """)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            sidebar_layout.addWidget(btn)
+            
+        main_layout.addWidget(sidebar)
+        
+        # --- Main Content Area ---
+        content_area = QWidget()
+        content_layout = QVBoxLayout(content_area)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        
+        top_nav = QFrame()
+        top_nav.setFixedHeight(64)
+        top_nav.setStyleSheet("border: none;")
+        content_layout.addWidget(top_nav)
         
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
-        self.chat_display.setStyleSheet("""
-            QTextEdit {
-                background-color: #12121A;
-                border: 1px solid #2A2A35;
-                border-radius: 8px;
-                padding: 15px;
-                font-family: 'Inter', 'Segoe UI', sans-serif;
-                font-size: 14px;
-            }
+        self.chat_display.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: transparent;
+                border: none;
+                padding: 20px;
+                font-size: 1rem;
+                color: {TEXT_PRIMARY};
+            }}
         """)
-        main_layout.addWidget(self.chat_display)
         
-        input_layout = QHBoxLayout()
-        input_layout.setSpacing(10)
+        self.chat_display.append(f"<div style='font-family: Georgia, serif; font-size: 2.5rem; text-align: center; margin-top: 50px; margin-bottom: 30px;'><span style='color: {TEXT_ACCENT};'>✺</span> Hello, night owl</div>")
+        
+        content_layout.addWidget(self.chat_display)
+        
+        input_container = QWidget()
+        input_container_layout = QVBoxLayout(input_container)
+        input_container_layout.setContentsMargins(40, 20, 40, 30)
+        
+        self.input_wrapper = QFrame()
+        self.input_wrapper.setMaximumWidth(800)
+        self.input_wrapper.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG_INPUT};
+                border: 1px solid {BORDER_COLOR};
+                border-radius: 16px;
+            }}
+        """)
+        
+        wrapper_layout = QVBoxLayout(self.input_wrapper)
+        wrapper_layout.setContentsMargins(16, 12, 16, 12)
+        wrapper_layout.setSpacing(10)
+        
+        input_top_layout = QHBoxLayout()
+        input_top_layout.setContentsMargins(0,0,0,0)
+        
+        add_btn = QLabel("+")
+        add_btn.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 1.5rem; border: none;")
+        input_top_layout.addWidget(add_btn)
         
         self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("Ask HIVE...")
-        self.input_field.setStyleSheet("""
-            QLineEdit {
-                background-color: #1A1A24;
-                border: 1px solid #333340;
-                border-radius: 8px;
-                padding: 10px 15px;
-                font-family: 'Inter', 'Segoe UI', sans-serif;
-                font-size: 14px;
-                color: white;
-            }
-            QLineEdit:focus {
-                border: 1px solid #4D4D60;
-            }
+        self.input_field.setPlaceholderText("How can I help you today?")
+        self.input_field.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: transparent;
+                border: none;
+                color: {TEXT_PRIMARY};
+                font-size: 1rem;
+            }}
         """)
         self.input_field.returnPressed.connect(self.send_message)
-        input_layout.addWidget(self.input_field)
+        input_top_layout.addWidget(self.input_field)
         
-        self.send_button = QPushButton("Send")
-        self.send_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.send_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2D5B99;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-family: 'Inter', 'Segoe UI', sans-serif;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #386DB3;
-            }
-            QPushButton:pressed {
-                background-color: #23477A;
-            }
-            QPushButton:disabled {
-                background-color: #333340;
-                color: #888888;
-            }
-        """)
-        self.send_button.clicked.connect(self.send_message)
-        input_layout.addWidget(self.send_button)
+        wrapper_layout.addLayout(input_top_layout)
         
-        main_layout.addLayout(input_layout)
+        input_controls_layout = QHBoxLayout()
+        input_controls_layout.setContentsMargins(0,0,0,0)
         
         model_name = "Unknown"
         if "dolphin" in MODEL_PATH.lower():
@@ -225,27 +310,58 @@ class ChatWindow(QMainWindow):
             model_name = "Nova"
             
         self.model_label = model_name
-        self.append_system_message(f"HIVE connected. Model: {model_name} | Press Esc to close")
+        
+        model_lbl = QLabel(f"{model_name} Adaptive ⌄")
+        model_lbl.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 0.85rem; border: none;")
+        input_controls_layout.addWidget(model_lbl)
+        
+        input_controls_layout.addStretch()
+        
+        self.send_button = QPushButton("➤")
+        self.send_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.send_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {TEXT_SECONDARY};
+                border: none;
+                font-size: 1.2rem;
+            }}
+            QPushButton:hover {{
+                color: {TEXT_PRIMARY};
+            }}
+        """)
+        self.send_button.clicked.connect(self.send_message)
+        input_controls_layout.addWidget(self.send_button)
+        
+        wrapper_layout.addLayout(input_controls_layout)
+        
+        h_layout = QHBoxLayout()
+        h_layout.addStretch()
+        h_layout.addWidget(self.input_wrapper)
+        h_layout.addStretch()
+        
+        input_container_layout.addLayout(h_layout)
+        content_layout.addWidget(input_container)
+        
+        main_layout.addWidget(content_area)
         
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
             self.close()
             
-    def append_system_message(self, text):
-        self.chat_display.append(f"<div style='color: #8888A0; font-style: italic; margin-bottom: 10px;'>{text}</div>")
-        
     def append_user_message(self, text):
-        self.chat_display.append(f"<div style='margin-top: 15px; margin-bottom: 5px;'><b style='color: #E2E2E2;'>You</b></div>")
-        self.chat_display.append(f"<div style='color: #FFFFFF; margin-bottom: 15px;'>{text}</div><br>")
+        self.chat_display.append(f"<div style='margin-top: 20px; max-width: 800px; margin-left: auto; margin-right: auto;'><div style='color: {TEXT_PRIMARY}; font-size: 1.1rem;'>{text}</div></div>")
         
     def append_hive_message(self, text, elapsed=None):
-        header = f"<b style='color: #6392D8;'>HIVE ({self.model_label})</b>"
+        header = f"<div style='color: {TEXT_SECONDARY}; font-size: 0.9rem; margin-bottom: 8px;'><span style='color: {TEXT_ACCENT};'>✺</span> HIVE ({self.model_label})"
         if elapsed is not None:
-            header += f" <span style='color: #666677; font-size: 12px; font-weight: normal;'>— {elapsed:.1f}s</span>"
+            header += f" — {elapsed:.1f}s"
+        header += "</div>"
             
-        self.chat_display.append(f"<div style='margin-top: 15px; margin-bottom: 5px;'>{header}</div>")
+        self.chat_display.append(f"<div style='margin-top: 20px; max-width: 800px; margin-left: auto; margin-right: auto;'>{header}")
+        
         formatted_text = text.replace('\\n', '<br>')
-        self.chat_display.append(f"<div style='color: #D0D0E0; margin-bottom: 15px;'>{formatted_text}</div><br><br>")
+        self.chat_display.append(f"<div style='color: {TEXT_PRIMARY}; line-height: 1.5; font-size: 1rem;'>{formatted_text}</div></div><br>")
         
         scrollbar = self.chat_display.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
@@ -255,9 +371,13 @@ class ChatWindow(QMainWindow):
         if not prompt:
             return
             
+        if not self.history:
+            self.chat_display.clear() # clear greeting
+            
         self.input_field.clear()
         self.input_field.setEnabled(False)
         self.send_button.setEnabled(False)
+        
         self.append_user_message(prompt)
         
         self.thread = InferenceThread(prompt, self.history)
@@ -273,7 +393,7 @@ class ChatWindow(QMainWindow):
         self.input_field.setFocus()
         
     def on_error(self, error_msg):
-        self.chat_display.append(f"<div style='color: #FF5555; margin-top: 10px; margin-bottom: 10px;'><b>Error:</b> {error_msg}</div><br>")
+        self.chat_display.append(f"<div style='color: #FF5555; margin-top: 10px; margin-bottom: 10px; max-width: 800px; margin-left: auto; margin-right: auto;'><b>Error:</b> {error_msg}</div><br>")
         self.input_field.setEnabled(True)
         self.send_button.setEnabled(True)
         self.input_field.setFocus()

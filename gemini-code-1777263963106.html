@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat UI Clone</title>
+    <style>
+        /* --- CSS Variables for Theme Colors --- */
+        :root {
+            --bg-sidebar: #1e1e1e;
+            --bg-main: #252525;
+            --bg-input: #333333;
+            --bg-hover: #2c2c2c;
+            --text-primary: #ececec;
+            --text-secondary: #9e9e9e;
+            --text-accent: #c48b71;
+            --border-color: #424242;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* --- Global Reset --- */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            overflow: hidden; /* Prevent full page scroll */
+        }
+
+        /* --- Sidebar Layout --- */
+        .sidebar {
+            width: 260px;
+            background-color: var(--bg-sidebar);
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #2a2a2a;
+            height: 100%;
+        }
+
+        .sidebar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .sidebar-header svg {
+            cursor: pointer;
+            fill: var(--text-secondary);
+        }
+
+        /* --- Sidebar Navigation --- */
+        .nav-list {
+            list-style: none;
+            padding: 0 8px;
+            margin-bottom: 16px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 12px;
+            color: var(--text-primary);
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .nav-item:hover {
+            background-color: var(--bg-hover);
+        }
+
+        .nav-item svg {
+            width: 16px;
+            height: 16px;
+            fill: var(--text-secondary);
+        }
+
+        /* --- Sidebar History Sections --- */
+        .sidebar-section {
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto; /* Allow scrolling for history */
+            flex-grow: 1;
+        }
+
+        .section-title {
+            padding: 8px 20px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            letter-spacing: 0.05em;
+            margin-top: 8px;
+        }
+
+        .history-item {
+            padding: 8px 20px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: color 0.2s;
+        }
+
+        .history-item:hover {
+            color: var(--text-primary);
+            background-color: var(--bg-hover);
+        }
+
+        /* --- Main Content Area --- */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .top-nav {
+            display: flex;
+            justify-content: flex-end;
+            padding: 16px 24px;
+        }
+
+        .profile-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background-color: var(--bg-hover);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border: 1px solid var(--border-color);
+        }
+
+        /* --- Center Chat Container --- */
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 0 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .greeting {
+            font-family: "Georgia", serif; /* Matching the serif font in the image */
+            font-size: 2.5rem;
+            font-weight: 400;
+            color: var(--text-primary);
+            margin-bottom: 40px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .sparkle-icon {
+            color: var(--text-accent);
+        }
+
+        /* --- Input Area --- */
+        .input-wrapper {
+            width: 100%;
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .input-top {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .input-top input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 1rem;
+            outline: none;
+        }
+
+        .input-top input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .add-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0 8px;
+        }
+
+        .input-controls {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .model-selector {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+        }
+
+        .model-selector:hover {
+            color: var(--text-primary);
+        }
+
+        /* --- Usage Banner --- */
+        .usage-banner {
+            width: 100%;
+            background-color: #1e1e1e;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-top: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .usage-link {
+            color: var(--text-primary);
+            text-decoration: underline;
+            cursor: pointer;
+            margin-right: 12px;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        /* --- Action Chips --- */
+        .action-chips {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .chip {
+            background-color: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 8px 16px;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .chip:hover {
+            background-color: var(--bg-hover);
+            color: var(--text-primary);
+        }
+    </style>
+</head>
+<body>
+
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <span>Claude</span>
+            <svg width="20" height="20" viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+        </div>
+
+        <ul class="nav-list">
+            <li class="nav-item">
+                <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                New chat
+            </li>
+            <li class="nav-item">
+                <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                Search
+            </li>
+            <li class="nav-item">
+                <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+                Chats
+            </li>
+            <li class="nav-item">
+                <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+                Projects
+            </li>
+            <li class="nav-item">
+                <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+                Code
+            </li>
+            <li class="nav-item">
+                <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.06-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.73,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.06,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.43-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.49-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+                Customize
+            </li>
+            <li class="nav-item">
+                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                Design
+            </li>
+        </ul>
+
+        <div class="sidebar-section">
+            <div class="section-title">Starred</div>
+            <div class="history-item">Reviewing recent conversation h...</div>
+            <div class="history-item">Reviving forex trading bot project</div>
+            
+            <div class="section-title">Recents</div>
+            <div class="history-item">Login screen and boot issues de...</div>
+            <div class="history-item">Luminos OS bar and dock autost...</div>
+            <div class="history-item">Luminous debugging context</div>
+            <div class="history-item">Starting a vending machine busi...</div>
+            <div class="history-item">Claude code unrestricted mode ...</div>
+            <div class="history-item">Code-review-graph for token sa...</div>
+            <div class="history-item">Untitled</div>
+            <div class="history-item">Setting up AI agents developme...</div>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <header class="top-nav">
+            <div class="profile-icon">
+                <svg width="18" height="18" fill="var(--text-secondary)" viewBox="0 0 24 24">
+                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                </svg>
+            </div>
+        </header>
+
+        <div class="chat-container">
+            <h1 class="greeting">
+                <svg class="sparkle-icon" width="36" height="36" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2L13.4 8.6L20 10L13.4 11.4L12 18L10.6 11.4L4 10L10.6 8.6L12 2Z"/>
+                </svg>
+                Hello, night owl
+            </h1>
+
+            <div class="input-wrapper">
+                <div class="input-top">
+                    <button class="add-btn">+</button>
+                    <input type="text" placeholder="How can I help you today?">
+                </div>
+                <div class="input-controls">
+                    <div class="model-selector">
+                        Sonnet 4.6 Adaptive 
+                        <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
+                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+                </div>
+            </div>
+
+            <div class="usage-banner">
+                <span>You've used 75% of your weekly limit</span>
+                <div>
+                    <span class="usage-link">Get more usage</span>
+                    <button class="close-btn">✕</button>
+                </div>
+            </div>
+
+            <div class="action-chips">
+                <button class="chip"><span>&lt;/&gt;</span> Code</button>
+                <button class="chip"><span>🎓</span> Learn</button>
+                <button class="chip"><span>📈</span> Strategize</button>
+                <button class="chip"><span>✏️</span> Write</button>
+                <button class="chip"><span>☕</span> Life stuff</button>
+            </div>
+        </div>
+    </main>
+
+</body>
+</html>
