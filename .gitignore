@@ -29,3 +29,4 @@ research/turboquant/repo-ggml/build/
 .opencode.json
 src/kcms/kcm_luminos_hive/build/
 CMakeFiles/
+.notes.db

@@ -9,8 +9,8 @@ Never write code for banned components. See LUMINOS_DECISIONS.md Decision 12.
 
 ### Mandatory — Before Every Task
 - Read `LUMINOS_PROJECT_SCOPE.md` and `LUMINOS_STATUS.md` before every task
-- Query MemPalace before starting: `source ~/.mempalace-venv/bin/activate && python3 -m mempalace search "<topic>"`
-  - **[CHANGE: antigravity | 2026-04-19] MemPalace fixed. Must activate venv first: `source ~/.mempalace-venv/bin/activate`**
+- Query Luminos Notes before starting: `~/luminos-os/scripts/luminos-notes.sh search "<topic>"`
+  - **[CHANGE: gemini-cli | 2026-04-26] MemPalace retired. Use luminos-notes.sh instead.**
 - Minimal changes only — do not touch working components
 - Add `[CHANGE: gemini-cli | date]` tags to every modified block
 - Update docs and commit after every task (see `docs/WORKFLOW.md`)
@@ -27,7 +27,7 @@ gemini "
 Before doing anything:
 1. Read ~/luminos-os/AGENTS.md (project rules)
 2. Read ~/luminos-os/LUMINOS_STATUS.md (current component state)
-3. Query MemPalace: source ~/.mempalace-venv/bin/activate && python3 -m mempalace search '<TOPIC>'
+3. Query Luminos Notes: ~/luminos-os/scripts/luminos-notes.sh search '<TOPIC>'
 
 About this project:
 Luminos OS is a custom Arch Linux distro on an ASUS ROG G14.
@@ -44,7 +44,7 @@ Constraints:
 - Never use Docker, Ollama, or any banned dep
 
 When done:
-- source ~/.mempalace-venv/bin/activate && python3 -m mempalace mine ~/luminos-os/
+- ~/luminos-os/scripts/luminos-notes.sh add [TAG] '[Summary of changes]'
 - Update ~/luminos-os/LUMINOS_STATUS.md if a component status changed
 - Update ~/luminos-os/LUMINOS_DECISIONS.md if an architectural decision was made
 - git commit -m 'type(scope): description\n\nAgent: gemini-cli\nTask: <task>' and push
@@ -92,15 +92,14 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 3. Use `get_affected_flows` to understand impact.
 4. Use `query_graph` pattern="tests_for" to check coverage.
 
-Rule: MemPalace Usage (mandatory)
+Rule: Luminos Notes Usage (mandatory)
 BEFORE every task:
-  source ~/.mempalace-venv/bin/activate
-  python3 -m mempalace search "<task topic>"
+  ~/luminos-os/scripts/luminos-notes.sh search "<task topic>"
   This searches existing project knowledge.
 
 AFTER every task:
-  python3 -m mempalace mine ~/luminos-os/
-  This indexes new changes into MemPalace.
+  ~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Summary of changes]"
+  This indexes new changes into Luminos Notes.
 
 Rule: CodeGraph Usage (mandatory)
 BEFORE modifying any Python or Go file:

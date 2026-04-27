@@ -16,17 +16,16 @@
 
 ## Workflow
 1. Read AGENTS.md fully
-2. Search MemPalace: `source ~/.mempalace-venv/bin/activate && python3 -m mempalace search "<topic>"`
+2. Search Luminos Notes: `~/luminos-os/scripts/luminos-notes.sh search "<topic>"`
 3. Execute surgical changes with `[CHANGE: claude-code | date]` tags
 4. Update LUMINOS_STATUS.md if component status changed
 5. Update LUMINOS_DECISIONS.md if architectural decision made
-6. Mine MemPalace: `python3 -m mempalace mine ~/luminos-os/`
+6. Update Luminos Notes: `~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Summary of changes]"`
 7. Commit and push
 
 ## Mandatory After Every Task
 ```bash
-source ~/.mempalace-venv/bin/activate
-python3 -m mempalace mine ~/luminos-os/
+~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Summary of changes]"
 git add -A
 git commit -m "type(scope): description
 
@@ -35,15 +34,14 @@ Task: [what was asked]"
 git push origin main
 ```
 
-Rule: MemPalace Usage (mandatory)
+Rule: Luminos Notes Usage (mandatory)
 BEFORE every task:
-  source ~/.mempalace-venv/bin/activate
-  python3 -m mempalace search "<task topic>"
+  ~/luminos-os/scripts/luminos-notes.sh search "<task topic>"
   This searches existing project knowledge.
 
 AFTER every task:
-  python3 -m mempalace mine ~/luminos-os/
-  This indexes new changes into MemPalace.
+  ~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Summary of changes]"
+  This indexes new changes into Luminos Notes.
 
 Rule: CodeGraph Usage (mandatory)
 BEFORE modifying any Python or Go file:

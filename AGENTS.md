@@ -1,5 +1,5 @@
 # STRICT POST-EXECUTION RULE
-Before concluding ANY task, you MUST update the `mempalace` and `code-review-graph` to reflect all file changes, deleted directories, and architectural shifts. You must also verify that `LUMINOS_STATUS.md` matches the current reality. Do not output a final report until these state files are synchronized.
+Before concluding ANY task, you MUST update `luminos-notes.sh` and `code-review-graph` to reflect all file changes, deleted directories, and architectural shifts. You must also verify that `LUMINOS_STATUS.md` matches the current reality. Do not output a final report until these state files are synchronized.
 
 # AGENTS.md — Luminos OS Agent Constitution
 # Last Updated: 2026-04-26 (Global Sync + Cleanup)
@@ -23,7 +23,7 @@ Luminos OS is a custom Arch Linux distribution on ASUS ROG G14.
 - **Minimal Changes**: Do not touch working OS components.
 - **Identity Tags**: Add `[CHANGE: agent | date]` to every modified block.
 - **VRAM Watchdog**: Respect the 4.6GB safe limit. HIVE models swap on dGPU.
-- **State Tracking**: Update `LUMINOS_STATUS.md` and `mempalace` every turn.
+- **State Tracking**: Update `LUMINOS_STATUS.md` and `luminos-notes.sh` every turn.
 
 ---
 
@@ -59,10 +59,9 @@ Luminos OS is a custom Arch Linux distribution on ASUS ROG G14.
 
 After EVERY task, ALL agents must:
 
-### 6.1 Update MemPalace:
+### 6.1 Update Luminos Notes:
 ```bash
-source ~/.mempalace-venv/bin/activate
-python3 -m mempalace mine ~/luminos-os/
+~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Detailed summary of changes]"
 ```
 
 ### 6.2 Update relevant .md files:
@@ -81,7 +80,7 @@ Task: [what was asked]"
 git push origin main
 ```
 
-NEVER complete a task without updating MemPalace.
+NEVER complete a task without updating Luminos Notes.
 NEVER complete a task without updating relevant docs.
 NEVER commit without the Agent and Task fields.
 
@@ -93,21 +92,20 @@ REPLY TO MANAGEMENT:
   - Task completed: [yes/no/partial]
   - What changed: [list files modified/created]
   - LUMINOS_STATUS.md updated: [yes/no]
-  - MemPalace updated: [yes/no]
+  - Luminos Notes updated: [yes/no]
   - Ready for: [what comes next]
 ```
 
-Rule: MemPalace Usage (mandatory)
+Rule: Luminos Notes Usage (mandatory)
 BEFORE every task:
-  source ~/.mempalace-venv/bin/activate
-  python3 -m mempalace search "<task topic>"
+  ~/luminos-os/scripts/luminos-notes.sh search "<task topic>"
   This searches existing project knowledge.
-  Never start a task without checking MemPalace first.
+  Never start a task without checking Luminos Notes first.
 
 AFTER every task:
-  python3 -m mempalace mine ~/luminos-os/
-  This indexes new changes into MemPalace.
-  Never complete a task without mining MemPalace.
+  ~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Summary of changes]"
+  This indexes new changes into Luminos Notes.
+  Never complete a task without updating Luminos Notes.
 
 Rule: CodeGraph Usage (mandatory)
 BEFORE modifying any Python or Go file:

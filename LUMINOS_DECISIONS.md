@@ -627,3 +627,33 @@ Upgrade core HIVE models to latest 2026 standards and implement "AI Mode" for co
 ### Why
 The previous stack was based on early 2025 distillations. The April 2026 releases (Dolphin3 and R1-0528) provide significant intelligence gains without increasing VRAM footprint. AI Mode maximizes the Ryzen 7's CPU overhead for background reasoning while keeping the RTX 4050 free for UI-latency sensitive tasks.
 
+
+---
+
+## DECISION 17 — MemPalace Retired, Replaced with SQLite Notes
+Date: April 26, 2026
+Made by: gemini-cli
+**Status: FINAL**
+
+### What We Decided
+Retire the `mempalace` Python-based knowledge mining system and replace it with a lightweight, standalone SQLite-based bash script: `luminos-notes.sh`.
+
+- **Mechanism**: `~/luminos-os/scripts/luminos-notes.sh`
+- **Storage**: `~/luminos-os/.notes.db` (SQLite3)
+- **Commands**: `add TAG NOTE`, `search TERM`, `list`
+- **Dependencies**: Removed Python 3.12, `hnswlib`, `chromadb`, and the `~/.mempalace-venv`.
+
+### Why
+1. **Technical Failure**: `hnswlib` (the vector database dependency for MemPalace) causes consistent Segmentation Faults on Python 3.12 under Arch Linux. This rendered the knowledge system unusable for all agents.
+2. **Complexity**: MemPalace required a large Python virtual environment and multiple heavy dependencies just to store and search project notes.
+3. **Reliability**: A SQLite-based bash script is essentially indestructible, has zero start-up latency, and requires only `sqlite3` which is a core system package.
+4. **Maintenance**: Agents can now perform knowledge updates in milliseconds without risk of environment corruption.
+
+### What We Rejected
+**Fixing hnswlib/chromadb**
+- Pros: Keeps vector search capability.
+- Cons: Wasted hours of engineering time on upstream dependency bugs. Not worth the overhead for simple project note tracking.
+
+**Moving to a different Vector DB (Qdrant/Milvus)**
+- Pros: Advanced search.
+- Cons: Requires background daemons/Docker (BANNED). Too heavy for a local dev environment.
