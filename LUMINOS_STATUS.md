@@ -39,18 +39,19 @@ Agent: antigravity
 | llama.cpp TurboQuant | ✅ Working | turbo4 (type_k=12, type_v=12) |
 | HIVE Orchestrator | ✅ Working | Native Python reasoning layer (systemd active) |
 | llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
-| HIVE popup (SUPER+SPACE) | ✅ Working | Native GTK4/Adwaita Python UI |
+| HIVE popup (SUPER+SPACE) | ✅ Working | Standalone Direct llama-cli (GTK4 UI) |
+| luminos-notes.sh | ✅ Working | SQLite replacement for MemPalace |
 | HIVE Settings in KDE | ✅ Working | Native KCM plugin (kcm_luminos_hive.so) |
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
 | AI Mode | ✅ Active | Nova on CPU alongside GPU model |
-| Codebase Cleanup | ✅ Phase 2 Done | Doc merge & Linux rewrite |
+| Codebase Cleanup | ✅ Phase 2 Done | MemPalace retired, SQLite notes active |
 
 ## ARCHITECTURE SHIFT
-- **Deprecated:** Docker Desktop, n8n (Docker), Ollama (Process), SearXNG (Docker)
+- **Deprecated:** Docker Desktop, n8n (Docker), Ollama (Process), SearXNG (Docker), MemPalace (hnswlib crash)
 - **Current:** Bare-metal Linux
     - **Data Plane:** Native `llama.cpp` (GPU/CPU) + HATS (NPU)
     - **Control Plane:** Go `luminos-ai` daemons
-    - **Reasoning Plane:** Python `HIVE` orchestrator
+    - **Reasoning Plane:** Python `HIVE` orchestrator, Standalone SQLite Notes
 
 ## TAG SCHEMA (LOCKED)
 ```
