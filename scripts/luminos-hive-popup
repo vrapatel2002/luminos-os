@@ -1,36 +1,310 @@
 #!/bin/bash
-# HIVE Proper Chat UI — kdialog based
-# [CHANGE: antigravity | 2026-04-26]
+# HIVE Chat Popup — Bash/kdialog + llama-cli + PyQt6
+# [CHANGE: antigravity | 2026-04-27]
+# Launched by SUPER+SPACE via kglobalaccel → luminos-hive-popup.desktop
+# 
+# 
+# 
+# 
 
-# Get user input
-USER_PROMPT=$(kdialog --title "HIVE — Luminos AI" --inputbox "Ask HIVE:")
-if [ $? -ne 0 ] || [ -z "$USER_PROMPT" ]; then
-    exit 0
+# ════════════════════════════════════════
+# CRITICAL SECTION — DO NOT MODIFY
+# KDE Wayland environment setup
+# Changing this breaks SUPER+SPACE shortcut
+# Last fixed: 2026-04-26 by Opus
+# Touch only if KDE Plasma version changes
+# ════════════════════════════════════════
+
+# When kglobalaccel launches a process on KDE Plasma 6 Wayland,
+# the child process does NOT inherit WAYLAND_DISPLAY, DISPLAY,
+# DBUS_SESSION_BUS_ADDRESS, or XDG_RUNTIME_DIR. Without these,
+# kdialog cannot connect to the compositor and silently exits.
+# We resolve them from the user's runtime environment.
+
+# XDG_RUNTIME_DIR — must be set first, others depend on it
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+# WAYLAND_DISPLAY — needed for kdialog to render on Wayland
+if [ -z "$WAYLAND_DISPLAY" ]; then
+    # Check the most common Wayland socket names
+    for sock in wayland-0 wayland-1; do
+        if [ -S "$XDG_RUNTIME_DIR/$sock" ]; then
+            export WAYLAND_DISPLAY="$sock"
+            break
+        fi
+    done
 fi
 
-# Notify user
-kdialog --passivepopup "HIVE is thinking..." 3
+# DISPLAY — fallback for XWayland apps
+if [ -z "$DISPLAY" ]; then
+    export DISPLAY=":0"
+fi
 
-# Find model
+# DBUS_SESSION_BUS_ADDRESS — required for kdialog IPC
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+    if [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+    else
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+    fi
+fi
+
+# XDG_SESSION_TYPE — tells Qt/kdialog to use Wayland backend
+export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+
+# QT_QPA_PLATFORM — force kdialog to use wayland
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+
+# HOME — sometimes missing in service contexts
+export HOME="${HOME:-$(getent passwd $(id -u) | cut -d: -f6)}"
+
+# ════════════════════════════════════════
+# END CRITICAL SECTION
+# ════════════════════════════════════════
+
+# ════════════════════════════════════════
+# MODEL PATHS — Update here when changing models
+# Safe to modify this section only
+# ════════════════════════════════════════
+
 MODEL_PATH="$HOME/.local/share/luminos/models/hive/Dolphin3.0-Llama3.1-8B-Q4_K_M.gguf"
+LLAMA_CLI="/usr/local/bin/llama-cli"
 
-# Format prompt
-FORMATTED_PROMPT="<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+# ════════════════════════════════════════
+# END MODEL PATHS
+# ════════════════════════════════════════
 
-You are HIVE, the Luminos OS AI assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
+export MODEL_PATH LLAMA_CLI
 
-${USER_PROMPT}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+if python3 -c "import PyQt6" 2>/dev/null; then
+    python3 - << 'EOF'
+import sys
+import os
+import subprocess
+import time
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QTextEdit, QLineEdit, QPushButton)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
-"
+MODEL_PATH = os.environ.get("MODEL_PATH", "")
+LLAMA_CLI = os.environ.get("LLAMA_CLI", "")
 
-# Run inference
-RESPONSE=$(/usr/local/bin/llama-cli -m "$MODEL_PATH" \
-    -p "$FORMATTED_PROMPT" \
-    -n 512 \
-    --temp 0.7 \
-    --log-disable \
-    --no-display-prompt \
-    -no-cnv 2>/dev/null)
+class InferenceThread(QThread):
+    response_ready = pyqtSignal(str, float)
+    error_occurred = pyqtSignal(str)
 
-# Show response
-kdialog --title "HIVE" --msgbox "$RESPONSE"
+    def __init__(self, prompt, history):
+        super().__init__()
+        self.prompt = prompt
+        self.history = history
+
+    def run(self):
+        try:
+            start_time = time.time()
+            
+            formatted_prompt = "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are HIVE, the Luminos OS AI assistant. You are helpful, concise, and knowledgeable about Linux systems.<|eot_id|>"
+            
+            for h_prompt, h_resp in self.history:
+                formatted_prompt += f"<|start_header_id|>user<|end_header_id|>\n\n{h_prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{h_resp}<|eot_id|>"
+                
+            formatted_prompt += f"<|start_header_id|>user<|end_header_id|>\n\n{self.prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+
+            cmd = [
+                LLAMA_CLI,
+                "-m", MODEL_PATH,
+                "-p", formatted_prompt,
+                "-n", "512",
+                "--temp", "0.7",
+                "-ngl", "99",
+                "--log-disable",
+                "--no-display-prompt",
+                "-no-cnv"
+            ]
+            
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, stderr = process.communicate()
+            
+            if process.returncode != 0:
+                self.error_occurred.emit(f"Error: {stderr.strip()}")
+                return
+                
+            elapsed = time.time() - start_time
+            self.response_ready.emit(stdout.strip(), elapsed)
+            
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+class ChatWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.history = []
+        self.initUI()
+        
+    def initUI(self):
+        self.setWindowTitle('HIVE — Luminos AI')
+        self.setMinimumSize(800, 600)
+        self.setStyleSheet("background-color: #0A0A0F; color: #E0E0E0;")
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+        
+        self.chat_display = QTextEdit()
+        self.chat_display.setReadOnly(True)
+        self.chat_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #12121A;
+                border: 1px solid #2A2A35;
+                border-radius: 8px;
+                padding: 15px;
+                font-family: 'Inter', 'Segoe UI', sans-serif;
+                font-size: 14px;
+            }
+        """)
+        main_layout.addWidget(self.chat_display)
+        
+        input_layout = QHBoxLayout()
+        input_layout.setSpacing(10)
+        
+        self.input_field = QLineEdit()
+        self.input_field.setPlaceholderText("Ask HIVE...")
+        self.input_field.setStyleSheet("""
+            QLineEdit {
+                background-color: #1A1A24;
+                border: 1px solid #333340;
+                border-radius: 8px;
+                padding: 10px 15px;
+                font-family: 'Inter', 'Segoe UI', sans-serif;
+                font-size: 14px;
+                color: white;
+            }
+            QLineEdit:focus {
+                border: 1px solid #4D4D60;
+            }
+        """)
+        self.input_field.returnPressed.connect(self.send_message)
+        input_layout.addWidget(self.input_field)
+        
+        self.send_button = QPushButton("Send")
+        self.send_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.send_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2D5B99;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-family: 'Inter', 'Segoe UI', sans-serif;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #386DB3;
+            }
+            QPushButton:pressed {
+                background-color: #23477A;
+            }
+            QPushButton:disabled {
+                background-color: #333340;
+                color: #888888;
+            }
+        """)
+        self.send_button.clicked.connect(self.send_message)
+        input_layout.addWidget(self.send_button)
+        
+        main_layout.addLayout(input_layout)
+        
+        model_name = "Unknown"
+        if "dolphin" in MODEL_PATH.lower():
+            model_name = "Nexus"
+        elif "qwen" in MODEL_PATH.lower():
+            model_name = "Bolt"
+        elif "deepseek" in MODEL_PATH.lower():
+            model_name = "Nova"
+            
+        self.model_label = model_name
+        self.append_system_message(f"HIVE connected. Model: {model_name} | Press Esc to close")
+        
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
+            
+    def append_system_message(self, text):
+        self.chat_display.append(f"<div style='color: #8888A0; font-style: italic; margin-bottom: 10px;'>{text}</div>")
+        
+    def append_user_message(self, text):
+        self.chat_display.append(f"<div style='margin-top: 15px; margin-bottom: 5px;'><b style='color: #E2E2E2;'>You</b></div>")
+        self.chat_display.append(f"<div style='color: #FFFFFF; margin-bottom: 15px;'>{text}</div><br>")
+        
+    def append_hive_message(self, text, elapsed=None):
+        header = f"<b style='color: #6392D8;'>HIVE ({self.model_label})</b>"
+        if elapsed is not None:
+            header += f" <span style='color: #666677; font-size: 12px; font-weight: normal;'>— {elapsed:.1f}s</span>"
+            
+        self.chat_display.append(f"<div style='margin-top: 15px; margin-bottom: 5px;'>{header}</div>")
+        formatted_text = text.replace('\\n', '<br>')
+        self.chat_display.append(f"<div style='color: #D0D0E0; margin-bottom: 15px;'>{formatted_text}</div><br><br>")
+        
+        scrollbar = self.chat_display.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        
+    def send_message(self):
+        prompt = self.input_field.text().strip()
+        if not prompt:
+            return
+            
+        self.input_field.clear()
+        self.input_field.setEnabled(False)
+        self.send_button.setEnabled(False)
+        self.append_user_message(prompt)
+        
+        self.thread = InferenceThread(prompt, self.history)
+        self.thread.response_ready.connect(lambda resp, elap: self.on_response(prompt, resp, elap))
+        self.thread.error_occurred.connect(self.on_error)
+        self.thread.start()
+        
+    def on_response(self, prompt, response, elapsed):
+        self.history.append((prompt, response))
+        self.append_hive_message(response, elapsed)
+        self.input_field.setEnabled(True)
+        self.send_button.setEnabled(True)
+        self.input_field.setFocus()
+        
+    def on_error(self, error_msg):
+        self.chat_display.append(f"<div style='color: #FF5555; margin-top: 10px; margin-bottom: 10px;'><b>Error:</b> {error_msg}</div><br>")
+        self.input_field.setEnabled(True)
+        self.send_button.setEnabled(True)
+        self.input_field.setFocus()
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    ex = ChatWindow()
+    ex.show()
+    sys.exit(app.exec())
+EOF
+else
+    # Fallback to kdialog conversation loop if PyQt6 is not installed
+    HISTORY=""
+    while true; do
+        if [ -z "$HISTORY" ]; then
+            TEXT="Ask HIVE:"
+        else
+            TEXT="$HISTORY\n\nAsk HIVE:"
+        fi
+        
+        USER_PROMPT=$(kdialog --title "HIVE — Luminos AI" --inputbox "$TEXT")
+        if [ $? -ne 0 ] || [ -z "$USER_PROMPT" ]; then
+            break
+        fi
+        
+        kdialog --passivepopup "HIVE is thinking..." 3
+        
+        FORMATTED_PROMPT="<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are HIVE, the Luminos OS AI assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n${USER_PROMPT}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+        
+        RESPONSE=$("$LLAMA_CLI" -m "$MODEL_PATH" -p "$FORMATTED_PROMPT" -n 512 --temp 0.7 -ngl 99 --log-disable --no-display-prompt -no-cnv 2>/dev/null)
+        
+        HISTORY="${HISTORY}\nYou: ${USER_PROMPT}\nHIVE: ${RESPONSE}\n----------------"
+    done
+fi
