@@ -1,205 +1,36 @@
-#!/usr/bin/env python3
-# HIVE Proper Chat UI — GTK4 based
-# [CHANGE: gemini-cli | 2026-04-26]
-# Standalone version using llama-cli directly
+#!/bin/bash
+# HIVE Proper Chat UI — kdialog based
+# [CHANGE: antigravity | 2026-04-26]
 
-import os
-import sys
-import json
-import threading
-import subprocess
-import gi
+# Get user input
+USER_PROMPT=$(kdialog --title "HIVE — Luminos AI" --inputbox "Ask HIVE:")
+if [ $? -ne 0 ] || [ -z "$USER_PROMPT" ]; then
+    exit 0
+fi
 
-gi.require_version('Gtk', '4.0')
-gi.require_version('Adw', '1')
-from gi.repository import Gtk, Gdk, GLib, Adw
+# Notify user
+kdialog --passivepopup "HIVE is thinking..." 3
 
-class HiveChatWindow(Adw.ApplicationWindow):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+# Find model
+MODEL_PATH="$HOME/.local/share/luminos/models/hive/Dolphin3.0-Llama3.1-8B-Q4_K_M.gguf"
 
-        self.set_title("HIVE — Luminos AI (Standalone)")
-        self.set_default_size(600, 450)
-        self.set_resizable(True)
+# Format prompt
+FORMATTED_PROMPT="<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 
-        # Style context for dark theme and custom colors
-        style_provider = Gtk.CssProvider()
-        style_provider.load_from_data(b"""
-            window {
-                background-color: #0A0A0F;
-                color: white;
-            }
-            .chat-box {
-                background-color: #12121A;
-                border-radius: 10px;
-                padding: 10px;
-                margin: 5px;
-            }
-            .user-msg {
-                color: #0080FF;
-                font-weight: bold;
-            }
-            .hive-msg {
-                color: #FFFFFF;
-            }
-            .input-box {
-                background-color: #1A1A24;
-                color: white;
-                border: 1px solid #333;
-                border-radius: 5px;
-                padding: 5px;
-            }
-        """)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            style_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
+You are HIVE, the Luminos OS AI assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
 
-        # Main Layout
-        self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.set_content(self.main_box)
+${USER_PROMPT}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
-        # Chat History Area
-        self.scroll = Gtk.ScrolledWindow()
-        self.scroll.set_vexpand(True)
-        self.main_box.append(self.scroll)
+"
 
-        self.chat_view = Gtk.TextView()
-        self.chat_view.set_editable(False)
-        self.chat_view.set_cursor_visible(False)
-        self.chat_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self.chat_view.add_css_class("chat-box")
-        self.scroll.set_child(self.chat_view)
-        self.buffer = self.chat_view.get_buffer()
+# Run inference
+RESPONSE=$(/usr/local/bin/llama-cli -m "$MODEL_PATH" \
+    -p "$FORMATTED_PROMPT" \
+    -n 512 \
+    --temp 0.7 \
+    --log-disable \
+    --no-display-prompt \
+    -no-cnv 2>/dev/null)
 
-        # Input Area
-        self.entry_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        self.entry_box.set_margin_start(10)
-        self.entry_box.set_margin_end(10)
-        self.entry_box.set_margin_top(10)
-        self.entry_box.set_margin_bottom(10)
-        self.main_box.append(self.entry_box)
-
-        self.entry = Gtk.Entry()
-        self.entry.set_placeholder_text("Ask HIVE...")
-        self.entry.set_hexpand(True)
-        self.entry.add_css_class("input-box")
-        self.entry.connect("activate", self.on_send_clicked)
-        self.entry_box.append(self.entry)
-
-        self.send_btn = Gtk.Button(label="Send")
-        self.send_btn.connect("clicked", self.on_send_clicked)
-        self.entry_box.append(self.send_btn)
-
-        # Shortcuts
-        self.controller = Gtk.EventControllerKey()
-        self.controller.connect("key-pressed", self.on_key_pressed)
-        self.add_controller(self.controller)
-
-        # Initialize HIVE
-        self.append_text("System", "HIVE Standalone mode active (Direct llama-cli).")
-        
-        # Auto-focus entry
-        self.entry.grab_focus()
-
-        self.history = []
-
-    def append_text(self, sender, text):
-        end_iter = self.buffer.get_end_iter()
-        tag = "user-msg" if sender == "User" else "hive-msg"
-        
-        # Create tag if it doesn't exist
-        if not self.buffer.get_tag_table().lookup(tag):
-            if tag == "user-msg":
-                self.buffer.create_tag(tag, foreground="#0080FF", weight=700)
-            else:
-                self.buffer.create_tag(tag, foreground="#FFFFFF")
-
-        self.buffer.insert_with_tags_by_name(end_iter, f"\n{sender}: ", tag)
-        self.buffer.insert(self.buffer.get_end_iter(), f"{text}\n")
-        
-        # Scroll to bottom
-        adj = self.scroll.get_vadjustment()
-        adj.set_value(adj.get_upper() - adj.get_page_size())
-
-    def on_send_clicked(self, widget):
-        text = self.entry.get_text().strip()
-        if not text:
-            return
-        
-        self.entry.set_text("")
-        self.append_text("User", text)
-        self.send_btn.set_sensitive(False)
-        self.entry.set_sensitive(False)
-
-        threading.Thread(target=self.call_hive, args=(text,), daemon=True).start()
-
-    def call_hive(self, prompt):
-        try:
-            model_path = os.path.expanduser("~/.local/share/luminos/models/hive/Dolphin3.0-Llama3.1-8B-Q4_K_M.gguf")
-            if not os.path.exists(model_path):
-                raise FileNotFoundError(f"Model not found at {model_path}")
-
-            # Chat template for Llama 3.1
-            formatted_prompt = f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are HIVE, the Luminos OS AI assistant.<|eot_id|>"
-            for p, r in self.history:
-                formatted_prompt += f"<|start_header_id|>user<|end_header_id|>\n\n{p}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{r}<|eot_id|>"
-            formatted_prompt += f"<|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
-
-            cmd = [
-                "/usr/local/bin/llama-cli",
-                "-m", model_path,
-                "-p", formatted_prompt,
-                "--temp", "0.7",
-                "-n", "512",
-                "--log-disable",
-                "--no-display-prompt"
-            ]
-            
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            stdout, stderr = process.communicate()
-            
-            if process.returncode != 0:
-                raise Exception(f"llama-cli error: {stderr}")
-            
-            response = stdout.strip()
-            self.history.append((prompt, response))
-            
-            result = {
-                'response': response,
-                'model_used': 'Dolphin 3.0 (Nexus)',
-                'tokens_per_sec': 'N/A'
-            }
-            GLib.idle_add(self.show_response, result)
-        except Exception as e:
-            GLib.idle_add(self.append_text, "Error", str(e))
-            GLib.idle_add(self.send_btn.set_sensitive, True)
-            GLib.idle_add(self.entry.set_sensitive, True)
-
-    def show_response(self, result):
-        model = result.get('model_used', 'unknown')
-        self.append_text(f"HIVE ({model})", result.get('response', ''))
-        self.send_btn.set_sensitive(True)
-        self.entry.set_sensitive(True)
-        self.entry.grab_focus()
-
-    def on_key_pressed(self, controller, keyval, keycode, state):
-        if keyval == Gdk.KEY_Escape:
-            self.close()
-            return True
-        return False
-
-class HiveApp(Adw.Application):
-    def __init__(self, **kwargs):
-        super().__init__(application_id='org.luminos.hive-chat', **kwargs)
-
-    def do_activate(self):
-        win = self.active_window
-        if not win:
-            win = HiveChatWindow(application=self)
-        win.present()
-
-if __name__ == "__main__":
-    app = HiveApp()
-    app.run(sys.argv)
+# Show response
+kdialog --title "HIVE" --msgbox "$RESPONSE"

@@ -17,6 +17,16 @@ Each bug entry:
 
 ## Fixed Bugs
 
+### BUG-043 — HIVE popup crash (import: command not found)
+- Status: FIXED
+- Severity: HIGH
+- Component: /usr/local/bin/luminos-hive-popup
+- Description: Pressing SUPER+SPACE to launch HIVE popup crashes with bash syntax errors like "import: command not found".
+- Root Cause: An agent rewrote the popup script as a Python script using GTK4 (which is banned), but the global shortcut was executing it via `bash -x`.
+- Fix Applied: Rewrote the script to a native bash script using `kdialog` for UI and `llama-cli` for inference, matching project rules.
+- Date Found: 2026-04-26
+- Date Fixed: 2026-04-26
+
 ### BUG-001 — build.log directory missing at start
 - Status: FIXED
 - Severity: HIGH
