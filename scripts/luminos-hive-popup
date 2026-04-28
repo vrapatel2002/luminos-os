@@ -78,4 +78,19 @@ trap "rm -f $LOCKFILE" EXIT
 # HiDPI scale factor if needed (can be uncommented if too small)
 # export QT_SCALE_FACTOR=2
 
+
+# Auto-start Nexus if llama-server not running
+if ! pgrep -x "llama-server" > /dev/null; then
+    /home/shawn/luminos-os/scripts/hive-start-model.sh nexus &
+    sleep 8  # wait for model to load into VRAM
+fi
+
+# Keep watchdog alive while popup is open
+(
+    while kill -0 $$ 2>/dev/null; do
+        touch /tmp/hive-last-request
+        sleep 30
+    done
+) &
+
 exec qml6 ~/luminos-os/src/hive/HiveChat.qml

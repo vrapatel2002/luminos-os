@@ -249,14 +249,13 @@ Window {
                         text: "⊕" // Plus icon placeholder
                         color: "#A39E96" // Plus icon color
                         font.pixelSize: 20
-                        Layout.alignment: Qt.AlignVCenter
-                        Layout.leftMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
                     }
 
                     TextField {
                         id: textInput
                         Layout.fillWidth: true
-                        Layout.alignment: Qt.AlignVCenter
+                        anchors.verticalCenter: parent.verticalCenter
                         placeholderText: "How can I help you today?" // Input placeholder text
                         placeholderTextColor: "#A39E96" // Placeholder text color
                         color: "#2D2B28" // Input text color
@@ -268,7 +267,7 @@ Window {
                     }
 
                     Rectangle {
-                        Layout.alignment: Qt.AlignVCenter
+                        anchors.verticalCenter: parent.verticalCenter
                         width: 28; height: 28; radius: 14
                         color: textInput.text.trim() === "" ? "#F5F3EF" : "#D4784A" // Send button active color
                         Behavior on color { ColorAnimation { duration: 150 } } // Send button transition
@@ -379,17 +378,7 @@ Window {
     }
 
     // Process chat interaction
-    function touchLastRequest() {
-        try {
-            var proc = Qt.createQmlObject('import QtQuick; import QtCore; Process {}', root);
-            proc.start("touch", ["/tmp/hive-last-request"]);
-        } catch(e) {
-            console.log("Process component unavailable:", e);
-        }
-    }
-
     function sendMessage() {
-        touchLastRequest()
         var msg = textInput.text.trim()
         if (msg === "") return
 
@@ -424,6 +413,7 @@ Window {
     }
 
     function sendToHive() {
+        console.log("sendToHive called, messages:", JSON.stringify(conversationHistory))
         var xhr = new XMLHttpRequest()
         xhr.open("POST", "http://localhost:8080/v1/chat/completions", true)
         xhr.setRequestHeader("Content-Type", "application/json")
@@ -433,6 +423,7 @@ Window {
         
         xhr.onreadystatechange = function() {
             if (xhr.readyState === XMLHttpRequest.DONE) {
+                console.log("XHR status:", xhr.status, "response:", xhr.responseText)
                 isTyping = false
                 if (xhr.status === 200) {
                     try {
@@ -446,34 +437,18 @@ Window {
                         chatModel.append({ "role": "assistant", "content": "<i>Error parsing response</i>" })
                     }
                 } else if (xhr.status === 0) {
-                    // Connection refused or no server
-                    var wakeMsgId = conversationHistory.length
+                    console.log("XHR error or timeout (status 0)")
                     chatModel.append({ "role": "assistant", "content": "<i>HIVE is waking up... give me a moment.</i><br><b>Tip:</b> If it doesn't wake automatically, verify the background daemon is active." })
-                    
-                    try {
-                        var proc = Qt.createQmlObject('import QtQuick; import QtCore; Process {}', root);
-                        proc.start("/home/shawn/luminos-os/scripts/hive-start-model.sh", ["nexus"]);
-                    } catch(e) {
-                        console.log("Process component unavailable:", e);
-                    }
-                    
-                    // Retry after 15 seconds
-                    var timer = Qt.createQmlObject("import QtQuick; Timer { interval: 15000; repeat: false; running: true }", root);
-                    timer.triggered.connect(function() {
-                        // Remove the waking up message before retrying
-                        if (chatModel.count > 0 && chatModel.get(chatModel.count - 1).role === "assistant" && chatModel.get(chatModel.count - 1).content.indexOf("waking up") !== -1) {
-                            chatModel.remove(chatModel.count - 1);
-                        }
-                        sendToHive();
-                        timer.destroy();
-                    });
+                    // The launcher auto-starts it, but if it failed, we just tell the user.
                 } else {
+                    console.log("XHR error:", xhr.status)
                     chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an error (" + xhr.status + ")</i>" })
                 }
             }
         }
         
         xhr.ontimeout = function() {
+            console.log("XHR error or timeout")
             isTyping = false
             chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond. The model may not be loaded.</i>" })
         }

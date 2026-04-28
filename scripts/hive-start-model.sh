@@ -14,7 +14,7 @@ MODEL_NAME=$1
 
 case "$MODEL_NAME" in
     "nexus")
-        MODEL_PATH="$HOME/.local/share/luminos/models/hive/dolphin3.0-llama3.1-8b-Q4_K_M.gguf"
+        MODEL_PATH="$HOME/.local/share/luminos/models/hive/Dolphin3.0-Llama3.1-8B-Q4_K_M.gguf"
         ;;
     "bolt")
         MODEL_PATH="$HOME/.local/share/luminos/models/hive/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf"
@@ -34,15 +34,15 @@ if pgrep -x "llama-server" > /dev/null; then
     sleep 2
 fi
 
+touch /tmp/hive-last-request
+
 echo "Starting llama-server with model $MODEL_PATH..."
 /usr/local/bin/llama-server \
     -m "$MODEL_PATH" \
     --n-gpu-layers 99 \
     --ctx-size 4096 \
     --port 8080 \
-    --host 127.0.0.1 \
-    --cache-type-k turbo4 \
-    --flash-attn > /dev/null 2>&1 &
+    --host 127.0.0.1 > /dev/null 2>&1 &
 
 # Wait for server to be ready
 TIMEOUT=30
