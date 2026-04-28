@@ -338,94 +338,113 @@ Window {
                     minimumSize: 0.05
                 }
 
+                // [CHANGE: antigravity | 2026-04-28] Full delegate rewrite — responsive layout, no hardcoded heights
                 delegate: Column {
                     id: delegateCol
                     width: ListView.view ? ListView.view.width - 40 : 0
-                    spacing: 4
+                    spacing: 0  // We control spacing with explicit spacer Items
 
-                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Conversation Block Separators (Fixed overlap)
+                    // ── PART 1: Separator (only before user messages, not first message) ──
                     Item {
-                        visible: model.role === "user" && model.index > 0 && !model.isStatus
                         width: parent.width
-                        height: 1
+                        height: 25  // 12px above + 1px line + 12px below
+                        visible: model.role === "user" && model.index > 0 && !model.isStatus
 
                         Rectangle {
                             width: parent.width * 0.9
                             height: 1
                             color: separatorColor
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.bottom: parent.bottom
+                            anchors.centerIn: parent
                         }
                     }
 
+                    // ── PART 2: Message bubble ──
                     Item {
+                        id: bubbleRow
                         width: parent.width
-                        height: (model.role === "assistant" && !model.isStatus ? messageText.contentHeight : msgText.implicitHeight) + 24 // [CHANGE: gemini-cli | 2026-04-28] Use contentHeight + more padding
-                        
+                        // Height determined entirely by the bubble's natural size
+                        implicitHeight: msgBubble.implicitHeight > 0 ? msgBubble.implicitHeight : 40
+
                         Rectangle {
                             id: msgBubble
-                            width: Math.min(
-                                (model.role === "assistant" && !model.isStatus ? messageText.implicitWidth : msgText.implicitWidth) + 32,
-                                parent.width * (model.role === "user" ? 0.75 : 0.8)
-                            )
-                            height: parent.height
+                            // Width: simple percentage width to avoid implicitWidth wrap issues
+                            width: parent.width * (model.role === "user" ? 0.75 : 0.85)
+                            
+                            // Height: entirely driven by childrenRect
+                            implicitHeight: bubbleContent.childrenRect.height + 24  // 12px top + 12px bottom padding
+
+                            // Alignment: user right, AI/status left
                             anchors.right: model.role === "user" ? parent.right : undefined
-                            anchors.left: model.role === "assistant" ? parent.left : undefined
-                            color: model.role === "user" ? userBubble : "transparent" // [CHANGE: gemini-cli | 2026-04-28] Use userBubble
-                            radius: 18 // Bubble radius
+                            anchors.left: model.role !== "user" ? parent.left : undefined
 
-                            Text {
-                                id: msgText
-                                visible: model.role !== "assistant" || model.isStatus
-                                anchors.centerIn: parent
-                                width: parent.width - 32
-                                text: model.content
-                                color: textColor // [CHANGE: gemini-cli | 2026-04-28] Use textColor
-                                font.family: "Inter"
-                                font.pixelSize: 14 // Message font size
-                                wrapMode: Text.Wrap
-                                textFormat: Text.RichText // Enables bold (<b>)
-                                lineHeight: 1.4 // Reduced from 1.6
-                            }
+                            color: model.role === "user" ? userBubble : "transparent"
+                            radius: 18
 
-                            TextEdit {
-                                id: messageText
-                                visible: model.role === "assistant" && !model.isStatus
-                                anchors.centerIn: parent
-                                width: parent.width - 32
-                                text: model.content
-                                readOnly: true
-                                selectByMouse: true
-                                wrapMode: TextEdit.Wrap
-                                textFormat: TextEdit.RichText
-                                font.family: "Inter"
-                                font.pixelSize: 14
-                                color: textColor
-                                selectedTextColor: surfaceColor
-                                selectionColor: accentColor
+                            // Inner content Column — positions text with padding
+                            Column {
+                                id: bubbleContent
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.leftMargin: 16
+                                anchors.rightMargin: 16
+                                anchors.top: parent.top
+                                anchors.topMargin: 12
+
+                                // User messages + status: plain Text (not selectable)
+                                Text {
+                                    id: msgText
+                                    visible: model.role !== "assistant" || model.isStatus
+                                    width: parent.width
+                                    text: model.content
+                                    color: model.isStatus ? subtleText : textColor
+                                    font.family: "Inter"
+                                    font.pixelSize: 14
+                                    font.italic: model.isStatus ? true : false
+                                    wrapMode: Text.Wrap
+                                    textFormat: Text.RichText
+                                    lineHeight: 1.4
+                                    // Height is NEVER set — determined by wrapMode
+                                }
+
+                                // AI messages (non-status): selectable TextEdit for copy support
+                                TextEdit {
+                                    id: messageText
+                                    visible: model.role === "assistant" && !model.isStatus
+                                    width: parent.width
+                                    text: model.content
+                                    readOnly: true
+                                    selectByMouse: true
+                                    wrapMode: TextEdit.Wrap
+                                    textFormat: TextEdit.RichText
+                                    font.family: "Inter"
+                                    font.pixelSize: 14
+                                    color: textColor
+                                    selectedTextColor: surfaceColor
+                                    selectionColor: accentColor
+                                    // Height is NEVER set — determined by wrapMode
+                                }
                             }
                         }
                     }
 
-                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Show model label under AI messages
+                    // ── PART 3: Model label (AI messages only, not status) ──
                     Text {
                         id: modelLabel
                         visible: model.role === "assistant" && !model.isStatus
                         text: activeModel
                         font.pixelSize: 11
-                        color: subtleText // [CHANGE: gemini-cli | 2026-04-28] Use subtleText
+                        color: subtleText
+                        topPadding: 4
                         leftPadding: 4
-                        anchors.left: parent.left
                     }
 
-                    // [CHANGE: gemini-cli | 2026-04-28] Copy Button for AI messages (Wayland fixed)
+                    // ── PART 4: Copy button (AI messages only, not status) ──
                     Row {
                         id: copyRowContainer
                         spacing: 6
                         topPadding: 2
                         visible: model.role === "assistant" && !model.isStatus
-                        opacity: 1.0 // Always visible but subtle
-                        
+
                         Rectangle {
                             id: copyRect
                             width: copyRow.width + 12
@@ -465,7 +484,7 @@ Window {
                                 cursorShape: Qt.PointingHandCursor
                                 hoverEnabled: true
                                 onClicked: {
-                                    // [CHANGE: gemini-cli | 2026-04-28] Use selectable TextEdit for reliable Wayland clipboard
+                                    // [CHANGE: antigravity | 2026-04-28] Copy via selectable TextEdit (Wayland safe)
                                     messageText.selectAll();
                                     messageText.copy();
                                     messageText.deselect();
@@ -482,13 +501,10 @@ Window {
                         }
                     }
 
-                    // Hover detection area for the entire message turn (optional now, but kept for consistency)
-                    MouseArea {
-                        id: aiMessageHover
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        acceptedButtons: Qt.NoButton  // don't eat clicks
-                        visible: model.role === "assistant" && !model.isStatus
+                    // ── PART 5: Bottom spacer — consistent gap after every message ──
+                    Item {
+                        width: 1
+                        height: 6
                     }
                 }
 
