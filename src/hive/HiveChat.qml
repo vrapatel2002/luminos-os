@@ -343,23 +343,24 @@ Window {
                     width: ListView.view ? ListView.view.width - 40 : 0
                     spacing: 4
 
-                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Conversation Block Separators (Fixed overlap and spacing)
+                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Conversation Block Separators (Fixed overlap)
                     Item {
                         visible: model.role === "user" && model.index > 0 && !model.isStatus
                         width: parent.width
-                        height: 25 // 12px top + 1px line + 12px bottom
-                        
+                        height: 1
+
                         Rectangle {
                             width: parent.width * 0.9
                             height: 1
                             color: separatorColor
-                            anchors.centerIn: parent
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
                         }
                     }
 
                     Item {
                         width: parent.width
-                        height: (model.role === "assistant" && !model.isStatus ? messageText.implicitHeight : msgText.implicitHeight) + 12 // Reduced from +24 to tighten bubble
+                        height: (model.role === "assistant" && !model.isStatus ? messageText.contentHeight : msgText.implicitHeight) + 24 // [CHANGE: gemini-cli | 2026-04-28] Use contentHeight + more padding
                         
                         Rectangle {
                             id: msgBubble
