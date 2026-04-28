@@ -1,10 +1,10 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Effects
+import QtQuick.LocalStorage
 
-// [CHANGE: gemini-cli | 2026-04-27]
-// Modified to use KDE native window, fix opacity spam, and connect backend
+// [CHANGE: antigravity | 2026-04-28]
+// Added: LocalStorage chat persistence, debug console.log, activity marker
 Window {
     id: root
     visible: true
@@ -22,12 +22,89 @@ Window {
     property bool chatStarted: false
     property var conversationHistory: []
     property bool isTyping: false
+    property int currentConversationId: -1
 
     property string timeOfDay: {
         var hour = new Date().getHours()
         if (hour >= 5 && hour < 12) return "Morning"
         if (hour >= 12 && hour < 17) return "Afternoon"
         return "Evening"
+    }
+
+    // ============================================
+    // SECTION: LocalStorage Database
+    // PURPOSE: Persist chat messages to SQLite via Qt's built-in LocalStorage.
+    //          Two tables: conversations (id, title, created_at)
+    //                      messages (id, conversation_id, role, content, created_at)
+    //          Save only — no load, no sidebar. History UI comes later.
+    // ============================================
+    function getDb() {
+        return LocalStorage.openDatabaseSync(
+            "HiveChatDB",   // DB identifier
+            "1.0",          // Version
+            "HIVE Chat History",
+            1000000         // Estimated size in bytes (~1MB)
+        )
+    }
+
+    function initDb() {
+        var db = getDb()
+        db.transaction(function(tx) {
+            tx.executeSql("CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )")
+            tx.executeSql("CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER,
+                role TEXT,
+                content TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+            )")
+        })
+        console.log("[HIVE DB] Database initialized")
+    }
+
+    function createConversation() {
+        var db = getDb()
+        var newId = -1
+        db.transaction(function(tx) {
+            tx.executeSql("INSERT INTO conversations (title) VALUES (?)", ["New chat"])
+            var result = tx.executeSql("SELECT last_insert_rowid() as id")
+            if (result.rows.length > 0) {
+                newId = result.rows.item(0).id
+            }
+        })
+        console.log("[HIVE DB] Created conversation:", newId)
+        return newId
+    }
+
+    function saveMessage(conversationId, role, content) {
+        if (conversationId < 0) return
+        var db = getDb()
+        db.transaction(function(tx) {
+            tx.executeSql(
+                "INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
+                [conversationId, role, content]
+            )
+        })
+        console.log("[HIVE DB] Saved message:", role, "len:", content.length)
+    }
+
+    function updateConversationTitle(conversationId, firstMessage) {
+        if (conversationId < 0) return
+        var title = firstMessage.substring(0, 50)
+        if (firstMessage.length > 50) title += "..."
+        var db = getDb()
+        db.transaction(function(tx) {
+            tx.executeSql(
+                "UPDATE conversations SET title = ? WHERE id = ?",
+                [title, conversationId]
+            )
+        })
+        console.log("[HIVE DB] Updated title:", title)
     }
 
     Item {
@@ -61,6 +138,7 @@ Window {
             id: landingView
             anchors.fill: parent
             opacity: root.chatStarted ? 0 : 1
+            visible: opacity > 0
             Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.InOutQuad } } // Greeting fade duration
 
             ColumnLayout {
@@ -104,77 +182,58 @@ Window {
             anchors.margins: 10
             anchors.bottomMargin: 0
             padding: 20 // Chat view padding
-            
+
             opacity: root.chatStarted ? 1 : 0
+            visible: opacity > 0
             Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.InOutQuad } } // Chat view fade duration
 
             // Hide standard scrollbar, use custom logic or default KDE look if possible
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
-            
+
             ListView {
                 id: messageList
                 anchors.fill: parent
                 model: ListModel { id: chatModel }
                 spacing: 16 // Spacing between messages
-                
-                delegate: Item {
-                    width: ListView.view.width
-                    height: messageColumn.height
 
-                    Column {
-                        id: messageColumn
-                        width: model.role === "user" ? parent.width * 0.75 : parent.width * 0.8 // Max width
+                delegate: Item {
+                    width: ListView.view ? ListView.view.width : 0
+                    height: msgBubble.height + 8
+                    opacity: 0
+
+                    Rectangle {
+                        id: msgBubble
+                        width: Math.min(msgText.implicitWidth + 32, parent.width * (model.role === "user" ? 0.75 : 0.8))
+                        height: msgText.implicitHeight + 24
                         anchors.right: model.role === "user" ? parent.right : undefined
                         anchors.left: model.role === "assistant" ? parent.left : undefined
-                        spacing: 4
+                        color: model.role === "user" ? "#F0EDE8" : "transparent" // User bubble color vs transparent
+                        radius: 18 // Bubble radius
 
-                        Rectangle {
-                            width: textMetrics.width + 32
-                            height: textMetrics.height + 24
-                            color: model.role === "user" ? "#F0EDE8" : "transparent" // User bubble color vs transparent
-                            radius: 18 // User bubble radius
-                            
-                            // Asymmetrical tail for user
-                            Rectangle {
-                                visible: model.role === "user"
-                                width: 18
-                                height: 18
-                                color: "#F0EDE8" // Tail color matches bubble
-                                anchors.bottom: parent.bottom
-                                anchors.right: parent.right
-                                anchors.rightMargin: -4 // overlap
-                                radius: 4 // Tail radius
-                                z: -1
-                            }
-
-                            Text {
-                                id: textMetrics
-                                anchors.centerIn: parent
-                                width: Math.min(messageColumn.width - 32, implicitWidth)
-                                text: model.content
-                                color: "#2D2B28" // Message text color
-                                font.family: "Inter"
-                                font.pixelSize: 14 // Message font size
-                                wrapMode: Text.Wrap
-                                textFormat: Text.RichText // Enables bold (<b>)
-                                lineHeight: 1.6 // AI message line height
-                            }
+                        Text {
+                            id: msgText
+                            anchors.centerIn: parent
+                            width: parent.width - 32
+                            text: model.content
+                            color: "#2D2B28" // Message text color
+                            font.family: "Inter"
+                            font.pixelSize: 14 // Message font size
+                            wrapMode: Text.Wrap
+                            textFormat: Text.RichText // Enables bold (<b>)
+                            lineHeight: 1.6 // AI message line height
                         }
                     }
 
                     // Slide up animation on appear
                     Component.onCompleted: {
-                        y += 5
-                        opacity = 0
-                        anim.start()
+                        slideIn.start()
                     }
-                    ParallelAnimation {
-                        id: anim
-                        NumberAnimation { target: parent; property: "y"; to: parent.y - 5; duration: 150; easing.type: Easing.OutQuad } // Slide up duration
-                        NumberAnimation { target: parent; property: "opacity"; to: 1; duration: 150; easing.type: Easing.OutQuad } // Fade in duration
+                    NumberAnimation on opacity {
+                        id: slideIn
+                        from: 0; to: 1; duration: 150; easing.type: Easing.OutQuad
                     }
                 }
-                
+
                 onCountChanged: {
                     Qt.callLater(function() {
                         messageList.positionViewAtEnd()
@@ -201,7 +260,7 @@ Window {
                     Rectangle {
                         width: 6; height: 6; radius: 3
                         color: "#A39E96" // Typing dot color
-                        
+
                         SequentialAnimation on scale {
                             loops: Animation.Infinite
                             running: typingIndicator.visible
@@ -237,7 +296,7 @@ Window {
                 radius: 26 // Input bar border radius (pill)
                 border.width: 1.5 // Input bar border width
                 border.color: textInput.activeFocus ? "#D4784A" : "#E5E2DC" // Input bar border colors
-                
+
                 Behavior on border.color { ColorAnimation { duration: 200 } } // Focus transition duration
 
                 RowLayout {
@@ -249,29 +308,30 @@ Window {
                         text: "⊕" // Plus icon placeholder
                         color: "#A39E96" // Plus icon color
                         font.pixelSize: 20
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
+                        Layout.leftMargin: 4
                     }
 
                     TextField {
                         id: textInput
                         Layout.fillWidth: true
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
                         placeholderText: "How can I help you today?" // Input placeholder text
                         placeholderTextColor: "#A39E96" // Placeholder text color
                         color: "#2D2B28" // Input text color
                         font.family: "Inter"
                         font.pixelSize: 15 // Input text size
                         background: Item {} // Remove default background
-                        
+
                         onAccepted: root.sendMessage()
                     }
 
                     Rectangle {
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
                         width: 28; height: 28; radius: 14
                         color: textInput.text.trim() === "" ? "#F5F3EF" : "#D4784A" // Send button active color
                         Behavior on color { ColorAnimation { duration: 150 } } // Send button transition
-                        
+
                         Text {
                             anchors.centerIn: parent
                             text: "↑" // Send arrow icon
@@ -279,7 +339,7 @@ Window {
                             font.pixelSize: 16
                             font.bold: true
                         }
-                        
+
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
@@ -311,6 +371,7 @@ Window {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 8 // Gap between chips
                 opacity: root.chatStarted ? 0 : 1
+                visible: opacity > 0
                 Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.InOutQuad } } // Chip fade duration
 
                 Repeater {
@@ -321,7 +382,7 @@ Window {
                         { icon: "✏️", label: "Write", prefix: "Help me write " },
                         { icon: "⚙️", label: "System", prefix: "On this system, " }
                     ]
-                    
+
                     Rectangle {
                         id: chipRect
                         width: chipRow.implicitWidth + 16
@@ -330,7 +391,7 @@ Window {
                         color: chipMouse.containsMouse ? "#F5F3EF" : "#FFFFFF" // Chip bg hover state
                         border.width: 1 // Chip border width
                         border.color: chipMouse.containsMouse ? "#D1CEC8" : "#E5E2DC" // Chip border hover state
-                        
+
                         Behavior on color { ColorAnimation { duration: 100 } }
                         Behavior on border.color { ColorAnimation { duration: 100 } }
 
@@ -339,8 +400,8 @@ Window {
                             anchors.centerIn: parent
                             spacing: 4
                             Text { text: modelData.icon; font.pixelSize: 12 } // Chip icon
-                            Text { 
-                                text: modelData.label 
+                            Text {
+                                text: modelData.label
                                 color: "#5A5650" // Chip text color
                                 font.family: "Inter"
                                 font.pixelSize: 13 // Chip text size
@@ -364,7 +425,6 @@ Window {
     }
 
 
-
     function closeWindow() {
         var fadeOut = Qt.createQmlObject('import QtQuick 2.0; NumberAnimation { target: mainContent; property: "opacity"; to: 0; duration: 150; easing.type: Easing.InQuad }', root) // Window close fade-out duration
         fadeOut.finished.connect(Qt.quit)
@@ -382,19 +442,26 @@ Window {
         var msg = textInput.text.trim()
         if (msg === "") return
 
+        console.log("[HIVE] Sending message:", msg.substring(0, 80))
+
         if (!chatStarted) {
             chatStarted = true
+            // Update conversation title from first message
+            updateConversationTitle(currentConversationId, msg)
         }
 
         // Add to UI
         chatModel.append({ "role": "user", "content": msg })
-        
+
         // Add to history
         conversationHistory.push({ "role": "user", "content": msg })
-        
+
+        // Persist to DB
+        saveMessage(currentConversationId, "user", msg)
+
         textInput.text = ""
         isTyping = true
-        
+
         sendToHive()
     }
 
@@ -413,56 +480,67 @@ Window {
     }
 
     function sendToHive() {
-        console.log("sendToHive called, messages:", JSON.stringify(conversationHistory))
+        console.log("[HIVE] sendToHive() — messages:", conversationHistory.length)
         var xhr = new XMLHttpRequest()
         xhr.open("POST", "http://localhost:8080/v1/chat/completions", true)
         xhr.setRequestHeader("Content-Type", "application/json")
-        
+
         // 30 seconds timeout
-        xhr.timeout = 30000 
-        
+        xhr.timeout = 30000
+
         xhr.onreadystatechange = function() {
             if (xhr.readyState === XMLHttpRequest.DONE) {
-                console.log("XHR status:", xhr.status, "response:", xhr.responseText)
+                console.log("[HIVE] XHR done — status:", xhr.status, "len:", xhr.responseText.length)
                 isTyping = false
                 if (xhr.status === 200) {
                     try {
                         var response = JSON.parse(xhr.responseText)
                         if (response.choices && response.choices.length > 0) {
                             var aiText = response.choices[0].message.content
+                            console.log("[HIVE] AI response received, len:", aiText.length)
                             conversationHistory.push({ "role": "assistant", "content": aiText })
                             chatModel.append({ "role": "assistant", "content": formatMarkdown(aiText) })
+                            // Persist AI response to DB
+                            saveMessage(currentConversationId, "assistant", aiText)
+                        } else {
+                            console.log("[HIVE] ERROR: No choices in response")
+                            chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an empty response.</i>" })
                         }
                     } catch(e) {
-                        chatModel.append({ "role": "assistant", "content": "<i>Error parsing response</i>" })
+                        console.log("[HIVE] ERROR: JSON parse failed:", e)
+                        chatModel.append({ "role": "assistant", "content": "<i>Error parsing HIVE response.</i>" })
                     }
                 } else if (xhr.status === 0) {
-                    console.log("XHR error or timeout (status 0)")
-                    chatModel.append({ "role": "assistant", "content": "<i>HIVE is waking up... give me a moment.</i><br><b>Tip:</b> If it doesn't wake automatically, verify the background daemon is active." })
-                    // The launcher auto-starts it, but if it failed, we just tell the user.
+                    console.log("[HIVE] ERROR: Connection refused (status 0) — server may not be running")
+                    chatModel.append({ "role": "assistant", "content": "<i>HIVE is waking up... give me a moment.</i><br><b>Tip:</b> If it doesn't wake automatically, check /tmp/hive-server.log" })
                 } else {
-                    console.log("XHR error:", xhr.status)
+                    console.log("[HIVE] ERROR: HTTP", xhr.status)
                     chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an error (" + xhr.status + ")</i>" })
                 }
             }
         }
-        
+
         xhr.ontimeout = function() {
-            console.log("XHR error or timeout")
+            console.log("[HIVE] ERROR: Request timed out after 30s")
             isTyping = false
-            chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond. The model may not be loaded.</i>" })
+            chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond within 30 seconds. The model may not be loaded.</i>" })
         }
-        
+
         var payload = {
             "model": "nexus",
             "messages": conversationHistory,
             "stream": false
         }
-        
+
+        console.log("[HIVE] Sending POST to localhost:8080")
         xhr.send(JSON.stringify(payload))
     }
 
     Component.onCompleted: {
+        console.log("[HIVE] HiveChat.qml loaded")
+        initDb()
+        currentConversationId = createConversation()
+        console.log("[HIVE] New conversation ID:", currentConversationId)
         textInput.forceActiveFocus()
     }
 }

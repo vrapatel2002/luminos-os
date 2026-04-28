@@ -404,6 +404,16 @@ Each bug entry:
 
 (none)
 
+### BUG-044 — SUPER+SPACE opens popup but llama-server doesn't start
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/luminos-hive-popup, scripts/hive-start-model.sh, scripts/hive-idle-watchdog.sh
+- Description: Launching HIVE via `Meta+Space` (KDE shortcut) opened the QML popup, but `llama-server` never started. The same script worked fine from a terminal. Chat showed "HIVE is waking up..." forever.
+- Root Cause: KDE kglobalaccel launches shortcuts in a MINIMAL environment. `PATH`, `HOME`, `LD_LIBRARY_PATH`, and CUDA variables are all missing or incomplete. Bare commands like `pgrep`, `curl`, `touch` resolve to nothing. `$HOME` expansion for model paths returned empty string.
+- Fix Applied: (1) Added hardened env block below the critical section in `luminos-hive-popup` — explicit `PATH`, `LD_LIBRARY_PATH`, `CUDA_VISIBLE_DEVICES`. (2) Replaced ALL bare commands with absolute paths (`/usr/bin/pgrep`, `/usr/bin/curl`, `/usr/bin/touch`, `/usr/bin/sleep`, `/usr/bin/kill`, `/usr/bin/nohup`, `/usr/bin/qml6`, `/usr/local/bin/llama-server`). (3) Hardcoded `HOME=/home/shawn` in `hive-start-model.sh` and model paths use `/home/shawn/...` instead of `$HOME/...`. (4) Used `nohup + disown` for llama-server background launch so it survives. (5) Changed `qml6` from `exec` to foreground so bash manages watchdog cleanup. (6) Same absolute path treatment applied to `hive-idle-watchdog.sh`.
+- Date Found: 2026-04-28
+- Date Fixed: 2026-04-28
+
 ### BUG-041 — SUPER+SPACE not triggering HIVE popup
 - Status: FIXED
 - Severity: HIGH

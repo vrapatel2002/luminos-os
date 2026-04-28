@@ -52,45 +52,89 @@ fi
 # XDG_SESSION_TYPE — tells Qt/kdialog to use Wayland backend
 export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
 
-# QT_QPA_PLATFORM — force kdialog to use wayland
+# QT_QPA_PLATFORM — force Qt to use wayland
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 
 # HOME — sometimes missing in service contexts
-export HOME="${HOME:-$(getent passwd $(id -u) | cut -d: -f6)}"
+export HOME="${HOME:-$(/usr/bin/getent passwd $(/usr/bin/id -u) | /usr/bin/cut -d: -f6)}"
 
 # ════════════════════════════════════════
 # END CRITICAL SECTION
 # ════════════════════════════════════════
 
+# ════════════════════════════════════════
+# SECTION: Hardened Environment for KDE Shortcut Launch
+# PURPOSE: kglobalaccel launches with a MINIMAL env — PATH, HOME,
+#          LD_LIBRARY_PATH, CUDA vars are all missing or incomplete.
+#          We export everything explicitly so llama-server, pgrep,
+#          curl, and qml6 all work from the shortcut context.
+# [CHANGE: antigravity | 2026-04-28]
+# ════════════════════════════════════════
+
+export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/opt/cuda/bin:$PATH"
+export LD_LIBRARY_PATH="/opt/cuda/lib64:/usr/lib:/usr/local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+
+# ════════════════════════════════════════
+# SECTION: Toggle Lock (SUPER+SPACE on/off)
+# PURPOSE: If popup is already open, close it. Otherwise start new.
+# ════════════════════════════════════════
+
 LOCKFILE="/tmp/luminos-hive-popup.lock"
 
 if [ -f "$LOCKFILE" ]; then
-    OLD_PID=$(cat "$LOCKFILE")
-    if kill -0 "$OLD_PID" 2>/dev/null; then
-        kill -TERM "$OLD_PID"
+    OLD_PID=$(/usr/bin/cat "$LOCKFILE" 2>/dev/null)
+    if [ -n "$OLD_PID" ] && /usr/bin/kill -0 "$OLD_PID" 2>/dev/null; then
+        /usr/bin/kill -TERM "$OLD_PID"
         exit 0
     fi
 fi
 
 echo $$ > "$LOCKFILE"
-trap "rm -f $LOCKFILE" EXIT
+trap "/usr/bin/rm -f $LOCKFILE" EXIT
 
-# HiDPI scale factor if needed (can be uncommented if too small)
-# export QT_SCALE_FACTOR=2
+# ════════════════════════════════════════
+# SECTION: Auto-start Nexus
+# PURPOSE: If llama-server isn't running, start it before the UI.
+#          Uses nohup + disown so the server survives independently.
+# ════════════════════════════════════════
 
-
-# Auto-start Nexus if llama-server not running
-if ! pgrep -x "llama-server" > /dev/null; then
-    /home/shawn/luminos-os/scripts/hive-start-model.sh nexus &
-    sleep 8  # wait for model to load into VRAM
+if ! /usr/bin/pgrep -x "llama-server" > /dev/null 2>&1; then
+    /usr/bin/nohup /home/shawn/luminos-os/scripts/hive-start-model.sh nexus \
+        >> /tmp/hive-server.log 2>&1 &
+    disown
+    /usr/bin/sleep 8  # wait for model to load into VRAM
 fi
 
-# Keep watchdog alive while popup is open
+# Mark activity so idle-watchdog doesn't kill while popup is open
+/usr/bin/touch /tmp/hive-last-request
+
+# ════════════════════════════════════════
+# SECTION: Watchdog Keep-Alive Loop
+# PURPOSE: Touch the activity marker every 30s while popup is open
+#          so the idle-watchdog doesn't kill llama-server under us.
+#          Killed automatically when qml6 exits (via wait + trap).
+# ════════════════════════════════════════
+
+KEEP_ALIVE_PID=""
 (
-    while kill -0 $$ 2>/dev/null; do
-        touch /tmp/hive-last-request
-        sleep 30
+    while /usr/bin/kill -0 $$ 2>/dev/null; do
+        /usr/bin/touch /tmp/hive-last-request
+        /usr/bin/sleep 30
     done
 ) &
+KEEP_ALIVE_PID=$!
 
-exec qml6 ~/luminos-os/src/hive/HiveChat.qml
+# ════════════════════════════════════════
+# SECTION: Launch QML UI
+# PURPOSE: Run qml6 in foreground (NOT exec) so this bash process
+#          stays alive to manage the keep-alive loop and lockfile.
+# ════════════════════════════════════════
+
+/usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml
+
+# Cleanup: kill keep-alive loop after popup closes
+if [ -n "$KEEP_ALIVE_PID" ]; then
+    /usr/bin/kill "$KEEP_ALIVE_PID" 2>/dev/null
+    wait "$KEEP_ALIVE_PID" 2>/dev/null
+fi
