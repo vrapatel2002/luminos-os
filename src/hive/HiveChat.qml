@@ -254,16 +254,34 @@ Window {
                 
                 cacheBuffer: 1000
                 clip: true
-                // [CHANGE: gemini-cli | 2026-04-27] Issue 1: Trackpad physics
-                flickDeceleration: 1500
-                maximumFlickVelocity: 4000
-                pixelAligned: false
+                // [CHANGE: gemini-cli | 2026-04-27] Issue 1: Replace flick physics with WheelHandler for Trackpad
+                interactive: false
                 boundsBehavior: Flickable.StopAtBounds
-                boundsMovement: Flickable.FollowBoundsBehavior
+
+                WheelHandler {
+                    id: scrollHandler
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: function(event) {
+                        // Use angleDelta for discrete scroll, pixelDelta for smooth trackpad
+                        var delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 2;
+                        
+                        // Apply directly — negative delta = scroll down
+                        var newY = messageList.contentY - delta;
+                        
+                        // Clamp to bounds
+                        var minY = messageList.originY;
+                        var maxY = messageList.contentHeight - messageList.height + messageList.originY;
+                        
+                        if (maxY < minY) maxY = minY;
+                        
+                        messageList.contentY = Math.max(minY, Math.min(maxY, newY));
+                    }
+                }
 
                 ScrollBar.vertical: ScrollBar {
                     policy: ScrollBar.AsNeeded
                     interactive: true
+                    minimumSize: 0.05
                 }
 
                 delegate: Column {
