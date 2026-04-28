@@ -15,10 +15,10 @@ Window {
     // ============================================
     width: 820          // Window width in logical px — adjust for wider/narrower
     height: 620         // Window height in logical px — adjust for taller/shorter
-    color: bgColor    // [CHANGE: gemini-cli | 2026-04-27] Dynamic background
+    color: bgColor    // [CHANGE: gemini-cli | 2026-04-28] Dynamic background
     title: "HIVE Chat"
 
-    // [CHANGE: gemini-cli | 2026-04-27] Issue 1: System theme detection
+    // [CHANGE: gemini-cli | 2026-04-28] Issue 1: System theme detection
     SystemPalette { id: sysPalette; colorGroup: SystemPalette.Active }
     
     property bool isDark: {
@@ -58,7 +58,7 @@ Window {
     property var conversationHistory: []
     property bool isTyping: false
     property int currentConversationId: -1
-    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Dynamic model name
+    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Dynamic model name
     property string activeModel: "HIVE"
 
     property string timeOfDay: {
@@ -68,7 +68,7 @@ Window {
         return "Evening"
     }
 
-    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Load active model name from file
+    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Load active model name from file
     function loadActiveModel() {
         var xhr = new XMLHttpRequest();
         xhr.open("GET", "file:///tmp/hive-active-model");
@@ -85,7 +85,7 @@ Window {
         xhr.send();
     }
 
-    // [CHANGE: gemini-cli | 2026-04-27] Issue 3: Ping health and show status
+    // [CHANGE: gemini-cli | 2026-04-28] Issue 3: Ping health and show status
     function checkServerHealth() {
         var hc = new XMLHttpRequest();
         hc.open("GET", "http://localhost:8080/health");
@@ -212,7 +212,7 @@ Window {
         Rectangle {
             id: bgRect
             anchors.fill: parent
-            color: bgColor // [CHANGE: gemini-cli | 2026-04-27] Dynamic background
+            color: bgColor // [CHANGE: gemini-cli | 2026-04-28] Dynamic background
         }
 
         // ============================================
@@ -238,13 +238,13 @@ Window {
 
                     Text {
                         text: "✳" // Sparkle/asterisk icon
-                        color: accentColor // [CHANGE: gemini-cli | 2026-04-27] Use accentColor
+                        color: accentColor // [CHANGE: gemini-cli | 2026-04-28] Use accentColor
                         font.pixelSize: 40 // Icon size
                     }
 
                     Text {
                         text: root.timeOfDay + ", Sam"
-                        color: textColor // [CHANGE: gemini-cli | 2026-04-27] Use textColor
+                        color: textColor // [CHANGE: gemini-cli | 2026-04-28] Use textColor
                         font.family: "Inter" // Greeting font
                         font.pixelSize: 36 // Greeting font size
                         font.weight: Font.Normal
@@ -259,7 +259,7 @@ Window {
         // PURPOSE: Shows the conversation history
         // TUNE: Adjust chat bubbles, padding, and text colors
         // ============================================
-        // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 3: Chat now anchors to parent.bottom and clips behind input bar
+        // [CHANGE: gemini-cli | 2026-04-28] Fix Bug 3: Chat now anchors to parent.bottom and clips behind input bar
         ScrollView {
             id: chatView
             anchors.top: parent.top
@@ -276,7 +276,7 @@ Window {
             // Hide standard scrollbar, use custom logic or default KDE look if possible
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-            // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 1: Optimized ListView for smooth scrolling (Trackpad)
+            // [CHANGE: gemini-cli | 2026-04-28] Fix Bug 1: Optimized ListView for smooth scrolling (Trackpad)
             ListView {
                 id: messageList
                 anchors.fill: parent
@@ -289,7 +289,7 @@ Window {
                 
                 cacheBuffer: 1000
                 clip: true
-                // [CHANGE: gemini-cli | 2026-04-27] Issue 1: Replace flick physics with WheelHandler for Trackpad
+                // [CHANGE: gemini-cli | 2026-04-28] Issue 1: Replace flick physics with WheelHandler for Trackpad
                 interactive: false
                 boundsBehavior: Flickable.StopAtBounds
 
@@ -323,20 +323,29 @@ Window {
                     id: delegateCol
                     width: ListView.view ? ListView.view.width - 40 : 0
                     spacing: 4
-                    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Add top margin when separator is shown
+                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Add top margin when separator is shown
                     topPadding: (model.role === "user" && model.index > 0 && !model.isStatus) ? 16 : 8
 
-                    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Conversation Block Separators
+                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Conversation Block Separators
                     Loader {
                         active: model.role === "user" && model.index > 0 && !model.isStatus
                         width: parent.width
+                        // Ensure 8px space below the 1px line (spacing 4 + height 5 = 9? No, height 5 means 4px extra)
+                        // If spacing is 4, and I want 8px total below: 1px line + 4px space inside item + 4px spacing = 9.
+                        // Wait, user said 8px below it.
+                        // I'll use a height that accounts for the spacing.
+                        height: active ? 5 : 0 
                         sourceComponent: Component {
-                            Rectangle {
-                                width: parent ? parent.width * 0.9 : 0
-                                height: 1
-                                color: separatorColor
-                                anchors.horizontalCenter: parent ? parent.horizontalCenter : undefined
-                                anchors.bottomMargin: 8
+                            Item {
+                                width: parent.width
+                                height: 5
+                                Rectangle {
+                                    width: parent.width * 0.9
+                                    height: 1
+                                    color: separatorColor
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                }
                             }
                         }
                     }
@@ -351,7 +360,7 @@ Window {
                             height: msgText.implicitHeight + 24
                             anchors.right: model.role === "user" ? parent.right : undefined
                             anchors.left: model.role === "assistant" ? parent.left : undefined
-                            color: model.role === "user" ? userBubble : "transparent" // [CHANGE: gemini-cli | 2026-04-27] Use userBubble
+                            color: model.role === "user" ? userBubble : "transparent" // [CHANGE: gemini-cli | 2026-04-28] Use userBubble
                             radius: 18 // Bubble radius
 
                             Text {
@@ -359,7 +368,7 @@ Window {
                                 anchors.centerIn: parent
                                 width: parent.width - 32
                                 text: model.content
-                                color: textColor // [CHANGE: gemini-cli | 2026-04-27] Use textColor
+                                color: textColor // [CHANGE: gemini-cli | 2026-04-28] Use textColor
                                 font.family: "Inter"
                                 font.pixelSize: 14 // Message font size
                                 wrapMode: Text.Wrap
@@ -369,12 +378,12 @@ Window {
                         }
                     }
 
-                    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Show model label under AI messages
+                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Show model label under AI messages
                     Text {
                         visible: model.role === "assistant" && !model.isStatus
                         text: activeModel
                         font.pixelSize: 11
-                        color: subtleText // [CHANGE: gemini-cli | 2026-04-27] Use subtleText
+                        color: subtleText // [CHANGE: gemini-cli | 2026-04-28] Use subtleText
                         leftPadding: 4
                         anchors.left: parent.left
                     }
@@ -406,7 +415,7 @@ Window {
                     model: 3
                     Rectangle {
                         width: 6; height: 6; radius: 3
-                        color: subtleText // [CHANGE: gemini-cli | 2026-04-27] Use subtleText
+                        color: subtleText // [CHANGE: gemini-cli | 2026-04-28] Use subtleText
 
                         SequentialAnimation on scale {
                             loops: Animation.Infinite
@@ -426,12 +435,12 @@ Window {
         // PURPOSE: Search/Chat input field
         // TUNE: Adjust dimensions, borders, colors
         // ============================================
-        // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 3: Input bar layered on top with solid background
+        // [CHANGE: gemini-cli | 2026-04-28] Fix Bug 3: Input bar layered on top with solid background
         Rectangle {
             id: footerBar
             width: parent.width
             height: 140
-            color: bgColor // [CHANGE: gemini-cli | 2026-04-27] Use bgColor
+            color: bgColor // [CHANGE: gemini-cli | 2026-04-28] Use bgColor
             anchors.bottom: parent.bottom
             z: 10
 
@@ -445,10 +454,10 @@ Window {
                 Rectangle {
                     id: inputBg
                     anchors.fill: parent
-                    color: surfaceColor // [CHANGE: gemini-cli | 2026-04-27] Use surfaceColor
+                    color: surfaceColor // [CHANGE: gemini-cli | 2026-04-28] Use surfaceColor
                     radius: 26 // Input bar border radius (pill)
                     border.width: 1.5 // Input bar border width
-                    border.color: textInput.activeFocus ? accentColor : borderColor // [CHANGE: gemini-cli | 2026-04-27] Use theme colors
+                    border.color: textInput.activeFocus ? accentColor : borderColor // [CHANGE: gemini-cli | 2026-04-28] Use theme colors
 
                     Behavior on border.color { ColorAnimation { duration: 200 } } // Focus transition duration
 
@@ -458,10 +467,10 @@ Window {
                         anchors.rightMargin: 12
                         spacing: 8
 
-                        // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 2: Center buttons and text perfectly
+                        // [CHANGE: gemini-cli | 2026-04-28] Fix Bug 2: Center buttons and text perfectly
                         Text {
                             text: "⊕" // Plus icon placeholder
-                            color: subtleText // [CHANGE: gemini-cli | 2026-04-27] Use subtleText
+                            color: subtleText // [CHANGE: gemini-cli | 2026-04-28] Use subtleText
                             font.pixelSize: 20
                             Layout.alignment: Qt.AlignVCenter
                         }
@@ -471,8 +480,8 @@ Window {
                             Layout.fillWidth: true
                             Layout.alignment: Qt.AlignVCenter
                             placeholderText: "How can I help you today?" // Input placeholder text
-                            placeholderTextColor: subtleText // [CHANGE: gemini-cli | 2026-04-27] Use subtleText
-                            color: textColor // [CHANGE: gemini-cli | 2026-04-27] Use textColor
+                            placeholderTextColor: subtleText // [CHANGE: gemini-cli | 2026-04-28] Use subtleText
+                            color: textColor // [CHANGE: gemini-cli | 2026-04-28] Use textColor
                             font.family: "Inter"
                             font.pixelSize: 15 // Input text size
                             background: Item {} // Remove default background
@@ -484,14 +493,14 @@ Window {
 
                         Rectangle {
                             width: 28; height: 28; radius: 14
-                            color: textInput.text.trim() === "" ? hoverColor : accentColor // [CHANGE: gemini-cli | 2026-04-27] Use hoverColor and accentColor
+                            color: textInput.text.trim() === "" ? hoverColor : accentColor // [CHANGE: gemini-cli | 2026-04-28] Use hoverColor and accentColor
                             Layout.alignment: Qt.AlignVCenter
                             Behavior on color { ColorAnimation { duration: 150 } } // Send button transition
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "↑" // Send arrow icon
-                                color: textInput.text.trim() === "" ? subtleText : "#FFFFFF" // [CHANGE: gemini-cli | 2026-04-27] White arrow when active
+                                color: textInput.text.trim() === "" ? subtleText : surfaceColor // [CHANGE: gemini-cli | 2026-04-28] Use surfaceColor when active
                                 font.pixelSize: 16
                                 font.bold: true
                             }
@@ -506,9 +515,9 @@ Window {
                 }
 
                 Text {
-                    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Dynamic footer label
+                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Dynamic footer label
                     text: activeModel + " · HIVE" // Small bottom label
-                    color: labelText // [CHANGE: gemini-cli | 2026-04-27] Use labelText
+                    color: labelText // [CHANGE: gemini-cli | 2026-04-28] Use labelText
                     font.family: "Inter"
                     font.pixelSize: 11 // Bottom label font size
                     anchors.right: inputBg.right
@@ -545,9 +554,9 @@ Window {
                             width: chipRow.implicitWidth + 16
                             height: 28 // Chip height
                             radius: 14 // Chip corner radius
-                            color: chipMouse.containsMouse ? hoverColor : surfaceColor // [CHANGE: gemini-cli | 2026-04-27] Theme colors
+                            color: chipMouse.containsMouse ? hoverColor : surfaceColor // [CHANGE: gemini-cli | 2026-04-28] Theme colors
                             border.width: 1 // Chip border width
-                            border.color: chipMouse.containsMouse ? borderHoverColor : borderColor // [CHANGE: gemini-cli | 2026-04-27] Theme colors
+                            border.color: chipMouse.containsMouse ? borderHoverColor : borderColor // [CHANGE: gemini-cli | 2026-04-28] Theme colors
 
                             Behavior on color { ColorAnimation { duration: 100 } }
                             Behavior on border.color { ColorAnimation { duration: 100 } }
@@ -559,7 +568,7 @@ Window {
                                 Text { text: modelData.icon; font.pixelSize: 12 } // Chip icon
                                 Text {
                                     text: modelData.label
-                                    color: labelText // [CHANGE: gemini-cli | 2026-04-27] Use labelText
+                                    color: labelText // [CHANGE: gemini-cli | 2026-04-28] Use labelText
                                     font.family: "Inter"
                                     font.pixelSize: 13 // Chip text size
                                 }
@@ -685,7 +694,7 @@ Window {
             chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond within 30 seconds. The model may not be loaded.</i>" })
         }
 
-        // [CHANGE: gemini-cli | 2026-04-27] Only send messages that are NOT status messages
+        // [CHANGE: gemini-cli | 2026-04-28] Only send messages that are NOT status messages
         var historyToSend = []
         for (var i = 0; i < conversationHistory.length; i++) {
             if (!conversationHistory[i].isStatus) {
@@ -709,7 +718,7 @@ Window {
         currentConversationId = createConversation()
         console.log("[HIVE] New conversation ID:", currentConversationId)
         
-        // [CHANGE: gemini-cli | 2026-04-27] Issue 2 & 3: Initialization
+        // [CHANGE: gemini-cli | 2026-04-28] Issue 2 & 3: Initialization
         loadActiveModel()
         
         var hour = new Date().getHours()
