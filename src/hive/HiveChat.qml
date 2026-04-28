@@ -484,12 +484,22 @@ Window {
                                 cursorShape: Qt.PointingHandCursor
                                 hoverEnabled: true
                                 onClicked: {
-                                    // [CHANGE: antigravity | 2026-04-28] Copy via selectable TextEdit (Wayland safe)
-                                    messageText.selectAll();
-                                    messageText.copy();
-                                    messageText.deselect();
-                                    copyLabel.copied = true;
-                                    copyResetTimer.restart();
+                                    // [CHANGE: antigravity | 2026-04-28] Copy via swap server /copy endpoint (wl-copy)
+                                    var xhr = new XMLHttpRequest();
+                                    xhr.open("POST", "http://localhost:8079/copy");
+                                    xhr.setRequestHeader("Content-Type", "application/json");
+                                    xhr.onreadystatechange = function() {
+                                        if (xhr.readyState === XMLHttpRequest.DONE) {
+                                            if (xhr.status === 200) {
+                                                copyLabel.copied = true;
+                                            } else {
+                                                copyLabel.text = "⚠ Failed";
+                                                copyLabel.color = accentColor;
+                                            }
+                                            copyResetTimer.restart();
+                                        }
+                                    };
+                                    xhr.send(JSON.stringify({"text": model.content}));
                                 }
                             }
 

@@ -94,7 +94,7 @@ if [ -f "$LOCKFILE" ]; then
 fi
 
 echo $$ > "$LOCKFILE"
-trap "/usr/bin/rm -f $LOCKFILE" EXIT
+trap "/usr/bin/rm -f $LOCKFILE; /usr/bin/pkill -f 'hive-swap-server.py' 2>/dev/null" EXIT
 
 # ════════════════════════════════════════
 # SECTION: Auto-start Nexus
@@ -121,6 +121,14 @@ fi
 # Mark activity so idle-watchdog doesn't kill while popup is open
 /usr/bin/touch /tmp/hive-last-request
 
+# [CHANGE: antigravity | 2026-04-28] Start swap server if not running
+SWAP_PID=""
+if ! /usr/bin/pgrep -f "hive-swap-server.py" > /dev/null 2>&1; then
+    /usr/bin/python3 /home/shawn/luminos-os/scripts/hive-swap-server.py &
+    SWAP_PID=$!
+    echo "[HIVE] Swap server started (PID: $SWAP_PID)"
+fi
+
 # ════════════════════════════════════════
 # SECTION: Watchdog Keep-Alive Loop
 # PURPOSE: Touch the activity marker every 30s while popup is open
@@ -145,8 +153,13 @@ KEEP_ALIVE_PID=$!
 
 /usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml
 
-# Cleanup: kill keep-alive loop after popup closes
+# Cleanup: kill keep-alive loop and swap server after popup closes
 if [ -n "$KEEP_ALIVE_PID" ]; then
     /usr/bin/kill "$KEEP_ALIVE_PID" 2>/dev/null
     wait "$KEEP_ALIVE_PID" 2>/dev/null
+fi
+# [CHANGE: antigravity | 2026-04-28] Kill swap server on popup close
+if [ -n "$SWAP_PID" ]; then
+    /usr/bin/kill "$SWAP_PID" 2>/dev/null
+    wait "$SWAP_PID" 2>/dev/null
 fi
