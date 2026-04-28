@@ -61,6 +61,18 @@ Window {
     // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Dynamic model name
     property string activeModel: "HIVE"
 
+    // [CHANGE: gemini-cli | 2026-04-28] Clipboard helper
+    TextEdit {
+        id: clipboardHelper
+        visible: false
+        text: ""
+        function copyText(txt) {
+            text = txt;
+            selectAll();
+            copy();
+        }
+    }
+
     property string timeOfDay: {
         var hour = new Date().getHours()
         if (hour >= 5 && hour < 12) return "Morning"
@@ -380,12 +392,81 @@ Window {
 
                     // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Show model label under AI messages
                     Text {
+                        id: modelLabel
                         visible: model.role === "assistant" && !model.isStatus
                         text: activeModel
                         font.pixelSize: 11
                         color: subtleText // [CHANGE: gemini-cli | 2026-04-28] Use subtleText
                         leftPadding: 4
                         anchors.left: parent.left
+                    }
+
+                    // [CHANGE: gemini-cli | 2026-04-28] Copy Button for AI messages
+                    Row {
+                        id: copyRowContainer
+                        spacing: 6
+                        topPadding: 2
+                        visible: model.role === "assistant" && !model.isStatus
+                        opacity: aiMessageHover.containsMouse ? 1.0 : 0.0
+                        Behavior on opacity { NumberAnimation { duration: 150 } }
+
+                        Rectangle {
+                            width: copyRow.width + 12
+                            height: copyRow.height + 6
+                            radius: 4
+                            color: copyMouseArea.containsMouse ? borderColor : "transparent"
+
+                            Row {
+                                id: copyRow
+                                anchors.centerIn: parent
+                                spacing: 4
+
+                                Text {
+                                    id: copyLabel
+                                    text: "📋 Copy"
+                                    font.pixelSize: 11
+                                    color: subtleText
+
+                                    property bool copied: false
+
+                                    states: State {
+                                        name: "copied"
+                                        when: copyLabel.copied
+                                        PropertyChanges {
+                                            target: copyLabel
+                                            text: "✓ Copied"
+                                            color: accentColor
+                                        }
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                id: copyMouseArea
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                hoverEnabled: true
+                                onClicked: {
+                                    clipboardHelper.copyText(model.content);
+                                    copyLabel.copied = true;
+                                    copyResetTimer.restart();
+                                }
+                            }
+
+                            Timer {
+                                id: copyResetTimer
+                                interval: 2000
+                                onTriggered: copyLabel.copied = false
+                            }
+                        }
+                    }
+
+                    MouseArea {
+                        id: aiMessageHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton  // don't eat clicks from children
+                        visible: model.role === "assistant" && !model.isStatus
                     }
                 }
 
