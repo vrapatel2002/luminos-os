@@ -58,8 +58,11 @@ Window {
     property var conversationHistory: []
     property bool isTyping: false
     property int currentConversationId: -1
-    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Dynamic model name
-    property string activeModel: "HIVE"
+    // [CHANGE: antigravity | 2026-04-28] Phase 4: Chip routing state
+    property string activeChip: ""         // "" or "Code"/"Learn"/"Strategize"/"Write"/"System"
+    property string activeModel: "nexus"   // current model backend name
+    property string activeAgent: "Nexus"   // display name for labels
+    property bool isSwapping: false        // true during swap XHR
 
     // [CHANGE: gemini-cli | 2026-04-28] HIVE Team Identity
     property string systemPrompt: ""
@@ -87,21 +90,105 @@ Window {
         return "Evening"
     }
 
-    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Load active model name from file
+    // [CHANGE: antigravity | 2026-04-28] Phase 4: Load active model from file + set agent name
     function loadActiveModel() {
         var xhr = new XMLHttpRequest();
         xhr.open("GET", "file:///tmp/hive-active-model");
         xhr.onreadystatechange = function() {
             if (xhr.readyState === XMLHttpRequest.DONE) {
-                // For file:/// local files, status is often 0 on success
                 var name = xhr.responseText.trim();
                 if (name.length > 0) {
-                    activeModel = name.charAt(0).toUpperCase() + name.substring(1);
-                    console.log("[HIVE] Active model loaded:", activeModel);
+                    activeModel = name.toLowerCase();
+                    activeAgent = name.charAt(0).toUpperCase() + name.substring(1);
+                    console.log("[HIVE] Active model loaded:", activeModel, "agent:", activeAgent);
                 }
             }
         };
         xhr.send();
+    }
+
+    // [CHANGE: antigravity | 2026-04-28] Phase 4: Model swap, greeting, and status functions
+    function swapModel(chipName, modelName, agentName) {
+        if (isSwapping) return;  // prevent double-tap
+
+        // If clicking the already-active chip, deselect → back to Nexus
+        if (activeChip === chipName) {
+            activeChip = "";
+            modelName = "nexus";
+            agentName = "Nexus";
+        } else {
+            activeChip = chipName;
+        }
+
+        // If already on this model, just show greeting (no swap needed)
+        if (activeModel === modelName) {
+            showGreeting(agentName);
+            return;
+        }
+
+        isSwapping = true;
+        addStatusMessage("Switching to " + agentName + "...");
+
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "http://localhost:8079/swap/" + modelName);
+        xhr.timeout = 60000;
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === XMLHttpRequest.DONE) {
+                isSwapping = false;
+                if (xhr.status === 200) {
+                    try {
+                        var resp = JSON.parse(xhr.responseText);
+                        if (resp.status === "ready") {
+                            activeModel = modelName;
+                            activeAgent = agentName;
+                            loadSystemPrompt();
+                            showGreeting(agentName);
+                            console.log("[HIVE] Swapped to:", agentName);
+                        } else {
+                            addStatusMessage("Failed to load " + agentName + ". Staying on " + activeAgent + ".");
+                            activeChip = "";  // revert
+                        }
+                    } catch(e) {
+                        addStatusMessage("Failed to load " + agentName + ".");
+                        activeChip = "";
+                    }
+                } else {
+                    addStatusMessage("Failed to load " + agentName + ". Staying on " + activeAgent + ".");
+                    activeChip = "";  // revert
+                }
+            }
+        };
+        xhr.ontimeout = function() {
+            isSwapping = false;
+            addStatusMessage(agentName + " took too long to load.");
+            activeChip = "";
+        };
+        xhr.send();
+    }
+
+    function showGreeting(agentName) {
+        var greetings = {
+            "Nexus": "What's on your mind?",
+            "Bolt": "What are we building?",
+            "Nova": "What would you like to think through?"
+        };
+        var msg = greetings[agentName] || "Ready.";
+        chatModel.append({
+            "role": "assistant",
+            "content": msg,
+            "isStatus": false,
+            "agentName": agentName
+        });
+        // Greetings are NOT saved to DB or conversation history
+    }
+
+    function addStatusMessage(text) {
+        chatModel.append({
+            "role": "assistant",
+            "content": "<i>" + text + "</i>",
+            "isStatus": true,
+            "agentName": ""
+        });
     }
 
     // [CHANGE: gemini-cli | 2026-04-28] Issue 3: Ping health and show status
@@ -114,14 +201,16 @@ Window {
                 if (hc.status === 200) {
                     chatModel.append({
                         "role": "assistant",
-                        "content": activeModel + " is ready.",
-                        "isStatus": true
+                        "content": activeAgent + " is ready.",
+                        "isStatus": true,
+                        "agentName": ""
                     });
                 } else {
                     chatModel.append({
                         "role": "assistant",
                         "content": "Waking up...",
-                        "isStatus": true
+                        "isStatus": true,
+                        "agentName": ""
                     });
                 }
             }
@@ -130,7 +219,8 @@ Window {
             chatModel.append({
                 "role": "assistant",
                 "content": "Waking up...",
-                "isStatus": true
+                "isStatus": true,
+                "agentName": ""
             });
         };
         hc.send();
@@ -428,10 +518,11 @@ Window {
                     }
 
                     // ── PART 3: Model label (AI messages only, not status) ──
+                    // [CHANGE: antigravity | 2026-04-28] Phase 4: per-message agent name
                     Text {
                         id: modelLabel
                         visible: model.role === "assistant" && !model.isStatus
-                        text: activeModel
+                        text: model.agentName || activeAgent
                         font.pixelSize: 11
                         color: subtleText
                         topPadding: 4
@@ -644,15 +735,16 @@ Window {
                 }
 
                 Text {
-                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Dynamic footer label
-                    text: activeModel + " · HIVE" // Small bottom label
-                    color: labelText // [CHANGE: gemini-cli | 2026-04-28] Use labelText
+                    // [CHANGE: antigravity | 2026-04-28] Phase 4: Dynamic footer label with swap state
+                    text: isSwapping ? "Loading..." : (activeAgent + " · HIVE")
+                    color: labelText
                     font.family: "Inter"
-                    font.pixelSize: 11 // Bottom label font size
+                    font.pixelSize: 11
                     anchors.right: inputBg.right
                     anchors.rightMargin: 16
                     anchors.top: inputBg.bottom
                     anchors.topMargin: 6
+                    Behavior on text { enabled: false } // no animation on text swap
                 }
 
                 // ============================================
@@ -660,46 +752,55 @@ Window {
                 // PURPOSE: Quick prompt prefixes
                 // TUNE: Chip colors, borders, and hover states
                 // ============================================
+                // [CHANGE: antigravity | 2026-04-28] Phase 4: Chips as model selectors
                 RowLayout {
                     anchors.top: inputBg.bottom
                     anchors.topMargin: 20
                     anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: 8 // Gap between chips
+                    spacing: 8
                     opacity: root.chatStarted ? 0 : 1
                     visible: opacity > 0
-                    Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.InOutQuad } } // Chip fade duration
+                    Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.InOutQuad } }
 
                     Repeater {
                         model: [
-                            { icon: "</>", label: "Code", prefix: "Help me write code for " },
-                            { icon: "🌐", label: "Learn", prefix: "Explain to me " },
-                            { icon: "📊", label: "Strategize", prefix: "Help me plan " },
-                            { icon: "✏️", label: "Write", prefix: "Help me write " },
-                            { icon: "⚙️", label: "System", prefix: "On this system, " }
+                            { icon: "</>", label: "Code",       modelId: "bolt",  agent: "Bolt"  },
+                            { icon: "🌐",  label: "Learn",      modelId: "nova",  agent: "Nova"  },
+                            { icon: "📊",  label: "Strategize", modelId: "nova",  agent: "Nova"  },
+                            { icon: "✏️",  label: "Write",      modelId: "nexus", agent: "Nexus" },
+                            { icon: "⚙️",  label: "System",     modelId: "nexus", agent: "Nexus" }
                         ]
 
                         Rectangle {
                             id: chipRect
+                            property bool isActive: root.activeChip === modelData.label
                             width: chipRow.implicitWidth + 16
-                            height: 28 // Chip height
-                            radius: 14 // Chip corner radius
-                            color: chipMouse.containsMouse ? hoverColor : surfaceColor // [CHANGE: gemini-cli | 2026-04-28] Theme colors
-                            border.width: 1 // Chip border width
-                            border.color: chipMouse.containsMouse ? borderHoverColor : borderColor // [CHANGE: gemini-cli | 2026-04-28] Theme colors
+                            height: 28
+                            radius: 14
+                            color: isActive ? accentColor :
+                                   chipMouse.containsMouse ? hoverColor : surfaceColor
+                            border.width: isActive ? 0 : 1
+                            border.color: chipMouse.containsMouse ? borderHoverColor : borderColor
+                            opacity: root.isSwapping ? 0.5 : 1.0
 
-                            Behavior on color { ColorAnimation { duration: 100 } }
+                            Behavior on color { ColorAnimation { duration: 150 } }
                             Behavior on border.color { ColorAnimation { duration: 100 } }
+                            Behavior on opacity { NumberAnimation { duration: 150 } }
 
                             RowLayout {
                                 id: chipRow
                                 anchors.centerIn: parent
                                 spacing: 4
-                                Text { text: modelData.icon; font.pixelSize: 12 } // Chip icon
+                                Text {
+                                    text: modelData.icon
+                                    font.pixelSize: 12
+                                }
                                 Text {
                                     text: modelData.label
-                                    color: labelText // [CHANGE: gemini-cli | 2026-04-28] Use labelText
+                                    color: chipRect.isActive ? "#FFFFFF" : labelText
                                     font.family: "Inter"
-                                    font.pixelSize: 13 // Chip text size
+                                    font.pixelSize: 13
+                                    Behavior on color { ColorAnimation { duration: 150 } }
                                 }
                             }
 
@@ -707,10 +808,11 @@ Window {
                                 id: chipMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
+                                cursorShape: root.isSwapping ? Qt.ArrowCursor : Qt.PointingHandCursor
                                 onClicked: {
-                                    textInput.text = modelData.prefix
-                                    textInput.forceActiveFocus()
+                                    if (!root.isSwapping) {
+                                        root.swapModel(modelData.label, modelData.modelId, modelData.agent);
+                                    }
                                 }
                             }
                         }
@@ -746,7 +848,7 @@ Window {
         }
 
         // Add to UI
-        chatModel.append({ "role": "user", "content": msg })
+        chatModel.append({ "role": "user", "content": msg, "isStatus": false, "agentName": "" })
 
         // Add to history
         conversationHistory.push({ "role": "user", "content": msg })
@@ -794,23 +896,23 @@ Window {
                             var aiText = response.choices[0].message.content
                             console.log("[HIVE] AI response received, len:", aiText.length)
                             conversationHistory.push({ "role": "assistant", "content": aiText })
-                            chatModel.append({ "role": "assistant", "content": formatMarkdown(aiText) })
+                            chatModel.append({ "role": "assistant", "content": formatMarkdown(aiText), "isStatus": false, "agentName": activeAgent })
                             // Persist AI response to DB
                             saveMessage(currentConversationId, "assistant", aiText)
                         } else {
                             console.log("[HIVE] ERROR: No choices in response")
-                            chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an empty response.</i>", "isStatus": true })
+                            chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an empty response.</i>", "isStatus": true, "agentName": "" })
                         }
                     } catch(e) {
                         console.log("[HIVE] ERROR: JSON parse failed:", e)
-                        chatModel.append({ "role": "assistant", "content": "<i>Error parsing HIVE response.</i>", "isStatus": true })
+                        chatModel.append({ "role": "assistant", "content": "<i>Error parsing HIVE response.</i>", "isStatus": true, "agentName": "" })
                     }
                 } else if (xhr.status === 0) {
                     console.log("[HIVE] ERROR: Connection refused (status 0) — server may not be running")
-                    chatModel.append({ "role": "assistant", "content": "<i>HIVE is waking up... give me a moment.</i><br><b>Tip:</b> If it doesn't wake automatically, check /tmp/hive-server.log", "isStatus": true })
+                    chatModel.append({ "role": "assistant", "content": "<i>HIVE is waking up... give me a moment.</i><br><b>Tip:</b> If it doesn't wake automatically, check /tmp/hive-server.log", "isStatus": true, "agentName": "" })
                 } else {
                     console.log("[HIVE] ERROR: HTTP", xhr.status)
-                    chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an error (" + xhr.status + ")</i>", "isStatus": true })
+                    chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an error (" + xhr.status + ")</i>", "isStatus": true, "agentName": "" })
                 }
             }
         }
@@ -818,7 +920,7 @@ Window {
         xhr.ontimeout = function() {
             console.log("[HIVE] ERROR: Request timed out after 30s")
             isTyping = false
-            chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond within 30 seconds. The model may not be loaded.</i>", "isStatus": true })
+            chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond within 30 seconds. The model may not be loaded.</i>", "isStatus": true, "agentName": "" })
         }
 
         // [CHANGE: gemini-cli | 2026-04-28] Only send messages that are NOT status messages
@@ -835,8 +937,9 @@ Window {
             }
         }
 
+        // [CHANGE: antigravity | 2026-04-28] Phase 4: Use activeModel in payload
         var payload = {
-            "model": "nexus",
+            "model": activeModel,
             "messages": historyToSend,
             "stream": false
         }
@@ -863,7 +966,8 @@ Window {
         chatModel.append({
             "role": "assistant",
             "content": greeting,
-            "isStatus": true
+            "isStatus": true,
+            "agentName": ""
         });
         
         checkServerHealth()

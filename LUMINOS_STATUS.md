@@ -41,7 +41,7 @@ Agent: antigravity (delegate rewrite)
 | HIVE Orchestrator | ✅ Working | Native Python reasoning layer (systemd active) |
 | llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
 | HIVE Swap Server | ✅ Working | Port 8079, model swap + wl-copy clipboard endpoint |
-| HIVE popup (SUPER+SPACE) | ✅ Working | QML6 native UI, responsive delegate (no hardcoded heights), optimized scroll (ListView), LocalStorage persistence, System theme matching (dark/light), Copy via wl-copy HTTP endpoint, HIVE Team Identity (System prompts) |
+| HIVE popup (SUPER+SPACE) | ✅ Working | QML6 native UI, chip model routing (Nexus/Bolt/Nova), responsive delegate, optimized scroll (ListView), LocalStorage persistence, System theme matching, Copy via wl-copy HTTP endpoint, HIVE Team Identity |
 | luminos-notes.sh | ✅ Working | SQLite replacement for MemPalace |
 | HIVE Settings in KDE | ✅ Working | Native KCM plugin (kcm_luminos_hive.so) |
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
