@@ -61,6 +61,25 @@ Window {
     // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Dynamic model name
     property string activeModel: "HIVE"
 
+    // [CHANGE: gemini-cli | 2026-04-28] HIVE Team Identity
+    property string systemPrompt: ""
+    onActiveModelChanged: loadSystemPrompt()
+
+    function loadSystemPrompt() {
+        var model = activeModel.toLowerCase();
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "file:///home/shawn/luminos-os/config/prompts/" + model + ".txt");
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === XMLHttpRequest.DONE) {
+                if (xhr.responseText.trim().length > 0) {
+                    systemPrompt = xhr.responseText.trim();
+                    console.log("[HIVE] System prompt loaded for:", model);
+                }
+            }
+        };
+        xhr.send();
+    }
+
     property string timeOfDay: {
         var hour = new Date().getHours()
         if (hour >= 5 && hour < 12) return "Morning"
@@ -789,6 +808,12 @@ Window {
 
         // [CHANGE: gemini-cli | 2026-04-28] Only send messages that are NOT status messages
         var historyToSend = []
+        
+        // Prepend system prompt if available
+        if (systemPrompt.length > 0) {
+            historyToSend.push({ "role": "system", "content": systemPrompt })
+        }
+
         for (var i = 0; i < conversationHistory.length; i++) {
             if (!conversationHistory[i].isStatus) {
                 historyToSend.push(conversationHistory[i])
@@ -813,6 +838,7 @@ Window {
         
         // [CHANGE: gemini-cli | 2026-04-28] Issue 2 & 3: Initialization
         loadActiveModel()
+        loadSystemPrompt()
         
         var hour = new Date().getHours()
         var greeting = hour < 12 ? "Morning, Sam ✳" :
