@@ -465,7 +465,6 @@ Window {
                                     copyResetTimer.restart();
                                 }
                             }
-                            }
 
                             Timer {
                                 id: copyResetTimer
@@ -685,9 +684,7 @@ Window {
                 }
             }
         }
-
     }
-
 
     function closeWindow() {
         var fadeOut = Qt.createQmlObject('import QtQuick 2.0; NumberAnimation { target: mainContent; property: "opacity"; to: 0; duration: 150; easing.type: Easing.InQuad }', root) // Window close fade-out duration
