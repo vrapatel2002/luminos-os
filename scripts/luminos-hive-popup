@@ -146,6 +146,22 @@ KEEP_ALIVE_PID=$!
 
 /usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml
 
+# Cleanup: kill keep-alive loop and clipboard server after popup closes
+if [ -n "$KEEP_ALIVE_PID" ]; then
+    /usr/bin/kill "$KEEP_ALIVE_PID" 2>/dev/null
+    wait "$KEEP_ALIVE_PID" 2>/dev/null
+fi
+
+if [ -n "$CLIPBOARD_SERVER_PID" ]; then
+    /usr/bin/kill "$CLIPBOARD_SERVER_PID" 2>/dev/null
+fi
+ Launch QML UI
+# PURPOSE: Run qml6 in foreground (NOT exec) so this bash process
+#          stays alive to manage the keep-alive loop and lockfile.
+# ════════════════════════════════════════
+
+/usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml
+
 # Cleanup: kill keep-alive loop after popup closes
 if [ -n "$KEEP_ALIVE_PID" ]; then
     /usr/bin/kill "$KEEP_ALIVE_PID" 2>/dev/null

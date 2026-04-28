@@ -61,18 +61,6 @@ Window {
     // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Dynamic model name
     property string activeModel: "HIVE"
 
-    // [CHANGE: gemini-cli | 2026-04-28] Clipboard helper
-    TextEdit {
-        id: clipboardHelper
-        visible: false
-        text: ""
-        function copyText(txt) {
-            text = txt;
-            selectAll();
-            copy();
-        }
-    }
-
     property string timeOfDay: {
         var hour = new Date().getHours()
         if (hour >= 5 && hour < 12) return "Morning"
@@ -368,8 +356,11 @@ Window {
 
                         Rectangle {
                             id: msgBubble
-                            width: Math.min(msgText.implicitWidth + 32, parent.width * (model.role === "user" ? 0.75 : 0.8))
-                            height: msgText.implicitHeight + 24
+                            width: Math.min(
+                                (model.role === "assistant" && !model.isStatus ? messageText.implicitWidth : msgText.implicitWidth) + 32,
+                                parent.width * (model.role === "user" ? 0.75 : 0.8)
+                            )
+                            height: (model.role === "assistant" && !model.isStatus ? messageText.implicitHeight : msgText.implicitHeight) + 24
                             anchors.right: model.role === "user" ? parent.right : undefined
                             anchors.left: model.role === "assistant" ? parent.left : undefined
                             color: model.role === "user" ? userBubble : "transparent" // [CHANGE: gemini-cli | 2026-04-28] Use userBubble
@@ -377,6 +368,7 @@ Window {
 
                             Text {
                                 id: msgText
+                                visible: model.role !== "assistant" || model.isStatus
                                 anchors.centerIn: parent
                                 width: parent.width - 32
                                 text: model.content
@@ -385,7 +377,24 @@ Window {
                                 font.pixelSize: 14 // Message font size
                                 wrapMode: Text.Wrap
                                 textFormat: Text.RichText // Enables bold (<b>)
-                                lineHeight: 1.6 // AI message line height
+                                lineHeight: 1.6 // User message line height
+                            }
+
+                            TextEdit {
+                                id: messageText
+                                visible: model.role === "assistant" && !model.isStatus
+                                anchors.centerIn: parent
+                                width: parent.width - 32
+                                text: model.content
+                                readOnly: true
+                                selectByMouse: true
+                                wrapMode: TextEdit.Wrap
+                                textFormat: TextEdit.RichText
+                                font.family: "Inter"
+                                font.pixelSize: 14
+                                color: textColor
+                                selectedTextColor: surfaceColor
+                                selectionColor: accentColor
                             }
                         }
                     }
@@ -401,20 +410,21 @@ Window {
                         anchors.left: parent.left
                     }
 
-                    // [CHANGE: gemini-cli | 2026-04-28] Copy Button for AI messages
+                    // [CHANGE: gemini-cli | 2026-04-28] Copy Button for AI messages (Wayland fixed)
                     Row {
                         id: copyRowContainer
                         spacing: 6
                         topPadding: 2
                         visible: model.role === "assistant" && !model.isStatus
-                        opacity: aiMessageHover.containsMouse ? 1.0 : 0.0
-                        Behavior on opacity { NumberAnimation { duration: 150 } }
-
+                        opacity: 1.0 // Always visible but subtle
+                        
                         Rectangle {
+                            id: copyRect
                             width: copyRow.width + 12
                             height: copyRow.height + 6
                             radius: 4
                             color: copyMouseArea.containsMouse ? borderColor : "transparent"
+                            Behavior on color { ColorAnimation { duration: 100 } }
 
                             Row {
                                 id: copyRow
@@ -447,10 +457,14 @@ Window {
                                 cursorShape: Qt.PointingHandCursor
                                 hoverEnabled: true
                                 onClicked: {
-                                    clipboardHelper.copyText(model.content);
+                                    // [CHANGE: gemini-cli | 2026-04-28] Use selectable TextEdit for reliable Wayland clipboard
+                                    messageText.selectAll();
+                                    messageText.copy();
+                                    messageText.deselect();
                                     copyLabel.copied = true;
                                     copyResetTimer.restart();
                                 }
+                            }
                             }
 
                             Timer {
@@ -461,11 +475,12 @@ Window {
                         }
                     }
 
+                    // Hover detection area for the entire message turn (optional now, but kept for consistency)
                     MouseArea {
                         id: aiMessageHover
                         anchors.fill: parent
                         hoverEnabled: true
-                        acceptedButtons: Qt.NoButton  // don't eat clicks from children
+                        acceptedButtons: Qt.NoButton  // don't eat clicks
                         visible: model.role === "assistant" && !model.isStatus
                     }
                 }
