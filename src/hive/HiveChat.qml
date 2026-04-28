@@ -15,8 +15,43 @@ Window {
     // ============================================
     width: 820          // Window width in logical px — adjust for wider/narrower
     height: 620         // Window height in logical px — adjust for taller/shorter
-    color: "#FAF9F6"    // Main window background
+    color: bgColor    // [CHANGE: gemini-cli | 2026-04-27] Dynamic background
     title: "HIVE Chat"
+
+    // [CHANGE: gemini-cli | 2026-04-27] Issue 1: System theme detection
+    SystemPalette { id: sysPalette; colorGroup: SystemPalette.Active }
+    
+    property bool isDark: {
+        var c = sysPalette.window;
+        var luminance = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+        return luminance < 0.5;
+    }
+
+    // Background
+    property color bgColor: isDark ? "#1E1E1E" : "#FAF9F6"
+    // Surface (input bar, chips background)
+    property color surfaceColor: isDark ? "#2A2A2A" : "#FFFFFF"
+    // Input border / chip border
+    property color borderColor: isDark ? "#444444" : "#E5E2DC"
+    // Primary text
+    property color textColor: isDark ? "#E8E6E3" : "#2D2B28"
+    // Subtle/placeholder text
+    property color subtleText: isDark ? "#888580" : "#A39E96"
+    // Label text (chips, "Nexus · HIVE")
+    property color labelText: isDark ? "#9A9590" : "#5A5650"
+    // User message bubble
+    property color userBubble: isDark ? "#333028" : "#F0EDE8"
+    // AI message area (no bubble, just text on bg)
+    property color aiBubble: isDark ? "#1E1E1E" : "#FAF9F6"
+    // Accent (warm orange — same in both themes)
+    property color accentColor: "#D4784A"
+    // Separator line between conversation blocks
+    property color separatorColor: isDark ? "#333333" : "#E8E5E0"
+    // Scrollbar
+    property color scrollbarColor: isDark ? "#555555" : "#CCCCCC"
+    // Additional theme-aware colors for hover states
+    property color hoverColor: isDark ? "#3A3A3A" : "#F5F3EF"
+    property color borderHoverColor: isDark ? "#555555" : "#D1CEC8"
 
     // Main state variables
     property bool chatStarted: false
@@ -177,7 +212,7 @@ Window {
         Rectangle {
             id: bgRect
             anchors.fill: parent
-            color: "#FAF9F6" // Inner content background
+            color: bgColor // [CHANGE: gemini-cli | 2026-04-27] Dynamic background
         }
 
         // ============================================
@@ -203,13 +238,13 @@ Window {
 
                     Text {
                         text: "✳" // Sparkle/asterisk icon
-                        color: "#D4784A" // Accent color of the icon
+                        color: accentColor // [CHANGE: gemini-cli | 2026-04-27] Use accentColor
                         font.pixelSize: 40 // Icon size
                     }
 
                     Text {
                         text: root.timeOfDay + ", Sam"
-                        color: "#2D2B28" // Greeting text color
+                        color: textColor // [CHANGE: gemini-cli | 2026-04-27] Use textColor
                         font.family: "Inter" // Greeting font
                         font.pixelSize: 36 // Greeting font size
                         font.weight: Font.Normal
@@ -288,6 +323,23 @@ Window {
                     id: delegateCol
                     width: ListView.view ? ListView.view.width - 40 : 0
                     spacing: 4
+                    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Add top margin when separator is shown
+                    topPadding: (model.role === "user" && model.index > 0 && !model.isStatus) ? 16 : 8
+
+                    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Conversation Block Separators
+                    Loader {
+                        active: model.role === "user" && model.index > 0 && !model.isStatus
+                        width: parent.width
+                        sourceComponent: Component {
+                            Rectangle {
+                                width: parent ? parent.width * 0.9 : 0
+                                height: 1
+                                color: separatorColor
+                                anchors.horizontalCenter: parent ? parent.horizontalCenter : undefined
+                                anchors.bottomMargin: 8
+                            }
+                        }
+                    }
 
                     Item {
                         width: parent.width
@@ -299,7 +351,7 @@ Window {
                             height: msgText.implicitHeight + 24
                             anchors.right: model.role === "user" ? parent.right : undefined
                             anchors.left: model.role === "assistant" ? parent.left : undefined
-                            color: model.role === "user" ? "#F0EDE8" : "transparent" // User bubble color vs transparent
+                            color: model.role === "user" ? userBubble : "transparent" // [CHANGE: gemini-cli | 2026-04-27] Use userBubble
                             radius: 18 // Bubble radius
 
                             Text {
@@ -307,7 +359,7 @@ Window {
                                 anchors.centerIn: parent
                                 width: parent.width - 32
                                 text: model.content
-                                color: "#2D2B28" // Message text color
+                                color: textColor // [CHANGE: gemini-cli | 2026-04-27] Use textColor
                                 font.family: "Inter"
                                 font.pixelSize: 14 // Message font size
                                 wrapMode: Text.Wrap
@@ -322,7 +374,7 @@ Window {
                         visible: model.role === "assistant" && !model.isStatus
                         text: activeModel
                         font.pixelSize: 11
-                        color: "#B5B0A8"
+                        color: subtleText // [CHANGE: gemini-cli | 2026-04-27] Use subtleText
                         leftPadding: 4
                         anchors.left: parent.left
                     }
@@ -354,7 +406,7 @@ Window {
                     model: 3
                     Rectangle {
                         width: 6; height: 6; radius: 3
-                        color: "#A39E96" // Typing dot color
+                        color: subtleText // [CHANGE: gemini-cli | 2026-04-27] Use subtleText
 
                         SequentialAnimation on scale {
                             loops: Animation.Infinite
@@ -379,7 +431,7 @@ Window {
             id: footerBar
             width: parent.width
             height: 140
-            color: "#FAF9F6"
+            color: bgColor // [CHANGE: gemini-cli | 2026-04-27] Use bgColor
             anchors.bottom: parent.bottom
             z: 10
 
@@ -393,10 +445,10 @@ Window {
                 Rectangle {
                     id: inputBg
                     anchors.fill: parent
-                    color: "#FFFFFF" // Input bar background
+                    color: surfaceColor // [CHANGE: gemini-cli | 2026-04-27] Use surfaceColor
                     radius: 26 // Input bar border radius (pill)
                     border.width: 1.5 // Input bar border width
-                    border.color: textInput.activeFocus ? "#D4784A" : "#E5E2DC" // Input bar border colors
+                    border.color: textInput.activeFocus ? accentColor : borderColor // [CHANGE: gemini-cli | 2026-04-27] Use theme colors
 
                     Behavior on border.color { ColorAnimation { duration: 200 } } // Focus transition duration
 
@@ -409,7 +461,7 @@ Window {
                         // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 2: Center buttons and text perfectly
                         Text {
                             text: "⊕" // Plus icon placeholder
-                            color: "#A39E96" // Plus icon color
+                            color: subtleText // [CHANGE: gemini-cli | 2026-04-27] Use subtleText
                             font.pixelSize: 20
                             Layout.alignment: Qt.AlignVCenter
                         }
@@ -419,8 +471,8 @@ Window {
                             Layout.fillWidth: true
                             Layout.alignment: Qt.AlignVCenter
                             placeholderText: "How can I help you today?" // Input placeholder text
-                            placeholderTextColor: "#A39E96" // Placeholder text color
-                            color: "#2D2B28" // Input text color
+                            placeholderTextColor: subtleText // [CHANGE: gemini-cli | 2026-04-27] Use subtleText
+                            color: textColor // [CHANGE: gemini-cli | 2026-04-27] Use textColor
                             font.family: "Inter"
                             font.pixelSize: 15 // Input text size
                             background: Item {} // Remove default background
@@ -432,14 +484,14 @@ Window {
 
                         Rectangle {
                             width: 28; height: 28; radius: 14
-                            color: textInput.text.trim() === "" ? "#F5F3EF" : "#D4784A" // Send button active color
+                            color: textInput.text.trim() === "" ? hoverColor : accentColor // [CHANGE: gemini-cli | 2026-04-27] Use hoverColor and accentColor
                             Layout.alignment: Qt.AlignVCenter
                             Behavior on color { ColorAnimation { duration: 150 } } // Send button transition
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "↑" // Send arrow icon
-                                color: textInput.text.trim() === "" ? "#A39E96" : "#FFFFFF" // Arrow color
+                                color: textInput.text.trim() === "" ? subtleText : "#FFFFFF" // [CHANGE: gemini-cli | 2026-04-27] White arrow when active
                                 font.pixelSize: 16
                                 font.bold: true
                             }
@@ -456,7 +508,7 @@ Window {
                 Text {
                     // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Dynamic footer label
                     text: activeModel + " · HIVE" // Small bottom label
-                    color: "#B5B0A8" // Bottom label color
+                    color: labelText // [CHANGE: gemini-cli | 2026-04-27] Use labelText
                     font.family: "Inter"
                     font.pixelSize: 11 // Bottom label font size
                     anchors.right: inputBg.right
@@ -493,9 +545,9 @@ Window {
                             width: chipRow.implicitWidth + 16
                             height: 28 // Chip height
                             radius: 14 // Chip corner radius
-                            color: chipMouse.containsMouse ? "#F5F3EF" : "#FFFFFF" // Chip bg hover state
+                            color: chipMouse.containsMouse ? hoverColor : surfaceColor // [CHANGE: gemini-cli | 2026-04-27] Theme colors
                             border.width: 1 // Chip border width
-                            border.color: chipMouse.containsMouse ? "#E5E2DC" : "#E5E2DC" // Chip border hover state
+                            border.color: chipMouse.containsMouse ? borderHoverColor : borderColor // [CHANGE: gemini-cli | 2026-04-27] Theme colors
 
                             Behavior on color { ColorAnimation { duration: 100 } }
                             Behavior on border.color { ColorAnimation { duration: 100 } }
@@ -507,7 +559,7 @@ Window {
                                 Text { text: modelData.icon; font.pixelSize: 12 } // Chip icon
                                 Text {
                                     text: modelData.label
-                                    color: "#5A5650" // Chip text color
+                                    color: labelText // [CHANGE: gemini-cli | 2026-04-27] Use labelText
                                     font.family: "Inter"
                                     font.pixelSize: 13 // Chip text size
                                 }
@@ -576,9 +628,9 @@ Window {
         // Basic Markdown support for bold and code backticks
         // Since we are using RichText, we can replace syntax.
         // Replace ``` code blocks
-        var formatted = text.replace(/```([\s\S]*?)```/g, "<pre style='background-color: #F5F3EF; border-radius: 8px; padding: 12px; font-family: \"JetBrains Mono\"; font-size: 13px;'>$1</pre>")
+        var formatted = text.replace(/```([\s\S]*?)```/g, "<pre style='background-color: " + hoverColor + "; border-radius: 8px; padding: 12px; font-family: \"JetBrains Mono\"; font-size: 13px;'>$1</pre>")
         // Replace `code`
-        formatted = formatted.replace(/`([^`]+)`/g, "<code style='background-color: #F5F3EF; font-family: \"JetBrains Mono\";'>$1</code>")
+        formatted = formatted.replace(/`([^`]+)`/g, "<code style='background-color: " + hoverColor + "; font-family: \"JetBrains Mono\";'>$1</code>")
         // Replace **bold**
         formatted = formatted.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
         // Newlines to <br>
