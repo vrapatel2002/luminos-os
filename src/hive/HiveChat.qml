@@ -173,15 +173,15 @@ Window {
         // PURPOSE: Shows the conversation history
         // TUNE: Adjust chat bubbles, padding, and text colors
         // ============================================
+        // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 3: Chat now anchors to parent.bottom and clips behind input bar
         ScrollView {
             id: chatView
             anchors.top: parent.top
-            anchors.bottom: inputContainer.top
+            anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.margins: 10
-            anchors.bottomMargin: 0
-            padding: 20 // Chat view padding
+            anchors.margins: 0
+            clip: true
 
             opacity: root.chatStarted ? 1 : 0
             visible: opacity > 0
@@ -190,16 +190,26 @@ Window {
             // Hide standard scrollbar, use custom logic or default KDE look if possible
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
+            // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 1: Optimized ListView for smooth scrolling
             ListView {
                 id: messageList
                 anchors.fill: parent
                 model: ListModel { id: chatModel }
                 spacing: 16 // Spacing between messages
+                topMargin: 20
+                bottomMargin: footerBar.height + 40 // Prevent last message from being hidden behind input bar
+                leftMargin: 20
+                rightMargin: 20
+                
+                cacheBuffer: 1000
+                clip: true
+                flickDeceleration: 3000
+                maximumFlickVelocity: 4000
+                boundsBehavior: Flickable.StopAtBounds
 
                 delegate: Item {
-                    width: ListView.view ? ListView.view.width : 0
+                    width: ListView.view ? ListView.view.width - 40 : 0
                     height: msgBubble.height + 8
-                    opacity: 0
 
                     Rectangle {
                         id: msgBubble
@@ -223,15 +233,6 @@ Window {
                             lineHeight: 1.6 // AI message line height
                         }
                     }
-
-                    // Slide up animation on appear
-                    Component.onCompleted: {
-                        slideIn.start()
-                    }
-                    NumberAnimation on opacity {
-                        id: slideIn
-                        from: 0; to: 1; duration: 150; easing.type: Easing.OutQuad
-                    }
                 }
 
                 onCountChanged: {
@@ -250,8 +251,9 @@ Window {
             height: 20
             anchors.left: chatView.left
             anchors.leftMargin: 20
-            anchors.bottom: inputContainer.top
+            anchors.bottom: footerBar.top
             anchors.bottomMargin: 10
+            z: 5
 
             Row {
                 spacing: 4
@@ -279,149 +281,160 @@ Window {
         // PURPOSE: Search/Chat input field
         // TUNE: Adjust dimensions, borders, colors
         // ============================================
-        Item {
-            id: inputContainer
-            width: parent.width * 0.85 // Input bar width (85% of window)
-            height: 100
+        // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 3: Input bar layered on top with solid background
+        Rectangle {
+            id: footerBar
+            width: parent.width
+            height: 140
+            color: "#FAF9F6"
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: 30
-            anchors.horizontalCenter: parent.horizontalCenter
+            z: 10
 
-            Rectangle {
-                id: inputBg
-                width: parent.width
-                height: 52 // Input bar min height
+            Item {
+                id: inputContainer
+                width: parent.width * 0.85 // Input bar width (85% of window)
+                height: 52
                 anchors.top: parent.top
-                color: "#FFFFFF" // Input bar background
-                radius: 26 // Input bar border radius (pill)
-                border.width: 1.5 // Input bar border width
-                border.color: textInput.activeFocus ? "#D4784A" : "#E5E2DC" // Input bar border colors
+                anchors.horizontalCenter: parent.horizontalCenter
 
-                Behavior on border.color { ColorAnimation { duration: 200 } } // Focus transition duration
-
-                RowLayout {
+                Rectangle {
+                    id: inputBg
                     anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 8
+                    color: "#FFFFFF" // Input bar background
+                    radius: 26 // Input bar border radius (pill)
+                    border.width: 1.5 // Input bar border width
+                    border.color: textInput.activeFocus ? "#D4784A" : "#E5E2DC" // Input bar border colors
 
-                    Text {
-                        text: "⊕" // Plus icon placeholder
-                        color: "#A39E96" // Plus icon color
-                        font.pixelSize: 20
-                        Layout.alignment: Qt.AlignVCenter
-                        Layout.leftMargin: 4
-                    }
+                    Behavior on border.color { ColorAnimation { duration: 200 } } // Focus transition duration
 
-                    TextField {
-                        id: textInput
-                        Layout.fillWidth: true
-                        Layout.alignment: Qt.AlignVCenter
-                        placeholderText: "How can I help you today?" // Input placeholder text
-                        placeholderTextColor: "#A39E96" // Placeholder text color
-                        color: "#2D2B28" // Input text color
-                        font.family: "Inter"
-                        font.pixelSize: 15 // Input text size
-                        background: Item {} // Remove default background
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 16
+                        anchors.rightMargin: 12
+                        spacing: 8
 
-                        onAccepted: root.sendMessage()
-                    }
-
-                    Rectangle {
-                        Layout.alignment: Qt.AlignVCenter
-                        width: 28; height: 28; radius: 14
-                        color: textInput.text.trim() === "" ? "#F5F3EF" : "#D4784A" // Send button active color
-                        Behavior on color { ColorAnimation { duration: 150 } } // Send button transition
-
+                        // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 2: Center buttons and text perfectly
                         Text {
-                            anchors.centerIn: parent
-                            text: "↑" // Send arrow icon
-                            color: textInput.text.trim() === "" ? "#A39E96" : "#FFFFFF" // Arrow color
-                            font.pixelSize: 16
-                            font.bold: true
+                            text: "⊕" // Plus icon placeholder
+                            color: "#A39E96" // Plus icon color
+                            font.pixelSize: 20
+                            Layout.alignment: Qt.AlignVCenter
                         }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.sendMessage()
+                        TextField {
+                            id: textInput
+                            Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignVCenter
+                            placeholderText: "How can I help you today?" // Input placeholder text
+                            placeholderTextColor: "#A39E96" // Placeholder text color
+                            color: "#2D2B28" // Input text color
+                            font.family: "Inter"
+                            font.pixelSize: 15 // Input text size
+                            background: Item {} // Remove default background
+                            leftPadding: 4
+                            rightPadding: 4
+
+                            onAccepted: root.sendMessage()
+                        }
+
+                        Rectangle {
+                            width: 28; height: 28; radius: 14
+                            color: textInput.text.trim() === "" ? "#F5F3EF" : "#D4784A" // Send button active color
+                            Layout.alignment: Qt.AlignVCenter
+                            Behavior on color { ColorAnimation { duration: 150 } } // Send button transition
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "↑" // Send arrow icon
+                                color: textInput.text.trim() === "" ? "#A39E96" : "#FFFFFF" // Arrow color
+                                font.pixelSize: 16
+                                font.bold: true
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.sendMessage()
+                            }
                         }
                     }
                 }
-            }
 
-            Text {
-                text: "Nexus · HIVE" // Small bottom label
-                color: "#B5B0A8" // Bottom label color
-                font.family: "Inter"
-                font.pixelSize: 11 // Bottom label font size
-                anchors.right: inputBg.right
-                anchors.rightMargin: 16
-                anchors.top: inputBg.bottom
-                anchors.topMargin: 6
-            }
+                Text {
+                    text: "Nexus · HIVE" // Small bottom label
+                    color: "#B5B0A8" // Bottom label color
+                    font.family: "Inter"
+                    font.pixelSize: 11 // Bottom label font size
+                    anchors.right: inputBg.right
+                    anchors.rightMargin: 16
+                    anchors.top: inputBg.bottom
+                    anchors.topMargin: 6
+                }
 
-            // ============================================
-            // SECTION: Category Chips
-            // PURPOSE: Quick prompt prefixes
-            // TUNE: Chip colors, borders, and hover states
-            // ============================================
-            RowLayout {
-                anchors.top: inputBg.bottom
-                anchors.topMargin: 20
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: 8 // Gap between chips
-                opacity: root.chatStarted ? 0 : 1
-                visible: opacity > 0
-                Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.InOutQuad } } // Chip fade duration
+                // ============================================
+                // SECTION: Category Chips
+                // PURPOSE: Quick prompt prefixes
+                // TUNE: Chip colors, borders, and hover states
+                // ============================================
+                RowLayout {
+                    anchors.top: inputBg.bottom
+                    anchors.topMargin: 20
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 8 // Gap between chips
+                    opacity: root.chatStarted ? 0 : 1
+                    visible: opacity > 0
+                    Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.InOutQuad } } // Chip fade duration
 
-                Repeater {
-                    model: [
-                        { icon: "</>", label: "Code", prefix: "Help me write code for " },
-                        { icon: "🌐", label: "Learn", prefix: "Explain to me " },
-                        { icon: "📊", label: "Strategize", prefix: "Help me plan " },
-                        { icon: "✏️", label: "Write", prefix: "Help me write " },
-                        { icon: "⚙️", label: "System", prefix: "On this system, " }
-                    ]
+                    Repeater {
+                        model: [
+                            { icon: "</>", label: "Code", prefix: "Help me write code for " },
+                            { icon: "🌐", label: "Learn", prefix: "Explain to me " },
+                            { icon: "📊", label: "Strategize", prefix: "Help me plan " },
+                            { icon: "✏️", label: "Write", prefix: "Help me write " },
+                            { icon: "⚙️", label: "System", prefix: "On this system, " }
+                        ]
 
-                    Rectangle {
-                        id: chipRect
-                        width: chipRow.implicitWidth + 16
-                        height: 28 // Chip height
-                        radius: 14 // Chip corner radius
-                        color: chipMouse.containsMouse ? "#F5F3EF" : "#FFFFFF" // Chip bg hover state
-                        border.width: 1 // Chip border width
-                        border.color: chipMouse.containsMouse ? "#D1CEC8" : "#E5E2DC" // Chip border hover state
+                        Rectangle {
+                            id: chipRect
+                            width: chipRow.implicitWidth + 16
+                            height: 28 // Chip height
+                            radius: 14 // Chip corner radius
+                            color: chipMouse.containsMouse ? "#F5F3EF" : "#FFFFFF" // Chip bg hover state
+                            border.width: 1 // Chip border width
+                            border.color: chipMouse.containsMouse ? "#E5E2DC" : "#E5E2DC" // Chip border hover state
 
-                        Behavior on color { ColorAnimation { duration: 100 } }
-                        Behavior on border.color { ColorAnimation { duration: 100 } }
+                            Behavior on color { ColorAnimation { duration: 100 } }
+                            Behavior on border.color { ColorAnimation { duration: 100 } }
 
-                        RowLayout {
-                            id: chipRow
-                            anchors.centerIn: parent
-                            spacing: 4
-                            Text { text: modelData.icon; font.pixelSize: 12 } // Chip icon
-                            Text {
-                                text: modelData.label
-                                color: "#5A5650" // Chip text color
-                                font.family: "Inter"
-                                font.pixelSize: 13 // Chip text size
+                            RowLayout {
+                                id: chipRow
+                                anchors.centerIn: parent
+                                spacing: 4
+                                Text { text: modelData.icon; font.pixelSize: 12 } // Chip icon
+                                Text {
+                                    text: modelData.label
+                                    color: "#5A5650" // Chip text color
+                                    font.family: "Inter"
+                                    font.pixelSize: 13 // Chip text size
+                                }
                             }
-                        }
 
-                        MouseArea {
-                            id: chipMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                textInput.text = modelData.prefix
-                                textInput.forceActiveFocus()
+                            MouseArea {
+                                id: chipMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    textInput.text = modelData.prefix
+                                    textInput.forceActiveFocus()
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
     }
 
 

@@ -40,7 +40,7 @@ Agent: antigravity
 | HIVE Idle Watchdog | ✅ Working | Auto-unloads models after 5 mins |
 | HIVE Orchestrator | ✅ Working | Native Python reasoning layer (systemd active) |
 | llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
-| HIVE popup (SUPER+SPACE) | ✅ Working | QML6 native UI + hardened KDE shortcut launch + LocalStorage persistence |
+| HIVE popup (SUPER+SPACE) | ✅ Working | QML6 native UI, optimized scroll (ListView), LocalStorage persistence |
 | luminos-notes.sh | ✅ Working | SQLite replacement for MemPalace |
 | HIVE Settings in KDE | ✅ Working | Native KCM plugin (kcm_luminos_hive.so) |
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
