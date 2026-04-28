@@ -55,6 +55,9 @@ export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
 # QT_QPA_PLATFORM — force Qt to use wayland
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 
+# [CHANGE: gemini-cli | 2026-04-27] Allow QML to read /tmp/hive-active-model
+export QML_XHR_ALLOW_FILE_READ=1
+
 # HOME — sometimes missing in service contexts
 export HOME="${HOME:-$(/usr/bin/getent passwd $(/usr/bin/id -u) | /usr/bin/cut -d: -f6)}"
 
@@ -100,10 +103,20 @@ trap "/usr/bin/rm -f $LOCKFILE" EXIT
 # ════════════════════════════════════════
 
 if ! /usr/bin/pgrep -x "llama-server" > /dev/null 2>&1; then
-    /usr/bin/nohup /home/shawn/luminos-os/scripts/hive-start-model.sh nexus \
+    MODEL_NAME="nexus"
+    /usr/bin/nohup /home/shawn/luminos-os/scripts/hive-start-model.sh "$MODEL_NAME" \
         >> /tmp/hive-server.log 2>&1 &
     disown
+    echo "$MODEL_NAME" > /tmp/hive-active-model
     /usr/bin/sleep 8  # wait for model to load into VRAM
+else
+    # Server is already running, try to detect which model is active
+    # If hive-start-model.sh records its state elsewhere, we'd use that.
+    # For now, if we can't detect, we'll assume nexus or leave it to QML to handle.
+    /usr/bin/pgrep -a "llama-server" | /usr/bin/grep -oP "(?<=--model-name\s)\w+" > /tmp/hive-active-model 2>/dev/null
+    if [ ! -s /tmp/hive-active-model ]; then
+        echo "nexus" > /tmp/hive-active-model
+    fi
 fi
 
 # Mark activity so idle-watchdog doesn't kill while popup is open

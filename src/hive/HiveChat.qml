@@ -23,12 +23,63 @@ Window {
     property var conversationHistory: []
     property bool isTyping: false
     property int currentConversationId: -1
+    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Dynamic model name
+    property string activeModel: "HIVE"
 
     property string timeOfDay: {
         var hour = new Date().getHours()
         if (hour >= 5 && hour < 12) return "Morning"
         if (hour >= 12 && hour < 17) return "Afternoon"
         return "Evening"
+    }
+
+    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Load active model name from file
+    function loadActiveModel() {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "file:///tmp/hive-active-model");
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === XMLHttpRequest.DONE) {
+                // For file:/// local files, status is often 0 on success
+                var name = xhr.responseText.trim();
+                if (name.length > 0) {
+                    activeModel = name.charAt(0).toUpperCase() + name.substring(1);
+                    console.log("[HIVE] Active model loaded:", activeModel);
+                }
+            }
+        };
+        xhr.send();
+    }
+
+    // [CHANGE: gemini-cli | 2026-04-27] Issue 3: Ping health and show status
+    function checkServerHealth() {
+        var hc = new XMLHttpRequest();
+        hc.open("GET", "http://localhost:8080/health");
+        hc.timeout = 3000;
+        hc.onreadystatechange = function() {
+            if (hc.readyState === XMLHttpRequest.DONE) {
+                if (hc.status === 200) {
+                    chatModel.append({
+                        "role": "assistant",
+                        "content": activeModel + " is ready.",
+                        "isStatus": true
+                    });
+                } else {
+                    chatModel.append({
+                        "role": "assistant",
+                        "content": "Waking up...",
+                        "isStatus": true
+                    });
+                }
+            }
+        };
+        hc.ontimeout = function() {
+            chatModel.append({
+                "role": "assistant",
+                "content": "Waking up...",
+                "isStatus": true
+            });
+        };
+        hc.send();
     }
 
     // ============================================
@@ -190,7 +241,7 @@ Window {
             // Hide standard scrollbar, use custom logic or default KDE look if possible
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-            // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 1: Optimized ListView for smooth scrolling
+            // [CHANGE: gemini-cli | 2026-04-27] Fix Bug 1: Optimized ListView for smooth scrolling (Trackpad)
             ListView {
                 id: messageList
                 anchors.fill: parent
@@ -203,35 +254,59 @@ Window {
                 
                 cacheBuffer: 1000
                 clip: true
-                flickDeceleration: 3000
+                // [CHANGE: gemini-cli | 2026-04-27] Issue 1: Trackpad physics
+                flickDeceleration: 1500
                 maximumFlickVelocity: 4000
+                pixelAligned: false
                 boundsBehavior: Flickable.StopAtBounds
+                boundsMovement: Flickable.FollowBoundsBehavior
 
-                delegate: Item {
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    interactive: true
+                }
+
+                delegate: Column {
+                    id: delegateCol
                     width: ListView.view ? ListView.view.width - 40 : 0
-                    height: msgBubble.height + 8
+                    spacing: 4
 
-                    Rectangle {
-                        id: msgBubble
-                        width: Math.min(msgText.implicitWidth + 32, parent.width * (model.role === "user" ? 0.75 : 0.8))
-                        height: msgText.implicitHeight + 24
-                        anchors.right: model.role === "user" ? parent.right : undefined
-                        anchors.left: model.role === "assistant" ? parent.left : undefined
-                        color: model.role === "user" ? "#F0EDE8" : "transparent" // User bubble color vs transparent
-                        radius: 18 // Bubble radius
+                    Item {
+                        width: parent.width
+                        height: msgBubble.height + 8
 
-                        Text {
-                            id: msgText
-                            anchors.centerIn: parent
-                            width: parent.width - 32
-                            text: model.content
-                            color: "#2D2B28" // Message text color
-                            font.family: "Inter"
-                            font.pixelSize: 14 // Message font size
-                            wrapMode: Text.Wrap
-                            textFormat: Text.RichText // Enables bold (<b>)
-                            lineHeight: 1.6 // AI message line height
+                        Rectangle {
+                            id: msgBubble
+                            width: Math.min(msgText.implicitWidth + 32, parent.width * (model.role === "user" ? 0.75 : 0.8))
+                            height: msgText.implicitHeight + 24
+                            anchors.right: model.role === "user" ? parent.right : undefined
+                            anchors.left: model.role === "assistant" ? parent.left : undefined
+                            color: model.role === "user" ? "#F0EDE8" : "transparent" // User bubble color vs transparent
+                            radius: 18 // Bubble radius
+
+                            Text {
+                                id: msgText
+                                anchors.centerIn: parent
+                                width: parent.width - 32
+                                text: model.content
+                                color: "#2D2B28" // Message text color
+                                font.family: "Inter"
+                                font.pixelSize: 14 // Message font size
+                                wrapMode: Text.Wrap
+                                textFormat: Text.RichText // Enables bold (<b>)
+                                lineHeight: 1.6 // AI message line height
+                            }
                         }
+                    }
+
+                    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Show model label under AI messages
+                    Text {
+                        visible: model.role === "assistant" && !model.isStatus
+                        text: activeModel
+                        font.pixelSize: 11
+                        color: "#B5B0A8"
+                        leftPadding: 4
+                        anchors.left: parent.left
                     }
                 }
 
@@ -361,7 +436,8 @@ Window {
                 }
 
                 Text {
-                    text: "Nexus · HIVE" // Small bottom label
+                    // [CHANGE: gemini-cli | 2026-04-27] Issue 2: Dynamic footer label
+                    text: activeModel + " · HIVE" // Small bottom label
                     color: "#B5B0A8" // Bottom label color
                     font.family: "Inter"
                     font.pixelSize: 11 // Bottom label font size
@@ -539,9 +615,17 @@ Window {
             chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond within 30 seconds. The model may not be loaded.</i>" })
         }
 
+        // [CHANGE: gemini-cli | 2026-04-27] Only send messages that are NOT status messages
+        var historyToSend = []
+        for (var i = 0; i < conversationHistory.length; i++) {
+            if (!conversationHistory[i].isStatus) {
+                historyToSend.push(conversationHistory[i])
+            }
+        }
+
         var payload = {
             "model": "nexus",
-            "messages": conversationHistory,
+            "messages": historyToSend,
             "stream": false
         }
 
@@ -554,6 +638,23 @@ Window {
         initDb()
         currentConversationId = createConversation()
         console.log("[HIVE] New conversation ID:", currentConversationId)
+        
+        // [CHANGE: gemini-cli | 2026-04-27] Issue 2 & 3: Initialization
+        loadActiveModel()
+        
+        var hour = new Date().getHours()
+        var greeting = hour < 12 ? "Morning, Sam ✳" :
+                       hour < 17 ? "Afternoon, Sam ✳" :
+                       "Evening, Sam ✳"
+        
+        chatModel.append({
+            "role": "assistant",
+            "content": greeting,
+            "isStatus": true
+        });
+        
+        checkServerHealth()
+        
         textInput.forceActiveFocus()
     }
 }
