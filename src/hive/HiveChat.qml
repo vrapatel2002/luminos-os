@@ -33,7 +33,7 @@ Window {
     Item {
         id: mainContent
         anchors.fill: parent
-        anchors.margins: 20 // Space for drop shadow
+        anchors.margins: 0 // Content fills the window
 
         // ============================================
         // SECTION: Window Fade
@@ -49,18 +49,7 @@ Window {
         Rectangle {
             id: bgRect
             anchors.fill: parent
-            color: "#FAF9F6" // Background color — change for different base tone
-            radius: 16       // Window corner roundness — higher = more rounded
-        }
-
-        MultiEffect {
-            source: bgRect
-            anchors.fill: bgRect
-            shadowEnabled: true
-            shadowBlur: 1.0     // Shadow blur intensity (0.0 to 1.0)
-            shadowColor: Qt.rgba(0, 0, 0, 0.15) // Shadow color and opacity (15% black)
-            shadowVerticalOffset: 4
-            shadowHorizontalOffset: 0
+            color: "transparent" // Background handled by Window color
         }
 
         // ============================================
