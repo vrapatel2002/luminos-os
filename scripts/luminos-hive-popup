@@ -100,6 +100,8 @@ trap "/usr/bin/rm -f $LOCKFILE" EXIT
 # SECTION: Auto-start Nexus
 # PURPOSE: If llama-server isn't running, start it before the UI.
 #          Uses nohup + disown so the server survives independently.
+#          Non-blocking: removed sleep 8.
+# [CHANGE: gemini-cli | 2026-04-28]
 # ════════════════════════════════════════
 
 if ! /usr/bin/pgrep -x "llama-server" > /dev/null 2>&1; then
@@ -108,11 +110,8 @@ if ! /usr/bin/pgrep -x "llama-server" > /dev/null 2>&1; then
         >> /tmp/hive-server.log 2>&1 &
     disown
     echo "$MODEL_NAME" > /tmp/hive-active-model
-    /usr/bin/sleep 8  # wait for model to load into VRAM
 else
     # Server is already running, try to detect which model is active
-    # If hive-start-model.sh records its state elsewhere, we'd use that.
-    # For now, if we can't detect, we'll assume nexus or leave it to QML to handle.
     /usr/bin/pgrep -a "llama-server" | /usr/bin/grep -oP "(?<=--model-name\s)\w+" > /tmp/hive-active-model 2>/dev/null
     if [ ! -s /tmp/hive-active-model ]; then
         echo "nexus" > /tmp/hive-active-model
@@ -140,22 +139,6 @@ KEEP_ALIVE_PID=$!
 
 # ════════════════════════════════════════
 # SECTION: Launch QML UI
-# PURPOSE: Run qml6 in foreground (NOT exec) so this bash process
-#          stays alive to manage the keep-alive loop and lockfile.
-# ════════════════════════════════════════
-
-/usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml
-
-# Cleanup: kill keep-alive loop and clipboard server after popup closes
-if [ -n "$KEEP_ALIVE_PID" ]; then
-    /usr/bin/kill "$KEEP_ALIVE_PID" 2>/dev/null
-    wait "$KEEP_ALIVE_PID" 2>/dev/null
-fi
-
-if [ -n "$CLIPBOARD_SERVER_PID" ]; then
-    /usr/bin/kill "$CLIPBOARD_SERVER_PID" 2>/dev/null
-fi
- Launch QML UI
 # PURPOSE: Run qml6 in foreground (NOT exec) so this bash process
 #          stays alive to manage the keep-alive loop and lockfile.
 # ════════════════════════════════════════
