@@ -15,7 +15,7 @@ Window {
     // ============================================
     width: 820          // Window width in logical px — adjust for wider/narrower
     height: 620         // Window height in logical px — adjust for taller/shorter
-    color: "transparent" // Leave transparent to allow rounded corners and shadow
+    color: "#FAF9F6"    // Main window background
     title: "HIVE Chat"
 
     // Main state variables
@@ -49,7 +49,7 @@ Window {
         Rectangle {
             id: bgRect
             anchors.fill: parent
-            color: "transparent" // Background handled by Window color
+            color: "#FAF9F6" // Inner content background
         }
 
         // ============================================
