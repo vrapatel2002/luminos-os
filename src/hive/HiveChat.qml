@@ -300,9 +300,9 @@ Window {
                 id: messageList
                 anchors.fill: parent
                 model: ListModel { id: chatModel }
-                spacing: 16 // Spacing between messages
+                spacing: 6 // [CHANGE: gemini-cli | 2026-04-28] Reduced spacing between turns
                 topMargin: 20
-                bottomMargin: footerBar.height + 40 // Prevent last message from being hidden behind input bar
+                bottomMargin: footerBar.height + 60 // [CHANGE: gemini-cli | 2026-04-28] Extra bottom margin to ensure last message clears input bar
                 leftMargin: 20
                 rightMargin: 20
                 
@@ -342,44 +342,32 @@ Window {
                     id: delegateCol
                     width: ListView.view ? ListView.view.width - 40 : 0
                     spacing: 4
-                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Add top margin when separator is shown
-                    topPadding: (model.role === "user" && model.index > 0 && !model.isStatus) ? 16 : 8
 
-                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Conversation Block Separators
-                    Loader {
-                        active: model.role === "user" && model.index > 0 && !model.isStatus
+                    // [CHANGE: gemini-cli | 2026-04-28] Issue 2: Conversation Block Separators (Fixed overlap and spacing)
+                    Item {
+                        visible: model.role === "user" && model.index > 0 && !model.isStatus
                         width: parent.width
-                        // Ensure 8px space below the 1px line (spacing 4 + height 5 = 9? No, height 5 means 4px extra)
-                        // If spacing is 4, and I want 8px total below: 1px line + 4px space inside item + 4px spacing = 9.
-                        // Wait, user said 8px below it.
-                        // I'll use a height that accounts for the spacing.
-                        height: active ? 5 : 0 
-                        sourceComponent: Component {
-                            Item {
-                                width: parent.width
-                                height: 5
-                                Rectangle {
-                                    width: parent.width * 0.9
-                                    height: 1
-                                    color: separatorColor
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    anchors.top: parent.top
-                                }
-                            }
+                        height: 25 // 12px top + 1px line + 12px bottom
+                        
+                        Rectangle {
+                            width: parent.width * 0.9
+                            height: 1
+                            color: separatorColor
+                            anchors.centerIn: parent
                         }
                     }
 
                     Item {
                         width: parent.width
-                        height: msgBubble.height + 8
-
+                        height: (model.role === "assistant" && !model.isStatus ? messageText.implicitHeight : msgText.implicitHeight) + 12 // Reduced from +24 to tighten bubble
+                        
                         Rectangle {
                             id: msgBubble
                             width: Math.min(
                                 (model.role === "assistant" && !model.isStatus ? messageText.implicitWidth : msgText.implicitWidth) + 32,
                                 parent.width * (model.role === "user" ? 0.75 : 0.8)
                             )
-                            height: (model.role === "assistant" && !model.isStatus ? messageText.implicitHeight : msgText.implicitHeight) + 24
+                            height: parent.height
                             anchors.right: model.role === "user" ? parent.right : undefined
                             anchors.left: model.role === "assistant" ? parent.left : undefined
                             color: model.role === "user" ? userBubble : "transparent" // [CHANGE: gemini-cli | 2026-04-28] Use userBubble
@@ -396,7 +384,7 @@ Window {
                                 font.pixelSize: 14 // Message font size
                                 wrapMode: Text.Wrap
                                 textFormat: Text.RichText // Enables bold (<b>)
-                                lineHeight: 1.6 // User message line height
+                                lineHeight: 1.4 // Reduced from 1.6
                             }
 
                             TextEdit {
@@ -784,18 +772,18 @@ Window {
                             saveMessage(currentConversationId, "assistant", aiText)
                         } else {
                             console.log("[HIVE] ERROR: No choices in response")
-                            chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an empty response.</i>" })
+                            chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an empty response.</i>", "isStatus": true })
                         }
                     } catch(e) {
                         console.log("[HIVE] ERROR: JSON parse failed:", e)
-                        chatModel.append({ "role": "assistant", "content": "<i>Error parsing HIVE response.</i>" })
+                        chatModel.append({ "role": "assistant", "content": "<i>Error parsing HIVE response.</i>", "isStatus": true })
                     }
                 } else if (xhr.status === 0) {
                     console.log("[HIVE] ERROR: Connection refused (status 0) — server may not be running")
-                    chatModel.append({ "role": "assistant", "content": "<i>HIVE is waking up... give me a moment.</i><br><b>Tip:</b> If it doesn't wake automatically, check /tmp/hive-server.log" })
+                    chatModel.append({ "role": "assistant", "content": "<i>HIVE is waking up... give me a moment.</i><br><b>Tip:</b> If it doesn't wake automatically, check /tmp/hive-server.log", "isStatus": true })
                 } else {
                     console.log("[HIVE] ERROR: HTTP", xhr.status)
-                    chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an error (" + xhr.status + ")</i>" })
+                    chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an error (" + xhr.status + ")</i>", "isStatus": true })
                 }
             }
         }
@@ -803,7 +791,7 @@ Window {
         xhr.ontimeout = function() {
             console.log("[HIVE] ERROR: Request timed out after 30s")
             isTyping = false
-            chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond within 30 seconds. The model may not be loaded.</i>" })
+            chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond within 30 seconds. The model may not be loaded.</i>", "isStatus": true })
         }
 
         // [CHANGE: gemini-cli | 2026-04-28] Only send messages that are NOT status messages
