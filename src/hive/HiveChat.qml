@@ -58,11 +58,16 @@ Window {
     property var conversationHistory: []
     property bool isTyping: false
     property int currentConversationId: -1
-    // [CHANGE: antigravity | 2026-04-28] Phase 4: Chip routing state
+    // [CHANGE: antigravity | 2026-04-28] Phase 4+5+5.5: Chip routing + smart routing + thinking trace state
     property string activeChip: ""         // "" or "Code"/"Learn"/"Strategize"/"Write"/"System"
     property string activeModel: "nexus"   // current model backend name
     property string activeAgent: "Nexus"   // display name for labels
     property bool isSwapping: false        // true during swap XHR
+    property string lastUserMessage: ""    // Phase 5: last user msg for specialist re-send
+    property real sendTimestamp: 0          // Phase 5.5: timestamp when message sent to API
+    property real specialistSendTimestamp: 0 // Phase 5.5: timestamp when specialist query sent
+    property int retryCount: 0
+    property int maxRetries: 10
 
     // [CHANGE: gemini-cli | 2026-04-28] HIVE Team Identity
     property string systemPrompt: ""
@@ -177,7 +182,8 @@ Window {
             "role": "assistant",
             "content": msg,
             "isStatus": false,
-            "agentName": agentName
+            "agentName": agentName,
+            "thinkingTime": ""
         });
         // Greetings are NOT saved to DB or conversation history
     }
@@ -187,8 +193,200 @@ Window {
             "role": "assistant",
             "content": "<i>" + text + "</i>",
             "isStatus": true,
-            "agentName": ""
+            "agentName": "",
+            "thinkingTime": ""
         });
+    }
+
+    // [CHANGE: antigravity | 2026-04-28] Phase 5: Smart routing functions
+    function detectRoute(responseText) {
+        console.log(">>> DIAG-4 DETECT | checking text = " + responseText.substring(0, 200))
+        // Returns {routeTo: "bolt"/"nova"/null, cleanText: "text without tag"}
+        var boltMatch = responseText.match(/\[ROUTE:BOLT\]/i);
+        var novaMatch = responseText.match(/\[ROUTE:NOVA\]/i);
+
+        var routeTo = null;
+        var tag = "";
+        if (boltMatch) { routeTo = "bolt"; tag = boltMatch[0]; }
+        else if (novaMatch) { routeTo = "nova"; tag = novaMatch[0]; }
+
+        if (!routeTo) return {routeTo: null, cleanText: responseText};
+
+        var cleanText = responseText.replace(tag, "").trim();
+        return {routeTo: routeTo, cleanText: cleanText};
+    }
+
+    function executeRoute(routeTo, originalUserMessage) {
+        console.log(">>> DIAG-5 ROUTE | routing to = " + routeTo + " | lastUserMessage = " + lastUserMessage)
+        var agentName = routeTo === "bolt" ? "Bolt" : "Nova";
+        console.log("[HIVE] Smart route → " + agentName + " for: " + originalUserMessage.substring(0, 60));
+
+        addStatusMessage("Routing to " + agentName + "...");
+        isSwapping = true;
+        isTyping = true;
+
+        var swapXhr = new XMLHttpRequest();
+        swapXhr.open("GET", "http://localhost:8079/swap/" + routeTo);
+        swapXhr.timeout = 120000;
+        swapXhr.onreadystatechange = function() {
+            if (swapXhr.readyState === XMLHttpRequest.DONE) {
+                if (swapXhr.status === 200) {
+                    try {
+                        var resp = JSON.parse(swapXhr.responseText);
+                        if (resp.status === "ready") {
+                            activeModel = routeTo;
+                            activeAgent = agentName;
+                            isSwapping = false;
+                            // Send the original user message to the specialist
+                            sendToSpecialist(originalUserMessage, agentName);
+                            return;
+                        }
+                    } catch(e) { /* fall through to error */ }
+                }
+                // Swap failed
+                isSwapping = false;
+                isTyping = false;
+                addStatusMessage("Failed to reach " + agentName + ". Staying on Nexus.");
+            }
+        };
+        swapXhr.ontimeout = function() {
+            isSwapping = false;
+            isTyping = false;
+            addStatusMessage(agentName + " took too long to load.");
+        };
+        swapXhr.send();
+    }
+
+    function sendToSpecialist(userMessage, agentName) {
+        console.log("[HIVE] Sending to specialist " + agentName + ": " + userMessage.substring(0, 60));
+
+        // Load the correct specialist prompt directly — do NOT use the global
+        // systemPrompt variable (race condition: it may still hold the old prompt)
+        var promptMap = {
+            "Bolt": "/home/shawn/luminos-os/config/prompts/bolt.txt",
+            "Nova": "/home/shawn/luminos-os/config/prompts/nova.txt",
+            "Nexus": "/home/shawn/luminos-os/config/prompts/nexus.txt"
+        };
+
+        var specialistPrompt = "";
+        var promptPath = promptMap[agentName] || "";
+        if (promptPath !== "") {
+            try {
+                var promptXhr = new XMLHttpRequest();
+                promptXhr.open("GET", "file://" + promptPath, false);  // SYNCHRONOUS read
+                promptXhr.send();
+                if (promptXhr.status === 200 || promptXhr.status === 0) {
+                    specialistPrompt = promptXhr.responseText.trim();
+                    console.log(">>> DIAG-PROMPT | Loaded prompt for " + agentName + " (" + specialistPrompt.length + " chars)");
+                } else {
+                    console.log(">>> DIAG-PROMPT | FAILED to load prompt for " + agentName + " status=" + promptXhr.status);
+                }
+            } catch(e) {
+                console.log(">>> DIAG-PROMPT | ERROR loading prompt for " + agentName + ": " + e);
+            }
+        }
+
+        var messages = [];
+        if (specialistPrompt.length > 0) {
+            messages.push({"role": "system", "content": specialistPrompt});
+        }
+
+        messages.push({
+            "role": "user",
+            "content": lastUserMessage
+        });
+
+        // [CHANGE: gemini-cli | 2026-04-28] Wait 2s for llama-server warmup after swap
+        var warmupTimer = Qt.createQmlObject('import QtQuick; Timer { interval: 2000; repeat: false; running: true }', root, "warmupTimer");
+        warmupTimer.triggered.connect(function() {
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", "http://localhost:8080/v1/chat/completions", true);
+            xhr.setRequestHeader("Content-Type", "application/json");
+            xhr.timeout = 30000;
+
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === XMLHttpRequest.DONE) {
+                    console.log(">>> DIAG-7 SPECIALIST RESPONSE | agent = " + agentName + " | content = " + xhr.responseText.substring(0, 200))
+                    isTyping = false;
+                    if (xhr.status === 200) {
+                        try {
+                            var response = JSON.parse(xhr.responseText);
+                            if (response.choices && response.choices.length > 0) {
+                                var aiText = response.choices[0].message.content;
+                                console.log("[HIVE] Specialist " + agentName + " responded, len: " + aiText.length);
+
+                                // Strip any tags the specialist might include
+                                aiText = aiText.replace(/\[ROUTE:(BOLT|NOVA|NEXUS)\]/gi, "").trim();
+
+                                // Specialist thinking trace created AFTER response to show full time
+                                var specialistTime = ((Date.now() - specialistSendTimestamp) / 1000).toFixed(1) + "s";
+                                chatModel.append({
+                                    "role": "thinking",
+                                    "content": "Processing request...",
+                                    "agentName": agentName,
+                                    "isStatus": false,
+                                    "thinkingTime": specialistTime
+                                });
+
+                                conversationHistory.push({"role": "assistant", "content": aiText});
+                                chatModel.append({
+                                    "role": "assistant",
+                                    "content": formatMarkdown(aiText),
+                                    "isStatus": false,
+                                    "agentName": agentName,
+                                    "thinkingTime": ""
+                                });
+                                saveMessage(currentConversationId, "assistant", aiText);
+                            } else {
+                                chatModel.append({"role": "assistant", "content": "<i>" + agentName + " returned an empty response.</i>", "isStatus": true, "agentName": "", "thinkingTime": ""});
+                            }
+                        } catch(e) {
+                            chatModel.append({"role": "assistant", "content": "<i>Error parsing " + agentName + "'s response.</i>", "isStatus": true, "agentName": "", "thinkingTime": ""});
+                        }
+                    } else {
+                        chatModel.append({"role": "assistant", "content": "<i>" + agentName + " failed to respond.</i>", "isStatus": true, "agentName": "", "thinkingTime": ""});
+                    }
+
+                    // Silent swap back to Nexus only after callback completes
+                    silentSwapToNexus();
+                }
+            };
+
+            xhr.ontimeout = function() {
+                isTyping = false;
+                chatModel.append({"role": "assistant", "content": "<i>" + agentName + " didn't respond in time.</i>", "isStatus": true, "agentName": "", "thinkingTime": ""});
+                silentSwapToNexus();
+            };
+
+            var payload = {
+                "model": activeModel,
+                "messages": messages,
+                "stream": false
+            };
+            console.log("[HIVE] Sending specialist POST to localhost:8080");
+            console.log(">>> DIAG-6 SPECIALIST | agent = " + agentName + " | sending payload = " + JSON.stringify(messages))
+            specialistSendTimestamp = Date.now();
+            xhr.send(JSON.stringify(payload));
+            warmupTimer.destroy();
+        });
+    }
+
+    function silentSwapToNexus() {
+        console.log(">>> DIAG-9 SILENT SWAP | returning to Nexus")
+        // Don't show greeting, don't show status — just swap back quietly
+        console.log("[HIVE] Silent swap back to Nexus");
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "http://localhost:8079/swap/nexus");
+        xhr.timeout = 120000;
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === XMLHttpRequest.DONE) {
+                activeModel = "nexus";
+                activeAgent = "Nexus";
+                loadSystemPrompt();
+                console.log("[HIVE] Silently returned to Nexus");
+            }
+        };
+        xhr.send();
     }
 
     // [CHANGE: gemini-cli | 2026-04-28] Issue 3: Ping health and show status
@@ -203,14 +401,16 @@ Window {
                         "role": "assistant",
                         "content": activeAgent + " is ready.",
                         "isStatus": true,
-                        "agentName": ""
+                        "agentName": "",
+                        "thinkingTime": ""
                     });
                 } else {
                     chatModel.append({
                         "role": "assistant",
                         "content": "Waking up...",
                         "isStatus": true,
-                        "agentName": ""
+                        "agentName": "",
+                        "thinkingTime": ""
                     });
                 }
             }
@@ -220,7 +420,8 @@ Window {
                 "role": "assistant",
                 "content": "Waking up...",
                 "isStatus": true,
-                "agentName": ""
+                "agentName": "",
+                "thinkingTime": ""
             });
         };
         hc.send();
@@ -448,12 +649,77 @@ Window {
                         }
                     }
 
-                    // ── PART 2: Message bubble ──
+                    // ── PART 1.5: Thinking trace (collapsible) ──
+                    // [CHANGE: antigravity | 2026-04-28] Phase 5.5: Collapsible thinking/reasoning trace
+                    Column {
+                        id: thinkingTrace
+                        width: parent.width
+                        visible: model.role === "thinking"
+                        spacing: 0
+
+                        // Header row — click to toggle expand/collapse
+                        Item {
+                            width: parent.width
+                            height: thinkingHeader.implicitHeight + 8
+
+                            Text {
+                                id: thinkingHeader
+                                property bool expanded: false
+                                text: (expanded ? "▼ " : "▶ ") + (model.agentName || "HIVE") + " · Thinking (" + (model.thinkingTime || "...") + ")"
+                                color: subtleText
+                                font.family: "Inter"
+                                font.pixelSize: 12
+                                font.italic: true
+                                anchors.verticalCenter: parent.verticalCenter
+                                leftPadding: 4
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: thinkingHeader.expanded = !thinkingHeader.expanded
+                            }
+                        }
+
+                        // Expandable content box
+                        Rectangle {
+                            id: thinkingBody
+                            width: parent.width * 0.85
+                            visible: thinkingHeader.expanded
+                            implicitHeight: thinkingBodyText.implicitHeight + 16
+                            color: root.isDark ? "#252525" : "#F5F3EF"
+                            border.width: 1
+                            border.color: borderColor
+                            radius: 8
+
+                            Text {
+                                id: thinkingBodyText
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 8
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                text: model.content
+                                color: subtleText
+                                font.family: "Inter"
+                                font.pixelSize: 12
+                                wrapMode: Text.Wrap
+                                lineHeight: 1.3
+                            }
+                        }
+
+                        // Small spacer after thinking trace
+                        Item { width: 1; height: 4 }
+                    }
+
+                    // ── PART 2: Message bubble (not for thinking traces) ──
                     Item {
                         id: bubbleRow
                         width: parent.width
+                        visible: model.role !== "thinking"
                         // Height determined entirely by the bubble's natural size
-                        implicitHeight: msgBubble.implicitHeight > 0 ? msgBubble.implicitHeight : 40
+                        implicitHeight: model.role === "thinking" ? 0 : (msgBubble.implicitHeight > 0 ? msgBubble.implicitHeight : 40)
 
                         Rectangle {
                             id: msgBubble
@@ -517,7 +783,7 @@ Window {
                         }
                     }
 
-                    // ── PART 3: Model label (AI messages only, not status) ──
+                    // ── PART 3: Model label (AI messages only, not status, not thinking) ──
                     // [CHANGE: antigravity | 2026-04-28] Phase 4: per-message agent name
                     Text {
                         id: modelLabel
@@ -529,7 +795,7 @@ Window {
                         leftPadding: 4
                     }
 
-                    // ── PART 4: Copy button (AI messages only, not status) ──
+                    // ── PART 4: Copy button (AI messages only, not status, not thinking) ──
                     Row {
                         id: copyRowContainer
                         spacing: 6
@@ -834,12 +1100,23 @@ Window {
         onActivated: closeWindow()
     }
 
+    Timer {
+        id: retryTimer
+        interval: 3000
+        repeat: false
+        onTriggered: retrySendToHive()
+    }
+
     // Process chat interaction
+    // [CHANGE: antigravity | 2026-04-28] Phase 5: Block sends during swap, track lastUserMessage
     function sendMessage() {
+        if (isSwapping) return;  // block sends during model swap
         var msg = textInput.text.trim()
         if (msg === "") return
 
         console.log("[HIVE] Sending message:", msg.substring(0, 80))
+        lastUserMessage = msg;  // Phase 5: track for specialist re-send
+        console.log(">>> DIAG-1 SEND | lastUserMessage = " + lastUserMessage)
 
         if (!chatStarted) {
             chatStarted = true
@@ -848,7 +1125,7 @@ Window {
         }
 
         // Add to UI
-        chatModel.append({ "role": "user", "content": msg, "isStatus": false, "agentName": "" })
+        chatModel.append({ "role": "user", "content": msg, "isStatus": false, "agentName": "", "thinkingTime": "" })
 
         // Add to history
         conversationHistory.push({ "role": "user", "content": msg })
@@ -876,8 +1153,47 @@ Window {
         return formatted
     }
 
+    function retrySendToHive() {
+        retryCount++;
+        console.log(">>> RETRY | attempt " + retryCount + "/" + maxRetries + " | checking server...");
+
+        if (retryCount > maxRetries) {
+            isTyping = false;
+            retryCount = 0;
+            addStatusMessage("HIVE couldn't start. Try again in a moment.");
+            console.log(">>> RETRY | gave up after " + maxRetries + " attempts");
+            return;
+        }
+
+        var checkXhr = new XMLHttpRequest();
+        checkXhr.open("GET", "http://localhost:8080/health", true);
+        checkXhr.timeout = 3000;
+
+        checkXhr.onreadystatechange = function() {
+            if (checkXhr.readyState === XMLHttpRequest.DONE) {
+                if (checkXhr.status === 200) {
+                    console.log(">>> RETRY | server is UP — resending message");
+                    retryCount = 0;
+                    addStatusMessage("Nexus is ready. ✳");
+                    sendToHive();
+                } else {
+                    console.log(">>> RETRY | server not ready (status " + checkXhr.status + "), retrying in 3s...");
+                    retryTimer.start();
+                }
+            }
+        };
+
+        checkXhr.ontimeout = function() {
+            console.log(">>> RETRY | health check timed out, retrying in 3s...");
+            retryTimer.start();
+        };
+
+        checkXhr.send();
+    }
+
     function sendToHive() {
         console.log("[HIVE] sendToHive() — messages:", conversationHistory.length)
+        sendTimestamp = Date.now();  // [CHANGE: antigravity | 2026-04-28] Phase 5.5: record send time
         var xhr = new XMLHttpRequest()
         xhr.open("POST", "http://localhost:8080/v1/chat/completions", true)
         xhr.setRequestHeader("Content-Type", "application/json")
@@ -888,31 +1204,82 @@ Window {
         xhr.onreadystatechange = function() {
             if (xhr.readyState === XMLHttpRequest.DONE) {
                 console.log("[HIVE] XHR done — status:", xhr.status, "len:", xhr.responseText.length)
-                isTyping = false
                 if (xhr.status === 200) {
+                    isTyping = false
                     try {
                         var response = JSON.parse(xhr.responseText)
                         if (response.choices && response.choices.length > 0) {
                             var aiText = response.choices[0].message.content
                             console.log("[HIVE] AI response received, len:", aiText.length)
+
+                            // [CHANGE: antigravity | 2026-04-28] Phase 5.5: Thinking trace
+                            var thinkingTime = ((Date.now() - sendTimestamp) / 1000).toFixed(1) + "s";
+
+                            // [CHANGE: antigravity | 2026-04-28] Phase 5: Route detection
+                            // Only detect routes when on Nexus and no chip is manually active
+                            if (activeModel === "nexus" && activeChip === "") {
+                                console.log(">>> DIAG-2 RESPONSE | raw response = " + aiText.substring(0, 200))
+                                console.log(">>> DIAG-3 RESPONSE | lastUserMessage still = " + lastUserMessage)
+                                var route = detectRoute(aiText);
+                                if (route.routeTo !== null) {
+                                    console.log("[HIVE] Route detected →", route.routeTo);
+                                    var routeAgent = route.routeTo === "bolt" ? "Bolt" : "Nova";
+
+                                    // [CHANGE: gemini-cli | 2026-04-28] Build thinking trace content that includes transition text
+                                    var thinkingContent = "Routing decision: specialist needed\n→ Routing to " + routeAgent;
+                                    if (route.cleanText.length > 0) {
+                                        thinkingContent = route.cleanText + "\n→ Routing to " + routeAgent;
+                                    }
+
+                                    console.log(">>> DIAG-8 NEXUS TEXT | role = thinking | content = " + thinkingContent)
+                                    chatModel.append({
+                                        "role": "thinking",
+                                        "content": thinkingContent,
+                                        "agentName": "Nexus",
+                                        "isStatus": false,
+                                        "thinkingTime": thinkingTime
+                                    });
+
+                                    // Execute the route with the original user message
+                                    executeRoute(route.routeTo, lastUserMessage);
+                                    return;  // Don't add the raw response to chat
+                                }
+                            }
+
+                            // No routing — add thinking trace for direct handling
+                            chatModel.append({
+                                "role": "thinking",
+                                "content": "Handling directly — no routing needed",
+                                "agentName": activeAgent,
+                                "isStatus": false,
+                                "thinkingTime": thinkingTime
+                            });
+
+                            // Display normally
                             conversationHistory.push({ "role": "assistant", "content": aiText })
-                            chatModel.append({ "role": "assistant", "content": formatMarkdown(aiText), "isStatus": false, "agentName": activeAgent })
+                            chatModel.append({ "role": "assistant", "content": formatMarkdown(aiText), "isStatus": false, "agentName": activeAgent, "thinkingTime": "" })
                             // Persist AI response to DB
                             saveMessage(currentConversationId, "assistant", aiText)
                         } else {
                             console.log("[HIVE] ERROR: No choices in response")
-                            chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an empty response.</i>", "isStatus": true, "agentName": "" })
+                            chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an empty response.</i>", "isStatus": true, "agentName": "", "thinkingTime": "" })
                         }
                     } catch(e) {
                         console.log("[HIVE] ERROR: JSON parse failed:", e)
-                        chatModel.append({ "role": "assistant", "content": "<i>Error parsing HIVE response.</i>", "isStatus": true, "agentName": "" })
+                        chatModel.append({ "role": "assistant", "content": "<i>Error parsing HIVE response.</i>", "isStatus": true, "agentName": "", "thinkingTime": "" })
                     }
                 } else if (xhr.status === 0) {
-                    console.log("[HIVE] ERROR: Connection refused (status 0) — server may not be running")
-                    chatModel.append({ "role": "assistant", "content": "<i>HIVE is waking up... give me a moment.</i><br><b>Tip:</b> If it doesn't wake automatically, check /tmp/hive-server.log", "isStatus": true, "agentName": "" })
+                    // Server not running yet — start retry loop
+                    console.log(">>> RETRY | server not reachable, starting retry loop");
+                    if (retryCount === 0) {
+                        addStatusMessage("HIVE is waking up... ✳");
+                    }
+                    retryTimer.start();
+                    return;
                 } else {
+                    isTyping = false
                     console.log("[HIVE] ERROR: HTTP", xhr.status)
-                    chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an error (" + xhr.status + ")</i>", "isStatus": true, "agentName": "" })
+                    chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an error (" + xhr.status + ")</i>", "isStatus": true, "agentName": "", "thinkingTime": "" })
                 }
             }
         }
@@ -920,7 +1287,7 @@ Window {
         xhr.ontimeout = function() {
             console.log("[HIVE] ERROR: Request timed out after 30s")
             isTyping = false
-            chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond within 30 seconds. The model may not be loaded.</i>", "isStatus": true, "agentName": "" })
+            chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond within 30 seconds. The model may not be loaded.</i>", "isStatus": true, "agentName": "", "thinkingTime": "" })
         }
 
         // [CHANGE: gemini-cli | 2026-04-28] Only send messages that are NOT status messages
@@ -967,7 +1334,8 @@ Window {
             "role": "assistant",
             "content": greeting,
             "isStatus": true,
-            "agentName": ""
+            "agentName": "",
+            "thinkingTime": ""
         });
         
         checkServerHealth()
