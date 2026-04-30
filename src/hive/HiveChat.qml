@@ -1268,9 +1268,9 @@ Window {
                         console.log("[HIVE] ERROR: JSON parse failed:", e)
                         chatModel.append({ "role": "assistant", "content": "<i>Error parsing HIVE response.</i>", "isStatus": true, "agentName": "", "thinkingTime": "" })
                     }
-                } else if (xhr.status === 0) {
+                } else if (xhr.status === 0 || xhr.status === 503) {
                     // Server not running yet — start retry loop
-                    console.log(">>> RETRY | server not reachable, starting retry loop");
+                    console.log(">>> RETRY | server not reachable (status " + xhr.status + "), starting retry loop");
                     if (retryCount === 0) {
                         addStatusMessage("HIVE is waking up... ✳");
                     }
