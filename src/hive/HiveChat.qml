@@ -221,7 +221,6 @@ Window {
         var agentName = routeTo === "bolt" ? "Bolt" : "Nova";
         console.log("[HIVE] Smart route → " + agentName + " for: " + originalUserMessage.substring(0, 60));
 
-        addStatusMessage("Routing to " + agentName + "...");
         isSwapping = true;
         isTyping = true;
 
@@ -318,15 +317,22 @@ Window {
                                 // Strip any tags the specialist might include
                                 aiText = aiText.replace(/\[ROUTE:(BOLT|NOVA|NEXUS)\]/gi, "").trim();
 
-                                // Specialist thinking trace created AFTER response to show full time
-                                var specialistTime = ((Date.now() - specialistSendTimestamp) / 1000).toFixed(1) + "s";
-                                chatModel.append({
-                                    "role": "thinking",
-                                    "content": "Processing request...",
-                                    "agentName": agentName,
-                                    "isStatus": false,
-                                    "thinkingTime": specialistTime
-                                });
+                                // Update existing Nexus thinking trace into one combined routing box
+                                var totalTime = ((Date.now() - sendTimestamp) / 1000).toFixed(1) + "s";
+                                for (var i = chatModel.count - 1; i >= 0; i--) {
+                                    var item = chatModel.get(i);
+                                    if (item.role === "thinking" && !item.isStatus) {
+                                        var userPreview = lastUserMessage.substring(0, 50);
+                                        chatModel.set(i, {
+                                            "role": "thinking",
+                                            "content": item.content + "\n" + agentName + " → Answering: \"" + userPreview + "\"",
+                                            "agentName": "Routing to " + agentName,
+                                            "isStatus": false,
+                                            "thinkingTime": totalTime
+                                        });
+                                        break;
+                                    }
+                                }
 
                                 conversationHistory.push({"role": "assistant", "content": aiText});
                                 chatModel.append({
