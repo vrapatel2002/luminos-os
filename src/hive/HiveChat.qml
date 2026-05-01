@@ -198,6 +198,23 @@ Window {
         });
     }
 
+    function updateLastStatus(text) {
+        for (var i = chatModel.count - 1; i >= 0; i--) {
+            var item = chatModel.get(i);
+            if (item.isStatus === true) {
+                chatModel.set(i, {
+                    "role": item.role,
+                    "content": "<i>" + text + "</i>",
+                    "agentName": "",
+                    "isStatus": true,
+                    "thinkingTime": ""
+                });
+                return;
+            }
+        }
+        addStatusMessage(text);
+    }
+
     // [CHANGE: antigravity | 2026-04-28] Phase 5: Smart routing functions
     function detectRoute(responseText) {
         console.log(">>> DIAG-4 DETECT | checking text = " + responseText.substring(0, 200))
@@ -236,6 +253,8 @@ Window {
                             activeModel = routeTo;
                             activeAgent = agentName;
                             isSwapping = false;
+                            console.log(">>> SWAP-STATUS | " + agentName + " is ready. Sending your question...");
+                            updateLastStatus(agentName + " is ready. Sending your question...");
                             // Send the original user message to the specialist
                             sendToSpecialist(originalUserMessage, agentName);
                             return;
@@ -254,6 +273,8 @@ Window {
             addStatusMessage(agentName + " took too long to load.");
         };
         swapXhr.send();
+        console.log(">>> SWAP-STATUS | Loading " + agentName + "...");
+        updateLastStatus("Loading " + agentName + "...");
     }
 
     function sendToSpecialist(userMessage, agentName) {
@@ -372,6 +393,8 @@ Window {
             console.log("[HIVE] Sending specialist POST to localhost:8080");
             console.log(">>> DIAG-6 SPECIALIST | agent = " + agentName + " | sending payload = " + JSON.stringify(messages))
             specialistSendTimestamp = Date.now();
+            console.log(">>> SWAP-STATUS | " + agentName + " is thinking...");
+            updateLastStatus(agentName + " is thinking...");
             xhr.send(JSON.stringify(payload));
             warmupTimer.destroy();
         });
