@@ -199,7 +199,10 @@ Window {
     }
 
     function updateLastStatus(text) {
-        for (var i = chatModel.count - 1; i >= 0; i--) {
+        // Only update a status message if it's one of the last 3 items
+        // This prevents overwriting old status messages from earlier in chat
+        var searchLimit = Math.max(0, chatModel.count - 3);
+        for (var i = chatModel.count - 1; i >= searchLimit; i--) {
             var item = chatModel.get(i);
             if (item.isStatus === true) {
                 chatModel.set(i, {
@@ -212,6 +215,7 @@ Window {
                 return;
             }
         }
+        // No recent status found — add new one
         addStatusMessage(text);
     }
 
@@ -622,7 +626,7 @@ Window {
                 model: ListModel { id: chatModel }
                 spacing: 6 // [CHANGE: gemini-cli | 2026-04-28] Reduced spacing between turns
                 topMargin: 20
-                bottomMargin: footerBar.height + 60 // [CHANGE: gemini-cli | 2026-04-28] Extra bottom margin to ensure last message clears input bar
+                bottomMargin: 120
                 leftMargin: 20
                 rightMargin: 20
                 
