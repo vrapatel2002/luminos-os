@@ -67,7 +67,7 @@ Window {
     property real sendTimestamp: 0          // Phase 5.5: timestamp when message sent to API
     property real specialistSendTimestamp: 0 // Phase 5.5: timestamp when specialist query sent
     property int retryCount: 0
-    property int maxRetries: 10
+    property int maxRetries: 20
 
     // [CHANGE: gemini-cli | 2026-04-28] HIVE Team Identity
     property string systemPrompt: ""
@@ -1337,6 +1337,35 @@ Window {
             return;
         }
 
+        // On attempts 3 and 7, actively try to start the server
+        if (retryCount === 3 || retryCount === 7) {
+            console.log(">>> RETRY | attempt " + retryCount + " — forcing server start via swap server");
+            updateLastStatus("Starting HIVE... ✳");
+            var startXhr = new XMLHttpRequest();
+            startXhr.open("GET", "http://localhost:8079/swap/nexus", true);
+            startXhr.timeout = 60000;
+            startXhr.onreadystatechange = function() {
+                if (startXhr.readyState === XMLHttpRequest.DONE) {
+                    if (startXhr.status === 200) {
+                        console.log(">>> RETRY | swap server started nexus successfully");
+                        retryCount = 0;
+                        updateLastStatus("Nexus is ready. ✳");
+                        sendToHive();
+                    } else {
+                        console.log(">>> RETRY | swap server start failed (status " + startXhr.status + "), continuing retries...");
+                        retryTimer.start();
+                    }
+                }
+            };
+            startXhr.ontimeout = function() {
+                console.log(">>> RETRY | swap server start timed out, continuing retries...");
+                retryTimer.start();
+            };
+            startXhr.send();
+            return;
+        }
+
+        // Normal retry — just check health
         var checkXhr = new XMLHttpRequest();
         checkXhr.open("GET", "http://localhost:8080/health", true);
         checkXhr.timeout = 3000;
@@ -1346,7 +1375,7 @@ Window {
                 if (checkXhr.status === 200) {
                     console.log(">>> RETRY | server is UP — resending message");
                     retryCount = 0;
-                    addStatusMessage("Nexus is ready. ✳");
+                    updateLastStatus("Nexus is ready. ✳");
                     sendToHive();
                 } else {
                     console.log(">>> RETRY | server not ready (status " + checkXhr.status + "), retrying in 3s...");

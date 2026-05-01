@@ -94,7 +94,7 @@ if [ -f "$LOCKFILE" ]; then
 fi
 
 echo $$ > "$LOCKFILE"
-trap "/usr/bin/rm -f $LOCKFILE; /usr/bin/pkill -f 'hive-swap-server.py' 2>/dev/null" EXIT
+trap "/usr/bin/rm -f $LOCKFILE; /usr/bin/pkill -f 'hive-swap-server.py' 2>/dev/null; kill \$SWAP_PID 2>/dev/null; kill \$LLAMA_START_PID 2>/dev/null" EXIT
 
 # ════════════════════════════════════════
 # SECTION: Auto-start Nexus
@@ -104,12 +104,12 @@ trap "/usr/bin/rm -f $LOCKFILE; /usr/bin/pkill -f 'hive-swap-server.py' 2>/dev/n
 # [CHANGE: gemini-cli | 2026-04-28]
 # ════════════════════════════════════════
 
+LLAMA_START_PID=""
 if ! /usr/bin/pgrep -x "llama-server" > /dev/null 2>&1; then
-    MODEL_NAME="nexus"
-    /usr/bin/nohup /home/shawn/luminos-os/scripts/hive-start-model.sh "$MODEL_NAME" \
-        >> /tmp/hive-server.log 2>&1 &
-    disown
-    echo "$MODEL_NAME" > /tmp/hive-active-model
+    echo "[LAUNCHER] llama-server not running, starting..."
+    bash /home/shawn/luminos-os/scripts/hive-start-model.sh nexus >> /tmp/hive-server.log 2>&1 &
+    LLAMA_START_PID=$!
+    echo "nexus" > /tmp/hive-active-model
 else
     # Server is already running, try to detect which model is active
     /usr/bin/pgrep -a "llama-server" | /usr/bin/grep -oP "(?<=--model-name\s)\w+" > /tmp/hive-active-model 2>/dev/null
@@ -124,9 +124,9 @@ fi
 # [CHANGE: antigravity | 2026-04-28] Start swap server if not running
 SWAP_PID=""
 if ! /usr/bin/pgrep -f "hive-swap-server.py" > /dev/null 2>&1; then
+    echo "[LAUNCHER] swap server not running, starting..."
     /usr/bin/python3 /home/shawn/luminos-os/scripts/hive-swap-server.py &
     SWAP_PID=$!
-    echo "[HIVE] Swap server started (PID: $SWAP_PID)"
 fi
 
 # ════════════════════════════════════════
