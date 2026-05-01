@@ -638,6 +638,8 @@ Window {
                 // [CHANGE: antigravity | 2026-04-28] Full delegate rewrite — responsive layout, no hardcoded heights
                 delegate: Column {
                     id: delegateCol
+                    // [CHANGE: gemini-cli | 2026-05-01] Pre-parse segments for repeater
+                    property var segments: parseMessageSegments(model.content || "")
                     width: ListView.view ? ListView.view.width - 40 : 0
                     spacing: 0  // We control spacing with explicit spacer Items
 
@@ -768,22 +770,127 @@ Window {
                                     // Height is NEVER set — determined by wrapMode
                                 }
 
-                                // AI messages (non-status): selectable TextEdit for copy support
-                                TextEdit {
-                                    id: messageText
+                                // AI messages (non-status): Column + Repeater for code block support
+                                // [CHANGE: gemini-cli | 2026-05-01] Added multi-segment rendering with code block copy buttons
+                                Column {
+                                    id: messageSegments
                                     visible: model.role === "assistant" && !model.isStatus
                                     width: parent.width
-                                    text: model.content
-                                    readOnly: true
-                                    selectByMouse: true
-                                    wrapMode: TextEdit.Wrap
-                                    textFormat: TextEdit.RichText
-                                    font.family: "Inter"
-                                    font.pixelSize: 14
-                                    color: textColor
-                                    selectedTextColor: surfaceColor
-                                    selectionColor: accentColor
-                                    // Height is NEVER set — determined by wrapMode
+                                    spacing: 8
+
+                                    Repeater {
+                                        model: segments
+                                        delegate: Column {
+                                            id: segmentData
+                                            width: parent.width
+                                            spacing: 0
+
+                                            // Text Segment
+                                            TextEdit {
+                                                id: textSeg
+                                                visible: modelData.type === "text"
+                                                width: parent.width
+                                                height: visible ? contentHeight : 0
+                                                text: formatMarkdown(modelData.content || "")
+                                                readOnly: true
+                                                selectByMouse: true
+                                                wrapMode: TextEdit.Wrap
+                                                textFormat: TextEdit.RichText
+                                                font.family: "Inter"
+                                                font.pixelSize: 14
+                                                color: textColor
+                                                selectedTextColor: surfaceColor
+                                                selectionColor: accentColor
+                                            }
+
+                                            // Code Segment
+                                            Rectangle {
+                                                id: codeSeg
+                                                visible: modelData.type === "code"
+                                                width: parent.width
+                                                height: visible ? (codeHeader.height + codeContent.contentHeight + 24) : 0
+                                                radius: 8
+                                                color: isDark ? "#1A1A1A" : "#F5F3EF"
+                                                border.color: isDark ? "#333333" : "#E0DDD8"
+                                                border.width: 1
+
+                                                // Code Header Row
+                                                Rectangle {
+                                                    id: codeHeader
+                                                    width: parent.width
+                                                    height: 32
+                                                    color: isDark ? "#252525" : "#EBE8E3"
+                                                    radius: 8
+                                                    // Only top corners rounded for header
+                                                    Rectangle {
+                                                        width: parent.width; height: 8; anchors.bottom: parent.bottom; color: parent.color
+                                                    }
+
+                                                    Text {
+                                                        anchors.left: parent.left
+                                                        anchors.leftMargin: 12
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        text: modelData.lang || "code"
+                                                        color: subtleText
+                                                        font.family: "JetBrains Mono"
+                                                        font.pixelSize: 12
+                                                    }
+
+                                                    Rectangle {
+                                                        id: codeCopy
+                                                        anchors.right: parent.right
+                                                        anchors.rightMargin: 8
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        width: 28; height: 28; radius: 4
+                                                        color: codeCopyMouse.containsMouse ? borderColor : "transparent"
+
+                                                        Text {
+                                                            id: codeCopyIcon
+                                                            anchors.centerIn: parent
+                                                            text: "📋"
+                                                            font.pixelSize: 14
+                                                        }
+
+                                                        MouseArea {
+                                                            id: codeCopyMouse
+                                                            anchors.fill: parent
+                                                            hoverEnabled: true
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: {
+                                                                var xhr = new XMLHttpRequest();
+                                                                xhr.open("POST", "http://localhost:8079/copy");
+                                                                xhr.setRequestHeader("Content-Type", "application/json");
+                                                                xhr.send(JSON.stringify({"text": modelData.content}));
+                                                                codeCopyIcon.text = "✓";
+                                                                codeCopyTimer.restart();
+                                                            }
+                                                        }
+                                                        Timer {
+                                                            id: codeCopyTimer
+                                                            interval: 2000
+                                                            onTriggered: codeCopyIcon.text = "📋"
+                                                        }
+                                                    }
+                                                }
+
+                                                TextEdit {
+                                                    id: codeContent
+                                                    anchors.top: codeHeader.bottom
+                                                    anchors.left: parent.left
+                                                    anchors.right: parent.right
+                                                    anchors.margins: 12
+                                                    text: modelData.content || ""
+                                                    readOnly: true
+                                                    selectByMouse: true
+                                                    textFormat: TextEdit.PlainText
+                                                    font.family: "JetBrains Mono"
+                                                    font.pixelSize: 13
+                                                    color: textColor
+                                                    wrapMode: TextEdit.Wrap
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1157,6 +1264,33 @@ Window {
         // Newlines to <br>
         formatted = formatted.replace(/\n/g, "<br>")
         return formatted
+    }
+
+    // [CHANGE: gemini-cli | 2026-05-01] Split message into text and code segments
+    function parseMessageSegments(text) {
+        if (!text) return [{type: "text", content: ""}];
+        var segments = [];
+        var parts = text.split("```");
+        for (var i = 0; i < parts.length; i++) {
+            if (i % 2 === 0) {
+                // Text segment
+                if (parts[i].length > 0 || parts.length === 1) {
+                    segments.push({type: "text", content: parts[i]});
+                }
+            } else {
+                // Code segment
+                var part = parts[i];
+                var firstNewline = part.indexOf("\n");
+                var lang = "";
+                var content = part;
+                if (firstNewline !== -1) {
+                    lang = part.substring(0, firstNewline).trim();
+                    content = part.substring(firstNewline + 1).trim();
+                }
+                segments.push({type: "code", lang: lang, content: content});
+            }
+        }
+        return segments;
     }
 
     function retrySendToHive() {
