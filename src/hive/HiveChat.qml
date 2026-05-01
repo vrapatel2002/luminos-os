@@ -626,7 +626,7 @@ Window {
                 model: ListModel { id: chatModel }
                 spacing: 6 // [CHANGE: gemini-cli | 2026-04-28] Reduced spacing between turns
                 topMargin: 20
-                bottomMargin: 120
+                bottomMargin: 160
                 leftMargin: 20
                 rightMargin: 20
                 
@@ -1016,6 +1016,11 @@ Window {
                 }
 
                 onCountChanged: {
+                    Qt.callLater(function() {
+                        messageList.positionViewAtEnd()
+                    })
+                }
+                onContentHeightChanged: {
                     Qt.callLater(function() {
                         messageList.positionViewAtEnd()
                     })
