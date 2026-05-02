@@ -1,6 +1,6 @@
 # Luminos OS — System Status
-Last updated: 2026-05-01
-Agent: gemini-cli (code block copy)
+Last updated: 2026-05-02
+Agent: gemini-cli (daemon test suite)
 
 ## System
 | Component | Status | Notes |
@@ -41,6 +41,7 @@ Agent: gemini-cli (code block copy)
 | HIVE Orchestrator | ✅ Working | Native Python reasoning layer (systemd active) |
 | llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
 | HIVE Swap Server | ✅ Working | Port 8079, model swap + wl-copy clipboard endpoint |
+| HIVE Daemon | ✅ Working | Port 8078, verified with test-hive-daemon.sh. Consolidated orchestration (routing/swap/inference). |
 | HIVE popup (SUPER+SPACE) | ✅ Working | QML6 native UI, chip routing, smart routing ([ROUTE:X] tags), collapsible thinking trace, strict routing prompt, responsive delegate, LocalStorage persistence, Copy via wl-copy, HIVE Team Identity, segmented message rendering with per-code-block copy buttons |
 | luminos-notes.sh | ✅ Working | SQLite replacement for MemPalace |
 | HIVE Settings in KDE | ✅ Working | Native KCM plugin (kcm_luminos_hive.so) |
