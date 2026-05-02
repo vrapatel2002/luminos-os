@@ -58,134 +58,14 @@ Window {
     property var conversationHistory: []
     property bool isTyping: false
     property int currentConversationId: -1
-    // [CHANGE: antigravity | 2026-04-28] Phase 4+5+5.5: Chip routing + smart routing + thinking trace state
     property string activeChip: ""         // "" or "Code"/"Learn"/"Strategize"/"Write"/"System"
-    property string activeModel: "nexus"   // current model backend name
-    property string activeAgent: "Nexus"   // display name for labels
-    property bool isSwapping: false        // true during swap XHR
-    property string lastUserMessage: ""    // Phase 5: last user msg for specialist re-send
-    property real sendTimestamp: 0          // Phase 5.5: timestamp when message sent to API
-    property real specialistSendTimestamp: 0 // Phase 5.5: timestamp when specialist query sent
-    property int retryCount: 0
-    property int maxRetries: 20
-
-    // [CHANGE: gemini-cli | 2026-04-28] HIVE Team Identity
-    property string systemPrompt: ""
-    onActiveModelChanged: loadSystemPrompt()
-
-    function loadSystemPrompt() {
-        var model = activeModel.toLowerCase();
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "file:///home/shawn/luminos-os/config/prompts/" + model + ".txt");
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState === XMLHttpRequest.DONE) {
-                if (xhr.responseText.trim().length > 0) {
-                    systemPrompt = xhr.responseText.trim();
-                    console.log("[HIVE] System prompt loaded for:", model);
-                }
-            }
-        };
-        xhr.send();
-    }
+    property string lastAgent: "Nexus"     // updated from daemon response; drives footer label
 
     property string timeOfDay: {
         var hour = new Date().getHours()
         if (hour >= 5 && hour < 12) return "Morning"
         if (hour >= 12 && hour < 17) return "Afternoon"
         return "Evening"
-    }
-
-    // [CHANGE: antigravity | 2026-04-28] Phase 4: Load active model from file + set agent name
-    function loadActiveModel() {
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "file:///tmp/hive-active-model");
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState === XMLHttpRequest.DONE) {
-                var name = xhr.responseText.trim();
-                if (name.length > 0) {
-                    activeModel = name.toLowerCase();
-                    activeAgent = name.charAt(0).toUpperCase() + name.substring(1);
-                    console.log("[HIVE] Active model loaded:", activeModel, "agent:", activeAgent);
-                }
-            }
-        };
-        xhr.send();
-    }
-
-    // [CHANGE: antigravity | 2026-04-28] Phase 4: Model swap, greeting, and status functions
-    function swapModel(chipName, modelName, agentName) {
-        if (isSwapping) return;  // prevent double-tap
-
-        // If clicking the already-active chip, deselect → back to Nexus
-        if (activeChip === chipName) {
-            activeChip = "";
-            modelName = "nexus";
-            agentName = "Nexus";
-        } else {
-            activeChip = chipName;
-        }
-
-        // If already on this model, just show greeting (no swap needed)
-        if (activeModel === modelName) {
-            showGreeting(agentName);
-            return;
-        }
-
-        isSwapping = true;
-        addStatusMessage("Switching to " + agentName + "...");
-
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "http://localhost:8079/swap/" + modelName);
-        xhr.timeout = 60000;
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState === XMLHttpRequest.DONE) {
-                isSwapping = false;
-                if (xhr.status === 200) {
-                    try {
-                        var resp = JSON.parse(xhr.responseText);
-                        if (resp.status === "ready") {
-                            activeModel = modelName;
-                            activeAgent = agentName;
-                            loadSystemPrompt();
-                            showGreeting(agentName);
-                            console.log("[HIVE] Swapped to:", agentName);
-                        } else {
-                            addStatusMessage("Failed to load " + agentName + ". Staying on " + activeAgent + ".");
-                            activeChip = "";  // revert
-                        }
-                    } catch(e) {
-                        addStatusMessage("Failed to load " + agentName + ".");
-                        activeChip = "";
-                    }
-                } else {
-                    addStatusMessage("Failed to load " + agentName + ". Staying on " + activeAgent + ".");
-                    activeChip = "";  // revert
-                }
-            }
-        };
-        xhr.ontimeout = function() {
-            isSwapping = false;
-            addStatusMessage(agentName + " took too long to load.");
-            activeChip = "";
-        };
-        xhr.send();
-    }
-
-    function showGreeting(agentName) {
-        var greetings = {
-            "Nexus": "What's on your mind?",
-            "Bolt": "What are we building?",
-            "Nova": "What would you like to think through?"
-        };
-        var msg = greetings[agentName] || "Ready.";
-        chatModel.append({
-            "role": "assistant",
-            "content": msg,
-            "isStatus": false,
-            "agentName": agentName,
-            "thinkingTime": ""
-        });
-        // Greetings are NOT saved to DB or conversation history
     }
 
     function addStatusMessage(text) {
@@ -198,241 +78,17 @@ Window {
         });
     }
 
-    function updateLastStatus(text) {
-        // Only update a status message if it's one of the last 3 items
-        // This prevents overwriting old status messages from earlier in chat
-        var searchLimit = Math.max(0, chatModel.count - 3);
-        for (var i = chatModel.count - 1; i >= searchLimit; i--) {
-            var item = chatModel.get(i);
-            if (item.isStatus === true) {
-                chatModel.set(i, {
-                    "role": item.role,
-                    "content": "<i>" + text + "</i>",
-                    "agentName": "",
-                    "isStatus": true,
-                    "thinkingTime": ""
-                });
-                return;
-            }
-        }
-        // No recent status found — add new one
-        addStatusMessage(text);
-    }
-
-    // [CHANGE: antigravity | 2026-04-28] Phase 5: Smart routing functions
-    function detectRoute(responseText) {
-        console.log(">>> DIAG-4 DETECT | checking text = " + responseText.substring(0, 200))
-        // Returns {routeTo: "bolt"/"nova"/null, cleanText: "text without tag"}
-        var boltMatch = responseText.match(/\[ROUTE:BOLT\]/i);
-        var novaMatch = responseText.match(/\[ROUTE:NOVA\]/i);
-
-        var routeTo = null;
-        var tag = "";
-        if (boltMatch) { routeTo = "bolt"; tag = boltMatch[0]; }
-        else if (novaMatch) { routeTo = "nova"; tag = novaMatch[0]; }
-
-        if (!routeTo) return {routeTo: null, cleanText: responseText};
-
-        var cleanText = responseText.replace(tag, "").trim();
-        return {routeTo: routeTo, cleanText: cleanText};
-    }
-
-    function executeRoute(routeTo, originalUserMessage) {
-        console.log(">>> DIAG-5 ROUTE | routing to = " + routeTo + " | lastUserMessage = " + lastUserMessage)
-        var agentName = routeTo === "bolt" ? "Bolt" : "Nova";
-        console.log("[HIVE] Smart route → " + agentName + " for: " + originalUserMessage.substring(0, 60));
-
-        isSwapping = true;
-        isTyping = true;
-
-        var swapXhr = new XMLHttpRequest();
-        swapXhr.open("GET", "http://localhost:8079/swap/" + routeTo);
-        swapXhr.timeout = 120000;
-        swapXhr.onreadystatechange = function() {
-            if (swapXhr.readyState === XMLHttpRequest.DONE) {
-                if (swapXhr.status === 200) {
-                    try {
-                        var resp = JSON.parse(swapXhr.responseText);
-                        if (resp.status === "ready") {
-                            activeModel = routeTo;
-                            activeAgent = agentName;
-                            isSwapping = false;
-                            console.log(">>> SWAP-STATUS | " + agentName + " is ready. Sending your question...");
-                            updateLastStatus(agentName + " is ready. Sending your question...");
-                            // Send the original user message to the specialist
-                            sendToSpecialist(originalUserMessage, agentName);
-                            return;
-                        }
-                    } catch(e) { /* fall through to error */ }
-                }
-                // Swap failed
-                isSwapping = false;
-                isTyping = false;
-                addStatusMessage("Failed to reach " + agentName + ". Staying on Nexus.");
-            }
-        };
-        swapXhr.ontimeout = function() {
-            isSwapping = false;
-            isTyping = false;
-            addStatusMessage(agentName + " took too long to load.");
-        };
-        swapXhr.send();
-        console.log(">>> SWAP-STATUS | Loading " + agentName + "...");
-        updateLastStatus("Loading " + agentName + "...");
-    }
-
-    function sendToSpecialist(userMessage, agentName) {
-        console.log("[HIVE] Sending to specialist " + agentName + ": " + userMessage.substring(0, 60));
-
-        // Load the correct specialist prompt directly — do NOT use the global
-        // systemPrompt variable (race condition: it may still hold the old prompt)
-        var promptMap = {
-            "Bolt": "/home/shawn/luminos-os/config/prompts/bolt.txt",
-            "Nova": "/home/shawn/luminos-os/config/prompts/nova.txt",
-            "Nexus": "/home/shawn/luminos-os/config/prompts/nexus.txt"
-        };
-
-        var specialistPrompt = "";
-        var promptPath = promptMap[agentName] || "";
-        if (promptPath !== "") {
-            try {
-                var promptXhr = new XMLHttpRequest();
-                promptXhr.open("GET", "file://" + promptPath, false);  // SYNCHRONOUS read
-                promptXhr.send();
-                if (promptXhr.status === 200 || promptXhr.status === 0) {
-                    specialistPrompt = promptXhr.responseText.trim();
-                    console.log(">>> DIAG-PROMPT | Loaded prompt for " + agentName + " (" + specialistPrompt.length + " chars)");
-                } else {
-                    console.log(">>> DIAG-PROMPT | FAILED to load prompt for " + agentName + " status=" + promptXhr.status);
-                }
-            } catch(e) {
-                console.log(">>> DIAG-PROMPT | ERROR loading prompt for " + agentName + ": " + e);
-            }
-        }
-
-        var messages = [];
-        if (specialistPrompt.length > 0) {
-            messages.push({"role": "system", "content": specialistPrompt});
-        }
-
-        messages.push({
-            "role": "user",
-            "content": lastUserMessage
-        });
-
-        // [CHANGE: gemini-cli | 2026-04-28] Wait 2s for llama-server warmup after swap
-        var warmupTimer = Qt.createQmlObject('import QtQuick; Timer { interval: 2000; repeat: false; running: true }', root, "warmupTimer");
-        warmupTimer.triggered.connect(function() {
-            var xhr = new XMLHttpRequest();
-            xhr.open("POST", "http://localhost:8080/v1/chat/completions", true);
-            xhr.setRequestHeader("Content-Type", "application/json");
-            xhr.timeout = 30000;
-
-            xhr.onreadystatechange = function() {
-                if (xhr.readyState === XMLHttpRequest.DONE) {
-                    console.log(">>> DIAG-7 SPECIALIST RESPONSE | agent = " + agentName + " | content = " + xhr.responseText.substring(0, 200))
-                    isTyping = false;
-                    if (xhr.status === 200) {
-                        try {
-                            var response = JSON.parse(xhr.responseText);
-                            if (response.choices && response.choices.length > 0) {
-                                var aiText = response.choices[0].message.content;
-                                console.log("[HIVE] Specialist " + agentName + " responded, len: " + aiText.length);
-
-                                // Strip any tags the specialist might include
-                                aiText = aiText.replace(/\[ROUTE:(BOLT|NOVA|NEXUS)\]/gi, "").trim();
-
-                                // Update existing Nexus thinking trace into one combined routing box
-                                var totalTime = ((Date.now() - sendTimestamp) / 1000).toFixed(1) + "s";
-                                for (var i = chatModel.count - 1; i >= 0; i--) {
-                                    var item = chatModel.get(i);
-                                    if (item.role === "thinking" && !item.isStatus) {
-                                        var userPreview = lastUserMessage.substring(0, 50);
-                                        chatModel.set(i, {
-                                            "role": "thinking",
-                                            "content": item.content + "\n" + agentName + " → Answering: \"" + userPreview + "\"",
-                                            "agentName": "Routing to " + agentName,
-                                            "isStatus": false,
-                                            "thinkingTime": totalTime
-                                        });
-                                        break;
-                                    }
-                                }
-
-                                conversationHistory.push({"role": "assistant", "content": aiText});
-                                chatModel.append({
-                                    "role": "assistant",
-                                    "content": formatMarkdown(aiText),
-                                    "isStatus": false,
-                                    "agentName": agentName,
-                                    "thinkingTime": ""
-                                });
-                                saveMessage(currentConversationId, "assistant", aiText);
-                            } else {
-                                chatModel.append({"role": "assistant", "content": "<i>" + agentName + " returned an empty response.</i>", "isStatus": true, "agentName": "", "thinkingTime": ""});
-                            }
-                        } catch(e) {
-                            chatModel.append({"role": "assistant", "content": "<i>Error parsing " + agentName + "'s response.</i>", "isStatus": true, "agentName": "", "thinkingTime": ""});
-                        }
-                    } else {
-                        chatModel.append({"role": "assistant", "content": "<i>" + agentName + " failed to respond.</i>", "isStatus": true, "agentName": "", "thinkingTime": ""});
-                    }
-
-                    // Silent swap back to Nexus only after callback completes
-                    silentSwapToNexus();
-                }
-            };
-
-            xhr.ontimeout = function() {
-                isTyping = false;
-                chatModel.append({"role": "assistant", "content": "<i>" + agentName + " didn't respond in time.</i>", "isStatus": true, "agentName": "", "thinkingTime": ""});
-                silentSwapToNexus();
-            };
-
-            var payload = {
-                "model": activeModel,
-                "messages": messages,
-                "stream": false
-            };
-            console.log("[HIVE] Sending specialist POST to localhost:8080");
-            console.log(">>> DIAG-6 SPECIALIST | agent = " + agentName + " | sending payload = " + JSON.stringify(messages))
-            specialistSendTimestamp = Date.now();
-            console.log(">>> SWAP-STATUS | " + agentName + " is thinking...");
-            updateLastStatus(agentName + " is thinking...");
-            xhr.send(JSON.stringify(payload));
-            warmupTimer.destroy();
-        });
-    }
-
-    function silentSwapToNexus() {
-        console.log(">>> DIAG-9 SILENT SWAP | returning to Nexus")
-        // Don't show greeting, don't show status — just swap back quietly
-        console.log("[HIVE] Silent swap back to Nexus");
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "http://localhost:8079/swap/nexus");
-        xhr.timeout = 120000;
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState === XMLHttpRequest.DONE) {
-                activeModel = "nexus";
-                activeAgent = "Nexus";
-                loadSystemPrompt();
-                console.log("[HIVE] Silently returned to Nexus");
-            }
-        };
-        xhr.send();
-    }
-
     // [CHANGE: gemini-cli | 2026-04-28] Issue 3: Ping health and show status
     function checkServerHealth() {
         var hc = new XMLHttpRequest();
-        hc.open("GET", "http://localhost:8080/health");
+        hc.open("GET", "http://localhost:8078/health");
         hc.timeout = 3000;
         hc.onreadystatechange = function() {
             if (hc.readyState === XMLHttpRequest.DONE) {
                 if (hc.status === 200) {
                     chatModel.append({
                         "role": "assistant",
-                        "content": activeAgent + " is ready.",
+                        "content": "HIVE is ready.",
                         "isStatus": true,
                         "agentName": "",
                         "thinkingTime": ""
@@ -629,7 +285,7 @@ Window {
                 bottomMargin: 40
                 leftMargin: 20
                 rightMargin: 20
-                
+
                 cacheBuffer: 1000
                 clip: true
                 // [CHANGE: gemini-cli | 2026-04-28] Issue 1: Replace flick physics with WheelHandler for Trackpad
@@ -642,16 +298,16 @@ Window {
                     onWheel: function(event) {
                         // Use angleDelta for discrete scroll, pixelDelta for smooth trackpad
                         var delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 2;
-                        
+
                         // Apply directly — negative delta = scroll down
                         var newY = messageList.contentY - delta;
-                        
+
                         // Clamp to bounds
                         var minY = messageList.originY;
                         var maxY = messageList.contentHeight - messageList.height + messageList.originY;
-                        
+
                         if (maxY < minY) maxY = minY;
-                        
+
                         messageList.contentY = Math.max(minY, Math.min(maxY, newY));
                     }
                 }
@@ -760,7 +416,7 @@ Window {
                             id: msgBubble
                             // Width: simple percentage width to avoid implicitWidth wrap issues
                             width: parent.width * (model.role === "user" ? 0.75 : 0.85)
-                            
+
                             // Height: entirely driven by childrenRect
                             implicitHeight: bubbleContent.childrenRect.height + 24  // 12px top + 12px bottom padding
 
@@ -885,7 +541,7 @@ Window {
                                                             cursorShape: Qt.PointingHandCursor
                                                             onClicked: {
                                                                 var xhr = new XMLHttpRequest();
-                                                                xhr.open("POST", "http://localhost:8079/copy");
+                                                                xhr.open("POST", "http://localhost:8078/copy");
                                                                 xhr.setRequestHeader("Content-Type", "application/json");
                                                                 xhr.send(JSON.stringify({"text": modelData.content}));
                                                                 codeCopyIcon.text = "✓";
@@ -928,7 +584,7 @@ Window {
                     Text {
                         id: modelLabel
                         visible: model.role === "assistant" && !model.isStatus
-                        text: model.agentName || activeAgent
+                        text: model.agentName || "Nexus"
                         font.pixelSize: 11
                         color: subtleText
                         topPadding: 4
@@ -981,9 +637,8 @@ Window {
                                 cursorShape: Qt.PointingHandCursor
                                 hoverEnabled: true
                                 onClicked: {
-                                    // [CHANGE: antigravity | 2026-04-28] Copy via swap server /copy endpoint (wl-copy)
                                     var xhr = new XMLHttpRequest();
-                                    xhr.open("POST", "http://localhost:8079/copy");
+                                    xhr.open("POST", "http://localhost:8078/copy");
                                     xhr.setRequestHeader("Content-Type", "application/json");
                                     xhr.onreadystatechange = function() {
                                         if (xhr.readyState === XMLHttpRequest.DONE) {
@@ -1147,8 +802,8 @@ Window {
                 }
 
                 Text {
-                    // [CHANGE: antigravity | 2026-04-28] Phase 4: Dynamic footer label with swap state
-                    text: isSwapping ? "Loading..." : (activeAgent + " · HIVE")
+                    // Footer label: reads agent from last response; defaults to Nexus
+                    text: lastAgent + " · HIVE"
                     color: labelText
                     font.family: "Inter"
                     font.pixelSize: 11
@@ -1161,10 +816,9 @@ Window {
 
                 // ============================================
                 // SECTION: Category Chips
-                // PURPOSE: Quick prompt prefixes
+                // PURPOSE: Quick prompt prefixes — chip value travels with next chat request
                 // TUNE: Chip colors, borders, and hover states
                 // ============================================
-                // [CHANGE: antigravity | 2026-04-28] Phase 4: Chips as model selectors
                 RowLayout {
                     anchors.top: inputBg.bottom
                     anchors.topMargin: 20
@@ -1193,7 +847,7 @@ Window {
                                    chipMouse.containsMouse ? hoverColor : surfaceColor
                             border.width: isActive ? 0 : 1
                             border.color: chipMouse.containsMouse ? borderHoverColor : borderColor
-                            opacity: root.isSwapping ? 0.5 : 1.0
+                            opacity: 1.0
 
                             Behavior on color { ColorAnimation { duration: 150 } }
                             Behavior on border.color { ColorAnimation { duration: 100 } }
@@ -1220,11 +874,10 @@ Window {
                                 id: chipMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                cursorShape: root.isSwapping ? Qt.ArrowCursor : Qt.PointingHandCursor
+                                cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    if (!root.isSwapping) {
-                                        root.swapModel(modelData.label, modelData.modelId, modelData.agent);
-                                    }
+                                    // Chip selection is silent — value travels with next send
+                                    root.activeChip = (root.activeChip === modelData.label) ? "" : modelData.label;
                                 }
                             }
                         }
@@ -1246,27 +899,15 @@ Window {
         onActivated: closeWindow()
     }
 
-    Timer {
-        id: retryTimer
-        interval: 3000
-        repeat: false
-        onTriggered: retrySendToHive()
-    }
-
     // Process chat interaction
-    // [CHANGE: antigravity | 2026-04-28] Phase 5: Block sends during swap, track lastUserMessage
     function sendMessage() {
-        if (isSwapping) return;  // block sends during model swap
         var msg = textInput.text.trim()
         if (msg === "") return
 
-        console.log("[HIVE] Sending message:", msg.substring(0, 80))
-        lastUserMessage = msg;  // Phase 5: track for specialist re-send
-        console.log(">>> DIAG-1 SEND | lastUserMessage = " + lastUserMessage)
+        console.log("HIVE-SEND:", msg.substring(0, 80), "chip:", activeChip)
 
         if (!chatStarted) {
             chatStarted = true
-            // Update conversation title from first message
             updateConversationTitle(currentConversationId, msg)
         }
 
@@ -1327,197 +968,106 @@ Window {
         return segments;
     }
 
-    function retrySendToHive() {
-        retryCount++;
-        console.log(">>> RETRY | attempt " + retryCount + "/" + maxRetries + " | checking server...");
-
-        if (retryCount > maxRetries) {
-            isTyping = false;
-            retryCount = 0;
-            addStatusMessage("HIVE couldn't start. Try again in a moment.");
-            console.log(">>> RETRY | gave up after " + maxRetries + " attempts");
-            return;
-        }
-
-        // On attempts 3 and 7, actively try to start the server
-        if (retryCount === 3 || retryCount === 7) {
-            console.log(">>> RETRY | attempt " + retryCount + " — forcing server start via swap server");
-            updateLastStatus("Starting HIVE... ✳");
-            var startXhr = new XMLHttpRequest();
-            startXhr.open("GET", "http://localhost:8079/swap/nexus", true);
-            startXhr.timeout = 60000;
-            startXhr.onreadystatechange = function() {
-                if (startXhr.readyState === XMLHttpRequest.DONE) {
-                    if (startXhr.status === 200) {
-                        console.log(">>> RETRY | swap server started nexus successfully");
-                        retryCount = 0;
-                        updateLastStatus("Nexus is ready. ✳");
-                        sendToHive();
-                    } else {
-                        console.log(">>> RETRY | swap server start failed (status " + startXhr.status + "), continuing retries...");
-                        retryTimer.start();
-                    }
-                }
-            };
-            startXhr.ontimeout = function() {
-                console.log(">>> RETRY | swap server start timed out, continuing retries...");
-                retryTimer.start();
-            };
-            startXhr.send();
-            return;
-        }
-
-        // Normal retry — just check health
-        var checkXhr = new XMLHttpRequest();
-        checkXhr.open("GET", "http://localhost:8080/health", true);
-        checkXhr.timeout = 3000;
-
-        checkXhr.onreadystatechange = function() {
-            if (checkXhr.readyState === XMLHttpRequest.DONE) {
-                if (checkXhr.status === 200) {
-                    console.log(">>> RETRY | server is UP — resending message");
-                    retryCount = 0;
-                    updateLastStatus("Nexus is ready. ✳");
-                    sendToHive();
-                } else {
-                    console.log(">>> RETRY | server not ready (status " + checkXhr.status + "), retrying in 3s...");
-                    retryTimer.start();
-                }
-            }
-        };
-
-        checkXhr.ontimeout = function() {
-            console.log(">>> RETRY | health check timed out, retrying in 3s...");
-            retryTimer.start();
-        };
-
-        checkXhr.send();
-    }
-
+    // [CHANGE: claude-code | 2026-05-02] Repointed to hive-daemon on :8078; single POST, daemon owns orchestration
     function sendToHive() {
-        console.log("[HIVE] sendToHive() — messages:", conversationHistory.length)
-        console.log(">>> DIAG-SYSTEM-PROMPT | loaded=" + (systemPrompt.length > 0) + " | len=" + systemPrompt.length + " | first50=" + systemPrompt.substring(0, 50))
-        sendTimestamp = Date.now();  // [CHANGE: antigravity | 2026-04-28] Phase 5.5: record send time
-        var xhr = new XMLHttpRequest()
-        xhr.open("POST", "http://localhost:8080/v1/chat/completions", true)
-        xhr.setRequestHeader("Content-Type", "application/json")
+        var userMsg = conversationHistory.length > 0
+            ? conversationHistory[conversationHistory.length - 1].content
+            : "";
 
-        // 30 seconds timeout
-        xhr.timeout = 30000
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "http://localhost:8078/chat", true);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.timeout = 180000;
 
         xhr.onreadystatechange = function() {
             if (xhr.readyState === XMLHttpRequest.DONE) {
-                console.log("[HIVE] XHR done — status:", xhr.status, "len:", xhr.responseText.length)
+                isTyping = false;
                 if (xhr.status === 200) {
-                    isTyping = false
                     try {
-                        var response = JSON.parse(xhr.responseText)
-                        if (response.choices && response.choices.length > 0) {
-                            var aiText = response.choices[0].message.content
-                            console.log("[HIVE] AI response received, len:", aiText.length)
+                        var response = JSON.parse(xhr.responseText);
+                        if (response.error) {
+                            console.log("HIVE-ERROR: daemon error:", response.error)
+                            addStatusMessage(response.error);
+                            return;
+                        }
 
-                            // [CHANGE: antigravity | 2026-04-28] Phase 5.5: Thinking trace
-                            var thinkingTime = ((Date.now() - sendTimestamp) / 1000).toFixed(1) + "s";
+                        var agent = response.agent || "Nexus";
+                        var content = response.content || "";
 
-                            // [CHANGE: antigravity | 2026-04-28] Phase 5: Route detection
-                            // Only detect routes when on Nexus and no chip is manually active
-                            if (activeModel === "nexus" && activeChip === "") {
-                                console.log(">>> DIAG-2 RESPONSE | raw response = " + aiText.substring(0, 200))
-                                console.log(">>> DIAG-3 RESPONSE | lastUserMessage still = " + lastUserMessage)
-                                console.log(">>> DIAG-ROUTE-CHECK | activeModel=" + activeModel + " | activeChip=" + activeChip + " | responseLen=" + aiText.length + " | containsRoute=" + (aiText.indexOf("[ROUTE:") !== -1))
-                                var route = detectRoute(aiText);
-                                if (route.routeTo !== null) {
-                                    console.log("[HIVE] Route detected →", route.routeTo);
-                                    var routeAgent = route.routeTo === "bolt" ? "Bolt" : "Nova";
+                        console.log("HIVE-RESPONSE:", agent, "routed:", response.routed, "ms:", response.thinking_time_ms)
 
-                                    // [CHANGE: gemini-cli | 2026-04-28] Build thinking trace content that includes transition text
-                                    var thinkingContent = "Routing decision: specialist needed\n→ Routing to " + routeAgent;
-                                    if (route.cleanText.length > 0) {
-                                        thinkingContent = route.cleanText + "\n→ Routing to " + routeAgent;
-                                    }
-
-                                    console.log(">>> DIAG-8 NEXUS TEXT | role = thinking | content = " + thinkingContent)
-                                    chatModel.append({
-                                        "role": "thinking",
-                                        "content": thinkingContent,
-                                        "agentName": "Nexus",
-                                        "isStatus": false,
-                                        "thinkingTime": thinkingTime
-                                    });
-
-                                    // Execute the route with the original user message
-                                    executeRoute(route.routeTo, lastUserMessage);
-                                    return;  // Don't add the raw response to chat
-                                }
-                            }
-
-                            // No routing — add thinking trace for direct handling
+                        // Thinking trace — single entry regardless of routing
+                        if (response.routed) {
+                            var nexusSecs   = ((response.nexus_time_ms      || 0) / 1000).toFixed(1) + "s";
+                            var specSecs    = ((response.specialist_time_ms || 0) / 1000).toFixed(1) + "s";
+                            var totalSecs   = (((response.nexus_time_ms || 0) + (response.specialist_time_ms || 0)) / 1000).toFixed(1) + "s";
                             chatModel.append({
                                 "role": "thinking",
-                                "content": "Handling directly — no routing needed",
-                                "agentName": activeAgent,
+                                "content": "Nexus → routing decision (" + nexusSecs + ")\n" + agent + " → answering (" + specSecs + ")",
+                                "agentName": "Routing to " + agent,
                                 "isStatus": false,
-                                "thinkingTime": thinkingTime
+                                "thinkingTime": totalSecs
                             });
-
-                            // Display normally
-                            conversationHistory.push({ "role": "assistant", "content": aiText })
-                            chatModel.append({ "role": "assistant", "content": formatMarkdown(aiText), "isStatus": false, "agentName": activeAgent, "thinkingTime": "" })
-                            // Persist AI response to DB
-                            saveMessage(currentConversationId, "assistant", aiText)
                         } else {
-                            console.log("[HIVE] ERROR: No choices in response")
-                            chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an empty response.</i>", "isStatus": true, "agentName": "", "thinkingTime": "" })
+                            var thinkSecs = ((response.thinking_time_ms || 0) / 1000).toFixed(1) + "s";
+                            chatModel.append({
+                                "role": "thinking",
+                                "content": "Direct response",
+                                "agentName": agent,
+                                "isStatus": false,
+                                "thinkingTime": thinkSecs
+                            });
                         }
+
+                        // Assistant message
+                        lastAgent = agent;
+                        conversationHistory.push({"role": "assistant", "content": content});
+                        chatModel.append({
+                            "role": "assistant",
+                            "content": formatMarkdown(content),
+                            "isStatus": false,
+                            "agentName": agent,
+                            "thinkingTime": ""
+                        });
+                        saveMessage(currentConversationId, "assistant", content);
+
                     } catch(e) {
-                        console.log("[HIVE] ERROR: JSON parse failed:", e)
-                        chatModel.append({ "role": "assistant", "content": "<i>Error parsing HIVE response.</i>", "isStatus": true, "agentName": "", "thinkingTime": "" })
+                        console.log("HIVE-ERROR: JSON parse failed:", e)
+                        addStatusMessage("Error parsing HIVE response.");
                     }
-                } else if (xhr.status === 0 || xhr.status === 503) {
-                    // Server not running yet — start retry loop
-                    console.log(">>> RETRY | server not reachable (status " + xhr.status + "), starting retry loop");
-                    if (retryCount === 0) {
-                        addStatusMessage("HIVE is waking up... ✳");
-                    }
-                    retryTimer.start();
-                    return;
+                } else if (xhr.status === 0) {
+                    console.log("HIVE-ERROR:", xhr.status, "connection refused")
+                    addStatusMessage("HIVE daemon is not responding. Try again.");
                 } else {
-                    isTyping = false
-                    console.log("[HIVE] ERROR: HTTP", xhr.status)
-                    chatModel.append({ "role": "assistant", "content": "<i>HIVE returned an error (" + xhr.status + ")</i>", "isStatus": true, "agentName": "", "thinkingTime": "" })
+                    console.log("HIVE-ERROR:", xhr.status, xhr.responseText.substring(0, 100))
+                    addStatusMessage("HIVE returned an error (" + xhr.status + ").");
                 }
             }
-        }
+        };
 
         xhr.ontimeout = function() {
-            console.log("[HIVE] ERROR: Request timed out after 30s")
-            isTyping = false
-            chatModel.append({ "role": "assistant", "content": "<i>HIVE didn't respond within 30 seconds. The model may not be loaded.</i>", "isStatus": true, "agentName": "", "thinkingTime": "" })
-        }
+            isTyping = false;
+            console.log("HIVE-ERROR: timeout after 180s")
+            addStatusMessage("HIVE daemon is not responding. Try again.");
+        };
 
-        // [CHANGE: gemini-cli | 2026-04-28] Only send messages that are NOT status messages
-        var historyToSend = []
-        
-        // Prepend system prompt if available
-        if (systemPrompt.length > 0) {
-            historyToSend.push({ "role": "system", "content": systemPrompt })
-        }
-
-        for (var i = 0; i < conversationHistory.length; i++) {
-            if (!conversationHistory[i].isStatus) {
-                historyToSend.push(conversationHistory[i])
+        // History: last 10 turns before current message, no thinking/status entries
+        var history = [];
+        var histStart = Math.max(0, conversationHistory.length - 11);
+        for (var i = histStart; i < conversationHistory.length - 1; i++) {
+            var item = conversationHistory[i];
+            if (!item.isStatus) {
+                history.push({"role": item.role, "content": item.content});
             }
         }
 
-        // [CHANGE: antigravity | 2026-04-28] Phase 4: Use activeModel in payload
         var payload = {
-            "model": activeModel,
-            "messages": historyToSend,
-            "stream": false
-        }
+            "message": userMsg,
+            "chip": activeChip !== "" ? activeChip : null,
+            "history": history
+        };
 
-        console.log("[HIVE] Sending POST to localhost:8080")
-        xhr.send(JSON.stringify(payload))
+        xhr.send(JSON.stringify(payload));
     }
 
     Component.onCompleted: {
@@ -1525,16 +1075,12 @@ Window {
         initDb()
         currentConversationId = createConversation()
         console.log("[HIVE] New conversation ID:", currentConversationId)
-        
-        // [CHANGE: gemini-cli | 2026-04-28] Issue 2 & 3: Initialization
-        loadActiveModel()
-        loadSystemPrompt()
-        
+
         var hour = new Date().getHours()
         var greeting = hour < 12 ? "Morning, Sam ✳" :
                        hour < 17 ? "Afternoon, Sam ✳" :
                        "Evening, Sam ✳"
-        
+
         chatModel.append({
             "role": "assistant",
             "content": greeting,
@@ -1542,9 +1088,9 @@ Window {
             "agentName": "",
             "thinkingTime": ""
         });
-        
+
         checkServerHealth()
-        
+
         textInput.forceActiveFocus()
     }
 }
