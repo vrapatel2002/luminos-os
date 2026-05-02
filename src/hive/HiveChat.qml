@@ -263,7 +263,7 @@ Window {
             id: chatView
             anchors.top: parent.top
             anchors.bottom: footerBar.top
-            anchors.bottomMargin: 10
+            anchors.bottomMargin: 2
             anchors.left: parent.left
             anchors.right: parent.right
             clip: true
@@ -282,7 +282,7 @@ Window {
                 model: ListModel { id: chatModel }
                 spacing: 6 // [CHANGE: gemini-cli | 2026-04-28] Reduced spacing between turns
                 topMargin: 20
-                bottomMargin: 40
+                bottomMargin: 10
                 leftMargin: 20
                 rightMargin: 20
 
@@ -726,7 +726,7 @@ Window {
         Rectangle {
             id: footerBar
             width: parent.width
-            height: 140
+            height: 110
             color: bgColor // [CHANGE: gemini-cli | 2026-04-28] Use bgColor
             anchors.bottom: parent.bottom
             z: 10

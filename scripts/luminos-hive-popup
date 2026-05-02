@@ -94,8 +94,7 @@ if [ -f "$LOCKFILE" ]; then
 fi
 
 echo $$ > "$LOCKFILE"
-trap "/usr/bin/rm -f $LOCKFILE; /usr/bin/pkill -f 'hive-swap-server.py' 2>/dev/null; kill \$SWAP_PID 2>/dev/null; kill \$LLAMA_START_PID 2>/dev/null" EXIT
-
+trap "/usr/bin/rm -f $LOCKFILE; /usr/bin/pkill -f 'hive-daemon.py' 2>/dev/null; kill \$DAEMON_PID 2>/dev/null; kill \$LLAMA_START_PID 2>/dev/null" EXIT
 # ════════════════════════════════════════
 # SECTION: Auto-start Nexus
 # PURPOSE: If llama-server isn't running, start it before the UI.
@@ -121,14 +120,13 @@ fi
 # Mark activity so idle-watchdog doesn't kill while popup is open
 /usr/bin/touch /tmp/hive-last-request
 
-# [CHANGE: antigravity | 2026-04-28] Start swap server if not running
-SWAP_PID=""
-if ! /usr/bin/pgrep -f "hive-swap-server.py" > /dev/null 2>&1; then
-    echo "[LAUNCHER] swap server not running, starting..."
-    /usr/bin/python3 /home/shawn/luminos-os/scripts/hive-swap-server.py &
-    SWAP_PID=$!
+# [CHANGE: gemini-cli | 2026-05-02] Start HIVE daemon if not running
+DAEMON_PID=""
+if ! /usr/bin/pgrep -f "hive-daemon.py" > /dev/null 2>&1; then
+    echo "[LAUNCHER] HIVE daemon not running, starting..."
+    /usr/bin/python3 /home/shawn/luminos-os/scripts/hive-daemon.py &
+    DAEMON_PID=$!
 fi
-
 # ════════════════════════════════════════
 # SECTION: Watchdog Keep-Alive Loop
 # PURPOSE: Touch the activity marker every 30s while popup is open
@@ -153,13 +151,13 @@ KEEP_ALIVE_PID=$!
 
 /usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml
 
-# Cleanup: kill keep-alive loop and swap server after popup closes
+# Cleanup: kill keep-alive loop and daemon after popup closes
 if [ -n "$KEEP_ALIVE_PID" ]; then
     /usr/bin/kill "$KEEP_ALIVE_PID" 2>/dev/null
     wait "$KEEP_ALIVE_PID" 2>/dev/null
 fi
-# [CHANGE: antigravity | 2026-04-28] Kill swap server on popup close
-if [ -n "$SWAP_PID" ]; then
-    /usr/bin/kill "$SWAP_PID" 2>/dev/null
-    wait "$SWAP_PID" 2>/dev/null
+# [CHANGE: gemini-cli | 2026-05-02] Kill HIVE daemon on popup close
+if [ -n "$DAEMON_PID" ]; then
+    /usr/bin/kill "$DAEMON_PID" 2>/dev/null
+    wait "$DAEMON_PID" 2>/dev/null
 fi
