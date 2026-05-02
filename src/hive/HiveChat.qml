@@ -626,7 +626,7 @@ Window {
                 model: ListModel { id: chatModel }
                 spacing: 6 // [CHANGE: gemini-cli | 2026-04-28] Reduced spacing between turns
                 topMargin: 20
-                bottomMargin: 20
+                bottomMargin: 40
                 leftMargin: 20
                 rightMargin: 20
                 
@@ -1016,14 +1016,15 @@ Window {
                 }
 
                 onCountChanged: {
-                    Qt.callLater(function() {
-                        messageList.positionViewAtEnd()
-                    })
+                    // Only auto-scroll if user is near the bottom (within 150px)
+                    if (contentHeight - contentY - height < 150) {
+                        Qt.callLater(positionViewAtEnd);
+                    }
                 }
                 onContentHeightChanged: {
-                    Qt.callLater(function() {
-                        messageList.positionViewAtEnd()
-                    })
+                    if (contentHeight - contentY - height < 150) {
+                        Qt.callLater(positionViewAtEnd);
+                    }
                 }
             }
         }
@@ -1037,7 +1038,7 @@ Window {
             anchors.left: chatView.left
             anchors.leftMargin: 20
             anchors.bottom: footerBar.top
-            anchors.bottomMargin: 10
+            anchors.bottomMargin: 15
             z: 5
 
             Row {
@@ -1271,6 +1272,7 @@ Window {
 
         // Add to UI
         chatModel.append({ "role": "user", "content": msg, "isStatus": false, "agentName": "", "thinkingTime": "" })
+        Qt.callLater(function() { messageList.positionViewAtEnd(); });
 
         // Add to history
         conversationHistory.push({ "role": "user", "content": msg })
@@ -1394,6 +1396,7 @@ Window {
 
     function sendToHive() {
         console.log("[HIVE] sendToHive() — messages:", conversationHistory.length)
+        console.log(">>> DIAG-SYSTEM-PROMPT | loaded=" + (systemPrompt.length > 0) + " | len=" + systemPrompt.length + " | first50=" + systemPrompt.substring(0, 50))
         sendTimestamp = Date.now();  // [CHANGE: antigravity | 2026-04-28] Phase 5.5: record send time
         var xhr = new XMLHttpRequest()
         xhr.open("POST", "http://localhost:8080/v1/chat/completions", true)
@@ -1421,6 +1424,7 @@ Window {
                             if (activeModel === "nexus" && activeChip === "") {
                                 console.log(">>> DIAG-2 RESPONSE | raw response = " + aiText.substring(0, 200))
                                 console.log(">>> DIAG-3 RESPONSE | lastUserMessage still = " + lastUserMessage)
+                                console.log(">>> DIAG-ROUTE-CHECK | activeModel=" + activeModel + " | activeChip=" + activeChip + " | responseLen=" + aiText.length + " | containsRoute=" + (aiText.indexOf("[ROUTE:") !== -1))
                                 var route = detectRoute(aiText);
                                 if (route.routeTo !== null) {
                                     console.log("[HIVE] Route detected →", route.routeTo);
