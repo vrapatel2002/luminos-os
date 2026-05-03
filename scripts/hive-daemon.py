@@ -106,6 +106,8 @@ class ModelState:
         self._lock = threading.Lock()
         self._current_model: str | None = None
         self._ready = False
+        self._current_stage = "idle"
+        self._stage_started_at = 0.0
 
         # Try to bootstrap from existing active-model file
         # (in case llama-server is already running from popup)
@@ -131,6 +133,16 @@ class ModelState:
     def ready(self) -> bool:
         with self._lock:
             return self._ready
+
+    @property
+    def progress(self) -> tuple[str, float]:
+        with self._lock:
+            return self._current_stage, self._stage_started_at
+
+    def set_stage(self, stage: str):
+        with self._lock:
+            self._current_stage = stage
+            self._stage_started_at = time.time()
 
     def set_model(self, model: str | None, ready: bool = True):
         with self._lock:
@@ -360,6 +372,17 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
             })
             return
 
+        # ── GET /progress ──
+        if path == "/progress":
+            stage, started_at = _state.progress
+            elapsed = int((time.time() - started_at) * 1000) if started_at > 0 else 0
+            self._send_json(200, {
+                "stage": stage,
+                "elapsed_ms": elapsed,
+                "loaded_model": _state.current_model
+            })
+            return
+
         self._send_json(404, {"error": "Not found"})
 
     def do_POST(self):
@@ -410,137 +433,150 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(400, {"error": "Missing 'message' field"})
             return
 
-        chip = data.get("chip")  # None or one of the chip names
-        history = data.get("history")  # None or list of {role, content}
-
-        logger.info("POST /chat — chip=%s message=%s",
-                     chip, user_message[:80] + ("..." if len(user_message) > 80 else ""))
-
-        # Touch activity marker
         try:
-            with open(LAST_REQUEST_FILE, "a"):
-                os.utime(LAST_REQUEST_FILE, None)
-        except OSError:
-            pass
+            _state.set_stage("routing_check")
 
-        # ── Path A: Chip is set → direct to mapped model ──
-        if chip and chip in CHIP_TO_MODEL:
-            target_model = CHIP_TO_MODEL[chip]
-            ok, swap_err = _swap_model(target_model)
+            chip = data.get("chip")  # None or one of the chip names
+            history = data.get("history")  # None or list of {role, content}
+
+            logger.info("POST /chat — chip=%s message=%s",
+                         chip, user_message[:80] + ("..." if len(user_message) > 80 else ""))
+
+            # Touch activity marker
+            try:
+                with open(LAST_REQUEST_FILE, "a"):
+                    os.utime(LAST_REQUEST_FILE, None)
+            except OSError:
+                pass
+
+            # ── Path A: Chip is set → direct to mapped model ──
+            if chip and chip in CHIP_TO_MODEL:
+                target_model = CHIP_TO_MODEL[chip]
+                _state.set_stage(f"swapping_to_{target_model}")
+                ok, swap_err = _swap_model(target_model)
+                if not ok:
+                    self._send_json(500, self._error_response(swap_err))
+                    return
+
+                _state.set_stage(f"generating_{target_model}")
+                messages = _build_messages(target_model, user_message, history)
+                response_text, infer_err = _call_llama(messages, target_model)
+                t_end = time.monotonic()
+
+                if infer_err:
+                    self._send_json(502, self._error_response(infer_err))
+                    return
+
+                # Strip any accidental route tags from specialist output
+                clean_text = _strip_route_tags(response_text)
+
+                # Map model to agent display name
+                agent_name = {"nexus": "Nexus", "bolt": "Bolt", "nova": "Nova"}.get(target_model, target_model)
+
+                self._send_json(200, {
+                    "agent": agent_name,
+                    "content": clean_text,
+                    "thinking_time_ms": int((t_end - t_start) * 1000),
+                    "routed": False,
+                    "route_target": None,
+                    "error": None,
+                })
+                return
+
+            # ── Path B: No chip → route through Nexus ──
+            _state.set_stage("swapping_to_nexus")
+            ok, swap_err = _swap_model("nexus")
             if not ok:
                 self._send_json(500, self._error_response(swap_err))
                 return
 
-            messages = _build_messages(target_model, user_message, history)
-            response_text, infer_err = _call_llama(messages, target_model)
+            _state.set_stage("generating_nexus")
+            nexus_messages = _build_messages("nexus", user_message, history)
+            nexus_response, infer_err = _call_llama(nexus_messages, "nexus")
+            t_nexus = time.monotonic()
+
+            if infer_err:
+                self._send_json(502, self._error_response(infer_err))
+                return
+
+            # Check for route tags
+            route_match = ROUTE_TAG_RE.search(nexus_response)
+
+            if not route_match:
+                # Nexus handles it directly — no routing
+                clean_text = _strip_route_tags(nexus_response)
+                t_end = time.monotonic()
+                self._send_json(200, {
+                    "agent": "Nexus",
+                    "content": clean_text,
+                    "thinking_time_ms": int((t_end - t_start) * 1000),
+                    "routed": False,
+                    "route_target": None,
+                    "error": None,
+                })
+                return
+
+            # ── Route to specialist ──
+            route_target = route_match.group(1).lower()  # "bolt" or "nova"
+            if route_target not in ALLOWED_MODELS:
+                # Unknown route target — return Nexus response stripped
+                logger.warning("Unknown route target from Nexus: %s", route_target)
+                clean_text = _strip_route_tags(nexus_response)
+                t_end = time.monotonic()
+                self._send_json(200, {
+                    "agent": "Nexus",
+                    "content": clean_text,
+                    "thinking_time_ms": int((t_end - t_start) * 1000),
+                    "routed": False,
+                    "route_target": None,
+                    "error": None,
+                })
+                return
+
+            _state.set_stage(f"routing_to_{route_target}")
+            logger.info("ROUTING: Nexus → %s", route_target)
+
+            _state.set_stage(f"swapping_to_{route_target}")
+            ok, swap_err = _swap_model(route_target)
+            if not ok:
+                # Swap failed — return Nexus response with error note
+                clean_text = _strip_route_tags(nexus_response)
+                self._send_json(500, {
+                    "agent": "Nexus",
+                    "content": clean_text,
+                    "thinking_time_ms": int((time.monotonic() - t_start) * 1000),
+                    "routed": True,
+                    "route_target": route_target,
+                    "error": f"Routing to {route_target} failed: {swap_err}",
+                })
+                return
+
+            # Send ONLY the original user message to specialist (no Nexus artifacts)
+            _state.set_stage(f"generating_{route_target}")
+            specialist_messages = _build_messages(route_target, user_message, history)
+            specialist_response, infer_err = _call_llama(specialist_messages, route_target)
             t_end = time.monotonic()
 
             if infer_err:
                 self._send_json(502, self._error_response(infer_err))
                 return
 
-            # Strip any accidental route tags from specialist output
-            clean_text = _strip_route_tags(response_text)
-
-            # Map model to agent display name
-            agent_name = {"nexus": "Nexus", "bolt": "Bolt", "nova": "Nova"}.get(target_model, target_model)
+            clean_text = _strip_route_tags(specialist_response)
+            agent_name = {"nexus": "Nexus", "bolt": "Bolt", "nova": "Nova"}.get(route_target, route_target)
 
             self._send_json(200, {
                 "agent": agent_name,
                 "content": clean_text,
                 "thinking_time_ms": int((t_end - t_start) * 1000),
-                "routed": False,
-                "route_target": None,
-                "error": None,
-            })
-            return
-
-        # ── Path B: No chip → route through Nexus ──
-        ok, swap_err = _swap_model("nexus")
-        if not ok:
-            self._send_json(500, self._error_response(swap_err))
-            return
-
-        nexus_messages = _build_messages("nexus", user_message, history)
-        nexus_response, infer_err = _call_llama(nexus_messages, "nexus")
-        t_nexus = time.monotonic()
-
-        if infer_err:
-            self._send_json(502, self._error_response(infer_err))
-            return
-
-        # Check for route tags
-        route_match = ROUTE_TAG_RE.search(nexus_response)
-
-        if not route_match:
-            # Nexus handles it directly — no routing
-            clean_text = _strip_route_tags(nexus_response)
-            t_end = time.monotonic()
-            self._send_json(200, {
-                "agent": "Nexus",
-                "content": clean_text,
-                "thinking_time_ms": int((t_end - t_start) * 1000),
-                "routed": False,
-                "route_target": None,
-                "error": None,
-            })
-            return
-
-        # ── Route to specialist ──
-        route_target = route_match.group(1).lower()  # "bolt" or "nova"
-        if route_target not in ALLOWED_MODELS:
-            # Unknown route target — return Nexus response stripped
-            logger.warning("Unknown route target from Nexus: %s", route_target)
-            clean_text = _strip_route_tags(nexus_response)
-            t_end = time.monotonic()
-            self._send_json(200, {
-                "agent": "Nexus",
-                "content": clean_text,
-                "thinking_time_ms": int((t_end - t_start) * 1000),
-                "routed": False,
-                "route_target": None,
-                "error": None,
-            })
-            return
-
-        logger.info("ROUTING: Nexus → %s", route_target)
-
-        ok, swap_err = _swap_model(route_target)
-        if not ok:
-            # Swap failed — return Nexus response with error note
-            clean_text = _strip_route_tags(nexus_response)
-            self._send_json(500, {
-                "agent": "Nexus",
-                "content": clean_text,
-                "thinking_time_ms": int((time.monotonic() - t_start) * 1000),
+                "nexus_time_ms": int((t_nexus - t_start) * 1000),
+                "specialist_time_ms": int((t_end - t_nexus) * 1000),
                 "routed": True,
                 "route_target": route_target,
-                "error": f"Routing to {route_target} failed: {swap_err}",
+                "error": None,
             })
-            return
 
-        # Send ONLY the original user message to specialist (no Nexus artifacts)
-        specialist_messages = _build_messages(route_target, user_message, history)
-        specialist_response, infer_err = _call_llama(specialist_messages, route_target)
-        t_end = time.monotonic()
-
-        if infer_err:
-            self._send_json(502, self._error_response(infer_err))
-            return
-
-        clean_text = _strip_route_tags(specialist_response)
-        agent_name = {"nexus": "Nexus", "bolt": "Bolt", "nova": "Nova"}.get(route_target, route_target)
-
-        self._send_json(200, {
-            "agent": agent_name,
-            "content": clean_text,
-            "thinking_time_ms": int((t_end - t_start) * 1000),
-            "nexus_time_ms": int((t_nexus - t_start) * 1000),
-            "specialist_time_ms": int((t_end - t_nexus) * 1000),
-            "routed": True,
-            "route_target": route_target,
-            "error": None,
-        })
+        finally:
+            _state.set_stage("idle")
 
     def _error_response(self, error_msg: str) -> dict:
         return {
