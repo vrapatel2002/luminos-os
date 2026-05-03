@@ -1,6 +1,6 @@
 # Luminos OS — System Status
 Last updated: 2026-05-02
-Agent: gemini-cli (daemon test suite)
+Agent: gemini-cli (daemon hardening + QML perf)
 
 ## System
 | Component | Status | Notes |
@@ -40,9 +40,9 @@ Agent: gemini-cli (daemon test suite)
 | HIVE Idle Watchdog | ✅ Working | Auto-unloads models after 5 mins |
 | HIVE Orchestrator | ✅ Working | Native Python reasoning layer (systemd active) |
 | llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
-| HIVE Swap Server | ✅ Working | Port 8079, model swap + wl-copy clipboard endpoint |
-| HIVE Daemon | ✅ Working | Port 8078, verified with test-hive-daemon.sh. Consolidated orchestration (routing/swap/inference). |
-| HIVE popup (SUPER+SPACE) | ✅ Working | QML6 native UI, chip routing, smart routing ([ROUTE:X] tags), collapsible thinking trace, strict routing prompt, responsive delegate, LocalStorage persistence, Copy via wl-copy, HIVE Team Identity, segmented message rendering with per-code-block copy buttons |
+| HIVE Swap Server | 🛠 Retired | Port 8079 functionality merged into HIVE Daemon |
+| HIVE Daemon | ✅ Working | Port 8078. Consolidated orchestration. ThreadingHTTPServer enabled. 60s inference timeout. |
+| HIVE popup (SUPER+SPACE) | ✅ Working | QML6 native UI. Optimized startup (deferred DB/health init). Segmented message rendering with per-code-block copy buttons. |
 | luminos-notes.sh | ✅ Working | SQLite replacement for MemPalace |
 | HIVE Settings in KDE | ✅ Working | Native KCM plugin (kcm_luminos_hive.so) |
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
@@ -50,10 +50,10 @@ Agent: gemini-cli (daemon test suite)
 | Codebase Cleanup | ✅ Phase 2 Done | MemPalace retired, SQLite notes active |
 
 ## ARCHITECTURE SHIFT
-- **Deprecated:** Docker Desktop, n8n (Docker), Ollama (Process), SearXNG (Docker), MemPalace (hnswlib crash)
+- **Deprecated:** Docker Desktop, n8n (Docker), Ollama (Process), SearXNG (Docker), MemPalace (hnswlib crash), hive-swap-server.py
 - **Current:** Bare-metal Linux
     - **Data Plane:** Native `llama.cpp` (GPU/CPU) + HATS (NPU)
-    - **Control Plane:** Go `luminos-ai` daemons
+    - **Control Plane:** Go `luminos-ai` daemons + Python `hive-daemon.py`
     - **Reasoning Plane:** Python `HIVE` orchestrator, Standalone SQLite Notes
 
 ## TAG SCHEMA (LOCKED)
