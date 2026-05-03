@@ -239,6 +239,7 @@ C:\Users\vrati\VSCODE\Luminos\
 │   ├── luminos-hive-popup          ← [EXISTS] HIVE popup launcher — Wayland env setup, toggle lock, auto-start Nexus, swap server start, keep-alive loop, qml6 launch
 │   ├── hive-start-model.sh         ← [EXISTS] Model launcher — kills existing llama-server, starts new one with GGUF, health check loop (30s timeout)
 │   ├── hive-swap-server.py         ← [EXISTS] Model swap HTTP server — port 8079, /swap/<model> (nexus|bolt|nova), /status, /copy (wl-copy), stdlib only
+│   ├── hive-daemon.py              ← [EXISTS] Consolidated HIVE orchestration daemon — port 8078, /chat (routing+inference), /state, /health, /copy; thread-safe model state, chip routing, smart [ROUTE:X] routing via Nexus, retry logic, timing breakdown; stdlib only, parallel to swap server until QML migration
 │   ├── hive-idle-watchdog.sh       ← [EXISTS] Idle watchdog — kills llama-server after 5 mins of inactivity
 │   ├── luminos-session.sh          ← [EXISTS] login session script: first-run check → daemon start → bar + dock + wallpaper launch; chmod +x
 │   ├── install_luminos.sh          ← [EXISTS] Phase 9 — main OS installer (complete rewrite): base deps, source deploy, systemd service, compat layer, Firecracker, luminos-run-windows, MIME registration, wallpaper setup

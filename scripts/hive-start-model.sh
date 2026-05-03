@@ -50,15 +50,19 @@ fi
 
 echo "Starting llama-server with model $MODEL_PATH..."
 # SAFE FLAGS ONLY — --n-gpu-layers 99 is NON-NEGOTIABLE (full GPU)
-/usr/local/bin/llama-server \
+/usr/bin/nohup /usr/local/bin/llama-server \
     -m "$MODEL_PATH" \
     --n-gpu-layers 99 \
     --ctx-size 4096 \
     --port 8080 \
     --host 127.0.0.1 >> /tmp/hive-server.log 2>&1 &
 
+SERVER_PID=$!
+# Disown so it survives script exit (especially when called via swap server)
+disown $SERVER_PID 2>/dev/null || true
+
 # Wait for server health check
-TIMEOUT=30
+TIMEOUT=90
 while [ $TIMEOUT -gt 0 ]; do
     if /usr/bin/curl -s http://localhost:8080/health 2>/dev/null | /usr/bin/grep -q "ok"; then
         echo "ready"
@@ -69,4 +73,6 @@ while [ $TIMEOUT -gt 0 ]; do
 done
 
 echo "failed — check /tmp/hive-server.log"
+# Kill the specific llama-server we just started so it doesn't ghost
+/usr/bin/kill $SERVER_PID 2>/dev/null
 exit 1
