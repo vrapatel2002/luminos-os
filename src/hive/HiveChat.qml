@@ -1070,11 +1070,16 @@ Window {
         xhr.send(JSON.stringify(payload));
     }
 
-    Component.onCompleted: {
-        console.log("[HIVE] HiveChat.qml loaded")
+    // [CHANGE: gemini-cli | 2026-05-02] Defer non-visual init to speed up first paint
+    function deferredInit() {
         initDb()
         currentConversationId = createConversation()
         console.log("[HIVE] New conversation ID:", currentConversationId)
+        checkServerHealth()
+    }
+
+    Component.onCompleted: {
+        console.log("[HIVE] HiveChat.qml loaded")
 
         var hour = new Date().getHours()
         var greeting = hour < 12 ? "Morning, Sam ✳" :
@@ -1089,8 +1094,9 @@ Window {
             "thinkingTime": ""
         });
 
-        checkServerHealth()
-
         textInput.forceActiveFocus()
+
+        // Non-visual work runs on next event loop tick
+        Qt.callLater(deferredInit)
     }
 }
