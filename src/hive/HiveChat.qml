@@ -78,6 +78,87 @@ Window {
         });
     }
 
+    // [CHANGE: gemini-cli | 2026-05-03] In-place status update helper
+    function updateLastStatus(text) {
+        var found = false;
+        // Search last 3 items for an existing status message
+        var start = Math.max(0, chatModel.count - 3);
+        for (var i = chatModel.count - 1; i >= start; i--) {
+            if (chatModel.get(i).isStatus === true) {
+                chatModel.setProperty(i, "content", "<i>" + text + "</i>");
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            addStatusMessage(text);
+        }
+    }
+
+    // [CHANGE: gemini-cli | 2026-05-03] Remove last status message before assistant response
+    function removeLastStatus() {
+        var start = Math.max(0, chatModel.count - 3);
+        for (var i = chatModel.count - 1; i >= start; i--) {
+            if (chatModel.get(i).isStatus === true) {
+                chatModel.remove(i);
+                break;
+            }
+        }
+    }
+
+    // [CHANGE: gemini-cli | 2026-05-03] Progress polling timer and logic
+    Timer {
+        id: progressTimer
+        interval: 500
+        repeat: true
+        running: false
+        onTriggered: pollProgress()
+    }
+
+    function pollProgress() {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "http://localhost:8078/progress");
+        xhr.timeout = 2000;
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 200) {
+                try {
+                    var response = JSON.parse(xhr.responseText);
+                    var stage = response.stage;
+                    var elapsed_ms = response.elapsed_ms;
+                    
+                    if (stage === "idle") {
+                        progressTimer.running = false;
+                        return;
+                    }
+
+                    console.log("HIVE-PROGRESS:", stage, elapsed_ms + "ms");
+
+                    var secs = (elapsed_ms / 1000).toFixed(1) + "s";
+                    var msg = "";
+
+                    switch (stage) {
+                        case "routing_check":     msg = "Nexus is thinking…"; break;
+                        case "swapping_to_nexus": msg = "Loading Nexus… (" + secs + ")"; break;
+                        case "swapping_to_bolt":  msg = "Loading Bolt… (" + secs + ")"; break;
+                        case "swapping_to_nova":  msg = "Loading Nova… (" + secs + ")"; break;
+                        case "generating_nexus":  msg = "Nexus is responding… (" + secs + ")"; break;
+                        case "generating_bolt":   msg = "Bolt is responding… (" + secs + ")"; break;
+                        case "generating_nova":   msg = "Nova is responding… (" + secs + ")"; break;
+                        case "routing_to_bolt":   msg = "Routing to Bolt…"; break;
+                        case "routing_to_nova":   msg = "Routing to Nova…"; break;
+                        default:                  msg = stage; break;
+                    }
+
+                    updateLastStatus(msg);
+
+                } catch (e) {
+                    console.log("HIVE-ERROR: Progress parse failed:", e);
+                }
+            }
+        };
+        xhr.send();
+    }
+
     // [CHANGE: gemini-cli | 2026-04-28] Issue 3: Ping health and show status
     function checkServerHealth() {
         var hc = new XMLHttpRequest();
@@ -687,7 +768,15 @@ Window {
         // Typing Indicator
         Item {
             id: typingIndicator
-            visible: root.isTyping && root.chatStarted
+            // [CHANGE: gemini-cli | 2026-05-03] Hide dots if a status message is already showing
+            property bool hasStatus: {
+                var start = Math.max(0, chatModel.count - 3);
+                for (var i = chatModel.count - 1; i >= start; i--) {
+                    if (chatModel.get(i).isStatus === true) return true;
+                }
+                return false;
+            }
+            visible: root.isTyping && root.chatStarted && !hasStatus
             width: 50
             height: 20
             anchors.left: chatView.left
@@ -979,14 +1068,20 @@ Window {
         xhr.setRequestHeader("Content-Type", "application/json");
         xhr.timeout = 180000;
 
+        // [CHANGE: gemini-cli | 2026-05-03] Start progress polling
+        progressTimer.running = true;
+
         xhr.onreadystatechange = function() {
             if (xhr.readyState === XMLHttpRequest.DONE) {
                 isTyping = false;
+                progressTimer.running = false;
+
                 if (xhr.status === 200) {
                     try {
                         var response = JSON.parse(xhr.responseText);
                         if (response.error) {
                             console.log("HIVE-ERROR: daemon error:", response.error)
+                            removeLastStatus();
                             addStatusMessage(response.error);
                             return;
                         }
@@ -995,6 +1090,9 @@ Window {
                         var content = response.content || "";
 
                         console.log("HIVE-RESPONSE:", agent, "routed:", response.routed, "ms:", response.thinking_time_ms)
+
+                        // [CHANGE: gemini-cli | 2026-05-03] Clean up status message before response lands
+                        removeLastStatus();
 
                         // Thinking trace — single entry regardless of routing
                         if (response.routed) {
@@ -1033,13 +1131,16 @@ Window {
 
                     } catch(e) {
                         console.log("HIVE-ERROR: JSON parse failed:", e)
+                        removeLastStatus();
                         addStatusMessage("Error parsing HIVE response.");
                     }
                 } else if (xhr.status === 0) {
                     console.log("HIVE-ERROR:", xhr.status, "connection refused")
+                    removeLastStatus();
                     addStatusMessage("HIVE daemon is not responding. Try again.");
                 } else {
                     console.log("HIVE-ERROR:", xhr.status, xhr.responseText.substring(0, 100))
+                    removeLastStatus();
                     addStatusMessage("HIVE returned an error (" + xhr.status + ").");
                 }
             }
@@ -1047,7 +1148,9 @@ Window {
 
         xhr.ontimeout = function() {
             isTyping = false;
+            progressTimer.running = false;
             console.log("HIVE-ERROR: timeout after 180s")
+            removeLastStatus();
             addStatusMessage("HIVE daemon is not responding. Try again.");
         };
 
