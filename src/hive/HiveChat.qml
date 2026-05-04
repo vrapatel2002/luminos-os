@@ -421,6 +421,7 @@ Window {
             anchors.bottom: footerBar.top
             anchors.bottomMargin: 2
             anchors.left: parent.left
+            anchors.leftMargin: 0
             anchors.right: parent.right
             clip: true
 
@@ -438,9 +439,9 @@ Window {
                 model: ListModel { id: chatModel }
                 spacing: 6 // [CHANGE: gemini-cli | 2026-04-28] Reduced spacing between turns
                 topMargin: 16
-                bottomMargin: 10
-                leftMargin: 20
-                rightMargin: 20
+                bottomMargin: 16
+                leftMargin: 24
+                rightMargin: 24
 
                 cacheBuffer: 1000
                 clip: true
@@ -479,7 +480,7 @@ Window {
                     id: delegateCol
                     // [CHANGE: gemini-cli | 2026-05-01] Pre-parse segments for repeater
                     property var segments: parseMessageSegments(model.content || "")
-                    width: ListView.view ? ListView.view.width - 40 : 0
+                    width: ListView.view ? ListView.view.width - 48 : 0
                     spacing: 0  // We control spacing with explicit spacer Items
 
                     // ── PART 1: Separator (only before user messages, not first message) ──
