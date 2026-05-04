@@ -440,8 +440,6 @@ Window {
                 spacing: 6 // [CHANGE: gemini-cli | 2026-04-28] Reduced spacing between turns
                 topMargin: 16
                 bottomMargin: 16
-                leftMargin: 24
-                rightMargin: 24
 
                 cacheBuffer: 1000
                 clip: true
@@ -480,6 +478,7 @@ Window {
                     id: delegateCol
                     // [CHANGE: gemini-cli | 2026-05-01] Pre-parse segments for repeater
                     property var segments: parseMessageSegments(model.content || "")
+                    x: 24
                     width: ListView.view ? ListView.view.width - 48 : 0
                     spacing: 0  // We control spacing with explicit spacer Items
 
