@@ -117,10 +117,10 @@ Rectangle {
                 width: historyView.width
                 height: 54
                 radius: 6
-                color: (convId === sidebar.currentConversationId) ? accentColor :
+                color: (model.convId === sidebar.currentConversationId) ? accentColor :
                        (delegateMouse.containsMouse ? borderColor : "transparent")
                 
-                opacity: (convId === sidebar.currentConversationId) ? 1.0 : 0.8
+                opacity: (model.convId === sidebar.currentConversationId) ? 1.0 : 0.8
 
                 Column {
                     anchors.fill: parent
@@ -129,8 +129,8 @@ Rectangle {
 
                     Text {
                         width: parent.width
-                        text: title
-                        color: (convId === sidebar.currentConversationId) ? "#FFFFFF" : textColor
+                        text: model.title
+                        color: (model.convId === sidebar.currentConversationId) ? "#FFFFFF" : textColor
                         font.family: "Inter"
                         font.pixelSize: 13
                         font.weight: Font.Medium
@@ -139,8 +139,8 @@ Rectangle {
                     }
 
                     Text {
-                        text: date
-                        color: (convId === sidebar.currentConversationId) ? "#EEEEEE" : subtleText
+                        text: model.date
+                        color: (model.convId === sidebar.currentConversationId) ? "#EEEEEE" : subtleText
                         font.family: "Inter"
                         font.pixelSize: 11
                     }
@@ -151,7 +151,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: sidebar.conversationSelected(convId)
+                    onClicked: sidebar.conversationSelected(model.convId)
                 }
             }
         }
