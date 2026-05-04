@@ -417,6 +417,7 @@ Window {
         ScrollView {
             id: chatView
             anchors.top: parent.top
+            anchors.topMargin: 8
             anchors.bottom: footerBar.top
             anchors.bottomMargin: 2
             anchors.left: parent.left
@@ -436,7 +437,7 @@ Window {
                 anchors.fill: parent
                 model: ListModel { id: chatModel }
                 spacing: 6 // [CHANGE: gemini-cli | 2026-04-28] Reduced spacing between turns
-                topMargin: 20
+                topMargin: 16
                 bottomMargin: 10
                 leftMargin: 20
                 rightMargin: 20
