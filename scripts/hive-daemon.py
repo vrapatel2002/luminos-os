@@ -55,6 +55,35 @@ CHIP_TO_MODEL = {
 # Route tag regex: [ROUTE:BOLT], [ROUTE:NOVA], [ROUTE:NEXUS]
 ROUTE_TAG_RE = re.compile(r"\[ROUTE:(\w+)\]", re.IGNORECASE)
 
+# [CHANGE: gemini-cli | 2026-05-03] Intent detection keywords for fallback routing
+CODE_KEYWORDS = [
+    re.compile(r"\bwrite\s+(me\s+)?(a|an|some)?\s*(code|script|function|class|program)", re.IGNORECASE),
+    re.compile(r"\b(debug|fix|review)\s+(this|my|the)?\s*(code|script|function)", re.IGNORECASE),
+    re.compile(r"\b(python|bash|javascript|typescript|rust|go|c\+\+|sql)\b", re.IGNORECASE),
+    re.compile(r"\b(api|endpoint|http|curl|json|yaml)\b", re.IGNORECASE),
+    re.compile(r"\b(asyncio|await|promise|callback)\b", re.IGNORECASE),
+    re.compile(r"```"),
+]
+
+REASONING_KEYWORDS = [
+    re.compile(r"\bexplain\s+why\b", re.IGNORECASE),
+    re.compile(r"\bstep[- ]by[- ]step\b", re.IGNORECASE),
+    re.compile(r"\b(plan|strategy|architecture|design)\s+(a|an|the|for)", re.IGNORECASE),
+    re.compile(r"\b(compare|evaluate|weigh|trade[- ]off)\b", re.IGNORECASE),
+    re.compile(r"\b(analyze|reason|deduce)\b", re.IGNORECASE),
+    re.compile(r"\b(math|calculate|equation|proof)\b", re.IGNORECASE),
+]
+
+def detect_intent(message: str) -> str | None:
+    """Detect if message likely needs Bolt (code) or Nova (reasoning)."""
+    for pattern in CODE_KEYWORDS:
+        if pattern.search(message):
+            return "bolt"
+    for pattern in REASONING_KEYWORDS:
+        if pattern.search(message):
+            return "nova"
+    return None
+
 # ── Logging ────────────────────────────────────────────────────────────────────
 
 LOG_FORMAT = "%(asctime)s [HIVE] %(message)s"
@@ -501,8 +530,19 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
 
             # Check for route tags
             route_match = ROUTE_TAG_RE.search(nexus_response)
+            route_target = None
+            fallback_routed = False
 
-            if not route_match:
+            if route_match:
+                route_target = route_match.group(1).lower()
+            else:
+                # [CHANGE: gemini-cli | 2026-05-03] Fallback intent detection
+                route_target = detect_intent(user_message)
+                if route_target:
+                    fallback_routed = True
+                    logger.info("FALLBACK ROUTING: Detected intent '%s' for message", route_target)
+
+            if not route_target or route_target == "nexus":
                 # Nexus handles it directly — no routing
                 clean_text = _strip_route_tags(nexus_response)
                 t_end = time.monotonic()
@@ -511,16 +551,16 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                     "content": clean_text,
                     "thinking_time_ms": int((t_end - t_start) * 1000),
                     "routed": False,
+                    "fallback_routed": False,
                     "route_target": None,
                     "error": None,
                 })
                 return
 
             # ── Route to specialist ──
-            route_target = route_match.group(1).lower()  # "bolt" or "nova"
             if route_target not in ALLOWED_MODELS:
                 # Unknown route target — return Nexus response stripped
-                logger.warning("Unknown route target from Nexus: %s", route_target)
+                logger.warning("Unknown route target: %s", route_target)
                 clean_text = _strip_route_tags(nexus_response)
                 t_end = time.monotonic()
                 self._send_json(200, {
@@ -528,13 +568,14 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                     "content": clean_text,
                     "thinking_time_ms": int((t_end - t_start) * 1000),
                     "routed": False,
+                    "fallback_routed": False,
                     "route_target": None,
                     "error": None,
                 })
                 return
 
             _state.set_stage(f"routing_to_{route_target}")
-            logger.info("ROUTING: Nexus → %s", route_target)
+            logger.info("ROUTING: Nexus → %s (fallback=%s)", route_target, fallback_routed)
 
             _state.set_stage(f"swapping_to_{route_target}")
             ok, swap_err = _swap_model(route_target)
@@ -545,7 +586,8 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                     "agent": "Nexus",
                     "content": clean_text,
                     "thinking_time_ms": int((time.monotonic() - t_start) * 1000),
-                    "routed": True,
+                    "routed": not fallback_routed,
+                    "fallback_routed": fallback_routed,
                     "route_target": route_target,
                     "error": f"Routing to {route_target} failed: {swap_err}",
                 })
@@ -570,7 +612,8 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                 "thinking_time_ms": int((t_end - t_start) * 1000),
                 "nexus_time_ms": int((t_nexus - t_start) * 1000),
                 "specialist_time_ms": int((t_end - t_nexus) * 1000),
-                "routed": True,
+                "routed": not fallback_routed,
+                "fallback_routed": fallback_routed,
                 "route_target": route_target,
                 "error": None,
             })
