@@ -266,7 +266,9 @@ Window {
     function loadConversation(id) {
         var db = getDb()
         chatModel.clear()
+        conversationHistory = []
         root.currentConversationId = id
+        chatStarted = true
         db.readTransaction(function(tx) {
             var rs = tx.executeSql(
                 "SELECT role, content FROM messages WHERE conversation_id=? ORDER BY created_at ASC",
@@ -275,12 +277,13 @@ Window {
             for (var i = 0; i < rs.rows.length; i++) {
                 var row = rs.rows.item(i)
                 chatModel.append({
-                    role: row.role,
-                    content: row.content,
-                    agentName: "",
-                    isStatus: false,
-                    thinkingTime: ""
+                    "role": row.role,
+                    "content": row.content,
+                    "agentName": "",
+                    "isStatus": false,
+                    "thinkingTime": ""
                 })
+                conversationHistory.push({"role": row.role, "content": row.content})
             }
         })
         sidebarExpanded = false
