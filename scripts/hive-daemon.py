@@ -39,6 +39,7 @@ ACTIVE_MODEL_FILE = "/tmp/hive-active-model"
 LAST_REQUEST_FILE = "/tmp/hive-last-request"
 LOCKFILE = "/tmp/hive-daemon.lock"
 WL_COPY_BIN = "/usr/bin/wl-copy"
+GREETING_CACHE_PATH = os.path.expanduser("~/.cache/luminos/hive-greeting.txt")
 
 ALLOWED_MODELS = {"nexus", "bolt", "nova"}
 
@@ -412,6 +413,21 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
             })
             return
 
+        # ── GET /greeting ──
+        if path == "/greeting":
+            logger.debug("GET /greeting")
+            if os.path.exists(GREETING_CACHE_PATH):
+                try:
+                    with open(GREETING_CACHE_PATH, "r") as f:
+                        text = f.read().strip()
+                        if text:
+                            self._send_json(200, {"greeting": text, "cached": True})
+                            return
+                except OSError:
+                    pass
+            self._send_json(200, {"greeting": None, "cached": False})
+            return
+
         self._send_json(404, {"error": "Not found"})
 
     def do_POST(self):
@@ -446,9 +462,65 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
             self._handle_chat()
             return
 
+        # ── POST /greeting/refresh ──
+        if path == "/greeting/refresh":
+            self._handle_greeting_refresh()
+            return
+
         self._send_json(404, {"error": "Not found"})
 
     # ── Chat Logic ────────────────────────────────────────────────────────
+
+    def _handle_greeting_refresh(self):
+        """Generate a fresh greeting using Nexus and cache it."""
+        logger.info("POST /greeting/refresh — refreshing cached greeting")
+        
+        # Ensure Nexus is loaded (re-use _swap_model logic)
+        ok, swap_err = _swap_model("nexus")
+        if not ok:
+            logger.error("Failed to swap to Nexus for greeting refresh: %s", swap_err)
+            self._send_json(500, {"status": "error", "error": swap_err})
+            return
+
+        system_prompt = (
+            "You are Nexus. Generate ONE punchy greeting for Vratik opening a fresh chat. RULES: "
+            "- MAXIMUM 4 words. "
+            "- No full sentences. "
+            "- No 'Hey Sam' or 'Hey Vratik' — too generic. "
+            "- Vary tone: curious, hyped, chill, playful. "
+            "- Output ONLY the greeting, no quotes, no explanation. "
+            "Good examples: 'Inspired, Vratik?' / 'What's cooking?' / 'Back at it?' / 'Let's build.' / 'Yo, ready?'. "
+            "Bad examples: 'Hey, what's up? Ready to dive in' / 'Hello! How can I help you today?'"
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "Generate one greeting now."}
+        ]
+
+        try:
+            # We don't track stage for background refresh to avoid UI interference
+            # but we use _call_llama directly
+            response_text, infer_err = _call_llama(messages, "nexus")
+            
+            if infer_err:
+                logger.error("Inference failed for greeting refresh: %s", infer_err)
+                self._send_json(502, {"status": "error", "error": infer_err})
+                return
+
+            # Clean result
+            greeting = response_text.strip().strip('"').strip("'")
+            
+            # Cache it
+            os.makedirs(os.path.dirname(GREETING_CACHE_PATH), exist_ok=True)
+            with open(GREETING_CACHE_PATH, "w") as f:
+                f.write(greeting)
+            
+            logger.info("Successfully refreshed greeting cache: %s", greeting)
+            self._send_json(200, {"status": "ok", "greeting": greeting})
+
+        except Exception as e:
+            logger.error("Unexpected error in greeting refresh: %s", e)
+            self._send_json(500, {"status": "error", "error": str(e)})
 
     def _handle_chat(self):
         t_start = time.monotonic()

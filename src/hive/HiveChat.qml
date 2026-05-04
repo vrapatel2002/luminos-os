@@ -61,11 +61,14 @@ Window {
     property string activeChip: ""         // "" or "Code"/"Learn"/"Strategize"/"Write"/"System"
     property string lastAgent: "Nexus"     // updated from daemon response; drives footer label
 
-    property string timeOfDay: {
+    // [CHANGE: gemini-cli | 2026-05-04] Greeting state with instant fallback
+    property string greetingText: getTimeBasedGreeting()
+
+    function getTimeBasedGreeting() {
         var hour = new Date().getHours()
-        if (hour >= 5 && hour < 12) return "Morning"
-        if (hour >= 12 && hour < 17) return "Afternoon"
-        return "Evening"
+        if (hour < 12) return "Morning, Vratik ✳"
+        if (hour < 17) return "Afternoon, Vratik ✳"
+        return "Evening, Vratik ✳"
     }
 
     function addStatusMessage(text) {
@@ -323,7 +326,7 @@ Window {
                     }
 
                     Text {
-                        text: root.timeOfDay + ", Sam"
+                        text: root.greetingText
                         color: textColor // [CHANGE: gemini-cli | 2026-04-28] Use textColor
                         font.family: "Inter" // Greeting font
                         font.pixelSize: 36 // Greeting font size
@@ -752,14 +755,18 @@ Window {
                 }
 
                 onCountChanged: {
-                    // Only auto-scroll if user is near the bottom (within 150px)
-                    if (contentHeight - contentY - height < 150) {
-                        Qt.callLater(positionViewAtEnd);
-                    }
-                }
-                onContentHeightChanged: {
-                    if (contentHeight - contentY - height < 150) {
-                        Qt.callLater(positionViewAtEnd);
+                    var lastIndex = chatModel.count - 1;
+                    if (lastIndex >= 0) {
+                        var item = chatModel.get(lastIndex);
+                        var isFinalAssistant = (item.role === "assistant" && item.isStatus === false);
+                        var isNearBottom = (contentHeight - contentY - height < 150);
+                        
+                        // Force scroll for final answer; otherwise respect threshold
+                        if (isFinalAssistant || isNearBottom) {
+                            Qt.callLater(function() {
+                                messageList.positionViewAtIndex(chatModel.count - 1, ListView.End);
+                            });
+                        }
                     }
                 }
             }
@@ -1002,7 +1009,7 @@ Window {
 
         // Add to UI
         chatModel.append({ "role": "user", "content": msg, "isStatus": false, "agentName": "", "thinkingTime": "" })
-        Qt.callLater(function() { messageList.positionViewAtEnd(); });
+        Qt.callLater(function() { messageList.positionViewAtIndex(chatModel.count - 1, ListView.End); });
 
         // Add to history
         conversationHistory.push({ "role": "user", "content": msg })
@@ -1179,19 +1186,48 @@ Window {
         currentConversationId = createConversation()
         console.log("[HIVE] New conversation ID:", currentConversationId)
         checkServerHealth()
+
+        // [CHANGE: gemini-cli | 2026-05-03] Refresh greeting cache in background
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "http://localhost:8078/greeting/refresh", true);
+        xhr.send();
+    }
+
+    // [CHANGE: gemini-cli | 2026-05-04] Load greeting from daemon cache async
+    function loadGreeting() {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "http://localhost:8078/greeting", true);
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 200) {
+                try {
+                    var response = JSON.parse(xhr.responseText);
+                    if (response.greeting) {
+                        // [CHANGE: gemini-cli | 2026-05-04] Defensive word count guard
+                        if (response.greeting.split(/\s+/).length > 5) {
+                            console.log("[HIVE] Greeting too long, ignoring:", response.greeting)
+                            return
+                        }
+
+                        root.greetingText = response.greeting;
+                        // Also update the initial message in model if it was a greeting
+                        if (chatModel.count > 0 && chatModel.get(0).isStatus) {
+                            chatModel.setProperty(0, "content", response.greeting);
+                        }
+                    }
+                } catch (e) {
+                    console.log("[HIVE] Async greeting parse failed");
+                }
+            }
+        };
+        xhr.send();
     }
 
     Component.onCompleted: {
         console.log("[HIVE] HiveChat.qml loaded")
 
-        var hour = new Date().getHours()
-        var greeting = hour < 12 ? "Morning, Sam ✳" :
-                       hour < 17 ? "Afternoon, Sam ✳" :
-                       "Evening, Sam ✳"
-
         chatModel.append({
             "role": "assistant",
-            "content": greeting,
+            "content": root.greetingText,
             "isStatus": true,
             "agentName": "",
             "thinkingTime": ""
@@ -1201,5 +1237,6 @@ Window {
 
         // Non-visual work runs on next event loop tick
         Qt.callLater(deferredInit)
+        Qt.callLater(loadGreeting)
     }
 }
