@@ -54,6 +54,7 @@ Window {
     property color borderHoverColor: isDark ? "#555555" : "#D1CEC8"
 
     // Main state variables
+    property bool sidebarExpanded: false
     property bool chatStarted: false
     property var conversationHistory: []
     property bool isTyping: false
@@ -262,6 +263,30 @@ Window {
         console.log("[HIVE DB] Saved message:", role, "len:", content.length)
     }
 
+    function loadConversation(id) {
+        var db = getDb()
+        chatModel.clear()
+        root.currentConversationId = id
+        db.readTransaction(function(tx) {
+            var rs = tx.executeSql(
+                "SELECT role, content FROM messages WHERE conversation_id=? ORDER BY created_at ASC",
+                [id]
+            )
+            for (var i = 0; i < rs.rows.length; i++) {
+                var row = rs.rows.item(i)
+                chatModel.append({
+                    role: row.role,
+                    content: row.content,
+                    agentName: "",
+                    isStatus: false,
+                    thinkingTime: ""
+                })
+            }
+        })
+        sidebarExpanded = false
+        sidebar.refresh()
+    }
+
     function updateConversationTitle(conversationId, firstMessage) {
         if (conversationId < 0) return
         var title = firstMessage.substring(0, 50)
@@ -280,6 +305,27 @@ Window {
         id: mainContent
         anchors.fill: parent
         anchors.margins: 0 // Content fills the window
+
+        HistorySidebar {
+            id: sidebar
+            expanded: sidebarExpanded
+            currentConversationId: root.currentConversationId
+            bgColor: root.bgColor
+            textColor: root.textColor
+            borderColor: root.borderColor
+            accentColor: root.accentColor
+            subtleText: root.subtleText
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            z: 10
+            onConversationSelected: function(id) { loadConversation(id) }
+            onNewChatRequested: {
+                chatModel.clear()
+                createConversation()
+                sidebar.refresh()
+            }
+        }
 
         // ============================================
         // SECTION: Window Fade
@@ -303,6 +349,28 @@ Window {
         // PURPOSE: Shows the initial welcome message
         // TUNE: Adjust colors, fonts, and icons for greeting
         // ============================================
+
+        Rectangle {
+            id: hamburgerBtn
+            width: 32; height: 32
+            radius: 6
+            color: "transparent"
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.margins: 8
+            z: 11
+            Text {
+                anchors.centerIn: parent
+                text: "☰"
+                color: root.subtleText
+                font.pixelSize: 18
+            }
+            MouseArea {
+                anchors.fill: parent
+                onClicked: root.sidebarExpanded = !root.sidebarExpanded
+            }
+        }
+
         Item {
             id: landingView
             anchors.fill: parent
