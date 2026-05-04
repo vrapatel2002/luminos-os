@@ -438,8 +438,8 @@ Window {
                 anchors.fill: parent
                 model: ListModel { id: chatModel }
                 spacing: 6 // [CHANGE: gemini-cli | 2026-04-28] Reduced spacing between turns
-                topMargin: 16
-                bottomMargin: 16
+                topMargin: 20
+                bottomMargin: 20
 
                 cacheBuffer: 1000
                 clip: true
@@ -474,13 +474,21 @@ Window {
                 }
 
                 // [CHANGE: antigravity | 2026-04-28] Full delegate rewrite — responsive layout, no hardcoded heights
-                delegate: Column {
-                    id: delegateCol
-                    // [CHANGE: gemini-cli | 2026-05-01] Pre-parse segments for repeater
-                    property var segments: parseMessageSegments(model.content || "")
-                    x: 24
-                    width: ListView.view ? ListView.view.width - 48 : 0
-                    spacing: 0  // We control spacing with explicit spacer Items
+                delegate: Item {
+                    width: ListView.view ? ListView.view.width : 0
+                    height: delegateCol.height + 16
+
+                    Column {
+                        id: delegateCol
+                        // [CHANGE: gemini-cli | 2026-05-01] Pre-parse segments for repeater
+                        property var segments: parseMessageSegments(model.content || "")
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.leftMargin: 24
+                        anchors.rightMargin: 24
+                        anchors.topMargin: 8
+                        spacing: 0  // We control spacing with explicit spacer Items
 
                     // ── PART 1: Separator (only before user messages, not first message) ──
                     Item {
@@ -825,6 +833,7 @@ Window {
                         height: 6
                     }
                 }
+            }
 
                 onCountChanged: {
                     var lastIndex = chatModel.count - 1;
