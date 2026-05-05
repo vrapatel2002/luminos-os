@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.LocalStorage
 
@@ -111,6 +112,7 @@ Rectangle {
             Layout.fillHeight: true
             spacing: 4
             clip: true
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             model: ListModel { id: historyModel }
 
             delegate: Rectangle {
