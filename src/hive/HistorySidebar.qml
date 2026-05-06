@@ -59,12 +59,15 @@ Rectangle {
         })
     }
 
-    // CHANGE 2: Relative timestamp helper
+    // CHANGE 2: Relative timestamp — fixes SQLite "YYYY-MM-DD HH:MM:SS" parse
     function relativeTime(dateStr) {
         var now = new Date()
-        var date = new Date(dateStr)
-        var diffMs = now - date
-        var diffDays = Math.floor(diffMs / 86400000)
+        var fixed = dateStr.replace(" ", "T")
+        var date = new Date(fixed)
+        if (isNaN(date.getTime())) return "Unknown"
+        var nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        var thenDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+        var diffDays = Math.round((nowDay - thenDay) / 86400000)
         if (diffDays === 0) return "Today"
         if (diffDays === 1) return "Yesterday"
         if (diffDays < 7) return diffDays + " days ago"
@@ -85,7 +88,7 @@ Rectangle {
         // CHANGE 1: New Chat — slim row, no orange fill
         Item {
             Layout.fillWidth: true
-            height: 44
+            height: 52
 
             // Hover overlay (very subtle)
             Rectangle {
@@ -97,7 +100,7 @@ Rectangle {
 
             Row {
                 anchors.left: parent.left
-                anchors.leftMargin: 16
+                anchors.leftMargin: 20
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 10
 
@@ -169,11 +172,11 @@ Rectangle {
                 width: historyView.width
                 height: 56
 
-                // Hover background — very subtle
+                // Hover background — subtle
                 Rectangle {
                     anchors.fill: parent
                     color: sidebar.accentColor
-                    opacity: delegateMouse.containsMouse ? 0.06 : 0
+                    opacity: delegateMouse.containsMouse ? 0.08 : 0
                     Behavior on opacity { NumberAnimation { duration: 150 } }
                 }
 
@@ -222,15 +225,15 @@ Rectangle {
                     onClicked: sidebar.conversationSelected(model.convId)
                 }
 
-                // CHANGE 3: Delete button — visible on hover, on top of delegateMouse
+                // CHANGE 3+4: Trash icon — visible on hover, on top of delegateMouse
                 Text {
                     id: deleteBtn
-                    text: "×"
-                    font.pixelSize: 16
+                    text: "🗑"
+                    font.pixelSize: 14
                     color: sidebar.subtleText
                     visible: delegateMouse.containsMouse || deleteMouse.containsMouse
                     anchors.right: parent.right
-                    anchors.rightMargin: 10
+                    anchors.rightMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
                     padding: 4
 
@@ -241,12 +244,18 @@ Rectangle {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
+                            // FIX 3: Save scroll position before refresh
+                            var savedPos = historyView.contentY
                             var db = sidebar.getDb()
                             db.transaction(function(tx) {
                                 tx.executeSql("DELETE FROM messages WHERE conversation_id=?", [model.convId])
                                 tx.executeSql("DELETE FROM conversations WHERE id=?", [model.convId])
                             })
                             sidebar.refresh()
+                            Qt.callLater(function() {
+                                historyView.contentY = Math.min(savedPos,
+                                    Math.max(0, historyView.contentHeight - historyView.height))
+                            })
                             if (model.convId === sidebar.currentConversationId) {
                                 sidebar.newChatRequested()
                             }
