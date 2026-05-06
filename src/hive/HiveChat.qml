@@ -309,7 +309,7 @@ Window {
         anchors.fill: parent
         anchors.margins: 0 // Content fills the window
 
-        // Hamburger toggle — always visible, opens/closes sidebar
+        // Hamburger toggle — hidden when sidebar is open (sidebar has its own ☰)
         Rectangle {
             id: hamburgerBtn
             width: 32; height: 32
@@ -319,6 +319,7 @@ Window {
             anchors.left: parent.left
             anchors.margins: 8
             z: 11
+            visible: !root.sidebarExpanded
             Text {
                 anchors.centerIn: parent
                 text: "☰"
