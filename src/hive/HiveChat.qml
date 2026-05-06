@@ -323,6 +323,7 @@ Window {
             anchors.left: parent.left
             z: 10
             onConversationSelected: function(id) { loadConversation(id) }
+            onCollapseRequested: root.sidebarExpanded = false
             onNewChatRequested: {
                 chatModel.clear()
                 createConversation()
@@ -352,27 +353,6 @@ Window {
         // PURPOSE: Shows the initial welcome message
         // TUNE: Adjust colors, fonts, and icons for greeting
         // ============================================
-
-        Rectangle {
-            id: hamburgerBtn
-            width: 32; height: 32
-            radius: 6
-            color: "transparent"
-            anchors.top: parent.top
-            anchors.left: parent.left
-            anchors.margins: 8
-            z: 11
-            Text {
-                anchors.centerIn: parent
-                text: "☰"
-                color: root.subtleText
-                font.pixelSize: 18
-            }
-            MouseArea {
-                anchors.fill: parent
-                onClicked: root.sidebarExpanded = !root.sidebarExpanded
-            }
-        }
 
         Item {
             id: landingView

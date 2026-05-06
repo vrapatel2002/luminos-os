@@ -28,6 +28,7 @@ Rectangle {
     // --- Signals ---
     signal conversationSelected(int id)
     signal newChatRequested()
+    signal collapseRequested()
 
     width: expanded ? 260 : 0
     height: parent.height
@@ -59,16 +60,21 @@ Rectangle {
         })
     }
 
-    // CHANGE 2: Relative timestamp — fixes SQLite "YYYY-MM-DD HH:MM:SS" parse
+    // FIX 3: Relative timestamp — UTC-aware, handles SQLite format
     function relativeTime(dateStr) {
-        var now = new Date()
-        var fixed = dateStr.replace(" ", "T")
+        if (!dateStr) return ""
+        var fixed = dateStr.replace(" ", "T") + "Z"
         var date = new Date(fixed)
+        if (isNaN(date.getTime())) {
+            fixed = dateStr.replace(" ", "T")
+            date = new Date(fixed)
+        }
         if (isNaN(date.getTime())) return "Unknown"
+        var now = new Date()
         var nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
         var thenDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
         var diffDays = Math.round((nowDay - thenDay) / 86400000)
-        if (diffDays === 0) return "Today"
+        if (diffDays <= 0) return "Today"
         if (diffDays === 1) return "Yesterday"
         if (diffDays < 7) return diffDays + " days ago"
         return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
@@ -85,57 +91,91 @@ Rectangle {
         spacing: 0
         visible: sidebar.width > 200 // Prevent layout glitches during animation
 
-        // CHANGE 1: New Chat — slim row, no orange fill
-        Item {
+        // FIX 1: Header — + New Chat (left) + ☰ collapse (right)
+        Column {
             Layout.fillWidth: true
-            height: 52
-
-            // Hover overlay (very subtle)
-            Rectangle {
-                anchors.fill: parent
-                color: sidebar.accentColor
-                opacity: newChatMouse.containsMouse ? 0.06 : 0
-                Behavior on opacity { NumberAnimation { duration: 150 } }
-            }
 
             Row {
-                anchors.left: parent.left
-                anchors.leftMargin: 20
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 10
+                width: parent.width
+                height: 52
 
-                Text {
-                    text: "+"
-                    color: sidebar.accentColor
-                    font.pixelSize: 20
-                    font.bold: true
-                    verticalAlignment: Text.AlignVCenter
+                // Left: + New Chat
+                Item {
+                    width: parent.width - 44
+                    height: 52
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: sidebar.accentColor
+                        opacity: newChatMouse.containsMouse ? 0.06 : 0
+                        Behavior on opacity { NumberAnimation { duration: 150 } }
+                    }
+
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: 16
+                        spacing: 8
+
+                        Text {
+                            text: "+"
+                            color: sidebar.accentColor
+                            font.pixelSize: 22
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        Text {
+                            text: "New Chat"
+                            color: sidebar.textColor
+                            font.family: "Inter"
+                            font.pixelSize: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    MouseArea {
+                        id: newChatMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: sidebar.newChatRequested()
+                    }
                 }
 
-                Text {
-                    text: "New Chat"
-                    color: sidebar.textColor
-                    font.family: "Inter"
-                    font.pixelSize: 14
-                    font.weight: Font.Normal
+                // Right: ☰ collapse button
+                Item {
+                    width: 44
+                    height: 52
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: sidebar.accentColor
+                        opacity: collapseMouse.containsMouse ? 0.06 : 0
+                        Behavior on opacity { NumberAnimation { duration: 150 } }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "☰"
+                        color: sidebar.subtleText
+                        font.pixelSize: 18
+                    }
+
+                    MouseArea {
+                        id: collapseMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: sidebar.collapseRequested()
+                    }
                 }
             }
 
-            // Subtle bottom separator
+            // Separator line
             Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
+                width: parent.width
                 height: 1
                 color: sidebar.borderColor
-            }
-
-            MouseArea {
-                id: newChatMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: sidebar.newChatRequested()
             }
         }
 
@@ -225,26 +265,62 @@ Rectangle {
                     onClicked: sidebar.conversationSelected(model.convId)
                 }
 
-                // CHANGE 3+4: Trash icon — visible on hover, on top of delegateMouse
-                Text {
+                // FIX 2: Styled trash icon — visible on hover, on top of delegateMouse
+                Item {
                     id: deleteBtn
-                    text: "🗑"
-                    font.pixelSize: 14
-                    color: sidebar.subtleText
-                    visible: delegateMouse.containsMouse || deleteMouse.containsMouse
+                    width: 32
+                    height: 32
                     anchors.right: parent.right
-                    anchors.rightMargin: 12
+                    anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    padding: 4
+                    visible: delegateMouse.containsMouse || deleteMouse.containsMouse
+
+                    Column {
+                        spacing: 1
+                        anchors.centerIn: parent
+                        opacity: 0.7
+
+                        // Bin lid
+                        Rectangle {
+                            width: 14
+                            height: 2
+                            radius: 1
+                            color: "#E05555"
+                            anchors.horizontalCenter: parent.horizontalCenter
+                        }
+
+                        // Bin body
+                        Rectangle {
+                            width: 11
+                            height: 9
+                            radius: 1
+                            color: "transparent"
+                            border.color: "#E05555"
+                            border.width: 1.5
+                            anchors.horizontalCenter: parent.horizontalCenter
+
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 2
+                                Repeater {
+                                    model: 3
+                                    Rectangle {
+                                        width: 1
+                                        height: 5
+                                        color: "#E05555"
+                                        opacity: 0.7
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     MouseArea {
                         id: deleteMouse
                         anchors.fill: parent
-                        anchors.margins: -4
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            // FIX 3: Save scroll position before refresh
                             var savedPos = historyView.contentY
                             var db = sidebar.getDb()
                             db.transaction(function(tx) {
