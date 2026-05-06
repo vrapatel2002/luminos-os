@@ -5,8 +5,9 @@ import QtQuick.LocalStorage
 
 /*
  * HistorySidebar.qml
- * [CHANGE: gemini-cli | 2026-05-04]
- * Collapsible sidebar listing past conversations from LocalStorage.
+ * [CHANGE: claude-code | 2026-05-05]
+ * Minimal sidebar — Claude.ai style. Relative timestamps, delete per chat,
+ * slim left-border active state, no orange fill boxes.
  */
 
 Rectangle {
@@ -14,6 +15,7 @@ Rectangle {
 
     // --- Theme Properties (passed from parent) ---
     property color bgColor: "#FFFFFF"
+    property color surfaceColor: "#F5F5F5"
     property color textColor: "#000000"
     property color borderColor: "#E0E0E0"
     property color accentColor: "#0078D4"
@@ -57,6 +59,18 @@ Rectangle {
         })
     }
 
+    // CHANGE 2: Relative timestamp helper
+    function relativeTime(dateStr) {
+        var now = new Date()
+        var date = new Date(dateStr)
+        var diffMs = now - date
+        var diffDays = Math.floor(diffMs / 86400000)
+        if (diffDays === 0) return "Today"
+        if (diffDays === 1) return "Yesterday"
+        if (diffDays < 7) return diffDays + " days ago"
+        return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    }
+
     onExpandedChanged: {
         if (expanded) refresh()
     }
@@ -65,35 +79,52 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 16
+        spacing: 0
         visible: sidebar.width > 200 // Prevent layout glitches during animation
 
-        // --- Header / New Chat Button ---
-        Rectangle {
+        // CHANGE 1: New Chat — slim row, no orange fill
+        Item {
             Layout.fillWidth: true
-            height: 40
-            radius: 8
-            color: newChatMouse.containsMouse ? accentColor : "transparent"
-            border.color: accentColor
-            border.width: 1
+            height: 44
 
-            RowLayout {
-                anchors.centerIn: parent
-                spacing: 8
+            // Hover overlay (very subtle)
+            Rectangle {
+                anchors.fill: parent
+                color: sidebar.accentColor
+                opacity: newChatMouse.containsMouse ? 0.06 : 0
+                Behavior on opacity { NumberAnimation { duration: 150 } }
+            }
+
+            Row {
+                anchors.left: parent.left
+                anchors.leftMargin: 16
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 10
+
                 Text {
                     text: "+"
-                    color: newChatMouse.containsMouse ? "#FFFFFF" : accentColor
-                    font.pixelSize: 18
+                    color: sidebar.accentColor
+                    font.pixelSize: 20
                     font.bold: true
+                    verticalAlignment: Text.AlignVCenter
                 }
+
                 Text {
                     text: "New Chat"
-                    color: newChatMouse.containsMouse ? "#FFFFFF" : accentColor
+                    color: sidebar.textColor
                     font.family: "Inter"
                     font.pixelSize: 14
-                    font.weight: Font.Medium
+                    font.weight: Font.Normal
                 }
+            }
+
+            // Subtle bottom separator
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: sidebar.borderColor
             }
 
             MouseArea {
@@ -105,55 +136,122 @@ Rectangle {
             }
         }
 
-        // --- Conversations List ---
+        // CHANGE 5: "Recents" section header
+        Text {
+            text: "Recents"
+            color: sidebar.subtleText
+            font.family: "Inter"
+            font.pixelSize: 11
+            font.weight: Font.Medium
+            leftPadding: 16
+            topPadding: 12
+            bottomPadding: 4
+        }
+
+        // CHANGE 2+3+4: Conversation list
         ListView {
             id: historyView
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 4
+            spacing: 0
             clip: true
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            // CHANGE 4: Slim scrollbar
+            ScrollBar.vertical: ScrollBar {
+                policy: ScrollBar.AsNeeded
+                width: 4
+            }
+
             model: ListModel { id: historyModel }
 
-            delegate: Rectangle {
+            delegate: Item {
+                id: delegateItem
                 width: historyView.width
-                height: 54
-                radius: 6
-                color: (model.convId === sidebar.currentConversationId) ? accentColor :
-                       (delegateMouse.containsMouse ? borderColor : "transparent")
-                
-                opacity: (model.convId === sidebar.currentConversationId) ? 1.0 : 0.8
+                height: 56
 
-                Column {
+                // Hover background — very subtle
+                Rectangle {
                     anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 2
+                    color: sidebar.accentColor
+                    opacity: delegateMouse.containsMouse ? 0.06 : 0
+                    Behavior on opacity { NumberAnimation { duration: 150 } }
+                }
+
+                // CHANGE 2: Active conversation — left border only, no full fill
+                Rectangle {
+                    width: 3
+                    height: parent.height
+                    color: sidebar.accentColor
+                    visible: model.convId === sidebar.currentConversationId
+                }
+
+                // Content: title + relative timestamp
+                Column {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 16
+                    anchors.right: parent.right
+                    anchors.rightMargin: 36
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 3
 
                     Text {
                         width: parent.width
                         text: model.title
-                        color: (model.convId === sidebar.currentConversationId) ? "#FFFFFF" : textColor
+                        color: sidebar.textColor
                         font.family: "Inter"
                         font.pixelSize: 13
-                        font.weight: Font.Medium
+                        font.weight: Font.Normal
                         elide: Text.ElideRight
                         maximumLineCount: 1
                     }
 
                     Text {
-                        text: model.date
-                        color: (model.convId === sidebar.currentConversationId) ? "#EEEEEE" : subtleText
+                        text: sidebar.relativeTime(model.date)
+                        color: sidebar.subtleText
                         font.family: "Inter"
                         font.pixelSize: 11
                     }
                 }
 
+                // Main click area — placed BEFORE deleteBtn so delete sits on top
                 MouseArea {
                     id: delegateMouse
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: sidebar.conversationSelected(model.convId)
+                }
+
+                // CHANGE 3: Delete button — visible on hover, on top of delegateMouse
+                Text {
+                    id: deleteBtn
+                    text: "×"
+                    font.pixelSize: 16
+                    color: sidebar.subtleText
+                    visible: delegateMouse.containsMouse || deleteMouse.containsMouse
+                    anchors.right: parent.right
+                    anchors.rightMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    padding: 4
+
+                    MouseArea {
+                        id: deleteMouse
+                        anchors.fill: parent
+                        anchors.margins: -4
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            var db = sidebar.getDb()
+                            db.transaction(function(tx) {
+                                tx.executeSql("DELETE FROM messages WHERE conversation_id=?", [model.convId])
+                                tx.executeSql("DELETE FROM conversations WHERE id=?", [model.convId])
+                            })
+                            sidebar.refresh()
+                            if (model.convId === sidebar.currentConversationId) {
+                                sidebar.newChatRequested()
+                            }
+                        }
+                    }
                 }
             }
         }
