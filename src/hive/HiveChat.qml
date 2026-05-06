@@ -309,6 +309,29 @@ Window {
         anchors.fill: parent
         anchors.margins: 0 // Content fills the window
 
+        // Hamburger toggle — always visible, opens/closes sidebar
+        Rectangle {
+            id: hamburgerBtn
+            width: 32; height: 32
+            radius: 6
+            color: "transparent"
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.margins: 8
+            z: 11
+            Text {
+                anchors.centerIn: parent
+                text: "☰"
+                color: root.subtleText
+                font.pixelSize: 18
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.sidebarExpanded = !root.sidebarExpanded
+            }
+        }
+
         HistorySidebar {
             id: sidebar
             expanded: sidebarExpanded
