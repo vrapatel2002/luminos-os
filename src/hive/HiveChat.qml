@@ -478,8 +478,8 @@ Window {
                     id: delegateCol
                     // [CHANGE: gemini-cli | 2026-05-01] Pre-parse segments for repeater
                     property var segments: parseMessageSegments(model.content || "")
-                    x: 24
-                    width: ListView.view ? ListView.view.width - 48 : 0
+                    width: ListView.view ? Math.min(720, ListView.view.width - 48) : 0
+                    x: ListView.view ? (ListView.view.width - width) / 2 : 24
                     spacing: 0  // We control spacing with explicit spacer Items
 
                     // ── PART 1: Separator (only before user messages, not first message) ──
