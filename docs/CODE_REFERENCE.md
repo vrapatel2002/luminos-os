@@ -246,7 +246,9 @@ C:\Users\vrati\VSCODE\Luminos\
 │   ├── install_compatibility.sh    ← [EXISTS] Phase 8.12 — Wine/DXVK/VKD3D-Proton OS-level installer: WineHQ stable repo+install, DXVK 2.3.1, VKD3D-Proton 2.12, system prefix wineboot init, Vulkan runtime
 │   ├── build_iso.sh                ← [EXISTS] Phase 9 — Master ISO build script: bootstraps Ubuntu chroot, strips, installs Sway stack+Luminos, builds squashfs & ISO via xorriso
 │   ├── strip_ubuntu.sh             ← [EXISTS] Phase 9 — Base OS stripper: removes snap, telemetry, GNOME; installs Sway+Flatpak+fonts stack
-│   └── verify_iso.sh               ← [EXISTS] Phase 9 — Post-build validator: loop-mounts ISO and squashfs to verify all required binaries and config files exist
+│   ├── verify_iso.sh               ← [EXISTS] Phase 9 — Post-build validator: loop-mounts ISO and squashfs to verify all required binaries and config files exist
+│   ├── claude-deepseek             ← [EXISTS] Claude Code launcher — sources .env for API key, exports OpenRouter env vars, forces DeepSeek V4 Pro
+│   └── test-openrouter.sh          ← [EXISTS] OpenRouter API test — validates key, checks model availability, tests inference via Anthropic Messages API
 │
 ├── config/
 │   ├── luminos.conf               ← [EXISTS — skeleton] main config

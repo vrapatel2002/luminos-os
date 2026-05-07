@@ -1,0 +1,33 @@
+#!/bin/bash
+# claude-deepseek — Launch Claude Code with DeepSeek V4 Pro via OpenRouter
+# Loads API key from .env so it never needs to be typed
+# [CHANGE: antigravity | 2026-05-07]
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+ENV_FILE="$(dirname "$SCRIPT_DIR")/.env"
+
+if [ ! -f "$ENV_FILE" ]; then
+    echo "ERROR: $ENV_FILE not found"
+    echo "Create it with your OPENROUTER_API_KEY=sk-or-..."
+    exit 1
+fi
+
+# Load API key from .env
+source "$ENV_FILE"
+
+if [ -z "$OPENROUTER_API_KEY" ]; then
+    echo "ERROR: OPENROUTER_API_KEY is empty in $ENV_FILE"
+    exit 1
+fi
+
+# Export all required env vars for Claude Code
+export ANTHROPIC_BASE_URL="https://openrouter.ai/api"
+export ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY"
+export ANTHROPIC_API_KEY=""
+export ANTHROPIC_MODEL="deepseek/deepseek-v4-pro"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek/deepseek-v4-pro"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek/deepseek-v4-pro"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek/deepseek-v4-pro"
+
+echo "🚀 Launching Claude Code → DeepSeek V4 Pro via OpenRouter"
+exec claude "$@"
