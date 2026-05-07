@@ -250,6 +250,8 @@ C:\Users\vrati\VSCODE\Luminos\
 │
 ├── config/
 │   ├── luminos.conf               ← [EXISTS — skeleton] main config
+│   ├── claude-code-openrouter.json ← [EXISTS] Claude Code + OpenRouter settings.json template (blank API key)
+│   ├── claude-code-router.json    ← [EXISTS] OpenRouter configuration reference (URLs, model strings, troubleshooting)
 │   └── luminos-windows.desktop    ← [EXISTS] Phase 8.12 — MIME handler for .exe/.msi/.lnk → luminos-run-windows %f; NoDisplay=true; StartupNotify=true
 
 ---

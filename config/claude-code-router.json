@@ -1,26 +1,41 @@
 {
-  "Providers": [
-    {
-      "name": "anthropic",
-      "api_base": "https://api.anthropic.com",
-      "api_key": "USE_EXISTING_SESSION"
+    "_comment": "Claude Code + OpenRouter Configuration Reference",
+    "_source": "https://openrouter.ai/docs/guides/coding-agents/claude-code-integration",
+    "_note": "ANTHROPIC_BASE_URL must be https://openrouter.ai/api (NOT /api/v1). Use ANTHROPIC_AUTH_TOKEN, NOT ANTHROPIC_API_KEY.",
+
+    "shell_profile_setup": {
+        "_comment": "Add these to ~/.bashrc or ~/.zshrc",
+        "OPENROUTER_API_KEY": "YOUR_KEY_HERE",
+        "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+        "ANTHROPIC_AUTH_TOKEN": "$OPENROUTER_API_KEY",
+        "ANTHROPIC_API_KEY": ""
     },
-    {
-      "name": "openrouter",
-      "api_key": "YOUR_OPENROUTER_KEY",
-      "api_base": "https://openrouter.ai/api/v1"
+
+    "available_models": {
+        "_comment": "OpenRouter model strings for ANTHROPIC_DEFAULT_*_MODEL env vars",
+        "opus": "anthropic/claude-opus-4.7",
+        "sonnet": "anthropic/claude-sonnet-4.6",
+        "haiku": "anthropic/claude-haiku-4.5",
+        "_warning": "Claude Code only works reliably with Anthropic models via OpenRouter"
     },
-    {
-      "name": "gemini",
-      "api_key": "YOUR_GEMINI_KEY",
-      "api_base": "https://generativelanguage.googleapis.com/v1beta/openai"
+
+    "project_settings_example": {
+        "_comment": "For .claude/settings.json or .claude/settings.local.json",
+        "env": {
+            "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+            "ANTHROPIC_AUTH_TOKEN": "sk-or-YOUR_KEY_HERE",
+            "ANTHROPIC_API_KEY": "",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-4.6",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.7"
+        }
+    },
+
+    "launch_command_example": "ANTHROPIC_BASE_URL=https://openrouter.ai/api ANTHROPIC_AUTH_TOKEN=sk-or-YOUR_KEY claude",
+
+    "troubleshooting": {
+        "auth_errors": "Ensure ANTHROPIC_API_KEY is set to empty string, not unset/null",
+        "wrong_endpoint": "Base URL must be https://openrouter.ai/api — NOT https://openrouter.ai/api/v1",
+        "verify": "Run /status inside Claude Code — should show 'Anthropic base URL: https://openrouter.ai/api'",
+        "logout_first": "If previously logged in, run /logout before switching to OpenRouter"
     }
-  ],
-  "Router": {
-    "default": "anthropic,claude-sonnet-4-6",
-    "background": "openrouter,deepseek/deepseek-chat-v3-0324",
-    "reasoning": "openrouter,deepseek/deepseek-r1",
-    "longContext": "gemini,gemini-2.5-pro",
-    "thinkingMode": "openrouter,deepseek/deepseek-r1"
-  }
 }
