@@ -1,5 +1,5 @@
 # STRICT POST-EXECUTION RULE
-Before concluding ANY task, you MUST update `luminos-notes.sh` and `code-review-graph` to reflect all file changes, deleted directories, and architectural shifts. You must also verify that `LUMINOS_STATUS.md` matches the current reality. Do not output a final report until these state files are synchronized.
+Before concluding ANY task, you MUST update `luminos-notes.sh` to reflect all file changes, deleted directories, and architectural shifts. You must also verify that `LUMINOS_STATUS.md` matches the current reality. Do not output a final report until these state files are synchronized.
 
 # AGENTS.md — Luminos OS Agent Constitution
 # Last Updated: 2026-04-26 (Global Sync + Cleanup)
@@ -115,15 +115,6 @@ AFTER every task:
   ~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Summary of changes]"
   This indexes new changes into Luminos Notes.
   Never complete a task without updating Luminos Notes.
-
-Rule: CodeGraph Usage (mandatory)
-BEFORE modifying any Python or Go file:
-  Use code-review-graph MCP tool to understand
-  what imports and depends on the file you will edit.
-  Never modify code without checking dependencies first.
-
-AFTER adding new files or changing imports:
-  Use code-review-graph MCP to update the graph.
 
 Rule: Doc Updates (mandatory)
 After EVERY task check these and update if relevant:
