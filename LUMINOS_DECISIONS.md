@@ -657,3 +657,31 @@ Retire the `mempalace` Python-based knowledge mining system and replace it with 
 **Moving to a different Vector DB (Qdrant/Milvus)**
 - Pros: Advanced search.
 - Cons: Requires background daemons/Docker (BANNED). Too heavy for a local dev environment.
+
+---
+
+## DECISION 18 — Claude Code Router for Multi-Model Orchestration
+Date: May 7, 2026
+Made by: gemini-cli
+**Status: FINAL**
+
+### What We Decided
+Implement `claude-code-router` to dynamically route Claude Code tasks to the most appropriate model based on task type.
+
+- **Default:** Claude 3.5 Sonnet (Anthropic)
+- **Reasoning/Thinking:** DeepSeek R1 (OpenRouter)
+- **Long Context:** Gemini 2.5 Pro (Google)
+- **Background:** DeepSeek V4 Chat (OpenRouter)
+- **Implementation:** Global installation of `@musistudio/claude-code-router` with a dedicated startup script `/usr/local/bin/luminos-claude-router`.
+
+### Why
+1. **Model Specialization:** While Claude 3.5 Sonnet is excellent for general coding, DeepSeek R1 excels at complex reasoning/debugging, and Gemini 2.5 Pro handles massive context windows better.
+2. **Cost & Rate Limits:** Offloading simpler background tasks or massive context reads to cheaper or higher-limit models preserves Claude API credits.
+3. **Seamless Integration:** The router acts as a local proxy (port 3456), allowing the `claude` CLI to remain the primary interface while gaining multi-model powers.
+4. **Resilience:** Provides fallbacks if one provider is down or rate-limited.
+
+### What We Rejected
+**Manual Model Switching**
+- Pros: Simple, no extra tools.
+- Cons: High friction; requires manually changing environment variables for every task type.
+
