@@ -38,13 +38,13 @@ Agent: gemini-cli (daemon hardening + QML perf)
 | VRAM Watchdog | ✅ Working | Auto-evict if >90% usage |
 | llama.cpp TurboQuant | ✅ Working | turbo4 (type_k=12, type_v=12) |
 | HIVE Idle Watchdog | ✅ Working | Auto-unloads models after 5 mins |
-| HIVE Orchestrator | ✅ Working | Native Python reasoning layer (systemd active) |
+| HIVE Orchestrator (orchestrator.py) | 🛠 Retired | Superseded by hive-daemon.py. luminos-hive.service updated + disabled. |
 | llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
 | HIVE Swap Server | 🛠 Retired | Port 8079 functionality merged into HIVE Daemon |
-| HIVE Daemon | ✅ Working | Port 8078. Consolidated orchestration. ThreadingHTTPServer enabled. 60s inference timeout. |
-| HIVE popup (SUPER+SPACE) | ✅ Working | QML6 native UI. Optimized startup (deferred DB/health init). Segmented message rendering with per-code-block copy buttons. |
+| HIVE Daemon | ✅ Working | Port 8078. Popup-managed lifecycle (pgrep guard). ThreadingHTTPServer, 60s timeout, lockfile. |
+| HIVE popup (SUPER+SPACE) | ✅ Working | QML6 native UI + HistorySidebar. Starts hive-daemon.py on open, kills on close. |
 | luminos-notes.sh | ✅ Working | SQLite replacement for MemPalace |
-| HIVE Settings in KDE | ✅ Working | Native KCM plugin (kcm_luminos_hive.so) |
+| HIVE Settings in KDE | ✅ Working | kcm_luminos_hive.so installed at /usr/lib/qt6/plugins/plasma/kcms/systemsettings/ |
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
 | AI Mode | ✅ Active | Nova on CPU alongside GPU model |
 | Codebase Cleanup | ✅ Phase 2 Done | MemPalace retired, SQLite notes active |
@@ -54,7 +54,7 @@ Agent: gemini-cli (daemon hardening + QML perf)
 - **Current:** Bare-metal Linux
     - **Data Plane:** Native `llama.cpp` (GPU/CPU) + HATS (NPU)
     - **Control Plane:** Go `luminos-ai` daemons + Python `hive-daemon.py`
-    - **Reasoning Plane:** Python `HIVE` orchestrator, Standalone SQLite Notes
+    - **Reasoning Plane:** Python `hive-daemon.py` (port 8078), Standalone SQLite Notes
 
 ## TAG SCHEMA (LOCKED)
 ```

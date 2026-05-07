@@ -35,13 +35,22 @@ Luminos OS is a custom Arch Linux distribution on ASUS ROG G14.
 | Gemini CLI | Terminal automation, HIVE routing, state maintenance |
 | Antigravity | Visual Qt/QML implementation |
 
+## 3.1 Local DeepSeek Routing (Advanced)
+For complex reasoning tasks where local inference is preferred over Claude API:
+```bash
+ANTHROPIC_BASE_URL=http://localhost:8080/v1 claude
+```
+This routes Claude Code sessions through llama-server (port 8080 = active HIVE model).
+**Only use when hive-daemon has loaded Nova (DeepSeek R1).** Default sessions use Claude API normally.
+
 ---
 
 ## 4. Bare-Metal Architecture Rules
 
 - **OS Core**: `MobileLLM-R1-140M` runs on the NPU via HATS. It is a native OS system driver, completely separate from HIVE.
 - **HIVE Cluster**: Bare-metal Linux. Uses `llama.cpp` directly managed by Go daemons. **NO DOCKER. NO OLLAMA.**
-- **Routing**: Dolphin 3.0 (GPU) is the front-end. Routes to Qwen 3.6 (Coder), DeepSeek-R1 (CPU), Qwen3-VL (Vision).
+- **Routing**: Dolphin 3.0 / Nexus (GPU) is the front-end. Routes to Qwen2.5-Coder-7B / Bolt (GPU), DeepSeek-R1-0528 / Nova (CPU), Qwen-VL / Eye (GPU, pending).
+- **Orchestration**: `scripts/hive-daemon.py` on port 8078. Owns model lifecycle, routing, inference. Started by popup launcher. `hive-swap-server.py` (8079) is RETIRED.
 - **VRAM Constraint**: 6GB Total, 4.6GB Safe. Only ONE GPU model loads at a time. VRAM manager handles eviction (`SIGUSR1` to llama-server).
 
 ---

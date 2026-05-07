@@ -9,10 +9,18 @@
 - **Rules**: NO DOCKER, NO OLLAMA, IDENTITY TAGS MANDATORY.
 
 ## HIVE Models (llama.cpp GGUF — NOT Ollama)
-- **Nexus**: Llama-3.1-8B-Instruct-Q4_K_M.gguf (GPU)
-- **Bolt**: Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf (GPU)
-- **Nova**: DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf (CPU)
-- **Sentinel**: MobileLLM-R1-140M-INT8.onnx (NPU via HATS)
+- **Nexus**: Dolphin3.0-Llama3.1-8B-Q4_K_M.gguf (GPU) — uncensored coordinator
+- **Bolt**: Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf (GPU) — coding specialist
+- **Nova**: DeepSeek-R1-0528-Qwen3-8B-Q4_K_M.gguf (CPU/GPU) — deep reasoning
+- **Sentinel**: MobileLLM-R1-140M-INT8.onnx (NPU via HATS) — OS security
+- **Eye**: Qwen2.5-VL-7B-Q4_K_M.gguf (GPU) — vision [📋 Pending download]
+
+## HIVE Architecture (current)
+- **Backend**: `scripts/hive-daemon.py` on port 8078 — owns routing, swapping, inference
+- **UI**: `src/hive/HiveChat.qml` + `src/hive/HistorySidebar.qml`
+- **Launcher**: `/usr/local/bin/luminos-hive-popup` (SUPER+SPACE → qml6)
+- **Service**: `luminos-hive.service` runs hive-daemon.py (systemd --user)
+- **Retired**: `hive-swap-server.py` (port 8079) — functionality merged into daemon
 
 ## Workflow
 1. Read AGENTS.md fully
