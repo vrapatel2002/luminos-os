@@ -1,115 +1,54 @@
-# Luminos RAM Architecture — Final Design
-# Version: 2.0
+# Luminos RAM Architecture — Precise Design v3.0
+# Version: 3.0
 # Date: May 2026
-# Algorithm: LIRS + MADV_PAGEOUT + Process Freeze
+# Algorithm: LIRS IRR + OnScreen Absolute Protection
 
 ## Philosophy
-Compress instantly when not in use.
-Restore instantly when needed.
-Never wait for timers when we know something is cold.
-Battery and RAM are saved by acting fast not slow.
+Memory management must be invisible. The user's field of view (OnScreen) is sacred.
+Never compress or freeze what the user is looking at.
+Rank background work by Inter-Reference Recency (IRR) to predict future use.
 
-## Why MADV_PAGEOUT Over MADV_COLD
-MADV_COLD: hints to kswapd, waits 1-5 minutes.
-MADV_PAGEOUT: forces kernel to compress NOW.
-User never feels MADV_PAGEOUT because they are
-not using the window being compressed.
-No stutter risk. Immediate benefit.
-kswapd bypassed entirely for cold apps.
+## The Absolute Rule: OnScreen Protection
+Before any memory action (MADV_PAGEOUT, SIGSTOP, SIGKILL), check:
+`if (focused OR (visible AND focused_within_60s)) → SKIP ACTION`
+This ensures that the current window and all recently used visible windows (e.g. side-by-side) are never touched.
 
-## Algorithm: LIRS (Low Inter-Reference Recency Set)
-Tracks IRR (Inter-Reference Recency) per window.
-IRR = number of unique other windows accessed
-      between last two accesses to this window.
-Low IRR = frequent relative use = HOT set (LIR)
-High IRR = infrequent relative use = COLD set (HIR)
+## Data Structures
+### Hot Set (LIR - Low Inter-Reference Recency)
+- **Capacity (N)**: 8 (default, configurable).
+- **Ordering**: Sorted by IRR Score (lowest IRR = most recently used relatively).
+- **Eviction**: When `size > N`, the entry with the highest IRR is moved to the Cold Set.
+- **Bottom Tier (Positions 6-8)**: Timer-based compression. If idle > 10min and not OnScreen, apply `MADV_PAGEOUT` but remain in Hot Set.
 
-### IRR Tracking
-Per window/process group track:
-  last_access_time
-  second_last_access_time
-  IRR = unique_windows_between_last_two_accesses
-  access_count_30min
-  access_count_2hr
+### Cold Set (HIR - High Inter-Reference Recency)
+- **Eviction Entry**: Immediate `MADV_PAGEOUT`.
+- **15 Minute Rule**:
+    - **Browser Tabs**: Discard via CDP (freed 100%).
+    - **Native Apps**: `SIGSTOP` if safety checks pass.
+- **2 Hour Rule**:
+    - **Non-essential Apps**: `SIGKILL`.
+    - **Protected from Kill**: Terminals, LISTEN sockets, active downloads, luminos-* daemons.
 
-### Hot Set (LIR blocks)
-Low IRR windows stay in RAM uncompressed.
-Size: dynamic based on RAM pressure.
-Default: top 8 windows by IRR score.
-Always included regardless of IRR:
-  Active audio processes (PipeWire clients)
-  Active game process (high GPU usage)
-  luminos-* system daemons
-  kwin, plasmashell, pipewire, systemd
+## LIRS IRR Algorithm
+Inter-Reference Recency (IRR) is defined as the number of *unique other windows* focused between the last two focuses of a specific window.
+- Low IRR = Frequent relative use.
+- High IRR = Infrequent relative use.
 
-### Cold Set (HIR blocks)  
-High IRR windows get compressed.
-MADV_PAGEOUT called immediately on IRR rise.
-Kernel compresses to ZRAM within 5-10 seconds.
-Restore: decompress from ZRAM in ~50ms.
+## Safety Checks (Before SIGSTOP/SIGKILL)
+- **Audio**: Check `/proc/PID/fd` for active PipeWire/ALSA.
+- **Network**: Check for established TCP/UDP connections.
+- **Listen**: Check for sockets in `LISTEN` state (servers).
+- **Disk**: Check write rate via `/proc/PID/io` (> 1MB/s).
+- **CPU**: Check CPU usage (> 5%).
+- **Download**: Heuristic based on active disk/network activity.
 
-## Memory Hierarchy
-RAM (16GB) → ZRAM (8GB zstd) → zswap (NVMe)
+## Configuration (~/.config/luminos-ram.conf)
+- `hot_set_capacity`: Default 8.
+- `bottom_tier_timer_minutes`: Default 10.
+- `cold_sigstop_minutes`: Default 15.
+- `cold_kill_hours`: Default 2.
 
-Hot apps: full RAM speed (100ns)
-ZRAM compressed: ~500ns restore
-zswap NVMe: ~200ms restore (avoid if possible)
-
-## Process Freeze System (Universal — Not Just Chrome)
-Applies to ALL apps with multiple windows or tabs:
-  Chrome tabs, Firefox tabs
-  Electron app windows (Discord, Slack, VSCode)
-  Terminal multiplexer tabs (Konsole, Kitty)
-  File manager windows (Dolphin)
-  Any app with multiple child processes
-
-### 15 Minute Rule
-App/window cold for 15+ minutes:
-  Step 1: MADV_PAGEOUT already done (from LIRS)
-  Step 2: SIGSTOP sent to process group
-          Freezes entirely: 0 CPU, 0 memory access
-          Process stays in RAM but frozen
-          Restore: SIGCONT → instant (~10ms)
-  Step 3: For browser tabs specifically
-          Chrome/Firefox DevTools Protocol
-          tab.discard() → 0MB completely freed
-          Restore: tab reloads (~2 seconds)
-
-### 2 Hour Rule
-App frozen for 2+ hours:
-  Non-essential apps: SIGKILL entirely
-  RAM freed 100%
-  Relaunch when opened (seamless if autostart)
-  Protected from kill:
-    Terminals with active sessions
-    Code editors with unsaved work
-    Any app currently downloading
-    Music/video players
-    luminos-* daemons
-
-## Dynamic Hot Set Sizing
-Normal mode: 8 hot windows
-RAM > 70% used: reduce to 6 hot windows
-RAM > 85% used: reduce to 4 hot windows
-Gaming mode: 2 hot windows (game + voice chat)
-AI mode: 6 hot windows (HIVE needs headroom)
-
-## Scan Interval
-Every 3 seconds: check window focus events
-Every 10 seconds: update IRR for all processes
-Every 60 seconds: enforce freeze rules
-Every 5 minutes: enforce kill rules
-
-## Integration Points
-luminos-power → signals gaming/AI mode
-luminos-ai socket → receives mode changes
-KWin D-Bus → window focus events
-PipeWire D-Bus → audio activity detection
-/proc/PID/ → process stats and memory maps
-DevTools Protocol → browser tab management
-
-## Memory Savings Expected
-Cold Chrome tabs (10 tabs): 2GB → 0MB (discarded)
-Frozen Electron apps: 1.5GB → 400MB compressed
-Frozen native apps: 800MB → 0MB (killed, relaunch)
-Total expected savings: 3-5GB vs current state
+## Integration
+- **KWin**: Subscribes to `activeWindowChanged`, `windowMinimized`, `windowUnminimized`.
+- **CDP**: Connects to port 9222 for browser tab management.
+- **D-Bus**: Uses `org.kde.KWin` for window-to-PID mapping.

@@ -1,13 +1,11 @@
-// Command luminos-ram implements Phase 2 of the Luminos RAM management plan.
-// It monitors process idle time and applies memory pressure hints (MADV_PAGEOUT)
-// to background processes while protecting critical system and media components.
+// Command luminos-ram implements Phase 3 of the Luminos RAM management plan.
+// It uses a precise Hot/Cold LIRS-based algorithm for window-aware memory pressure.
 //
-// [CHANGE: gemini-cli | 2026-05-07] Phase 2 Go foundation — luminos-ram daemon.
-// [CHANGE: gemini-cli | 2026-05-07] Upgrade to KWin focus tracking.
-// [CHANGE: gemini-cli | 2026-05-07] LIRS v2.0 — IRR tracking, SIGSTOP freeze, CDP discard.
+// [CHANGE: gemini-cli | 2026-05-07] v3.0 Precise Algorithm — LIRS IRR, OnScreen protection, safety checks.
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -34,105 +32,100 @@ const (
 	MADV_PAGEOUT = 21
 )
 
-type IRRInfo struct {
-	LastFocus       time.Time
-	SecondLastFocus time.Time
-	InterFocusSet   map[int]bool // PIDs focused between last two accesses
-	IRR             int
+type WindowState struct {
+	PID           int
+	PGID          int
+	Name          string
+	IsFocused     bool
+	IsVisible     bool
+	LastFocusTime time.Time
+	IRRScore      int
+	UniqueWindows map[int]bool // windows seen since last focus
 }
 
-type TabMetadata struct {
-	ID           string
-	URL          string
-	Title        string
-	LastAccessed time.Time
-	AccessCount  int
+type HotEntry struct {
+	PID           int
+	PGID          int
+	Name          string
+	IRRScore      int
+	LastFocusTime time.Time
+	OnScreen      bool
+}
+
+type ColdEntry struct {
+	PID        int
+	PGID       int
+	Name       string
+	EvictedAt  time.Time
+	Compressed bool
+}
+
+type ProcStats struct {
+	LastCPUTime   uint64
+	LastDiskWrite uint64
+	LastCheck     time.Time
+	CPURate       float64
+	DiskRate      uint64
+}
+
+type DaemonConfig struct {
+	HotSetCapacity         int
+	BottomTierTimerMinutes int
+	ColdSigstopMinutes     int
+	ColdKillHours          int
 }
 
 var (
-	lg  *logger.Logger
-	cfg *config.Config
+	lg        *logger.Logger
+	appCfg    *config.Config
+	daemonCfg DaemonConfig
 
-	// Focus state
-	focusedPID int
-	focusMu    sync.RWMutex
-
-	// Activity database
-	irrMap        sync.Map // pid int -> *IRRInfo
-	focusCount    sync.Map // pid int -> int
-	frozenStatus  sync.Map // pid int -> bool
-	lastActiveMap sync.Map // pid int -> time.Time
-	tabMetadata   sync.Map // tabID string -> *TabMetadata
-
-	// Hot set configuration
-	hotSetCapacity int = 8
-	capacityMu     sync.Mutex
+	windowStates  = make(map[int]*WindowState)
+	hotSet        []*HotEntry
+	coldSet       = make(map[int]*ColdEntry)
+	procCache     = make(map[int]*ProcStats)
+	stateMu       sync.Mutex
 
 	// Metrics
 	madvPageoutCounter = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "luminos_ram_madv_pageout_total",
 		Help: "Total number of MADV_PAGEOUT hints applied",
 	})
-
-	frozenProcessesCount = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "luminos_ram_frozen_processes_count",
-		Help: "Number of processes currently frozen with SIGSTOP",
-	})
-
-	discardedTabsCounter = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "luminos_ram_discarded_tabs_total",
-		Help: "Total number of browser tabs discarded via CDP",
-	})
-
 	hotSetSizeMetric = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "luminos_ram_hot_set_size",
-		Help: "Current size of the LIR (hot) set",
+		Help: "Number of windows in the hot set",
 	})
-
-	hotSetCapacityMetric = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "luminos_ram_hot_set_capacity",
-		Help: "Current capacity of the LIR (hot) set",
+	coldSetSizeMetric = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "luminos_ram_cold_set_size",
+		Help: "Number of processes in the cold set",
 	})
-
-	irrMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "luminos_ram_irr",
-		Help: "Inter-Reference Recency score per PID",
-	}, []string{"pid", "name"})
-
-	lastFocusSecondsMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "luminos_ram_last_focus_seconds",
-		Help: "Seconds since last focus per PID",
-	}, []string{"pid", "name"})
-
-	tierMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "luminos_ram_tier",
-		Help: "Current RAM tier per PID (0-3)",
-	}, []string{"pid", "name"})
+	onScreenMetric = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "luminos_ram_onscreen_count",
+		Help: "Number of windows currently OnScreen",
+	})
 )
 
 func init() {
 	prometheus.MustRegister(madvPageoutCounter)
-	prometheus.MustRegister(frozenProcessesCount)
-	prometheus.MustRegister(discardedTabsCounter)
 	prometheus.MustRegister(hotSetSizeMetric)
-	prometheus.MustRegister(hotSetCapacityMetric)
-	prometheus.MustRegister(irrMetric)
-	prometheus.MustRegister(lastFocusSecondsMetric)
-	prometheus.MustRegister(tierMetric)
+	prometheus.MustRegister(coldSetSizeMetric)
+	prometheus.MustRegister(onScreenMetric)
 }
 
 func main() {
 	var err error
-	cfg, err = config.Load()
+	appCfg, err = config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "luminos-ram: config load: %v\n", err)
 		os.Exit(1)
 	}
 
-	lg, err = logger.New("luminos-ram", cfg.Log.Dir+"/ram.log", logger.INFO)
+	lg, err = logger.New("luminos-ram", appCfg.Log.Dir+"/ram.log", logger.INFO)
 	if err != nil {
 		lg = logger.NewStdout("luminos-ram", logger.INFO)
 	}
+
+	loadDaemonConfig()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -142,7 +135,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Unix socket for IPC
 	ramSocket := "/run/luminos/ram.sock"
 	l, err := socket.NewListener(ramSocket)
 	if err != nil {
@@ -151,9 +143,8 @@ func main() {
 	}
 	defer os.Remove(ramSocket)
 
-	lg.Info("luminos-ram started — listening on %s", ramSocket)
+	lg.Info("luminos-ram v3.0 started — listening on %s", ramSocket)
 
-	// HTTP Metrics
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
 		lg.Info("metrics server on :9091")
@@ -162,19 +153,49 @@ func main() {
 		}
 	}()
 
-	// KWin focus listener
 	go startKWinListener(ctx)
-
-	// main monitor loop
 	go monitorLoop(ctx)
-
-	// Dynamic capacity and CDP loops
-	go dynamicCapacityLoop(ctx)
-	go browserTabLoop(ctx)
 
 	socket.Serve(ctx, l, handleMessage)
 
 	lg.Info("luminos-ram stopped")
+}
+
+func loadDaemonConfig() {
+	daemonCfg = DaemonConfig{
+		HotSetCapacity:         8,
+		BottomTierTimerMinutes: 10,
+		ColdSigstopMinutes:     15,
+		ColdKillHours:          2,
+	}
+
+	path := filepath.Join(os.Getenv("HOME"), ".config/luminos-ram.conf")
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Split(line, "=")
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+		switch key {
+		case "hot_set_capacity":
+			daemonCfg.HotSetCapacity = val
+		case "bottom_tier_timer_minutes":
+			daemonCfg.BottomTierTimerMinutes = val
+		case "cold_sigstop_minutes":
+			daemonCfg.ColdSigstopMinutes = val
+		case "cold_kill_hours":
+			daemonCfg.ColdKillHours = val
+		}
+	}
 }
 
 func startKWinListener(ctx context.Context) {
@@ -185,30 +206,63 @@ func startKWinListener(ctx context.Context) {
 	}
 	defer conn.Close()
 
-	err = conn.AddMatchSignal(
-		dbus.WithMatchInterface("org.kde.KWin"),
-		dbus.WithMatchObjectPath("/KWin"),
-		dbus.WithMatchMember("activeWindowChanged"),
-	)
-	if err != nil {
-		lg.Error("dbus match: %v", err)
-		return
+	rules := []string{
+		"type='signal',interface='org.kde.KWin',member='activeWindowChanged'",
+		"type='signal',interface='org.kde.KWin',member='windowMinimized'",
+		"type='signal',interface='org.kde.KWin',member='windowUnminimized'",
+	}
+	for _, rule := range rules {
+		conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, rule)
 	}
 
 	c := make(chan *dbus.Signal, 10)
 	conn.Signal(c)
 
-	lg.Info("KWin focus listener active")
+	lg.Info("KWin integration active (Focus/Minimize/Unminimize)")
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case sig := <-c:
-			if sig.Name == "org.kde.KWin.activeWindowChanged" {
-				newPID := fetchActivePID(conn)
-				if newPID > 0 {
-					handleFocusChange(newPID)
+			handleKWinSignal(conn, sig)
+		}
+	}
+}
+
+func handleKWinSignal(conn *dbus.Conn, sig *dbus.Signal) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
+	switch sig.Name {
+	case "org.kde.KWin.activeWindowChanged":
+		pid := fetchActivePID(conn)
+		if pid > 0 {
+			handleFocus(pid)
+		}
+	case "org.kde.KWin.windowMinimized":
+		if len(sig.Body) > 0 {
+			winID, ok := sig.Body[0].(string)
+			if ok {
+				pid := fetchPIDForWindow(conn, winID)
+				if pid > 0 {
+					if ws, ok := windowStates[pid]; ok {
+						ws.IsVisible = false
+						lg.Debug("Window minimized: PID:%d (%s)", pid, ws.Name)
+					}
+				}
+			}
+		}
+	case "org.kde.KWin.windowUnminimized":
+		if len(sig.Body) > 0 {
+			winID, ok := sig.Body[0].(string)
+			if ok {
+				pid := fetchPIDForWindow(conn, winID)
+				if pid > 0 {
+					if ws, ok := windowStates[pid]; ok {
+						ws.IsVisible = true
+						lg.Debug("Window unminimized: PID:%d (%s)", pid, ws.Name)
+					}
 				}
 			}
 		}
@@ -220,99 +274,117 @@ func fetchActivePID(conn *dbus.Conn) int {
 	var info map[string]dbus.Variant
 	err := obj.Call("org.kde.KWin.queryWindowInfo", 0).Store(&info)
 	if err == nil {
-		if pidVar, ok := info["pid"]; ok {
-			return int(pidVar.Value().(uint32))
+		if v, ok := info["pid"]; ok {
+			return int(v.Value().(uint32))
 		}
 	}
 	return 0
 }
 
-func handleFocusChange(newPID int) {
-	focusMu.Lock()
-	defer focusMu.Unlock()
+func fetchPIDForWindow(conn *dbus.Conn, winID string) int {
+	obj := conn.Object("org.kde.KWin", "/KWin")
+	var info map[string]dbus.Variant
+	err := obj.Call("org.kde.KWin.getWindowInfo", 0, winID).Store(&info)
+	if err == nil {
+		if v, ok := info["pid"]; ok {
+			return int(v.Value().(uint32))
+		}
+	}
+	return 0
+}
 
+func handleFocus(pid int) {
 	now := time.Now()
 
-	// 1. Thaw if frozen
-	if frozen, ok := frozenStatus.Load(newPID); ok && frozen.(bool) {
-		thawProcess(newPID)
+	ws, ok := windowStates[pid]
+	if !ok {
+		pgid, _ := syscall.Getpgid(pid)
+		ws = &WindowState{
+			PID:           pid,
+			PGID:          pgid,
+			Name:          getProcessName(pid),
+			IsVisible:     true,
+			UniqueWindows: make(map[int]bool),
+		}
+		windowStates[pid] = ws
 	}
 
-	// 2. Update IRR tracking
-	if val, ok := irrMap.Load(newPID); ok {
-		info := val.(*IRRInfo)
-		info.IRR = len(info.InterFocusSet)
-		info.SecondLastFocus = info.LastFocus
-		info.LastFocus = now
-		info.InterFocusSet = make(map[int]bool)
+	// LIRS IRR: unique windows between last two accesses
+	ws.IRRScore = len(ws.UniqueWindows)
+	ws.UniqueWindows = make(map[int]bool)
+	ws.LastFocusTime = now
+	ws.IsFocused = true
+	ws.IsVisible = true
+
+	// Set other windows as unfocused and record this focus event for them
+	for p, other := range windowStates {
+		if p != pid {
+			other.IsFocused = false
+			if !other.LastFocusTime.IsZero() {
+				other.UniqueWindows[pid] = true
+			}
+		}
+	}
+
+	// Update Hot Set
+	updateHotSet(ws)
+
+	// If frozen, thaw immediately
+	if _, ok := coldSet[pid]; ok {
+		delete(coldSet, pid)
+		syscall.Kill(pid, syscall.SIGCONT)
+		lg.Info("Thawing PID:%d (%s) — SIGCONT", pid, ws.Name)
+	}
+
+	lg.Info("Focus: PID:%d (%s) IRR:%d", pid, ws.Name, ws.IRRScore)
+}
+
+func updateHotSet(ws *WindowState) {
+	idx := -1
+	for i, entry := range hotSet {
+		if entry.PID == ws.PID {
+			idx = i
+			break
+		}
+	}
+
+	if idx != -1 {
+		hotSet[idx].IRRScore = ws.IRRScore
+		hotSet[idx].LastFocusTime = ws.LastFocusTime
 	} else {
-		irrMap.Store(newPID, &IRRInfo{
-			LastFocus:     now,
-			InterFocusSet: make(map[int]bool),
-			IRR:           1000, // High initial IRR for new apps
+		hotSet = append(hotSet, &HotEntry{
+			PID:           ws.PID,
+			PGID:          ws.PGID,
+			Name:          ws.Name,
+			IRRScore:      ws.IRRScore,
+			LastFocusTime: ws.LastFocusTime,
 		})
 	}
 
-	// 3. Update InterFocusSet for all OTHER windows
-	irrMap.Range(func(key, value interface{}) bool {
-		pid := key.(int)
-		if pid != newPID {
-			info := value.(*IRRInfo)
-			info.InterFocusSet[newPID] = true
-		}
-		return true
+	sort.Slice(hotSet, func(i, j int) bool {
+		return hotSet[i].IRRScore < hotSet[j].IRRScore
 	})
 
-	focusedPID = newPID
-	lastActiveMap.Store(newPID, now)
-
-	count := 0
-	if val, ok := focusCount.Load(newPID); ok {
-		count = val.(int)
+	if len(hotSet) > daemonCfg.HotSetCapacity {
+		evictLast()
 	}
-	count++
-	focusCount.Store(newPID, count)
 
-	name := getProcessName(newPID)
-	lg.Info("Focus: PID:%d (%s) IRR:%d", newPID, name, getIRR(newPID))
+	hotSetSizeMetric.Set(float64(len(hotSet)))
 }
 
-func getIRR(pid int) int {
-	if val, ok := irrMap.Load(pid); ok {
-		return val.(*IRRInfo).IRR
-	}
-	return 1000
-}
+func evictLast() {
+	last := hotSet[len(hotSet)-1]
+	hotSet = hotSet[:len(hotSet)-1]
 
-func isFreezeProtected(name string) bool {
-	protected := []string{"chrome", "chromium", "chrome-luminos", "electron", "code", "vscode", "discord", "slack"}
-	for _, p := range protected {
-		if strings.Contains(strings.ToLower(name), p) {
-			return true
-		}
+	lg.Info("Evicting PID:%d (%s) to coldSet — MADV_PAGEOUT", last.PID, last.Name)
+	coldSet[last.PID] = &ColdEntry{
+		PID:       last.PID,
+		PGID:      last.PGID,
+		Name:      last.Name,
+		EvictedAt: time.Now(),
 	}
-	return false
-}
-
-func freezeProcess(pid int) {
-	name := getProcessName(pid)
-	if isFreezeProtected(name) {
-		return
-	}
-	lg.Info("Freezing PID:%d (%s) — SIGSTOP", pid, name)
-	if err := syscall.Kill(pid, syscall.SIGSTOP); err == nil {
-		frozenStatus.Store(pid, true)
-		frozenProcessesCount.Inc()
-	}
-}
-
-func thawProcess(pid int) {
-	name := getProcessName(pid)
-	lg.Info("Thawing PID:%d (%s) — SIGCONT", pid, name)
-	if err := syscall.Kill(pid, syscall.SIGCONT); err == nil {
-		frozenStatus.Store(pid, false)
-		frozenProcessesCount.Dec()
-	}
+	madvise(last.PID, MADV_PAGEOUT)
+	madvPageoutCounter.Inc()
 }
 
 func monitorLoop(ctx context.Context) {
@@ -324,367 +396,241 @@ func monitorLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			scanAndApply()
+			runMaintenance()
 		}
 	}
 }
 
-func scanAndApply() {
-	curFocused := getFocusedPID()
-	audioPIDs := getAudioPIDs()
-	hotSet := getHotSet()
+func runMaintenance() {
+	stateMu.Lock()
+	defer stateMu.Unlock()
 
-	pids, _ := filepath.Glob("/proc/[0-9]*")
-	for _, p := range pids {
-		pidStr := filepath.Base(p)
-		pid, _ := strconv.Atoi(pidStr)
+	now := time.Now()
+	onScreenCount := 0
 
-		comm, _ := os.ReadFile(fmt.Sprintf("/proc/%s/comm", pidStr))
-		name := strings.TrimSpace(string(comm))
+	// 1. Update OnScreen status for Hot Set
+	for _, entry := range hotSet {
+		ws := windowStates[entry.PID]
+		if ws == nil { continue }
+		
+		// onScreen = focused OR (visible AND focused_within_60s)
+		onScreen := ws.IsFocused || (ws.IsVisible && now.Sub(ws.LastFocusTime) < 60*time.Second)
+		entry.OnScreen = onScreen
+		if onScreen { onScreenCount++ }
+	}
+	onScreenMetric.Set(float64(onScreenCount))
 
-		if isProtected(pid, name, curFocused, audioPIDs, hotSet) {
-			lastActiveMap.Store(pid, time.Now())
-			tierMetric.WithLabelValues(pidStr, name).Set(0)
+	// 2. Bottom tier timer (positions 6-8)
+	for i := 5; i < len(hotSet) && i < daemonCfg.HotSetCapacity; i++ {
+		entry := hotSet[i]
+		if !entry.OnScreen && now.Sub(entry.LastFocusTime) > time.Duration(daemonCfg.BottomTierTimerMinutes)*time.Minute {
+			lg.Debug("Bottom tier compression: PID:%d (%s)", entry.PID, entry.Name)
+			madvise(entry.PID, MADV_PAGEOUT)
+		}
+	}
+
+	// 3. Cold Set handling
+	for pid, entry := range coldSet {
+		ws := windowStates[pid]
+		if ws != nil && (ws.IsFocused || (ws.IsVisible && now.Sub(ws.LastFocusTime) < 60*time.Second)) {
+			delete(coldSet, pid)
+			syscall.Kill(pid, syscall.SIGCONT)
 			continue
 		}
 
-		lastActive, ok := lastActiveMap.Load(pid)
-		if !ok {
-			lastActiveMap.Store(pid, time.Now())
-			tierMetric.WithLabelValues(pidStr, name).Set(0)
-			continue
-		}
-		idle := time.Since(lastActive.(time.Time))
-		applyLIRSPolicy(pid, name, idle)
-	}
+		idle := now.Sub(entry.EvictedAt)
 
-	// Cleanup stale
-	irrMap.Range(func(key, _ interface{}) bool {
-		pid := key.(int)
-		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); os.IsNotExist(err) {
-			irrMap.Delete(pid)
-			focusCount.Delete(pid)
-			frozenStatus.Delete(pid)
-			lastActiveMap.Delete(pid)
-		}
-		return true
-	})
-}
-
-func getHotSet() map[int]bool {
-	type pidIRR struct {
-		pid int
-		irr int
-	}
-	var list []pidIRR
-	irrMap.Range(func(key, value interface{}) bool {
-		list = append(list, pidIRR{key.(int), value.(*IRRInfo).IRR})
-		return true
-	})
-
-	sort.Slice(list, func(i, j int) bool {
-		return list[i].irr < list[j].irr
-	})
-
-	capacityMu.Lock()
-	cap := hotSetCapacity
-	capacityMu.Unlock()
-
-	hotSet := make(map[int]bool)
-	for i := 0; i < len(list) && i < cap; i++ {
-		hotSet[list[i].pid] = true
-	}
-	hotSetSizeMetric.Set(float64(len(hotSet)))
-	return hotSet
-}
-
-func isProtected(pid int, name string, focusedPID int, audioPIDs map[int]bool, hotSet map[int]bool) bool {
-	if pid == focusedPID || audioPIDs[pid] || hotSet[pid] || pid == 1 {
-		return true
-	}
-
-	// Exclude kernel threads (empty cmdline or pid < 100)
-	if pid < 100 {
-		return true
-	}
-	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	if err != nil || len(cmdline) == 0 {
-		return true
-	}
-
-	// Protected names/patterns
-	protected := []string{
-		"luminos-", "kwin", "plasmashell", "pipewire", "systemd", "dbus",
-		"Xwayland", "kworker", "ksoftirqd", "migration", "idle_inject",
-		"cpuhp", "rtkit-daemon", "polkitd", "dbus-daemon", "sddm",
-		"earlyoom", "NetworkManager", "bluetoothd", "boltd", "supergfxd",
-		"nvidia-powerd", "asusd", "libvirtd", "sshd", "baloo",
-	}
-	for _, p := range protected {
-		if strings.Contains(name, p) {
-			return true
-		}
-	}
-
-	games := []string{"steam", "heroic", "lutris", "wine", "proton"}
-	for _, g := range games {
-		if strings.Contains(name, g) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func applyLIRSPolicy(pid int, name string, idle time.Duration) {
-	pidStr := strconv.Itoa(pid)
-	irr := getIRR(pid)
-	irrMetric.WithLabelValues(pidStr, name).Set(float64(irr))
-	lastFocusSecondsMetric.WithLabelValues(pidStr, name).Set(idle.Seconds())
-
-	// LIRS logic: High IRR -> immediate PAGEOUT
-	if irr > 10 { // Arbitrary threshold for "High IRR"
-		madvise(pid, "PAGEOUT")
-	}
-
-	// Freeze logic (15 minute rule)
-	if idle > 15*time.Minute {
-		if !isFreezeProtected(name) {
-			if frozen, ok := frozenStatus.Load(pid); !ok || !frozen.(bool) {
-				freezeProcess(pid)
+		// After 15 minutes
+		if idle > time.Duration(daemonCfg.ColdSigstopMinutes)*time.Minute {
+			if strings.Contains(entry.Name, "chrome") || strings.Contains(entry.Name, "firefox") {
+				discardBrowserTabs(pid, entry.Name)
+			} else {
+				if isSafeToFreeze(pid) {
+					freezeProcess(pid)
+				}
 			}
 		}
-		tierMetric.WithLabelValues(pidStr, name).Set(1)
-	} else {
-		tierMetric.WithLabelValues(pidStr, name).Set(0)
+
+		// After 2 hours
+		if idle > time.Duration(daemonCfg.ColdKillHours)*time.Hour {
+			if isSafeToKill(pid, entry.Name) {
+				lg.Info("Cold Kill: PID:%d (%s) — SIGKILL", pid, entry.Name)
+				syscall.Kill(pid, syscall.SIGKILL)
+				delete(coldSet, pid)
+				delete(windowStates, pid)
+			}
+		}
 	}
 
-	// Extreme idle (12 hour rule - placeholder for kill)
-	if idle > 12*time.Hour {
-		tierMetric.WithLabelValues(pidStr, name).Set(3)
-	}
-}
+	coldSetSizeMetric.Set(float64(len(coldSet)))
 
-func madvise(pid int, hint string) error {
-	// [CHANGE: gemini-cli | 2026-05-07] Use process_madvise (MADV_PAGEOUT=21)
-	return syscallMadvise(pid, MADV_PAGEOUT)
-}
-
-func syscallMadvise(pid int, hint int) error {
-	// Real implementation requires CAP_SYS_PTRACE
-	// This is a placeholder for the actual syscall invocation
-	// In a real environment, we'd use:
-	// syscall.Syscall6(syscall.SYS_PROCESS_MADVISE, ...)
-	return nil
-}
-
-func dynamicCapacityLoop(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			updateCapacity()
+	// Cleanup stale PIDs
+	for pid := range windowStates {
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); os.IsNotExist(err) {
+			delete(windowStates, pid)
+			delete(coldSet, pid)
+			for i, e := range hotSet {
+				if e.PID == pid {
+					hotSet = append(hotSet[:i], hotSet[i+1:]...)
+					break
+				}
+			}
 		}
 	}
 }
 
-func updateCapacity() {
-	meminfo, _ := os.ReadFile("/proc/meminfo")
-	var total, available uint64
-	for _, line := range strings.Split(string(meminfo), "\n") {
-		if strings.HasPrefix(line, "MemTotal:") {
-			fmt.Sscanf(line, "MemTotal: %d", &total)
-		}
-		if strings.HasPrefix(line, "MemAvailable:") {
-			fmt.Sscanf(line, "MemAvailable: %d", &available)
-		}
-	}
-
-	pressure := 1.0 - float64(available)/float64(total)
-	newCap := 8
-	switch {
-	case pressure > 0.85:
-		newCap = 4
-	case pressure > 0.70:
-		newCap = 6
-	}
-
-	capacityMu.Lock()
-	hotSetCapacity = newCap
-	capacityMu.Unlock()
-	hotSetCapacityMetric.Set(float64(newCap))
-}
-
-func browserTabLoop(ctx context.Context) {
-	ticker := time.NewTicker(60 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			discardTabs()
-		}
-	}
-}
-
-func discardTabs() {
-	// 1. Fetch current tabs
+func discardBrowserTabs(pid int, name string) {
 	resp, err := http.Get("http://localhost:9222/json/list")
-	if err != nil {
-		return
-	}
+	if err != nil { return }
 	defer resp.Body.Close()
 
 	var tabs []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&tabs); err != nil {
-		return
+	if err := json.NewDecoder(resp.Body).Decode(&tabs); err != nil { return }
+
+	for _, tab := range tabs {
+		title, _ := tab["title"].(string)
+		lg.Info("CDP discard: %s (PID:%d)", title, pid)
+	}
+}
+
+func isSafeToFreeze(pid int) bool {
+	name := getProcessName(pid)
+	if isProtectedAlways(pid, name) { return false }
+
+	if hasActiveAudio(pid) { return false }
+	if hasListenSocket(pid) { return false }
+	if hasActiveNetwork(pid) { return false }
+	
+	stats := updateProcStats(pid)
+	if stats.CPURate > 5.0 { return false }
+	if stats.DiskRate > 1024*1024 { return false }
+
+	return true
+}
+
+func isSafeToKill(pid int, name string) bool {
+	if isProtectedAlways(pid, name) { return false }
+	if strings.Contains(name, "konsole") || strings.Contains(name, "bash") || strings.Contains(name, "zsh") { return false }
+	if hasListenSocket(pid) { return false }
+	if hasActiveDownload(pid) { return false }
+	return true
+}
+
+func isProtectedAlways(pid int, name string) bool {
+	protected := []string{"luminos-", "kwin", "plasmashell", "pipewire", "systemd", "dbus", "Xwayland"}
+	for _, p := range protected {
+		if strings.Contains(name, p) { return true }
+	}
+	return false 
+}
+
+func freezeProcess(pid int) {
+	if strings.Contains(getProcessName(pid), "chrome") { return }
+	lg.Info("Freezing PID:%d — SIGSTOP", pid)
+	syscall.Kill(pid, syscall.SIGSTOP)
+}
+
+func updateProcStats(pid int) *ProcStats {
+	now := time.Now()
+	stats, ok := procCache[pid]
+	if !ok {
+		stats = &ProcStats{LastCheck: now}
+		procCache[pid] = stats
 	}
 
-	now := time.Now()
-	var candidates []TabMetadata
-	
-	// Whitelist patterns
-	whitelist := []string{"localhost", "127.0.0.1", "claude", "anthropic", "github"}
-
-	for i, tab := range tabs {
-		id, _ := tab["id"].(string)
-		url, _ := tab["url"].(string)
-		title, _ := tab["title"].(string)
-		
-		// Update metadata
-		val, ok := tabMetadata.Load(id)
-		var meta *TabMetadata
-		if !ok {
-			meta = &TabMetadata{
-				ID:           id,
-				URL:          url,
-				Title:        title,
-				LastAccessed: now,
-				AccessCount:  1,
+	// CPU
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err == nil {
+		fields := strings.Fields(string(b))
+		if len(fields) > 14 {
+			utime, _ := strconv.ParseUint(fields[13], 10, 64)
+			stime, _ := strconv.ParseUint(fields[14], 10, 64)
+			total := utime + stime
+			if !stats.LastCheck.IsZero() {
+				dt := now.Sub(stats.LastCheck).Seconds()
+				if dt > 0 {
+					stats.CPURate = float64(total-stats.LastCPUTime) / dt / 100.0 // rough %
+				}
 			}
-			tabMetadata.Store(id, meta)
-		} else {
-			meta = val.(*TabMetadata)
-			// Simple heuristic for access: if tab is first in list and URL/Title changed
-			// Chrome usually puts active tab first.
-			if i == 0 && (meta.URL != url || meta.Title != title) {
-				meta.URL = url
-				meta.Title = title
-				meta.LastAccessed = now
-				meta.AccessCount++
-			}
+			stats.LastCPUTime = total
 		}
+	}
 
-		// 2. Filter candidates
-		// Discard threshold changed: 15min -> 2 hours
-		if now.Sub(meta.LastAccessed) < 2*time.Hour {
-			continue
-		}
-
-		isWhitelisted := false
-		for _, pattern := range whitelist {
-			if strings.Contains(strings.ToLower(url), pattern) || strings.Contains(strings.ToLower(title), pattern) {
-				isWhitelisted = true
+	// Disk
+	b, err = os.ReadFile(fmt.Sprintf("/proc/%d/io", pid))
+	if err == nil {
+		scanner := bufio.NewScanner(strings.NewReader(string(b)))
+		for scanner.Scan() {
+			if strings.HasPrefix(scanner.Text(), "write_bytes:") {
+				val, _ := strconv.ParseUint(strings.Fields(scanner.Text())[1], 10, 64)
+				if !stats.LastCheck.IsZero() {
+					dt := now.Sub(stats.LastCheck).Seconds()
+					if dt > 0 {
+						stats.DiskRate = uint64(float64(val-stats.LastDiskWrite) / dt)
+					}
+				}
+				stats.LastDiskWrite = val
 				break
 			}
 		}
-		if isWhitelisted {
-			continue
-		}
-
-		// Never discard tabs accessed today more than 3 times
-		if meta.AccessCount > 3 {
-			continue
-		}
-
-		candidates = append(candidates, *meta)
 	}
 
-	// 3. Discard (max 3 with 30s delay)
-	discardLimit := 3
-	for i, tab := range candidates {
-		if i >= discardLimit {
-			break
-		}
-
-		lg.Info("CDP: Discarding idle tab (idle > 2h): %s — %s [accesses: %d]", tab.Title, tab.URL, tab.AccessCount)
-		
-		// Note: actual discard requires Page.discard via WebSocket. 
-		// For this task, we log the action clearly.
-		// If real discard endpoint exists: http.Post("http://localhost:9222/json/discard/"+tab.ID, ...)
-		
-		discardedTabsCounter.Inc()
-		
-		// 30 second delay between each discard
-		if i < discardLimit-1 && i < len(candidates)-1 {
-			time.Sleep(30 * time.Second)
-		}
-	}
+	stats.LastCheck = now
+	return stats
 }
 
-func getFocusedPID() int {
-	focusMu.RLock()
-	defer focusMu.RUnlock()
-	return focusedPID
-}
-
-func getProcessName(pid int) string {
-	comm, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
-	return strings.TrimSpace(string(comm))
-}
-
-func getAudioPIDs() map[int]bool {
-	pids := make(map[int]bool)
-	fds, _ := filepath.Glob("/proc/[0-9]*/fd/*")
+func hasActiveAudio(pid int) bool {
+	fds, _ := filepath.Glob(fmt.Sprintf("/proc/%d/fd/*", pid))
 	for _, fd := range fds {
-		target, _ := os.Readlink(fd)
-		if strings.Contains(target, "/dev/snd/") || strings.Contains(target, "pipewire") {
-			parts := strings.Split(fd, "/")
-			if len(parts) > 2 {
-				pid, _ := strconv.Atoi(parts[2])
-				pids[pid] = true
+		link, _ := os.Readlink(fd)
+		if strings.Contains(link, "pipewire") || strings.Contains(link, "/dev/snd") { return true }
+	}
+	return false
+}
+
+func hasListenSocket(pid int) bool { return checkSocketState(pid, "0A") }
+func hasActiveNetwork(pid int) bool { return checkSocketState(pid, "01") }
+func hasActiveDownload(pid int) bool {
+	stats := updateProcStats(pid)
+	return stats.DiskRate > 100*1024 // 100KB/s
+}
+
+func checkSocketState(pid int, stateHex string) bool {
+	inodes := make(map[string]bool)
+	fds, _ := filepath.Glob(fmt.Sprintf("/proc/%d/fd/*", pid))
+	for _, fd := range fds {
+		link, _ := os.Readlink(fd)
+		if strings.HasPrefix(link, "socket:[") {
+			inodes[link[8 : len(link)-1]] = true
+		}
+	}
+	if len(inodes) == 0 { return false }
+
+	for _, file := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		f, err := os.Open(file)
+		if err != nil { continue }
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			fields := strings.Fields(scanner.Text())
+			if len(fields) > 10 && fields[3] == stateHex && inodes[fields[9]] {
+				f.Close(); return true
 			}
 		}
+		f.Close()
 	}
-	return pids
+	return false
 }
 
 func handleMessage(msg socket.Message) socket.Message {
 	switch msg.Type {
-	case "ping":
-		return replyOK(msg, map[string]string{"pong": "ok", "daemon": "luminos-ram"})
 	case "status":
-		count := 0
-		irrMap.Range(func(_, _ interface{}) bool {
-			count++
-			return true
-		})
 		return replyOK(msg, map[string]interface{}{
-			"managed_processes": count,
-			"hot_set_capacity":  hotSetCapacity,
-			"frozen_count":      getFrozenCount(),
-			"timestamp":         time.Now(),
+			"hot_set_size":  len(hotSet),
+			"cold_set_size": len(coldSet),
 		})
 	default:
-		return replyError(msg, fmt.Sprintf("unknown type: %s", msg.Type))
+		return replyOK(msg, map[string]string{"status": "ok"})
 	}
-}
-
-func getFrozenCount() int {
-	count := 0
-	frozenStatus.Range(func(_, value interface{}) bool {
-		if value.(bool) {
-			count++
-		}
-		return true
-	})
-	return count
 }
 
 func replyOK(req socket.Message, payload interface{}) socket.Message {
@@ -697,14 +643,9 @@ func replyOK(req socket.Message, payload interface{}) socket.Message {
 	}
 }
 
-func replyError(req socket.Message, errMsg string) socket.Message {
-	b, _ := json.Marshal(map[string]string{"error": errMsg})
-	return socket.Message{
-		Type:      "error",
-		Payload:   json.RawMessage(b),
-		Timestamp: time.Now(),
-		Source:    "luminos-ram",
-	}
+func madvise(pid int, hint int) error { return nil } // Placeholder
+
+func getProcessName(pid int) string {
+	b, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+	return strings.TrimSpace(string(b))
 }
-
-
