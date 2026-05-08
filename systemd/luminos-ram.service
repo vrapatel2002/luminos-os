@@ -1,0 +1,20 @@
+[Unit]
+Description=Luminos OS RAM Management Daemon
+After=network.target pipewire.service
+ConditionPathExists=/sys/kernel/mm/ksm/run
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/luminos-ram
+Restart=always
+RestartSec=5
+# Requires CAP_SYS_PTRACE for process_madvise
+CapabilityBoundingSet=CAP_SYS_PTRACE
+AmbientCapabilities=CAP_SYS_PTRACE
+# Security hardening
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

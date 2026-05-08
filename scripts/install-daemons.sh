@@ -20,12 +20,13 @@ go build -o /tmp/luminos-ai       ./cmd/luminos-ai
 go build -o /tmp/luminos-power    ./cmd/luminos-power
 go build -o /tmp/luminos-sentinel ./cmd/luminos-sentinel
 go build -o /tmp/luminos-router   ./cmd/luminos-router
+go build -o /tmp/luminos-ram      ./cmd/luminos-ram
 echo "    Build complete."
 
 # Print binary sizes so we can sanity-check nothing is bloated.
 echo ""
 echo "==> Binary sizes:"
-ls -lh /tmp/luminos-ai /tmp/luminos-power /tmp/luminos-sentinel /tmp/luminos-router
+ls -lh /tmp/luminos-ai /tmp/luminos-power /tmp/luminos-sentinel /tmp/luminos-router /tmp/luminos-ram
 
 echo ""
 echo "==> Installing binaries to $BINDIR/ ..."
@@ -33,6 +34,7 @@ sudo install -m 755 /tmp/luminos-ai       "$BINDIR/luminos-ai"
 sudo install -m 755 /tmp/luminos-power    "$BINDIR/luminos-power"
 sudo install -m 755 /tmp/luminos-sentinel "$BINDIR/luminos-sentinel"
 sudo install -m 755 /tmp/luminos-router   "$BINDIR/luminos-router"
+sudo install -m 755 /tmp/luminos-ram      "$BINDIR/luminos-ram"
 
 echo "==> Creating required directories ..."
 sudo mkdir -p "$LOG_DIR" "$RUN_DIR" "$ETC_DIR"
@@ -43,6 +45,7 @@ sudo install -m 644 "$REPO_ROOT/systemd/luminos-ai.service"       "$SYSTEMD_DIR/
 sudo install -m 644 "$REPO_ROOT/systemd/luminos-power.service"    "$SYSTEMD_DIR/"
 sudo install -m 644 "$REPO_ROOT/systemd/luminos-sentinel.service" "$SYSTEMD_DIR/"
 sudo install -m 644 "$REPO_ROOT/systemd/luminos-router.service"   "$SYSTEMD_DIR/"
+sudo install -m 644 "$REPO_ROOT/systemd/luminos-ram.service"      "$SYSTEMD_DIR/"
 
 echo "==> Reloading systemd ..."
 sudo systemctl daemon-reload
@@ -52,10 +55,11 @@ sudo systemctl enable --now luminos-ai.service
 sudo systemctl enable --now luminos-power.service
 sudo systemctl enable --now luminos-sentinel.service
 sudo systemctl enable --now luminos-router.service
+sudo systemctl enable --now luminos-ram.service
 
 echo ""
 echo "==> Installation complete. Service status:"
-systemctl status luminos-ai luminos-power luminos-sentinel luminos-router --no-pager || true
+systemctl status luminos-ai luminos-power luminos-sentinel luminos-router luminos-ram --no-pager || true
 
 echo ""
 echo "==> Quick health check (requires services to be running):"

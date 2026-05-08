@@ -49,7 +49,7 @@ Agent: gemini-cli (RAM Management Phase 1)
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
 | AI Mode | ✅ Active | Nova on CPU alongside GPU model |
 | Codebase Cleanup | ✅ Phase 2 Done | MemPalace retired, SQLite notes active |
-| RAM Management | ✅ Phase 1 | ZRAM 8GB, KSM, earlyoom, Chrome limits. Plan in LUMINOS_RAM_PLAN.md |
+| RAM Management | ✅ Phase 2 | luminos-ram daemon active. Tiers: 15m/2h/12h. |
 
 ## ARCHITECTURE SHIFT
 - **Deprecated:** Docker Desktop, n8n (Docker), Ollama (Process), SearXNG (Docker), MemPalace (hnswlib crash), hive-swap-server.py
