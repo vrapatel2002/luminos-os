@@ -41,6 +41,14 @@ type IRRInfo struct {
 	IRR             int
 }
 
+type TabMetadata struct {
+	ID           string
+	URL          string
+	Title        string
+	LastAccessed time.Time
+	AccessCount  int
+}
+
 var (
 	lg  *logger.Logger
 	cfg *config.Config
@@ -54,6 +62,7 @@ var (
 	focusCount    sync.Map // pid int -> int
 	frozenStatus  sync.Map // pid int -> bool
 	lastActiveMap sync.Map // pid int -> time.Time
+	tabMetadata   sync.Map // tabID string -> *TabMetadata
 
 	// Hot set configuration
 	hotSetCapacity int = 8
@@ -275,8 +284,21 @@ func getIRR(pid int) int {
 	return 1000
 }
 
+func isFreezeProtected(name string) bool {
+	protected := []string{"chrome", "chromium", "chrome-luminos", "electron", "code", "vscode", "discord", "slack"}
+	for _, p := range protected {
+		if strings.Contains(strings.ToLower(name), p) {
+			return true
+		}
+	}
+	return false
+}
+
 func freezeProcess(pid int) {
 	name := getProcessName(pid)
+	if isFreezeProtected(name) {
+		return
+	}
 	lg.Info("Freezing PID:%d (%s) — SIGSTOP", pid, name)
 	if err := syscall.Kill(pid, syscall.SIGSTOP); err == nil {
 		frozenStatus.Store(pid, true)
@@ -427,8 +449,10 @@ func applyLIRSPolicy(pid int, name string, idle time.Duration) {
 
 	// Freeze logic (15 minute rule)
 	if idle > 15*time.Minute {
-		if frozen, ok := frozenStatus.Load(pid); !ok || !frozen.(bool) {
-			freezeProcess(pid)
+		if !isFreezeProtected(name) {
+			if frozen, ok := frozenStatus.Load(pid); !ok || !frozen.(bool) {
+				freezeProcess(pid)
+			}
 		}
 		tierMetric.WithLabelValues(pidStr, name).Set(1)
 	} else {
@@ -510,7 +534,7 @@ func browserTabLoop(ctx context.Context) {
 }
 
 func discardTabs() {
-	// Chrome CDP HTTP API
+	// 1. Fetch current tabs
 	resp, err := http.Get("http://localhost:9222/json/list")
 	if err != nil {
 		return
@@ -518,17 +542,89 @@ func discardTabs() {
 	defer resp.Body.Close()
 
 	var tabs []map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&tabs)
+	if err := json.NewDecoder(resp.Body).Decode(&tabs); err != nil {
+		return
+	}
 
-	for _, tab := range tabs {
-		title := tab["title"].(string)
-		// Heuristic: if tab not active and system under pressure, discard
-		// Real CDP would check lastAccessed time via Page.getAppManifest or similar
-		// For now, we simulate discard via the CDP activate/close/etc if available
-		// or just log the intent as instructed.
-		lg.Info("CDP: Potential discard for tab: %s", title)
-		// http.Post("http://localhost:9222/json/discard/"+id, ...) // hypothetical
+	now := time.Now()
+	var candidates []TabMetadata
+	
+	// Whitelist patterns
+	whitelist := []string{"localhost", "127.0.0.1", "claude", "anthropic", "github"}
+
+	for i, tab := range tabs {
+		id, _ := tab["id"].(string)
+		url, _ := tab["url"].(string)
+		title, _ := tab["title"].(string)
+		
+		// Update metadata
+		val, ok := tabMetadata.Load(id)
+		var meta *TabMetadata
+		if !ok {
+			meta = &TabMetadata{
+				ID:           id,
+				URL:          url,
+				Title:        title,
+				LastAccessed: now,
+				AccessCount:  1,
+			}
+			tabMetadata.Store(id, meta)
+		} else {
+			meta = val.(*TabMetadata)
+			// Simple heuristic for access: if tab is first in list and URL/Title changed
+			// Chrome usually puts active tab first.
+			if i == 0 && (meta.URL != url || meta.Title != title) {
+				meta.URL = url
+				meta.Title = title
+				meta.LastAccessed = now
+				meta.AccessCount++
+			}
+		}
+
+		// 2. Filter candidates
+		// Discard threshold changed: 15min -> 2 hours
+		if now.Sub(meta.LastAccessed) < 2*time.Hour {
+			continue
+		}
+
+		isWhitelisted := false
+		for _, pattern := range whitelist {
+			if strings.Contains(strings.ToLower(url), pattern) || strings.Contains(strings.ToLower(title), pattern) {
+				isWhitelisted = true
+				break
+			}
+		}
+		if isWhitelisted {
+			continue
+		}
+
+		// Never discard tabs accessed today more than 3 times
+		if meta.AccessCount > 3 {
+			continue
+		}
+
+		candidates = append(candidates, *meta)
+	}
+
+	// 3. Discard (max 3 with 30s delay)
+	discardLimit := 3
+	for i, tab := range candidates {
+		if i >= discardLimit {
+			break
+		}
+
+		lg.Info("CDP: Discarding idle tab (idle > 2h): %s — %s [accesses: %d]", tab.Title, tab.URL, tab.AccessCount)
+		
+		// Note: actual discard requires Page.discard via WebSocket. 
+		// For this task, we log the action clearly.
+		// If real discard endpoint exists: http.Post("http://localhost:9222/json/discard/"+tab.ID, ...)
+		
 		discardedTabsCounter.Inc()
+		
+		// 30 second delay between each discard
+		if i < discardLimit-1 && i < len(candidates)-1 {
+			time.Sleep(30 * time.Second)
+		}
 	}
 }
 
