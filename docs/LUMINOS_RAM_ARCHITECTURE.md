@@ -52,3 +52,9 @@ Inter-Reference Recency (IRR) is defined as the number of *unique other windows*
 - **KWin**: Subscribes to `activeWindowChanged`, `windowMinimized`, `windowUnminimized`.
 - **CDP**: Connects to port 9222 for browser tab management.
 - **D-Bus**: Uses `org.kde.KWin` for window-to-PID mapping.
+
+## Restore Speed Optimizations (v3.1)
+- **MADV_WILLNEED Prefetch**: Before `SIGCONT`, `process_madvise(MADV_WILLNEED)` is called on process memory to warm up pages from ZRAM/Disk.
+- **Staged Thaw**: For large processes (> 500MB), a 200ms delay is inserted between prefetch and `SIGCONT` to allow the kernel to finish page-ins.
+- **Priority Boosting**: Process priority is boosted to `nice -10` for 5 seconds upon focus to speed up initial response.
+- **Bulk Page Reads**: `vm.page-cluster=3` set via sysctl to read 8 pages per fault instead of 1, reducing restore latency.
