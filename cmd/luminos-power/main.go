@@ -7,11 +7,12 @@
 //   Plugged in → asusctl profile Performance
 //
 // Fan curve (from LUMINOS_PROJECT_SCOPE.md §Feature 4):
-//   < 60°C  → quiet    fan curve
-//   60–75°C → balanced fan curve
-//   75–85°C → performance fan curve
+//   < 50°C  → quiet    fan curve
+//   50–65°C → balanced fan curve
+//   65–85°C → performance fan curve
 //   > 85°C  → max fan curve + force Quiet profile to protect hardware
 //
+// [CHANGE: gemini-cli | 2026-05-07] Lowered thresholds: Q->B at 50°C, B->P at 65°C.
 // supergfxctl mode is NEVER changed — always stays Hybrid per project rules.
 // [CHANGE: claude-code | 2026-04-20] Phase 1 Go foundation — luminos-power daemon.
 package main
@@ -182,14 +183,14 @@ func readCPUTemp() float64 {
 // applyPowerState compares current readings to prevState and calls asusctl only when
 // something changed. This avoids hammering asusctl 30 times a minute when nothing changes.
 func applyPowerState(onAC bool, tempC float64) {
-	// [CHANGE: gemini-cli | 2026-04-20] In asusctl 6.3.6, fan curves are tied to profiles.
+	// [CHANGE: gemini-cli | 2026-05-07] Lowered thresholds to keep CPU near 50°C.
 	// We select the profile based on AC state and temperature.
 	profile := "Quiet"
 	if onAC {
 		switch {
-		case tempC >= 75.0:
+		case tempC >= 65.0:
 			profile = "Performance"
-		case tempC >= 60.0:
+		case tempC >= 50.0:
 			profile = "Balanced"
 		default:
 			profile = "Quiet"

@@ -80,7 +80,7 @@ Agent: gemini-cli (RAM Management Phase 1)
 | Daemon | Status | Notes |
 |---|---|---|
 | luminos-ai | ✅ Running | Unix socket IPC |
-| luminos-power | ✅ Running | Auto profile switch |
+| luminos-power | ✅ Running | Auto profile switch. Q→B at 50°C, B→P at 65°C |
 | luminos-sentinel | ✅ Running | Process monitor |
 | luminos-router | ✅ Running | .exe classifier |
 
