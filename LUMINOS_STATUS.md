@@ -42,7 +42,7 @@ Agent: gemini-cli (RAM Management Phase 1)
 | llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
 | HIVE Swap Server | 🛠 Retired | Port 8079 functionality merged into HIVE Daemon |
 | HIVE Daemon | ✅ Working | Port 8078. Popup-managed lifecycle (pgrep guard). ThreadingHTTPServer, 60s timeout, lockfile. |
-| HIVE popup (SUPER+SPACE) | ✅ Working | QML6 native UI + HistorySidebar. Starts hive-daemon.py on open, kills on close. |
+| HIVE popup (SUPER+SPACE) | ✅ Working | Persistent kdialog conversation loop. Starts hive-daemon.py on open, kills on close. |
 | Claude Code Router | ✅ Working | DeepSeek V4 Pro via OpenRouter. Key in .env, config in .claude/settings.local.json |
 | luminos-notes.sh | ✅ Working | SQLite replacement for MemPalace |
 | HIVE Settings in KDE | ✅ Working | kcm_luminos_hive.so installed at /usr/lib/qt6/plugins/plasma/kcms/systemsettings/ |

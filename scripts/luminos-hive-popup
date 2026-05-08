@@ -1,11 +1,8 @@
 #!/bin/bash
 # HIVE Chat Popup — Bash/kdialog + llama-cli + PyQt6
 # [CHANGE: antigravity | 2026-04-27]
+# [CHANGE: gemini-cli | 2026-05-08] Added conversation loop with kdialog
 # Launched by SUPER+SPACE via kglobalaccel → luminos-hive-popup.desktop
-# 
-# 
-# 
-# 
 
 # ════════════════════════════════════════
 # CRITICAL SECTION — DO NOT MODIFY
@@ -95,6 +92,7 @@ fi
 
 echo $$ > "$LOCKFILE"
 trap "/usr/bin/rm -f $LOCKFILE; /usr/bin/pkill -f 'hive-daemon.py' 2>/dev/null; kill \$DAEMON_PID 2>/dev/null; kill \$LLAMA_START_PID 2>/dev/null" EXIT
+
 # ════════════════════════════════════════
 # SECTION: Auto-start Nexus
 # PURPOSE: If llama-server isn't running, start it before the UI.
@@ -127,11 +125,12 @@ if ! /usr/bin/pgrep -f "hive-daemon.py" > /dev/null 2>&1; then
     /usr/bin/python3 /home/shawn/luminos-os/scripts/hive-daemon.py &
     DAEMON_PID=$!
 fi
+
 # ════════════════════════════════════════
 # SECTION: Watchdog Keep-Alive Loop
 # PURPOSE: Touch the activity marker every 30s while popup is open
 #          so the idle-watchdog doesn't kill llama-server under us.
-#          Killed automatically when qml6 exits (via wait + trap).
+#          Killed automatically when the loop exits (via wait + trap).
 # ════════════════════════════════════════
 
 KEEP_ALIVE_PID=""
@@ -144,12 +143,57 @@ KEEP_ALIVE_PID=""
 KEEP_ALIVE_PID=$!
 
 # ════════════════════════════════════════
-# SECTION: Launch QML UI
-# PURPOSE: Run qml6 in foreground (NOT exec) so this bash process
-#          stays alive to manage the keep-alive loop and lockfile.
+# SECTION: Launch Conversation Loop
+# PURPOSE: Stays open for multiple messages
+# [CHANGE: gemini-cli | 2026-05-08]
 # ════════════════════════════════════════
 
-/usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml
+HISTORY_STR=""
+JSON_HISTORY="[]"
+
+while true; do
+    PROMPT_FILE=$(mktemp)
+    if [ -n "$HISTORY_STR" ]; then
+        echo -e "HIVE CONVERSATION\n-----------------\n$HISTORY_STR\n\nYou:" > "$PROMPT_FILE"
+    else
+        echo -e "HIVE: How can I help?\n\nYou:" > "$PROMPT_FILE"
+    fi
+    
+    USER_INPUT=$(kdialog --title "HIVE Chat" --inputbox "$(cat "$PROMPT_FILE")" "" 2>/dev/null)
+    EXIT_CODE=$?
+    rm -f "$PROMPT_FILE"
+    
+    if [ $EXIT_CODE -ne 0 ] || [ -z "$USER_INPUT" ]; then
+        break
+    fi
+    
+    HISTORY_STR="$HISTORY_STR\nYou: $USER_INPUT"
+    
+    # Show "Thinking..." message
+    kdialog --title "HIVE" --passivepopup "HIVE is thinking..." 2 &
+    
+    # Call HIVE daemon
+    PAYLOAD=$(python3 -c "import json, sys; print(json.dumps({'message': sys.argv[1], 'history': json.loads(sys.argv[2])}))" "$USER_INPUT" "$JSON_HISTORY")
+    
+    RESPONSE_JSON=$(curl -s -X POST http://localhost:8078/chat \
+        -H "Content-Type: application/json" \
+        -d "$PAYLOAD")
+    
+    # Extract content and agent
+    AGENT=$(echo "$RESPONSE_JSON" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('agent', 'Assistant'))")
+    CONTENT=$(echo "$RESPONSE_JSON" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('content', 'No response'))")
+    ERROR=$(echo "$RESPONSE_JSON" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('error', ''))")
+    
+    if [ -n "$ERROR" ]; then
+        kdialog --title "HIVE Error" --error "$ERROR"
+        continue
+    fi
+    
+    HISTORY_STR="$HISTORY_STR\n$AGENT: $CONTENT"
+    
+    # Update JSON history
+    JSON_HISTORY=$(python3 -c "import json, sys; h=json.loads(sys.argv[1]); h.append({'role': 'user', 'content': sys.argv[2]}); h.append({'role': 'assistant', 'content': sys.argv[3]}); print(json.dumps(h))" "$JSON_HISTORY" "$USER_INPUT" "$CONTENT")
+done
 
 # Cleanup: kill keep-alive loop and daemon after popup closes
 if [ -n "$KEEP_ALIVE_PID" ]; then
