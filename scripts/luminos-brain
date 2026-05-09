@@ -14,35 +14,51 @@ fi
 case "$1" in
     safe)
         ACTION="$2"
+        REASON=""
+        # Check for --reason flag
+        if [ "$3" == "--reason" ]; then
+            REASON="$4"
+        fi
+
         # Simple keyword matching for high-risk patterns
         KEYWORDS=$(echo "$ACTION" | tr '[:upper:]' '[:lower:]')
         
-        # Check specific critical traps first
-        if echo "$KEYWORDS" | grep -q "torch" && echo "$KEYWORDS" | grep -qE "system|3.14|pip3"; then
-            echo "NO: use pyenv 3.12 pip. torch breaks on Python 3.14"
-            exit 0
-        fi
-        
+        # HARD BLOCK: hnswlib specifically (NEVER overrideable)
         if echo "$KEYWORDS" | grep -qE "hnswlib|chromadb"; then
             echo "NO: hnswlib SEGV crash detected. Use FAISS instead."
             exit 0
         fi
 
-        if echo "$KEYWORDS" | grep -q "vulkan" && echo "$KEYWORDS" | grep -q "chrome"; then
-            echo "NO: Vulkan/SkiaGraphite causes input lag on Mesa 26."
-            exit 0
+        # SOFT BLOCKS - CAN BE OVERRIDDEN
+        IS_SOFT=false
+        WARNING=""
+
+        if echo "$KEYWORDS" | grep -q "torch" && echo "$KEYWORDS" | grep -qE "system|3.14|pip3"; then
+            IS_SOFT=true
+            WARNING="use pyenv 3.12 pip. torch breaks on Python 3.14"
+        elif echo "$KEYWORDS" | grep -q "vulkan" && echo "$KEYWORDS" | grep -q "chrome"; then
+            IS_SOFT=true
+            WARNING="Vulkan/SkiaGraphite causes input lag on Mesa 26."
+        else
+            # Search for keyword matches in KNOWN CONFLICTS or rules
+            KEYS=$(echo "$ACTION" | grep -oE "[a-zA-Z0-9]{4,}" | tr '\n' '|')
+            KEYS=${KEYS%|}
+            if [ -n "$KEYS" ]; then
+                MATCH=$(grep -iE "($KEYS)" -B 2 -A 5 "$BRAIN_FILE" | grep -iE "Resolution:|Rule:|Critical:" | head -n 1)
+                if [ -n "$MATCH" ]; then
+                    IS_SOFT=true
+                    WARNING=$(echo "$MATCH" | sed 's/.*: //')
+                fi
+            fi
         fi
 
-        # Extract keywords (words > 3 chars)
-        KEYS=$(echo "$ACTION" | grep -oE "[a-zA-Z0-9]{4,}" | tr '\n' '|')
-        KEYS=${KEYS%|}
-        
-        if [ -n "$KEYS" ]; then
-            MATCH=$(grep -iE "($KEYS)" -B 2 -A 5 "$BRAIN_FILE" | grep -iE "Resolution:|Rule:|Critical:" | head -n 1)
-            if [ -n "$MATCH" ]; then
-                echo "NO: $(echo "$MATCH" | sed 's/.*: //')"
+        if [ "$IS_SOFT" = true ]; then
+            if [ -n "$REASON" ]; then
+                DATE=$(date +%Y-%m-%d)
+                sed -i "/## INCIDENT LOG/a ### $DATE OVERRIDE: $ACTION | Reason: $REASON" "$BRAIN_FILE"
+                echo "OVERRIDE LOGGED: proceeding with caution"
             else
-                echo "YES: no known conflicts"
+                echo "NO: $WARNING (Use --reason 'why' to override if necessary)"
             fi
         else
             echo "YES: no known conflicts"
@@ -89,7 +105,7 @@ case "$1" in
         ;;
 
     *)
-        echo "Usage: luminos-brain {safe|log|query|status} \"content\""
+        echo "Usage: luminos-brain {safe|log|query|status|think} \"content\" [--reason \"why\"]"
         exit 1
         ;;
 esac

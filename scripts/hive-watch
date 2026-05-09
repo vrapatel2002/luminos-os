@@ -10,10 +10,64 @@ BRAIN="$HOME/.local/share/luminos/hive-brain.md"
 
 if [ ! -f "$BRAIN" ]; then exit 0; fi
 
-# Check 1: hnswlib specifically (always dangerous) - Prioritized
+# Function to log override
+log_override() {
+  local reason="$1"
+  local date=$(date +%Y-%m-%d)
+  sed -i "/## INCIDENT LOG/a ### $date OVERRIDE: $COMMAND | Reason: $reason" "$BRAIN"
+  echo "HIVE OVERRIDE LOGGED: $reason"
+}
+
+# Check for override flag
+OVERRIDE=false
+REASON="No reason provided"
+if echo "$COMMAND" | grep -q -- "--hive-override"; then
+  OVERRIDE=true
+  # Extract reason if possible, or just use a default
+  REASON=$(echo "$COMMAND" | sed 's/.*--hive-override[ =]*//' | awk '{print $1}')
+  if [ -z "$REASON" ] || [ "$REASON" == "--hive-override" ]; then
+    REASON="Manual override via terminal"
+  fi
+fi
+
+# Check 1: hnswlib specifically (HARD BLOCK - NEVER OVERRIDE)
 if echo "$COMMAND" | grep -qi "hnswlib"; then
   echo "CRITICAL: hnswlib causes SEGV on this system. Use FAISS instead. See hive-brain.md [KNOWN CONFLICTS]"
   exit 0
+fi
+
+# SOFT BLOCKS - CAN BE OVERRIDDEN
+if [ "$OVERRIDE" = true ]; then
+  # Check if any soft block would have triggered
+  SOFT_TRIGGERED=false
+  
+  # pip/python version conflicts
+  if echo "$COMMAND" | grep -qiE "pip install|pip3 install" && echo "$COMMAND" | grep -qvE "pyenv|\.venv|3\.12" && echo "$COMMAND" | grep -qiE "torch|tensorflow|chromadb|numpy|scipy"; then
+    SOFT_TRIGGERED=true
+  fi
+  
+  # rm -rf on important paths
+  if echo "$COMMAND" | grep -qE "rm -rf"; then
+    for danger in ".venv" "luminos-os" "hive-brain" "models/hive"; do
+      if echo "$COMMAND" | grep -q "$danger"; then
+        SOFT_TRIGGERED=true
+      fi
+    done
+  fi
+
+  # system-wide package installs
+  if echo "$COMMAND" | grep -qE "pacman -R|pacman -Rs"; then
+    for pkg in "python" "nodejs" "wine" "cuda"; do
+      if echo "$COMMAND" | grep -q "$pkg"; then
+        SOFT_TRIGGERED=true
+      fi
+    done
+  fi
+
+  if [ "$SOFT_TRIGGERED" = true ]; then
+    log_override "$REASON"
+    exit 0
+  fi
 fi
 
 # Check 2: pip/python version conflicts
@@ -21,10 +75,8 @@ if echo "$COMMAND" | grep -qiE "pip install|pip3 install"; then
   # Check if using system Python (dangerous for ML)
   if echo "$COMMAND" | grep -qvE "pyenv|\.venv|3\.12"; then
     # Check if package is ML related
-    if echo "$COMMAND" | grep -qiE \
-      "torch|tensorflow|chromadb|numpy|scipy"; then
-      PKG=$(echo "$COMMAND" | grep -oiE \
-        "torch|tensorflow|hnswlib|chromadb|numpy|scipy" | head -1)
+    if echo "$COMMAND" | grep -qiE "torch|tensorflow|chromadb|numpy|scipy"; then
+      PKG=$(echo "$COMMAND" | grep -oiE "torch|tensorflow|chromadb|numpy|scipy" | head -1)
       echo "ML package '$PKG' needs pyenv 3.12. System pip will fail. Use: ~/.pyenv/versions/3.12.13/bin/pip"
       exit 0
     fi
@@ -33,8 +85,7 @@ fi
 
 # Check 3: rm -rf on important paths
 if echo "$COMMAND" | grep -qE "rm -rf"; then
-  for danger in ".venv" "luminos-os" \
-    "hive-brain" "models/hive"; do
+  for danger in ".venv" "luminos-os" "hive-brain" "models/hive"; do
     if echo "$COMMAND" | grep -q "$danger"; then
       echo "WARNING: deleting '$danger' may break dependent projects. Check hive-brain.md first."
       exit 0
@@ -43,8 +94,7 @@ if echo "$COMMAND" | grep -qE "rm -rf"; then
 fi
 
 # Check 4: system-wide package installs
-if echo "$COMMAND" | \
-  grep -qE "pacman -R|pacman -Rs" ; then
+if echo "$COMMAND" | grep -qE "pacman -R|pacman -Rs" ; then
   for pkg in "python" "nodejs" "wine" "cuda"; do
     if echo "$COMMAND" | grep -q "$pkg"; then
       echo "WARNING: removing '$pkg' may break Luminos dependencies. Verify in hive-brain.md first."
