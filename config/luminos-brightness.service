@@ -1,0 +1,11 @@
+[Unit]
+Description=Luminos Brightness Restore on Wake
+Documentation=https://github.com/vrapatel2002/luminos-os
+After=suspend.target hibernate.target hybrid-sleep.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c "echo 399000 > /sys/class/backlight/amdgpu_bl2/brightness && echo 100 > /sys/class/backlight/nvidia_0/brightness"
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target

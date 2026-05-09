@@ -1,0 +1,11 @@
+[Unit]
+Description=Luminos Keyboard Light Restore on Wake
+Documentation=https://github.com/vrapatel2002/luminos-os
+After=suspend.target hibernate.target hybrid-sleep.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c "/usr/bin/asusctl aura effect static -c ffffff && echo 3 > /sys/class/leds/asus::kbd_backlight/brightness"
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target
