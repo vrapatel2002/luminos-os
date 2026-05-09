@@ -1,6 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
-import org.kde.plasma.core as PlasmaCore
+import org.kde.plasma.plasma5support 2.0 as Plasma5Support
 import org.kde.plasma.components 3.0 as PC3
 import org.kde.plasma.plasmoid 2.0
 
@@ -19,25 +19,37 @@ PlasmoidItem {
         zram_saved: 0
     })
 
+    Plasma5Support.DataSource {
+        id: executable
+        engine: "executable"
+        connectedSources: []
+        onNewData: {
+            var stdout = data["stdout"]
+            
+            if (sourceName.includes("/metrics")) {
+                parseMetrics(stdout)
+            } else if (sourceName.includes("/meminfo")) {
+                parseMemInfo(stdout)
+            }
+            disconnectSource(sourceName)
+        }
+    }
+
     Timer {
         interval: 5000
         running: true
         repeat: true
+        triggeredOnStart: true
         onTriggered: updateStats()
     }
 
     function updateStats() {
-        var xhr = new XMLHttpRequest()
-        xhr.open("GET", "http://localhost:9091/metrics")
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState === 4) {
-                parseMetrics(xhr.responseText)
-            }
-        }
-        xhr.send()
+        executable.connectSource("curl -s http://localhost:9091/metrics")
+        executable.connectSource("curl -s http://localhost:9091/meminfo")
     }
 
     function parseMetrics(text) {
+        if (!text) return
         var lines = text.split('\n')
         var s = stats
         for (var i = 0; i < lines.length; i++) {
@@ -48,23 +60,24 @@ PlasmoidItem {
             if (l.includes('luminos_ram_cold_set_size '))
                 s.cold = parseFloat(l.split(' ')[1]) || 0
         }
-        // Read /proc/meminfo via separate call
-        var xhr2 = new XMLHttpRequest()
-        xhr2.open("GET", "http://localhost:9091/meminfo")
-        xhr2.onreadystatechange = function() {
-            if (xhr2.readyState === 4 && xhr2.status === 200) {
-                var d = JSON.parse(xhr2.responseText)
-                s.total = d.total
-                s.used = d.used
-                s.available = d.available
-                s.zram_used = d.zram_used
-                s.zram_total = d.zram_total
-                s.zram_saved = d.zram_saved
-                stats = s
-            }
-        }
-        xhr2.send()
         stats = s
+    }
+
+    function parseMemInfo(text) {
+        if (!text) return
+        try {
+            var d = JSON.parse(text)
+            var s = stats
+            s.total = d.total
+            s.used = d.used
+            s.available = d.available
+            s.zram_used = d.zram_used
+            s.zram_total = d.zram_total
+            s.zram_saved = d.zram_saved
+            stats = s
+        } catch (e) {
+            console.log("Error parsing meminfo JSON: " + e)
+        }
     }
 
     compactRepresentation: Item {
