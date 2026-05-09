@@ -1,0 +1,22 @@
+#!/bin/bash
+# Luminos Antigravity CLI wrapper
+# Ensures HIVE Brain context injected before every task
+# Usage: luminos-antigravity "your task here"
+
+TASK="$*"
+BRAIN_STATUS=$(luminos-brain status 2>/dev/null)
+TOPIC=$(echo "$TASK" | awk '{print $1,$2,$3}')
+BRAIN_CONTEXT=$(luminos-brain query "$TOPIC" 2>/dev/null)
+
+FULL_PROMPT="Read ~/luminos-os/AGENTS.md first.
+Run: luminos-brain status
+
+HIVE BRAIN CONTEXT:
+$BRAIN_CONTEXT
+
+TASK: $TASK
+
+After completing:
+luminos-brain log 'antigravity completed: $TOPIC'"
+
+antigravity chat "$FULL_PROMPT"
