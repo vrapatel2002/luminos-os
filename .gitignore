@@ -31,3 +31,4 @@ src/kcms/kcm_luminos_hive/build/
 CMakeFiles/
 .notes.db
 .claude/settings.local.json
+src/hive/.venv/
