@@ -2,7 +2,7 @@
 # HIVE Brain — Luminos OS Security Logbook
 # Role: Security Guard — Observe, Report, Guide
 # Rule: NEVER fix. NEVER touch. ONLY inform.
-# Updated: 2026-05-09
+# Updated: 2026-05-09 (Full System Audit)
 
 ## HOW TO USE THIS FILE
 Agents: run `luminos-brain safe "action"` before acting.
@@ -18,29 +18,37 @@ Rule: System tools can use 3.14
 Rule: NEVER install torch on system Python
 
 ## PYTHON ENVIRONMENTS
-### MemPalace Venv
+### MemPalace Venv (Broken)
 Path: /home/shawn/mempalace-venv
 Python: 3.12.13
 Purpose: chromadb (retired)
-Status: healthy
+Status: BROKEN - python binary missing
 Do not touch: yes
-Notes: retired — hnswlib crash unresolvable
+Notes: Legacy venv. See .mempalace-venv for active one.
+
+### MemPalace Venv (Active)
+Path: /home/shawn/.mempalace-venv
+Python: 3.12.13
+Purpose: chromadb (retired)
+Status: BROKEN - hnswlib SEGV
+Do not touch: yes
+Notes: hnswlib imports but search crashes. Do not attempt to fix.
 
 ### Triton Venv
 Path: /home/shawn/luminos-os/.triton_venv
 Python: 3.12.13
 Purpose: NPU / Triton inference
-Status: healthy
+Status: healthy (80 packages)
 Do not touch: yes
-Notes: Core Luminos AI stack
+Notes: Core Luminos AI stack. Stable.
 
 ### Forex Bot Venv
 Path: /home/shawn/Forex-Trading-Bot-main/Forex-Trading-Bot-main/.venv
-Python: 3.14.4
+Python: 3.14.4 (CRITICAL CONFLICT)
 Purpose: Forex Trading Bot
-Status: healthy
+Status: BROKEN - uses system 3.14 instead of 3.12
 Do not touch: yes
-Notes: Critical: Currently using system 3.14 — needs pyenv 3.12.13 for torch stability
+Notes: Critical: Installed torch/xgboost on 3.14. Needs pyenv 3.12.13 rebuild.
 
 ## PROJECTS
 ### Luminos OS
@@ -58,8 +66,13 @@ Entry: python run.py
 Pre-run: source .venv/bin/activate
          python -m mt5linux 18812 &
 Requires: MT5 terminal running in Wine on port 18812
-Status: available
-Critical: NEVER run with system Python 3.14
+Status: BROKEN - Environment conflict (Python 3.14)
+Critical: NEVER run with system Python 3.14. Packages installed: torch (2.11.0), xgboost (3.2.0), mt5linux (1.0.3).
+
+### code-review-graph
+Path: /home/shawn/.local/bin/code-review-graph
+Status: found (not in PATH)
+Notes: Utility for mapping codebase dependencies.
 
 ## KNOWN CONFLICTS
 ### Python 3.14 + torch
@@ -116,6 +129,12 @@ Always verify Python version before pip install.
 - [historical] HIVE popup: import: command not found (bash/python mismatch)
 
 ## INCIDENT LOG
+### 2026-05-09 Terminal watcher active via zshrc preexec hook. Crash analyzer installed. Systemd path watcher on coredump directory.
+### 2026-05-09 hive-mcp stdio built. Works with Claude Code natively. Gemini and Antigravity use CLI fallback. Zero RAM when idle.
+### 2026-05-09 HIVE popup and daemon wired to brain. System context and semantic knowledge injection active.
+### 2026-05-09 Step 3 completed: RAG system built with nomic-embed and FAISS. 'think' command active.
+### 2026-05-09 Step 2 completed: luminos-brain CLI built and rules enforced.
+### 2026-05-09 test log entry from build
 ### 2026-04-25 MemPalace Retired
 Cause: hnswlib SEGV on Python 3.12
 Decision: replaced with luminos-notes.sh SQLite
