@@ -72,6 +72,12 @@ case "$1" in
         fi
         ;;
 
+    think)
+        QUESTION="$2"
+        # Run Python RAG script using the correct venv
+        /home/shawn/luminos-os/src/hive/.venv/bin/python3 /home/shawn/luminos-os/src/hive/luminos-rag.py query "$QUESTION"
+        ;;
+
     status)
         ERRS=$(grep -c "❌" "$BRAIN_FILE")
         WARNS=$(grep -c "⚠️" "$BRAIN_FILE")
