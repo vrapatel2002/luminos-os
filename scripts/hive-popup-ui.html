@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HIVE</title>
+<style>
+:root {
+  --bg: #0a0a0a;
+  --sidebar-bg: #111;
+  --accent: #0080ff;
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --border: #1a1a2e;
+  --hover: #1a1a2e;
+  --user-bubble: #0050a0;
+  --radius: 8px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  height: 100vh; overflow: hidden;
+}
+
+#app { display: flex; height: 100vh; }
+
+/* ── Sidebar ── */
+#sidebar {
+  width: 240px; min-width: 0;
+  background: var(--sidebar-bg);
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--border);
+  transition: width 0.2s, padding 0.2s;
+  overflow: hidden;
+}
+#sidebar.collapsed { width: 0; border-right: none; }
+
+.sidebar-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.sidebar-header button {
+  background: none; border: none; color: var(--text);
+  cursor: pointer; font-size: 16px; padding: 4px 6px;
+  border-radius: 4px; line-height: 1;
+}
+.sidebar-header button:hover { background: var(--hover); }
+.sidebar-header .new-chat-btn {
+  color: var(--accent); font-weight: 600;
+  flex: 1; text-align: left; font-size: 13px;
+}
+
+#chat-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+#chat-list::-webkit-scrollbar { width: 4px; }
+#chat-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+.chat-item {
+  padding: 10px 12px; cursor: pointer;
+  border-bottom: 1px solid transparent;
+  white-space: nowrap; overflow: hidden;
+}
+.chat-item:hover { background: var(--hover); }
+.chat-item.active { background: #1a2a3a; border-left: 2px solid var(--accent); }
+.chat-item .chat-name { font-size: 13px; font-weight: 500; }
+.chat-item .chat-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; display: flex; gap: 8px; }
+
+/* ── Main ── */
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+/* ── Topbar ── */
+#topbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; border-bottom: 1px solid var(--border);
+  min-height: 48px;
+}
+#topbar button, #topbar .icon-btn {
+  background: none; border: none; color: var(--text);
+  cursor: pointer; font-size: 16px; padding: 4px 6px;
+  border-radius: 4px; line-height: 1;
+}
+#topbar button:hover, #topbar .icon-btn:hover { background: var(--hover); }
+
+#chat-title {
+  flex: 1; background: none; border: none; color: var(--text);
+  font-size: 14px; font-weight: 600; outline: none;
+  padding: 4px 8px; border-radius: 4px;
+}
+#chat-title:hover, #chat-title:focus { background: #1a1a2e; }
+
+.model-badge {
+  font-size: 11px; padding: 3px 8px; border-radius: 12px;
+  background: #1a2a3a; color: var(--accent); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+
+#mode-toggle {
+  font-size: 14px; padding: 4px 10px; border-radius: 4px;
+  border: 1px solid var(--border); background: none;
+  color: var(--text-dim); cursor: pointer;
+}
+#mode-toggle:hover { color: var(--text); border-color: #555; }
+#mode-toggle.auto { color: var(--accent); border-color: var(--accent); }
+
+/* ── Messages ── */
+#messages {
+  flex: 1; overflow-y: auto; padding: 20px 0;
+  display: flex; flex-direction: column; gap: 16px;
+}
+#messages::-webkit-scrollbar { width: 4px; }
+#messages::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+.msg-row { display: flex; padding: 0 20px; }
+.msg-row.user { justify-content: flex-end; }
+.msg-row.assistant { justify-content: flex-start; }
+
+.msg-bubble {
+  max-width: 75%; padding: 10px 14px; border-radius: var(--radius);
+  font-size: 13.5px; line-height: 1.55; white-space: pre-wrap;
+  word-break: break-word;
+}
+.msg-row.user .msg-bubble {
+  background: var(--user-bubble); color: #fff;
+  border-bottom-right-radius: 2px;
+}
+.msg-row.assistant .msg-bubble {
+  background: none; color: var(--text); padding: 10px 0;
+}
+
+.msg-actions {
+  display: flex; gap: 6px; margin-top: 6px; opacity: 0;
+  transition: opacity 0.15s;
+}
+.msg-row.assistant .msg-bubble:hover .msg-actions,
+.msg-actions.visible { opacity: 1; }
+
+.msg-actions button {
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 14px; padding: 2px 4px;
+  border-radius: 4px;
+}
+.msg-actions button:hover { color: var(--text); background: #222; }
+
+/* ── Empty state ── */
+#empty-state {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px;
+  padding: 40px;
+}
+#empty-state h2 { font-size: 22px; color: var(--text); }
+#empty-state p { color: var(--text-dim); font-size: 13px; }
+.suggest-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 500px; }
+.suggest-btn {
+  padding: 8px 16px; border-radius: 20px;
+  border: 1px solid var(--border); background: #111;
+  color: var(--text); cursor: pointer; font-size: 13px;
+  transition: border-color 0.15s;
+}
+.suggest-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Input bar ── */
+#input-bar {
+  display: flex; align-items: flex-end; gap: 10px;
+  padding: 12px 20px; border-top: 1px solid var(--border);
+}
+#input-bar textarea {
+  flex: 1; background: #111; border: 1px solid var(--border);
+  color: var(--text); font-size: 13.5px; padding: 10px 14px;
+  border-radius: var(--radius); resize: none; outline: none;
+  font-family: inherit; min-height: 42px; max-height: 150px;
+}
+#input-bar textarea:focus { border-color: #333; }
+#input-bar button, #input-bar .icon-btn {
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 18px; padding: 8px;
+  border-radius: 6px; line-height: 1;
+}
+#input-bar button:hover, #input-bar .icon-btn:hover { background: #1a1a2e; color: var(--text); }
+#send-btn { color: var(--accent) !important; }
+#send-btn:disabled { color: var(--text-dim) !important; cursor: not-allowed; }
+
+/* ── Loading ── */
+.loading-dots { display: inline-flex; gap: 4px; padding: 4px 0; }
+.loading-dots span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-dim); animation: bounce 1.2s infinite;
+}
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-4px); }
+}
+
+/* ── Toast ── */
+#toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: #222; color: var(--text); padding: 8px 18px;
+  border-radius: 6px; font-size: 12px; opacity: 0; transition: opacity 0.2s;
+  pointer-events: none; z-index: 100;
+}
+#toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <button class="new-chat-btn" onclick="newChat()">+ New chat</button>
+      <button onclick="toggleSidebar()" title="Close sidebar">&#9776;</button>
+    </div>
+    <div id="chat-list"></div>
+  </aside>
+
+  <section id="main">
+    <div id="topbar">
+      <button onclick="toggleSidebar()" title="Toggle sidebar">&#9776;</button>
+      <input id="chat-title" value="New chat" placeholder="New chat" onchange="renameChat(this.value)">
+      <span class="model-badge" id="model-badge">AUTO</span>
+      <button id="mode-toggle" class="auto" onclick="toggleMode()" title="Toggle manual model select">AUTO</button>
+    </div>
+
+    <div id="messages"></div>
+
+    <div id="empty-state">
+      <h2>HIVE</h2>
+      <p>Ask anything. Nexus answers. Bolt handles code.</p>
+      <div class="suggest-btns">
+        <button class="suggest-btn" onclick="sendSuggest(this.textContent)">Explain quantum computing</button>
+        <button class="suggest-btn" onclick="sendSuggest(this.textContent)">Write a Python script to parse logs</button>
+        <button class="suggest-btn" onclick="sendSuggest(this.textContent)">What can Luminos OS do?</button>
+        <button class="suggest-btn" onclick="sendSuggest(this.textContent)">Debug a segfault in C</button>
+      </div>
+    </div>
+
+    <div id="input-bar">
+      <button class="icon-btn" title="Attach" onclick="document.getElementById('file-input').click()">&#128206;</button>
+      <input type="file" id="file-input" style="display:none" onchange="attachFile(this)">
+      <textarea id="user-input" rows="1" placeholder="Message HIVE..."
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"
+        oninput="autoResize(this); updateSendBtn()"></textarea>
+      <button id="send-btn" disabled onclick="sendMessage()">&#10148;</button>
+    </div>
+  </section>
+</div>
+<div id="toast"></div>
+
+<script>
+const ICONS = {
+  copy: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  regenerate: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 2-11.5L1 10"/></svg>',
+  thumbUp: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>',
+  thumbDown: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10zM17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>',
+};
+
+let currentChat = null;
+let chats = [];
+let manualModel = null; // null = auto, "nexus" or "bolt"
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
+
+function toggleMode() {
+  const btn = document.getElementById('mode-toggle');
+  const badge = document.getElementById('model-badge');
+  if (manualModel === null) {
+    manualModel = 'nexus';
+    btn.textContent = 'NEX';
+    btn.classList.remove('auto');
+    badge.textContent = 'NEXUS';
+  } else if (manualModel === 'nexus') {
+    manualModel = 'bolt';
+    btn.textContent = 'BOLT';
+    badge.textContent = 'BOLT';
+  } else {
+    manualModel = null;
+    btn.textContent = 'AUTO';
+    btn.classList.add('auto');
+    badge.textContent = 'AUTO';
+  }
+}
+
+function newChat() {
+  currentChat = {
+    id: null,
+    name: 'New chat',
+    model: manualModel || 'auto',
+    messages: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  document.getElementById('chat-title').value = 'New chat';
+  document.getElementById('messages').innerHTML = '';
+  document.getElementById('empty-state').style.display = 'flex';
+  document.getElementById('user-input').value = '';
+  updateSendBtn();
+  updateModelBadge();
+}
+
+function updateModelBadge() {
+  const badge = document.getElementById('model-badge');
+  if (manualModel) badge.textContent = manualModel.toUpperCase();
+  else badge.textContent = 'AUTO';
+}
+
+async function loadChats() {
+  try {
+    const res = await fetch('/api/chats');
+    chats = await res.json();
+    renderChatList();
+  } catch(e) { console.error('loadChats', e); }
+}
+
+function renderChatList() {
+  const el = document.getElementById('chat-list');
+  el.innerHTML = chats.map(c => `
+    <div class="chat-item${currentChat && currentChat.id === c.id ? ' active' : ''}"
+         onclick="openChat('${c.id}')">
+      <div class="chat-name">${escHtml(c.name)}</div>
+      <div class="chat-meta">
+        <span>${escHtml(c.model)}</span>
+        <span>${fmtTime(c.updatedAt)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function openChat(id) {
+  try {
+    const res = await fetch(`/api/chats/${id}`);
+    currentChat = await res.json();
+    document.getElementById('chat-title').value = currentChat.name || 'Untitled';
+    renderMessages();
+    document.getElementById('empty-state').style.display = currentChat.messages.length ? 'none' : 'flex';
+    renderChatList();
+    updateModelBadge();
+    scrollToBottom();
+  } catch(e) { console.error('openChat', e); }
+}
+
+function renderMessages() {
+  const el = document.getElementById('messages');
+  if (!currentChat) { el.innerHTML = ''; return; }
+  el.innerHTML = currentChat.messages.map((m, i) => {
+    if (m.role === 'user') {
+      return `<div class="msg-row user"><div class="msg-bubble">${escHtml(m.content)}</div></div>`;
+    }
+    return `
+      <div class="msg-row assistant">
+        <div class="msg-bubble">
+          ${escHtml(m.content)}
+          <div class="msg-actions">
+            <button title="Copy" onclick="copyMsg(${i})">${ICONS.copy}</button>
+            <button title="Regenerate" onclick="regenerateMsg(${i})">${ICONS.regenerate}</button>
+            <button title="Good response" onclick="rateMsg(${i},'up')">${ICONS.thumbUp}</button>
+            <button title="Bad response" onclick="rateMsg(${i},'down')">${ICONS.thumbDown}</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function sendMessage() {
+  const input = document.getElementById('user-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  if (!currentChat) newChat();
+
+  const userMsg = { id: genId(), role: 'user', content: text, timestamp: new Date().toISOString() };
+  currentChat.messages.push(userMsg);
+  input.value = '';
+  autoResize(input);
+  updateSendBtn();
+
+  document.getElementById('empty-state').style.display = 'none';
+  renderMessages();
+  scrollToBottom();
+  await saveChat();
+
+  // Show loading
+  const msgsEl = document.getElementById('messages');
+  const loadingId = 'loading-' + genId();
+  msgsEl.insertAdjacentHTML('beforeend',
+    `<div class="msg-row assistant" id="${loadingId}"><div class="msg-bubble"><div class="loading-dots"><span></span><span></span><span></span></div></div></div>`);
+  scrollToBottom();
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        message: text,
+        model: manualModel || undefined,
+        messages: currentChat.messages.slice(0, -1),
+      }),
+    });
+    const reply = await res.json();
+    document.getElementById(loadingId)?.remove();
+
+    currentChat.messages.push(reply);
+    currentChat.updatedAt = new Date().toISOString();
+    if (currentChat.messages.length === 2 && currentChat.name === 'New chat') {
+      currentChat.name = text.slice(0, 50);
+      document.getElementById('chat-title').value = currentChat.name;
+    }
+    renderMessages();
+    scrollToBottom();
+    await saveChat();
+    loadChats();
+    updateModelBadge();
+    document.getElementById('model-badge').textContent = (reply.model || 'nexus').toUpperCase();
+  } catch(e) {
+    document.getElementById(loadingId)?.remove();
+    console.error('sendMessage', e);
+  }
+}
+
+async function saveChat() {
+  if (!currentChat) return;
+  try {
+    const res = await fetch('/api/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(currentChat),
+    });
+    const data = await res.json();
+    if (!currentChat.id) currentChat.id = data.id;
+  } catch(e) { console.error('saveChat', e); }
+}
+
+async function regenerateMsg(idx) {
+  if (!currentChat || idx < 1) return;
+  // Remove the assistant response and resend the user message before it
+  const userMsg = currentChat.messages[idx - 1];
+  if (!userMsg || userMsg.role !== 'user') return;
+  currentChat.messages = currentChat.messages.slice(0, idx);
+  renderMessages();
+  await saveChat();
+
+  const msgsEl = document.getElementById('messages');
+  const loadingId = 'loading-' + genId();
+  msgsEl.insertAdjacentHTML('beforeend',
+    `<div class="msg-row assistant" id="${loadingId}"><div class="msg-bubble"><div class="loading-dots"><span></span><span></span><span></span></div></div></div>`);
+  scrollToBottom();
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        message: userMsg.content,
+        model: manualModel || undefined,
+        messages: currentChat.messages,
+      }),
+    });
+    const reply = await res.json();
+    document.getElementById(loadingId)?.remove();
+    currentChat.messages.push(reply);
+    currentChat.updatedAt = new Date().toISOString();
+    renderMessages();
+    scrollToBottom();
+    await saveChat();
+    loadChats();
+  } catch(e) {
+    document.getElementById(loadingId)?.remove();
+    console.error('regenerate', e);
+  }
+}
+
+function copyMsg(idx) {
+  if (!currentChat) return;
+  const msg = currentChat.messages[idx];
+  if (!msg) return;
+  navigator.clipboard.writeText(msg.content).then(() => toast('Copied'));
+}
+
+function rateMsg(idx, dir) {
+  const actions = document.querySelectorAll('.msg-actions')[Math.floor(idx / 2)];
+  if (actions) actions.classList.add('visible');
+  toast(dir === 'up' ? 'Thanks for the feedback' : 'Feedback noted');
+}
+
+function sendSuggest(text) {
+  document.getElementById('user-input').value = text;
+  updateSendBtn();
+  sendMessage();
+}
+
+async function attachFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const text = await file.text();
+  document.getElementById('user-input').value = `File: ${file.name}\n\`\`\`\n${text.slice(0, 4000)}\n\`\`\``;
+  updateSendBtn();
+  input.value = '';
+}
+
+function renameChat(name) {
+  if (!currentChat) return;
+  currentChat.name = name || 'Untitled';
+  saveChat().then(() => loadChats());
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+}
+
+function updateSendBtn() {
+  const hasText = document.getElementById('user-input').value.trim().length > 0;
+  document.getElementById('send-btn').disabled = !hasText;
+}
+
+function scrollToBottom() {
+  const msgs = document.getElementById('messages');
+  requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 86400000 && d.getDate() === now.getDate()) {
+    return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  }
+  return d.toLocaleDateString([], {month:'short',day:'numeric'});
+}
+
+function genId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+// Init
+newChat();
+loadChats();
+</script>
+</body>
+</html>
