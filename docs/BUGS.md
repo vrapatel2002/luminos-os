@@ -555,3 +555,13 @@ Each bug entry:
 - RAM compression: zram not configured yet
 - Disk encryption: not enabled by default
 - Secure Boot: ISO not signed
+
+### BUG-045 — Touchpad Input Lag / Jump Detection
+- Status: FIXED
+- Severity: MEDIUM
+- Component: /etc/libinput/local-overrides.quirks, /etc/udev/rules.d/99-cpu-governor.rules
+- Description: Input lag during browsing, typing and scrolling felt stuttery, especially on heavy JS sites.
+- Root Cause: libinput detecting erratic touchpad hardware events on ASUS ROG G14 (ASUP1208). Kernel logged "Touch jump detected and discarded" at a rate exceeding limits, causing many dropped events.
+- Fix Applied: 1. Created /etc/libinput/local-overrides.quirks with AttrTouchSizeRange and AttrPalmSizeThreshold tuned for G14. 2. Changed CPU governor from powersave to schedutil via udev rule.
+- Date Found: 2026-05-09
+- Date Fixed: 2026-05-09

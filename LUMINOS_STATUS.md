@@ -114,3 +114,9 @@ Agent: gemini-cli (RAM Management Phase 1)
 7. Go orchestrator (replace Python)
 8. Zone indicator Plasma widget
 9. SDDM custom Luminos theme
+
+## Input & Hardware
+| Component | Status | Notes |
+|---|---|---|
+| Touchpad input lag | ✅ Fixed | libinput quirks (BUG-045) |
+| CPU governor | ✅ schedutil | Permanent udev rule (was powersave) |
