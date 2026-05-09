@@ -29,7 +29,29 @@ Luminos OS is a custom Arch Linux distribution on ASUS ROG G14.
 
 ---
 
-## 3. Agent Strengths
+## 3. HIVE Brain MCP Tool (Native Integration)
+The HIVE Brain is available as a native tool for supported agents.
+
+- **Tool Name**: `hive-brain`
+- **Interface**: `stdio` (zero overhead)
+- **Commands**: `safe`, `log`, `query`, `think`, `status`
+
+### 3.1 Usage by Agent
+| Agent | Integration | Priority Method |
+|-------|-------------|-----------------|
+| **Claude Code** | Native MCP | Call `hive-brain` tools directly |
+| **Gemini CLI** | CLI Fallback | Run `/usr/local/bin/luminos-brain` |
+| **Antigravity** | CLI Fallback | Run `/usr/local/bin/luminos-brain` |
+
+### 3.2 Mandatory Safety Protocol
+Before ANY action involving Python, virtual environments, or package installation:
+- **Claude**: Call `hive-brain.safe(action="...")`
+- **Others**: Run `luminos-brain safe "..."`
+If the response starts with **NO**, do not proceed.
+
+---
+
+## 4. Agent Strengths
 
 | Agent | Use for |
 |-------|---------|
