@@ -27,6 +27,7 @@ import time
 import fcntl
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
+from hive_context import get_system_context, get_brain_context, log_incident
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -320,12 +321,35 @@ def _call_llama(messages: list[dict], model_name: str) -> tuple[str | None, str 
     return None, err
 
 
-def _build_messages(model: str, user_message: str, history: list[dict] | None) -> list[dict]:
+def _build_messages(model: str, user_message: str, history: list[dict] | None, sys_ctx=None, brain_ctx="") -> list[dict]:
     """Build the messages array with system prompt + history + user message."""
     messages = []
-    prompt = _system_prompts.get(model)
-    if prompt:
-        messages.append({"role": "system", "content": prompt})
+    
+    # System Context String
+    if sys_ctx:
+        sys_info = f"""
+CURRENT SYSTEM STATE:
+RAM: {sys_ctx['ram_used']}GB used of {sys_ctx['ram_total']}GB ({sys_ctx['ram_available']}GB available)
+CPU Temperature: {sys_ctx['cpu_temp']}°C
+Power Profile: {sys_ctx['profile']}
+Services: {sys_ctx['services_status']}
+"""
+    else:
+        sys_info = ""
+
+    knowledge = f"\nRELEVANT KNOWLEDGE:\n{brain_ctx}\n" if brain_ctx else ""
+
+    system_prompt = f"""You are HIVE, the local AI assistant for Luminos OS.
+You are a security guard — observe, report, guide.
+Never fix things yourself. Guide the user.
+{sys_info}{knowledge}
+RULES:
+- If asked about Python/venv: always check brain context before answering
+- If something seems risky: say NO and explain why
+- Keep answers short and direct
+- Cite which rule or incident you're referencing"""
+
+    messages.append({"role": "system", "content": system_prompt})
     if history:
         messages.extend(history)
     messages.append({"role": "user", "content": user_message})
@@ -550,6 +574,10 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+            # [CHANGE: gemini-cli | 2026-05-09] Context injection
+            sys_ctx = get_system_context()
+            brain_ctx = get_brain_context(user_message)
+
             # ── Path A: Chip is set → direct to mapped model ──
             if chip and chip in CHIP_TO_MODEL:
                 target_model = CHIP_TO_MODEL[chip]
@@ -560,7 +588,7 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 _state.set_stage(f"generating_{target_model}")
-                messages = _build_messages(target_model, user_message, history)
+                messages = _build_messages(target_model, user_message, history, sys_ctx, brain_ctx)
                 response_text, infer_err = _call_llama(messages, target_model)
                 t_end = time.monotonic()
 
@@ -592,7 +620,7 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             _state.set_stage("generating_nexus")
-            nexus_messages = _build_messages("nexus", user_message, history)
+            nexus_messages = _build_messages("nexus", user_message, history, sys_ctx, brain_ctx)
             nexus_response, infer_err = _call_llama(nexus_messages, "nexus")
             t_nexus = time.monotonic()
 
@@ -618,6 +646,10 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                 # Nexus handles it directly — no routing
                 clean_text = _strip_route_tags(nexus_response)
                 t_end = time.monotonic()
+
+                # [CHANGE: gemini-cli | 2026-05-09] Log incident if needed
+                log_incident(user_message)
+
                 self._send_json(200, {
                     "agent": "Nexus",
                     "content": clean_text,
@@ -635,6 +667,10 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                 logger.warning("Unknown route target: %s", route_target)
                 clean_text = _strip_route_tags(nexus_response)
                 t_end = time.monotonic()
+
+                # [CHANGE: gemini-cli | 2026-05-09] Log incident if needed
+                log_incident(user_message)
+
                 self._send_json(200, {
                     "agent": "Nexus",
                     "content": clean_text,
@@ -666,8 +702,9 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             # Send ONLY the original user message to specialist (no Nexus artifacts)
+            # [CHANGE: gemini-cli | 2026-05-09] Specialist also gets context
             _state.set_stage(f"generating_{route_target}")
-            specialist_messages = _build_messages(route_target, user_message, history)
+            specialist_messages = _build_messages(route_target, user_message, history, sys_ctx, brain_ctx)
             specialist_response, infer_err = _call_llama(specialist_messages, route_target)
             t_end = time.monotonic()
 
@@ -677,6 +714,9 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
 
             clean_text = _strip_route_tags(specialist_response)
             agent_name = {"nexus": "Nexus", "bolt": "Bolt", "nova": "Nova"}.get(route_target, route_target)
+
+            # [CHANGE: gemini-cli | 2026-05-09] Log incident if needed
+            log_incident(user_message)
 
             self._send_json(200, {
                 "agent": agent_name,

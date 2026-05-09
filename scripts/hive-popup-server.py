@@ -10,6 +10,7 @@ from pathlib import Path
 
 import requests
 from flask import Flask, jsonify, request, send_file
+from hive_context import get_system_context, get_brain_context, log_incident
 
 app = Flask(__name__)
 
@@ -81,7 +82,12 @@ def chat():
 
     model_key = data.get("model") or route_model(message)
     history = data.get("messages", [])
-    prompt = build_prompt(history, message, model_key)
+
+    # [CHANGE: gemini-cli | 2026-05-09] Context injection
+    sys_ctx = get_system_context()
+    brain_ctx = get_brain_context(message)
+    
+    prompt = build_prompt(history, message, model_key, sys_ctx, brain_ctx)
 
     try:
         r = requests.post(
@@ -91,7 +97,7 @@ def chat():
                 "n_predict": 256,
                 "temperature": 0.7,
                 "top_p": 0.9,
-                "stop": ["User:", "Assistant:"],
+                "stop": ["User:", "Assistant:", "</s>"],
             },
             timeout=120,
         )
@@ -107,6 +113,9 @@ def chat():
     if not response_text:
         response_text = "(empty response)"
 
+    # [CHANGE: gemini-cli | 2026-05-09] Log incident if needed
+    log_incident(message)
+
     reply = {
         "id": uuid.uuid4().hex[:12],
         "role": "assistant",
@@ -117,12 +126,34 @@ def chat():
     return jsonify(reply)
 
 
-def build_prompt(history, current_msg, model):
+def build_prompt(history, current_msg, model, sys_ctx=None, brain_ctx=""):
     lines = []
-    if model == "bolt":
-        lines.append("<|system|>\nYou are Bolt, a coding specialist AI. Provide concise, correct code solutions.</s>")
+    
+    # System Context String
+    if sys_ctx:
+        sys_info = f"""
+CURRENT SYSTEM STATE:
+RAM: {sys_ctx['ram_used']}GB used of {sys_ctx['ram_total']}GB ({sys_ctx['ram_available']}GB available)
+CPU Temperature: {sys_ctx['cpu_temp']}°C
+Power Profile: {sys_ctx['profile']}
+Services: {sys_ctx['services_status']}
+"""
     else:
-        lines.append("<|system|>\nYou are Nexus, a helpful AI assistant. Be direct and concise.</s>")
+        sys_info = ""
+
+    knowledge = f"\nRELEVANT KNOWLEDGE:\n{brain_ctx}\n" if brain_ctx else ""
+
+    system_prompt = f"""You are HIVE, the local AI assistant for Luminos OS.
+You are a security guard — observe, report, guide.
+Never fix things yourself. Guide the user.
+{sys_info}{knowledge}
+RULES:
+- If asked about Python/venv: always check brain context before answering
+- If something seems risky: say NO and explain why
+- Keep answers short and direct
+- Cite which rule or incident you're referencing"""
+
+    lines.append(f"<|system|>\n{system_prompt}</s>")
 
     for msg in history[-10:]:
         role = "user" if msg["role"] == "user" else "assistant"
