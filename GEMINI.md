@@ -11,9 +11,11 @@ Never write code for banned components. See LUMINOS_DECISIONS.md Decision 12.
 - Read `LUMINOS_PROJECT_SCOPE.md` and `LUMINOS_STATUS.md` before every task
 - Query Luminos Notes before starting: `~/luminos-os/scripts/luminos-notes.sh search "<topic>"`
   - **[CHANGE: gemini-cli | 2026-04-26] MemPalace retired. Use luminos-notes.sh instead.**
+- For ANY Python/venv/package action: `luminos-brain safe "[action]"` (STOP if NO)
 - Minimal changes only — do not touch working components
 - Add `[CHANGE: gemini-cli | date]` tags to every modified block
 - Update docs and commit after every task (see `docs/WORKFLOW.md`)
+- After acting, log to brain: `luminos-brain log "[summary]"`
 - Keep the existing MCP tools block at the bottom
 
 ---

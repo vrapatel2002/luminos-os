@@ -24,6 +24,8 @@ Luminos OS is a custom Arch Linux distribution on ASUS ROG G14.
 - **Identity Tags**: Add `[CHANGE: agent | date]` to every modified block.
 - **VRAM Watchdog**: Respect the 4.6GB safe limit. HIVE models swap on dGPU.
 - **State Tracking**: Update `LUMINOS_STATUS.md` and `luminos-notes.sh` every turn.
+- **HIVE Brain**: Use `luminos-brain` CLI for environment safety and audit logging.
+- **Python Safety**: For ANY Python/venv/package action, run `luminos-brain safe "[action]"`. If response is NO, STOP immediately.
 
 ---
 
@@ -73,7 +75,12 @@ After EVERY task, ALL agents must:
 ~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Detailed summary of changes]"
 ```
 
-### 6.2 Update relevant .md files:
+### 6.2 Update HIVE Brain Log:
+```bash
+luminos-brain log "[Summary of what was done]"
+```
+
+### 6.3 Update relevant .md files:
 - `LUMINOS_STATUS.md` → if any component status changed
 - `LUMINOS_DECISIONS.md` → if any architectural decision was made
 - `docs/BUGS.md` → if a bug was found or fixed

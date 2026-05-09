@@ -25,11 +25,13 @@
 ## Workflow
 1. Read AGENTS.md fully
 2. Search Luminos Notes: `~/luminos-os/scripts/luminos-notes.sh search "<topic>"`
-3. Execute surgical changes with `[CHANGE: claude-code | date]` tags
-4. Update LUMINOS_STATUS.md if component status changed
-5. Update LUMINOS_DECISIONS.md if architectural decision made
-6. Update Luminos Notes: `~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Summary of changes]"`
-7. Commit and push
+3. For ANY Python/venv/package action: `luminos-brain safe "[action]"` (STOP if NO)
+4. Execute surgical changes with `[CHANGE: claude-code | date]` tags
+5. Update LUMINOS_STATUS.md if component status changed
+6. Update LUMINOS_DECISIONS.md if architectural decision made
+7. Update Luminos Notes: `~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Summary of changes]"`
+8. Log to brain: `luminos-brain log "[Summary]"`
+9. Commit and push
 
 ## Mandatory After Every Task
 ```bash

@@ -1,0 +1,89 @@
+#!/bin/bash
+# luminos-brain CLI tool — Step 2 of HIVE Brain system
+# [CHANGE: gemini-cli | 2026-05-09]
+# Role: Interface for agents to query hive-brain.md safely.
+
+BRAIN_FILE="$HOME/.local/share/luminos/hive-brain.md"
+NOTES_SCRIPT="$HOME/luminos-os/scripts/luminos-notes.sh"
+
+if [ ! -f "$BRAIN_FILE" ]; then
+    echo "ERROR: Brain logbook missing at $BRAIN_FILE"
+    exit 1
+fi
+
+case "$1" in
+    safe)
+        ACTION="$2"
+        # Simple keyword matching for high-risk patterns
+        KEYWORDS=$(echo "$ACTION" | tr '[:upper:]' '[:lower:]')
+        
+        # Check specific critical traps first
+        if echo "$KEYWORDS" | grep -q "torch" && echo "$KEYWORDS" | grep -qE "system|3.14|pip3"; then
+            echo "NO: use pyenv 3.12 pip. torch breaks on Python 3.14"
+            exit 0
+        fi
+        
+        if echo "$KEYWORDS" | grep -qE "hnswlib|chromadb"; then
+            echo "NO: hnswlib SEGV crash detected. Use FAISS instead."
+            exit 0
+        fi
+
+        if echo "$KEYWORDS" | grep -q "vulkan" && echo "$KEYWORDS" | grep -q "chrome"; then
+            echo "NO: Vulkan/SkiaGraphite causes input lag on Mesa 26."
+            exit 0
+        fi
+
+        # Extract keywords (words > 3 chars)
+        KEYS=$(echo "$ACTION" | grep -oE "[a-zA-Z0-9]{4,}" | tr '\n' '|')
+        KEYS=${KEYS%|}
+        
+        if [ -n "$KEYS" ]; then
+            MATCH=$(grep -iE "($KEYS)" -B 2 -A 5 "$BRAIN_FILE" | grep -iE "Resolution:|Rule:|Critical:" | head -n 1)
+            if [ -n "$MATCH" ]; then
+                echo "NO: $(echo "$MATCH" | sed 's/.*: //')"
+            else
+                echo "YES: no known conflicts"
+            fi
+        else
+            echo "YES: no known conflicts"
+        fi
+        ;;
+
+    log)
+        MESSAGE="$2"
+        DATE=$(date +%Y-%m-%d)
+        # Append to INCIDENT LOG section
+        sed -i "/## INCIDENT LOG/a ### $DATE $MESSAGE" "$BRAIN_FILE"
+        # Also use luminos-notes.sh
+        if [ -f "$NOTES_SCRIPT" ]; then
+            bash "$NOTES_SCRIPT" add "hive-log" "$MESSAGE" >/dev/null
+        fi
+        echo "Action logged to Brain and Notes."
+        ;;
+
+    query)
+        QUERY="$2"
+        KEYS=$(echo "$QUERY" | grep -oE "[a-zA-Z0-9]{3,}" | tr '\n' '|')
+        KEYS=${KEYS%|}
+        if [ -n "$KEYS" ]; then
+            grep -iE "($KEYS)" -C 2 "$BRAIN_FILE" | head -n 10
+        else
+            echo "Please provide a more specific query."
+        fi
+        ;;
+
+    status)
+        ERRS=$(grep -c "❌" "$BRAIN_FILE")
+        WARNS=$(grep -c "⚠️" "$BRAIN_FILE")
+        PENDING=$(sed -n '/## PENDING ACTIONS/,/##/p' "$BRAIN_FILE" | grep -c '^- ')
+        echo "Luminos System Health Summary:"
+        echo "Errors: $ERRS | Warnings: $WARNS | Pending Actions: $PENDING"
+        echo "Recent Log Entries:"
+        grep "### 202" "$BRAIN_FILE" | head -n 3
+        ;;
+
+    *)
+        echo "Usage: luminos-brain {safe|log|query|status} \"content\""
+        exit 1
+        ;;
+esac
