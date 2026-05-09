@@ -1,0 +1,57 @@
+#!/bin/bash
+# HIVE Crash Analyzer
+# [CHANGE: gemini-cli | 2026-05-09]
+# Reads system crashes and generates report
+# Appends findings to hive-brain.md
+
+BRAIN="$HOME/.local/share/luminos/hive-brain.md"
+CRASH_LOG="$HOME/.local/share/luminos/hive-crashes.log"
+DATE=$(date '+%Y-%m-%d %H:%M')
+
+echo "HIVE Crash Analyzer running at $DATE"
+echo "=================================="
+
+# Read recent coredumps
+echo "=== Recent Coredumps ==="
+coredumpctl list --no-pager 2>/dev/null | tail -10 || echo "No coredumps found"
+
+# Read recent crashes from journal
+echo "=== Journal Crashes (last 24h) ==="
+journalctl --since "24 hours ago" -p err --no-pager 2>/dev/null | \
+  grep -vE "audit|dbus|NetworkManager|bluetooth" | \
+  grep -iE "crash|segfault|killed|oom|error" | \
+  tail -20
+
+# Read systemd service failures
+echo "=== Failed Services ==="
+systemctl --failed --no-pager 2>/dev/null | grep -v "^$\|UNIT\|LOAD\|ACTIVE\|SUB\|listed"
+
+# Read luminos daemon errors
+echo "=== Luminos Daemon Errors ==="
+for service in luminos-ram luminos-power luminos-sentinel luminos-router; do
+  errors=$(journalctl -u $service --since "24 hours ago" -p err --no-pager 2>/dev/null | tail -3)
+  if [ -n "$errors" ]; then
+    echo "[$service]: $errors"
+  fi
+done
+
+# Check OOM kills
+echo "=== OOM Kills ==="
+journalctl --since "24 hours ago" --no-pager 2>/dev/null | \
+  grep -i "oom\|out of memory\|killed process" | \
+  tail -5 || echo "No OOM kills"
+
+# Append summary to hive-brain.md
+SUMMARY=$(journalctl --since "24 hours ago" -p err --no-pager 2>/dev/null | grep -iE "crash|segfault|killed|oom" | wc -l)
+
+if [ "$SUMMARY" -gt 0 ]; then
+  cat >> "$BRAIN" << EOF
+
+### $DATE Crash Analysis
+Crashes detected: $SUMMARY in last 24h
+Run: hive-crash-analyzer for full report
+EOF
+  echo "Added $SUMMARY crash events to hive-brain.md"
+else
+  echo "System clean — no crashes in last 24h"
+fi

@@ -1,0 +1,8 @@
+[Unit]
+Description=HIVE Crash Analyzer Trigger
+After=multi-user.target
+
+[Service]
+Type=oneshot
+User=shawn
+ExecStart=/usr/local/bin/hive-crash-analyzer

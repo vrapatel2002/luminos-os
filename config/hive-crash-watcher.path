@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for new coredumps
+
+[Path]
+PathChanged=/var/lib/systemd/coredump
+Unit=hive-crash-watcher.service
+
+[Install]
+WantedBy=multi-user.target

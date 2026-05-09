@@ -1,0 +1,57 @@
+#!/bin/bash
+# HIVE Terminal Watcher
+# [CHANGE: gemini-cli | 2026-05-09]
+# Called before every command via zsh preexec hook
+# Input: the command about to be run
+# Output: warning if dangerous, silent if safe
+
+COMMAND="$*"
+BRAIN="$HOME/.local/share/luminos/hive-brain.md"
+
+if [ ! -f "$BRAIN" ]; then exit 0; fi
+
+# Check 1: hnswlib specifically (always dangerous) - Prioritized
+if echo "$COMMAND" | grep -qi "hnswlib"; then
+  echo "CRITICAL: hnswlib causes SEGV on this system. Use FAISS instead. See hive-brain.md [KNOWN CONFLICTS]"
+  exit 0
+fi
+
+# Check 2: pip/python version conflicts
+if echo "$COMMAND" | grep -qiE "pip install|pip3 install"; then
+  # Check if using system Python (dangerous for ML)
+  if echo "$COMMAND" | grep -qvE "pyenv|\.venv|3\.12"; then
+    # Check if package is ML related
+    if echo "$COMMAND" | grep -qiE \
+      "torch|tensorflow|chromadb|numpy|scipy"; then
+      PKG=$(echo "$COMMAND" | grep -oiE \
+        "torch|tensorflow|hnswlib|chromadb|numpy|scipy" | head -1)
+      echo "ML package '$PKG' needs pyenv 3.12. System pip will fail. Use: ~/.pyenv/versions/3.12.13/bin/pip"
+      exit 0
+    fi
+  fi
+fi
+
+# Check 3: rm -rf on important paths
+if echo "$COMMAND" | grep -qE "rm -rf"; then
+  for danger in ".venv" "luminos-os" \
+    "hive-brain" "models/hive"; do
+    if echo "$COMMAND" | grep -q "$danger"; then
+      echo "WARNING: deleting '$danger' may break dependent projects. Check hive-brain.md first."
+      exit 0
+    fi
+  done
+fi
+
+# Check 4: system-wide package installs
+if echo "$COMMAND" | \
+  grep -qE "pacman -R|pacman -Rs" ; then
+  for pkg in "python" "nodejs" "wine" "cuda"; do
+    if echo "$COMMAND" | grep -q "$pkg"; then
+      echo "WARNING: removing '$pkg' may break Luminos dependencies. Verify in hive-brain.md first."
+      exit 0
+    fi
+  done
+fi
+
+# Safe — no warning needed
+exit 0
