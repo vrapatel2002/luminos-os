@@ -1,6 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
-import org.kde.plasma.plasma5support 2.0 as Plasma5Support
+import org.kde.plasma.plasma5support 0.1 as P5Support
 import org.kde.plasma.components 3.0 as PC3
 import org.kde.plasma.plasmoid 2.0
 
@@ -19,16 +19,18 @@ PlasmoidItem {
         zram_saved: 0
     })
 
-    Plasma5Support.DataSource {
+    P5Support.DataSource {
         id: executable
         engine: "executable"
         connectedSources: []
-        onNewData: {
+        onNewData: (sourceName, data) => {
             var stdout = data["stdout"]
+            console.log("RAM Widget DEBUG: New data from " + sourceName)
             
             if (sourceName.includes("/metrics")) {
                 parseMetrics(stdout)
             } else if (sourceName.includes("/meminfo")) {
+                console.log("RAM Widget DEBUG: meminfo raw: " + stdout)
                 parseMemInfo(stdout)
             }
             disconnectSource(sourceName)
@@ -44,6 +46,7 @@ PlasmoidItem {
     }
 
     function updateStats() {
+        console.log("RAM Widget DEBUG: updateStats() triggered")
         executable.connectSource("curl -s http://localhost:9091/metrics")
         executable.connectSource("curl -s http://localhost:9091/meminfo")
     }
@@ -67,6 +70,7 @@ PlasmoidItem {
         if (!text) return
         try {
             var d = JSON.parse(text)
+            console.log("RAM Widget DEBUG: zram_used parsed: " + d.zram_used)
             var s = stats
             s.total = d.total
             s.used = d.used
@@ -76,7 +80,7 @@ PlasmoidItem {
             s.zram_saved = d.zram_saved
             stats = s
         } catch (e) {
-            console.log("Error parsing meminfo JSON: " + e)
+            console.log("RAM Widget DEBUG: Error parsing meminfo JSON: " + e)
         }
     }
 
@@ -162,10 +166,10 @@ PlasmoidItem {
                         height: 6; radius: 3
                         color: "#222"
                         Rectangle {
-                            width: parent.width * Math.min(1.0, (stats.used / stats.total))
+                            width: parent.width * Math.min(1.0, (stats.used / (stats.total || 1)))
                             height: 6; radius: 3
-                            color: stats.used/stats.total > 0.85 ? "#ff4444" :
-                                   stats.used/stats.total > 0.7 ? "#ffaa00" : "#0080ff"
+                            color: stats.used/(stats.total || 1) > 0.85 ? "#ff4444" :
+                                   stats.used/(stats.total || 1) > 0.7 ? "#ffaa00" : "#0080ff"
                         }
                     }
                 }
@@ -188,7 +192,7 @@ PlasmoidItem {
                         height: 6; radius: 3
                         color: "#222"
                         Rectangle {
-                            width: parent.width * Math.min(1.0, (stats.zram_used / stats.zram_total))
+                            width: parent.width * Math.min(1.0, (stats.zram_used / (stats.zram_total || 1)))
                             height: 6; radius: 3
                             color: "#0080ff88"
                         }

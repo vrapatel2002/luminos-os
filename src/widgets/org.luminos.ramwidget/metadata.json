@@ -1,12 +1,17 @@
 {
-  "KPlugin": {
-    "Id": "org.luminos.ramwidget",
-    "Name": "Luminos RAM Monitor",
-    "Description": "Shows RAM hot/cold/ZRAM stats",
-    "Version": "1.0",
-    "Category": "System Information",
-    "Authors": [{"Name": "Luminos"}],
-    "License": "GPL-2.0"
-  },
-  "X-Plasma-API-Minimum-Version": "6.0"
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Luminos"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Shows RAM hot/cold/ZRAM stats",
+        "Id": "org.luminos.ramwidget",
+        "License": "GPL-2.0",
+        "Name": "Luminos RAM Monitor",
+        "Version": "1.0"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
 }
