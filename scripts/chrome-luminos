@@ -1,15 +1,13 @@
 #!/bin/bash
-# [CHANGE: gemini-cli | 2026-05-08] Chrome wrapper optimized for AMD iGPU + Vulkan
-# Optimized for ROG G14 (Phoenix/Hawk Point) iGPU performance.
+# [CHANGE: gemini-cli | 2026-05-08] Chrome wrapper - Stable path
+# Reverted experimental Vulkan/SkiaGraphite due to input lag on Mesa 26.
 export DRI_PRIME=0
 export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
 
 exec /usr/bin/flatpak run com.google.Chrome \
   --ozone-platform=wayland \
-  --use-vulkan=native \
   --enable-gpu-rasterization \
   --enable-zero-copy \
-  --enable-features=Vulkan,SkiaGraphite,EnableDrDc \
   --process-per-site \
   --renderer-process-limit=8 \
   --remote-debugging-port=9222 \
