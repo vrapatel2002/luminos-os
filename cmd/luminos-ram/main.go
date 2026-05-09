@@ -148,7 +148,9 @@ func main() {
 	lg.Info("luminos-ram v3.0 started — listening on %s", ramSocket)
 
 	go func() {
+		// [CHANGE: gemini-cli | 2026-05-08] Added /meminfo endpoint for Plasma widget
 		http.Handle("/metrics", promhttp.Handler())
+		http.HandleFunc("/meminfo", handleMemInfo)
 		lg.Info("metrics server on :9091")
 		if err := http.ListenAndServe(":9091", nil); err != nil {
 			lg.Error("metrics server: %v", err)
@@ -701,4 +703,68 @@ func madvise(pid int, hint int) error {
 func getProcessName(pid int) string {
 	b, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
 	return strings.TrimSpace(string(b))
+}
+
+// [CHANGE: gemini-cli | 2026-05-08] /meminfo implementation for Plasma widget
+type MemStats struct {
+	Total     float64 `json:"total"`
+	Used      float64 `json:"used"`
+	Available float64 `json:"available"`
+	ZramUsed  float64 `json:"zram_used"`
+	ZramTotal float64 `json:"zram_total"`
+	ZramSaved float64 `json:"zram_saved"`
+}
+
+func handleMemInfo(w http.ResponseWriter, r *http.Request) {
+	stats := MemStats{}
+
+	// /proc/meminfo
+	f, err := os.Open("/proc/meminfo")
+	if err == nil {
+		scanner := bufio.NewScanner(f)
+		var total, available float64
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "MemTotal:") {
+				total = parseKb(line)
+			} else if strings.HasPrefix(line, "MemAvailable:") {
+				available = parseKb(line)
+			}
+		}
+		f.Close()
+		stats.Total = total / 1024 / 1024
+		stats.Available = available / 1024 / 1024
+		stats.Used = stats.Total - stats.Available
+	}
+
+	// zram stats from mm_stat: data_size, compr_data_size, mem_used_total ...
+	b, err := os.ReadFile("/sys/block/zram0/mm_stat")
+	if err == nil {
+		fields := strings.Fields(string(b))
+		if len(fields) >= 2 {
+			data, _ := strconv.ParseFloat(fields[0], 64)
+			compr, _ := strconv.ParseFloat(fields[1], 64)
+			stats.ZramUsed = data / 1024 / 1024 / 1024
+			stats.ZramSaved = (data - compr) / 1024 / 1024 / 1024
+		}
+	}
+
+	b, err = os.ReadFile("/sys/block/zram0/disksize")
+	if err == nil {
+		size, _ := strconv.ParseFloat(strings.TrimSpace(string(b)), 64)
+		stats.ZramTotal = size / 1024 / 1024 / 1024
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func parseKb(line string) float64 {
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return 0
+	}
+	v, _ := strconv.ParseFloat(fields[1], 64)
+	return v
 }

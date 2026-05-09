@@ -101,6 +101,7 @@ Agent: gemini-cli (RAM Management Phase 1)
 | ZSH + Starship | ✅ Working | macOS style prompt |
 | Albert launcher | ✅ Working | Alt+Space (Meta+Space → HIVE) |
 | Floating panel | 🔧 In Progress | Layout needs polish |
+| RAM monitor widget | ✅ Working | Plasma widget (org.luminos.ramwidget) installed |
 | Firefox WhiteSur | 📋 Pending | Profile issue |
 
 ## Open Tasks (Priority Order)
