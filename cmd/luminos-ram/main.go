@@ -594,25 +594,31 @@ func isProtectedMedia(title, url string) bool {
 func discardBrowserTabs(pid int, name string) {
 	// [CHANGE: gemini-cli | 2026-05-10] Skip all if system is in fullscreen
 	if isSystemFullscreen() {
-		lg.Debug("CDP: system in fullscreen — skipping tab discards")
+		lg.Debug("CDP: system in fullscreen — skipping renderer compression")
+		return
+	}
+
+	// [CHANGE: gemini-cli | 2026-05-10] Never compress if focused in last 30 minutes
+	stateMu.Lock()
+	ws := windowStates[pid]
+	stateMu.Unlock()
+	if ws != nil && time.Since(ws.LastFocusTime) < 30*time.Minute {
+		lg.Debug("CDP: window focused in last 30m — skipping PID:%d", pid)
 		return
 	}
 
 	// [CHANGE: gemini-cli | 2026-05-09] Robust retry logic for CDP
 	var err error
 	var resp *http.Response
-
 	for i := 0; i < 3; i++ {
 		resp, err = http.Get("http://localhost:9222/json/list")
-		if err == nil {
-			break
-		}
+		if err == nil { break }
 		lg.Debug("CDP: retry %d/3 for PID:%d...", i+1, pid)
 		time.Sleep(1 * time.Second)
 	}
 
 	if err != nil {
-		lg.Error("CDP: connect failed after retries for PID:%d (is --remote-debugging-port=9222 active?): %v", pid, err)
+		lg.Error("CDP: connect failed after retries for PID:%d: %v", pid, err)
 		return
 	}
 	defer resp.Body.Close()
@@ -623,24 +629,37 @@ func discardBrowserTabs(pid int, name string) {
 		return
 	}
 
-	for _, tab := range tabs {
-		t, _ := tab["type"].(string)
-		if t != "page" { continue }
-
-		title, _ := tab["title"].(string)
-		url, _ := tab["url"].(string) // [CHANGE: gemini-cli | 2026-05-10] Fetch URL for protection check
-		id, _ := tab["id"].(string)
-
-		// [CHANGE: gemini-cli | 2026-05-10] Media protection
-		if isProtectedMedia(title, url) {
-			lg.Debug("CDP: skipping protected media tab: %s", title)
-			continue
+	// Check for protected media (audio + specific sites)
+	hasActiveMedia := false
+	if hasActiveAudio(pid) {
+		for _, tab := range tabs {
+			title, _ := tab["title"].(string)
+			url, _ := tab["url"].(string)
+			if isProtectedMedia(title, url) {
+				hasActiveMedia = true
+				break
+			}
 		}
+	}
 
-		// [CHANGE: gemini-cli | 2026-05-09] Log the intent
-		// To actually discard, we need to send a WebSocket message to /devtools/page/{id}
-		// Method: "Page.discard"
-		lg.Info("CDP: Tab discard requested: %s (%s)", title, id)
+	if hasActiveMedia {
+		lg.Debug("CDP: skipping protected media window PID:%d", pid)
+		return
+	}
+
+	// Find child renderers and compress
+	children := getChildPIDs(pid)
+	for _, cpid := range children {
+		cmdline := getProcessCommandLine(cpid)
+		if strings.Contains(cmdline, "--type=renderer") {
+			// CPU check < 1%
+			stats := updateProcStats(cpid)
+			if stats.CPURate < 1.0 {
+				lg.Info("CDP: Compressing renderer PID:%d (Parent:%d) — MADV_PAGEOUT", cpid, pid)
+				madvise(cpid, MADV_PAGEOUT)
+				madvPageoutCounter.Inc()
+			}
+		}
 	}
 }
 
@@ -1278,4 +1297,21 @@ func performSilentRestart(pid int, cfg RestartConfig, savedMB int64) {
 		lg.Warn("REPEATED LEAK: %s", alertMsg)
 	}
 	restartMu.Unlock()
+}
+
+func getChildPIDs(ppid int) []int {
+	var children []int
+	matches, _ := filepath.Glob("/proc/*/stat")
+	for _, m := range matches {
+		b, err := os.ReadFile(m)
+		if err != nil { continue }
+		fields := strings.Fields(string(b))
+		if len(fields) < 4 { continue }
+		p, _ := strconv.Atoi(fields[3])
+		if p == ppid {
+			childPID, _ := strconv.Atoi(filepath.Base(filepath.Dir(m)))
+			children = append(children, childPID)
+		}
+	}
+	return children
 }

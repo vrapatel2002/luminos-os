@@ -45,9 +45,10 @@ type PowerState struct {
 }
 
 var (
-	lg        *logger.Logger
-	cfg       *config.Config
-	prevState PowerState
+	lg             *logger.Logger
+	cfg            *config.Config
+	prevState      PowerState
+	lastChangeTime time.Time // [CHANGE: gemini-cli | 2026-05-10] 30s hold time tracking
 )
 
 func main() {
@@ -78,6 +79,9 @@ func main() {
 	}
 
 	lg.Info("luminos-power started — listening on %s", cfg.Sockets.Power)
+
+	// [CHANGE: gemini-cli | 2026-05-10] Apply aggressive fan curve to Balanced on startup
+	applyAggressiveFanCurve()
 
 	// monitorLoop runs the AC/thermal polling in the background.
 	go monitorLoop(ctx)
@@ -183,48 +187,49 @@ func readCPUTemp() float64 {
 // applyPowerState compares current readings to prevState and calls asusctl only when
 // something changed. This avoids hammering asusctl 30 times a minute when nothing changes.
 func applyPowerState(onAC bool, tempC float64) {
-	// [CHANGE: gemini-cli | 2026-05-07] Lowered thresholds to keep CPU near 50°C.
-	// We select the profile based on AC state and temperature.
+	// [CHANGE: gemini-cli | 2026-05-10] New stable thermal logic
+	// AC: Balanced (Default), Quiet if > 85C, back to Balanced if < 75C
+	// Battery: Always Quiet
+	
 	profile := "Quiet"
 	if onAC {
-		switch {
-		case tempC >= 65.0:
-			profile = "Performance"
-		case tempC >= 50.0:
-			profile = "Balanced"
-		default:
+		profile = "Balanced"
+		
+		// Hysteresis logic for emergency Quiet
+		if prevState.Profile == "Balanced" && tempC > 85.0 {
+			lg.Warn("CPU temp %.1f°C > 85°C — Emergency Quiet triggered", tempC)
+			profile = "Quiet"
+		} else if prevState.Profile == "Quiet" && tempC > 75.0 {
+			// Stay in Quiet until it cools below 75C
 			profile = "Quiet"
 		}
-	}
-
-	// Emergency throttle: if temp exceeds 85°C, force Quiet profile regardless of AC state
-	// to protect hardware before the kernel's thermal throttle kicks in.
-	if tempC > 85.0 {
-		lg.Warn("CPU temp %.1f°C > 85°C — forcing Quiet profile to protect hardware", tempC)
-		profile = "Quiet"
 	}
 
 	acChanged := onAC != prevState.OnAC
 	profileChanged := profile != prevState.Profile
 
 	if !acChanged && !profileChanged {
-		return // Nothing changed — skip asusctl execs entirely.
+		return 
+	}
+
+	// 30 second hold time check (ignore if AC state changed as that's priority)
+	if !acChanged && time.Since(lastChangeTime) < 30*time.Second {
+		return
 	}
 
 	lg.Info("state change: ac=%v temp=%.1f°C profile=%s", onAC, tempC, profile)
 
-	// [CHANGE: gemini-cli | 2026-04-20] Updated to asusctl 6.3.6 'profile set <name>' syntax.
-	// Independent fan-curve mode calls are removed as they are part of the profile.
 	if profileChanged || acChanged {
 		if err := runCmd("asusctl", "profile", "set", profile); err != nil {
 			lg.Error("asusctl profile set %s: %v", profile, err)
 		}
+		lastChangeTime = time.Now()
 	}
 
 	prevState = PowerState{
 		OnAC:      onAC,
 		CPUTempC:  tempC,
-		FanMode:   profile, // Storing profile as 'fanMode' for legacy compatibility in JSON
+		FanMode:   profile, 
 		Profile:   profile,
 		UpdatedAt: time.Now(),
 	}
@@ -233,6 +238,25 @@ func applyPowerState(onAC bool, tempC float64) {
 	reportToAI()
 }
 // [CHANGE: gemini-cli | 2026-04-20] fanModeForTemp removed; logic integrated into applyPowerState.
+// [CHANGE: gemini-cli | 2026-05-10] Aggressive fan curve for Balanced profile
+func applyAggressiveFanCurve() {
+	lg.Info("Applying aggressive fan curve to Balanced profile")
+	curve := "30c:0,40c:20,50c:40,60c:60,65c:75,70c:90,80c:100,100c:100"
+	
+	// Apply to CPU fan
+	if err := runCmd("asusctl", "fan-curve", "--mod-profile", "balanced", "--fan", "cpu", "--data", curve); err != nil {
+		lg.Error("failed to set CPU fan curve: %v", err)
+	}
+	// Apply to GPU fan
+	if err := runCmd("asusctl", "fan-curve", "--mod-profile", "balanced", "--fan", "gpu", "--data", curve); err != nil {
+		lg.Error("failed to set GPU fan curve: %v", err)
+	}
+	// Enable all fan curves for Balanced
+	if err := runCmd("asusctl", "fan-curve", "--mod-profile", "balanced", "--enable-fan-curves", "true"); err != nil {
+		lg.Error("failed to enable fan curves: %v", err)
+	}
+}
+
 // runCmd executes a command and returns a descriptive error on non-zero exit.
 func runCmd(name string, args ...string) error {
 	out, err := exec.Command(name, args...).CombinedOutput()

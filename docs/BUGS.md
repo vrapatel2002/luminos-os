@@ -28,13 +28,14 @@ Each bug entry:
 - Date Fixed: 2026-05-10 (Monitoring)
 
 ### BUG-048 — luminos-power Thermal Oscillation
-- Status: OPEN (PENDING FIX)
+- Status: FIXED
 - Severity: HIGH
 - Component: cmd/luminos-power
 - Description: CPU temperature oscillating between 60-88°C constantly.
-- Root Cause: Profile switching thresholds have no hysteresis, causing switches every 2-4 seconds. Performance mode raises TDP, making heat worse.
-- Planned Fix: Remove auto-Performance switching; stay in Balanced with aggressive fan curve.
+- Root Cause: Profile switching thresholds had no hysteresis and no hold time, causing rapid toggling between Balanced and Performance. Performance mode raised TDP, causing more heat.
+- Fix Applied: Removed auto-Performance switching. System stays in Balanced on AC with an aggressive fan curve (100% at 80°C). Added 30s hold time between profile changes and hysteresis for emergency Quiet mode (>85°C to enter, <75°C to exit).
 - Date Found: 2026-05-10
+- Date Fixed: 2026-05-10
 
 ### BUG-047 — NVIDIA GPU Always Active
 - Status: FIXED
