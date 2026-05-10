@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-03-29
+Last Updated: 2026-05-10
 
 ## Format
 Each bug entry:
@@ -17,23 +17,62 @@ Each bug entry:
 
 ## Fixed Bugs
 
-### BUG-046 — luminos-ram "blind" to user desktop session
+### BUG-049 — Claude Desktop Memory Leak
+- Status: MONITORING
+- Severity: MEDIUM
+- Component: Claude Desktop (Electron)
+- Description: Electron renderer running 101+ hours. Memory grows from 300MB to 2.1GB over time.
+- Root Cause: All Electron apps exhibit this growth pattern.
+- Fix Applied: [Workaround] Restart Claude Desktop daily. Added background leak detection to `luminos-ram` (v3.1) to alert on future occurrences.
+- Date Found: 2026-05-10
+- Date Fixed: 2026-05-10 (Monitoring)
+
+### BUG-048 — luminos-power Thermal Oscillation
+- Status: OPEN (PENDING FIX)
+- Severity: HIGH
+- Component: cmd/luminos-power
+- Description: CPU temperature oscillating between 60-88°C constantly.
+- Root Cause: Profile switching thresholds have no hysteresis, causing switches every 2-4 seconds. Performance mode raises TDP, making heat worse.
+- Planned Fix: Remove auto-Performance switching; stay in Balanced with aggressive fan curve.
+- Date Found: 2026-05-10
+
+### BUG-047 — NVIDIA GPU Always Active
+- Status: FIXED
+- Severity: MEDIUM
+- Component: NVIDIA Driver / Power Management
+- Description: NVIDIA GPU wasting ~8W constantly by staying in D0 state.
+- Root Cause: No power gating configured.
+- Fix Applied: Implemented udev rules for auto power gating and enabled `NVreg_DynamicPowerManagement=0x02` in modprobe.
+- Date Found: 2026-05-10
+- Date Fixed: 2026-05-10
+
+### BUG-046 — Chrome Using NVIDIA GPU
+- Status: FIXED
+- Severity: HIGH
+- Component: /usr/local/bin/chrome-luminos
+- Description: NVIDIA GPU active during all browsing, wasting 8-15W.
+- Root Cause: Wrapper had `--render-node-override=/dev/dri/renderD129` (NVIDIA).
+- Fix Applied: Removed render-node-override. `DRI_PRIME=0` correctly forces AMD iGPU.
+- Date Found: 2026-05-10
+- Date Fixed: 2026-05-10
+
+### BUG-046b — luminos-ram "blind" to user desktop session
 - Status: FIXED
 - Severity: HIGH
 - Component: cmd/luminos-ram, systemd/luminos-ram.service
-- Description: The RAM management daemon was not tracking any active windows (Hot/Cold sets always 0), despite windows being open and focused.
-- Root Cause: The daemon was running as `root` in a system-level service. It could not connect to the user's D-Bus session bus or access KWin's window state information on Wayland.
-- Fix Applied: 1. Updated `luminos-ram.service` to run as `User=shawn`. 2. Used `setcap` to grant `CAP_SYS_PTRACE` directly to the binary so it can still perform `madvise(MADV_PAGEOUT)` on other processes. 3. Ensured the user-session D-Bus socket is accessible.
+- Description: The RAM management daemon was not tracking any active windows.
+- Root Cause: The daemon was running as `root` and could not connect to user D-Bus.
+- Fix Applied: Updated service to run as `User=shawn` with `CAP_SYS_PTRACE`.
 - Date Found: 2026-05-10
 - Date Fixed: 2026-05-10
 
 ### BUG-045 — Touchpad Input Lag / Jump Detection
 - Status: FIXED
 - Severity: MEDIUM
-- Component: /etc/libinput/local-overrides.quirks, /etc/udev/rules.d/99-cpu-governor.rules
-- Description: Input lag during browsing, typing and scrolling felt stuttery, especially on heavy JS sites.
-- Root Cause: libinput detecting erratic touchpad hardware events on ASUS ROG G14 (ASUP1208). Kernel logged "Touch jump detected and discarded" at a rate exceeding limits, causing many dropped events.
-- Fix Applied: 1. Created /etc/libinput/local-overrides.quirks with AttrTouchSizeRange and AttrPalmSizeThreshold tuned for G14. 2. Changed CPU governor from powersave to schedutil via udev rule.
+- Component: /etc/libinput/local-overrides.quirks
+- Description: Input lag during browsing; stuttery scrolling.
+- Root Cause: libinput discarding "touch jump" events on G14 touchpad.
+- Fix Applied: libinput quirks + schedutil CPU governor.
 - Date Found: 2026-05-09
 - Date Fixed: 2026-05-09
 
@@ -41,8 +80,8 @@ Each bug entry:
 - Status: FIXED
 - Severity: HIGH
 - Component: /usr/local/bin/luminos-hive-popup
-- Description: Pressing SUPER+SPACE to launch HIVE popup crashes with bash syntax errors like "import: command not found".
-- Root Cause: An agent rewrote the popup script as a Python script using GTK4 (which is banned), but the global shortcut was executing it via `bash -x`.
-- Fix Applied: Rewrote the script to a native bash script using `kdialog` for UI and `llama-cli` for inference, matching project rules.
+- Description: SUPER+SPACE launch crash.
+- Root Cause: Agent wrote GTK4 Python script for a bash-executed shortcut.
+- Fix Applied: Rewrote to native bash + kdialog.
 - Date Found: 2026-04-26
 - Date Fixed: 2026-04-26

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -119,7 +120,17 @@ var (
 		Name: "luminos_system_zram_compr_data_bytes",
 		Help: "Compressed data size stored in ZRAM",
 	})
+
+	// [CHANGE: gemini-cli | 2026-05-10] Memory leak tracking
+	leakTracker = make(map[int]*LeakEntry)
 )
+
+type LeakEntry struct {
+	FirstSeenRSS uint64
+	LastSeenRSS  uint64
+	FirstSeenAt  time.Time
+	Alerted      bool
+}
 
 func init() {
 	prometheus.MustRegister(madvPageoutCounter)
@@ -177,6 +188,7 @@ func main() {
 	go startKWinListener(ctx)
 	go monitorLoop(ctx)
 	go telemetryLoop(ctx) // [CHANGE: gemini-cli | 2026-05-09] Constant data tracking
+	go leakLoop(ctx)      // [CHANGE: gemini-cli | 2026-05-10] Background leak detection
 
 	socket.Serve(ctx, l, handleMessage)
 
@@ -943,4 +955,82 @@ func parseKb(line string) float64 {
 	}
 	v, _ := strconv.ParseFloat(fields[1], 64)
 	return v
+}
+
+// [CHANGE: gemini-cli | 2026-05-10] Memory leak detection
+func leakLoop(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			checkLeaks()
+		}
+	}
+}
+
+func checkLeaks() {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
+	now := time.Now()
+	for pid, ws := range windowStates {
+		// Ignore processes actively used in last 2 hours
+		if now.Sub(ws.LastFocusTime) < 2*time.Hour {
+			delete(leakTracker, pid)
+			continue
+		}
+
+		// Ignore HIVE models (llama-server)
+		if strings.Contains(ws.Name, "llama-server") {
+			continue
+		}
+
+		rss := getRSS(pid)
+		if rss == 0 {
+			continue
+		}
+
+		entry, ok := leakTracker[pid]
+		if !ok {
+			leakTracker[pid] = &LeakEntry{
+				FirstSeenRSS: rss,
+				LastSeenRSS:  rss,
+				FirstSeenAt:  now,
+			}
+			continue
+		}
+
+		// Growth > 500MB
+		growth := int64(rss) - int64(entry.FirstSeenRSS)
+		if growth > 500*1024*1024 && !entry.Alerted {
+			msg := fmt.Sprintf("Process %s (PID:%d) leaking memory: %dMB in 2hrs", ws.Name, pid, growth/1024/1024)
+			lg.Warn("MEMORY LEAK DETECTED: %s", msg)
+
+			// Log to brain
+			exec.Command("luminos-brain", "log", "CRITICAL: "+msg).Run()
+
+			// Desktop notification
+			exec.Command("notify-send", "HIVE Memory Alert", msg).Run()
+
+			entry.Alerted = true
+		}
+		entry.LastSeenRSS = rss
+	}
+}
+
+func getRSS(pid int) uint64 {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
+	if err != nil {
+		return 0
+	}
+	fields := strings.Fields(string(b))
+	if len(fields) < 2 {
+		return 0
+	}
+	rss, _ := strconv.ParseUint(fields[1], 10, 64)
+	return rss * 4096 // 4KB pages
 }

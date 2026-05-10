@@ -1,6 +1,5 @@
 #!/bin/bash
-# [CHANGE: gemini-cli | 2026-05-08] Chrome wrapper - Stable path
-# Reverted experimental Vulkan/SkiaGraphite due to input lag on Mesa 26.
+# [CHANGE: gemini-cli | 2026-05-09] Cleaned up flags and ensured remote debugging
 export DRI_PRIME=0
 export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
 
