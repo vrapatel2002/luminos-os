@@ -132,6 +132,48 @@ type LeakEntry struct {
 	Alerted      bool
 }
 
+// [CHANGE: gemini-cli | 2026-05-10] Secret Restart System
+type RestartConfig struct {
+	Name            string
+	MatchCmd        string
+	MinIdleMins     int
+	LeakMBThreshold int
+	NotifyUser      bool
+}
+
+type RestartHistory struct {
+	LastRestartAt time.Time
+	DailyCount    int
+	LastResetDay  int
+}
+
+var restartWhitelist = []RestartConfig{
+	{
+		Name:            "Claude Desktop Renderer",
+		MatchCmd:        "claude-desktop-bin.*renderer",
+		MinIdleMins:     60,
+		LeakMBThreshold: 500,
+		NotifyUser:      false,
+	},
+	{
+		Name:            "Chrome Renderer",
+		MatchCmd:        "chrome.*renderer",
+		MinIdleMins:     30,
+		LeakMBThreshold: 300,
+		NotifyUser:      false,
+	},
+	{
+		Name:            "Antigravity LSP",
+		MatchCmd:        "language_server_linux",
+		MinIdleMins:     120,
+		LeakMBThreshold: 400,
+		NotifyUser:      false,
+	},
+}
+
+var appRestartHistory = make(map[string]*RestartHistory)
+var restartMu sync.Mutex
+
 func init() {
 	prometheus.MustRegister(madvPageoutCounter)
 	prometheus.MustRegister(hotSetSizeMetric)
@@ -189,6 +231,7 @@ func main() {
 	go monitorLoop(ctx)
 	go telemetryLoop(ctx) // [CHANGE: gemini-cli | 2026-05-09] Constant data tracking
 	go leakLoop(ctx)      // [CHANGE: gemini-cli | 2026-05-10] Background leak detection
+	go restartLoop(ctx)   // [CHANGE: gemini-cli | 2026-05-10] macOS-style silent restart
 
 	socket.Serve(ctx, l, handleMessage)
 
@@ -1033,4 +1076,206 @@ func getRSS(pid int) uint64 {
 	}
 	rss, _ := strconv.ParseUint(fields[1], 10, 64)
 	return rss * 4096 // 4KB pages
+}
+
+// [CHANGE: gemini-cli | 2026-05-10] Secret Restart Implementation
+func restartLoop(ctx context.Context) {
+	lg.Info("macOS-style silent restart active")
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			checkRestarts()
+		}
+	}
+}
+
+func checkRestarts() {
+	now := time.Now()
+	
+	// Scan all processes in /proc
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+
+		cmdline := getProcessCommandLine(pid)
+		for _, cfg := range restartWhitelist {
+			if matchProcess(cmdline, cfg.MatchCmd) {
+				processRestartIfLeaking(pid, cfg, now)
+			}
+		}
+	}
+}
+
+func getProcessCommandLine(pid int) string {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return ""
+	}
+	return strings.ReplaceAll(string(b), "\x00", " ")
+}
+
+func matchProcess(cmdline, pattern string) bool {
+	if cmdline == "" { return false }
+	// Simple containment check for now, can be improved to full regex if needed
+	return strings.Contains(cmdline, pattern)
+}
+
+func processRestartIfLeaking(pid int, cfg RestartConfig, now time.Time) {
+	// Safety 1: Never kill parent (renderer processes have specific flags)
+	// Whitelist patterns already target renderers/LSPs
+
+	// Safety 2: Check rate limit (once per hour per app)
+	restartMu.Lock()
+	hist, ok := appRestartHistory[cfg.Name]
+	if !ok {
+		hist = &RestartHistory{LastResetDay: now.Day()}
+		appRestartHistory[cfg.Name] = hist
+	}
+	
+	// Reset daily count if day changed
+	if hist.LastResetDay != now.Day() {
+		hist.DailyCount = 0
+		hist.LastResetDay = now.Day()
+	}
+
+	if now.Sub(hist.LastRestartAt) < 1*time.Hour {
+		restartMu.Unlock()
+		return
+	}
+	restartMu.Unlock()
+
+	// Safety 3: Check idle time (using windowStates of parent if applicable)
+	// For Electron/Chrome, we look at the main process focus time
+	if !isProcessIdleEnough(pid, cfg.MinIdleMins, now) {
+		return
+	}
+
+	// Safety 4: No interaction in last 5 min
+	if time.Since(getLastGlobalInteraction()) < 5*time.Minute {
+		return
+	}
+
+	// Safety 5: No audio playing
+	if hasActiveAudio(pid) {
+		return
+	}
+
+	// Check Leak
+	rss := getRSS(pid)
+	if rss == 0 { return }
+
+	stateMu.Lock()
+	entry, ok := leakTracker[pid]
+	if !ok {
+		leakTracker[pid] = &LeakEntry{
+			FirstSeenRSS: rss,
+			LastSeenRSS:  rss,
+			FirstSeenAt:  now,
+		}
+		stateMu.Unlock()
+		return
+	}
+	stateMu.Unlock()
+
+	growth := int64(rss) - int64(entry.FirstSeenRSS)
+	if growth > int64(cfg.LeakMBThreshold)*1024*1024 {
+		performSilentRestart(pid, cfg, growth/1024/1024)
+	}
+}
+
+func isProcessIdleEnough(pid int, minIdle int, now time.Time) bool {
+	// Find the window state for this PID or its parent
+	stateMu.Lock()
+	ws, ok := windowStates[pid]
+	if !ok {
+		// Try to find parent PID and check its window state
+		ppid := getParentPID(pid)
+		ws, ok = windowStates[ppid]
+	}
+	stateMu.Unlock()
+
+	if ok {
+		// If it has a window, check focus time
+		if ws.IsFocused || now.Sub(ws.LastFocusTime) < time.Duration(minIdle)*time.Minute {
+			return false
+		}
+	} else {
+		// If no window found (typical for renderers), we assume it follows the app's idle state.
+		// For Chrome, we can check all Chrome windows.
+		if strings.Contains(getProcessName(pid), "chrome") {
+			anyChromeActive := false
+			stateMu.Lock()
+			for _, w := range windowStates {
+				if strings.Contains(w.Name, "chrome") && (w.IsFocused || now.Sub(w.LastFocusTime) < time.Duration(minIdle)*time.Minute) {
+					anyChromeActive = true
+					break
+				}
+			}
+			stateMu.Unlock()
+			if anyChromeActive { return false }
+		}
+	}
+	return true
+}
+
+func getParentPID(pid int) int {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil { return 0 }
+	fields := strings.Fields(string(b))
+	if len(fields) < 4 { return 0 }
+	ppid, _ := strconv.Atoi(fields[3])
+	return ppid
+}
+
+func getLastGlobalInteraction() time.Time {
+	// We track this via windowStates focuses
+	last := time.Time{}
+	stateMu.Lock()
+	for _, ws := range windowStates {
+		if ws.LastFocusTime.After(last) {
+			last = ws.LastFocusTime
+		}
+	}
+	stateMu.Unlock()
+	return last
+}
+
+func performSilentRestart(pid int, cfg RestartConfig, savedMB int64) {
+	lg.Info("Silent Restart: %s (PID:%d) — saved %dMB", cfg.Name, pid, savedMB)
+	
+	// Log to brain
+	msg := fmt.Sprintf("silently restarted %s (PID:%d) - saved %dMB", cfg.Name, pid, savedMB)
+	exec.Command("luminos-brain", "log", msg).Run()
+
+	// Kill
+	syscall.Kill(pid, syscall.SIGTERM)
+	time.Sleep(1 * time.Second)
+	// Ensure it's gone
+	if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err == nil {
+		syscall.Kill(pid, syscall.SIGKILL)
+	}
+
+	restartMu.Lock()
+	hist := appRestartHistory[cfg.Name]
+	hist.LastRestartAt = time.Now()
+	hist.DailyCount++
+	
+	if hist.DailyCount >= 3 {
+		alertMsg := fmt.Sprintf("%s leaking repeatedly. Consider full restart.", cfg.Name)
+		exec.Command("notify-send", "HIVE", alertMsg).Run()
+		lg.Warn("REPEATED LEAK: %s", alertMsg)
+	}
+	restartMu.Unlock()
 }
