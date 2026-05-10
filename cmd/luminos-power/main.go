@@ -2,8 +2,8 @@
 // automatically applying power profiles via asusctl and reporting to luminos-ai.
 // Fully automatic — no user interaction, no manual switching.
 //
-// [CHANGE: gemini-cli | 2026-05-10] v2.0 Smart Mode Switching
-// Load-based switching: Quiet (Idle/Battery), Balanced (Work), Performance (Gaming).
+// [CHANGE: gemini-cli | 2026-05-10] v2.1 Quiet Daily Driver
+// Load-based switching: Quiet (Idle/Battery), Balanced (Heavy Work), Performance (Gaming).
 package main
 
 import (
@@ -44,8 +44,8 @@ var (
 	// History for triggers
 	gpuHighTicks int // 30s threshold (15 ticks at 2s)
 	gpuLowTicks  int // 60s threshold (30 ticks at 2s)
-	cpuHighTicks int // 2m threshold (60 ticks at 2s)
-	cpuLowTicks  int // 5m threshold (150 ticks at 2s)
+	cpuHighTicks int // 3m threshold (90 ticks at 2s) [CHANGE: v2.1]
+	cpuLowTicks  int // 3m threshold (90 ticks at 2s) [CHANGE: v2.1]
 	cpuCount     int
 )
 
@@ -78,7 +78,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	lg.Info("luminos-power v2.0 started — listening on %s", cfg.Sockets.Power)
+	lg.Info("luminos-power v2.1 started — listening on %s", cfg.Sockets.Power)
 
 	// Apply aggressive fan curves to all modes
 	applyAggressiveFanCurve("balanced")
@@ -110,7 +110,6 @@ func handleMessage(msg socket.Message) socket.Message {
 }
 
 func monitorLoop(ctx context.Context) {
-	// Fixed 2 second interval for tick counting
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -156,13 +155,11 @@ func readCPULoad() float64 {
 	if err != nil { return 0 }
 	fields := strings.Fields(string(d))
 	if len(fields) < 3 { return 0 }
-	// Using 15min average as requested
 	load, _ := strconv.ParseFloat(fields[2], 64)
 	return load / float64(cpuCount)
 }
 
 func readGPULoad() float64 {
-	// Check all cards, take max
 	matches, _ := filepath.Glob("/sys/class/drm/card*/device/gpu_busy_percent")
 	var max float64
 	for _, m := range matches {
@@ -174,16 +171,14 @@ func readGPULoad() float64 {
 }
 
 func applyPowerState(onAC bool, tempC, cpuLoad, gpuLoad float64) {
-	// [CHANGE: gemini-cli | 2026-05-10] Smart Mode Switching Logic
+	// [CHANGE: gemini-cli | 2026-05-10] Smart Mode Switching Logic v2.1
 	profile := prevState.Profile
-	if profile == "" { profile = "Balanced" }
+	if profile == "" { profile = "Quiet" } // Default to Quiet
 
 	// Battery: Always Quiet
 	if !onAC {
 		profile = "Quiet"
 	} else {
-		// AC Logic
-		
 		// 1. GPU Gaming Trigger -> Performance
 		if gpuLoad > 80.0 {
 			gpuHighTicks++
@@ -204,23 +199,25 @@ func applyPowerState(onAC bool, tempC, cpuLoad, gpuLoad float64) {
 			profile = "Balanced"
 		}
 
-		// 3. CPU Normal Work -> Balanced (if in Quiet)
-		if profile == "Quiet" && cpuLoad > 0.2 {
+		// 3. CPU Heavy Work -> Balanced (if in Quiet)
+		// [CHANGE: v2.1] CPU > 40% for 3 minutes
+		if profile == "Quiet" && cpuLoad > 0.4 {
 			cpuHighTicks++
 		} else {
 			cpuHighTicks = 0
 		}
-		if cpuHighTicks >= 60 { // 2 minutes
+		if cpuHighTicks >= 90 { // 180 seconds / 2s per tick = 90
 			profile = "Balanced"
 		}
 
 		// 4. CPU Idle -> Quiet (if in Balanced)
-		if profile == "Balanced" && cpuLoad < 0.2 {
+		// [CHANGE: v2.1] CPU < 30% for 3 minutes
+		if profile == "Balanced" && cpuLoad < 0.3 {
 			cpuLowTicks++
 		} else {
 			cpuLowTicks = 0
 		}
-		if cpuLowTicks >= 150 { // 5 minutes
+		if cpuLowTicks >= 90 { // 180 seconds
 			profile = "Quiet"
 		}
 
@@ -228,8 +225,8 @@ func applyPowerState(onAC bool, tempC, cpuLoad, gpuLoad float64) {
 		if tempC > 85.0 {
 			lg.Warn("CPU temp %.1f°C > 85°C — Emergency Quiet", tempC)
 			profile = "Quiet"
-		} else if profile == "Quiet" && prevState.Profile == "Quiet" && tempC < 75.0 && cpuLoad > 0.2 {
-			// Recovery from emergency if load is still present
+		} else if profile == "Quiet" && prevState.Profile == "Quiet" && tempC < 75.0 && cpuLoad > 0.4 {
+			// Recovery from emergency if load is still high
 			profile = "Balanced"
 		}
 	}

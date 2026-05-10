@@ -1,0 +1,9 @@
+{
+  "KPlugin": {
+    "Id": "luminos-maximize",
+    "Name": "Luminos Smart Maximize",
+    "Description": "Maximize toggles to 80% centered",
+    "Version": "1.0",
+    "License": "GPL-2.0"
+  }
+}
