@@ -53,3 +53,15 @@ qdbus6 org.kde.KWin /KWin reconfigure 2>/dev/null
 qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.refreshCurrentShell 2>/dev/null
 
 echo "Tahoe theme applied successfully."
+
+# [CHANGE: gemini-cli | 2026-05-10] Panel transparency and behavior fixes
+kwriteconfig6 --file plasmashellrc --group "PlasmaViews" --key panelOpacity 1
+kwriteconfig6 --file plasmashellrc --group "PlasmaViews" --key floating 1
+kwriteconfig6 --file kwinrc --group Plugins --key luminos-fullscreenEnabled true
+
+# Force specific panel opacity for known panels
+grep -oP "\[PlasmaViews\]\[Panel \K[0-9]+" ~/.config/plasmashellrc > /tmp/panel_ids.txt
+while read -r panel_id; do
+  kwriteconfig6 --file plasmashellrc --group "PlasmaViews" --group "Panel $panel_id" --key panelOpacity 1
+  kwriteconfig6 --file plasmashellrc --group "PlasmaViews" --group "Panel $panel_id" --key floating 1
+done < /tmp/panel_ids.txt
