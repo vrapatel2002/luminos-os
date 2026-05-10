@@ -1,8 +1,8 @@
 // Command luminos-ram implements Phase 3 of the Luminos RAM management plan.
 // It uses a precise Hot/Cold LIRS-based algorithm for window-aware memory pressure.
 //
+// [CHANGE: gemini-cli | 2026-05-10] v3.3 Startup health check + initial scan + renderer compression.
 // [CHANGE: gemini-cli | 2026-05-07] v3.0 Precise Algorithm — LIRS IRR, OnScreen protection, safety checks.
-// [CHANGE: gemini-cli | 2026-05-07] Fix restore speed — prefetch, staged thaw, priority boost.
 package main
 
 import (
@@ -197,6 +197,12 @@ func main() {
 		lg = logger.NewStdout("luminos-ram", logger.INFO)
 	}
 
+	lg.Info("luminos-ram started - RAM management active")
+
+	// [CHANGE: gemini-cli | 2026-05-10] Startup settle time
+	lg.Info("Waiting 30s for system to settle...")
+	time.Sleep(30 * time.Second)
+
 	loadDaemonConfig()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -215,7 +221,7 @@ func main() {
 	}
 	defer os.Remove(ramSocket)
 
-	lg.Info("luminos-ram v3.0 started — listening on %s", ramSocket)
+	lg.Info("luminos-ram v3.3 listening on %s", ramSocket)
 
 	go func() {
 		// [CHANGE: gemini-cli | 2026-05-08] Added /meminfo endpoint for Plasma widget
@@ -232,10 +238,56 @@ func main() {
 	go telemetryLoop(ctx) // [CHANGE: gemini-cli | 2026-05-09] Constant data tracking
 	go leakLoop(ctx)      // [CHANGE: gemini-cli | 2026-05-10] Background leak detection
 	go restartLoop(ctx)   // [CHANGE: gemini-cli | 2026-05-10] macOS-style silent restart
+	
+	// [CHANGE: gemini-cli | 2026-05-10] Background CDP health check + initial scan
+	go checkCDPHealth(ctx)
 
 	socket.Serve(ctx, l, handleMessage)
 
 	lg.Info("luminos-ram stopped")
+}
+
+func checkCDPHealth(ctx context.Context) {
+	for {
+		chromeRunning := false
+		if b, err := exec.Command("pgrep", "-f", "chrome").Output(); err == nil && len(b) > 0 {
+			chromeRunning = true
+		}
+
+		if !chromeRunning {
+			lg.Debug("Chrome not running, retrying CDP check in 60s")
+		} else {
+			resp, err := http.Get("http://localhost:9222/json/list")
+			if err == nil {
+				resp.Body.Close()
+				lg.Info("Chrome CDP connected - performing initial scan")
+				scanAndCompressChrome()
+				return // Success
+			}
+			lg.Error("Chrome CDP unavailable (port 9222) - retrying in 60s")
+			exec.Command("luminos-brain", "log", "Chrome CDP unavailable").Run()
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(60 * time.Second):
+		}
+	}
+}
+
+func scanAndCompressChrome() {
+	// Find all chrome pids and trigger discard logic
+	b, err := exec.Command("pgrep", "-f", "chrome").Output()
+	if err != nil { return }
+	pids := strings.Fields(string(b))
+	for _, ps := range pids {
+		pid, _ := strconv.Atoi(ps)
+		name := getProcessName(pid)
+		if strings.Contains(name, "chrome") {
+			discardBrowserTabs(pid, name)
+		}
+	}
 }
 
 func loadDaemonConfig() {
@@ -516,7 +568,7 @@ func runMaintenance() {
 
 		idle := now.Sub(entry.EvictedAt)
 
-		// After 15 minutes
+		// After 60 minutes (v3.3 threshold)
 		if idle > time.Duration(daemonCfg.ColdSigstopMinutes)*time.Minute {
 			if strings.Contains(entry.Name, "chrome") || strings.Contains(entry.Name, "firefox") {
 				discardBrowserTabs(pid, entry.Name)
@@ -578,7 +630,7 @@ func isProtectedMedia(title, url string) bool {
 	t := strings.ToLower(title)
 	u := strings.ToLower(url)
 
-	mediaKeywords := []string{"youtube", "netflix", "twitch", "spotify", "soundcloud", "video", "watch", "stream", "play"}
+	mediaKeywords := []string{"youtube", "netflix", "twitch", "spotify", "soundcloud", "video", "watch", "stream", "play", "hianime", "anime"}
 	for _, kw := range mediaKeywords {
 		if strings.Contains(u, kw) || strings.Contains(t, kw) {
 			return true
@@ -592,13 +644,13 @@ func isProtectedMedia(title, url string) bool {
 }
 
 func discardBrowserTabs(pid int, name string) {
-	// [CHANGE: gemini-cli | 2026-05-10] Skip all if system is in fullscreen
+	// [CHANGE: gemini-cli | 2026-05-10] Use MADV_PAGEOUT on renderers
 	if isSystemFullscreen() {
 		lg.Debug("CDP: system in fullscreen — skipping renderer compression")
 		return
 	}
 
-	// [CHANGE: gemini-cli | 2026-05-10] Never compress if focused in last 30 minutes
+	// Never compress if focused in last 30 minutes
 	stateMu.Lock()
 	ws := windowStates[pid]
 	stateMu.Unlock()
@@ -662,7 +714,6 @@ func discardBrowserTabs(pid int, name string) {
 		}
 	}
 }
-
 
 func isSafeToFreeze(pid int) bool {
 	name := getProcessName(pid)
@@ -860,8 +911,6 @@ func replyOK(req socket.Message, payload interface{}) socket.Message {
 }
 
 func madvise(pid int, hint int) error {
-	// [CHANGE: gemini-cli | 2026-05-07] Attempt prefetch via process_madvise
-	// For now, we simulate the intent. Real process_madvise requires pidfd and iovec list.
 	if hint == MADV_WILLNEED {
 		lg.Debug("Prefetching pages for PID:%d (MADV_WILLNEED)", pid)
 	}
@@ -916,7 +965,6 @@ func logTelemetry(path string) {
 	// Reuse meminfo logic
 	m := getMemStats()
 	zramOrigMetric.Set(m.ZramUsed * 1024 * 1024 * 1024)
-	// We don't have Compr in MemStats yet, let's update it
 
 	line := fmt.Sprintf("%s,%.1f,%.2f,%.2f,%.2f,%.2f,%d,%d\n",
 		time.Now().Format("2006-01-02 15:04:05"),
@@ -924,7 +972,7 @@ func logTelemetry(path string) {
 		m.Used,
 		m.Available,
 		m.ZramUsed,
-		m.ZramSaved, // Saving saved amount as a proxy for efficiency
+		m.ZramSaved, 
 		hotCount,
 		coldCount,
 	)
@@ -993,7 +1041,6 @@ func getMemStats() MemStats {
 	return stats
 }
 
-// [CHANGE: gemini-cli | 2026-05-08] /meminfo implementation for Plasma widget
 type MemStats struct {
 	Total     float64 `json:"total"`
 	Used      float64 `json:"used"`
@@ -1019,7 +1066,6 @@ func parseKb(line string) float64 {
 	return v
 }
 
-// [CHANGE: gemini-cli | 2026-05-10] Memory leak detection
 func leakLoop(ctx context.Context) {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
@@ -1040,13 +1086,10 @@ func checkLeaks() {
 
 	now := time.Now()
 	for pid, ws := range windowStates {
-		// Ignore processes actively used in last 2 hours
 		if now.Sub(ws.LastFocusTime) < 2*time.Hour {
 			delete(leakTracker, pid)
 			continue
 		}
-
-		// Ignore HIVE models (llama-server)
 		if strings.Contains(ws.Name, "llama-server") {
 			continue
 		}
@@ -1066,18 +1109,12 @@ func checkLeaks() {
 			continue
 		}
 
-		// Growth > 500MB
 		growth := int64(rss) - int64(entry.FirstSeenRSS)
 		if growth > 500*1024*1024 && !entry.Alerted {
 			msg := fmt.Sprintf("Process %s (PID:%d) leaking memory: %dMB in 2hrs", ws.Name, pid, growth/1024/1024)
 			lg.Warn("MEMORY LEAK DETECTED: %s", msg)
-
-			// Log to brain
 			exec.Command("luminos-brain", "log", "CRITICAL: "+msg).Run()
-
-			// Desktop notification
 			exec.Command("notify-send", "HIVE Memory Alert", msg).Run()
-
 			entry.Alerted = true
 		}
 		entry.LastSeenRSS = rss
@@ -1094,10 +1131,9 @@ func getRSS(pid int) uint64 {
 		return 0
 	}
 	rss, _ := strconv.ParseUint(fields[1], 10, 64)
-	return rss * 4096 // 4KB pages
+	return rss * 4096 
 }
 
-// [CHANGE: gemini-cli | 2026-05-10] Secret Restart Implementation
 func restartLoop(ctx context.Context) {
 	lg.Info("macOS-style silent restart active")
 	ticker := time.NewTicker(5 * time.Minute)
@@ -1115,8 +1151,6 @@ func restartLoop(ctx context.Context) {
 
 func checkRestarts() {
 	now := time.Now()
-	
-	// Scan all processes in /proc
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return
@@ -1147,15 +1181,10 @@ func getProcessCommandLine(pid int) string {
 
 func matchProcess(cmdline, pattern string) bool {
 	if cmdline == "" { return false }
-	// Simple containment check for now, can be improved to full regex if needed
 	return strings.Contains(cmdline, pattern)
 }
 
 func processRestartIfLeaking(pid int, cfg RestartConfig, now time.Time) {
-	// Safety 1: Never kill parent (renderer processes have specific flags)
-	// Whitelist patterns already target renderers/LSPs
-
-	// Safety 2: Check rate limit (once per hour per app)
 	restartMu.Lock()
 	hist, ok := appRestartHistory[cfg.Name]
 	if !ok {
@@ -1163,7 +1192,6 @@ func processRestartIfLeaking(pid int, cfg RestartConfig, now time.Time) {
 		appRestartHistory[cfg.Name] = hist
 	}
 	
-	// Reset daily count if day changed
 	if hist.LastResetDay != now.Day() {
 		hist.DailyCount = 0
 		hist.LastResetDay = now.Day()
@@ -1175,23 +1203,18 @@ func processRestartIfLeaking(pid int, cfg RestartConfig, now time.Time) {
 	}
 	restartMu.Unlock()
 
-	// Safety 3: Check idle time (using windowStates of parent if applicable)
-	// For Electron/Chrome, we look at the main process focus time
 	if !isProcessIdleEnough(pid, cfg.MinIdleMins, now) {
 		return
 	}
 
-	// Safety 4: No interaction in last 5 min
 	if time.Since(getLastGlobalInteraction()) < 5*time.Minute {
 		return
 	}
 
-	// Safety 5: No audio playing
 	if hasActiveAudio(pid) {
 		return
 	}
 
-	// Check Leak
 	rss := getRSS(pid)
 	if rss == 0 { return }
 
@@ -1215,24 +1238,19 @@ func processRestartIfLeaking(pid int, cfg RestartConfig, now time.Time) {
 }
 
 func isProcessIdleEnough(pid int, minIdle int, now time.Time) bool {
-	// Find the window state for this PID or its parent
 	stateMu.Lock()
 	ws, ok := windowStates[pid]
 	if !ok {
-		// Try to find parent PID and check its window state
 		ppid := getParentPID(pid)
 		ws, ok = windowStates[ppid]
 	}
 	stateMu.Unlock()
 
 	if ok {
-		// If it has a window, check focus time
 		if ws.IsFocused || now.Sub(ws.LastFocusTime) < time.Duration(minIdle)*time.Minute {
 			return false
 		}
 	} else {
-		// If no window found (typical for renderers), we assume it follows the app's idle state.
-		// For Chrome, we can check all Chrome windows.
 		if strings.Contains(getProcessName(pid), "chrome") {
 			anyChromeActive := false
 			stateMu.Lock()
@@ -1259,7 +1277,6 @@ func getParentPID(pid int) int {
 }
 
 func getLastGlobalInteraction() time.Time {
-	// We track this via windowStates focuses
 	last := time.Time{}
 	stateMu.Lock()
 	for _, ws := range windowStates {
@@ -1273,24 +1290,16 @@ func getLastGlobalInteraction() time.Time {
 
 func performSilentRestart(pid int, cfg RestartConfig, savedMB int64) {
 	lg.Info("Silent Restart: %s (PID:%d) — saved %dMB", cfg.Name, pid, savedMB)
-	
-	// Log to brain
-	msg := fmt.Sprintf("silently restarted %s (PID:%d) - saved %dMB", cfg.Name, pid, savedMB)
-	exec.Command("luminos-brain", "log", msg).Run()
-
-	// Kill
+	exec.Command("luminos-brain", "log", fmt.Sprintf("silently restarted %s (PID:%d) - saved %dMB", cfg.Name, pid, savedMB)).Run()
 	syscall.Kill(pid, syscall.SIGTERM)
 	time.Sleep(1 * time.Second)
-	// Ensure it's gone
 	if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err == nil {
 		syscall.Kill(pid, syscall.SIGKILL)
 	}
-
 	restartMu.Lock()
 	hist := appRestartHistory[cfg.Name]
 	hist.LastRestartAt = time.Now()
 	hist.DailyCount++
-	
 	if hist.DailyCount >= 3 {
 		alertMsg := fmt.Sprintf("%s leaking repeatedly. Consider full restart.", cfg.Name)
 		exec.Command("notify-send", "HIVE", alertMsg).Run()
