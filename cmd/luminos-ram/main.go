@@ -187,7 +187,7 @@ func loadDaemonConfig() {
 	daemonCfg = DaemonConfig{
 		HotSetCapacity:         8,
 		BottomTierTimerMinutes: 10,
-		ColdSigstopMinutes:     15,
+		ColdSigstopMinutes:     60, // [CHANGE: gemini-cli | 2026-05-10] Increased to 60 mins for media sessions
 		ColdKillHours:          2,
 	}
 
@@ -500,7 +500,49 @@ func runMaintenance() {
 	}
 }
 
+// [CHANGE: gemini-cli | 2026-05-10] Fullscreen and Media Protection Helpers
+func isSystemFullscreen() bool {
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+
+	obj := conn.Object("org.kde.KWin", "/KWin")
+	var info map[string]dbus.Variant
+	err = obj.Call("org.kde.KWin.queryWindowInfo", 0).Store(&info)
+	if err == nil {
+		if v, ok := info["fullscreen"]; ok {
+			return v.Value().(bool)
+		}
+	}
+	return false
+}
+
+func isProtectedMedia(title, url string) bool {
+	t := strings.ToLower(title)
+	u := strings.ToLower(url)
+
+	mediaKeywords := []string{"youtube", "netflix", "twitch", "spotify", "soundcloud", "video", "watch", "stream", "play"}
+	for _, kw := range mediaKeywords {
+		if strings.Contains(u, kw) || strings.Contains(t, kw) {
+			return true
+		}
+	}
+	// Extra title keywords
+	if strings.Contains(t, "playing") || strings.Contains(t, "live") {
+		return true
+	}
+	return false
+}
+
 func discardBrowserTabs(pid int, name string) {
+	// [CHANGE: gemini-cli | 2026-05-10] Skip all if system is in fullscreen
+	if isSystemFullscreen() {
+		lg.Debug("CDP: system in fullscreen — skipping tab discards")
+		return
+	}
+
 	// [CHANGE: gemini-cli | 2026-05-09] Robust retry logic for CDP
 	var err error
 	var resp *http.Response
@@ -531,7 +573,14 @@ func discardBrowserTabs(pid int, name string) {
 		if t != "page" { continue }
 
 		title, _ := tab["title"].(string)
+		url, _ := tab["url"].(string) // [CHANGE: gemini-cli | 2026-05-10] Fetch URL for protection check
 		id, _ := tab["id"].(string)
+
+		// [CHANGE: gemini-cli | 2026-05-10] Media protection
+		if isProtectedMedia(title, url) {
+			lg.Debug("CDP: skipping protected media tab: %s", title)
+			continue
+		}
 
 		// [CHANGE: gemini-cli | 2026-05-09] Log the intent
 		// To actually discard, we need to send a WebSocket message to /devtools/page/{id}
