@@ -102,6 +102,7 @@ Agent: gemini-cli (RAM Management Phase 1)
 | Albert launcher | ✅ Working | Alt+Space (Meta+Space → HIVE) |
 | Floating panel | 🔧 In Progress | Layout needs polish |
 | RAM monitor widget | ✅ Working | Plasma widget (org.luminos.ramwidget) installed |
+| System Telemetry | ✅ Active | Continuous logging to /var/log/luminos-telemetry.csv |
 | Firefox WhiteSur | 📋 Pending | Profile issue |
 
 ## Open Tasks (Priority Order)

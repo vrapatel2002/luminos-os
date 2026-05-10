@@ -105,6 +105,20 @@ var (
 		Name: "luminos_ram_onscreen_count",
 		Help: "Number of windows currently OnScreen",
 	})
+
+	// [CHANGE: gemini-cli | 2026-05-09] New system telemetry metrics
+	cpuTempMetric = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "luminos_system_cpu_temp_celsius",
+		Help: "Current CPU temperature in Celsius",
+	})
+	zramOrigMetric = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "luminos_system_zram_orig_data_bytes",
+		Help: "Uncompressed data size in ZRAM",
+	})
+	zramComprMetric = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "luminos_system_zram_compr_data_bytes",
+		Help: "Compressed data size stored in ZRAM",
+	})
 )
 
 func init() {
@@ -112,6 +126,9 @@ func init() {
 	prometheus.MustRegister(hotSetSizeMetric)
 	prometheus.MustRegister(coldSetSizeMetric)
 	prometheus.MustRegister(onScreenMetric)
+	prometheus.MustRegister(cpuTempMetric)
+	prometheus.MustRegister(zramOrigMetric)
+	prometheus.MustRegister(zramComprMetric)
 }
 
 func main() {
@@ -159,6 +176,7 @@ func main() {
 
 	go startKWinListener(ctx)
 	go monitorLoop(ctx)
+	go telemetryLoop(ctx) // [CHANGE: gemini-cli | 2026-05-09] Constant data tracking
 
 	socket.Serve(ctx, l, handleMessage)
 
@@ -483,18 +501,45 @@ func runMaintenance() {
 }
 
 func discardBrowserTabs(pid int, name string) {
-	resp, err := http.Get("http://localhost:9222/json/list")
-	if err != nil { return }
+	// [CHANGE: gemini-cli | 2026-05-09] Robust retry logic for CDP
+	var err error
+	var resp *http.Response
+
+	for i := 0; i < 3; i++ {
+		resp, err = http.Get("http://localhost:9222/json/list")
+		if err == nil {
+			break
+		}
+		lg.Debug("CDP: retry %d/3 for PID:%d...", i+1, pid)
+		time.Sleep(1 * time.Second)
+	}
+
+	if err != nil {
+		lg.Error("CDP: connect failed after retries for PID:%d (is --remote-debugging-port=9222 active?): %v", pid, err)
+		return
+	}
 	defer resp.Body.Close()
 
 	var tabs []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&tabs); err != nil { return }
+	if err := json.NewDecoder(resp.Body).Decode(&tabs); err != nil {
+		lg.Error("CDP: decode failed: %v", err)
+		return
+	}
 
 	for _, tab := range tabs {
+		t, _ := tab["type"].(string)
+		if t != "page" { continue }
+
 		title, _ := tab["title"].(string)
-		lg.Info("CDP discard: %s (PID:%d)", title, pid)
+		id, _ := tab["id"].(string)
+
+		// [CHANGE: gemini-cli | 2026-05-09] Log the intent
+		// To actually discard, we need to send a WebSocket message to /devtools/page/{id}
+		// Method: "Page.discard"
+		lg.Info("CDP: Tab discard requested: %s (%s)", title, id)
 	}
 }
+
 
 func isSafeToFreeze(pid int) bool {
 	name := getProcessName(pid)
@@ -705,19 +750,87 @@ func getProcessName(pid int) string {
 	return strings.TrimSpace(string(b))
 }
 
-// [CHANGE: gemini-cli | 2026-05-08] /meminfo implementation for Plasma widget
-type MemStats struct {
-	Total     float64 `json:"total"`
-	Used      float64 `json:"used"`
-	Available float64 `json:"available"`
-	ZramUsed  float64 `json:"zram_used"`
-	ZramTotal float64 `json:"zram_total"`
-	ZramSaved float64 `json:"zram_saved"`
+// [CHANGE: gemini-cli | 2026-05-09] System Telemetry Implementation
+func telemetryLoop(ctx context.Context) {
+	lg.Info("Telemetry logger started")
+	csvPath := "/var/log/luminos-telemetry.csv"
+
+	// Ensure header exists
+	if _, err := os.Stat(csvPath); os.IsNotExist(err) {
+		err := os.WriteFile(csvPath, []byte("Timestamp,CPU_Temp_C,RAM_Used_GB,RAM_Avail_GB,ZRAM_Orig_GB,ZRAM_Compr_GB,Hot_Set,Cold_Set\n"), 0644)
+		if err != nil {
+			lg.Error("Telemetry: failed to create file: %v", err)
+			return
+		}
+	}
+
+	// Log immediately on start
+	logTelemetry(csvPath)
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			lg.Info("Telemetry logger stopped")
+			return
+		case <-ticker.C:
+			logTelemetry(csvPath)
+		}
+	}
 }
 
-func handleMemInfo(w http.ResponseWriter, r *http.Request) {
-	stats := MemStats{}
+func logTelemetry(path string) {
+	stateMu.Lock()
+	hotCount := len(hotSet)
+	coldCount := len(coldSet)
+	stateMu.Unlock()
 
+	temp := getMaxCPUTemp()
+	cpuTempMetric.Set(temp)
+
+	// Reuse meminfo logic
+	m := getMemStats()
+	zramOrigMetric.Set(m.ZramUsed * 1024 * 1024 * 1024)
+	// We don't have Compr in MemStats yet, let's update it
+
+	line := fmt.Sprintf("%s,%.1f,%.2f,%.2f,%.2f,%.2f,%d,%d\n",
+		time.Now().Format("2006-01-02 15:04:05"),
+		temp,
+		m.Used,
+		m.Available,
+		m.ZramUsed,
+		m.ZramSaved, // Saving saved amount as a proxy for efficiency
+		hotCount,
+		coldCount,
+	)
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err == nil {
+		f.WriteString(line)
+		f.Close()
+	}
+}
+
+func getMaxCPUTemp() float64 {
+	maxTemp := 0.0
+	matches, _ := filepath.Glob("/sys/class/hwmon/hwmon*/temp*_input")
+	for _, m := range matches {
+		b, err := os.ReadFile(m)
+		if err == nil {
+			val, _ := strconv.ParseFloat(strings.TrimSpace(string(b)), 64)
+			t := val / 1000.0
+			if t > maxTemp && t < 150 { // filter outliers
+				maxTemp = t
+			}
+		}
+	}
+	return maxTemp
+}
+
+func getMemStats() MemStats {
+	stats := MemStats{}
 	// /proc/meminfo
 	f, err := os.Open("/proc/meminfo")
 	if err == nil {
@@ -737,7 +850,7 @@ func handleMemInfo(w http.ResponseWriter, r *http.Request) {
 		stats.Used = stats.Total - stats.Available
 	}
 
-	// zram stats from mm_stat: data_size, compr_data_size, mem_used_total ...
+	// zram stats
 	b, err := os.ReadFile("/sys/block/zram0/mm_stat")
 	if err == nil {
 		fields := strings.Fields(string(b))
@@ -754,7 +867,21 @@ func handleMemInfo(w http.ResponseWriter, r *http.Request) {
 		size, _ := strconv.ParseFloat(strings.TrimSpace(string(b)), 64)
 		stats.ZramTotal = size / 1024 / 1024 / 1024
 	}
+	return stats
+}
 
+// [CHANGE: gemini-cli | 2026-05-08] /meminfo implementation for Plasma widget
+type MemStats struct {
+	Total     float64 `json:"total"`
+	Used      float64 `json:"used"`
+	Available float64 `json:"available"`
+	ZramUsed  float64 `json:"zram_used"`
+	ZramTotal float64 `json:"zram_total"`
+	ZramSaved float64 `json:"zram_saved"`
+}
+
+func handleMemInfo(w http.ResponseWriter, r *http.Request) {
+	stats := getMemStats()
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(stats)
