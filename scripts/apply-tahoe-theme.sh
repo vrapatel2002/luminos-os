@@ -65,3 +65,18 @@ while read -r panel_id; do
   kwriteconfig6 --file plasmashellrc --group "PlasmaViews" --group "Panel $panel_id" --key panelOpacity 1
   kwriteconfig6 --file plasmashellrc --group "PlasmaViews" --group "Panel $panel_id" --key floating 1
 done < /tmp/panel_ids.txt
+
+# [CHANGE: gemini-cli | 2026-05-10] Fix panel white on window touch
+for i in 178 208 2 3 4 5 6 7 8; do
+  kwriteconfig6 --file plasmashellrc \
+    --group "PlasmaViews" \
+    --group "Panel $i" \
+    --key panelOpacity 1
+done
+
+qdbus6 org.kde.plasmashell /PlasmaShell \
+  org.kde.PlasmaShell.evaluateScript "
+var allPanels = panels();
+allPanels.forEach(function(p) {
+  p.opacity = 1;
+});" 2>/dev/null
