@@ -100,8 +100,8 @@ Agent: gemini-cli (RAM Management Phase 1)
 | KWin blur + animations | ✅ Working | Magic Lamp on |
 | ZSH + Starship | ✅ Working | macOS style prompt |
 | Albert launcher | ✅ Working | Alt+Space (Meta+Space → HIVE) |
-| Tahoe macOS Theme | ✅ Installed | [CHANGE: gemini-cli | 2026-05-10] AppleDark-ALL, MacTahoe-Dark icons/dec, SF Pro fonts. Automated via scripts/apply-tahoe-theme.sh |
-| Floating panel | ✅ Working | [CHANGE: gemini-cli | 2026-05-10] AppleTahoe panel layout applied |
+| Tahoe macOS Theme | ❌ Removed | [CHANGE: gemini-cli | 2026-05-11] Reverted Tahoe theme and restored Breeze Dark default state. |
+| Floating panel | ❌ Reverted | [CHANGE: gemini-cli | 2026-05-11] Panel reset to default bottom position. |
 | RAM monitor widget | ✅ Working | Plasma widget (org.luminos.ramwidget) installed |
 | System Telemetry | ✅ Active | Continuous logging to /var/log/luminos-telemetry.csv |
 | Chrome GPU | ✅ Fixed | AMD iGPU only (BUG-046) |
