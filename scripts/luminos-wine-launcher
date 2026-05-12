@@ -1,0 +1,44 @@
+#!/bin/bash
+# Luminos Wine Launcher
+# Shows GPU selector before every Wine app
+# [CHANGE: gemini-cli | 2026-05-11]
+# Usage: luminos-wine-launcher <exe> [args...]
+
+EXE="$1"
+shift
+ARGS="$@"
+APP_NAME=$(basename "$EXE" .exe)
+
+# Show GPU selection dialog
+GPU_CHOICE=$(kdialog \
+  --title "Luminos — $APP_NAME" \
+  --menu "Select GPU for $APP_NAME:" \
+  "igpu" "AMD Radeon 780M (Cool & Silent)" \
+  "nvidia" "NVIDIA RTX 4050 (Games & AI)" \
+  2>/dev/null)
+
+# Handle cancel
+if [ -z "$GPU_CHOICE" ]; then
+  exit 0
+fi
+
+if [ "$GPU_CHOICE" = "igpu" ]; then
+  export DRI_PRIME=0
+  export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json
+  export WINEDLLOVERRIDES="d3d11=b;d3d10core=b;d3d9=b;dxgi=b"
+  notify-send "HIVE" \
+    "$APP_NAME running on AMD iGPU (cool mode)" \
+    --icon=dialog-information
+  
+elif [ "$GPU_CHOICE" = "nvidia" ]; then
+  export DRI_PRIME=1
+  export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+  # Wake NVIDIA
+  echo "on" | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control > /dev/null
+  notify-send "HIVE" \
+    "$APP_NAME running on NVIDIA RTX 4050" \
+    --icon=dialog-information
+fi
+
+# Launch the Wine app
+exec wine "$EXE" $ARGS

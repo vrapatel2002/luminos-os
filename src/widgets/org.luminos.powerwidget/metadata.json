@@ -1,0 +1,12 @@
+{
+  "KPlugin": {
+    "Id": "org.luminos.powerwidget",
+    "Name": "Luminos Power Monitor",
+    "Description": "Shows power mode, temp, fans, TDP",
+    "Version": "1.0",
+    "Category": "System Information",
+    "Authors": [{"Name": "Luminos"}],
+    "License": "GPL-2.0"
+  },
+  "X-Plasma-API-Minimum-Version": "6.0"
+}
