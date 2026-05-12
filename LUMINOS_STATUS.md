@@ -105,9 +105,10 @@ Agent: gemini-cli (RAM Management Phase 1)
 | RAM monitor widget | ✅ Working | Plasma widget (org.luminos.ramwidget) installed |
 | System Telemetry | ✅ Active | Continuous logging to /var/log/luminos-telemetry.csv |
 | Chrome GPU | ✅ Fixed | AMD iGPU only (BUG-046) |
-| Wine/MT5 GPU | ✅ Fixed | [CHANGE: gemini-cli | 2026-05-11] Forced AMD iGPU + WineD3D. |
+| Wine/MT5 GPU | ✅ Fixed | [CHANGE: gemini-cli | 2026-05-11] Wine GPU selector launcher implemented. User chooses iGPU/dGPU. |
 | Forex Bot GPU | ✅ Fixed | [CHANGE: gemini-cli | 2026-05-11] Forced CPU inference only. |
 | NVIDIA power gating | ✅ Active | Sleeps when idle (BUG-047) |
+| Power Monitor widget | ✅ Working | [CHANGE: gemini-cli | 2026-05-11] Plasma widget (org.luminos.powerwidget) installed. |
 | Thermal oscillation | ⚠️ Pending | Fixed thresholds needed (BUG-048) |
 | Memory leak detection | ✅ Active | Alerts for background growth (BUG-049) |
 | Firefox WhiteSur | 📋 Pending | Profile issue |

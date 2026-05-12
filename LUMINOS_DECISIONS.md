@@ -704,3 +704,22 @@ Strictly enforce AMD iGPU usage for secondary non-AI workloads like MetaTrader 5
 2. **Thermal Budget:** Keeping the dGPU off during background trading ensures the system remains cool and silent for the user's primary desktop work.
 3. **Resource Availability:** Ensures VRAM is fully available for HIVE models without fragmentation from minor apps.
 
+---
+
+## DECISION 20 — User-Centric GPU and Power Control
+Date: May 11, 2026
+Made by: gemini-cli
+**Status: FINAL**
+
+### What We Decided
+Implement explicit user control for GPU selection in Wine and real-time power monitoring via a custom KDE widget.
+
+- **Wine GPU Selector:** Instead of hardcoded AMD usage, users are prompted via `kdialog` to choose `igpu` or `nvidia` for every `.exe` launch.
+- **Power Monitor Widget:** A dedicated Plasma 6 widget (`org.luminos.powerwidget`) displays current power profile, CPU temp, fan speed, and NVIDIA sleep state.
+- **Manual Override:** The widget includes buttons to manually switch `asusctl` power profiles (Quiet, Balanced, Performance).
+
+### Why
+1. **Flexibility:** While the default policy favors the iGPU for efficiency, power users may need the NVIDIA dGPU for specific high-performance Windows applications or games.
+2. **Visibility:** The system's power state and NVIDIA's "wake" status should be visible at a glance to ensure the user understands why fans are spinning or battery is draining.
+3. **Control:** Providing a central location for power profile switching reduces the need to hunt through system settings or use the CLI for common tasks.
+
