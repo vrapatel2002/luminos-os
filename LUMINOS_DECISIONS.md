@@ -685,3 +685,22 @@ Implement `claude-code-router` to dynamically route Claude Code tasks to the mos
 - Pros: Simple, no extra tools.
 - Cons: High friction; requires manually changing environment variables for every task type.
 
+---
+
+## DECISION 19 — GPU Policy: NVIDIA reserved for AI/HIVE/Gaming only
+Date: May 11, 2026
+Made by: gemini-cli
+**Status: FINAL**
+
+### What We Decided
+Strictly enforce AMD iGPU usage for secondary non-AI workloads like MetaTrader 5 (Wine) and CPU-only inference for background trading bots (Forex bot).
+
+- **MT5 (Wine):** Forced AMD iGPU via `DRI_PRIME=0`, `VK_ICD_FILENAMES`, and `WINEDLLOVERRIDES` (WineD3D).
+- **Forex Bot:** Forced CPU inference via `CUDA_VISIBLE_DEVICES=""` to keep NVIDIA in sleep state.
+- **NVIDIA:** Explicitly reserved for HIVE model serving, heavy LLM inference, and gaming.
+
+### Why
+1. **Power & Heat:** Running MT5 or background bots on NVIDIA prevents the dGPU from entering its lowest power state, increasing heat and reducing battery life unnecessarily.
+2. **Thermal Budget:** Keeping the dGPU off during background trading ensures the system remains cool and silent for the user's primary desktop work.
+3. **Resource Availability:** Ensures VRAM is fully available for HIVE models without fragmentation from minor apps.
+
