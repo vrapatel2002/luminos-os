@@ -1,9 +1,10 @@
 # BUG-050 — Battery Life 3-4hr (Expected 8-10hr)
 
-- **Status:** INVESTIGATING
+- **Status:** DIAGNOSED — READY TO FIX
 - **Severity:** CRITICAL
 - **Component:** System-wide power management
 - **Date Found:** 2026-05-14
+- **Diagnosed:** 2026-05-14
 - **Date Fixed:** —
 - **Agent:** claude-code
 
@@ -14,303 +15,293 @@ Reference baselines:
 - Ubuntu (same hardware, light use): 8-10hr
 - Expected Luminos target: 7-8hr (light), 5-6hr (medium)
 
-We are currently **worse than Windows** and roughly half of Ubuntu.
-The power profile/algorithm is NOT the root cause — the system has unmanaged subsystems
-draining power that no daemon or config is currently addressing.
+Currently worse than Windows and roughly half of Ubuntu.
 
 ---
 
-## Suspected Causes (13 total — all unverified, need diagnostics)
-
-### CAUSE-01 — NVIDIA Not Reaching D3cold on Battery
-- **Impact:** HIGH (5–12W constant drain if true)
-- **Status:** UNVERIFIED
-- **Theory:** `NVreg_DynamicPowerManagement=0x02` is configured (BUG-047 fix) but
-  the actual runtime power state on battery is unknown. May be stuck in D3hot
-  (suspended but still drawing power) rather than D3cold (rail fully off).
-- **Note:** We want NVIDIA available on-demand for HIVE/Forex — goal is D3cold idle,
-  not disabling it. D3cold + dynamic PM gives us 0W idle with ~500ms wake time.
-- **Diagnostic:**
-  ```bash
-  cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_status
-  cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_suspended_time
-  cat /sys/bus/pci/devices/0000:01:00.0/power/control
-  ```
-- **Fix if confirmed:** Verify udev rules are applying on battery plug/unplug events.
-  May need `RuntimePM` kernel parameter or manual D3cold force.
+## Confirmed Root Causes (ordered by impact)
 
 ---
 
-### CAUSE-02 — AMD P-State EPP Stuck on Performance/Balance-Performance
-- **Impact:** HIGH (1–3W constant, prevents deep CPU idle)
-- **Status:** UNVERIFIED
-- **Theory:** Ryzen 8845HS uses `amd_pstate_epp` driver. EPP (Energy Performance
-  Preference) tells the CPU firmware how aggressively to trade power for speed.
-  Values: `performance` > `balance_performance` > `balance_power` > `power`.
-  Ubuntu auto-switches to `power` on battery. Arch does not auto-switch.
-  If stuck on `balance_performance`, CPU never fully clocks down between bursts —
-  costing 1-3W even at idle.
-- **Diagnostic:**
-  ```bash
-  cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_driver
-  cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference
-  cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_available_preferences
-  ```
-- **Fix if confirmed:** `luminos-power` daemon sets EPP via sysfs on battery plug/unplug.
-  Battery → `power`, AC light → `balance_power`, AC heavy → `balance_performance`.
+### ROOT-01 — nvidia-powerd holding GPU in D0 forever [CRITICAL — ~3-7W]
 
----
-
-### CAUSE-03 — PCIe ASPM Disabled or Not Enforced
-- **Impact:** HIGH (2–4W constant)
-- **Status:** UNVERIFIED
-- **Theory:** ASPM (Active State Power Management) allows PCIe devices (NVMe SSD,
-  WiFi chip, NVIDIA PCIe slot) to enter low-power link states when idle.
-  If ASPM policy is `off` or BIOS forces it off, all PCIe devices stay at full link
-  power — NVMe alone draws 1.5W instead of 0.1W at idle.
-- **Diagnostic:**
-  ```bash
-  cat /sys/module/pcie_aspm/parameters/policy
-  sudo lspci -vv | grep -i aspm
-  dmesg | grep -i aspm
-  ```
-- **Fix if confirmed:** Kernel parameter `pcie_aspm=force` or set policy to
-  `powersupersave` via `/sys/module/pcie_aspm/parameters/policy`.
-
----
-
-### CAUSE-04 — Luminos Daemons Preventing Deep CPU C-States (2s Polling)
-- **Impact:** MEDIUM-HIGH (1–2W, prevents C8/C10 sleep)
-- **Status:** UNVERIFIED
-- **Theory:** `luminos-power`, `luminos-ram`, `luminos-sentinel` all poll on 2-second
-  tickers. Each tick wakes the CPU from idle. The problem isn't the work done —
-  it's that the CPU can't enter C8/C10 deep sleep states (which save 0.8–1.5W)
-  if it wakes every 2 seconds. Ubuntu has no equivalent constant-polling daemons.
-- **Diagnostic:**
-  ```bash
-  sudo powertop --time=10 2>/dev/null | head -60
-  # Look for: C-state residency — want >80% time in C8/C10
-  # Look for: wakeup sources — our daemons will appear
-  ```
-- **Fix if confirmed:** On battery, increase poll interval to 10–30s. The 2s interval
-  is unnecessary for power management decisions.
-
----
-
-### CAUSE-05 — No Comprehensive Power Manager (TLP/power-profiles-daemon Gap)
-- **Impact:** MEDIUM-HIGH (cumulative 2–4W from multiple unmanaged subsystems)
-- **Status:** LIKELY TRUE
-- **Theory:** Ubuntu uses `power-profiles-daemon` or TLP which configures dozens of
-  power optimizations automatically. We have `asusctl` for ACPI profiles only.
-  The following are almost certainly at power-hungry defaults:
-  - USB autosuspend: OFF (default)
-  - WiFi power save: OFF (default for reliability)
-  - Audio codec (snd_hda_intel) power_save: 0 (default)
-  - NVMe APST: may be disabled
-  - Runtime PM for PCI devices: OFF (default)
-  - SATA link power management: max_performance (default)
-- **Diagnostic:**
-  ```bash
-  cat /sys/module/snd_hda_intel/parameters/power_save
-  iwconfig 2>/dev/null | grep Power
-  cat /sys/bus/pci/devices/*/power/control 2>/dev/null | sort | uniq -c
-  ```
-- **Fix if confirmed:** Install TLP or write a battery-event script that sets all
-  these when unplugged. Do NOT install power-profiles-daemon — conflicts with asusctl.
-
----
-
-### CAUSE-06 — Continuous Telemetry Logging Preventing NVMe Sleep
-- **Impact:** MEDIUM (0.5–1.5W, NVMe can't enter APST)
-- **Status:** LIKELY TRUE
-- **Theory:** `/var/log/luminos-telemetry.csv` is described as "continuous logging."
-  NVMe APST (Autonomous Power State Transitions) works by sleeping the drive after
-  ~8ms of inactivity. Constant writes reset this timer — NVMe never sleeps.
-  At idle, NVMe in APST saves ~1.2W.
-- **Diagnostic:**
-  ```bash
-  sudo nvme get-feature /dev/nvme0 -f 0x0c -H
-  # Check write frequency:
-  iostat -x 2 5 | grep nvme
-  ```
-- **Fix if confirmed:** On battery, pause telemetry logging or batch writes every 60s.
-
----
-
-### CAUSE-07 — KSM Always Running on Battery
-- **Impact:** MEDIUM (0.5–1W of CPU busy time)
-- **Status:** LIKELY TRUE
-- **Theory:** KSM (Kernel Samepage Merging) continuously scans RAM for duplicate
-  pages to merge. We enabled this for RAM efficiency. On battery, this is wasted
-  CPU work that keeps the processor warm and prevents deep idle.
-- **Diagnostic:**
-  ```bash
-  cat /sys/kernel/mm/ksm/run
-  cat /sys/kernel/mm/ksm/pages_shared
-  cat /sys/kernel/mm/ksm/pages_unshared
-  ```
-- **Fix if confirmed:** Disable KSM on battery: `echo 0 > /sys/kernel/mm/ksm/run`
-  Re-enable on AC: `echo 1 > /sys/kernel/mm/ksm/run`
-
----
-
-### CAUSE-08 — Display Stays at 120Hz on Battery
-- **Impact:** MEDIUM (1.5–2.5W)
-- **Status:** UNVERIFIED
-- **Theory:** The 2560×1600 OLED panel draws measurably more power at 120Hz vs 60Hz.
-  Ubuntu/Windows both auto-switch to 60Hz on battery. No such logic exists in Luminos.
-- **Diagnostic:**
-  ```bash
-  kscreen-doctor -o 2>/dev/null | grep -i refresh
-  # or
-  xrandr 2>/dev/null | grep '*'
-  ```
-- **Fix if confirmed:** KDE power management → "on battery: switch to 60Hz" OR
-  wired into `luminos-power` battery event handler via `kscreen-doctor` call.
-
----
-
-### CAUSE-09 — WiFi Power Management Disabled
-- **Impact:** LOW-MEDIUM (0.3–0.8W)
-- **Status:** LIKELY TRUE
-- **Theory:** WiFi drivers default to `power_save = off` for connection stability.
-  On battery, enabling WiFi power management saves ~0.5W with negligible latency impact.
-- **Diagnostic:**
-  ```bash
-  iwconfig 2>/dev/null | grep -i power
-  iw dev wlan0 get power_save 2>/dev/null
-  ```
-- **Fix if confirmed:** `iwconfig wlan0 power on` on battery.
-  Or via NetworkManager: `nmcli connection modify <conn> 802-11-wireless.powersave 3`
-
----
-
-### CAUSE-10 — Audio Codec Always Powered
-- **Impact:** LOW (0.1–0.3W)
-- **Status:** LIKELY TRUE
-- **Theory:** `snd_hda_intel power_save` defaults to 0 (never sleep). When set to 1,
-  the audio codec powers down after 1 second of inactivity.
-- **Diagnostic:**
-  ```bash
-  cat /sys/module/snd_hda_intel/parameters/power_save
-  cat /sys/module/snd_hda_intel/parameters/power_save_controller
-  ```
-- **Fix if confirmed:** `/etc/modprobe.d/audio-power.conf`: `options snd_hda_intel power_save=1`
-
----
-
-### CAUSE-11 — USB Devices Not Autosuspending
-- **Impact:** LOW (0.1–0.5W per device)
-- **Status:** UNVERIFIED
-- **Theory:** USB devices (keyboard receiver, USB-C hub, etc.) keep their bus active
-  unless autosuspend is configured. Each unsuspended device draws idle power.
-- **Diagnostic:**
-  ```bash
-  cat /sys/bus/usb/devices/*/power/runtime_status 2>/dev/null | sort | uniq -c
-  cat /sys/bus/usb/devices/*/power/control 2>/dev/null | sort | uniq -c
-  ```
-- **Fix if confirmed:** `echo auto > /sys/bus/usb/devices/*/power/control` on battery.
-  TLP handles this automatically — another reason to add a battery-event script.
-
----
-
-### CAUSE-12 — Bluetooth Scanning / Active
-- **Impact:** LOW (0.1–0.3W)
-- **Status:** UNVERIFIED
-- **Theory:** If Bluetooth is powered on and in discoverable/scanning mode, it draws
-  steady power and generates CPU wakeups.
-- **Diagnostic:**
-  ```bash
-  bluetoothctl show | grep -i powered
-  hciconfig hci0 2>/dev/null
-  ```
-- **Fix if confirmed:** Disable Bluetooth on battery if not in use.
-
----
-
-### CAUSE-13 — Screen Brightness Not Auto-Reduced on Battery
-- **Impact:** VARIABLE (0.5–3W depending on brightness level)
-- **Status:** UNVERIFIED
-- **Theory:** OLED display power scales roughly linearly with brightness.
-  No auto-dim or brightness reduction on unplug event in current Luminos setup.
-  Windows and Ubuntu both reduce brightness on battery by default.
-- **Diagnostic:**
-  ```bash
-  cat /sys/class/backlight/*/brightness
-  cat /sys/class/backlight/*/max_brightness
-  ```
-- **Fix if confirmed:** Add to battery event handler: reduce brightness to 60% on unplug,
-  restore on plug-in. KDE has this built-in under Power Management settings.
-
----
-
-## Summary Table
-
-| # | Cause | Impact | Confidence | Status |
-|---|---|---|---|---|
-| 01 | NVIDIA not in D3cold on battery | HIGH 5-12W | Medium | UNVERIFIED |
-| 02 | AMD P-State EPP wrong | HIGH 1-3W | High | UNVERIFIED |
-| 03 | PCIe ASPM disabled | HIGH 2-4W | Medium | UNVERIFIED |
-| 04 | Daemon 2s polling kills C-states | MED-HIGH 1-2W | High | UNVERIFIED |
-| 05 | No TLP / unmanaged subsystems | MED-HIGH 2-4W | LIKELY TRUE | UNVERIFIED |
-| 06 | Continuous telemetry writes | MEDIUM 0.5-1.5W | LIKELY TRUE | UNVERIFIED |
-| 07 | KSM always on | MEDIUM 0.5-1W | LIKELY TRUE | UNVERIFIED |
-| 08 | Display at 120Hz on battery | MEDIUM 1.5-2.5W | Medium | UNVERIFIED |
-| 09 | WiFi power save off | LOW-MED 0.3-0.8W | LIKELY TRUE | UNVERIFIED |
-| 10 | Audio codec always on | LOW 0.1-0.3W | LIKELY TRUE | UNVERIFIED |
-| 11 | USB no autosuspend | LOW 0.1-0.5W | Medium | UNVERIFIED |
-| 12 | Bluetooth scanning | LOW 0.1-0.3W | Low | UNVERIFIED |
-| 13 | Brightness not auto-reduced | VARIABLE 0.5-3W | Medium | UNVERIFIED |
-
-**Worst-case total if all true: ~15–35W extra drain**
-**Best-case if top 5 fixed: likely 4–6hr gain → reaching 7-8hr target**
-
----
-
-## Debug Plan (Run Before Any Fixes)
-
-### Step 1 — Measure baseline
-```bash
-# Current power draw in watts
-cat /sys/class/power_supply/BAT0/power_now
-# or
-cat /sys/class/power_supply/BAT0/current_now
-cat /sys/class/power_supply/BAT0/voltage_now
-# watts = (current_now * voltage_now) / 1e12
+**Diagnostic output:**
+```
+/sys/bus/pci/devices/0000:01:00.0/power/runtime_status:       active
+/sys/bus/pci/devices/0000:01:00.0/power/runtime_suspended_time: 0
+/sys/bus/pci/devices/0000:01:00.0/power_state:                 D0
+nvidia-smi: 1.89W draw, P8 state, 0% utilization
 ```
 
-### Step 2 — NVIDIA state
+**What's happening:**
+`nvidia-powerd` (PID 771) holds 10 open file descriptors on `/dev/nvidia0`.
+Any open FD on that device prevents `NVreg_DynamicPowerManagement=0x02` from
+power-gating the GPU. The GPU has been in D0 (fully active) for 100% of uptime —
+`runtime_suspended_time = 0` means it has NEVER suspended, not even for 1ms.
+
+`nvidia-powerd` is NVIDIA's Dynamic Boost daemon (designed for gaming TDP redistribution).
+The service is marked `disabled` (should not start at boot) but is running — started by
+something at boot. Its own log reports:
+`ERROR! Client (presumably SBIOS) has requested to disable Dynamic Boost DC controller`
+It's broken, does nothing useful on this hardware, and keeps the GPU awake 24/7.
+
+**Actual power impact:**
+- nvidia-smi reports 1.89W GPU draw (P8 minimum state)
+- In D3cold: 0W
+- Additional hidden cost: D0 keeps PCIe lanes + clock domains active → real system delta ~3-7W
+
+**Note:** We DO want NVIDIA available on-demand for HIVE/Forex.
+D3cold + dynamic PM gives exactly that: 0W idle, ~500ms wake when needed.
+The `NVreg_DynamicPowerManagement=0x02` config is already correct.
+Just need nvidia-powerd out of the way.
+
+**Fix:**
 ```bash
-cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_status
-cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_suspended_time
+sudo systemctl stop nvidia-powerd
+sudo systemctl disable nvidia-powerd
+sudo systemctl mask nvidia-powerd     # prevent anything from starting it
+```
+After masking, the NVIDIA driver's own DPM handles wake/sleep automatically.
+
+---
+
+### ROOT-02 — AMD P-State EPP stuck on `performance` always [CRITICAL — ~1-3W]
+
+**Diagnostic output:**
+```
+scaling_driver:   amd-pstate-epp     ← correct driver
+scaling_governor: performance        ← WRONG
+EPP (cpu0-cpu14): performance        ← all 16 cores, always
 ```
 
-### Step 3 — CPU driver and EPP
+**What's happening:**
+The `performance` governor overrides all EPP hints. It tells the CPU "always target
+maximum frequency." The CPU never enters low-power states between work bursts.
+Ubuntu on battery sets governor=`powersave` + EPP=`power`, which hands control to
+the CPU's SMU firmware — far smarter than any userspace decision.
+
+**Why EPP is the right approach (replaces app/window tracking):**
+The Ryzen 8845HS SMU has real-time per-core voltage, current, temperature, and power
+data. It makes frequency decisions in microseconds with information no OS daemon can
+access. With the right EPP hint:
+- `power`: CPU SMU maximizes efficiency, clocks only what's needed
+- `balance_power`: headroom for responsiveness, still conservative
+- `balance_performance`: good for development/AI work
+- `performance`: only for gaming/benchmarks
+
+This completely replaces the 3-minute CPU load tracking in luminos-power v2.1.
+No window counting, no load averages — just set the hint based on AC state and let
+the hardware handle everything.
+
+**Fix:**
+Change governor to `powersave` on all cores and set EPP by AC state:
 ```bash
-cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_driver
-cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference
+# On battery:
+echo powersave | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+echo power | tee /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference
+
+# On AC (normal work):
+echo powersave | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+echo balance_performance | tee /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference
+```
+Wire this into luminos-power on AC plug/unplug events.
+
+---
+
+### ROOT-03 — PCIe ASPM on `default` policy, most devices disabled [HIGH — ~1-3W]
+
+**Diagnostic output:**
+```
+/sys/module/pcie_aspm/parameters/policy: [default]
+lspci output: "ASPM Disabled" appears 8+ times
+              "ASPM L1 Enabled" only on internal AMD fabric links
 ```
 
-### Step 4 — ASPM
+**What's happening:**
+ASPM `default` means BIOS decides. The ASUS ROG BIOS disables ASPM on external
+PCIe devices (NVMe, WiFi, NVIDIA slot) for maximum performance/stability.
+Without ASPM:
+- NVMe SSD stays at full PCIe link power (~1.5W) instead of APST sleep (~0.1W)
+- WiFi PCIe link stays active
+- NVIDIA PCIe slot link stays at full power
+
+**Fix:**
+Add kernel parameter to force ASPM:
+```
+# /etc/kernel/cmdline or GRUB config — add:
+pcie_aspm=force
+```
+Or set at runtime:
 ```bash
-cat /sys/module/pcie_aspm/parameters/policy
+echo powersupersave > /sys/module/pcie_aspm/parameters/policy
+```
+Note: Some ASUS ROG BIOSes re-disable specific slots. Test for stability.
+
+---
+
+### ROOT-04 — No battery-event power manager [HIGH — cumulative ~1-2W]
+
+**Diagnostic output:**
+```
+TLP:                    not installed
+power-profiles-daemon:  not installed
+thermald:               not installed
+WiFi power save:        off (wlp3s0 — no power save configured)
+USB ITE devices:        control=on (correct — these are ASUS EC)
+USB others:             auto (correct)
+Audio:                  power_save=10 (already fine)
 ```
 
-### Step 5 — Full powertop snapshot
-```bash
-sudo powertop --time=15 --html=/tmp/powertop.html
-# Open in browser for full breakdown
+**What's happening:**
+No power manager applies battery-specific settings on unplug. Ubuntu/TLP handle
+a dozen small optimizations automatically. We need a single udev-triggered script.
+
+Items confirmed needing a fix:
+- **WiFi power save**: off. Should enable on battery. (~0.3-0.8W)
+- **KSM on battery**: enabled, 0 pages shared (doing nothing useful on battery)
+- **Bluetooth**: powered on when not in use
+
+Items that are already fine (do NOT touch):
+- Audio codec: power_save=10 already set ✅
+- USB autosuspend: default=2s, most devices on auto ✅
+- ITE Device(8910) USB entries: ASUS embedded controller, must stay `on` ✅
+- Telemetry: 30s interval, fine for NVMe APST ✅
+
+**Fix:**
+Create `/usr/local/bin/luminos-battery-event` script called by udev on
+`ACAD online` change. Sets WiFi power save, KSM, Bluetooth, and triggers
+luminos-power EPP update.
+
+---
+
+### ROOT-05 — 2s daemon polling rate [MEDIUM — ~0.5-1W]
+
+**Diagnostic output:**
+```
+luminos-power: time.NewTicker(2 * time.Second)
+luminos-ram:   time.NewTicker(3 * time.Second)
+CPU C-states:  C1(1μs), C2(18μs), C3(350μs max)
 ```
 
-### Step 6 — C-state residency
+**What's happening:**
+Every 2-3 seconds all daemons wake up. This prevents the CPU package from
+staying in C3 (deepest available state at 350μs latency) for more than ~2 seconds.
+The overhead of the wake itself costs power. On battery, power management decisions
+don't need 2s resolution — 10s is more than sufficient.
+
+**Fix:**
+In luminos-power and luminos-ram: when on battery, use a 10s ticker instead of 2s.
+Add AC-state awareness to the monitor loop.
+
+---
+
+### ROOT-06 — Display at 120Hz (no battery switch) [MEDIUM — ~1-2W]
+
+**Diagnostic output:**
+```
+card2-eDP-2: connected, 2880x1800
+Mode #0 (preferred): 2880x1800 @ 120Hz
+Mode #1:             2880x1800 @ 60Hz
+KDE power management: no refresh rate switching configured
+```
+
+**What's happening:**
+KDE Power Management does not have a "switch to 60Hz on battery" rule.
+The panel stays at 120Hz on battery. Difference is approximately 1-2W.
+
+**Fix:**
+Add to KDE Power Management OR add to battery event script:
 ```bash
-sudo turbostat --interval 5 --quiet 2>/dev/null | head -20
+# On battery:
+kscreen-doctor output.2.mode.2880x1800@60
+# On AC:
+kscreen-doctor output.2.mode.2880x1800@120
 ```
 
 ---
 
-## Fix Log (append as fixes are applied)
+## Causes That Are NOT Issues (do not touch)
 
-| Date | Agent | Cause Fixed | Result |
+| # | Cause | Finding |
+|---|---|---|
+| 06 | Telemetry writes | 30s interval — NVMe APST needs 8ms idle, 30s is fine |
+| 10 | Audio codec | power_save=10 already set — codec sleeps after 10s |
+| 11 | USB autosuspend | Default=2s, most devices already on auto. ITE EC devices must stay `on` |
+| 13 | Screen brightness | Already at 30% (119701/399000) |
+
+---
+
+## Estimated Gains Per Fix
+
+| Fix | Estimated Saving | Confidence |
+|---|---|---|
+| Stop nvidia-powerd (ROOT-01) | 3-7W | HIGH |
+| Fix EPP governor (ROOT-02) | 1-3W | HIGH |
+| Force PCIe ASPM (ROOT-03) | 1-3W | MEDIUM |
+| Battery event script (ROOT-04) | 0.5-1.5W | HIGH |
+| Daemon poll rate (ROOT-05) | 0.5-1W | MEDIUM |
+| 60Hz on battery (ROOT-06) | 1-2W | MEDIUM |
+| **Total** | **7-17.5W** | — |
+
+At current 40Wh usable capacity:
+- Current draw (estimated): ~12-15W average → 3-4hr
+- After fixes (estimated): ~5-7W average → 6-8hr ✅
+
+---
+
+## Fix Plan (in order — do not skip steps)
+
+1. **Stop nvidia-powerd** → retest battery drain → should drop 3-7W immediately
+2. **Fix EPP** → add to luminos-power AC/battery event handler
+3. **Force PCIe ASPM** → kernel parameter + test for stability
+4. **Battery event script** → WiFi power save + KSM + 60Hz
+5. **Daemon poll rate** → modify luminos-power + luminos-ram to slow down on battery
+
+---
+
+## Fix Log (append as fixes applied)
+
+| Date | Agent | Root Cause Fixed | Measured Impact |
 |---|---|---|---|
 | — | — | — | — |
+
+---
+
+## New luminos-power Architecture (post-fix)
+
+Replace the current load-tracking algorithm entirely with EPP-based control:
+
+```
+Battery plug-out:
+  → EPP = power (all cores)
+  → governor = powersave
+  → WiFi power save = on
+  → KSM = off
+  → Display = 60Hz
+  → Daemon poll = 10s
+
+Battery plug-in (AC):
+  → EPP = balance_performance (all cores)
+  → governor = powersave
+  → WiFi power save = off
+  → KSM = on
+  → Display = 120Hz
+  → Daemon poll = 2s
+
+GPU gaming detected (GPU > 80% for 30s on AC):
+  → EPP = performance
+  → asusctl profile set Performance
+  → (existing fan curve logic unchanged)
+
+GPU idle after gaming (GPU < 20% for 60s):
+  → EPP = balance_performance
+  → asusctl profile set Balanced
+
+Emergency thermal (>85°C):
+  → EPP = power (instant, no delay)
+  → asusctl profile set Quiet
+```
+
+The CPU P-state/frequency decisions are entirely removed from luminos-power.
+The Ryzen 8845HS SMU handles all of that better than any 2s polling loop.
+```
