@@ -263,7 +263,13 @@ At current 40Wh usable capacity:
 
 | Date | Agent | Root Cause Fixed | Measured Impact |
 |---|---|---|---|
-| — | — | — | — |
+| 2026-05-14 | claude-code | ROOT-01a: Stopped + masked nvidia-powerd | GPU no longer blocked by daemon |
+| 2026-05-14 | claude-code | ROOT-01b: EGL priority flipped (10→60_nvidia) + pacman hook | KDE system apps drop NVIDIA EGL on next login |
+| — | — | ROOT-02: EPP governor fix | — |
+| — | — | ROOT-03: PCIe ASPM | — |
+| — | — | ROOT-04: Battery event script | — |
+| — | — | ROOT-05: Daemon poll rate | — |
+| — | — | ROOT-06: 60Hz on battery | — |
 
 ---
 

@@ -10,6 +10,7 @@ Format: BUG-NNN-short-description/report.md
 |---|---|---|---|
 | [BUG-045](./BUG-045-touchpad-input-lag/report.md) | Touchpad Input Lag / Jump Detection | FIXED | MEDIUM |
 | [BUG-046](./BUG-046-chrome-nvidia-gpu/report.md) | Chrome Using NVIDIA GPU | FIXED | HIGH |
+| [BUG-046c](./BUG-046c-system-default-nvidia-egl/report.md) | System Default GPU is NVIDIA (EGL Priority) | FIXED (needs logout) | HIGH |
 | [BUG-046b](./BUG-046b-luminos-ram-blind/report.md) | luminos-ram Blind to Desktop Session | FIXED | HIGH |
 | [BUG-047](./BUG-047-nvidia-always-active/report.md) | NVIDIA GPU Always Active | FIXED | MEDIUM |
 | [BUG-048](./BUG-048-thermal-oscillation/report.md) | luminos-power Thermal Oscillation | FIXED | HIGH |
