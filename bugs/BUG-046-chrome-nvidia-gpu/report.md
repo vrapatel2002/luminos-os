@@ -23,12 +23,34 @@ which explicitly points to the NVIDIA render node.
 ## Re-Fix (2026-05-14, claude-code)
 The 2026-05-10 fix was incomplete. Chrome Flatpak runs its own GPU enumeration
 inside the sandbox — it ignores `DRI_PRIME` and re-selects NVIDIA independently,
-then passes `--render-node-override=/dev/dri/renderD129` to its own GPU subprocess.
+then passes `--render-node-override` to its own GPU subprocess.
 
-Confirmed via: `cat /proc/<chrome-gpu-pid>/cmdline | grep render-node`
+Fix: added `--render-node-override` explicitly to the wrapper so Chrome's outer
+process locks the GPU before Chrome's internal detection runs. GPU selector dialog
+added via kdialog.
 
-Fix: added `--render-node-override=/dev/dri/renderD128` explicitly to the wrapper
-so Chrome's outer process sets AMD before Chrome's internal GPU detection runs.
+## Hotfix (2026-05-15, claude-code) — render-node assignment was reversed
+The 2026-05-14 re-fix had the render nodes backwards, causing Chrome to crash
+with Signal 5 (TRAP) in libzypak whenever AMD was selected.
+
+**Root cause:** NVIDIA (pci 01:00.0) has a lower PCI bus number than AMD (pci 65:00.0),
+so the kernel probes NVIDIA first and assigns it renderD128. AMD gets renderD129.
+
+```
+/dev/dri/renderD128 → pci-0000:01:00.0 → NVIDIA RTX 4050
+/dev/dri/renderD129 → pci-0000:65:00.0 → AMD Radeon 780M
+```
+
+The 2026-05-14 fix incorrectly set:
+- AMD mode → `--render-node-override=/dev/dri/renderD128` (was NVIDIA!)
+- NVIDIA mode → `--render-node-override=/dev/dri/renderD129` (was AMD!)
+
+Chrome received conflicting signals (AMD env vars + NVIDIA render node) and
+libzypak's sandbox setup assertion fired → SIGTRAP crash.
+
+**Fix:** swapped the render node assignments:
+- AMD mode → `--render-node-override=/dev/dri/renderD129` ✓
+- NVIDIA mode → `--render-node-override=/dev/dri/renderD128` ✓
 
 ## Files Changed
 - `/usr/local/bin/chrome-luminos`
