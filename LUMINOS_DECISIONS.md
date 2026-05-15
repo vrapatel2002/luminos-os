@@ -339,6 +339,44 @@ These switch automatically. No power profiles menu exists anywhere.
 
 ---
 
+## DECISION 4b — Thermal Target: 45°C Regardless of AC State
+Date: 2026-05-15
+Made by: Shawn + claude-code
+
+### What We Decided
+- Target CPU temperature: ~45°C idle, regardless of whether on AC or battery.
+- EPP=power is the default in both states. Gaming detection is the only thing
+  that raises EPP (to `performance`) and only on AC.
+- Frequency caps (scaling_max_freq) are a last resort — only applied when
+  the CPU is genuinely overheating (62°C+ battery, 72°C+ AC). They are never
+  applied preemptively.
+
+### Why This Works Without Causing Lag
+- EPP=power is a *hint* to the AMD SMU firmware, not a hard clock limit.
+  The CPU can still boost to 5.1 GHz when a burst of work arrives —
+  EPP=power just tells the SMU "recover to low-power state faster when idle."
+- This is exactly how Ubuntu achieves 45°C idle: power-profiles-daemon sets
+  EPP=power, the SMU handles everything. No freq cap needed for idle temps.
+- Frequency caps would cause lag because they prevent boost even during
+  legitimate work bursts. EPP hints do not — the hardware decides.
+
+### The Concern: EPP=power vs balance_performance on AC
+- `balance_performance` lets the CPU sit at a higher idle frequency and
+  boosts more aggressively. It keeps the CPU warmer even when idle (~55-65°C).
+- `power` tells the SMU to clock down between work bursts. The CPU is
+  just as fast during bursts, but spends more time at low freq/voltage.
+- For HIVE inference, Forex, development: sustained load already keeps the
+  CPU busy — EPP makes no difference to throughput in those cases.
+- For desktop idle (browsing, reading, typing): EPP=power can drop idle
+  temp from 60°C to 42-47°C. This is the target.
+
+### Gaming Mode Exception
+When GPU load > 80% for 30s on AC, luminos-power switches to
+EPP=performance + asusctl Performance profile. This is the only time
+the system intentionally runs hot. Exits back to EPP=power when GPU cools.
+
+---
+
 ## DECISION 5 — Compatibility Router Uses Rules First, AI Second
 Date: Session 2
 Made by: Sam + Claude

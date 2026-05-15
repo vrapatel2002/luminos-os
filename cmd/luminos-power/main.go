@@ -205,8 +205,8 @@ func monitorLoop(ctx context.Context) {
 				profile := applyGamingDetection(gpuLoad, prevState.Profile)
 				if profile == "Performance" {
 					runCmd("asusctl", "profile", "set", "Performance")
-					setAllEPP("performance") // after asusctl
-					setAllMaxFreq(0)         // uncap for gaming
+					setEPPAfterAsusctl("performance")
+					setAllMaxFreq(0) // uncap for gaming
 					currentThermalZone = ZoneCool
 					updateState(onAC, temp, gpuLoad, "performance", "Performance")
 					continue
@@ -216,8 +216,8 @@ func monitorLoop(ctx context.Context) {
 				profile := applyGamingDetection(gpuLoad, "Performance")
 				if profile == "Balanced" {
 					runCmd("asusctl", "profile", "set", "Balanced")
-					setAllEPP("balance_performance") // after asusctl
-					updateState(onAC, temp, gpuLoad, "balance_performance", "Balanced")
+					setEPPAfterAsusctl("power") // back to cool target after gaming
+					updateState(onAC, temp, gpuLoad, "power", "Balanced")
 					continue
 				}
 			}
@@ -246,9 +246,10 @@ func applyACTransition(onAC bool) {
 		setKSM(true)
 		setDisplayHz(120)
 		runCmd("asusctl", "profile", "set", "Balanced")
-		// Write EPP after asusctl — asusctl overwrites EPP when setting profile
-		setAllEPP("balance_performance")
-		prevState.EPP = "balance_performance"
+		// asusd applies EPP asynchronously via D-Bus — wait for it to finish
+		// before overwriting. EPP=power targets 45°C idle on AC and battery alike.
+		setEPPAfterAsusctl("power")
+		prevState.EPP = "power"
 		prevState.Profile = "Balanced"
 	} else {
 		lg.Info("AC unplugged — applying battery power settings")
@@ -257,8 +258,7 @@ func applyACTransition(onAC bool) {
 		setKSM(false)
 		setDisplayHz(60)
 		runCmd("asusctl", "profile", "set", "Quiet")
-		// Write EPP after asusctl — asusctl overwrites EPP when setting profile
-		setAllEPP("power")
+		setEPPAfterAsusctl("power")
 		prevState.EPP = "power"
 		prevState.Profile = "Quiet"
 	}
@@ -368,11 +368,10 @@ func applyThermalGovernor(temp float64, onAC bool) {
 	switch newZone {
 	case ZoneCool:
 		setAllMaxFreq(0) // uncap
-		if onAC {
-			setAllEPP("balance_performance")
-			prevState.EPP = "balance_performance"
-		}
-		// on battery stays EPP=power — already the base state
+		// EPP=power in both states — targeting 45°C idle on AC and battery alike.
+		// Gaming detection overrides to performance when GPU load warrants it.
+		setAllEPP("power")
+		prevState.EPP = "power"
 	case ZoneMild:
 		setAllMaxFreq(0) // EPP hint is enough, no hard cap
 		setAllEPP("power")
@@ -394,6 +393,14 @@ func applyThermalGovernor(temp float64, onAC bool) {
 		setAllEPP("power")
 		prevState.EPP = "power"
 	}
+}
+
+// setEPPAfterAsusctl waits for asusd's async D-Bus write to complete before
+// overwriting EPP. asusctl returns immediately but asusd applies the profile
+// EPP ~100-300ms later via the kernel driver, clobbering a direct sysfs write.
+func setEPPAfterAsusctl(epp string) {
+	time.Sleep(350 * time.Millisecond)
+	setAllEPP(epp)
 }
 
 // --- sysfs writers ---
