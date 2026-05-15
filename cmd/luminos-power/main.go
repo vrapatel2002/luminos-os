@@ -8,6 +8,10 @@
 //   - WiFi power save, KSM, display Hz managed on AC transitions (ROOT-04, ROOT-06)
 //   - GPU gaming detection retained (asusctl profile Performance on AC only)
 //   - Emergency thermal: EPP=power immediately (no delay)
+// [CHANGE: claude-code | 2026-05-15] v3.1 Thermal governor — 45°C target
+//   - 4 thermal zones with 5°C hysteresis, scaling_max_freq caps per zone
+//   - Gaming mode bypasses thermal capping on AC (user explicitly wants performance)
+//   - Hardware max freq read at startup (no hardcoded value)
 package main
 
 import (
@@ -50,6 +54,23 @@ const (
 	gpuLowThreshTicks  = 30 // 60s at 2s poll
 	// Emergency thermal threshold
 	thermalEmergencyC = 85.0
+
+	// Thermal governor zones (ZoneCool→ZoneHot) with 5°C hysteresis for exit.
+	// Target: keep CPU at or below 45°C at idle by throttling boost when warm.
+	thermalHysteresisC = 5.0
+	thermalZone1C      = 45.0 // cool→mild: start light throttle
+	thermalZone2C      = 55.0 // mild→warm: apply freq cap
+	thermalZone3C      = 65.0 // warm→hot:  tighter freq cap
+)
+
+// ThermalZone represents current CPU temperature zone.
+type ThermalZone int
+
+const (
+	ZoneCool ThermalZone = iota // <45°C  — no throttle
+	ZoneMild                    // 45-55°C — EPP nudge
+	ZoneWarm                    // 55-65°C — 3.5 GHz cap
+	ZoneHot                     // 65-75°C — 2.5 GHz cap (below emergency)
 )
 
 var (
@@ -60,6 +81,9 @@ var (
 
 	gpuHighTicks int
 	gpuLowTicks  int
+
+	currentThermalZone ThermalZone = ZoneCool
+	cpuHardwareMaxFreq int         // read from sysfs at startup, kHz
 )
 
 func main() {
@@ -76,6 +100,8 @@ func main() {
 	}
 
 	cpuCount = runtime.NumCPU()
+	cpuHardwareMaxFreq = readCPUHardwareMax()
+	lg.Info("CPU hardware max freq: %d kHz (%.2f GHz)", cpuHardwareMaxFreq, float64(cpuHardwareMaxFreq)/1e6)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -91,7 +117,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	lg.Info("luminos-power v3.0 started — EPP-based control, listening on %s", cfg.Sockets.Power)
+	lg.Info("luminos-power v3.1 started — EPP + thermal governor, listening on %s", cfg.Sockets.Power)
 
 	// Apply fan curves to all profiles once at startup
 	applyAggressiveFanCurve("balanced")
@@ -157,6 +183,7 @@ func monitorLoop(ctx context.Context) {
 				lg.Warn("CPU temp %.1f°C > %.0f°C — Emergency: EPP=power + Quiet profile", temp, thermalEmergencyC)
 				runCmd("asusctl", "profile", "set", "Quiet")
 				setAllEPP("power") // after asusctl
+				setAllMaxFreq(2000000) // 2.0 GHz hard cap in emergency
 				updateState(onAC, temp, gpuLoad, "power", "Quiet")
 				gpuHighTicks = 0
 				gpuLowTicks = 0
@@ -164,16 +191,31 @@ func monitorLoop(ctx context.Context) {
 			}
 
 			// GPU gaming detection (AC only — no Performance on battery)
-			if onAC {
+			// Gaming mode bypasses thermal governor — user explicitly wants performance.
+			if onAC && prevState.Profile != "Performance" {
 				profile := applyGamingDetection(gpuLoad, prevState.Profile)
-				if profile != prevState.Profile {
-					epp := eppForProfile(profile)
-					runCmd("asusctl", "profile", "set", profile)
-					// Write EPP after asusctl — asusctl overwrites EPP when setting profile
-					setAllEPP(epp)
-					updateState(onAC, temp, gpuLoad, epp, profile)
+				if profile == "Performance" {
+					runCmd("asusctl", "profile", "set", "Performance")
+					setAllEPP("performance") // after asusctl
+					setAllMaxFreq(0)         // uncap for gaming
+					currentThermalZone = ZoneCool
+					updateState(onAC, temp, gpuLoad, "performance", "Performance")
 					continue
 				}
+			} else if onAC && prevState.Profile == "Performance" {
+				// Check if we should exit gaming mode
+				profile := applyGamingDetection(gpuLoad, "Performance")
+				if profile == "Balanced" {
+					runCmd("asusctl", "profile", "set", "Balanced")
+					setAllEPP("balance_performance") // after asusctl
+					updateState(onAC, temp, gpuLoad, "balance_performance", "Balanced")
+					continue
+				}
+			}
+
+			// Thermal governor — skip when gaming (temp will be high intentionally)
+			if prevState.Profile != "Performance" {
+				applyThermalGovernor(temp, onAC)
 			}
 
 			updateState(onAC, temp, gpuLoad, prevState.EPP, prevState.Profile)
@@ -184,6 +226,10 @@ func monitorLoop(ctx context.Context) {
 // applyACTransition handles the full set of changes when AC state changes.
 // Called at startup and on every AC plug/unplug event.
 func applyACTransition(onAC bool) {
+	// Reset thermal zone and freq cap on any AC transition
+	currentThermalZone = ZoneCool
+	setAllMaxFreq(0)
+
 	if onAC {
 		lg.Info("AC plugged — applying AC power settings")
 		setAllGovernor("powersave")
@@ -255,6 +301,74 @@ func batteryInterval(onAC bool) time.Duration {
 	return 10 * time.Second
 }
 
+// --- thermal governor ---
+
+// applyThermalGovernor advances or retreats thermal zones based on current CPU temp.
+// Zones use 5°C hysteresis on exit to prevent oscillation.
+// Each zone applies a scaling_max_freq cap to drive temps toward the 45°C target.
+//
+// Zone table:
+//   ZoneCool (<45°C)   no cap          EPP: per AC state (no change)
+//   ZoneMild (45-55°C) no freq cap     EPP: power (nudge CPU to be conservative)
+//   ZoneWarm (55-65°C) 3.5 GHz cap     EPP: power
+//   ZoneHot  (65-75°C) 2.5 GHz cap     EPP: power
+func applyThermalGovernor(temp float64, onAC bool) {
+	prev := currentThermalZone
+	newZone := prev
+
+	switch prev {
+	case ZoneCool:
+		if temp >= thermalZone1C {
+			newZone = ZoneMild
+		}
+	case ZoneMild:
+		if temp >= thermalZone2C {
+			newZone = ZoneWarm
+		} else if temp < thermalZone1C-thermalHysteresisC {
+			newZone = ZoneCool
+		}
+	case ZoneWarm:
+		if temp >= thermalZone3C {
+			newZone = ZoneHot
+		} else if temp < thermalZone2C-thermalHysteresisC {
+			newZone = ZoneMild
+		}
+	case ZoneHot:
+		if temp < thermalZone3C-thermalHysteresisC {
+			newZone = ZoneWarm
+		}
+	}
+
+	if newZone == prev {
+		return // no zone change, nothing to apply
+	}
+
+	currentThermalZone = newZone
+	lg.Info("thermal zone %d→%d (%.1f°C)", prev, newZone, temp)
+
+	switch newZone {
+	case ZoneCool:
+		setAllMaxFreq(0) // uncap
+		if onAC {
+			setAllEPP("balance_performance")
+			prevState.EPP = "balance_performance"
+		}
+		// battery stays at EPP=power (already set)
+	case ZoneMild:
+		setAllMaxFreq(0) // no freq cap — EPP nudge is enough
+		setAllEPP("power")
+		prevState.EPP = "power"
+	case ZoneWarm:
+		setAllMaxFreq(3500000) // 3.5 GHz
+		setAllEPP("power")
+		prevState.EPP = "power"
+	case ZoneHot:
+		setAllMaxFreq(2500000) // 2.5 GHz
+		setAllEPP("power")
+		prevState.EPP = "power"
+	}
+}
+
 // --- sysfs writers ---
 
 func setAllGovernor(gov string) {
@@ -285,6 +399,42 @@ func setAllEPP(epp string) {
 	} else {
 		lg.Info("EPP → %s (%d cores)", epp, len(matches))
 	}
+}
+
+// setAllMaxFreq sets scaling_max_freq on all CPU cores.
+// freqKHz=0 restores the hardware maximum (no cap).
+func setAllMaxFreq(freqKHz int) {
+	target := freqKHz
+	if target == 0 {
+		target = cpuHardwareMaxFreq
+	}
+	matches, _ := filepath.Glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq")
+	var failed int
+	for _, p := range matches {
+		if err := writeSysfs(p, strconv.Itoa(target)); err != nil {
+			failed++
+		}
+	}
+	capGHz := float64(target) / 1e6
+	if failed > 0 {
+		lg.Warn("max_freq → %.1f GHz: %d/%d cores failed", capGHz, failed, len(matches))
+	} else {
+		lg.Info("max_freq → %.1f GHz (%d cores)", capGHz, len(matches))
+	}
+}
+
+// readCPUHardwareMax returns the hardware max frequency of cpu0 in kHz.
+// Falls back to 5137904 (Ryzen 9 8845HS spec) if unreadable.
+func readCPUHardwareMax() int {
+	d, err := os.ReadFile("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
+	if err != nil {
+		return 5137904
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(string(d)))
+	if err != nil || v <= 0 {
+		return 5137904
+	}
+	return v
 }
 
 // writeSysfs writes a value to a sysfs file using O_WRONLY (no truncate/create flags).
