@@ -56,11 +56,20 @@ const (
 	thermalEmergencyC = 85.0
 
 	// Thermal governor zones (ZoneCool→ZoneHot) with 5°C hysteresis for exit.
-	// Target: keep CPU at or below 45°C at idle by throttling boost when warm.
+	// Target: 45°C idle via EPP hints alone. Freq caps only for genuinely hot temps.
+	// On AC: caps start at 72°C so normal workloads are never throttled.
+	// On battery: caps start at 62°C — saves power and battery.
 	thermalHysteresisC = 5.0
-	thermalZone1C      = 45.0 // cool→mild: start light throttle
-	thermalZone2C      = 55.0 // mild→warm: apply freq cap
-	thermalZone3C      = 65.0 // warm→hot:  tighter freq cap
+
+	// AC thresholds — permissive, caps only when actually overheating
+	thermalACZone1C = 60.0 // cool→mild on AC: EPP nudge only, no cap
+	thermalACZone2C = 72.0 // mild→warm on AC: 4.0 GHz cap
+	thermalACZone3C = 80.0 // warm→hot on AC:  3.0 GHz cap
+
+	// Battery thresholds — more aggressive to save power and extend range
+	thermalBatZone1C = 50.0 // cool→mild on bat: EPP=power (already set), no cap
+	thermalBatZone2C = 62.0 // mild→warm on bat: 3.5 GHz cap
+	thermalBatZone3C = 72.0 // warm→hot on bat:  2.5 GHz cap
 )
 
 // ThermalZone represents current CPU temperature zone.
@@ -305,36 +314,46 @@ func batteryInterval(onAC bool) time.Duration {
 
 // applyThermalGovernor advances or retreats thermal zones based on current CPU temp.
 // Zones use 5°C hysteresis on exit to prevent oscillation.
-// Each zone applies a scaling_max_freq cap to drive temps toward the 45°C target.
 //
-// Zone table:
-//   ZoneCool (<45°C)   no cap          EPP: per AC state (no change)
-//   ZoneMild (45-55°C) no freq cap     EPP: power (nudge CPU to be conservative)
-//   ZoneWarm (55-65°C) 3.5 GHz cap     EPP: power
-//   ZoneHot  (65-75°C) 2.5 GHz cap     EPP: power
+// AC thresholds (permissive — normal workloads never throttled):
+//   ZoneCool (<60°C)   no cap    EPP: balance_performance
+//   ZoneMild (60-72°C) no cap    EPP: power (SMU conserves without hard cap)
+//   ZoneWarm (72-80°C) 4.0 GHz   EPP: power
+//   ZoneHot  (>80°C)   3.0 GHz   EPP: power
+//
+// Battery thresholds (tighter — saves power, extends range):
+//   ZoneCool (<50°C)   no cap    EPP: power (already set by AC transition)
+//   ZoneMild (50-62°C) no cap    EPP: power
+//   ZoneWarm (62-72°C) 3.5 GHz   EPP: power
+//   ZoneHot  (>72°C)   2.5 GHz   EPP: power
 func applyThermalGovernor(temp float64, onAC bool) {
+	z1, z2, z3 := thermalACZone1C, thermalACZone2C, thermalACZone3C
+	if !onAC {
+		z1, z2, z3 = thermalBatZone1C, thermalBatZone2C, thermalBatZone3C
+	}
+
 	prev := currentThermalZone
 	newZone := prev
 
 	switch prev {
 	case ZoneCool:
-		if temp >= thermalZone1C {
+		if temp >= z1 {
 			newZone = ZoneMild
 		}
 	case ZoneMild:
-		if temp >= thermalZone2C {
+		if temp >= z2 {
 			newZone = ZoneWarm
-		} else if temp < thermalZone1C-thermalHysteresisC {
+		} else if temp < z1-thermalHysteresisC {
 			newZone = ZoneCool
 		}
 	case ZoneWarm:
-		if temp >= thermalZone3C {
+		if temp >= z3 {
 			newZone = ZoneHot
-		} else if temp < thermalZone2C-thermalHysteresisC {
+		} else if temp < z2-thermalHysteresisC {
 			newZone = ZoneMild
 		}
 	case ZoneHot:
-		if temp < thermalZone3C-thermalHysteresisC {
+		if temp < z3-thermalHysteresisC {
 			newZone = ZoneWarm
 		}
 	}
@@ -344,7 +363,7 @@ func applyThermalGovernor(temp float64, onAC bool) {
 	}
 
 	currentThermalZone = newZone
-	lg.Info("thermal zone %d→%d (%.1f°C)", prev, newZone, temp)
+	lg.Info("thermal zone %d→%d (%.1f°C, on_ac=%v)", prev, newZone, temp, onAC)
 
 	switch newZone {
 	case ZoneCool:
@@ -353,17 +372,25 @@ func applyThermalGovernor(temp float64, onAC bool) {
 			setAllEPP("balance_performance")
 			prevState.EPP = "balance_performance"
 		}
-		// battery stays at EPP=power (already set)
+		// on battery stays EPP=power — already the base state
 	case ZoneMild:
-		setAllMaxFreq(0) // no freq cap — EPP nudge is enough
+		setAllMaxFreq(0) // EPP hint is enough, no hard cap
 		setAllEPP("power")
 		prevState.EPP = "power"
 	case ZoneWarm:
-		setAllMaxFreq(3500000) // 3.5 GHz
+		if onAC {
+			setAllMaxFreq(4000000) // 4.0 GHz on AC — still fast, just no turbo
+		} else {
+			setAllMaxFreq(3500000) // 3.5 GHz on battery
+		}
 		setAllEPP("power")
 		prevState.EPP = "power"
 	case ZoneHot:
-		setAllMaxFreq(2500000) // 2.5 GHz
+		if onAC {
+			setAllMaxFreq(3000000) // 3.0 GHz on AC
+		} else {
+			setAllMaxFreq(2500000) // 2.5 GHz on battery
+		}
 		setAllEPP("power")
 		prevState.EPP = "power"
 	}
