@@ -1,6 +1,6 @@
 # BUG-050 — Battery Life 3-4hr (Expected 8-10hr)
 
-- **Status:** DIAGNOSED — READY TO FIX
+- **Status:** PARTIALLY FIXED (ROOT-01a, ROOT-01b, ROOT-02 done; ROOT-03 through ROOT-06 pending)
 - **Severity:** CRITICAL
 - **Component:** System-wide power management
 - **Date Found:** 2026-05-14
@@ -265,7 +265,7 @@ At current 40Wh usable capacity:
 |---|---|---|---|
 | 2026-05-14 | claude-code | ROOT-01a: Stopped + masked nvidia-powerd | GPU no longer blocked by daemon |
 | 2026-05-14 | claude-code | ROOT-01b: EGL priority flipped (10→60_nvidia) + pacman hook | KDE system apps drop NVIDIA EGL on next login |
-| — | — | ROOT-02: EPP governor fix | — |
+| 2026-05-14 | claude-code | ROOT-02: luminos-power v3.0 — EPP-based control replaces load-tracking | governor=powersave all cores; EPP=balance_performance(AC)/power(battery); poll 2s/10s; WiFi/KSM/displayHz on transition |
 | — | — | ROOT-03: PCIe ASPM | — |
 | — | — | ROOT-04: Battery event script | — |
 | — | — | ROOT-05: Daemon poll rate | — |

@@ -1,9 +1,13 @@
 // Command luminos-power monitors AC adapter state and CPU temperature on the ASUS ROG G14,
-// automatically applying power profiles via asusctl and reporting to luminos-ai.
-// Fully automatic — no user interaction, no manual switching.
+// applying EPP-based CPU power hints and asusctl profiles automatically.
 //
-// [CHANGE: gemini-cli | 2026-05-10] v2.1 Quiet Daily Driver
-// Load-based switching: Quiet (Idle/Battery), Balanced (Heavy Work), Performance (Gaming).
+// [CHANGE: gemini-cli | 2026-05-10] v2.1 Quiet Daily Driver (load-tracking)
+// [CHANGE: claude-code | 2026-05-14] v3.0 EPP-based control — replaces load-tracking algorithm
+//   - governor=powersave always; EPP hint set by AC state
+//   - Poll rate: 2s on AC, 10s on battery (ROOT-05 fix)
+//   - WiFi power save, KSM, display Hz managed on AC transitions (ROOT-04, ROOT-06)
+//   - GPU gaming detection retained (asusctl profile Performance on AC only)
+//   - Emergency thermal: EPP=power immediately (no delay)
 package main
 
 import (
@@ -29,24 +33,33 @@ import (
 type PowerState struct {
 	OnAC      bool      `json:"on_ac"`
 	CPUTempC  float64   `json:"cpu_temp_c"`
-	CPULoad   float64   `json:"cpu_load"`
 	GPULoad   float64   `json:"gpu_load"`
+	EPP       string    `json:"epp"`
 	Profile   string    `json:"profile"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+const (
+	wifiIface = "wlp3s0"
+	// kscreen output ID for the built-in eDP panel
+	displayOutputID = "1"
+	// GPU gaming thresholds (unchanged from v2.1)
+	gpuHighThreshPct   = 80.0
+	gpuHighThreshTicks = 15 // 30s at 2s poll
+	gpuLowThreshPct    = 20.0
+	gpuLowThreshTicks  = 30 // 60s at 2s poll
+	// Emergency thermal threshold
+	thermalEmergencyC = 85.0
+)
+
 var (
-	lg             *logger.Logger
-	cfg            *config.Config
-	prevState      PowerState
-	lastChangeTime time.Time
-	
-	// History for triggers
-	gpuHighTicks int // 30s threshold (15 ticks at 2s)
-	gpuLowTicks  int // 60s threshold (30 ticks at 2s)
-	cpuHighTicks int // 3m threshold (90 ticks at 2s) [CHANGE: v2.1]
-	cpuLowTicks  int // 3m threshold (90 ticks at 2s) [CHANGE: v2.1]
-	cpuCount     int
+	lg        *logger.Logger
+	cfg       *config.Config
+	prevState PowerState
+	cpuCount  int
+
+	gpuHighTicks int
+	gpuLowTicks  int
 )
 
 func main() {
@@ -78,14 +91,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	lg.Info("luminos-power v2.1 started — listening on %s", cfg.Sockets.Power)
+	lg.Info("luminos-power v3.0 started — EPP-based control, listening on %s", cfg.Sockets.Power)
 
-	// Apply aggressive fan curves to all modes
+	// Apply fan curves to all profiles once at startup
 	applyAggressiveFanCurve("balanced")
 	applyAggressiveFanCurve("quiet")
 
-	go monitorLoop(ctx)
+	// Set initial power state based on current AC state
+	onAC := readACState()
+	applyACTransition(onAC)
 
+	go monitorLoop(ctx)
 	socket.Serve(ctx, l, handleMessage)
 
 	os.Remove(cfg.Sockets.Power)
@@ -110,7 +126,9 @@ func handleMessage(msg socket.Message) socket.Message {
 }
 
 func monitorLoop(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
+	// Start at 2s; adjusted below based on AC state
+	interval := 2 * time.Second
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -120,12 +138,242 @@ func monitorLoop(ctx context.Context) {
 		case <-ticker.C:
 			onAC := readACState()
 			temp := readCPUTemp()
-			cpuLoad := readCPULoad()
 			gpuLoad := readGPULoad()
-			applyPowerState(onAC, temp, cpuLoad, gpuLoad)
+
+			// Detect AC transition → immediate response
+			if onAC != prevState.OnAC {
+				applyACTransition(onAC)
+				// Adjust poll rate
+				newInterval := batteryInterval(onAC)
+				if newInterval != interval {
+					interval = newInterval
+					ticker.Reset(interval)
+					lg.Info("poll interval → %v (on_ac=%v)", interval, onAC)
+				}
+			}
+
+			// Emergency thermal: override EPP instantly, no delay
+			if temp > thermalEmergencyC {
+				lg.Warn("CPU temp %.1f°C > %.0f°C — Emergency: EPP=power + Quiet profile", temp, thermalEmergencyC)
+				runCmd("asusctl", "profile", "set", "Quiet")
+				setAllEPP("power") // after asusctl
+				updateState(onAC, temp, gpuLoad, "power", "Quiet")
+				gpuHighTicks = 0
+				gpuLowTicks = 0
+				continue
+			}
+
+			// GPU gaming detection (AC only — no Performance on battery)
+			if onAC {
+				profile := applyGamingDetection(gpuLoad, prevState.Profile)
+				if profile != prevState.Profile {
+					epp := eppForProfile(profile)
+					runCmd("asusctl", "profile", "set", profile)
+					// Write EPP after asusctl — asusctl overwrites EPP when setting profile
+					setAllEPP(epp)
+					updateState(onAC, temp, gpuLoad, epp, profile)
+					continue
+				}
+			}
+
+			updateState(onAC, temp, gpuLoad, prevState.EPP, prevState.Profile)
 		}
 	}
 }
+
+// applyACTransition handles the full set of changes when AC state changes.
+// Called at startup and on every AC plug/unplug event.
+func applyACTransition(onAC bool) {
+	if onAC {
+		lg.Info("AC plugged — applying AC power settings")
+		setAllGovernor("powersave")
+		setWiFiPowerSave(false)
+		setKSM(true)
+		setDisplayHz(120)
+		runCmd("asusctl", "profile", "set", "Balanced")
+		// Write EPP after asusctl — asusctl overwrites EPP when setting profile
+		setAllEPP("balance_performance")
+		prevState.EPP = "balance_performance"
+		prevState.Profile = "Balanced"
+	} else {
+		lg.Info("AC unplugged — applying battery power settings")
+		setAllGovernor("powersave")
+		setWiFiPowerSave(true)
+		setKSM(false)
+		setDisplayHz(60)
+		runCmd("asusctl", "profile", "set", "Quiet")
+		// Write EPP after asusctl — asusctl overwrites EPP when setting profile
+		setAllEPP("power")
+		prevState.EPP = "power"
+		prevState.Profile = "Quiet"
+	}
+	prevState.OnAC = onAC
+	prevState.UpdatedAt = time.Now()
+	reportToAI()
+}
+
+// applyGamingDetection tracks GPU load and returns the desired profile.
+// GPU > 80% for 30s → Performance; GPU < 20% for 60s after Performance → Balanced.
+func applyGamingDetection(gpuLoad float64, currentProfile string) string {
+	if gpuLoad > gpuHighThreshPct {
+		gpuHighTicks++
+		gpuLowTicks = 0
+	} else if currentProfile == "Performance" && gpuLoad < gpuLowThreshPct {
+		gpuLowTicks++
+		gpuHighTicks = 0
+	} else {
+		gpuHighTicks = 0
+		gpuLowTicks = 0
+	}
+
+	if gpuHighTicks >= gpuHighThreshTicks {
+		gpuHighTicks = gpuHighThreshTicks // cap
+		return "Performance"
+	}
+	if gpuLowTicks >= gpuLowThreshTicks {
+		gpuLowTicks = 0
+		return "Balanced"
+	}
+	return currentProfile
+}
+
+func eppForProfile(profile string) string {
+	switch profile {
+	case "Performance":
+		return "performance"
+	case "Balanced":
+		return "balance_performance"
+	default:
+		return "balance_performance"
+	}
+}
+
+func batteryInterval(onAC bool) time.Duration {
+	if onAC {
+		return 2 * time.Second
+	}
+	return 10 * time.Second
+}
+
+// --- sysfs writers ---
+
+func setAllGovernor(gov string) {
+	matches, _ := filepath.Glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor")
+	var failed int
+	for _, p := range matches {
+		if err := writeSysfs(p, gov); err != nil {
+			failed++
+		}
+	}
+	if failed > 0 {
+		lg.Warn("governor → %s: %d/%d cores failed", gov, failed, len(matches))
+	} else {
+		lg.Info("governor → %s (%d cores)", gov, len(matches))
+	}
+}
+
+func setAllEPP(epp string) {
+	matches, _ := filepath.Glob("/sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference")
+	var failed int
+	for _, p := range matches {
+		if err := writeSysfs(p, epp); err != nil {
+			failed++
+		}
+	}
+	if failed > 0 {
+		lg.Warn("EPP → %s: %d/%d cores failed", epp, failed, len(matches))
+	} else {
+		lg.Info("EPP → %s (%d cores)", epp, len(matches))
+	}
+}
+
+// writeSysfs writes a value to a sysfs file using O_WRONLY (no truncate/create flags).
+// Sysfs files need a trailing newline for the kernel to accept the value.
+func writeSysfs(path, value string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "%s\n", value)
+	return err
+}
+
+func setWiFiPowerSave(enable bool) {
+	val := "off"
+	if enable {
+		val = "on"
+	}
+	if err := runCmd("/usr/bin/iw", "dev", wifiIface, "set", "power_save", val); err != nil {
+		lg.Warn("WiFi power_save %s: %v", val, err)
+	} else {
+		lg.Info("WiFi power_save → %s", val)
+	}
+}
+
+func setKSM(enable bool) {
+	val := "1"
+	if !enable {
+		val = "0"
+	}
+	if err := writeSysfs("/sys/kernel/mm/ksm/run", val); err != nil {
+		lg.Warn("KSM run=%s: %v", val, err)
+	} else {
+		lg.Info("KSM → %s", val)
+	}
+}
+
+func setDisplayHz(hz int) {
+	mode := fmt.Sprintf("2880x1800@%d", hz)
+	arg := fmt.Sprintf("output.%s.mode.%s", displayOutputID, mode)
+	// kscreen-doctor requires a running Wayland session — run as the display user
+	uid, wayland, dbus := findSessionEnv()
+	if uid == "" {
+		lg.Warn("setDisplayHz: no active user session found")
+		return
+	}
+	cmd := exec.Command("runuser", "-u", uid, "--",
+		"env",
+		"WAYLAND_DISPLAY="+wayland,
+		"DBUS_SESSION_BUS_ADDRESS="+dbus,
+		"kscreen-doctor", arg,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		lg.Warn("kscreen-doctor %s: %v — %s", mode, err, strings.TrimSpace(string(out)))
+	} else {
+		lg.Info("display → %s", mode)
+	}
+}
+
+// findSessionEnv returns (username, WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS)
+// for the first active graphical session found in /run/user/*/wayland-*.
+func findSessionEnv() (username, wayland, dbus string) {
+	sockets, _ := filepath.Glob("/run/user/*/wayland-[0-9]")
+	if len(sockets) == 0 {
+		return
+	}
+	// e.g. /run/user/1000/wayland-0 → uid dir = /run/user/1000
+	uidDir := filepath.Dir(sockets[0])
+	uid := filepath.Base(uidDir) // "1000"
+	// Look up username from /etc/passwd
+	if d, err := os.ReadFile("/etc/passwd"); err == nil {
+		for _, line := range strings.Split(string(d), "\n") {
+			fields := strings.Split(line, ":")
+			if len(fields) >= 4 && fields[2] == uid {
+				username = fields[0]
+				break
+			}
+		}
+	}
+	if username == "" {
+		username = uid // fall back to numeric uid
+	}
+	wayland = filepath.Base(sockets[0]) // e.g. "wayland-0"
+	dbus = "unix:path=" + uidDir + "/bus"
+	return
+}
+
+// --- sensors ---
 
 func readACState() bool {
 	entries, _ := filepath.Glob("/sys/class/power_supply/*/type")
@@ -145,18 +393,11 @@ func readCPUTemp() float64 {
 	for _, p := range entries {
 		d, _ := os.ReadFile(p)
 		m, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
-		if c := m / 1000.0; c > max { max = c }
+		if c := m / 1000.0; c > max {
+			max = c
+		}
 	}
 	return max
-}
-
-func readCPULoad() float64 {
-	d, err := os.ReadFile("/proc/loadavg")
-	if err != nil { return 0 }
-	fields := strings.Fields(string(d))
-	if len(fields) < 3 { return 0 }
-	load, _ := strconv.ParseFloat(fields[2], 64)
-	return load / float64(cpuCount)
 }
 
 func readGPULoad() float64 {
@@ -165,97 +406,24 @@ func readGPULoad() float64 {
 	for _, m := range matches {
 		d, _ := os.ReadFile(m)
 		val, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
-		if val > max { max = val }
+		if val > max {
+			max = val
+		}
 	}
 	return max
 }
 
-func applyPowerState(onAC bool, tempC, cpuLoad, gpuLoad float64) {
-	// [CHANGE: gemini-cli | 2026-05-10] Smart Mode Switching Logic v2.1
-	profile := prevState.Profile
-	if profile == "" { profile = "Quiet" } // Default to Quiet
+// --- helpers ---
 
-	// Battery: Always Quiet
-	if !onAC {
-		profile = "Quiet"
-	} else {
-		// 1. GPU Gaming Trigger -> Performance
-		if gpuLoad > 80.0 {
-			gpuHighTicks++
-		} else {
-			gpuHighTicks = 0
-		}
-		if gpuHighTicks >= 15 { // 30 seconds
-			profile = "Performance"
-		}
-
-		// 2. GPU Idle Trigger -> Back from Performance
-		if profile == "Performance" && gpuLoad < 20.0 {
-			gpuLowTicks++
-		} else {
-			gpuLowTicks = 0
-		}
-		if gpuLowTicks >= 30 { // 60 seconds
-			profile = "Balanced"
-		}
-
-		// 3. CPU Heavy Work -> Balanced (if in Quiet)
-		// [CHANGE: v2.1] CPU > 40% for 3 minutes
-		if profile == "Quiet" && cpuLoad > 0.4 {
-			cpuHighTicks++
-		} else {
-			cpuHighTicks = 0
-		}
-		if cpuHighTicks >= 90 { // 180 seconds / 2s per tick = 90
-			profile = "Balanced"
-		}
-
-		// 4. CPU Idle -> Quiet (if in Balanced)
-		// [CHANGE: v2.1] CPU < 30% for 3 minutes
-		if profile == "Balanced" && cpuLoad < 0.3 {
-			cpuLowTicks++
-		} else {
-			cpuLowTicks = 0
-		}
-		if cpuLowTicks >= 90 { // 180 seconds
-			profile = "Quiet"
-		}
-
-		// 5. Emergency Throttle (> 85C)
-		if tempC > 85.0 {
-			lg.Warn("CPU temp %.1f°C > 85°C — Emergency Quiet", tempC)
-			profile = "Quiet"
-		} else if profile == "Quiet" && prevState.Profile == "Quiet" && tempC < 75.0 && cpuLoad > 0.4 {
-			// Recovery from emergency if load is still high
-			profile = "Balanced"
-		}
-	}
-
-	if profile == prevState.Profile && onAC == prevState.OnAC {
-		return
-	}
-
-	// 30s Hold Time
-	if onAC == prevState.OnAC && time.Since(lastChangeTime) < 30*time.Second {
-		return
-	}
-
-	lg.Info("state change: profile=%s load=%.2f gpu=%.0f%% temp=%.1f°C", profile, cpuLoad, gpuLoad, tempC)
-
-	if err := runCmd("asusctl", "profile", "set", profile); err != nil {
-		lg.Error("asusctl profile set %s: %v", profile, err)
-	}
-	lastChangeTime = time.Now()
-
+func updateState(onAC bool, temp, gpuLoad float64, epp, profile string) {
 	prevState = PowerState{
 		OnAC:      onAC,
-		CPUTempC:  tempC,
-		CPULoad:   cpuLoad,
+		CPUTempC:  temp,
 		GPULoad:   gpuLoad,
+		EPP:       epp,
 		Profile:   profile,
 		UpdatedAt: time.Now(),
 	}
-	reportToAI()
 }
 
 func applyAggressiveFanCurve(mode string) {
