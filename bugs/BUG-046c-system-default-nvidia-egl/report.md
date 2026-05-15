@@ -68,6 +68,17 @@ Exec = /bin/sh -c 'if [ -f /usr/share/glvnd/egl_vendor.d/10_nvidia.json ]; \
 | HIVE (llama.cpp) | CUDA (unaffected by EGL) | CUDA (unaffected) |
 | Wine GPU selector | User picks | User picks (unchanged) |
 
+## Why JSON Rename Alone Was Not Enough
+
+The `60_nvidia.json` rename affects GLVND's EGL vendor *enumeration order*.
+But KWin in Hybrid NVIDIA mode advertises **both** DRM render nodes (`renderD128` AMD,
+`renderD129` NVIDIA) to all Wayland clients via the `zwp_linux_dmabuf` protocol.
+Clients open renderD129 directly via the fd sent by the compositor, bypassing GLVND ordering.
+
+`__EGL_VENDOR_LIBRARY_FILENAMES` is a hard override — it completely replaces vendor
+discovery and forces ONLY the specified EGL vendor library to load, regardless of how
+the DRM fd was obtained. This is why both fixes are required.
+
 ## When Does It Take Full Effect?
 - **New processes started after rename**: immediately use AMD EGL ✅
 - **Running processes (Xwayland, plasmashell, etc.)**: need a **logout/login** to restart
