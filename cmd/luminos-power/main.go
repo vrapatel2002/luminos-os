@@ -231,6 +231,8 @@ func monitorLoop(ctx context.Context) {
 				if gpuProfile == "Balanced" && cpuProfile == "Balanced" {
 					lg.Info("beast mode exit → Balanced (cpu=%.0f%%, gpu=%.0f%%)", cpuLoad, gpuLoad)
 					runCmd("asusctl", "profile", "set", "Balanced")
+					setAllMaxFreq(0) // clear any emergency freq cap applied during beast mode
+					currentThermalZone = ZoneCool
 					setEPPAfterAsusctl("power") // back to cool target
 					updateState(onAC, temp, gpuLoad, "power", "Balanced")
 					continue
