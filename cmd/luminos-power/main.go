@@ -47,11 +47,19 @@ const (
 	wifiIface = "wlp3s0"
 	// kscreen output ID for the built-in eDP panel
 	displayOutputID = "1"
-	// GPU gaming thresholds (unchanged from v2.1)
+	// GPU gaming thresholds
 	gpuHighThreshPct   = 80.0
 	gpuHighThreshTicks = 15 // 30s at 2s poll
 	gpuLowThreshPct    = 20.0
 	gpuLowThreshTicks  = 30 // 60s at 2s poll
+	// CPU beast-mode thresholds — catches CPU-heavy work (ML training, compilation)
+	// that GPU detection misses entirely.
+	// 10 ticks = 20s: short enough to trigger before thermal oscillation at ~85°C
+	// can reset the counter too many times.
+	cpuHighThreshPct   = 75.0
+	cpuHighThreshTicks = 10 // 20s at 2s poll
+	cpuLowThreshPct    = 25.0
+	cpuLowThreshTicks  = 30 // 60s at 2s poll
 	// Emergency thermal threshold
 	thermalEmergencyC = 85.0
 
@@ -90,9 +98,15 @@ var (
 
 	gpuHighTicks int
 	gpuLowTicks  int
+	cpuHighTicks int
+	cpuLowTicks  int
 
 	currentThermalZone ThermalZone = ZoneCool
 	cpuHardwareMaxFreq int         // read from sysfs at startup, kHz
+
+	// /proc/stat snapshot for delta-based CPU load calculation
+	lastCPUStatIdle  uint64
+	lastCPUStatTotal uint64
 )
 
 func main() {
@@ -174,10 +188,13 @@ func monitorLoop(ctx context.Context) {
 			onAC := readACState()
 			temp := readCPUTemp()
 			gpuLoad := readGPULoad()
+			cpuLoad := readCPULoadPct()
 
 			// Detect AC transition → immediate response
 			if onAC != prevState.OnAC {
 				applyACTransition(onAC)
+				cpuHighTicks = 0
+				cpuLowTicks = 0
 				// Adjust poll rate
 				newInterval := batteryInterval(onAC)
 				if newInterval != interval {
@@ -187,42 +204,64 @@ func monitorLoop(ctx context.Context) {
 				}
 			}
 
-			// Emergency thermal: override EPP instantly, no delay
-			if temp > thermalEmergencyC {
-				lg.Warn("CPU temp %.1f°C > %.0f°C — Emergency: EPP=power + Quiet profile", temp, thermalEmergencyC)
-				runCmd("asusctl", "profile", "set", "Quiet")
-				setAllEPP("power") // after asusctl
-				setAllMaxFreq(2000000) // 2.0 GHz hard cap in emergency
-				updateState(onAC, temp, gpuLoad, "power", "Quiet")
-				gpuHighTicks = 0
-				gpuLowTicks = 0
-				continue
-			}
-
-			// GPU gaming detection (AC only — no Performance on battery)
-			// Gaming mode bypasses thermal governor — user explicitly wants performance.
+			// Beast-mode detection runs BEFORE emergency thermal so sustained CPU/GPU
+			// load can trigger Performance before the emergency handler resets the ticks.
+			// GPU path: games, GPU-accelerated workloads.
+			// CPU path: ML training (XGBoost, feature engineering), compilation, etc.
 			if onAC && prevState.Profile != "Performance" {
-				profile := applyGamingDetection(gpuLoad, prevState.Profile)
-				if profile == "Performance" {
+				gpuProfile := applyGamingDetection(gpuLoad, prevState.Profile)
+				cpuProfile := applyCPUBeastDetection(cpuLoad, prevState.Profile)
+				if gpuProfile == "Performance" || cpuProfile == "Performance" {
+					src := "gpu"
+					if cpuProfile == "Performance" {
+						src = "cpu"
+					}
+					lg.Info("beast mode → Performance (trigger: %s, cpu=%.0f%%, gpu=%.0f%%)", src, cpuLoad, gpuLoad)
 					runCmd("asusctl", "profile", "set", "Performance")
 					setEPPAfterAsusctl("performance")
-					setAllMaxFreq(0) // uncap for gaming
+					setAllMaxFreq(0) // full boost — no thermal cap during beast mode
 					currentThermalZone = ZoneCool
 					updateState(onAC, temp, gpuLoad, "performance", "Performance")
 					continue
 				}
 			} else if onAC && prevState.Profile == "Performance" {
-				// Check if we should exit gaming mode
-				profile := applyGamingDetection(gpuLoad, "Performance")
-				if profile == "Balanced" {
+				// Exit beast mode when both GPU and CPU load drop
+				gpuProfile := applyGamingDetection(gpuLoad, "Performance")
+				cpuProfile := applyCPUBeastDetection(cpuLoad, "Performance")
+				if gpuProfile == "Balanced" && cpuProfile == "Balanced" {
+					lg.Info("beast mode exit → Balanced (cpu=%.0f%%, gpu=%.0f%%)", cpuLoad, gpuLoad)
 					runCmd("asusctl", "profile", "set", "Balanced")
-					setEPPAfterAsusctl("power") // back to cool target after gaming
+					setEPPAfterAsusctl("power") // back to cool target
 					updateState(onAC, temp, gpuLoad, "power", "Balanced")
 					continue
 				}
 			}
 
-			// Thermal governor — skip when gaming (temp will be high intentionally)
+			// Emergency thermal — after beast mode check.
+			// In Performance (beast/gaming): Ryzen 9 8845HS TJmax is 105°C, so 90°C
+			// under load is normal for a gaming laptop. Use 95°C threshold and only
+			// apply a freq cap — do NOT exit Performance profile.
+			// Outside Performance: 85°C threshold, full Quiet + 2GHz cap.
+			emergencyThreshC := thermalEmergencyC // 85°C for normal modes
+			if prevState.Profile == "Performance" {
+				emergencyThreshC = 95.0 // gaming laptop safe operating limit
+			}
+			if temp > emergencyThreshC {
+				if prevState.Profile == "Performance" {
+					lg.Warn("CPU temp %.1f°C > %.0f°C in beast mode — freq cap to 3.5GHz (staying in Performance)", temp, emergencyThreshC)
+					setAllMaxFreq(3500000) // throttle without exiting beast mode
+					// EPP stays at performance — SMU will back off naturally
+				} else {
+					lg.Warn("CPU temp %.1f°C > %.0f°C — Emergency: EPP=power + Quiet + 2GHz cap", temp, thermalEmergencyC)
+					runCmd("asusctl", "profile", "set", "Quiet")
+					setAllEPP("power")
+					setAllMaxFreq(2000000)
+					updateState(onAC, temp, gpuLoad, "power", "Quiet")
+				}
+				continue
+			}
+
+			// Thermal governor — skipped in Performance (beast/gaming handles thermals)
 			if prevState.Profile != "Performance" {
 				applyThermalGovernor(temp, onAC)
 			}
@@ -287,6 +326,31 @@ func applyGamingDetection(gpuLoad float64, currentProfile string) string {
 	}
 	if gpuLowTicks >= gpuLowThreshTicks {
 		gpuLowTicks = 0
+		return "Balanced"
+	}
+	return currentProfile
+}
+
+// applyCPUBeastDetection mirrors applyGamingDetection for CPU-heavy workloads.
+// Catches ML training, XGBoost, compilation — anything GPU detection misses.
+func applyCPUBeastDetection(cpuLoad float64, currentProfile string) string {
+	if cpuLoad > cpuHighThreshPct {
+		cpuHighTicks++
+		cpuLowTicks = 0
+	} else if currentProfile == "Performance" && cpuLoad < cpuLowThreshPct {
+		cpuLowTicks++
+		cpuHighTicks = 0
+	} else {
+		cpuHighTicks = 0
+		cpuLowTicks = 0
+	}
+
+	if cpuHighTicks >= cpuHighThreshTicks {
+		cpuHighTicks = cpuHighThreshTicks // cap
+		return "Performance"
+	}
+	if cpuLowTicks >= cpuLowThreshTicks {
+		cpuLowTicks = 0
 		return "Balanced"
 	}
 	return currentProfile
@@ -595,6 +659,52 @@ func readGPULoad() float64 {
 		}
 	}
 	return max
+}
+
+// readCPULoadPct returns system-wide CPU utilisation as a percentage (0-100)
+// computed from the delta of /proc/stat between consecutive calls.
+// First call always returns 0 (no previous snapshot to diff against).
+func readCPULoadPct() float64 {
+	data, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return 0
+	}
+	// First line: "cpu  user nice system idle iowait irq softirq steal guest guest_nice"
+	line := strings.SplitN(string(data), "\n", 2)[0]
+	fields := strings.Fields(line)
+	if len(fields) < 5 || fields[0] != "cpu" {
+		return 0
+	}
+	var vals [10]uint64
+	for i, f := range fields[1:] {
+		if i >= 10 {
+			break
+		}
+		vals[i], _ = strconv.ParseUint(f, 10, 64)
+	}
+	idle := vals[3] + vals[4] // idle + iowait
+	var total uint64
+	for _, v := range vals {
+		total += v
+	}
+
+	if lastCPUStatTotal == 0 {
+		// First call — seed the snapshot, return 0
+		lastCPUStatIdle = idle
+		lastCPUStatTotal = total
+		return 0
+	}
+
+	deltaTotal := total - lastCPUStatTotal
+	deltaIdle := idle - lastCPUStatIdle
+	lastCPUStatIdle = idle
+	lastCPUStatTotal = total
+
+	if deltaTotal == 0 {
+		return 0
+	}
+	used := deltaTotal - deltaIdle
+	return float64(used) / float64(deltaTotal) * 100.0
 }
 
 // --- helpers ---
