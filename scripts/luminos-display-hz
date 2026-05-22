@@ -1,0 +1,22 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-05-21] Luminos display Hz settings window
+
+CURRENT=$(python3 -c "
+import json
+d = json.load(open('/home/shawn/.config/kwinoutputconfig.json'))
+for item in d:
+    for o in item.get('data', []):
+        if 'mode' in o:
+            print(o['mode']['refreshRate'] // 1000)
+            break
+" 2>/dev/null || echo "120")
+
+CHOICE=$(kdialog \
+  --title "Display — Refresh Rate" \
+  --radiolist "Current: ${CURRENT} Hz" \
+  "60"  "60 Hz  —  battery saver (coding, reading)" $([ "$CURRENT" = "60"  ] && echo on || echo off) \
+  "120" "120 Hz  —  smooth (browsing, video, gaming)" $([ "$CURRENT" = "120" ] && echo on || echo off) \
+  2>/dev/null)
+
+[ "$CHOICE" = "60"  ] && luminos-60hz
+[ "$CHOICE" = "120" ] && luminos-120hz

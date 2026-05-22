@@ -4,8 +4,6 @@ import org.kde.plasma.components 3.0 as PC3
 import org.kde.plasma.plasmoid
 import org.kde.plasma.plasma5support as P5Support
 
-// [CHANGE: claude-code | 2026-05-21] Added Hz toggle row + compact Hz indicator
-
 PlasmoidItem {
     id: root
     preferredRepresentation: compactRepresentation
@@ -15,8 +13,7 @@ PlasmoidItem {
     property string fanSpeed: "0 RPM"
     property string tdp: "15W"
     property string gpuTemp: "0°C"
-    property bool   nvidiaAwake: false
-    property string currentHz: "120"   // read from kwinoutputconfig.json on poll
+    property bool nvidiaAwake: false
 
     P5Support.DataSource {
         id: executable
@@ -31,10 +28,6 @@ PlasmoidItem {
                 parseSensors(stdout)
             } else if (source.includes("nvidia")) {
                 root.nvidiaAwake = stdout.includes("W")
-            } else if (source.includes("kwinoutputconfig")) {
-                var hz = stdout.trim()
-                if (hz === "60" || hz === "120")
-                    root.currentHz = hz
             }
             disconnectSource(source)
         }
@@ -72,6 +65,7 @@ PlasmoidItem {
     }
 
     function updateAll() {
+        // [CHANGE: gemini-cli | 2026-05-11]
         executable.exec(
             "sudo journalctl -u luminos-power " +
             "--no-pager -n 1 | " +
@@ -87,19 +81,6 @@ PlasmoidItem {
             "power.draw --format=csv,noheader " +
             "2>/dev/null | head -1"
         )
-        // Read current refresh rate from kwinoutputconfig.json
-        executable.exec(
-            "python3 -c \"import json; " +
-            "d=json.load(open('/home/shawn/.config/kwinoutputconfig.json')); " +
-            "[print(o['mode']['refreshRate']//1000) " +
-            " for item in d for o in item.get('data',[]) if 'mode' in o]\" " +
-            "2>/dev/null | head -1"
-        )
-    }
-
-    function setHz(hz) {
-        root.currentHz = String(hz)
-        executable.exec("luminos-" + hz + "hz")
     }
 
     Timer {
@@ -111,9 +92,8 @@ PlasmoidItem {
 
     Component.onCompleted: root.updateAll()
 
-    // ── Compact panel bar ────────────────────────────────────────────────────
     compactRepresentation: Item {
-        Layout.minimumWidth: 240
+        Layout.minimumWidth: 200
         Layout.minimumHeight: 24
 
         RowLayout {
@@ -121,13 +101,14 @@ PlasmoidItem {
             anchors.margins: 4
             spacing: 8
 
-            // Power mode dot
+            // Mode indicator
             Rectangle {
                 width: 8; height: 8
                 radius: 4
-                color: root.currentMode === "Performance" ? "#ff4444"
-                     : root.currentMode === "Balanced"    ? "#ffaa00"
-                     : "#00cc66"
+                color: root.currentMode === "Performance"
+                    ? "#ff4444"
+                    : root.currentMode === "Balanced"
+                    ? "#ffaa00" : "#00cc66"
             }
 
             PC3.Label {
@@ -137,7 +118,8 @@ PlasmoidItem {
             }
 
             PC3.Label {
-                color: parseFloat(root.currentTemp) > 70 ? "#ff4444" : "#e0e0e0"
+                color: parseFloat(root.currentTemp) > 70
+                    ? "#ff4444" : "#e0e0e0"
                 font.pixelSize: 11
                 text: "🌡" + root.currentTemp
             }
@@ -148,23 +130,18 @@ PlasmoidItem {
                 text: "🌀" + root.fanSpeed
             }
 
-            // Hz indicator — orange at 60, blue at 120
-            PC3.Label {
-                color: root.currentHz === "60" ? "#ffaa00" : "#0080ff"
-                font.pixelSize: 10
-                font.bold: true
-                text: root.currentHz + "Hz"
-            }
-
-            // NVIDIA dot
             Rectangle {
                 width: 8; height: 8
                 radius: 4
-                color: root.nvidiaAwake ? "#ff6600" : "#444"
-
-                PC3.ToolTip.text: root.nvidiaAwake ? "NVIDIA: Active" : "NVIDIA: Sleep"
+                color: root.nvidiaAwake
+                    ? "#ff6600" : "#444"
+                visible: true
+                
+                PC3.ToolTip.text: root.nvidiaAwake
+                    ? "NVIDIA: Active"
+                    : "NVIDIA: Sleep"
                 PC3.ToolTip.visible: compactMA.containsMouse
-
+                
                 MouseArea {
                     id: compactMA
                     anchors.fill: parent
@@ -174,10 +151,9 @@ PlasmoidItem {
         }
     }
 
-    // ── Full popup ───────────────────────────────────────────────────────────
     fullRepresentation: Item {
         width: 280
-        height: 320   // +70 for Hz toggle row
+        height: 250
 
         Rectangle {
             anchors.fill: parent
@@ -196,19 +172,29 @@ PlasmoidItem {
                     font.bold: true
                 }
 
-                // Mode badge
+                // Mode row
                 RowLayout {
                     Layout.fillWidth: true
-                    PC3.Label { text: "Mode"; color: "#888"; font.pixelSize: 11 }
+                    PC3.Label {
+                        text: "Mode"
+                        color: "#888"
+                        font.pixelSize: 11
+                    }
                     Item { Layout.fillWidth: true }
                     Rectangle {
-                        width: 80; height: 22; radius: 11
-                        color:  root.currentMode === "Performance" ? "#ff444422"
-                              : root.currentMode === "Balanced"    ? "#ffaa0022"
-                              : "#00cc6622"
-                        border.color: root.currentMode === "Performance" ? "#ff4444"
-                                    : root.currentMode === "Balanced"    ? "#ffaa00"
-                                    : "#00cc66"
+                        width: 80; height: 22
+                        radius: 11
+                        color: root.currentMode ===
+                            "Performance" ? "#ff444422"
+                            : root.currentMode ===
+                            "Balanced" ? "#ffaa0022"
+                            : "#00cc6622"
+                        border.color:
+                            root.currentMode ===
+                            "Performance" ? "#ff4444"
+                            : root.currentMode ===
+                            "Balanced" ? "#ffaa00"
+                            : "#00cc66"
                         PC3.Label {
                             anchors.centerIn: parent
                             text: root.currentMode
@@ -218,23 +204,42 @@ PlasmoidItem {
                     }
                 }
 
-                // CPU temperature
+                // Temperature
                 ColumnLayout {
                     spacing: 4
                     Layout.fillWidth: true
                     RowLayout {
-                        PC3.Label { text: "CPU Temp"; color: "#888"; font.pixelSize: 11 }
+                        PC3.Label {
+                            text: "CPU Temp"
+                            color: "#888"
+                            font.pixelSize: 11
+                        }
                         Item { Layout.fillWidth: true }
-                        PC3.Label { text: root.currentTemp; color: "#e0e0e0"; font.pixelSize: 11 }
+                        PC3.Label {
+                            text: root.currentTemp
+                            color: "#e0e0e0"
+                            font.pixelSize: 11
+                        }
                     }
                     Rectangle {
-                        Layout.fillWidth: true; height: 6; radius: 3; color: "#222"
+                        Layout.fillWidth: true
+                        height: 6; radius: 3
+                        color: "#222"
                         Rectangle {
-                            width:  parent.width * Math.min(parseFloat(root.currentTemp) / 100, 1)
+                            width: {
+                                var t = parseFloat(
+                                    root.currentTemp)
+                                return parent.width *
+                                    Math.min(t/100, 1)
+                            }
                             height: 6; radius: 3
-                            color:  parseFloat(root.currentTemp) > 80 ? "#ff4444"
-                                  : parseFloat(root.currentTemp) > 65 ? "#ffaa00"
-                                  : "#00cc66"
+                            color: {
+                                var t = parseFloat(
+                                    root.currentTemp)
+                                return t > 80 ?
+                                    "#ff4444" : t > 65 ?
+                                    "#ffaa00" : "#00cc66"
+                            }
                         }
                     }
                 }
@@ -242,76 +247,61 @@ PlasmoidItem {
                 // Fan speed
                 RowLayout {
                     Layout.fillWidth: true
-                    PC3.Label { text: "Fan Speed"; color: "#888"; font.pixelSize: 11 }
+                    PC3.Label {
+                        text: "Fan Speed"
+                        color: "#888"
+                        font.pixelSize: 11
+                    }
                     Item { Layout.fillWidth: true }
-                    PC3.Label { text: root.fanSpeed; color: "#0080ff"; font.pixelSize: 11 }
+                    PC3.Label {
+                        text: root.fanSpeed
+                        color: "#0080ff"
+                        font.pixelSize: 11
+                    }
                 }
 
                 // NVIDIA status
                 RowLayout {
                     Layout.fillWidth: true
-                    PC3.Label { text: "NVIDIA GPU"; color: "#888"; font.pixelSize: 11 }
+                    PC3.Label {
+                        text: "NVIDIA GPU"
+                        color: "#888"
+                        font.pixelSize: 11
+                    }
                     Item { Layout.fillWidth: true }
                     PC3.Label {
-                        text:  root.nvidiaAwake ? "⚡ Active" : "💤 Sleeping"
-                        color: root.nvidiaAwake ? "#ff6600"  : "#00cc66"
+                        text: root.nvidiaAwake ?
+                            "⚡ Active" : "💤 Sleeping"
+                        color: root.nvidiaAwake ?
+                            "#ff6600" : "#00cc66"
                         font.pixelSize: 11
                     }
                 }
 
-                // ── Display Hz toggle ────────────────────────────────────────
-                PC3.Label { text: "Display"; color: "#555"; font.pixelSize: 10 }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-
-                    Repeater {
-                        model: ["60", "120"]
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 28; radius: 6
-                            color:  root.currentHz === modelData ? "#0080ff22" : "#1a1a1a"
-                            border.color: root.currentHz === modelData ? "#0080ff" : "#333"
-
-                            RowLayout {
-                                anchors.centerIn: parent
-                                spacing: 4
-                                PC3.Label {
-                                    text: modelData + " Hz"
-                                    color: "#e0e0e0"
-                                    font.pixelSize: 10
-                                }
-                                PC3.Label {
-                                    text: modelData === "60" ? "· battery" : "· sharp"
-                                    color: "#555"
-                                    font.pixelSize: 9
-                                }
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: root.setHz(modelData)
-                            }
-                        }
-                    }
+                // Manual mode buttons
+                PC3.Label {
+                    text: "Manual Override"
+                    color: "#555"
+                    font.pixelSize: 10
                 }
-                // ─────────────────────────────────────────────────────────────
-
-                // Power profile buttons
-                PC3.Label { text: "Manual Override"; color: "#555"; font.pixelSize: 10 }
 
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 6
 
                     Repeater {
-                        model: ["Quiet", "Balanced", "Performance"]
+                        model: ["Quiet","Balanced",
+                                "Performance"]
                         Rectangle {
                             Layout.fillWidth: true
                             height: 28; radius: 6
-                            color:  root.currentMode === modelData ? "#0080ff22" : "#1a1a1a"
-                            border.color: root.currentMode === modelData ? "#0080ff" : "#333"
+                            color: root.currentMode
+                                === modelData ?
+                                "#0080ff22" : "#1a1a1a"
+                            border.color:
+                                root.currentMode ===
+                                modelData ?
+                                "#0080ff" : "#333"
                             PC3.Label {
                                 anchors.centerIn: parent
                                 text: modelData
@@ -321,8 +311,11 @@ PlasmoidItem {
                             MouseArea {
                                 anchors.fill: parent
                                 onClicked: {
-                                    executable.exec("asusctl profile set " + modelData)
-                                    root.currentMode = modelData
+                                    executable.exec(
+                                        "asusctl profile set "
+                                        + modelData)
+                                    root.currentMode =
+                                        modelData
                                 }
                             }
                         }
