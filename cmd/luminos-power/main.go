@@ -723,13 +723,12 @@ func updateState(onAC bool, temp, gpuLoad float64, epp, profile string) {
 }
 
 func applyAggressiveFanCurve(mode string) {
-	// [CHANGE: claude-code | 2026-05-19]
-	// Early-ramp curve: spin hard at 40°C so temp can't climb past 50°C.
-	// Old curve only reached 45% PWM at 50°C — too late to pull it back.
-	// Now at 45°C fans are already at 62% → cap sits comfortably below 50°C.
-	lg.Info("Applying fan curve to %s profile (50°C target)", mode)
-	cpuGpuCurve := "30c:0%,40c:40%,45c:62%,50c:80%,60c:95%,70c:100%,80c:100%,90c:100%"
-	midCurve    := "30c:0%,40c:30%,45c:52%,50c:72%,60c:88%,70c:100%,80c:100%,90c:100%"
+	// [CHANGE: claude-code | 2026-05-21] Fan curve v3.2 — 47-49°C target
+	// Silent below 44°C. Gentle spin at 47°C to hold target. Aggressive ramp above 49°C.
+	// Previous early-ramp (40% at 40°C) was louder than needed for 40°C idle.
+	lg.Info("Applying fan curve to %s profile (47-49°C target)", mode)
+	cpuGpuCurve := "30c:0%,44c:0%,47c:20%,49c:38%,52c:62%,57c:80%,65c:100%,90c:100%"
+	midCurve    := "30c:0%,44c:0%,47c:15%,49c:30%,52c:52%,57c:72%,65c:100%,90c:100%"
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "cpu", "--data", cpuGpuCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "gpu", "--data", cpuGpuCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "mid", "--data", midCurve)
