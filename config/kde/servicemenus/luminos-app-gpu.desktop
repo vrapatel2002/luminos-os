@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=application/x-desktop;
+Actions=app_gpu_ask;
+X-KDE-Priority=TopLevel
+
+[Desktop Action app_gpu_ask]
+Name=Launch on Different GPU...
+Icon=video-display
+Exec=bash -c 'APP=$(grep "^Exec=" %f | head -1 | sed "s/^Exec=//;s/ %.//g"); luminos-gpu-launch $APP'

@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=application/x-executable;application/x-elf;application/x-sharedlib;
+Actions=gpu_amd;gpu_nvidia;gpu_ask;
+X-KDE-Priority=TopLevel
+X-KDE-Submenu=Run on GPU
+
+[Desktop Action gpu_ask]
+Name=Ask GPU (AMD or NVIDIA)...
+Icon=video-display
+Exec=luminos-gpu-launch %f
+
+[Desktop Action gpu_amd]
+Name=Run on AMD Radeon 780M (Battery)
+Icon=cpu
+Exec=env DRI_PRIME=0 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json %f
+
+[Desktop Action gpu_nvidia]
+Name=Run on NVIDIA RTX 4050 (Performance)
+Icon=video-card
+Exec=luminos-nvidia-run %f

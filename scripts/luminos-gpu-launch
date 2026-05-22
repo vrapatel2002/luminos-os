@@ -1,0 +1,50 @@
+#!/bin/bash
+# Luminos Universal GPU Launcher
+# [CHANGE: claude-code | 2026-05-21]
+# Usage: luminos-gpu-launch [command] [args...]
+# Example: luminos-gpu-launch blender
+#          luminos-gpu-launch steam
+#
+# For Flatpak apps: luminos-gpu-launch flatpak run com.valvesoftware.Steam
+#
+# Key env vars set by GPU choice:
+#   AMD:    DRI_PRIME=0, VK_ICD=radeon, EGL=mesa
+#   NVIDIA: DRI_PRIME=1, VK_ICD=nvidia, EGL=nvidia, wakes NVIDIA from power gate
+
+if [ $# -eq 0 ]; then
+  echo "Usage: luminos-gpu-launch <command> [args...]"
+  echo "Example: luminos-gpu-launch blender"
+  exit 1
+fi
+
+CMD="$1"
+shift
+ARGS=("$@")
+
+GPU_CHOICE=$(kdialog \
+  --title "Luminos — GPU Selector" \
+  --menu "Run '$(basename "$CMD")' on which GPU?" \
+  "igpu" "AMD Radeon 780M  ·  Battery Saver (default)" \
+  "nvidia" "NVIDIA RTX 4050  ·  High Performance" \
+  2>/dev/null)
+
+# Default AMD if dialog cancelled
+[ -z "$GPU_CHOICE" ] && GPU_CHOICE="igpu"
+
+if [ "$GPU_CHOICE" = "igpu" ]; then
+  export DRI_PRIME=0
+  export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
+  export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+  notify-send "GPU Launcher" "$(basename "$CMD") → AMD Radeon 780M" --icon=dialog-information 2>/dev/null
+else
+  export DRI_PRIME=1
+  export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+  export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/60_nvidia.json
+  export __NV_PRIME_RENDER_OFFLOAD=1
+  export __GLX_VENDOR_LIBRARY_NAME=nvidia
+  # Wake NVIDIA from power gate
+  echo "on" | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control > /dev/null 2>&1 || true
+  notify-send "GPU Launcher" "$(basename "$CMD") → NVIDIA RTX 4050" --icon=dialog-information 2>/dev/null
+fi
+
+exec "$CMD" "${ARGS[@]}"

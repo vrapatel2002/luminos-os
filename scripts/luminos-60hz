@@ -1,0 +1,13 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-05-21] Quick display Hz toggle — 60Hz (battery saver)
+WAYLAND_DISPLAY=wayland-0 DBUS_SESSION_BUS_ADDRESS="$(cat /run/user/1000/dbus-session)" kscreen-doctor output.1.mode.2880x1800@60 2>/dev/null || \
+  python3 -c "
+import json, subprocess
+cfg = json.load(open('/home/shawn/.config/kwinoutputconfig.json'))
+for item in cfg:
+    for o in item.get('data', []):
+        if 'mode' in o:
+            o['mode']['refreshRate'] = 60000
+json.dump(cfg, open('/home/shawn/.config/kwinoutputconfig.json', 'w'), indent=4)
+" && WAYLAND_DISPLAY=wayland-0 qdbus6 org.kde.KWin /KWin reconfigure 2>/dev/null
+notify-send "Display" "60 Hz — Battery mode" --icon=video-display 2>/dev/null
