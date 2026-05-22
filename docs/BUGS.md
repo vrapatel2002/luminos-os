@@ -17,6 +17,17 @@ Each bug entry:
 
 ## Fixed Bugs
 
+### BUG-052 — Kickoff Launcher Empty / Chrome Not Searchable
+- Status: FIXED
+- Severity: HIGH
+- Component: ~/.config/plasma-org.kde.plasma.desktop-appletsrc, ~/.local/share/applications/com.google.Chrome.desktop
+- Description: Opening the Start button showed a blank screen. Searching "chrome" returned nothing.
+- Root Cause 1: `applicationsDisplay=0` — Kickoff defaults to Favorites tab. No apps were pinned to Favorites, so the launcher appeared empty. The All Applications tab existed but user had no way to know.
+- Root Cause 2: Chrome desktop file Exec line had `@@u %U @@` — Flatpak-specific URL forwarding syntax that is invalid for a plain wrapper script. Caused incorrect desktop file parsing.
+- Fix Applied: Set `applicationsDisplay=1` in plasma-org.kde.plasma.desktop-appletsrc (Kickoff opens to All Applications by default). Fixed Exec to `Exec=/usr/local/bin/chrome-luminos %U`. Rebuilt sycoca index via `kbuildsycoca6 --noincremental`. Restarted plasmashell via `systemctl --user restart plasma-plasmashell`.
+- Date Found: 2026-05-21
+- Date Fixed: 2026-05-21
+
 ### BUG-051 — Display Stutter / 120Hz Compositing Lag
 - Status: FIXED
 - Severity: MEDIUM
