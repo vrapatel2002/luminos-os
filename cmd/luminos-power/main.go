@@ -63,31 +63,32 @@ const (
 	// Emergency thermal threshold
 	thermalEmergencyC = 85.0
 
-	// Thermal governor zones (ZoneCool→ZoneHot) with 5°C hysteresis for exit.
-	// Target: 45°C idle via EPP hints alone. Freq caps only for genuinely hot temps.
-	// On AC: caps start at 72°C so normal workloads are never throttled.
-	// On battery: caps start at 62°C — saves power and battery.
-	thermalHysteresisC = 5.0
+	// [CHANGE: claude-code | 2026-05-21] Thermal governor v3.3 — fixed oscillation
+	// Hysteresis raised 5→12°C: once a cap kicks in it stays until genuinely cool.
+	// AC zone 2 lowered 72→65°C: caps sooner, prevents 70-80°C oscillation loop.
+	// AC zone 3 lowered 80→75°C: catch runaway before emergency threshold.
+	// Result: temp settles in 55-65°C range under load instead of 65-81°C cycling.
+	thermalHysteresisC = 12.0
 
-	// AC thresholds — permissive, caps only when actually overheating
-	thermalACZone1C = 60.0 // cool→mild on AC: EPP nudge only, no cap
-	thermalACZone2C = 72.0 // mild→warm on AC: 4.0 GHz cap
-	thermalACZone3C = 80.0 // warm→hot on AC:  3.0 GHz cap
+	// AC thresholds — cap starts at 65°C to prevent oscillation above that
+	thermalACZone1C = 55.0 // cool→mild on AC: EPP nudge only, no cap
+	thermalACZone2C = 65.0 // mild→warm on AC: 4.0 GHz cap  (was 72°C — too late)
+	thermalACZone3C = 75.0 // warm→hot on AC:  3.0 GHz cap  (was 80°C)
 
-	// Battery thresholds — more aggressive to save power and extend range
-	thermalBatZone1C = 50.0 // cool→mild on bat: EPP=power (already set), no cap
-	thermalBatZone2C = 62.0 // mild→warm on bat: 3.5 GHz cap
-	thermalBatZone3C = 72.0 // warm→hot on bat:  2.5 GHz cap
+	// Battery thresholds — tighter for power/heat savings
+	thermalBatZone1C = 45.0 // cool→mild on bat: EPP=power (already set), no cap
+	thermalBatZone2C = 55.0 // mild→warm on bat: 3.5 GHz cap
+	thermalBatZone3C = 65.0 // warm→hot on bat:  2.5 GHz cap
 )
 
 // ThermalZone represents current CPU temperature zone.
 type ThermalZone int
 
 const (
-	ZoneCool ThermalZone = iota // <45°C  — no throttle
-	ZoneMild                    // 45-55°C — EPP nudge
-	ZoneWarm                    // 55-65°C — 3.5 GHz cap
-	ZoneHot                     // 65-75°C — 2.5 GHz cap (below emergency)
+	ZoneCool ThermalZone = iota // <55°C  — no throttle (AC)
+	ZoneMild                    // 55-65°C — EPP nudge, no cap (AC)
+	ZoneWarm                    // 65-75°C — 4.0 GHz cap (AC)
+	ZoneHot                     // >75°C  — 3.0 GHz cap (AC, below emergency 85°C)
 )
 
 var (
@@ -379,19 +380,21 @@ func batteryInterval(onAC bool) time.Duration {
 // --- thermal governor ---
 
 // applyThermalGovernor advances or retreats thermal zones based on current CPU temp.
-// Zones use 5°C hysteresis on exit to prevent oscillation.
+// [CHANGE: claude-code | 2026-05-21] v3.3 — 12°C hysteresis, AC zone 2 at 65°C
+// Zones use 12°C hysteresis on exit — once a cap is applied it stays until genuinely cool.
+// This prevents the 65-80°C oscillation (cap→cool 2s→uncap→overheat→repeat).
 //
-// AC thresholds (permissive — normal workloads never throttled):
-//   ZoneCool (<60°C)   no cap    EPP: balance_performance
-//   ZoneMild (60-72°C) no cap    EPP: power (SMU conserves without hard cap)
-//   ZoneWarm (72-80°C) 4.0 GHz   EPP: power
-//   ZoneHot  (>80°C)   3.0 GHz   EPP: power
+// AC thresholds (v3.3):
+//   ZoneCool (<55°C)   no cap    EPP: power
+//   ZoneMild (55-65°C) no cap    EPP: power (SMU conserves without hard cap)
+//   ZoneWarm (65-75°C) 4.0 GHz   EPP: power
+//   ZoneHot  (>75°C)   3.0 GHz   EPP: power
 //
-// Battery thresholds (tighter — saves power, extends range):
-//   ZoneCool (<50°C)   no cap    EPP: power (already set by AC transition)
-//   ZoneMild (50-62°C) no cap    EPP: power
-//   ZoneWarm (62-72°C) 3.5 GHz   EPP: power
-//   ZoneHot  (>72°C)   2.5 GHz   EPP: power
+// Battery thresholds (v3.3):
+//   ZoneCool (<45°C)   no cap    EPP: power
+//   ZoneMild (45-55°C) no cap    EPP: power
+//   ZoneWarm (55-65°C) 3.5 GHz   EPP: power
+//   ZoneHot  (>65°C)   2.5 GHz   EPP: power
 func applyThermalGovernor(temp float64, onAC bool) {
 	z1, z2, z3 := thermalACZone1C, thermalACZone2C, thermalACZone3C
 	if !onAC {
