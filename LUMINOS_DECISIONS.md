@@ -6,6 +6,50 @@
 
 ---
 
+## DECISION 16 — GPU-Per-App Selector Architecture
+Date: May 21, 2026
+Made by: claude-code
+**Status: FINAL**
+
+### What We Decided
+Universal GPU launcher via env var injection, not per-app wrappers. Two scripts:
+- `luminos-gpu-launch` — kdialog picker → sets AMD or NVIDIA env vars → execs any command
+- `luminos-nvidia-run` — writes `"on"` to PCI power/control sysfs → sets PRIME env vars → execs
+
+Dolphin KDE service menus wire these to right-click for executables (.desktop: `luminos-gpu-select.desktop`) and .desktop app files (`.desktop: luminos-app-gpu.desktop`).
+
+### Why
+- PRIME render offload works via env vars for native Wayland apps without system-level changes
+- Dolphin service menus cover any installed app without needing per-app wrappers
+- Flatpak apps (Chrome) need wrapper scripts — handled separately via `chrome-luminos`
+- NVIDIA requires explicit PCI power gate wake (`echo "on" > .../power/control`) before use; bare `env ... exec` doesn't do this — hence a dedicated `luminos-nvidia-run` binary
+
+### What We Rejected
+- System-wide NVIDIA default: increases VRAM pressure and heat when idle
+- Per-app wrappers for every binary: unmaintainable at scale
+- GPU selector widget in panel: adds complexity, breaks panel (proven during session)
+
+---
+
+## DECISION 17 — Chrome Wayland Mode + GPU-Specific GL
+Date: May 21, 2026
+Made by: claude-code
+**Status: FINAL**
+
+### What We Decided
+- Global `--ozone-platform=wayland` in chrome-flags.conf (reduces CPU vs XWayland path)
+- Removed `--use-gl=angle --use-angle=vulkan` (wrong for AMD, high overhead)
+- `chrome-luminos` wrapper: AMD branch uses `--use-gl=egl`; NVIDIA branch uses `--use-gl=desktop`
+
+### Why
+ANGLE+Vulkan was a leftover flag optimized for NVIDIA/Windows. On AMD iGPU (primary renderer), EGL via mesa is the correct path. XWayland added unnecessary compositor overhead causing 95% CPU in competing with KWin.
+
+### What We Rejected
+- Global `--use-gl=egl` for all cases: breaks NVIDIA path (NVIDIA EGL context is different)
+- NIS upscaling system-wide on Wayland PRIME: not possible — compositor owns the framebuffer
+
+---
+
 ## Decision 15: Three-Phase AI Maturity
 - B: 0.7 threshold gates NPU, rules fallback
 - A: Auto-collect rule decisions as training data

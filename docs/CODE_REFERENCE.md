@@ -2,6 +2,7 @@
 # Project Luminos — File Map & Architecture Reference
 # [CHANGE: claude-code | 2026-04-26] Full cleanup pass — Windows HIVE archived
 # [CHANGE: claude-code | 2026-05-21] Refreshed — luminos-ram added, power v3.1, VRR
+# [CHANGE: claude-code | 2026-05-21] Session 2 — power v3.2 fan curve, GPU launcher, Chrome Wayland, Hz toggle, touchpad fix
 
 ## Stack as of May 2026
 - Shell: KDE Plasma 6.6.4 + KWin (Wayland)
@@ -16,13 +17,13 @@
 
 ---
 
-Last Updated: 2026-05-21 (luminos-ram v3.0, power v3.1, VRR enabled, BUG-050/051 fixed)
+Last Updated: 2026-05-21 (luminos-ram v3.0, power v3.2 fan curve, universal GPU launcher, Chrome Wayland, display Hz toggle, touchpad log fix, display sharpness)
 
 ## Current Active Structure
 
 ### Go Daemons (cmd/)
 - `cmd/luminos-ai/` — Unix socket IPC server (central routing daemon)
-- `cmd/luminos-power/` — v3.1 EPP-based thermal control, 45°C target, beast mode, fan curves
+- `cmd/luminos-power/` — v3.2 EPP-based thermal control, 45°C target, beast mode, fan curve v3.2 (silent ≤44°C, 20% at 47°C, 47-49°C target)
 - `cmd/luminos-sentinel/` — Process security monitoring (CAP_SYS_PTRACE, /proc scan)
 - `cmd/luminos-router/` — .exe compatibility classifier (80% rules + 20% ONNX AI)
 - `cmd/luminos-ram/` — v3.0 RAM management (LIRS ranking, HotSet N=8, OnScreen guard)
@@ -55,6 +56,24 @@ Last Updated: 2026-05-21 (luminos-ram v3.0, power v3.1, VRR enabled, BUG-050/051
 ### Scripts (scripts/)
 - `scripts/luminos-kb-settings` — Keyboard light settings UI
 - `scripts/luminos-keyboard-smart` — Smart keyboard daemon
+- `scripts/luminos-display-hz` — Display Hz settings window (kdialog; deployed to /usr/local/bin/luminos-display-hz)
+- `scripts/luminos-60hz` — Switch display to 60Hz (kwinoutputconfig.json + qdbus6 reconfigure; deployed to /usr/local/bin/luminos-60hz)
+- `scripts/luminos-120hz` — Switch display to 120Hz (same mechanism; deployed to /usr/local/bin/luminos-120hz)
+- `scripts/luminos-gpu-launch` — Universal GPU picker (kdialog; AMD or NVIDIA env vars; deployed to /usr/local/bin/luminos-gpu-launch)
+- `scripts/luminos-nvidia-run` — Wake NVIDIA from PCI power gate + set PRIME env vars + exec; deployed to /usr/local/bin/luminos-nvidia-run
+
+### KDE Service Menus (~/.local/share/kio/servicemenus/)
+- `luminos-gpu-select.desktop` — Dolphin right-click for executables/ELF: "Ask GPU...", "Run on AMD", "Run on NVIDIA RTX 4050"
+- `luminos-app-gpu.desktop` — Dolphin right-click for .desktop files: extracts Exec= line → luminos-gpu-launch
+
+### KDE App Launcher Entries (~/.local/share/applications/)
+- `luminos-display-hz.desktop` — "Display Refresh Rate" in KDE Settings (Categories=System;Settings;HardwareSettings)
+
+### System Config Changes
+- `/etc/environment` — `QT_LOGGING_RULES=kwin_libinput.warning=false` (suppresses ASUP1208 touchpad Touch Jump log spam)
+- `~/.config/kwinoutputconfig.json` — `sharpness: 0.35` (KWin AMD display pipeline sharpening)
+- `~/.var/app/com.google.Chrome/config/chrome-flags.conf` — `--ozone-platform=wayland` globally; removed ANGLE/Vulkan flags
+- `/usr/local/bin/chrome-luminos` — GPU-specific GL: AMD uses `--use-gl=egl`, NVIDIA uses `--use-gl=desktop`
 
 ### Archive (archive/)
 - `archive/windows-hive-2026/` — Old Windows HIVE (Ollama/Docker) — DO NOT RESTORE

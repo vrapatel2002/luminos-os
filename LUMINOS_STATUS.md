@@ -1,6 +1,6 @@
 # Luminos OS — System Status
 Last updated: 2026-05-21
-Agent: claude-code (full refresh — power v3.1, GPU, VRR, display, daemons)
+Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome Wayland, touchpad log fix, display sharpness, Hz toggle)
 
 ## System
 | Component | Status | Notes |
@@ -14,7 +14,9 @@ Agent: claude-code (full refresh — power v3.1, GPU, VRR, display, daemons)
 | asusctl + supergfxctl | ✅ Working | Hybrid mode locked |
 | Keyboard backlight | ✅ Working | Enhanced KDE KCM (7 modes) + Smart power daemon |
 | NPU (RyzenAI-npu1) | ✅ Working | /dev/accel0 active |
-| Display VRR | ✅ Enabled | Adaptive sync Automatic — Samsung eDP-2 2880×1800 @ 120Hz |
+| Display VRR | ⚪ Disabled | VRR=Never (user intentional — reverted from Automatic) |
+| Display sharpness | ✅ Active | KWin sharpness=0.35 (AMD display pipeline, all content) |
+| Display Hz toggle | ✅ Available | luminos-display-hz in KDE Settings; luminos-60hz / luminos-120hz scripts |
 
 ## HIVE Roster (2026) — April Upgrade
 | Alias | Model Base | Target | Role | Status |
@@ -81,7 +83,7 @@ Agent: claude-code (full refresh — power v3.1, GPU, VRR, display, daemons)
 | Daemon | Status | Notes |
 |---|---|---|
 | luminos-ai | ✅ Running | Unix socket IPC — central routing daemon |
-| luminos-power | ✅ Running | v3.1 EPP-based. AC: EPP=power, 45°C target, no auto-Performance. Battery: EPP=balance_power. Beast mode: explicit only. Fan: 50°C early ramp (40% at 40°C, 80% at 50°C) |
+| luminos-power | ✅ Running | v3.2 EPP-based. AC: EPP=power, 45°C target, no auto-Performance. Battery: EPP=balance_power. Beast mode: explicit only. Fan curve v3.2: silent ≤44°C, 20% at 47°C, target 47-49°C range |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
 | luminos-ram | ✅ Running | v3.0 — LIRS IRR ranking, N=8 HotSet, OnScreen protection, memory pressure monitor |
@@ -106,13 +108,16 @@ Agent: claude-code (full refresh — power v3.1, GPU, VRR, display, daemons)
 | Floating panel | ❌ Reverted | [CHANGE: gemini-cli | 2026-05-11] Panel reset to default bottom position. |
 | RAM monitor widget | ✅ Working | Plasma widget (org.luminos.ramwidget) installed |
 | System Telemetry | ✅ Active | Continuous logging to /var/log/luminos-telemetry.csv |
-| Chrome GPU | ✅ Fixed | AMD iGPU only (BUG-046) |
+| Chrome GPU | ✅ Fixed | AMD iGPU only (BUG-046); Wayland mode global; GPU-specific GL in chrome-luminos wrapper |
+| Chrome CPU | ✅ Fixed | Removed ANGLE/Vulkan flags (wrong for AMD); --ozone-platform=wayland; GPU-specific --use-gl |
+| Universal GPU launcher | ✅ Working | luminos-gpu-launch (kdialog picker); luminos-nvidia-run (wakes PCI power gate); Dolphin service menus for executables + .desktop files |
+| Touchpad log flood | ✅ Fixed | QT_LOGGING_RULES=kwin_libinput.warning=false in /etc/environment; suppresses ASUP1208 Touch Jump spam |
 | Wine/MT5 GPU | ✅ Fixed | [CHANGE: gemini-cli | 2026-05-11] Wine GPU selector launcher implemented. User chooses iGPU/dGPU. |
 | Forex Bot GPU | ✅ Fixed | [CHANGE: gemini-cli | 2026-05-11] Forced CPU inference only. |
 | NVIDIA power gating | ✅ Active | Sleeps when idle (BUG-047) |
 | Power Monitor widget | ✅ Working | [CHANGE: gemini-cli | 2026-05-11] Plasma widget (org.luminos.powerwidget) installed. |
 | Thermal oscillation | ✅ Fixed | BUG-048: Removed auto-Performance switching, 45°C target, EPP-based control, hysteresis |
-| Display smoothness | ✅ Fixed | BUG-051: VRR=Automatic, KWin LatencyPolicy=Low, GLPreferBufferSwap=e |
+| Display smoothness | ⚪ VRR reverted | BUG-051 fix was VRR=Automatic+KWin LatencyPolicy=Low; user reverted VRR to Never (intentional) |
 | Memory leak detection | ✅ Active | Alerts for background growth (BUG-049) |
 | Firefox WhiteSur | 📋 Pending | Profile issue |
 
