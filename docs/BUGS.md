@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-10
+Last Updated: 2026-05-21
 
 ## Format
 Each bug entry:
@@ -16,6 +16,26 @@ Each bug entry:
 ---
 
 ## Fixed Bugs
+
+### BUG-051 — Display Stutter / 120Hz Compositing Lag
+- Status: FIXED
+- Severity: MEDIUM
+- Component: ~/.config/kwinoutputconfig.json, ~/.config/kwinrc
+- Description: Desktop felt unsmooth/stuttery at 120Hz. Fans spinning without reason. kwin_wayland at 19% CPU idle.
+- Root Cause: `vrrPolicy` was `"Never"` — compositor locked to hard 120Hz deadline every 8.33ms. Any frame taking slightly longer caused a dropped frame. Also: `GLPreferBufferSwap=a` (auto) and no latency policy set, both leaving performance on the table.
+- Fix Applied: Set `vrrPolicy: "Automatic"` in kwinoutputconfig.json. Set `LatencyPolicy=Low` and `GLPreferBufferSwap=e` in kwinrc. KWin reloaded via `qdbus6 org.kde.KWin /KWin reconfigure`.
+- Date Found: 2026-05-21
+- Date Fixed: 2026-05-21
+
+### BUG-050 — System Processes Keeping NVIDIA dGPU in D0 State
+- Status: FIXED
+- Severity: HIGH
+- Component: /etc/environment
+- Description: NVIDIA GPU staying awake (D0, ~8W) even when idle. KDE system processes (ksecretd, plasmashell, Xwayland, baloorunner) were opening NVIDIA EGL by default.
+- Root Cause: No EGL vendor preference set — libEGL defaulted to NVIDIA (60_nvidia.json) for all processes. KWin also advertising renderD129 (NVIDIA) to Wayland clients via linux-dmabuf protocol.
+- Fix Applied: Added to /etc/environment: `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json` (force AMD Mesa EGL for all session apps) and `KWIN_DRM_DEVICES=/dev/dri/card2` (restrict KWin to AMD DRM only). PRIME render offload for games still works.
+- Date Found: 2026-05-14
+- Date Fixed: 2026-05-14
 
 ### BUG-049 — Claude Desktop Memory Leak
 - Status: MONITORING

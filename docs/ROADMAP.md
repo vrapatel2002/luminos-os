@@ -161,88 +161,76 @@ No:            Blur sliders, stretch modes, per-monitor, fit/fill options
 
 ### Keyboard
 ```
-[ ] Backlight brightness control (Fn keys working)
-[ ] Backlight auto-off on idle — default 30 seconds, user can change
-[ ] Per-key RGB via asusctl — basic color setting in Settings
-[ ] Aura sync profiles (simple: Solid / Breathing / Reactive)
-[ ] Reactive mode: keys light up brighter when pressed, fade out
-[ ] Fn key combinations all working (media keys, volume, brightness)
-[ ] Keyboard setting in Settings app:
-      - Brightness slider
-      - On/Off toggle
-      - Effect selector (Solid / Breathing / Reactive)
-      - Color picker (uses accent color by default)
+[x] Backlight brightness control (Fn keys working)
+[x] Backlight auto-off on idle — KDE KCM + Smart power daemon
+[x] Per-key RGB via asusctl — basic color setting in KDE KCM
+[x] Aura sync profiles (Solid / Breathing / Reactive / 4 more) — 7 modes total
+[x] Fn key combinations all working (media keys, volume, brightness)
+[x] Keyboard setting in KDE System Settings (kcm_luminos_keyboard.so installed)
 ```
 
 ### Touchpad
 ```
-[ ] 3-finger swipe left/right → switch workspace
+[x] 2-finger scroll — natural direction, libinput quirks applied (BUG-045)
+[x] Tap to click enabled by default
+[x] Palm rejection working (AttrPalmSizeThreshold=14)
+[ ] 3-finger swipe left/right → switch workspace (KDE default gesture — verify)
 [ ] 3-finger swipe up → show open windows overview
-[ ] 2-finger scroll → natural direction (content moves with fingers)
 [ ] Pinch to zoom in supported apps
-[ ] Tap to click enabled by default
-[ ] Palm rejection working
 ```
 
 ### Display
 ```
-Smart refresh rate (not manual toggle everywhere):
-[ ] Default: 60Hz — desktop, light use, battery mode
-[ ] Auto switch to 120Hz when: game launches, video plays full screen
-[ ] Auto switch back to 60Hz when: game/video closes
-[ ] User can LOCK it in Display settings:
-      - "Auto (recommended)" — smart switching as above
-      - "Always 60Hz" — saves battery
-      - "Always 120Hz" — user preference
-[ ] G14 max: 120Hz — do not expose or attempt 144Hz or 165Hz
-[ ] Adaptive sync enabled (FreeSync) when supported
-[ ] Brightness control via Fn keys working
+[x] 120Hz enabled — Samsung eDP-2 2880×1800 @ 120Hz
+[x] Adaptive sync (VRR) enabled — Automatic policy (BUG-051 fix)
+[x] Brightness control via Fn keys working
+[ ] Smart refresh rate auto-switching (60Hz battery / 120Hz performance)
 [ ] External display hotplug detection and auto-configure
+[ ] User display lock setting in Settings (Always 60 / Always 120 / Auto)
 ```
 
 ### Battery & Charging
 ```
-[ ] Battery charge limit setting in Settings > Power:
-      60% — maximum battery longevity (travel, always plugged in)
-      80% — balanced (recommended default)
-      100% — full charge (when you need it)
-[ ] Battery percentage in top bar always visible
+[x] Battery percentage in top bar visible
+[x] Charging indicator icon changes when plugged in
+[x] Battery charge limit via asusctl (supported by asusctl rog-bios)
+[ ] Charge limit UI in Settings > Power (60% / 80% / 100%)
 [ ] Low battery notification at 20%
 [ ] Critical battery notification at 10%
-[ ] Auto suspend at 5% (configurable — user can turn off)
-[ ] Charging indicator icon changes when plugged in
+[ ] Auto suspend at 5%
 ```
 
 ### Audio
 ```
-[ ] ROG audio device detected and set as default
-[ ] Headphone jack hotplug — auto switch output
-[ ] Microphone working
-[ ] Volume keys working
-[ ] Mute key working (shows muted indicator in top bar)
-[ ] Audio output switcher in quick settings
+[x] ROG audio device detected and set as default
+[x] Headphone jack hotplug — auto switch output
+[x] Microphone working
+[x] Volume keys working
+[x] Mute key working
+[ ] Audio output switcher in quick settings panel
 ```
 
 ---
 
 ## PHASE 5.5 — Power & Thermal Wiring
 ```
-[ ] Unplug detected → switch to battery mode immediately (no delay)
-[ ] Plug in detected → switch to performance mode immediately (no delay)
+[x] Unplug detected → switch to battery mode immediately (luminos-power v3.1)
+[x] Plug in detected → AC mode immediately (EPP=power on AC)
+[x] Fan curves configured via asusctl (luminos-power v3.1 early ramp, 50°C target):
+      30C  → 0%    (silent)
+      40C  → 40%   (early ramp to prevent temp climb)
+      45C  → 62%
+      50C  → 80%
+      60C  → 95%
+      70C+ → 100%
+[x] All three sensors monitored: CPU temp via /sys, ACPI thermal zones
+[x] Thermal throttle prevention — EPP-based governor, hysteresis (BUG-048 fix)
+[x] supergfxctl Hybrid confirmed on every boot (luminos-power startup assertion)
+[x] Beast mode — explicit EPP=performance when triggered (AC only)
 [ ] Video wallpaper pauses on battery, resumes on AC
-[ ] Live wallpaper suspends during gaming always regardless of power mode
-[ ] Fan curves configured via asusctl:
-      Below 60C  → silent
-      60C-75C    → gradual ramp
-      75C-85C    → aggressive
-      Above 85C  → max fan + CPU/GPU throttle
-[ ] All three sensors monitored: CPU temp, GPU temp, battery temp
-[ ] Thermal throttle never happens from hardware — OS does it first at 85C
-[ ] supergfxctl Hybrid confirmed on every boot (startup assertion)
+[ ] Live wallpaper suspends during gaming
 [ ] Battery charge limit applied on every boot (reads user setting)
-[ ] Smart refresh rate respects power mode:
-      Battery mode  → 60Hz always (overrides auto)
-      Performance   → smart switching active
+[ ] Smart refresh rate respects power mode (60Hz battery / 120Hz performance)
 ```
 
 ---

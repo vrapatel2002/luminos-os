@@ -1,27 +1,31 @@
 # CODE_REFERENCE.md
 # Project Luminos — File Map & Architecture Reference
 # [CHANGE: claude-code | 2026-04-26] Full cleanup pass — Windows HIVE archived
+# [CHANGE: claude-code | 2026-05-21] Refreshed — luminos-ram added, power v3.1, VRR
 
-## Stack as of April 2026
+## Stack as of May 2026
 - Shell: KDE Plasma 6.6.4 + KWin (Wayland)
 - Widgets: Qt/QML
-- Backend: Go daemons (cmd/)
+- Backend: Go daemons (cmd/) — 5 daemons
 - AI: llama.cpp TurboQuant (NOT Ollama) + HATS NPU
 - Archived: Hyprland → archive/hyprland/
 - Archived: GTK4 Python UI → archive/gtk4-ui/
 - Archived: Windows HIVE (Ollama) → archive/windows-hive-2026/
+- Archived: Ubuntu→Arch migration plan → archive/stale-docs/
+- Archived: Gemini agent rules (superseded by CLAUDE.md) → archive/stale-docs/
 
 ---
 
-Last Updated: 2026-04-26 (Cleanup — Windows HIVE archived, Ollama removed)
+Last Updated: 2026-05-21 (luminos-ram v3.0, power v3.1, VRR enabled, BUG-050/051 fixed)
 
 ## Current Active Structure
 
 ### Go Daemons (cmd/)
-- `cmd/luminos-ai/` — Unix socket IPC server
-- `cmd/luminos-power/` — Auto power profile switching
-- `cmd/luminos-sentinel/` — Process security monitoring
-- `cmd/luminos-router/` — .exe compatibility classifier
+- `cmd/luminos-ai/` — Unix socket IPC server (central routing daemon)
+- `cmd/luminos-power/` — v3.1 EPP-based thermal control, 45°C target, beast mode, fan curves
+- `cmd/luminos-sentinel/` — Process security monitoring (CAP_SYS_PTRACE, /proc scan)
+- `cmd/luminos-router/` — .exe compatibility classifier (80% rules + 20% ONNX AI)
+- `cmd/luminos-ram/` — v3.0 RAM management (LIRS ranking, HotSet N=8, OnScreen guard)
 
 ### Python HIVE (src/hive/)
 - `src/hive/agent_base.py` — Base agent class
@@ -59,7 +63,12 @@ Last Updated: 2026-04-26 (Cleanup — Windows HIVE archived, Ollama removed)
 - `archive/stale-configs/` — Old .desktop and .bak files
 - `archive/research-scripts/` — One-off experiment scripts
 
-## CURRENT FILE MAP
+---
+> **NOTE:** The file tree below is historical (Ubuntu/GTK4 era). Active structure is documented above.
+> The GTK4 Python UI (bar, dock, launcher, settings, wallpaper, lockscreen, store, firstrun, notifications)
+> has been replaced by KDE Plasma 6 / Qt QML widgets and KDE KCMs.
+
+## HISTORICAL FILE MAP (Ubuntu/GTK4 era — for reference only)
 
 ```
 C:\Users\vrati\VSCODE\Luminos\
@@ -357,16 +366,19 @@ ONNX VitisAI     AMD XDNA NPU    ONNX      onnxruntime + amd-quark
 
 ---
 
-## HIVE MODELS (when gaming finishes)
+## HIVE MODELS (llama.cpp TurboQuant — NOT Ollama)
 
 ```
-Model     Role              VRAM (Q4)  Location
-──────────────────────────────────────────────────
-Nexus     Orchestrator      ~4GB       /usr/lib/luminos/models/nexus-Q4.gguf
-Bolt      Code              ~4GB       /usr/lib/luminos/models/bolt-Q4.gguf
-Nova      Writing/Research  ~4GB       /usr/lib/luminos/models/nova-Q4.gguf
-Eye       Vision            ~4GB       /usr/lib/luminos/models/eye-Q4.gguf
+Alias   Base Model                              VRAM (Q4_K_M)  Target      Status
+────────────────────────────────────────────────────────────────────────────────────
+Nexus   Dolphin3.0-Llama3.1-8B-Q4_K_M.gguf    ~4.4GB         GPU (RTX)   ✅ Active ~36 t/s
+Bolt    Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf  ~4.4GB         GPU (RTX)   ✅ Active ~38 t/s
+Nova    DeepSeek-R1-0528-Qwen3-8B-Q4_K_M.gguf  ~4.4GB/CPU     CPU or GPU  ✅ Active ~10 t/s CPU
+Eye     Qwen2.5-VL-7B-Q4_K_M.gguf              ~4.4GB         GPU (RTX)   📋 Pending download
 ```
+
+VRAM constraint: 6GB total, 4.6GB safe. Only ONE GPU model at a time (swap via hive-daemon.py).
+Nova can run on CPU alongside a GPU model (AI Mode) — set n_gpu_layers=0.
 
 ---
 

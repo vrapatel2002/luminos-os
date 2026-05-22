@@ -1,6 +1,6 @@
 # Luminos OS — System Status
-Last updated: 2026-05-03
-Agent: gemini-cli (RAM Management Phase 1)
+Last updated: 2026-05-21
+Agent: claude-code (full refresh — power v3.1, GPU, VRR, display, daemons)
 
 ## System
 | Component | Status | Notes |
@@ -8,12 +8,13 @@ Agent: gemini-cli (RAM Management Phase 1)
 | Arch Linux base | ✅ Working | Triple boot G14 |
 | KDE Plasma 6.6.4 | ✅ Working | Wayland session |
 | SDDM | ✅ Working | Defaults to Plasma Wayland |
-| NVIDIA 595.58.03 | ✅ Working | nvidia-dkms |
-| AMD iGPU (Radeon 780M) | ✅ Working | Desktop rendering |
-| RTX 4050 6GB | ✅ Working | AI + gaming |
+| NVIDIA 595.71.05 | ✅ Working | nvidia-dkms (Arch native — no Ubuntu dependency) |
+| AMD iGPU (Radeon 780M) | ✅ Working | Desktop rendering + KWin compositor |
+| RTX 4050 6GB | ✅ Working | HIVE AI models + gaming (power-gated when idle) |
 | asusctl + supergfxctl | ✅ Working | Hybrid mode locked |
 | Keyboard backlight | ✅ Working | Enhanced KDE KCM (7 modes) + Smart power daemon |
 | NPU (RyzenAI-npu1) | ✅ Working | /dev/accel0 active |
+| Display VRR | ✅ Enabled | Adaptive sync Automatic — Samsung eDP-2 2880×1800 @ 120Hz |
 
 ## HIVE Roster (2026) — April Upgrade
 | Alias | Model Base | Target | Role | Status |
@@ -79,10 +80,11 @@ Agent: gemini-cli (RAM Management Phase 1)
 ## Go Daemons
 | Daemon | Status | Notes |
 |---|---|---|
-| luminos-ai | ✅ Running | Unix socket IPC |
-| luminos-power | ✅ Running | Auto profile switch. Q→B at 50°C, B→P at 65°C |
-| luminos-sentinel | ✅ Running | Process monitor |
-| luminos-router | ✅ Running | .exe classifier |
+| luminos-ai | ✅ Running | Unix socket IPC — central routing daemon |
+| luminos-power | ✅ Running | v3.1 EPP-based. AC: EPP=power, 45°C target, no auto-Performance. Battery: EPP=balance_power. Beast mode: explicit only. Fan: 50°C early ramp (40% at 40°C, 80% at 50°C) |
+| luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
+| luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
+| luminos-ram | ✅ Running | v3.0 — LIRS IRR ranking, N=8 HotSet, OnScreen protection, memory pressure monitor |
 
 ## Compatibility
 | Component | Status | Notes |
@@ -109,20 +111,20 @@ Agent: gemini-cli (RAM Management Phase 1)
 | Forex Bot GPU | ✅ Fixed | [CHANGE: gemini-cli | 2026-05-11] Forced CPU inference only. |
 | NVIDIA power gating | ✅ Active | Sleeps when idle (BUG-047) |
 | Power Monitor widget | ✅ Working | [CHANGE: gemini-cli | 2026-05-11] Plasma widget (org.luminos.powerwidget) installed. |
-| Thermal oscillation | ⚠️ Pending | Fixed thresholds needed (BUG-048) |
+| Thermal oscillation | ✅ Fixed | BUG-048: Removed auto-Performance switching, 45°C target, EPP-based control, hysteresis |
+| Display smoothness | ✅ Fixed | BUG-051: VRR=Automatic, KWin LatencyPolicy=Low, GLPreferBufferSwap=e |
 | Memory leak detection | ✅ Active | Alerts for background growth (BUG-049) |
 | Firefox WhiteSur | 📋 Pending | Profile issue |
 
 ## Open Tasks (Priority Order)
-1. Eye model download + wire to orchestrator
-2. Panel layout final polish
-3. Firefox WhiteSur theme
-4. HIVE right-click KDE service menus
-5. ydotool type-into-apps integration
-6. HIVE chat web panel (Flask localhost:7437)
-7. Go orchestrator (replace Python)
-8. Zone indicator Plasma widget
-9. SDDM custom Luminos theme
+1. Eye model download + wire vision route in hive-daemon.py
+2. KDE right-click service menus for HIVE (kcm_luminos_hive.so already installed)
+3. ydotool type-into-apps integration
+4. Firefox WhiteSur theme
+5. HIVE chat web panel (Flask localhost:7437)
+6. Go orchestrator (replace Python hive-daemon.py)
+7. Zone indicator Plasma widget
+8. SDDM custom Luminos theme
 
 ## Input & Hardware
 | Component | Status | Notes |
