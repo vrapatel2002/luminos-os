@@ -2,7 +2,7 @@
 Before concluding ANY task, you MUST update `luminos-notes.sh` to reflect all file changes, deleted directories, and architectural shifts. You must also verify that `LUMINOS_STATUS.md` matches the current reality. Do not output a final report until these state files are synchronized.
 
 # AGENTS.md — Luminos OS Agent Constitution
-# Last Updated: 2026-05-23 (Full rewrite — synced with Handbook, Status, Decisions)
+# Last Updated: 2026-05-23 (Full rewrite + code-review-graph + mempalace re-enabled)
 
 ---
 
@@ -126,8 +126,9 @@ llama-server    127.0.0.1:8080  (lazy load, HIVE inference)
 4. **State Tracking** — Update `LUMINOS_STATUS.md` and `luminos-notes.sh` every turn.
 5. **HIVE Brain** — Use `luminos-brain` CLI for environment safety and audit logging.
 6. **Python Safety** — For ANY Python/venv/package action, run `luminos-brain safe "[action]"`. If response is NO, STOP.
-7. **No CodeGraph** — code-review-graph MCP removed May 7 2026. Do NOT reference or call it.
-8. **No Docker / No Ollama** — Inference is bare-metal llama.cpp. Never suggest either.
+7. **CodeGraph** — Use `code-review-graph` MCP BEFORE modifying any Python or Go file. AFTER adding new files or changing imports, run `code-review-graph update --repo ~/luminos-os` to keep the graph current.
+8. **MemPalace** — Use `mempalace` MCP to recall project history and file decisions after tasks. Do NOT use the CLI `mempalace search` command (segfaults). Use only via MCP tools.
+9. **No Docker / No Ollama** — Inference is bare-metal llama.cpp. Never suggest either.
 
 ---
 
@@ -153,7 +154,80 @@ luminos-brain status                     # system health
 
 ---
 
-## 7. Agent Roles
+## 7. MCP Tools — Code Review Graph + MemPalace
+
+### 7.1 code-review-graph
+
+Persistent knowledge graph of the entire codebase. 3203 nodes, 21355 edges, 257 files. Builds an AST-level map of every function, class, and import across Go, Python, QML, C++, Bash.
+
+**MCP server:** `/home/shawn/.local/bin/code-review-graph serve --repo /home/shawn/luminos-os`
+**Configured in:** `~/luminos-os/.mcp.json`
+
+**When to use:**
+- BEFORE modifying any Python or Go file — check what calls/imports the target
+- BEFORE refactoring — understand the blast radius
+- To find where a function is defined vs called
+- To understand data flow between daemons
+
+**Maintenance commands (run outside MCP):**
+```bash
+# After adding new files or changing imports:
+/home/shawn/.local/bin/code-review-graph update --repo ~/luminos-os
+
+# Full rebuild (after major refactor or branch change):
+/home/shawn/.local/bin/code-review-graph build --repo ~/luminos-os
+
+# Check graph is current:
+/home/shawn/.local/bin/code-review-graph status --repo ~/luminos-os
+```
+
+**Current state:** 3203 nodes, 21355 edges, built on `main` @ `90b40671` (2026-05-23).
+
+---
+
+### 7.2 MemPalace
+
+Semantic knowledge palace with 253,822 drawers. Stores project history, Claude conversation exports, Luminos OS decisions, code, scripts, documentation. Enables cross-session recall.
+
+**MCP server:** `/home/shawn/.mempalace-venv/bin/python3 -m mempalace.mcp_server`
+**Configured in:** `~/luminos-os/.mcp.json`
+**Palace data:** `~/.mempalace/`
+**Python venv:** `~/.mempalace-venv/` (Python 3.12, chromadb 0.6.x, chroma_hnswlib 0.7.6)
+
+**Existing wings (project data):**
+| Wing | Rooms | Drawers |
+|------|-------|---------|
+| `luminos_os` | general, documentation, testing, configuration, src, scripts, systemd | ~253k |
+| `claude_exports` | architecture, general | ~837 |
+| `luminos-os` | decisions | 1 |
+
+**Key MCP tools:**
+| Tool | Use for |
+|------|---------|
+| `mempalace_search` | Semantic search across all drawers |
+| `mempalace_add_drawer` | File new content (use after decisions/changes) |
+| `mempalace_status` | Palace overview — counts by wing/room |
+| `mempalace_kg_query` | Query knowledge graph for entity relationships |
+| `mempalace_kg_add` | Add a fact to the knowledge graph |
+| `mempalace_list_rooms` | List rooms in a wing |
+| `mempalace_get_drawer` | Fetch full content of a specific drawer |
+| `mempalace_diary_write` | Write agent diary entry (AAAK format) |
+| `mempalace_reconnect` | Force reconnect after external CLI use |
+
+**CRITICAL:** Do NOT use the CLI `mempalace search` command — it segfaults (Python 3.12 + chroma_hnswlib CLI path issue). Use ONLY via MCP tools in Claude Code. The MCP server path does NOT segfault.
+
+**After major changes,** file a summary into the palace:
+```
+Use MCP tool: mempalace_add_drawer
+  wing: "luminos-os"
+  room: "decisions"  (or "general", "scripts", etc.)
+  content: "[full summary of what changed and why]"
+  added_by: "claude-code"
+```
+
+---
+
+## 8. Agent Roles
 
 | Agent | Best For | Start Command |
 |-------|----------|---------------|
@@ -168,7 +242,7 @@ Only use when hive-daemon has loaded Nova. Default sessions use Claude API norma
 
 ---
 
-## 8. Session Start Checklist (Every Agent, Every Session)
+## 9. Session Start Checklist (Every Agent, Every Session)
 
 ```bash
 # 1. Read mission context
@@ -188,7 +262,7 @@ luminos-brain safe "<action description>"
 
 ---
 
-## 9. File Map (Current — May 2026)
+## 10. File Map (Current — May 2026)
 
 ### Go Daemons (`cmd/`)
 | Path | Description |
@@ -272,7 +346,7 @@ luminos-brain safe "<action description>"
 
 ---
 
-## 10. Absolute Do-Nots
+## 11. Absolute Do-Nots
 
 | Target | Reason |
 |--------|--------|
@@ -287,7 +361,7 @@ luminos-brain safe "<action description>"
 
 ---
 
-## 11. Power & Thermal Quick Reference
+## 12. Power & Thermal Quick Reference
 
 **Current fan curve (v2 — ACTIVE, restored at commit 385f1302):**
 - CPU/GPU: `30c:0%, 40c:40%, 45c:62%, 50c:80%, 60c:95%, 70c:100%, 80c:100%, 90c:100%`
@@ -306,7 +380,7 @@ luminos-brain safe "<action description>"
 
 ---
 
-## 12. Luminos Notes Usage (Mandatory)
+## 13. Luminos Notes Usage (Mandatory)
 
 **BEFORE every task:**
 ```bash
@@ -325,27 +399,27 @@ Never complete a task without adding to Luminos Notes.
 
 ---
 
-## 13. Mandatory Update Protocol (Every Task)
+## 14. Mandatory Update Protocol (Every Task)
 
 After EVERY task, ALL agents must:
 
-### 13.1 Luminos Notes
+### 14.1 Luminos Notes
 ```bash
 ~/luminos-os/scripts/luminos-notes.sh add [TAG] "[Detailed summary of changes]"
 ```
 
-### 13.2 HIVE Brain Log
+### 14.2 HIVE Brain Log
 ```bash
 luminos-brain log "[Summary of what was done]"
 ```
 
-### 13.3 Relevant .md files (check all, update if changed)
+### 14.3 Relevant .md files (check all, update if changed)
 - `LUMINOS_STATUS.md` → component status changed
 - `LUMINOS_DECISIONS.md` → architectural decision made
 - `docs/BUGS.md` → bug found or fixed
 - `docs/CODE_REFERENCE.md` → new files added or removed
 
-### 13.4 Git Commit Format (mandatory)
+### 14.4 Git Commit Format (mandatory)
 ```bash
 git add -A
 git commit -m "type(scope): description
@@ -361,7 +435,7 @@ NEVER commit without the Agent and Task fields.
 
 ---
 
-## 14. Emergency Recovery Reference
+## 15. Emergency Recovery Reference
 
 | Symptom | Fix |
 |---------|-----|
@@ -378,7 +452,7 @@ NEVER commit without the Agent and Task fields.
 
 ---
 
-## 15. TAG SCHEMA (LOCKED — DO NOT MODIFY)
+## 16. TAG SCHEMA (LOCKED — DO NOT MODIFY)
 
 ```
 [SAVE: TOPIC-NN | description]    — bookmark result
@@ -391,7 +465,7 @@ NEVER commit without the Agent and Task fields.
 
 ---
 
-## 16. Open Tasks (Priority Order)
+## 17. Open Tasks (Priority Order)
 
 1. Eye model download + wire vision route in hive-daemon.py
 2. KDE right-click service menus for HIVE (kcm_luminos_hive.so already installed)
@@ -404,7 +478,7 @@ NEVER commit without the Agent and Task fields.
 
 ---
 
-## 17. Reply Format (always end output with)
+## 18. Reply Format (always end output with)
 
 ```
 REPLY TO MANAGEMENT:

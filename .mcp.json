@@ -1,9 +1,11 @@
 {
   "mcpServers": {
     "code-review-graph": {
-      "command": "code-review-graph",
+      "command": "/home/shawn/.local/bin/code-review-graph",
       "args": [
-        "serve"
+        "serve",
+        "--repo",
+        "/home/shawn/luminos-os"
       ],
       "type": "stdio"
     },
@@ -11,8 +13,7 @@
       "command": "/home/shawn/.mempalace-venv/bin/python3",
       "args": [
         "-m",
-        "mempalace",
-        "mcp"
+        "mempalace.mcp_server"
       ],
       "type": "stdio"
     }
