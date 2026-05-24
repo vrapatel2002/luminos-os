@@ -1,5 +1,27 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-21
+Last Updated: 2026-05-24
+
+## Fixed Bugs (new)
+
+### BUG-053 — Thermal zone 1↔2 oscillation every 2s / Chrome rendering stutter
+- Status: FIXED
+- Severity: HIGH
+- Component: cmd/luminos-power/main.go — applyThermalGovernor()
+- Description: Thermal zone bounced between 1 and 2 every 2-4 seconds under load. Caused visible Chrome tab stutter.
+- Root Cause: The 4.0GHz freq cap (applied at zone 2 entry, 72°C) cools the CPU from ~75°C to ~64°C in a single 2s tick, which crosses the 67°C exit threshold (72-5°C hysteresis). The cap is immediately removed, CPU boosts back to 5.1GHz, reheats in 2 seconds → repeat indefinitely. The 5°C hysteresis was on the temperature, not on time. One tick below the threshold was enough to remove the cap.
+- Fix Applied: Added `thermalDownholdTick` counter. Zone downgrades now require `thermalDowngradeHoldTicks=5` consecutive ticks (10 seconds on AC) below the exit threshold. Zone upgrades remain immediate. Counter resets on AC transition and beast mode entry/exit.
+- Date Found: 2026-05-24
+- Date Fixed: 2026-05-24
+
+### BUG-054 — Chrome tab stutter on AMD iGPU path (--enable-zero-copy)
+- Status: FIXED
+- Severity: MEDIUM
+- Component: /usr/local/bin/chrome-luminos
+- Description: Tab scrolling and rendering hitches on AMD iGPU path.
+- Root Cause: `--enable-zero-copy` causes intermittent rendering hitches with AMD Mesa on Wayland. Also compounded by BUG-053 CPU freq oscillation.
+- Fix Applied: Removed `--enable-zero-copy` from the AMD (igpu) path in chrome-luminos. NVIDIA path keeps it (works correctly with desktop GL). Added `--enable-features=MemorySaver` to both paths to enable tab sleeping.
+- Date Found: 2026-05-24
+- Date Fixed: 2026-05-24
 
 ## Format
 Each bug entry:

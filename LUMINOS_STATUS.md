@@ -83,7 +83,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Daemon | Status | Notes |
 |---|---|---|
 | luminos-ai | ✅ Running | Unix socket IPC — central routing daemon |
-| luminos-power | ✅ Running | v3.2 EPP-based. AC: EPP=power, 45°C target, no auto-Performance. Battery: EPP=balance_power. Beast mode: explicit only. Fan curve v3.2: silent ≤44°C, 20% at 47°C, target 47-49°C range |
+| luminos-power | ✅ Running | v3.3 EPP-based. AC: EPP=power, 45°C target, no auto-Performance. Beast mode: CPU>75%/GPU>80% for 20-30s. Fan curve v2 (early ramp). Thermal downgrade hold: 5 ticks (10s) — fixes zone 1↔2 oscillation (BUG-053). |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
 | luminos-ram | ✅ Running | v3.0 — LIRS IRR ranking, N=8 HotSet, OnScreen protection, memory pressure monitor |
@@ -108,7 +108,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Floating panel | ❌ Reverted | [CHANGE: gemini-cli | 2026-05-11] Panel reset to default bottom position. |
 | RAM monitor widget | ✅ Working | Plasma widget (org.luminos.ramwidget) installed |
 | System Telemetry | ✅ Active | Continuous logging to /var/log/luminos-telemetry.csv |
-| Chrome GPU | ✅ Fixed | AMD iGPU only (BUG-046); Wayland mode global; GPU-specific GL in chrome-luminos wrapper |
+| Chrome GPU | ✅ Fixed | AMD iGPU only (BUG-046); Wayland mode global; GPU-specific GL in chrome-luminos wrapper; --enable-zero-copy removed from AMD path (BUG-054); MemorySaver tab sleep enabled |
 | Chrome CPU | ✅ Fixed | Removed ANGLE/Vulkan flags (wrong for AMD); --ozone-platform=wayland; GPU-specific --use-gl |
 | Universal GPU launcher | ✅ Working | luminos-gpu-launch (kdialog picker); luminos-nvidia-run (wakes PCI power gate); Dolphin service menus for executables + .desktop files |
 | Touchpad log flood | ✅ Fixed | QT_LOGGING_RULES=kwin_libinput.warning=false in /etc/environment; suppresses ASUP1208 Touch Jump spam |

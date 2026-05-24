@@ -67,7 +67,8 @@ const (
 	// Target: 45°C idle via EPP hints alone. Freq caps only for genuinely hot temps.
 	// On AC: caps start at 72°C so normal workloads are never throttled.
 	// On battery: caps start at 62°C — saves power and battery.
-	thermalHysteresisC = 5.0
+	thermalHysteresisC        = 5.0
+	thermalDowngradeHoldTicks = 5 // must stay below exit threshold for 5 ticks (10s on AC, 50s on battery) before downgrading zone
 
 	// AC thresholds — permissive, caps only when actually overheating
 	thermalACZone1C = 60.0 // cool→mild on AC: EPP nudge only, no cap
@@ -101,8 +102,9 @@ var (
 	cpuHighTicks int
 	cpuLowTicks  int
 
-	currentThermalZone ThermalZone = ZoneCool
-	cpuHardwareMaxFreq int         // read from sysfs at startup, kHz
+	currentThermalZone  ThermalZone = ZoneCool
+	thermalDownholdTick int        // consecutive ticks below exit threshold before downgrading
+	cpuHardwareMaxFreq  int        // read from sysfs at startup, kHz
 
 	// /proc/stat snapshot for delta-based CPU load calculation
 	lastCPUStatIdle  uint64
@@ -221,6 +223,7 @@ func monitorLoop(ctx context.Context) {
 					setEPPAfterAsusctl("performance")
 					setAllMaxFreq(0) // full boost — no thermal cap during beast mode
 					currentThermalZone = ZoneCool
+					thermalDownholdTick = 0
 					updateState(onAC, temp, gpuLoad, "performance", "Performance")
 					continue
 				}
@@ -233,6 +236,7 @@ func monitorLoop(ctx context.Context) {
 					runCmd("asusctl", "profile", "set", "Balanced")
 					setAllMaxFreq(0) // clear any emergency freq cap applied during beast mode
 					currentThermalZone = ZoneCool
+					thermalDownholdTick = 0
 					setEPPAfterAsusctl("power") // back to cool target
 					updateState(onAC, temp, gpuLoad, "power", "Balanced")
 					continue
@@ -276,8 +280,9 @@ func monitorLoop(ctx context.Context) {
 // applyACTransition handles the full set of changes when AC state changes.
 // Called at startup and on every AC plug/unplug event.
 func applyACTransition(onAC bool) {
-	// Reset thermal zone and freq cap on any AC transition
+	// Reset thermal zone, hold counter, and freq cap on any AC transition
 	currentThermalZone = ZoneCool
+	thermalDownholdTick = 0
 	setAllMaxFreq(0)
 
 	if onAC {
@@ -394,6 +399,13 @@ func batteryInterval(onAC bool) time.Duration {
 //   ZoneWarm (62-72°C) 3.5 GHz   EPP: power
 //   ZoneHot  (>72°C)   2.5 GHz   EPP: power
 func applyThermalGovernor(temp float64, onAC bool) {
+	// [CHANGE: claude-code | 2026-05-24] BUG-053: add downgrade hold counter.
+	// Without a hold, the 4.0GHz cap cools the CPU from 75→64°C in one 2s tick,
+	// crossing the 67°C exit threshold and immediately removing the cap. The CPU then
+	// boosts back to 5.1GHz and reheats in the next tick → zone 1↔2 oscillation every
+	// 2s, which causes visible Chrome rendering stutter and constant freq cap churn.
+	// Fix: require thermalDowngradeHoldTicks (5) consecutive ticks below the exit
+	// threshold before allowing a zone downgrade. Upgrades remain immediate.
 	z1, z2, z3 := thermalACZone1C, thermalACZone2C, thermalACZone3C
 	if !onAC {
 		z1, z2, z3 = thermalBatZone1C, thermalBatZone2C, thermalBatZone3C
@@ -405,23 +417,49 @@ func applyThermalGovernor(temp float64, onAC bool) {
 	switch prev {
 	case ZoneCool:
 		if temp >= z1 {
+			thermalDownholdTick = 0
 			newZone = ZoneMild
 		}
 	case ZoneMild:
 		if temp >= z2 {
+			// Upgrade: immediate
+			thermalDownholdTick = 0
 			newZone = ZoneWarm
 		} else if temp < z1-thermalHysteresisC {
-			newZone = ZoneCool
+			// Downgrade: must hold below exit threshold for N ticks
+			thermalDownholdTick++
+			if thermalDownholdTick >= thermalDowngradeHoldTicks {
+				thermalDownholdTick = 0
+				newZone = ZoneCool
+			}
+		} else {
+			thermalDownholdTick = 0
 		}
 	case ZoneWarm:
 		if temp >= z3 {
+			// Upgrade: immediate
+			thermalDownholdTick = 0
 			newZone = ZoneHot
 		} else if temp < z2-thermalHysteresisC {
-			newZone = ZoneMild
+			// Downgrade: must hold below exit threshold for N ticks
+			thermalDownholdTick++
+			if thermalDownholdTick >= thermalDowngradeHoldTicks {
+				thermalDownholdTick = 0
+				newZone = ZoneMild
+			}
+		} else {
+			thermalDownholdTick = 0
 		}
 	case ZoneHot:
 		if temp < z3-thermalHysteresisC {
-			newZone = ZoneWarm
+			// Downgrade: must hold below exit threshold for N ticks
+			thermalDownholdTick++
+			if thermalDownholdTick >= thermalDowngradeHoldTicks {
+				thermalDownholdTick = 0
+				newZone = ZoneWarm
+			}
+		} else {
+			thermalDownholdTick = 0
 		}
 	}
 
