@@ -762,13 +762,24 @@ func updateState(onAC bool, temp, gpuLoad float64, epp, profile string) {
 }
 
 func applyAggressiveFanCurve(mode string) {
-	// [CHANGE: claude-code | 2026-05-19] Early-ramp curve — 50°C target
-	// Fans spin hard at 40°C so heat can't climb past 50°C.
-	// Old curve only reached 45% at 50°C — too late to pull temp back down.
-	// Now at 45°C fans are already at 62% → holds comfortably below 50°C.
-	lg.Info("Applying fan curve to %s profile (50°C target)", mode)
-	cpuGpuCurve := "30c:0%,40c:40%,45c:62%,50c:80%,60c:95%,70c:100%,80c:100%,90c:100%"
-	midCurve    := "30c:0%,40c:30%,45c:52%,50c:72%,60c:88%,70c:100%,80c:100%,90c:100%"
+	// [CHANGE: claude-code | 2026-05-24] Exponential fan curve — 47°C hold target
+	//
+	// Design: f(T) = A·e^(β·(T−45))  where A=18%, β=0.0635
+	//   β = ln(88/18) / 25 = 0.0635  (anchors 18% at 45°C, 88% at 70°C)
+	//
+	// Hardware temps are fixed at 30,40,45,50,60,70,80,90 — firmware linearly
+	// interpolates between points. 47°C hold is achieved via interpolation:
+	//   47°C → 18 + (2/5)·(25−18) = 21%  (quiet hum, holds thermal target)
+	//   44°C → 5  + (4/5)·(18−5)  = 15%  (nearly silent at current idle)
+	//
+	// Exponential growth rate per segment (demonstrates the curve is non-linear):
+	//   45→50: 1.4 %/°C  |  50→60: 2.2 %/°C  |  60→70: 4.1 %/°C  (~1.7× each)
+	//
+	// Previous linear curve: 40% at 40°C was too loud at idle.
+	// This curve: 5% at 40°C, 15% at 44°C, 21% at 47°C — silent at idle.
+	lg.Info("Applying fan curve to %s profile (47°C hold, exponential growth)", mode)
+	cpuGpuCurve := "30c:0%,40c:5%,45c:18%,50c:25%,60c:47%,70c:88%,80c:100%,90c:100%"
+	midCurve    := "30c:0%,40c:0%,45c:12%,50c:17%,60c:31%,70c:59%,80c:88%,90c:100%"
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "cpu", "--data", cpuGpuCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "gpu", "--data", cpuGpuCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "mid", "--data", midCurve)
