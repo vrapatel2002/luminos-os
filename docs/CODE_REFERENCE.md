@@ -4,6 +4,7 @@
 # [CHANGE: claude-code | 2026-05-21] Refreshed — luminos-ram added, power v3.1, VRR
 # [CHANGE: claude-code | 2026-05-21] Session 2 — power v3.2 fan curve, GPU launcher, Chrome Wayland, Hz toggle, touchpad fix
 # [CHANGE: claude-code | 2026-05-23] AGENTS.md full rewrite — synced with Handbook, Status, Decisions
+# [CHANGE: claude-code | 2026-05-24] BUG-053: thermal downgrade hold ticks in luminos-power; BUG-054: Chrome zero-copy + MemorySaver
 
 ## Stack as of May 2026
 - Shell: KDE Plasma 6.6.4 + KWin (Wayland)
@@ -18,13 +19,13 @@
 
 ---
 
-Last Updated: 2026-05-21 (luminos-ram v3.0, power v3.2 fan curve, universal GPU launcher, Chrome Wayland, display Hz toggle, touchpad log fix, display sharpness)
+Last Updated: 2026-05-24 (BUG-053: power v3.3 thermal downgrade hold ticks; BUG-054: Chrome AMD zero-copy removed + MemorySaver tab sleep)
 
 ## Current Active Structure
 
 ### Go Daemons (cmd/)
 - `cmd/luminos-ai/` — Unix socket IPC server (central routing daemon)
-- `cmd/luminos-power/` — v3.2 EPP-based thermal control, 45°C target, beast mode, fan curve v3.2 (silent ≤44°C, 20% at 47°C, 47-49°C target)
+- `cmd/luminos-power/` — v3.3 EPP-based thermal control, 45°C target, beast mode (CPU>75%/GPU>80% for 20-30s), fan curve v2 (early ramp). Thermal downgrade hold: 5 ticks/10s (BUG-053 fix).
 - `cmd/luminos-sentinel/` — Process security monitoring (CAP_SYS_PTRACE, /proc scan)
 - `cmd/luminos-router/` — .exe compatibility classifier (80% rules + 20% ONNX AI)
 - `cmd/luminos-ram/` — v3.0 RAM management (LIRS ranking, HotSet N=8, OnScreen guard)
@@ -74,7 +75,7 @@ Last Updated: 2026-05-21 (luminos-ram v3.0, power v3.2 fan curve, universal GPU 
 - `/etc/environment` — `QT_LOGGING_RULES=kwin_libinput.warning=false` (suppresses ASUP1208 touchpad Touch Jump log spam)
 - `~/.config/kwinoutputconfig.json` — `sharpness: 0.35` (KWin AMD display pipeline sharpening)
 - `~/.var/app/com.google.Chrome/config/chrome-flags.conf` — `--ozone-platform=wayland` globally; removed ANGLE/Vulkan flags
-- `/usr/local/bin/chrome-luminos` — GPU-specific GL: AMD uses `--use-gl=egl`, NVIDIA uses `--use-gl=desktop`
+- `/usr/local/bin/chrome-luminos` — GPU-specific GL: AMD uses `--use-gl=egl`, NVIDIA uses `--use-gl=desktop`. AMD path: no `--enable-zero-copy` (BUG-054). Both paths: `--enable-features=MemorySaver` (tab sleep).
 
 ### Archive (archive/)
 - `archive/windows-hive-2026/` — Old Windows HIVE (Ollama/Docker) — DO NOT RESTORE
