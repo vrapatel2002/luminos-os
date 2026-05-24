@@ -47,19 +47,23 @@ const (
 	wifiIface = "wlp3s0"
 	// kscreen output ID for the built-in eDP panel
 	displayOutputID = "1"
-	// GPU gaming thresholds
+	// dGPU (NVIDIA) gaming thresholds — beast mode trigger
 	gpuHighThreshPct   = 80.0
 	gpuHighThreshTicks = 15 // 30s at 2s poll
 	gpuLowThreshPct    = 20.0
 	gpuLowThreshTicks  = 30 // 60s at 2s poll
 	// CPU beast-mode thresholds — catches CPU-heavy work (ML training, compilation)
-	// that GPU detection misses entirely.
-	// 10 ticks = 20s: short enough to trigger before thermal oscillation at ~85°C
-	// can reset the counter too many times.
 	cpuHighThreshPct   = 75.0
 	cpuHighThreshTicks = 10 // 20s at 2s poll
 	cpuLowThreshPct    = 25.0
 	cpuLowThreshTicks  = 30 // 60s at 2s poll
+	// [CHANGE: claude-code | 2026-05-24] Load-based Quiet idle detection.
+	// Balanced→Quiet when CPU+iGPU+dGPU all idle for 60s on AC.
+	// Quiet→Balanced immediately when any load rises.
+	quietIdleCPUPct   = 25.0 // CPU% threshold for idle
+	quietIdleIGPUPct  = 15.0 // iGPU% threshold for idle (card2=AMD 780M)
+	quietIdleDGPUPct  = 5.0  // dGPU% threshold for idle (card1=NVIDIA)
+	quietIdleTicks    = 30   // 60s sustained idle (30 × 2s) → drop to Quiet
 	// Emergency thermal threshold
 	// [CHANGE: claude-code | 2026-05-24] BUG-055: raised from 85°C→92°C (ZoneHot entry raised to 87°C)
 	thermalEmergencyC = 92.0
@@ -90,9 +94,9 @@ type ThermalZone int
 
 const (
 	ZoneCool ThermalZone = iota // <60°C  — no throttle (AC)
-	ZoneMild                    // 60-72°C — EPP nudge, no cap (AC)
-	ZoneWarm                    // 72-80°C — 4.0 GHz cap (AC)
-	ZoneHot                     // >80°C  — 3.0 GHz cap (AC, below emergency 85°C)
+	ZoneMild                    // 60-72°C — no cap (AC)
+	ZoneWarm                    // 72-87°C — no cap (fans at 100% handle it — BUG-055)
+	ZoneHot                     // >87°C  — 3.0 GHz cap (AC, below emergency 92°C)
 )
 
 var (
@@ -105,6 +109,7 @@ var (
 	gpuLowTicks  int
 	cpuHighTicks int
 	cpuLowTicks  int
+	quietTicks   int // ticks of all-idle load → Quiet profile
 
 	currentThermalZone  ThermalZone = ZoneCool
 	thermalDownholdTick int        // consecutive ticks below exit threshold before downgrading
@@ -193,7 +198,9 @@ func monitorLoop(ctx context.Context) {
 		case <-ticker.C:
 			onAC := readACState()
 			temp := readCPUTemp()
-			gpuLoad := readGPULoad()
+			dgpuLoad := readDGPULoad() // NVIDIA dGPU — gaming/ML detection
+			igpuLoad := readIGPULoad() // AMD iGPU — compositor/display load
+			gpuLoad := dgpuLoad        // beast mode uses dGPU only (iGPU≠gaming)
 			cpuLoad := readCPULoadPct()
 
 			// Detect AC transition → immediate response
@@ -201,6 +208,7 @@ func monitorLoop(ctx context.Context) {
 				applyACTransition(onAC)
 				cpuHighTicks = 0
 				cpuLowTicks = 0
+				quietTicks = 0
 				// Adjust poll rate
 				newInterval := batteryInterval(onAC)
 				if newInterval != interval {
@@ -210,10 +218,9 @@ func monitorLoop(ctx context.Context) {
 				}
 			}
 
-			// Beast-mode detection runs BEFORE emergency thermal so sustained CPU/GPU
-			// load can trigger Performance before the emergency handler resets the ticks.
-			// GPU path: games, GPU-accelerated workloads.
-			// CPU path: ML training (XGBoost, feature engineering), compilation, etc.
+			// Beast-mode detection runs BEFORE everything else.
+			// Uses dGPU (NVIDIA) for gaming detection — high iGPU load is just compositing.
+			// CPU path: ML training, compilation.
 			if onAC && prevState.Profile != "Performance" {
 				gpuProfile := applyGamingDetection(gpuLoad, prevState.Profile)
 				cpuProfile := applyCPUBeastDetection(cpuLoad, prevState.Profile)
@@ -222,37 +229,65 @@ func monitorLoop(ctx context.Context) {
 					if cpuProfile == "Performance" {
 						src = "cpu"
 					}
-					lg.Info("beast mode → Performance (trigger: %s, cpu=%.0f%%, gpu=%.0f%%)", src, cpuLoad, gpuLoad)
+					lg.Info("beast mode → Performance (trigger: %s, cpu=%.0f%%, dgpu=%.0f%%)", src, cpuLoad, dgpuLoad)
 					runCmd("asusctl", "profile", "set", "Performance")
 					setEPPAfterAsusctl("performance")
 					setAllMaxFreq(0) // full boost — no thermal cap during beast mode
 					currentThermalZone = ZoneCool
 					thermalDownholdTick = 0
+					quietTicks = 0
 					updateState(onAC, temp, gpuLoad, "performance", "Performance")
 					continue
 				}
 			} else if onAC && prevState.Profile == "Performance" {
-				// Exit beast mode when both GPU and CPU load drop
+				// Exit beast mode when both dGPU and CPU load drop
 				gpuProfile := applyGamingDetection(gpuLoad, "Performance")
 				cpuProfile := applyCPUBeastDetection(cpuLoad, "Performance")
 				if gpuProfile == "Balanced" && cpuProfile == "Balanced" {
-					lg.Info("beast mode exit → Balanced (cpu=%.0f%%, gpu=%.0f%%)", cpuLoad, gpuLoad)
+					lg.Info("beast mode exit → Balanced (cpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, dgpuLoad)
 					runCmd("asusctl", "profile", "set", "Balanced")
 					setAllMaxFreq(0) // clear any emergency freq cap applied during beast mode
 					currentThermalZone = ZoneCool
 					thermalDownholdTick = 0
+					quietTicks = 0
 					setEPPAfterAsusctl("power") // back to cool target
 					updateState(onAC, temp, gpuLoad, "power", "Balanced")
 					continue
 				}
 			}
 
+			// Load-based Quiet idle detection (AC, non-Performance only).
+			// Balanced→Quiet: CPU<25% AND iGPU<15% AND dGPU<5% for 60s sustained.
+			// Quiet→Balanced: any load spike above those thresholds, immediately.
+			if onAC && prevState.Profile == "Balanced" {
+				if cpuLoad < quietIdleCPUPct && igpuLoad < quietIdleIGPUPct && dgpuLoad < quietIdleDGPUPct {
+					quietTicks++
+					if quietTicks >= quietIdleTicks {
+						quietTicks = 0
+						lg.Info("idle → Quiet (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
+						runCmd("asusctl", "profile", "set", "Quiet")
+						updateState(onAC, temp, gpuLoad, prevState.EPP, "Quiet")
+						continue
+					}
+				} else {
+					quietTicks = 0
+				}
+			} else if onAC && prevState.Profile == "Quiet" {
+				if cpuLoad >= quietIdleCPUPct || igpuLoad >= quietIdleIGPUPct || dgpuLoad >= quietIdleDGPUPct {
+					quietTicks = 0
+					lg.Info("load → Balanced (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
+					runCmd("asusctl", "profile", "set", "Balanced")
+					updateState(onAC, temp, gpuLoad, prevState.EPP, "Balanced")
+					continue
+				}
+			}
+
 			// Emergency thermal — after beast mode check.
-			// In Performance (beast/gaming): Ryzen 9 8845HS TJmax is 105°C, so 90°C
+			// In Performance (beast/gaming): Ryzen 9 8845HS TJmax is 105°C, so 95°C
 			// under load is normal for a gaming laptop. Use 95°C threshold and only
 			// apply a freq cap — do NOT exit Performance profile.
-			// Outside Performance: 85°C threshold, full Quiet + 2GHz cap.
-			emergencyThreshC := thermalEmergencyC // 85°C for normal modes
+			// Outside Performance: 92°C threshold, full Quiet + 2GHz cap.
+			emergencyThreshC := thermalEmergencyC // 92°C for normal modes
 			if prevState.Profile == "Performance" {
 				emergencyThreshC = 95.0 // gaming laptop safe operating limit
 			}
@@ -284,9 +319,10 @@ func monitorLoop(ctx context.Context) {
 // applyACTransition handles the full set of changes when AC state changes.
 // Called at startup and on every AC plug/unplug event.
 func applyACTransition(onAC bool) {
-	// Reset thermal zone, hold counter, and freq cap on any AC transition
+	// Reset thermal zone, hold counter, freq cap, and idle counter on any AC transition
 	currentThermalZone = ZoneCool
 	thermalDownholdTick = 0
+	quietTicks = 0
 	setAllMaxFreq(0)
 
 	if onAC {
@@ -700,6 +736,7 @@ func readCPUTemp() float64 {
 }
 
 func readGPULoad() float64 {
+	// Returns max GPU load across all cards (used for beast-mode dGPU detection).
 	matches, _ := filepath.Glob("/sys/class/drm/card*/device/gpu_busy_percent")
 	var max float64
 	for _, m := range matches {
@@ -710,6 +747,20 @@ func readGPULoad() float64 {
 		}
 	}
 	return max
+}
+
+// readDGPULoad returns NVIDIA dGPU (card1) busy percent. 0 if unavailable/powered down.
+func readDGPULoad() float64 {
+	d, _ := os.ReadFile("/sys/class/drm/card1/device/gpu_busy_percent")
+	val, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
+	return val
+}
+
+// readIGPULoad returns AMD iGPU (card2) busy percent. 0 if unavailable.
+func readIGPULoad() float64 {
+	d, _ := os.ReadFile("/sys/class/drm/card2/device/gpu_busy_percent")
+	val, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
+	return val
 }
 
 // readCPULoadPct returns system-wide CPU utilisation as a percentage (0-100)

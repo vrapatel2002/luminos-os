@@ -83,7 +83,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Daemon | Status | Notes |
 |---|---|---|
 | luminos-ai | ✅ Running | Unix socket IPC — central routing daemon |
-| luminos-power | ✅ Running | v3.6 EPP-based. AC: EPP=power, 47°C fan hold. Beast mode: CPU>75%/GPU>80% for 20-30s. Fan curve v5: 35%@47°C, 55%@50°C, 62%@52°C. Zones: no cap ≤87°C (fans 100% at 70°C), 3.0GHz@87°C+, 2.0GHz@92°C+ emergency — BUG-055. |
+| luminos-power | ✅ Running | v3.7 EPP-based. Load-based profiles: Balanced→Quiet after 60s idle (CPU<25%+iGPU<15%+dGPU<5%), immediate Balanced on load. Beast mode: CPU>75% or dGPU>80% → Performance. Fan curve v5: 35%@47°C, 62%@52°C. No freq cap ≤87°C — BUG-055/056. |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
 | luminos-ram | ✅ Running | v3.0 — LIRS IRR ranking, N=8 HotSet, OnScreen protection, memory pressure monitor |
@@ -108,7 +108,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Floating panel | ❌ Reverted | [CHANGE: gemini-cli | 2026-05-11] Panel reset to default bottom position. |
 | RAM monitor widget | ✅ Working | Plasma widget (org.luminos.ramwidget) installed |
 | System Telemetry | ✅ Active | Continuous logging to /var/log/luminos-telemetry.csv |
-| Chrome GPU | ✅ Fixed | AMD iGPU only (BUG-046); Wayland mode global; GPU-specific GL in chrome-luminos wrapper; --enable-zero-copy removed from AMD path (BUG-054); MemorySaver tab sleep enabled |
+| Chrome GPU | ✅ Fixed | AMD iGPU only (BUG-046); Wayland mode global; GPU-specific GL in chrome-luminos wrapper; --enable-zero-copy removed from AMD path (BUG-054); MemorySaver tab sleep enabled; VAAPI hardware decode enabled (BUG-056) — VP9+AV1 hardware decode on 780M |
 | Chrome CPU | ✅ Fixed | Removed ANGLE/Vulkan flags (wrong for AMD); --ozone-platform=wayland; GPU-specific --use-gl |
 | Universal GPU launcher | ✅ Working | luminos-gpu-launch (kdialog picker); luminos-nvidia-run (wakes PCI power gate); Dolphin service menus for executables + .desktop files |
 | Touchpad log flood | ✅ Fixed | QT_LOGGING_RULES=kwin_libinput.warning=false in /etc/environment; suppresses ASUP1208 Touch Jump spam |

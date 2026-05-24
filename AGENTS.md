@@ -381,7 +381,13 @@ luminos-brain safe "<action description>"
 - v3.2 (febd312a) — silent below 44°C, caused 55–65°C drift
 - v2 early-ramp — 40% at 40°C idle, too loud
 
-**EPP policy:** `power` in all non-gaming states. `performance` only in beast mode (GPU >80% for 30s or CPU >75% for 20s, AC only).
+**EPP policy:** `power` in all non-gaming states. `performance` only in beast mode (dGPU >80% for 30s or CPU >75% for 20s, AC only).
+
+**Load-based profile switching (AC):**
+- `Balanced` → `Quiet`: CPU<25% + iGPU<15% + dGPU<5% sustained 60s
+- `Quiet` → `Balanced`: any load above thresholds, immediate
+- `Balanced/Quiet` → `Performance`: beast mode trigger (CPU>75% 20s or dGPU>80% 30s)
+- `Performance` → `Balanced`: beast mode exit (both drop below threshold)
 
 **Thermal zones (AC):** Cool <60°C | Mild 60°C (no cap) | Warm 72°C (no cap — fans 100% at 70°C) | Hot 87°C (3.0GHz cap) | Emergency 92°C (2.0GHz) (2.0GHz + Quiet)
 **5°C hysteresis** on all zone exits.

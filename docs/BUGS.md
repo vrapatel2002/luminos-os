@@ -3,6 +3,16 @@ Last Updated: 2026-05-24 (BUG-055: ZoneWarm/ZoneHot freq cap oscillation + YT st
 
 ## Fixed Bugs (new)
 
+### BUG-056 — Chrome YouTube stutter — VAAPI not enabled on AMD path
+- Status: FIXED
+- Severity: HIGH
+- Component: /usr/local/bin/chrome-luminos
+- Description: Chrome video (YouTube) stuttered on AMD iGPU path.
+- Root Cause: `radeonsi_drv_video.so` (Mesa VAAPI driver) is present at `/usr/lib/dri/` and supports H264/HEVC/VP9/AV1, but `LIBVA_DRIVER_NAME` was not passed into the Flatpak sandbox. Chrome couldn't discover the VAAPI driver → fell back to software video decode → CPU doing all decode work → GPU compositor sync stalls → stutter.
+- Fix Applied: Added `--env=LIBVA_DRIVER_NAME=radeonsi` to `flatpak run` in chrome-luminos AMD path. Added `--enable-features=VaapiVideoDecodeLinuxGL,VaapiVideoEncoder` and `--ignore-gpu-blocklist` to Chrome flags. YouTube VP9+AV1 decode now hardware-accelerated on AMD 780M.
+- Date Found: 2026-05-24
+- Date Fixed: 2026-05-24
+
 ### BUG-055 — Thermal zone oscillation + YT stutter (ZoneWarm/ZoneHot freq caps)
 - Status: FIXED
 - Severity: HIGH
