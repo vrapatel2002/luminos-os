@@ -1,17 +1,27 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-24
+Last Updated: 2026-05-24 (BUG-055: ZoneWarm/ZoneHot freq cap oscillation + YT stutter)
 
 ## Fixed Bugs (new)
 
-### BUG-053 — Thermal zone 1↔2 oscillation every 2s / Chrome rendering stutter
+### BUG-055 — Thermal zone oscillation + YT stutter (ZoneWarm/ZoneHot freq caps)
 - Status: FIXED
+- Severity: HIGH
+- Component: cmd/luminos-power/main.go — applyThermalGovernor(), thermalACZone3C
+- Description: YouTube video stuttered. Logs showed zone 1↔2 oscillating every 12s (was 2s after BUG-053 hold-ticks fix), and then zone 2↔3 oscillating every 10s. Every zone transition changed max_freq (5.1→4.0→5.1 GHz or 5.1→3.0→5.1 GHz), causing renderer hitches.
+- Root Cause: Any hard freq cap creates a self-defeating cooling loop: cap → CPU cools → cap removed → CPU boosts → reheats → cap reapplied. BUG-053's hold ticks extended the period but did not break the loop. Two issues: (1) ZoneWarm (72°C) had a 4.0GHz cap despite fans running at 100% above 70°C; (2) ZoneHot threshold was 80°C — too conservative for 8845HS (TJmax 105°C) during YouTube.
+- Fix Applied: (1) Removed the 4.0GHz AC cap from ZoneWarm — fans at 100% handle cooling above 70°C without a hard cap. Battery path keeps 3.5GHz cap (correct behavior). (2) Raised thermalACZone3C from 80°C→87°C and thermalEmergencyC from 85°C→92°C. YouTube at 82°C stays in ZoneWarm with no cap. ZoneHot (3.0GHz) only triggers at genuine overheating (87°C+).
+- Date Found: 2026-05-24
+- Date Fixed: 2026-05-24
+
+### BUG-053 — Thermal zone 1↔2 oscillation every 2s / Chrome rendering stutter
+- Status: SUPERSEDED by BUG-055
 - Severity: HIGH
 - Component: cmd/luminos-power/main.go — applyThermalGovernor()
 - Description: Thermal zone bounced between 1 and 2 every 2-4 seconds under load. Caused visible Chrome tab stutter.
-- Root Cause: The 4.0GHz freq cap (applied at zone 2 entry, 72°C) cools the CPU from ~75°C to ~64°C in a single 2s tick, which crosses the 67°C exit threshold (72-5°C hysteresis). The cap is immediately removed, CPU boosts back to 5.1GHz, reheats in 2 seconds → repeat indefinitely. The 5°C hysteresis was on the temperature, not on time. One tick below the threshold was enough to remove the cap.
-- Fix Applied: Added `thermalDownholdTick` counter. Zone downgrades now require `thermalDowngradeHoldTicks=5` consecutive ticks (10 seconds on AC) below the exit threshold. Zone upgrades remain immediate. Counter resets on AC transition and beast mode entry/exit.
+- Root Cause: The 4.0GHz freq cap (applied at zone 2 entry, 72°C) cools the CPU from ~75°C to ~64°C in a single 2s tick, which crosses the 67°C exit threshold. Cap removed, CPU boosts, reheats → loop.
+- Fix Applied (partial): Added `thermalDownholdTick` counter requiring 5 consecutive ticks below exit threshold before downgrading. Extended period to 12s but did not break the loop. Full fix in BUG-055: remove cap entirely from ZoneWarm on AC.
 - Date Found: 2026-05-24
-- Date Fixed: 2026-05-24
+- Date Fixed: 2026-05-24 (fully resolved by BUG-055)
 
 ### BUG-054 — Chrome tab stutter on AMD iGPU path (--enable-zero-copy)
 - Status: FIXED

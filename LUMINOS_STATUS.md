@@ -83,7 +83,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Daemon | Status | Notes |
 |---|---|---|
 | luminos-ai | ✅ Running | Unix socket IPC — central routing daemon |
-| luminos-power | ✅ Running | v3.5 EPP-based. AC: EPP=power, 47°C fan hold target. Beast mode: CPU>75%/GPU>80% for 20-30s. Fan curve v5 (steep recovery): silent at 40°C (5%), 35% at 47°C hold, 55% at 50°C, 62% at 52°C recovery. Thermal downgrade hold: 5 ticks (10s) — BUG-053. |
+| luminos-power | ✅ Running | v3.6 EPP-based. AC: EPP=power, 47°C fan hold. Beast mode: CPU>75%/GPU>80% for 20-30s. Fan curve v5: 35%@47°C, 55%@50°C, 62%@52°C. Zones: no cap ≤87°C (fans 100% at 70°C), 3.0GHz@87°C+, 2.0GHz@92°C+ emergency — BUG-055. |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
 | luminos-ram | ✅ Running | v3.0 — LIRS IRR ranking, N=8 HotSet, OnScreen protection, memory pressure monitor |

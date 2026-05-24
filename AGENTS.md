@@ -383,7 +383,7 @@ luminos-brain safe "<action description>"
 
 **EPP policy:** `power` in all non-gaming states. `performance` only in beast mode (GPU >80% for 30s or CPU >75% for 20s, AC only).
 
-**Thermal zones (AC):** Cool <60°C | Mild 60°C | Warm 72°C (4.0GHz cap) | Hot 80°C (3.0GHz cap) | Emergency 85°C (2.0GHz + Quiet)
+**Thermal zones (AC):** Cool <60°C | Mild 60°C (no cap) | Warm 72°C (no cap — fans 100% at 70°C) | Hot 87°C (3.0GHz cap) | Emergency 92°C (2.0GHz) (2.0GHz + Quiet)
 **5°C hysteresis** on all zone exits.
 
 **EPP timing:** Always use `setEPPAfterAsusctl()` (350ms sleep after asusctl) to win the asusd race. Never write EPP immediately after `asusctl profile set`.

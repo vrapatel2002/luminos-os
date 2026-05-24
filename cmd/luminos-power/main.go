@@ -61,19 +61,23 @@ const (
 	cpuLowThreshPct    = 25.0
 	cpuLowThreshTicks  = 30 // 60s at 2s poll
 	// Emergency thermal threshold
-	thermalEmergencyC = 85.0
+	// [CHANGE: claude-code | 2026-05-24] BUG-055: raised from 85°C→92°C (ZoneHot entry raised to 87°C)
+	thermalEmergencyC = 92.0
 
 	// Thermal governor zones (ZoneCool→ZoneHot) with 5°C hysteresis for exit.
 	// Target: 45°C idle via EPP hints alone. Freq caps only for genuinely hot temps.
-	// On AC: caps start at 72°C so normal workloads are never throttled.
+	// On AC: ZoneWarm has no cap (fans at 100% from 70°C handle it). Only ZoneHot+ caps.
 	// On battery: caps start at 62°C — saves power and battery.
 	thermalHysteresisC        = 5.0
-	thermalDowngradeHoldTicks = 5 // must stay below exit threshold for 5 ticks (10s on AC, 50s on battery) before downgrading zone
+	thermalDowngradeHoldTicks = 5 // must stay below exit threshold for 5 ticks (10s on AC) before downgrading zone
 
 	// AC thresholds — permissive, caps only when actually overheating
+	// [CHANGE: claude-code | 2026-05-24] BUG-055: raised Zone3 from 80°C→87°C.
+	// 8845HS TJmax=105°C. YouTube/normal load sits at 80-85°C with fans at 100%.
+	// Old 80°C threshold triggered 3.0GHz cap during normal use, causing oscillation+stutter.
 	thermalACZone1C = 60.0 // cool→mild on AC: EPP nudge only, no cap
-	thermalACZone2C = 72.0 // mild→warm on AC: 4.0 GHz cap
-	thermalACZone3C = 80.0 // warm→hot on AC:  3.0 GHz cap
+	thermalACZone2C = 72.0 // mild→warm on AC: no cap (fans 100% at 70°C handle cooling — BUG-055)
+	thermalACZone3C = 87.0 // warm→hot on AC:  3.0 GHz cap (was 80°C — raised, BUG-055)
 
 	// Battery thresholds — more aggressive to save power and extend range
 	thermalBatZone1C = 50.0 // cool→mild on bat: EPP=power (already set), no cap
@@ -390,7 +394,7 @@ func batteryInterval(onAC bool) time.Duration {
 // AC thresholds (permissive — normal workloads never throttled):
 //   ZoneCool (<60°C)   no cap    EPP: power
 //   ZoneMild (60-72°C) no cap    EPP: power (SMU conserves without hard cap)
-//   ZoneWarm (72-80°C) 4.0 GHz   EPP: power
+//   ZoneWarm (72-80°C) no cap    EPP: power (fans 100% at 70°C — cap removed, was causing oscillation BUG-055)
 //   ZoneHot  (>80°C)   3.0 GHz   EPP: power
 //
 // Battery thresholds (tighter — saves power, extends range):
@@ -482,8 +486,14 @@ func applyThermalGovernor(temp float64, onAC bool) {
 		setAllEPP("power")
 		prevState.EPP = "power"
 	case ZoneWarm:
+		// [CHANGE: claude-code | 2026-05-24] BUG-055: removed 4.0GHz AC cap.
+		// Fan curve v5 runs fans at 100% at 70°C — no freq cap needed on AC.
+		// The cap was creating a cooling→reboost feedback loop: cap cools CPU to 62°C,
+		// cap removed, CPU boosts to 78°C in 2s, cap reapplied → infinite oscillation.
+		// Hold ticks (BUG-053 fix) only extended the period, did not break the loop.
+		// Battery still uses 3.5GHz cap (power saving on battery is correct behavior).
 		if onAC {
-			setAllMaxFreq(4000000) // 4.0 GHz on AC — still fast, just no turbo
+			setAllMaxFreq(0) // no cap — fans at 100% handle it
 		} else {
 			setAllMaxFreq(3500000) // 3.5 GHz on battery
 		}

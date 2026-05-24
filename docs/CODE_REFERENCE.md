@@ -27,7 +27,7 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 
 ### Go Daemons (cmd/)
 - `cmd/luminos-ai/` — Unix socket IPC server (central routing daemon)
-- `cmd/luminos-power/` — v3.5 EPP-based thermal control. AC: EPP=power, 47°C fan hold. Beast mode: CPU>75%/GPU>80% for 20-30s. Fan curve v5 (steep recovery): 5%@40°C, 35%@47°C hold, 55%@50°C, 62%@52°C. Thermal downgrade hold: 5 ticks (10s) — BUG-053.
+- `cmd/luminos-power/` — v3.6 EPP-based thermal control. AC: no cap ≤87°C (fans 100% at 70°C), 3.0GHz@87°C, 2.0GHz@92°C emergency. Fan curve v5: 35%@47°C, 62%@52°C. Beast mode: CPU>75%/GPU>80% — BUG-055.
 - `cmd/luminos-sentinel/` — Process security monitoring (CAP_SYS_PTRACE, /proc scan)
 - `cmd/luminos-router/` — .exe compatibility classifier (80% rules + 20% ONNX AI)
 - `cmd/luminos-ram/` — v3.0 RAM management (LIRS ranking, HotSet N=8, OnScreen guard)
