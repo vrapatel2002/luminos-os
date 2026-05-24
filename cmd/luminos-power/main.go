@@ -762,24 +762,24 @@ func updateState(onAC bool, temp, gpuLoad float64, epp, profile string) {
 }
 
 func applyAggressiveFanCurve(mode string) {
-	// [CHANGE: claude-code | 2026-05-24] Exponential fan curve — 47°C hold target
+	// [CHANGE: claude-code | 2026-05-24] Fan curve v5 — steep recovery above 47°C
 	//
-	// Design: f(T) = A·e^(β·(T−45))  where A=18%, β=0.0635
-	//   β = ln(88/18) / 25 = 0.0635  (anchors 18% at 45°C, 88% at 70°C)
+	// Problem with v4: 50°C breakpoint was only 25%. At 52°C the firmware interpolated
+	// to ~29% — not enough fan to pull the CPU back down to 47°C. The curve was quiet
+	// below 47°C but had no recovery bite above it.
 	//
-	// Hardware temps are fixed at 30,40,45,50,60,70,80,90 — firmware linearly
-	// interpolates between points. 47°C hold is achieved via interpolation:
-	//   47°C → 18 + (2/5)·(25−18) = 21%  (quiet hum, holds thermal target)
-	//   44°C → 5  + (4/5)·(18−5)  = 15%  (nearly silent at current idle)
+	// Fix: raise 50°C from 25% → 55%. Creates a steep 45→50°C slope so any overshoot
+	// above 47°C gets aggressively corrected:
+	//   40°C → 5%   (silent at idle — same as v4)
+	//   47°C → 22 + (2/5)·(55−22) = 35%  (good hold — up from 21%)
+	//   48°C → 22 + (3/5)·(55−22) = 42%  (noticeably ramping)
+	//   50°C → 55%  (aggressive recovery threshold)
+	//   52°C → 55 + (2/10)·(88−55) = 62%  (strong pullback from overshoot)
 	//
-	// Exponential growth rate per segment (demonstrates the curve is non-linear):
-	//   45→50: 1.4 %/°C  |  50→60: 2.2 %/°C  |  60→70: 4.1 %/°C  (~1.7× each)
-	//
-	// Previous linear curve: 40% at 40°C was too loud at idle.
-	// This curve: 5% at 40°C, 15% at 44°C, 21% at 47°C — silent at idle.
-	lg.Info("Applying fan curve to %s profile (47°C hold, exponential growth)", mode)
-	cpuGpuCurve := "30c:0%,40c:5%,45c:18%,50c:25%,60c:47%,70c:88%,80c:100%,90c:100%"
-	midCurve    := "30c:0%,40c:0%,45c:12%,50c:17%,60c:31%,70c:59%,80c:88%,90c:100%"
+	// Mid fan is 67% of CPU/GPU curve throughout.
+	lg.Info("Applying fan curve to %s profile (v5: steep 47°C recovery)", mode)
+	cpuGpuCurve := "30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%"
+	midCurve    := "30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%"
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "cpu", "--data", cpuGpuCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "gpu", "--data", cpuGpuCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "mid", "--data", midCurve)

@@ -357,19 +357,29 @@ luminos-brain safe "<action description>"
 | `hive-swap-server.py` (port 8079) | RETIRED — do not restart or reference |
 | `orchestrator.py` service | RETIRED — do not enable or reference |
 | Tahoe macOS theme | Caused white panel bugs. Archived. Do not restore. |
-| code-review-graph MCP | Removed 2026-05-07. Do not call. |
+| ~~code-review-graph removed~~ | Re-enabled 2026-05-23. Use via MCP tools (see Section 7). |
 
 ---
 
 ## 12. Power & Thermal Quick Reference
 
-**Current fan curve (v2 — ACTIVE, restored at commit 385f1302):**
-- CPU/GPU: `30c:0%, 40c:40%, 45c:62%, 50c:80%, 60c:95%, 70c:100%, 80c:100%, 90c:100%`
-- Mid fan: `30c:0%, 40c:30%, 45c:52%, 50c:72%, 60c:88%, 70c:100%, 80c:100%, 90c:100%`
+**Current fan curve (v5 — ACTIVE, 2026-05-24):**
+- CPU/GPU: `30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%`
+- Mid fan:  `30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%`
+- Hardware PWM CPU/GPU: `(0, 13, 56, 140, 224, 255, 255, 255)`
+- Hardware PWM Mid: `(0, 0, 38, 94, 150, 179, 224, 255)`
+
+**Key operating points (CPU/GPU fan):**
+- 40°C: 5% — silent idle
+- 47°C: 35% — hold target (interpolated between 45c:22% and 50c:55%)
+- 50°C: 55% — recovery threshold
+- 52°C: 62% — strong overshoot pullback
+- 60°C: 88% — near-max under load
 
 **WRONG curves (do not use):**
+- v4 (cfb64db0) — 50°C breakpoint too low (25%), caused 52°C drift with only 29% fan
 - v3.2 (febd312a) — silent below 44°C, caused 55–65°C drift
-- v3.3 (8faeef7d) — 12°C hysteresis, caused over-throttling
+- v2 early-ramp — 40% at 40°C idle, too loud
 
 **EPP policy:** `power` in all non-gaming states. `performance` only in beast mode (GPU >80% for 30s or CPU >75% for 20s, AC only).
 

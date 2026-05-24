@@ -6,6 +6,7 @@
 # [CHANGE: claude-code | 2026-05-23] AGENTS.md full rewrite — synced with Handbook, Status, Decisions
 # [CHANGE: claude-code | 2026-05-24] BUG-053: thermal downgrade hold ticks in luminos-power; BUG-054: Chrome zero-copy + MemorySaver
 # [CHANGE: claude-code | 2026-05-24] fan curve v4: exponential f(T)=18·e^(0.0635·(T-45)), 47°C hold target, silent 5% at 40°C, 88% at 70°C
+# [CHANGE: claude-code | 2026-05-24] fan curve v5: steep recovery — 50°C raised from 25%→55% to prevent 52°C drift; 35%@47°C hold, 62%@52°C pullback
 
 ## Stack as of May 2026
 - Shell: KDE Plasma 6.6.4 + KWin (Wayland)
@@ -20,13 +21,13 @@
 
 ---
 
-Last Updated: 2026-05-24 (BUG-053+054 fixes; fan curve v4 exponential 47°C hold)
+Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 
 ## Current Active Structure
 
 ### Go Daemons (cmd/)
 - `cmd/luminos-ai/` — Unix socket IPC server (central routing daemon)
-- `cmd/luminos-power/` — v3.4 EPP-based thermal control. AC: EPP=power, 47°C fan hold target. Beast mode: CPU>75%/GPU>80% for 20-30s. Fan curve v4 (exponential f(T)=18·e^(0.0635·(T-45))): silent at 40°C (5%), 21% at 47°C hold, 88% at 70°C. Thermal downgrade hold: 5 ticks (10s) — BUG-053.
+- `cmd/luminos-power/` — v3.5 EPP-based thermal control. AC: EPP=power, 47°C fan hold. Beast mode: CPU>75%/GPU>80% for 20-30s. Fan curve v5 (steep recovery): 5%@40°C, 35%@47°C hold, 55%@50°C, 62%@52°C. Thermal downgrade hold: 5 ticks (10s) — BUG-053.
 - `cmd/luminos-sentinel/` — Process security monitoring (CAP_SYS_PTRACE, /proc scan)
 - `cmd/luminos-router/` — .exe compatibility classifier (80% rules + 20% ONNX AI)
 - `cmd/luminos-ram/` — v3.0 RAM management (LIRS ranking, HotSet N=8, OnScreen guard)
