@@ -3,6 +3,7 @@
 # [CHANGE: claude-code | 2026-04-26] Full cleanup pass — Windows HIVE archived
 # [CHANGE: claude-code | 2026-05-21] Refreshed — luminos-ram added, power v3.1, VRR
 # [CHANGE: claude-code | 2026-05-21] Session 2 — power v3.2 fan curve, GPU launcher, Chrome Wayland, Hz toggle, touchpad fix
+# [CHANGE: claude-code | 2026-05-23] AGENTS.md full rewrite — synced with Handbook, Status, Decisions
 
 ## Stack as of May 2026
 - Shell: KDE Plasma 6.6.4 + KWin (Wayland)
