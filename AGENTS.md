@@ -363,36 +363,45 @@ luminos-brain safe "<action description>"
 
 ## 12. Power & Thermal Quick Reference
 
+**luminos-power version: v4.0 (Adaptive Dual Governor, 2026-05-26)**
+
 **Current fan curve (v5 — ACTIVE, 2026-05-24):**
 - CPU/GPU: `30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%`
 - Mid fan:  `30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%`
-- Hardware PWM CPU/GPU: `(0, 13, 56, 140, 224, 255, 255, 255)`
-- Hardware PWM Mid: `(0, 0, 38, 94, 150, 179, 224, 255)`
-
-**Key operating points (CPU/GPU fan):**
-- 40°C: 5% — silent idle
-- 47°C: 35% — hold target (interpolated between 45c:22% and 50c:55%)
-- 50°C: 55% — recovery threshold
-- 52°C: 62% — strong overshoot pullback
-- 60°C: 88% — near-max under load
+- 40°C: 5% — silent idle | 47°C: 35% — hold | 50°C: 55% — recovery | 52°C: 62% — pullback
 
 **WRONG curves (do not use):**
-- v4 (cfb64db0) — 50°C breakpoint too low (25%), caused 52°C drift with only 29% fan
+- v4 (cfb64db0) — 50°C at 25%, caused 52°C drift
 - v3.2 (febd312a) — silent below 44°C, caused 55–65°C drift
-- v2 early-ramp — 40% at 40°C idle, too loud
 
-**EPP policy:** `power` in all non-gaming states. `performance` only in beast mode (dGPU >80% for 30s or CPU >75% for 20s, AC only).
+**Adaptive Governor (v4.0):**
+- CPU cap = `1.8GHz + (smoothedLoad/100) × (hwMax − 1.8GHz)`
+- EMA α=0.3: `smoothed = 0.7×prev + 0.3×current`
+- Cap transition smoothed 70/30; only writes sysfs if change >150MHz
+- iGPU dominance penalty: when `igpuLoad − cpuLoad > 20%` → up to 300MHz CPU reduction
+- Pre-alloc on app launch: known apps get +N% effective load for 30s (see knownApps table in main.go)
 
-**Load-based profile switching (AC):**
+**PSI sleep strategy:**
+- Idle (<20%): PSI event-driven, up to 10s — kernel wakes on CPU stall only
+- Active (20-60%): 2s sleep
+- Near cap (>60%): 500ms tight loop
+
+**Load-based profile switching (AC, unchanged):**
 - `Balanced` → `Quiet`: CPU<25% + iGPU<15% + dGPU<5% sustained 60s
 - `Quiet` → `Balanced`: any load above thresholds, immediate
-- `Balanced/Quiet` → `Performance`: beast mode trigger (CPU>75% 20s or dGPU>80% 30s)
-- `Performance` → `Balanced`: beast mode exit (both drop below threshold)
+- `Balanced/Quiet` → `Performance`: beast mode (CPU>75% 20s OR dGPU>80% 30s)
+- `Performance` → `Balanced`: beast mode exit
 
-**Thermal zones (AC):** Cool <60°C | Mild 60°C (no cap) | Warm 72°C (no cap — fans 100% at 70°C) | Hot 87°C (3.0GHz cap) | Emergency 92°C (2.0GHz) (2.0GHz + Quiet)
-**5°C hysteresis** on all zone exits.
+**Thermal zones (backstop only — adaptive governor runs below ZoneHot):**
+| Zone (AC) | Entry | Cap |
+|-----------|-------|-----|
+| Cool/Mild/Warm | <87°C | none — adaptive governor |
+| Hot | 87°C | 3.0 GHz (overrides adaptive) |
+| Emergency | 92°C | 2.0 GHz + Quiet (absolute override) |
+**5°C hysteresis** on all zone exits. Battery: ZoneWarm (62°C)→3.5GHz, ZoneHot (72°C)→2.5GHz.
 
-**EPP timing:** Always use `setEPPAfterAsusctl()` (350ms sleep after asusctl) to win the asusd race. Never write EPP immediately after `asusctl profile set`.
+**EPP policy:** `power` in all non-gaming states. `performance` only in beast mode.
+**EPP timing:** Always `setEPPAfterAsusctl()` (350ms sleep) — never write EPP immediately after asusctl.
 
 ---
 
@@ -429,11 +438,34 @@ After EVERY task, ALL agents must:
 luminos-brain log "[Summary of what was done]"
 ```
 
-### 14.3 Relevant .md files (check all, update if changed)
-- `LUMINOS_STATUS.md` → component status changed
-- `LUMINOS_DECISIONS.md` → architectural decision made
-- `docs/BUGS.md` → bug found or fixed
-- `docs/CODE_REFERENCE.md` → new files added or removed
+### 14.3 Mandatory Doc Updates — Full File Trigger Table
+
+Check EVERY file below. If the trigger condition is true, update it. No exceptions.
+
+| File | Update when… |
+|------|-------------|
+| `LUMINOS_STATUS.md` | Any daemon/component status changes (version bump, new feature, bug fixed, retired) |
+| `LUMINOS_DECISIONS.md` | Architectural decision made — new approach chosen, old approach replaced, tradeoff documented |
+| `docs/BUGS.md` | Bug found (add OPEN entry) OR bug fixed (add FIXED entry with root cause + fix) |
+| `docs/CODE_REFERENCE.md` | New file added, file deleted, function signature changed, new daemon feature wired up |
+| `docs/LUMINOS_HANDBOOK.md` | User-facing behaviour changed — power profiles, fan curve, keyboard, display, Chrome, Wine, shortcuts |
+| `docs/DAEMON_ARCHITECTURE.md` | Daemon internals changed — new goroutine, new IPC message, socket path change, algorithm redesign |
+| `docs/LUMINOS_RAM_ARCHITECTURE.md` | `luminos-ram` changed — LIRS algorithm, HotSet size, eviction logic, new protection rule |
+| `HIVE_ARCHITECTURE.md` | HIVE stack changed — new model, routing change, hive-daemon.py modified, port changed |
+| `docs/HIVE_VISION.md` | HIVE strategy or long-term design direction changed |
+| `docs/ROADMAP.md` | Feature completed (mark done) OR new feature planned (add entry) |
+| `AGENTS.md` → Section 12 | Power/thermal constants changed — fan curve breakpoints, zone thresholds, EPP policy, beast mode thresholds |
+| `AGENTS.md` → Section 15 | New recovery procedure identified for a recurring failure |
+| `AGENTS.md` → Section 17 | Open task completed (remove) OR new task added |
+
+**Rule: scan the table top-to-bottom after every task. Mark each row yes/no mentally. Update every yes.**
+
+Files you do NOT need to update every task (only when directly relevant):
+- `docs/HIVE_POPUP_TUNING.md` — only when hive-daemon.py or popup behaviour changes
+- `docs/PROMPTS.md` — only when HIVE system prompts change
+- `LUMINOS_DESIGN_SYSTEM.md` — only when UI/visual design tokens change
+- `LUMINOS_MASTER_FILE.md` — only when top-level project scope changes
+- `README.md` — only when project setup steps change
 
 ### 14.4 Git Commit Format (mandatory)
 ```bash

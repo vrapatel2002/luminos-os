@@ -191,6 +191,8 @@ BUG-046, BUG-047, BUG-050 (GPU/NVIDIA) were diagnosed and fixed in a concentrate
 luminos-power went through rapid iteration:
 - v3.0 EPP-based control: `810ec387` (2026-05-14)
 - v3.1 beast mode + thermal tuning: `df2bf467` (2026-05-17)
+- v3.7 load-based profile switching: `27477ef6` (2026-05-26)
+- v4.0 Adaptive Dual Governor + PSI watcher: `e48ddd0d` (2026-05-26)
 - Fan curve early ramp: `c34f41fb` (2026-05-19)
 - Fan curve v3.2 (WRONG — silent below 44°C, caused high temps): `febd312a` (2026-05-21)
 - Governor v3.3 (WRONG — 12°C hysteresis caused oscillation): `8faeef7d` (2026-05-21)
@@ -312,7 +314,7 @@ luminos-power is a Go daemon (`cmd/luminos-power/main.go`) running as a systemd 
 - asusctl power profile (Quiet/Balanced/Performance)
 - ASUS fan curves (via asusctl fan-curve)
 
-The binary lives at `/usr/local/bin/luminos-power`. The source is `cmd/luminos-power/main.go`. Entry point is `main()` at line 112. The monitoring loop is `monitorLoop()` at line 177.
+The binary lives at `/usr/local/bin/luminos-power`. The source is `cmd/luminos-power/main.go`. Entry point is `main()`. The monitoring loop is `monitorLoop()`. **[v4.0 — 2026-05-26]**
 
 ### 4.2 The Three Profiles
 
@@ -377,61 +379,111 @@ The `setAllEPP()` function (main.go:490–506) writes to all 16 EPP sysfs paths 
 
 Beast mode automatically escalates to the Performance profile when sustained load is detected. It only activates on AC power and only when the current profile is not already Performance.
 
-**GPU trigger** (gaming detection, main.go:313–334):
-- Entry: GPU load > 80% for 30 seconds (15 ticks at 2s poll)
-- Exit: GPU load < 20% AND CPU load < 25% for 60 seconds (30 ticks at 2s poll)
+**GPU trigger** (gaming detection — dGPU only, iGPU load is compositing not gaming):
+- Entry: dGPU load > 80% for 30 seconds (15 ticks at 2s poll)
+- Exit: dGPU load < 20% AND CPU load < 25% for 60 seconds (30 ticks)
 
-**CPU trigger** (compilation/ML detection, main.go:338–370):
-- Entry: CPU load > 75% for 20 seconds (10 ticks at 2s poll)
+**CPU trigger** (compilation/ML detection):
+- Entry: CPU load > 75% for 20 seconds (10 ticks)
 - Exit: same as GPU exit — both CPU and GPU must be idle
 
-When either trigger fires (main.go:211–225):
+When either trigger fires:
 1. `asusctl profile set Performance`
 2. EPP → `performance`
-3. `setAllMaxFreq(0)` — removes any thermal frequency cap, allows full 5.137 GHz boost
-4. `currentThermalZone` reset to `ZoneCool` — thermal governor starts clean
-5. Daemon skips thermal governor for remainder of beast mode
+3. `setAllMaxFreq(0)` — removes adaptive cap, allows full 5.137 GHz boost
+4. `currentThermalZone` reset to `ZoneCool` — adaptive governor suspended
+5. Daemon skips adaptive governor for remainder of beast mode
 
-When both triggers show idle for 60s (main.go:227–237):
+When both triggers show idle for 60s:
 1. `asusctl profile set Balanced`
-2. `setAllMaxFreq(0)` — clears any emergency freq cap applied during beast mode
+2. `setAllMaxFreq(0)` — adaptive governor resumes from hardware max
 3. `currentThermalZone` reset to `ZoneCool`
-4. EPP → `power` — back to cool target
+4. EPP → `power`
 
-### 4.6 Thermal Governor — 4 Zones, Hysteresis, AC vs Battery
+### 4.6 Adaptive Dual Governor — v4.0 (2026-05-26)
 
-The thermal governor runs inside `monitorLoop()` whenever the profile is NOT Performance. It is called in `applyThermalGovernor()` at main.go:396–462.
+**[CHANGE: claude-code | 2026-05-26]** Replaced the static thermal zone cap table with a continuous load-based frequency governor. The thermal zone table now only provides emergency backstop caps; normal operation is governed by load.
 
-The thermal constants are defined at main.go:63–81:
-```go
-thermalHysteresisC = 5.0  // 5°C hysteresis on zone exit
-thermalEmergencyC  = 85.0 // emergency threshold (non-Performance)
+#### 4.6.1 Continuous CPU Cap Formula
+
+```
+cap = 1.8 GHz + (smoothedLoad / 100) × (hwMax − 1.8 GHz)
 ```
 
-**AC Thermal Zones** (main.go:73–75):
-| Zone | Entry Temp | Exit Temp (with 5°C hysteresis) | Freq Cap | EPP |
-|------|-----------|--------------------------------|----------|-----|
-| ZoneCool | < 60°C | always | none | power |
-| ZoneMild | 60°C | < 55°C | none | power |
-| ZoneWarm | 72°C | < 67°C | 4.0 GHz | power |
-| ZoneHot  | 80°C | < 75°C | 3.0 GHz | power |
-| Emergency | 85°C | — | 2.0 GHz + Quiet | power |
+- `smoothedLoad` = EMA of raw CPU% with α=0.3 (formula: `0.7×prev + 0.3×current`)
+- `hwMax` = 5.137 GHz on AC, 3.5 GHz ceiling on battery
+- At 0% load → 1.8 GHz (floor)
+- At 9% load (light browsing) → ~3.5 GHz
+- At 50% load → ~3.5 GHz
+- At 80% load → ~4.5 GHz
+- At 100% load → 5.137 GHz (full boost)
 
-**Battery Thermal Zones** (main.go:78–80):
-| Zone | Entry Temp | Exit Temp | Freq Cap | EPP |
-|------|-----------|-----------|----------|-----|
-| ZoneCool | < 50°C | always | none | power |
-| ZoneMild | 50°C | < 45°C | none | power |
-| ZoneWarm | 62°C | < 57°C | 3.5 GHz | power |
-| ZoneHot  | 72°C | < 67°C | 2.5 GHz | power |
+Cap transitions are further smoothed: `applied = 0.7×prev + 0.3×target`. Only written to sysfs if change > 150 MHz, preventing constant churn.
 
-Zone enum (main.go:83–91): `ZoneCool=0`, `ZoneMild=1`, `ZoneWarm=2`, `ZoneHot=3`
+#### 4.6.2 iGPU Dominance Penalty
 
-The state machine logic (main.go:405–426) only advances or retreats one zone per tick and only exits a zone if the temperature drops below the entry threshold minus 5°C. This prevents the oscillation bug (BUG-048) where rapid zone changes would cause the profile to flip repeatedly.
+When iGPU is doing more work than CPU (e.g. video decode while CPU is light), the CPU and iGPU share the same APU TDP pool. Giving the CPU full headroom starves the iGPU. The governor reduces the CPU cap by up to 300 MHz when `igpuLoad − cpuLoad > 20%`:
 
-**Emergency path** (main.go:251–261, outside thermal governor):
-- In non-Performance mode: > 85°C → Quiet + 2.0 GHz cap
-- In Performance/beast mode: > 95°C → 3.5 GHz cap (no profile exit — TJmax is 105°C)
+```
+penalty = min((igpuLoad − cpuLoad) × 12kHz, 300MHz)
+```
+
+This lets hardware video decode (VP9, AV1 on YouTube via VAAPI) run at full speed without CPU competition.
+
+#### 4.6.3 App Launch Pre-allocation
+
+When a known app is detected launching (via `/proc` exec scan), the governor temporarily adds a `PreAllocPct` bonus to the effective load estimate for 30 seconds:
+
+```
+effectiveLoad = smoothedLoad + preAllocBonus
+```
+
+This raises the cap ceiling before the app's actual CPU load shows up in stats, preventing throttled startup. The bonus decays naturally after 30s as the EMA catches up to real load.
+
+| App | PreAllocPct | Rationale |
+|-----|------------|-----------|
+| chrome | +20% | GPU process + tab init |
+| terminal64.exe (MetaTrader) | +15% | Wine heavy on start |
+| claude | +18% | Electron renderer init |
+| code | +20% | VS Code extension host |
+| python3 | +10% | hive-daemon, forex bot |
+
+#### 4.6.4 Thermal Zone Tracking (backstop only)
+
+Zones are still tracked but only apply caps at ZoneHot and above. ZoneCool/ZoneMild/ZoneWarm on AC have no cap — the adaptive governor and fans handle it (BUG-055 fix: any freq cap in ZoneWarm creates a self-defeating cooling loop).
+
+**AC Thermal Zones:**
+| Zone | Entry | Exit (−5°C hysteresis) | Cap | Notes |
+|------|-------|----------------------|-----|-------|
+| ZoneCool | < 60°C | always | none (adaptive) | Normal idle |
+| ZoneMild | 60°C | < 55°C | none (adaptive) | Light load |
+| ZoneWarm | 72°C | < 67°C | none (adaptive) | Fans at 100% from 70°C |
+| ZoneHot | 87°C | < 82°C | 3.0 GHz | Overrides adaptive cap |
+| Emergency | 92°C | — | 2.0 GHz + Quiet | Absolute override |
+
+**Battery Thermal Zones** (caps start earlier for power saving):
+| Zone | Entry | Exit | Cap |
+|------|-------|------|-----|
+| ZoneCool | < 50°C | always | none (adaptive, 3.5GHz max) |
+| ZoneMild | 50°C | < 45°C | none |
+| ZoneWarm | 62°C | < 57°C | 3.5 GHz |
+| ZoneHot | 72°C | < 67°C | 2.5 GHz |
+
+**Emergency path** (overrides everything):
+- Non-Performance > 92°C → Quiet + 2.0 GHz
+- Performance/beast mode > 95°C → 3.5 GHz cap (no profile exit, TJmax=105°C)
+
+#### 4.6.5 PSI-driven Sleep (replaces fixed 2s ticker)
+
+The monitoring loop no longer wakes on a fixed interval. Sleep duration adapts to load:
+
+| Load | Sleep method | Duration |
+|------|-------------|---------|
+| < 20% all | PSI event poll on `/proc/pressure/cpu` | Up to 10s — wakes only on CPU stall |
+| 20–60% | `time.After` | 2s |
+| > 60% | `time.After` | 500ms — tight loop near cap |
+
+PSI (Pressure Stall Information) is a Linux kernel mechanism. The governor writes a stall threshold to `/proc/pressure/cpu` and the kernel wakes the fd via `poll(POLLPRI)` only when CPU stall time exceeds 70ms in any 1s window. Zero CPU wasted when truly idle.
 
 ### 4.7 Fan Curve — Complete Version History
 
@@ -445,21 +497,19 @@ All fan curves are applied via `applyAggressiveFanCurve()` (main.go:726–738) u
 Silent below 60°C, gradual ramp. Exact values not recorded. Caused temperatures to climb to 70°C+ before fans engaged meaningfully.
 
 **v2 — Early ramp (c34f41fb, 2026-05-19)**:
-The first intentional design: ramp fans hard before 50°C so the heat never climbs past 50°C.
 - cpuGpuCurve: `"30c:0%,40c:40%,45c:62%,50c:80%,60c:95%,70c:100%,80c:100%,90c:100%"`
 - midCurve: `"30c:0%,40c:30%,45c:52%,50c:72%,60c:88%,70c:100%,80c:100%,90c:100%"`
-**This is the current working curve (restored at 385f1302).**
 
-**v3.2 — WRONG (febd312a, 2026-05-21)**:
-Attempted to reduce fan noise by targeting 47–49°C with silence below 44°C. The curve was:
-- cpuGpuCurve: silent at 44°C, 20% at 47°C
-This was too late — by 47°C the heat was already climbing and the fans could not pull it back fast enough, resulting in temps drifting to 55–65°C.
+**v3.2 — WRONG (febd312a, 2026-05-21)**: Silent at 44°C → fans couldn't recover from 55–65°C drift.
 
-**v3.3 — WRONG (8faeef7d, 2026-05-21)**:
-Attempted to fix oscillation with 12°C hysteresis in the thermal governor. The hysteresis was too large — once the zone changed, it could not exit for a long time, causing the system to stay in a throttled state longer than necessary.
+**v3.3 — WRONG (8faeef7d, 2026-05-21)**: 12°C hysteresis in thermal governor → stayed throttled too long.
 
-**Revert (385f1302, 2026-05-21)**:
-Reverted to the working early-ramp curve (v2 above). This is the current production fan curve.
+**v4 — WRONG (cfb64db0, 2026-05-24)**: 50°C at only 25% — at 52°C firmware interpolated ~29%, not enough recovery bite.
+
+**v5 — CURRENT (2026-05-24)**: Steep recovery above 47°C. 50°C raised to 55%.
+- cpuGpuCurve: `"30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%"`
+- midCurve: `"30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%"`
+- Key points: 40°C→5% (silent), 47°C→35% (hold), 50°C→55% (recovery), 52°C→62% (overshoot pullback), 60°C→88%
 
 #### Why Early Ramp Beats Silent Curve (Physics)
 
@@ -469,13 +519,11 @@ At 45°C: cpu/gpu fan = 62%, mid fan = 52%. These speeds are audible but not dis
 At 40°C: cpu/gpu fan = 40%, mid fan = 30%. Spinning but quiet.
 At 30°C: fans off (0%). Completely silent at idle.
 
-### 4.8 Poll Rate and Why
+### 4.8 Sleep Strategy — PSI-driven (v4.0)
 
-Poll rate is controlled by `batteryInterval()` (main.go:372–377):
-- AC: 2 seconds — faster response to load spikes and thermal events
-- Battery: 10 seconds — reduce CPU wake cycles to extend battery
+**[CHANGE: claude-code | 2026-05-26]** Fixed 2s ticker replaced with adaptive PSI-driven sleep. See Section 4.6.5 for full details.
 
-The ticker is reset immediately when AC state changes (main.go:199–204), so the poll rate adjusts without waiting for the next tick.
+Summary: idle = PSI event-driven (up to 10s, zero busy polling), active = 2s, near cap = 500ms. The daemon uses essentially zero CPU when the system is idle.
 
 ### 4.9 Live Diagnosis Commands
 
