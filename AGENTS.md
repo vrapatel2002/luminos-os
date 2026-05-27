@@ -236,8 +236,8 @@ Use MCP tool: mempalace_add_drawer
 | **Antigravity** | Full feature builds, complex Qt/QML UI (100+ lines) | `antigravity chat "prompt"` |
 | **Cowork** | Autonomous background tasks, delegates to Gemini/Claude | Claude Desktop → Open ~/luminos-os |
 
-**Claude Code Settings:** `~/luminos-os/.claude/settings.local.json` (OpenRouter → DeepSeek V4 Pro)
-**Local DeepSeek Routing (advanced):** When Nova is loaded: `ANTHROPIC_BASE_URL=http://localhost:8080/v1 claude`
+**Claude Code Settings:** `~/luminos-os/.claude/settings.local.json` (default Claude API — OpenRouter routing removed 2026-05-27, caused Signal 5 TRAP crashes on new session start)
+**Local Nova Routing (advanced):** When Nova is loaded: `ANTHROPIC_BASE_URL=http://localhost:8080/v1 claude`
 Only use when hive-daemon has loaded Nova. Default sessions use Claude API normally.
 
 ---
