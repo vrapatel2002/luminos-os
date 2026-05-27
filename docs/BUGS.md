@@ -1,7 +1,17 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-27 (BUG-058: --enable-zero-copy in chrome-flags.conf re-triggers --use-gl=disabled)
+Last Updated: 2026-05-27 (BUG-059: Chrome GPU detection always selects NVIDIA renderD129 internally — __EGL_VENDOR_LIBRARY_FILENAMES not passed into Flatpak AMD path)
 
 ## Fixed Bugs (new)
+
+### BUG-059 — Chrome GPU subprocess always picks renderD129 (NVIDIA) — EGL vendor not restricted in Flatpak sandbox
+- Status: FIXED
+- Severity: CRITICAL
+- Component: /usr/local/bin/chrome-luminos (AMD path)
+- Description: Chrome GPU subprocess spawns with `--use-gl=disabled --render-node-override=/dev/dri/renderD129` even after BUG-057 and BUG-058 fixes. Software rendering, GPU process at 50%+ CPU, severe lag.
+- Root Cause: Flatpak sandbox does NOT inherit `/etc/environment`. The system-wide `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json` that prevents NVIDIA EGL elsewhere is invisible inside the Flatpak. Chrome sees both `50_mesa.json` (AMD) and `60_nvidia.json` (NVIDIA) EGL vendors. During its GPU info-collection phase, Chrome iterates `/dev/dri/renderD128` and `renderD129`, scores the NVIDIA dGPU higher (discrete GPU preference heuristic), and bakes `--render-node-override=/dev/dri/renderD129` into the GPU subprocess command line. EGL init on renderD129 then fails in the GPU subprocess context → Chrome falls back to `--use-gl=disabled`. `DRI_PRIME=0` and `VK_ICD_FILENAMES` do not affect this — Chrome's DRM enumeration uses GBM/ioctl directly, not Mesa device selection.
+- Fix Applied: Added `--env=__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json` to `flatpak run` AMD path. With only Mesa EGL visible, Chrome's EGL probe on renderD129 (NVIDIA) fails at detection time → Chrome selects renderD128 (AMD) → GPU subprocess gets `--render-node-override=/dev/dri/renderD128 --use-gl=egl`. Added `--env=MESA_LOADER_DRIVER_OVERRIDE=radeonsi` to additionally prevent Mesa GBM from opening renderD129 (NVIDIA hardware). Mirror: NVIDIA path already uses `__EGL_VENDOR_LIBRARY_FILENAMES=60_nvidia.json` (same mechanism, opposite direction).
+- Date Found: 2026-05-27
+- Date Fixed: 2026-05-27
 
 ### BUG-058 — Chrome --use-gl=disabled recurring — chrome-flags.conf injecting --enable-zero-copy globally
 - Status: FIXED

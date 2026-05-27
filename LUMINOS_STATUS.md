@@ -108,7 +108,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Floating panel | ❌ Reverted | [CHANGE: gemini-cli | 2026-05-11] Panel reset to default bottom position. |
 | RAM monitor widget | ✅ Working | Plasma widget (org.luminos.ramwidget) installed |
 | System Telemetry | ✅ Active | Continuous logging to /var/log/luminos-telemetry.csv |
-| Chrome GPU | ✅ Fixed | AMD iGPU only (BUG-046); Wayland EGL via KWin (no render-node-override — BUG-057); VAAPI VP9+AV1 hardware decode on 780M (BUG-056); MemorySaver tab sleep; GPU selector dialog preserved |
+| Chrome GPU | ✅ Fixed | AMD iGPU only (BUG-046); Wayland EGL via KWin (no render-node-override — BUG-057); VAAPI VP9+AV1 hardware decode on 780M (BUG-056); MemorySaver tab sleep; GPU selector dialog preserved; __EGL_VENDOR_LIBRARY_FILENAMES=50_mesa.json + MESA_LOADER_DRIVER_OVERRIDE=radeonsi in Flatpak env prevent NVIDIA GPU selection (BUG-059) |
 | Chrome CPU | ✅ Fixed | Removed ANGLE/Vulkan flags (wrong for AMD); --ozone-platform=wayland; GPU-specific --use-gl |
 | Universal GPU launcher | ✅ Working | luminos-gpu-launch (kdialog picker); luminos-nvidia-run (wakes PCI power gate); Dolphin service menus for executables + .desktop files |
 | Touchpad log flood | ✅ Fixed | QT_LOGGING_RULES=kwin_libinput.warning=false in /etc/environment; suppresses ASUP1208 Touch Jump spam |
