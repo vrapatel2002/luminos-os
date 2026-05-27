@@ -12,12 +12,21 @@
 //   - 4 thermal zones with 5°C hysteresis, scaling_max_freq caps per zone
 //   - Gaming mode bypasses thermal capping on AC (user explicitly wants performance)
 //   - Hardware max freq read at startup (no hardcoded value)
+// [CHANGE: claude-code | 2026-05-26] v4.0 Adaptive Dual Governor
+//   - Continuous CPU cap: baseCap + (smoothedLoad/100) × (maxCap - baseCap)
+//   - EMA smoothing (α=0.3) on CPU load — no snap changes
+//   - Thermal zone tracking decoupled from cap writes (zone only sets emergency/ZoneHot caps)
+//   - Exec watcher: /proc scan for new app launches → pre-alloc cap headroom
+//   - PSI watcher: poll /proc/pressure/cpu — event-driven wake when idle, tight loop when near cap
+//   - iGPU dominance penalty: when iGPU busier than CPU, up to 0.3 GHz CPU reduction (shared TDP)
+//   - App history table: known apps pre-allocate cap headroom on launch for smooth startup
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -25,12 +34,14 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/luminos-os/luminos/internal/config"
 	"github.com/luminos-os/luminos/internal/logger"
 	"github.com/luminos-os/luminos/internal/socket"
+	"golang.org/x/sys/unix"
 )
 
 // PowerState is the payload reported to luminos-ai on every state change.
@@ -68,6 +79,30 @@ const (
 	// [CHANGE: claude-code | 2026-05-24] BUG-055: raised from 85°C→92°C (ZoneHot entry raised to 87°C)
 	thermalEmergencyC = 92.0
 
+	// [CHANGE: claude-code | 2026-05-26] v4.0 Adaptive Governor constants.
+	//
+	// The governor sets a continuous CPU frequency cap based on smoothed load:
+	//   cap = baseCap + (smoothedLoad/100) × (maxCap - baseCap)
+	//
+	// At 0% load → baseCap (floor, power saving).
+	// At 100% load → maxCap (ceiling, full performance).
+	// Thermal zones still apply ZoneHot (87°C→3.0GHz) and Emergency (92°C→2.0GHz) as overrides.
+	//
+	// iGPU dominance: when iGPU is busier than CPU by >20%, apply a small CPU penalty
+	// (up to 0.3 GHz) to redistribute shared APU TDP toward the iGPU.
+	//
+	// Pre-allocation: when a known app launches, temporarily raise effective load estimate
+	// by the app's PreAllocPct for 30s, giving startup headroom without waiting for load to ramp.
+	adaptiveBaseCap    = 1800000  // kHz — floor cap when fully idle (1.8 GHz)
+	adaptiveMaxCapAC   = 0        // 0 = hardware max on AC (5.137 GHz)
+	adaptiveMaxCapBat  = 3500000  // kHz — max cap on battery (3.5 GHz, power saving)
+	adaptiveEMAAlpha   = 0.30     // EMA weight for new sample (0.7 old + 0.3 new)
+	adaptiveCapChangeThreshKHz = 150000 // only write sysfs if cap shifts by >150 MHz
+	preAllocDuration   = 30 * time.Second
+	// iGPU dominance: penalty per 1% of dominance delta, capped at 300 MHz total
+	dominancePenaltyPerPct = 12000 // kHz per 1% dominance (0.012 GHz/%)
+	dominanceMaxPenaltyKHz = 300000
+
 	// Thermal governor zones (ZoneCool→ZoneHot) with 5°C hysteresis for exit.
 	// Target: 45°C idle via EPP hints alone. Freq caps only for genuinely hot temps.
 	// On AC: ZoneWarm has no cap (fans at 100% from 70°C handle it). Only ZoneHot+ caps.
@@ -88,6 +123,30 @@ const (
 	thermalBatZone2C = 62.0 // mild→warm on bat: 3.5 GHz cap
 	thermalBatZone3C = 72.0 // warm→hot on bat:  2.5 GHz cap
 )
+
+// appProfile describes a known application's expected CPU load and launch headroom.
+// PreAllocPct is added to the smoothed load estimate for preAllocDuration after launch,
+// giving the app enough cap headroom to start up without being throttled.
+// It does NOT limit the app — it raises the frequency ceiling so startup feels smooth.
+type appProfile struct {
+	PreAllocPct float64 // extra % load to add to cap estimate at launch (e.g. 15 = +15%)
+}
+
+// knownApps maps process comm names (from /proc/N/comm) to their launch profiles.
+// Update this table as new apps are added; unknown apps get no pre-alloc bonus.
+// [CHANGE: claude-code | 2026-05-26] v4.0 app history table
+var knownApps = map[string]appProfile{
+	"chrome":          {PreAllocPct: 20}, // Chrome GPU process + initial tab load
+	"terminal64.exe":  {PreAllocPct: 15}, // MetaTrader 5 (Wine) — heavy on launch
+	"python.exe":      {PreAllocPct: 10}, // Forex bot bridge (Wine Python)
+	"python3":         {PreAllocPct: 10}, // hive-daemon, forex bot
+	"claude":          {PreAllocPct: 18}, // Claude Desktop (Electron)
+	"konsole":         {PreAllocPct: 8},
+	"kwin_wayland":    {PreAllocPct: 5},
+	"plasmashell":     {PreAllocPct: 8},
+	"code":            {PreAllocPct: 20}, // VS Code (Electron)
+	"wine64":          {PreAllocPct: 12},
+}
 
 // ThermalZone represents current CPU temperature zone.
 type ThermalZone int
@@ -115,6 +174,12 @@ var (
 	thermalDownholdTick int        // consecutive ticks below exit threshold before downgrading
 	cpuHardwareMaxFreq  int        // read from sysfs at startup, kHz
 
+	// [CHANGE: claude-code | 2026-05-26] v4.0 adaptive governor state
+	smoothedCPULoad    float64       // EMA-smoothed CPU% (α=0.3)
+	prevAppliedCapKHz  int           // last cap written to sysfs — avoid redundant writes
+	preAllocBonus      float64       // extra % added to load estimate (decays after preAllocDuration)
+	preAllocExpiry     time.Time     // when preAllocBonus expires
+
 	// /proc/stat snapshot for delta-based CPU load calculation
 	lastCPUStatIdle  uint64
 	lastCPUStatTotal uint64
@@ -135,6 +200,7 @@ func main() {
 
 	cpuCount = runtime.NumCPU()
 	cpuHardwareMaxFreq = readCPUHardwareMax()
+	prevAppliedCapKHz = cpuHardwareMaxFreq // start uncapped
 	lg.Info("CPU hardware max freq: %d kHz (%.2f GHz)", cpuHardwareMaxFreq, float64(cpuHardwareMaxFreq)/1e6)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -151,7 +217,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	lg.Info("luminos-power v3.1 started — EPP + thermal governor, listening on %s", cfg.Sockets.Power)
+	lg.Info("luminos-power v4.0 started — Adaptive Dual Governor + PSI watcher, listening on %s", cfg.Sockets.Power)
 
 	// Apply fan curves to all profiles once at startup
 	applyAggressiveFanCurve("balanced")
@@ -185,134 +251,209 @@ func handleMessage(msg socket.Message) socket.Message {
 	}
 }
 
+// monitorLoop is the main control loop for luminos-power v4.0.
+//
+// Sleep strategy (replaces fixed 2s ticker):
+//   - Idle (all loads <20%): block on PSI poll up to 10s — wakes only on CPU pressure event
+//   - Active (20-60%): 2s sleep
+//   - Near cap (>60%): 500ms tight loop — fast trigger detection
+//
+// Cap strategy:
+//   adaptive cap = baseCap + (effectiveLoad/100) × (maxCap - baseCap), EMA smoothed
+//   effectiveLoad = smoothedCPULoad + preAllocBonus (decays 30s after app launch)
+//   thermal override: ZoneHot (87°C) → 3.0 GHz cap replaces adaptive cap if lower
+//   emergency: 92°C → 2.0 GHz, Quiet profile — overrides everything
+//
+// [CHANGE: claude-code | 2026-05-26] v4.0
 func monitorLoop(ctx context.Context) {
-	// Start at 2s; adjusted below based on AC state
-	interval := 2 * time.Second
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	// PSI watcher — event-driven wake on CPU pressure.
+	// Falls back to time.After if /proc/pressure/cpu is unavailable.
+	psiFile, psiErr := openPSIWatcher()
+	if psiErr != nil {
+		lg.Warn("PSI watcher unavailable (%v) — using time-based sleep", psiErr)
+	} else {
+		lg.Info("PSI watcher active — event-driven idle sleep")
+		defer psiFile.Close()
+	}
+
+	// Exec watcher — /proc scanner detects new app launches.
+	ew := newExecWatcher()
+	go ew.run(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			onAC := readACState()
-			temp := readCPUTemp()
-			dgpuLoad := readDGPULoad() // NVIDIA dGPU — gaming/ML detection
-			igpuLoad := readIGPULoad() // AMD iGPU — compositor/display load
-			gpuLoad := dgpuLoad        // beast mode uses dGPU only (iGPU≠gaming)
-			cpuLoad := readCPULoadPct()
+		default:
+		}
 
-			// Detect AC transition → immediate response
-			if onAC != prevState.OnAC {
-				applyACTransition(onAC)
-				cpuHighTicks = 0
-				cpuLowTicks = 0
+		// === SENSE ===
+		onAC := readACState()
+		temp := readCPUTemp()
+		dgpuLoad := readDGPULoad() // NVIDIA dGPU
+		igpuLoad := readIGPULoad() // AMD 780M
+		cpuLoad := readCPULoadPct()
+
+		// EMA smoothing on CPU load — prevents snap decisions on spikes.
+		// First tick (smoothedCPULoad==0): seed from raw to avoid starting at 0%.
+		if smoothedCPULoad == 0 && cpuLoad > 0 {
+			smoothedCPULoad = cpuLoad
+		} else {
+			smoothedCPULoad = (1-adaptiveEMAAlpha)*smoothedCPULoad + adaptiveEMAAlpha*cpuLoad
+		}
+
+		// Drain exec events → update pre-alloc bonus.
+		// Takes the max bonus of all apps launched since last tick.
+	drainExec:
+		for {
+			select {
+			case appName := <-ew.events:
+				if p, ok := knownApps[appName]; ok {
+					if p.PreAllocPct > preAllocBonus {
+						preAllocBonus = p.PreAllocPct
+					}
+					preAllocExpiry = time.Now().Add(preAllocDuration)
+					lg.Info("exec: %s → pre-alloc +%.0f%% for %v", appName, p.PreAllocPct, preAllocDuration)
+				}
+			default:
+				break drainExec
+			}
+		}
+		if time.Now().After(preAllocExpiry) {
+			preAllocBonus = 0
+		}
+
+		// === AC TRANSITION ===
+		if onAC != prevState.OnAC {
+			applyACTransition(onAC)
+			cpuHighTicks = 0
+			cpuLowTicks = 0
+			quietTicks = 0
+			smoothedCPULoad = cpuLoad // reset EMA on AC change — old average no longer valid
+			prevAppliedCapKHz = cpuHardwareMaxFreq
+		}
+
+		// === BEAST MODE ===
+		// Uses dGPU only (iGPU load = compositing, not gaming).
+		// Beast mode disables the adaptive governor and runs uncapped.
+		if onAC && prevState.Profile != "Performance" {
+			gpuProfile := applyGamingDetection(dgpuLoad, prevState.Profile)
+			cpuProfile := applyCPUBeastDetection(cpuLoad, prevState.Profile)
+			if gpuProfile == "Performance" || cpuProfile == "Performance" {
+				src := "gpu"
+				if cpuProfile == "Performance" {
+					src = "cpu"
+				}
+				lg.Info("beast mode → Performance (trigger: %s, cpu=%.0f%%, dgpu=%.0f%%)", src, cpuLoad, dgpuLoad)
+				runCmd("asusctl", "profile", "set", "Performance")
+				setEPPAfterAsusctl("performance")
+				setAllMaxFreq(0) // full boost — adaptive governor suspended
+				prevAppliedCapKHz = cpuHardwareMaxFreq
+				currentThermalZone = ZoneCool
+				thermalDownholdTick = 0
 				quietTicks = 0
-				// Adjust poll rate
-				newInterval := batteryInterval(onAC)
-				if newInterval != interval {
-					interval = newInterval
-					ticker.Reset(interval)
-					lg.Info("poll interval → %v (on_ac=%v)", interval, onAC)
-				}
-			}
-
-			// Beast-mode detection runs BEFORE everything else.
-			// Uses dGPU (NVIDIA) for gaming detection — high iGPU load is just compositing.
-			// CPU path: ML training, compilation.
-			if onAC && prevState.Profile != "Performance" {
-				gpuProfile := applyGamingDetection(gpuLoad, prevState.Profile)
-				cpuProfile := applyCPUBeastDetection(cpuLoad, prevState.Profile)
-				if gpuProfile == "Performance" || cpuProfile == "Performance" {
-					src := "gpu"
-					if cpuProfile == "Performance" {
-						src = "cpu"
-					}
-					lg.Info("beast mode → Performance (trigger: %s, cpu=%.0f%%, dgpu=%.0f%%)", src, cpuLoad, dgpuLoad)
-					runCmd("asusctl", "profile", "set", "Performance")
-					setEPPAfterAsusctl("performance")
-					setAllMaxFreq(0) // full boost — no thermal cap during beast mode
-					currentThermalZone = ZoneCool
-					thermalDownholdTick = 0
-					quietTicks = 0
-					updateState(onAC, temp, gpuLoad, "performance", "Performance")
-					continue
-				}
-			} else if onAC && prevState.Profile == "Performance" {
-				// Exit beast mode when both dGPU and CPU load drop
-				gpuProfile := applyGamingDetection(gpuLoad, "Performance")
-				cpuProfile := applyCPUBeastDetection(cpuLoad, "Performance")
-				if gpuProfile == "Balanced" && cpuProfile == "Balanced" {
-					lg.Info("beast mode exit → Balanced (cpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, dgpuLoad)
-					runCmd("asusctl", "profile", "set", "Balanced")
-					setAllMaxFreq(0) // clear any emergency freq cap applied during beast mode
-					currentThermalZone = ZoneCool
-					thermalDownholdTick = 0
-					quietTicks = 0
-					setEPPAfterAsusctl("power") // back to cool target
-					updateState(onAC, temp, gpuLoad, "power", "Balanced")
-					continue
-				}
-			}
-
-			// Load-based Quiet idle detection (AC, non-Performance only).
-			// Balanced→Quiet: CPU<25% AND iGPU<15% AND dGPU<5% for 60s sustained.
-			// Quiet→Balanced: any load spike above those thresholds, immediately.
-			if onAC && prevState.Profile == "Balanced" {
-				if cpuLoad < quietIdleCPUPct && igpuLoad < quietIdleIGPUPct && dgpuLoad < quietIdleDGPUPct {
-					quietTicks++
-					if quietTicks >= quietIdleTicks {
-						quietTicks = 0
-						lg.Info("idle → Quiet (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
-						runCmd("asusctl", "profile", "set", "Quiet")
-						updateState(onAC, temp, gpuLoad, prevState.EPP, "Quiet")
-						continue
-					}
-				} else {
-					quietTicks = 0
-				}
-			} else if onAC && prevState.Profile == "Quiet" {
-				if cpuLoad >= quietIdleCPUPct || igpuLoad >= quietIdleIGPUPct || dgpuLoad >= quietIdleDGPUPct {
-					quietTicks = 0
-					lg.Info("load → Balanced (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
-					runCmd("asusctl", "profile", "set", "Balanced")
-					updateState(onAC, temp, gpuLoad, prevState.EPP, "Balanced")
-					continue
-				}
-			}
-
-			// Emergency thermal — after beast mode check.
-			// In Performance (beast/gaming): Ryzen 9 8845HS TJmax is 105°C, so 95°C
-			// under load is normal for a gaming laptop. Use 95°C threshold and only
-			// apply a freq cap — do NOT exit Performance profile.
-			// Outside Performance: 92°C threshold, full Quiet + 2GHz cap.
-			emergencyThreshC := thermalEmergencyC // 92°C for normal modes
-			if prevState.Profile == "Performance" {
-				emergencyThreshC = 95.0 // gaming laptop safe operating limit
-			}
-			if temp > emergencyThreshC {
-				if prevState.Profile == "Performance" {
-					lg.Warn("CPU temp %.1f°C > %.0f°C in beast mode — freq cap to 3.5GHz (staying in Performance)", temp, emergencyThreshC)
-					setAllMaxFreq(3500000) // throttle without exiting beast mode
-					// EPP stays at performance — SMU will back off naturally
-				} else {
-					lg.Warn("CPU temp %.1f°C > %.0f°C — Emergency: EPP=power + Quiet + 2GHz cap", temp, thermalEmergencyC)
-					runCmd("asusctl", "profile", "set", "Quiet")
-					setAllEPP("power")
-					setAllMaxFreq(2000000)
-					updateState(onAC, temp, gpuLoad, "power", "Quiet")
-				}
+				updateState(onAC, temp, dgpuLoad, "performance", "Performance")
+				sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
 				continue
 			}
+		} else if onAC && prevState.Profile == "Performance" {
+			gpuProfile := applyGamingDetection(dgpuLoad, "Performance")
+			cpuProfile := applyCPUBeastDetection(cpuLoad, "Performance")
+			if gpuProfile == "Balanced" && cpuProfile == "Balanced" {
+				lg.Info("beast mode exit → Balanced (cpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, dgpuLoad)
+				runCmd("asusctl", "profile", "set", "Balanced")
+				currentThermalZone = ZoneCool
+				thermalDownholdTick = 0
+				quietTicks = 0
+				setEPPAfterAsusctl("power")
+				updateState(onAC, temp, dgpuLoad, "power", "Balanced")
+				sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
+				continue
+			}
+		}
 
-			// Thermal governor — skipped in Performance (beast/gaming handles thermals)
-			if prevState.Profile != "Performance" {
-				applyThermalGovernor(temp, onAC)
+		// === QUIET IDLE DETECTION (AC, non-Performance) ===
+		// Balanced→Quiet: all loads idle for 60s. Quiet→Balanced: immediate on load.
+		if onAC && prevState.Profile == "Balanced" {
+			if cpuLoad < quietIdleCPUPct && igpuLoad < quietIdleIGPUPct && dgpuLoad < quietIdleDGPUPct {
+				quietTicks++
+				if quietTicks >= quietIdleTicks {
+					quietTicks = 0
+					lg.Info("idle → Quiet (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
+					runCmd("asusctl", "profile", "set", "Quiet")
+					updateState(onAC, temp, dgpuLoad, prevState.EPP, "Quiet")
+					sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
+					continue
+				}
+			} else {
+				quietTicks = 0
+			}
+		} else if onAC && prevState.Profile == "Quiet" {
+			if cpuLoad >= quietIdleCPUPct || igpuLoad >= quietIdleIGPUPct || dgpuLoad >= quietIdleDGPUPct {
+				quietTicks = 0
+				lg.Info("load → Balanced (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
+				runCmd("asusctl", "profile", "set", "Balanced")
+				updateState(onAC, temp, dgpuLoad, prevState.EPP, "Balanced")
+				sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
+				continue
+			}
+		}
+
+		// === EMERGENCY THERMAL ===
+		// Overrides adaptive governor entirely.
+		emergencyThreshC := thermalEmergencyC
+		if prevState.Profile == "Performance" {
+			emergencyThreshC = 95.0 // TJmax 105°C, 95°C is safe under gaming load
+		}
+		if temp > emergencyThreshC {
+			if prevState.Profile == "Performance" {
+				lg.Warn("%.1f°C > %.0f°C in beast mode — throttle 3.5GHz", temp, emergencyThreshC)
+				setAllMaxFreq(3500000)
+				prevAppliedCapKHz = 3500000
+			} else {
+				lg.Warn("%.1f°C > %.0f°C — Emergency: Quiet + 2GHz cap", temp, thermalEmergencyC)
+				runCmd("asusctl", "profile", "set", "Quiet")
+				setAllEPP("power")
+				setAllMaxFreq(2000000)
+				prevAppliedCapKHz = 2000000
+				updateState(onAC, temp, dgpuLoad, "power", "Quiet")
+			}
+			sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
+			continue
+		}
+
+		// === ADAPTIVE GOVERNOR (non-Performance, non-Emergency) ===
+		// Advance thermal zone for ZoneHot detection (only zone with a cap on AC).
+		// Then compute the final cap as min(adaptiveCap, thermalCap).
+		if prevState.Profile != "Performance" {
+			advanceThermalZone(temp, onAC)
+
+			// Effective load = smoothed + pre-alloc headroom (capped at 100%)
+			effectiveLoad := math.Min(smoothedCPULoad+preAllocBonus, 100)
+			adaptiveCap := computeAdaptiveCap(effectiveLoad, igpuLoad, onAC)
+
+			// Thermal override: ZoneHot applies a hard cap that adaptive governor must respect.
+			// ZoneCool/ZoneMild/ZoneWarm have no cap — fans handle it (BUG-055).
+			thermalCap := thermalCapForCurrentZone(onAC)
+			finalCap := adaptiveCap
+			if thermalCap > 0 && thermalCap < adaptiveCap {
+				finalCap = thermalCap
 			}
 
-			updateState(onAC, temp, gpuLoad, prevState.EPP, prevState.Profile)
+			// Smooth cap transitions: 70% old + 30% target — prevents rapid sysfs churn.
+			smoothedCap := int(0.7*float64(prevAppliedCapKHz) + 0.3*float64(finalCap))
+
+			// Only write sysfs if the change is meaningful (>150 MHz).
+			if abs(smoothedCap-prevAppliedCapKHz) > adaptiveCapChangeThreshKHz {
+				setAllMaxFreq(smoothedCap)
+				prevAppliedCapKHz = smoothedCap
+				lg.Info("adaptive cap → %.2f GHz (cpu=%.0f%% smooth=%.0f%% prealloc=%.0f%% igpu=%.0f%%)",
+					float64(smoothedCap)/1e6, cpuLoad, smoothedCPULoad, preAllocBonus, igpuLoad)
+			}
 		}
+
+		updateState(onAC, temp, dgpuLoad, prevState.EPP, prevState.Profile)
+		sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
 	}
 }
 
@@ -414,38 +555,18 @@ func eppForProfile(profile string) string {
 	}
 }
 
-func batteryInterval(onAC bool) time.Duration {
-	if onAC {
-		return 2 * time.Second
-	}
-	return 10 * time.Second
-}
 
-// --- thermal governor ---
+// --- thermal zone tracking ---
 
-// applyThermalGovernor advances or retreats thermal zones based on current CPU temp.
-// Zones use 5°C hysteresis on exit to prevent oscillation.
-// Fan curve keeps temps below 60°C under normal load, so governor zones rarely trigger.
+// advanceThermalZone updates currentThermalZone based on temperature.
+// Does NOT write sysfs — the adaptive governor reads thermalCapForCurrentZone()
+// and applies the final merged cap. This separation prevents double-writes.
 //
-// AC thresholds (permissive — normal workloads never throttled):
-//   ZoneCool (<60°C)   no cap    EPP: power
-//   ZoneMild (60-72°C) no cap    EPP: power (SMU conserves without hard cap)
-//   ZoneWarm (72-80°C) no cap    EPP: power (fans 100% at 70°C — cap removed, was causing oscillation BUG-055)
-//   ZoneHot  (>80°C)   3.0 GHz   EPP: power
-//
-// Battery thresholds (tighter — saves power, extends range):
-//   ZoneCool (<50°C)   no cap    EPP: power (already set by AC transition)
-//   ZoneMild (50-62°C) no cap    EPP: power
-//   ZoneWarm (62-72°C) 3.5 GHz   EPP: power
-//   ZoneHot  (>72°C)   2.5 GHz   EPP: power
-func applyThermalGovernor(temp float64, onAC bool) {
-	// [CHANGE: claude-code | 2026-05-24] BUG-053: add downgrade hold counter.
-	// Without a hold, the 4.0GHz cap cools the CPU from 75→64°C in one 2s tick,
-	// crossing the 67°C exit threshold and immediately removing the cap. The CPU then
-	// boosts back to 5.1GHz and reheats in the next tick → zone 1↔2 oscillation every
-	// 2s, which causes visible Chrome rendering stutter and constant freq cap churn.
-	// Fix: require thermalDowngradeHoldTicks (5) consecutive ticks below the exit
-	// threshold before allowing a zone downgrade. Upgrades remain immediate.
+// [CHANGE: claude-code | 2026-05-26] v4.0: decoupled zone tracking from cap writes.
+// Previously applyThermalGovernor() both tracked zone AND wrote sysfs — the adaptive
+// governor now owns all sysfs writes and calls thermalCapForCurrentZone() to get
+// the thermal constraint.
+func advanceThermalZone(temp float64, onAC bool) {
 	z1, z2, z3 := thermalACZone1C, thermalACZone2C, thermalACZone3C
 	if !onAC {
 		z1, z2, z3 = thermalBatZone1C, thermalBatZone2C, thermalBatZone3C
@@ -462,11 +583,9 @@ func applyThermalGovernor(temp float64, onAC bool) {
 		}
 	case ZoneMild:
 		if temp >= z2 {
-			// Upgrade: immediate
 			thermalDownholdTick = 0
 			newZone = ZoneWarm
 		} else if temp < z1-thermalHysteresisC {
-			// Downgrade: must hold below exit threshold for N ticks
 			thermalDownholdTick++
 			if thermalDownholdTick >= thermalDowngradeHoldTicks {
 				thermalDownholdTick = 0
@@ -477,11 +596,9 @@ func applyThermalGovernor(temp float64, onAC bool) {
 		}
 	case ZoneWarm:
 		if temp >= z3 {
-			// Upgrade: immediate
 			thermalDownholdTick = 0
 			newZone = ZoneHot
 		} else if temp < z2-thermalHysteresisC {
-			// Downgrade: must hold below exit threshold for N ticks
 			thermalDownholdTick++
 			if thermalDownholdTick >= thermalDowngradeHoldTicks {
 				thermalDownholdTick = 0
@@ -492,7 +609,6 @@ func applyThermalGovernor(temp float64, onAC bool) {
 		}
 	case ZoneHot:
 		if temp < z3-thermalHysteresisC {
-			// Downgrade: must hold below exit threshold for N ticks
 			thermalDownholdTick++
 			if thermalDownholdTick >= thermalDowngradeHoldTicks {
 				thermalDownholdTick = 0
@@ -503,47 +619,230 @@ func applyThermalGovernor(temp float64, onAC bool) {
 		}
 	}
 
-	if newZone == prev {
-		return // no zone change, nothing to apply
+	if newZone != prev {
+		currentThermalZone = newZone
+		lg.Info("thermal zone %d→%d (%.1f°C, on_ac=%v)", prev, newZone, temp, onAC)
 	}
+}
 
-	currentThermalZone = newZone
-	lg.Info("thermal zone %d→%d (%.1f°C, on_ac=%v)", prev, newZone, temp, onAC)
-
-	switch newZone {
-	case ZoneCool:
-		setAllMaxFreq(0) // uncap
-		// EPP=power in both states — targeting 45°C idle on AC and battery alike.
-		// Gaming detection overrides to performance when GPU load warrants it.
-		setAllEPP("power")
-		prevState.EPP = "power"
-	case ZoneMild:
-		setAllMaxFreq(0) // EPP hint is enough, no hard cap
-		setAllEPP("power")
-		prevState.EPP = "power"
-	case ZoneWarm:
-		// [CHANGE: claude-code | 2026-05-24] BUG-055: removed 4.0GHz AC cap.
-		// Fan curve v5 runs fans at 100% at 70°C — no freq cap needed on AC.
-		// The cap was creating a cooling→reboost feedback loop: cap cools CPU to 62°C,
-		// cap removed, CPU boosts to 78°C in 2s, cap reapplied → infinite oscillation.
-		// Hold ticks (BUG-053 fix) only extended the period, did not break the loop.
-		// Battery still uses 3.5GHz cap (power saving on battery is correct behavior).
-		if onAC {
-			setAllMaxFreq(0) // no cap — fans at 100% handle it
-		} else {
-			setAllMaxFreq(3500000) // 3.5 GHz on battery
-		}
-		setAllEPP("power")
-		prevState.EPP = "power"
+// thermalCapForCurrentZone returns the thermal cap in kHz for the current zone.
+// Returns 0 (= no cap) for ZoneCool/ZoneMild/ZoneWarm on AC (fans handle it).
+// Returns non-zero for ZoneHot and battery warm zones.
+func thermalCapForCurrentZone(onAC bool) int {
+	switch currentThermalZone {
 	case ZoneHot:
 		if onAC {
-			setAllMaxFreq(3000000) // 3.0 GHz on AC
-		} else {
-			setAllMaxFreq(2500000) // 2.5 GHz on battery
+			return 3000000 // 3.0 GHz — only cap on AC, fans can't keep up at this point
 		}
-		setAllEPP("power")
-		prevState.EPP = "power"
+		return 2500000 // 2.5 GHz on battery
+	case ZoneWarm:
+		if onAC {
+			return 0 // no cap — fan curve v5 handles it (BUG-055)
+		}
+		return 3500000 // 3.5 GHz on battery (power saving)
+	default:
+		return 0 // ZoneCool, ZoneMild: no cap needed
 	}
+}
+
+// --- adaptive governor ---
+
+// computeAdaptiveCap returns the target CPU cap in kHz based on smoothed load.
+//
+// Formula:
+//   cap = baseCap + (effectiveLoad/100) × (maxCap - baseCap)
+//
+// iGPU dominance penalty: when iGPU is running harder than CPU (e.g. video decode
+// while CPU is light), reduce CPU cap slightly to give shared TDP headroom to iGPU.
+// Penalty = dominance% × 12kHz, capped at 300 MHz.
+//
+// [CHANGE: claude-code | 2026-05-26] v4.0
+func computeAdaptiveCap(effectiveLoad, igpuLoad float64, onAC bool) int {
+	maxCap := cpuHardwareMaxFreq
+	if !onAC && adaptiveMaxCapBat > 0 {
+		maxCap = adaptiveMaxCapBat
+	}
+
+	// Linear interpolation: idle→baseCap, full load→maxCap
+	cap := adaptiveBaseCap + int((effectiveLoad/100.0)*float64(maxCap-adaptiveBaseCap))
+
+	// iGPU dominance: when iGPU is doing more work than CPU, it needs more of the
+	// shared APU TDP. Nudge CPU cap down proportionally.
+	dominance := igpuLoad - effectiveLoad
+	if dominance > 20 {
+		penalty := int(dominance * dominancePenaltyPerPct)
+		if penalty > dominanceMaxPenaltyKHz {
+			penalty = dominanceMaxPenaltyKHz
+		}
+		cap -= penalty
+	}
+
+	// Clamp to [baseCap, maxCap]
+	if cap < adaptiveBaseCap {
+		cap = adaptiveBaseCap
+	}
+	if cap > maxCap {
+		cap = maxCap
+	}
+	return cap
+}
+
+// sleepAdaptive sleeps for an interval based on current load:
+//   - Idle (<20% all): PSI event-driven sleep up to 10s — wakes on CPU pressure
+//   - Active (20-60%): 2s
+//   - Near cap (>60%): 500ms — tight loop for trigger detection
+//
+// [CHANGE: claude-code | 2026-05-26] v4.0
+func sleepAdaptive(ctx context.Context, psiFile *os.File, cpuLoad, igpuLoad float64) {
+	maxLoad := math.Max(cpuLoad, igpuLoad)
+	var d time.Duration
+	switch {
+	case maxLoad < 20:
+		d = 10 * time.Second
+	case maxLoad < 60:
+		d = 2 * time.Second
+	default:
+		d = 500 * time.Millisecond
+	}
+
+	// In the idle zone, block on PSI rather than sleeping — wakes only when
+	// CPU stall pressure exceeds the threshold (70ms stall in 1s window).
+	if psiFile != nil && maxLoad < 20 {
+		waitPSI(psiFile, d)
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
+	}
+}
+
+// --- PSI (Pressure Stall Information) watcher ---
+// Linux 4.20+. /proc/pressure/cpu supports poll(POLLPRI) with a threshold trigger.
+// The kernel wakes the fd only when the stall rate crosses the threshold — zero CPU wasted.
+//
+// [CHANGE: claude-code | 2026-05-26] v4.0
+
+// openPSIWatcher opens /proc/pressure/cpu and arms a stall threshold.
+// The file stays open; call waitPSI() to block until the threshold fires.
+func openPSIWatcher() (*os.File, error) {
+	f, err := os.OpenFile("/proc/pressure/cpu", os.O_RDWR, 0)
+	if err != nil {
+		return nil, err
+	}
+	// "some 70000 1000000" = wake when any CPU stall exceeds 70ms in a 1s window.
+	// This fires under moderate load — light enough to catch real work, ignores pure idle.
+	if _, err := fmt.Fprintf(f, "some 70000 1000000"); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("write PSI threshold: %w", err)
+	}
+	return f, nil
+}
+
+// waitPSI blocks until the PSI threshold fires or timeout elapses.
+// Returns true if the PSI event fired, false on timeout.
+func waitPSI(f *os.File, timeout time.Duration) bool {
+	pfd := []unix.PollFd{{
+		Fd:     int32(f.Fd()),
+		Events: unix.POLLPRI | unix.POLLERR,
+	}}
+	ms := int(timeout.Milliseconds())
+	n, _ := unix.Poll(pfd, ms)
+	return n > 0
+}
+
+// --- exec watcher ---
+// Scans /proc every 1s for new PIDs. On detecting an unknown PID whose comm matches
+// a knownApp, fires the app name on the events channel.
+// This is simpler than fanotify/netlink and sufficient for our pre-allocation use case.
+//
+// [CHANGE: claude-code | 2026-05-26] v4.0
+
+type execWatcher struct {
+	knownPIDs map[int]struct{}
+	mu        sync.Mutex
+	events    chan string // comm names of newly launched known apps
+}
+
+func newExecWatcher() *execWatcher {
+	return &execWatcher{
+		knownPIDs: make(map[int]struct{}),
+		events:    make(chan string, 16),
+	}
+}
+
+// run scans /proc every 1s for new process launches.
+// Sends the comm name to events when a known app appears.
+func (w *execWatcher) run(ctx context.Context) {
+	// Seed known PIDs without firing events (they were already running at daemon start).
+	w.seed()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.scan()
+		}
+	}
+}
+
+func (w *execWatcher) seed() {
+	entries, _ := os.ReadDir("/proc")
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		w.knownPIDs[pid] = struct{}{}
+	}
+}
+
+func (w *execWatcher) scan() {
+	entries, _ := os.ReadDir("/proc")
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	seen := make(map[int]struct{}, len(entries))
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		seen[pid] = struct{}{}
+		if _, known := w.knownPIDs[pid]; !known {
+			w.knownPIDs[pid] = struct{}{}
+			comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+			if err != nil {
+				continue
+			}
+			name := strings.TrimSpace(string(comm))
+			if _, ok := knownApps[name]; ok {
+				select {
+				case w.events <- name:
+				default: // drop if channel full — non-blocking
+				}
+			}
+		}
+	}
+	// Prune dead PIDs to keep the map bounded.
+	for pid := range w.knownPIDs {
+		if _, alive := seen[pid]; !alive {
+			delete(w.knownPIDs, pid)
+		}
+	}
+}
+
+// abs returns the absolute value of an int.
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // setEPPAfterAsusctl waits for asusd's async D-Bus write to complete before

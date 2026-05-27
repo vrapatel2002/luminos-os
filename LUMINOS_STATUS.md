@@ -83,7 +83,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Daemon | Status | Notes |
 |---|---|---|
 | luminos-ai | ✅ Running | Unix socket IPC — central routing daemon |
-| luminos-power | ✅ Running | v3.7 EPP-based. Load-based profiles: Balanced→Quiet after 60s idle (CPU<25%+iGPU<15%+dGPU<5%), immediate Balanced on load. Beast mode: CPU>75% or dGPU>80% → Performance. Fan curve v5: 35%@47°C, 62%@52°C. No freq cap ≤87°C — BUG-055/056. |
+| luminos-power | ✅ Running | v4.0 Adaptive Dual Governor. Continuous CPU cap: 1.8GHz+(load/100)×(max-1.8), EMA α=0.3, 70/30 smooth. PSI event-driven idle sleep. Exec watcher pre-alloc. iGPU dominance penalty ≤300MHz. ZoneHot 87°C→3GHz override. Emergency 92°C. Beast mode + fan curve v5 unchanged. |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
 | luminos-ram | ✅ Running | v3.0 — LIRS IRR ranking, N=8 HotSet, OnScreen protection, memory pressure monitor |
