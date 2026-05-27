@@ -3,6 +3,16 @@ Last Updated: 2026-05-24 (BUG-055: ZoneWarm/ZoneHot freq cap oscillation + YT st
 
 ## Fixed Bugs (new)
 
+### BUG-057 — Chrome --use-gl=disabled on AMD Wayland Flatpak path
+- Status: FIXED
+- Severity: CRITICAL
+- Component: /usr/local/bin/chrome-luminos
+- Description: Chrome GPU process ran with `--use-gl=disabled` — entire browser rendered in software (CPU only). No GPU compositing, no hardware acceleration, severe Chrome lag.
+- Root Cause: `--render-node-override=/dev/dri/renderD129` was passed to Chrome Flatpak on AMD path. On Wayland, Chrome gets its EGL context from KWin (the Wayland compositor), not by directly opening a DRM render node. The forced render node bypassed the Wayland EGL path, causing EGL initialization failure. Chrome then disabled GL entirely for the session. Second issue: `DRI_PRIME=0` and `VK_ICD_FILENAMES` were set via shell `export` before `flatpak run` — Flatpak sandbox does not inherit parent shell exports; they must be passed via `--env=` to `flatpak run`.
+- Fix Applied: Removed `--render-node-override` from AMD path entirely. Moved `DRI_PRIME`, `VK_ICD_FILENAMES`, and `LIBVA_DRIVER_NAME` from shell exports to `--env=` arguments on `flatpak run`. NVIDIA path retains `--render-node-override=/dev/dri/renderD128` (correct for PRIME offload with desktop GL).
+- Date Found: 2026-05-26
+- Date Fixed: 2026-05-26
+
 ### BUG-056 — Chrome YouTube stutter — VAAPI not enabled on AMD path
 - Status: FIXED
 - Severity: HIGH
