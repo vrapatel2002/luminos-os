@@ -1,7 +1,17 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-24 (BUG-055: ZoneWarm/ZoneHot freq cap oscillation + YT stutter)
+Last Updated: 2026-05-27 (BUG-058: --enable-zero-copy in chrome-flags.conf re-triggers --use-gl=disabled)
 
 ## Fixed Bugs (new)
+
+### BUG-058 — Chrome --use-gl=disabled recurring — chrome-flags.conf injecting --enable-zero-copy globally
+- Status: FIXED
+- Severity: CRITICAL
+- Component: ~/.var/app/com.google.Chrome/config/chrome-flags.conf
+- Description: Chrome GPU process running at 51% CPU with `--use-gl=disabled` and `--render-node-override=/dev/dri/renderD129` again after BUG-057 fix. Identical symptom: software rendering, severe lag.
+- Root Cause: `chrome-flags.conf` contained `--enable-zero-copy` as a global flag, applied to every Chrome launch before the per-GPU launcher flags. `--enable-zero-copy` forces Chrome to open a DRM render node directly for DMA-BUF buffer sharing. Inside the Flatpak sandbox, Chrome's zero-copy subsystem picks `renderD129` (NVIDIA — first DRM device enumerated) regardless of `DRI_PRIME=0`. This hits the same EGL init failure as BUG-057, producing `--use-gl=disabled` in the spawned GPU process. The chrome-luminos launcher had already removed `--enable-zero-copy` from its flags (BUG-054 fix), but the global conf file re-injected it on every launch.
+- Fix Applied: Stripped `chrome-flags.conf` to only `--ozone-platform=wayland`. Removed `--enable-zero-copy`, `--enable-gpu-rasterization`, `CanvasOopRasterization`, `UseSkiaRenderer`. All GPU-specific flags now live exclusively in `/usr/local/bin/chrome-luminos` where they are controlled per-GPU choice.
+- Date Found: 2026-05-27
+- Date Fixed: 2026-05-27
 
 ### BUG-057 — Chrome --use-gl=disabled on AMD Wayland Flatpak path
 - Status: FIXED
