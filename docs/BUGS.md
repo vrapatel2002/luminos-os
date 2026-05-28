@@ -1,7 +1,17 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-28 (BUG-061: AMD Vulkan ICD filename radeon_icd.x86_64.json does not exist on Arch → Vulkan loader finds no AMD ICD → SwiftShader CPU fallback → --use-gl=disabled)
+Last Updated: 2026-05-28 (BUG-062: NVIDIA path — --ozone-platform=wayland incompatible with Vulkan PRIME offload → cross-device DMA-BUF import fails → Chrome crashes. Fix: --ozone-platform=x11 on NVIDIA path)
 
 ## Fixed Bugs (new)
+
+### BUG-062 — Chrome NVIDIA path: --ozone-platform=wayland + Vulkan crashes on PRIME offload
+- Status: FIXED
+- Severity: CRITICAL
+- Component: /usr/local/bin/chrome-luminos (NVIDIA path)
+- Description: Selecting NVIDIA in the GPU picker caused Chrome to crash with SIGTRAP. Error: `'--ozone-platform=wayland' is not compatible with Vulkan` and `importing the supplied dmabufs failed (error 7)`.
+- Root Cause: NVIDIA is a PRIME offload device — it renders offscreen and hands frames to the AMD KWin compositor via DMA-BUF. On Wayland + Vulkan, this cross-device DMA-BUF import between NVIDIA and AMD fails. Chrome's own Wayland platform code explicitly rejects this combination and crashes. AMD path is unaffected because AMD IS the KWin compositor (same device, no DMA-BUF handoff needed).
+- Fix Applied: NVIDIA path switched from `--ozone-platform=wayland` to `--ozone-platform=x11` (XWayland). XWayland handles the NVIDIA→AMD frame handoff via X11 protocol instead of Wayland DMA-BUF — well-tested with NVIDIA PRIME. Also removed VAAPI feature flags from NVIDIA path (LIBVA_DRIVER_NAME=nvidia and VaapiVideoDecodeLinuxGL are non-functional on NVIDIA Linux; removing them avoids spurious init errors).
+- Date Found: 2026-05-28
+- Date Fixed: 2026-05-28
 
 ### BUG-061 — Chrome AMD path: wrong Vulkan ICD filename → no AMD Vulkan device → SwiftShader CPU fallback → --use-gl=disabled
 - Status: FIXED
