@@ -53,7 +53,8 @@ The Emergency Card (below) is designed for fast triage under pressure. Find your
 | Panel broken / white after theme change | `systemctl --user restart plasma-plasmashell` | plasmashell lost state; also: `kquitapp6 plasmashell && kstart plasmashell` | Part 8.4 |
 | HIVE not responding (SUPER+SPACE) | `pkill -f hive-daemon.py; pkill -f llama-server; SUPER+SPACE again` | Daemon lock file stale or llama-server crashed | Part 7.6 |
 | NVIDIA GPU won't sleep (stays at 8W) | `cat /etc/environment` — verify `__EGL_VENDOR_LIBRARY_FILENAMES=...50_mesa.json` present | EGL defaulting to NVIDIA for session apps (BUG-050) | Part 5.4 |
-| Chrome 90–95% CPU on page load | `cat /usr/local/bin/chrome-luminos` — verify no `--use-gl=angle` flag | ANGLE/Vulkan overhead on AMD path (BUG-046 pattern) | Part 11 |
+| Chrome GPU dead / SwiftShader rendering | Check `chrome://gpu` GL_RENDERER. If SwiftShader: `VK_ICD_FILENAMES=radeon_icd.json` in `/usr/local/bin/chrome-luminos`. Clear `~/.config/google-chrome/{GPUCache,GrShaderCache,ShaderCache}`. | Wrong Vulkan ICD path or stale crash state (BUG-061) | Part 11 |
+| Chrome NVIDIA path: GPU confirmed but stutters | `nvidia-smi` — check pstate/clock. P8/210MHz = DPM=0x02 keeping GPU throttled. Known conflict with fine-grained power management. | `NVreg_DynamicPowerManagement=0x02` in `/etc/modprobe.d/nvidia.conf` (BUG-047 fix) throttles NVIDIA during light workloads | Part 11, LUMINOS_DECISIONS.md |
 | App launcher shows blank / empty | `kwriteconfig6 --file plasma-org.kde.plasma.desktop-appletsrc --group 'Applet-*' --key applicationsDisplay 1 && systemctl --user restart plasma-plasmashell` | applicationsDisplay=0 (shows Favorites, which is empty) — BUG-052 | Part 12 |
 | Keyboard light not restoring after sleep | `cat ~/.config/luminos-keyboard.conf && systemctl --user status luminos-keyboard.service` | Service failed to restart; or sysfs write permission | Part 6.7 |
 | KDE System Settings can't find HIVE | `kbuildsycoca6 --noincremental` | sycoca index stale after plugin install | Part 7.1 |
@@ -1095,67 +1096,83 @@ See Part 6 for the complete deep dive. Summary:
 
 ## PART 11 — CHROME & BROWSER
 
-### 11.1 Complete Launch Stack
+**Current state (2026-05-28):** Native AUR `google-chrome-stable` 148.x. Flatpak removed (BUG-059). GPU selector dialog on every launch.
 
-1. KDE app launcher or `.desktop` file calls `/usr/local/bin/chrome-luminos`
-2. `chrome-luminos` sets GPU env vars and calls `flatpak run com.google.Chrome`
-3. Chrome reads per-user flags from `~/.var/app/com.google.Chrome/config/chrome-flags.conf`
-4. Chrome starts on Wayland with AMD GPU
+### 11.1 Launch Stack
 
-### 11.2 chrome-luminos Wrapper (Current)
+1. KDE / `.desktop` → `~/.local/share/applications/google-chrome.desktop` (user override)
+2. That calls `/usr/local/bin/chrome-luminos`
+3. `chrome-luminos` shows `kdialog` GPU picker → sets path-specific env vars → `exec google-chrome-stable`
+4. Chrome reads global flags from `~/.config/chrome-flags.conf` (`--ozone-platform=wayland` only)
 
-Source: `scripts/chrome-luminos`, installed at `/usr/local/bin/chrome-luminos`
+### 11.2 chrome-luminos — AMD Path (default)
 
 ```bash
-export DRI_PRIME=0
-export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
-exec /usr/bin/flatpak run com.google.Chrome \
+exec env \
+  DRI_PRIME=0 \
+  VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json \
+  LIBVA_DRIVER_NAME=radeonsi \
+  google-chrome-stable \
   --ozone-platform=wayland \
+  --use-gl=angle --use-angle=vulkan \
   --enable-gpu-rasterization \
-  --enable-zero-copy \
-  --process-per-site \
-  --renderer-process-limit=8 \
+  --enable-features=VaapiVideoDecodeLinuxGL,VaapiVideoEncoder,MemorySaver \
+  --ignore-gpu-blocklist \
+  --process-per-site --renderer-process-limit=8 \
+  --remote-debugging-port=9222
+```
+
+- `radeon_icd.json` — Arch Mesa installs without arch suffix (not `.x86_64.json` — BUG-061)
+- `--use-gl=angle --use-angle=vulkan` — native Chrome 148 only allows ANGLE backends (BUG-060)
+- `--ozone-platform=wayland` — native Wayland; AMD IS the KWin compositor, no DMA-BUF cross-device issue
+
+### 11.3 chrome-luminos — NVIDIA Path
+
+```bash
+exec env \
+  DRI_PRIME=1 \
+  VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json \
+  __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/60_nvidia.json \
+  __NV_PRIME_RENDER_OFFLOAD=1 \
+  __GLX_VENDOR_LIBRARY_NAME=nvidia \
+  google-chrome-stable \
+  --ozone-platform=x11 \
+  --use-gl=angle --use-angle=vulkan \
+  --enable-gpu-rasterization \
+  --enable-features=MemorySaver \
+  --ignore-gpu-blocklist \
+  --process-per-site --renderer-process-limit=8 \
   --remote-debugging-port=9222 \
-  "$@"
+  --render-node-override=/dev/dri/renderD128
 ```
 
-`DRI_PRIME=0` forces the AMD iGPU. `VK_ICD_FILENAMES` forces the AMD Vulkan ICD. `--ozone-platform=wayland` activates the native Wayland backend (avoids XWayland overhead). `--remote-debugging-port=9222` enables CDP for luminos-ram tab management.
+- `--ozone-platform=x11` (XWayland) — Wayland+Vulkan incompatible with NVIDIA PRIME offload. Cross-device DMA-BUF import fails (BUG-062). XWayland handles frame handoff via X11 protocol instead.
+- No VAAPI flags — NVIDIA VA-API on Linux is non-functional; removed to avoid init errors.
+- `__EGL_VENDOR_LIBRARY_FILENAMES=60_nvidia.json` — overrides the system-wide `50_mesa.json` from `/etc/environment` for this process.
+- ⚠️ **KNOWN ISSUE:** `NVreg_DynamicPowerManagement=0x02` (in `/etc/modprobe.d/nvidia.conf`) keeps NVIDIA at P8/210MHz during light workloads. YouTube may stutter. See LUMINOS_DECISIONS.md for tradeoff.
 
-### 11.3 Chrome Flags (chrome-flags.conf)
+### 11.4 Bug History Summary
 
-Location: `~/.var/app/com.google.Chrome/config/chrome-flags.conf`
+| Bug | Root cause | Fix |
+|-----|-----------|-----|
+| BUG-046 | Chrome using NVIDIA by default (renderD129 hardcoded) | `DRI_PRIME=0`, no render-node-override on AMD |
+| BUG-057 | `--render-node-override` on Wayland AMD path → EGL fail | Removed render-node-override from AMD |
+| BUG-058 | `chrome-flags.conf` had `--enable-zero-copy` globally re-injecting broken flags | Stripped to `--ozone-platform=wayland` only |
+| BUG-059 | Flatpak NVIDIA GL extension poisoned AMD EGL path (unfixable) | Switched to native AUR `google-chrome-stable` |
+| BUG-060 | `--use-gl=egl` not in native Chrome 148 allowlist → GPU crash loop → disabled | `--use-gl=angle --use-angle=vulkan` |
+| BUG-061 | `radeon_icd.x86_64.json` doesn't exist on Arch → SwiftShader fallback | `radeon_icd.json` (no arch suffix) |
+| BUG-062 | `--ozone-platform=wayland` + Vulkan crashes on NVIDIA PRIME (DMA-BUF cross-device) | NVIDIA path uses `--ozone-platform=x11` |
 
-Current active flags:
+### 11.5 Desktop File
+
+`~/.local/share/applications/google-chrome.desktop` (user override — takes priority over AUR system entry)
+
+```ini
+[Desktop Entry]
+Exec=chrome-luminos %U
 ```
---ozone-platform=wayland
-```
 
-This is applied globally (all Chrome instances). The XWayland path was the root cause of the 95% CPU issue — Chrome was competing with KWin for X11 event processing.
-
-### 11.4 Why ANGLE Was Wrong
-
-A previous configuration had `--use-gl=angle --use-angle=vulkan`. ANGLE is an OpenGL-to-Vulkan translation layer optimized for NVIDIA/Windows. On AMD iGPU with Mesa:
-- Mesa's native EGL/GL path is already optimized for RDNA3
-- ANGLE adds a translation layer that duplicates work Mesa already does correctly
-- Vulkan on RDNA3 via ANGLE has higher driver overhead than native Mesa EGL
-
-Decision 17 (`aaacdbff`) established: AMD branch uses `--use-gl=egl` (Mesa EGL, no translation), NVIDIA branch uses `--use-gl=desktop` (native NVIDIA GL). The `--use-gl` flag is not currently set in `chrome-luminos` — Chrome defaults to EGL on Wayland when `ozone-platform=wayland` is set, which is correct.
-
-### 11.5 Chrome GPU History
-
-- BUG-046: Chrome wrapper had hardcoded `renderD129` (NVIDIA). Fixed by removing render-node-override and setting `DRI_PRIME=0`.
-- Commit `9e12186f` was the hotfix where render nodes had been swapped — `renderD128` was incorrectly labeled NVIDIA in the wrapper, causing AMD Signal 5 crash.
-- Current state: No render-node-override at all. `DRI_PRIME=0` + AMD VK ICD is sufficient.
-
-### 11.6 Desktop File
-
-`~/.local/share/applications/com.google.Chrome.desktop`
-
-The `Exec=` line was fixed at BUG-052 (`fc828d13`):
-- Before: `Exec=/usr/local/bin/chrome-luminos @@u %U @@` (Flatpak URL forwarding syntax — invalid for wrapper)
-- After: `Exec=/usr/local/bin/chrome-luminos %U`
-
-After fixing, `kbuildsycoca6 --noincremental` was run to update the sycoca index so KDE search could find Chrome.
+AUR's system entry at `/usr/share/applications/google-chrome.desktop` points directly to `google-chrome-stable`, bypassing the GPU picker. The user override fixes this.
 
 ---
 

@@ -6,6 +6,36 @@
 
 ---
 
+## DECISION 18 — NVreg_DynamicPowerManagement=0x02 vs Chrome NVIDIA P-State Conflict
+Date: May 28, 2026
+Made by: claude-code
+**Status: KNOWN CONFLICT — no resolution yet, tradeoff accepted**
+
+### The Conflict
+Two settings set at different times now fight each other:
+
+1. **BUG-047 fix (May 10, 2026):** Added `NVreg_DynamicPowerManagement=0x02` to `/etc/modprobe.d/nvidia.conf`. This enables fine-grained dynamic power management — NVIDIA GPU aggressively enters low P-states when workload is light. Solved NVIDIA drawing 8W constantly.
+
+2. **Chrome NVIDIA path (May 28, 2026):** User can now route Chrome to NVIDIA RTX 4050 via `chrome-luminos` GPU picker. Chrome's ANGLE Vulkan workload (2D rendering, video decode) is not heavy enough to trigger NVIDIA P-state boost. GPU stays at P8/210MHz (6.7% of max 3105MHz). Video playback stutters even though GL_RENDERER confirms NVIDIA and video decode is hardware-accelerated.
+
+### Why We Can't Just Remove DPM=0x02
+Removing `DPM=0x02` would revert to `DPM=0x00` (always-on D0), restoring the 8W idle draw that BUG-047 fixed. On battery this is unacceptable. `DPM=0x01` (coarse-grained) would reduce idle power but not as effectively.
+
+### What Was Rejected
+- **nvidia-settings GPUPowerMizerMode=1** (prefer max performance): Requires X server running, not persistent across sessions, doesn't set at launch time reliably.
+- **Removing DPM=0x02:** Restores 8W idle — unacceptable on battery.
+- **nvidia-smi persistence mode:** Controls process persistence, not P-state selection.
+
+### Current Tradeoff
+DPM=0x02 stays. Chrome NVIDIA path is best-effort — good for GPU-heavy WebGL/3D sites where the high workload will naturally trigger P-state boost. For video streaming (YouTube), AMD path is better (native Wayland + VAAPI + no P-state issue). The GPU picker dialog makes this choice explicit.
+
+### Cross-references
+- BUG-047 (NVIDIA always-on fix) → `docs/BUGS.md`
+- BUG-062 (Chrome NVIDIA XWayland fix) → `docs/BUGS.md`
+- `/etc/modprobe.d/nvidia.conf` → `AGENTS.md §9`
+
+---
+
 ## DECISION 16 — GPU-Per-App Selector Architecture
 Date: May 21, 2026
 Made by: claude-code

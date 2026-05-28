@@ -204,3 +204,18 @@ You have limited tokens across all tools. Use them efficiently:
 ---
 
 *Last updated: 2026-04-19 | By: claude-chat*
+
+---
+
+## Agent Reply Format
+
+After completing any task, end your response with:
+
+```
+REPLY TO MANAGEMENT:
+  - Task completed: [yes/no/partial]
+  - What changed: [list files modified/created]
+  - LUMINOS_STATUS.md updated: [yes/no]
+  - Luminos Notes updated: [yes/no]
+  - Ready for: [what comes next]
+```
