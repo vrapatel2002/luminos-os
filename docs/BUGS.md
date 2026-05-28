@@ -1,7 +1,17 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-27 (BUG-059 final: switched Chrome from Flatpak to native AUR google-chrome-stable — Flatpak NVIDIA GL extension contamination unfixable at flag level)
+Last Updated: 2026-05-28 (BUG-060: --use-gl=egl not in native Chrome 148 allowed GL implementations → GPU process crash loop → all hardware acceleration disabled)
 
 ## Fixed Bugs (new)
+
+### BUG-060 — Chrome native: --use-gl=egl crashes GPU process → software rendering → YouTube stutter
+- Status: FIXED
+- Severity: CRITICAL
+- Component: /usr/local/bin/chrome-luminos
+- Description: GPU process at 81.5% CPU, --use-gl=disabled, all GPU features disabled, YouTube stuttering on battery. chrome://gpu showed "GPU process was unable to boot: GPU access is disabled due to frequent crashes."
+- Root Cause: Launcher passed --use-gl=egl which native Chrome 148 maps to gl=egl-gles2,angle=none. Native Chrome 148 only allows ANGLE backends: (gl=egl-angle,angle=opengl), (gl=egl-angle,angle=opengles), (gl=egl-angle,angle=vulkan). gl=egl-gles2 is not in the allowlist → GPU process exits immediately → Chrome retries 7 times → declares GPU broken → disables all hardware acceleration for the session. This happened on every Chrome launch since switching from Flatpak to native (BUG-059). On battery, software decode + luminos-power CPU cap = double throttle → severe stutter.
+- Fix Applied: Changed --use-gl=egl to --use-gl=angle --use-angle=vulkan for both AMD and NVIDIA paths. AMD uses Mesa radv (VK_ICD_FILENAMES=radeon_icd.x86_64.json), NVIDIA uses proprietary Vulkan (VK_ICD_FILENAMES=nvidia_icd.json). Cleared Chrome GPU/shader caches to remove stale crash state.
+- Date Found: 2026-05-28
+- Date Fixed: 2026-05-28
 
 ### BUG-059 — Chrome GPU subprocess --use-gl=disabled — three layered mistakes (corrected)
 - Status: FIXED
