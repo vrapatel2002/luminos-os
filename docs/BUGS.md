@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-27 (BUG-059 corrected: three layered mistakes — wrong EGL path in Flatpak, wrong GL backend, wrong render node docs)
+Last Updated: 2026-05-27 (BUG-059 final: switched Chrome from Flatpak to native AUR google-chrome-stable — Flatpak NVIDIA GL extension contamination unfixable at flag level)
 
 ## Fixed Bugs (new)
 
@@ -12,7 +12,7 @@ Last Updated: 2026-05-27 (BUG-059 corrected: three layered mistakes — wrong EG
   1. WRONG RENDER NODE DOCS: AGENTS.md section 2 had render nodes backwards. Actual mapping: renderD128=NVIDIA (0x10de, card1 pci 01:00.0), renderD129=AMD (0x1002, card2 pci 65:00.0). Chrome was correctly selecting renderD129 (AMD) all along. The problem was EGL init failure on AMD, not wrong device selection.
   2. WRONG EGL VENDOR PATH (BUG-059 first attempt): Set __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json — this path does NOT exist inside the Flatpak sandbox. File is actually at /usr/lib/x86_64-linux-gnu/GL/glvnd/egl_vendor.d/50_mesa.json. Setting a non-existent path causes GLVND to load zero EGL vendors → guaranteed EGL failure.
   3. WRONG GL BACKEND: --use-gl=egl uses Chrome's bundled ANGLE. Even though ANGLE bypasses GLVND for most operations, on Wayland it still uses system GLVND EGL for display backend selection. Inside the Flatpak, NVIDIA EGL vendors (09_nvidia_wayland2.json, 10_nvidia.json) have lower sort numbers than Mesa (50_mesa.json) and claim the Wayland EGL display first. NVIDIA EGL cannot drive AMD hardware (renderD129) → ANGLE EGL init fails → --use-gl=disabled.
-- Fix Applied: (1) Corrected __EGL_VENDOR_LIBRARY_FILENAMES to the real Flatpak path: /usr/lib/x86_64-linux-gnu/GL/glvnd/egl_vendor.d/50_mesa.json. With Mesa-only EGL, NVIDIA EGL vendors are excluded, Mesa EGL handles AMD renderD129 correctly. (2) Changed AMD path from --use-gl=egl to --use-gl=desktop (system Mesa GL via GLVND, same as NVIDIA path). --use-gl=desktop fully respects __EGL_VENDOR_LIBRARY_FILENAMES. (3) Removed incorrect MESA_LOADER_DRIVER_OVERRIDE=radeonsi (not needed, potentially disruptive). (4) Fixed AGENTS.md section 2 render node table.
+- Fix Applied (final): Abandoned Flatpak Chrome entirely. Installed native google-chrome-stable 148.0.7778.178 via AUR (yay). The Flatpak Freedesktop SDK 25.08 runtime has the NVIDIA GL extension installed which injects NVIDIA EGL vendors (09_nvidia_wayland2, 10_nvidia) that sort before Mesa (50_mesa) — this is baked into the Flatpak runtime and cannot be overridden at the launcher flag level without removing the NVIDIA GL extension from the Flatpak runtime itself. Native Chrome inherits /etc/environment directly (includes __EGL_VENDOR_LIBRARY_FILENAMES=50_mesa.json), no GL layer indirection, no NVIDIA EGL contamination. chrome-luminos updated to use google-chrome-stable with env vars via exec env. Created ~/.config/chrome-flags.conf (--ozone-platform=wayland). AGENTS.md section 2 render node table corrected (renderD128=NVIDIA, renderD129=AMD).
 - Date Found: 2026-05-27
 - Date Fixed: 2026-05-27
 

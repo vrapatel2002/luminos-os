@@ -108,7 +108,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Floating panel | ❌ Reverted | [CHANGE: gemini-cli | 2026-05-11] Panel reset to default bottom position. |
 | RAM monitor widget | ✅ Working | Plasma widget (org.luminos.ramwidget) installed |
 | System Telemetry | ✅ Active | Continuous logging to /var/log/luminos-telemetry.csv |
-| Chrome GPU | ✅ Fixed | AMD path: --use-gl=desktop + __EGL_VENDOR_LIBRARY_FILENAMES=Flatpak-Mesa-path → Mesa EGL only, NVIDIA EGL excluded, GPU subprocess uses renderD129 (AMD) with desktop GL (BUG-059); VAAPI VP9+AV1 on 780M (BUG-056); MemorySaver; GPU selector dialog. renderD128=NVIDIA, renderD129=AMD (corrected from wrong AGENTS.md docs). |
+| Chrome GPU | ✅ Fixed | Native AUR google-chrome-stable (NOT Flatpak — Flatpak NVIDIA GL extension causes unfixable EGL contamination). AMD: --use-gl=egl + Mesa-only EGL from /etc/environment. VAAPI on 780M. GPU selector dialog. renderD128=NVIDIA, renderD129=AMD. |
 | Chrome CPU | ✅ Fixed | Removed ANGLE/Vulkan flags (wrong for AMD); --ozone-platform=wayland; GPU-specific --use-gl |
 | Universal GPU launcher | ✅ Working | luminos-gpu-launch (kdialog picker); luminos-nvidia-run (wakes PCI power gate); Dolphin service menus for executables + .desktop files |
 | Touchpad log flood | ✅ Fixed | QT_LOGGING_RULES=kwin_libinput.warning=false in /etc/environment; suppresses ASUP1208 Touch Jump spam |
