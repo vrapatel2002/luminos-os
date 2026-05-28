@@ -26,8 +26,8 @@ Luminos OS is a custom **Arch Linux** distribution for the **ASUS ROG G14 GA403U
 | Component | Spec | Notes |
 |-----------|------|-------|
 | CPU | Ryzen 9 8845HS | 8c/16t Zen 4, TJmax 105°C, max boost 5.137 GHz |
-| iGPU | Radeon 780M | `/dev/dri/card2`, renderD128 — always drives KWin |
-| dGPU | RTX 4050 6GB | `/dev/dri/card1`, renderD129 — power-gated when idle |
+| iGPU | Radeon 780M | `/dev/dri/card2`, **renderD129** (vendor 0x1002) — always drives KWin |
+| dGPU | RTX 4050 6GB | `/dev/dri/card1`, **renderD128** (vendor 0x10de) — power-gated when idle |
 | NPU | AMD XDNA (accel0) | 16 TOPS — ONNX/HATS only, NOT ROCm |
 | Display | Samsung eDP-2 | 2880×1800, 120Hz, 2× integer HiDPI, VRR=Never (intentional) |
 | RAM | 16GB LPDDR5x | Shared CPU/iGPU/OS |

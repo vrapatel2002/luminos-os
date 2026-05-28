@@ -1,15 +1,18 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-27 (BUG-059: Chrome GPU detection always selects NVIDIA renderD129 internally — __EGL_VENDOR_LIBRARY_FILENAMES not passed into Flatpak AMD path)
+Last Updated: 2026-05-27 (BUG-059 corrected: three layered mistakes — wrong EGL path in Flatpak, wrong GL backend, wrong render node docs)
 
 ## Fixed Bugs (new)
 
-### BUG-059 — Chrome GPU subprocess always picks renderD129 (NVIDIA) — EGL vendor not restricted in Flatpak sandbox
+### BUG-059 — Chrome GPU subprocess --use-gl=disabled — three layered mistakes (corrected)
 - Status: FIXED
 - Severity: CRITICAL
-- Component: /usr/local/bin/chrome-luminos (AMD path)
-- Description: Chrome GPU subprocess spawns with `--use-gl=disabled --render-node-override=/dev/dri/renderD129` even after BUG-057 and BUG-058 fixes. Software rendering, GPU process at 50%+ CPU, severe lag.
-- Root Cause: Flatpak sandbox does NOT inherit `/etc/environment`. The system-wide `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json` that prevents NVIDIA EGL elsewhere is invisible inside the Flatpak. Chrome sees both `50_mesa.json` (AMD) and `60_nvidia.json` (NVIDIA) EGL vendors. During its GPU info-collection phase, Chrome iterates `/dev/dri/renderD128` and `renderD129`, scores the NVIDIA dGPU higher (discrete GPU preference heuristic), and bakes `--render-node-override=/dev/dri/renderD129` into the GPU subprocess command line. EGL init on renderD129 then fails in the GPU subprocess context → Chrome falls back to `--use-gl=disabled`. `DRI_PRIME=0` and `VK_ICD_FILENAMES` do not affect this — Chrome's DRM enumeration uses GBM/ioctl directly, not Mesa device selection.
-- Fix Applied: Added `--env=__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json` to `flatpak run` AMD path. With only Mesa EGL visible, Chrome's EGL probe on renderD129 (NVIDIA) fails at detection time → Chrome selects renderD128 (AMD) → GPU subprocess gets `--render-node-override=/dev/dri/renderD128 --use-gl=egl`. Added `--env=MESA_LOADER_DRIVER_OVERRIDE=radeonsi` to additionally prevent Mesa GBM from opening renderD129 (NVIDIA hardware). Mirror: NVIDIA path already uses `__EGL_VENDOR_LIBRARY_FILENAMES=60_nvidia.json` (same mechanism, opposite direction).
+- Component: /usr/local/bin/chrome-luminos (AMD path), AGENTS.md section 2
+- Description: Chrome GPU subprocess spawns with `--use-gl=disabled --render-node-override=/dev/dri/renderD129` even after BUG-057 and BUG-058 fixes. Software rendering, GPU process at 50%+ CPU, severe video stutter.
+- Root Cause (confirmed via sysfs /sys/class/drm/renderD*/device/vendor):
+  1. WRONG RENDER NODE DOCS: AGENTS.md section 2 had render nodes backwards. Actual mapping: renderD128=NVIDIA (0x10de, card1 pci 01:00.0), renderD129=AMD (0x1002, card2 pci 65:00.0). Chrome was correctly selecting renderD129 (AMD) all along. The problem was EGL init failure on AMD, not wrong device selection.
+  2. WRONG EGL VENDOR PATH (BUG-059 first attempt): Set __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json — this path does NOT exist inside the Flatpak sandbox. File is actually at /usr/lib/x86_64-linux-gnu/GL/glvnd/egl_vendor.d/50_mesa.json. Setting a non-existent path causes GLVND to load zero EGL vendors → guaranteed EGL failure.
+  3. WRONG GL BACKEND: --use-gl=egl uses Chrome's bundled ANGLE. Even though ANGLE bypasses GLVND for most operations, on Wayland it still uses system GLVND EGL for display backend selection. Inside the Flatpak, NVIDIA EGL vendors (09_nvidia_wayland2.json, 10_nvidia.json) have lower sort numbers than Mesa (50_mesa.json) and claim the Wayland EGL display first. NVIDIA EGL cannot drive AMD hardware (renderD129) → ANGLE EGL init fails → --use-gl=disabled.
+- Fix Applied: (1) Corrected __EGL_VENDOR_LIBRARY_FILENAMES to the real Flatpak path: /usr/lib/x86_64-linux-gnu/GL/glvnd/egl_vendor.d/50_mesa.json. With Mesa-only EGL, NVIDIA EGL vendors are excluded, Mesa EGL handles AMD renderD129 correctly. (2) Changed AMD path from --use-gl=egl to --use-gl=desktop (system Mesa GL via GLVND, same as NVIDIA path). --use-gl=desktop fully respects __EGL_VENDOR_LIBRARY_FILENAMES. (3) Removed incorrect MESA_LOADER_DRIVER_OVERRIDE=radeonsi (not needed, potentially disruptive). (4) Fixed AGENTS.md section 2 render node table.
 - Date Found: 2026-05-27
 - Date Fixed: 2026-05-27
 
