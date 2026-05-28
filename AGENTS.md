@@ -332,7 +332,7 @@ luminos-brain safe "<action description>"
 | `/etc/environment` | `KWIN_DRM_DEVICES=/dev/dri/card2` + `__EGL_VENDOR_LIBRARY_FILENAMES=...50_mesa.json` + touchpad log suppression |
 | `~/.config/kwinoutputconfig.json` | `sharpness: 0.35`, `vrrPolicy: "Never"` |
 | `~/.var/app/com.google.Chrome/config/chrome-flags.conf` | `--ozone-platform=wayland` globally |
-| `/usr/local/bin/chrome-luminos` | GPU-specific GL: AMD=`--use-gl=egl`, NVIDIA=`--use-gl=desktop` |
+| `/usr/local/bin/chrome-luminos` | GPU-specific GL: both paths use `--use-gl=angle --use-angle=vulkan`. AMD=`radeon_icd.json`, NVIDIA=`nvidia_icd.json`. |
 | `~/.local/share/kio/servicemenus/luminos-gpu-select.desktop` | Dolphin right-click GPU picker for executables |
 | `~/.local/share/kio/servicemenus/luminos-app-gpu.desktop` | Dolphin right-click GPU picker for .desktop files |
 
@@ -491,7 +491,7 @@ NEVER commit without the Agent and Task fields.
 | Thermal oscillation in logs | `sudo journalctl -u luminos-power -n 50` — check for rapid zone changes |
 | HIVE not responding (SUPER+SPACE) | `pkill -f hive-daemon.py; pkill -f llama-server; SUPER+SPACE again` |
 | NVIDIA GPU won't sleep (8W idle) | Check `/etc/environment` for `__EGL_VENDOR_LIBRARY_FILENAMES=...50_mesa.json` |
-| Chrome 90–95% CPU | Check `/usr/local/bin/chrome-luminos` — remove any `--use-gl=angle` flag |
+| Chrome 90–95% CPU | Check `chrome://gpu` — if GL=SwiftShader, check VK_ICD_FILENAMES in `/usr/local/bin/chrome-luminos`. Correct AMD path: `radeon_icd.json`. Clear `~/.config/google-chrome/{GPUCache,GrShaderCache,ShaderCache}`. |
 | Panel broken/white | `systemctl --user restart plasma-plasmashell` |
 | Launcher blank/empty | Fix: `applicationsDisplay=1` in plasma-org.kde.plasma.desktop-appletsrc |
 | KDE Settings can't find HIVE KCM | `kbuildsycoca6 --noincremental` |
