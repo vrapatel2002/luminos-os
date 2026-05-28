@@ -324,3 +324,16 @@ Full reference with root causes: `docs/LUMINOS_HANDBOOK.md` Emergency Card.
 | Display stuck at wrong Hz | `luminos-120hz` or `luminos-60hz` |
 | KWin crash (blank screen) | `kwin_wayland --replace &` |
 | Launcher blank/empty | Set `applicationsDisplay=1` in `plasma-org.kde.plasma.desktop-appletsrc` |
+
+---
+
+## 16. Reply Format (mandatory — end every response with this)
+
+```
+REPLY TO MANAGEMENT:
+  - Task completed: [yes/no/partial]
+  - What changed: [list files modified/created]
+  - LUMINOS_STATUS.md updated: [yes/no]
+  - Luminos Notes updated: [yes/no]
+  - Ready for: [what comes next]
+```
