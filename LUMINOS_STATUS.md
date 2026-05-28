@@ -108,7 +108,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Floating panel | ❌ Reverted | [CHANGE: gemini-cli | 2026-05-11] Panel reset to default bottom position. |
 | RAM monitor widget | ✅ Working | Plasma widget (org.luminos.ramwidget) installed |
 | System Telemetry | ✅ Active | Continuous logging to /var/log/luminos-telemetry.csv |
-| Chrome GPU | ✅ Fixed | Native AUR google-chrome-stable. AMD+NVIDIA: --use-gl=angle --use-angle=vulkan (BUG-060). VAAPI on 780M. GPU selector dialog (kdialog). renderD128=NVIDIA, renderD129=AMD. |
+| Chrome GPU | ✅ Fixed | Native AUR google-chrome-stable. AMD+NVIDIA: --use-gl=angle --use-angle=vulkan (BUG-060). AMD VK_ICD=radeon_icd.json (BUG-061). VAAPI on 780M. GPU selector dialog (kdialog). renderD128=NVIDIA, renderD129=AMD. |
 | Chrome CPU | ✅ Fixed | Removed ANGLE/Vulkan flags (wrong for AMD); --ozone-platform=wayland; GPU-specific --use-gl |
 | Universal GPU launcher | ✅ Working | luminos-gpu-launch (kdialog picker); luminos-nvidia-run (wakes PCI power gate); Dolphin service menus for executables + .desktop files |
 | Touchpad log flood | ✅ Fixed | QT_LOGGING_RULES=kwin_libinput.warning=false in /etc/environment; suppresses ASUP1208 Touch Jump spam |
