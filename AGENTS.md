@@ -2,7 +2,21 @@
 Before concluding ANY task, you MUST update `luminos-notes.sh` to reflect all file changes, deleted directories, and architectural shifts. You must also verify that `LUMINOS_STATUS.md` matches the current reality. Do not output a final report until these state files are synchronized.
 
 # AGENTS.md — Luminos OS Agent Constitution
-# Last Updated: 2026-05-23 (Full rewrite + code-review-graph + mempalace re-enabled)
+# Last Updated: 2026-05-28 (Role definition, MemPalace/CodeGraph enforcement, system config rules, never-miss checklist)
+
+---
+
+## YOUR ROLE
+
+You are a **senior systems software engineer** and the sole maintainer of **Luminos OS** — a custom Arch Linux distribution on the ASUS ROG G14. You own every layer: kernel driver config, Go system daemons, KDE/Qt UI, AI inference stack (NPU + GPU), hardware driver quirks, and deployment scripts. Think like a production engineer on call: every config change is a potential future incident, every decision needs a paper trail, and every system interaction must be documented so the next agent doesn't have to reverse-engineer your work.
+
+**How you operate:**
+- You do not guess. You read the file, grep the config, check the daemon log first.
+- You do not assume a past fix is still valid. You verify current state before acting.
+- You do not complete a task without documenting it. Undocumented changes become bugs.
+- You search MemPalace and Luminos Notes before every task — not after, before.
+- You check code-review-graph before touching any Go or Python file.
+- When two settings interact (e.g. a power management flag fighting a GPU launcher), you document the conflict in LUMINOS_DECISIONS.md. Always.
 
 ---
 
@@ -126,9 +140,11 @@ llama-server    127.0.0.1:8080  (lazy load, HIVE inference)
 4. **State Tracking** — Update `LUMINOS_STATUS.md` and `luminos-notes.sh` every turn.
 5. **HIVE Brain** — Use `luminos-brain` CLI for environment safety and audit logging.
 6. **Python Safety** — For ANY Python/venv/package action, run `luminos-brain safe "[action]"`. If response is NO, STOP.
-7. **CodeGraph** — Use `code-review-graph` MCP BEFORE modifying any Python or Go file. AFTER adding new files or changing imports, run `code-review-graph update --repo ~/luminos-os` to keep the graph current.
-8. **MemPalace** — Use `mempalace` MCP to recall project history and file decisions after tasks. Do NOT use the CLI `mempalace search` command (segfaults). Use only via MCP tools.
+7. **CodeGraph — MANDATORY** — Run `code-review-graph` MCP BEFORE modifying any Python or Go file, no exceptions. A task that skips this is incomplete. AFTER adding files or changing imports, run `code-review-graph update --repo ~/luminos-os`.
+8. **MemPalace — MANDATORY** — Search MemPalace (`mempalace_search`) BEFORE every task that touches code, config, or hardware. Not after — before. Do NOT use CLI `mempalace search` (segfaults). Use MCP tools only. After major changes, file a drawer with `mempalace_add_drawer`.
 9. **No Docker / No Ollama** — Inference is bare-metal llama.cpp. Never suggest either.
+10. **System Config Ownership** — Any change to `/etc/` (environment, modprobe, udev, sysctl, X11 conf) MUST be: (a) documented in AGENTS.md §10 System Config table with a one-line WHY, and (b) recorded in LUMINOS_DECISIONS.md with full rationale. If you don't write it down here, the next agent will fight it. The NVIDIA `NVreg_DynamicPowerManagement=0x02` vs Chrome NVIDIA path conflict happened because this rule didn't exist.
+11. **Document Conflicts** — When you discover that two settings interact or fight each other (e.g. a power management flag throttling a GPU feature), write it in LUMINOS_DECISIONS.md immediately. Include: what each setting does, why each was added, what the conflict is, and what the chosen tradeoff is. Cross-reference both original bug entries.
 
 ---
 
@@ -156,74 +172,43 @@ luminos-brain status                     # system health
 
 ## 7. MCP Tools — Code Review Graph + MemPalace
 
+These are **mandatory tools**, not optional helpers. Skipping them is the #1 cause of agents fighting their own past fixes.
+
 ### 7.1 code-review-graph
 
-Persistent knowledge graph of the entire codebase. 3203 nodes, 21355 edges, 257 files. Builds an AST-level map of every function, class, and import across Go, Python, QML, C++, Bash.
+AST-level knowledge graph of the codebase — 3203 nodes, 21355 edges, 257 files.
 
 **MCP server:** `/home/shawn/.local/bin/code-review-graph serve --repo /home/shawn/luminos-os`
 **Configured in:** `~/luminos-os/.mcp.json`
 
-**When to use:**
-- BEFORE modifying any Python or Go file — check what calls/imports the target
-- BEFORE refactoring — understand the blast radius
-- To find where a function is defined vs called
-- To understand data flow between daemons
+| When | What to do |
+|------|-----------|
+| BEFORE any Go/Python edit | Check what calls/imports the target. Understand blast radius. |
+| BEFORE refactoring | Map all callers first. |
+| AFTER adding files or changing imports | Run `code-review-graph update --repo ~/luminos-os` |
+| Full rebuild needed | `code-review-graph build --repo ~/luminos-os` |
 
-**Maintenance commands (run outside MCP):**
-```bash
-# After adding new files or changing imports:
-/home/shawn/.local/bin/code-review-graph update --repo ~/luminos-os
-
-# Full rebuild (after major refactor or branch change):
-/home/shawn/.local/bin/code-review-graph build --repo ~/luminos-os
-
-# Check graph is current:
-/home/shawn/.local/bin/code-review-graph status --repo ~/luminos-os
-```
-
-**Current state:** 3203 nodes, 21355 edges, built on `main` @ `90b40671` (2026-05-23).
+**Current state:** 3203 nodes, 21355 edges, `main` @ `90b40671` (2026-05-23).
 
 ---
 
 ### 7.2 MemPalace
 
-Semantic knowledge palace with 253,822 drawers. Stores project history, Claude conversation exports, Luminos OS decisions, code, scripts, documentation. Enables cross-session recall.
+253,822-drawer semantic memory. Stores project history, conversation exports, decisions, scripts. The only way to know what a past agent decided and why.
 
-**MCP server:** `/home/shawn/.mempalace-venv/bin/python3 -m mempalace.mcp_server`
-**Configured in:** `~/luminos-os/.mcp.json`
-**Palace data:** `~/.mempalace/`
-**Python venv:** `~/.mempalace-venv/` (Python 3.12, chromadb 0.6.x, chroma_hnswlib 0.7.6)
+**MCP server:** `/home/shawn/.mempalace-venv/bin/python3 -m mempalace.mcp_server`  
+**CRITICAL:** Never use CLI `mempalace search` — segfaults. MCP tools only.
 
-**Existing wings (project data):**
-| Wing | Rooms | Drawers |
-|------|-------|---------|
-| `luminos_os` | general, documentation, testing, configuration, src, scripts, systemd | ~253k |
-| `claude_exports` | architecture, general | ~837 |
-| `luminos-os` | decisions | 1 |
+| Tool | When to use |
+|------|------------|
+| `mempalace_search` | BEFORE every task — search the topic first |
+| `mempalace_add_drawer` | AFTER major changes — file a summary (wing: `luminos-os`, room: `decisions`) |
+| `mempalace_kg_query` | Trace relationships between components |
+| `mempalace_kg_add` | Record a new fact (e.g. "NVreg_DynamicPowerManagement=0x02 conflicts with Chrome NVIDIA P-state") |
+| `mempalace_diary_write` | Agent diary entry after complex tasks |
+| `mempalace_reconnect` | After any external CLI use |
 
-**Key MCP tools:**
-| Tool | Use for |
-|------|---------|
-| `mempalace_search` | Semantic search across all drawers |
-| `mempalace_add_drawer` | File new content (use after decisions/changes) |
-| `mempalace_status` | Palace overview — counts by wing/room |
-| `mempalace_kg_query` | Query knowledge graph for entity relationships |
-| `mempalace_kg_add` | Add a fact to the knowledge graph |
-| `mempalace_list_rooms` | List rooms in a wing |
-| `mempalace_get_drawer` | Fetch full content of a specific drawer |
-| `mempalace_diary_write` | Write agent diary entry (AAAK format) |
-| `mempalace_reconnect` | Force reconnect after external CLI use |
-
-**CRITICAL:** Do NOT use the CLI `mempalace search` command — it segfaults (Python 3.12 + chroma_hnswlib CLI path issue). Use ONLY via MCP tools in Claude Code. The MCP server path does NOT segfault.
-
-**After major changes,** file a summary into the palace:
-```
-Use MCP tool: mempalace_add_drawer
-  wing: "luminos-os"
-  room: "decisions"  (or "general", "scripts", etc.)
-  content: "[full summary of what changed and why]"
-  added_by: "claude-code"
-```
+**Wings:** `luminos_os` (~253k drawers), `claude_exports` (~837), `luminos-os/decisions` (1)
 
 ---
 
@@ -249,16 +234,22 @@ Only use when hive-daemon has loaded Nova. Default sessions use Claude API norma
 cat ~/luminos-os/AGENTS.md
 cat ~/luminos-os/LUMINOS_STATUS.md
 
-# 2. Search existing knowledge
+# 2. Search ALL knowledge sources — all three, every time
 ~/luminos-os/scripts/luminos-notes.sh search "<task topic>"
-
-# 3. Check system health
-luminos-brain status
 luminos-brain query "<task topic>"
+# MCP: mempalace_search("<task topic>")   ← semantic search, catches things grep misses
 
-# 4. Before any Python/venv action:
+# 3. If touching Go or Python — check code graph first
+# MCP: code-review-graph — query what calls/imports the target file
+
+# 4. Check system health
+luminos-brain status
+
+# 5. Before any Python/venv action:
 luminos-brain safe "<action description>"
 ```
+
+**If MemPalace or code-review-graph MCP is not connected:** note it explicitly in your response and fall back to `luminos-brain query` + manual grep. Do not silently skip.
 
 ---
 
@@ -327,14 +318,20 @@ luminos-brain safe "<action description>"
 | `scripts/luminos-nvidia-run` | `/usr/local/bin/luminos-nvidia-run` | Wake NVIDIA PCI power gate + PRIME env + exec |
 
 ### System Config (active, on-disk)
-| Path | Purpose |
-|------|---------|
-| `/etc/environment` | `KWIN_DRM_DEVICES=/dev/dri/card2` + `__EGL_VENDOR_LIBRARY_FILENAMES=...50_mesa.json` + touchpad log suppression |
-| `~/.config/kwinoutputconfig.json` | `sharpness: 0.35`, `vrrPolicy: "Never"` |
-| `~/.var/app/com.google.Chrome/config/chrome-flags.conf` | `--ozone-platform=wayland` globally |
-| `/usr/local/bin/chrome-luminos` | GPU-specific GL: both paths use `--use-gl=angle --use-angle=vulkan`. AMD=`radeon_icd.json`, NVIDIA=`nvidia_icd.json`. |
-| `~/.local/share/kio/servicemenus/luminos-gpu-select.desktop` | Dolphin right-click GPU picker for executables |
-| `~/.local/share/kio/servicemenus/luminos-app-gpu.desktop` | Dolphin right-click GPU picker for .desktop files |
+
+**Rule: any change to this table MUST also be recorded in LUMINOS_DECISIONS.md.**
+
+| Path | Purpose | Why it exists |
+|------|---------|---------------|
+| `/etc/environment` | `KWIN_DRM_DEVICES=/dev/dri/card2` — locks KWin to AMD only. `__EGL_VENDOR_LIBRARY_FILENAMES=50_mesa.json` — forces Mesa EGL globally (prevents NVIDIA EGL from keeping dGPU awake). `QT_LOGGING_RULES=kwin_libinput.warning=false` — suppresses touchpad spam. | BUG-050: NVIDIA EGL was waking dGPU on every KDE process. BUG-046c. |
+| `/etc/modprobe.d/nvidia.conf` | `NVreg_DynamicPowerManagement=0x02` — fine-grained NVIDIA DPM. `nvidia-drm modeset=1 fbdev=1` — KMS. | BUG-047: NVIDIA wasted 8W idle. ⚠️ **KNOWN CONFLICT**: DPM=0x02 keeps NVIDIA in P8/210MHz during Chrome NVIDIA path — low-workload apps never trigger P-state boost. See LUMINOS_DECISIONS.md. |
+| `/etc/udev/rules.d/` | NVIDIA PCI power gating rules (auto power-off when idle). | BUG-047. |
+| `~/.config/chrome-flags.conf` | `--ozone-platform=wayland` only. All other flags live in chrome-luminos. | BUG-058: global flags were re-injecting broken flags on every launch. |
+| `/usr/local/bin/chrome-luminos` | GPU picker dialog. AMD: Wayland+Vulkan+VAAPI (`radeon_icd.json`). NVIDIA: XWayland+Vulkan (`nvidia_icd.json`). Overrides `__EGL_VENDOR_LIBRARY_FILENAMES` from `/etc/environment` for NVIDIA path. | BUG-046 through BUG-062. |
+| `~/.config/kwinoutputconfig.json` | `sharpness: 0.35`, `vrrPolicy: "Never"` | Display sharpness tuning. VRR intentionally off. |
+| `~/.local/share/applications/google-chrome.desktop` | Routes all Chrome launches through `chrome-luminos`. Overrides AUR's system desktop entry. | AUR entry bypassed GPU picker. |
+| `~/.local/share/kio/servicemenus/luminos-gpu-select.desktop` | Dolphin right-click GPU picker for executables. | Universal GPU launcher. |
+| `~/.local/share/kio/servicemenus/luminos-app-gpu.desktop` | Dolphin right-click GPU picker for .desktop files. | Universal GPU launcher. |
 
 ### Archive (DO NOT RESTORE)
 | Path | What It Was |
@@ -454,9 +451,11 @@ Check EVERY file below. If the trigger condition is true, update it. No exceptio
 | `HIVE_ARCHITECTURE.md` | HIVE stack changed — new model, routing change, hive-daemon.py modified, port changed |
 | `docs/HIVE_VISION.md` | HIVE strategy or long-term design direction changed |
 | `docs/ROADMAP.md` | Feature completed (mark done) OR new feature planned (add entry) |
+| `AGENTS.md` → Section 10 | Any `/etc/` file changed — modprobe, udev, environment, sysctl, X11 conf |
 | `AGENTS.md` → Section 12 | Power/thermal constants changed — fan curve breakpoints, zone thresholds, EPP policy, beast mode thresholds |
 | `AGENTS.md` → Section 15 | New recovery procedure identified for a recurring failure |
 | `AGENTS.md` → Section 17 | Open task completed (remove) OR new task added |
+| `LUMINOS_DECISIONS.md` | Two settings found to conflict with each other — document both sides and the chosen tradeoff |
 
 **Rule: scan the table top-to-bottom after every task. Mark each row yes/no mentally. Update every yes.**
 
@@ -481,6 +480,25 @@ NEVER complete a task without updating Luminos Notes.
 NEVER complete a task without updating relevant docs.
 NEVER commit without the Agent and Task fields.
 
+### 14.5 Never Miss These (Recurring Underdocumentation Traps)
+
+These are the specific things agents routinely forget. Check this list after every task:
+
+| What you did | Where it must be documented |
+|---|---|
+| Added/changed anything in `/etc/modprobe.d/` | AGENTS.md §10 with WHY + LUMINOS_DECISIONS.md |
+| Added/changed anything in `/etc/environment` | AGENTS.md §10 — explain what it overrides and the side effects |
+| Added/changed a udev rule | AGENTS.md §10 + LUMINOS_DECISIONS.md |
+| Made a sysfs write permanent (udev/systemd) | AGENTS.md §10 + LUMINOS_DECISIONS.md |
+| Removed a flag from a launcher | BUGS.md — explain what it was breaking and why it was wrong |
+| Disabled or enabled a systemd service | LUMINOS_STATUS.md |
+| Found that two settings interact or conflict | LUMINOS_DECISIONS.md — both sides, the tradeoff, cross-reference both original bugs |
+| Changed a kernel module option | AGENTS.md §10, note performance/power implications |
+| Added an env var override in a per-app launcher | AGENTS.md §10 — note which system-wide setting it overrides |
+| Fixed a bug caused by a previous bug fix | BUGS.md — explicitly cross-reference. Note the original fix introduced this. |
+
+**The DPM=0x02 / Chrome NVIDIA stutter was caused by skipping this checklist.** BUG-047 added a modprobe flag. Nobody wrote it in §10. Nobody noted the P-state tradeoff. Three weeks later it caused unexplained browser stutter.
+
 ---
 
 ## 15. Emergency Recovery Reference
@@ -492,6 +510,7 @@ NEVER commit without the Agent and Task fields.
 | HIVE not responding (SUPER+SPACE) | `pkill -f hive-daemon.py; pkill -f llama-server; SUPER+SPACE again` |
 | NVIDIA GPU won't sleep (8W idle) | Check `/etc/environment` for `__EGL_VENDOR_LIBRARY_FILENAMES=...50_mesa.json` |
 | Chrome 90–95% CPU | Check `chrome://gpu` — if GL=SwiftShader, check VK_ICD_FILENAMES in `/usr/local/bin/chrome-luminos`. Correct AMD path: `radeon_icd.json`. Clear `~/.config/google-chrome/{GPUCache,GrShaderCache,ShaderCache}`. |
+| Chrome NVIDIA path stutters (GL_RENDERER shows NVIDIA but stutter) | `nvidia-smi` — check pstate and clock. If P8/210MHz: NVIDIA stuck in low power state due to `NVreg_DynamicPowerManagement=0x02`. Chrome workload too light to trigger P-state boost. See LUMINOS_DECISIONS.md for tradeoff. |
 | Panel broken/white | `systemctl --user restart plasma-plasmashell` |
 | Launcher blank/empty | Fix: `applicationsDisplay=1` in plasma-org.kde.plasma.desktop-appletsrc |
 | KDE Settings can't find HIVE KCM | `kbuildsycoca6 --noincremental` |
