@@ -14,7 +14,9 @@
 # DEPS: Python stdlib only — NO pip packages
 # ============================================
 
+import html
 import http.server
+import html.parser
 import json
 import logging
 import os
@@ -25,6 +27,7 @@ import sys
 import threading
 import time
 import fcntl
+import urllib.parse
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from hive_context import get_system_context, get_brain_context, log_incident
@@ -42,7 +45,7 @@ LOCKFILE = "/tmp/hive-daemon.lock"
 WL_COPY_BIN = "/usr/bin/wl-copy"
 GREETING_CACHE_PATH = os.path.expanduser("~/.cache/luminos/hive-greeting.txt")
 
-ALLOWED_MODELS = {"nexus", "bolt", "nova"}
+ALLOWED_MODELS = {"nexus", "bolt", "nova", "web"}
 
 # Chip name → model alias
 # Matches QML HiveChat.qml chip definitions
@@ -76,8 +79,22 @@ REASONING_KEYWORDS = [
     re.compile(r"\b(math|calculate|equation|proof)\b", re.IGNORECASE),
 ]
 
+WEB_KEYWORDS = [
+    re.compile(r"\b(search|look up|google|find|browse)\b.*\b(web|online|internet|site|article|news|price|weather|stock)\b", re.IGNORECASE),
+    re.compile(r"\b(what('s| is) (happening|going on|the latest|the current|the price|the weather))\b", re.IGNORECASE),
+    re.compile(r"\b(latest|current|recent|today'?s?|live)\b.*(news|price|update|score|weather|rate)\b", re.IGNORECASE),
+    re.compile(r"\bsearch (for|about|the web for)\b", re.IGNORECASE),
+    re.compile(r"\b(find me|look up|fetch|get me) (info|information|data|details|the price|the score)\b", re.IGNORECASE),
+    re.compile(r"\bwhat (is|are) .{0,40} (today|right now|currently|at the moment)\b", re.IGNORECASE),
+    re.compile(r"\b(how much (does|is)|what does .{0,30} cost)\b", re.IGNORECASE),
+]
+
+
 def detect_intent(message: str) -> str | None:
-    """Detect if message likely needs Bolt (code) or Nova (reasoning)."""
+    """Detect if message likely needs Bolt (code), Nova (reasoning), or web search."""
+    for pattern in WEB_KEYWORDS:
+        if pattern.search(message):
+            return "web"
     for pattern in CODE_KEYWORDS:
         if pattern.search(message):
             return "bolt"
@@ -85,6 +102,120 @@ def detect_intent(message: str) -> str | None:
         if pattern.search(message):
             return "nova"
     return None
+
+
+# ── Web Search ────────────────────────────────────────────────────────────────
+
+class _HTMLTextExtractor(html.parser.HTMLParser):
+    """Strip HTML tags and collect visible text."""
+    _SKIP_TAGS = {"script", "style", "noscript", "head", "meta", "link"}
+
+    def __init__(self):
+        super().__init__()
+        self._parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP_TAGS and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data):
+        if self._skip_depth == 0:
+            stripped = data.strip()
+            if stripped:
+                self._parts.append(stripped)
+
+    def get_text(self) -> str:
+        return " ".join(self._parts)
+
+
+def _web_search(query: str, num_results: int = 5) -> list[dict]:
+    """
+    Search DuckDuckGo HTML endpoint. Returns list of {title, snippet, url}.
+    No API key. Uses stdlib urllib only.
+    """
+    encoded = urllib.parse.urlencode({"q": query})
+    url = f"https://html.duckduckgo.com/html/?{encoded}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    try:
+        req = Request(url, headers=headers)
+        with urlopen(req, timeout=8) as resp:
+            raw_html = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        logger.warning("Web search HTTP error: %s", e)
+        return []
+
+    results = []
+    # DDG HTML: <a class="result__a" ...>TITLE</a> ... <a class="result__snippet">SNIPPET</a>
+    # Extract result blocks with a simple regex (no bs4 needed)
+    block_re = re.compile(
+        r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>'
+        r'.*?<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+        re.DOTALL,
+    )
+    for m in block_re.finditer(raw_html):
+        raw_url, raw_title, raw_snippet = m.group(1), m.group(2), m.group(3)
+        # DDG wraps real URLs in a redirect; extract uddg param if present
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(raw_url).query)
+        real_url = qs.get("uddg", [raw_url])[0]
+        # Skip ad redirects (y.js) and bare duckduckgo.com links
+        if "duckduckgo.com/y.js" in real_url or real_url.startswith("//duckduckgo.com"):
+            continue
+        title = html.unescape(re.sub(r"<[^>]+>", "", raw_title)).strip()
+        snippet = html.unescape(re.sub(r"<[^>]+>", "", raw_snippet)).strip()
+        if title and snippet:
+            results.append({"title": title, "snippet": snippet, "url": real_url})
+        if len(results) >= num_results:
+            break
+
+    logger.info("Web search '%s' → %d results", query[:60], len(results))
+    return results
+
+
+def _fetch_page_text(url: str, max_chars: int = 4000) -> str:
+    """Fetch a URL and return stripped plain text, truncated to max_chars."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        "Accept": "text/html",
+    }
+    try:
+        req = Request(url, headers=headers)
+        with urlopen(req, timeout=6) as resp:
+            raw = resp.read(65536).decode("utf-8", errors="replace")
+    except Exception as e:
+        logger.warning("Page fetch error %s: %s", url, e)
+        return ""
+
+    extractor = _HTMLTextExtractor()
+    try:
+        extractor.feed(raw)
+    except Exception:
+        pass
+    text = extractor.get_text()
+    return text[:max_chars] if len(text) > max_chars else text
+
+
+def _format_web_context(query: str, results: list[dict], page_text: str = "") -> str:
+    """Format search results + optional page text for injection into Nexus context."""
+    lines = [f"[WEB SEARCH RESULTS for: {query}]", ""]
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r['title']}")
+        lines.append(f"   {r['snippet']}")
+        lines.append(f"   URL: {r['url']}")
+        lines.append("")
+    if page_text:
+        lines.append("[TOP RESULT — FULL PAGE EXCERPT]")
+        lines.append(page_text)
+        lines.append("")
+    lines.append("[END WEB RESULTS — summarize and answer the user's question using the above]")
+    return "\n".join(lines)
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 
@@ -657,6 +788,40 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                     "routed": False,
                     "fallback_routed": False,
                     "route_target": None,
+                    "error": None,
+                })
+                return
+
+            # ── Web search route — fetch data then re-run Nexus with context ──
+            if route_target == "web":
+                logger.info("WEB ROUTE: fetching results for query: %s", user_message[:80])
+                _state.set_stage("web_search")
+                search_results = _web_search(user_message)
+                page_text = ""
+                if search_results:
+                    page_text = _fetch_page_text(search_results[0]["url"])
+                web_ctx = _format_web_context(user_message, search_results, page_text)
+                # Re-run Nexus with web context injected so it can synthesize an answer
+                _state.set_stage("swapping_to_nexus")
+                ok, swap_err = _swap_model("nexus")
+                if not ok:
+                    self._send_json(500, self._error_response(swap_err))
+                    return
+                _state.set_stage("generating_nexus_web")
+                web_messages = _build_messages("nexus", user_message, history, sys_ctx, web_ctx)
+                response_text, infer_err = _call_llama(web_messages, "nexus")
+                t_end = time.monotonic()
+                if infer_err:
+                    self._send_json(502, self._error_response(infer_err))
+                    return
+                clean_text = _strip_route_tags(response_text)
+                self._send_json(200, {
+                    "agent": "Nexus",
+                    "content": clean_text,
+                    "thinking_time_ms": int((t_end - t_start) * 1000),
+                    "routed": True,
+                    "fallback_routed": fallback_routed,
+                    "route_target": "web",
                     "error": None,
                 })
                 return
