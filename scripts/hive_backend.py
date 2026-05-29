@@ -4,6 +4,8 @@
 # [CHANGE: claude-code | 2026-05-28] Route through hive-daemon (8078) not llama-server directly
 # Imported by hive-popup-app.py, bridged to JS via QWebChannel.
 
+import base64
+import io
 import json
 import uuid
 from datetime import datetime, timezone
@@ -144,6 +146,66 @@ def js_delete_chat(chat_id):
         return json.dumps({"ok": True})
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+def read_file(filename: str, b64_content: str) -> dict:
+    """
+    Decode a base64-encoded file and extract readable text from it.
+    Supports: PDF, TXT, MD, PY, JS, TS, JSON, CSV, YAML, and most plain-text formats.
+    Returns: {text, truncated, pages (PDF only), error}
+    """
+    MAX_CHARS = 8000
+    ext = Path(filename).suffix.lower()
+
+    try:
+        raw = base64.b64decode(b64_content)
+    except Exception as e:
+        return {"error": f"Could not decode file: {e}", "text": None}
+
+    # ── PDF ──
+    if ext == ".pdf":
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(raw))
+            pages = len(reader.pages)
+            parts = []
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text() or ""
+                if text.strip():
+                    parts.append(f"[Page {i+1}]\n{text.strip()}")
+            full = "\n\n".join(parts)
+            truncated = len(full) > MAX_CHARS
+            return {
+                "text": full[:MAX_CHARS],
+                "pages": pages,
+                "truncated": truncated,
+                "error": None,
+            }
+        except Exception as e:
+            return {"error": f"PDF read failed: {e}", "text": None}
+
+    # ── Plain text / code / data ──
+    TEXT_EXTS = {
+        ".txt", ".md", ".py", ".js", ".ts", ".jsx", ".tsx",
+        ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+        ".csv", ".html", ".css", ".sh", ".bash", ".go",
+        ".rs", ".c", ".cpp", ".h", ".java", ".xml", ".log",
+    }
+    if ext in TEXT_EXTS or ext == "":
+        try:
+            text = raw.decode("utf-8", errors="replace")
+            truncated = len(text) > MAX_CHARS
+            return {"text": text[:MAX_CHARS], "truncated": truncated, "error": None}
+        except Exception as e:
+            return {"error": f"Text read failed: {e}", "text": None}
+
+    return {"error": f"Unsupported file type: {ext}", "text": None}
+
+
+def js_read_file(json_str: str) -> str:
+    data = json.loads(json_str)
+    result = read_file(data.get("filename", ""), data.get("content", ""))
+    return json.dumps(result)
 
 
 def js_preload():

@@ -38,6 +38,11 @@ class HiveBridge(QObject):
         return fn(json_str)
 
     @pyqtSlot(str, result=str)
+    def js_read_file(self, json_str):
+        from hive_backend import js_read_file as fn
+        return fn(json_str)
+
+    @pyqtSlot(str, result=str)
     def js_delete_chat(self, chat_id):
         from hive_backend import js_delete_chat as fn
         return fn(chat_id)

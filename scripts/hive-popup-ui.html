@@ -574,7 +574,8 @@
           <button class="icon-btn" title="Add" onclick="document.getElementById('file-input').click()">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           </button>
-          <input type="file" id="file-input" style="display:none" onchange="attachFile(this)">
+          <input type="file" id="file-input" style="display:none" onchange="attachFile(this)"
+                 accept=".pdf,.txt,.md,.py,.js,.ts,.json,.csv,.yaml,.yml,.sh,.go,.rs,.c,.cpp,.h,.log,.xml,.html,.css,.java,.toml,.ini">
           <textarea id="user-input" rows="1" placeholder="Message HIVE..."
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"
             oninput="autoResize(this); updateSendBtn()"></textarea>
@@ -836,10 +837,38 @@
     async function attachFile(input) {
       const file = input.files[0];
       if (!file) return;
-      const text = await file.text();
-      document.getElementById('user-input').value = `File: ${file.name}\n\`\`\`\n${text.slice(0, 4000)}\n\`\`\``;
-      updateSendBtn();
       input.value = '';
+
+      // Read file as base64 and send to Python bridge for proper parsing
+      const arrayBuf = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuf);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      const b64 = btoa(binary);
+
+      const placeholder = `[Reading ${file.name}…]`;
+      document.getElementById('user-input').value = placeholder;
+      updateSendBtn();
+
+      try {
+        const result = await backendCall('js_read_file', JSON.stringify({
+          filename: file.name,
+          content: b64,
+        }));
+        const data = JSON.parse(result);
+        if (data.error) {
+          document.getElementById('user-input').value = `[Could not read ${file.name}: ${data.error}]`;
+        } else {
+          const pageInfo = data.pages ? ` (${data.pages} pages)` : '';
+          const truncNote = data.truncated ? '\n[…truncated to 8000 chars]' : '';
+          document.getElementById('user-input').value =
+            `File: ${file.name}${pageInfo}\n\`\`\`\n${data.text}${truncNote}\n\`\`\`\n`;
+        }
+      } catch (e) {
+        document.getElementById('user-input').value = `[Error reading file: ${e}]`;
+      }
+      updateSendBtn();
+      autoResize(document.getElementById('user-input'));
     }
 
     function renameChat(name) {
