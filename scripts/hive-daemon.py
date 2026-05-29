@@ -120,8 +120,9 @@ def detect_intent(message: str) -> str | None:
 # ── Web Search ────────────────────────────────────────────────────────────────
 
 class _HTMLTextExtractor(html.parser.HTMLParser):
-    """Strip HTML tags and collect visible text."""
-    _SKIP_TAGS = {"script", "style", "noscript", "head", "meta", "link"}
+    """Strip HTML tags and collect visible text, skipping nav/footer/menu noise."""
+    _SKIP_TAGS = {"script", "style", "noscript", "head", "meta", "link",
+                  "nav", "footer", "header", "aside", "form", "button", "svg", "iframe"}
 
     def __init__(self):
         super().__init__()
@@ -131,9 +132,17 @@ class _HTMLTextExtractor(html.parser.HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag in self._SKIP_TAGS:
             self._skip_depth += 1
+            return
+        # Also skip elements with nav/menu/ad-related class or id
+        attr_dict = dict(attrs)
+        for val in (attr_dict.get("class", ""), attr_dict.get("id", "")):
+            if any(noise in val.lower() for noise in
+                   ("nav", "menu", "header", "footer", "sidebar", "ad-", "cookie", "banner", "popup")):
+                self._skip_depth += 1
+                return
 
     def handle_endtag(self, tag):
-        if tag in self._SKIP_TAGS and self._skip_depth > 0:
+        if self._skip_depth > 0:
             self._skip_depth -= 1
 
     def handle_data(self, data):
@@ -192,16 +201,17 @@ def _web_search(query: str, num_results: int = 5) -> list[dict]:
     return results
 
 
-def _fetch_page_text(url: str, max_chars: int = 4000) -> str:
+def _fetch_page_text(url: str, max_chars: int = 5000) -> str:
     """Fetch a URL and return stripped plain text, truncated to max_chars."""
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-        "Accept": "text/html",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
     }
     try:
         req = Request(url, headers=headers)
-        with urlopen(req, timeout=6) as resp:
-            raw = resp.read(65536).decode("utf-8", errors="replace")
+        with urlopen(req, timeout=8) as resp:
+            raw = resp.read(131072).decode("utf-8", errors="replace")
     except Exception as e:
         logger.warning("Page fetch error %s: %s", url, e)
         return ""
@@ -212,22 +222,41 @@ def _fetch_page_text(url: str, max_chars: int = 4000) -> str:
     except Exception:
         pass
     text = extractor.get_text()
+    # Filter out very short or pure-whitespace extractions (JS-rendered pages)
+    if len(text) < 200:
+        return ""
     return text[:max_chars] if len(text) > max_chars else text
+
+
+def _fetch_best_page_text(results: list[dict], max_chars: int = 5000) -> str:
+    """Try top 3 results until one yields useful page content (>500 chars)."""
+    for r in results[:3]:
+        text = _fetch_page_text(r["url"], max_chars)
+        if len(text) > 500:
+            logger.info("Page fetch OK: %s (%d chars)", r["url"][:60], len(text))
+            return text
+        logger.info("Page fetch thin/blocked: %s", r["url"][:60])
+    return ""
 
 
 def _format_web_context(query: str, results: list[dict], page_text: str = "") -> str:
     """Format search results + optional page text for injection into Nexus context."""
-    lines = [f"[WEB SEARCH RESULTS for: {query}]", ""]
+    lines = [
+        f"[WEB SEARCH RESULTS for: {query}]",
+        "INSTRUCTION: Extract and present the actual data below in a clear formatted list.",
+        "DO NOT just provide links. DO NOT say 'I recommend visiting'. Present the real content.",
+        "",
+    ]
     for i, r in enumerate(results, 1):
         lines.append(f"{i}. {r['title']}")
         lines.append(f"   {r['snippet']}")
         lines.append(f"   URL: {r['url']}")
         lines.append("")
     if page_text:
-        lines.append("[TOP RESULT — FULL PAGE EXCERPT]")
+        lines.append("[PAGE CONTENT — use this to extract the actual data]")
         lines.append(page_text)
         lines.append("")
-    lines.append("[END WEB RESULTS — summarize and answer the user's question using the above]")
+    lines.append("[END — present the data as a structured list, cite source at the bottom]")
     return "\n".join(lines)
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -748,7 +777,7 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                 logger.info("EARLY WEB INTERCEPT: fetching search results")
                 _state.set_stage("web_search")
                 search_results = _web_search(user_message)
-                page_text = _fetch_page_text(search_results[0]["url"]) if search_results else ""
+                page_text = _fetch_best_page_text(search_results) if search_results else ""
                 t_search = time.monotonic()
 
                 if _state.ready:
@@ -889,7 +918,7 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                 search_results = _web_search(user_message)
                 page_text = ""
                 if search_results:
-                    page_text = _fetch_page_text(search_results[0]["url"])
+                    page_text = _fetch_best_page_text(search_results)
                 web_ctx = _format_web_context(user_message, search_results, page_text)
                 # Re-run Nexus with web context injected so it can synthesize an answer
                 _state.set_stage("swapping_to_nexus")
