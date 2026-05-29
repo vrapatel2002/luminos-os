@@ -86,7 +86,7 @@ Custom Arch Linux on ASUS ROG G14 GA403UU. Privacy-first, AI-native Windows repl
 2. **Identity Tags** — Add `[CHANGE: agent | date]` to EVERY modified code block.
 3. **VRAM Watchdog** — 4.6GB safe limit. Only one GPU model at a time.
 4. **State Tracking** — Update `LUMINOS_STATUS.md` and `luminos-notes.sh` every task.
-5. **HIVE Brain** — `luminos-brain safe "[action]"` before ANY Python/venv/package action. NO = stop. Full reference: `docs/hive-brain.md`.
+5. **HIVE Brain** — `luminos-brain safe "[action]"` before ANY Python/venv/package action. NO = stop. **Any HIVE task: read `docs/hive-brain.md` first.**
 6. **Python Safety** — Same as Rule 5. Non-negotiable.
 7. **CodeGraph — MANDATORY** — `code-review-graph` MCP before any Go/Python edit. After new files or import changes: `code-review-graph update --repo ~/luminos-os`. Skipping = incomplete task. Targeted: query your specific file, not the whole repo.
 8. **MemPalace — MANDATORY** — `mempalace_search("<topic>")` BEFORE every task. After major changes: `mempalace_add_drawer` (wing: `luminos-os`, room: `decisions`). CLI segfaults — MCP only. Skipping = incomplete task. Targeted: "chrome vulkan icd" returns Chrome content, not HIVE content.
@@ -148,12 +148,31 @@ cat ~/luminos-os/LUMINOS_STATUS.md
 luminos-brain query "<task topic>"
 # MCP: mempalace_search("<task topic>")
 
-# 3. If touching Go or Python
+# 3. Find which docs cover this topic — search before assuming
+grep -rl "<task topic>" ~/luminos-os/docs/ ~/luminos-os/*.md 2>/dev/null
+# OR: MCP mempalace_search will surface the right doc in its results
+# Read whatever it points to BEFORE touching any file.
+
+# 4. If touching Go or Python
 # MCP: code-review-graph — query target file before editing
 
-# 4. Python/venv safety
+# 5. Python/venv safety
 luminos-brain safe "<action>"
 ```
+
+**Domain doc routing (fallback if search returns nothing):**
+
+| Working on | Read this first |
+|---|---|
+| HIVE / models / hive-daemon.py / inference | `docs/hive-brain.md` |
+| Chrome / browser / GPU launcher | `docs/LUMINOS_HANDBOOK.md` Part 11 |
+| Power / thermal / fan curve / EPP | `docs/LUMINOS_HANDBOOK.md` Part 4 |
+| RAM daemon / eviction / HotSet | `docs/LUMINOS_RAM_ARCHITECTURE.md` |
+| Go daemon internals / IPC / sockets | `docs/DAEMON_ARCHITECTURE.md` |
+| Any architectural or config decision | `LUMINOS_DECISIONS.md` |
+| Bugs — finding or fixing | `docs/BUGS.md` |
+
+**Rule:** search first — grep or MemPalace will tell you where the detail lives. The table above is the fallback, not the first step. If search surfaces a doc you weren't expecting, read it.
 
 ---
 
@@ -167,7 +186,7 @@ luminos-brain safe "<action>"
 | `/etc/modprobe.d/nvidia.conf` | `NVreg_DynamicPowerManagement=0x02` (fine-grained DPM — GPU sleeps aggressively). `nvidia-drm modeset=1 fbdev=1` (KMS). | BUG-047: NVIDIA wasted 8W idle. ⚠️ **KNOWN CONFLICT:** DPM=0x02 keeps NVIDIA at P8/210MHz during light workloads (e.g. Chrome). See LUMINOS_DECISIONS.md. |
 | `/etc/udev/rules.d/` | NVIDIA PCI auto power-off when idle. | BUG-047 |
 | `~/.config/chrome-flags.conf` | `--ozone-platform=wayland` only. All GPU flags live in chrome-luminos. | BUG-058: global flags injected broken options on every launch. |
-| `/usr/local/bin/chrome-luminos` | GPU picker (kdialog). AMD: Wayland+Vulkan+VAAPI (`radeon_icd.json`). NVIDIA: XWayland+Vulkan (`nvidia_icd.json`). Overrides `__EGL_VENDOR_LIBRARY_FILENAMES` for NVIDIA path. | BUG-046 through BUG-062. Full history: `docs/LUMINOS_HANDBOOK.md` Part 11. |
+| `/usr/local/bin/chrome-luminos` | GPU picker (kdialog). AMD: Wayland+Vulkan+VAAPI (`radeon_icd.json`). NVIDIA: XWayland+Vulkan (`nvidia_icd.json`). Overrides `__EGL_VENDOR_LIBRARY_FILENAMES` for NVIDIA path. **Any Chrome task: read `docs/LUMINOS_HANDBOOK.md` Part 11 first.** | BUG-046 through BUG-062. |
 | `~/.config/kwinoutputconfig.json` | `sharpness: 0.35`, `vrrPolicy: "Never"` | Intentional display tuning. |
 | `~/.local/share/applications/google-chrome.desktop` | Routes all Chrome launches through `chrome-luminos`. | AUR entry bypassed GPU picker. |
 | `~/.local/share/kio/servicemenus/luminos-gpu-*.desktop` | Dolphin right-click GPU picker for executables and .desktop files. | Universal GPU launcher (Decision 16). |
