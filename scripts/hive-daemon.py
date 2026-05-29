@@ -80,13 +80,26 @@ REASONING_KEYWORDS = [
 ]
 
 WEB_KEYWORDS = [
+    # Explicit search/browse requests
     re.compile(r"\b(search|look up|google|find|browse)\b.*\b(web|online|internet|site|article|news|price|weather|stock)\b", re.IGNORECASE),
-    re.compile(r"\b(what('s| is) (happening|going on|the latest|the current|the price|the weather))\b", re.IGNORECASE),
-    re.compile(r"\b(latest|current|recent|today'?s?|live)\b.*(news|price|update|score|weather|rate)\b", re.IGNORECASE),
     re.compile(r"\bsearch (for|about|the web for)\b", re.IGNORECASE),
     re.compile(r"\b(find me|look up|fetch|get me) (info|information|data|details|the price|the score)\b", re.IGNORECASE),
+    # Live/current data
+    re.compile(r"\b(what('s| is) (happening|going on|the latest|the current|the price|the weather))\b", re.IGNORECASE),
+    re.compile(r"\b(latest|current|recent|today'?s?|live)\b.*(news|price|update|score|weather|rate)\b", re.IGNORECASE),
     re.compile(r"\bwhat (is|are) .{0,40} (today|right now|currently|at the moment)\b", re.IGNORECASE),
     re.compile(r"\b(how much (does|is)|what does .{0,30} cost)\b", re.IGNORECASE),
+    # Sports: matches, fixtures, schedules, standings
+    re.compile(r"\b(ipl|cricket|football|soccer|nfl|nba|nhl|premier league|la liga|bundesliga|champions league|formula.?1|f1|tennis|ufc|mma|rugby|hockey|baseball)\b", re.IGNORECASE),
+    re.compile(r"\b(remaining|upcoming|next|scheduled|fixture|fixtures|standings|table|results|scoreboard)\b.*(match|game|match|season|series|tournament|round)\b", re.IGNORECASE),
+    re.compile(r"\b(match|game|tournament|season|series|playoff|qualifier|final|semi.?final)\b.*(schedule|fixture|remaining|upcoming|result|score)\b", re.IGNORECASE),
+    re.compile(r"\b(who (won|is winning|leads|is leading|is ahead))\b", re.IGNORECASE),
+    re.compile(r"\b(score|result|winner|standings)\b.*(today|yesterday|this week|last night|live)\b", re.IGNORECASE),
+    # News / events / announcements
+    re.compile(r"\b(news|headline|announcement|release|launch|update)\b.*(about|on|for|from|regarding)\b", re.IGNORECASE),
+    re.compile(r"\b(tell me|what are|show me).{0,30}(news|update|match|game|score|result|price|weather)\b", re.IGNORECASE),
+    # Tech releases / software versions
+    re.compile(r"\b(latest|new|newest|current) (version|release|update) of\b", re.IGNORECASE),
 ]
 
 
@@ -704,6 +717,61 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                     os.utime(LAST_REQUEST_FILE, None)
             except OSError:
                 pass
+
+            # ── Early web intercept — no model needed ──────────────────────────
+            # Check web intent BEFORE any _swap_model calls so web search works
+            # even when llama-server is not running.
+            # Chips bypass this (user explicitly chose a model).
+            if not chip and detect_intent(user_message) == "web":
+                logger.info("EARLY WEB INTERCEPT: fetching search results")
+                _state.set_stage("web_search")
+                search_results = _web_search(user_message)
+                page_text = _fetch_page_text(search_results[0]["url"]) if search_results else ""
+                t_search = time.monotonic()
+
+                if _state.ready:
+                    # Llama is loaded — synthesize via Nexus
+                    web_ctx = _format_web_context(user_message, search_results, page_text)
+                    sys_ctx = get_system_context()
+                    _state.set_stage("generating_nexus_web")
+                    web_messages = _build_messages("nexus", user_message, history, sys_ctx, web_ctx)
+                    response_text, infer_err = _call_llama(web_messages, "nexus")
+                    t_end = time.monotonic()
+                    if not infer_err:
+                        clean_text = _strip_route_tags(response_text)
+                        self._send_json(200, {
+                            "agent": "Nexus",
+                            "content": clean_text,
+                            "thinking_time_ms": int((t_end - t_start) * 1000),
+                            "routed": True,
+                            "fallback_routed": True,
+                            "route_target": "web",
+                            "error": None,
+                        })
+                        return
+
+                # No model loaded (or synthesis failed) — return raw results directly
+                if search_results:
+                    lines = [f"**Web results for:** {user_message}\n"]
+                    for i, r in enumerate(search_results, 1):
+                        lines.append(f"**{i}. {r['title']}**")
+                        lines.append(r["snippet"])
+                        lines.append(f"🔗 {r['url']}\n")
+                    content = "\n".join(lines)
+                else:
+                    content = "No results found. Try a different query."
+                t_end = time.monotonic()
+                self._send_json(200, {
+                    "agent": "Nexus",
+                    "content": content,
+                    "thinking_time_ms": int((t_end - t_start) * 1000),
+                    "routed": True,
+                    "fallback_routed": True,
+                    "route_target": "web",
+                    "error": None,
+                })
+                return
+            # ── End early web intercept ────────────────────────────────────────
 
             # [CHANGE: gemini-cli | 2026-05-09] Context injection
             sys_ctx = get_system_context()

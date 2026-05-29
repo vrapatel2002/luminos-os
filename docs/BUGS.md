@@ -1,7 +1,17 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-28 (BUG-062: NVIDIA path — --ozone-platform=wayland incompatible with Vulkan PRIME offload → cross-device DMA-BUF import fails → Chrome crashes. Fix: --ozone-platform=x11 on NVIDIA path)
+Last Updated: 2026-05-28 (BUG-063: HIVE web search blocked when llama-server not running — early intercept added)
 
 ## Fixed Bugs (new)
+
+### BUG-063 — HIVE web search returns "llama-server not running" error
+- Status: FIXED
+- Severity: HIGH
+- Component: scripts/hive-daemon.py — _handle_chat
+- Description: Web search queries always failed with "(llama-server not running — start it first)" even though web search doesn't need a model loaded.
+- Root Cause: Web intent detection relied on Nexus routing (Path B). Path B calls `_swap_model("nexus")` immediately, which fails if llama-server isn't running. The [ROUTE:WEB] tag never reached the web handler.
+- Fix Applied: Added early web intercept at the TOP of `_handle_chat`, before any `_swap_model` call. `detect_intent()` runs first — if result is "web", search runs immediately. If llama IS loaded, Nexus synthesizes the results. If llama is NOT loaded, raw formatted results are returned directly to the user.
+- Date Found: 2026-05-28
+- Date Fixed: 2026-05-28
 
 ### BUG-062 — Chrome NVIDIA path: --ozone-platform=wayland + Vulkan crashes on PRIME offload
 - Status: FIXED

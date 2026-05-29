@@ -45,6 +45,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
 | HIVE Swap Server | 🛠 Retired | Port 8079 functionality merged into HIVE Daemon |
 | HIVE Daemon | ✅ Working | Port 8078. Popup-managed lifecycle (pgrep guard). ThreadingHTTPServer, 60s timeout, lockfile. |
+| HIVE Web Search | ✅ Working | DuckDuckGo HTML scraping, no API key. Works without llama-server loaded. Auto-routes via [ROUTE:WEB] or keyword detection. |
 | HIVE popup (SUPER+SPACE) | ✅ Working | Persistent kdialog conversation loop. Starts hive-daemon.py on open, kills on close. |
 | Claude Code Router | ✅ Working | DeepSeek V4 Pro via OpenRouter. Key in .env, config in .claude/settings.local.json |
 | luminos-notes.sh | ✅ Working | SQLite replacement for MemPalace |
