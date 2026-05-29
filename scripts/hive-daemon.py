@@ -460,6 +460,7 @@ def _call_llama(messages: list[dict], model_name: str) -> tuple[str | None, str 
     # Handle connection refused: attempt re-swap, then retry
     if needs_reswap:
         logger.warning("Connection refused — attempting re-swap of %s", model_name)
+        _state.set_model(None, ready=False)  # Force reset — prevents _swap_model skipping on stale state
         ok, swap_err = _swap_model(model_name)
         if not ok:
             return None, f"Re-swap failed: {swap_err}"
@@ -1037,12 +1038,35 @@ def _release_lock():
 _startup_time = time.time()
 
 
+def _health_monitor():
+    """
+    Background thread: ping llama-server every 30s.
+    If it's unreachable when we think it's ready, mark state not-ready.
+    Catches idle-watchdog kills, OOM kills, crashes — any case where
+    llama-server dies without telling the daemon.
+    """
+    while True:
+        time.sleep(30)
+        if _state.ready:
+            try:
+                with urlopen("http://localhost:8080/health", timeout=3) as resp:
+                    body = resp.read()
+                    if b"ok" not in body:
+                        raise Exception("unhealthy")
+            except Exception:
+                logger.info("HEALTH MONITOR: llama-server unreachable — marking not ready")
+                _state.set_model(None, ready=False)
+
+
 def main():
     global _startup_time
     _startup_time = time.time()
 
     _acquire_lock()
     _load_system_prompts()
+
+    # Background health monitor — keeps _state in sync when llama-server dies
+    threading.Thread(target=_health_monitor, daemon=True).start()
 
     server = http.server.ThreadingHTTPServer((BIND_HOST, BIND_PORT), HiveDaemonHandler)
     # Allow socket reuse to avoid "Address already in use" after restart
