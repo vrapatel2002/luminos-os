@@ -137,6 +137,15 @@ def js_save_chat(json_str):
     return json.dumps(result)
 
 
+def js_delete_chat(chat_id):
+    chat_file = CHATS_DIR / f"{chat_id}.json"
+    try:
+        chat_file.unlink(missing_ok=True)
+        return json.dumps({"ok": True})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 def js_preload():
     """Trigger background nexus preload and return immediately."""
     return json.dumps(preload())
