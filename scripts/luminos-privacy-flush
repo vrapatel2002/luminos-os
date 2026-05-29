@@ -1,20 +1,21 @@
 #!/bin/bash
 # Luminos Privacy Flush — clear DNS cache, history, journals, thumbnails
 # [CHANGE: claude-code | 2026-05-28] Initial script
+# [CHANGE: claude-code | 2026-05-28] Fix DNS flush: systemd-resolved not active, use NetworkManager
 
 TITLE="Luminos — Privacy Flush"
 
 # Confirm
 kdialog --title "$TITLE" \
-  --yesno "Clear the following?\n\n• DNS cache (systemd-resolved)\n• Zsh shell history\n• System journal (keep last 2 days)\n• Thumbnail cache\n• Luminos telemetry log\n• Chrome GPU/shader cache" \
+  --yesno "Clear the following?\n\n• DNS cache (NetworkManager)\n• Zsh shell history\n• System journal (keep last 2 days)\n• Thumbnail cache\n• Luminos telemetry log\n• Chrome GPU/shader cache" \
   2>/dev/null
 
 [ $? -ne 0 ] && exit 0
 
 REPORT=""
 
-# DNS cache
-sudo systemd-resolve --flush-caches 2>/dev/null \
+# DNS cache (NetworkManager — systemd-resolved not active on this system)
+sudo nmcli general reload dns-full 2>/dev/null \
   && REPORT="${REPORT}✓ DNS cache flushed\n" \
   || REPORT="${REPORT}✗ DNS flush failed\n"
 
