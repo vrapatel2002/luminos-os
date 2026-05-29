@@ -317,6 +317,28 @@
       background: var(--hover);
     }
 
+    /* ── Model status bar ── */
+    #model-status {
+      font-size: 11px;
+      color: var(--text-dim);
+      padding: 3px 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-bottom: 1px solid var(--border);
+      min-height: 22px;
+    }
+    #model-status .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #555;
+      flex-shrink: 0;
+    }
+    #model-status.ready .dot   { background: #3db85a; }
+    #model-status.loading .dot { background: #f0a030; animation: pulse 1.2s infinite; }
+    #model-status.offline .dot { background: #e05555; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
     /* ── Empty state ── */
     #empty-state {
       flex: 1;
@@ -489,6 +511,11 @@
       <div id="topbar">
         <input id="chat-title" value="New chat" placeholder="New chat" onchange="renameChat(this.value)">
         <button id="mode-toggle" class="auto" onclick="toggleMode()" title="Toggle manual model select">AUTO</button>
+      </div>
+
+      <div id="model-status" class="loading">
+        <div class="dot"></div>
+        <span id="model-status-text">Nexus loading…</span>
       </div>
 
       <div id="messages"></div>
@@ -808,9 +835,43 @@
     }
 
     // Init
+    // ── Model status polling ──
+    let _statusInterval = null;
+
+    function updateStatus(data) {
+      const bar  = document.getElementById('model-status');
+      const text = document.getElementById('model-status-text');
+      if (!bar) return;
+      if (data.ready) {
+        const name = (data.model || 'nexus').charAt(0).toUpperCase() + (data.model || 'nexus').slice(1);
+        bar.className = 'ready';
+        text.textContent = name + ' ready';
+        if (_statusInterval) { clearInterval(_statusInterval); _statusInterval = null; }
+      } else if (data.stage === 'daemon_offline') {
+        bar.className = 'offline';
+        text.textContent = 'HIVE daemon offline';
+        if (_statusInterval) { clearInterval(_statusInterval); _statusInterval = null; }
+      } else {
+        bar.className = 'loading';
+        const stage = data.stage || 'loading';
+        text.textContent = 'Nexus loading… (' + stage.replace(/_/g,' ') + ')';
+      }
+    }
+
+    function pollStatus() {
+      backend.js_state(function(result) {
+        try { updateStatus(JSON.parse(result)); } catch(e) {}
+      });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
       new QWebChannel(qt.webChannelTransport, function (channel) {
         window.backend = channel.objects.backend;
+        // Kick off nexus preload the moment the popup opens — non-blocking
+        backend.js_preload(function(result) {});
+        // Poll state every 2s until ready
+        _statusInterval = setInterval(pollStatus, 2000);
+        pollStatus();
         newChat();
         loadChats();
       });

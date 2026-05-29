@@ -284,18 +284,24 @@ class ModelState:
         self._current_stage = "idle"
         self._stage_started_at = 0.0
 
-        # Try to bootstrap from existing active-model file
-        # (in case llama-server is already running from popup)
+        # Try to bootstrap from existing active-model file, but ONLY if
+        # llama-server is actually reachable right now (file can be stale on restart).
         try:
             with open(ACTIVE_MODEL_FILE, "r") as f:
                 name = f.read().strip()
                 if name in ALLOWED_MODELS:
                     self._current_model = name
-                    # Don't set _ready — we haven't verified llama-server is alive.
-                    # We'll trust that state once a /chat request arrives.
-                    # Actually, since the file was written by a previous swap, trust it.
-                    self._ready = True
-                    logger.info("Bootstrapped model state from file: %s", name)
+                    # Verify llama-server is actually alive before trusting
+                    try:
+                        from urllib.request import urlopen as _urlopen
+                        with _urlopen("http://localhost:8080/health", timeout=2) as resp:
+                            if b"ok" in resp.read():
+                                self._ready = True
+                                logger.info("Bootstrapped model state: %s (llama-server verified alive)", name)
+                            else:
+                                logger.info("Bootstrapped model name: %s (llama-server unhealthy — marking not ready)", name)
+                    except Exception:
+                        logger.info("Bootstrapped model name: %s (llama-server not running — marking not ready)", name)
         except (FileNotFoundError, OSError):
             pass
 
@@ -600,6 +606,21 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.rstrip("/")
+
+        # ── POST /preload ──
+        # Kicks off nexus loading in a background thread — returns immediately.
+        # Called by the popup on open so the model is warming while user types.
+        if path == "/preload":
+            if _state.ready and _state.current_model == "nexus":
+                self._send_json(200, {"status": "ready", "model": "nexus"})
+            elif _state.progress[0] not in ("idle",):
+                # Already loading — don't spawn a second swap
+                self._send_json(200, {"status": "loading", "stage": _state.progress[0]})
+            else:
+                logger.info("POST /preload — starting nexus preload in background")
+                threading.Thread(target=_swap_model, args=("nexus",), daemon=True).start()
+                self._send_json(200, {"status": "loading"})
+            return
 
         # ── POST /copy ──
         if path == "/copy":

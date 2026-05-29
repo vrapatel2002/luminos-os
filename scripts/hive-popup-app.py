@@ -37,6 +37,16 @@ class HiveBridge(QObject):
         from hive_backend import js_save_chat as fn
         return fn(json_str)
 
+    @pyqtSlot(result=str)
+    def js_preload(self):
+        from hive_backend import js_preload as fn
+        return fn()
+
+    @pyqtSlot(result=str)
+    def js_state(self):
+        from hive_backend import js_state as fn
+        return fn()
+
 
 def main():
     app = QApplication(sys.argv)

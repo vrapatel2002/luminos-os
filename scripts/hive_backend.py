@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # HIVE Backend — inference + chat persistence (no HTTP)
 # [CHANGE: claude-code | 2026-05-08]
+# [CHANGE: claude-code | 2026-05-28] Route through hive-daemon (8078) not llama-server directly
 # Imported by hive-popup-app.py, bridged to JS via QWebChannel.
 
 import json
@@ -9,106 +10,70 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-from hive_context import get_system_context, get_brain_context, log_incident
+from hive_context import log_incident
 
 CHATS_DIR = Path.home() / ".local/share/luminos/hive-chats"
 CHATS_DIR.mkdir(parents=True, exist_ok=True)
 
-LLAMA_SERVER = "http://127.0.0.1:8080"
+# All chat goes through hive-daemon which owns routing, swapping, and web search.
+HIVE_DAEMON = "http://127.0.0.1:8078"
 
-
-def route_model(text):
-    lower = text.lower()
-    for kw in ["code", "script", "write"]:
-        if kw in lower:
-            return "bolt"
-    return "nexus"
-
-
-def build_prompt(history, current_msg, model, sys_ctx=None, brain_ctx=""):
-    lines = []
-    
-    # System Context String
-    if sys_ctx:
-        sys_info = f"""
-CURRENT SYSTEM STATE:
-RAM: {sys_ctx['ram_used']}GB used of {sys_ctx['ram_total']}GB ({sys_ctx['ram_available']}GB available)
-CPU Temperature: {sys_ctx['cpu_temp']}°C
-Power Profile: {sys_ctx['profile']}
-Services: {sys_ctx['services_status']}
-"""
-    else:
-        sys_info = ""
-
-    knowledge = f"\nRELEVANT KNOWLEDGE:\n{brain_ctx}\n" if brain_ctx else ""
-
-    system_prompt = f"""You are HIVE, the local AI assistant for Luminos OS.
-You are a security guard — observe, report, guide.
-Never fix things yourself. Guide the user.
-{sys_info}{knowledge}
-RULES:
-- If asked about Python/venv: always check brain context before answering
-- If something seems risky: say NO and explain why
-- Keep answers short and direct
-- Cite which rule or incident you're referencing"""
-
-    lines.append(f"<|system|>\n{system_prompt}</s>")
-
-    for msg in history[-10:]:
-        role = "user" if msg["role"] == "user" else "assistant"
-        lines.append(f"<|{role}|>\n{msg['content']}</s>")
-
-    lines.append(f"<|user|>\n{current_msg}</s>")
-    lines.append("<|assistant|>\n")
-    return "\n".join(lines)
+# Map UI model names → chip names that hive-daemon understands
+_CHIP_MAP = {
+    "bolt":  "Code",
+    "nova":  "Learn",
+    "nexus": None,   # nexus = no chip = auto route
+}
 
 
 def chat(message, model, history):
     if not message or not message.strip():
         return {"error": "empty message"}
 
-    model_key = model or route_model(message)
-
-    # [CHANGE: gemini-cli | 2026-05-09] Context injection
-    sys_ctx = get_system_context()
-    brain_ctx = get_brain_context(message)
-
-    prompt = build_prompt(history or [], message, model_key, sys_ctx, brain_ctx)
+    chip = _CHIP_MAP.get(model) if model else None
 
     try:
         r = requests.post(
-            f"{LLAMA_SERVER}/completion",
+            f"{HIVE_DAEMON}/chat",
             json={
-                "prompt": prompt,
-                "n_predict": 256,
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "stop": ["User:", "Assistant:", "</s>"],
+                "message": message,
+                "chip": chip,
+                "history": history or [],
             },
-            timeout=120,
+            timeout=180,
         )
         r.raise_for_status()
-        response_text = r.json().get("content", "").strip()
+        data = r.json()
+        response_text = (data.get("content") or "").strip() or "(empty response)"
+        agent = (data.get("agent") or "nexus").lower()
     except requests.exceptions.Timeout:
-        response_text = "(llama-server timed out)"
+        response_text = "(HIVE timed out — model may still be loading, try again)"
+        agent = model or "nexus"
     except requests.exceptions.ConnectionError:
-        response_text = "(llama-server not running — start it first)"
+        response_text = "(HIVE daemon not running — check: systemctl --user status luminos-hive.service)"
+        agent = model or "nexus"
     except Exception as e:
         response_text = f"(error: {e})"
+        agent = model or "nexus"
 
-    if not response_text:
-        response_text = "(empty response)"
-
-    # [CHANGE: gemini-cli | 2026-05-09] Log incident if needed
     log_incident(message)
 
     return {
         "id": uuid.uuid4().hex[:12],
         "role": "assistant",
         "content": response_text,
-        "model": model_key,
+        "model": agent,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def preload():
+    """Trigger hive-daemon to start loading nexus in background. Non-blocking."""
+    try:
+        requests.post(f"{HIVE_DAEMON}/preload", timeout=2)
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 def list_chats():
@@ -170,3 +135,22 @@ def js_save_chat(json_str):
     data = json.loads(json_str)
     result = save_chat(data)
     return json.dumps(result)
+
+
+def js_preload():
+    """Trigger background nexus preload and return immediately."""
+    return json.dumps(preload())
+
+
+def js_state():
+    """Poll daemon state: {ready, model, stage}."""
+    try:
+        r = requests.get(f"{HIVE_DAEMON}/state", timeout=2)
+        data = r.json()
+        r2 = requests.get(f"{HIVE_DAEMON}/progress", timeout=2)
+        prog = r2.json()
+        return json.dumps({"ready": data.get("ready", False),
+                           "model": data.get("model"),
+                           "stage": prog.get("stage", "idle")})
+    except Exception:
+        return json.dumps({"ready": False, "model": None, "stage": "daemon_offline"})
