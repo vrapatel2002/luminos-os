@@ -1,0 +1,54 @@
+#!/bin/bash
+# Luminos Privacy Flush — clear DNS cache, history, journals, thumbnails
+# [CHANGE: claude-code | 2026-05-28] Initial script
+
+TITLE="Luminos — Privacy Flush"
+
+# Confirm
+kdialog --title "$TITLE" \
+  --yesno "Clear the following?\n\n• DNS cache (systemd-resolved)\n• Zsh shell history\n• System journal (keep last 2 days)\n• Thumbnail cache\n• Luminos telemetry log\n• Chrome GPU/shader cache" \
+  2>/dev/null
+
+[ $? -ne 0 ] && exit 0
+
+REPORT=""
+
+# DNS cache
+sudo systemd-resolve --flush-caches 2>/dev/null \
+  && REPORT="${REPORT}✓ DNS cache flushed\n" \
+  || REPORT="${REPORT}✗ DNS flush failed\n"
+
+# Zsh history
+echo "" > ~/.zsh_history 2>/dev/null \
+  && REPORT="${REPORT}✓ Zsh history cleared\n" \
+  || REPORT="${REPORT}✗ Zsh history failed\n"
+
+# Journal vacuum (keep 2 days)
+sudo journalctl --vacuum-time=2d 2>/dev/null \
+  && REPORT="${REPORT}✓ Journal trimmed (kept 2 days)\n" \
+  || REPORT="${REPORT}✗ Journal trim failed\n"
+
+# Thumbnail cache
+rm -rf ~/.cache/thumbnails/* 2>/dev/null \
+  && REPORT="${REPORT}✓ Thumbnail cache cleared\n" \
+  || REPORT="${REPORT}✗ Thumbnail clear failed\n"
+
+# Luminos telemetry
+sudo truncate -s 0 /var/log/luminos-telemetry.csv 2>/dev/null \
+  && REPORT="${REPORT}✓ Luminos telemetry cleared\n" \
+  || REPORT="${REPORT}✗ Telemetry clear failed (file may not exist)\n"
+
+# Chrome GPU/shader cache (not full profile — keeps logins)
+rm -rf ~/.config/google-chrome/Default/GPUCache \
+       ~/.config/google-chrome/GrShaderCache \
+       ~/.config/google-chrome/ShaderCache \
+       ~/.config/google-chrome/Default/Cache 2>/dev/null \
+  && REPORT="${REPORT}✓ Chrome cache cleared\n" \
+  || REPORT="${REPORT}✗ Chrome cache clear failed\n"
+
+# KDE recent files
+kwriteconfig6 --file kactivitymanagerd-statsrc --group "Plugins" --key "org.kde.ActivityManager.ResourceScoringEnabled" false 2>/dev/null
+rm -f ~/.local/share/recently-used.xbel 2>/dev/null \
+  && REPORT="${REPORT}✓ KDE recent files cleared\n"
+
+notify-send "$TITLE" "Done.\n\n${REPORT}" --icon=security-high 2>/dev/null
