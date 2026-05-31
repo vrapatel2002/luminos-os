@@ -79,25 +79,27 @@ fi
 
 mkdir -p "$DEST"
 
-notify "Extracting $BASENAME..."
+LOG="/tmp/luminos-extract-$(echo "$BASENAME" | tr ' /' '__').log"
+notify "Extracting $BASENAME — log: $LOG"
 
 case "$LOWER" in
-    *.tar.gz|*.tgz)    tar -xf "$FILE" -C "$DEST" ;;
-    *.tar.bz2|*.tbz2)  tar -xf "$FILE" -C "$DEST" ;;
-    *.tar.xz)          tar -xf "$FILE" -C "$DEST" ;;
-    *.tar.zst)         tar -xf "$FILE" -C "$DEST" ;;
-    *.tar)             tar -xf "$FILE" -C "$DEST" ;;
-    *.rar)             7z x "$FILE" -o"$DEST" ;;   # 7z handles RAR natively — no unrar
-    *.zip)             7z x "$FILE" -o"$DEST" ;;
-    *.7z)              7z x "$FILE" -o"$DEST" ;;
-    *)                 7z x "$FILE" -o"$DEST" ;;
+    *.tar.gz|*.tgz)    tar -xf "$FILE" -C "$DEST"          >"$LOG" 2>&1 ;;
+    *.tar.bz2|*.tbz2)  tar -xf "$FILE" -C "$DEST"          >"$LOG" 2>&1 ;;
+    *.tar.xz)          tar -xf "$FILE" -C "$DEST"          >"$LOG" 2>&1 ;;
+    *.tar.zst)         tar -xf "$FILE" -C "$DEST"          >"$LOG" 2>&1 ;;
+    *.tar)             tar -xf "$FILE" -C "$DEST"          >"$LOG" 2>&1 ;;
+    *.rar)             7z x "$FILE" -o"$DEST"              >"$LOG" 2>&1 ;;
+    *.zip)             7z x "$FILE" -o"$DEST"              >"$LOG" 2>&1 ;;
+    *.7z)              7z x "$FILE" -o"$DEST"              >"$LOG" 2>&1 ;;
+    *)                 7z x "$FILE" -o"$DEST"              >"$LOG" 2>&1 ;;
 esac
 
 if [ $? -eq 0 ]; then
     notify "Done: extracted to $(basename "$DEST")/"
     dolphin "$DEST" &
 else
-    notify "Failed: $BASENAME"
+    LAST_ERROR=$(tail -5 "$LOG" | tr '\n' ' ')
+    notify "Failed: $BASENAME — $LAST_ERROR"
     rmdir "$DEST" 2>/dev/null
     exit 1
 fi
