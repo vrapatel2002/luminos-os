@@ -97,7 +97,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Notepad++ tested | ✅ Working | Zone 2 Wine |
 | Windows apps in launcher | ✅ Working | Auto-created |
 | VM integration | ✅ Working | Right-click + auto-fallback |
-| Lutris | ✅ Installed | v0.5.22. Games partition mounted at /home/shawn/Games (315GB, nvme0n1p6). lib32 GPU libs installed. |
+| Lutris | ✅ Installed | v0.5.22. lib32 GPU libs installed. Games install to root partition (629GB total). |
 
 ## Visual
 | Component | Status | Notes |
