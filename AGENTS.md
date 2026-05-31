@@ -190,6 +190,7 @@ luminos-brain safe "<action>"
 | `~/.config/kwinoutputconfig.json` | `sharpness: 0.35`, `vrrPolicy: "Never"` | Intentional display tuning. |
 | `~/.local/share/applications/google-chrome.desktop` | Routes all Chrome launches through `chrome-luminos`. | AUR entry bypassed GPU picker. |
 | `~/.local/share/kio/servicemenus/luminos-gpu-*.desktop` | Dolphin right-click GPU picker for executables and .desktop files. | Universal GPU launcher (Decision 16). |
+| `/etc/fstab` | Added `/dev/nvme0n1p6` (UUID=b79c398e) mount at `/home/shawn/Games`, ext4, nofail. Games partition separate from root. | Decision 21 — games isolated from OS root to prevent space exhaustion. |
 
 ---
 

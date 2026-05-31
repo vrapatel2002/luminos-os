@@ -835,3 +835,30 @@ Implement explicit user control for GPU selection in Wine and real-time power mo
 2. **Visibility:** The system's power state and NVIDIA's "wake" status should be visible at a glance to ensure the user understands why fans are spinning or battery is draining.
 3. **Control:** Providing a central location for power profile switching reduces the need to hunt through system settings or use the CLI for common tasks.
 
+
+---
+
+## DECISION 21 — Games Partition Separate from OS Root
+Date: May 30, 2026
+Made by: claude-code
+**Status: FINAL**
+
+### What We Decided
+Created a dedicated 315 GB ext4 partition (`/dev/nvme0n1p6`, UUID=b79c398e-f7d3-471b-97bd-afae69dab058) mounted at `/home/shawn/Games`. Lutris `game_path` set to `/home/shawn/Games`. Added to `/etc/fstab` with `nofail`.
+
+### Why
+1. **Root protection:** Games can fill 100+ GB each. Keeping them on root risks filling `/` and crashing system services, daemons, and journals.
+2. **Isolation:** If the Games partition fills or corrupts, OS root is unaffected. Unmount and wipe without touching the system.
+3. **Live creation:** Could not expand root (p5) live since it's mounted. Free space from Windows shrink (315 GB) was between p3 and p5 on disk — a new partition was the only option without a live USB.
+
+### What We Rejected
+- **Expanding root (p5) directly:** Requires booting from live USB to move and resize the mounted partition. Deferred — can still be done later if needed.
+- **LVM:** Not applicable; existing root is plain ext4, no LVM.
+
+### Disk Layout After
+```
+nvme0n1p3  290MB → 1323GB  Windows NTFS  (1.23 TB)
+nvme0n1p6  1323GB → 1638GB /home/shawn/Games ext4  (315 GB)
+nvme0n1p5  1638GB → 1999GB /  ext4  (361 GB, Luminos root)
+nvme0n1p4  1999GB → 2000GB Recovery NTFS  (1.4 GB)
+```
