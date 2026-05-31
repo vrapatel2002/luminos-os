@@ -132,14 +132,17 @@ const (
 	// [CHANGE: claude-code | 2026-05-31] v4.1 — Thermal burst cooling
 	//
 	// When chassis temp hits 52°C (below Zone1=60°C, so the zone system won't react),
-	// override the fan curve to 100% until the aluminium body cools to 40°C.
+	// override the fan curve to 100% until the aluminium body cools by ~7°C to 45°C.
 	// The v5 curve alone is correct but the chassis stores heat — at 52°C the fans are at
-	// ~62% which isn't enough to pull the body back down to the 40°C target. Blasting
-	// 100% for a few minutes achieves that without triggering the emergency thermal path.
-	// Safety timeout: revert after 3 min regardless (prevents stuck-loud after a crash).
-	thermalBurstTriggerC    = 52.0
-	thermalBurstExitC       = 40.0
-	thermalBurstMaxDuration = 3 * time.Minute
+	// ~62% which isn't enough to pull the body back down quickly. Blasting 100% for
+	// up to 2 minutes achieves that without triggering the emergency thermal path.
+	//
+	// Exit at 45°C (not 40°C) — a 7°C drop from trigger is a clear cool-down signal.
+	// Cooldown: 30 min after any burst before re-triggering, prevents constant loudness.
+	thermalBurstTriggerC        = 52.0
+	thermalBurstExitC           = 45.0          // exit burst when temp drops to here (7°C below trigger)
+	thermalBurstMaxDuration     = 2 * time.Minute
+	thermalBurstCooldownPeriod  = 30 * time.Minute // minimum quiet time between bursts
 
 	// [CHANGE: claude-code | 2026-05-31] v4.1 — Resource coordinator RAM threshold
 	// When available RAM falls below 20%, treat the deficit as extra effective CPU load
@@ -213,6 +216,7 @@ var (
 	// [CHANGE: claude-code | 2026-05-31] v4.1 — thermal burst cooling state
 	inThermalBurst      bool      // true while burst fan curve is active
 	thermalBurstStart   time.Time // when burst mode was entered
+	thermalBurstLastEnd time.Time // when last burst ended (enforces cooldown period)
 	thermalBurstProfile string    // profile the burst curve was applied to (need to revert correctly)
 )
 
@@ -453,13 +457,20 @@ func monitorLoop(ctx context.Context) {
 		if prevState.Profile != "Performance" && temp < thermalEmergencyC {
 			profileLower := strings.ToLower(prevState.Profile)
 			if !inThermalBurst {
-				if temp >= thermalBurstTriggerC {
+				// Respect cooldown: don't re-trigger within 30 min of last burst.
+				cooldownDone := thermalBurstLastEnd.IsZero() ||
+					time.Since(thermalBurstLastEnd) >= thermalBurstCooldownPeriod
+				if temp >= thermalBurstTriggerC && cooldownDone {
 					inThermalBurst = true
 					thermalBurstStart = time.Now()
 					thermalBurstProfile = profileLower
-					lg.Info("thermal burst START: %.1f°C ≥ %.0f°C — 100%% fans until %.0f°C (profile=%s)",
+					lg.Info("thermal burst START: %.1f°C ≥ %.0f°C — 100%% fans until %.0f°C or 2min (profile=%s)",
 						temp, thermalBurstTriggerC, thermalBurstExitC, profileLower)
 					applyBurstFanCurve(profileLower)
+				} else if temp >= thermalBurstTriggerC && !cooldownDone {
+					remaining := thermalBurstCooldownPeriod - time.Since(thermalBurstLastEnd)
+					lg.Info("thermal burst suppressed: %.1f°C but in cooldown — next burst in %v",
+						temp, remaining.Round(time.Minute))
 				}
 			} else {
 				// Re-apply burst curve if profile changed mid-burst (e.g. Balanced→Quiet).
@@ -472,11 +483,12 @@ func monitorLoop(ctx context.Context) {
 				timedOut := elapsed >= thermalBurstMaxDuration
 				if cooledDown || timedOut {
 					inThermalBurst = false
+					thermalBurstLastEnd = time.Now()
 					if cooledDown {
-						lg.Info("thermal burst DONE: %.1f°C ≤ %.0f°C after %v — v5 curve restored",
+						lg.Info("thermal burst DONE: %.1f°C ≤ %.0f°C after %v — v5 curve restored (next burst in 30min)",
 							temp, thermalBurstExitC, elapsed.Round(time.Second))
 					} else {
-						lg.Warn("thermal burst TIMEOUT after %v (still %.1f°C) — v5 curve restored",
+						lg.Warn("thermal burst TIMEOUT after %v (still %.1f°C) — v5 curve restored (next burst in 30min)",
 							elapsed.Round(time.Second), temp)
 					}
 					applyAggressiveFanCurve(profileLower)
@@ -486,6 +498,7 @@ func monitorLoop(ctx context.Context) {
 			// Beast mode kicked in while burst was active — revert the burst curve
 			// (beast mode manages its own thermal; we don't want to override asusctl Performance fans).
 			inThermalBurst = false
+			thermalBurstLastEnd = time.Now()
 			lg.Info("thermal burst cancelled: beast mode active")
 		}
 
