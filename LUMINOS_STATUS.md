@@ -84,7 +84,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Daemon | Status | Notes |
 |---|---|---|
 | luminos-ai | ✅ Running | Unix socket IPC — central routing daemon |
-| luminos-power | ✅ Running | v4.1 Adaptive Dual Governor. Busiest-core demand signal: max(smoothAvg, smoothMaxCore). Per-core EMA α=0.3. sleepAdaptive keyed to demand. |
+| luminos-power | ✅ Running | v4.1 Adaptive Dual Governor + Thermal Burst Cooling + Resource Coordinator. Burst: 52°C→100% fans until 40°C. RAM pressure → effective load modifier. SPI log. |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
 | luminos-ram | ✅ Running | v3.0 — LIRS IRR ranking, N=8 HotSet, OnScreen protection, memory pressure monitor |

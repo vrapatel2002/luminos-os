@@ -20,6 +20,12 @@
 //   - PSI watcher: poll /proc/pressure/cpu — event-driven wake when idle, tight loop when near cap
 //   - iGPU dominance penalty: when iGPU busier than CPU, up to 0.3 GHz CPU reduction (shared TDP)
 //   - App history table: known apps pre-allocate cap headroom on launch for smooth startup
+// [CHANGE: claude-code | 2026-05-31] v4.1 Thermal Burst Cooling + Resource Coordinator
+//   - Thermal burst: 52°C → 100% fans until chassis drops to 40°C (or 3min safety timeout)
+//     Addresses aluminium heat-soak: curve was correct but body couldn't dissipate fast enough
+//   - Resource coordinator: reads /proc/meminfo RAM pressure into effective CPU load
+//     When RAM < 20% available + temp > 45°C → pressure bonus on effective load (up to 30%)
+//   - System pressure index logged each tick: combined thermal/CPU/GPU/RAM health score
 package main
 
 import (
@@ -122,6 +128,23 @@ const (
 	thermalBatZone1C = 50.0 // cool→mild on bat: EPP=power (already set), no cap
 	thermalBatZone2C = 62.0 // mild→warm on bat: 3.5 GHz cap
 	thermalBatZone3C = 72.0 // warm→hot on bat:  2.5 GHz cap
+
+	// [CHANGE: claude-code | 2026-05-31] v4.1 — Thermal burst cooling
+	//
+	// When chassis temp hits 52°C (below Zone1=60°C, so the zone system won't react),
+	// override the fan curve to 100% until the aluminium body cools to 40°C.
+	// The v5 curve alone is correct but the chassis stores heat — at 52°C the fans are at
+	// ~62% which isn't enough to pull the body back down to the 40°C target. Blasting
+	// 100% for a few minutes achieves that without triggering the emergency thermal path.
+	// Safety timeout: revert after 3 min regardless (prevents stuck-loud after a crash).
+	thermalBurstTriggerC    = 52.0
+	thermalBurstExitC       = 40.0
+	thermalBurstMaxDuration = 3 * time.Minute
+
+	// [CHANGE: claude-code | 2026-05-31] v4.1 — Resource coordinator RAM threshold
+	// When available RAM falls below 20%, treat the deficit as extra effective CPU load
+	// to nudge the adaptive cap down and reduce memory allocation pressure.
+	ramPressureLowFrac = 0.20
 )
 
 // appProfile describes a known application's expected CPU load and launch headroom.
@@ -186,6 +209,11 @@ var (
 	lastCoreIdle     []uint64 // per-core idle snapshot (busiest-core detection)
 	lastCoreTotal    []uint64 // per-core total snapshot
 	smoothedMaxCore  float64  // EMA of busiest single-core load (α=adaptiveEMAAlpha)
+
+	// [CHANGE: claude-code | 2026-05-31] v4.1 — thermal burst cooling state
+	inThermalBurst      bool      // true while burst fan curve is active
+	thermalBurstStart   time.Time // when burst mode was entered
+	thermalBurstProfile string    // profile the burst curve was applied to (need to revert correctly)
 )
 
 func main() {
@@ -220,7 +248,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	lg.Info("luminos-power v4.0 started — Adaptive Dual Governor + PSI watcher, listening on %s", cfg.Sockets.Power)
+	lg.Info("luminos-power v4.1 started — Adaptive Dual Governor + Thermal Burst + Resource Coordinator, listening on %s", cfg.Sockets.Power)
 
 	// Apply fan curves to all profiles once at startup
 	applyAggressiveFanCurve("balanced")
@@ -411,6 +439,56 @@ func monitorLoop(ctx context.Context) {
 			}
 		}
 
+		// === THERMAL BURST COOLING ===
+		// [CHANGE: claude-code | 2026-05-31] v4.1
+		//
+		// Handles the aluminium heat-soak problem: the v5 curve hits ~62% at 52°C which
+		// isn't enough fan to pull the chassis back to the 40°C idle target. At 52°C we're
+		// still below Zone1 (60°C) so the zone system does nothing. This burst mode fills
+		// that gap: slam fans to 100% for a few minutes until the body cools down, then
+		// restore the normal v5 curve so idle stays quiet again.
+		//
+		// Skipped during Performance (beast mode handles its own thermal).
+		// Skipped when temp >= thermalEmergencyC (emergency path takes over).
+		if prevState.Profile != "Performance" && temp < thermalEmergencyC {
+			profileLower := strings.ToLower(prevState.Profile)
+			if !inThermalBurst {
+				if temp >= thermalBurstTriggerC {
+					inThermalBurst = true
+					thermalBurstStart = time.Now()
+					thermalBurstProfile = profileLower
+					lg.Info("thermal burst START: %.1f°C ≥ %.0f°C — 100%% fans until %.0f°C (profile=%s)",
+						temp, thermalBurstTriggerC, thermalBurstExitC, profileLower)
+					applyBurstFanCurve(profileLower)
+				}
+			} else {
+				// Re-apply burst curve if profile changed mid-burst (e.g. Balanced→Quiet).
+				if profileLower != thermalBurstProfile {
+					thermalBurstProfile = profileLower
+					applyBurstFanCurve(profileLower)
+				}
+				elapsed := time.Since(thermalBurstStart)
+				cooledDown := temp <= thermalBurstExitC
+				timedOut := elapsed >= thermalBurstMaxDuration
+				if cooledDown || timedOut {
+					inThermalBurst = false
+					if cooledDown {
+						lg.Info("thermal burst DONE: %.1f°C ≤ %.0f°C after %v — v5 curve restored",
+							temp, thermalBurstExitC, elapsed.Round(time.Second))
+					} else {
+						lg.Warn("thermal burst TIMEOUT after %v (still %.1f°C) — v5 curve restored",
+							elapsed.Round(time.Second), temp)
+					}
+					applyAggressiveFanCurve(profileLower)
+				}
+			}
+		} else if inThermalBurst && prevState.Profile == "Performance" {
+			// Beast mode kicked in while burst was active — revert the burst curve
+			// (beast mode manages its own thermal; we don't want to override asusctl Performance fans).
+			inThermalBurst = false
+			lg.Info("thermal burst cancelled: beast mode active")
+		}
+
 		// === EMERGENCY THERMAL ===
 		// Overrides adaptive governor entirely.
 		emergencyThreshC := thermalEmergencyC
@@ -450,6 +528,20 @@ func monitorLoop(ctx context.Context) {
 			// this max(), the cap would stay near 1.8 GHz and starve the hot core entirely.
 			// Beast-mode and quiet-idle detection remain average-driven (intentional).
 			effectiveLoad := math.Min(demand+preAllocBonus, 100)
+
+			// [CHANGE: claude-code | 2026-05-31] v4.1 Resource coordinator: RAM pressure.
+			// When available RAM < 20% and the machine is warm, treat the deficit as extra
+			// effective load to nudge the CPU cap down. Reduces memory allocation rate and
+			// gives the kernel more breathing room before we hit swap pressure.
+			// Scale: each 1% below 20% threshold → +2% effective load, capped at +30%.
+			ramAvailFrac := readRAMPressure()
+			if ramAvailFrac < ramPressureLowFrac && temp > 45.0 {
+				ramBonus := math.Min((ramPressureLowFrac-ramAvailFrac)*200.0, 30.0)
+				effectiveLoad = math.Min(effectiveLoad+ramBonus, 100)
+				lg.Info("resource coord: RAM %.0f%% avail → +%.0f%% effective load (cap nudged down)",
+					ramAvailFrac*100, ramBonus)
+			}
+
 			adaptiveCap := computeAdaptiveCap(effectiveLoad, igpuLoad, onAC)
 
 			// Thermal override: ZoneHot applies a hard cap that adaptive governor must respect.
@@ -473,6 +565,19 @@ func monitorLoop(ctx context.Context) {
 		}
 
 		updateState(onAC, temp, dgpuLoad, prevState.EPP, prevState.Profile)
+
+		// [CHANGE: claude-code | 2026-05-31] v4.1 System pressure index (informational log).
+		// Combined score 0-100: thermal(40%) + cpu(25%) + gpu(20%) + ram(15%).
+		// Not used for decisions yet — gives a single health number to tail in logs.
+		{
+			ramFrac := readRAMPressure()
+			spi := systemPressureIndex(temp, smoothedCPULoad, igpuLoad, dgpuLoad, ramFrac)
+			if spi > 60 || inThermalBurst {
+				lg.Info("SPI=%.0f  temp=%.1f°C  cpu=%.0f%%  igpu=%.0f%%  dgpu=%.0f%%  ram=%.0f%%avail  burst=%v",
+					spi, temp, smoothedCPULoad, igpuLoad, dgpuLoad, ramFrac*100, inThermalBurst)
+			}
+		}
+
 		// Use demand (max of avg/maxCore) so single-threaded extract keeps the loop in 500ms
 		// band — not 10s PSI idle sleep — while the cap EMA ramps up.
 		sleepAdaptive(ctx, psiFile, demand, igpuLoad)
@@ -1163,6 +1268,52 @@ func readCPULoad() (avg, maxCore float64) {
 	return avg, maxCore
 }
 
+// readRAMPressure returns available RAM as a fraction of total (0.0=empty, 1.0=all free).
+// Reads MemAvailable from /proc/meminfo — same metric the kernel uses for OOM decisions.
+// Returns 1.0 on any read error so callers stay conservative (no false pressure penalty).
+// [CHANGE: claude-code | 2026-05-31] v4.1 resource coordinator.
+func readRAMPressure() float64 {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 1.0
+	}
+	var total, available uint64
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch fields[0] {
+		case "MemTotal:":
+			total, _ = strconv.ParseUint(fields[1], 10, 64)
+		case "MemAvailable:":
+			available, _ = strconv.ParseUint(fields[1], 10, 64)
+		}
+		if total > 0 && available > 0 {
+			break
+		}
+	}
+	if total == 0 {
+		return 1.0
+	}
+	return float64(available) / float64(total)
+}
+
+// systemPressureIndex returns a 0–100 health score combining thermal, CPU, GPU, and RAM pressure.
+// Weights: thermal 40%, CPU 25%, GPU 20%, RAM 15%.
+// 0 = fully idle and cool; 100 = maximum stress on all fronts.
+// Used for informational logging (SPI= lines) and future decision-making.
+// [CHANGE: claude-code | 2026-05-31] v4.1 resource coordinator.
+func systemPressureIndex(temp, cpuLoad, igpuLoad, dgpuLoad, ramAvailFrac float64) float64 {
+	// Thermal: 0 at 40°C, 100 at 90°C
+	thermalScore := math.Max(0, math.Min(100, (temp-40.0)/50.0*100))
+	// GPU: worst of iGPU/dGPU
+	gpuScore := math.Max(igpuLoad, dgpuLoad)
+	// RAM: 0 when all free, 100 when fully consumed
+	ramScore := (1.0 - ramAvailFrac) * 100
+	return 0.40*thermalScore + 0.25*cpuLoad + 0.20*gpuScore + 0.15*ramScore
+}
+
 // --- helpers ---
 
 func updateState(onAC bool, temp, gpuLoad float64, epp, profile string) {
@@ -1199,6 +1350,20 @@ func applyAggressiveFanCurve(mode string) {
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "gpu", "--data", cpuGpuCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "mid", "--data", midCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--enable-fan-curves", "true")
+}
+
+// applyBurstFanCurve sets fans to 100% from 40°C upward for rapid chassis cooling.
+// Used during thermal burst mode (52°C trigger). Reversed by applyAggressiveFanCurve.
+// CPU/GPU fans run at 100% from 40°C; mid fan at 88% (slightly softer for noise balance).
+// [CHANGE: claude-code | 2026-05-31] v4.1 thermal burst cooling.
+func applyBurstFanCurve(profile string) {
+	lg.Info("burst fan curve → 100%% on %s profile (chassis cool-down mode)", profile)
+	cpuGpuBurst := "30c:0%,40c:100%,45c:100%,50c:100%,60c:100%,70c:100%,80c:100%,90c:100%"
+	midBurst    := "30c:0%,40c:88%,45c:88%,50c:88%,60c:88%,70c:88%,80c:88%,90c:100%"
+	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--fan", "cpu", "--data", cpuGpuBurst)
+	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--fan", "gpu", "--data", cpuGpuBurst)
+	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--fan", "mid", "--data", midBurst)
+	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--enable-fan-curves", "true")
 }
 
 func runCmd(name string, args ...string) error {

@@ -257,7 +257,9 @@ Full detail: `docs/LUMINOS_HANDBOOK.md` Part 4.
 CPU/GPU: `30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%`
 Mid fan:  `30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%`
 
-**Adaptive Governor v4.0:** `cap = 1.8GHz + (load/100) × (hwMax − 1.8GHz)`, EMA α=0.3, iGPU dominance penalty ≤300MHz, 70/30 smooth, >150MHz threshold to write sysfs.
+**Thermal Burst Mode (ACTIVE, 2026-05-31):** When temp ≥ 52°C (below Zone1=60°C) and profile ≠ Performance, override fan curve to 100% (CPU/GPU) / 88% (mid) until chassis cools to 40°C. Safety timeout: 3 min. Addresses aluminium heat-soak: v5 curve at 52°C = ~62% which isn't enough to pull body back to 40°C target. Beast mode cancels burst (Performance manages its own thermal).
+
+**Adaptive Governor v4.1:** `cap = 1.8GHz + (load/100) × (hwMax − 1.8GHz)`, EMA α=0.3, iGPU dominance penalty ≤300MHz, 70/30 smooth, >150MHz threshold to write sysfs. RAM pressure: when avail < 20% + temp > 45°C, add up to +30% effective load to nudge cap down.
 
 **Thermal zones (AC):** Hot=87°C→3GHz | Emergency=92°C→2GHz+Quiet | 5°C hysteresis on exits.
 **Battery:** ZoneWarm=62°C→3.5GHz | ZoneHot=72°C→2.5GHz.
