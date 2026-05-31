@@ -180,9 +180,12 @@ var (
 	preAllocBonus      float64       // extra % added to load estimate (decays after preAllocDuration)
 	preAllocExpiry     time.Time     // when preAllocBonus expires
 
-	// /proc/stat snapshot for delta-based CPU load calculation
+	// /proc/stat snapshots for delta-based CPU load calculation
 	lastCPUStatIdle  uint64
 	lastCPUStatTotal uint64
+	lastCoreIdle     []uint64 // per-core idle snapshot (busiest-core detection)
+	lastCoreTotal    []uint64 // per-core total snapshot
+	smoothedMaxCore  float64  // EMA of busiest single-core load (α=adaptiveEMAAlpha)
 )
 
 func main() {
@@ -292,14 +295,22 @@ func monitorLoop(ctx context.Context) {
 		temp := readCPUTemp()
 		dgpuLoad := readDGPULoad() // NVIDIA dGPU
 		igpuLoad := readIGPULoad() // AMD 780M
-		cpuLoad := readCPULoadPct()
+		// [CHANGE: claude-code | 2026-05-31] ROOT-BUG: drive cap off busiest core, not 16-core avg.
+		// scaling_max_freq is a per-core ceiling — a single pinned thread (7-zip, Wine, compiler)
+		// hits 100% on one core while the 16-core average collapses to ~6%, starving the cap.
+		cpuLoad, maxCoreLoad := readCPULoad()
 
-		// EMA smoothing on CPU load — prevents snap decisions on spikes.
-		// First tick (smoothedCPULoad==0): seed from raw to avoid starting at 0%.
+		// EMA smoothing on both signals — prevents snap decisions on spikes.
+		// First tick (==0): seed from raw to avoid starting at 0%.
 		if smoothedCPULoad == 0 && cpuLoad > 0 {
 			smoothedCPULoad = cpuLoad
 		} else {
 			smoothedCPULoad = (1-adaptiveEMAAlpha)*smoothedCPULoad + adaptiveEMAAlpha*cpuLoad
+		}
+		if smoothedMaxCore == 0 && maxCoreLoad > 0 {
+			smoothedMaxCore = maxCoreLoad
+		} else {
+			smoothedMaxCore = (1-adaptiveEMAAlpha)*smoothedMaxCore + adaptiveEMAAlpha*maxCoreLoad
 		}
 
 		// Drain exec events → update pre-alloc bonus.
@@ -329,7 +340,8 @@ func monitorLoop(ctx context.Context) {
 			cpuHighTicks = 0
 			cpuLowTicks = 0
 			quietTicks = 0
-			smoothedCPULoad = cpuLoad // reset EMA on AC change — old average no longer valid
+			smoothedCPULoad = cpuLoad    // reset EMA on AC change — old average no longer valid
+			smoothedMaxCore  = maxCoreLoad
 			prevAppliedCapKHz = cpuHardwareMaxFreq
 		}
 
@@ -422,14 +434,22 @@ func monitorLoop(ctx context.Context) {
 			continue
 		}
 
+		// demand is hoisted here so the bottom sleepAdaptive can use it regardless of profile.
+		// Beast-mode and quiet-idle checks above use raw cpuLoad (average) intentionally.
+		demand := math.Max(smoothedCPULoad, smoothedMaxCore)
+
 		// === ADAPTIVE GOVERNOR (non-Performance, non-Emergency) ===
 		// Advance thermal zone for ZoneHot detection (only zone with a cap on AC).
 		// Then compute the final cap as min(adaptiveCap, thermalCap).
 		if prevState.Profile != "Performance" {
 			advanceThermalZone(temp, onAC)
 
-			// Effective load = smoothed + pre-alloc headroom (capped at 100%)
-			effectiveLoad := math.Min(smoothedCPULoad+preAllocBonus, 100)
+			// Effective load = max(avg, busiest-core) + pre-alloc headroom (capped at 100%).
+			// Using the busiest-core signal here is the key fix: a single-threaded 7-zip/Wine
+			// extract pins one core at ~100% while the 16-core average sits near 6% — without
+			// this max(), the cap would stay near 1.8 GHz and starve the hot core entirely.
+			// Beast-mode and quiet-idle detection remain average-driven (intentional).
+			effectiveLoad := math.Min(demand+preAllocBonus, 100)
 			adaptiveCap := computeAdaptiveCap(effectiveLoad, igpuLoad, onAC)
 
 			// Thermal override: ZoneHot applies a hard cap that adaptive governor must respect.
@@ -447,13 +467,15 @@ func monitorLoop(ctx context.Context) {
 			if abs(smoothedCap-prevAppliedCapKHz) > adaptiveCapChangeThreshKHz {
 				setAllMaxFreq(smoothedCap)
 				prevAppliedCapKHz = smoothedCap
-				lg.Info("adaptive cap → %.2f GHz (cpu=%.0f%% smooth=%.0f%% prealloc=%.0f%% igpu=%.0f%%)",
-					float64(smoothedCap)/1e6, cpuLoad, smoothedCPULoad, preAllocBonus, igpuLoad)
+				lg.Info("adaptive cap → %.2f GHz (avg=%.0f%% smoothAvg=%.0f%% maxCore=%.0f%% smoothMax=%.0f%% prealloc=%.0f%% igpu=%.0f%%)",
+					float64(smoothedCap)/1e6, cpuLoad, smoothedCPULoad, maxCoreLoad, smoothedMaxCore, preAllocBonus, igpuLoad)
 			}
 		}
 
 		updateState(onAC, temp, dgpuLoad, prevState.EPP, prevState.Profile)
-		sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
+		// Use demand (max of avg/maxCore) so single-threaded extract keeps the loop in 500ms
+		// band — not 10s PSI idle sleep — while the cap EMA ramps up.
+		sleepAdaptive(ctx, psiFile, demand, igpuLoad)
 	}
 }
 
@@ -1062,50 +1084,83 @@ func readIGPULoad() float64 {
 	return val
 }
 
-// readCPULoadPct returns system-wide CPU utilisation as a percentage (0-100)
-// computed from the delta of /proc/stat between consecutive calls.
-// First call always returns 0 (no previous snapshot to diff against).
-func readCPULoadPct() float64 {
+// readCPULoad returns system-wide average utilisation and the busiest single-core
+// utilisation (both 0-100), from /proc/stat deltas.
+// maxCore is the value a frequency ceiling must respect: scaling_max_freq caps every
+// core's peak clock, so one pinned core (7-zip, Wine, compiler) needs the ceiling
+// raised even when the 16-core average is near idle.
+// First call returns (0, 0) — no previous snapshot to diff against.
+// [CHANGE: claude-code | 2026-05-31] ROOT-BUG fix: cap driven by busiest core, not avg
+func readCPULoad() (avg, maxCore float64) {
 	data, err := os.ReadFile("/proc/stat")
 	if err != nil {
-		return 0
+		return 0, 0
 	}
-	// First line: "cpu  user nice system idle iowait irq softirq steal guest guest_nice"
-	line := strings.SplitN(string(data), "\n", 2)[0]
-	fields := strings.Fields(line)
-	if len(fields) < 5 || fields[0] != "cpu" {
-		return 0
+	lines := strings.Split(string(data), "\n")
+
+	parse := func(fields []string) (idle, total uint64) {
+		var vals [10]uint64
+		for i, f := range fields[1:] {
+			if i >= 10 {
+				break
+			}
+			vals[i], _ = strconv.ParseUint(f, 10, 64)
+		}
+		idle = vals[3] + vals[4] // idle + iowait
+		for _, v := range vals {
+			total += v
+		}
+		return
 	}
-	var vals [10]uint64
-	for i, f := range fields[1:] {
-		if i >= 10 {
+
+	// Aggregate line (first): "cpu user nice system idle iowait ..."
+	agg := strings.Fields(lines[0])
+	if len(agg) < 5 || agg[0] != "cpu" {
+		return 0, 0
+	}
+	aggIdle, aggTotal := parse(agg)
+
+	// Per-core lines: cpu0, cpu1, ... (contiguous block after the aggregate line)
+	type coreSample struct{ idle, total uint64 }
+	var cores []coreSample
+	for _, ln := range lines[1:] {
+		if !strings.HasPrefix(ln, "cpu") {
 			break
 		}
-		vals[i], _ = strconv.ParseUint(f, 10, 64)
-	}
-	idle := vals[3] + vals[4] // idle + iowait
-	var total uint64
-	for _, v := range vals {
-		total += v
+		i, t := parse(strings.Fields(ln))
+		cores = append(cores, coreSample{i, t})
 	}
 
-	if lastCPUStatTotal == 0 {
-		// First call — seed the snapshot, return 0
-		lastCPUStatIdle = idle
-		lastCPUStatTotal = total
-		return 0
+	// Seed on first call or core-count change — return (0,0), no delta yet.
+	if lastCPUStatTotal == 0 || len(lastCoreTotal) != len(cores) {
+		lastCPUStatIdle, lastCPUStatTotal = aggIdle, aggTotal
+		lastCoreIdle = make([]uint64, len(cores))
+		lastCoreTotal = make([]uint64, len(cores))
+		for i, c := range cores {
+			lastCoreIdle[i], lastCoreTotal[i] = c.idle, c.total
+		}
+		return 0, 0
 	}
 
-	deltaTotal := total - lastCPUStatTotal
-	deltaIdle := idle - lastCPUStatIdle
-	lastCPUStatIdle = idle
-	lastCPUStatTotal = total
-
-	if deltaTotal == 0 {
-		return 0
+	// Aggregate delta → system-wide average
+	if dT := aggTotal - lastCPUStatTotal; dT > 0 {
+		avg = float64(dT-(aggIdle-lastCPUStatIdle)) / float64(dT) * 100.0
 	}
-	used := deltaTotal - deltaIdle
-	return float64(used) / float64(deltaTotal) * 100.0
+	lastCPUStatIdle, lastCPUStatTotal = aggIdle, aggTotal
+
+	// Per-core deltas → find busiest core
+	for i, c := range cores {
+		dT := c.total - lastCoreTotal[i]
+		dI := c.idle - lastCoreIdle[i]
+		lastCoreIdle[i], lastCoreTotal[i] = c.idle, c.total
+		if dT == 0 {
+			continue
+		}
+		if u := float64(dT-dI) / float64(dT) * 100.0; u > maxCore {
+			maxCore = u
+		}
+	}
+	return avg, maxCore
 }
 
 // --- helpers ---
