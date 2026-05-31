@@ -92,11 +92,12 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 ## Compatibility
 | Component | Status | Notes |
 |---|---|---|
-| Wine 11.6 | ✅ Working | .exe launches |
+| Wine 11.8 | ✅ Working | .exe launches |
 | .exe file association | ✅ Working | Silent auto-routing |
 | Notepad++ tested | ✅ Working | Zone 2 Wine |
 | Windows apps in launcher | ✅ Working | Auto-created |
 | VM integration | ✅ Working | Right-click + auto-fallback |
+| Lutris | ✅ Installed | v0.5.22. multilib enabled. lib32-vulkan-radeon/mesa/vkd3d/gnutls installed. For games only (not MT5). |
 
 ## Visual
 | Component | Status | Notes |
