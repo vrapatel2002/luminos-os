@@ -2,6 +2,7 @@
 # luminos-extract — Right-click archive extractor for Dolphin
 # [CHANGE: claude-code | 2026-05-31]
 # Usage: luminos-extract <archive-file>
+# Tools: tar (tar.*), 7z (rar/zip/7z — Linux-native, no unrar/winrar), gzip/bzip2/xz/zstd
 # Extracts to a subfolder named after the archive (same directory).
 # Single-file compression (.gz .bz2 .xz .zst) decompresses in-place.
 
@@ -86,8 +87,8 @@ case "$LOWER" in
     *.tar.xz)          tar -xf "$FILE" -C "$DEST" ;;
     *.tar.zst)         tar -xf "$FILE" -C "$DEST" ;;
     *.tar)             tar -xf "$FILE" -C "$DEST" ;;
-    *.rar)             unrar x "$FILE" "$DEST/" ;;
-    *.zip)             unzip "$FILE" -d "$DEST" ;;
+    *.rar)             7z x "$FILE" -o"$DEST" ;;   # 7z handles RAR natively — no unrar
+    *.zip)             7z x "$FILE" -o"$DEST" ;;
     *.7z)              7z x "$FILE" -o"$DEST" ;;
     *)                 7z x "$FILE" -o"$DEST" ;;
 esac
