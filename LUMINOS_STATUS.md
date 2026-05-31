@@ -98,6 +98,9 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | Windows apps in launcher | ✅ Working | Auto-created |
 | VM integration | ✅ Working | Right-click + auto-fallback |
 | Lutris | ✅ Installed | v0.5.22. lib32 GPU libs installed. Games install to root partition (629GB total). |
+| GE-Proton10-34 | ✅ Installed | [CHANGE: claude-code | 2026-05-31] ~/.local/share/Steam/compatibilitytools.d/. DXVK+VKD3D-Proton bundled. |
+| luminos-proton-run | ✅ Installed | [CHANGE: claude-code | 2026-05-31] /usr/local/bin/. GE-Proton launcher wrapper for Lutris (no Steam). |
+| Black Myth: Wukong | 🔧 Installing | Fitgirl repack. Prefix: ~/Games/prefixes/black-myth-wukong. Setup via Lutris+GE-Proton. |
 
 ## Visual
 | Component | Status | Notes |

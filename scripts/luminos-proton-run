@@ -1,0 +1,44 @@
+#!/bin/bash
+# luminos-proton-run — GE-Proton Wine launcher (no Steam required)
+# [CHANGE: claude-code | 2026-05-31]
+# Usage: WINEPREFIX=/path/to/prefix luminos-proton-run <exe> [args...]
+# Provides DXVK (DX11/10/9 → Vulkan) + VKD3D-Proton (DX12 → Vulkan)
+# Required for UE5/DX12 games like Black Myth: Wukong
+
+PROTON_DIR="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton10-34"
+WINE_BIN="$PROTON_DIR/files/bin/wine"
+WINE_LIB="$PROTON_DIR/files/lib/wine"
+
+if [ ! -x "$WINE_BIN" ]; then
+    notify-send "luminos-proton-run" "GE-Proton10-34 not found at $PROTON_DIR" 2>/dev/null
+    echo "ERROR: GE-Proton not found at $PROTON_DIR" >&2
+    exit 1
+fi
+
+if [ -z "$WINEPREFIX" ]; then
+    echo "ERROR: WINEPREFIX not set" >&2
+    exit 1
+fi
+
+# VKD3D-Proton (DX12) and DXVK (DX11/10/9) override Wine's built-ins
+# Prepend so they take priority over Wine's own d3d implementations
+export WINEDLLPATH="$WINE_LIB/vkd3d-proton/x86_64-windows:$WINE_LIB/vkd3d-proton/i386-windows:$WINE_LIB/dxvk/x86_64-windows:$WINE_LIB/dxvk/i386-windows:$WINE_LIB/x86_64-windows:$WINE_LIB/i386-windows${WINEDLLPATH:+:$WINEDLLPATH}"
+
+# Force native DLLs (uses WINEDLLPATH above — picks DXVK/VKD3D-Proton first)
+OVERRIDES="d3d12=n;d3d12core=n;d3d11=n;dxgi=n;d3d10core=n;d3d10=n;d3d10_1=n"
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}$OVERRIDES"
+
+# VKD3D-Proton — enable DX12 ray tracing
+export VKD3D_CONFIG="${VKD3D_CONFIG:-dxr11}"
+export VKD3D_FEATURE_LEVEL="${VKD3D_FEATURE_LEVEL:-12_2}"
+
+# DXVK async shader compilation (reduces first-run stutters)
+export DXVK_ASYNC="${DXVK_ASYNC:-1}"
+export DXVK_STATE_CACHE_PATH="${DXVK_STATE_CACHE_PATH:-$WINEPREFIX}"
+
+# Performance
+export WINE_LARGE_ADDRESS_AWARE=1
+export __GL_SHADER_DISK_CACHE=1
+export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1
+
+exec "$WINE_BIN" "$@"
