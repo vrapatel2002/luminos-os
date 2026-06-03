@@ -26,6 +26,12 @@
 //   - Resource coordinator: reads /proc/meminfo RAM pressure into effective CPU load
 //     When RAM < 20% available + temp > 45°C → pressure bonus on effective load (up to 30%)
 //   - System pressure index logged each tick: combined thermal/CPU/GPU/RAM health score
+// [CHANGE: claude-code | 2026-06-03] v4.2 GPU TGP dynamic switching
+//   - Switch NVIDIA GPU power limit 55W → 90W when draw ≥ 47W (85% of cap) on AC
+//   - Gate: GPU temp < 83°C (thermal headroom required before uplifting)
+//   - Revert: power < 15W AND util < 20% sustained 60s, or temp ≥ 83°C (thermal override)
+//   - 60s hysteresis between any switch to prevent oscillation
+//   - GPU power/temp read from sysfs hwmon (fast); falls back to nvidia-smi if unavailable
 package main
 
 import (
@@ -69,6 +75,19 @@ const (
 	gpuHighThreshTicks = 15 // 30s at 2s poll
 	gpuLowThreshPct    = 20.0
 	gpuLowThreshTicks  = 30 // 60s at 2s poll
+
+	// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU TGP dynamic switching
+	// When GPU power draw nears the 55W cap, uplift to 90W so the GPU isn't
+	// artificially constrained. Revert when idle, or temperature-override when too hot.
+	gpuTGPLowW         = 55.0            // default TGP (W)
+	gpuTGPHighW        = 90.0            // boosted TGP (W)
+	gpuTGPUpThreshW    = 47.0            // 85% of 55W → trigger uplift
+	gpuTGPDownPowerW   = 15.0            // revert when power draw < 15W …
+	gpuTGPDownUtilPct  = 20.0            // … AND GPU util < 20%
+	gpuTGPDownTicks    = 30              // 60s sustained idle at 2s poll before revert
+	gpuTGPThermalCeilC = 83.0            // do not run at 90W if GPU temp ≥ 83°C
+	gpuTGPHysteresis   = 60 * time.Second // minimum time between any TGP switch
+
 	// CPU beast-mode thresholds — catches CPU-heavy work (ML training, compilation)
 	cpuHighThreshPct   = 75.0
 	cpuHighThreshTicks = 10 // 20s at 2s poll
@@ -218,6 +237,11 @@ var (
 	thermalBurstStart   time.Time // when burst mode was entered
 	thermalBurstLastEnd time.Time // when last burst ended (enforces cooldown period)
 	thermalBurstProfile string    // profile the burst curve was applied to (need to revert correctly)
+
+	// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU TGP dynamic switching state
+	currentGPUTGPW   float64   // current GPU power limit in watts (55 or 90)
+	gpuTGPLastSwitch time.Time // time of last TGP switch (hysteresis enforcement)
+	gpuTGPDownTick   int       // consecutive ticks of low power+util → revert
 )
 
 func main() {
@@ -252,11 +276,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	lg.Info("luminos-power v4.1 started — Adaptive Dual Governor + Thermal Burst + Resource Coordinator, listening on %s", cfg.Sockets.Power)
+	lg.Info("luminos-power v4.2 started — Adaptive Dual Governor + Thermal Burst + Resource Coordinator + GPU TGP, listening on %s", cfg.Sockets.Power)
 
 	// Apply fan curves to all profiles once at startup
 	applyAggressiveFanCurve("balanced")
 	applyAggressiveFanCurve("quiet")
+
+	// Read current GPU TGP and initialise state from it (handles daemon restarts)
+	initGPUTGP()
 
 	// Set initial power state based on current AC state
 	onAC := readACState()
@@ -327,6 +354,9 @@ func monitorLoop(ctx context.Context) {
 		temp := readCPUTemp()
 		dgpuLoad := readDGPULoad() // NVIDIA dGPU
 		igpuLoad := readIGPULoad() // AMD 780M
+		// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU power draw and temp for TGP management
+		gpuPowerW, gpuTempC := readGPUStats()
+		manageGPUTGP(gpuPowerW, dgpuLoad, gpuTempC, onAC)
 		// [CHANGE: claude-code | 2026-05-31] ROOT-BUG: drive cap off busiest core, not 16-core avg.
 		// scaling_max_freq is a per-core ceiling — a single pinned thread (7-zip, Wine, compiler)
 		// hits 100% on one core while the 16-core average collapses to ~6%, starving the cap.
@@ -1200,6 +1230,133 @@ func readIGPULoad() float64 {
 	d, _ := os.ReadFile("/sys/class/drm/card2/device/gpu_busy_percent")
 	val, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
 	return val
+}
+
+// readGPUStats returns NVIDIA dGPU power draw (W) and temperature (°C).
+// Reads from sysfs hwmon first (fast, no subprocess). Falls back to nvidia-smi if
+// sysfs files are absent or return zero — handles driver version differences.
+// [CHANGE: claude-code | 2026-06-03] v4.2
+func readGPUStats() (powerW, tempC float64) {
+	powerPaths, _ := filepath.Glob("/sys/class/drm/card1/device/hwmon/hwmon*/power1_input")
+	tempPaths, _ := filepath.Glob("/sys/class/drm/card1/device/hwmon/hwmon*/temp1_input")
+	if len(powerPaths) > 0 && len(tempPaths) > 0 {
+		if d, err := os.ReadFile(powerPaths[0]); err == nil {
+			v, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
+			powerW = v / 1e6 // microwatts → watts
+		}
+		if d, err := os.ReadFile(tempPaths[0]); err == nil {
+			v, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
+			tempC = v / 1000.0 // millidegrees → degrees
+		}
+		if powerW > 0 || tempC > 0 {
+			return
+		}
+	}
+	// Fallback: nvidia-smi (slower but always available)
+	out, err := exec.Command("nvidia-smi",
+		"--query-gpu=power.draw,temperature.gpu",
+		"--format=csv,noheader,nounits").Output()
+	if err != nil {
+		return 0, 0
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), ",", 2)
+	if len(parts) == 2 {
+		powerW, _ = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+		tempC, _ = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	}
+	return
+}
+
+// initGPUTGP reads the current GPU power limit at startup and seeds currentGPUTGPW.
+// Avoids a spurious setGPUTGP call if the daemon restarts while already at 90W.
+// Falls back to forcing 55W if the limit cannot be read.
+// [CHANGE: claude-code | 2026-06-03] v4.2
+func initGPUTGP() {
+	out, err := exec.Command("nvidia-smi",
+		"--query-gpu=power.limit",
+		"--format=csv,noheader,nounits").Output()
+	if err == nil {
+		if v, err2 := strconv.ParseFloat(strings.TrimSpace(string(out)), 64); err2 == nil && v > 0 {
+			currentGPUTGPW = v
+			lg.Info("GPU TGP init: current limit %.0fW", v)
+			return
+		}
+	}
+	// Can't read — force a known baseline
+	setGPUTGP(gpuTGPLowW)
+}
+
+// setGPUTGP applies a new NVIDIA GPU power limit via nvidia-smi and updates currentGPUTGPW.
+// Requires the daemon to run as root (nvidia-smi -pl is root-only).
+// [CHANGE: claude-code | 2026-06-03] v4.2
+func setGPUTGP(watts float64) {
+	if err := runCmd("nvidia-smi", "-pl", fmt.Sprintf("%.0f", watts)); err != nil {
+		lg.Warn("GPU TGP → %.0fW failed: %v", watts, err)
+		return
+	}
+	currentGPUTGPW = watts
+	lg.Info("GPU TGP → %.0fW", watts)
+}
+
+// manageGPUTGP handles dynamic switching of the NVIDIA GPU power limit.
+//
+// Uplift to 90W when:
+//   - Power draw ≥ 47W (85% of 55W cap) — GPU is about to be constrained
+//   - GPU temp < 83°C — thermal headroom exists
+//   - On AC power — never boost on battery
+//   - 60s hysteresis since last switch
+//
+// Revert to 55W when:
+//   - GPU temp ≥ 83°C (thermal override, regardless of load)
+//   - OR power draw < 15W AND util < 20% sustained for 60s (idle)
+//
+// [CHANGE: claude-code | 2026-06-03] v4.2
+func manageGPUTGP(gpuPowerW, gpuLoad, gpuTempC float64, onAC bool) {
+	// Always revert to low cap on battery
+	if !onAC {
+		if currentGPUTGPW != gpuTGPLowW {
+			lg.Info("GPU TGP: AC lost → %.0fW", gpuTGPLowW)
+			setGPUTGP(gpuTGPLowW)
+			gpuTGPDownTick = 0
+		}
+		return
+	}
+
+	now := time.Now()
+	hysteresisOK := gpuTGPLastSwitch.IsZero() || now.Sub(gpuTGPLastSwitch) >= gpuTGPHysteresis
+
+	if currentGPUTGPW < gpuTGPHighW {
+		// Currently at 55W: uplift if power draw is near the cap and temp is safe
+		if gpuPowerW >= gpuTGPUpThreshW && gpuTempC < gpuTGPThermalCeilC && hysteresisOK {
+			gpuTGPLastSwitch = now
+			gpuTGPDownTick = 0
+			lg.Info("GPU TGP uplift: %.1fW draw ≥ %.0fW threshold, temp=%.1f°C", gpuPowerW, gpuTGPUpThreshW, gpuTempC)
+			setGPUTGP(gpuTGPHighW)
+		}
+		return
+	}
+
+	// Currently at 90W: check thermal override first, then idle revert
+	if gpuTempC >= gpuTGPThermalCeilC && hysteresisOK {
+		lg.Warn("GPU TGP thermal override: %.1f°C ≥ %.0f°C → %.0fW", gpuTempC, gpuTGPThermalCeilC, gpuTGPLowW)
+		gpuTGPLastSwitch = now
+		gpuTGPDownTick = 0
+		setGPUTGP(gpuTGPLowW)
+		return
+	}
+
+	if gpuPowerW < gpuTGPDownPowerW && gpuLoad < gpuTGPDownUtilPct {
+		gpuTGPDownTick++
+		if gpuTGPDownTick >= gpuTGPDownTicks && hysteresisOK {
+			gpuTGPLastSwitch = now
+			gpuTGPDownTick = 0
+			lg.Info("GPU TGP revert: idle %.0fs (%.1fW, %.0f%% util) → %.0fW",
+				float64(gpuTGPDownTicks)*2, gpuPowerW, gpuLoad, gpuTGPLowW)
+			setGPUTGP(gpuTGPLowW)
+		}
+	} else {
+		gpuTGPDownTick = 0
+	}
 }
 
 // readCPULoad returns system-wide average utilisation and the busiest single-core
