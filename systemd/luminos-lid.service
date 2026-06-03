@@ -1,0 +1,8 @@
+# [CHANGE: claude-code | 2026-06-03]
+# Triggered by the 99-luminos-lid.rules udev rule on lid open/close.
+[Unit]
+Description=Luminos lid handler — toggle screen, keep system awake
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-lid

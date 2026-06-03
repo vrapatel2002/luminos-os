@@ -1,0 +1,27 @@
+#!/bin/bash
+# luminos-lid — lid close/open handler
+# System stays fully awake; only the built-in eDP panel is toggled.
+# Triggered by udev on every lid state change.
+# [CHANGE: claude-code | 2026-06-03]
+
+USER_ID=1000
+XDG_RT="/run/user/${USER_ID}"
+WAYLAND_DISP="wayland-0"
+DBUS_ADDR="unix:path=${XDG_RT}/bus"
+
+lid_state=$(cat /proc/acpi/button/lid/LID0/state 2>/dev/null \
+         || cat /proc/acpi/button/lid/LID/state 2>/dev/null)
+
+if [[ "$lid_state" == *"closed"* ]]; then
+    runuser -u shawn -- env \
+        XDG_RUNTIME_DIR="$XDG_RT" \
+        WAYLAND_DISPLAY="$WAYLAND_DISP" \
+        DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
+        kscreen-doctor output.1.disable
+else
+    runuser -u shawn -- env \
+        XDG_RUNTIME_DIR="$XDG_RT" \
+        WAYLAND_DISPLAY="$WAYLAND_DISP" \
+        DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
+        kscreen-doctor output.1.enable
+fi
