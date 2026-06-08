@@ -149,17 +149,20 @@ const (
 	thermalBatZone3C = 72.0 // warm→hot on bat:  2.5 GHz cap
 
 	// [CHANGE: claude-code | 2026-05-31] v4.1 — Thermal burst cooling
+	// [CHANGE: claude-code | 2026-06-08] exit raised 45°C→48°C (BUG: burst timed out every cycle)
 	//
 	// When chassis temp hits 52°C (below Zone1=60°C, so the zone system won't react),
-	// override the fan curve to 100% until the aluminium body cools by ~7°C to 45°C.
+	// override the fan curve to 100% until the aluminium body cools by ~4°C to 48°C.
 	// The v5 curve alone is correct but the chassis stores heat — at 52°C the fans are at
 	// ~62% which isn't enough to pull the body back down quickly. Blasting 100% for
 	// up to 2 minutes achieves that without triggering the emergency thermal path.
 	//
-	// Exit at 45°C (not 40°C) — a 7°C drop from trigger is a clear cool-down signal.
+	// Exit at 48°C: background processes (forex bots, iGPU) keep the chassis at ~47-50°C
+	// idle, making 45°C unreachable within 2 min → burst always timed out → fans blasted
+	// every 30 min permanently. 48°C is achievable and breaks the timeout cycle.
 	// Cooldown: 30 min after any burst before re-triggering, prevents constant loudness.
 	thermalBurstTriggerC        = 52.0
-	thermalBurstExitC           = 45.0          // exit burst when temp drops to here (7°C below trigger)
+	thermalBurstExitC           = 48.0          // [CHANGE: claude-code | 2026-06-08] was 45°C — unreachable under load
 	thermalBurstMaxDuration     = 2 * time.Minute
 	thermalBurstCooldownPeriod  = 30 * time.Minute // minimum quiet time between bursts
 
@@ -436,6 +439,7 @@ func monitorLoop(ctx context.Context) {
 			if gpuProfile == "Balanced" && cpuProfile == "Balanced" {
 				lg.Info("beast mode exit → Balanced (cpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, dgpuLoad)
 				runCmd("asusctl", "profile", "set", "Balanced")
+				applyAggressiveFanCurve("balanced") // re-apply: asusctl loses custom curve on profile switch
 				currentThermalZone = ZoneCool
 				thermalDownholdTick = 0
 				quietTicks = 0
@@ -455,6 +459,7 @@ func monitorLoop(ctx context.Context) {
 					quietTicks = 0
 					lg.Info("idle → Quiet (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
 					runCmd("asusctl", "profile", "set", "Quiet")
+					applyAggressiveFanCurve("quiet") // re-apply: asusctl loses custom curve on profile switch
 					updateState(onAC, temp, dgpuLoad, prevState.EPP, "Quiet")
 					sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
 					continue
@@ -467,6 +472,7 @@ func monitorLoop(ctx context.Context) {
 				quietTicks = 0
 				lg.Info("load → Balanced (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
 				runCmd("asusctl", "profile", "set", "Balanced")
+				applyAggressiveFanCurve("balanced") // re-apply: asusctl loses custom curve on profile switch
 				updateState(onAC, temp, dgpuLoad, prevState.EPP, "Balanced")
 				sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
 				continue
@@ -1263,6 +1269,12 @@ func readGPUStats() (powerW, tempC float64) {
 	if len(parts) == 2 {
 		powerW, _ = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
 		tempC, _ = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	}
+	// Sanity cap: RTX 4050 max TGP is 90W — anything higher is a bad read (driver quirk).
+	// [CHANGE: claude-code | 2026-06-08] Observed 590W spurious read causing false TGP uplift.
+	if powerW > 110.0 {
+		lg.Warn("GPU power read %.1fW exceeds hardware max — discarding (driver quirk)", powerW)
+		powerW = 0
 	}
 	return
 }
