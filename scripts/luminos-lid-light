@@ -1,0 +1,85 @@
+#!/bin/bash
+# luminos-lid-light — ASUS ROG Slash Ledbar control
+# Usage: luminos-lid-light <command> [args]
+# [CHANGE: claude-code | 2026-06-09]
+
+usage() {
+    cat <<'EOF'
+Usage: luminos-lid-light <command> [args]
+
+Commands:
+  on                    Enable slash ledbar
+  off                   Disable slash ledbar
+  brightness <0-255>    Set brightness (0=off, 255=max)
+  mode <animation>      Set animation mode
+  interval <0-5>        Set animation speed (0=fastest)
+  list                  List available animations
+  status                Show current slash state
+  boot <on|off>         Show animation on boot
+  shutdown <on|off>     Show animation on shutdown
+  sleep <on|off>        Show animation on sleep
+  battery <on|off>      Show animation on battery
+  warning <on|off>      Show low-battery warning animation
+
+Examples:
+  luminos-lid-light on
+  luminos-lid-light brightness 128
+  luminos-lid-light mode Slash
+  luminos-lid-light mode Static
+  luminos-lid-light off
+EOF
+}
+
+bool_flag() {
+    case "${1,,}" in
+        on|true|1|yes)  echo "true" ;;
+        off|false|0|no) echo "false" ;;
+        *) echo "Error: expected on/off, got '$1'" >&2; exit 1 ;;
+    esac
+}
+
+case "${1:-}" in
+    on)
+        asusctl slash --enable
+        ;;
+    off)
+        asusctl slash --disable
+        ;;
+    brightness)
+        [[ -z "$2" ]] && { echo "Error: brightness requires a value (0-255)" >&2; exit 1; }
+        asusctl slash -l "$2"
+        ;;
+    mode)
+        [[ -z "$2" ]] && { echo "Error: mode requires an animation name (use 'list' to see options)" >&2; exit 1; }
+        asusctl slash --mode "$2"
+        ;;
+    interval)
+        [[ -z "$2" ]] && { echo "Error: interval requires a value (0-5)" >&2; exit 1; }
+        asusctl slash --interval "$2"
+        ;;
+    list)
+        asusctl slash --list
+        ;;
+    status)
+        echo "Slash Ledbar status:"
+        asusctl slash 2>&1
+        ;;
+    boot)
+        asusctl slash -B "$(bool_flag "$2")"
+        ;;
+    shutdown)
+        asusctl slash -S "$(bool_flag "$2")"
+        ;;
+    sleep)
+        asusctl slash -s "$(bool_flag "$2")"
+        ;;
+    battery)
+        asusctl slash -b "$(bool_flag "$2")"
+        ;;
+    warning)
+        asusctl slash -w "$(bool_flag "$2")"
+        ;;
+    *)
+        usage
+        ;;
+esac

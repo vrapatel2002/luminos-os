@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Authors": [{"Name": "Luminos OS"}],
+        "Description": "Control ASUS ROG Slash Ledbar animation, brightness and event triggers",
+        "Icon": "computer-laptop",
+        "Id": "kcm_luminos_lid_light",
+        "License": "GPL",
+        "Name": "Lid Light",
+        "Version": "1.0"
+    },
+    "X-KDE-ParentApp": "kcontrol",
+    "X-KDE-System-Settings-Parent-Category": "input-devices",
+    "X-KDE-System-Settings-Category": "keyboard",
+    "X-KDE-Keywords": "lid,light,slash,ledbar,animation,brightness,asus,rog"
+}
