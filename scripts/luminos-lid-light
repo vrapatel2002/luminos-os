@@ -1,7 +1,9 @@
 #!/bin/bash
 # luminos-lid-light — ASUS ROG Slash Ledbar control
 # Usage: luminos-lid-light <command> [args]
-# [CHANGE: claude-code | 2026-06-09]
+# [CHANGE: claude-code | 2026-06-10]
+
+BATTERY_SYS="/sys/class/power_supply/BAT1"
 
 usage() {
     cat <<'EOF'
@@ -20,12 +22,34 @@ Commands:
   sleep <on|off>        Show animation on sleep
   battery <on|off>      Show animation on battery
   warning <on|off>      Show low-battery warning animation
+  battery-show          Set brightness to match current battery %
+  battery-daemon [sec]  Run battery indicator loop (default: 30s poll)
+
+Animations:
+  Static        Solid light, no animation
+  Bounce        Light bounces back and forth
+  Slash         Quick diagonal slash effect
+  Loading       Loading/progress bar animation
+  BitStream     Digital data stream effect
+  Transmission  Signal transmission pulse
+  Flow          Smooth flowing light
+  Flux          Fluctuating intensity
+  Phantom       Ghostly fade in/out
+  Spectrum      Color spectrum sweep
+  Hazard        Warning flash pattern
+  Interfacing   Tech interface animation
+  Ramp          Gradual ramp up/down
+  GameOver      Game over sequence
+  Start         Startup sequence
+  Buzzer        Quick buzz flash
 
 Examples:
   luminos-lid-light on
   luminos-lid-light brightness 128
   luminos-lid-light mode Slash
   luminos-lid-light mode Static
+  luminos-lid-light battery-show
+  luminos-lid-light battery-daemon 15
   luminos-lid-light off
 EOF
 }
@@ -36,6 +60,39 @@ bool_flag() {
         off|false|0|no) echo "false" ;;
         *) echo "Error: expected on/off, got '$1'" >&2; exit 1 ;;
     esac
+}
+
+get_battery_pct() {
+    cat "$BATTERY_SYS/capacity" 2>/dev/null || echo "0"
+}
+
+# Map battery % (0-100) to slash brightness (0-255)
+battery_to_brightness() {
+    local pct="$1"
+    echo $(( pct * 255 / 100 ))
+}
+
+apply_battery_brightness() {
+    local pct
+    pct=$(get_battery_pct)
+    local bright
+    bright=$(battery_to_brightness "$pct")
+    local status
+    status=$(cat "$BATTERY_SYS/status" 2>/dev/null || echo "Unknown")
+
+    asusctl slash --enable
+    asusctl slash -l "$bright"
+
+    # Charging = Flow animation, discharging = Static, low = Hazard
+    if [[ "$status" == "Charging" ]]; then
+        asusctl slash --mode Flow
+    elif (( pct <= 15 )); then
+        asusctl slash --mode Hazard
+    else
+        asusctl slash --mode Static
+    fi
+
+    echo "Battery: ${pct}% (${status}) → brightness ${bright}/255"
 }
 
 case "${1:-}" in
@@ -58,11 +115,29 @@ case "${1:-}" in
         asusctl slash --interval "$2"
         ;;
     list)
-        asusctl slash --list
+        echo "Available animations:"
+        echo "  Static        — Solid light, no animation"
+        echo "  Bounce        — Light bounces back and forth"
+        echo "  Slash         — Quick diagonal slash effect"
+        echo "  Loading       — Loading/progress bar animation"
+        echo "  BitStream     — Digital data stream effect"
+        echo "  Transmission  — Signal transmission pulse"
+        echo "  Flow          — Smooth flowing light"
+        echo "  Flux          — Fluctuating intensity"
+        echo "  Phantom       — Ghostly fade in/out"
+        echo "  Spectrum      — Color spectrum sweep"
+        echo "  Hazard        — Warning flash pattern"
+        echo "  Interfacing   — Tech interface animation"
+        echo "  Ramp          — Gradual ramp up/down"
+        echo "  GameOver      — Game over sequence"
+        echo "  Start         — Startup sequence"
+        echo "  Buzzer        — Quick buzz flash"
         ;;
     status)
         echo "Slash Ledbar status:"
         asusctl slash 2>&1
+        echo ""
+        echo "Battery: $(get_battery_pct)% ($(cat "$BATTERY_SYS/status" 2>/dev/null))"
         ;;
     boot)
         asusctl slash -B "$(bool_flag "$2")"
@@ -78,6 +153,17 @@ case "${1:-}" in
         ;;
     warning)
         asusctl slash -w "$(bool_flag "$2")"
+        ;;
+    battery-show)
+        apply_battery_brightness
+        ;;
+    battery-daemon)
+        interval="${2:-30}"
+        echo "Lid light battery indicator — polling every ${interval}s (Ctrl+C to stop)"
+        while true; do
+            apply_battery_brightness
+            sleep "$interval"
+        done
         ;;
     *)
         usage

@@ -1,5 +1,5 @@
 // Luminos OS — Lid Light (Slash Ledbar) KCM UI
-// [CHANGE: claude-code | 2026-06-09]
+// [CHANGE: claude-code | 2026-06-10]
 
 import QtQuick
 import QtQuick.Controls as QQC2
@@ -37,8 +37,9 @@ KCMUtils.SimpleKCM {
         }
 
         QQC2.ComboBox {
+            id: modeCombo
             Kirigami.FormData.label: qsTr("Mode:")
-            visible: kcm.enabled
+            visible: kcm.enabled && !kcm.batteryIndicator
             implicitWidth: Kirigami.Units.gridUnit * 14
             model: kcm.availableModes
             currentIndex: {
@@ -49,6 +50,21 @@ KCMUtils.SimpleKCM {
                 kcm.mode = model[currentIndex]
                 kcm.preview()
             }
+        }
+
+        // Mode description
+        QQC2.Label {
+            Kirigami.FormData.label: " "
+            visible: kcm.enabled && !kcm.batteryIndicator
+            text: {
+                var idx = modeCombo.currentIndex
+                var descs = kcm.modeDescriptions
+                return (idx >= 0 && idx < descs.length) ? descs[idx] : ""
+            }
+            wrapMode: Text.WordWrap
+            font.italic: true
+            opacity: 0.65
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
         }
 
         RowLayout {
@@ -76,14 +92,14 @@ KCMUtils.SimpleKCM {
         // BRIGHTNESS
         // ════════════════════════════════════════════════════════════
         Kirigami.Separator {
-            visible: kcm.enabled
+            visible: kcm.enabled && !kcm.batteryIndicator
             Kirigami.FormData.label: qsTr("Brightness")
             Kirigami.FormData.isSection: true
         }
 
         RowLayout {
             Kirigami.FormData.label: qsTr("Level:")
-            visible: kcm.enabled
+            visible: kcm.enabled && !kcm.batteryIndicator
             spacing: Kirigami.Units.smallSpacing
 
             QQC2.Label { text: qsTr("Off"); opacity: 0.6 }
@@ -99,6 +115,55 @@ KCMUtils.SimpleKCM {
                 text: Math.round(brightSlider.value)
                 font.bold: true
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 2
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // BATTERY INDICATOR
+        // ════════════════════════════════════════════════════════════
+        Kirigami.Separator {
+            Kirigami.FormData.label: qsTr("Battery Indicator")
+            Kirigami.FormData.isSection: true
+        }
+
+        QQC2.Switch {
+            Kirigami.FormData.label: qsTr("Enabled:")
+            checked: kcm.batteryIndicator
+            onToggled: { kcm.batteryIndicator = checked; kcm.preview() }
+        }
+
+        QQC2.Label {
+            Kirigami.FormData.label: " "
+            visible: !kcm.batteryIndicator
+            text: qsTr("When enabled, the lid light brightness reflects battery level.\nCharging → Flow animation, Low battery → Hazard, Otherwise → Static.")
+            wrapMode: Text.WordWrap
+            font.italic: true
+            opacity: 0.65
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+        }
+
+        // Live battery readout
+        QQC2.Label {
+            Kirigami.FormData.label: qsTr("Battery:")
+            visible: kcm.batteryIndicator
+            text: kcm.currentBatteryPct + "% (" + kcm.currentBatteryStatus + ") → brightness " + Math.round(kcm.currentBatteryPct * 255 / 100)
+            font.bold: true
+        }
+
+        RowLayout {
+            Kirigami.FormData.label: qsTr("Poll interval:")
+            visible: kcm.batteryIndicator
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.SpinBox {
+                id: pollSpin
+                from: 5; to: 300; stepSize: 5
+                value: kcm.batteryPollSecs
+                onValueModified: kcm.batteryPollSecs = value
+            }
+            QQC2.Label {
+                text: qsTr("seconds")
+                opacity: 0.6
             }
         }
 
