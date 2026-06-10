@@ -28,6 +28,36 @@ KCMUtils.SimpleKCM {
         }
 
         // ════════════════════════════════════════════════════════════
+        // BRIGHTNESS
+        // ════════════════════════════════════════════════════════════
+        Kirigami.Separator {
+            visible: kcm.enabled
+            Kirigami.FormData.label: qsTr("Brightness")
+            Kirigami.FormData.isSection: true
+        }
+
+        RowLayout {
+            Kirigami.FormData.label: qsTr("Level:")
+            visible: kcm.enabled
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.Label { text: qsTr("Off"); opacity: 0.6 }
+            QQC2.Slider {
+                id: brightSlider
+                from: 0; to: 255; stepSize: 1
+                value: kcm.brightness
+                implicitWidth: Kirigami.Units.gridUnit * 14
+                onMoved: { kcm.brightness = Math.round(value); kcm.preview() }
+            }
+            QQC2.Label { text: qsTr("Max"); opacity: 0.6 }
+            QQC2.Label {
+                text: Math.round(brightSlider.value)
+                font.bold: true
+                Layout.minimumWidth: Kirigami.Units.gridUnit * 2
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
         // ANIMATION MODE
         // ════════════════════════════════════════════════════════════
         Kirigami.Separator {
@@ -39,7 +69,7 @@ KCMUtils.SimpleKCM {
         QQC2.ComboBox {
             id: modeCombo
             Kirigami.FormData.label: qsTr("Mode:")
-            visible: kcm.enabled && !kcm.batteryIndicator
+            visible: kcm.enabled
             implicitWidth: Kirigami.Units.gridUnit * 14
             model: kcm.availableModes
             currentIndex: {
@@ -55,7 +85,7 @@ KCMUtils.SimpleKCM {
         // Mode description
         QQC2.Label {
             Kirigami.FormData.label: " "
-            visible: kcm.enabled && !kcm.batteryIndicator
+            visible: kcm.enabled
             text: {
                 var idx = modeCombo.currentIndex
                 var descs = kcm.modeDescriptions
@@ -89,36 +119,6 @@ KCMUtils.SimpleKCM {
         }
 
         // ════════════════════════════════════════════════════════════
-        // BRIGHTNESS
-        // ════════════════════════════════════════════════════════════
-        Kirigami.Separator {
-            visible: kcm.enabled && !kcm.batteryIndicator
-            Kirigami.FormData.label: qsTr("Brightness")
-            Kirigami.FormData.isSection: true
-        }
-
-        RowLayout {
-            Kirigami.FormData.label: qsTr("Level:")
-            visible: kcm.enabled && !kcm.batteryIndicator
-            spacing: Kirigami.Units.smallSpacing
-
-            QQC2.Label { text: qsTr("Off"); opacity: 0.6 }
-            QQC2.Slider {
-                id: brightSlider
-                from: 0; to: 255; stepSize: 1
-                value: kcm.brightness
-                implicitWidth: Kirigami.Units.gridUnit * 14
-                onMoved: { kcm.brightness = Math.round(value); kcm.preview() }
-            }
-            QQC2.Label { text: qsTr("Max"); opacity: 0.6 }
-            QQC2.Label {
-                text: Math.round(brightSlider.value)
-                font.bold: true
-                Layout.minimumWidth: Kirigami.Units.gridUnit * 2
-            }
-        }
-
-        // ════════════════════════════════════════════════════════════
         // BATTERY INDICATOR
         // ════════════════════════════════════════════════════════════
         Kirigami.Separator {
@@ -134,8 +134,7 @@ KCMUtils.SimpleKCM {
 
         QQC2.Label {
             Kirigami.FormData.label: " "
-            visible: !kcm.batteryIndicator
-            text: qsTr("When enabled, the lid light brightness reflects battery level.\nCharging → Flow animation, Low battery → Hazard, Otherwise → Static.")
+            text: qsTr("Maps battery % to slash brightness.\nCharging → Flow, Low ≤15% → Hazard, Otherwise → Static.")
             wrapMode: Text.WordWrap
             font.italic: true
             opacity: 0.65
