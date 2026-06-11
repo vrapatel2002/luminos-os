@@ -1,7 +1,18 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-06-10 (BUG-065/066/067: luminos-ram madvise stub, capability bounding set, shared RuntimeDirectory wipe)
+Last Updated: 2026-06-11 (BUG-068: incomplete Tahoe/macOS theme revert left mixed theming live)
 
 ## Fixed Bugs (new)
+
+### BUG-068 — Incomplete Tahoe revert: GTK ran WhiteSur-Dark + Kvantum pinned to MacTahoe for a month
+<!-- [CHANGE: claude-code | 2026-06-11] -->
+- Status: FIXED
+- Severity: MEDIUM
+- Component: GTK settings.ini, ~/.config/Kvantum, kwinrc, AUR whitesur-* packages
+- Description: The 2026-05-11 Tahoe revert ("restored clean KDE Plasma Breeze Dark state") only reverted Plasma-side settings. Left behind: GTK3/4 `gtk-theme-name=WhiteSur-Dark` (GTK apps rendered macOS-style while Qt rendered Breeze), `~/.config/Kvantum/kvantum.kvconfig` still `theme=MacTahoe`, legacy `AnimationSpeed=3` in kwinrc [Compositing] (set by apply-tahoe-theme.sh; conflicts with Plasma 6 `AnimationDurationFactor=1.0`), 6× MacTahoe GTK themes in ~/.themes, MacTahoe icons/aurorae decorations/desktoptheme/wallpapers in ~/.local/share, and 3 AUR packages (whitesur-gtk/icon/cursor-theme-git). Net effect: a three-way Breeze/WhiteSur/MacTahoe hybrid — the "stitched-together" UI feel.
+- Root Cause: Revert only undid kwriteconfig6/Plasma changes; never touched GTK configs, Kvantum, ~/.themes, ~/.local/share assets, or pacman packages installed for Tahoe.
+- Fix Applied: GTK3/4 → `Breeze-Dark`; deleted ~/.config/Kvantum, ~/.themes/MacTahoe-*, MacTahoe icons/aurorae/desktoptheme/wallpapers (incl. TahoeDusk.webp — verified not referenced by desktop or lockscreen); removed `AnimationSpeed` key from kwinrc; `pacman -Rns whitesur-{gtk,icon,cursor}-theme-git`; KWin reconfigured. Verified zero mac/tahoe/whitesur remnants on disk.
+- Date Found: 2026-06-11
+- Date Fixed: 2026-06-11
 
 ### BUG-067 — Shared RuntimeDirectory: restarting one daemon unlinks every other daemon's socket
 - Status: FIXED (config installed; takes effect now — already-unlinked sockets need the one-time restart in PENDING_RESTART.md)

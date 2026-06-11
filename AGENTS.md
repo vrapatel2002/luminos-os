@@ -325,7 +325,7 @@ Task: [what was asked]" && git push origin main
 1. Eye model download + wire vision route in hive-daemon.py
 2. KDE right-click service menus for HIVE (kcm_luminos_hive.so already installed)
 3. ydotool type-into-apps integration
-4. Firefox WhiteSur theme
+4. ~~Firefox WhiteSur theme~~ — DROPPED 2026-06-11: all macOS theming (WhiteSur/MacTahoe) removed from system by user decision (BUG-068). Firefox not installed.
 5. HIVE chat web panel (Flask localhost:7437)
 6. Go orchestrator (replace Python hive-daemon.py)
 7. Zone indicator Plasma widget
