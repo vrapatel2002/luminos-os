@@ -321,6 +321,7 @@ Task: [what was asked]" && git push origin main
 
 0. **One-time restart of 5 Go daemons** after HOPE training finishes — activates BUG-065/066/067 fixes. See PENDING_RESTART.md. DO NOT do this while training runs.
 0a. Sentinel fine-tune: build training dataset (sentinel_*.jsonl, same pattern as nexus_*.jsonl), fine-tune MobileLLM-R1-140M, re-quantize INT8, THEN create `src/npu/npu_daemon.py` + `luminos-npu.service` (blocked 2026-06-10 by luminos-brain safe NO).
+0c. **BUG-069**: fix luminos-power setGPUTGP — `nvidia-smi -pl` is a no-op on mobile (exit 0 despite "not supported"); TGP logs since 2026-06-03 were fiction. Use nvidia-powerd lifecycle + read-back verification. nvidia-powerd currently unmasked as temporary workaround (revert table in PENDING_RESTART.md).
 0b. Fix `luminos-brain safe` to output the actual REASON for a block — currently returns unrelated canned incident lines (e.g. KWin fullscreen crash note when asked about an NPU file), making NO decisions unreviewable.
 1. Eye model download + wire vision route in hive-daemon.py
 2. KDE right-click service menus for HIVE (kcm_luminos_hive.so already installed)

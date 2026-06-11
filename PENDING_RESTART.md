@@ -26,4 +26,14 @@ ls -la /run/luminos/   # expect: ai.sock, sentinel.sock, ram.sock, power.sock
 journalctl -u luminos-ram -n 20
 ```
 
+## Training-performance overrides to revert AFTER training (added 2026-06-11)
+<!-- [CHANGE: claude-code | 2026-06-11] -->
+
+User-requested max-performance state for HOPE training (BUG-069 context):
+
+| Override | Applied | Revert with |
+|---|---|---|
+| `nvidia-powerd` unmasked + started (Dynamic Boost 55→90W — only working TGP mechanism; daemon's nvidia-smi -pl is a no-op, see BUG-069) | 2026-06-11 | `sudo systemctl stop nvidia-powerd && sudo systemctl mask nvidia-powerd` (was masked for idle-drain reasons, BUG-047 era) |
+| Flat 100% fan curves (cpu/gpu/mid) on Balanced profile via asusctl | 2026-06-11 | Automatic — luminos-power re-applies fan curve v5 on its restart (above) or any profile switch |
+
 Then delete this file and update LUMINOS_STATUS.md.
