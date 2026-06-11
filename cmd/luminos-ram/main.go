@@ -22,8 +22,10 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/godbus/dbus/v5"
+	"golang.org/x/sys/unix"
 	"github.com/luminos-os/luminos/internal/config"
 	"github.com/luminos-os/luminos/internal/logger"
 	"github.com/luminos-os/luminos/internal/socket"
@@ -341,8 +343,12 @@ func startKWinListener(ctx context.Context) {
 		"type='signal',interface='org.kde.KWin',member='windowMinimized'",
 		"type='signal',interface='org.kde.KWin',member='windowUnminimized'",
 	}
+	// [CHANGE: claude-code | 2026-06-10] AddMatch errors were ignored — a failed
+	// subscription meant focus tracking silently died until restart. Now logged loudly.
 	for _, rule := range rules {
-		conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, rule)
+		if call := conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, rule); call.Err != nil {
+			lg.Error("dbus AddMatch failed (%s): %v — window tracking degraded", rule, call.Err)
+		}
 	}
 
 	c := make(chan *dbus.Signal, 10)
@@ -608,17 +614,36 @@ func runMaintenance() {
 }
 
 // [CHANGE: gemini-cli | 2026-05-10] Fullscreen and Media Protection Helpers
-func isSystemFullscreen() bool {
+// [CHANGE: claude-code | 2026-06-10] Reuse one session-bus connection instead of
+// dialing a new one every 3s monitor tick.
+var (
+	fsConnMu sync.Mutex
+	fsConn   *dbus.Conn
+)
+
+func sessionBusCached() *dbus.Conn {
+	fsConnMu.Lock()
+	defer fsConnMu.Unlock()
+	if fsConn != nil {
+		return fsConn
+	}
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
+		return nil
+	}
+	fsConn = conn
+	return fsConn
+}
+
+func isSystemFullscreen() bool {
+	conn := sessionBusCached()
+	if conn == nil {
 		return false
 	}
-	defer conn.Close()
 
 	obj := conn.Object("org.kde.KWin", "/KWin")
 	var info map[string]dbus.Variant
-	err = obj.Call("org.kde.KWin.queryWindowInfo", 0).Store(&info)
-	if err == nil {
+	if err := obj.Call("org.kde.KWin.queryWindowInfo", 0).Store(&info); err == nil {
 		if v, ok := info["fullscreen"]; ok {
 			return v.Value().(bool)
 		}
@@ -915,11 +940,95 @@ func replyOK(req socket.Message, payload interface{}) socket.Message {
 	}
 }
 
+// [CHANGE: claude-code | 2026-06-10] BUG: madvise() was a stub — every MADV_PAGEOUT
+// call site in the eviction pipeline silently did nothing. Real implementation via
+// process_madvise(2): pidfd_open on the target, iovecs built from /proc/<pid>/maps
+// (readable private mappings), chunked at UIO_MAXIOV. MADV_PAGEOUT requires
+// CAP_SYS_NICE + CAP_SYS_PTRACE (unit file updated to grant both).
 func madvise(pid int, hint int) error {
-	if hint == MADV_WILLNEED {
-		lg.Debug("Prefetching pages for PID:%d (MADV_WILLNEED)", pid)
+	pidfd, err := unix.PidfdOpen(pid, 0)
+	if err != nil {
+		lg.Debug("pidfd_open(%d) failed: %v", pid, err)
+		return fmt.Errorf("pidfd_open(%d): %w", pid, err)
 	}
+	defer unix.Close(pidfd)
+
+	iovs, err := buildMadviseIovecs(pid)
+	if err != nil {
+		return err
+	}
+	if len(iovs) == 0 {
+		return nil
+	}
+
+	const iovMax = 1024 // UIO_MAXIOV
+	var advised uintptr
+	for start := 0; start < len(iovs); start += iovMax {
+		end := start + iovMax
+		if end > len(iovs) {
+			end = len(iovs)
+		}
+		chunk := iovs[start:end]
+		n, _, errno := syscall.Syscall6(unix.SYS_PROCESS_MADVISE,
+			uintptr(pidfd),
+			uintptr(unsafe.Pointer(&chunk[0])),
+			uintptr(len(chunk)),
+			uintptr(hint), 0, 0)
+		if errno != 0 {
+			// Kernels < 5.14 reject anything but COLD/PAGEOUT — treat WILLNEED
+			// rejection as a soft miss, not an error.
+			if hint == MADV_WILLNEED && errno == syscall.EINVAL {
+				lg.Debug("process_madvise: MADV_WILLNEED unsupported by kernel — skipping prefetch")
+				return nil
+			}
+			lg.Warn("process_madvise(pid=%d, advice=%d) failed: %v", pid, hint, errno)
+			return fmt.Errorf("process_madvise(pid=%d, advice=%d): %v", pid, hint, errno)
+		}
+		advised += n
+	}
+	lg.Debug("process_madvise PID:%d advice=%d — %d KB advised across %d regions",
+		pid, hint, advised/1024, len(iovs))
 	return nil
+}
+
+// buildMadviseIovecs parses /proc/<pid>/maps into iovecs for reclaimable regions:
+// readable, private (CoW) mappings, skipping kernel special mappings.
+// [CHANGE: claude-code | 2026-06-10]
+func buildMadviseIovecs(pid int) ([]unix.Iovec, error) {
+	f, err := os.Open(fmt.Sprintf("/proc/%d/maps", pid))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var iovs []unix.Iovec
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		perms := fields[1] // e.g. "rw-p"
+		if len(perms) < 4 || perms[0] != 'r' || perms[3] != 'p' {
+			continue // unreadable or shared — not a reclaim target
+		}
+		if len(fields) >= 6 {
+			switch p := fields[5]; {
+			case p == "[vdso]", p == "[vsyscall]", strings.HasPrefix(p, "[vvar"):
+				continue
+			}
+		}
+		var start, end uint64
+		if _, err := fmt.Sscanf(fields[0], "%x-%x", &start, &end); err != nil || end <= start {
+			continue
+		}
+		// Address lives in the TARGET process's address space — never dereferenced
+		// here, only passed to the kernel. go vet's unsafe.Pointer warning is expected.
+		iov := unix.Iovec{Base: (*byte)(unsafe.Pointer(uintptr(start)))}
+		iov.SetLen(int(end - start))
+		iovs = append(iovs, iov)
+	}
+	return iovs, scanner.Err()
 }
 
 func getProcessName(pid int) string {
@@ -1313,19 +1422,33 @@ func performSilentRestart(pid int, cfg RestartConfig, savedMB int64) {
 	restartMu.Unlock()
 }
 
+// [CHANGE: claude-code | 2026-06-10] Was a full /proc/*/stat scan (every process on
+// the system, every call, inside the 3s monitor loop) and only found DIRECT children
+// — Chrome renderers hang off the zygote, so they were never found. Now walks
+// /proc/<pid>/task/*/children recursively: O(descendants), and returns the full tree.
 func getChildPIDs(ppid int) []int {
-	var children []int
-	matches, _ := filepath.Glob("/proc/*/stat")
-	for _, m := range matches {
-		b, err := os.ReadFile(m)
-		if err != nil { continue }
-		fields := strings.Fields(string(b))
-		if len(fields) < 4 { continue }
-		p, _ := strconv.Atoi(fields[3])
-		if p == ppid {
-			childPID, _ := strconv.Atoi(filepath.Base(filepath.Dir(m)))
-			children = append(children, childPID)
+	var out []int
+	seen := map[int]bool{ppid: true}
+	queue := []int{ppid}
+	for len(queue) > 0 {
+		pid := queue[0]
+		queue = queue[1:]
+		tasks, _ := filepath.Glob(fmt.Sprintf("/proc/%d/task/*/children", pid))
+		for _, t := range tasks {
+			b, err := os.ReadFile(t)
+			if err != nil {
+				continue
+			}
+			for _, f := range strings.Fields(string(b)) {
+				cpid, err := strconv.Atoi(f)
+				if err != nil || seen[cpid] {
+					continue
+				}
+				seen[cpid] = true
+				out = append(out, cpid)
+				queue = append(queue, cpid)
+			}
 		}
 	}
-	return children
+	return out
 }

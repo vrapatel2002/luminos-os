@@ -1,7 +1,17 @@
 # Luminos RAM Architecture — Precise Design v3.0
-# Version: 3.0
-# Date: May 2026
+# Version: 3.5
+# Date: May 2026 (updated 2026-06-10)
 # Algorithm: LIRS IRR + OnScreen Absolute Protection
+
+> **v3.5 (2026-06-10, BUG-065/066/067):** Until this date `madvise()` was a stub —
+> every MADV_PAGEOUT below was a silent no-op, and the unit's capability bounding
+> set blocked SIGSTOP/SIGKILL/setpriority with EPERM. Now implemented for real via
+> `process_madvise(2)`: pidfd_open + iovecs from `/proc/<pid>/maps` (readable
+> private mappings, UIO_MAXIOV chunks). Verified: 64MB test process RSS
+> 70MB→2.4MB into zram. `getChildPIDs()` now walks `/proc/<pid>/task/*/children`
+> recursively (full descendant tree — Chrome renderers hang off the zygote and
+> were previously never found). Fix is installed but inactive until the one-time
+> restart in PENDING_RESTART.md.
 
 ## Philosophy
 Memory management must be invisible. The user's field of view (OnScreen) is sacred.

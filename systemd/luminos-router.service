@@ -18,6 +18,8 @@ StandardError=journal
 SyslogIdentifier=luminos-router
 RuntimeDirectory=luminos
 RuntimeDirectoryMode=0755
+# [CHANGE: claude-code | 2026-06-10] Shared dir — see luminos-power.service note.
+RuntimeDirectoryPreserve=yes
 
 [Install]
 WantedBy=multi-user.target

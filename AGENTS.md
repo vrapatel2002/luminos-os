@@ -52,8 +52,8 @@ Custom Arch Linux on ASUS ROG G14 GA403UU. Privacy-first, AI-native Windows repl
 | luminos-power | `/run/luminos/power.sock` | JSON | systemd |
 | luminos-sentinel | `/run/luminos/sentinel.sock` | JSON | systemd |
 | luminos-router | `$XDG_RUNTIME_DIR/luminos-router.sock` | newline JSON | systemd |
-| luminos-npu | `/run/luminos/npu.sock` | JSON | systemd |
-| luminos-classifier | `/run/luminos/classifier.sock` | JSON | systemd |
+| luminos-npu | `/run/luminos/npu.sock` | JSON | 📋 PLANNED — never created (audit 2026-06-10). No unit, no daemon code binds this socket. Blocked on Sentinel fine-tune. |
+| luminos-classifier | `/run/luminos/classifier.sock` | JSON | 📋 PLANNED — never created. Router shells out to `src/classifier/onnx_classifier.py` per-request instead. |
 | llama-server | `127.0.0.1:8080` | OpenAI REST | lazy, on first HIVE request |
 | hive-daemon | `127.0.0.1:8078` | HTTP JSON | popup-managed (SUPER+SPACE) |
 
@@ -70,7 +70,7 @@ Custom Arch Linux on ASUS ROG G14 GA403UU. Privacy-first, AI-native Windows repl
 | **Nexus** | Dolphin3.0-Llama3.1-8B-Q4_K_M | GPU (RTX 4050) | Uncensored coordinator | ✅ Active | 36.3 |
 | **Bolt** | Qwen2.5-Coder-7B-Q4_K_M | GPU (RTX 4050) | Expert coder | ✅ Active | 38.6 |
 | **Nova** | DeepSeek-R1-0528-Qwen3-8B-Q4_K_M | CPU (AI Mode) | Deep reasoning | ✅ Active | 10.3 |
-| **Sentinel** | MobileLLM-R1-140M-INT8.onnx | NPU (XDNA) | OS security | ✅ Active | — |
+| **Sentinel** | MobileLLM-R1-140M-INT8.onnx | NPU (XDNA) | OS security | 📋 Pending fine-tune (deliberately not deployed; Go sentinel runs rules_only Phase 1) | — |
 | **Eye** | Qwen2.5-VL-7B-Q4_K_M | GPU | Vision | 📋 Pending | — |
 
 **Backend:** `scripts/hive-daemon.py` port 8078 — routing, model lifecycle, inference
@@ -190,6 +190,7 @@ luminos-brain safe "<action>"
 | `~/.config/kwinoutputconfig.json` | `sharpness: 0.35`, `vrrPolicy: "Never"` | Intentional display tuning. |
 | `~/.local/share/applications/google-chrome.desktop` | Routes all Chrome launches through `chrome-luminos`. | AUR entry bypassed GPU picker. |
 | `~/.local/share/kio/servicemenus/luminos-gpu-*.desktop` | Dolphin right-click GPU picker for executables and .desktop files. | Universal GPU launcher (Decision 16). |
+| `/etc/systemd/system/luminos-{ai,power,router,sentinel,ram}.service` | `RuntimeDirectoryPreserve=yes` on all five (shared `/run/luminos` no longer wiped when one daemon restarts). luminos-ram: + `RuntimeDirectory=luminos` (was undeclared) + caps `CAP_SYS_PTRACE CAP_SYS_NICE CAP_KILL` (process_madvise/kill/setpriority were EPERM). | BUG-065/066/067. ⚠️ One-time daemon restart pending — see PENDING_RESTART.md. |
 
 ---
 
@@ -318,6 +319,9 @@ Task: [what was asked]" && git push origin main
 
 ## 14. Open Tasks
 
+0. **One-time restart of 5 Go daemons** after HOPE training finishes — activates BUG-065/066/067 fixes. See PENDING_RESTART.md. DO NOT do this while training runs.
+0a. Sentinel fine-tune: build training dataset (sentinel_*.jsonl, same pattern as nexus_*.jsonl), fine-tune MobileLLM-R1-140M, re-quantize INT8, THEN create `src/npu/npu_daemon.py` + `luminos-npu.service` (blocked 2026-06-10 by luminos-brain safe NO).
+0b. Fix `luminos-brain safe` to output the actual REASON for a block — currently returns unrelated canned incident lines (e.g. KWin fullscreen crash note when asked about an NPU file), making NO decisions unreviewable.
 1. Eye model download + wire vision route in hive-daemon.py
 2. KDE right-click service menus for HIVE (kcm_luminos_hive.so already installed)
 3. ydotool type-into-apps integration

@@ -16,6 +16,10 @@ SyslogIdentifier=luminos-power
 # Needs access to /sys/class/power_supply and /sys/class/hwmon.
 RuntimeDirectory=luminos
 RuntimeDirectoryMode=0755
+# [CHANGE: claude-code | 2026-06-10] BUG: /run/luminos is SHARED by 5 daemons.
+# Without Preserve, restarting any one of them wipes the dir and unlinks every
+# other daemon's socket (happened 2026-06-08: power restart killed ai/sentinel/ram sockets).
+RuntimeDirectoryPreserve=yes
 
 [Install]
 WantedBy=multi-user.target

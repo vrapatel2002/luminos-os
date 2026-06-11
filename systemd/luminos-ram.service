@@ -8,13 +8,23 @@ Type=simple
 ExecStart=/usr/local/bin/luminos-ram
 Restart=always
 RestartSec=5
-# Requires CAP_SYS_PTRACE for process_madvise
-CapabilityBoundingSet=CAP_SYS_PTRACE
-AmbientCapabilities=CAP_SYS_PTRACE
+# [CHANGE: claude-code | 2026-06-10] process_madvise(MADV_PAGEOUT) needs
+# CAP_SYS_NICE + CAP_SYS_PTRACE. SIGSTOP/SIGKILL of other-user processes needs
+# CAP_KILL. setpriority boost needs CAP_SYS_NICE. Old bounding set
+# (CAP_SYS_PTRACE only) stripped these from root — freeze/kill/madvise all
+# failed silently with EPERM.
+CapabilityBoundingSet=CAP_SYS_PTRACE CAP_SYS_NICE CAP_KILL
+AmbientCapabilities=CAP_SYS_PTRACE CAP_SYS_NICE CAP_KILL
 # Security hardening
 ProtectSystem=full
 PrivateTmp=true
 NoNewPrivileges=true
+# [CHANGE: claude-code | 2026-06-10] luminos-ram binds /run/luminos/ram.sock but
+# never declared the dir — it depended on other daemons creating it. Now
+# self-sufficient + Preserve (see luminos-power.service note on the shared-dir wipe bug).
+RuntimeDirectory=luminos
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
 
 [Install]
 WantedBy=multi-user.target

@@ -6,6 +6,32 @@
 
 ---
 
+## DECISION 19 — RuntimeDirectoryPreserve=yes on all shared-/run/luminos units + luminos-ram capability set
+Date: June 10, 2026
+Made by: claude-code
+**Status: INSTALLED — activates fully on one-time restart (PENDING_RESTART.md)**
+
+### The Decision
+1. All five Go daemon units (`luminos-ai`, `luminos-power`, `luminos-router`, `luminos-sentinel`, `luminos-ram`) get `RuntimeDirectoryPreserve=yes`. `luminos-ram` additionally declares `RuntimeDirectory=luminos` (it bound `/run/luminos/ram.sock` without ever declaring the dir).
+2. `luminos-ram` bounding set widened: `CAP_SYS_PTRACE` → `CAP_SYS_PTRACE CAP_SYS_NICE CAP_KILL`.
+
+### Why
+- systemd removes a RuntimeDirectory when its service stops. Five daemons SHARE `/run/luminos`, so the first restart wipes every sibling's socket. Proven incident: luminos-power restart 2026-06-08 07:07 unlinked ai.sock/sentinel.sock/ram.sock — daemons kept listening on dead inodes, clients got ENOENT for 2 days, silently (BUG-067).
+- `process_madvise(MADV_PAGEOUT)` requires CAP_SYS_NICE; SIGSTOP/SIGKILL of other-user processes requires CAP_KILL; setpriority requires CAP_SYS_NICE. The old bounding set stripped all three from root, so the RAM manager's freeze/kill/compress actions were EPERM no-ops (BUG-066) — invisible because madvise() was also a code stub (BUG-065) and syscall errors were unchecked.
+
+### What Was Rejected
+- **Per-daemon runtime dirs** (`/run/luminos-ram/` etc.): would fix the wipe but breaks every documented socket path in AGENTS.md §3, internal/config, and all clients. Too invasive.
+- **One owning service + others not declaring the dir:** fragile ordering dependency; a restart of the owner still wipes everyone.
+- **tmpfiles.d static dir:** works, but RuntimeDirectoryPreserve is the idiomatic single-line fix and keeps unit-file ownership of the path.
+- **Full caps for root (no bounding set):** unnecessary attack surface; the three named caps are the exact set the code needs.
+
+### Cross-references
+- BUG-065/066/067 → `docs/BUGS.md`
+- `AGENTS.md §9` row for the five unit files
+- `PENDING_RESTART.md` — restart deliberately deferred (HOPE training in progress)
+
+---
+
 ## DECISION 18 — NVreg_DynamicPowerManagement=0x02 vs Chrome NVIDIA P-State Conflict
 Date: May 28, 2026
 Made by: claude-code

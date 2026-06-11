@@ -1,7 +1,38 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-05-30 (BUG-064: MT5 desktop file pointing to plain Wine → NVIDIA wakeup)
+Last Updated: 2026-06-10 (BUG-065/066/067: luminos-ram madvise stub, capability bounding set, shared RuntimeDirectory wipe)
 
 ## Fixed Bugs (new)
+
+### BUG-067 — Shared RuntimeDirectory: restarting one daemon unlinks every other daemon's socket
+- Status: FIXED (config installed; takes effect now — already-unlinked sockets need the one-time restart in PENDING_RESTART.md)
+- Severity: HIGH
+- Component: systemd units — luminos-ai, luminos-power, luminos-router, luminos-sentinel, luminos-ram
+- Description: All daemons share `RuntimeDirectory=luminos` (/run/luminos). When luminos-power restarted on 2026-06-08 07:07, systemd removed and recreated /run/luminos, unlinking ai.sock, sentinel.sock, and ram.sock. The daemons kept listening on unlinked inodes (visible in `ss -xl`), but any client connecting by path got ENOENT. Sentinel→AI threat reports and the RAM widget were silently dead for 2 days.
+- Root Cause: systemd removes a RuntimeDirectory on service stop by default. With a SHARED directory, the first service to stop destroys every sibling's socket. luminos-ram additionally never declared RuntimeDirectory at all — it depended on the other units creating the dir first.
+- Fix Applied: `RuntimeDirectoryPreserve=yes` added to all five units (repo `systemd/` + `/etc/systemd/system/`), and `RuntimeDirectory=luminos` added to luminos-ram so it is self-sufficient. `systemctl daemon-reload` done. NOT restarted (HOPE model training in progress) — see PENDING_RESTART.md.
+- Date Found: 2026-06-10
+- Date Fixed: 2026-06-10
+
+### BUG-066 — luminos-ram capability bounding set stripped CAP_KILL/CAP_SYS_NICE — freeze/kill/boost silently EPERM
+- Status: FIXED (unit installed; takes effect on next service start — see PENDING_RESTART.md)
+- Severity: HIGH
+- Component: systemd/luminos-ram.service
+- Description: The unit ran the daemon as root but with `CapabilityBoundingSet=CAP_SYS_PTRACE`, which strips ALL other capabilities — including CAP_KILL (SIGSTOP/SIGCONT/SIGKILL of other users' processes), CAP_SYS_NICE (setpriority boost AND process_madvise(MADV_PAGEOUT)). Every freeze/thaw/cold-kill/priority action failed with EPERM, and all those syscall errors were ignored in code (audit finding), so nothing was ever logged.
+- Root Cause: Bounding set chosen when madvise() was still a stub (BUG-065) — nothing exercised the missing capabilities, so the gap was invisible.
+- Fix Applied: `CapabilityBoundingSet=CAP_SYS_PTRACE CAP_SYS_NICE CAP_KILL` + matching AmbientCapabilities.
+- Date Found: 2026-06-10
+- Date Fixed: 2026-06-10
+
+### BUG-065 — luminos-ram madvise() was a stub: every MADV_PAGEOUT in the eviction pipeline was a no-op
+- Status: FIXED (binary installed; takes effect on next service start — see PENDING_RESTART.md)
+- Severity: CRITICAL
+- Component: cmd/luminos-ram/main.go
+- Description: `madvise(pid, hint)` logged a debug line for MADV_WILLNEED and returned nil. All call sites — evictLast() hot→cold eviction, bottom-tier compression, Chrome renderer compression — did nothing. The madvPageoutCounter metric incremented anyway, so telemetry claimed compression was happening. The RAM manager's core memory-reclaim function never existed.
+- Root Cause: Stub left in during v3.0 development; metric increments masked it.
+- Fix Applied: Real `process_madvise(2)` implementation — `pidfd_open` on target, iovecs built from /proc/<pid>/maps (readable private mappings, kernel special mappings skipped), chunked at UIO_MAXIOV=1024. MADV_WILLNEED EINVAL treated as soft-miss for older kernels. Also fixed in same pass: D-Bus AddMatch errors now logged (silent focus-tracking death), session-bus connection cached instead of re-dialed every 3s tick, getChildPIDs() rewritten from full /proc/*/stat scan (O(all processes), direct children only — never found Chrome renderers, which hang off the zygote) to recursive /proc/<pid>/task/*/children walk (O(descendants), full tree).
+- Verification: standalone test against a 64MB perl process — RSS 70,412 KB → 2,420 KB (68 MB reclaimed to zram) via the exact same code path.
+- Date Found: 2026-06-10
+- Date Fixed: 2026-06-10
 
 ### BUG-064 — MT5 KDE launcher waking NVIDIA GPU
 - Status: FIXED

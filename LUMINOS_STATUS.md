@@ -1,6 +1,9 @@
 # Luminos OS — System Status
-Last updated: 2026-05-24
-Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome Wayland, touchpad log fix, display sharpness, Hz toggle)
+Last updated: 2026-06-10
+Agent: claude-code (audit + fixes: luminos-ram process_madvise BUG-065/066, RuntimeDirectory wipe BUG-067, NPU status corrected)
+
+> ⚠️ **PENDING_RESTART.md exists** — installed fixes need a one-time daemon restart
+> AFTER HOPE training finishes. Do not restart anything while training runs.
 
 ## System
 | Component | Status | Notes |
@@ -24,7 +27,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | **Nexus** | Dolphin3-Llama3.1-8B | GPU | Coordinator (Uncensored) | ✅ Active (36.3 TPS) |
 | **Bolt** | Qwen2.5-Coder-7B | GPU | Expert Coder | ✅ Active (38.6 TPS) |
 | **Nova** | DeepSeek-R1-0528-8B | CPU/GPU | Deep Thinker | ✅ Active (10.3 TPS CPU) |
-| **Sentinel**| MobileLLM-140M | NPU | OS Security | ✅ Active |
+| **Sentinel**| MobileLLM-140M | NPU | OS Security | 📋 Pending fine-tune (deliberate — model held back until custom training; no NPU service running. NPU hw/driver verified ✅) |
 | **Eye** | Qwen2.5-VL-7B | GPU | Vision | 📋 Pending |
 
 ## Max Speed Geometry (G14/4050)
@@ -36,8 +39,8 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 ## AI Stack
 | Component | Status | Notes |
 |---|---|---|
-| HATS + triton-xdna | ✅ Working | NPU inference |
-| MobileLLM-R1-140M INT8 | ✅ Working | 64MB, 800MB budget |
+| HATS + triton-xdna | ⚪ Verified 2026-04, not in production | xclbin compile proof in ~/.triton/cache; no daemon consumes it yet (Phase 3). luminos-npu.service / luminos-classifier.service from AGENTS.md §3 were never created. |
+| MobileLLM-R1-140M INT8 | 📋 Pending fine-tune | 64MB quantized weights on disk; deliberately not deployed until custom Sentinel training done |
 | VRAM Watchdog | ✅ Working | Auto-evict if >90% usage |
 | llama.cpp TurboQuant | ✅ Working | turbo4 (type_k=12, type_v=12) |
 | HIVE Idle Watchdog | ✅ Working | Auto-unloads models after 5 mins |
@@ -87,7 +90,7 @@ Agent: claude-code (session 2 — fan curve v3.2, universal GPU launcher, Chrome
 | luminos-power | ✅ Running | v4.1 Adaptive Dual Governor + Thermal Burst Cooling + Resource Coordinator. Burst: 52°C→100% fans until 40°C. RAM pressure → effective load modifier. SPI log. |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
-| luminos-ram | ✅ Running | v3.0 — LIRS IRR ranking, N=8 HotSet, OnScreen protection, memory pressure monitor |
+| luminos-ram | ⚠️ Running OLD binary | v3.5 fix installed (real process_madvise — BUG-065/066) but old stub binary still in memory; activates on one-time restart (PENDING_RESTART.md). Sockets ai/sentinel/ram unlinked since 2026-06-08 (BUG-067) until same restart. |
 
 ## Compatibility
 | Component | Status | Notes |
