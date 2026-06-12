@@ -1,9 +1,6 @@
 # Luminos OS — System Status
-Last updated: 2026-06-10
-Agent: claude-code (audit + fixes: luminos-ram process_madvise BUG-065/066, RuntimeDirectory wipe BUG-067, NPU status corrected)
-
-> ⚠️ **PENDING_RESTART.md exists** — installed fixes need a one-time daemon restart
-> AFTER HOPE training finishes. Do not restart anything while training runs.
+Last updated: 2026-06-12
+Agent: claude-code (HOPE training finished → one-time daemon restart done, BUG-065/066/067 fixes ACTIVE; training-mode overrides reverted; new `luminos-train-mode` script)
 
 ## System
 | Component | Status | Notes |
@@ -90,7 +87,7 @@ Agent: claude-code (audit + fixes: luminos-ram process_madvise BUG-065/066, Runt
 | luminos-power | ✅ Running | v4.1 Adaptive Dual Governor + Thermal Burst Cooling + Resource Coordinator. Burst: 52°C→100% fans until 40°C. RAM pressure → effective load modifier. SPI log. |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
-| luminos-ram | ⚠️ Running OLD binary | v3.5 fix installed (real process_madvise — BUG-065/066) but old stub binary still in memory; activates on one-time restart (PENDING_RESTART.md). Sockets ai/sentinel/ram unlinked since 2026-06-08 (BUG-067) until same restart. |
+| luminos-ram | ✅ Running v3.5 | Real process_madvise + caps CAP_KILL/CAP_SYS_NICE active (BUG-065/066 fixed 2026-06-12 restart). All /run/luminos sockets rebound (BUG-067). |
 
 ## Compatibility
 | Component | Status | Notes |
@@ -127,13 +124,13 @@ Agent: claude-code (audit + fixes: luminos-ram process_madvise BUG-065/066, Runt
 | Thermal oscillation | ✅ Fixed | BUG-048: Removed auto-Performance switching, 45°C target, EPP-based control, hysteresis |
 | Display smoothness | ⚪ VRR reverted | BUG-051 fix was VRR=Automatic+KWin LatencyPolicy=Low; user reverted VRR to Never (intentional) |
 | Memory leak detection | ✅ Active | Alerts for background growth (BUG-049) |
-| Firefox WhiteSur | 📋 Pending | Profile issue |
+| Firefox WhiteSur | ❌ Dropped | macOS theming removed 2026-06-11 (BUG-068); Firefox not installed |
 
 ## Open Tasks (Priority Order)
 1. Eye model download + wire vision route in hive-daemon.py
 2. KDE right-click service menus for HIVE (kcm_luminos_hive.so already installed)
 3. ydotool type-into-apps integration
-4. Firefox WhiteSur theme
+4. ~~Firefox WhiteSur theme~~ — dropped (BUG-068, macOS theming removed)
 5. HIVE chat web panel (Flask localhost:7437)
 6. Go orchestrator (replace Python hive-daemon.py)
 7. Zone indicator Plasma widget

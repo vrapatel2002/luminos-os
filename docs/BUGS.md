@@ -1,11 +1,11 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-06-11 (BUG-069: luminos-power GPU TGP feature is a silent no-op; BUG-068: incomplete Tahoe revert)
+Last Updated: 2026-06-12 (BUG-065/066/067 ACTIVE after post-training daemon restart; BUG-069 workaround reverted, luminos-train-mode created)
 
 ## Open Bugs
 
 ### BUG-069 — luminos-power v4.2 GPU TGP switching is a silent no-op: `nvidia-smi -pl` unsupported on mobile but exits 0
 <!-- [CHANGE: claude-code | 2026-06-11] -->
-- Status: OPEN (workaround active; code fix blocked on post-training daemon restart — PENDING_RESTART.md)
+- Status: OPEN (code fix pending; workaround reverted 2026-06-12 — nvidia-powerd re-masked. Reusable interim: `scripts/luminos-train-mode` on/off wraps nvidia-powerd + 100% fan pin for training runs)
 - Severity: HIGH
 - Component: cmd/luminos-power/main.go (setGPUTGP, line ~1304)
 - Description: The v4.2 "GPU TGP dynamic switching" feature (55W↔90W, shipped 2026-06-03) never changed the GPU power limit once. `nvidia-smi -pl 90` on the mobile RTX 4050 prints "Changing power management limit is not supported … Treating as warning and moving on" and **exits 0**, so `runCmd` sees success and the daemon logs "GPU TGP → 90W" while hardware stays at 55W. All TGP log lines since 2026-06-03 are fiction; the daemon's internal state (`currentGPUTGPW=90`) diverges from reality, which also suppresses retry attempts. Discovered during HOPE training: GPU pegged at 55.0W/55W limit, P0, 92% util, clocks 2385/3105 MHz.
@@ -28,7 +28,7 @@ Last Updated: 2026-06-11 (BUG-069: luminos-power GPU TGP feature is a silent no-
 - Date Fixed: 2026-06-11
 
 ### BUG-067 — Shared RuntimeDirectory: restarting one daemon unlinks every other daemon's socket
-- Status: FIXED (config installed; takes effect now — already-unlinked sockets need the one-time restart in PENDING_RESTART.md)
+- Status: FIXED — ACTIVE (one-time daemon restart done 2026-06-12; all /run/luminos sockets rebound and verified)
 - Severity: HIGH
 - Component: systemd units — luminos-ai, luminos-power, luminos-router, luminos-sentinel, luminos-ram
 - Description: All daemons share `RuntimeDirectory=luminos` (/run/luminos). When luminos-power restarted on 2026-06-08 07:07, systemd removed and recreated /run/luminos, unlinking ai.sock, sentinel.sock, and ram.sock. The daemons kept listening on unlinked inodes (visible in `ss -xl`), but any client connecting by path got ENOENT. Sentinel→AI threat reports and the RAM widget were silently dead for 2 days.
@@ -38,7 +38,7 @@ Last Updated: 2026-06-11 (BUG-069: luminos-power GPU TGP feature is a silent no-
 - Date Fixed: 2026-06-10
 
 ### BUG-066 — luminos-ram capability bounding set stripped CAP_KILL/CAP_SYS_NICE — freeze/kill/boost silently EPERM
-- Status: FIXED (unit installed; takes effect on next service start — see PENDING_RESTART.md)
+- Status: FIXED — ACTIVE (daemon restart 2026-06-12; caps verified: cap_kill cap_sys_ptrace cap_sys_nice)
 - Severity: HIGH
 - Component: systemd/luminos-ram.service
 - Description: The unit ran the daemon as root but with `CapabilityBoundingSet=CAP_SYS_PTRACE`, which strips ALL other capabilities — including CAP_KILL (SIGSTOP/SIGCONT/SIGKILL of other users' processes), CAP_SYS_NICE (setpriority boost AND process_madvise(MADV_PAGEOUT)). Every freeze/thaw/cold-kill/priority action failed with EPERM, and all those syscall errors were ignored in code (audit finding), so nothing was ever logged.
@@ -48,7 +48,7 @@ Last Updated: 2026-06-11 (BUG-069: luminos-power GPU TGP feature is a silent no-
 - Date Fixed: 2026-06-10
 
 ### BUG-065 — luminos-ram madvise() was a stub: every MADV_PAGEOUT in the eviction pipeline was a no-op
-- Status: FIXED (binary installed; takes effect on next service start — see PENDING_RESTART.md)
+- Status: FIXED — ACTIVE (v3.5 binary running since 2026-06-12 restart)
 - Severity: CRITICAL
 - Component: cmd/luminos-ram/main.go
 - Description: `madvise(pid, hint)` logged a debug line for MADV_WILLNEED and returned nil. All call sites — evictLast() hot→cold eviction, bottom-tier compression, Chrome renderer compression — did nothing. The madvPageoutCounter metric incremented anyway, so telemetry claimed compression was happening. The RAM manager's core memory-reclaim function never existed.

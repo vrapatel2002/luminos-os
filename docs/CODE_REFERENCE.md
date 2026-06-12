@@ -65,6 +65,7 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 - `scripts/luminos-120hz` — Switch display to 120Hz (same mechanism; deployed to /usr/local/bin/luminos-120hz)
 - `scripts/luminos-gpu-launch` — Universal GPU picker (kdialog; AMD or NVIDIA env vars; deployed to /usr/local/bin/luminos-gpu-launch)
 - `scripts/luminos-nvidia-run` — Wake NVIDIA from PCI power gate + set PRIME env vars + exec; deployed to /usr/local/bin/luminos-nvidia-run
+- `scripts/luminos-train-mode` — ML-training max-perf toggle (`on [pgrep-pattern]`/`off`/`status`): nvidia-powerd Dynamic Boost 55→88W + 100% fan pin via keep-alive transient unit, auto-off when watched process exits; BUG-069 interim; deployed to /usr/local/bin/luminos-train-mode
 
 ### KDE Service Menus (~/.local/share/kio/servicemenus/)
 - `luminos-gpu-select.desktop` — Dolphin right-click for executables/ELF: "Ask GPU...", "Run on AMD", "Run on NVIDIA RTX 4050"

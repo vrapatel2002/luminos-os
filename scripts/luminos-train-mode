@@ -1,0 +1,83 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-06-12] luminos-train-mode — max GPU performance for ML training runs.
+#
+# Packages the validated HOPE-training setup (2026-06-11, BUG-069 context):
+#   on  → unmask+start nvidia-powerd (Dynamic Boost: GPU TGP 55W → up to ~88W)
+#         + pin all fans at 100% via a keep-alive transient unit (re-asserts
+#         every 60s because luminos-power re-applies fan curve v5 on
+#         profile/thermal-zone transitions)
+#   off → stop fan lock, restore fan curve v5, stop+mask nvidia-powerd
+#         (masked by default: idle-drain policy, BUG-047 era)
+#
+# Usage:
+#   luminos-train-mode on [pgrep-pattern]   # with pattern: auto-off when the
+#                                           # matching process exits
+#   luminos-train-mode off
+#   luminos-train-mode status
+#
+# Measured effect on HOPE training (RTX 4050, 2026-06-11): power limit 55→88W,
+# SM clocks 2385→2655 MHz (+11%), GPU temp 85→71°C with fans pinned.
+# NOTE: nvidia-smi -pl does NOT work on this mobile GPU (BUG-069) — nvidia-powerd
+# is the only functioning TGP mechanism on the GA403UU.
+
+set -u
+
+UNIT="luminos-train-mode-fanlock"
+FLAT="30c:100%,40c:100%,45c:100%,50c:100%,60c:100%,70c:100%,80c:100%,90c:100%"
+# Fan curve v5 (AGENTS.md §12)
+V5_CPUGPU="30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%"
+V5_MID="30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%"
+
+apply_curves() { # $1 = cpu/gpu curve, $2 = mid curve
+    asusctl fan-curve --mod-profile balanced --fan cpu --data "$1" >/dev/null 2>&1
+    asusctl fan-curve --mod-profile balanced --fan gpu --data "$1" >/dev/null 2>&1
+    asusctl fan-curve --mod-profile balanced --fan mid --data "$2" >/dev/null 2>&1
+    asusctl fan-curve --mod-profile balanced --enable-fan-curves true >/dev/null 2>&1
+}
+
+case "${1:-}" in
+on)
+    WATCH="${2:-}"
+    echo "→ enabling NVIDIA Dynamic Boost (nvidia-powerd)"
+    sudo systemctl unmask nvidia-powerd >/dev/null
+    sudo systemctl start nvidia-powerd
+    echo "→ pinning fans at 100% (keep-alive: $UNIT)"
+    systemd-run --user --unit="$UNIT" "$0" _fanloop "$WATCH" >/dev/null 2>&1
+    echo "✅ training mode ON. Disable with: luminos-train-mode off"
+    [ -n "$WATCH" ] && echo "   (auto-off when no process matches: pgrep -f '$WATCH')"
+    ;;
+off)
+    echo "→ stopping fan lock + restoring fan curve v5"
+    systemctl --user stop "$UNIT" 2>/dev/null
+    apply_curves "$V5_CPUGPU" "$V5_MID"
+    echo "→ re-masking nvidia-powerd (idle-drain policy)"
+    sudo systemctl stop nvidia-powerd 2>/dev/null
+    sudo systemctl mask nvidia-powerd >/dev/null
+    echo "✅ training mode OFF — system back to normal power policy"
+    ;;
+status)
+    echo "nvidia-powerd : $(systemctl is-active nvidia-powerd 2>/dev/null) ($(systemctl is-enabled nvidia-powerd 2>/dev/null))"
+    echo "fan lock      : $(systemctl --user is-active "$UNIT" 2>/dev/null)"
+    nvidia-smi --query-gpu=pstate,power.draw,temperature.gpu,clocks.sm --format=csv,noheader 2>/dev/null
+    sensors 2>/dev/null | grep -iE "^cpu_fan|^gpu_fan|^mid_fan"
+    ;;
+_fanloop)
+    # internal: keep-alive loop run by the transient unit
+    WATCH="${2:-}"
+    while :; do
+        if [ -n "$WATCH" ] && ! pgrep -f "$WATCH" >/dev/null 2>&1; then
+            break
+        fi
+        apply_curves "$FLAT" "$FLAT"
+        sleep 60
+    done
+    apply_curves "$V5_CPUGPU" "$V5_MID"
+    sudo systemctl stop nvidia-powerd 2>/dev/null
+    sudo systemctl mask nvidia-powerd >/dev/null 2>&1
+    echo "watch target gone — fan curve v5 restored, nvidia-powerd re-masked"
+    ;;
+*)
+    echo "usage: luminos-train-mode on [pgrep-pattern] | off | status"
+    exit 1
+    ;;
+esac
