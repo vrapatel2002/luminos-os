@@ -34,6 +34,6 @@ User-requested max-performance state for HOPE training (BUG-069 context):
 | Override | Applied | Revert with |
 |---|---|---|
 | `nvidia-powerd` unmasked + started (Dynamic Boost 55→90W — only working TGP mechanism; daemon's nvidia-smi -pl is a no-op, see BUG-069) | 2026-06-11 | `sudo systemctl stop nvidia-powerd && sudo systemctl mask nvidia-powerd` (was masked for idle-drain reasons, BUG-047 era) |
-| Flat 100% fan curves (cpu/gpu/mid) on Balanced profile via asusctl | 2026-06-11 | Automatic — luminos-power re-applies fan curve v5 on its restart (above) or any profile switch |
+| Fan lock: transient user unit `luminos-train-fanlock` (`/tmp/luminos-train-fanlock.sh`) re-asserts flat 100% curves on Balanced every 60s — needed because luminos-power clobbers manual curves on profile/zone transitions | 2026-06-11 | Automatic — unit watches `pgrep -f scripts/train.py`, exits when training ends and restores fan curve v5 itself. Manual stop: `systemctl --user stop luminos-train-fanlock` (also restores v5 via script exit path only if training ended; otherwise re-run apply v5 per AGENTS.md §12) |
 
 Then delete this file and update LUMINOS_STATUS.md.
