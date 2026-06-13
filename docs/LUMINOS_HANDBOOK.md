@@ -1037,6 +1037,21 @@ ZRAM creates a compressed in-memory swap device. Compressed pages use ~30–50% 
 
 ZRAM is configured separately from luminos-ram (via systemd or `/etc/fstab`). luminos-ram uses `MADV_PAGEOUT` to proactively push cold pages to ZRAM before the kernel does so reactively.
 
+**Caveat — ZRAM is NOT a spill valve.** ZRAM compresses cold pages back into the *same* RAM, so it cannot relieve a genuine RAM shortage — under real anonymous-memory pressure there is nowhere for pages to go and the kernel OOM-kills. This bit ML training: a ~7.6GB memmap dataset + DataLoader pinned buffers exhausted RAM and the run was SIGKILLed with no traceback (BUG-070). For training, use the toggle below to add a *real* disk spill valve temporarily.
+
+### 9.2a luminos-train-ram (training RAM headroom — reversible)
+
+`luminos-train-ram` is the CPU/RAM companion to `luminos-train-mode` (GPU power+fans). It is a strict toggle — normal desktop memory policy is untouched until you turn it on, and `off` restores the exact baseline. Nothing is written to `/etc/fstab` or `/etc/sysctl.d`.
+
+```
+luminos-train-ram on                 # add low-prio /swapfile.train (16G, not in fstab) + vm.swappiness 60→10
+luminos-train-ram run -- python scripts/train.py ...   # on → run in a memory cgroup → off (clean-fail)
+luminos-train-ram off                # remove swapfile + restore swappiness
+luminos-train-ram status
+```
+
+Run it alongside `luminos-train-mode on` for a full training session (RAM + GPU). swappiness 10 makes the kernel reclaim the reclaimable memmap page cache before the trainer's working set; the low-priority swapfile sits below ZRAM so ZRAM is still used first and the disk file only catches true overflow. See BUG-070 / Decision 20.
+
 ### 9.3 KSM (Kernel Samepage Merging)
 
 KSM scans anonymous memory pages and deduplicates identical ones. Useful when multiple instances of the same app are running (e.g., multiple Chrome renderer processes with identical code pages).

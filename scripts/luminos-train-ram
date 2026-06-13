@@ -1,0 +1,144 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-06-13] luminos-train-ram — TEMPORARY RAM headroom for ML training.
+#
+# Sister to luminos-train-mode (which handles GPU power + fans). This handles the
+# CPU-side data pipeline. Like train-mode, it is a strict ON/OFF toggle: `off`
+# returns the machine to the exact normal-desktop state. NOTHING here is permanent:
+#   - swapfile is a runtime file, NOT added to /etc/fstab (also gone on reboot)
+#   - swappiness is set with `sysctl -w` (runtime only, NOT written to /etc/sysctl.d)
+#   - luminos-ram is left running; no daemon recompile, no /etc changes
+#
+# WHY (root cause, 2026-06-13):
+#   Training crashes were blamed on VRAM but the GPU was idle (1.9/6 GB). The
+#   killer is the CPU/RAM side: the dataset is a ~7.6 GB memmap, and the box has
+#   14 GB RAM with ONLY zram swap (prio 100). zram is compressed RAM — it is NOT
+#   a real spill valve, so when anonymous/pinned memory (DataLoader pin_memory
+#   staging buffers, optimizer state, python heap) grows, the kernel has nowhere
+#   to push cold pages → OOM-killer SIGKILLs the run instantly, no traceback.
+#
+# WHAT this does while ON:
+#   1. Adds a real on-disk swapfile at LOW priority (below zram): a genuine spill
+#      valve so anon pressure degrades to "slow" instead of "killed".
+#   2. Lowers vm.swappiness so the kernel reclaims the (cheap, re-readable) memmap
+#      page cache FIRST and keeps the trainer's working set resident.
+#   3. (optional `run`) launches the trainer inside a memory cgroup so a runaway
+#      data-path dies cleanly in its OWN cgroup instead of taking down Plasma.
+#
+# NOTE: this is the RAM-side interim companion to BUG-069 / luminos-train-mode.
+#       For a full training session run BOTH:  luminos-train-mode on  +  luminos-train-ram on
+#
+# Usage:
+#   luminos-train-ram on                  # add swap + tune (prints the run line)
+#   luminos-train-ram off                 # remove swap + restore everything
+#   luminos-train-ram status
+#   luminos-train-ram run -- <cmd...>     # on → run <cmd> in a memory cgroup → off
+
+set -u
+
+SWAPFILE="/swapfile.train"           # distinct name — never touches a user swapfile
+SWAP_GB="${LUMINOS_TRAIN_SWAP_GB:-16}"
+SWAP_PRIO=5                          # zram is prio 100 → zram used first, disk spill second
+STATE_DIR="/run/luminos-train-ram"   # tmpfs — saved baseline for clean restore
+SWAPPINESS_TRAIN="${LUMINOS_TRAIN_SWAPPINESS:-10}"
+CG_HIGH="${LUMINOS_TRAIN_CG_HIGH:-11G}"     # soft throttle: reclaim hard before global OOM
+CG_MAX="${LUMINOS_TRAIN_CG_MAX:-12500M}"    # hard cap: trainer OOMs in its cgroup, not Plasma
+
+need_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        exec sudo -E "$0" "$@"
+    fi
+}
+
+swap_on() {
+    if swapon --show=NAME --noheadings | grep -qx "$SWAPFILE"; then
+        echo "→ swapfile already active: $SWAPFILE"
+        return 0
+    fi
+    if [ ! -f "$SWAPFILE" ]; then
+        echo "→ creating ${SWAP_GB}G swapfile at $SWAPFILE (ext4, runtime-only)"
+        # fallocate is instant on ext4; fall back to dd if the FS rejects it
+        if ! fallocate -l "${SWAP_GB}G" "$SWAPFILE" 2>/dev/null; then
+            dd if=/dev/zero of="$SWAPFILE" bs=1M count=$((SWAP_GB*1024)) status=progress
+        fi
+        chmod 600 "$SWAPFILE"
+        mkswap "$SWAPFILE" >/dev/null
+    fi
+    swapon --priority "$SWAP_PRIO" "$SWAPFILE"
+    echo "✅ swap added (prio $SWAP_PRIO, below zram@100)"
+}
+
+swap_off() {
+    if swapon --show=NAME --noheadings | grep -qx "$SWAPFILE"; then
+        echo "→ swapoff $SWAPFILE (this can take a moment if pages are in use)"
+        swapoff "$SWAPFILE"
+    fi
+    if [ -f "$SWAPFILE" ]; then
+        rm -f "$SWAPFILE"
+        echo "✅ swapfile removed — no trace, not in fstab"
+    fi
+}
+
+tune_on() {
+    mkdir -p "$STATE_DIR"
+    if [ ! -f "$STATE_DIR/swappiness.orig" ]; then
+        cat /proc/sys/vm/swappiness > "$STATE_DIR/swappiness.orig"
+    fi
+    sysctl -w "vm.swappiness=$SWAPPINESS_TRAIN" >/dev/null
+    echo "✅ vm.swappiness → $SWAPPINESS_TRAIN (was $(cat "$STATE_DIR/swappiness.orig"); reclaim memmap cache before trainer)"
+}
+
+tune_off() {
+    local orig=60
+    [ -f "$STATE_DIR/swappiness.orig" ] && orig="$(cat "$STATE_DIR/swappiness.orig")"
+    sysctl -w "vm.swappiness=$orig" >/dev/null
+    rm -rf "$STATE_DIR"
+    echo "✅ vm.swappiness restored → $orig"
+}
+
+case "${1:-}" in
+on)
+    need_root on
+    swap_on
+    tune_on
+    echo
+    echo "Training mode (RAM) is ON. For the GPU side too:  luminos-train-mode on"
+    echo "Recommended launch (clean-fail in its own cgroup):"
+    echo "  luminos-train-ram run -- python scripts/train.py --workers 0 ..."
+    echo "Disable with:  luminos-train-ram off"
+    ;;
+off)
+    need_root off
+    swap_off
+    tune_off
+    echo "✅ RAM training mode OFF — desktop back to normal (zram-only, swappiness 60)"
+    ;;
+status)
+    echo "swapfile      : $(swapon --show=NAME,SIZE,USED,PRIO --noheadings | grep "$SWAPFILE" || echo 'not active')"
+    echo "all swap      :"; swapon --show
+    echo "swappiness    : $(cat /proc/sys/vm/swappiness)  (normal=60, training=$SWAPPINESS_TRAIN)"
+    echo "mem free      :"; free -h | sed 's/^/  /'
+    ;;
+run)
+    shift
+    [ "${1:-}" = "--" ] && shift
+    if [ $# -eq 0 ]; then echo "usage: luminos-train-ram run -- <command...>"; exit 1; fi
+    need_root run -- "$@"
+    swap_on; tune_on
+    echo "→ launching in memory cgroup (MemoryHigh=$CG_HIGH MemoryMax=$CG_MAX): $*"
+    # Run as the invoking (pre-sudo) user if available, else current user.
+    RUN_USER="${SUDO_USER:-$(id -un)}"
+    systemd-run --scope --uid="$RUN_USER" --gid="$RUN_USER" \
+        -p "MemoryHigh=$CG_HIGH" -p "MemoryMax=$CG_MAX" \
+        --setenv=HOME="$(getent passwd "$RUN_USER" | cut -d: -f6)" \
+        -- "$@"
+    rc=$?
+    echo "→ command exited (rc=$rc) — tearing down RAM training mode"
+    swap_off; tune_off
+    exit $rc
+    ;;
+*)
+    echo "usage: luminos-train-ram on | off | status | run -- <command...>"
+    echo "  (companion to luminos-train-mode, which handles GPU power + fans)"
+    exit 1
+    ;;
+esac

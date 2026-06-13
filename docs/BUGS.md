@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-06-12 (BUG-065/066/067 ACTIVE after post-training daemon restart; BUG-069 workaround reverted, luminos-train-mode created)
+Last Updated: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; luminos-train-ram toggle created)
 
 ## Open Bugs
 
@@ -15,6 +15,18 @@ Last Updated: 2026-06-12 (BUG-065/066/067 ACTIVE after post-training daemon rest
 - Date Found: 2026-06-11
 
 ## Fixed Bugs (new)
+
+### BUG-070 — Training OOM-killed with no traceback: zram-only swap is not a real spill valve
+<!-- [CHANGE: claude-code | 2026-06-13] -->
+- Status: FIXED (luminos-os side mitigated by reversible toggle; app-side data-path fix owned by the hope-llm repo)
+- Severity: HIGH
+- Component: system memory policy (swap) + ML training interaction (`~/hope-llm/scripts/train.py`, `~/hope-llm/src/dataset.py`)
+- Description: HOPE training was SIGKILLed mid-run with no Python traceback ("just gone"). Blamed on VRAM, but the GPU was idle (1880MB / 6GB — see `~/hope-llm/cosmo_train.log`). Real exhaustion is CPU/RAM-side: dataset is a 7.6GB uint16 memmap (`data_cosmo/train.npy`, 3.795B tokens) and the DataLoader ran `--workers 2 pin_memory=True shuffle=True`. For a pre-tokenized memmap, `__getitem__` is a slice+cast — workers add fork + IPC + per-worker page-locked pin buffers (×prefetch_factor) + a ~237MB RandomSampler permutation, for ~zero throughput gain. On 14GB RAM with **only zram swap (prio 100, compressed RAM, no disk spill)**, anon/pinned pressure has nowhere to go → instant global OOM-kill.
+- Root Cause: (1) No real disk swap — zram compresses cold pages back into the same RAM, so it can't relieve true RAM exhaustion. (2) App data-path over-allocates (workers/pin) for a workload that doesn't benefit. `luminos-ram` was investigated and RULED OUT: its evict/freeze/kill sets are window-keyed (KWin focus) and `isSafeToFreeze` bails at CPU>5%, so a headless busy trainer isn't its target.
+- Fix Applied (luminos-os side, reversible): `scripts/luminos-train-ram` toggle. ON = low-priority on-disk swapfile (`/swapfile.train`, default 16G, **not** in fstab) + `vm.swappiness` 60→10 (reclaim the reclaimable memmap page cache before the trainer's anon set) + optional memory-cgroup `run` (clean cgroup-OOM instead of nuking Plasma). OFF = removes swapfile, restores swappiness exactly. Verified add/revert leaves the zram-only / swappiness-60 baseline with no leftover. NOTHING permanent (no /etc, fstab, or sysctl.d) — normal desktop policy unchanged.
+- App-side fix (OWNED BY hope-llm repo, NOT this repo — DONE + benchmarked 2026-06-13): replaced DataLoader/workers/pin/RandomSampler with a vectorized `get_batch` (torch.randint offsets into the uint16 memmap, int32 on CPU → int64 on GPU). Result: 4,383 tok/s (was ~3,700), peak anon RAM 1.29GB / 14GB, swap flat → swapfile confirmed a safety net, not load-bearing. CORRECTION to earlier advice: on this 6GB GPU, raising seq_len does NOT help throughput (DGD memory-kernel activations scale with batch×seq and aren't cut by attention-only grad-ckpt) — seq_len is a quality lever; batch size (ceiling 8 at seq 128) is the throughput lever.
+- Date Found: 2026-06-13
+- Date Fixed: 2026-06-13
 
 ### BUG-068 — Incomplete Tahoe revert: GTK ran WhiteSur-Dark + Kvantum pinned to MacTahoe for a month
 <!-- [CHANGE: claude-code | 2026-06-11] -->

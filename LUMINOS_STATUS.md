@@ -1,6 +1,6 @@
 # Luminos OS — System Status
-Last updated: 2026-06-12
-Agent: claude-code (HOPE training finished → one-time daemon restart done, BUG-065/066/067 fixes ACTIVE; training-mode overrides reverted; new `luminos-train-mode` script)
+Last updated: 2026-06-13
+Agent: claude-code (BUG-070 FIXED — training OOM root-caused to zram-only swap; new reversible `luminos-train-ram` toggle (temp swapfile + swappiness, fully reverts) deployed alongside `luminos-train-mode`. Decision 20)
 
 ## System
 | Component | Status | Notes |

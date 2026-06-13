@@ -231,6 +231,7 @@ luminos-brain safe "<action>"
 | `scripts/luminos-gpu-launch` | GPU picker for any app |
 | `scripts/luminos-nvidia-run` | Wake NVIDIA PCI gate + PRIME env + exec |
 | `scripts/luminos-train-mode` | ML training max-perf toggle: nvidia-powerd Dynamic Boost (55→88W) + 100% fan pin w/ keep-alive; `on [pgrep-pattern]`/`off`/`status` (BUG-069 interim) |
+| `scripts/luminos-train-ram` | ML training RAM-headroom toggle (CPU-side companion to train-mode): runtime swapfile `/swapfile.train` at low prio (NOT in fstab) + `vm.swappiness` 60→10 + optional memory-cgroup via `run`; `on`/`off`/`status`/`run -- <cmd>`. **Fully reverts on `off` — nothing permanent (no /etc, no fstab, no sysctl.d).** Fixes zram-only OOM during training (BUG-070). |
 
 ### Archive (DO NOT RESTORE)
 `archive/windows-hive-2026/`, `archive/gtk4-ui/`, `archive/hyprland/`, `archive/stale-docs/`

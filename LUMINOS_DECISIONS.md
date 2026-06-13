@@ -6,6 +6,36 @@
 
 ---
 
+## DECISION 20 — Training RAM headroom is a REVERSIBLE toggle (luminos-train-ram), not a permanent swap/sysctl change
+Date: June 13, 2026
+Made by: claude-code
+**Status: ACTIVE — `scripts/luminos-train-ram` deployed to /usr/local/bin (verified on/off cycle)**
+
+### The Decision
+RAM headroom for ML training is delivered as an on/off toggle (`luminos-train-ram`), mirroring `luminos-train-mode` (GPU). While ON it (1) adds a low-priority on-disk swapfile `/swapfile.train` (default 16G, **not** in /etc/fstab), (2) sets `vm.swappiness=10` at runtime via `sysctl -w` (**not** written to /etc/sysctl.d), and (3) optionally runs the trainer in a memory cgroup (`run` subcommand, MemoryHigh/MemoryMax). OFF removes the swapfile and restores swappiness to the saved baseline. Nothing persists across `off` or reboot.
+
+### Why
+- Root cause of training OOM (BUG-070): the box has 14GB RAM and **only zram swap** (compressed RAM, prio 100) — no real spill valve. A 7.6GB memmap dataset + DataLoader pin/worker buffers exhaust anon RAM → instant OOM-kill, no traceback. A real disk swapfile + lower swappiness gives the kernel somewhere to put cold pages and biases reclaim toward the reclaimable memmap cache.
+- User constraint (explicit): the normal desktop config is good and must stay unchanged; training needs maximum headroom but only transiently. A toggle satisfies both — "absolute best for training" while ON, "old good thing" the rest of the time.
+
+### What Was Rejected
+- **Permanent swapfile in /etc/fstab:** would change normal-desktop memory behavior 24/7 and re-introduce disk swap the system was deliberately run without. Violates the "non-permanent" constraint.
+- **Persistent vm.swappiness in /etc/sysctl.d:** same objection — alters idle desktop reclaim balance permanently.
+- **Recompiling luminos-ram to whitelist the trainer:** investigated and unnecessary — luminos-ram's victim sets are window-keyed and `isSafeToFreeze` exempts CPU>5%, so a headless busy trainer is already untouched. Adding a code path would be a permanent binary change for no proven benefit (AGENTS §5 minimal-changes).
+- **Bigger zram:** zram is compressed RAM; enlarging it cannot relieve genuine RAM exhaustion, it competes for the same RAM.
+
+### Division of ownership
+- **luminos-os (this repo):** OS-side headroom only — the toggle above.
+- **hope-llm repo (separate):** the application data-path fix (DataLoader workers/pin_memory/get_batch, seq_len/batch sizing). Not changed here.
+
+### Cross-references
+- BUG-070 → `docs/BUGS.md`
+- `AGENTS.md §10` File Map row for `scripts/luminos-train-ram`
+- Companion: `scripts/luminos-train-mode` (GPU power+fans) / BUG-069
+- NOT in `AGENTS.md §9` — by design there is no permanent on-disk /etc config to record.
+
+---
+
 ## DECISION 19 — RuntimeDirectoryPreserve=yes on all shared-/run/luminos units + luminos-ram capability set
 Date: June 10, 2026
 Made by: claude-code
