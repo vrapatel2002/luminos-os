@@ -1,7 +1,17 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; luminos-train-ram toggle created)
+Last Updated: 2026-06-24 (BUG-072 FIXED — light/dark fragmentation root-caused to fixed-dark `Breeze-Dark` theme name; BUG-073 OPEN — app-launcher stutter is swap paging, not iGPU)
 
 ## Open Bugs
+
+### BUG-073 — App-launcher (Kickoff) stutter on open — swap page-faults, NOT the iGPU
+<!-- [CHANGE: claude-code | 2026-06-24] -->
+- Status: OPEN (diagnosed, not yet fixed)
+- Severity: LOW-MEDIUM (cosmetic latency hitch; no crash)
+- Component: plasmashell (Kickoff launcher) + system memory policy (zram/swap) + luminos-ram interaction
+- Description: Clicking the application launcher produces a visible stutter on first open. User reasonably suspected the iGPU — but the Radeon 780M runs AAA titles at 1080p, so raw GPU throughput is not the bottleneck. Measured: `plasmashell` had `VmSwap: 50020 kB` (~50MB swapped out) under normal desktop load. The launcher hitch is plasmashell page-faulting its Kickoff QML scene + icon-cache pages back in **from swap** on open — a latency-bound paging stall, not a GPU fill-rate problem.
+- Root Cause: 16GB LPDDR5x is shared across CPU + iGPU + OS, and under pressure (Chrome, HIVE models, zram) the kernel pushes plasmashell's cold pages to swap. KWin blur on the translucent Kickoff panel (`BlurStrength=4`, `backgroundcontrastEnabled=true`) adds GPU fill on a 2880×1800 HiDPI surface but the iGPU absorbs that; the perceptible jank is the swap-in fault when those pages were evicted. luminos-ram's OnScreen guard is **window-keyed (KWin focus)**, so the plasmashell shell process's own launcher pages are not its protection target — they remain swap-eligible.
+- Candidate Fixes (NOT applied — need a memory-policy decision, see future DECISION): (a) keep plasmashell resident — `vm.swappiness` lower for interactive desktop, or a per-process `memory.low`/`oom_score_adj` cgroup for plasmashell; (b) teach luminos-ram to pin/protect the plasmashell PID, not just focused windows; (c) warm the icon cache at session start. Verify with `grep VmSwap /proc/$(pgrep -x plasmashell)/status` before/after.
+- Date Found: 2026-06-24
 
 ### BUG-069 — luminos-power v4.2 GPU TGP switching is a silent no-op: `nvidia-smi -pl` unsupported on mobile but exits 0
 <!-- [CHANGE: claude-code | 2026-06-11] -->
@@ -15,6 +25,19 @@ Last Updated: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-onl
 - Date Found: 2026-06-11
 
 ## Fixed Bugs (new)
+
+### BUG-072 — Light/dark fragmentation: `gtk-theme-name=Breeze-Dark` is a fixed-dark theme that ignores the prefer-dark flag (regression introduced by BUG-068/BUG-071)
+<!-- [CHANGE: claude-code | 2026-06-24] -->
+- Status: FIXED (live `~/.config` + repo mirror). Cross-ref: introduced by **BUG-068** and **BUG-071** (both set GTK to `Breeze-Dark` believing it was the correct Breeze value).
+- Severity: MEDIUM (whole-desktop visual incoherence; the "stitched-together" feel persisted after the macOS revert)
+- Component: `~/.config/gtk-{3,4}.0/settings.ini`, repo `config/gtk-{3,4}.0/settings.ini`, gsettings `org.gnome.desktop.interface gtk-theme`
+- Description: Foreign-toolkit apps (Electron/Chromium/Flatpak) and GTK apps disagreed with Qt/Plasma about light vs dark — at the same time, on the same desktop. Traced to a 3-way contradiction: GTK theme name said `Breeze-Dark`, the GTK `gtk-application-prefer-dark-theme` flag said light, and the xdg portal `org.freedesktop.appearance color-scheme` said light. The single bad value was the **theme name**: `Breeze-Dark` is a *permanently dark* theme (`/usr/share/themes/Breeze-Dark/` ships only `gtk.css`), so it ignores the prefer-dark flag entirely. The adaptive theme is plain **`Breeze`** (`/usr/share/themes/Breeze/` ships both `gtk.css` (light) and `gtk-dark.css` (dark), selected by the flag).
+- Root Cause: KDE already owns light/dark as a single source of truth — kded's `gtkconfig` module auto-syncs the GTK prefer-dark flag AND the xdg portal (which Electron/Chromium/Flatpak read) to the active Plasma color scheme on every change. But it only ever sets the **flag**, never the theme **name**. BUG-068/BUG-071 hand-set the name to the fixed-dark `Breeze-Dark`, which overrode the flag → the flag and the theme permanently contradicted each other, and nothing self-corrected because no KDE mechanism rewrites the name. Verified: applying a light Plasma scheme flipped the flag to `false` but `Breeze-Dark` stayed dark.
+- Fix Applied: `gtk-theme-name=Breeze` (adaptive) in live `~/.config/gtk-{3,4}.0/settings.ini` and repo `config/gtk-{3,4}.0/settings.ini`; `gsettings set org.gnome.desktop.interface gtk-theme Breeze`. Verified round-trip: switching **only** the KDE color scheme (System Settings → Colors, or `plasma-apply-colorscheme`) now flips the GTK flag + xdg portal + GTK rendering together — Qt, GTK, Electron, Chromium, Flatpak all follow. **No daemon, no timer, no extra process** — KDE's built-in kded gtkconfig does it.
+- Why this fix (not a daemon): an earlier attempt (`scripts/luminos-theme-switch` Go daemon, committed 15ff0ba4 then removed in f50cb496) re-implemented what KDE already does and fought kded's gtkconfig. Removed. The correct, durable fix is one config value + letting KDE be the authority.
+- Remaining risk (tracked): `scripts/smart_build.sh` bakes `gtk-theme-name=Adwaita-dark` (also fixed-dark) into `/etc/skel` for the ISO, so a freshly built/installed Luminos would reship this contradiction. Not changed here (installer theme identity is a product decision) — flagged for a follow-up.
+- Date Found: 2026-06-24
+- Date Fixed: 2026-06-24
 
 ### BUG-071 — Repo config mirror still shipped WhiteSur-Dark after BUG-068's live fix (latent re-fragmentation)
 <!-- [CHANGE: claude-code | 2026-06-14] -->

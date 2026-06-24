@@ -937,3 +937,24 @@ Removed the separate Games partition concept. Games install to wherever the inst
 
 ### Why
 User preference — simpler is better. No separate partition management needed.
+
+## DECISION 22 — Light/Dark is owned by the KDE color scheme, NOT a custom daemon
+Date: June 24, 2026
+Made by: claude-code
+**Status: ACTIVE**
+
+### What We Decided
+The system's single source of truth for light/dark is the **KDE Plasma color scheme**. Everything else follows it automatically; Luminos ships **no daemon, timer, or script** to manage light/dark. GTK theme name is pinned to the **adaptive** `Breeze` (never the fixed-dark `Breeze-Dark`).
+
+### Why
+On KDE, kded's `gtkconfig` module already keeps the GTK `gtk-application-prefer-dark-theme` flag AND the xdg-desktop-portal `org.freedesktop.appearance color-scheme` (what Electron/Chromium/Flatpak read) in sync with the active Plasma color scheme. That machinery is built in and already running — re-implementing it is redundant and actively fights kded. An earlier `luminos-theme-switch` Go daemon was built (sun-calc + propagation) and then removed for exactly this reason. The only thing kded does NOT manage is the GTK theme **name**; pinning it to the adaptive `Breeze` lets the flag do its job. See BUG-072.
+
+### The Conflict (both sides, per Rule 11)
+- **Fixed-dark `Breeze-Dark`**: looks "more dark by default," but ignores the prefer-dark flag → permanently contradicts KDE's light/dark state → foreign-toolkit fragmentation. REJECTED.
+- **Adaptive `Breeze`**: honors the flag, so one KDE color-scheme switch moves the whole desktop (Qt/GTK/Electron/Chromium/Flatpak) together. CHOSEN.
+
+### Consequence for day/night auto-switching
+KDE 6.6.x ships the day/night *backend* (`knighttimed` / `org.kde.NightTime`, surfaced as "Day-Night Cycle") but only wires it to Night Light (color temperature), NOT to the color scheme — so there is no native time-based light/dark yet, and Arch's newest (6.6.5) does not add it. Options if automation is wanted later: (a) wait for KDE to ship it natively; (b) a single oneshot hooked onto KDE's existing `org.kde.NightTime` DBus signal calling `plasma-apply-colorscheme` — reuses KDE's clock, not custom sun math. Until then: manual toggle in System Settings → Colors. Deliberately NOT building a daemon (user directive 2026-06-24).
+
+### Durability
+This fix survives package updates (user `~/.config` files are never overwritten by pacman) and KDE re-syncs (kded only writes the flag, defaulting the name to `Breeze`). The only regression vectors are (1) a human/agent hand-editing the theme name back to a fixed-dark value, and (2) `scripts/smart_build.sh` /etc/skel shipping `Adwaita-dark` to fresh installs — both documented in BUG-072.
