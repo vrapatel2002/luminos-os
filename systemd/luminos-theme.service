@@ -1,0 +1,29 @@
+# luminos-theme.service
+# [CHANGE: claude-code | 2026-06-24]
+# Day/night light-dark switcher — single source of truth across Plasma + GTK + portal.
+# Install: sudo cp this /etc/systemd/user/
+# Enable:  systemctl --user enable --now luminos-theme
+#
+# User service (--user): plasma-apply-colorscheme needs the graphical session
+# (Wayland display + session DBus), which Plasma imports into the user manager
+# on login. Config lives at ~/.config/luminos/theme.conf.
+
+[Unit]
+Description=Luminos Day/Night Theme Switcher
+After=graphical-session.target
+Wants=graphical-session.target
+PartOf=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/luminos-theme-switch daemon
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical-session.target
