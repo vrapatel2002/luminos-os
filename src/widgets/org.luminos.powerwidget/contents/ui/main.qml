@@ -8,6 +8,9 @@ PlasmoidItem {
     id: root
     preferredRepresentation: compactRepresentation
 
+    // [CHANGE: claude-code | 2026-06-14] Tokenized — colors/radii from design/luminos-tokens.json
+    Theme { id: theme }
+
     property string currentMode: "Quiet"
     property string currentTemp: "0°C"
     property string fanSpeed: "0 RPM"
@@ -106,26 +109,26 @@ PlasmoidItem {
                 width: 8; height: 8
                 radius: 4
                 color: root.currentMode === "Performance"
-                    ? "#ff4444"
+                    ? theme.error
                     : root.currentMode === "Balanced"
-                    ? "#ffaa00" : "#00cc66"
+                    ? theme.warning : theme.success
             }
 
             PC3.Label {
-                color: "#e0e0e0"
+                color: theme.textPrimary
                 font.pixelSize: 11
                 text: root.currentMode
             }
 
             PC3.Label {
                 color: parseFloat(root.currentTemp) > 70
-                    ? "#ff4444" : "#e0e0e0"
+                    ? theme.error : theme.textPrimary
                 font.pixelSize: 11
                 text: "🌡" + root.currentTemp
             }
 
             PC3.Label {
-                color: "#888"
+                color: theme.textSecondary
                 font.pixelSize: 11
                 text: "🌀" + root.fanSpeed
             }
@@ -134,14 +137,14 @@ PlasmoidItem {
                 width: 8; height: 8
                 radius: 4
                 color: root.nvidiaAwake
-                    ? "#ff6600" : "#444"
+                    ? theme.warning : theme.textDisabled
                 visible: true
-                
+
                 PC3.ToolTip.text: root.nvidiaAwake
                     ? "NVIDIA: Active"
                     : "NVIDIA: Sleep"
                 PC3.ToolTip.visible: compactMA.containsMouse
-                
+
                 MouseArea {
                     id: compactMA
                     anchors.fill: parent
@@ -157,8 +160,8 @@ PlasmoidItem {
 
         Rectangle {
             anchors.fill: parent
-            color: "#111111"
-            radius: 10
+            color: theme.surface
+            radius: theme.radiusDefault
 
             ColumnLayout {
                 anchors.fill: parent
@@ -167,7 +170,7 @@ PlasmoidItem {
 
                 PC3.Label {
                     text: "Luminos Power"
-                    color: "#e0e0e0"
+                    color: theme.textPrimary
                     font.pixelSize: 13
                     font.bold: true
                 }
@@ -177,28 +180,26 @@ PlasmoidItem {
                     Layout.fillWidth: true
                     PC3.Label {
                         text: "Mode"
-                        color: "#888"
+                        color: theme.textSecondary
                         font.pixelSize: 11
                     }
                     Item { Layout.fillWidth: true }
                     Rectangle {
                         width: 80; height: 22
-                        radius: 11
-                        color: root.currentMode ===
-                            "Performance" ? "#ff444422"
-                            : root.currentMode ===
-                            "Balanced" ? "#ffaa0022"
-                            : "#00cc6622"
+                        radius: theme.radiusFull
+                        color: root.currentMode === "Performance"
+                            ? Qt.rgba(theme.error.r, theme.error.g, theme.error.b, 0.13)
+                            : root.currentMode === "Balanced"
+                            ? Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.13)
+                            : Qt.rgba(theme.success.r, theme.success.g, theme.success.b, 0.13)
                         border.color:
-                            root.currentMode ===
-                            "Performance" ? "#ff4444"
-                            : root.currentMode ===
-                            "Balanced" ? "#ffaa00"
-                            : "#00cc66"
+                            root.currentMode === "Performance" ? theme.error
+                            : root.currentMode === "Balanced" ? theme.warning
+                            : theme.success
                         PC3.Label {
                             anchors.centerIn: parent
                             text: root.currentMode
-                            color: "#e0e0e0"
+                            color: theme.textPrimary
                             font.pixelSize: 11
                         }
                     }
@@ -211,20 +212,20 @@ PlasmoidItem {
                     RowLayout {
                         PC3.Label {
                             text: "CPU Temp"
-                            color: "#888"
+                            color: theme.textSecondary
                             font.pixelSize: 11
                         }
                         Item { Layout.fillWidth: true }
                         PC3.Label {
                             text: root.currentTemp
-                            color: "#e0e0e0"
+                            color: theme.textPrimary
                             font.pixelSize: 11
                         }
                     }
                     Rectangle {
                         Layout.fillWidth: true
                         height: 6; radius: 3
-                        color: "#222"
+                        color: theme.trackColor
                         Rectangle {
                             width: {
                                 var t = parseFloat(
@@ -236,9 +237,9 @@ PlasmoidItem {
                             color: {
                                 var t = parseFloat(
                                     root.currentTemp)
-                                return t > 80 ?
-                                    "#ff4444" : t > 65 ?
-                                    "#ffaa00" : "#00cc66"
+                                return t > 80 ? theme.error
+                                    : t > 65 ? theme.warning
+                                    : theme.success
                             }
                         }
                     }
@@ -249,13 +250,13 @@ PlasmoidItem {
                     Layout.fillWidth: true
                     PC3.Label {
                         text: "Fan Speed"
-                        color: "#888"
+                        color: theme.textSecondary
                         font.pixelSize: 11
                     }
                     Item { Layout.fillWidth: true }
                     PC3.Label {
                         text: root.fanSpeed
-                        color: "#0080ff"
+                        color: theme.accent
                         font.pixelSize: 11
                     }
                 }
@@ -265,7 +266,7 @@ PlasmoidItem {
                     Layout.fillWidth: true
                     PC3.Label {
                         text: "NVIDIA GPU"
-                        color: "#888"
+                        color: theme.textSecondary
                         font.pixelSize: 11
                     }
                     Item { Layout.fillWidth: true }
@@ -273,7 +274,7 @@ PlasmoidItem {
                         text: root.nvidiaAwake ?
                             "⚡ Active" : "💤 Sleeping"
                         color: root.nvidiaAwake ?
-                            "#ff6600" : "#00cc66"
+                            theme.warning : theme.success
                         font.pixelSize: 11
                     }
                 }
@@ -281,7 +282,7 @@ PlasmoidItem {
                 // Manual mode buttons
                 PC3.Label {
                     text: "Manual Override"
-                    color: "#555"
+                    color: theme.textDisabled
                     font.pixelSize: 10
                 }
 
@@ -294,18 +295,17 @@ PlasmoidItem {
                                 "Performance"]
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 28; radius: 6
-                            color: root.currentMode
-                                === modelData ?
-                                "#0080ff22" : "#1a1a1a"
+                            height: 28; radius: theme.radiusMd
+                            color: root.currentMode === modelData
+                                ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.13)
+                                : theme.surfaceElevated
                             border.color:
-                                root.currentMode ===
-                                modelData ?
-                                "#0080ff" : "#333"
+                                root.currentMode === modelData
+                                ? theme.accent : theme.trackColor
                             PC3.Label {
                                 anchors.centerIn: parent
                                 text: modelData
-                                color: "#e0e0e0"
+                                color: theme.textPrimary
                                 font.pixelSize: 10
                             }
                             MouseArea {

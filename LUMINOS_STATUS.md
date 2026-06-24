@@ -1,6 +1,6 @@
 # Luminos OS — System Status
 Last updated: 2026-06-24
-Agent: claude-code (Foreign-toolkit cohesion: root-caused desktop fragmentation to a 3-way light/dark disagreement — GTK theme name (dark) vs GTK prefer-dark flag (light) vs portal color-scheme (light). Fixed with `luminos-theme-switch` — single source of truth that propagates ONE mode across Plasma + gsettings + GTK ini; xdg portal then carries it to Electron/Chromium/Flatpak. Day/night auto-switch via NOAA sunrise/sunset (systemd --user). Theme-agnostic pair in `~/.config/luminos/theme.conf`. LIVE + enabled.)
+Agent: claude-code (Foreign-toolkit light/dark cohesion ROOT-CAUSED + fixed, no daemon. The desktop's 3-way light/dark disagreement traced to ONE bad value: GTK theme name was `Breeze-Dark` (a permanently-dark theme that ignores the prefer-dark flag) instead of `Breeze` (the adaptive theme). KDE's built-in kded `gtkconfig` already syncs the prefer-dark flag + xdg portal to the active Plasma color scheme — but a fixed-dark theme name overrode it, so the flag and the theme contradicted each other. Fix = `gtk-theme-name=Breeze` everywhere. Now KDE color scheme is the single source of truth; Qt/GTK/Electron/Chromium/Flatpak all follow it natively. Verified round-trip light<->dark with no extra process. Daemon experiment removed.)
 Prev: 2026-06-14 (UI cohesion: single token source `design/luminos-tokens.json` + `scripts/luminos-theme-gen` generator + `src/theme/Theme.qml`; power/ram widgets + HIVE refactored off hardcoded hex; BUG-071 fixed. SCAFFOLDED repo-only. Decision 21)
 Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; reversible `luminos-train-ram` toggle. Decision 20)
 
@@ -20,7 +20,7 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | Display sharpness | ✅ Active | KWin sharpness=0.35 (AMD display pipeline, all content) |
 | Display Hz toggle | ✅ Available | luminos-display-hz in KDE Settings; luminos-60hz / luminos-120hz scripts |
 | UI design tokens | 🛠 Scaffolded (not applied) | Single source `design/luminos-tokens.json` → `scripts/luminos-theme-gen` → `Theme.qml` (QML), `Luminos.colors` (KDE), `gtk.css` (GTK/libadwaita). Widgets+HIVE tokenized. Apply post-training. Decision 21 |
-| Light/dark day-night | ✅ Live | `luminos-theme-switch` daemon (`luminos-theme.service`, systemd --user). One mode → Plasma + gsettings + GTK ini; portal carries it to Electron/Chromium/Flatpak. NOAA sunrise/sunset. Theme-agnostic pair in `~/.config/luminos/theme.conf` |
+| Light/dark cohesion | ✅ Fixed (no daemon) | Root cause: GTK name was `Breeze-Dark` (always-dark, ignores prefer-dark flag) → contradicted KDE's auto-synced flag. Fix: `gtk-theme-name=Breeze` (adaptive). KDE color scheme = single source of truth; GTK + portal + Electron/Chromium/Flatpak follow natively via kded gtkconfig. Flip in System Settings → Colors |
 
 ## HIVE Roster (2026) — April Upgrade
 | Alias | Model Base | Target | Role | Status |

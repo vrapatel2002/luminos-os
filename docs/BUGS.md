@@ -16,6 +16,17 @@ Last Updated: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-onl
 
 ## Fixed Bugs (new)
 
+### BUG-071 — Repo config mirror still shipped WhiteSur-Dark after BUG-068's live fix (latent re-fragmentation)
+<!-- [CHANGE: claude-code | 2026-06-14] -->
+- Status: FIXED (repo-only; live `~/.config` was already correct from BUG-068)
+- Severity: MEDIUM
+- Component: config/gtk-3.0/settings.ini, config/gtk-4.0/settings.ini, config/kde/kwinrc
+- Description: BUG-068 (2026-06-11) fixed the LIVE GTK theme to Breeze-Dark, but the repo mirrors under `config/gtk-{3,4}.0/settings.ini` still declared `gtk-theme-name=WhiteSur-Dark` + `gtk-cursor-theme-name=WhiteSur-cursors`. Any redeploy of repo configs would have resurrected the three-way Breeze/WhiteSur hybrid "stitched-together" look. The deprecated `AnimationSpeed=3` (Plasma-6-obsolete, conflicts with `AnimationDurationFactor=1.0`) also lingered in repo `config/kde/kwinrc` `[Compositing]`.
+- Root Cause: BUG-068's fix used `kwriteconfig6`/filesystem ops on live `~/.config` and `~/.local/share` but never updated the repo's `config/` mirror — the repo is the deploy source, so the divergence was a loaded gun.
+- Fix Applied: repo `settings.ini` ×2 → `Breeze-Dark` + `breeze-dark` icons + `breeze_cursors`; removed `AnimationSpeed=3` from repo `kwinrc`. Added generated `config/gtk-{3,4}.0/gtk.css` (token `@define-color` accent overrides, reaches libadwaita). NOT applied live (training run in progress, no checkpoint) — repo edits are inert until deploy. See DECISION 21.
+- Date Found: 2026-06-14
+- Date Fixed: 2026-06-14
+
 ### BUG-070 — Training OOM-killed with no traceback: zram-only swap is not a real spill valve
 <!-- [CHANGE: claude-code | 2026-06-13] -->
 - Status: FIXED (luminos-os side mitigated by reversible toggle; app-side data-path fix owned by the hope-llm repo)

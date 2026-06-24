@@ -13,13 +13,18 @@ import QtQuick.LocalStorage
 Rectangle {
     id: sidebar
 
-    // --- Theme Properties (passed from parent) ---
-    property color bgColor: "#FFFFFF"
-    property color surfaceColor: "#F5F5F5"
-    property color textColor: "#000000"
-    property color borderColor: "#E0E0E0"
-    property color accentColor: "#0078D4"
-    property color subtleText: "#666666"
+    // [CHANGE: claude-code | 2026-06-14] Tokenized fallbacks. Were Windows-blue #0078D4 +
+    // always-light #FFFFFF — a latent mismatch if ever rendered without parent bindings.
+    // Now default to the warm HIVE tokens; HiveChat still overrides these at runtime.
+    Theme { id: theme }
+
+    // --- Theme Properties (overridden by parent HiveChat bindings) ---
+    property color bgColor: theme.hiveDarkBg
+    property color surfaceColor: theme.hiveDarkSurface
+    property color textColor: theme.hiveDarkText
+    property color borderColor: theme.hiveDarkBorder
+    property color accentColor: theme.hiveAccent
+    property color subtleText: theme.hiveDarkSubtle
 
     // --- State ---
     property bool expanded: false
@@ -285,7 +290,7 @@ Rectangle {
                             width: 14
                             height: 2
                             radius: 1
-                            color: "#E05555"
+                            color: theme.hiveDanger
                             anchors.horizontalCenter: parent.horizontalCenter
                         }
 
@@ -295,7 +300,7 @@ Rectangle {
                             height: 9
                             radius: 1
                             color: "transparent"
-                            border.color: "#E05555"
+                            border.color: theme.hiveDanger
                             border.width: 1.5
                             anchors.horizontalCenter: parent.horizontalCenter
 
@@ -307,7 +312,7 @@ Rectangle {
                                     Rectangle {
                                         width: 1
                                         height: 5
-                                        color: "#E05555"
+                                        color: theme.hiveDanger
                                         opacity: 0.7
                                     }
                                 }

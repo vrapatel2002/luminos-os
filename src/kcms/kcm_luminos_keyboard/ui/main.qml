@@ -356,7 +356,7 @@ KCMUtils.SimpleKCM {
                         Rectangle {
                             anchors { top: parent.top; right: parent.right; margins: -3 }
                             width: 14; height: 14; radius: 7
-                            color: "#cc2200"
+                            color: Kirigami.Theme.negativeTextColor // [CHANGE: claude-code | 2026-06-14] was hardcoded #cc2200
                             QQC2.Label { anchors.centerIn: parent; text: "×"; font.pixelSize: 10; font.bold: true; color: "white" }
                             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: kcm.removeAutoColor(index) }
                         }

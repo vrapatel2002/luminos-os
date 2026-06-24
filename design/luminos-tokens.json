@@ -1,0 +1,117 @@
+{
+  "$comment": "[CHANGE: claude-code | 2026-06-14] SINGLE SOURCE OF TRUTH for all Luminos visual tokens. Replaces the dead archive/gtk4-ui/luminos_theme.py reference in LUMINOS_DESIGN_SYSTEM.md. Edit values HERE only; run scripts/luminos-theme-gen to regenerate every per-toolkit artifact (QML Theme, KDE .colors, gtk.css). Mirrors LUMINOS_DESIGN_SYSTEM.md v1.0.",
+  "version": "1.0",
+  "meta": {
+    "spec": "LUMINOS_DESIGN_SYSTEM.md",
+    "generator": "scripts/luminos-theme-gen",
+    "outputs": [
+      "src/theme/LuminosTheme.qml (canonical, copied into each package's contents/ui/ at deploy)",
+      "config/kde/colors/Luminos.colors",
+      "config/gtk-3.0/gtk.css",
+      "config/gtk-4.0/gtk.css"
+    ]
+  },
+
+  "color": {
+    "bgBase":          "#0A0A0F",
+    "surface":         "#13131A",
+    "surfaceElevated": "#1C1C26",
+    "surfaceOverlay":  "rgba(255,255,255,0.06)",
+
+    "accent":          "#0080FF",
+    "accentHover":     "#0066CC",
+    "accentPressed":   "#0052A3",
+    "accentSubtle":    "rgba(0,128,255,0.12)",
+    "accentGlow":      "rgba(0,128,255,0.40)",
+
+    "textPrimary":     "#FFFFFF",
+    "textSecondary":   "#8888AA",
+    "textDisabled":    "#444466",
+
+    "borderDefault":   "rgba(255,255,255,0.08)",
+    "borderFocus":     "rgba(0,128,255,0.60)",
+    "borderSubtle":    "rgba(255,255,255,0.04)",
+
+    "trackColor":      "rgba(255,255,255,0.12)",
+
+    "success":         "#00C896",
+    "warning":         "#FFB020",
+    "error":           "#FF4455",
+    "info":            "#0080FF"
+  },
+
+  "radius": {
+    "sharp":   0,
+    "sm":      4,
+    "md":      8,
+    "default": 12,
+    "lg":      16,
+    "full":    999
+  },
+
+  "spacing": {
+    "micro":  4,
+    "sm":     8,
+    "base":   12,
+    "md":     16,
+    "lg":     24,
+    "xl":     32,
+    "xxl":    48
+  },
+
+  "duration": {
+    "instant": 0,
+    "fast":    100,
+    "default": 200,
+    "slow":    350
+  },
+
+  "easing": {
+    "standard": [0.4, 0.0, 0.2, 1.0],
+    "enter":    [0.0, 0.0, 0.2, 1.0],
+    "exit":     [0.4, 0.0, 1.0, 1.0],
+    "spring":   [0.34, 1.56, 0.64, 1.0]
+  },
+
+  "blur": { "strength": 20 },
+
+  "font": {
+    "primary":  "Inter",
+    "mono":     "JetBrains Mono",
+    "fallback": "system-ui, -apple-system, sans-serif"
+  },
+
+  "hive": {
+    "$comment": "HIVE chat sub-brand: deliberate WARM palette, distinct from the system electric-blue. OPEN DECISION for Sam: keep warm (#D4784A) or unify to system accent #0080FF. Preserved verbatim from HiveChat.qml so nothing is lost either way.",
+    "accent":      "#D4784A",
+    "danger":      "#E05555",
+    "dark": {
+      "bg":          "#1E1E1E",
+      "surface":     "#2A2A2A",
+      "border":      "#444444",
+      "text":        "#E8E6E3",
+      "subtle":      "#888580",
+      "label":       "#9A9590",
+      "userBubble":  "#333028",
+      "aiBubble":    "#1E1E1E",
+      "separator":   "#333333",
+      "scrollbar":   "#555555",
+      "hover":       "#3A3A3A",
+      "borderHover": "#555555"
+    },
+    "light": {
+      "bg":          "#FAF9F6",
+      "surface":     "#FFFFFF",
+      "border":      "#E5E2DC",
+      "text":        "#2D2B28",
+      "subtle":      "#A39E96",
+      "label":       "#5A5650",
+      "userBubble":  "#F0EDE8",
+      "aiBubble":    "#FAF9F6",
+      "separator":   "#E8E5E0",
+      "scrollbar":   "#CCCCCC",
+      "hover":       "#F5F3EF",
+      "borderHover": "#D1CEC8"
+    }
+  }
+}

@@ -20,38 +20,43 @@ Window {
 
     // [CHANGE: gemini-cli | 2026-04-28] Issue 1: System theme detection
     SystemPalette { id: sysPalette; colorGroup: SystemPalette.Active }
-    
+
+    // [CHANGE: claude-code | 2026-06-14] Tokenized — HIVE warm sub-brand from design/luminos-tokens.json
+    Theme { id: theme }
+
     property bool isDark: {
         var c = sysPalette.window;
         var luminance = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
         return luminance < 0.5;
     }
 
+    // [CHANGE: claude-code | 2026-06-14] All HIVE colors now sourced from Theme tokens
+    // (hive.* group). Edit design/luminos-tokens.json, not these lines.
     // Background
-    property color bgColor: isDark ? "#1E1E1E" : "#FAF9F6"
+    property color bgColor: isDark ? theme.hiveDarkBg : theme.hiveLightBg
     // Surface (input bar, chips background)
-    property color surfaceColor: isDark ? "#2A2A2A" : "#FFFFFF"
+    property color surfaceColor: isDark ? theme.hiveDarkSurface : theme.hiveLightSurface
     // Input border / chip border
-    property color borderColor: isDark ? "#444444" : "#E5E2DC"
+    property color borderColor: isDark ? theme.hiveDarkBorder : theme.hiveLightBorder
     // Primary text
-    property color textColor: isDark ? "#E8E6E3" : "#2D2B28"
+    property color textColor: isDark ? theme.hiveDarkText : theme.hiveLightText
     // Subtle/placeholder text
-    property color subtleText: isDark ? "#888580" : "#A39E96"
+    property color subtleText: isDark ? theme.hiveDarkSubtle : theme.hiveLightSubtle
     // Label text (chips, "Nexus · HIVE")
-    property color labelText: isDark ? "#9A9590" : "#5A5650"
+    property color labelText: isDark ? theme.hiveDarkLabel : theme.hiveLightLabel
     // User message bubble
-    property color userBubble: isDark ? "#333028" : "#F0EDE8"
+    property color userBubble: isDark ? theme.hiveDarkUserBubble : theme.hiveLightUserBubble
     // AI message area (no bubble, just text on bg)
-    property color aiBubble: isDark ? "#1E1E1E" : "#FAF9F6"
-    // Accent (warm orange — same in both themes)
-    property color accentColor: "#D4784A"
+    property color aiBubble: isDark ? theme.hiveDarkAiBubble : theme.hiveLightAiBubble
+    // Accent (warm orange — same in both themes; OPEN DECISION: unify to theme.accent?)
+    property color accentColor: theme.hiveAccent
     // Separator line between conversation blocks
-    property color separatorColor: isDark ? "#333333" : "#E8E5E0"
+    property color separatorColor: isDark ? theme.hiveDarkSeparator : theme.hiveLightSeparator
     // Scrollbar
-    property color scrollbarColor: isDark ? "#555555" : "#CCCCCC"
+    property color scrollbarColor: isDark ? theme.hiveDarkScrollbar : theme.hiveLightScrollbar
     // Additional theme-aware colors for hover states
-    property color hoverColor: isDark ? "#3A3A3A" : "#F5F3EF"
-    property color borderHoverColor: isDark ? "#555555" : "#D1CEC8"
+    property color hoverColor: isDark ? theme.hiveDarkHover : theme.hiveLightHover
+    property color borderHoverColor: isDark ? theme.hiveDarkBorderHover : theme.hiveLightBorderHover
 
     // Main state variables
     property bool sidebarExpanded: false

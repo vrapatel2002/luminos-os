@@ -7,6 +7,7 @@
 # [CHANGE: claude-code | 2026-05-24] BUG-053: thermal downgrade hold ticks in luminos-power; BUG-054: Chrome zero-copy + MemorySaver
 # [CHANGE: claude-code | 2026-05-24] fan curve v4: exponential f(T)=18·e^(0.0635·(T-45)), 47°C hold target, silent 5% at 40°C, 88% at 70°C
 # [CHANGE: claude-code | 2026-05-24] fan curve v5: steep recovery — 50°C raised from 25%→55% to prevent 52°C drift; 35%@47°C hold, 62%@52°C pullback
+# [CHANGE: claude-code | 2026-06-14] UI design-token pipeline added (design/luminos-tokens.json, scripts/luminos-theme-gen, src/theme/Theme.qml) — DECISION 21 / BUG-071
 
 ## Stack as of May 2026
 - Shell: KDE Plasma 6.6.4 + KWin (Wayland)
@@ -42,6 +43,14 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 ### KDE KCM Plugins (src/kcms/)
 - `src/kcms/kcm_luminos_keyboard/` — Keyboard backlight C++/QML KCM
 - `src/kcms/kcm_luminos_hive/` — HIVE AI Settings C++/QML KCM (mode toggle, model roster, VRAM, shortcut)
+
+### Design Token Pipeline (UI cohesion — DECISION 21) [CHANGE: claude-code | 2026-06-14]
+- `design/luminos-tokens.json` — **single source of truth** for all visual tokens (color/radius/spacing/motion/font + `hive.*` warm sub-brand). Mirrors LUMINOS_DESIGN_SYSTEM.md.
+- `src/theme/Theme.qml` — canonical instantiable QML token component (`Theme { id: theme }`), edited alongside the JSON.
+- `src/theme/README.md` — pipeline + deploy/apply order (post-training only).
+- `scripts/luminos-theme-gen/` — Go generator (`main.go`, `go.mod`). Reads JSON, copies `Theme.qml` into each package, generates KDE `.colors` + GTK `gtk.css`. `-check` flag fails if outputs are stale. Repo-only; applies nothing live.
+- Generated outputs (DO NOT hand-edit): `config/kde/colors/Luminos.colors`, `config/gtk-3.0/gtk.css`, `config/gtk-4.0/gtk.css`, and per-package `contents/ui/Theme.qml` copies (powerwidget, ramwidget) + `src/hive/Theme.qml`.
+- Consumers tokenized: `src/widgets/org.luminos.powerwidget`, `org.luminos.ramwidget`, `src/hive/HiveChat.qml`, `src/hive/HistorySidebar.qml`.
 
 ### Python NPU (src/npu/)
 - `src/npu/hats_kernel.py` — HATS NPU inference

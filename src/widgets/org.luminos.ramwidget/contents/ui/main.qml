@@ -7,7 +7,10 @@ import org.kde.plasma.plasmoid 2.0
 PlasmoidItem {
     id: root
     preferredRepresentation: compactRepresentation
-    
+
+    // [CHANGE: claude-code | 2026-06-14] Tokenized — colors/radii from design/luminos-tokens.json
+    Theme { id: theme }
+
     property var stats: ({
         total: 15,
         used: 10,
@@ -26,7 +29,7 @@ PlasmoidItem {
         onNewData: (sourceName, data) => {
             var stdout = data["stdout"]
             console.log("RAM Widget DEBUG: New data from " + sourceName)
-            
+
             if (sourceName.includes("/metrics")) {
                 parseMetrics(stdout)
             } else if (sourceName.includes("/meminfo")) {
@@ -96,14 +99,14 @@ PlasmoidItem {
             Rectangle {
                 width: 8; height: 8
                 radius: 4
-                color: stats.available < 2 ? "#ff4444" :
-                       stats.available < 4 ? "#ffaa00" : "#00cc66"
+                color: stats.available < 2 ? theme.error :
+                       stats.available < 4 ? theme.warning : theme.success
             }
 
             PC3.Label {
-                color: "#e0e0e0"
+                color: theme.textPrimary
                 font.pixelSize: 11
-                font.family: "Inter"
+                font.family: theme.fontPrimary
                 text: {
                     var pct = Math.round(stats.used / stats.total * 100)
                     return "RAM " + pct + "%"
@@ -111,17 +114,17 @@ PlasmoidItem {
             }
 
             PC3.Label {
-                color: "#0080ff"
+                color: theme.accent
                 font.pixelSize: 10
-                font.family: "Inter"
+                font.family: theme.fontPrimary
                 text: "❄" + stats.cold
                 visible: stats.cold > 0
             }
 
             PC3.Label {
-                color: "#888"
+                color: theme.textSecondary
                 font.pixelSize: 10
-                font.family: "Inter"
+                font.family: theme.fontPrimary
                 text: "Z:" + stats.zram_used.toFixed(1) + "G"
             }
         }
@@ -133,8 +136,8 @@ PlasmoidItem {
 
         Rectangle {
             anchors.fill: parent
-            color: "#111111"
-            radius: 10
+            color: theme.surface
+            radius: theme.radiusDefault
 
             ColumnLayout {
                 anchors.fill: parent
@@ -143,7 +146,7 @@ PlasmoidItem {
 
                 PC3.Label {
                     text: "Luminos RAM"
-                    color: "#e0e0e0"
+                    color: theme.textPrimary
                     font.pixelSize: 13
                     font.bold: true
                 }
@@ -154,22 +157,22 @@ PlasmoidItem {
                     Layout.fillWidth: true
 
                     RowLayout {
-                        PC3.Label { text: "RAM"; color: "#888"; font.pixelSize: 11 }
+                        PC3.Label { text: "RAM"; color: theme.textSecondary; font.pixelSize: 11 }
                         Item { Layout.fillWidth: true }
                         PC3.Label {
                             text: stats.used.toFixed(1) + "GB / " + stats.total.toFixed(0) + "GB"
-                            color: "#e0e0e0"; font.pixelSize: 11
+                            color: theme.textPrimary; font.pixelSize: 11
                         }
                     }
                     Rectangle {
                         Layout.fillWidth: true
                         height: 6; radius: 3
-                        color: "#222"
+                        color: theme.trackColor
                         Rectangle {
                             width: parent.width * Math.min(1.0, (stats.used / (stats.total || 1)))
                             height: 6; radius: 3
-                            color: stats.used/(stats.total || 1) > 0.85 ? "#ff4444" :
-                                   stats.used/(stats.total || 1) > 0.7 ? "#ffaa00" : "#0080ff"
+                            color: stats.used/(stats.total || 1) > 0.85 ? theme.error :
+                                   stats.used/(stats.total || 1) > 0.7 ? theme.warning : theme.accent
                         }
                     }
                 }
@@ -180,21 +183,21 @@ PlasmoidItem {
                     Layout.fillWidth: true
 
                     RowLayout {
-                        PC3.Label { text: "ZRAM"; color: "#888"; font.pixelSize: 11 }
+                        PC3.Label { text: "ZRAM"; color: theme.textSecondary; font.pixelSize: 11 }
                         Item { Layout.fillWidth: true }
                         PC3.Label {
                             text: stats.zram_used.toFixed(1) + "GB / " + stats.zram_total + "GB"
-                            color: "#0080ff"; font.pixelSize: 11
+                            color: theme.accent; font.pixelSize: 11
                         }
                     }
                     Rectangle {
                         Layout.fillWidth: true
                         height: 6; radius: 3
-                        color: "#222"
+                        color: theme.trackColor
                         Rectangle {
                             width: parent.width * Math.min(1.0, (stats.zram_used / (stats.zram_total || 1)))
                             height: 6; radius: 3
-                            color: "#0080ff88"
+                            color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.53)
                         }
                     }
                 }
@@ -206,20 +209,20 @@ PlasmoidItem {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 48; radius: 8
-                        color: "#1a1a1a"
+                        height: 48; radius: theme.radiusMd
+                        color: theme.surfaceElevated
                         ColumnLayout {
                             anchors.centerIn: parent
                             spacing: 2
                             PC3.Label {
                                 text: "🔥 " + stats.hot
-                                color: "#ff6644"
+                                color: theme.warning
                                 font.pixelSize: 16
                                 Layout.alignment: Qt.AlignHCenter
                             }
                             PC3.Label {
                                 text: "Hot"
-                                color: "#555"
+                                color: theme.textDisabled
                                 font.pixelSize: 10
                                 Layout.alignment: Qt.AlignHCenter
                             }
@@ -228,20 +231,20 @@ PlasmoidItem {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 48; radius: 8
-                        color: "#1a1a1a"
+                        height: 48; radius: theme.radiusMd
+                        color: theme.surfaceElevated
                         ColumnLayout {
                             anchors.centerIn: parent
                             spacing: 2
                             PC3.Label {
                                 text: "❄ " + stats.cold
-                                color: "#0080ff"
+                                color: theme.accent
                                 font.pixelSize: 16
                                 Layout.alignment: Qt.AlignHCenter
                             }
                             PC3.Label {
                                 text: "Cold"
-                                color: "#555"
+                                color: theme.textDisabled
                                 font.pixelSize: 10
                                 Layout.alignment: Qt.AlignHCenter
                             }
@@ -250,20 +253,20 @@ PlasmoidItem {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 48; radius: 8
-                        color: "#1a1a1a"
+                        height: 48; radius: theme.radiusMd
+                        color: theme.surfaceElevated
                         ColumnLayout {
                             anchors.centerIn: parent
                             spacing: 2
                             PC3.Label {
                                 text: stats.available.toFixed(1) + "G"
-                                color: "#00cc66"
+                                color: theme.success
                                 font.pixelSize: 16
                                 Layout.alignment: Qt.AlignHCenter
                             }
                             PC3.Label {
                                 text: "Free"
-                                color: "#555"
+                                color: theme.textDisabled
                                 font.pixelSize: 10
                                 Layout.alignment: Qt.AlignHCenter
                             }

@@ -20,6 +20,10 @@ if [ -z "$WINEPREFIX" ]; then
     exit 1
 fi
 
+# Wine's own Unix bridge .so files (ntdll.so, win32u.so, display drivers)
+# These MUST be in LD_LIBRARY_PATH or Wine can't load its own display driver
+export LD_LIBRARY_PATH="$WINE_LIB/x86_64-unix:$WINE_LIB/i386-unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 # VKD3D-Proton (DX12) and DXVK (DX11/10/9) override Wine's built-ins
 # Prepend so they take priority over Wine's own d3d implementations
 export WINEDLLPATH="$WINE_LIB/vkd3d-proton/x86_64-windows:$WINE_LIB/vkd3d-proton/i386-windows:$WINE_LIB/dxvk/x86_64-windows:$WINE_LIB/dxvk/i386-windows:$WINE_LIB/x86_64-windows:$WINE_LIB/i386-windows${WINEDLLPATH:+:$WINEDLLPATH}"

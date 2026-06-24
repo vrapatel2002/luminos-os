@@ -6,6 +6,39 @@
 
 ---
 
+## DECISION 21 — One token source of truth feeds every toolkit (anti-fragmentation pipeline)
+Date: June 14, 2026
+Made by: claude-code
+**Status: SCAFFOLDED (repo-only, NOT yet applied live — built during a no-checkpoint training run; apply post-training)**
+
+### The Decision
+All visual tokens (color, radius, spacing, motion, font) live in ONE source: `design/luminos-tokens.json`, mirrored by the canonical QML component `src/theme/Theme.qml`. A Go generator `scripts/luminos-theme-gen` fans them out to every toolkit so nothing can drift by hand:
+- **QML** (plasmoids + HIVE): the generator copies `Theme.qml` verbatim into each package's `contents/ui/` (and `src/hive/`). It is an **instantiable** `QtObject` (`Theme { id: theme }`), NOT a `pragma Singleton`, so there is no cross-module QML import-path runtime dependency — each Plasma package stays self-contained.
+- **Qt/KDE**: generated `config/kde/colors/Luminos.colors` (electric-blue scheme matching the spec; replaces reliance on stock Breeze `#3DAEE9`).
+- **GTK + libadwaita**: generated `config/gtk-{3,4}.0/gtk.css` `@define-color` overrides — the only lever that reaches libadwaita.
+
+Consumers refactored off hardcoded hex onto tokens: `org.luminos.powerwidget`, `org.luminos.ramwidget`, `src/hive/HiveChat.qml`, `src/hive/HistorySidebar.qml`. Keyboard KCM left as-is (already Kirigami-themed; its color grid is a *functional* backlight picker, not UI theming — only the one stray `#cc2200` delete badge was aligned to `Kirigami.Theme.negativeTextColor`).
+
+### Why
+- The fragmentation problem was never a missing design — `LUMINOS_DESIGN_SYSTEM.md` is complete. It was missing **enforcement**: its Rule 1 ("every color from `luminos_theme.py`") pointed at a file archived when the GTK4 shell was abandoned, so every widget improvised (three different "accent" colors across the codebase). A live token source makes "no hardcoding" actually enforceable (`-check` mode fails CI if any output is stale).
+- macOS-grade cohesion has a hard ceiling on Linux: libadwaita ignores `gtk-theme-name`, Electron/Flatpak ship their own toolkits. The achievable target is mechanical consistency across everything we control (Qt + our widgets + theme-respecting GTK), with documented holdouts — not literal parity everywhere.
+
+### What Was Rejected
+- **`pragma Singleton` shared QML module** (`import org.luminos.theme`): cleaner on paper, but adds a QML import-path install dependency that breaks plasmoids if the module isn't installed first. Per-package generated copy is more robust for Plasma packaging.
+- **Regenerating Theme.qml text from JSON in Go**: error-prone (could emit non-compiling QML). Instead `Theme.qml` is the canonical QML mirror, edited alongside the JSON; the generator distributes it and generates only the non-QML artifacts.
+- **Flattening HIVE's warm accent (`#D4784A`) to system blue**: it's a deliberate sub-brand (full warm palette). Routed through tokens as a named `hive.*` group instead; keep-warm-vs-unify is an OPEN DECISION left for Sam.
+
+### Conflict resolved (per Rule 11)
+GTK↔Qt toolkit mismatch: repo `config/gtk-{3,4}.0/settings.ini` still shipped `WhiteSur-Dark`/`WhiteSur-cursors` despite BUG-068's live fix (2026-06-11). Synced to Breeze (BUG-071). Tradeoff: Breeze GTK ≠ pixel-identical to Qt Breeze, but token `gtk.css` accent overrides close most of the gap and reach libadwaita; full GTK/Qt parity is not achievable without owning the toolkit.
+
+### Cross-references
+- Report/diagnosis: this session's deep-dive; `LUMINOS_DESIGN_SYSTEM.md` (Rule 1 updated to point at the JSON)
+- BUG-068 (original incomplete Tahoe revert) + BUG-071 (repo-mirror divergence) → `docs/BUGS.md`
+- `src/theme/README.md` — deploy/apply order (post-training only)
+- NOT in `AGENTS.md §9` — repo mirrors only; live `~/.config` untouched this session.
+
+---
+
 ## DECISION 20 — Training RAM headroom is a REVERSIBLE toggle (luminos-train-ram), not a permanent swap/sysctl change
 Date: June 13, 2026
 Made by: claude-code

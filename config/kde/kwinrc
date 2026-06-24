@@ -1,5 +1,4 @@
 [Compositing]
-AnimationSpeed=3
 Backend=OpenGL
 Enabled=true
 GLCore=true
