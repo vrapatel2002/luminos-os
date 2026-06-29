@@ -1,8 +1,9 @@
 # Luminos Offload Architecture — Big-LLM-on-System-RAM
 # [CHANGE: claude-code | 2026-06-28]
-# Status: PHASES 0-5 DONE — full 20 GB run generates COHERENT text on 6 GB VRAM
-#         (2.18 GB used, ~2 tok/s, --no-daemons). Remaining: daemon-coordinated
-#         run (root socket perms) + Phase 6 throughput tuning/polish.
+# Status: PHASES 0-5 DONE + Phase 6 throughput tuning — full 20 GB run generates
+#         COHERENT text on 6 GB VRAM. ~3.07 tok/s with --resident-gb 2.0 (4.31 GB
+#         used) vs ~2.0 all-streamed. Remaining: widget/teardown polish, optional
+#         daemon-coordinated run (root socket perms).
 # Decision rationale: LUMINOS_DECISIONS.md → DECISION 23
 #
 # Engine: hope-llm/src/offload_engine.py  (StreamedLinear + StagingPool +
@@ -204,5 +205,21 @@ VRAM-resident.
 
 ### Phase 6 — Productionize & document  (in progress)
 - 2026-06-28: engine + runner + validator committed with identity tags; this doc, BUGS.md, DECISIONS.md,
-  STATUS, Luminos Notes updated. Widget status + clean teardown polish deferred until after the full run
-  confirms real tok/s.
+  STATUS, Luminos Notes updated.
+- 2026-06-28: **Throughput tuning — resident-layer lever (`ResidentStreamedLinear` + `--resident-gb`).**
+  The run is transfer-bound: at full offload every token drags all 4.77 GB over PCIe (~12 GB/s → ~0.4 s/token),
+  so prefetch/double-buffering can't help (transfer >> single-token compute). The real lever is spending the
+  ~2.4 GB of spare VRAM to keep the hottest 4-bit block weights GPU-RESIDENT, cutting bytes-streamed/token.
+  Measured (n_mem=4, seq 2048, greedy), real checkpoint:
+
+  | `--resident-gb` | streamed/token | VRAM used | single-token tok/s | refeed tok/s |
+  |-----------------|----------------|-----------|--------------------|--------------|
+  | 0.0 (all stream)| 4.77 GB        | 2.18 GB   | ~2.0               | ~0.88        |
+  | 2.0 (113 layers)| 2.63 GB        | 4.31 GB   | **~3.07**          | ~1.05        |
+
+  → 1.5× from filling spare VRAM; output stays coherent (re-feed: "Paris, which is located in the Seine River.").
+  Higher `--resident-gb` keeps approaching the 4.6 GB safe budget; more headroom (smaller activations / lower
+  seq_len, or a tighter resident split) would push further toward the ~5.4 tok/s ceiling.
+- ⏳ Remaining polish: widget status + clean teardown; optional daemon-coordinated run (root socket perms) —
+  note the daemons mostly buy STABILITY (no swap stalls) + a small clock gain, not a big tok/s jump (the bus,
+  not clocks, is the bottleneck).
