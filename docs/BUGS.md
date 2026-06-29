@@ -14,6 +14,35 @@ Last Updated: 2026-06-24 (BUG-072 FIXED — light/dark fragmentation root-caused
 - Candidate fix (NOT applied — hope-llm owns generate.py): cast only floating params to bf16 and leave complex buffers alone, or recompute `freqs_cis` after the cast (as the engine does). Verify with a shuffle/position test before/after.
 - Date Found: 2026-06-28
 
+### BUG-077 — HOPE single-token "memory-carries-context" decode degenerates; full re-feed is coherent
+<!-- [CHANGE: claude-code | 2026-06-28] -->
+- Status: OPEN (characterised during offload Phase 5 first real generation; not a defect in the offload engine)
+- Severity: MEDIUM (model is unusable for generation in its "intended" decode mode; works fine with standard re-feed)
+- Component: hope-llm decode contract — `scripts/generate.py` (line ~103 `ids = next_id`, "memory carries context") and the offload runner `scripts/offload_run.py`
+- Description: After the first token, the reference decode feeds ONLY the new token and relies on the DGD self-modifying memory state to carry prior context (no KV cache, no re-feed). On the 10.4B qwen3_transplant (step 3500, val_loss 1.57) this degenerates immediately: `The capital of France is` → `Paris,d,d,d,d,…` (token 0 "Paris" is correct; everything after collapses to a repeated token). Switching the offload runner to **re-feed the full growing sequence each step** (`--refeed`, memory reset per step) yields coherent text: `Paris, which is located in the Seine River.` then fluent multilingual continuation. So the forward, weights, nf4 quant and resident DGD path are all correct — only the single-token memory recurrence fails to preserve context.
+- Root Cause (suspected): the checkpoint was trained teacher-forced (val_loss is a full-sequence metric) and the DGD memory recurrence with `memory_chunk_size=8` does not propagate context across length-1 decode steps — the memory update likely fires per-chunk, so single-token steps never commit usable state. Undertrained recurrence is plausible at only 3500 steps.
+- Workaround: use `--refeed` in `offload_run.py` for coherent generation (cost: O(seq) streaming per step → ~0.88 tok/s vs ~2.0 tok/s single-token).
+- Candidate fix (NOT applied — hope-llm owns the architecture): implement a real KV cache for the attention layers + verify the DGD memory commits state on single-token steps; or continue training the memory recurrence. Verify by comparing single-token vs re-feed logits per step.
+- Date Found: 2026-06-28
+
+### BUG-076 — Offload runner used the GPT-2 tokenizer (vocab 50257) for a Qwen3 transplant (vocab 151936)
+<!-- [CHANGE: claude-code | 2026-06-28] -->
+- Status: FIXED (2026-06-28)
+- Severity: HIGH (pure-garbage output from a correct model — `athen,d,d,d,…`)
+- Component: hope-llm `scripts/offload_run.py` (was importing `src.tokenizer.Tokenizer`, a tiktoken GPT-2 wrapper)
+- Description: The transplant grafts DeepSeek-R1-0528-Qwen3-8B weights (vocab 151936) but `src.tokenizer.Tokenizer` is a GPT-2 BPE wrapper (vocab 50257). The runner encoded the prompt with GPT-2 ids (model receives the wrong embeddings) and decoded Qwen3 output ids with the GPT-2 vocab (correct " Paris" id renders as garbage). The model was perfect; the tokenizer was mismatched.
+- Fix: `offload_run.py` now loads `AutoTokenizer.from_pretrained("deepseek-ai/DeepSeek-R1-0528-Qwen3-8B")` and stops on `tok.eos_token_id` (151645). NB: `scripts/generate.py` still uses the GPT-2 tokenizer and has the same latent bug for Qwen3 checkpoints (hope-llm owns it).
+- Date Found / Fixed: 2026-06-28
+
+### BUG-075 — Offload head OOM: untied lm_head dequantises to a single ~2.3 GB temp during multi-token prefill
+<!-- [CHANGE: claude-code | 2026-06-28] -->
+- Status: FIXED (2026-06-28)
+- Severity: HIGH (CUDA OOM at generation time on the 6 GB GPU; build-only path was unaffected)
+- Component: hope-llm `src/offload_engine.py` (`StreamedLinear` / lm_head streaming)
+- Description: `bnb.matmul_4bit` only takes its fused gemv path for single-token inputs; for any multi-token input (prompt prefill) it falls back to `linear(A, dequantize_4bit(B))`, materialising the full weight. For the untied head (151936×4096) that transient is ~2.3 GB, which OOMs with only ~1.2 GB free. Other streamed weights are ≤0.4 GB dequantised, so the head was the sole offender.
+- Fix: added `ChunkedStreamedLinear` (and `HEAD_CHUNKS=8`) — the head is quantised in 8 vocab-row chunks, each streamed + matmul'd separately and concatenated, capping the dequant transient at ~0.3 GB. Bonus: smaller head chunks shrank the shared StagingPool slot from the head (311 MB) to the FFN size (~50 MB), dropping post-build VRAM from 3.53 → 2.18 GB.
+- Date Found / Fixed: 2026-06-28
+
 ### BUG-073 — App-launcher (Kickoff) stutter on open — swap page-faults, NOT the iGPU
 <!-- [CHANGE: claude-code | 2026-06-24] -->
 - Status: OPEN (diagnosed, not yet fixed)

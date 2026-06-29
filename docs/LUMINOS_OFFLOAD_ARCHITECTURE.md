@@ -1,7 +1,8 @@
 # Luminos Offload Architecture — Big-LLM-on-System-RAM
 # [CHANGE: claude-code | 2026-06-28]
-# Status: PHASES 0-4 DONE + VALIDATED (bit-exact small-proxy). PHASE 5 (full
-#         20 GB run + daemon deploy) AWAITING USER GO-AHEAD (root + live laptop).
+# Status: PHASES 0-5 DONE — full 20 GB run generates COHERENT text on 6 GB VRAM
+#         (2.18 GB used, ~2 tok/s, --no-daemons). Remaining: daemon-coordinated
+#         run (root socket perms) + Phase 6 throughput tuning/polish.
 # Decision rationale: LUMINOS_DECISIONS.md → DECISION 23
 #
 # Engine: hope-llm/src/offload_engine.py  (StreamedLinear + StagingPool +
@@ -184,10 +185,22 @@ VRAM-resident.
 - **Computed budget for the real run** (n_mem=4, 40 layers): RAM-parked 4.77 GB (fits 14 GB); GPU baseline
   ~2.4 GB (1.66 resident + 0.62 pool + ~0.1 qstates) → fits the 4.6 GB safe budget with headroom for the
   DGD state + activations. Throughput ceiling from Phase 0: R=18 → ~5.4 tok/s, R=22 → ~6.7 (transfer-bound).
-- ⏳ **PENDING — needs user go-ahead** (root + stresses the live laptop):
-  1. Deploy the rebuilt luminos-power + luminos-ram (restarts the live power governor).
-  2. `scripts/offload_run.py --build-only` first (full-scale Phase 3 sanity: ~9.4 B params quantised), then
-     the real generation with daemon coordination → measure real tok/s vs the ceiling + thermal/OOM stability.
+- 2026-06-28: **FULL-SCALE REAL GENERATION SUCCEEDED** (`scripts/offload_run.py --no-daemons`, real 20 GB
+  qwen3_transplant checkpoint, step 3500 / val_loss 1.57, n_mem=4, seq_len 2048):
+  - Build: 26–28 s, 233 streamed layers = **4.77 GB parked in RAM**, resident bf16 = **1.66 GB on GPU**,
+    **2.18 GB VRAM used** after build (within the 4.6 GB safe budget, ~3.9 GB free for activations).
+  - **Coherent output (re-feed decode):** `The capital of France is` → **"Paris, which is located in the Seine
+    River."** then fluent multilingual continuation. Token 0 = "Paris" confirms the streamed forward + nf4 quant
+    + resident DGD path are correct at full 10.4B scale.
+  - **Throughput:** ~2.0 tok/s single-token decode / ~0.88 tok/s re-feed (O(seq)/step). Below the transfer-bound
+    ceiling (5.4–6.7) — gap is per-layer bnb dequant overhead + no daemon clock-pin yet; tuning is Phase 6.
+  - **Three bugs found & fixed this run** (see BUGS.md): BUG-075 head OOM → `ChunkedStreamedLinear` (8 vocab
+    chunks; also dropped VRAM 3.53→2.18 GB); BUG-076 wrong tokenizer (GPT-2→Qwen3); BUG-077 single-token
+    "memory-carries-context" decode degenerates → use `--refeed` for coherent text.
+- ⏳ **REMAINING — needs user go-ahead** (root): daemon-coordinated run. The daemons ARE deployed and running,
+  but `/run/luminos/{power,ram}.sock` are root-only-writable → a user-process run gets PermissionError (engine
+  degrades gracefully, hence `--no-daemons` works). To measure coordinated tok/s either run via passwordless
+  `sudo` (recompiles the Triton cache under /root) or relax the daemon socket perms. Decision pending.
 
 ### Phase 6 — Productionize & document  (in progress)
 - 2026-06-28: engine + runner + validator committed with identity tags; this doc, BUGS.md, DECISIONS.md,
