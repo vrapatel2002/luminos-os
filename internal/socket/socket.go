@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -53,6 +55,21 @@ func NewListener(socketPath string) (net.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
+	// [CHANGE: claude-code | 2026-06-28] Allow the desktop user to connect to the
+	// root-owned control sockets. net.Listen creates the socket with no write bit
+	// for group/other (umask), and connecting to a Unix socket requires write — so
+	// a normal-user client (e.g. the weight-offload engine signalling power/ram)
+	// gets EACCES. Grant the "wheel" group connect access (chown group + 0660); if
+	// the group can't be resolved, fall back to world-writable so local IPC works.
+	if grp, gerr := user.LookupGroup("wheel"); gerr == nil {
+		if gid, cerr := strconv.Atoi(grp.Gid); cerr == nil {
+			if err := os.Chown(socketPath, -1, gid); err == nil {
+				_ = os.Chmod(socketPath, 0660)
+				return l, nil
+			}
+		}
+	}
+	_ = os.Chmod(socketPath, 0666)
 	return l, nil
 }
 
