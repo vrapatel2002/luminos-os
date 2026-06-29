@@ -332,6 +332,7 @@ Task: [what was asked]" && git push origin main
 6. Go orchestrator (replace Python hive-daemon.py)
 7. Zone indicator Plasma widget
 8. SDDM custom Luminos theme
+9. **Offload-inference daemon coordination (DECISION 23)** — make luminos-power + luminos-ram offload-aware for running the 10.4B HOPE model via weight-streaming. (a) power: session-scoped pin of dGPU P0 + PCIe Gen4 x8 (link idles at Gen1=2.5GT/s under DPM=0x02 → ~8× bandwidth loss), revert after. (b) ram: exempt pinned weight region from MADV_PAGEOUT/zram + reserve ~5GB pinned budget in headroom math (avoid BUG-070 OOM) + drop swappiness for session. (c) shared start/stop signal so daemons react together. Blocked on model-side number: size of resident memory-block (CUDA-kernel) weights at 4-bit.
 
 ---
 

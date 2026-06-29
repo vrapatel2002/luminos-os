@@ -47,6 +47,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -245,6 +246,13 @@ var (
 	currentGPUTGPW   float64   // current GPU power limit in watts (55 or 90)
 	gpuTGPLastSwitch time.Time // time of last TGP switch (hysteresis enforcement)
 	gpuTGPDownTick   int       // consecutive ticks of low power+util → revert
+
+	// [CHANGE: claude-code | 2026-06-28] v4.3 — weight-offload session pin (DECISION 23)
+	// Set true while the weight-offload inference engine holds a session open. When
+	// active, the dGPU is kept at full performance (clocks locked, TGP pinned high)
+	// so streamed-layer micro-gaps don't let the GPU downclock mid-token. Read by
+	// monitorLoop (atomic — set from the socket goroutine in handleMessage).
+	offloadActive atomic.Bool
 )
 
 func main() {
@@ -311,6 +319,17 @@ func handleMessage(msg socket.Message) socket.Message {
 			Timestamp: time.Now(),
 			Source:    "luminos-power",
 		}
+	// [CHANGE: claude-code | 2026-06-28] v4.3 — weight-offload session pin (DECISION 23, Phase 1).
+	// The offload inference engine sends offload_start before streaming weights and
+	// offload_stop on teardown. The pin is fully reversible.
+	case "offload_start":
+		applyOffloadPin(true)
+		return replyOK(msg, map[string]interface{}{"offload": "started", "tgp_target_w": gpuTGPHighW})
+	case "offload_stop":
+		applyOffloadPin(false)
+		return replyOK(msg, map[string]string{"offload": "stopped"})
+	case "offload_status":
+		return replyOK(msg, map[string]bool{"active": offloadActive.Load()})
 	default:
 		return replyError(msg, fmt.Sprintf("unknown type: %s", msg.Type))
 	}
@@ -359,7 +378,23 @@ func monitorLoop(ctx context.Context) {
 		igpuLoad := readIGPULoad() // AMD 780M
 		// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU power draw and temp for TGP management
 		gpuPowerW, gpuTempC := readGPUStats()
-		manageGPUTGP(gpuPowerW, dgpuLoad, gpuTempC, onAC)
+		// [CHANGE: claude-code | 2026-06-28] v4.3 — during an offload session, pin TGP to the
+		// 90W ceiling instead of letting it idle-revert in the micro-gaps between streamed
+		// layers. Thermal safety still wins: drop to 55W if the GPU reaches the thermal ceiling.
+		// (Clock lock + persistence are applied immediately in applyOffloadPin; this only owns
+		// the TGP write so currentGPUTGPW stays single-writer — no data race.)
+		if offloadActive.Load() {
+			if gpuTempC >= gpuTGPThermalCeilC {
+				if currentGPUTGPW != gpuTGPLowW {
+					lg.Warn("offload: GPU %.1f°C ≥ %.0f°C thermal ceiling → %.0fW", gpuTempC, gpuTGPThermalCeilC, gpuTGPLowW)
+					setGPUTGP(gpuTGPLowW)
+				}
+			} else if currentGPUTGPW != gpuTGPHighW {
+				setGPUTGP(gpuTGPHighW)
+			}
+		} else {
+			manageGPUTGP(gpuPowerW, dgpuLoad, gpuTempC, onAC)
+		}
 		// [CHANGE: claude-code | 2026-05-31] ROOT-BUG: drive cap off busiest core, not 16-core avg.
 		// scaling_max_freq is a per-core ceiling — a single pinned thread (7-zip, Wine, compiler)
 		// hits 100% on one core while the 16-core average collapses to ~6%, starving the cap.
@@ -1283,6 +1318,75 @@ func readGPUStats() (powerW, tempC float64) {
 // Avoids a spurious setGPUTGP call if the daemon restarts while already at 90W.
 // Falls back to forcing 55W if the limit cannot be read.
 // [CHANGE: claude-code | 2026-06-03] v4.2
+// offloadSignalFile is the shared cross-daemon signal for an active weight-offload
+// session (DECISION 23). luminos-power writes it on offload_start and removes it on
+// offload_stop; luminos-ram (Phase 2) reads it to know when to exempt the pinned
+// weight region from MADV_PAGEOUT/zram. Contents are advisory (writer + timestamp).
+const offloadSignalFile = "/run/luminos/offload.active"
+
+// readGPUMaxGraphicsClock returns the dGPU's max graphics clock in MHz (0 if unknown).
+// [CHANGE: claude-code | 2026-06-28] v4.3
+func readGPUMaxGraphicsClock() int {
+	out, err := exec.Command("nvidia-smi",
+		"--query-gpu=clocks.max.graphics",
+		"--format=csv,noheader,nounits").Output()
+	if err != nil {
+		return 0
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// applyOffloadPin starts/stops a weight-offload GPU performance pin (Phase 1, DECISION 23).
+//
+// On start it:
+//   - enables persistence mode so the driver/CUDA context stays resident between calls,
+//   - locks the GPU graphics clock to its max so the sub-millisecond gaps between streamed
+//     layers can't trigger a P-state downclock mid-token,
+//   - flips offloadActive so monitorLoop pins TGP to the 90W ceiling (thermal-gated).
+//
+// The PCIe link is deliberately NOT pinned: Phase 0 measurement proved it holds Gen4 x8
+// under sustained streaming on its own (DPM Gen1 is an idle-only state), so the link
+// self-manages and only the GPU core clocks needed an explicit pin.
+//
+// On stop it reverses everything: clears the flag (TGP returns to the dynamic manager),
+// resets the GPU clocks, and removes the shared signal file. Requires root (nvidia-smi).
+// [CHANGE: claude-code | 2026-06-28] v4.3
+func applyOffloadPin(on bool) {
+	if on {
+		if err := runCmd("nvidia-smi", "-pm", "1"); err != nil {
+			lg.Warn("offload: persistence mode on failed: %v", err)
+		}
+		if maxClk := readGPUMaxGraphicsClock(); maxClk > 0 {
+			if err := runCmd("nvidia-smi", fmt.Sprintf("--lock-gpu-clocks=%d", maxClk)); err != nil {
+				lg.Warn("offload: lock GPU clocks to %d MHz failed: %v", maxClk, err)
+			} else {
+				lg.Info("offload: GPU graphics clock locked to %d MHz", maxClk)
+			}
+		} else {
+			lg.Warn("offload: could not read max graphics clock — clocks left unlocked")
+		}
+		offloadActive.Store(true)
+		marker := fmt.Sprintf("power pid=%d started=%s\n", os.Getpid(), time.Now().Format(time.RFC3339))
+		if err := os.WriteFile(offloadSignalFile, []byte(marker), 0644); err != nil {
+			lg.Warn("offload: write signal file %s: %v", offloadSignalFile, err)
+		}
+		lg.Info("offload session START — dGPU pinned for weight streaming (TGP→90W on next tick)")
+		return
+	}
+	offloadActive.Store(false)
+	if err := runCmd("nvidia-smi", "--reset-gpu-clocks"); err != nil {
+		lg.Warn("offload: reset GPU clocks failed: %v", err)
+	}
+	if err := os.Remove(offloadSignalFile); err != nil && !os.IsNotExist(err) {
+		lg.Warn("offload: remove signal file: %v", err)
+	}
+	lg.Info("offload session STOP — GPU clocks reset, TGP returned to dynamic manager")
+}
+
 func initGPUTGP() {
 	out, err := exec.Command("nvidia-smi",
 		"--query-gpu=power.limit",

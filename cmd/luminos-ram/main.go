@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -36,6 +37,19 @@ import (
 const (
 	MADV_WILLNEED = 3
 	MADV_PAGEOUT  = 21
+)
+
+// [CHANGE: claude-code | 2026-06-28] Phase 2 — weight-offload RAM coordination (DECISION 23).
+// While the weight-offload inference engine holds a session open, the inference process
+// must NOT be paged out / frozen / killed, and the kernel's swap tendency is lowered so
+// the 4-bit weight region parked in system RAM stays resident (paging it to zram would
+// destroy streaming throughput). The engine drives this with offload_start/offload_stop
+// socket commands carrying the inference PID + the pinned-weight budget to reserve.
+// Mirrors /run/luminos/offload.active, written by luminos-power's matching pin (Phase 1).
+const (
+	offloadSignalFile  = "/run/luminos/offload.active"
+	swappinessPath     = "/proc/sys/vm/swappiness"
+	offloadSwappiness  = 10 // session value — discourage swapping the weight region (base is 60)
 )
 
 type WindowState struct {
@@ -91,6 +105,15 @@ var (
 	coldSet       = make(map[int]*ColdEntry)
 	procCache     = make(map[int]*ProcStats)
 	stateMu       sync.Mutex
+
+	// [CHANGE: claude-code | 2026-06-28] Phase 2 — offload session state (DECISION 23).
+	// offloadPID/offloadReservedMB are atomic: written from the socket goroutine
+	// (handleMessage) and read from the monitor/leak goroutines (madvise, isProtectedAlways).
+	// offloadMu serializes start/stop and guards savedSwappiness.
+	offloadPID        atomic.Int64 // PID of the active offload inference process (0 = none)
+	offloadReservedMB atomic.Int64 // pinned-weight budget reserved out of headroom (MB)
+	offloadMu         sync.Mutex   // serializes offload start/stop + savedSwappiness
+	savedSwappiness   = -1         // original vm.swappiness restored on stop (-1 = not saved)
 
 	// Metrics
 	madvPageoutCounter = prometheus.NewCounter(prometheus.CounterOpts{
@@ -532,8 +555,36 @@ func monitorLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			runMaintenance()
+			checkOffloadLiveness()
 		}
 	}
+}
+
+// checkOffloadLiveness is a failsafe: if the offload inference process dies without
+// sending offload_stop (crash/OOM-kill), auto-release its protection and — critically —
+// restore vm.swappiness so the lowered session value doesn't linger system-wide.
+// luminos-power's GPU pin is reverted separately (Phase 5 cross-daemon crash recovery).
+// [CHANGE: claude-code | 2026-06-28] Phase 2
+func checkOffloadLiveness() {
+	pid := offloadPID.Load()
+	if pid == 0 {
+		return
+	}
+	if syscall.Kill(int(pid), 0) == nil {
+		return // still alive
+	}
+	offloadMu.Lock()
+	defer offloadMu.Unlock()
+	if offloadPID.Load() != pid {
+		return // changed under us
+	}
+	offloadPID.Store(0)
+	offloadReservedMB.Store(0)
+	if savedSwappiness >= 0 {
+		setSwappiness(savedSwappiness)
+		savedSwappiness = -1
+	}
+	lg.Warn("offload: PID:%d gone without offload_stop — auto-released, swappiness restored", pid)
 }
 
 func runMaintenance() {
@@ -769,6 +820,11 @@ func isSafeToKill(pid int, name string) bool {
 }
 
 func isProtectedAlways(pid int, name string) bool {
+	// [CHANGE: claude-code | 2026-06-28] Phase 2 — the active offload inference process
+	// must never be frozen (SIGSTOP) or killed mid-session.
+	if p := offloadPID.Load(); p != 0 && int64(pid) == p {
+		return true
+	}
 	protected := []string{"luminos-", "kwin", "plasmashell", "pipewire", "systemd", "dbus", "Xwayland"}
 	for _, p := range protected {
 		if strings.Contains(name, p) { return true }
@@ -922,11 +978,99 @@ func handleMessage(msg socket.Message) socket.Message {
 	switch msg.Type {
 	case "status":
 		return replyOK(msg, map[string]interface{}{
-			"hot_set_size":  len(hotSet),
-			"cold_set_size": len(coldSet),
+			"hot_set_size":   len(hotSet),
+			"cold_set_size":  len(coldSet),
+			"offload_pid":    offloadPID.Load(),
+			"offload_reserved_mb": offloadReservedMB.Load(),
 		})
+	// [CHANGE: claude-code | 2026-06-28] Phase 2 — weight-offload coordination (DECISION 23).
+	case "offload_start":
+		return handleOffloadStart(msg)
+	case "offload_stop":
+		return handleOffloadStop(msg)
 	default:
 		return replyOK(msg, map[string]string{"status": "ok"})
+	}
+}
+
+// handleOffloadStart registers the inference PID for protection, reserves the pinned
+// budget out of reported headroom, and lowers vm.swappiness for the session.
+// Payload: {"pid": <int>, "reserved_mb": <int>}. [CHANGE: claude-code | 2026-06-28]
+func handleOffloadStart(msg socket.Message) socket.Message {
+	var req struct {
+		PID        int   `json:"pid"`
+		ReservedMB int64 `json:"reserved_mb"`
+	}
+	if len(msg.Payload) > 0 {
+		_ = json.Unmarshal(msg.Payload, &req)
+	}
+	if req.PID <= 0 {
+		return replyOK(msg, map[string]string{"error": "offload_start requires a positive pid"})
+	}
+
+	offloadMu.Lock()
+	defer offloadMu.Unlock()
+
+	offloadPID.Store(int64(req.PID))
+	offloadReservedMB.Store(req.ReservedMB)
+	if savedSwappiness < 0 {
+		savedSwappiness = readSwappiness()
+	}
+	setSwappiness(offloadSwappiness)
+	lg.Info("offload START — protecting PID:%d, reserved %d MB, swappiness %d→%d",
+		req.PID, req.ReservedMB, savedSwappiness, offloadSwappiness)
+	return replyOK(msg, map[string]interface{}{
+		"offload":       "started",
+		"protected_pid": req.PID,
+		"reserved_mb":   req.ReservedMB,
+		"swappiness":    offloadSwappiness,
+	})
+}
+
+// handleOffloadStop releases the protected PID, clears the reservation, and restores
+// the original vm.swappiness. [CHANGE: claude-code | 2026-06-28]
+func handleOffloadStop(msg socket.Message) socket.Message {
+	offloadMu.Lock()
+	defer offloadMu.Unlock()
+
+	pid := offloadPID.Swap(0)
+	offloadReservedMB.Store(0)
+	restored := -1
+	if savedSwappiness >= 0 {
+		setSwappiness(savedSwappiness)
+		restored = savedSwappiness
+		savedSwappiness = -1
+	}
+	lg.Info("offload STOP — released PID:%d, swappiness restored→%d", pid, restored)
+	return replyOK(msg, map[string]interface{}{
+		"offload":      "stopped",
+		"released_pid": pid,
+		"swappiness":   restored,
+	})
+}
+
+// readSwappiness returns the current vm.swappiness (-1 on error).
+// [CHANGE: claude-code | 2026-06-28]
+func readSwappiness() int {
+	b, err := os.ReadFile(swappinessPath)
+	if err != nil {
+		return -1
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		return -1
+	}
+	return v
+}
+
+// setSwappiness writes vm.swappiness (best-effort; logs on failure).
+// [CHANGE: claude-code | 2026-06-28]
+func setSwappiness(v int) {
+	if v < 0 {
+		return
+	}
+	if err := os.WriteFile(swappinessPath, []byte(strconv.Itoa(v)), 0644); err != nil {
+		lg.Warn("offload: set %s=%d failed: %v", swappinessPath, v, err)
 	}
 }
 
@@ -946,6 +1090,13 @@ func replyOK(req socket.Message, payload interface{}) socket.Message {
 // (readable private mappings), chunked at UIO_MAXIOV. MADV_PAGEOUT requires
 // CAP_SYS_NICE + CAP_SYS_PTRACE (unit file updated to grant both).
 func madvise(pid int, hint int) error {
+	// [CHANGE: claude-code | 2026-06-28] Phase 2 — never page out the active offload
+	// inference process: its RAM-parked weights must stay resident for streaming.
+	// (Prefetch hints like MADV_WILLNEED are still allowed.)
+	if hint == MADV_PAGEOUT && int64(pid) == offloadPID.Load() {
+		lg.Debug("offload: skip MADV_PAGEOUT on protected PID:%d", pid)
+		return nil
+	}
 	pidfd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
 		lg.Debug("pidfd_open(%d) failed: %v", pid, err)
@@ -1133,6 +1284,15 @@ func getMemStats() MemStats {
 		stats.Total = total / 1024 / 1024
 		stats.Available = available / 1024 / 1024
 		stats.Used = stats.Total - stats.Available
+		// [CHANGE: claude-code | 2026-06-28] Phase 2 — subtract the pinned-weight
+		// reservation so headroom consumers (BUG-070 luminos-train-ram) don't count
+		// the offload region as free. EffectiveAvailable floors at 0.
+		reserved := float64(offloadReservedMB.Load()) / 1024 // MB → GB
+		stats.OffloadReservedGB = reserved
+		stats.EffectiveAvailable = stats.Available - reserved
+		if stats.EffectiveAvailable < 0 {
+			stats.EffectiveAvailable = 0
+		}
 	}
 
 	// zram stats
@@ -1162,6 +1322,9 @@ type MemStats struct {
 	ZramUsed  float64 `json:"zram_used"`
 	ZramTotal float64 `json:"zram_total"`
 	ZramSaved float64 `json:"zram_saved"`
+	// [CHANGE: claude-code | 2026-06-28] Phase 2 — offload reservation (GB).
+	OffloadReservedGB  float64 `json:"offload_reserved_gb"`
+	EffectiveAvailable float64 `json:"effective_available"`
 }
 
 func handleMemInfo(w http.ResponseWriter, r *http.Request) {

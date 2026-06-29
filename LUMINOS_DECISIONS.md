@@ -958,3 +958,28 @@ KDE 6.6.x ships the day/night *backend* (`knighttimed` / `org.kde.NightTime`, su
 
 ### Durability
 This fix survives package updates (user `~/.config` files are never overwritten by pacman) and KDE re-syncs (kded only writes the flag, defaulting the name to `Breeze`). The only regression vectors are (1) a human/agent hand-editing the theme name back to a fixed-dark value, and (2) `scripts/smart_build.sh` /etc/skel shipping `Adwaita-dark` to fresh installs — both documented in BUG-072.
+
+## DECISION 23 — Weight-offload inference requires CROSS-DAEMON coordination (PCIe link + RAM pinning)
+Date: June 28, 2026
+Made by: claude-code
+**Status: PROPOSED — design phase, not yet built**
+
+### Context
+To run the ~10.4B HOPE model (20.8 GB bf16 / ~5.2 GB at 4-bit) it cannot fit VRAM (4.6 GB usable), so weights are parked in system RAM and streamed to the dGPU layer-by-layer over PCIe. This makes inference **PCIe-bandwidth-bound**, which exposes two OS-level constraints that no single daemon can solve alone — the daemons must cooperate.
+
+### What We Decided (the requirement)
+Every Luminos daemon that touches power or memory must become **offload-aware** and coordinate so the streaming path runs at full speed **without giving up the idle power savings the rest of the time**. Specifically:
+- **luminos-power** must detect an active offload-inference session and hold the dGPU + PCIe link at full performance (P0 / Gen4) for its duration, then revert to power-saving when it ends. The mechanism in `scripts/luminos-train-mode` (nvidia-powerd lifecycle + perf pin) is the starting point.
+- **luminos-ram** must (a) **exempt** the registered pinned weight region from `MADV_PAGEOUT`/zram so DMA never hits a compressed page, and (b) **reserve/account** the pinned budget (~5 GB of 14 GB) in its headroom math so squeezing the desktop into zram doesn't re-trigger OOM (BUG-070). It should drop swappiness for the session like `luminos-train-ram` does.
+- A shared signal (socket/D-Bus) announces "offload session start/stop" so power + ram + sentinel react together, not independently.
+
+### The Conflict (both sides, per Rule 11) — DPM=0x02 vs PCIe bandwidth
+- **`NVreg_DynamicPowerManagement=0x02`** (set for BUG-047, saves ~8W idle): aggressively downtrains the dGPU and its PCIe link during light load. **Measured 2026-06-28: link sitting at Gen1 (2.5 GT/s) x8 = ~2 GB/s, one-eighth of the Gen4 x8 ~16 GB/s capability.** This is the same family of conflict as the Chrome P8/210MHz issue.
+- **Streaming inference** needs the link held at **Gen4 x8** the whole session, including the micro-gaps between layers, or throughput collapses (~4–5 tok/s → ~0.4 tok/s).
+- **Resolution direction:** do NOT globally disable DPM (idle savings matter). Instead, **session-scoped override** — power daemon pins P0/Gen4 only while an offload session is active, reverts after. Cross-ref BUG-047 and BUG-069 (mobile TGP no-op).
+
+### Open question handed back to the model side
+Whether the resident/streamed VRAM split fits 4.6 GB depends on the size of the **memory-block (CUDA-kernel) weights** at 4-bit — these stay resident ("the pens") alongside the states, KV, embeddings, output head, double-buffer, and activations. That number is being requested from the model/LLM expert before the split is finalized.
+
+### Why PROPOSED not ACTIVE
+No code written yet. This entry records the requirement so the daemon work is scoped as one coordinated change, not three disconnected hacks. See AGENTS.md §14 task 9.
