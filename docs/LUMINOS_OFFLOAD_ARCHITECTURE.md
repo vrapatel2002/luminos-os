@@ -1,7 +1,12 @@
 # Luminos Offload Architecture — Big-LLM-on-System-RAM
 # [CHANGE: claude-code | 2026-06-28]
-# Status: PHASE 0 (de-risking) IN PROGRESS
+# Status: PHASES 0-4 DONE + VALIDATED (bit-exact small-proxy). PHASE 5 (full
+#         20 GB run + daemon deploy) AWAITING USER GO-AHEAD (root + live laptop).
 # Decision rationale: LUMINOS_DECISIONS.md → DECISION 23
+#
+# Engine: hope-llm/src/offload_engine.py  (StreamedLinear + StagingPool +
+#         build_offload_hope + OffloadSession daemon coordination)
+# Runner: hope-llm/scripts/offload_run.py   Validator: scripts/offload_validate.py
 
 ## Goal
 Run the ~10.378B HOPE model (custom self-modifying-memory architecture, CUDA-only
@@ -132,3 +137,59 @@ VRAM-resident.
     CapabilityBoundingSet (PTRACE/NICE/KILL) + ProtectSystem=full. /proc/sys/vm/swappiness is root-owned 0644
     and ProtectSystem=full does NOT cover /proc/sys, so root file-owner write should succeed without extra
     caps — VERIFY on deploy (smoke test: offload_start then `cat /proc/sys/vm/swappiness` == 10).
+
+### Phase 3 — Model prep (quantize + resident/stream split)  ✅ DONE
+- 2026-06-28: **Phase 3 DONE.** Built `src/offload_engine.py`. The architecture skeleton is built on the
+  `meta` device (zero RAM), then each weight is materialised one-at-a-time from an **mmap'd** checkpoint
+  (`torch.load(..., mmap=True)` — never a full 20 GB load; confirmed mmap opens in 0.1s).
+  - **Classifier `is_streamed_linear(name)`** verified against the REAL 20 GB checkpoint:
+    `checkpoints/qwen3_transplant/best.pt` = **10.378 B params, all bf16**, 459 tensors.
+    - **STREAMED nf4 (parked in RAM): 233 tensors → 4.77 GB.** attn W_q/k/v/o, SwiGLU gate_up/down,
+      CMS fc1/fc2, and the untied `head`.
+    - **RESIDENT bf16 (on GPU): 226 tensors → 1.66 GB.** SelfModifyingMemory W_in/W_q/W_o + M_*_init +
+      w_eta/w_alpha + mem_norm (feed the CUDA-only DGD kernel), every RMSNorm, CausalConv, ReZero scalars,
+      and tok_emb (random-access lookup).
+  - **nf4 quant**: `quantize_4bit(quant_type='nf4', blocksize=64, compress_statistics=True)` — double-quant
+    keeps the GPU-resident absmax small. Verified `matmul_4bit` == `dequantize_4bit`+matmul **bit-exactly**
+    (max|Δ|=0, both with and without compress_statistics) → streaming reproduces resident-quant exactly.
+
+### Phase 4 — Streaming inference engine  ✅ DONE
+- 2026-06-28: **Phase 4 DONE.** `StreamedLinear` (drop-in for the bias-free nn.Linear) holds the nf4 bytes in
+  **pinned CPU RAM** + a small GPU QuantState; forward stages the packed bytes H2D through a **shared
+  `StagingPool`** and runs `matmul_4bit` (dequant-on-the-fly, no full bf16 weight ever materialised).
+  - **Critical design fix found at scale:** the first cut gave each StreamedLinear its OWN persistent GPU
+    buffer → at 233 layers that put all 4.77 GB back on the GPU (defeats offload). Replaced with a **shared
+    ring of 2 GPU slots sized to the largest streamed weight** (head = 311 MB packed) → streaming VRAM
+    footprint is just **~0.62 GB**, independent of model size.
+  - **Double-buffering is automatic:** the pool's 2 slots each have their own CUDA copy stream + event;
+    consecutive forwards round-robin onto different streams, so the H2D copy of weight i+1 overlaps the
+    matmul of weight i with no explicit prefetch bookkeeping.
+  - Every other module (RoPE, QK-Norm, SDPA, the Triton DGD kernel, CMS) is the **unmodified model.py code**,
+    so the streamed forward is architecturally bit-faithful by construction.
+  - **`OffloadSession`** (context manager) brackets a run with the daemon coordination: `offload_start` to
+    luminos-power (GPU clock pin) + luminos-ram (`{pid, reserved_mb}`, swappiness drop + PID protect), and
+    `offload_stop` on exit. Unreachable daemons are logged, not fatal (engine still runs without OS assists).
+
+### Phase 5 — Integration & validation  (small-proxy ✅ / full-scale ⏳ user)
+- 2026-06-28: **Small-proxy validation PASSED** (`scripts/offload_validate.py`, toy 5.5M model, same flags as
+  the 10.4B: qk_norm, untied head, alternating mem/attn). Compares:
+  - Engine (streamed) **vs** RefB (same linears nf4 round-tripped, resident): **max|Δ| = 0.000e+00, rel = 0,
+    argmax agreement 100%** → the streaming engine reproduces resident-quantised output BIT-EXACTLY.
+  - Engine vs RefA (full bf16): rel ≈ 0.24 — pure nf4 loss on RANDOM untrained weights (far smaller on the
+    real trained checkpoint); informational only.
+  - **Bug found & fixed in the harness (latent, worth noting):** `model.to(torch.bfloat16)` **casts the
+    complex `freqs_cis` RoPE buffer to real bf16, discarding the imaginary part** → corrupts RoPE. The engine
+    recomputes `freqs_cis` as complex after build so it is unaffected; `scripts/generate.py` does
+    `model.bfloat16()` and MAY carry this corruption — flagged for follow-up (see BUGS.md BUG-074).
+- **Computed budget for the real run** (n_mem=4, 40 layers): RAM-parked 4.77 GB (fits 14 GB); GPU baseline
+  ~2.4 GB (1.66 resident + 0.62 pool + ~0.1 qstates) → fits the 4.6 GB safe budget with headroom for the
+  DGD state + activations. Throughput ceiling from Phase 0: R=18 → ~5.4 tok/s, R=22 → ~6.7 (transfer-bound).
+- ⏳ **PENDING — needs user go-ahead** (root + stresses the live laptop):
+  1. Deploy the rebuilt luminos-power + luminos-ram (restarts the live power governor).
+  2. `scripts/offload_run.py --build-only` first (full-scale Phase 3 sanity: ~9.4 B params quantised), then
+     the real generation with daemon coordination → measure real tok/s vs the ceiling + thermal/OOM stability.
+
+### Phase 6 — Productionize & document  (in progress)
+- 2026-06-28: engine + runner + validator committed with identity tags; this doc, BUGS.md, DECISIONS.md,
+  STATUS, Luminos Notes updated. Widget status + clean teardown polish deferred until after the full run
+  confirms real tok/s.

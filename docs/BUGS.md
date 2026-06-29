@@ -3,6 +3,17 @@ Last Updated: 2026-06-24 (BUG-072 FIXED — light/dark fragmentation root-caused
 
 ## Open Bugs
 
+### BUG-074 — `model.to(bfloat16)` corrupts the complex `freqs_cis` RoPE buffer (discards the imaginary part)
+<!-- [CHANGE: claude-code | 2026-06-28] -->
+- Status: OPEN (found during offload Phase 5 validation; the offload engine works around it, generate.py may not)
+- Severity: MEDIUM (silently degrades RoPE → wrong positional encoding → worse generations; no crash)
+- Component: hope-llm `scripts/generate.py` (`model = model.bfloat16().to(device)`), any code that dtype-casts a HOPELLM after construction
+- Description: HOPELLM registers `freqs_cis` as a non-persistent **complex64** buffer (`torch.polar(...)`). A blanket `model.to(torch.bfloat16)` / `model.bfloat16()` casts **all** buffers, including `freqs_cis`, to bf16 — which is REAL, so the imaginary part is silently discarded (PyTorch warns "Casting complex values to real discards the imaginary part"). `apply_rotary_emb` then multiplies the complex query/key by a now-real "freqs", giving incorrect rotation → broken/weakened RoPE. Found because the offload validator's reference models (built with `.to(bf16)`) diverged from the engine by rel≈0.21 until `freqs_cis` was recomputed as complex.
+- Root Cause: complex buffers don't survive a real-dtype `.to()`. The cast is applied module-wide rather than param-only.
+- Workaround in the offload engine: `build_offload_hope` recomputes `freqs_cis` (complex) on-device AFTER materialising weights, so streamed inference is unaffected.
+- Candidate fix (NOT applied — hope-llm owns generate.py): cast only floating params to bf16 and leave complex buffers alone, or recompute `freqs_cis` after the cast (as the engine does). Verify with a shuffle/position test before/after.
+- Date Found: 2026-06-28
+
 ### BUG-073 — App-launcher (Kickoff) stutter on open — swap page-faults, NOT the iGPU
 <!-- [CHANGE: claude-code | 2026-06-24] -->
 - Status: OPEN (diagnosed, not yet fixed)
