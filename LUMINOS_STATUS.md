@@ -1,5 +1,5 @@
 # Luminos OS — System Status
-Last updated: 2026-06-24
+Last updated: 2026-06-30
 Agent: claude-code (Foreign-toolkit light/dark cohesion ROOT-CAUSED + fixed, no daemon. The desktop's 3-way light/dark disagreement traced to ONE bad value: GTK theme name was `Breeze-Dark` (a permanently-dark theme that ignores the prefer-dark flag) instead of `Breeze` (the adaptive theme). KDE's built-in kded `gtkconfig` already syncs the prefer-dark flag + xdg portal to the active Plasma color scheme — but a fixed-dark theme name overrode it, so the flag and the theme contradicted each other. Fix = `gtk-theme-name=Breeze` everywhere. Now KDE color scheme is the single source of truth; Qt/GTK/Electron/Chromium/Flatpak all follow it natively. Verified round-trip light<->dark with no extra process. Daemon experiment removed.)
 Prev: 2026-06-14 (UI cohesion: single token source `design/luminos-tokens.json` + `scripts/luminos-theme-gen` generator + `src/theme/Theme.qml`; power/ram widgets + HIVE refactored off hardcoded hex; BUG-071 fixed. SCAFFOLDED repo-only. Decision 21)
 Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; reversible `luminos-train-ram` toggle. Decision 20)
@@ -89,7 +89,7 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | Daemon | Status | Notes |
 |---|---|---|
 | luminos-ai | ✅ Running | Unix socket IPC — central routing daemon |
-| luminos-power | ✅ Running | v4.1 Adaptive Dual Governor + Thermal Burst Cooling + Resource Coordinator. Burst: 52°C→100% fans until 40°C. RAM pressure → effective load modifier. SPI log. |
+| luminos-power | ✅ Running | v4.1 Adaptive Dual Governor + Thermal Burst Cooling + Resource Coordinator. Burst: 52°C→100% fans until 40°C. RAM pressure → effective load modifier. SPI log. **+ Conductor (DECISION 24, Phases 0-3) landed & wired — closed-loop PID fan + workload PCIe P0 pin. GATED OFF by default; enable with `LUMINOS_CONDUCTOR=1`.** |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
 | luminos-ram | ✅ Running v3.5 | Real process_madvise + caps CAP_KILL/CAP_SYS_NICE active (BUG-065/066 fixed 2026-06-12 restart). All /run/luminos sockets rebound (BUG-067). |

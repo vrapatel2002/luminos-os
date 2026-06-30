@@ -300,6 +300,15 @@ func main() {
 	onAC := readACState()
 	applyACTransition(onAC)
 
+	// [CHANGE: claude-code | 2026-06-30] Conductor (DECISION 24) — gated OFF by default.
+	// Only builds and takes over the fan/PCIe levers when launched with
+	// LUMINOS_CONDUCTOR=1. When off, conductor stays nil and monitorLoop is unchanged.
+	if conductorEnabled {
+		conductor = NewConductor()
+		defer conductor.Revert() // never leave the GPU pinned / fan on a stale duty
+		lg.Info("CONDUCTOR ENABLED (LUMINOS_CONDUCTOR=1) — closed-loop fan + workload PCIe pin active")
+	}
+
 	go monitorLoop(ctx)
 	socket.Serve(ctx, l, handleMessage)
 
@@ -411,6 +420,22 @@ func monitorLoop(ctx context.Context) {
 			smoothedMaxCore = maxCoreLoad
 		} else {
 			smoothedMaxCore = (1-adaptiveEMAAlpha)*smoothedMaxCore + adaptiveEMAAlpha*maxCoreLoad
+		}
+
+		// [CHANGE: claude-code | 2026-06-30] Conductor tick (DECISION 24) — gated OFF
+		// by default. When enabled it owns the fan PID + PCIe pin off the SAME sensed
+		// signals (no extra sysfs reads). The legacy fan-curve / burst writes below
+		// no-op while it owns the fan (see conductorOwnsFan), so there is one writer.
+		if conductorEnabled && conductor != nil {
+			conductor.Tick(Signals{
+				OnAC:      onAC,
+				CPUTempC:  temp,
+				GPUTempC:  gpuTempC,
+				CPULoad:   cpuLoad,
+				DGPULoad:  dgpuLoad,
+				IGPULoad:  igpuLoad,
+				GPUPowerW: gpuPowerW,
+			})
 		}
 
 		// Drain exec events → update pre-alloc bonus.
@@ -1614,6 +1639,11 @@ func updateState(onAC bool, temp, gpuLoad float64, epp, profile string) {
 }
 
 func applyAggressiveFanCurve(mode string) {
+	// [CHANGE: claude-code | 2026-06-30] Single-writer: the Conductor PID owns the fan
+	// when enabled — skip the asusctl curve so we never fight it on the same hwmon.
+	if conductorOwnsFan() {
+		return
+	}
 	// [CHANGE: claude-code | 2026-05-24] Fan curve v5 — steep recovery above 47°C
 	//
 	// Problem with v4: 50°C breakpoint was only 25%. At 52°C the firmware interpolated
@@ -1643,6 +1673,11 @@ func applyAggressiveFanCurve(mode string) {
 // CPU/GPU fans run at 100% from 40°C; mid fan at 88% (slightly softer for noise balance).
 // [CHANGE: claude-code | 2026-05-31] v4.1 thermal burst cooling.
 func applyBurstFanCurve(profile string) {
+	// [CHANGE: claude-code | 2026-06-30] Single-writer: when the Conductor owns the fan
+	// it handles cooling via the PID + baked-in EC failsafe ramp — skip the burst curve.
+	if conductorOwnsFan() {
+		return
+	}
 	lg.Info("burst fan curve → 100%% on %s profile (chassis cool-down mode)", profile)
 	cpuGpuBurst := "30c:0%,40c:100%,45c:100%,50c:100%,60c:100%,70c:100%,80c:100%,90c:100%"
 	midBurst    := "30c:0%,40c:88%,45c:88%,50c:88%,60c:88%,70c:88%,80c:88%,90c:100%"

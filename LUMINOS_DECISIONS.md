@@ -983,3 +983,31 @@ Whether the resident/streamed VRAM split fits 4.6 GB depends on the size of the 
 
 ### Why PROPOSED not ACTIVE
 No code written yet. This entry records the requirement so the daemon work is scoped as one coordinated change, not three disconnected hacks. See AGENTS.md §14 task 9.
+
+## DECISION 24 — The Conductor: unified per-component power/thermal policy (one brain, independent levers)
+Date: June 30, 2026
+Made by: claude-code
+**Status: PHASES 0-3 LANDED — wired into monitorLoop but gated OFF by default (`LUMINOS_CONDUCTOR=1`)**
+
+### Context (three user pains, grounded in code)
+1. **No per-component control.** A single coarse `asusctl profile` moved every knob together — no way to "unlock PCIe but keep the rest normal."
+2. **PCIe capped during training.** The machine was **always on the 180W brick, never battery.** `DPM=0x02` (BUG-047) parks the unpinned dGPU in its lowest P-state and downtrains the link to Gen1 **even on AC**; the old daemon never recognized the training job as GPU-busy so it never pinned P0. Not a battery issue.
+3. **Open-loop cooling.** Fan control was a static table handed to the EC once, with a 52°C burst panic-button. No real-time temp→PWM feedback; the lazy 45-55°C mid-band stayed hot.
+
+### What We Decided
+Build a single policy engine — the **Conductor** — that lives INSIDE `luminos-power` (single-writer discipline for sysfs) and replaces "one profile moves everything" with **independent levers driven from one workload Intent**:
+- **`Intent`** (per-workload posture): fan target °C, GPU fan target °C, whether to pin the dGPU to P0. Each lever reads only the fields it owns.
+- **`Lever` interface** (fan, pcie): `Apply(Intent)` on change, `Revert()` on shutdown. This is the "per-component control under one rule" mechanism.
+- **Fan lever (Phase 2):** closed-loop PID (`fan_control.go`) holding a **workload-aware** fair target — 47°C at light load, a fair higher ceiling (~55-65°C) under heavy load — using the **least** PWM that holds it. Writes `asus_custom_fan_curve` hwmon directly with a baked-in EC failsafe ramp ≥70°C (survives a daemon crash). NOT a single aggressive 47°C setpoint (user rejected maxing fan at 50-55°C as wasteful).
+- **PCIe lever (Phase 1):** reuses the proven `applyOffloadPin` P0 mechanism (persistence + `lock-gpu-clocks`, **never** `-pl` — BUG-069), fired by the classifier on training/heavy-GPU **on AC only**, with `current_link_speed` read-back verification. Defers if a real offload session already owns the pin.
+- **Classifier (Phase 4 seed):** heuristic `classify()` maps live signals → class (idle/light/media/compute/gaming/training) → Intent. NPU/LLM policy model deferred (Phase 5).
+
+### Why gated OFF by default
+Handing fan + PCIe control to brand-new code on a machine probed at 83.5°C carries thermal risk. The whole engine is behind `LUMINOS_CONDUCTOR=1`: when unset, `conductor` stays nil, every guard short-circuits, the legacy asusctl curves + thermal burst run unchanged, and committing/pushing/restarting cannot change live cooling. The user enables it deliberately and watches it.
+
+### The Conflict (both sides, per Rule 11)
+- **Keep firmware open-loop curves:** simple, self-protecting, but blind in the 45-55°C band → the heat-soak pain. Kept ONLY as the disabled-Conductor default and the hardware failsafe ramp.
+- **Closed-loop PID owning the fan:** smart minimum-effort cooling, but a bug could under-cool a hot machine → mitigated by the baked-in EC failsafe ramp ≥70°C + gated-OFF default + retained 92°C emergency CPU cap path.
+
+### Consequence / single-writer
+When the Conductor owns the fan, `applyAggressiveFanCurve` / `applyBurstFanCurve` no-op (`conductorOwnsFan()`), so exactly one code path ever writes the fan hwmon. See `docs/CONDUCTOR_DESIGN.md` for the full design + Phase 0 probe findings. Files: `cmd/luminos-power/conductor.go`, `cmd/luminos-power/fan_control.go`.
