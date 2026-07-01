@@ -1,7 +1,8 @@
 # CONDUCTOR_DESIGN.md — Unified Per-Component Power Policy
 # Proposal for DECISION 24 | Draft by: claude-code | 2026-06-30
-# Status: APPROVED — Phases 0-3 landed & wired (gated OFF by default), Phase 4 partial, Phase 5 deferred
+# Status: APPROVED — Phases 0-4 landed & wired (gated OFF by default), Phase 5 deferred
 # [CHANGE: claude-code | 2026-06-30]
+# [CHANGE: claude-code | 2026-07-01] Phase 4 complete — intent broadcast + ram coordination + telemetry corpus.
 
 > Approved by user 2026-06-30. The NPU/LLM policy-model layer (Phase 5) is deferred —
 > heuristic brain first. Phases 1-3 are now wired into monitorLoop but **gated OFF by
@@ -20,8 +21,8 @@
 | 1 — PCIe lever + read-back | ✅ done | `pcieLever` in `conductor.go` reuses `applyOffloadPin` P0 mechanism; fires on training/heavy-GPU (AC only); `verifyPCIeLinkSpeed` reads back `current_link_speed`/`width`. Defers if a real offload session owns the pin. |
 | 2 — PID fan controller | ✅ wired | `fan_control.go` PID + `fanLever` in `conductor.go`, wired into `monitorLoop`. Legacy `applyAggressiveFanCurve`/`applyBurstFanCurve` no-op when `conductorOwnsFan()` (single writer). Gated OFF by default. |
 | 3 — Lever abstraction + Intent | ✅ done | `Intent`, `Signals`, `Lever` interface + `Conductor` in `conductor.go`. Sense→classify→Intent→drive levers; fan PID every tick. |
-| 4 — Classifier + intent broadcast | 🟡 partial | Heuristic `classify()` seed landed (idle/light/media/compute/gaming/training). **Still TODO:** broadcast Intent via `/run/luminos/intent.json` + socket push to ram+ai, add `report_ram`, generalize ram offload reaction, log telemetry rows for future NPU model. |
-| 5 — NPU policy model | ⏸ deferred | Per user — heuristics first. |
+| 4 — Classifier + intent broadcast | ✅ done | Heuristic `classify()` + broadcast landed. Conductor writes `/run/luminos/intent.json` (atomic) + socket-pushes `intent` to ram+ai on change. `luminos-ram` reacts (heavy→lower swappiness via single-writer `reconcileSwappinessLocked`, offload>intent precedence) and now pushes `report_ram` to ai. Per-tick `conductor-telemetry.jsonl` corpus (sensor vector→action) logged for Phase 5. `[CHANGE: claude-code | 2026-07-01]` |
+| 5 — NPU policy model | ⏸ deferred | Per user — heuristics first. Training corpus now being logged from day one (`conductor-telemetry.jsonl`). |
 
 ### Phase 0 hardware probe — findings (real G14, 2026-06-30, on AC)
 - **Fan actuator = direct sysfs.** `hwmon` named `asus_custom_fan_curve` exposes writable 8-point curves per fan (`pwmN_auto_pointM_{temp,pwm}`, root-writable, temp °C, pwm 0-255). cpu=ch1, gpu=ch2, mid=ch3. **Decision: write a flat-duty curve with a baked-in failsafe ramp ≥70°C** — direct PWM authority + hardware self-protection if the daemon dies. No asusctl subprocess needed. (hwmon index is unstable → discover by name.)

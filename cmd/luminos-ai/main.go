@@ -28,6 +28,9 @@ type aggregatedState struct {
 	power    json.RawMessage
 	sentinel json.RawMessage
 	router   json.RawMessage
+	// [CHANGE: claude-code | 2026-07-01] Phase 4 — ram state + Conductor intent (DECISION 24).
+	ram    json.RawMessage
+	intent json.RawMessage
 }
 
 var (
@@ -101,6 +104,8 @@ func handleMessage(msg socket.Message) socket.Message {
 			"power":    state.power,
 			"sentinel": state.sentinel,
 			"router":   state.router,
+			"ram":      state.ram,
+			"intent":   state.intent,
 		})
 
 	case "report_power":
@@ -124,6 +129,23 @@ func handleMessage(msg socket.Message) socket.Message {
 		state.mu.Lock()
 		state.router = msg.Payload
 		state.mu.Unlock()
+		return replyOK(msg, map[string]string{"status": "received"})
+
+	case "report_ram":
+		// [CHANGE: claude-code | 2026-07-01] Phase 4 — luminos-ram pushes memory/offload/
+		// intent state on change so the aggregated status has the full picture (DECISION 24).
+		state.mu.Lock()
+		state.ram = msg.Payload
+		state.mu.Unlock()
+		return replyOK(msg, map[string]string{"status": "received"})
+
+	case "intent":
+		// [CHANGE: claude-code | 2026-07-01] Phase 4 — the Conductor (luminos-power) broadcasts
+		// the active workload Intent; cache it for status/telemetry visibility (DECISION 24).
+		state.mu.Lock()
+		state.intent = msg.Payload
+		state.mu.Unlock()
+		lg.Info("intent broadcast from %s: %s", msg.Source, string(msg.Payload))
 		return replyOK(msg, map[string]string{"status": "received"})
 
 	default:

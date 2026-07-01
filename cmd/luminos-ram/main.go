@@ -50,6 +50,12 @@ const (
 	offloadSignalFile  = "/run/luminos/offload.active"
 	swappinessPath     = "/proc/sys/vm/swappiness"
 	offloadSwappiness  = 10 // session value — discourage swapping the weight region (base is 60)
+	// [CHANGE: claude-code | 2026-07-01] Phase 4 — Conductor intent coordination (DECISION 24).
+	// A heavy workload intent (training/gaming/compute) broadcast by luminos-power lowers
+	// swappiness so the working set isn't paged out under pressure. This is the SOFT,
+	// fully-revertible ram reaction to the shared Intent; the HARD pinned-region reservation
+	// still comes only from a real offload_start (which carries the actual weight budget).
+	intentSwappiness = 10
 )
 
 type WindowState struct {
@@ -112,8 +118,15 @@ var (
 	// offloadMu serializes start/stop and guards savedSwappiness.
 	offloadPID        atomic.Int64 // PID of the active offload inference process (0 = none)
 	offloadReservedMB atomic.Int64 // pinned-weight budget reserved out of headroom (MB)
-	offloadMu         sync.Mutex   // serializes offload start/stop + savedSwappiness
-	savedSwappiness   = -1         // original vm.swappiness restored on stop (-1 = not saved)
+	offloadMu         sync.Mutex   // serializes offload start/stop + intent + savedSwappiness
+	savedSwappiness   = -1         // original vm.swappiness restored when nothing lowers it (-1 = not saved)
+
+	// [CHANGE: claude-code | 2026-07-01] Phase 4 — Conductor intent state (DECISION 24).
+	// intentHeavy is set from the broadcast Intent; guarded by offloadMu (written in
+	// handleIntent, read in reconcileSwappinessLocked). intentName is an atomic so the
+	// lock-free status handler can surface it. Precedence: offload session > intent.
+	intentHeavy atomic.Bool
+	intentName  atomic.Value // string — last broadcast intent name ("" until first)
 
 	// Metrics
 	madvPageoutCounter = prometheus.NewCounter(prometheus.CounterOpts{
@@ -977,17 +990,25 @@ func checkSocketState(pid int, stateHex string) bool {
 func handleMessage(msg socket.Message) socket.Message {
 	switch msg.Type {
 	case "status":
+		intent, _ := intentName.Load().(string)
 		return replyOK(msg, map[string]interface{}{
 			"hot_set_size":   len(hotSet),
 			"cold_set_size":  len(coldSet),
 			"offload_pid":    offloadPID.Load(),
 			"offload_reserved_mb": offloadReservedMB.Load(),
+			// [CHANGE: claude-code | 2026-07-01] Phase 4 — Conductor intent visibility.
+			"intent":       intent,
+			"intent_heavy": intentHeavy.Load(),
+			"swappiness":   readSwappiness(),
 		})
 	// [CHANGE: claude-code | 2026-06-28] Phase 2 — weight-offload coordination (DECISION 23).
 	case "offload_start":
 		return handleOffloadStart(msg)
 	case "offload_stop":
 		return handleOffloadStop(msg)
+	// [CHANGE: claude-code | 2026-07-01] Phase 4 — Conductor intent broadcast (DECISION 24).
+	case "intent":
+		return handleIntent(msg)
 	default:
 		return replyOK(msg, map[string]string{"status": "ok"})
 	}
@@ -1013,17 +1034,15 @@ func handleOffloadStart(msg socket.Message) socket.Message {
 
 	offloadPID.Store(int64(req.PID))
 	offloadReservedMB.Store(req.ReservedMB)
-	if savedSwappiness < 0 {
-		savedSwappiness = readSwappiness()
-	}
-	setSwappiness(offloadSwappiness)
-	lg.Info("offload START — protecting PID:%d, reserved %d MB, swappiness %d→%d",
-		req.PID, req.ReservedMB, savedSwappiness, offloadSwappiness)
+	reconcileSwappinessLocked() // offload outranks any intent — this sets swappiness=10
+	lg.Info("offload START — protecting PID:%d, reserved %d MB, swappiness→%d (baseline %d)",
+		req.PID, req.ReservedMB, readSwappiness(), savedSwappiness)
+	reportRAMToAI()
 	return replyOK(msg, map[string]interface{}{
 		"offload":       "started",
 		"protected_pid": req.PID,
 		"reserved_mb":   req.ReservedMB,
-		"swappiness":    offloadSwappiness,
+		"swappiness":    readSwappiness(),
 	})
 }
 
@@ -1035,18 +1054,86 @@ func handleOffloadStop(msg socket.Message) socket.Message {
 
 	pid := offloadPID.Swap(0)
 	offloadReservedMB.Store(0)
-	restored := -1
-	if savedSwappiness >= 0 {
-		setSwappiness(savedSwappiness)
-		restored = savedSwappiness
-		savedSwappiness = -1
-	}
-	lg.Info("offload STOP — released PID:%d, swappiness restored→%d", pid, restored)
+	// With the session gone, precedence falls to a heavy intent (if one is still active)
+	// or back to the baseline. [CHANGE: claude-code | 2026-07-01]
+	reconcileSwappinessLocked()
+	restored := readSwappiness()
+	lg.Info("offload STOP — released PID:%d, swappiness→%d", pid, restored)
+	reportRAMToAI()
 	return replyOK(msg, map[string]interface{}{
 		"offload":      "stopped",
 		"released_pid": pid,
 		"swappiness":   restored,
 	})
+}
+
+// handleIntent reacts to the Conductor's broadcast Intent (Phase 4, DECISION 24). It
+// is the SOFT ram slice of the shared policy: a heavy workload keeps its working set
+// resident (lower swappiness); light/idle hands the baseline back. It deliberately does
+// NOT fabricate a pinned-region reservation — that hard number only comes from a real
+// offload_start carrying the actual weight budget. Precedence (offload > intent) is
+// enforced in reconcileSwappinessLocked, so this never disturbs an active offload
+// session. Payload: {"name": "...", ...}. [CHANGE: claude-code | 2026-07-01]
+func handleIntent(msg socket.Message) socket.Message {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if len(msg.Payload) > 0 {
+		_ = json.Unmarshal(msg.Payload, &req)
+	}
+	heavy := isHeavyIntent(req.Name)
+
+	offloadMu.Lock()
+	intentName.Store(req.Name)
+	intentHeavy.Store(heavy)
+	reconcileSwappinessLocked()
+	sw := readSwappiness()
+	offloadMu.Unlock()
+
+	lg.Info("intent %q (heavy=%v) — swappiness→%d", req.Name, heavy, sw)
+	reportRAMToAI()
+	return replyOK(msg, map[string]interface{}{
+		"intent":     req.Name,
+		"heavy":      heavy,
+		"swappiness": sw,
+	})
+}
+
+// isHeavyIntent reports whether a workload class wants its working set kept resident.
+// [CHANGE: claude-code | 2026-07-01]
+func isHeavyIntent(name string) bool {
+	switch name {
+	case "gaming", "training", "compute", "heavy":
+		return true
+	default:
+		return false
+	}
+}
+
+// reportRAMToAI pushes a snapshot of ram state to luminos-ai so the aggregated status
+// view includes memory/offload/intent state (Phase 4). Best-effort, state-change driven
+// (offload start/stop, intent change) — no new polling loop. [CHANGE: claude-code | 2026-07-01]
+func reportRAMToAI() {
+	if appCfg == nil {
+		return
+	}
+	intent, _ := intentName.Load().(string)
+	payload := map[string]interface{}{
+		"hot_set_size":        len(hotSet),
+		"cold_set_size":       len(coldSet),
+		"offload_pid":         offloadPID.Load(),
+		"offload_reserved_mb": offloadReservedMB.Load(),
+		"intent":              intent,
+		"intent_heavy":        intentHeavy.Load(),
+		"swappiness":          readSwappiness(),
+	}
+	msg, err := socket.NewMessage("report_ram", "luminos-ram", payload)
+	if err != nil {
+		return
+	}
+	if _, err := socket.Send(appCfg.Sockets.AI, msg); err != nil {
+		lg.Debug("report_ram push failed: %v", err)
+	}
 }
 
 // readSwappiness returns the current vm.swappiness (-1 on error).
@@ -1072,6 +1159,35 @@ func setSwappiness(v int) {
 	if err := os.WriteFile(swappinessPath, []byte(strconv.Itoa(v)), 0644); err != nil {
 		lg.Warn("offload: set %s=%d failed: %v", swappinessPath, v, err)
 	}
+}
+
+// reconcileSwappinessLocked is the SINGLE writer of vm.swappiness (caller must hold
+// offloadMu). Two independent reasons can lower it — an offload session or a heavy
+// Conductor intent — so we centralise the decision to avoid the two clobbering each
+// other's baseline (e.g. an intent lowering to 10, then offload capturing 10 as the
+// "original"). Precedence: offload session > heavy intent > kernel default.
+// savedSwappiness holds the TRUE baseline, captured once on the first lowering and
+// restored (then reset to -1) only when no reason remains. [CHANGE: claude-code | 2026-07-01]
+func reconcileSwappinessLocked() {
+	desired := -1
+	switch {
+	case offloadPID.Load() != 0:
+		desired = offloadSwappiness
+	case intentHeavy.Load():
+		desired = intentSwappiness
+	}
+	if desired < 0 {
+		// Nothing wants swap discouraged — hand the baseline back if we ever lowered it.
+		if savedSwappiness >= 0 {
+			setSwappiness(savedSwappiness)
+			savedSwappiness = -1
+		}
+		return
+	}
+	if savedSwappiness < 0 {
+		savedSwappiness = readSwappiness() // capture the real baseline exactly once
+	}
+	setSwappiness(desired)
 }
 
 func replyOK(req socket.Message, payload interface{}) socket.Message {

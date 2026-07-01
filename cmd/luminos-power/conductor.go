@@ -15,12 +15,17 @@
 // applyAggressiveFanCurve / applyBurstFanCurve calls no-op (see conductorOwnsFan),
 // so only ONE code path ever writes the asus_custom_fan_curve hwmon points.
 // [CHANGE: claude-code | 2026-06-30] v0 — Conductor policy engine (Phases 1-3).
+// [CHANGE: claude-code | 2026-07-01] Phase 4 — intent broadcast + per-tick telemetry.
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/luminos-os/luminos/internal/socket"
 )
 
 // conductorEnabled gates the entire DECISION 24 engine. Default OFF — see file header.
@@ -28,6 +33,19 @@ var conductorEnabled = os.Getenv("LUMINOS_CONDUCTOR") == "1"
 
 // conductor is the live engine instance (nil until main() builds it when enabled).
 var conductor *Conductor
+
+// Phase 4 cross-daemon coordination surfaces. [CHANGE: claude-code | 2026-07-01]
+const (
+	// intentSignalFile is the broadcast Intent, generalising /run/luminos/offload.active
+	// into a full posture other daemons can read. Written atomically on intent change.
+	intentSignalFile = "/run/luminos/intent.json"
+	// ramSocketPath is luminos-ram's control socket (hardcoded there too — config has no
+	// RAM field). The Conductor pushes the Intent here so ram reacts in lock-step.
+	ramSocketPath = "/run/luminos/ram.sock"
+	// telemetryMaxBytes caps the per-tick telemetry log; it rotates to .1 past this size
+	// so the always-on corpus can't grow unbounded on disk.
+	telemetryMaxBytes = 64 << 20 // 64 MiB
+)
 
 // conductorOwnsFan reports whether the Conductor is the single writer of the fan
 // hwmon. The legacy curve writers check this and bail so they never fight the PID.
@@ -43,6 +61,43 @@ type Intent struct {
 	FanTarget float64 // fair chassis setpoint °C the CPU/chassis fan PID holds
 	GPUTarget float64 // fair GPU setpoint °C the GPU fan PID holds
 	PinGPUP0  bool    // pin dGPU to P0 + lock clocks so PCIe can't downtrain mid-job
+}
+
+// IntentBroadcast is the cross-daemon wire form of the active Intent (Phase 4). The
+// Conductor writes it to intentSignalFile and pushes it to ram+ai on every intent
+// change so the whole daemon stack reacts under ONE rule instead of each guessing.
+// Swappiness is the ram hint: heavy workloads want less paging of the working set
+// (-1 = leave the kernel default). [CHANGE: claude-code | 2026-07-01]
+type IntentBroadcast struct {
+	Name       string  `json:"name"`
+	FanTarget  float64 `json:"fan_target_c"`
+	GPUTarget  float64 `json:"gpu_target_c"`
+	PinGPUP0   bool    `json:"pin_gpu_p0"`
+	Swappiness int     `json:"swappiness"`
+	OnAC       bool    `json:"on_ac"`
+	Source     string  `json:"source"`
+	Timestamp  string  `json:"timestamp"`
+}
+
+// telemetryRow is one per-tick training sample: the numeric sensor vector plus the
+// action the Conductor took (fair targets, resulting fan duties, pin decision). This
+// is the corpus the future NPU policy model (Phase 5) trains on — same .jsonl idea as
+// nexus_*.jsonl, but numbers in → action out. [CHANGE: claude-code | 2026-07-01]
+type telemetryRow struct {
+	T         string  `json:"t"`
+	Intent    string  `json:"intent"`
+	OnAC      bool    `json:"on_ac"`
+	CPUTempC  float64 `json:"cpu_temp_c"`
+	GPUTempC  float64 `json:"gpu_temp_c"`
+	CPULoad   float64 `json:"cpu_load"`
+	DGPULoad  float64 `json:"dgpu_load"`
+	IGPULoad  float64 `json:"igpu_load"`
+	GPUPowerW float64 `json:"gpu_power_w"`
+	FanTarget float64 `json:"fan_target_c"`
+	GPUTarget float64 `json:"gpu_target_c"`
+	CPUDuty   int     `json:"cpu_duty"`
+	GPUDuty   int     `json:"gpu_duty"`
+	PinP0     bool    `json:"pin_p0"`
 }
 
 // Signals is the sensed state the Conductor classifies on. Filled each tick from
@@ -75,6 +130,11 @@ type fanLever struct {
 	cpu   *FanController
 	gpu   *FanController
 	hwmon string // "" → actuator not found; tick() no-ops and fan stays on firmware
+
+	// last PID outputs, surfaced for the Phase 4 telemetry row (0 when hwmon unbound).
+	// [CHANGE: claude-code | 2026-07-01]
+	lastCPUDuty int
+	lastGPUDuty int
 }
 
 func newFanLever() *fanLever {
@@ -97,6 +157,7 @@ func (f *fanLever) tick(cpuTempC, gpuTempC, dt float64, in Intent) {
 	}
 	cpuDuty := f.cpu.Update(cpuTempC, in.FanTarget, dt)
 	gpuDuty := f.gpu.Update(gpuTempC, in.GPUTarget, dt)
+	f.lastCPUDuty, f.lastGPUDuty = cpuDuty, gpuDuty
 	if err := setAllFansDuty(f.hwmon, cpuDuty, gpuDuty); err != nil {
 		lg.Warn("conductor: fan write failed: %v", err)
 	}
@@ -206,15 +267,119 @@ func (c *Conductor) Tick(sig Signals) {
 			l.Apply(in)
 		}
 		c.cur = in
+		// Phase 4: only broadcast on change (levers Apply on change too) — ram/ai react
+		// in lock-step. Sockets are pushed off the loop so a slow peer can't stall the PID.
+		c.broadcast(in, sig)
 	}
 	c.fan.tick(sig.CPUTempC, sig.GPUTempC, dt, in)
+	c.logTelemetry(sig, in) // every tick: the sensor→action corpus for the Phase 5 model
+}
+
+// broadcast publishes the active Intent to the rest of the stack (Phase 4). It writes
+// intentSignalFile atomically (rename-over so a reader never sees a half-written file)
+// and pushes an "intent" message to ram+ai. The file is the durable, pollable copy;
+// the socket push is the low-latency nudge. Both are best-effort. [CHANGE: claude-code | 2026-07-01]
+func (c *Conductor) broadcast(in Intent, sig Signals) {
+	b := IntentBroadcast{
+		Name:       in.Name,
+		FanTarget:  in.FanTarget,
+		GPUTarget:  in.GPUTarget,
+		PinGPUP0:   in.PinGPUP0,
+		Swappiness: intentSwappinessHint(in.Name),
+		OnAC:       sig.OnAC,
+		Source:     "luminos-power",
+		Timestamp:  time.Now().Format(time.RFC3339),
+	}
+	payload, err := json.Marshal(b)
+	if err != nil {
+		lg.Warn("conductor: marshal intent broadcast: %v", err)
+		return
+	}
+	// Atomic write: temp file in the same dir + rename.
+	tmp := intentSignalFile + ".tmp"
+	if err := os.WriteFile(tmp, append(payload, '\n'), 0644); err != nil {
+		lg.Warn("conductor: write %s: %v", tmp, err)
+	} else if err := os.Rename(tmp, intentSignalFile); err != nil {
+		lg.Warn("conductor: rename intent signal: %v", err)
+	}
+	// Socket nudge, off-loop so a 3s dial timeout can't stall the fan PID cadence.
+	go pushIntent(b)
+}
+
+// intentSwappinessHint maps a workload class to the ram swappiness hint. Heavy work
+// keeps its working set resident (less paging); everything else leaves the kernel
+// default (-1). ram enforces offload>intent precedence. [CHANGE: claude-code | 2026-07-01]
+func intentSwappinessHint(class string) int {
+	switch class {
+	case "gaming", "training", "compute", "heavy":
+		return 10
+	default:
+		return -1
+	}
+}
+
+// pushIntent dials ram and ai and delivers the Intent. Failures are logged, not fatal —
+// the intentSignalFile is the durable fallback any daemon can poll. [CHANGE: claude-code | 2026-07-01]
+func pushIntent(b IntentBroadcast) {
+	msg, err := socket.NewMessage("intent", "luminos-power", b)
+	if err != nil {
+		lg.Warn("conductor: build intent msg: %v", err)
+		return
+	}
+	for _, sock := range []string{ramSocketPath, cfg.Sockets.AI} {
+		if _, err := socket.Send(sock, msg); err != nil {
+			lg.Debug("conductor: intent push to %s failed: %v", sock, err)
+		}
+	}
+}
+
+// logTelemetry appends one training row per tick. Best-effort: telemetry must never
+// take down the control loop. Rotates past telemetryMaxBytes. [CHANGE: claude-code | 2026-07-01]
+func (c *Conductor) logTelemetry(sig Signals, in Intent) {
+	path := cfg.Log.Dir + "/conductor-telemetry.jsonl"
+	if fi, err := os.Stat(path); err == nil && fi.Size() > telemetryMaxBytes {
+		_ = os.Rename(path, path+".1") // keep one previous generation
+	}
+	row := telemetryRow{
+		T:         time.Now().Format(time.RFC3339),
+		Intent:    in.Name,
+		OnAC:      sig.OnAC,
+		CPUTempC:  sig.CPUTempC,
+		GPUTempC:  sig.GPUTempC,
+		CPULoad:   sig.CPULoad,
+		DGPULoad:  sig.DGPULoad,
+		IGPULoad:  sig.IGPULoad,
+		GPUPowerW: sig.GPUPowerW,
+		FanTarget: in.FanTarget,
+		GPUTarget: in.GPUTarget,
+		CPUDuty:   c.fan.lastCPUDuty,
+		GPUDuty:   c.fan.lastGPUDuty,
+		PinP0:     in.PinGPUP0,
+	}
+	line, err := json.Marshal(row)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s\n", line)
 }
 
 // Revert returns every lever to firmware/default management. Called on shutdown so
 // we never leave the GPU pinned or the fan on a stale duty after the daemon exits.
+// It also clears the broadcast so ram restores its swappiness baseline (Phase 4).
 func (c *Conductor) Revert() {
 	for _, l := range c.levers {
 		l.Revert()
+	}
+	// Tell the stack we're idle again, then drop the signal file so nothing reads a
+	// stale posture after we exit. [CHANGE: claude-code | 2026-07-01]
+	pushIntent(IntentBroadcast{Name: "idle", Swappiness: -1, Source: "luminos-power", Timestamp: time.Now().Format(time.RFC3339)})
+	if err := os.Remove(intentSignalFile); err != nil && !os.IsNotExist(err) {
+		lg.Warn("conductor: remove intent signal on revert: %v", err)
 	}
 }
 

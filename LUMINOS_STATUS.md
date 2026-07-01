@@ -88,11 +88,11 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 ## Go Daemons
 | Daemon | Status | Notes |
 |---|---|---|
-| luminos-ai | ✅ Running | Unix socket IPC — central routing daemon |
-| luminos-power | ✅ Running | v4.1 Adaptive Dual Governor + Thermal Burst Cooling + Resource Coordinator. Burst: 52°C→100% fans until 40°C. RAM pressure → effective load modifier. SPI log. **+ Conductor (DECISION 24, Phases 0-3) landed & wired — closed-loop PID fan + workload PCIe P0 pin. GATED OFF by default; enable with `LUMINOS_CONDUCTOR=1`.** |
+| luminos-ai | ✅ Running | Unix socket IPC — central routing daemon. **+ aggregates `report_ram` + Conductor `intent` broadcasts in `status` (DECISION 24 Phase 4).** |
+| luminos-power | ✅ Running | v4.1 Adaptive Dual Governor + Thermal Burst Cooling + Resource Coordinator. Burst: 52°C→100% fans until 40°C. RAM pressure → effective load modifier. SPI log. **+ Conductor (DECISION 24, Phases 0-4) landed & wired — closed-loop PID fan + workload PCIe P0 pin + intent broadcast (`/run/luminos/intent.json` + socket push to ram/ai) + per-tick `conductor-telemetry.jsonl` corpus. GATED OFF by default; enable with `LUMINOS_CONDUCTOR=1`.** |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
-| luminos-ram | ✅ Running v3.5 | Real process_madvise + caps CAP_KILL/CAP_SYS_NICE active (BUG-065/066 fixed 2026-06-12 restart). All /run/luminos sockets rebound (BUG-067). |
+| luminos-ram | ✅ Running v3.5 | Real process_madvise + caps CAP_KILL/CAP_SYS_NICE active (BUG-065/066 fixed 2026-06-12 restart). All /run/luminos sockets rebound (BUG-067). **+ reacts to Conductor `intent` broadcast — heavy workload lowers swappiness via single-writer `reconcileSwappinessLocked` (offload>intent precedence); pushes `report_ram` to ai (DECISION 24 Phase 4).** |
 
 ## Compatibility
 | Component | Status | Notes |
