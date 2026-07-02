@@ -29,8 +29,9 @@ PlasmoidItem {
                 parsePower(stdout)
             } else if (source.includes("sensors")) {
                 parseSensors(stdout)
-            } else if (source.includes("nvidia")) {
-                root.nvidiaAwake = stdout.includes("W")
+            } else if (source.includes("runtime_status")) {
+                // [CHANGE: claude-code | 2026-07-01] runtime_status is side-effect free
+                root.nvidiaAwake = stdout.trim() === "active"
             }
             disconnectSource(source)
         }
@@ -79,10 +80,11 @@ PlasmoidItem {
             "sensors 2>/dev/null | " +
             "grep -E 'temp1|cpu_fan'"
         )
+        // [CHANGE: claude-code | 2026-07-01] BUG-078: nvidia-smi poll every 5s took a
+        // runtime-PM ref each time — dGPU could NEVER runtime-suspend while plasmashell
+        // ran (runtime_suspended_time stuck at 0). runtime_status read is wake-free.
         executable.exec(
-            "nvidia-smi --query-gpu=" +
-            "power.draw --format=csv,noheader " +
-            "2>/dev/null | head -1"
+            "cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_status"
         )
     }
 

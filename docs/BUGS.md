@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-06-24 (BUG-072 FIXED — light/dark fragmentation root-caused to fixed-dark `Breeze-Dark` theme name; BUG-073 OPEN — app-launcher stutter is swap paging, not iGPU)
+Last Updated: 2026-07-01 (BUG-078 FIXED — monitoring itself kept the dGPU awake: nvidia-smi polls from powerwidget + luminos-monitor took runtime-PM refs; runtime_status reads are wake-free)
 
 ## Open Bugs
 
@@ -65,6 +65,17 @@ Last Updated: 2026-06-24 (BUG-072 FIXED — light/dark fragmentation root-caused
 - Date Found: 2026-06-11
 
 ## Fixed Bugs (new)
+
+### BUG-078 — Monitoring kept the dGPU awake: `nvidia-smi` polling (powerwidget every 5s, luminos-monitor every 2s) takes a runtime-PM ref per call
+<!-- [CHANGE: claude-code | 2026-07-01] -->
+- Status: FIXED (2026-07-01)
+- Severity: MEDIUM (idle power: dGPU held at P8 ~1.8–8W instead of D3cold ~0W whenever polling ran)
+- Component: src/widgets/org.luminos.powerwidget (main.qml updateAll), /usr/local/bin/luminos-monitor (_snapshot/watch)
+- Description: Every `nvidia-smi` invocation opens /dev/nvidia0 and takes a runtime-PM reference, waking a suspended GPU and resetting its autosuspend window. powerwidget polled `nvidia-smi --query-gpu=power.draw` every 5s from plasmashell; `luminos-monitor watch` polled the full query every 2s. Result observed 2026-07-01: `runtime_suspended_time = 0 ms` over a 55.7h uptime despite `d3cold_allowed=1` and the BUG-047 udev gating being correct. (Separate, legitimate wake-holders also present: forex bot with a live CUDA mmap on /dev/nvidia0+uvm, and nvidia-powerd left running — those hold the GPU awake by design; the monitoring wakes were pure waste.)
+- Root Cause: monitoring used a side-effectful query tool to ask "are you asleep?". `/sys/bus/pci/devices/0000:01:00.0/power/runtime_status` answers the same question with zero side effects.
+- Fix Applied: (1) luminos-monitor v1.2 sleep-guard — read runtime_status first; if `suspended`, report SLEEP/0W and skip nvidia-smi entirely. (2) powerwidget now reads runtime_status instead of nvidia-smi for its awake-dot. (3) new org.luminos.monitorwidget consumes `luminos-monitor stats` (v1.3) and inherits the guard.
+- Verify: with no CUDA holders running, `cat .../power/runtime_suspended_time` should start climbing; monitor shows `SLEEP/0W` without flipping runtime_status to active.
+- Date Found / Fixed: 2026-07-01
 
 ### BUG-072 — Light/dark fragmentation: `gtk-theme-name=Breeze-Dark` is a fixed-dark theme that ignores the prefer-dark flag (regression introduced by BUG-068/BUG-071)
 <!-- [CHANGE: claude-code | 2026-06-24] -->

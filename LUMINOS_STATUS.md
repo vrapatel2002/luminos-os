@@ -1,5 +1,7 @@
 # Luminos OS — System Status
-Last updated: 2026-06-30
+Last updated: 2026-07-01
+Agent: claude-code (Monitor made light + BUG-078 FIXED: Meta+M/Ctrl+M now open `luminos-monitor watch` (bash loop) instead of konsole+btop (saves ~55M unique RAM + ~5% CPU per window). Root-caused dGPU-never-sleeps: nvidia-smi polls (powerwidget 5s, monitor 2s) each take a runtime-PM ref — replaced with side-effect-free runtime_status reads; monitor v1.2/1.3 sleep-guard shows SLEEP/0W without waking GPU. New org.luminos.monitorwidget (panel popup, feeds on `luminos-monitor stats`) installed + added to panel; powerwidget tokenized version deployed (installed copy was stale since May 21). NOTE: forex bot CUDA mmap + nvidia-powerd still hold GPU awake — 0W/D3cold reachable only when those exit.)
+Prev: 2026-06-30
 Agent: claude-code (Foreign-toolkit light/dark cohesion ROOT-CAUSED + fixed, no daemon. The desktop's 3-way light/dark disagreement traced to ONE bad value: GTK theme name was `Breeze-Dark` (a permanently-dark theme that ignores the prefer-dark flag) instead of `Breeze` (the adaptive theme). KDE's built-in kded `gtkconfig` already syncs the prefer-dark flag + xdg portal to the active Plasma color scheme — but a fixed-dark theme name overrode it, so the flag and the theme contradicted each other. Fix = `gtk-theme-name=Breeze` everywhere. Now KDE color scheme is the single source of truth; Qt/GTK/Electron/Chromium/Flatpak all follow it natively. Verified round-trip light<->dark with no extra process. Daemon experiment removed.)
 Prev: 2026-06-14 (UI cohesion: single token source `design/luminos-tokens.json` + `scripts/luminos-theme-gen` generator + `src/theme/Theme.qml`; power/ram widgets + HIVE refactored off hardcoded hex; BUG-071 fixed. SCAFFOLDED repo-only. Decision 21)
 Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; reversible `luminos-train-ram` toggle. Decision 20)
@@ -125,7 +127,8 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | Wine/MT5 GPU | ✅ Fixed | [CHANGE: claude-code | 2026-05-30] luminos-mt5 launcher: AMD forced (DRI_PRIME=0, mesa EGL/GLX/VK), warns if markets closed. Desktop file fixed. mt5-terminal.service updated. |
 | Forex Bot GPU | ✅ Fixed | [CHANGE: gemini-cli | 2026-05-11] Forced CPU inference only. |
 | NVIDIA power gating | ✅ Active | Sleeps when idle (BUG-047) |
-| Power Monitor widget | ✅ Working | [CHANGE: gemini-cli | 2026-05-11] Plasma widget (org.luminos.powerwidget) installed. |
+| Power Monitor widget | ✅ Working | [CHANGE: gemini-cli | 2026-05-11] Plasma widget (org.luminos.powerwidget) installed. [CHANGE: claude-code | 2026-07-01] BUG-078: awake-dot now reads runtime_status (wake-free); tokenized repo version deployed (installed copy was stale). Not currently placed in any panel. |
+| System Monitor widget | ✅ Working | [CHANGE: claude-code | 2026-07-01] org.luminos.monitorwidget installed + in panel. Popup = full luminos-monitor box (CPU/iGPU/dGPU/fans/NVMe/WiFi/battery), feeds on `luminos-monitor stats`, 2s poll only while open (15s trickle for panel chip), dGPU sleep-guard inherited. btop escape-hatch button. |
 | Thermal oscillation | ✅ Fixed | BUG-048: Removed auto-Performance switching, 45°C target, EPP-based control, hysteresis |
 | Display smoothness | ⚪ VRR reverted | BUG-051 fix was VRR=Automatic+KWin LatencyPolicy=Low; user reverted VRR to Never (intentional) |
 | Memory leak detection | ✅ Active | Alerts for background growth (BUG-049) |

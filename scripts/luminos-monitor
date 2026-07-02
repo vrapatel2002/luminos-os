@@ -1,0 +1,154 @@
+#!/bin/bash
+# Luminos System Monitor
+# [CHANGE: claude-code | 2026-05-14] v1.0 — btop + nvtop launcher + gpu snapshot
+# [CHANGE: claude-code | 2026-05-14] v1.1 — add fan speeds, avg temps, watch mode
+# [CHANGE: claude-code | 2026-07-01] v1.2 — dGPU sleep-guard: read runtime_status (side-effect free)
+#   BEFORE nvidia-smi; if suspended, report SLEEP/0W and skip the query so monitoring
+#   never wakes a D3cold-parked GPU (BUG-047 power regression via polling)
+# [CHANGE: claude-code | 2026-07-01] v1.3 — split _collect from rendering; add `stats`
+#   mode (KEY=VALUE output) as the single data feed for org.luminos.monitorwidget
+
+_collect() {
+  # ── CPU ──────────────────────────────────────────────────────
+  CPU_TEMP=$(sensors k10temp-pci-00c3 2>/dev/null | awk '/Tctl/{gsub(/[^0-9.]/,"",$2); print $2}')
+  ACPI_TEMP=$(sensors acpitz-acpi-0   2>/dev/null | awk '/temp1/{gsub(/[^0-9.]/,"",$2); print $2}')
+  # Average of Tctl and ACPI (closest we get to "average" on Ryzen — no per-core sensors)
+  CPU_AVG=$(awk "BEGIN{printf \"%.1f\", ($CPU_TEMP + $ACPI_TEMP) / 2}" 2>/dev/null)
+  CPU_LOAD=$(awk '{printf "%.0f", $1*100/'"$(nproc)"'}' /proc/loadavg)
+
+  # ── AMD iGPU ─────────────────────────────────────────────────
+  AMD_TEMP=$(sensors amdgpu-pci-6500  2>/dev/null | awk '/edge/{gsub(/[^0-9.]/,"",$2); print $2}')
+  AMD_PPT=$(sensors  amdgpu-pci-6500  2>/dev/null | awk '/PPT/{gsub(/[^0-9.]/,"",$2); printf "%.1f", $2}')
+  AMD_FREQ=$(sensors amdgpu-pci-6500  2>/dev/null | awk '/sclk/{print $2}')
+  AMD_LOAD=$(cat /sys/class/drm/card2/device/gpu_busy_percent 2>/dev/null)
+
+  # ── NVIDIA dGPU ──────────────────────────────────────────────
+  # [CHANGE: claude-code | 2026-07-01] sleep-guard: runtime_status read is side-effect
+  # free; nvidia-smi is NOT (it takes a runtime-PM ref and wakes a suspended GPU).
+  NV_RUNTIME=$(cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_status 2>/dev/null)
+  if [ "$NV_RUNTIME" = "suspended" ]; then
+    NV_TEMP="--"; NV_PWR="0.0"; NV_LOAD="--"; NV_STATE="SLEEP"
+  else
+    NV_LINE=$(nvidia-smi --query-gpu=temperature.gpu,power.draw,utilization.gpu,pstate \
+                --format=csv,noheader,nounits 2>/dev/null)
+    NV_TEMP=$(echo "$NV_LINE" | awk -F',' '{gsub(/ /,"",$1); print $1}')
+    NV_PWR=$(echo  "$NV_LINE" | awk -F',' '{gsub(/ /,"",$2); print $2}')
+    NV_LOAD=$(echo "$NV_LINE" | awk -F',' '{gsub(/ /,"",$3); print $3}')
+    NV_STATE=$(echo "$NV_LINE"| awk -F',' '{gsub(/ /,"",$4); print $4}')
+  fi
+
+  # ── NVMe ─────────────────────────────────────────────────────
+  NVME_TEMP=$(sensors nvme-pci-0400 2>/dev/null | awk '/Composite/{gsub(/[^0-9.]/,"",$2); print $2}')
+
+  # ── WiFi ─────────────────────────────────────────────────────
+  WIFI_TEMP=$(sensors mt7921_phy0-pci-0300 2>/dev/null | awk '/temp1/{gsub(/[^0-9.]/,"",$2); print $2}')
+
+  # ── Fans ─────────────────────────────────────────────────────
+  FAN_CPU=$(sensors asus-isa-000a 2>/dev/null | awk '/cpu_fan/{print $2}')
+  FAN_GPU=$(sensors asus-isa-000a 2>/dev/null | awk '/gpu_fan/{print $2}')
+  FAN_MID=$(sensors asus-isa-000a 2>/dev/null | awk '/mid_fan/{print $2}')
+
+  # ── Battery ──────────────────────────────────────────────────
+  BAT_PATH=$(ls /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -1)
+  BAT_PCT=$(cat "$BAT_PATH" 2>/dev/null)
+  AC_STATE=$(cat /sys/class/power_supply/AC0/online 2>/dev/null || \
+             grep -l Mains /sys/class/power_supply/*/type 2>/dev/null | \
+             xargs -I{} dirname {} | xargs -I{} cat {}/online 2>/dev/null)
+  [ "$AC_STATE" = "1" ] && BAT_STATUS="AC" || BAT_STATUS="BATTERY"
+
+  # ── EPP ──────────────────────────────────────────────────────
+  EPP=$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null)
+  PROFILE=$(asusctl profile get 2>/dev/null | awk '/Active/{print $NF}')
+}
+
+_stats() {
+  # [CHANGE: claude-code | 2026-07-01] machine-readable feed for the Plasma widget
+  _collect
+  cat <<EOF
+CPU_TEMP=$CPU_TEMP
+CPU_AVG=$CPU_AVG
+CPU_LOAD=$CPU_LOAD
+EPP=$EPP
+PROFILE=$PROFILE
+AMD_TEMP=$AMD_TEMP
+AMD_LOAD=$AMD_LOAD
+AMD_PPT=$AMD_PPT
+AMD_FREQ=$AMD_FREQ
+NV_TEMP=$NV_TEMP
+NV_PWR=$NV_PWR
+NV_LOAD=$NV_LOAD
+NV_STATE=$NV_STATE
+NV_RUNTIME=$NV_RUNTIME
+NVME_TEMP=$NVME_TEMP
+WIFI_TEMP=$WIFI_TEMP
+FAN_CPU=$FAN_CPU
+FAN_GPU=$FAN_GPU
+FAN_MID=$FAN_MID
+BAT_PCT=$BAT_PCT
+BAT_STATUS=$BAT_STATUS
+EOF
+}
+
+_snapshot() {
+  _collect
+
+  # ── Output ───────────────────────────────────────────────────
+  printf "\n"
+  printf "╔══════════════════════════════════════════════╗\n"
+  printf "║           LUMINOS MONITOR  %-17s║\n" "$(date '+%H:%M:%S')"
+  printf "╠══════════════╦══════════════╦════════════════╣\n"
+  printf "║ %-12s ║ %-12s ║ %-14s ║\n" "CPU" "AMD iGPU" "NVIDIA dGPU"
+  printf "╠══════════════╬══════════════╬════════════════╣\n"
+  printf "║ Temp  %5s°C║ Temp  %5s°C║ Temp    %5s°C║\n" "$CPU_TEMP" "$AMD_TEMP" "$NV_TEMP"
+  printf "║ AvgT  %5s°C║ Load   %5s%%║ Load     %5s%%║\n" "$CPU_AVG" "$AMD_LOAD" "$NV_LOAD"
+  printf "║ Load  %5s%% ║ Power %5sW ║ Power   %5sW ║\n" "$CPU_LOAD" "$AMD_PPT" "$NV_PWR"
+  printf "║ EPP %-8s║ Freq  %4sMHz║ State  %-7s ║\n" "$EPP" "$AMD_FREQ" "$NV_STATE"
+  printf "║ Mode %-7s ║              ║ PM: %-10s║\n" "$PROFILE" "$NV_RUNTIME"
+  printf "╠══════════════╩══════════════╩════════════════╣\n"
+  printf "║  FANS:  CPU %4s RPM  GPU %4s RPM  MID %4s RPM  ║\n" "$FAN_CPU" "$FAN_GPU" "$FAN_MID"
+  printf "╠══════════════════════════════════════════════╣\n"
+  printf "║  NVMe: %5s°C   WiFi: %5s°C   Bat: %3s%% %-3s  ║\n" \
+         "$NVME_TEMP" "$WIFI_TEMP" "$BAT_PCT" "$BAT_STATUS"
+  printf "╚══════════════════════════════════════════════╝\n"
+}
+
+case "$1" in
+  btop)
+    exec btop
+    ;;
+  nvtop)
+    exec nvtop
+    ;;
+  gpu|snap|snapshot)
+    _snapshot
+    ;;
+  stats)
+    _stats
+    ;;
+  watch)
+    # Refresh every 2s — Ctrl+C to stop
+    INTERVAL="${2:-2}"
+    while true; do
+      clear
+      _snapshot
+      echo "  (refreshing every ${INTERVAL}s — Ctrl+C to stop)"
+      sleep "$INTERVAL"
+    done
+    ;;
+  *)
+    # Default: btop + nvtop side by side in tmux
+    exec konsole \
+      --title "Luminos Monitor" \
+      -e bash -c "
+        if command -v tmux &>/dev/null; then
+          tmux new-session \
+            'btop' \; \
+            split-window -h \
+            'nvtop' \; \
+            select-pane -t 0
+        else
+          btop
+        fi
+      "
+    ;;
+esac

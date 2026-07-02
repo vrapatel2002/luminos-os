@@ -221,11 +221,13 @@ luminos-brain safe "<action>"
 | `src/kcms/kcm_luminos_hive/` | HIVE AI settings KCM |
 | `src/widgets/org.luminos.powerwidget/` | Power monitor Plasma widget |
 | `src/widgets/org.luminos.ramwidget/` | RAM monitor Plasma widget |
+| `src/widgets/org.luminos.monitorwidget/` | Full system monitor popup widget — feeds on `luminos-monitor stats` (2026-07-01, replaces konsole/btop hotkey window) |
 
 ### Scripts → `/usr/local/bin/`
 | Script | Description |
 |--------|-------------|
 | `scripts/luminos-notes.sh` | SQLite knowledge base |
+| `scripts/luminos-monitor` | System monitor v1.3: btop/nvtop/snapshot/watch/stats. dGPU sleep-guard (BUG-078) — reads runtime_status before nvidia-smi, never wakes a suspended GPU. `stats` = KEY=VALUE feed for monitorwidget. Meta+M/Ctrl+M → `watch` (was konsole+btop) |
 | `scripts/luminos-display-hz` | Hz settings dialog (kdialog) |
 | `scripts/luminos-60hz` / `luminos-120hz` | Direct Hz switch |
 | `scripts/luminos-gpu-launch` | GPU picker for any app |

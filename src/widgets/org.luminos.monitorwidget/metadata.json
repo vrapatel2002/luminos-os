@@ -1,8 +1,8 @@
 {
   "KPlugin": {
-    "Id": "org.luminos.powerwidget",
-    "Name": "Luminos Power Monitor",
-    "Description": "Shows power mode, temp, fans, TDP",
+    "Id": "org.luminos.monitorwidget",
+    "Name": "Luminos System Monitor",
+    "Description": "CPU / iGPU / dGPU temps, fans, power — full luminos-monitor popup, zero extra processes",
     "Version": "1.0",
     "Category": "System Information",
     "Authors": [{"Name": "Luminos"}],
