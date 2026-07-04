@@ -32,6 +32,7 @@ case "$1" in
         # SOFT BLOCKS - CAN BE OVERRIDDEN
         IS_SOFT=false
         WARNING=""
+        SOURCE=""   # [CHANGE: claude-code | 2026-07-01] where the block came from, so a NO is reviewable (task 0b)
 
         if echo "$KEYWORDS" | grep -q "torch" && echo "$KEYWORDS" | grep -qE "system|3.14|pip3"; then
             IS_SOFT=true
@@ -48,8 +49,20 @@ case "$1" in
                 if [ -n "$MATCH" ]; then
                     IS_SOFT=true
                     WARNING=$(echo "$MATCH" | sed 's/.*: //')
+                    # [CHANGE: claude-code | 2026-07-01] cite the exact brain line that matched
+                    SOURCE=$(grep -niE "($KEYS)" "$BRAIN_FILE" | head -n 1 | sed 's/^ *//')
                 fi
             fi
+        fi
+
+        # [CHANGE: claude-code | 2026-07-01] a smart gate offers the other way, not just a dead-end NO
+        ALT=""
+        if echo "$KEYWORDS" | grep -qE "venv|virtualenv"; then
+            ALT="don't modify a protected venv. Make a fresh one (python -m venv <proj>/.venv), or RUN an existing venv's python read-only (e.g. ./.triton_venv/bin/python ...). Using a venv is allowed; only editing/reinstalling into it is blocked."
+        elif echo "$KEYWORDS" | grep -qE "pip|install"; then
+            ALT="install into an isolated venv, never system/protected python: python -m venv .venv && .venv/bin/pip install ..."
+        else
+            ALT="isolate just the flagged part of the action and retry the rest, or re-run with --reason 'why' to log an override."
         fi
 
         if [ "$IS_SOFT" = true ]; then
@@ -58,7 +71,10 @@ case "$1" in
                 sed -i "/## INCIDENT LOG/a ### $DATE OVERRIDE: $ACTION | Reason: $REASON" "$BRAIN_FILE"
                 echo "OVERRIDE LOGGED: proceeding with caution"
             else
-                echo "NO: $WARNING (Use --reason 'why' to override if necessary)"
+                echo "NO: $WARNING"
+                [ -n "$SOURCE" ] && echo "  WHY: matched hive-brain.md:$SOURCE"
+                echo "  ALT: $ALT"
+                echo "  OVERRIDE: re-run with --reason 'why' if you still need it"
             fi
         else
             echo "YES: no known conflicts"
