@@ -128,7 +128,7 @@ DPM=0x02 stays. Chrome NVIDIA path is best-effort — good for GPU-heavy WebGL/3
 ## DECISION 16 — GPU-Per-App Selector Architecture
 Date: May 21, 2026
 Made by: claude-code
-**Status: FINAL**
+**Status: SUPERSEDED by DECISION 25 (2026-07-04)** — `luminos-nvidia-run` was folded into the single `luminos-gpu-launch` (styled QML picker) and deleted; the two direct AMD/NVIDIA right-click actions were removed. History below kept for context.
 
 ### What We Decided
 Universal GPU launcher via env var injection, not per-app wrappers. Two scripts:
@@ -193,6 +193,21 @@ Made by: gemini-cli | Updated by: claude-code
   are heuristic until supervised fine-tuning is applied (future Phase 3+ work)
 - ⚠️ Triton-XDNA runs on CPU torch backend (NPU silicon path requires XRT BO
   allocation via amdxdna driver at runtime — needs on-device validation)
+
+### On-Device Validation Result (claude-code | 2026-07-01)
+On-silicon testing resolved the open ⚠️ above. Findings (full write-up: `docs/NPU_INVESTIGATION.md`):
+- ✅ **bf16 matmul WORKS on npu1** end-to-end (Triton→MLIR→AIR→Peano→aircc→XRT→NPU).
+  Vendor `matmul_bf16_m64_n64_k64` compiled fresh xclbins and passed `assert_close`
+  vs CPU at M,N,K ∈ {256,1024,4096}. The silicon path is real.
+- ❌ **int8 matmul does NOT compile on npu1** (AIE2 / Hawk Point). Our `npu_int8_gemv.py`
+  fails in aircc (`operand does not dominate`); the vendor's own int8 example fails in
+  aiecc (`Resource allocation pipeline failed`); and int8 transform scripts ship only for
+  `aie2p` (npu2 / Strix). **int8 is an NPU2 feature; our silicon is npu1.**
+- Consequence: HATS/Sentinel's CPU fallback is CORRECT for this hardware, not a bug.
+  Offloading Sentinel to *this* NPU would require a **bf16** path, not int8.
+- Working-recipe requirements (all three were previously missing): pinned
+  `mlir-air==e279756`; a real `AIR_TRANSFORM_TILING_SCRIPT` (driver's hardcoded fallback
+  is stale → `MLIRError: expected ':'`); `.triton_venv/bin` on PATH + `PEANO_INSTALL_DIR` set.
 
 ### What We Decided
 Formally adopt the **HATS (Host-Assisted Tile-Streaming)** architecture for all Luminos OS AI workloads. This follows the successful verification of the Triton-XDNA compiler stack on April 22, 2026, which proved we can generate valid `.xclbin` binaries for the `npu1` (Phoenix/Hawk Point) architecture.
@@ -1020,3 +1035,33 @@ The Conductor now broadcasts its Intent so the whole daemon stack reacts under O
 - **Phase 5 corpus:** the Conductor appends one `telemetryRow` per tick to `<logdir>/conductor-telemetry.jsonl` (numeric sensor vector → action: fair targets, resulting fan duties, pin decision), rotating past 64 MiB. This is the training data the deferred NPU/LLM policy model (Phase 5) will learn from — logged from day one so it exists by then.
 
 Files touched: `cmd/luminos-power/conductor.go`, `cmd/luminos-ram/main.go`, `cmd/luminos-ai/main.go`. New cross-daemon message type `intent`; new `report_ram` report type.
+
+## DECISION 25 — dGPU access gate: default-deny the discrete GPU, picker is the only door
+Date: July 3, 2026
+Made by: claude-code
+**Status: INSTALLED — authoritative driver-param layer takes full effect on next REBOOT**
+
+### Context (user pain, grounded in reality)
+The user believed a "GPU permission" system already existed (they remembered the `luminos-gpu-launch` kdialog picker) and was confused why `claude-desktop` and `antigravity` freely hold the dGPU. Investigation: **no access control existed.** The NVIDIA driver creates `/dev/nvidia*` **world-open (`0666 root:root`)**, so any process opens the discrete GPU with zero check. `claude-desktop` (`--render-node-override=/dev/dri/renderD129` = AMD iGPU) and `antigravity` (`__EGL...=50_mesa.json` = iGPU) both **render on the iGPU** and only *probe* the dGPU at startup — but that probe keeps the RTX 4050 awake. The existing `luminos-gpu-launch` picker was purely **opt-in**; nothing forced apps through it.
+
+### What We Decided
+Make the dGPU **default-deny** so the picker becomes the ONLY door. Because everything runs as user `shawn`, per-user file perms can't tell apps apart — so the gate is per-process via a setgid group + the authoritative driver param:
+- **`dgpu` system group** — `shawn` is deliberately NOT a member ⇒ normal apps denied by default.
+- **Authoritative layer (the one that actually holds): `/etc/modprobe.d/luminos-dgpu-gate.conf`** → `options nvidia NVreg_DeviceFileUID=0 NVreg_DeviceFileGID=<dgpu> NVreg_DeviceFileMode=0660`. This is REQUIRED because **`nvidia-modprobe` (setuid-root) recreates `/dev/nvidia*` at `0666` on every open/wake**, defeating any udev-only change. The driver params tell nvidia-modprobe what owner/group/mode to stamp. Applies when the module loads — and nvidia loads **late from the real root** here (autodetect prunes it from initramfs since the display is AMD), so the conf is read at boot. **⇒ full effect after reboot.**
+- **udev rule `70-luminos-dgpu-access.rules`** (`root:dgpu 0660`) — belt-and-suspenders for node creation between boots.
+- **`dgpu-exec`** — a tiny setgid-`dgpu` helper (`2755 root:dgpu`). Apps launched through it inherit `egid=dgpu` and can open the nodes; everything else falls back to the iGPU. `luminos-gpu-launch` (the single picker) routes the NVIDIA choice through it.
+
+### Update (claude-code | 2026-07-04) — styled picker + single launch path
+The kdialog picker was replaced by a styled QML dialog (`scripts/dgpu-gate/luminos-gpu-picker.qml`, installed to `/usr/local/share/luminos/`): one Chrome-style dialog listing AMD (default/recommended, battery-friendly) vs NVIDIA (performance), a "remember for this app" tick (persisted to `~/.config/luminos/gpu-choices.conf`), battery-aware warning copy. **Consolidation:** the redundant `luminos-nvidia-run` helper was **deleted** — its only unique job (waking the PCI power gate before launch) is now inline in `luminos-gpu-launch`'s NVIDIA branch, so there is exactly ONE launch path. The KDE service menu `luminos-gpu-select.desktop` collapsed to a single "Run on GPU..." action that opens the picker (old direct AMD/NVIDIA right-click actions removed).
+
+### Why this is safe (user's #1 rule: "don't crash yourself")
+Changing device perms does **not** revoke already-open FDs, so installing live did not touch the running `claude`/`antigravity` session. Both already render on the iGPU, so when they relaunch denied they simply stop probing the dGPU — no render path is removed. Root services (`nvidia-powerd`, `luminos-power`/Conductor) bypass DAC. Display is AMD-driven, so gating nvidia nodes does not affect the desktop. Forex bot is off until Monday and must be launched via `dgpu-exec`/picker to keep GPU access.
+
+### The Conflict (both sides, per Rule 11)
+- **Leave it world-open (0666):** zero risk of denying a legit app, but any unknown app silently grabs the dGPU and holds it awake (the pain). Rejected.
+- **Hard default-deny:** strong, but a mis-scoped allowlist could deny a legit consumer. Mitigated by: the picker/`dgpu-exec` allow path, root-service bypass, iGPU fallback, and an instant kill switch (`sudo chmod 0666 /dev/nvidia*`).
+
+### v2 (not built) — bypass-proof gate
+`CONFIG_BPF_LSM=y` and `bpf` is in the active LSM list, so a true **BPF-LSM** gate that allow-lists apps by binary at `open()` (defeats even a hostile process calling `dgpu-exec` itself) is possible. v1 covers the accidental-grab threat model; v2 covers the adversarial one.
+
+Files: `scripts/dgpu-gate/` (dgpu-exec.c, install-dgpu-gate.sh, luminos-gpu-picker.qml, README.md), `scripts/luminos-gpu-launch` (the single launcher), `config/modprobe.d/luminos-dgpu-gate.conf`, `config/udev/70-luminos-dgpu-access.rules`. KILL SWITCH: `sudo chmod 0666 /dev/nvidia*` (temp) or remove the modprobe+udev files and `mkinitcpio -P` (permanent).

@@ -230,8 +230,7 @@ luminos-brain safe "<action>"
 | `scripts/luminos-monitor` | System monitor v1.3: btop/nvtop/snapshot/watch/stats. dGPU sleep-guard (BUG-078) — reads runtime_status before nvidia-smi, never wakes a suspended GPU. `stats` = KEY=VALUE feed for monitorwidget. Meta+M/Ctrl+M → `watch` (was konsole+btop) |
 | `scripts/luminos-display-hz` | Hz settings dialog (kdialog) |
 | `scripts/luminos-60hz` / `luminos-120hz` | Direct Hz switch |
-| `scripts/luminos-gpu-launch` | GPU picker for any app |
-| `scripts/luminos-nvidia-run` | Wake NVIDIA PCI gate + PRIME env + exec |
+| `scripts/luminos-gpu-launch` | Single GPU launcher: styled QML picker, wakes NVIDIA PCI gate inline, routes NVIDIA via dgpu-exec gate (DECISION 25) |
 | `scripts/luminos-train-mode` | ML training max-perf toggle: nvidia-powerd Dynamic Boost (55→88W) + 100% fan pin w/ keep-alive; `on [pgrep-pattern]`/`off`/`status` (BUG-069 interim) |
 | `scripts/luminos-train-ram` | ML training RAM-headroom toggle (CPU-side companion to train-mode): runtime swapfile `/swapfile.train` at low prio (NOT in fstab) + `vm.swappiness` 60→10 + optional memory-cgroup via `run`; `on`/`off`/`status`/`run -- <cmd>`. **Fully reverts on `off` — nothing permanent (no /etc, no fstab, no sysctl.d).** Fixes zram-only OOM during training (BUG-070). |
 

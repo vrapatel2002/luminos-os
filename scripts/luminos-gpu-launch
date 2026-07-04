@@ -1,15 +1,19 @@
 #!/bin/bash
 # Luminos Universal GPU Launcher
 # [CHANGE: claude-code | 2026-05-21]
+# [CHANGE: claude-code | 2026-07-03] DECISION 25 — show the styled QML picker
+#          (luminos-gpu-picker.qml) instead of the plain kdialog menu, route the
+#          NVIDIA choice through the dgpu-exec setgid gate (the only door to the dGPU),
+#          and remember a per-app choice so it skips the dialog next time.
 # Usage: luminos-gpu-launch [command] [args...]
 # Example: luminos-gpu-launch blender
-#          luminos-gpu-launch steam
-#
-# For Flatpak apps: luminos-gpu-launch flatpak run com.valvesoftware.Steam
+#          luminos-gpu-launch flatpak run com.valvesoftware.Steam
 #
 # Key env vars set by GPU choice:
 #   AMD:    DRI_PRIME=0, VK_ICD=radeon, EGL=mesa
-#   NVIDIA: DRI_PRIME=1, VK_ICD=nvidia, EGL=nvidia, wakes NVIDIA from power gate
+#   NVIDIA: DRI_PRIME=1, VK_ICD=nvidia, EGL=nvidia, wakes NVIDIA + grants dgpu group
+
+set -u
 
 if [ $# -eq 0 ]; then
   echo "Usage: luminos-gpu-launch <command> [args...]"
@@ -17,34 +21,60 @@ if [ $# -eq 0 ]; then
   exit 1
 fi
 
-CMD="$1"
-shift
+CMD="$1"; shift
 ARGS=("$@")
+APP="$(basename "$CMD")"
 
-GPU_CHOICE=$(kdialog \
-  --title "Luminos — GPU Selector" \
-  --menu "Run '$(basename "$CMD")' on which GPU?" \
-  "igpu" "AMD Radeon 780M  ·  Battery Saver (default)" \
-  "nvidia" "NVIDIA RTX 4050  ·  High Performance" \
-  2>/dev/null)
+PICKER_QML="/usr/local/share/luminos/luminos-gpu-picker.qml"
+STORE="${XDG_CONFIG_HOME:-$HOME/.config}/luminos/gpu-choices.conf"   # app=igpu|nvidia
+mkdir -p "$(dirname "$STORE")"
 
-# Default AMD if dialog cancelled
-[ -z "$GPU_CHOICE" ] && GPU_CHOICE="igpu"
+# --- on-battery detection (for the picker's warning copy) --------------------
+ON_BATTERY=0
+for ac in /sys/class/power_supply/A{C,DP}*/online /sys/class/power_supply/AC/online; do
+  [ -r "$ac" ] || continue
+  [ "$(cat "$ac" 2>/dev/null)" = "0" ] && ON_BATTERY=1
+  break
+done
+
+# --- remembered choice? skip the dialog --------------------------------------
+GPU_CHOICE=""
+if [ -f "$STORE" ]; then
+  GPU_CHOICE="$(grep -m1 "^${APP}=" "$STORE" 2>/dev/null | cut -d= -f2)"
+fi
+
+if [ -z "$GPU_CHOICE" ]; then
+  # Show the styled QML picker. Exit code encodes choice + remember:
+  #   10 igpu once   11 igpu always   20 nvidia once   21 nvidia always
+  qml6 "$PICKER_QML" -- "$APP" "$ON_BATTERY" 2>/dev/null
+  code=$?
+  case "$code" in
+    20|21) GPU_CHOICE="nvidia" ;;
+    *)     GPU_CHOICE="igpu"   ;;   # 10/11/cancel/close → safe default
+  esac
+  # Persist if the user ticked "remember" (odd exit codes).
+  if [ "$code" = "11" ] || [ "$code" = "21" ]; then
+    grep -v "^${APP}=" "$STORE" 2>/dev/null > "${STORE}.tmp" || true
+    echo "${APP}=${GPU_CHOICE}" >> "${STORE}.tmp"
+    mv "${STORE}.tmp" "$STORE"
+  fi
+fi
 
 if [ "$GPU_CHOICE" = "igpu" ]; then
   export DRI_PRIME=0
   export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
   export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
-  notify-send "GPU Launcher" "$(basename "$CMD") → AMD Radeon 780M" --icon=dialog-information 2>/dev/null
+  notify-send "GPU Launcher" "$APP → AMD Radeon 780M" --icon=dialog-information 2>/dev/null
+  exec "$CMD" "${ARGS[@]}"
 else
   export DRI_PRIME=1
   export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
   export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/60_nvidia.json
   export __NV_PRIME_RENDER_OFFLOAD=1
   export __GLX_VENDOR_LIBRARY_NAME=nvidia
-  # Wake NVIDIA from power gate
+  # Wake NVIDIA from the RTD3 power gate.
   echo "on" | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control > /dev/null 2>&1 || true
-  notify-send "GPU Launcher" "$(basename "$CMD") → NVIDIA RTX 4050" --icon=dialog-information 2>/dev/null
+  notify-send "GPU Launcher" "$APP → NVIDIA RTX 4050" --icon=dialog-information 2>/dev/null
+  # DECISION 25: grant dGPU device access via the setgid gate (default-deny nodes).
+  exec dgpu-exec "$CMD" "${ARGS[@]}"
 fi
-
-exec "$CMD" "${ARGS[@]}"

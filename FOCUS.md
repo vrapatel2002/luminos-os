@@ -24,7 +24,7 @@ NO Ollama. NO Docker. Direct llama.cpp inference with turbo4 KV cache.
 - Relative timestamps, delete chat, minimal sidebar style
 - Competing orchestrator.py service disabled
 - luminos-power v3.2 — fan curve v3.2: silent ≤44°C, 20% at 47°C, 47-49°C target range
-- Universal GPU launcher — luminos-gpu-launch (kdialog picker) + luminos-nvidia-run (PCI power gate wake) + Dolphin service menus
+- Universal GPU launcher — single luminos-gpu-launch (styled QML picker; wakes PCI power gate inline; NVIDIA via dgpu-exec gate, DECISION 25)
 - Chrome CPU fix — Wayland mode global; removed ANGLE/Vulkan; GPU-specific --use-gl in chrome-luminos wrapper
 - Touchpad log flood fix — QT_LOGGING_RULES=kwin_libinput.warning=false in /etc/environment
 - Display sharpness — KWin sharpness=0.35 via kwinoutputconfig.json (AMD display pipeline)

@@ -18,6 +18,8 @@ wget-log*
 # Build artifacts
 bin/
 __pycache__/
+/luminos-power
+air_project/
 
 # Research build artifacts
 research/turboquant/repo-thetom-correct/build/

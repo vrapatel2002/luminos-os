@@ -649,23 +649,16 @@ Root cause: No EGL vendor preference — libEGL defaulted to `60_nvidia.json` fo
 Fix: Added both `__EGL_VENDOR_LIBRARY_FILENAMES` and `KWIN_DRM_DEVICES` to `/etc/environment`.
 Commit: `b7139d30`
 
-### 5.5 luminos-nvidia-run
+### 5.5 (retired) luminos-nvidia-run
 
-Source: `scripts/luminos-nvidia-run`
-Installed: `/usr/local/bin/luminos-nvidia-run`
-
-Purpose: Wakes NVIDIA from PCI power gate then executes an app with PRIME env vars. Used by the Dolphin KDE service menu for right-click "Run on NVIDIA RTX 4050" actions.
-
-The 0.3s sleep after writing `"on"` to the power control sysfs is intentional — the GPU needs ~200ms to exit D3cold before EGL/CUDA contexts can be created.
+**Deleted 2026-07-04 (DECISION 25 consolidation).** Its only unique job — writing `"on"` to the PCI power/control sysfs to wake the dGPU from D3cold before launch — is now inline in `luminos-gpu-launch`'s NVIDIA branch, so there is a single launch path. NVIDIA is reached only through the `dgpu-exec` setgid gate.
 
 ### 5.6 Dolphin Service Menus
 
 Two KDE service menus in `~/.local/share/kio/servicemenus/`:
 
 `luminos-gpu-select.desktop` — right-click on executables/ELF binaries:
-- "Ask GPU..." → runs `luminos-gpu-launch`
-- "Run on AMD Radeon" → `DRI_PRIME=0` inline
-- "Run on NVIDIA RTX 4050" → `luminos-nvidia-run`
+- "Run on GPU..." → runs `luminos-gpu-launch` (the styled QML picker; single action since 2026-07-04)
 
 `luminos-app-gpu.desktop` — right-click on `.desktop` files:
 - Extracts the `Exec=` line from the .desktop file and passes it to `luminos-gpu-launch`
@@ -1408,11 +1401,11 @@ Commit: `5ef0e7e6` | Date: 2026-04-22
 **Implementation status**: Triton-XDNA installed, aie.xclbin compiled, MobileLLM quantized. NPU silicon path requires on-device XRT BO validation — currently running on CPU torch backend as fallback.
 
 ### D16 — GPU-Per-App via Env Vars
-Commit: `aaacdbff` | Date: 2026-05-21
+Commit: `aaacdbff` | Date: 2026-05-21 | **Superseded by D25 (2026-07-04)**
 
-**Decision**: Universal GPU launcher via environment variable injection. Two tools: `luminos-gpu-launch` (interactive picker) and `luminos-nvidia-run` (direct NVIDIA launch). Dolphin service menus wire these to right-click for any app.
+**Decision**: Universal GPU launcher via environment variable injection. Originally two tools (`luminos-gpu-launch` + `luminos-nvidia-run`); consolidated in DECISION 25 to a single `luminos-gpu-launch` (styled QML picker that wakes the PCI power gate inline and routes NVIDIA through the `dgpu-exec` gate). `luminos-nvidia-run` deleted.
 
-**Rationale**: PRIME render offload works via env vars for native Wayland apps without system-level changes. Dolphin service menus cover any app without per-app wrappers. NVIDIA requires explicit PCI power gate wake before use — `luminos-nvidia-run` handles this.
+**Rationale**: PRIME render offload works via env vars for native Wayland apps without system-level changes. One launcher = one code path (user's simplicity mandate). NVIDIA requires explicit PCI power gate wake before use — now handled inline in `luminos-gpu-launch`.
 
 **What was rejected**: System-wide NVIDIA default (increases VRAM pressure and heat at idle); per-app wrappers for every binary (unmaintainable at scale); GPU selector widget in panel (breaks panel when clicked — proven during development session).
 
@@ -1532,12 +1525,6 @@ Key lines: Lock logic (86–97), llama-server start (107–118), daemon start (1
 Source: `scripts/luminos-gpu-launch`
 Purpose: Interactive GPU picker for any command. Shows kdialog menu, sets AMD or NVIDIA env vars, execs the command.
 Usage: `luminos-gpu-launch blender` or `luminos-gpu-launch flatpak run com.valvesoftware.Steam`
-
-### /usr/local/bin/luminos-nvidia-run
-Source: `scripts/luminos-nvidia-run`
-Purpose: Wake NVIDIA from D3cold, set PRIME env vars, exec the command. Used by Dolphin service menus.
-Key detail: Writes `"on"` to `/sys/bus/pci/devices/0000:01:00.0/power/control`, sleeps 0.3s, then execs.
-Usage: `luminos-nvidia-run blender`
 
 ### /usr/local/bin/luminos-display-hz
 Source: `scripts/luminos-display-hz`
@@ -1787,8 +1774,8 @@ echo "auto" | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control
 cat /proc/$(pgrep -f chrome | head -1)/maps | grep -c nvidia
 # 0 = AMD; >0 = NVIDIA (bad)
 
-# Launch any app on NVIDIA
-luminos-nvidia-run blender
+# Launch any app on a GPU (styled picker: AMD default, NVIDIA on demand)
+luminos-gpu-launch blender
 ```
 
 ### HIVE

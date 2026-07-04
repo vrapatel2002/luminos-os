@@ -383,26 +383,36 @@ func monitorLoop(ctx context.Context) {
 		// === SENSE ===
 		onAC := readACState()
 		temp := readCPUTemp()
-		dgpuLoad := readDGPULoad() // NVIDIA dGPU
 		igpuLoad := readIGPULoad() // AMD 780M
-		// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU power draw and temp for TGP management
-		gpuPowerW, gpuTempC := readGPUStats()
-		// [CHANGE: claude-code | 2026-06-28] v4.3 — during an offload session, pin TGP to the
-		// 90W ceiling instead of letting it idle-revert in the micro-gaps between streamed
-		// layers. Thermal safety still wins: drop to 55W if the GPU reaches the thermal ceiling.
-		// (Clock lock + persistence are applied immediately in applyOffloadPin; this only owns
-		// the TGP write so currentGPUTGPW stays single-writer — no data race.)
-		if offloadActive.Load() {
-			if gpuTempC >= gpuTGPThermalCeilC {
-				if currentGPUTGPW != gpuTGPLowW {
-					lg.Warn("offload: GPU %.1f°C ≥ %.0f°C thermal ceiling → %.0fW", gpuTempC, gpuTGPThermalCeilC, gpuTGPLowW)
-					setGPUTGP(gpuTGPLowW)
+		// [CHANGE: claude-code | 2026-07-03] dGPU RTD3 power-off completion (BUG-078):
+		// when the discrete GPU is runtime-suspended (D3cold, ~0W) do NOT sense or manage it.
+		// readGPUStats' nvidia-smi fallback AND setGPUTGP (nvidia-smi -pl) both WAKE a sleeping
+		// card — that was re-waking the dGPU every monitor tick, creating a wake/sleep loop that
+		// pinned the card at D0 and blocked true 0W idle. A suspended card is idle by definition,
+		// so report 0 load/power/temp and skip all dGPU access. During an offload session the card
+		// is actively in use, so always sense/manage it (offloadActive short-circuits the guard).
+		var dgpuLoad, gpuPowerW, gpuTempC float64
+		if offloadActive.Load() || !dgpuRuntimeSuspended() {
+			dgpuLoad = readDGPULoad() // NVIDIA dGPU
+			// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU power draw and temp for TGP management
+			gpuPowerW, gpuTempC = readGPUStats()
+			// [CHANGE: claude-code | 2026-06-28] v4.3 — during an offload session, pin TGP to the
+			// 90W ceiling instead of letting it idle-revert in the micro-gaps between streamed
+			// layers. Thermal safety still wins: drop to 55W if the GPU reaches the thermal ceiling.
+			// (Clock lock + persistence are applied immediately in applyOffloadPin; this only owns
+			// the TGP write so currentGPUTGPW stays single-writer — no data race.)
+			if offloadActive.Load() {
+				if gpuTempC >= gpuTGPThermalCeilC {
+					if currentGPUTGPW != gpuTGPLowW {
+						lg.Warn("offload: GPU %.1f°C ≥ %.0f°C thermal ceiling → %.0fW", gpuTempC, gpuTGPThermalCeilC, gpuTGPLowW)
+						setGPUTGP(gpuTGPLowW)
+					}
+				} else if currentGPUTGPW != gpuTGPHighW {
+					setGPUTGP(gpuTGPHighW)
 				}
-			} else if currentGPUTGPW != gpuTGPHighW {
-				setGPUTGP(gpuTGPHighW)
+			} else {
+				manageGPUTGP(gpuPowerW, dgpuLoad, gpuTempC, onAC)
 			}
-		} else {
-			manageGPUTGP(gpuPowerW, dgpuLoad, gpuTempC, onAC)
 		}
 		// [CHANGE: claude-code | 2026-05-31] ROOT-BUG: drive cap off busiest core, not 16-core avg.
 		// scaling_max_freq is a per-core ceiling — a single pinned thread (7-zip, Wine, compiler)
@@ -1289,6 +1299,18 @@ func readDGPULoad() float64 {
 	d, _ := os.ReadFile("/sys/class/drm/card1/device/gpu_busy_percent")
 	val, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
 	return val
+}
+
+// dgpuRuntimeSuspended reports whether the NVIDIA dGPU is runtime-suspended (D3cold, ~0W).
+// [CHANGE: claude-code | 2026-07-03] BUG-078: reading runtime_status does NOT wake the card
+// (unlike nvidia-smi or current_link_speed). Used to skip all dGPU sense/manage while asleep,
+// so the daemon stops poking the card and it can hold true 0W idle.
+func dgpuRuntimeSuspended() bool {
+	d, err := os.ReadFile("/sys/bus/pci/devices/0000:01:00.0/power/runtime_status")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(d)) == "suspended"
 }
 
 // readIGPULoad returns AMD iGPU (card2) busy percent. 0 if unavailable.

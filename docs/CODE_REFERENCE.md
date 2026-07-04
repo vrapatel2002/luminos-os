@@ -72,8 +72,7 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 - `scripts/luminos-display-hz` — Display Hz settings window (kdialog; deployed to /usr/local/bin/luminos-display-hz)
 - `scripts/luminos-60hz` — Switch display to 60Hz (kwinoutputconfig.json + qdbus6 reconfigure; deployed to /usr/local/bin/luminos-60hz)
 - `scripts/luminos-120hz` — Switch display to 120Hz (same mechanism; deployed to /usr/local/bin/luminos-120hz)
-- `scripts/luminos-gpu-launch` — Universal GPU picker (kdialog; AMD or NVIDIA env vars; deployed to /usr/local/bin/luminos-gpu-launch)
-- `scripts/luminos-nvidia-run` — Wake NVIDIA from PCI power gate + set PRIME env vars + exec; deployed to /usr/local/bin/luminos-nvidia-run
+- `scripts/luminos-gpu-launch` — Single universal GPU launcher: styled QML picker (`scripts/dgpu-gate/luminos-gpu-picker.qml`), AMD or NVIDIA env vars, wakes PCI power gate inline, routes NVIDIA via the dgpu-exec gate (DECISION 25); deployed to /usr/local/bin/luminos-gpu-launch. (luminos-nvidia-run deleted 2026-07-04 — folded into this.)
 - `scripts/luminos-train-mode` — ML-training max-perf toggle (`on [pgrep-pattern]`/`off`/`status`): nvidia-powerd Dynamic Boost 55→88W + 100% fan pin via keep-alive transient unit, auto-off when watched process exits; BUG-069 interim; deployed to /usr/local/bin/luminos-train-mode
 
 ### KDE Service Menus (~/.local/share/kio/servicemenus/)

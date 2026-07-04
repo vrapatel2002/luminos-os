@@ -1,0 +1,22 @@
+# 70-luminos-dgpu-access.rules
+# [CHANGE: claude-code | 2026-07-03] DECISION 25 — dGPU access gate (default-deny)
+#
+# The NVIDIA driver creates /dev/nvidia* world-open (0666), so ANY app can grab the
+# discrete GPU with no permission check. This rule flips those nodes to root:dgpu 0660.
+# User `shawn` is deliberately NOT a member of `dgpu`, so normal apps are denied and
+# fall back to the AMD iGPU. Only apps launched through luminos-gpu-launch / dgpu-exec
+# (setgid dgpu) get egid=dgpu and can open the dGPU.
+#
+# KILL SWITCH (instant restore of old world-open behavior):
+#     sudo chmod 0666 /dev/nvidia*
+# PERMANENT DISABLE:
+#     sudo rm /etc/udev/rules.d/70-luminos-dgpu-access.rules && sudo udevadm control --reload
+#
+# Note: root-owned services (nvidia-powerd, luminos-power/Conductor) bypass DAC and are
+# unaffected. Display is driven by the AMD iGPU, so the desktop does not need these nodes.
+
+KERNEL=="nvidiactl",        GROUP="dgpu", MODE="0660"
+KERNEL=="nvidia[0-9]*",     GROUP="dgpu", MODE="0660"
+KERNEL=="nvidia-modeset",   GROUP="dgpu", MODE="0660"
+KERNEL=="nvidia-uvm",       GROUP="dgpu", MODE="0660"
+KERNEL=="nvidia-uvm-tools", GROUP="dgpu", MODE="0660"
