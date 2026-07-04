@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-07-01 (BUG-078 FIXED — monitoring itself kept the dGPU awake: nvidia-smi polls from powerwidget + luminos-monitor took runtime-PM refs; runtime_status reads are wake-free)
+Last Updated: 2026-07-04 (BUG-079 FIXED — Conductor fan PID hunted/wound-up at idle: retuned with deadband + EMA smoothing + back-calc anti-windup; idle-validated, Conductor still gated OFF pending a load test)
 
 ## Open Bugs
 
@@ -65,6 +65,17 @@ Last Updated: 2026-07-01 (BUG-078 FIXED — monitoring itself kept the dGPU awak
 - Date Found: 2026-06-11
 
 ## Fixed Bugs (new)
+
+### BUG-079 — Conductor fan PID hunts/winds-up at idle: fan surges 2100↔3500 rpm on a flat 49.8°C
+<!-- [CHANGE: claude-code | 2026-07-04] -->
+- Status: FIXED (2026-07-04) — tuned + idle-validated; Conductor still gated OFF by default (LUMINOS_CONDUCTOR=1)
+- Severity: MEDIUM (loud/wasteful — audible "breathing"; thermally safe, only over-cools. This is the behavior that blocked enabling the Conductor after the 2026-07-03 test that maxed the fan at ~53°C)
+- Component: cmd/luminos-power/fan_control.go (FanController PID), driven by the Conductor (DECISION 24)
+- Description: First clean idle live test (2026-07-04, dGPU suspended, correctly classified idle/light → 47°C target) showed the CPU fan climbing 2400→3500 rpm while Tctl sat FLAT at 49.8°C, then oscillating 2600↔3500 on a ~30s period. Not a temp rise — the fan chased a target the workload parked ~2.8°C above.
+- Root Cause: four compounding flaws — (1) `Kp=14` too hot (1°C→5.5% fan); (2) integral windup via a hard ±120 clamp that unwound only when error went negative (slow slew-down kept it pinned); (3) no smoothing on the spiky per-core Tctl the PID reacted to; (4) a fixed 47°C idle target below the workload's natural settling temp (~50°C) → permanent positive error the integral kept accumulating.
+- Fix Applied: `fan_control.go` — (1) Kp 14→8, Ki 0.6→0.5; (2) ±2°C **deadband** around the target (no correction in-band → stops the surge); (3) **EMA smoothing** of the control temp (TempAlpha=0.30); (4) **back-calculation anti-windup** (Kbc=0.5) replacing the hard clamp, plus an in-band **integral leak** (0.90/tick) so the fan settles down after a hot spell. `NewFanController` retuned; `Reset()` re-primes the temp EMA on intent change.
+- Verify: re-run the same 75s auto-reverting test (drop-in `LUMINOS_CONDUCTOR=1` + restart). Post-fix result: fan held a STEADY ~2100–2200 rpm (CPU) / ~2400–2500 rpm (GPU) with Tctl 48–50°C — no surging, hunting eliminated. Reverted to the static curve after the test; not yet made persistent (idle validated; a load test is still recommended before default-on).
+- Date Found / Fixed: 2026-07-04
 
 ### BUG-078 — Monitoring kept the dGPU awake: `nvidia-smi` polling (powerwidget every 5s, luminos-monitor every 2s) takes a runtime-PM ref per call
 <!-- [CHANGE: claude-code | 2026-07-01] -->

@@ -1036,6 +1036,13 @@ The Conductor now broadcasts its Intent so the whole daemon stack reacts under O
 
 Files touched: `cmd/luminos-power/conductor.go`, `cmd/luminos-ram/main.go`, `cmd/luminos-ai/main.go`. New cross-daemon message type `intent`; new `report_ram` report type.
 
+### Phase 2 addendum — fan PID retuned after the first live tests (claude-code | 2026-07-04)
+The first real enablement of the fan lever exposed the open pain the design warned about — "smart minimum-effort cooling, but a bug could …" — as **inefficiency, not danger**. Two live tests, both time-boxed with an automatic revert to the static curve:
+- **2026-07-03 (first enable):** with the untuned gains (`Kp=14`) the PID wrote duty **254/255 at ~53°C idle** — the exact wasteful "max fan at 50-55°C" the user rejected. Enable reverted; binaries left installed but gated OFF.
+- **2026-07-04 (retuned):** a cleaner idle test showed the fan *hunting* — surging 2100↔3500 rpm on a FLAT 49.8°C (BUG-079). Root cause was four compounding flaws: Kp too hot, hard-clamp integral windup, no smoothing on spiky per-core Tctl, and a 47°C target below the workload's natural settling temp so the integral kept accumulating a standing error.
+- **Fix (BUG-079):** `fan_control.go` retuned — Kp 14→8, a **±2°C deadband** around the target (no correction in-band), **EMA smoothing** of the control temp (TempAlpha=0.30), and **back-calculation anti-windup** (Kbc=0.5) + an in-band **integral leak** (0.90/tick) replacing the hard clamp. Post-fix idle test held a STEADY ~2100-2200 rpm (CPU) / ~2400-2500 rpm (GPU), no surging.
+- **Status:** idle-validated only; the Conductor remains **gated OFF by default**. A load test (compute/gaming, where the fair target rises to ~55-60°C → *less* fan for the same heat) is still recommended before considering default-on. This confirms the workload-aware design intent: a correctly-classified heavy job raises the target, so it should never be the case that heavy load = max fan unless the temp genuinely demands it.
+
 ## DECISION 25 — dGPU access gate: default-deny the discrete GPU, picker is the only door
 Date: July 3, 2026
 Made by: claude-code

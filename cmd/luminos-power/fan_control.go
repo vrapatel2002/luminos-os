@@ -119,26 +119,42 @@ func setAllFansDuty(hwmon string, cpuDuty, gpuDuty int) error {
 type FanController struct {
 	Kp, Ki, Kd float64 // gains: Kp is PWM-per-°C of error
 
-	integral float64 // accumulated error (anti-windup clamped)
+	integral float64 // accumulated error (anti-windup via back-calculation)
 	prevErr  float64
 	prevDuty int  // last duty written, for slew limiting
 	seeded   bool // false until the first Update seeds prevErr
 
+	// [CHANGE: claude-code | 2026-07-04] input smoothing + deadband, added after the
+	// first live test (dGPU idle) showed the raw-temp PID hunting: fan surged
+	// 2600↔3500 rpm on a FLAT 49.8°C because the 47°C target left a standing +2.8°C
+	// error the integral kept winding up. See docs/BUGS.md BUG-079.
+	smoothedTemp float64 // EMA-filtered control temp (raw Tctl is too spiky to PID on)
+	tempSeeded   bool    // false until smoothedTemp is primed
+
 	// tuning knobs
-	IntegralClamp float64 // max |integral| — anti-windup
+	TempAlpha     float64 // EMA weight on the newest temp sample (0..1); lower = smoother
+	Deadband      float64 // °C band around the target where error is treated as 0
+	Kbc           float64 // back-calculation anti-windup gain (≈ 1/tracking-time)
+	IntegralLeak  float64 // per-tick integral decay while comfortably inside the deadband
+	IntegralClamp float64 // backstop clamp on |integral|
 	MinDuty       int     // floor (0 = allow silent at idle)
 	MaxDuty       int     // ceiling (255 = full)
 	MaxStepUp     int     // max PWM increase per tick (slew up — fast)
 	MaxStepDown   int     // max PWM decrease per tick (slew down — gentle, avoids surging)
 }
 
-// NewFanController returns a controller with conservative default tuning.
-// Kp=14 → each 1°C over target adds ~14 PWM (~5.5%); a 10°C overshoot ≈ full ramp.
-// Slew-up is faster than slew-down so it reacts quickly to heat but eases off
-// quietly. These are starting values to be refined against real telemetry.
+// NewFanController returns a controller tuned against the 2026-07-04 live test.
+// Kp=8 → each 1°C of (deadbanded) error adds ~8 PWM (~3%). A ±2°C deadband keeps
+// the fan from chasing the last couple degrees, EMA smoothing (TempAlpha) stops it
+// reacting to per-core spikes, and back-calculation anti-windup (Kbc) plus an
+// in-band integral leak keep it from winding up on a standing error. [CHANGE 2026-07-04]
 func NewFanController() *FanController {
 	return &FanController{
-		Kp: 14.0, Ki: 0.6, Kd: 8.0,
+		Kp: 8.0, Ki: 0.5, Kd: 8.0,
+		TempAlpha:     0.30, // smooth the spiky per-core Tctl (0.30 ≈ a few-tick half-life)
+		Deadband:      2.0,  // ±2°C around target = no correction → kills the surge
+		Kbc:           0.5,  // bleed the integral while the output is saturated (Tt≈2s)
+		IntegralLeak:  0.90, // relax the integral each in-band tick so the fan settles down
 		IntegralClamp: 120.0,
 		MinDuty:       0,
 		MaxDuty:       255,
@@ -158,22 +174,55 @@ func (c *FanController) Update(tempC, setpointC, dt float64) int {
 	if dt <= 0 {
 		dt = 1
 	}
-	err := tempC - setpointC
+
+	// 1. EMA-smooth the control temperature. Raw Tctl is spiky per-core; the first
+	//    live test showed the PID chasing those spikes into a hunting limit-cycle.
+	if !c.tempSeeded {
+		c.smoothedTemp = tempC
+		c.tempSeeded = true
+	} else {
+		c.smoothedTemp = (1-c.TempAlpha)*c.smoothedTemp + c.TempAlpha*tempC
+	}
+
+	// 2. Error with a deadband. Within ±Deadband of the target we command no
+	//    correction, so the fan settles at a steady low duty instead of surging to
+	//    shed the last couple degrees the workload makes hard to reach.
+	rawErr := c.smoothedTemp - setpointC
+	var err float64
+	inBand := false
+	switch {
+	case rawErr > c.Deadband:
+		err = rawErr - c.Deadband
+	case rawErr < -c.Deadband:
+		err = rawErr + c.Deadband
+	default:
+		inBand = true // err stays 0 inside the band
+	}
 
 	if !c.seeded {
 		// Seed derivative history so the first tick doesn't kick on a phantom slope.
 		c.prevErr = err
 		c.seeded = true
 	}
-
-	c.integral += err * dt
-	c.integral = clampF(c.integral, -c.IntegralClamp, c.IntegralClamp)
-
 	deriv := (err - c.prevErr) / dt
 	c.prevErr = err
 
-	raw := c.Kp*err + c.Ki*c.integral + c.Kd*deriv
-	duty := clampPWM(int(raw))
+	// 3. Tentative PID output using the integral carried from the last tick.
+	u := c.Kp*err + c.Ki*c.integral + c.Kd*deriv
+	uSat := clampF(u, float64(c.MinDuty), float64(c.MaxDuty))
+
+	// 4. Integral update. In-band: leak toward 0 so a past hot spell doesn't keep the
+	//    fan up once we're comfortable again. Out-of-band: integrate with a
+	//    back-calculation anti-windup term that bleeds the integral whenever the
+	//    output saturates (replaces the old hard clamp that unwound far too slowly).
+	if inBand {
+		c.integral *= c.IntegralLeak
+	} else {
+		c.integral += (err + c.Kbc*(uSat-u)) * dt
+		c.integral = clampF(c.integral, -c.IntegralClamp, c.IntegralClamp) // backstop
+	}
+
+	duty := int(uSat + 0.5)
 	if duty < c.MinDuty {
 		duty = c.MinDuty
 	}
@@ -181,7 +230,7 @@ func (c *FanController) Update(tempC, setpointC, dt float64) int {
 		duty = c.MaxDuty
 	}
 
-	// Slew limiting against the last duty — asymmetric (fast up, gentle down).
+	// 5. Slew limiting against the last duty — asymmetric (fast up, gentle down).
 	if duty > c.prevDuty+c.MaxStepUp {
 		duty = c.prevDuty + c.MaxStepUp
 	} else if duty < c.prevDuty-c.MaxStepDown {
@@ -198,6 +247,7 @@ func (c *FanController) Reset() {
 	c.integral = 0
 	c.prevErr = 0
 	c.seeded = false
+	c.tempSeeded = false // re-prime the temp EMA from the next real reading
 	// prevDuty intentionally retained so the next Update slews from the real fan state.
 }
 
