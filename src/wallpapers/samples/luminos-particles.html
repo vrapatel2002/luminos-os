@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<!--
+    Luminos sample wallpaper — cursor-reactive particle field.
+    Pointer pushes particles away; they drift back. Pure canvas 2D, capped ~30fps.
+    Works with the wallpaper's cursor forwarding (window 'mousemove').
+    [CHANGE: claude-code | 2026-07-22]
+    SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<meta charset="utf-8">
+<title>Luminos Particles</title>
+<style>
+  html,body{margin:0;height:100%;background:#05060a;overflow:hidden}
+  canvas{display:block}
+</style>
+<canvas id="c"></canvas>
+<script>
+(function(){
+  var cv=document.getElementById("c"),x=cv.getContext("2d");
+  var W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,1.5);
+  function size(){W=cv.width=innerWidth*DPR;H=cv.height=innerHeight*DPR;}
+  size(); addEventListener("resize",size);
+
+  var N=Math.min(140,Math.floor(innerWidth*innerHeight/12000));
+  var P=[];
+  for(var i=0;i<N;i++)P.push({
+    x:Math.random()*W, y:Math.random()*H,
+    hx:Math.random()*W, hy:Math.random()*H,   // home
+    vx:0, vy:0
+  });
+
+  var mx=-1e9,my=-1e9;
+  function move(e){mx=e.clientX*DPR;my=e.clientY*DPR;}
+  addEventListener("mousemove",move);
+  document.addEventListener("mousemove",move);
+
+  var last=0, FRAME=33;
+  function loop(t){
+    requestAnimationFrame(loop);
+    if(t-last<FRAME)return; last=t;
+    x.fillStyle="rgba(5,6,10,0.35)"; x.fillRect(0,0,W,H);
+    for(var i=0;i<N;i++){
+      var p=P[i];
+      // spring home
+      p.vx+=(p.hx-p.x)*0.006; p.vy+=(p.hy-p.y)*0.006;
+      // cursor repel
+      var dx=p.x-mx, dy=p.y-my, d2=dx*dx+dy*dy, R=140*DPR;
+      if(d2<R*R){ var d=Math.sqrt(d2)||1, f=(R-d)/R*4; p.vx+=dx/d*f; p.vy+=dy/d*f; }
+      p.vx*=0.90; p.vy*=0.90; p.x+=p.vx; p.y+=p.vy;
+      var sp=Math.min(1,(Math.abs(p.vx)+Math.abs(p.vy))/6);
+      x.fillStyle="hsl("+(190+sp*120)+",90%,"+(55+sp*25)+"%)";
+      x.beginPath(); x.arc(p.x,p.y,1.6*DPR+sp*2,0,6.283); x.fill();
+    }
+  }
+  requestAnimationFrame(loop);
+})();
+</script>

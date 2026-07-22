@@ -1,0 +1,16 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "claude-code@luminos",
+                "Name": "Luminos OS"
+            }
+        ],
+        "Category": "",
+        "Description": "One wallpaper plugin for image, video and web (HTML/JS/WebGL) backgrounds. Pauses on battery and when covered.",
+        "Id": "org.luminos.livewallpaper",
+        "License": "GPL-3.0-or-later",
+        "Name": "Luminos Live Wallpaper"
+    }
+}
