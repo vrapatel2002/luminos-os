@@ -1,27 +1,28 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-07-24 — Response 1
+Last updated: 2026-07-24 — Response 2
 
 ## Goal (the durable end objective)
-Two threads, in this order:
-1. **Make the desktop feel fast again.** The live wallpaper must never spend CPU/iGPU on frames
-   nobody can see, and must not be encoded above the panel's resolution. DONE + measured this
-   session (BUG-083 / DECISION 32).
-2. **Design and build the "pseudo-unified memory architecture"** — treat VRAM / system RAM / zram /
-   NVMe as a CPU-style cache hierarchy with one allocator, one replacement policy and one budget,
-   instead of four disconnected pools. NOT STARTED — scope question is out with the user.
+Three threads:
+1. **Make the desktop feel fast again.** DONE for the wallpaper (BUG-083 / DECISION 32) — it must
+   never spend CPU/iGPU on frames nobody can see, nor be encoded above the panel resolution.
+2. **BUG-084 — stop the crash handler from taking the machine down.** This turned out to be the
+   *actual* cause of the reported freeze. Cleared by hand; the durable cap is NOT applied yet.
+3. **"Pseudo-unified memory architecture"** — the user's clarified ask: *"24/7 unified memory across
+   the CPU and dGPU, as the dGPU will be mostly not used, so it's CPU/iGPU only regardless of what
+   we are doing, HIVE or not."* i.e. always-on and general-purpose, NOT a HIVE-session-scoped thing.
+   NOT STARTED — there is a hard hardware constraint to resolve with the user first (below).
 
 ## Aim right now
-Thread 1 is finished and verified. Thread 2 is blocked on **one scope decision from the user**
-(see "Next steps"): which workload the tier manager serves first — HIVE model swapping, HOPE
-weight-streaming inference (DECISION 23), or a general OS-wide allocator.
+Thread 1 done. Thread 2 awaiting a yes/no on the `MemoryMax` drop-in. Thread 3 needs the user to
+absorb one constraint before any code: **dGPU VRAM cannot be made into general 24/7 system memory on
+this box**, and trying would destroy the true-0W idle work.
 
 ## Why / motivation (context a newcomer would be missing)
 The user reported "Chrome and the OS are actually not responding" and suspected the live wallpaper.
-They were right, and for a non-obvious reason: the wallpaper's cost lands on the **iGPU
-(renderD129)**, the *same* device KWin composites on and Chrome renders on. It never showed up as a
-crash — no amdgpu ring resets, no OOM, PSI cpu/memory/io all 0 — it was pure steady-state
-contention. The user's own framing was the fix: "when the app is fullscreen there is no point using
-iGPU/CPU to render frames we are not seeing."
+The wallpaper *was* a genuine chronic cost — and for a non-obvious reason: it lands on the **iGPU
+(renderD129)**, the *same* device KWin composites on and Chrome renders on. But it was **not** the
+freeze. Mid-session the box went into a real **memory stall** (BUG-084) and that is what the user
+was feeling. Both were worth fixing; do not conflate them.
 
 ## Process / approach being used
 Measure first, then change, then re-measure the same counter. The counter used throughout is
@@ -50,31 +51,59 @@ seconds apart, plus `/sys/class/drm/card2/device/gpu_busy_percent` and RSS.
 - **Resume verified**, not assumed: minimize Chrome via a KWin script → 61 jiffies/6s, restore → 0.
 - Docs written: BUG-083, DECISION 32, LUMINOS_STATUS.md row, luminos-notes, luminos-brain.
 
+## State — what is DONE (thread 2, BUG-084 — the actual freeze)
+Diagnosed and cleared live, fully written up in `docs/BUGS.md` BUG-084. Summary:
+- KDE **DrKonqi** launched `gdb ... --init-eval-command=set debuginfod enabled on` on a **364 MB
+  Filelight core**. gdb reached **7.4 GB RSS / 16.3 GB VSZ at 70% CPU, still running after 12 min**,
+  with **five** `drkonqi-coredump-launcher@*` units active at once.
+- Peak: RAM **13 of 14 GiB used**, **zram swap 100% full (80 KiB free of 8 GiB)**, `pswpout` 2.47 M
+  pages, **PSI memory `full` avg10 = 7.85%** while **CPU PSI stayed ~1%** — a *memory* stall, not a
+  CPU shortage. That asymmetry is the fingerprint; check it first next time.
+- Cleared with `systemctl --user stop 'drkonqi-coredump-launcher@*.service'` → RAM 13 → 5.6 GiB,
+  swap 8 GiB full → 1.6 GiB, PSI memory full **7.85% → 0.08%**. Cores kept, nothing lost.
+- **Durable cap NOT applied** — it will recur on the next app crash.
+
 ## State — what is IN PROGRESS
-Nothing half-built. Thread 2 has **no code written** — deliberately, pending the scope answer.
+Nothing half-built. Thread 3 has **no code written** — deliberately.
+
+## Thread 3 — the constraint that has to be settled before any code
+The user asked for "24/7 unified memory across the CPU and dGPU". The honest hardware position,
+which must be put to them before building anything:
+- **dGPU VRAM cannot become general system memory on this box.** A consumer RTX 4050 over PCIe has no
+  mechanism to expose VRAM as a NUMA node or a block device to the kernel (that exists on
+  Grace-Hopper / CXL, not here). The only routes are userspace hacks (FUSE `vramfs`, NBD) that cannot
+  safely host swap.
+- **It would also destroy the true-0W work.** Holding VRAM 24/7 means the dGPU can never RTD3-suspend
+  → ~8 W constant idle draw on a laptop, undoing BUG-047, DECISION 25 and the `DPM=0x02` tuning. The
+  user's own reason for wanting it ("the dGPU will be mostly not used") is exactly why it is
+  currently free — it is *asleep*. This is a Rule 11 conflict and must be documented as one.
+- **The genuinely unified half already exists and is measurable.** Live readings this session:
+  `mem_info_vram_total = 512 MB` with **501 MB used (98% full)**, `mem_info_gtt_total = 7633 MB` with
+  1218 MB used. The 512 MB is the BIOS UMA carve-out for the 780M; everything beyond it spills to
+  GTT. That carve-out being pinned at 98% on a 2880×1800 HiDPI desktop is the most concrete
+  unified-memory lead we have, and it is on the CPU/iGPU side the user says they actually live on.
+- Suggested first move, pending user agreement: **characterise the iGPU VRAM/GTT split under real
+  load** (idle vs Chrome vs wallpaper vs HIVE) before proposing any allocator. Measure, then design.
 
 ## Next steps (ordered)
-1. **User answers the scope question** for the pseudo-unified memory architecture. The three framings
-   put to them:
-   - (a) **HIVE model cache** — only one GPU model fits 4.6 GB VRAM, so swapping Nexus↔Bolt today
-     kills llama-server and re-reads a ~4.5 GB GGUF from NVMe. Keep the cold model's weights hot in
-     system RAM/zram so a swap is a RAM→VRAM PCIe copy, not a disk reload. Smallest, most obviously
-     useful, directly exercises the tier machinery.
-   - (b) **HOPE weight-streaming** — build DECISION 23 for real (PCIe P0/Gen4 session pin in
-     luminos-power + pinned-region exemption in luminos-ram + a shared start/stop signal).
-   - (c) **General OS-wide tier manager** — a `luminos-uma` broker owning one budget across
-     VRAM/RAM/zram/NVMe for all clients.
-2. Whichever is chosen, the cache-theory mapping to reuse (already sketched, not yet written down in
-   the repo): tiers = L1 VRAM 4.6 GB / L2 system RAM 16 GB (already genuinely unified with the iGPU —
-   zero-copy there, only the dGPU needs a PCIe transfer) / L3 zram / L4 NVMe. Weights are **read-only
-   → clean lines → eviction is free, no write-back**; KV cache is read-write → must be pinned or
-   written back. Replacement policy already exists in-tree: **luminos-ram's LIRS/IRR + HotSet**.
-   Prefetch = the layer N+1 double-buffer. "Way-locking" = the resident weights/KV/embeddings/output
-   head that must never be evicted.
-3. Optional wallpaper follow-up: detect **session locked / DPMS-off** and freeze then too. Today the
+1. **BUG-084 durable fix** — user go-ahead for a systemd drop-in on
+   `drkonqi-coredump-launcher@.service` with `MemoryMax=`/`MemoryHigh=`, so a runaway backtrace is
+   OOM-killed in its own cgroup. Optionally also blank `DEBUGINFOD_URLS` for drkonqi and serialise
+   the launchers. Until this lands, every app crash can repeat the stall.
+2. Separately: **`kscreen-doctor` SIGABRTs reliably on this box** (three times in 24 h) and each crash
+   arms another launcher. Fix or avoid it.
+3. **Thread 3** — put the dGPU-VRAM constraint above to the user, get a direction, then measure the
+   iGPU VRAM/GTT split under load before writing any allocator code.
+   Cache-theory mapping to reuse when it does get built: L1 dGPU VRAM 4.6 GB / L2 system RAM 16 GB
+   (already genuinely unified with the iGPU — zero-copy there, only the dGPU needs a PCIe transfer) /
+   L3 zram / L4 NVMe. Weights are **read-only → clean lines → eviction is free, no write-back**; KV
+   cache is read-write → pin or write back. The replacement policy already exists in-tree:
+   **luminos-ram's LIRS/IRR + HotSet**. Prefetch = the layer N+1 double-buffer (DECISION 23).
+   "Way-locking" = resident weights/KV/embeddings/output head that must never be evicted.
+4. Optional wallpaper follow-up: detect **session locked / DPMS-off** and freeze then too. Today the
    lock greeter is not a window in `TasksModel`, so `coverLevel` stays 0 and the desktop copy keeps
    decoding behind the lock screen if no maximized window is up.
-4. Decide whether to `git push` — the wallpaper work is committed locally but NOT pushed (see Gotchas).
+5. `git push` is **on hold by explicit user decision** — commit locally, do not push yet.
 
 ## Key decisions & constraints so far
 - **DECISION 32 amends DECISION 31.** The session-wide `QTWEBENGINE_CHROMIUM_FLAGS` anti-throttle is
@@ -96,7 +125,13 @@ Nothing half-built. Thread 2 has **no code written** — deliberately, pending t
   0, 8.5 GB available. It is contention.
 - iGPU busy stays at ~12–21% even with the wallpaper fully frozen — that residue is Chrome / Claude /
   KWin, **not** the wallpaper. Do not attribute it to the wallpaper.
-- **NOT pushed to origin.** Committed locally only. `git add -A` would sweep in files the previous
+- **The wallpaper was not the freeze.** It was a real chronic cost (24% of a core, forever) and worth
+  fixing, but the unresponsiveness was BUG-084. Do not let the wallpaper fix "explain" a future stall
+  — check `/proc/pressure/memory` `full` vs `/proc/pressure/cpu` first. Memory-full high + CPU-some
+  low = a memory stall, and something is eating RAM.
+- **`ps --sort=-rss | head` found it in one command.** Reach for that before any deep GPU forensics.
+- **NOT pushed to origin** (user's explicit decision this session). Committed locally only.
+  `git add -A` would sweep in files the previous
   session explicitly parked as "awaiting user OK" (`scripts/luminos-ubuntu-persist`,
   `systemd/luminos-ubuntu-look.service`, `share/`, the wine scripts) — stage by name, never `-A`.
 - Still unverified from the previous session: BUG-082's real suspend/resume cycle (close lid, wait

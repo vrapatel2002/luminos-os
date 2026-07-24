@@ -1,7 +1,21 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-07-24 (BUG-083 FIXED + measured — live wallpaper decoded a 4K video 24/7 behind fullscreen windows; graded occlusion policy + panel-sized transcode. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-07-24 (BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram, stalling the whole desktop; cleared by hand, durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured — live wallpaper decoded a 4K video 24/7 behind fullscreen windows. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
+
+### BUG-084 — DrKonqi crash handler stalls the whole desktop: gdb + debuginfod ate 7.4 GB and filled zram
+<!-- [CHANGE: claude-code | 2026-07-24] -->
+- Status: OPEN (incident cleared by hand 2026-07-24; the durable cap is NOT applied yet — it WILL recur on the next app crash)
+- Severity: HIGH (whole-system stall — the desktop, Chrome and input all become unresponsive; this is the real cause of the "Chrome and the OS are not responding" report)
+- Component: KDE `drkonqi` — `drkonqi-coredump-launcher@*.service` (systemd --user), spawning `/usr/bin/gdb ... --init-eval-command=set debuginfod enabled on --core=...`
+- Description: Filelight segfaulted (SIGSEGV, 18:39:58, 364 MB core extracted to `~/.cache/drkonqi/cores/`). DrKonqi launched `gdb` with **debuginfod enabled** to build a submittable backtrace. gdb grew to **7.4 GB RSS / 16.3 GB VSZ at 70% CPU and was still running 12 minutes later**. Meanwhile **five** `drkonqi-coredump-launcher@*` units were active simultaneously (Filelight, plus several `kscreen-doctor` and `qml` crashes — `kscreen-doctor` segfaults reliably on this box and each crash arms another launcher).
+  Measured at peak: RAM **13 of 14 GiB used, 1.8 GiB available**, **zram swap 100% full (80 KiB free of 8 GiB)**, `pswpout` 2.47 M pages, **PSI `/proc/pressure/memory` full avg10 = 7.85%** (the entire system doing no work 8% of the time, waiting on memory), io full avg10 = 4.22%. CPU PSI stayed ~1% — this was a *memory* stall, not a CPU shortage, which is why it feels like a freeze rather than slowness.
+- Root Cause: an unbounded, unprioritised debug job runs in the user session with no memory cgroup limit. `debuginfod` downloads and loads full debug symbol sets, and a 364 MB core plus Qt/KDE debuginfo is enough to exhaust a 14 GiB box. Nothing caps it, nothing serialises the launchers, so N crashes = N concurrent gdb processes.
+- Immediate clear (what was done): `systemctl --user stop 'drkonqi-coredump-launcher@*.service'`. Recovery was immediate — RAM used 13 → 5.6 GiB, available 1.8 → 9.3 GiB, swap 8.0 GiB full → 1.6 GiB, PSI memory full **7.85% → 0.08%**. No data lost: the cores remain in `~/.cache/drkonqi/cores/` and `coredumpctl`.
+- Candidate durable fix (NOT applied — needs user go-ahead): a systemd drop-in on `drkonqi-coredump-launcher@.service` with `MemoryMax=` (e.g. 2G) + `MemoryHigh=`, so a runaway backtrace is OOM-killed **inside its own cgroup** instead of taking the desktop down. Crash reporting keeps working. Optionally also disable `debuginfod` for drkonqi (`DEBUGINFOD_URLS=`) and/or serialise the launchers so only one runs at a time.
+- Related: `kscreen-doctor` reliably SIGABRTs on this box (23:55/23:58 on 2026-07-23, 18:38 on 2026-07-24) — every invocation risks arming another launcher. Worth fixing or avoiding separately.
+- Verify: `cat /proc/pressure/memory` — `full avg10` should sit at ~0. `systemctl --user list-units --all 'drkonqi-coredump-launcher@*'` should show nothing running.
+- Date Found: 2026-07-24
 
 ### BUG-083 — Live wallpaper decoded a 4K video 24/7 behind fullscreen windows (desktop/browser jank)
 <!-- [CHANGE: claude-code | 2026-07-24] -->
