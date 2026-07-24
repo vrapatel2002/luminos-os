@@ -28,10 +28,12 @@
       <default></default>
     </entry>
 
-    <!-- 0 Stretch, 1 Fit, 2 Crop (default), 3 Center -->
+    <!-- Windows-parity fit modes. 0 Stretch (default) fills the screen edge-to-edge
+         with no bars; 1 Fit keeps proportions (adds bars); 2 Fill crops to fill;
+         3 Center; 4 Tile. [CHANGE: claude-code | 2026-07-23] -->
     <entry name="FillMode" type="int">
       <label>How image/video is scaled</label>
-      <default>2</default>
+      <default>0</default>
     </entry>
 
     <entry name="BackgroundColor" type="Color">
@@ -44,9 +46,16 @@
       <default>true</default>
     </entry>
 
-    <entry name="PauseWhenObscured" type="bool">
-      <label>Freeze the wallpaper when a window covers the desktop</label>
-      <default>true</default>
+    <!-- When to stop rendering because nobody can see the wallpaper.
+         0 = never (burn CPU/iGPU even fully hidden)
+         1 = only while a FULLSCREEN window is up
+         2 = whenever the desktop is hidden — fullscreen OR maximized (default)
+         Replaces the old PauseWhenObscured bool, which conflated "maximized"
+         with "fullscreen" and could only be all-or-nothing.
+         [CHANGE: claude-code | 2026-07-24] -->
+    <entry name="ObscurePolicy" type="int">
+      <label>When to freeze the wallpaper because it is not visible</label>
+      <default>2</default>
     </entry>
 
     <entry name="MuteAudio" type="bool">

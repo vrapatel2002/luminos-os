@@ -1072,3 +1072,308 @@ Changing device perms does **not** revoke already-open FDs, so installing live d
 `CONFIG_BPF_LSM=y` and `bpf` is in the active LSM list, so a true **BPF-LSM** gate that allow-lists apps by binary at `open()` (defeats even a hostile process calling `dgpu-exec` itself) is possible. v1 covers the accidental-grab threat model; v2 covers the adversarial one.
 
 Files: `scripts/dgpu-gate/` (dgpu-exec.c, install-dgpu-gate.sh, luminos-gpu-picker.qml, README.md), `scripts/luminos-gpu-launch` (the single launcher), `config/modprobe.d/luminos-dgpu-gate.conf`, `config/udev/70-luminos-dgpu-access.rules`. KILL SWITCH: `sudo chmod 0666 /dev/nvidia*` (temp) or remove the modprobe+udev files and `mkinitcpio -P` (permanent).
+
+---
+
+## DECISION 26 — Level-0 of the safe-update ladder: pin kernel + NVIDIA branch in pacman.conf
+Date: July 21, 2026
+Made by: claude-code
+**Status: ACTIVE (live in /etc/pacman.conf)**
+
+### Context
+System was 2.5 months stale (last full upgrade 2026-05-10; 645 packages behind). User
+wanted to install Steam (which needs matching 32-bit NVIDIA libs) and asked, more
+broadly, how to "act like an OS developer" and keep Luminos current **without breaking**.
+Investigation of a full `pacman -Syu` showed it is NOT a small update: it drags in
+`linux` 7.0.5→7.1.4, **`nvidia` 595.71.05 → 610.43.03 (a full driver-branch jump)**,
+`plasma-workspace` 6.6.4→6.7.3, `systemd` 260→261. Two specific dangers on THIS tuned
+machine: (a) the 595→610 branch jump can silently undo the true-0W dGPU RTD3 gating +
+DPM=0x02 power tuning; (b) Plasma 6.6→6.7 breaks the hand-built KCM `.so` plugins
+(kcm_luminos_hive/keyboard/lid_light) until recompiled. Root FS is **ext4**, so Btrfs
+instant-snapshot rollback is not available without a filesystem migration.
+
+### The framing (why "never breaks" is the wrong goal)
+A rolling release + a customized machine cannot guarantee break-free upgrades. The real
+engineering goal is upgrades that are **reversible + verifiable + pinnable**. The
+safe-update ladder: **L0 pin fragile pkgs** → L1 restore points (timeshift on ext4; Btrfs
+later) → L2 verification harness (KCMs load? 5 Go daemons bind sockets? dGPU 0W? HIVE up?
+fans alive?) → L3 auto-rebuild customs (cmake+go) as post-upgrade hook → L4 one
+`luminos-update` command tying it together → L5 (aspirational) immutable A/B image
+(SteamOS-style, Arch-based) or NixOS declarative.
+
+### What We Decided (L0)
+`/etc/pacman.conf`: `IgnorePkg = linux linux-headers nvidia-utils nvidia-open-dkms
+opencl-nvidia lib32-nvidia-utils lib32-opencl-nvidia`. Now `pacman -Syu` keeps ~640
+packages current but never moves the kernel or the version-locked NVIDIA driver set as a
+side effect. Kernel/NVIDIA are upgraded ONLY deliberately (unpin → upgrade → DKMS rebuild
+→ verify true-0W gating + KCMs → re-pin). Backup: `/etc/pacman.conf.bak-20260721`.
+(lib32-nvidia-utils/lib32-opencl-nvidia pinned pre-emptively so the Steam install pulls
+them at 595.71.05 to match the installed 64-bit driver.)
+
+### The Conflict (both sides, per Rule 11)
+- **Pin (chosen):** protects the tuned power stack + custom KCMs; lets the user stay
+  current elsewhere. Cost: creates a permanent partial-upgrade state — held pkgs can
+  eventually diverge from the rest (e.g. a future glibc/mesa bump wanting a newer driver).
+  Mitigation: revisit pins at each deliberate kernel/NVIDIA window; keep the window short.
+- **Don't pin (rejected):** always fully coherent, but every routine `-Syu` risks a
+  silent branch jump that undoes power tuning + breaks KCMs with no safety net (ext4, no
+  snapshots yet). Rejected until at least L1 restore points exist.
+
+Files: `/etc/pacman.conf` (+ .bak-20260721). Cross-ref AGENTS.md §9. Next rungs (L1–L4)
+not yet built — tracked as an open initiative.
+
+---
+
+## DECISION 27 — Local caching DNS resolver (systemd-resolved) for Chrome new-page-load speed
+Date: July 22, 2026
+Made by: claude-code
+**Status: APPLIED (live)**
+
+### The Decision
+Enable `systemd-resolved` as a local caching DNS resolver and route NetworkManager's DNS
+through it. Concretely: drop-in `/etc/NetworkManager/conf.d/dns-systemd-resolved.conf`
+(`[main] dns=systemd-resolved`), `systemctl enable --now systemd-resolved`, and symlink
+`/etc/resolv.conf` → `/run/systemd/resolve/stub-resolv.conf` (stub `127.0.0.53`). Upstream
+DNS is unchanged (router `192.168.2.1` + `207.164.234.129`, pushed to resolved by NM).
+
+### Why
+User reported brand-new pages/tabs (type "youtube" → Enter) render slower than on Windows —
+distinct from MemorySaver-discarded tabs. Measured: no local DNS cache existed; NetworkManager
+wrote `resolv.conf` straight to the router, so every new domain cost 30–50 ms (youtube.com 49,
+i.ytimg.com 50, github.com 33), and a page like YouTube pulls 10+ domains. Repeat lookups were
+~7 ms but cached at the ROUTER only — non-persistent. Windows caches DNS locally by default;
+this was the gap. After the change: fresh domain first hit ~50 ms, repeats <1 ms and persistent
+(verified via `resolvectl statistics` cache hits).
+
+This is "Chrome fix #3" in a small perceived-slowness punch-list. Fix #1 (removed the
+`--renderer-process-limit=8` + `--process-per-site` renderer caps) is also applied. Fix #2
+(remove `MemorySaver`) was tried then REVERTED at user request — MemorySaver stays on; it is a
+built-in Chromium feature, only toggleable, not externally rewritable.
+
+### What we rejected
+- **NetworkManager `dns=dnsmasq` caching mode:** also gives a local cache, but requires the
+  `dnsmasq` package. `systemd-resolved` ships with systemd (already installed) and needs no new
+  package — preferred for a zero-install, native fix.
+- **Just cleaning nsswitch** (dropping the dead `resolve`/`mymachines` entries) without a
+  resolver: removes a little dead-stub walk overhead but provides NO caching — misses the actual
+  win. Rejected.
+- **Do nothing:** rejected — the DNS cost is real, measured, and Windows-parity is achievable
+  cheaply and reversibly.
+
+### Revert
+`rm /etc/NetworkManager/conf.d/dns-systemd-resolved.conf` → `systemctl disable --now
+systemd-resolved` → restore `/etc/resolv.conf` from `/etc/resolv.conf.bak-20260722` (replace the
+symlink with the plain file) → `systemctl restart NetworkManager`.
+
+Files: `/etc/NetworkManager/conf.d/dns-systemd-resolved.conf` (new), `/etc/resolv.conf`
+(→ stub symlink, backup `.bak-20260722`). Cross-ref AGENTS.md §9, docs/LUMINOS_HANDBOOK.md §11.5.
+
+---
+
+## DECISION 28 — SDDM login screen matches the KDE lock screen (Breeze)
+Date: July 22, 2026
+Made by: claude-code
+**Status: APPLIED (visible at next login/reboot)**
+
+### The Decision
+Switch the SDDM login theme from `Sugar-Candy` to **Breeze**, and set the Breeze SDDM theme's
+background to the same wallpaper the KDE lock screen uses
+(`/usr/share/sddm/themes/Sugar-Candy/Backgrounds/Mountain.jpg`, via
+`/usr/share/sddm/themes/breeze/theme.conf.user`). All `/etc/sddm.conf.d/*.conf` consolidated to
+`Current=breeze` (`hidpi.conf`, `luminos.conf`, and the KCM-managed `kde_settings.conf`).
+
+### Why
+User wanted the login screen and lock screen to look the same ("use the KDE theme everywhere").
+They previously looked different: SDDM = Sugar-Candy frosted style, lock screen = Breeze. The two
+use different theming systems — SDDM loads "SDDM themes" while the KDE screen-locker loads a Plasma
+"Look & Feel" package and CANNOT load an SDDM theme. So the only clean way to match them is to move
+SDDM onto Breeze (the direction the lock screen already uses), then give SDDM the lock screen's
+wallpaper. Result: both show Breeze widgets + the Mountain wallpaper.
+
+### What we rejected
+- **Make the lock screen look like Sugar-Candy:** would require hand-building a custom Plasma
+  lock-screen QML theme imitating Sugar-Candy — high effort, fragile across Plasma updates. Rejected.
+- **Leave the two mismatched:** rejected — user explicitly wanted consistency.
+
+### Revert
+Set `Current=Sugar-Candy` in `/etc/sddm.conf.d/luminos.conf` (or restore
+`/etc/sddm-luminos.conf.bak-20260722`); optionally clear the `background=` line in
+`/usr/share/sddm/themes/breeze/theme.conf.user`.
+
+Files: `/etc/sddm.conf.d/{luminos,hidpi,kde_settings}.conf`,
+`/usr/share/sddm/themes/breeze/theme.conf.user`, backup `/etc/sddm-luminos.conf.bak-20260722`.
+Cross-ref AGENTS.md §9, docs/LUMINOS_HANDBOOK.md. Relates to open task #8 (custom Luminos SDDM
+theme) — for now standardized on Breeze to match the lock screen rather than a bespoke theme.
+
+## DECISION 29 — Auto-sync SDDM + lock screen to the desktop wallpaper (theme-sync watcher)
+Date: July 22, 2026
+Made by: claude-code
+**Status: APPLIED + LIVE (path watcher enabled)**
+
+### The Decision
+Make the DECISION 28 matching automatic instead of manual. A script `luminos-theme-sync`
+(`/usr/local/bin/`, source `scripts/luminos-theme-sync`) reads the CURRENT desktop wallpaper
+(fallback chain: `plasma-org.kde.plasma.desktop-appletsrc` → `kscreenlockerrc` → SDDM current)
+and pushes it into both the lock screen (`kscreenlockerrc`, written as the user via
+`kwriteconfig6`) and the SDDM Breeze theme (`/usr/share/sddm/themes/breeze/theme.conf.user`).
+It is debounced via `/var/lib/luminos/theme-sync.wallpaper` (no-op if unchanged). A systemd
+**system** path unit `luminos-theme-sync.path` watches the two config files and triggers the
+oneshot `luminos-theme-sync.service` on change — so changing the desktop wallpaper re-matches
+login + lock automatically, no manual step.
+
+### Why
+User is about to reskin the desktop (Ubuntu/Yaru look, DECISION 30) and did not want to hand-match
+SDDM every time the theme changes ("write code to make it automatically"). SDDM/lock are separate
+theming systems from the Plasma desktop (see DECISION 28), so the wallpaper has to be copied across;
+the watcher removes the manual copy.
+
+### Design notes / what we rejected
+- **Root path unit watching the user's home:** chosen — root can read `/home/shawn/.config` and
+  write both `/etc` (SDDM) and (as the user) `kscreenlockerrc`, so ONE privilege model, no sudoers
+  or polkit rule. User path `/home/shawn` hardcoded (single-user box, matches other configs).
+- **User-level watcher + sudoers NOPASSWD helper for the /etc write:** rejected for v1 — adds a
+  sudoers security file for little gain.
+- Currently syncs **wallpaper only** (the visible mismatch). Color-scheme sync into SDDM is a
+  possible future add.
+
+### Revert
+`sudo systemctl disable --now luminos-theme-sync.path`; optionally
+`sudo rm /etc/systemd/system/luminos-theme-sync.{path,service} /usr/local/bin/luminos-theme-sync`
+and `sudo systemctl daemon-reload`. The last-synced wallpaper stays in the SDDM/lock config
+(harmless); restore DECISION 28 state if desired.
+
+Files: `scripts/luminos-theme-sync`, `systemd/luminos-theme-sync.{service,path}`,
+`/usr/local/bin/luminos-theme-sync`, `/etc/systemd/system/luminos-theme-sync.{service,path}`,
+state `/var/lib/luminos/theme-sync.wallpaper`. Cross-ref DECISION 28, DECISION 30.
+
+## DECISION 30 — Ubuntu (Yaru) look on KDE Plasma, no GNOME
+Date: July 22, 2026
+Made by: claude-code
+**Status: APPLIED (live in session; fonts/full repaint finalize on next re-login)**
+
+### The Decision
+Give the Plasma desktop an Ubuntu look by layering the **Yaru** theme onto KDE — WITHOUT switching
+to GNOME. Installed (AUR via yay + official repo): `yaru-icon-theme` (icons + Yaru cursors),
+`yaru-gtk-theme` (GTK apps), `yaru-sound-theme`, `ttf-ubuntu-font-family`. Applied via
+`scripts/luminos-ubuntu-look` (→ /usr/local/bin): icons=Yaru, cursor=Yaru, UI font=Ubuntu 10,
+mono=Ubuntu Mono, GTK apps→Yaru (gtk-3.0/4.0 settings.ini + gsettings), and a custom Ubuntu-orange
+Plasma color scheme `share/color-schemes/Yaru.colors` (accent #E95420) installed to
+`~/.local/share/color-schemes/` + `/usr/local/share/color-schemes/`. The script finishes by calling
+`luminos-theme-sync` so login/lock pick up the wallpaper.
+
+### Why
+User wanted the desktop to look like Ubuntu but explicitly did NOT want to run GNOME. Yaru is
+Ubuntu's own theme; on KDE the convincing signals are icons + Ubuntu font + orange accent, all of
+which are Qt/Plasma-side and don't require GNOME.
+
+### Notes / limits / rejected
+- **Widget style stays Breeze** (Ubuntu-orange accent via the color scheme). No maintained "KvYaru"
+  Kvantum theme was found; Breeze + orange is the low-risk choice. Adwaita-Qt was rejected (that's
+  GNOME-generic, not Ubuntu-orange).
+- **Layout (top bar + left vertical dock)** — NOT done; the classic Ubuntu layout is a separate,
+  more invasive step (rearranges panels). Offered to the user as a follow-up.
+- Wallpaper left as-is (Ubuntu default wallpaper not installed); if the user sets one, DECISION 29's
+  watcher propagates it to login/lock automatically.
+- Live-apply from a non-session shell crashes the `plasma-apply-*` tools (no Wayland attach); applied
+  live by sourcing the running plasmashell's env (WAYLAND_DISPLAY/XDG_RUNTIME_DIR/DBUS). Config-file
+  writes are the durable path and survive re-login regardless.
+
+### Revert
+`luminos-ubuntu-look --revert` (restores icons→Papirus, colors→BreezeLight, cursor→breeze_cursors;
+re-login to finish). Optionally `yay -Rns yaru-icon-theme yaru-gtk-theme yaru-sound-theme
+ttf-ubuntu-font-family`. Previous icon theme was **Papirus**.
+
+Files: `scripts/luminos-ubuntu-look`, `share/color-schemes/Yaru.colors`,
+`/usr/local/bin/luminos-ubuntu-look`, `~/.config/{kdeglobals,kcminputrc,gtk-3.0/settings.ini,gtk-4.0/settings.ini}`.
+Cross-ref DECISION 29 (auto-sync), AGENTS.md §9.
+
+## DECISION 31 — Keep web live-wallpapers animating while the desktop is covered
+Date: July 23, 2026
+Made by: claude-code
+**Status: APPLIED (live this session; permanent via session env script, finalizes each login)**
+
+### The Decision
+Set `QTWEBENGINE_CHROMIUM_FLAGS="--disable-backgrounding-occluded-windows --disable-renderer-backgrounding"`
+for the whole Plasma session via `~/.config/plasma-workspace/env/luminos-wallpaper-nothrottle.sh`
+(KDE sources every `*.sh` there at session start). This stops KWin/QtWebEngine from throttling the
+`org.luminos.livewallpaper` WebEngineView to 0 fps when a window fully covers the desktop.
+
+### Why
+User reported web wallpapers (particles, etc.) "freeze" and unchecking the plugin's
+**"Freeze when a window covers the desktop"** box did nothing. Root cause (BUG-081): the freeze
+happens *below* the plugin — the compositor stops drawing the occluded desktop surface and Chromium
+background-throttles the WebEngine — so the plugin's `PauseWhenObscured=false` was overridden.
+Measured: renderer 0 jiffies/3s while covered → 17–24 jiffies/3s (~30fps) after the flags.
+
+### Conflict / interaction (two settings that touch the same behaviour)
+The plugin checkbox and this flag now compose deliberately:
+- Checkbox **CHECKED** (default `PauseWhenObscured=true`) → plugin explicitly sets WebEngine
+  `lifecycleState=Frozen` when covered → power saving preserved.
+- Checkbox **UNCHECKED** → the flags let the wallpaper keep animating while covered (small constant
+  GPU/CPU cost — this is the user's explicit choice; they almost always have a window up and want to
+  glance at motion). Trade-off documented per AGENTS §5 rule 11.
+
+### Notes / limits
+- The **particles** sample is cursor-reactive only → still looks static when covered (no cursor
+  reaches the desktop). For visible autonomous motion use the **aurora** sample or a **video**
+  wallpaper. Desktop was switched to aurora to demonstrate the fix.
+- Flag is Qt-WebEngine-specific (`QTWEBENGINE_CHROMIUM_FLAGS`); Chrome/Chromium proper ignore it.
+  4K Video Downloader Plus (bundles QtWebEngine) will inherit it — harmless.
+
+### Revert
+`rm ~/.config/plasma-workspace/env/luminos-wallpaper-nothrottle.sh` +
+`systemctl --user unset-environment QTWEBENGINE_CHROMIUM_FLAGS` + restart plasmashell (or re-login).
+
+Files: `~/.config/plasma-workspace/env/luminos-wallpaper-nothrottle.sh`. Cross-ref BUG-081, AGENTS.md §9.
+
+## DECISION 32 — Wallpaper visibility is a graded policy, not a boolean (amends DECISION 31)
+Date: July 24, 2026
+Made by: claude-code
+**Status: APPLIED (live; measured before/after)**
+
+### The Decision
+The live wallpaper's obscured guard becomes a three-way `ObscurePolicy` int instead of the
+`PauseWhenObscured` bool:
+- `0` — never freeze (old `false`; still useful for a glanceable web toy)
+- `1` — freeze only while a **fullscreen** window is up
+- `2` — freeze whenever the desktop is hidden at all, fullscreen **or** maximized — **the default**
+
+Per-window cover is now graded (`fullscreen=2`, `maximized=1`, `minimized/normal=0`) and the maximum
+across windows is debounced 400 ms before it is acted on.
+
+### Why
+DECISION 31 turned the guard OFF so *web* wallpapers would keep animating while covered. That bool
+also governed the *video* path, so a 3840×2160 H.264 wallpaper decoded + composited 24/7 behind a
+maximized Chrome — a constant 24% of a core, 810 MB RSS and 16–18% iGPU busy on the **same iGPU KWin
+and Chrome use**. The user experienced it as the browser and desktop "not responding". A boolean
+cannot express "keep the web toy alive but stop burning the iGPU on frames nobody sees" — the policy
+has to be graded. See BUG-083 for the measurements.
+
+### Conflict / interaction (per Rule 11) — with DECISION 31
+Both settings touch the same behaviour and are now deliberately layered:
+- DECISION 31's session-wide `QTWEBENGINE_CHROMIUM_FLAGS` anti-throttle is **kept**. It removes the
+  *involuntary* Chromium/KWin throttle, which is what makes `ObscurePolicy=0` actually work.
+- The plugin's `ObscurePolicy` is now the **authority** — it decides voluntarily whether to render.
+- Trade-off: default `2` means a maximized window stops the wallpaper. Anyone who wants motion behind
+  a maximized window sets `1` (fullscreen only) or `0` (never freeze) and pays ~12% of a core.
+
+### Companion change — right-size the source, don't just gate it
+Gating fixes the hidden case; it does nothing while the desktop is visible. The wallpaper video was
+also transcoded 3840×2160 → **2880×1620** (panel is 2880×1800) H.264 CRF 20, audio stripped:
+**−47% CPU, −27% RSS** while playing, with the 4K original kept. Rule of thumb recorded here: a
+wallpaper should never be encoded above the panel's resolution — the extra pixels are decoded, then
+thrown away by the scaler.
+
+### Known gap (deliberately not fixed here)
+A locked session / DPMS-off screen does not register as "covered" — the lock greeter is not a window
+in `TasksModel`. Wants a lock/idle signal; tracked in BUG-083.
+
+### Revert
+Set `ObscurePolicy=0` in
+`~/.config/plasma-org.kde.plasma.desktop-appletsrc [Containments][30][Wallpaper][org.luminos.livewallpaper][General]`
+and point `Video=` back at the `4K HD (h264).mp4` file. Config backups:
+`~/.config/plasma-org.kde.plasma.desktop-appletsrc.bak-wallpaper-20260724`,
+`~/.config/kscreenlockerrc.bak-wallpaper-20260724`.
+
+Files: `src/wallpapers/org.luminos.livewallpaper/contents/{config/main.xml,ui/main.qml,ui/config.qml}`.
+Cross-ref BUG-083, BUG-081, DECISION 31.

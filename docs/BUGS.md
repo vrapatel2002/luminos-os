@@ -1,7 +1,61 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-07-04 (BUG-079 FIXED — Conductor fan PID hunted/wound-up at idle: retuned with deadband + EMA smoothing + back-calc anti-windup; idle-validated, Conductor still gated OFF pending a load test)
+Last Updated: 2026-07-24 (BUG-083 FIXED + measured — live wallpaper decoded a 4K video 24/7 behind fullscreen windows; graded occlusion policy + panel-sized transcode. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
+
+### BUG-083 — Live wallpaper decoded a 4K video 24/7 behind fullscreen windows (desktop/browser jank)
+<!-- [CHANGE: claude-code | 2026-07-24] -->
+- Status: FIXED (2026-07-24, measured)
+- Severity: MEDIUM (no crash — steady-state CPU/iGPU contention felt as Chrome + desktop "not responding"/janky)
+- Component: `src/wallpapers/org.luminos.livewallpaper/` (`contents/config/main.xml`, `contents/ui/main.qml`, `contents/ui/config.qml`) + the wallpaper source video
+- Description: plasmashell sat at a **constant 24% of a core, 810 MB RSS and ~16–18% iGPU busy, forever**, including when a maximized Chrome window completely hid the desktop. Two independent causes stacked:
+  1. **`PauseWhenObscured=false`** — set during BUG-081 so *web* wallpapers keep animating while covered — also applied to the **video** path, so the MediaPlayer decoded, uploaded and composited every frame with nothing visible.
+  2. **The source video was 3840×2160** on a 2880×1800 panel — 8.3 MP decoded per frame to fill a 5.2 MP screen, ~1.8× more pixels than the display can show.
+  The cost lands on the **iGPU (renderD129)**, which is the same device KWin composites on and Chrome renders on, so it shows up as input lag and dropped frames rather than as a fault. Confirmed *not* a fault: no amdgpu ring resets/hangs, no OOM, PSI cpu/memory/io all 0, 8.5 GB available.
+- Root Cause: the obscured guard was a single bool that OR-ed `IsMaximized || IsFullScreen`, so it could only be all-or-nothing; turning it off (needed for web) removed the guard from video too. Nothing ever right-sized the video to the panel.
+- Fix:
+  - `PauseWhenObscured` (bool) → **`ObscurePolicy` (int)**: `0` never freeze, `1` freeze only under a **fullscreen** window, `2` freeze whenever the desktop is hidden (fullscreen **or** maximized) — **default 2**. Fullscreen and maximized are now graded separately per window (`cover` 2/1/0) instead of OR-ed.
+  - 400 ms **debounce** (`coverDebounce`) so alt-tab / window drags don't stop-start the decoder several times a second.
+  - Video transcoded 3840×2160 → **2880×1620** H.264 CRF 20, audio stripped (it is muted anyway). Original 4K file kept alongside.
+- Measured (plasmashell, jiffies of one core):
+  | State | CPU | RSS | iGPU |
+  |---|---|---|---|
+  | 4K, always render (before) | 240/10s (24%) | 810 MB | 16–18% |
+  | 2880×1620, always render | 128/10s (12%) | 589 MB | 12% |
+  | 2880×1620, hidden (now, default) | **1/10s (~0%)** | 617 MB | — |
+  | 2880×1620, desktop visible | 61/6s (~10%) | — | — |
+  Right-sizing alone ≈ **−47% CPU / −27% RSS**; the occlusion policy removes essentially all of it while hidden. Resume on uncover verified (minimize/restore Chrome via a KWin script → 0 → 61 jiffies/6s → 0).
+- Interaction with BUG-081 / DECISION 31: the session-wide `QTWEBENGINE_CHROMIUM_FLAGS` anti-throttle is **kept** — it is what makes `ObscurePolicy=0` actually work for web wallpapers. The plugin policy is now the authority; the flags only remove the *involuntary* Chromium throttle.
+- Known remaining gap (NOT fixed): the desktop wallpaper still plays while the **session is locked or the screen is DPMS-off** if no maximized window happens to be up — the lock greeter is not a window in `TasksModel`, so `coverLevel` stays 0. Needs a lock/idle signal. The lock screen's own copy is deliberately `ObscurePolicy=0`.
+- Gotcha for future tests: KWin's **"Show Desktop"** does NOT set `IsMinimized`, so it does not change `coverLevel` — use a real minimize/unmaximize to test the guard.
+- Verify: `awk '{print $14+$15}' /proc/$(pgrep -x plasmashell)/stat` twice 10 s apart with a maximized window up — the delta should be ~0.
+- Date Found / Fixed: 2026-07-24
+
+### BUG-082 — Video live-wallpaper freezes on resume from sleep (stale MediaPlayer decode surface)
+<!-- [CHANGE: claude-code | 2026-07-24] -->
+- Status: FIXED (2026-07-24, applied — pending live suspend/resume verification by user)
+- Severity: MEDIUM (cosmetic — desktop shows a frozen last frame after wake; no crash, no data loss)
+- Component: `src/wallpapers/org.luminos.livewallpaper/contents/ui/main.qml` (`videoComp`, the QtMultimedia `MediaPlayer`)
+- Description: On lid-open / unlock after suspend, the video wallpaper shows a frozen still frame and never resumes playing. On suspend the kernel tears down the MediaPlayer's GPU decode surface / pipeline; on resume it holds the last decoded frame but does not restart decoding. Playback was driven ONLY by `shouldPlay` (battery + window-obscured) via `onActiveChanged`, and neither of those changed across a plugged-in / unobscured suspend — so `player.play()` was never re-invoked. Even if it had been, a bare `play()` cannot revive a pipeline whose decode surface was destroyed; the source must be re-seated. GIF (CPU `AnimatedImage`) and web (`WebEngineView` self-recovers) modes were unaffected — video only.
+- Root Cause: no suspend/resume handler existed in the plugin; the `MediaPlayer` pipeline is invalid after resume and nothing re-loads it.
+- Fix: added a 1s repeating `Timer` inside `videoComp`. Timers don't tick during suspend, so a wall-clock gap >3s between ticks means the machine just resumed — on that first wake tick it `stop()`s, clears `source` to `""`, re-assigns `root.effectiveVideo`, and `play()`s, rebuilding the decode surface. Nothing runs during sleep; the check only fires on wake and is a no-op during normal playback.
+- Known limitation: for YouTube sources the reload re-uses the previously resolved googlevideo URL (does NOT re-run yt-dlp), so a very long sleep can still black-out on YouTube until the resolver refreshes; direct local video files recover cleanly every wake.
+- Verify (live): `kquitapp6 plasmashell && kstart plasmashell`, set a local video wallpaper, suspend, wait, reopen — video should re-seat and play instead of freezing.
+- Date Found / Fixed: 2026-07-24
+
+### BUG-080 — Wine 11.8→11.13 upgrade breaks the headless MT5 trading stack (forex-bot crash-loops)
+<!-- [CHANGE: claude-code | 2026-07-21] -->
+- Status: OPEN (deferred — fix in a future session; live-trading infra, needs a deliberate window)
+- Severity: HIGH (the live forex trading bot cannot run — it refuses to trade without a broker link, so no wrong trades, but no trading either)
+- Component: `wine` (11.8-1 → 11.13-1, upgraded 2026-07-21 in the big -Syu), `~/.config/systemd/user/mt5-terminal.service` + `mt5linux.service` + `forex-bot.service`
+- Description: After the full system upgrade, the two Wine-based services start and **exit cleanly (status 0) after ~3s** instead of staying resident: `mt5-terminal.service` (MetaTrader 5 `terminal64.exe` headless on Xvfb :99) and `mt5linux.service` (Windows-Python310 RPyC daemon that should listen on port 18812). Result: **port 18812 stays CLOSED**, so `forex-bot.service`'s `ExecStartPre` bridge-readiness gate (waits up to 120s for 18812) times out with "bridge port 18812 never came up", the bot fails, and systemd auto-restarts it in a crash loop (StartLimitBurst=3 / 600s). The bot itself, its venv, CUDA path etc. are NOT the fault — the Wine layer under MT5 is.
+- Root Cause (suspected, NOT yet confirmed): Wine 11.13 (+ wine-mono 11.1→11.2) changed prefix/loader behaviour vs 11.8; the MT5 terminal + Python310-under-Wine now terminate immediately. Most likely the `~/.wine` prefix needs a `wineboot -u` migration after the version bump, or a genuine regression in 11.13 for this headless GUI workload.
+- Candidate fixes (NOT applied — awaiting a deliberate session; do NOT touch live-trading infra casually):
+  (a) least invasive — `WINEPREFIX=~/.wine wineboot -u` to migrate the prefix under 11.13, then `systemctl --user start mt5-terminal mt5linux` and re-check port 18812;
+  (b) surgical rollback — reinstall `wine 11.8-1` (+ wine-mono 11.1.0) from the Arch Linux Archive (NOT in local pkg cache) and add `wine` to IgnorePkg so it stays pinned to the known-good version, keeping all 640 other upgrades;
+  (c) run `mt5-terminal.service`'s ExecStart manually under Wine 11.13 with WINEDEBUG to capture the real exit reason.
+- Verify: `(exec 3<>/dev/tcp/127.0.0.1/18812)` should succeed (port OPEN) and `systemctl --user status forex-bot` should reach `active (running)`.
+- Date Found: 2026-07-21
 
 ### BUG-074 — `model.to(bfloat16)` corrupts the complex `freqs_cis` RoPE buffer (discards the imaginary part)
 <!-- [CHANGE: claude-code | 2026-06-28] -->
@@ -65,6 +119,18 @@ Last Updated: 2026-07-04 (BUG-079 FIXED — Conductor fan PID hunted/wound-up at
 - Date Found: 2026-06-11
 
 ## Fixed Bugs (new)
+
+### BUG-081 — Web live-wallpaper freezes (0 fps) whenever a window fully covers the desktop, regardless of the plugin's freeze checkbox
+<!-- [CHANGE: claude-code | 2026-07-23] -->
+- Status: FIXED (2026-07-23)
+- Severity: MEDIUM (web wallpapers appeared "broken/frozen"; user almost always has a maximized window up, so the wallpaper was frozen ~all the time)
+- Component: `org.luminos.livewallpaper` web mode (WebEngineView) + KWin/QtWebEngine occlusion throttling + `~/.config/plasma-workspace/env/luminos-wallpaper-nothrottle.sh`
+- Description: When any normal window is maximized/fullscreen and fully covers the desktop, the web wallpaper's renderer drops to **0 CPU jiffies** (measured) — the rAF loop stops. Unchecking the plugin's "Freeze when a window covers the desktop" box did NOT help, because the freeze happens BELOW the plugin: KWin stops driving frame callbacks to the occluded desktop surface and Chromium background-throttles the occluded WebEngine. So the plugin's `PauseWhenObscured=false` was overridden by the engine's own throttle.
+- Root Cause: Chromium/QtWebEngine renderer backgrounding + occluded-window throttling on the always-present desktop surface. Not the plugin's `shouldPlay`/lifecycleState logic (that correctly kept the page Active).
+- Fix Applied: session env `QTWEBENGINE_CHROMIUM_FLAGS="--disable-backgrounding-occluded-windows --disable-renderer-backgrounding"` via `~/.config/plasma-workspace/env/luminos-wallpaper-nothrottle.sh` (KDE sources it at session start). The plugin's checkbox still works: CHECKED → plugin explicitly freezes when covered (power save); UNCHECKED → these flags let it keep animating while covered.
+- Verify (measured 2026-07-23): renderer jiffies over 3–4s while `cover_count=1` — BEFORE flags = **0** (frozen); AFTER flags = **17–24** (~30fps, animating). Confirmed with both the particles and aurora samples.
+- Note: the *particles* sample is cursor-reactive only, so even un-frozen it looks static when covered (no cursor reaches the desktop). Autonomous samples (aurora) and video wallpapers show visible motion. Desktop switched to aurora to demonstrate.
+- Date Found / Fixed: 2026-07-23
 
 ### BUG-079 — Conductor fan PID hunts/winds-up at idle: fan surges 2100↔3500 rpm on a flat 49.8°C
 <!-- [CHANGE: claude-code | 2026-07-04] -->

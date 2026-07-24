@@ -1,8 +1,9 @@
 /*
     Luminos Live Wallpaper — image / GIF / video / YouTube / web (HTML-JS-WebGL).
-    One KDE wallpaper plugin. Pauses on battery and when covered. Web wallpapers can
-    be mouse-reactive and can read live system stats via window.luminos.
-    [CHANGE: claude-code | 2026-07-22]
+    One KDE wallpaper plugin. Pauses on battery and when nothing can see it (see
+    ObscurePolicy). Web wallpapers can be mouse-reactive and can read live system
+    stats via window.luminos.
+    [CHANGE: claude-code | 2026-07-22, occlusion policy 2026-07-24]
     SPDX-License-Identifier: GPL-3.0-or-later
 */
 import QtQuick
@@ -21,12 +22,24 @@ WallpaperItem {
     property bool acPluggedIn: true
     property bool acDataValid: false
     readonly property bool onBattery: acDataValid && !acPluggedIn
-    property bool desktopObscured: false
+    // Cover level of the desktop, debounced. 0 = desktop visible,
+    // 1 = hidden by a maximized window, 2 = hidden by a fullscreen window.
+    // [CHANGE: claude-code | 2026-07-24]
+    property int coverLevel: 0
+
+    // ObscurePolicy: 0 never freeze, 1 freeze only under a fullscreen window,
+    // 2 freeze whenever the desktop is hidden at all (default).
+    readonly property bool notVisible: {
+        var p = root.configuration.ObscurePolicy;
+        if (p <= 0) return false;
+        if (p === 1) return coverLevel >= 2;
+        return coverLevel >= 1;
+    }
 
     readonly property bool shouldPlay: {
         if (root.configuration.PauseOnBattery && onBattery)
             return false;
-        if (root.configuration.PauseWhenObscured && desktopObscured)
+        if (notVisible)
             return false;
         return true;
     }
@@ -53,19 +66,24 @@ WallpaperItem {
         isYouTube(root.configuration.Video) ? resolvedVideo : toUrl(root.configuration.Video)
     property string resolvedVideo: ""
 
+    // Windows-parity fit modes (see config combo):
+    // 0 Stretch (default, fills screen edge-to-edge), 1 Fit (keep proportions),
+    // 2 Fill (crop to fill), 3 Center, 4 Tile. [CHANGE: claude-code | 2026-07-23]
     function imageFill(m) {
         switch (m) {
-        case 0: return Image.Stretch;
         case 1: return Image.PreserveAspectFit;
+        case 2: return Image.PreserveAspectCrop;
         case 3: return Image.Pad;
-        default: return Image.PreserveAspectCrop;
+        case 4: return Image.Tile;
+        default: return Image.Stretch;
         }
     }
+    // VideoOutput has no Tile/Center; those fall back to Stretch (still fills the screen).
     function videoFill(m) {
         switch (m) {
-        case 0: return VideoOutput.Stretch;
         case 1: return VideoOutput.PreserveAspectFit;
-        default: return VideoOutput.PreserveAspectCrop;
+        case 2: return VideoOutput.PreserveAspectCrop;
+        default: return VideoOutput.Stretch;
         }
     }
 
@@ -111,25 +129,38 @@ WallpaperItem {
         filterByScreen: false
     }
 
+    // Fullscreen and maximized are graded separately: a fullscreen window hides
+    // the desktop AND the panels, a maximized one only hides the desktop. The old
+    // code OR-ed them into one bool, so the two cases could not be told apart.
+    // [CHANGE: claude-code | 2026-07-24]
     Instantiator {
         id: windows
         model: tasksModel
         delegate: QtObject {
             required property var model
-            readonly property bool obscuring: (model.IsMaximized || model.IsFullScreen) && !model.IsMinimized
-            onObscuringChanged: root.recomputeObscured()
-            Component.onCompleted: root.recomputeObscured()
-            Component.onDestruction: root.recomputeObscured()
+            readonly property int cover: model.IsMinimized ? 0
+                                       : model.IsFullScreen ? 2
+                                       : model.IsMaximized ? 1 : 0
+            onCoverChanged: coverDebounce.restart()
+            Component.onCompleted: coverDebounce.restart()
+            Component.onDestruction: coverDebounce.restart()
         }
     }
 
-    function recomputeObscured() {
-        var covered = false;
-        for (var i = 0; i < windows.count; i++) {
-            var o = windows.objectAt(i);
-            if (o && o.obscuring) { covered = true; break; }
+    // Window state churns during alt-tab / window moves. Settle first, so the
+    // video decoder is not stopped and restarted several times a second.
+    Timer {
+        id: coverDebounce
+        interval: 400
+        onTriggered: {
+            var level = 0;
+            for (var i = 0; i < windows.count; i++) {
+                var o = windows.objectAt(i);
+                if (o && o.cover > level)
+                    level = o.cover;
+            }
+            root.coverLevel = level;
         }
-        root.desktopObscured = covered;
     }
 
     // =====================================================================
@@ -145,6 +176,12 @@ WallpaperItem {
                 root.resolvedVideo = out.split("\n")[0];
         }
         function resolve(url) {
+            // Must be a *muxed* progressive mp4 (single self-contained file). YouTube's
+            // higher-res streams are video-only DASH whose googlevideo URLs are locked to
+            // the extractor's client User-Agent — QtMultimedia's ffmpeg can't send that
+            // header, so they return HTTP 403 (black). Muxed tops out at 360p (itag 18)
+            // but actually plays. True 1080p needs a download-and-cache path (see HANDOFF).
+            // [CHANGE: claude-code | 2026-07-22]
             connectSource("yt-dlp -f 'best[ext=mp4][height<=1080]/best[ext=mp4]/best' -g '" + url + "'");
         }
     }
@@ -272,6 +309,27 @@ WallpaperItem {
             }
             onActiveChanged: active ? player.play() : player.pause()
             Component.onCompleted: if (active) player.play()
+
+            // Suspend/resume recovery. Timers don't tick while suspended, so a
+            // wall-clock gap far larger than the interval means the machine just
+            // resumed — the MediaPlayer's GPU decode surface is dead and shows a
+            // frozen frame. Re-seat the source to rebuild the pipeline, then play.
+            // Nothing runs during sleep; this only fires on the first wake tick.
+            // [CHANGE: claude-code | 2026-07-24]
+            Timer {
+                interval: 1000; repeat: true; running: true
+                property double last: Date.now()
+                onTriggered: {
+                    var now = Date.now();
+                    if (now - last > 3000 && active) {
+                        player.stop();
+                        player.source = "";
+                        player.source = root.effectiveVideo;
+                        player.play();
+                    }
+                    last = now;
+                }
+            }
         }
     }
 

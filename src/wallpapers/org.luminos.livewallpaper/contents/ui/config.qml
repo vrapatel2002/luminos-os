@@ -27,13 +27,13 @@ ColumnLayout {
     property string cfg_WebUrl
     property string cfg_WebUrlDefault: ""
     property int cfg_FillMode
-    property int cfg_FillModeDefault: 2
+    property int cfg_FillModeDefault: 0
     property color cfg_BackgroundColor
     property color cfg_BackgroundColorDefault: "#000000"
     property bool cfg_PauseOnBattery
     property bool cfg_PauseOnBatteryDefault: true
-    property bool cfg_PauseWhenObscured
-    property bool cfg_PauseWhenObscuredDefault: true
+    property int cfg_ObscurePolicy
+    property int cfg_ObscurePolicyDefault: 2
     property bool cfg_MuteAudio
     property bool cfg_MuteAudioDefault: true
     property bool cfg_WebInteractive
@@ -170,20 +170,32 @@ ColumnLayout {
 
         Item { Kirigami.FormData.isSection: true }
 
-        // ---- Scaling (image / video) --------------------------------
+        // ---- Scaling (image / video) — Windows-parity fit modes -----
+        // [CHANGE: claude-code | 2026-07-23]
         QQC2.ComboBox {
-            Kirigami.FormData.label: i18n("Scaling:")
+            id: fitCombo
+            Kirigami.FormData.label: i18n("Fit:")
             visible: root.cfg_WallpaperMode !== "web"
             textRole: "text"
             valueRole: "val"
             model: [
-                { text: i18n("Scaled and cropped"), val: 2 },
-                { text: i18n("Scaled, keep proportions"), val: 1 },
-                { text: i18n("Stretched"), val: 0 },
-                { text: i18n("Centered"), val: 3 }
+                { text: i18n("Stretch — fill screen, no bars"), val: 0 },
+                { text: i18n("Fit — keep proportions (adds bars)"), val: 1 },
+                { text: i18n("Fill — crop to fill"), val: 2 },
+                { text: i18n("Center"), val: 3 },
+                { text: i18n("Tile"), val: 4 }
             ]
             Component.onCompleted: currentIndex = Math.max(0, indexOfValue(root.cfg_FillMode))
             onActivated: root.cfg_FillMode = currentValue
+        }
+        QQC2.Label {
+            visible: root.cfg_WallpaperMode !== "web"
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            text: root.cfg_WallpaperMode === "video"
+                ? i18n("Stretch fills the screen edge-to-edge. Center and Tile fall back to Stretch for video.")
+                : i18n("Stretch fills the screen edge-to-edge with no black bars (slight distortion if the image shape differs from the screen).")
         }
 
         RowLayout {
@@ -204,10 +216,21 @@ ColumnLayout {
             checked: root.cfg_PauseOnBattery
             onToggled: root.cfg_PauseOnBattery = checked
         }
-        QQC2.CheckBox {
-            text: i18n("Freeze when a window covers the desktop")
-            checked: root.cfg_PauseWhenObscured
-            onToggled: root.cfg_PauseWhenObscured = checked
+        // [CHANGE: claude-code | 2026-07-24] was a single checkbox that treated a
+        // maximized window the same as a fullscreen one — all or nothing.
+        QQC2.ComboBox {
+            Kirigami.FormData.label: i18n("Stop rendering when hidden:")
+            model: [ i18n("Never — keep rendering even when hidden"),
+                     i18n("Only under a fullscreen window"),
+                     i18n("Whenever the desktop is hidden (recommended)") ]
+            currentIndex: Math.max(0, Math.min(2, root.cfg_ObscurePolicy))
+            onActivated: root.cfg_ObscurePolicy = currentIndex
+        }
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            text: i18n("Frames drawn behind a window are decoded, uploaded and composited on the iGPU that also runs KWin and the browser. Nobody sees them.")
         }
         QQC2.CheckBox {
             visible: root.cfg_WallpaperMode === "video"

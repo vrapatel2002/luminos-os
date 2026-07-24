@@ -103,7 +103,8 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | .exe file association | ✅ Working | Silent auto-routing |
 | Notepad++ tested | ✅ Working | Zone 2 Wine |
 | Windows apps in launcher | ✅ Working | Auto-created |
-| VM integration | ✅ Working | Right-click + auto-fallback |
+| Wine uninstaller | ✅ Working | [CHANGE: claude-code | 2026-07-05] luminos-wine-uninstall + .desktop: hybrid — runs the app's own uninstall.exe if present, then sweeps leftovers by location (folder + AppData + Start-Menu .lnk + Wine Linux launcher + registry key), with confirm. Falls back to pure location-sweep for ghosts (e.g. WinRAR, whose uninstall.exe is gone). MT5 hard-excluded. Verified: Notepad++→runs own uninstaller; Adobe→location-only; MT5 filtered. |
+| Windows VM (qemu/libvirt) | ❌ Removed | [CHANGE: claude-code | 2026-07-05] User request. luminos-windows domain undefined, VMShare/luminos-windows.qcow2 deleted (~9.7G freed), libvirtd disabled, full VM stack uninstalled (148 pkgs: qemu-full/libvirt/virt-manager/virt-viewer). Dead VM launchers + helpers swept (2nd pass): windows-vm/luminos-windows-vm/adobe-reader-vm .desktop, /usr/share/applications/luminos-vm.desktop, /usr/local/bin/luminos-vm-app + luminos-vm-launch. ("Adobe Reader (Windows VM)" menu ghost = adobe-reader-vm.desktop → luminos-vm-app; removed.) MT5 (Wine) untouched. Leftover: ~/VMShare/AcroRdrDCx…exe (739M installer). |
 | Lutris | ✅ Installed | v0.5.22. lib32 GPU libs installed. Games install to root partition (629GB total). |
 | GE-Proton10-34 | ✅ Installed | [CHANGE: claude-code | 2026-05-31] ~/.local/share/Steam/compatibilitytools.d/. DXVK+VKD3D-Proton bundled. |
 | luminos-proton-run | ✅ Installed | [CHANGE: claude-code | 2026-05-31] /usr/local/bin/. GE-Proton launcher wrapper for Lutris (no Steam). |
@@ -133,6 +134,8 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | Display smoothness | ⚪ VRR reverted | BUG-051 fix was VRR=Automatic+KWin LatencyPolicy=Low; user reverted VRR to Never (intentional) |
 | Memory leak detection | ✅ Active | Alerts for background growth (BUG-049) |
 | Firefox WhiteSur | ❌ Dropped | macOS theming removed 2026-06-11 (BUG-068); Firefox not installed |
+| Live Wallpaper — visibility cost | ✅ Fixed + measured | [CHANGE: claude-code \| 2026-07-24] BUG-083/DECISION 32. `PauseWhenObscured` bool → `ObscurePolicy` int (0 never / 1 fullscreen only / 2 desktop hidden — **default 2**), per-window cover graded + 400 ms debounce. Source video right-sized 3840×2160 → 2880×1620 (panel is 2880×1800), audio stripped. plasmashell 240 → **1 jiffies/10s** while hidden, 810 → ~600 MB RSS; 24% → 12% of a core while visible. Lock-screen copy deliberately `ObscurePolicy=0`. Gap: locked/DPMS-off session is not detected as covered. |
+| Login/lock cohesion | ✅ Unified look | [CHANGE: claude-code \| 2026-07-18] Two auth screens by design: SDDM (boot, Sugar-Candy theme) launches session; KScreenLocker (breeze-dark, Autolock 5min + LockOnResume) guards live session — cannot merge (different layers). Unified visually: lock screen wallpaper set to Sugar-Candy's `Mountain.jpg` via `~/.config/kscreenlockerrc [Greeter][Wallpaper][org.kde.image][General] Image=`. Both now show same mountain bg. Backup: `~/.config/kscreenlockerrc.bak-20260718`. Latent: `/etc/sddm.conf.d/hidpi.conf` says `Current=breeze` but `luminos.conf` says `Sugar-Candy` (Sugar-Candy wins alphabetically; harmless, uncleaned). |
 
 ## Open Tasks (Priority Order)
 1. Eye model download + wire vision route in hive-daemon.py
