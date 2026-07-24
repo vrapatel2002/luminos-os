@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-07-24 — Response 2
+Last updated: 2026-07-24 — Response 3
 
 ## Goal (the durable end objective)
 Three threads:
@@ -13,9 +13,10 @@ Three threads:
    NOT STARTED — there is a hard hardware constraint to resolve with the user first (below).
 
 ## Aim right now
-Thread 1 done. Thread 2 awaiting a yes/no on the `MemoryMax` drop-in. Thread 3 needs the user to
-absorb one constraint before any code: **dGPU VRAM cannot be made into general 24/7 system memory on
-this box**, and trying would destroy the true-0W idle work.
+Thread 1 done. Thread 2 awaiting a yes/no on the `MemoryMax` drop-in. Thread 3: the hardware
+constraint has been explained to the user (Response 3) — **dGPU VRAM cannot be made into general 24/7
+system memory on this box**, and trying would destroy the true-0W idle work. Awaiting their direction;
+the real lead is the iGPU carve-out, not the dGPU.
 
 ## Why / motivation (context a newcomer would be missing)
 The user reported "Chrome and the OS are actually not responding" and suspected the live wallpaper.
@@ -66,17 +67,47 @@ Diagnosed and cleared live, fully written up in `docs/BUGS.md` BUG-084. Summary:
 ## State — what is IN PROGRESS
 Nothing half-built. Thread 3 has **no code written** — deliberately.
 
-## Thread 3 — the constraint that has to be settled before any code
-The user asked for "24/7 unified memory across the CPU and dGPU". The honest hardware position,
-which must be put to them before building anything:
-- **dGPU VRAM cannot become general system memory on this box.** A consumer RTX 4050 over PCIe has no
-  mechanism to expose VRAM as a NUMA node or a block device to the kernel (that exists on
-  Grace-Hopper / CXL, not here). The only routes are userspace hacks (FUSE `vramfs`, NBD) that cannot
-  safely host swap.
-- **It would also destroy the true-0W work.** Holding VRAM 24/7 means the dGPU can never RTD3-suspend
-  → ~8 W constant idle draw on a laptop, undoing BUG-047, DECISION 25 and the `DPM=0x02` tuning. The
-  user's own reason for wanting it ("the dGPU will be mostly not used") is exactly why it is
-  currently free — it is *asleep*. This is a Rule 11 conflict and must be documented as one.
+## Thread 3 — the constraint, and the answer to "why do we need the dGPU to use VRAM?"
+The user asked for "24/7 unified memory across the CPU and dGPU", then asked directly:
+*"cant we access the vram without using the dgpu, why in the first place do we need dgpu to use?"*
+**This was answered in Response 3. Do not re-litigate it — record the reasoning here so a future
+session does not redo the investigation.**
+
+The premise is **half right**: the CPU *can already address VRAM*. Measured from sysfs this session
+(`/sys/bus/pci/devices/0000:01:00.0`, deliberately without touching `nvidia-smi`):
+```
+BAR0 = 16 MB   BAR1 = 8192 MB @ 0x7c00000000   BAR3 = 32 MB   BAR5 = 128 B
+resource0_resize / resource1_resize / resource3_resize present  → Resizable BAR ENABLED
+```
+So the full 6 GB VRAM aperture is mapped into CPU physical address space, no 256 MB window bouncing.
+The address works. Four separate reasons it still does not give us system memory:
+
+1. **The GPU die *is* the memory controller.** The GDDR6 chips are wired to exactly one thing — the
+   GPU's memory controller. There is no board trace from the CPU to those chips. Every access is
+   CPU → root complex → PCIe link → GPU endpoint → GPU fabric → GPU memory controller → GDDR6. The
+   BAR is a doorway, not the room.
+2. **GDDR6 is dynamic RAM — it forgets.** Capacitors leak and need refresh thousands of times per
+   second, and only the GPU's memory controller issues those refreshes. Even *parking* idle data
+   there needs the GPU powered. It is not passive storage.
+3. **D3cold cuts the power rails.** `d3cold_allowed=1`, and measured
+   `runtime_suspended_time = 34,627,852 ms` vs `runtime_active_time = 4,365,730 ms` → **asleep ~89%
+   of uptime**. VRAM contents are saved/restored *through system RAM* by the driver on each
+   transition. Using VRAM 24/7 drives suspended_time to 0 → ~8 W constant draw, undoing BUG-047,
+   DECISION 25 and the `DPM=0x02` tuning. **The dGPU's memory is free precisely because the dGPU is
+   asleep** — the user's own reason for wanting it is the reason it is currently free. Rule 11 conflict.
+4. **Even awake, the performance shape is wrong, and there is no kernel path.** BAR1 is MMIO —
+   uncached / write-combining. Writes stream fine; CPU *reads* are microsecond PCIe round trips vs
+   ~80 ns for DRAM, with no caching and no prefetch. Swap-in is a read — the exact worst direction.
+   zram already achieves ~4:1 (7.9 GB of data in 1.9 GB) at DRAM speed, so VRAM-as-swap is a
+   downgrade on a workload we already handle. And Linux only hot-adds device memory as a NUMA node
+   over *coherent* interconnects (CXL, NVLink-C2C on Grace-Hopper); plain PCIe device memory is
+   `DEVICE_PRIVATE` (not CPU-accessible) or `DEVICE_COHERENT` (needs coherent interconnect we lack).
+   Userspace routes (FUSE `vramfs`, NBD) cannot safely host swap.
+
+**Useful side finding: ReBAR being enabled with an 8 GB BAR1 is a real win for DECISION 23** —
+host→VRAM weight streaming can map the full 6 GB in one shot, no window juggling. Worth exploiting
+when HIVE weight streaming is built.
+
 - **The genuinely unified half already exists and is measurable.** Live readings this session:
   `mem_info_vram_total = 512 MB` with **501 MB used (98% full)**, `mem_info_gtt_total = 7633 MB` with
   1218 MB used. The 512 MB is the BIOS UMA carve-out for the 780M; everything beyond it spills to
@@ -92,8 +123,9 @@ which must be put to them before building anything:
    the launchers. Until this lands, every app crash can repeat the stall.
 2. Separately: **`kscreen-doctor` SIGABRTs reliably on this box** (three times in 24 h) and each crash
    arms another launcher. Fix or avoid it.
-3. **Thread 3** — put the dGPU-VRAM constraint above to the user, get a direction, then measure the
-   iGPU VRAM/GTT split under load before writing any allocator code.
+3. **Thread 3** — the dGPU-VRAM constraint has now been explained to the user (Response 3); awaiting
+   their direction. Next concrete move: measure the iGPU VRAM/GTT split under load (idle / Chrome /
+   wallpaper / HIVE) before writing any allocator code.
    Cache-theory mapping to reuse when it does get built: L1 dGPU VRAM 4.6 GB / L2 system RAM 16 GB
    (already genuinely unified with the iGPU — zero-copy there, only the dGPU needs a PCIe transfer) /
    L3 zram / L4 NVMe. Weights are **read-only → clean lines → eviction is free, no write-back**; KV
