@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-07-25 — Response 2
+Last updated: 2026-07-25 — Response 3
 
 ## READ THIS FIRST — unresolved credential leak (BUG-086)
 A **live OpenRouter API key** (`sk-or-98117e…`) sits in `.claude/settings1.json`, which is **tracked
@@ -9,7 +9,15 @@ by git and already pushed** to `origin/main` on `github.com/vrapatel2002/luminos
 a credential and rewriting published history are the user's calls. **Rotate the key first**; history
 surgery is pointless while it is still valid. The file is a dead config anyway (it duplicates
 `settings.json` and re-adds the OpenRouter routing that AGENTS.md §7 says was removed 2026-05-27 for
-Signal 5 TRAP crashes). `.claude/` is not in `.gitignore`, so a `git add -A` swept it in.
+Signal 5 TRAP crashes).
+
+**`.gitignore` did not fail — it was overridden.** Line 11 has covered `.claude/` since commit
+`b3919feb` (2026-03-25); the file was still added in `f1415d5e` (2026-04-24), a month later, i.e.
+**force-added** (`git add -f`) with the key already in it. Consequence: **re-adding a `.gitignore`
+rule fixes nothing** — `.gitignore` only affects *untracked* paths, and git keeps tracking anything
+already tracked. It needs an explicit `git rm --cached .claude/settings1.json`. And that still only
+stops future commits; the blob is in every tree from `f1415d5e` onward and is in `origin/main`, so
+**rotation is the only thing that actually revokes it.**
 
 ## Goal (the durable end objective)
 Four threads:
@@ -70,6 +78,14 @@ meant to catch it.
 `mempalace_search("dGPU power gating RTD3")` → 15 hits; code-review-graph 24 tools,
 `list_graph_stats_tool` → 259 files / 3161 nodes / 21658 edges,
 `query_graph_tool(callers_of, setEPPAfterAsusctl)` → 4 callers. Full `luminos-verify` → PASS.
+
+**Committed locally as `a9df5ec9`** (7 files, +587/−14: `.claude/settings.json`, `AGENTS.md`,
+`HANDOFF.md`, `LUMINOS_DECISIONS.md`, `LUMINOS_STATUS.md`, `docs/BUGS.md`, `scripts/luminos-verify`).
+Staged **by name, not `git add -A`** — the tree still holds unrelated parked work (`share/`, the
+wine and ubuntu-look scripts, `systemd/luminos-theme-sync.*`, the `cmd/luminos-power` conductor
+edits, three dirty `research/turboquant` submodules) that must NOT ride along. **Not pushed** —
+`git push` remains on hold by explicit user decision, and pushing now would also re-publish the
+BUG-086 key situation without it being addressed.
 
 ## Why / motivation (context a newcomer would be missing)
 The user reported "Chrome and the OS are actually not responding" and suspected the live wallpaper.
@@ -369,10 +385,11 @@ easier future rework; SPD located by searching `02 00 04 80 00 00 0`; checksum s
   load** (idle vs Chrome vs wallpaper vs HIVE) before proposing any allocator. Measure, then design.
 
 ## Next steps (ordered)
-0. **BUG-086 — ROTATE THE OPENROUTER KEY.** See the banner at the top of this file. Then delete
-   `.claude/settings1.json` and add `.claude/settings*.json` to `.gitignore`. Purging it from
-   history needs `git filter-repo` + a **force-push to a shared remote** — destructive, user's
-   decision only, and worthless before the key is revoked.
+0. **BUG-086 — ROTATE THE OPENROUTER KEY.** See the banner at the top of this file. Order matters:
+   (a) revoke/rotate at openrouter.ai — this is the only step that actually kills the credential;
+   (b) `git rm --cached .claude/settings1.json` — a plain `.gitignore` edit will NOT untrack it;
+   (c) commit. Purging it from history needs `git filter-repo` + a **force-push to a shared
+   remote** — destructive, user's decision only, and worthless before the key is revoked.
 1. **BUG-084 durable fix** — user go-ahead for a systemd drop-in on
    `drkonqi-coredump-launcher@.service` with `MemoryMax=`/`MemoryHigh=`, so a runaway backtrace is
    OOM-killed in its own cgroup. Optionally also blank `DEBUGINFOD_URLS` for drkonqi and serialise
