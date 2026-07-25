@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-07-24 — Response 3
+Last updated: 2026-07-24 — Response 7
 
 ## Goal (the durable end objective)
 Three threads:
@@ -151,17 +151,75 @@ Micron packages, 16 GiB, single rank, 128-bit, 6400 MT/s, same AMD platform gene
 4. Result: 32 GiB, still 6400 MT/s, stable. Windows Update must be blocked from flashing BIOS or the
    edit is reverted (he disabled the "System Firmware" device in Device Manager).
 
-**Unresolved blockers specific to GA403UU — do NOT assume these are fine:**
-- **Does the AMD PSP verify the APCB region on OUR BIOS?** It evidently did not on the Ally. If
-  GA403UU signs/verifies that region, an edited image is an unrecoverable brick. This is the
-  project-killer and it cannot be established by trial.
-- **No `/dev/mtd`,** so the SPI flash is not kernel-accessible — the EEPROM must come off the board,
-  a second rework operation on top of the four RAM packages.
-- **Sourcing:** replacement must match footprint, pinout and speed grade. Ours are rated 7500.
-- Risk profile is a dead mainboard, not a dead module. Warranty void.
+### BIOS IMAGE ANALYSED (2026-07-24, Response 7) — no signing, and 32 GiB SPD profiles already shipped
+Downloaded the exact installed firmware and parsed it byte-for-byte. This answers both open gates.
 
-**Bottom line for planning:** keep designing against 15.6 GiB. But the correct framing when this comes
-up is "hard, risky, and gated on an unanswered PSP-verification question" — **not** "impossible."
+**Provenance.** `https://dlcdnets.asus.com/pub/ASUS/GamingNB/Image/BIOS/117008/GA403UUAS306.zip`
+→ `GA403UUAS.306`, 33,556,480 bytes. That is 32 MiB **plus a 2048-byte ASUS/AMI update capsule**
+(GUID `4A3CA68B-7723-48FB-803D-578CC1FEC44D`, header size `0x0800`, version `0x00010000`, then RSA
+signature bytes). Stripping those 2048 bytes yields the raw 32 MiB flash image. **That capsule
+signature is checked by EZ Flash / WinFlash only — it does not live on the flash chip, so an external
+programmer writing the raw image bypasses it entirely.** No firmware tooling was installed (flashrom,
+UEFITool, psptool, amdfwtool are all absent); parsing was done with throwaway Python.
+
+**Layout found.** AMD Embedded Firmware Structure magic `0x55AA55AA` @`0x20000`;
+`psp_directory = 0x121000`, second pointer `0x122000`. Valid directories: `$PSP` @`0x121000` (2),
+`$PSP` @`0x122000` (2), `$PL2` @`0x125000` (45), `$BL2` @`0x524000` (36), and a full mirrored copy at
++`0x48F000` (`$PL2` @`0x5b4000`, `$BL2` @`0x9b3000`). Eight `APCB` blocks: `0x12f928`, `0x525000`,
+`0x528000`, `0x531100` and their four mirrors.
+
+**GATE 1 — Platform Secure Boot: NOT enabled in this image.** Both `$PL2` directories contain only
+type `0x00` AMD public key (`0x440` @`0x800`), type `0x0b` soft fuse chain, type `0x50` key database
+(`0x2680` @`0x195900`), type `0x51` token unlock (`0x2480` @`0x198000`). **Type `0x05` (OEM BIOS
+public key), type `0x07` (BIOS RTM signature) and type `0x0A` (OEM public key) are all ABSENT.** With
+no OEM key and no RTM signature there is nothing for the PSP to verify the BIOS region against — the
+APCB is protected by a plain checksum, not a cryptographic signature. Caveat that cannot be closed
+from the image alone: PSB enforcement ultimately depends on **CPU fuse state**, and fuses are not
+readable from firmware bytes. Evidence is strongly favourable, not a proof.
+
+**GATE 2 — the SPD edit is UNNECESSARY here. ASUS already ships 32 GiB profiles.** The big APCB
+(`0x528000`, size `0x16f8`) holds a `MEMG` group with **seven SPD records, stride `0x150`**, SPD data
+starting at `0x5280f0`, part-number string at record offset `+0xe1`:
+
+| SPD @ | part | byte 6 | dies/pkg | byte 12 | ranks | density/die | total |
+|---|---|---|---|---|---|---|---|
+| `0x5280f0` | `MT62F2G32D4DS-026 WT` | `0xB5` | 4 | `0x0A` | 2 | 16 Gb | **32 GiB** |
+| `0x528240` | `MT62F1G32D2DS-026 WT` | `0x95` | 2 | `0x02` | 1 | 16 Gb | 16 GiB ← **fitted** |
+| `0x528390` | `K3KL9L90CM-MGCT` (Samsung) | `0xB5` | 4 | `0x0A` | 2 | 16 Gb | **32 GiB** |
+| `0x5284e0` | `K3KL8L80CM-MGCT` (Samsung) | `0x95` | 2 | `0x02` | 1 | 16 Gb | 16 GiB |
+| `0x528630` | `H58G66BK7BX067` (SK Hynix) | `0xB5` | 4 | `0x0A` | 2 | 16 Gb | **32 GiB** |
+| `0x528780` | `H58G56BK7BX068` (SK Hynix) | `0x95` | 2 | `0x02` | 1 | 16 Gb | 16 GiB |
+| `0x5288d0` | `MT62F512M32D2DR-031` | `0x95` | 2 | `0x02` | 1 | 8 Gb | 8 GiB |
+
+The exact byte values dosdude1 had to hand-edit (`byte 6 = 0xB5`, `byte 12 = 0x0A`) are **already
+present, unedited, in three shipping profiles** — one per DRAM vendor. Vendor JEDEC IDs confirm at
+record offset `+0xd6`: `0x2C` Micron, `0xCE` Samsung, `0xAD` SK Hynix. Three vendors × two capacities
+in one image is the signature of a BIOS written to cover multiple factory RAM SKUs.
+
+**Consequence:** the hex-edit / checksum-fix / EEPROM-desolder half of the Ally procedure appears to
+be **not required on GA403UU**. Fit `MT62F2G32D4DS-026 WT` (or the Samsung/Hynix twin) and the
+matching profile is already in firmware. **Still unproven:** *how* AGESA selects among the seven.
+Most likely it reads LPDDR5 mode registers MR5/MR8 (vendor + density) from the chips themselves —
+that is the only mechanism that explains three vendors in one image — but this was not confirmed;
+confirming it means disassembling AGESA. If instead selection is by board strap, the edit is back on
+the table, and in that case the SPI flash must come off the board (**no `/dev/mtd` — the flash is not
+kernel-accessible**).
+
+**Remaining real risks:** four BGA reworks with a 250 °C preheater and 330 °C hot air; sourcing parts
+matching footprint, pinout and speed grade (ours are rated 7500 MT/s); a dead mainboard rather than a
+dead module if it goes wrong; warranty void.
+
+**Bottom line for planning:** keep designing against 15.6 GiB. But the honest framing is now "a
+soldering job, gated on one unconfirmed profile-selection mechanism" — **not** "impossible," and no
+longer "gated on PSP verification."
+
+**Confirmed from the full video transcript — SPD was the ONLY thing changed.** No power delivery, no
+VRM, no resistor straps, no other hardware modification anywhere in the procedure. Two bytes and a
+checksum. Tooling he used: TL866 / XGecu (Xgpro) programmer; **the EEPROM runs at 1.8 V**, so a
+3.3 V-only programmer needs a level shifter or it can damage the chip; `MX25U25645G` chosen as a
+near-match definition with "check ID" unchecked; SOIC adapter socket; leaded solder on reinstall for
+easier future rework; SPD located by searching `02 00 04 80 00 00 0`; checksum script run under
+`python` (v2), not `python3`.
 - **Total memory bandwidth = 128 bits × 6400 MT/s ÷ 8 = 102.4 GB/s, SHARED with the 780M iGPU.**
   The iGPU has no private VRAM — the 512 MB "vram" is a BIOS carve-out of this same LPDDR5. So
   zero-copy between CPU and iGPU is genuinely free, but **bandwidth is the contended resource, not
