@@ -108,22 +108,60 @@ The address works. Four separate reasons it still does not give us system memory
 host→VRAM weight streaming can map the full 6 GB in one shot, no window juggling. Worth exploiting
 when HIVE weight streaming is built.
 
-### System memory ceiling — measured, and it is HARD (2026-07-24)
+### System memory ceiling — measured (2026-07-24)
 `dmidecode -t memory` on this board (`ROG Zephyrus G14 GA403UU`):
 ```
 4 × Micron MT62F1G32D2DS-026 WT   LPDDR5, 4 GiB each  (16 GiB total, 15.6 GiB visible)
 Channels A / B / C / D            Data Width 32 bits each  → 128-bit total bus
 Form Factor: Other                → SOLDERED BGA, there is no SO-DIMM slot
 Rated 7500 MT/s   Configured 6400 MT/s   0.5 V   Rank 1   ECC: None
+BIOS: AMI GA403UU.306, 2024-06-05.  Secure Boot disabled, no kernel lockdown, no /dev/mtd.
 ```
-- **RAM is not upgradable on this machine, at all.** Reasons stack: soldered BGA (needs rework +
-  reball); density is fixed by the part (`1G32` = 1G × 32 bits = 32 Gbit = 4 GiB/package, so 32 GB
-  would need physically different 8 GiB dies); the memory controller is trained at boot against a
-  BIOS profile that only exists for the shipped config; and each channel is a single rank with no
-  spare chip-select. LPDDR5 has no SO-DIMM form factor in the standard — the socketable variant is
-  CAMM2, which this board does not have.
-- **Therefore 15.6 GiB is a permanent budget.** Every unified-memory / caching design must assume it.
-  This is the strongest argument for the luminos-ram + iGPU carve-out work: capacity cannot be bought.
+- **15.6 GiB is the ceiling for all current planning.** Treat it as fixed. But see the CORRECTION
+  below — "physically impossible to upgrade" is **wrong**, and an earlier version of this file said so.
+- **Total memory bandwidth = 128 bits × 6400 MT/s ÷ 8 = 102.4 GB/s, SHARED with the 780M iGPU.**
+  The iGPU has no private VRAM — the 512 MB "vram" is a BIOS carve-out of this same LPDDR5. So
+  zero-copy between CPU and iGPU is genuinely free, but **bandwidth is the contended resource, not
+  capacity**. BUG-083's 4K wallpaper was spending this budget, not a separate GPU one. **A RAM
+  upgrade would NOT relieve this** — doubling capacity leaves bandwidth at ~102.4 GB/s.
+
+### CORRECTION (2026-07-24, Response 6) — soldered LPDDR5 upgrade IS possible
+An earlier version of this section claimed RAM here is "not upgradable on this machine, at all."
+**That was overstated, and one of its four supporting reasons was factually false.** Evidence: the
+user surfaced dosdude1, "ASUS ROG Ally 32GB RAM Upgrade" (2025-06-28, youtu.be/KbYfhzZzNJg), a
+completed and verified 16 → 32 GiB soldered-LPDDR5 upgrade. Full transcript pulled and read.
+
+**The claim that was outright wrong:** *"each channel is a single rank with no spare chip-select."*
+LPDDR5 defines **two** ranks per channel and the CS1 line is already routed on these boards — it is
+simply unused because the fitted packages are single-rank. That idle second rank is exactly what the
+mod turns on. Do not repeat this claim.
+
+**What the mod actually is** (directly applicable — the Ally has the *same* topology as us: 4 × 32 Gbit
+Micron packages, 16 GiB, single rank, 128-bit, 6400 MT/s, same AMD platform generation):
+1. Board preheater at 250 °C, hot air at 330 °C; desolder all four packages, fit 4-die dual-rank
+   replacements (Samsung `K3LKCKC0BM-MGCP`, ~$100 AliExpress — same parts used for Steam Deck upgrades).
+2. It boots but still reports 16 GiB. The memory controller does **not** interrogate the chips; it
+   trusts SPD data baked into the BIOS image.
+3. Desolder the SPI EEPROM, dump it, locate the `APCB` blocks, and edit **two SPD bytes**:
+   - **byte 6** (SDRAM package type): 2 dies/package → 4 dies/package — `0x95` → `0xB5`
+   - **byte 12** (organization): 1 package rank → 2 package ranks — `0x02` → `0x0A`
+   Then copy the edited SPD record over **every** SPD entry in the image (board strap config selects
+   among them and will otherwise pick a stock Micron profile), fix the APCB checksum with
+   `github.com/95JakeHex/APCB_ROG_Ally` → `Man_edit_apcb_checksum_fix.py`, reflash, re-solder.
+4. Result: 32 GiB, still 6400 MT/s, stable. Windows Update must be blocked from flashing BIOS or the
+   edit is reverted (he disabled the "System Firmware" device in Device Manager).
+
+**Unresolved blockers specific to GA403UU — do NOT assume these are fine:**
+- **Does the AMD PSP verify the APCB region on OUR BIOS?** It evidently did not on the Ally. If
+  GA403UU signs/verifies that region, an edited image is an unrecoverable brick. This is the
+  project-killer and it cannot be established by trial.
+- **No `/dev/mtd`,** so the SPI flash is not kernel-accessible — the EEPROM must come off the board,
+  a second rework operation on top of the four RAM packages.
+- **Sourcing:** replacement must match footprint, pinout and speed grade. Ours are rated 7500.
+- Risk profile is a dead mainboard, not a dead module. Warranty void.
+
+**Bottom line for planning:** keep designing against 15.6 GiB. But the correct framing when this comes
+up is "hard, risky, and gated on an unanswered PSP-verification question" — **not** "impossible."
 - **Total memory bandwidth = 128 bits × 6400 MT/s ÷ 8 = 102.4 GB/s, SHARED with the 780M iGPU.**
   The iGPU has no private VRAM — the 512 MB "vram" is a BIOS carve-out of this same LPDDR5. So
   zero-copy between CPU and iGPU is genuinely free, but **bandwidth is the contended resource, not
