@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-07-24 — Response 7
+Last updated: 2026-07-24 — Response 8
 
 ## Goal (the durable end objective)
 Three threads:
@@ -196,22 +196,100 @@ present, unedited, in three shipping profiles** — one per DRAM vendor. Vendor 
 record offset `+0xd6`: `0x2C` Micron, `0xCE` Samsung, `0xAD` SK Hynix. Three vendors × two capacities
 in one image is the signature of a BIOS written to cover multiple factory RAM SKUs.
 
-**Consequence:** the hex-edit / checksum-fix / EEPROM-desolder half of the Ally procedure appears to
-be **not required on GA403UU**. Fit `MT62F2G32D4DS-026 WT` (or the Samsung/Hynix twin) and the
-matching profile is already in firmware. **Still unproven:** *how* AGESA selects among the seven.
-Most likely it reads LPDDR5 mode registers MR5/MR8 (vendor + density) from the chips themselves —
-that is the only mechanism that explains three vendors in one image — but this was not confirmed;
-confirming it means disassembling AGESA. If instead selection is by board strap, the edit is back on
-the table, and in that case the SPI flash must come off the board (**no `/dev/mtd` — the flash is not
-kernel-accessible**).
+### SELECTION MECHANISM RESOLVED (2026-07-24, Response 8) — BoardMask, not chip interrogation
+Parsed the APCB group/type headers properly. Every APCB type header carries a 16-bit **BoardMask**
+at offset +14, and the seven SPD entries each have a *different, single-bit* mask — a clean 1:1
+mapping onto six factory board variants:
+
+| BoardMask | part | capacity |
+|---|---|---|
+| `0x0002` (bit 1) | `MT62F2G32D4DS-026 WT` Micron | **32 GiB** |
+| `0x0004` (bit 2) | `MT62F1G32D2DS-026 WT` Micron | 16 GiB ← **this board** |
+| `0x0008` (bit 3) | `K3KL9L90CM-MGCT` Samsung | **32 GiB** |
+| `0x0010` (bit 4) | `K3KL8L80CM-MGCT` Samsung | 16 GiB |
+| `0x0020` (bit 5) | `H58G66BK7BX067` SK Hynix | **32 GiB** |
+| `0x0040` (bit 6) | `H58G56BK7BX068` SK Hynix | 16 GiB |
+| `0xffff` (any) | `MT62F512M32D2DR-031` Micron | 8 GiB |
+
+**Every other type in the image is `BoardMask=0xffff`** — PSPG, GNBG, FCHG, TOKN and the remaining
+MEMG types (0x31/0x35/0x36/0x38/0x40/0x50/0x52/0x53/0x5f/0x99/0x9a/0x9b), plus both small
+token-only APCBs at `0x525000` and `0x531100`. So board ID gates **nothing except which SPD profile
+is used.** Changing it has no other side effect anywhere in this firmware.
+
+Board ID comes from PSPG type `0x0060` (BoardIdGettingMethod, `BoardMask=0xffff`, data at
+`0x5280a0`):
+```
+03 00 03 00 00 0b 00 00 0c 01 00 ff ff ff 07 00
+01 07 01 02 07 02 03 07 03 04 07 04 05 07 05 06
+```
+The tail is unambiguous — six 3-byte tuples `(mask=0x07, value=N, boardId=N+1)` for N = 0..5, i.e. a
+**3-bit value mapped to board IDs 1-6**, and `BoardMask = 1 << boardId`. **The transport is NOT
+confirmed.** Method id is `0x0003`; `0c 01 00 ff ff ff` looks like a six-slot pin list with three
+used (pins 12, 1, 0). Tested that hypothesis against live FCH GPIO state via
+`/sys/kernel/debug/gpio` (`#0` reg `0x081578e3` → high, `#1` reg `0x00150000` → high, `#12` reg
+`0x00040000` → low; bit 16 is PIN_STS). Best-fit decode gives value `0b011` = 3 → board ID 4 →
+**Samsung 16 GiB** — which contradicts the Micron parts actually fitted, so **the pin-list reading is
+wrong.** Also `#0` has an interrupt with debounce configured, i.e. it is a live in-use pin, not a
+strap. Do not repeat the GPIO claim. Transport remains open; it does not block the plan.
+
+### The patch this enables — smaller than the Ally edit
+Because selection is by BoardMask, the SPD *contents* never need touching. Promoting the Micron
+32 GiB profile to match all boards is enough, and it is first in the list so it wins on order:
+
+```
+0x5280de:  02 00  ->  ff ff     BoardMask, Micron MT62F2G32D4DS entry
+0x528010:  94     ->  98        APCB checksum byte
+0x9b70de:  02 00  ->  ff ff     same, mirrored firmware copy at +0x48F000
+0x9b7010:  94     ->  98        same
+```
+**APCB checksum rule verified empirically:** the sum of every byte in the APCB, checksum byte
+included, is `0x00`. Confirmed on all four blocks (`0x525000` ck `0x72`, `0x528000` ck `0x94`,
+`0x531100` ck `0x72`, `0x9b7000` ck `0x94`) — all currently sum to zero. Recomputed values above are
+verified to restore that. No external checksum tool needed; `github.com/95JakeHex/APCB_ROG_Ally` is
+not required.
+
+Two bytes plus one checksum byte, twice. Offsets are into the **raw 32 MiB flash image**, i.e. the
+ASUS file minus its leading 2048-byte capsule. Still needs the SPI flash off the board (no
+`/dev/mtd`), and still needs the four DRAM packages replaced with `MT62F2G32D4DS-026 WT`.
 
 **Remaining real risks:** four BGA reworks with a 250 °C preheater and 330 °C hot air; sourcing parts
 matching footprint, pinout and speed grade (ours are rated 7500 MT/s); a dead mainboard rather than a
 dead module if it goes wrong; warranty void.
 
-**Bottom line for planning:** keep designing against 15.6 GiB. But the honest framing is now "a
-soldering job, gated on one unconfirmed profile-selection mechanism" — **not** "impossible," and no
-longer "gated on PSP verification."
+**Bottom line for planning:** keep designing against 15.6 GiB. Honest framing is now "four BGA
+reworks plus a three-byte firmware patch at known offsets" — not "impossible," and not gated on PSP
+verification.
+
+### dGPU VRAM upgrade — assessed 2026-07-24, Response 8
+`10de:28e1` rev `a1`, subsystem `1043:3398` = **AD107M, RTX 4050 Laptop**, read from sysfs without
+waking the device (`power_state = D3cold` throughout). 6 GB on a **96-bit bus = three 32-bit
+channels = three 2 GB (16 Gbit) GDDR6 packages**, soldered to the same mainboard as everything else.
+
+Three routes, all blocked for *specific* reasons — record these so this is not re-litigated:
+1. **Denser packages.** Needs 32 Gbit GDDR6 to double. Mainstream GDDR6 tops out at 16 Gbit; 24 Gbit
+   parts exist (Samsung) and would give 3 × 3 GB = 9 GB, a non-power-of-two config on 96 bits.
+2. **More packages (wider bus).** AD107 also ships as RTX 4060 Laptop / RTX 2000 Ada Laptop at
+   8 GB / 128-bit — but that is a fourth *channel*, needing a fourth set of routed traces that a
+   96-bit board does not have, and a different fused device ID.
+3. **Clamshell** (second package on the reverse side sharing the channel) needs back-side pads
+   designed into the PCB. Not present on a 3-package 96-bit layout.
+
+**The real gate is the VBIOS.** Since Turing, NVIDIA VBIOS is cryptographically signed and verified
+by on-die secure boot — a hand-edited image is rejected. Every *working* community mod
+(2080 Ti 11→22 GB, 3070 8→16 GB, 3080 10→20 GB) works because the **same die already shipped in a
+higher-VRAM SKU**, so a *stock signed* VBIOS describing that config exists: TU102 → Quadro RTX 6000
+24 GB, GA104 → RTX A4000 16 GB, GA102 → RTX A5000. This is structurally the identical trick to the
+BoardMask finding above — you don't forge the config, you select one the vendor already shipped.
+**For AD107 no such SKU exists.** Its maximum anywhere is 8 GB, and only on 128-bit. There is no
+signed NVIDIA firmware anywhere that describes an AD107 with more than 8 GB.
+
+So: unlike system RAM — where the win came from ASUS having already shipped the config we want —
+here nobody shipped it, so there is nothing to select. That is a hard blocker, not a hand-wave.
+Failure mode is also worse: the GPU is soldered to the same board as CPU, RAM and SPI flash, so a
+botched GPU rework kills the machine, whereas a modded desktop card is a replaceable part.
+
+**Priority note:** 16 → 32 GiB system RAM is both more achievable and worth more to HIVE than
+6 → 9 GB of VRAM would be, since it also raises the 780M's GTT ceiling and CPU-side model headroom.
 
 **Confirmed from the full video transcript — SPD was the ONLY thing changed.** No power delivery, no
 VRM, no resistor straps, no other hardware modification anywhere in the procedure. Two bytes and a
