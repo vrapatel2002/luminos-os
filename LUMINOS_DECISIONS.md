@@ -1377,3 +1377,74 @@ and point `Video=` back at the `4K HD (h264).mp4` file. Config backups:
 
 Files: `src/wallpapers/org.luminos.livewallpaper/contents/{config/main.xml,ui/main.qml,ui/config.qml}`.
 Cross-ref BUG-083, BUG-081, DECISION 31.
+
+---
+
+## DECISION 33 — Agent tooling is pinned and self-verifying: one venv per tool, one registration, one loud check
+Date: July 25, 2026
+Made by: claude-code
+**Status: APPLIED (live; every failure mode negative-tested)**
+
+### The Problem
+The user's report was: *"they work, we add some new things, it breaks its environment and it stops
+working."* Investigation (BUG-085) found the two MCP tools AGENTS.md makes **mandatory before every
+task** — `code-review-graph` and MemPalace — were degrading continuously with **no error surfaced
+anywhere**. Both servers still answered a handshake, which is why this went unnoticed for months.
+
+The common cause was not a bug in either tool. It was that **every dependency they had was a moving
+target, and every failure was silent**:
+
+| Moving target | What it broke |
+|---|---|
+| Arch's `/usr/bin/python3` (rolling) | `code-review-graph`'s shebang; its packages sat in `~/.local/lib/python3.14/` and would vanish on the next minor bump |
+| the `~/mempalace` git checkout | an **editable** install meant `git pull` silently changed the live server |
+| `~/.local/lib/python3.14/site-packages` | a shared **301-package** user-site; every unrelated `pip install --user` mutated what these tools resolved against |
+| `PATH` that only exists in interactive zsh | both hooks resolved to `command not found`, silently, on every single invocation |
+| the same server name in two config files | you got whichever won scope precedence, not what you edited |
+
+### The Decision
+Three rules, applied to all agent tooling:
+
+1. **One tool, one venv, pyenv 3.12.13.** Never `pip install --user`, never Arch's system python,
+   never a shared site-packages. This matches the existing `luminos-brain safe` house rule
+   ("ML/AI always use pyenv 3.12.13") — the outages were precisely what happened when tooling
+   drifted off it.
+2. **Never editable.** Install pinned copies (`==<version>`). If a source checkout must be hackable,
+   register it under a **different server name** so it cannot silently replace the stable one.
+3. **One registration: `.mcp.json` in the repo.** Never `~/.claude.json` — its local scope silently
+   shadows `.mcp.json`.
+
+And the part that makes it durable:
+
+4. **The invariants are enforced by a check that fails loudly**, `luminos-verify --mcp`
+   (section [5]), wired to the SessionStart hook. It does a **real MCP `initialize` handshake** per
+   server and hard-fails on: duplicate registration · interpreter under `/usr/bin/python*` ·
+   interpreter outside `~/.pyenv` · any editable install · missing binary · server that starts but
+   returns no valid result. Every one of those was verified by deliberately reintroducing the fault.
+
+### Tradeoffs
+- Pinned versions mean upgrades are now **deliberate**, not incidental. That is the point — but it
+  does mean nobody gets fixes for free. Bump the pin explicitly, then re-run `luminos-verify --mcp`.
+- A per-tool venv costs disk (duplicated deps) in exchange for blast-radius isolation. Worth it:
+  the 301-package shared user-site is exactly how one `pip install` broke unrelated tools.
+- The PostToolUse hook now genuinely runs on every `Edit|Write|Bash` where it previously no-opped.
+  Measured cost is **1.1 s** per invocation, well inside the 30 s timeout.
+
+### Conflicts documented (Rule 11)
+- **vs. Rule 9 (No Ollama):** `code-review-graph`'s `all` extra depends on `ollama`. Resolved by
+  installing with **no extras**. Anyone bumping the pin must not use `[all]`.
+- **vs. Rule 5 (`luminos-brain safe`):** brain returned `NO: ML/AI always use pyenv 3.12.13` for a
+  plan that *was* pyenv 3.12.13 — a keyword match, not a real objection. Proceeded under an
+  explicit `--reason` override with user authorization. This is a live instance of open task 0b
+  (brain's NO reasons are unreviewable) and is the second time it has blocked correct work.
+
+### Verification
+`luminos-verify --mcp` → 8 checks PASS. Functionally confirmed with real `tools/call`, not just a
+handshake: MemPalace 29 tools, `mempalace_search("dGPU power gating RTD3")` → 15 hits from the
+2.0 GB store; code-review-graph 24 tools, `list_graph_stats_tool` → 259 files / 3161 nodes /
+21658 edges, `query_graph_tool(callers_of, setEPPAfterAsusctl)` → 4 callers.
+
+### Related
+BUG-085 (the six defects and the fix). BUG-086 (found during this work — a live OpenRouter API key
+is committed and pushed; unrelated cause, same root habit of `git add -A` sweeping in files that
+were never meant to be tracked).

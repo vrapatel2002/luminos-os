@@ -1,4 +1,5 @@
 {
+  "_comment": "[CHANGE: claude-code | 2026-07-25] Hooks run under a NON-INTERACTIVE shell where PATH is only /usr/local/bin:/usr/bin. ~/.local/bin is added by ~/.zshrc, which such shells never source, so bare 'code-review-graph' resolved to nothing and BOTH hooks silently failed on every invocation. Always use absolute paths here. --repo is explicit because hook cwd is not guaranteed.",
   "hooks": {
     "PostToolUse": [
       {
@@ -6,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "code-review-graph update --skip-flows",
+            "command": "/home/shawn/.local/bin/code-review-graph update --skip-flows --repo /home/shawn/luminos-os",
             "timeout": 30
           }
         ]
@@ -18,8 +19,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "code-review-graph status",
-            "timeout": 10
+            "command": "/home/shawn/luminos-os/scripts/luminos-verify --mcp --quiet",
+            "timeout": 60
           }
         ]
       }

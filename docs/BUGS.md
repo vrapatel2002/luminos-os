@@ -1,7 +1,26 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-07-24 (BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram, stalling the whole desktop; cleared by hand, durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured — live wallpaper decoded a 4K video 24/7 behind fullscreen windows. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-07-25 (BUG-085 FIXED — MCP tooling silently rotted: hooks never ran, mempalace registered twice, crg on Arch's rolling python; now pinned + verified by `luminos-verify --mcp`. BUG-086 OPEN/URGENT — OpenRouter API key committed to git and pushed to GitHub. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; cleared by hand, durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
+
+### BUG-086 — Live OpenRouter API key committed to git AND pushed to GitHub
+<!-- [CHANGE: claude-code | 2026-07-25] -->
+- Status: **OPEN — URGENT, needs user action (key rotation). Nothing done automatically: revoking a credential and rewriting published history are both the user's call.**
+- Severity: **CRITICAL** (credential disclosure)
+- Component: `.claude/settings1.json` — a stale leftover Claude Code settings file
+- Description: `.claude/settings1.json` is **tracked by git** and contains a live key in plaintext:
+  `"ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1"` + `"ANTHROPIC_API_KEY": "sk-or-98117e…"`.
+  It is present in `origin/main` on `git@github.com:vrapatel2002/luminos-os.git` — i.e. **already pushed**, not merely local. Confirmed with `git cat-file -e origin/main:.claude/settings1.json` and by reading the key back out of `git show origin/main:.claude/settings1.json`.
+- How it got there — **`.gitignore` did not fail; it was overridden.** `.gitignore` line 11 has had `.claude/` since commit `b3919feb` (2026-03-25). The file was nevertheless added in `f1415d5e` (2026-04-24), i.e. **force-added** (`git add -f`, or staged explicitly) a month *after* the ignore rule existed — and the key was already in it in that first commit. Only that one commit ever touched the file, but the blob has been in every commit's tree since, so it is in the pushed history.
+  Note the consequence: **adding `.claude/` to `.gitignore` again fixes nothing.** `.gitignore` only affects *untracked* files; once a path is tracked git keeps tracking it. The file must be explicitly removed (`git rm --cached`), and `.claude/settings.json` + `.claude/skills/*` are tracked the same way for the same reason.
+  Context: AGENTS.md §7 records that OpenRouter was removed on 2026-05-27 for causing Signal 5 TRAP crashes. The config was abandoned but the file was never deleted, so the credential stayed.
+- Required fix, in order:
+  1. **Rotate/revoke the key at openrouter.ai first.** Assume it is compromised. History rewriting is pointless until the key is dead — clones and GitHub's cached views may already hold it.
+  2. Delete `.claude/settings1.json` (it is a dead config — duplicates `settings.json` and re-adds the banned OpenRouter routing).
+  3. Add `.claude/settings*.local.json` + any credential-bearing settings to `.gitignore`.
+  4. Optional and destructive, user's decision only: purge from history with `git filter-repo`, which requires a force-push to a shared remote.
+- Verify: `git log --all -p -- .claude/settings1.json | grep -c "sk-or-"` should be 0 after a history purge; the key should be rejected by OpenRouter after rotation.
+- Date Found: 2026-07-25
 
 ### BUG-084 — DrKonqi crash handler stalls the whole desktop: gdb + debuginfod ate 7.4 GB and filled zram
 <!-- [CHANGE: claude-code | 2026-07-24] -->
@@ -133,6 +152,32 @@ Last Updated: 2026-07-24 (BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and 
 - Date Found: 2026-06-11
 
 ## Fixed Bugs (new)
+
+### BUG-085 — MCP tooling (code-review-graph + MemPalace) silently rotted: hooks never ran, MemPalace was registered twice, crg rode Arch's rolling python
+<!-- [CHANGE: claude-code | 2026-07-25] -->
+- Status: FIXED (2026-07-25) — all six defects fixed and negative-tested
+- Severity: HIGH (the two tools AGENTS.md makes *mandatory* before every task were degrading with no error surfaced anywhere; the graph silently went stale and MemPalace answered from an unintended install)
+- Component: `.claude/settings.json` hooks, `.mcp.json`, `~/.claude.json`, `~/.local/bin/code-review-graph`, `~/.local/bin/mempalace`
+- Symptom as reported: *"they work, we add some new things, it breaks its environment and it stops working."*
+- Root cause — **every dependency was a moving target and every failure was silent.** Six distinct defects:
+  1. **The hooks had never once run.** `.claude/settings.json` invoked bare `code-review-graph` on PostToolUse (`Edit|Write|Bash`) and SessionStart. Hooks execute in a **non-interactive shell** whose `PATH` is only `/usr/local/bin:/usr/bin`; `~/.local/bin` is added by `~/.zshrc` line 33, which such shells never source. Result: `code-review-graph: command not found`, every single time, exit status swallowed. The 30 s timeout was never the issue — a real update takes **1.1 s**.
+  2. **MemPalace was registered twice under the same name**, in two files pointing at two different installs: `~/.claude.json` (local scope) → `/home/shawn/mempalace-venv` = uv venv, **editable**, v3.1.0; `.mcp.json` (project scope) → `/home/shawn/.mempalace-venv` = pyenv 3.12.13, pinned, v3.3.1. Local scope wins, so the **editable v3.1.0** was live while AGENTS.md §6 documented the other one.
+  3. **That install was editable** (`direct_url.json` → `{"editable": true, "url": "file:///home/shawn/mempalace"}`). A `git pull` in `~/mempalace` mutated the running server instantly. **This is the mechanism behind the reported symptom.**
+  4. **Three MemPalace copies existed**, the third being an editable install in `~/.local/lib/python3.14/site-packages` — a shared user-site with **301 packages** (chromadb, hnswlib, llama-cpp-python, onnxruntime, PyQt6 …) sitting on Arch's rolling python. Every `pip install --user` mutated the environment these tools resolved against. All three wrote the same 2.0 GB store at `~/.mempalace/palace`.
+  5. **`code-review-graph` was nailed to a rolling interpreter** — shebang `#!/usr/bin/python3`, packages in `~/.local/lib/python3.14/site-packages`. The next Arch python minor bump would have made them vanish. (Notes confirm this already bit once: `2026-05-07 | Removed all references to code-review-graph from AGENTS.md and GEMINI.md to stop startup errors.`)
+  6. **5,951 stale lock files** in `~/.mempalace/locks`, oldest 2026-04-22, never reaped.
+- Fix applied:
+  - `code-review-graph` installed into its own **pyenv 3.12.13** venv `~/.code-review-graph-venv` (pinned `==2.3.1`, no extras — the `all` extra pulls `ollama`, banned by Rule 9). `~/.local/bin/code-review-graph` is now a symlink into it, so the shebang is absolute and Arch upgrades cannot reach it.
+  - Duplicate `mempalace` entry removed from `~/.claude.json`; **`.mcp.json` is now the single authoritative registration** (version-controlled, travels with the repo).
+  - `~/.local/bin/mempalace` (CLI) repointed at the same pinned venv, so CLI and MCP can no longer disagree.
+  - Hooks rewritten to **absolute paths** with an explicit `--repo`, so neither PATH nor cwd can break them.
+  - `scripts/luminos-verify` gained **section [5] MCP tooling** + a `--mcp` flag; SessionStart now runs `luminos-verify --mcp --quiet` instead of the broken `code-review-graph status`.
+  - Locks reaped 5,951 → 0.
+- **Why it will not silently rot again:** section [5] performs a *real* MCP `initialize` handshake per server and hard-fails on: duplicate registration, an interpreter under `/usr/bin/python*`, an interpreter outside `~/.pyenv` (house rule), any editable install, a missing binary, or a server that starts but returns no valid result. Each of those was negative-tested by deliberately reintroducing the fault. `--quiet` was also fixed to still print the summary line — it previously printed **nothing at all**, so a FAIL looked exactly like a PASS, which would have re-created the same silent-rot disease inside the very check meant to catch it.
+- Gotcha found while writing the check (do not repeat): **never `os.path.realpath()` a venv's `bin/python` to locate its site-packages.** It resolves the symlink *out* of the venv into `~/.pyenv` or `~/.local/share/uv`, so you inspect the wrong tree. An earlier version of section [5] did this and reported a clean PASS for a known-editable install. Derive the venv from the **configured** command path instead.
+- Also note: pip/uv mark editable installs differently — pip writes `<dist-info>/direct_url.json`, uv drops a bare `_<pkg>.pth`. Section [5] checks both.
+- Verify: `luminos-verify --mcp` → 8 checks, expect PASS. Functionally confirmed by real `tools/call`: MemPalace 29 tools, `mempalace_search("dGPU power gating RTD3")` → 15 hits; code-review-graph 24 tools, `list_graph_stats_tool` → 259 files / 3161 nodes / 21658 edges, `query_graph_tool(callers_of, setEPPAfterAsusctl)` → 4 callers.
+- Date Found / Fixed: 2026-07-25
 
 ### BUG-081 — Web live-wallpaper freezes (0 fps) whenever a window fully covers the desktop, regardless of the plugin's freeze checkbox
 <!-- [CHANGE: claude-code | 2026-07-23] -->

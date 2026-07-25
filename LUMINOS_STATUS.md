@@ -1,5 +1,7 @@
 # Luminos OS — System Status
-Last updated: 2026-07-01
+Last updated: 2026-07-25
+Agent: claude-code (BUG-085 FIXED / DECISION 33 — agent MCP tooling was silently rotting. Neither tool was crashed: both answered a handshake, which is why nobody noticed. Six defects: (1) BOTH hooks had never run once — they called bare `code-review-graph`, but hooks get a non-interactive shell with PATH=/usr/local/bin:/usr/bin and `~/.local/bin` is only added by ~/.zshrc; (2) MemPalace was registered TWICE under one name across `.mcp.json` and `~/.claude.json`, pointing at two different installs, and local scope won — so the live server was an unintended v3.1.0 while docs described v3.3.1; (3) that one was an EDITABLE install, so a `git pull` in ~/mempalace silently changed the running server — the literal cause of "we add things and it breaks"; (4) a THIRD MemPalace lived in a shared 301-package user-site on Arch's ROLLING python; (5) code-review-graph's shebang was `#!/usr/bin/python3`, one pacman bump from vanishing; (6) 5,951 stale lock files. Fix: one tool → one pyenv-3.12.13 venv, pinned, never editable; single authoritative `.mcp.json`; absolute paths in hooks; locks reaped 5951→0. Durable part: `luminos-verify --mcp` does a REAL MCP handshake and hard-fails on all six modes — each negative-tested by reintroducing the fault. Also fixed `--quiet` printing NOTHING, which made a FAIL look identical to a PASS. **Found in passing: BUG-086 — a live OpenRouter API key is committed AND pushed to GitHub in `.claude/settings1.json`; needs rotation, user action.**)
+Prev: 2026-07-01
 Agent: claude-code (Monitor made light + BUG-078 FIXED: Meta+M/Ctrl+M now open `luminos-monitor watch` (bash loop) instead of konsole+btop (saves ~55M unique RAM + ~5% CPU per window). Root-caused dGPU-never-sleeps: nvidia-smi polls (powerwidget 5s, monitor 2s) each take a runtime-PM ref — replaced with side-effect-free runtime_status reads; monitor v1.2/1.3 sleep-guard shows SLEEP/0W without waking GPU. New org.luminos.monitorwidget (panel popup, feeds on `luminos-monitor stats`) installed + added to panel; powerwidget tokenized version deployed (installed copy was stale since May 21). NOTE: forex bot CUDA mmap + nvidia-powerd still hold GPU awake — 0W/D3cold reachable only when those exit.)
 Prev: 2026-06-30
 Agent: claude-code (Foreign-toolkit light/dark cohesion ROOT-CAUSED + fixed, no daemon. The desktop's 3-way light/dark disagreement traced to ONE bad value: GTK theme name was `Breeze-Dark` (a permanently-dark theme that ignores the prefer-dark flag) instead of `Breeze` (the adaptive theme). KDE's built-in kded `gtkconfig` already syncs the prefer-dark flag + xdg portal to the active Plasma color scheme — but a fixed-dark theme name overrode it, so the flag and the theme contradicted each other. Fix = `gtk-theme-name=Breeze` everywhere. Now KDE color scheme is the single source of truth; Qt/GTK/Electron/Chromium/Flatpak all follow it natively. Verified round-trip light<->dark with no extra process. Daemon experiment removed.)
@@ -55,7 +57,9 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | HIVE Web Search | ✅ Working | DuckDuckGo HTML scraping, no API key. Works without llama-server loaded. Auto-routes via [ROUTE:WEB] or keyword detection. |
 | HIVE popup (SUPER+SPACE) | ✅ Working | Persistent kdialog conversation loop. Starts hive-daemon.py on open, kills on close. |
 | Claude Code Router | ✅ Working | DeepSeek V4 Pro via OpenRouter. Key in .env, config in .claude/settings.local.json |
-| luminos-notes.sh | ✅ Working | SQLite replacement for MemPalace |
+| luminos-notes.sh | ✅ Working | SQLite knowledge base. Complements MemPalace (which is NOT retired — see below); AGENTS.md §8 says search both. |
+| MemPalace (MCP) | ✅ Working — pinned v3.3.1 | **NOT retired** (the old "hnswlib crash" note was stale). Registered ONLY in `.mcp.json` → `~/.mempalace-venv` (pyenv 3.12.13). 29 tools, 2.0 GB store at `~/.mempalace/palace`. Was silently running an unintended editable v3.1.0 for months — BUG-085 / DECISION 33. Check: `luminos-verify --mcp` |
+| code-review-graph (MCP) | ✅ Working — pinned v2.3.1 | `~/.code-review-graph-venv` (pyenv 3.12.13), symlinked from `~/.local/bin`. 24 tools; 259 files / 3161 nodes / 21658 edges. Was on Arch's **rolling** `/usr/bin/python3` and its hooks never ran (`command not found`) — BUG-085 / DECISION 33. |
 | HIVE Settings in KDE | ✅ Working | kcm_luminos_hive.so installed at /usr/lib/qt6/plugins/plasma/kcms/systemsettings/ |
 | AI Mode toggle | ✅ Available | Nova on CPU + GPU model simultaneously |
 | AI Mode | ✅ Active | Nova on CPU alongside GPU model |
@@ -63,7 +67,8 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | RAM Management | ✅ Phase 3 | luminos-ram v3.0 precise algorithm. N=8 HotSet, LIRS IRR ranking, OnScreen protection, and safety checks. |
 
 ## ARCHITECTURE SHIFT
-- **Deprecated:** Docker Desktop, n8n (Docker), Ollama (Process), SearXNG (Docker), MemPalace (hnswlib crash), hive-swap-server.py
+- **Deprecated:** Docker Desktop, n8n (Docker), Ollama (Process), SearXNG (Docker), hive-swap-server.py
+  - *(MemPalace removed from this list 2026-07-25 — it is active and MANDATORY per AGENTS.md §6. The "hnswlib crash" came from the CLI resolving to a different install on Arch's rolling python, not from MemPalace itself. Fixed in BUG-085.)*
 - **Current:** Bare-metal Linux
     - **Data Plane:** Native `llama.cpp` (GPU/CPU) + HATS (NPU)
     - **Control Plane:** Go `luminos-ai` daemons + Python `hive-daemon.py`

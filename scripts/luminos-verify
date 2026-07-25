@@ -1,0 +1,269 @@
+#!/bin/bash
+# luminos-verify — L2 of the safe-update ladder (DECISION 26)
+# =====================================================================
+# Post-upgrade health check for the Luminos-specific things a system
+# upgrade (kernel / NVIDIA / Plasma / Qt) is most likely to silently break.
+# Run BEFORE an upgrade to capture a known-good baseline, and AFTER to prove
+# nothing regressed. Exit 0 = all critical checks pass; non-zero = something
+# an upgrade broke. Read-only: never wakes the dGPU (sysfs only, no nvidia-smi).
+#
+# Usage:
+#   luminos-verify            # human-readable report + exit code
+#   luminos-verify --quiet    # just the PASS/FAIL summary line + exit code
+# [CHANGE: claude-code | 2026-07-21]
+set -uo pipefail
+
+# [CHANGE: claude-code | 2026-07-25] flags parsed in any order; --mcp runs section [5] alone
+QUIET=0; ONLY_MCP=0
+for a in "$@"; do
+  case "$a" in
+    --quiet) QUIET=1 ;;
+    --mcp)   ONLY_MCP=1 ;;
+  esac
+done
+FAIL=0; WARN=0
+say(){ [ "$QUIET" = 1 ] || echo -e "$1"; }
+ok(){   say "  \033[32m✓\033[0m $1"; }
+bad(){  say "  \033[31m✗\033[0m $1"; FAIL=$((FAIL+1)); }
+warn(){ say "  \033[33m!\033[0m $1"; WARN=$((WARN+1)); }
+
+DGPU_PCI="0000:01:00.0"   # RTX 4050 (card1 / renderD128)
+
+say "\n\033[1mLuminos Verify — $(date -Iseconds)\033[0m"
+
+if [ "$ONLY_MCP" = 0 ]; then
+# ---- 1. Five Go daemons: service active + socket present ----
+say "\n[1] Go daemons (service active + socket bound)"
+declare -A SOCK=(
+  [ai]=/run/luminos/ai.sock
+  [power]=/run/luminos/power.sock
+  [sentinel]=/run/luminos/sentinel.sock
+  [ram]=/run/luminos/ram.sock
+  [router]=/tmp/luminos-router.sock
+)
+for s in ai power sentinel router ram; do
+  st=$(systemctl is-active "luminos-$s" 2>/dev/null)
+  sock="${SOCK[$s]}"
+  if [ "$st" = "active" ] && [ -S "$sock" ]; then
+    ok "luminos-$s active, socket $sock"
+  elif [ "$st" = "active" ]; then
+    bad "luminos-$s active but socket MISSING: $sock"
+  else
+    bad "luminos-$s is '$st' (expected active)"
+  fi
+done
+
+# ---- 2. Custom KCM .so plugins load (catches Plasma/Qt ABI break) ----
+say "\n[2] Custom KCM plugins (found + no missing libs)"
+for k in kcm_luminos_hive kcm_luminos_keyboard kcm_luminos_lid_light; do
+  so=$(find /usr/lib/qt6/plugins -name "$k.so" 2>/dev/null | head -1)
+  if [ -z "$so" ]; then
+    bad "$k: NOT INSTALLED (an upgrade may have wiped it — rebuild needed)"
+    continue
+  fi
+  miss=$(ldd "$so" 2>/dev/null | grep "not found")
+  if [ -z "$miss" ]; then
+    ok "$k loads clean"
+  else
+    bad "$k has MISSING LIBS (Plasma/Qt ABI break — recompile):\n$(echo "$miss" | sed 's/^/        /')"
+  fi
+done
+
+# ---- 3. dGPU true-0W idle gating (sysfs only — never wakes it) ----
+say "\n[3] dGPU power gating (RTX 4050 — read-only, no nvidia-smi)"
+ctrl=$(cat /sys/bus/pci/devices/$DGPU_PCI/power/control 2>/dev/null)
+rst=$(cat  /sys/bus/pci/devices/$DGPU_PCI/power/runtime_status 2>/dev/null)
+if [ "$ctrl" = "auto" ]; then
+  ok "power/control=auto (runtime PM enabled)"
+else
+  bad "power/control='$ctrl' (expected 'auto' — RTD3 gating disabled; a driver update can reset this)"
+fi
+case "$rst" in
+  suspended) ok "runtime_status=suspended (true-0W idle achieved)";;
+  active)    warn "runtime_status=active (GPU in use right now, or not sleeping — recheck at idle)";;
+  *)         warn "runtime_status='$rst' (unexpected)";;
+esac
+# NVIDIA aggressive-DPM module param still 0x02?
+if [ -r /proc/driver/nvidia/params ]; then
+  dpm=$(grep -i "DynamicPowerManagement:" /proc/driver/nvidia/params 2>/dev/null | grep -oE "[0-9]+$")
+  [ -n "$dpm" ] && { [ "$dpm" = "2" ] && ok "NVreg_DynamicPowerManagement=0x02 (fine-grained)" || warn "DynamicPowerManagement=$dpm (expected 2/0x02)"; }
+fi
+
+# ---- 4. Fan / thermal daemon ----
+say "\n[4] Fan & thermal (luminos-power owns the fan curve)"
+[ "$(systemctl is-active luminos-power 2>/dev/null)" = "active" ] \
+  && ok "luminos-power active (fan curve live)" \
+  || bad "luminos-power NOT active — fans may be on firmware default"
+fi   # end ONLY_MCP guard
+
+# ---- 5. MCP tooling (code-review-graph + MemPalace) ----
+# [CHANGE: claude-code | 2026-07-25]
+# These two tools kept silently rotting. Every dependency they had was a MOVING
+# TARGET and every failure was invisible:
+#   * code-review-graph shebang was #!/usr/bin/python3 -> Arch's ROLLING python.
+#     Its packages sat in ~/.local/lib/python3.14/site-packages, so the next
+#     python minor bump would have made them vanish.
+#   * mempalace was registered TWICE under the same name, in two different files,
+#     pointing at two different installs (v3.1.0 editable vs v3.3.1 pinned) that
+#     share ONE 2.0 GB store. Whichever won was down to scope precedence, not intent.
+#   * an EDITABLE install means a `git pull` in the source checkout silently
+#     mutates the live server. That is the "we add something and it breaks" bug.
+# This section makes all of that fail LOUDLY instead of drifting. Run with --mcp.
+say "\n[5] MCP tooling (real initialize handshake — not just 'is the file there')"
+MCP_OUT=$(/usr/bin/python3 - <<'PYEOF' 2>&1
+import json, os, subprocess, sys, glob
+
+CJ   = "/home/shawn/.claude.json"
+MCPJ = "/home/shawn/luminos-os/.mcp.json"
+out  = []
+def emit(lvl, msg): out.append(f"{lvl}:{msg}")
+
+try:
+    servers = json.load(open(MCPJ))["mcpServers"]
+except Exception as e:
+    emit("BAD", f"cannot read {MCPJ}: {e}")
+    servers = {}
+
+# --- duplicate registration check (the precedence trap) ---
+dupes = set()
+try:
+    cj = json.load(open(CJ))
+    other = set(cj.get("mcpServers", {}))
+    other |= set(cj.get("projects", {}).get("/home/shawn/luminos-os", {}).get("mcpServers", {}))
+    dupes = other & set(servers)
+except Exception as e:
+    emit("WARN", f"cannot read {CJ}: {e}")
+if dupes:
+    emit("BAD", "DUPLICATE MCP registration (~/.claude.json shadows .mcp.json): "
+                + ", ".join(sorted(dupes)) + " — you get whichever wins precedence, not what you intended")
+else:
+    emit("OK", "no duplicate MCP registrations (.mcp.json is authoritative)")
+
+# --- per-server: interpreter pinned? handshake works? ---
+for name, cfg in sorted(servers.items()):
+    cmd = cfg.get("command", "")
+    if not (os.path.exists(cmd) and os.access(cmd, os.X_OK)):
+        emit("BAD", f"{name}: command missing or not executable: {cmd}")
+        continue
+
+    # Which interpreter really runs? If cmd is a console script, read its shebang.
+    # NOTE: do NOT realpath() a venv's bin/python -- that resolves the symlink OUT of
+    # the venv (into ~/.pyenv or ~/.local/share/uv) and you end up inspecting the wrong
+    # site-packages. This exact mistake made an earlier version of this check report a
+    # clean PASS for an editable install. Keep the venv derived from the CONFIGURED path.
+    interp = cmd
+    try:
+        with open(cmd, "rb") as f:
+            head = f.readline(400)
+        if head.startswith(b"#!"):
+            interp = head[2:].strip().split()[0].decode()
+    except Exception:
+        pass
+    venv = os.path.dirname(os.path.dirname(interp))     # <venv>/bin/x -> <venv>
+
+    resolved = os.path.realpath(interp)
+    if resolved.startswith("/usr/bin/python") or resolved.startswith("/bin/python"):
+        emit("BAD", f"{name}: runs on Arch's ROLLING python ({resolved}) — a pacman "
+                    f"python bump will break this. Give it its own venv.")
+    elif "/.pyenv/" not in resolved:
+        # house rule (luminos-brain): ML/AI tooling always pyenv 3.12.13
+        emit("WARN", f"{name}: interpreter {resolved} is not under ~/.pyenv "
+                     f"(house rule is pyenv 3.12.13)")
+    else:
+        emit("OK", f"{name}: interpreter pinned to pyenv ({resolved})")
+
+    # Editable install? Then the source checkout IS the live server and a `git pull`
+    # silently changes it. Two markers to look for, because pip and uv differ:
+    #   pip  -> <dist-info>/direct_url.json  {"dir_info": {"editable": true}}
+    #   uv   -> a bare _<pkg>.pth whose contents point outside the venv
+    edit_hits = []
+    sp_dirs = glob.glob(os.path.join(venv, "lib", "python*", "site-packages"))
+    for sp in sp_dirs:
+        for du in glob.glob(os.path.join(sp, "*.dist-info", "direct_url.json")):
+            try:
+                info = json.load(open(du))
+                if info.get("dir_info", {}).get("editable"):
+                    pkg = os.path.basename(os.path.dirname(du)).split("-")[0]
+                    edit_hits.append(f"{pkg} -> {info.get('url','?')}")
+            except Exception:
+                pass
+        for pth in glob.glob(os.path.join(sp, "*.pth")):
+            if os.path.basename(pth) in ("_virtualenv.pth",):
+                continue
+            try:
+                for ln in open(pth).read().splitlines():
+                    ln = ln.strip()
+                    if ln.startswith("/") and os.path.isdir(ln) and not ln.startswith(venv):
+                        edit_hits.append(f"{os.path.basename(pth)} -> {ln}")
+            except Exception:
+                pass
+    if edit_hits:
+        emit("BAD", f"{name}: EDITABLE install ({'; '.join(sorted(set(edit_hits)))}) — "
+                    f"editing that checkout silently changes the live server")
+    elif not sp_dirs:
+        emit("WARN", f"{name}: no site-packages found under {venv} — cannot check for editable installs")
+    else:
+        emit("OK", f"{name}: no editable installs (immutable, pinned copy)")
+
+    # real MCP initialize handshake
+    req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                      "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                                 "clientInfo": {"name": "luminos-verify", "version": "1"}}}) + "\n"
+    try:
+        p = subprocess.run([cmd] + cfg.get("args", []), input=req.encode(),
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=90)
+        info = None
+        for line in p.stdout.splitlines():
+            try:
+                r = json.loads(line)
+            except Exception:
+                continue
+            if r.get("id") == 1 and "result" in r:
+                info = r["result"].get("serverInfo", {})
+                break
+        if info:
+            emit("OK", f"{name}: handshake OK — {info.get('name')} v{info.get('version')}")
+        else:
+            emit("BAD", f"{name}: started but returned NO valid initialize result")
+    except subprocess.TimeoutExpired:
+        emit("BAD", f"{name}: handshake TIMED OUT (>90s)")
+    except Exception as e:
+        emit("BAD", f"{name}: handshake failed: {e}")
+
+# --- MemPalace stale lock reaping ---
+locks = "/home/shawn/.mempalace/locks"
+if os.path.isdir(locks):
+    n = len(os.listdir(locks))
+    if n > 500:
+        emit("WARN", f"MemPalace has {n} stale lock files in {locks} (never reaped)")
+    else:
+        emit("OK", f"MemPalace lock dir sane ({n} files)")
+
+print("\n".join(out))
+PYEOF
+)
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  case "$line" in
+    OK:*)   ok   "${line#OK:}"   ;;
+    BAD:*)  bad  "${line#BAD:}"  ;;
+    WARN:*) warn "${line#WARN:}" ;;
+    *)      warn "$line"         ;;
+  esac
+done <<< "$MCP_OUT"
+
+# ---- summary ----
+# [CHANGE: claude-code | 2026-07-25] The summary line now prints even under --quiet.
+# It previously used say(), so --quiet emitted NOTHING AT ALL -- a failure looked
+# exactly like a success. This script runs as a SessionStart hook, so a silent FAIL
+# would re-create the very silent-rot problem section [5] exists to catch.
+# --quiet means "summary line only", as the usage note at the top always claimed.
+say ""
+if [ "$FAIL" -eq 0 ]; then
+  echo -e "\033[1;32mPASS\033[0m — $WARN warning(s), 0 failures. Custom stack intact."
+  exit 0
+else
+  echo -e "\033[1;31mFAIL\033[0m — $FAIL failure(s), $WARN warning(s). Something above is broken."
+  [ "$QUIET" = 1 ] && echo -e "  run \033[1mluminos-verify${ONLY_MCP:+ --mcp}\033[0m (no --quiet) for detail"
+  exit 1
+fi

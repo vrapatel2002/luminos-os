@@ -1,8 +1,18 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-07-24 — Response 8
+Last updated: 2026-07-25 — Response 2
+
+## READ THIS FIRST — unresolved credential leak (BUG-086)
+A **live OpenRouter API key** (`sk-or-98117e…`) sits in `.claude/settings1.json`, which is **tracked
+by git and already pushed** to `origin/main` on `github.com/vrapatel2002/luminos-os`. Verified with
+`git cat-file -e origin/main:.claude/settings1.json` and by reading the key back from
+`git show origin/main:.claude/settings1.json`. **Nothing was done about it automatically** — revoking
+a credential and rewriting published history are the user's calls. **Rotate the key first**; history
+surgery is pointless while it is still valid. The file is a dead config anyway (it duplicates
+`settings.json` and re-adds the OpenRouter routing that AGENTS.md §7 says was removed 2026-05-27 for
+Signal 5 TRAP crashes). `.claude/` is not in `.gitignore`, so a `git add -A` swept it in.
 
 ## Goal (the durable end objective)
-Three threads:
+Four threads:
 1. **Make the desktop feel fast again.** DONE for the wallpaper (BUG-083 / DECISION 32) — it must
    never spend CPU/iGPU on frames nobody can see, nor be encoded above the panel resolution.
 2. **BUG-084 — stop the crash handler from taking the machine down.** This turned out to be the
@@ -11,12 +21,55 @@ Three threads:
    the CPU and dGPU, as the dGPU will be mostly not used, so it's CPU/iGPU only regardless of what
    we are doing, HIVE or not."* i.e. always-on and general-purpose, NOT a HIVE-session-scoped thing.
    NOT STARTED — there is a hard hardware constraint to resolve with the user first (below).
+4. **Stop the agent MCP tooling from silently rotting.** DONE (BUG-085 / DECISION 33) — see below.
+   The user's ask was *"we have mempalace and code review graph but we add some new things it breaks
+   its environment and it stops working — how to solve it once and for all."*
 
 ## Aim right now
+Thread 4 is **done and verified**; the only follow-up is BUG-086 (key rotation, user action).
 Thread 1 done. Thread 2 awaiting a yes/no on the `MemoryMax` drop-in. Thread 3: the hardware
 constraint has been explained to the user (Response 3) — **dGPU VRAM cannot be made into general 24/7
 system memory on this box**, and trying would destroy the true-0W idle work. Awaiting their direction;
 the real lead is the iGPU carve-out, not the dGPU.
+
+## State — what is DONE (thread 4, BUG-085 / DECISION 33 — MCP tooling)
+**Key insight: neither tool was crashed.** Both answered an MCP handshake the whole time, which is
+exactly why this rotted unnoticed for months. Every *dependency* was a moving target and every
+failure was silent. Six defects, all fixed:
+1. **Both hooks had never run, ever.** `.claude/settings.json` called bare `code-review-graph`;
+   hooks run in a **non-interactive shell** with `PATH=/usr/local/bin:/usr/bin`, and `~/.local/bin`
+   is added only by `~/.zshrc` line 33. → `command not found`, silently, every time. The 30 s
+   timeout was never the problem: a real update takes **1.1 s**.
+2. **MemPalace registered TWICE under one name** — `.mcp.json` (pyenv, pinned v3.3.1) vs
+   `~/.claude.json` local scope (uv venv, **editable**, v3.1.0). Local scope wins, so the live
+   server was v3.1.0 while AGENTS.md §6 documented the other one.
+3. **That install was editable** → a `git pull` in `~/mempalace` silently changed the running
+   server. This is the literal mechanism behind the user's complaint.
+4. **A THIRD MemPalace** lived in `~/.local/lib/python3.14/site-packages` — a shared **301-package**
+   user-site on Arch's *rolling* python. All three copies wrote one 2.0 GB store.
+5. **`code-review-graph` shebang was `#!/usr/bin/python3`** — one pacman python bump from vanishing.
+   Notes show it already bit once: `2026-05-07 | Removed all references to code-review-graph … to
+   stop startup errors.`
+6. **5,951 stale locks** in `~/.mempalace/locks` (oldest 2026-04-22).
+
+**Fix:** one tool = one **pyenv 3.12.13** venv, pinned, never editable
+(`~/.code-review-graph-venv`, `==2.3.1`, **no extras** — the `all` extra pulls `ollama`, Rule 9);
+`.mcp.json` is the single authoritative registration; hooks use absolute paths + `--repo`;
+`~/.local/bin/mempalace` CLI symlinked to the same venv so CLI and MCP cannot disagree;
+locks 5951 → 0.
+
+**Why it can't silently rot again:** `scripts/luminos-verify` gained **section [5] + `--mcp`**, wired
+to the SessionStart hook. It performs a **real MCP `initialize` handshake** per server and hard-fails
+on: duplicate registration · `/usr/bin/python*` interpreter · interpreter outside `~/.pyenv` ·
+any editable install · missing binary · starts-but-returns-nothing. **Each was negative-tested by
+deliberately reintroducing the fault.** Also fixed `--quiet`, which printed *nothing at all* — a FAIL
+was indistinguishable from a PASS, which would have rebuilt the silent-rot disease inside the check
+meant to catch it.
+
+**Verified functionally, not just by handshake:** MemPalace 29 tools,
+`mempalace_search("dGPU power gating RTD3")` → 15 hits; code-review-graph 24 tools,
+`list_graph_stats_tool` → 259 files / 3161 nodes / 21658 edges,
+`query_graph_tool(callers_of, setEPPAfterAsusctl)` → 4 callers. Full `luminos-verify` → PASS.
 
 ## Why / motivation (context a newcomer would be missing)
 The user reported "Chrome and the OS are actually not responding" and suspected the live wallpaper.
@@ -316,6 +369,10 @@ easier future rework; SPD located by searching `02 00 04 80 00 00 0`; checksum s
   load** (idle vs Chrome vs wallpaper vs HIVE) before proposing any allocator. Measure, then design.
 
 ## Next steps (ordered)
+0. **BUG-086 — ROTATE THE OPENROUTER KEY.** See the banner at the top of this file. Then delete
+   `.claude/settings1.json` and add `.claude/settings*.json` to `.gitignore`. Purging it from
+   history needs `git filter-repo` + a **force-push to a shared remote** — destructive, user's
+   decision only, and worthless before the key is revoked.
 1. **BUG-084 durable fix** — user go-ahead for a systemd drop-in on
    `drkonqi-coredump-launcher@.service` with `MemoryMax=`/`MemoryHigh=`, so a runaway backtrace is
    OOM-killed in its own cgroup. Optionally also blank `DEBUGINFOD_URLS` for drkonqi and serialise
@@ -346,6 +403,20 @@ easier future rework; SPD located by searching `02 00 04 80 00 00 0`; checksum s
   pixels are decoded and then thrown away by the scaler.
 
 ## Gotchas / dead-ends / things NOT to redo
+- **Never `os.path.realpath()` a venv's `bin/python` to find its site-packages.** It resolves the
+  symlink *out* of the venv into `~/.pyenv` or `~/.local/share/uv`, so you inspect the wrong tree.
+  An early version of `luminos-verify` section [5] did this and reported a clean **PASS for a
+  known-editable install**. Derive the venv from the **configured** command path instead. This is
+  why the negative tests exist — the check was wrong and only the negative test caught it.
+- **pip and uv mark editable installs differently**: pip writes `<dist-info>/direct_url.json` with
+  `{"dir_info":{"editable":true}}`; uv drops a bare `_<pkg>.pth`. Check both or you miss half.
+- **`luminos-brain safe` blocked this work twice with `NO: ML/AI always use pyenv 3.12.13` — for a
+  plan that WAS pyenv 3.12.13.** It is keyword-matching, not reasoning. Proceeded via
+  `--reason` with explicit user authorization. Live instance of open task 0b.
+- **Do not "fix" MemPalace by retiring it again.** LUMINOS_STATUS.md used to list it as deprecated
+  with "hnswlib crash" while AGENTS.md made it mandatory. The crash was the *CLI* resolving to a
+  different install on Arch's rolling python — not MemPalace. That contradiction is now corrected.
+- **`git add -A` is how the API key got published.** `.claude/` is not gitignored. Stage by name.
 - **The running wallpaper loads from the INSTALLED copy**
   (`~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/`). Editing the repo source alone does
   nothing — run the deploy recipe below + restart plasmashell. (This already cost a wasted test during

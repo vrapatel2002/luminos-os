@@ -13,6 +13,76 @@ You are a **senior systems software engineer** and sole maintainer of Luminos OS
 
 ---
 
+## 0. RESPONSE PROTOCOL — Turn Counter + Live Handoff (APPLIES TO EVERY RESPONSE)
+# [CHANGE: claude-code | 2026-07-04]
+
+This section exists to fight ONE problem: in a long chat the model slowly forgets
+the rules in this file. Two lightweight, always-on habits make that forgetting
+*visible* and make it *cheap to recover* by starting a fresh chat.
+
+### 0.1 Turn Counter — start EVERY response with `Response N`
+
+- Begin **every single reply** with a line of its own: `Response 1`, then the actual
+  answer. The next reply starts with `Response 2`, then its answer. And so on.
+- `N` increments by exactly **+1 per assistant turn**, within a single chat session.
+  Never reset it mid-chat. Never skip or repeat a number.
+- Format:
+  ```
+  Response 3
+  <the actual answer here>
+  ```
+- **Why this exists:** it is a canary. If a response arrives with no counter, a wrong
+  number, a reset back to `Response 1`, or the count drifting out of sequence, that is
+  the signal that the context is overloaded and the rules in this file are being
+  dropped. When the user sees that, they know to **start a new chat** (and the new chat
+  picks up from `HANDOFF.md`, see §0.2). Do not "fix" a broken count silently — a
+  broken count is useful information.
+- The counter is about the *chat turn*, not the task. Even a one-line answer, a
+  question back to the user, or an error still gets the next number.
+
+### 0.2 Live Handoff — keep ONE `HANDOFF.md` current at the end of EVERY response
+
+- There is **exactly one** handoff file: `HANDOFF.md` at the project root
+  (`~/luminos-os/HANDOFF.md`).
+- **Update it in place at the end of every response.** It is not a per-response log and
+  not a per-goal file — it is a single always-current snapshot.
+- **Never create a second handoff file.** No `HANDOFF_v2.md`, no `HANDOFF_<goal>.md`,
+  no dated copies, no `handoff/` folder. If you feel the urge to make a new one, you
+  are wrong — overwrite the one that exists. (This is the "avoid multiple handoffs for
+  the same goal" rule: one goal, one file, forever updated in place.)
+- **Overwrite, don't append.** The aim/goal is usually fuzzy in the first prompt and
+  gets sharper as the chat goes. `HANDOFF.md` must always reflect the **current best
+  understanding**, so replace stale fields with the newer understanding instead of
+  stacking old versions on top of each other. (History already lives in git +
+  `luminos-notes.sh` + LUMINOS_DECISIONS.md; `HANDOFF.md` is the "read me first to
+  continue" note.)
+- **What it must contain** (a new chat, run by someone who has never seen this
+  conversation, should be able to continue from `HANDOFF.md` alone):
+  ```
+  # HANDOFF.md — continue-from-here note (single source, overwritten in place)
+  Last updated: <date> — Response <N>
+
+  ## Goal (the durable end objective)
+  ## Aim right now (this can differ from the first prompt — keep it current)
+  ## Why / motivation (context a newcomer would be missing)
+  ## Process / approach being used
+  ## State — what is DONE
+  ## State — what is IN PROGRESS (and where exactly it was left off)
+  ## Next steps (ordered)
+  ## Key decisions & constraints so far
+  ## Gotchas / dead-ends / things NOT to redo
+  ## Files touched / relevant files
+  ```
+- If the goal genuinely *changes* to a different objective, don't spawn a new file —
+  update the `## Goal` field in the same `HANDOFF.md` (git history preserves the old
+  goal). One file, always.
+
+**Where the rest of this file hooks in:** read `HANDOFF.md` as step 0 of the Session
+Start Checklist (§8); overwrite `HANDOFF.md` + confirm the `Response N` line as part of
+the Reply Format (§16).
+
+---
+
 ## 1. What Is Luminos OS?
 
 Custom Arch Linux on ASUS ROG G14 GA403UU. Privacy-first, AI-native Windows replacement.
@@ -100,16 +170,38 @@ Custom Arch Linux on ASUS ROG G14 GA403UU. Privacy-first, AI-native Windows repl
 
 Both tools are **targeted query engines, not full context dumps**. A Chrome task returns Chrome results. Cost: ~300–800 tokens (code-review-graph), ~1,000–2,500 tokens (MemPalace). Worth it every time.
 
+**Registration is `~/luminos-os/.mcp.json` and NOTHING ELSE.** It is version-controlled and travels
+with the repo. Never add an MCP server to `~/.claude.json` — that file's local scope *silently
+shadows* `.mcp.json`, so you get whichever entry wins precedence rather than the one you edited.
+This exact trap ran MemPalace v3.1.0 for weeks while this section documented v3.3.1 (BUG-085).
+
+**Health check — run this first whenever either tool "stops working":**
+```bash
+luminos-verify --mcp        # real MCP handshake per server; hard-fails on the 6 known rot modes
+```
+
 ### code-review-graph
-3203 nodes, 21355 edges, 257 files — AST-level map of every function, import, call.
+259 files, 3161 nodes, 21658 edges — AST-level map of every function, import, call. 24 MCP tools.
 **Server:** `/home/shawn/.local/bin/code-review-graph serve --repo /home/shawn/luminos-os`
+**Interpreter:** symlink → `~/.code-review-graph-venv` (pyenv 3.12.13, pinned `==2.3.1`).
+Installed **without extras** — the `all` extra pulls `ollama`, which Rule 9 bans.
 
 Query target file before any edit. After new files or import changes: `code-review-graph update --repo ~/luminos-os`. After major refactor: `code-review-graph build --repo ~/luminos-os`.
 
 ### MemPalace
-253,822-drawer semantic memory. Wings: `luminos_os` (~253k), `claude_exports` (~837), `luminos-os/decisions`.
-**Server:** `/home/shawn/.mempalace-venv/bin/python3 -m mempalace.mcp_server`
-**CRITICAL:** CLI segfaults — MCP tools only.
+253,822-drawer semantic memory. Wings: `luminos_os` (~253k), `claude_exports` (~837), `luminos-os/decisions`. 29 MCP tools.
+**Server:** `/home/shawn/.mempalace-venv/bin/python3 -m mempalace.mcp_server` (pyenv 3.12.13, pinned v3.3.1)
+**Store:** `~/.mempalace/palace` (2.0 GB). Every install writes this one store — which is why two
+different versions must never be registered at once.
+**CLI:** `~/.local/bin/mempalace` now symlinks to the same pinned venv, so CLI and MCP agree.
+The old "CLI segfaults" warning came from the CLI resolving to a *different* install on Arch's
+rolling python (hnswlib built for 3.14). It no longer reproduces — but MCP tools remain preferred.
+
+**Never install either tool with `pip install --user`.** That lands in
+`~/.local/lib/python3.14/site-packages`, a shared 301-package user-site on Arch's **rolling**
+python: the next minor bump makes it vanish, and every unrelated `pip install --user` mutates the
+environment these tools resolve against. One tool, one venv, pyenv 3.12.13. Never `-e`/editable —
+an editable install means a `git pull` in the source checkout silently changes the live server.
 
 | Tool | When |
 |------|------|
@@ -139,6 +231,9 @@ Query target file before any edit. After new files or import changes: `code-revi
 ## 8. Session Start Checklist
 
 ```bash
+# 0. Read the single continue-from-here note (current goal/aim/state) — see §0.2
+cat ~/luminos-os/HANDOFF.md
+
 # 1. Context
 cat ~/luminos-os/AGENTS.md
 cat ~/luminos-os/LUMINOS_STATUS.md
@@ -191,6 +286,10 @@ luminos-brain safe "<action>"
 | `~/.local/share/applications/google-chrome.desktop` | Routes all Chrome launches through `chrome-luminos`. | AUR entry bypassed GPU picker. |
 | `~/.local/share/kio/servicemenus/luminos-gpu-*.desktop` | Dolphin right-click GPU picker for executables and .desktop files. | Universal GPU launcher (Decision 16). |
 | `/etc/systemd/system/luminos-{ai,power,router,sentinel,ram}.service` | `RuntimeDirectoryPreserve=yes` on all five (shared `/run/luminos` no longer wiped when one daemon restarts). luminos-ram: + `RuntimeDirectory=luminos` (was undeclared) + caps `CAP_SYS_PTRACE CAP_SYS_NICE CAP_KILL` (process_madvise/kill/setpriority were EPERM). | BUG-065/066/067. ✅ Active since one-time restart 2026-06-12 (post-HOPE-training). |
+| `/etc/sddm.conf.d/{luminos,hidpi,kde_settings}.conf` (`Current=breeze`) + `/usr/share/sddm/themes/breeze/theme.conf.user` (`background=…/Sugar-Candy/Backgrounds/Mountain.jpg`) | SDDM login theme switched Sugar-Candy → **Breeze** to match the KDE lock screen (same Breeze widgets + same Mountain wallpaper the lock screen uses). All conf.d files consolidated to `breeze`. Backup: `/etc/sddm-luminos.conf.bak-20260722` (moved OUT of conf.d). | DECISION 28. Reason: user wanted the login screen to match the lock screen ("use the KDE theme everywhere"). Lock screen can't load an SDDM theme, so the match was made by moving SDDM to Breeze. Revert: set `Current=Sugar-Candy` in luminos.conf. [CHANGE: claude-code \| 2026-07-22] |
+| `/etc/NetworkManager/conf.d/dns-systemd-resolved.conf` + `/etc/resolv.conf` (→ symlink to `/run/systemd/resolve/stub-resolv.conf`, nameserver `127.0.0.53`) | Enables `systemd-resolved` as a **local caching DNS resolver**; NM hands upstream DNS (`192.168.2.1`) to resolved. Gives Windows-parity DNS caching (repeat lookups <1 ms, persistent). Backup: `/etc/resolv.conf.bak-20260722`. | DECISION 27. Reason: no local DNS cache made every new domain a 30–50 ms round-trip → "new pages load slower than Windows" (Chrome fix #3). Revert: rm the NM drop-in + `systemctl disable --now systemd-resolved` + restore resolv.conf from backup + restart NM. [CHANGE: claude-code \| 2026-07-22] |
+| `~/.config/plasma-workspace/env/luminos-wallpaper-nothrottle.sh` | Exports `QTWEBENGINE_CHROMIUM_FLAGS=--disable-backgrounding-occluded-windows --disable-renderer-backgrounding` for the Plasma session. Stops KWin/QtWebEngine from throttling the `org.luminos.livewallpaper` web view to 0 fps when a window fully covers the desktop, so the plugin's "Freeze when a window covers the desktop" checkbox actually controls the behaviour (unchecked = keep animating). | BUG-081 / DECISION 31. Web wallpapers froze whenever any window was maximized regardless of the plugin setting. [CHANGE: claude-code \| 2026-07-23] |
+| `/etc/pacman.conf` | `IgnorePkg = linux linux-headers nvidia-utils nvidia-open-dkms opencl-nvidia lib32-nvidia-utils lib32-opencl-nvidia` — pins the kernel + the version-locked NVIDIA driver set so `pacman -Syu` stays current on everything else but never does the risky kernel/NVIDIA-branch jump as a side effect. Backup: `/etc/pacman.conf.bak-20260721`. **To deliberately move kernel/NVIDIA: temporarily remove from IgnorePkg (or `pacman -Syu --ignore=` empty), upgrade, rebuild DKMS, verify dGPU true-0W gating, then re-pin.** | DECISION 26. Reason: installed driver 595.71.05 is heavily tuned (true-0W RTD3 gating, DPM=0x02); repo has 610.43.03 branch jump that can silently undo power tuning + Plasma 6.7 breaks custom KCMs. Level-0 of the safe-update ladder (see LUMINOS_DECISIONS.md). [CHANGE: claude-code \| 2026-07-21] |
 
 ---
 
@@ -232,6 +331,8 @@ luminos-brain safe "<action>"
 | `scripts/luminos-60hz` / `luminos-120hz` | Direct Hz switch |
 | `scripts/luminos-gpu-launch` | Single GPU launcher: styled QML picker, wakes NVIDIA PCI gate inline, routes NVIDIA via dgpu-exec gate (DECISION 25) |
 | `scripts/luminos-train-mode` | ML training max-perf toggle: nvidia-powerd Dynamic Boost (55→88W) + 100% fan pin w/ keep-alive; `on [pgrep-pattern]`/`off`/`status` (BUG-069 interim) |
+| `scripts/luminos-wine-uninstall` | Wine uninstaller — **hybrid: run the app's own uninstaller, then sweep by location.** Scans a prefix's Program Files for real apps; on pick it (1) finds & runs the app's own `uninstall*.exe`/`unins0*.exe` if present (the proper Windows path — `wine uninstaller` dialog was unreliable because the .exe is often a ghost, e.g. WinRAR's is gone), then (2) sweeps leftovers: Program Files[/(x86)], AppData Roaming+Local, Start Menu .lnk (user + ProgramData), the Wine-generated `~/.local/share/applications/wine/Programs/*` launcher [the icon the app's own uninstaller never cleans], and the registry Uninstall key. Shows the exact path list + confirm before sweeping. MetaTrader 5 hard-excluded (filtered from menu AND guarded at selection). `--list [prefix]` = headless candidate dump. App-menu entry: `luminos-wine-uninstall.desktop`. [CHANGE: claude-code | 2026-07-05] |
+| `scripts/luminos-verify` | Post-upgrade health check (DECISION 26 L2). 5 sections: Go daemons · KCM plugins · dGPU gating (sysfs only, never wakes it) · fan/thermal · **[5] MCP tooling**. `--mcp` runs section 5 alone (wired to the SessionStart hook); `--quiet` prints only the PASS/FAIL line. Section [5] does a real MCP `initialize` handshake and hard-fails on duplicate registration, Arch rolling python, non-pyenv interpreter, editable install, missing binary, or no valid result. [CHANGE: claude-code \| 2026-07-25] |
 | `scripts/luminos-train-ram` | ML training RAM-headroom toggle (CPU-side companion to train-mode): runtime swapfile `/swapfile.train` at low prio (NOT in fstab) + `vm.swappiness` 60→10 + optional memory-cgroup via `run`; `on`/`off`/`status`/`run -- <cmd>`. **Fully reverts on `off` — nothing permanent (no /etc, no fstab, no sysctl.d).** Fixes zram-only OOM during training (BUG-070). |
 
 ### Archive (DO NOT RESTORE)
@@ -322,6 +423,12 @@ Task: [what was asked]" && git push origin main
 
 ## 14. Open Tasks
 
+00. **BUG-086 — URGENT, user action required.** A live OpenRouter API key (`sk-or-98117e…`) sits in
+    `.claude/settings1.json`, which is **tracked by git and already pushed to `origin/main`** on
+    `github.com/vrapatel2002/luminos-os`. **Rotate the key at openrouter.ai first** — history
+    rewriting is pointless while the credential is still valid. Then delete the file (it is a dead
+    config that also re-adds the banned OpenRouter routing), and add `.claude/settings*.json` to
+    `.gitignore`. Purging history needs `git filter-repo` + a force-push: user's decision only.
 0a. Sentinel fine-tune: build training dataset (sentinel_*.jsonl, same pattern as nexus_*.jsonl), fine-tune MobileLLM-R1-140M, re-quantize INT8, THEN create `src/npu/npu_daemon.py` + `luminos-npu.service` (blocked 2026-06-10 by luminos-brain safe NO).
 0c. **BUG-069**: fix luminos-power setGPUTGP — `nvidia-smi -pl` is a no-op on mobile (exit 0 despite "not supported"); TGP logs since 2026-06-03 were fiction. Use nvidia-powerd lifecycle + read-back verification. Interim: `scripts/luminos-train-mode` wraps the working mechanism (nvidia-powerd + fan pin) for training runs.
 0b. Fix `luminos-brain safe` to output the actual REASON for a block — currently returns unrelated canned incident lines (e.g. KWin fullscreen crash note when asked about an NPU file), making NO decisions unreviewable.
@@ -366,3 +473,7 @@ REPLY TO MANAGEMENT:
   - Luminos Notes updated: [yes/no]
   - Ready for: [what comes next]
 ```
+
+**Also required on EVERY response (see §0):** this reply started with its `Response N`
+counter line, and `HANDOFF.md` was overwritten in place with the current goal/aim/state
+(one file only — never a second handoff).
