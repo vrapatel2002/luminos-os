@@ -1,5 +1,37 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-07-25 — Response 8
+Last updated: 2026-07-25 — Response 9
+
+## FIRST ACTION IN A NEW CHAT — settle the one open question (hook liveness)
+Everything else in thread 4 is done and verified. **One thing could not be tested from the session
+that fixed it**, because it can only be answered by a *fresh* session. Do this before anything else:
+
+```bash
+~/luminos-os/scripts/luminos-verify --mcp
+```
+
+Expected today: `PASS — 1 warning(s), 0 failures`. Read that one warning:
+
+| What you see | What it means | What to do |
+|---|---|---|
+| The warning is **gone** (`0 warning(s)`) | User-scope hooks **do fire inside Cowork**. `SessionStart` ran and wrote to `~/.luminos-hooks.log`. | Nothing. Close the question in BUG-087 and drop the "unproven" caveat from AGENTS.md §6 and DECISION 34. |
+| `hooks are configured but have NEVER run — no /home/shawn/.luminos-hooks.log` | Cowork **does not execute hooks at all**. The graph will never refresh by itself in this host. | Build the fallback: a **systemd path unit** (below). |
+| `hook(s) PostToolUse … configured but never observed running` (SessionStart present, PostToolUse absent) | SessionStart fires, PostToolUse does not. Partial. | Same fallback — the graph is the part that needs freshness. |
+
+**Why this test is trustworthy:** `~/.luminos-hooks.log` was deliberately **cleared** at the end of
+Response 8, so any line in it now was written by *this* session. The log is appended to by
+`scripts/luminos-hook-session-check` (SessionStart) and `scripts/luminos-hook-crg-update`
+(PostToolUse); both write their trace line *before* their gate, so a line appears even when the
+hook correctly no-ops outside a repo.
+
+**Do NOT try to short-circuit this with `claude -p`.** Hooks do not run in headless mode at all —
+this was controlled for across `--setting-sources` unset / `user` / `user,project` and fired in
+none of them. A negative from `-p` proves nothing.
+
+**Fallback if hooks are dead here:** a systemd **path** unit (`--user`) watching
+`/home/shawn/luminos-os` and running
+`~/.code-review-graph-venv/bin/code-review-graph update --skip-flows --repo /home/shawn/luminos-os`.
+An update takes ~1.1 s. Use a path unit, not a timer, so it stays idle when nothing changes.
+Pattern to copy: `systemd/luminos-theme-sync.path` + `.service` already in the tree (untracked).
 
 ## READ THIS FIRST — where MCP config actually lives (BUG-087)
 **Claude Code reads `~/.claude/settings.json` (USER scope) — not the repo's `.mcp.json`.**
@@ -31,9 +63,8 @@ Four threads:
 
 ## Aim right now
 Thread 4 is **done and verified across all three MCP clients**. One open question, deliberately not
-claimed as solved: whether a *user-scope hook* actually fires inside Cowork. Hooks do not run under
-`claude -p` at all, so it cannot be tested headlessly — `~/.luminos-hooks.log` will answer it on the
-next real session, and `luminos-verify` warns until it does.
+claimed as solved: whether a *user-scope hook* actually fires inside Cowork. See **FIRST ACTION IN A
+NEW CHAT** at the top — that is the next thing to do, and it takes one command.
 Thread 1 done. Thread 2 awaiting a yes/no on the `MemoryMax` drop-in. Thread 3: the hardware
 constraint has been explained to the user (Response 3) — **dGPU VRAM cannot be made into general 24/7
 system memory on this box**, and trying would destroy the true-0W idle work. Awaiting their direction;
