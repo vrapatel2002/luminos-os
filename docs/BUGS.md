@@ -1,11 +1,12 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-07-25 (BUG-085 FIXED — MCP tooling silently rotted: hooks never ran, mempalace registered twice, crg on Arch's rolling python; now pinned + verified by `luminos-verify --mcp`. BUG-086 OPEN/URGENT — OpenRouter API key committed to git and pushed to GitHub. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; cleared by hand, durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-07-25 (BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted: hooks never ran, mempalace registered twice, crg on Arch's rolling python; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; cleared by hand, durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
 
 ### BUG-086 — Live OpenRouter API key committed to git AND pushed to GitHub
 <!-- [CHANGE: claude-code | 2026-07-25] -->
-- Status: **OPEN — URGENT, needs user action (key rotation). Nothing done automatically: revoking a credential and rewriting published history are both the user's call.**
+- Status: **CLOSED — WONTFIX (accepted by user, 2026-07-25).** User: *"fuck the OpenRouter thing its dropped deal"* — the account/arrangement is dead, so the key has no value to protect and no rotation is being done. **No further action; do not re-raise this.** The file stays as-is unless the user says otherwise.
+  - Kept on record only because the *mechanism* is reusable knowledge (see "How it got there" below): a force-add can put a secret past `.gitignore`, and `.gitignore` cannot untrack it afterwards. If a **live** credential is ever committed, that is a different bug and the order is: rotate first, then `git rm --cached`, then decide about history.
 - Severity: **CRITICAL** (credential disclosure)
 - Component: `.claude/settings1.json` — a stale leftover Claude Code settings file
 - Description: `.claude/settings1.json` is **tracked by git** and contains a live key in plaintext:
@@ -530,3 +531,25 @@ Each bug entry:
 - Fix Applied: Rewrote to native bash + kdialog.
 - Date Found: 2026-04-26
 - Date Fixed: 2026-04-26
+
+### BUG-087 — MCP tooling reached only one of three clients; hooks were dead in Cowork
+<!-- [CHANGE: claude-code | 2026-07-25] -->
+- Status: **FIXED** (follow-on to BUG-085)
+- Severity: HIGH (tools silently unavailable / silently stale)
+- Components: `~/.claude/settings.json`, `~/.config/Claude/claude_desktop_config.json`, `~/.config/Antigravity/User/mcp.json`, `.mcp.json`, `.claude/settings.json`, `scripts/luminos-verify`, `scripts/luminos-hook-*`
+- Trigger: user asked whether Claude Desktop / Antigravity / the CLI could all use MemPalace and code-review-graph, then challenged how the tools were being "used" at all in a Desktop-hosted session.
+- Findings:
+  1. **Claude Desktop had no `mcpServers` key at all**; Antigravity had only `hive-brain`. Neither could use either tool. Three stale 0-byte `~/.gemini/*/mcp_config.json` files were unrelated leftovers.
+  2. **Cowork launches Claude Code with `--setting-sources=user`.** The repo's `.mcp.json` and `.claude/settings.json` are therefore never read there. BUG-085's fix had put both the registration and the hooks in project scope, so in Cowork the registration was absent and **both hooks were dead**. Proven, not inferred: `graph.db` mtime stayed at 19:00:49 across an editing session whose last edit was 19:28:30.
+  3. `~/.claude/settings.json` was a **third** `mcpServers` location the BUG-085 health check never looked at, and it pinned `ANTHROPIC_BASE_URL` to a dropped OpenRouter account — harmless in Cowork (OAuth token) but would route plain `claude` in a terminal to a dead endpoint.
+  4. **`code-review-graph` fails silently when it cannot find a repo.** From a non-repo cwd it returns `status: ok` with `Files: 0` rather than erroring — so a GUI client with an arbitrary cwd would answer every query with "nothing found".
+- Fix:
+  - Registration and hooks moved to **user scope**, the only scope loaded by both the CLI and Cowork. `.mcp.json` emptied with a comment explaining why, so nobody re-adds it and recreates the duplicate-scope trap.
+  - Both tools registered in Claude Desktop and Antigravity, pointing at the same pinned venvs. `--repo` explicit for GUI clients, omitted for Claude Code so it follows the current repo.
+  - Hooks became self-gating wrappers (`scripts/luminos-hook-*`) so user scope does not fire them in unrelated projects.
+  - Dead OpenRouter `env` block removed.
+  - `luminos-verify --mcp` widened from 2 config files to 5, and now checks: per-client coverage, cross-client binary agreement, GUI `--repo`, hooks-in-user-scope, hooks-not-double-defined, hook commands executable, and **hook liveness**.
+- Verification: all three client configs spawned exactly as that client would spawn them, from a GUI-like `cwd=/` — mempalace v3.3.1 / 29 tools / 15 search hits and code-review-graph v2.14.7 / 24 tools / 3161 nodes, in every client. Eight negative tests (duplicate scope, missing client registration, divergent binary, missing `--repo`, hooks absent from user scope, hooks in both scopes, non-executable hook command, corrupted client JSON) each produced the expected failure and the check returned to PASS after restore.
+- **Open caveat — deliberately not overclaimed:** whether a *user-scope* hook actually fires inside Cowork is **still unproven**. Hooks do not run under `claude -p` at all (tested with `--setting-sources` unset, `user`, and `user,project`), so it cannot be settled headlessly. The hook wrappers now append to `~/.luminos-hooks.log` and `luminos-verify` warns while that log is missing, so **the next real session answers it**. If the warning persists after a fresh Cowork session, user-scope hooks do not fire there either and the graph must be refreshed another way (e.g. a systemd path unit).
+- Gotcha for future work: two concurrent MemPalace servers against the one 2.0 GB store are fine for reads (tested: both handshook, concurrent searches in 0.6s, ~290 MB RSS each). Writes go through Chroma's embedded SQLite in `journal_mode=delete` with a 5 s busy timeout, so simultaneous heavy ingest from several clients can raise `database is locked` — contention, not corruption. Ingest paths take a real `fcntl.flock`.
+- Correction to BUG-085: the "5,951 stale locks" listed there were harmless zero-byte litter, not stuck locks — `flock` releases on process death. That entry overstated the fault count as six; five were real.

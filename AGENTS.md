@@ -170,20 +170,44 @@ Custom Arch Linux on ASUS ROG G14 GA403UU. Privacy-first, AI-native Windows repl
 
 Both tools are **targeted query engines, not full context dumps**. A Chrome task returns Chrome results. Cost: ~300–800 tokens (code-review-graph), ~1,000–2,500 tokens (MemPalace). Worth it every time.
 
-**Registration is `~/luminos-os/.mcp.json` and NOTHING ELSE.** It is version-controlled and travels
-with the repo. Never add an MCP server to `~/.claude.json` — that file's local scope *silently
-shadows* `.mcp.json`, so you get whichever entry wins precedence rather than the one you edited.
-This exact trap ran MemPalace v3.1.0 for weeks while this section documented v3.3.1 (BUG-085).
+### Where servers are registered — read this before touching any config
+# [CHANGE: claude-code | 2026-07-25]
+
+There are **three separate MCP clients** on this box, and they do **not** share config:
+
+| Client | Config file | Notes |
+|---|---|---|
+| Claude Code (CLI **and** Cowork) | `~/.claude/settings.json` — **user scope** | authoritative |
+| Claude Desktop | `~/.config/Claude/claude_desktop_config.json` | own app, own config |
+| Antigravity | `~/.config/Antigravity/User/mcp.json` | VS Code schema: `servers`, not `mcpServers` |
+
+**For Claude Code, user scope is the only correct place.** Not `.mcp.json`, not `~/.claude.json`.
+Cowork / Claude Desktop launches Claude Code with **`--setting-sources=user`**, so the repo's
+`.mcp.json` and `.claude/settings.json` are **never loaded there** — a project-scoped registration
+works from a terminal and is invisible in Cowork, with no warning either way. `.mcp.json` is now
+deliberately empty and says so.
+
+Claude Code's scopes **stack**, so the same server name in two of them means you silently get
+whichever wins precedence. That trap ran MemPalace v3.1.0 for weeks while this section documented
+v3.3.1 (BUG-085). A separate registration in Desktop/Antigravity is **not** a duplicate — those are
+independent apps — but every client must point at the **same pinned binary**, or two versions end up
+fighting over one shared store.
+
+**`--repo` rule for code-review-graph:** omit it for Claude Code (cwd is the project, so it follows
+whatever repo you are in); **require** it for Desktop and Antigravity, whose cwd is arbitrary.
+Proven 2026-07-25: from a non-repo cwd the server does **not** error — it returns `status: ok` with
+`Files: 0`. A silent empty graph reads as "this function has no callers" rather than "misconfigured".
 
 **Health check — run this first whenever either tool "stops working":**
 ```bash
-luminos-verify --mcp        # real MCP handshake per server; hard-fails on the 6 known rot modes
+luminos-verify --mcp   # handshakes every server in every client config; checks duplicates,
+                       # cross-client binary agreement, --repo, hooks, and hook LIVENESS
 ```
 
 ### code-review-graph
 259 files, 3161 nodes, 21658 edges — AST-level map of every function, import, call. 24 MCP tools.
-**Server:** `/home/shawn/.local/bin/code-review-graph serve --repo /home/shawn/luminos-os`
-**Interpreter:** symlink → `~/.code-review-graph-venv` (pyenv 3.12.13, pinned `==2.3.1`).
+**Server:** `~/.code-review-graph-venv/bin/code-review-graph serve` (add `--repo <root>` for GUI clients).
+**Interpreter:** `~/.code-review-graph-venv` (pyenv 3.12.13, pinned `==2.3.1`).
 Installed **without extras** — the `all` extra pulls `ollama`, which Rule 9 bans.
 
 Query target file before any edit. After new files or import changes: `code-review-graph update --repo ~/luminos-os`. After major refactor: `code-review-graph build --repo ~/luminos-os`.
@@ -202,6 +226,24 @@ rolling python (hnswlib built for 3.14). It no longer reproduces — but MCP too
 python: the next minor bump makes it vanish, and every unrelated `pip install --user` mutates the
 environment these tools resolve against. One tool, one venv, pyenv 3.12.13. Never `-e`/editable —
 an editable install means a `git pull` in the source checkout silently changes the live server.
+
+### Hooks
+# [CHANGE: claude-code | 2026-07-25]
+Hooks live in **`~/.claude/settings.json` (user scope) only** — same `--setting-sources=user` reason
+as above. Do not put them back in `.claude/settings.json`: in the CLI both scopes load, so they
+would fire **twice** per event.
+
+Because user scope applies to *every* project, the hooks call self-gating wrappers
+(`scripts/luminos-hook-crg-update`, `scripts/luminos-hook-session-check`) that exit 0 unless the
+current repo opts in (has `.code-review-graph/` or `scripts/luminos-verify`).
+
+Two things that make hooks fail *silently*, both already paid for:
+- Hooks run with `PATH=/usr/local/bin:/usr/bin`. `~/.local/bin` is added by `~/.zshrc`, which
+  non-interactive shells never source. **Always use absolute paths.**
+- **Hooks do not run at all under `claude -p`** (verified across every `--setting-sources` value),
+  so headless runs can never prove a hook works. That is why both wrappers append to
+  `~/.luminos-hooks.log`, and `luminos-verify` warns when a configured hook has never been observed
+  running. Configured ≠ running; only the trace distinguishes them.
 
 | Tool | When |
 |------|------|

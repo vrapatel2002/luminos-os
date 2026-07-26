@@ -1,21 +1,4 @@
 {
-  "mcpServers": {
-    "code-review-graph": {
-      "command": "/home/shawn/.local/bin/code-review-graph",
-      "args": [
-        "serve",
-        "--repo",
-        "/home/shawn/luminos-os"
-      ],
-      "type": "stdio"
-    },
-    "mempalace": {
-      "command": "/home/shawn/.mempalace-venv/bin/python3",
-      "args": [
-        "-m",
-        "mempalace.mcp_server"
-      ],
-      "type": "stdio"
-    }
-  }
+  "_comment": "[CHANGE: claude-code | 2026-07-25] Intentionally EMPTY. mempalace and code-review-graph moved to user scope (~/.claude/settings.json) because Cowork / Claude Desktop launches Claude Code with `--setting-sources=user` and never reads this file -- so a project-scoped registration only works from a terminal. User scope is loaded by both. Do NOT re-add servers here: this file and user scope would then both define the same names, which is the exact duplicate-registration fault behind BUG-085 (whichever scope wins is invisible, so the version you think is running may not be the one answering). `luminos-verify --mcp` fails if any server name is defined in more than one Claude Code scope.",
+  "mcpServers": {}
 }

@@ -113,35 +113,126 @@ say "\n[5] MCP tooling (real initialize handshake — not just 'is the file ther
 MCP_OUT=$(/usr/bin/python3 - <<'PYEOF' 2>&1
 import json, os, subprocess, sys, glob
 
-CJ   = "/home/shawn/.claude.json"
-MCPJ = "/home/shawn/luminos-os/.mcp.json"
+HOME = "/home/shawn"
+REPO = "/home/shawn/luminos-os"
 out  = []
 def emit(lvl, msg): out.append(f"{lvl}:{msg}")
 
-try:
-    servers = json.load(open(MCPJ))["mcpServers"]
-except Exception as e:
-    emit("BAD", f"cannot read {MCPJ}: {e}")
-    servers = {}
+# The tools that must be reachable from every client.
+REQUIRED = {"mempalace", "code-review-graph"}
 
-# --- duplicate registration check (the precedence trap) ---
-dupes = set()
-try:
-    cj = json.load(open(CJ))
-    other = set(cj.get("mcpServers", {}))
-    other |= set(cj.get("projects", {}).get("/home/shawn/luminos-os", {}).get("mcpServers", {}))
-    dupes = other & set(servers)
-except Exception as e:
-    emit("WARN", f"cannot read {CJ}: {e}")
+# Every place an MCP server can be registered on this box.
+#   kind "cc"  = a Claude Code settings scope. These STACK, so the same name in
+#                two of them is the precedence trap that caused BUG-085.
+#   kind "gui" = a standalone app with its own independent config. A separate
+#                registration here is expected and correct, NOT a duplicate --
+#                but it must point at the SAME pinned binary, or the clients
+#                silently run different versions against one shared store.
+SOURCES = [
+    ("cc",  "Claude Code / user",     f"{HOME}/.claude/settings.json",                  ["mcpServers"]),
+    ("cc",  "Claude Code / local",    f"{HOME}/.claude.json",                           ["mcpServers"]),
+    ("cc",  "Claude Code / project",  f"{REPO}/.mcp.json",                              ["mcpServers"]),
+    ("gui", "Claude Desktop",         f"{HOME}/.config/Claude/claude_desktop_config.json", ["mcpServers"]),
+    ("gui", "Antigravity",            f"{HOME}/.config/Antigravity/User/mcp.json",      ["servers"]),
+]
+
+def load(path, keys):
+    """Return {name: cfg} from the first matching key, or None if unreadable."""
+    if not os.path.exists(path):
+        return None
+    try:
+        d = json.load(open(path))
+    except Exception as e:
+        emit("BAD", f"{path}: invalid JSON ({e}) — this client silently loses ALL its servers")
+        return {}
+    found = {}
+    for k in keys:
+        found.update(d.get(k, {}) or {})
+    # ~/.claude.json also nests per-project scopes
+    found.update(d.get("projects", {}).get(REPO, {}).get("mcpServers", {}) or {})
+    return found
+
+registry = {}   # (kind, label) -> {name: cfg}
+for kind, label, path, keys in SOURCES:
+    got = load(path, keys)
+    if got is None:
+        emit("WARN", f"{label}: config absent ({path}) — client not configured on this box")
+        continue
+    registry[(kind, label)] = got
+
+# --- 1. duplicate registration WITHIN Claude Code's stacked scopes ---
+seen = {}
+for (kind, label), servers in registry.items():
+    if kind != "cc":
+        continue
+    for name in servers:
+        seen.setdefault(name, []).append(label)
+dupes = {n: ls for n, ls in seen.items() if len(ls) > 1}
 if dupes:
-    emit("BAD", "DUPLICATE MCP registration (~/.claude.json shadows .mcp.json): "
-                + ", ".join(sorted(dupes)) + " — you get whichever wins precedence, not what you intended")
+    for n, ls in sorted(dupes.items()):
+        emit("BAD", f"DUPLICATE Claude Code registration for '{n}' in {len(ls)} scopes ({', '.join(ls)})"
+                    f" — scopes stack, so you silently get whichever wins precedence, not what you intended")
 else:
-    emit("OK", "no duplicate MCP registrations (.mcp.json is authoritative)")
+    emit("OK", f"no duplicate registrations across Claude Code's {sum(1 for k,_ in registry if k=='cc')} scopes")
 
-# --- per-server: interpreter pinned? handshake works? ---
-for name, cfg in sorted(servers.items()):
-    cmd = cfg.get("command", "")
+# --- 2. coverage: is each required tool reachable from each CLIENT? ---
+# Claude Code's three scopes are ONE client -- they stack, so a tool defined in
+# any one of them is reachable. Only the GUI apps are independent clients.
+clients = {}
+for (kind, label), servers in registry.items():
+    key = "Claude Code (all scopes)" if kind == "cc" else label
+    clients.setdefault(key, set()).update(servers)
+for label, names in sorted(clients.items()):
+    missing = REQUIRED - names
+    if missing:
+        emit("BAD", f"{label}: cannot use {', '.join(sorted(missing))} — not registered in any of its configs")
+    else:
+        emit("OK", f"{label}: both tools registered")
+
+# --- 3. do all clients point at the SAME binary? ---
+# Divergence here is exactly how one client ran v3.1.0 while another ran v3.3.1
+# against a single shared store.
+by_tool = {}
+for (kind, label), servers in registry.items():
+    for name, cfg in servers.items():
+        if name in REQUIRED:
+            by_tool.setdefault(name, {}).setdefault(cfg.get("command", ""), []).append(label)
+for name, cmds in sorted(by_tool.items()):
+    if len(cmds) > 1:
+        detail = "; ".join(f"{c or '<none>'} <- {', '.join(ls)}" for c, ls in cmds.items())
+        emit("BAD", f"'{name}' resolves to {len(cmds)} DIFFERENT binaries across clients: {detail}"
+                    f" — they share one store, so versions will fight")
+    else:
+        emit("OK", f"'{name}': all {len(next(iter(cmds.values())))} client(s) use one binary")
+
+# --- 4. GUI clients must pass --repo to code-review-graph ---
+# Proven 2026-07-25: with a cwd that is not a repo, the server does NOT error --
+# it returns status:ok with "Files: 0". A silent empty graph looks like "the code
+# has no callers" rather than "the tool is misconfigured". GUI apps have an
+# arbitrary cwd, so the repo must be explicit there.
+for (kind, label), servers in sorted(registry.items(), key=lambda x: x[0][1]):
+    if kind != "gui":
+        continue
+    cfg = servers.get("code-review-graph")
+    if cfg and "--repo" not in cfg.get("args", []):
+        emit("BAD", f"{label}: code-review-graph has no --repo. GUI cwd is arbitrary, and with no "
+                    f"repo the server returns an EMPTY graph with status:ok instead of failing")
+
+# --- 5. per-binary checks (deduped: same binary registered 3x is checked once) ---
+uniq = {}
+for (kind, label), servers in registry.items():
+    for name, cfg in servers.items():
+        if name not in REQUIRED:
+            continue
+        uniq.setdefault((cfg.get("command", ""), tuple(cfg.get("args", []))), name)
+
+for (cmd, args), name in sorted(uniq.items(), key=lambda x: (x[1], x[0][1])):
+    # A tool can legitimately have >1 invocation variant (e.g. code-review-graph
+    # runs bare for Claude Code so it follows the current repo, and with an
+    # explicit --repo for GUI clients). Label each variant so two near-identical
+    # result lines are actually distinguishable.
+    variant = " ".join(args[1:]) if len(args) > 1 else "auto-detect repo"
+    name = f"{name} [{variant}]" if len(uniq) > len(set(n for _, n in uniq.items())) else name
     if not (os.path.exists(cmd) and os.access(cmd, os.X_OK)):
         emit("BAD", f"{name}: command missing or not executable: {cmd}")
         continue
@@ -210,7 +301,7 @@ for name, cfg in sorted(servers.items()):
                       "params": {"protocolVersion": "2024-11-05", "capabilities": {},
                                  "clientInfo": {"name": "luminos-verify", "version": "1"}}}) + "\n"
     try:
-        p = subprocess.run([cmd] + cfg.get("args", []), input=req.encode(),
+        p = subprocess.run([cmd] + list(args), input=req.encode(), cwd="/",
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=90)
         info = None
         for line in p.stdout.splitlines():
@@ -229,6 +320,77 @@ for name, cfg in sorted(servers.items()):
         emit("BAD", f"{name}: handshake TIMED OUT (>90s)")
     except Exception as e:
         emit("BAD", f"{name}: handshake failed: {e}")
+
+# --- 6. hooks must live in USER scope, not project scope ---
+# Cowork / Claude Desktop launch Claude Code with `--setting-sources=user`, so a
+# hook in the project's .claude/settings.json is NEVER loaded there. It does not
+# warn; it just never runs. That is how the graph-update hook sat dead through a
+# whole editing session on 2026-07-25 while looking perfectly configured.
+USER_SET = f"{HOME}/.claude/settings.json"
+PROJ_SET = f"{REPO}/.claude/settings.json"
+
+def hooks_of(path):
+    try:
+        return json.load(open(path)).get("hooks", {}) or {}
+    except Exception:
+        return {}
+
+uh, ph = hooks_of(USER_SET), hooks_of(PROJ_SET)
+if not uh:
+    emit("BAD", f"no hooks in user scope ({USER_SET}) — Cowork loads ONLY user scope, "
+                f"so hooks defined anywhere else never fire there")
+else:
+    emit("OK", f"hooks present in user scope ({', '.join(sorted(uh))}) — the only scope Cowork loads")
+
+overlap = set(uh) & set(ph)
+if overlap:
+    emit("BAD", f"hooks defined in BOTH user and project scope ({', '.join(sorted(overlap))}) — "
+                f"in the CLI both scopes load, so these run TWICE per event")
+
+# every hook command must actually exist and be executable
+for scope, hk in (("user", uh), ("project", ph)):
+    for event, entries in hk.items():
+        for entry in entries:
+            for h in entry.get("hooks", []):
+                c = (h.get("command") or "").split()[0]
+                if not c:
+                    continue
+                if not (os.path.exists(c) and os.access(c, os.X_OK)):
+                    emit("BAD", f"{scope} hook {event}: command not executable: {c} — "
+                                f"hooks run with PATH=/usr/local/bin:/usr/bin, so this fails silently")
+
+# --- 7. hook LIVENESS: configured is not the same as running ---
+# Every fault in BUG-085 looked correctly configured. The only way to tell
+# "configured" from "actually executing" is a trace the hook itself writes.
+# Note: hooks do NOT run under `claude -p`, so this cannot be proven headlessly;
+# the log is the evidence, gathered from real sessions.
+TRACE = f"{HOME}/.luminos-hooks.log"
+if not uh:
+    pass  # already reported as BAD above
+elif not os.path.exists(TRACE):
+    emit("WARN", f"hooks are configured but have NEVER run — no {TRACE}. "
+                 f"Config alone cannot prove a hook fires; open a session and re-check")
+else:
+    import time as _t
+    seen_ev = set()
+    newest = 0.0
+    try:
+        for ln in open(TRACE):
+            parts = ln.split()
+            if len(parts) >= 2:
+                seen_ev.add(parts[1])
+        newest = os.path.getmtime(TRACE)
+    except Exception:
+        pass
+    age_d = (_t.time() - newest) / 86400.0
+    never = set(uh) - seen_ev
+    if never:
+        emit("WARN", f"hook(s) {', '.join(sorted(never))} configured but never observed running "
+                     f"(no trace line) — they may be silently dead in this host")
+    elif age_d > 7:
+        emit("WARN", f"hooks last ran {age_d:.0f} days ago — may have stopped firing")
+    else:
+        emit("OK", f"hooks observed running ({', '.join(sorted(seen_ev))}), last {age_d*24:.1f}h ago")
 
 # --- MemPalace stale lock reaping ---
 locks = "/home/shawn/.mempalace/locks"

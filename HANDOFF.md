@@ -1,23 +1,18 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-07-25 — Response 3
+Last updated: 2026-07-25 — Response 8
 
-## READ THIS FIRST — unresolved credential leak (BUG-086)
-A **live OpenRouter API key** (`sk-or-98117e…`) sits in `.claude/settings1.json`, which is **tracked
-by git and already pushed** to `origin/main` on `github.com/vrapatel2002/luminos-os`. Verified with
-`git cat-file -e origin/main:.claude/settings1.json` and by reading the key back from
-`git show origin/main:.claude/settings1.json`. **Nothing was done about it automatically** — revoking
-a credential and rewriting published history are the user's calls. **Rotate the key first**; history
-surgery is pointless while it is still valid. The file is a dead config anyway (it duplicates
-`settings.json` and re-adds the OpenRouter routing that AGENTS.md §7 says was removed 2026-05-27 for
-Signal 5 TRAP crashes).
+## READ THIS FIRST — where MCP config actually lives (BUG-087)
+**Claude Code reads `~/.claude/settings.json` (USER scope) — not the repo's `.mcp.json`.**
+Cowork / Claude Desktop launches Claude Code with `--setting-sources=user`, so anything in
+`~/luminos-os/.mcp.json` or `~/luminos-os/.claude/settings.json` is **never loaded there**. It still
+works from a terminal, which is why this went unnoticed: the config looks right and simply never
+runs. `.mcp.json` is now intentionally empty and says so — do not re-add servers to it.
+Claude Desktop and Antigravity have their own configs and their own registrations; that is correct,
+not duplication. The invariant is **one binary**, not one file. Run `luminos-verify --mcp`.
 
-**`.gitignore` did not fail — it was overridden.** Line 11 has covered `.claude/` since commit
-`b3919feb` (2026-03-25); the file was still added in `f1415d5e` (2026-04-24), a month later, i.e.
-**force-added** (`git add -f`) with the key already in it. Consequence: **re-adding a `.gitignore`
-rule fixes nothing** — `.gitignore` only affects *untracked* paths, and git keeps tracking anything
-already tracked. It needs an explicit `git rm --cached .claude/settings1.json`. And that still only
-stops future commits; the blob is in every tree from `f1415d5e` onward and is in `origin/main`, so
-**rotation is the only thing that actually revokes it.**
+**BUG-086 (OpenRouter key) is CLOSED/WONTFIX** — user dropped that account on 2026-07-25. Do not
+re-raise rotation. The second dead OpenRouter key that was pinning `ANTHROPIC_BASE_URL` in user
+scope has been removed, because it would have broken plain `claude` in a terminal.
 
 ## Goal (the durable end objective)
 Four threads:
@@ -29,12 +24,16 @@ Four threads:
    the CPU and dGPU, as the dGPU will be mostly not used, so it's CPU/iGPU only regardless of what
    we are doing, HIVE or not."* i.e. always-on and general-purpose, NOT a HIVE-session-scoped thing.
    NOT STARTED — there is a hard hardware constraint to resolve with the user first (below).
-4. **Stop the agent MCP tooling from silently rotting.** DONE (BUG-085 / DECISION 33) — see below.
+4. **Stop the agent MCP tooling from silently rotting, everywhere it runs.** DONE (BUG-085 +
+   BUG-087 / DECISIONS 33 & 34) — see below. Now reaches Claude Code, Claude Desktop and Antigravity.
    The user's ask was *"we have mempalace and code review graph but we add some new things it breaks
    its environment and it stops working — how to solve it once and for all."*
 
 ## Aim right now
-Thread 4 is **done and verified**; the only follow-up is BUG-086 (key rotation, user action).
+Thread 4 is **done and verified across all three MCP clients**. One open question, deliberately not
+claimed as solved: whether a *user-scope hook* actually fires inside Cowork. Hooks do not run under
+`claude -p` at all, so it cannot be tested headlessly — `~/.luminos-hooks.log` will answer it on the
+next real session, and `luminos-verify` warns until it does.
 Thread 1 done. Thread 2 awaiting a yes/no on the `MemoryMax` drop-in. Thread 3: the hardware
 constraint has been explained to the user (Response 3) — **dGPU VRAM cannot be made into general 24/7
 system memory on this box**, and trying would destroy the true-0W idle work. Awaiting their direction;

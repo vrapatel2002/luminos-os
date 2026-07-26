@@ -1,0 +1,49 @@
+#!/bin/sh
+# [CHANGE: claude-code | 2026-07-25]
+# PostToolUse hook: refresh the code-review-graph for the repo being edited.
+#
+# WHY THIS SCRIPT EXISTS INSTEAD OF A BARE COMMAND IN settings.json
+#   The hook now lives in USER scope (~/.claude/settings.json) rather than
+#   project scope, because Cowork/Claude Desktop launches Claude Code with
+#   `--setting-sources=user` and therefore NEVER loads the project's
+#   .claude/settings.json. A project-scoped hook is silently dead there.
+#   But a user-scoped hook fires in EVERY project, so it has to gate itself.
+#
+# GATE: do nothing unless the current repo already has a .code-review-graph
+#   directory. That makes the hook opt-in per repo: it only maintains graphs
+#   that someone deliberately created.
+#
+# WHY --repo IS PASSED EXPLICITLY
+#   `code-review-graph` auto-detects the repo from cwd, and when cwd is not a
+#   repo it does NOT error -- it happily reports "Files: 0" with status "ok".
+#   A silent empty graph is worse than a loud failure, so never rely on
+#   auto-detection from a hook whose cwd we do not control.
+#
+# Exits 0 on every path. A hook that fails loudly on unrelated projects would
+# train the user to ignore hook output, which is how the last breakage hid.
+
+set -u
+
+# Liveness trace. The whole BUG-085 family of faults was "configured correctly,
+# never actually ran, nobody noticed." Config inspection cannot distinguish those
+# two states, so every invocation leaves a dated line here and `luminos-verify`
+# reads it back. This is the only honest way to know a hook fires in a given host
+# (CLI vs Cowork), because hooks do not run at all under `claude -p`, so headless
+# testing cannot answer the question.
+TRACE=/home/shawn/.luminos-hooks.log
+printf '%s PostToolUse pid=%s cwd=%s\n' "$(date -Is)" "$$" "${CLAUDE_PROJECT_DIR:-$PWD}" >>"$TRACE" 2>/dev/null || true
+
+CRG=/home/shawn/.code-review-graph-venv/bin/code-review-graph
+[ -x "$CRG" ] || exit 0
+
+# Claude Code exports CLAUDE_PROJECT_DIR; fall back to cwd if it is absent.
+start_dir=${CLAUDE_PROJECT_DIR:-$PWD}
+[ -d "$start_dir" ] || exit 0
+
+root=$(git -C "$start_dir" rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -n "$root" ] || exit 0
+
+# The gate: only repos that already track a graph.
+[ -d "$root/.code-review-graph" ] || exit 0
+
+exec "$CRG" update --skip-flows --repo "$root" >/dev/null 2>&1

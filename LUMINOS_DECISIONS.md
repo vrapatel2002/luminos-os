@@ -1448,3 +1448,55 @@ handshake: MemPalace 29 tools, `mempalace_search("dGPU power gating RTD3")` → 
 BUG-085 (the six defects and the fix). BUG-086 (found during this work — a live OpenRouter API key
 is committed and pushed; unrelated cause, same root habit of `git add -A` sweeping in files that
 were never meant to be tracked).
+
+---
+
+## DECISION 34 — MCP config lives in the scope every host reads; hooks must prove they ran
+# [CHANGE: claude-code | 2026-07-25]
+
+### Context
+DECISION 33 said "`.mcp.json` is the ONLY registration." That was right about the *principle* (one
+authoritative place per client) and wrong about the *place*. Cowork / Claude Desktop launches Claude
+Code with `--setting-sources=user`, so project scope is never read there. The BUG-085 fix therefore
+worked from a terminal and was **completely inert** in the host the user actually spends time in —
+registration absent, both hooks dead — while every config file looked correct.
+
+### Decision
+1. **For Claude Code, user scope (`~/.claude/settings.json`) is authoritative** — registration *and*
+   hooks. `.mcp.json` is kept empty with a comment. Rationale: user scope is the intersection of
+   what the CLI and Cowork both load; project scope is the difference.
+2. **Other clients get their own registration** — Claude Desktop and Antigravity are separate apps,
+   not duplicates. The invariant is not "one file" but **"one binary"**: every client must point at
+   the same pinned venv. Divergence, not multiplicity, is what caused v3.1.0 and v3.3.1 to fight
+   over one store.
+3. **User-scope hooks must be self-gating.** User scope applies to every project, so the hook
+   commands are wrappers that exit 0 unless the current repo opts in.
+4. **`--repo` is mandatory for GUI clients** and deliberately omitted for Claude Code. A tool that
+   returns `status: ok` with an empty result set when misconfigured is worse than one that crashes.
+5. **Configured is not running. Hooks must leave a trace.** Both wrappers append to
+   `~/.luminos-hooks.log`; `luminos-verify` warns while a configured hook has never been observed.
+
+### Why 5 matters more than the rest
+Every fault in BUG-085 and BUG-087 shared one shape: **the config was correct and the thing never
+ran.** No amount of config inspection distinguishes those states — only evidence from execution
+does. This is also why hooks cannot be validated with `claude -p`: hooks do not run in headless
+mode at all (tested across every `--setting-sources` value), so the log is the only instrument.
+
+### Tradeoffs
+- User-scope config is **not version-controlled**. Mitigation: `luminos-verify` fails loudly if it
+  drifts, and the repo documents the expected contents. Accepted because a git-tracked file that is
+  never loaded is worse than an untracked one that is.
+- Three registrations mean three places to update. Accepted: cross-client binary agreement is
+  checked automatically, which is the property that actually matters.
+- Registering the tools in more clients invites concurrent access. Measured as safe for reads;
+  heavy simultaneous ingest can hit SQLite contention. Accepted, documented in BUG-087.
+
+### Rule 11 — conflicts documented
+- **Supersedes DECISION 33's "`.mcp.json` and nothing else."** The one-authoritative-place principle
+  stands; the location moves to user scope. DECISION 33 is otherwise intact.
+- **AGENTS.md §6** rewritten to match; it previously instructed agents to register in `.mcp.json`,
+  which would now silently fail in Cowork.
+
+### Related
+BUG-087 (findings, verification, and the still-open question of whether user-scope hooks fire in
+Cowork). BUG-085 (the original rot). DECISION 33 (pinning, which still holds).

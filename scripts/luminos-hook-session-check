@@ -1,0 +1,28 @@
+#!/bin/sh
+# [CHANGE: claude-code | 2026-07-25]
+# SessionStart hook: run the MCP health check, but only for this repo.
+#
+# Same reasoning as luminos-hook-crg-update: the hook lives in USER scope so it
+# survives Cowork's `--setting-sources=user`, which means it is invoked for
+# every project on the machine. `luminos-verify` is specific to Luminos OS, so
+# the script gates on the verifier actually being present in the current repo.
+#
+# Exits 0 unless the check itself fails, so unrelated projects stay silent.
+
+set -u
+
+# Liveness trace -- see the long note in luminos-hook-crg-update. Records that
+# this hook ran at all, which config inspection alone can never establish.
+TRACE=/home/shawn/.luminos-hooks.log
+printf '%s SessionStart pid=%s cwd=%s\n' "$(date -Is)" "$$" "${CLAUDE_PROJECT_DIR:-$PWD}" >>"$TRACE" 2>/dev/null || true
+
+start_dir=${CLAUDE_PROJECT_DIR:-$PWD}
+[ -d "$start_dir" ] || exit 0
+
+root=$(git -C "$start_dir" rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -n "$root" ] || exit 0
+
+VERIFY="$root/scripts/luminos-verify"
+[ -x "$VERIFY" ] || exit 0
+
+exec "$VERIFY" --mcp --quiet

@@ -1,29 +1,3 @@
 {
-  "_comment": "[CHANGE: claude-code | 2026-07-25] Hooks run under a NON-INTERACTIVE shell where PATH is only /usr/local/bin:/usr/bin. ~/.local/bin is added by ~/.zshrc, which such shells never source, so bare 'code-review-graph' resolved to nothing and BOTH hooks silently failed on every invocation. Always use absolute paths here. --repo is explicit because hook cwd is not guaranteed.",
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write|Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/shawn/.local/bin/code-review-graph update --skip-flows --repo /home/shawn/luminos-os",
-            "timeout": 30
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/shawn/luminos-os/scripts/luminos-verify --mcp --quiet",
-            "timeout": 60
-          }
-        ]
-      }
-    ]
-  }
+  "_comment": "[CHANGE: claude-code | 2026-07-25] The hooks that used to live here have MOVED to user scope (~/.claude/settings.json). Do not put them back. Reason: Cowork / Claude Desktop launches Claude Code with `--setting-sources=user`, so this file is never read there and the hooks were silently dead in every Cowork session -- confirmed by graph.db going untouched across a full editing session while the same hooks worked from a terminal. User scope is the only location loaded by BOTH the CLI and Cowork. The user-scope hooks call self-gating wrappers (scripts/luminos-hook-*) so they stay silent in unrelated projects. Keeping a second copy here would double-fire the graph update in the CLI, where both scopes load."
 }
