@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+# Luminos media library importer
+# [CHANGE: claude-code | 2026-07-28]
+#
+# Does the legitimate half of what Sonarr/Radarr do: takes a video file you
+# already have, renames it to Jellyfin's convention, and files it in the right
+# folder so Jellyfin's metadata scrapers can identify it.
+#
+# It does NOT search, index or download anything. You supply the file.
+#
+# The extra bit worth having: it probes the file against the codec profile of
+# the Philips 65PUL7973/F6 Roku TV and tells you BEFORE you commit the file
+# whether it will direct-play or force a transcode.
+#
+# Stdlib only - no venv, no pip, nothing to rot.
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+LIBRARY_ROOT = Path("/srv/media")
+FFPROBE = "/usr/lib/jellyfin-ffmpeg/ffprobe"
+
+# --- Roku playback profile -------------------------------------------------
+# Established empirically + from Roku's published spec. See docs/MEDIA_SERVER_PLAN.md
+VIDEO_OK = {"hevc", "h264", "vp9"}
+VIDEO_BAD = {"av1", "vc1", "mpeg4"}
+AUDIO_OK = {"aac", "mp3", "ac3", "eac3", "flac", "opus"}
+AUDIO_BAD = {"dts", "truehd", "dtshd", "mlp"}
+SUB_IMAGE = {"hdmv_pgs_subtitle", "dvd_subtitle", "dvdsub", "pgssub"}
+
+ILLEGAL = r'[<>:"/\\|?*\x00-\x1f]'
+
+
+def clean(name: str) -> str:
+    """Strip characters that break on NTFS/FAT - the drive will likely be NTFS."""
+    return re.sub(r"\s+", " ", re.sub(ILLEGAL, "", name)).strip().rstrip(".")
+
+
+def probe(path: Path) -> dict:
+    if not Path(FFPROBE).exists():
+        return {}
+    try:
+        out = subprocess.run(
+            [FFPROBE, "-v", "error", "-print_format", "json",
+             "-show_streams", "-show_format", str(path)],
+            capture_output=True, text=True, timeout=120, check=True).stdout
+        return json.loads(out)
+    except (subprocess.SubprocessError, json.JSONDecodeError) as e:
+        print(f"  ! probe failed: {e}")
+        return {}
+
+
+def check_roku(meta: dict) -> list:
+    """Return a list of (level, message) findings. level: OK | WARN | FAIL"""
+    findings = []
+    if not meta:
+        return [("WARN", "could not probe file - compatibility unknown")]
+
+    for s in meta.get("streams", []):
+        kind, codec = s.get("codec_type"), (s.get("codec_name") or "").lower()
+
+        if kind == "video":
+            h = s.get("height") or 0
+            w = s.get("width") or 0
+            if codec in VIDEO_BAD:
+                findings.append(("FAIL", f"video is {codec} - this TV cannot decode it"))
+            elif codec == "h264" and h > 1088:
+                findings.append(("FAIL",
+                    f"H.264 at {w}x{h} - Roku caps H.264 at 1080p. "
+                    "Re-encode to HEVC or it will transcode/refuse."))
+            elif codec in VIDEO_OK:
+                findings.append(("OK", f"video {codec} {w}x{h} - direct plays"))
+            else:
+                findings.append(("WARN", f"video {codec} - unverified on this TV"))
+
+        elif kind == "audio":
+            if codec in AUDIO_BAD:
+                findings.append(("WARN",
+                    f"audio is {codec} - this TV lacks the licence; "
+                    "audio will transcode (cheap, but avoidable)"))
+            elif codec in AUDIO_OK:
+                findings.append(("OK", f"audio {codec} - direct plays"))
+            else:
+                findings.append(("WARN", f"audio {codec} - unverified"))
+
+        elif kind == "subtitle":
+            if codec in SUB_IMAGE:
+                findings.append(("FAIL",
+                    f"subtitles are {codec} (image-based) - these must be burned "
+                    "in, forcing a FULL video transcode. Use external .srt instead."))
+            else:
+                findings.append(("OK", f"subtitles {codec} - no transcode"))
+
+    return findings
+
+
+def destination(args, src: Path) -> Path:
+    ext = src.suffix.lower()
+    if args.mode == "movie":
+        stem = f"{clean(args.title)} ({args.year})"
+        return LIBRARY_ROOT / "movies" / stem / f"{stem}{ext}"
+
+    show = f"{clean(args.title)} ({args.year})"
+    tag = f"S{args.season:02d}E{args.episode:02d}"
+    name = f"{show} - {tag}"
+    if args.episode_title:
+        name += f" - {clean(args.episode_title)}"
+    return LIBRARY_ROOT / "tv" / show / f"Season {args.season:02d}" / f"{name}{ext}"
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description="Import a video file you already own into the Jellyfin library.")
+    p.add_argument("source", type=Path)
+    p.add_argument("--mode", choices=["movie", "tv"], required=True)
+    p.add_argument("--title", required=True)
+    p.add_argument("--year", type=int, required=True)
+    p.add_argument("--season", type=int)
+    p.add_argument("--episode", type=int)
+    p.add_argument("--episode-title", default="")
+    p.add_argument("--copy", action="store_true", help="copy instead of move")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--force", action="store_true",
+                   help="import even if compatibility checks FAIL")
+    args = p.parse_args()
+
+    if args.mode == "tv" and (args.season is None or args.episode is None):
+        p.error("--mode tv requires --season and --episode")
+    if not args.source.is_file():
+        p.error(f"not a file: {args.source}")
+
+    dest = destination(args, args.source)
+
+    print(f"\n  source : {args.source}")
+    print(f"  dest   : {dest}")
+    size_gb = args.source.stat().st_size / 1024**3
+    print(f"  size   : {size_gb:.2f} GB")
+
+    print("\n  --- Roku 65PUL7973/F6 compatibility ---")
+    findings = check_roku(probe(args.source))
+    for level, msg in findings:
+        marker = {"OK": "  [ok]  ", "WARN": "  [warn]", "FAIL": "  [FAIL]"}[level]
+        print(f"{marker} {msg}")
+
+    fails = [m for lv, m in findings if lv == "FAIL"]
+    if fails and not args.force:
+        print("\n  REFUSING: this file will not direct-play on your TV.")
+        print("  Fix it, or re-run with --force to import anyway.")
+        return 2
+
+    if args.dry_run:
+        print("\n  dry-run - nothing written.")
+        return 0
+
+    if dest.exists():
+        print(f"\n  REFUSING: destination already exists: {dest}")
+        return 3
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if args.copy:
+        shutil.copy2(args.source, dest)
+    else:
+        shutil.move(str(args.source), str(dest))
+    print(f"\n  imported -> {dest}")
+    print("  Jellyfin will pick it up on the next scan "
+          "(Dashboard -> Libraries -> Scan All).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
