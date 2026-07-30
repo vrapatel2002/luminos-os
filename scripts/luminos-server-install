@@ -35,10 +35,19 @@ ESP_MIB=${ESP_MIB:-1024}
 AUTHORIZED_KEY=${AUTHORIZED_KEY:-}
 
 # WiFi is optional but the machine MUST come back on the network after reboot.
-# WIFI_PSK is taken from the environment, never from a command-line flag, so the
-# passphrase does not sit in the process list for every user on the box to read.
+#
+# Passphrases never travel as command-line arguments -- argv is world-readable
+# via ps. Two accepted routes:
+#   single network:  WIFI_PSK='...' ... --wifi-ssid 'MySSID'
+#   several:         --wifi-creds FILE   with tab-separated  SSID<TAB>passphrase
+#
+# Several is worth it when wifi is the ONLY route in: seed both bands and iwd
+# picks whichever it can actually see, instead of the box being unreachable
+# because the one SSID you configured was out of range.
 WIFI_SSID=${WIFI_SSID:-}
 WIFI_PSK=${WIFI_PSK:-}
+WIFI_CREDS=${WIFI_CREDS:-}
+WIFI_NETS=()   # each entry: "SSID<TAB>passphrase"
 
 DRY_RUN=1
 CONFIRM_DISK=""
@@ -55,6 +64,7 @@ while [ $# -gt 0 ]; do
     --confirm-disk) CONFIRM_DISK=${2:?--confirm-disk needs a value}; shift ;;
     --key)          AUTHORIZED_KEY=${2:?--key needs a value}; shift ;;
     --wifi-ssid)    WIFI_SSID=${2:?--wifi-ssid needs a value}; shift ;;
+    --wifi-creds)   WIFI_CREDS=${2:?--wifi-creds needs a path}; shift ;;
     --wifi-psk)     die "refusing --wifi-psk: a passphrase on the command line is
        visible in the process list. Pass it in the environment instead:
            WIFI_PSK='...' $0 --wifi-ssid '...' ..." ;;
@@ -178,7 +188,7 @@ cat <<PLAN
   desktop            none
   swap               zram (no swap partition)
   lid closed         ignored -- machine keeps running
-  network            DHCP via systemd-networkd${WIFI_SSID:+ + iwd on '$WIFI_SSID'}
+  network            DHCP via systemd-networkd$( [ -n "$WIFI_SSID$WIFI_CREDS" ] && echo " + iwd (networks listed below)" )
 PLAN
 
 if [ -z "$AUTHORIZED_KEY" ]; then
@@ -199,15 +209,34 @@ WIFI_IFACES=$(ls /sys/class/net | grep -E '^wl' || true)
 [ -n "$WIFI_IFACES" ]  && ok "wireless interface(s) present: $(echo "$WIFI_IFACES" | tr '\n' ' ')" \
                        || printf '\033[33m  warn\033[0m  no wireless interface detected\n'
 
-WIFI=0
+if [ -n "$WIFI_CREDS" ]; then
+  [ -r "$WIFI_CREDS" ] || die "--wifi-creds '$WIFI_CREDS' is not readable"
+  # Tab-separated so SSIDs containing spaces (BELL851 5.0 GHz) work unquoted.
+  while IFS=$'\t' read -r s p; do
+    case "$s" in ''|'#'*) continue ;; esac
+    [ -n "$p" ] || die "no passphrase for SSID '$s' in $WIFI_CREDS
+       expected format, tab-separated: SSID<TAB>passphrase"
+    WIFI_NETS+=("$s"$'\t'"$p")
+  done < "$WIFI_CREDS"
+  [ ${#WIFI_NETS[@]} -gt 0 ] || die "--wifi-creds '$WIFI_CREDS' contained no usable lines"
+fi
 if [ -n "$WIFI_SSID" ]; then
   [ -n "$WIFI_PSK" ] || die "--wifi-ssid given but WIFI_PSK is empty.
        Pass it in the environment: WIFI_PSK='...' $0 --wifi-ssid '$WIFI_SSID' ..."
-  [ -n "$WIFI_IFACES" ] || die "--wifi-ssid given but the kernel sees no wl* interface.
+  WIFI_NETS+=("$WIFI_SSID"$'\t'"$WIFI_PSK")
+fi
+
+WIFI=0
+if [ ${#WIFI_NETS[@]} -gt 0 ]; then
+  [ -n "$WIFI_IFACES" ] || die "wifi credentials given but the kernel sees no wl* interface.
        Either the card needs firmware that is not loaded, or there is no card.
        Check: ip link ; dmesg | grep -i firmware"
   WIFI=1
-  ok "wifi will be configured for SSID '$WIFI_SSID' (passphrase read from environment, ${#WIFI_PSK} chars)"
+  for n in "${WIFI_NETS[@]}"; do
+    s=${n%%$'\t'*}; p=${n#*$'\t'}
+    ok "wifi network configured: '$s' (passphrase ${#p} chars, never printed)"
+  done
+  [ ${#WIFI_NETS[@]} -gt 1 ] && ok "${#WIFI_NETS[@]} networks seeded -- iwd will use whichever is in range"
 fi
 
 if [ -z "$WIRED_IFACES" ] && [ "$WIFI" = 0 ]; then
@@ -218,8 +247,9 @@ if [ -z "$WIRED_IFACES" ] && [ "$WIFI" = 0 ]; then
            WIFI_PSK='...' $0 --wifi-ssid 'YourSSID' ..."
 fi
 if [ -z "$WIRED_IFACES" ] && [ "$WIFI" = 1 ]; then
-  printf '\033[33m  warn\033[0m  wifi is the ONLY route in after reboot. If the passphrase is\n'
+  printf '\033[33m  warn\033[0m  wifi is the ONLY route in after reboot. If every passphrase is\n'
   printf '\033[33m       \033[0m  wrong the box is unreachable and needs a monitor to fix.\n'
+  [ ${#WIFI_NETS[@]} = 1 ] && printf '\033[33m       \033[0m  Only ONE network seeded. Consider --wifi-creds with both bands.\n'
 fi
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -315,9 +345,12 @@ EOF
   # iwd stores credentials as one file per network. Passphrase in plaintext by
   # necessity -- iwd needs it to re-auth unattended at boot -- so 600 and root.
   install -d -m700 /mnt/var/lib/iwd
-  psk_file="/mnt/var/lib/iwd/${WIFI_SSID}.psk"
-  printf '[Security]\nPassphrase=%s\n' "$WIFI_PSK" > "$psk_file"
-  chmod 600 "$psk_file"
+  for n in "${WIFI_NETS[@]}"; do
+    s=${n%%$'\t'*}; p=${n#*$'\t'}
+    psk_file="/mnt/var/lib/iwd/${s}.psk"
+    printf '[Security]\nPassphrase=%s\n' "$p" > "$psk_file"
+    chmod 600 "$psk_file"
+  done
   # Let systemd-networkd own addressing; iwd only does authentication. Without
   # this they both try to run DHCP and fight over the route.
   install -d -m755 /mnt/etc/iwd
@@ -328,7 +361,7 @@ EnableNetworkConfiguration=false
 [Network]
 NameResolvingService=systemd
 EOF
-  ok "wifi credential written for '$WIFI_SSID' (mode 600, root only)"
+  ok "${#WIFI_NETS[@]} wifi credential(s) written (mode 600, root only)"
 fi
 
 mkdir -p /mnt/etc/systemd/logind.conf.d
@@ -431,8 +464,8 @@ chk "lid switch ignored"        '[ -s /mnt/etc/systemd/logind.conf.d/99-server.c
 chk "a network unit exists"     '[ -s /mnt/etc/systemd/network/20-wired.network ] || [ -s /mnt/etc/systemd/network/25-wireless.network ]'
 if [ "$WIFI" = 1 ]; then
   chk "iwd enabled"             '[ -L /mnt/etc/systemd/system/multi-user.target.wants/iwd.service ]'
-  chk "wifi credential written" "[ -s '/mnt/var/lib/iwd/${WIFI_SSID}.psk' ]"
-  chk "wifi credential is 0600" "[ \"\$(stat -c %a '/mnt/var/lib/iwd/${WIFI_SSID}.psk')\" = 600 ]"
+  chk "wifi credentials written" "[ \$(ls -1 /mnt/var/lib/iwd/*.psk 2>/dev/null | wc -l) = ${#WIFI_NETS[@]} ]"
+  chk "all credentials are 0600" '! find /mnt/var/lib/iwd -name "*.psk" ! -perm 600 | grep -q .'
   chk "iwd leaves DHCP to networkd" "grep -q 'EnableNetworkConfiguration=false' /mnt/etc/iwd/main.conf"
 fi
 if [ "$FIRMWARE" = uefi ]; then
