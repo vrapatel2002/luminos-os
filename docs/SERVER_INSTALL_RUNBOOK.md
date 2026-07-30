@@ -1,5 +1,10 @@
 # Media Server Install Runbook
-# [CHANGE: claude-code | 2026-07-29]
+# [CHANGE: claude-code | 2026-07-30]
+#
+# STATUS: Phases 1-7 are DONE on the real machine (Dell Inspiron 3590).
+# It is installed, headless, and reachable at 192.168.2.61 as `shawn`.
+# Live next step is Phase 8. Everything above it is kept as the record of how,
+# and as the recipe for the next box.
 
 Step-by-step, from your friend's Windows desktop to a working headless Jellyfin
 server. Follow it in order. Anything marked **YOU** needs hands on the Dell;
@@ -15,6 +20,21 @@ Design summary, so you know what you're agreeing to:
 - WiFi only (no ethernet in use). All three Bell SSIDs are seeded so it connects
   to whichever is in range.
 
+### Machine facts worth knowing before you start
+
+- **Dell Inspiron 3590.** InsydeH2O text BIOS — see Phase 2.
+- **The battery is removed and bypassed. It runs on AC only.** There is no
+  ride-through. A tripped breaker, a tugged cord, or a power cut is a hard
+  power-off mid-write, every time. This is why the install runs inside `tmux`
+  and why the boot order is fixed *before* the first reboot rather than after.
+- Target disk: `/dev/sda`, 931.5 GiB WDC WD10SPZX-75Z10T3 (the spinning one).
+- The NVMe SSD holding Windows is **invisible to Linux** because the BIOS is in
+  Intel RST `RAID On` mode. Windows is unharmable by construction, not by care.
+- WiFi MAC `18:47:3d:f3:22:25`. DHCP gave `.60` under the ISO and `.61` once
+  installed — different DHCP client identifiers, not a fault. Set a router
+  reservation if you want it pinned; mDNS (`luminos-server.local`) is seeded as
+  a fallback either way.
+
 ---
 
 ## Already done — nothing to do here
@@ -24,10 +44,12 @@ Design summary, so you know what you're agreeing to:
 | Arch ISO | Downloaded, sha256 + GPG verified |
 | USB stick | Written and **byte-verified** by reading it back (`e86295dc…a6c0`) |
 | SSH keypair | `~/.ssh/luminos-server` on the G14 |
-| Stage 1 installer | `scripts/luminos-server-install`, dry-run tested |
-| Stage 2 services | `scripts/luminos-server-services`, dry-run tested |
+| Stage 1 installer | `scripts/luminos-server-install` — **run for real, 17/17 checks passed** |
+| Stage 2 services | `scripts/luminos-server-services`, dry-run tested — not yet run |
 | BitLocker | Confirmed off on both disks |
 | Secure Boot | Confirmed off |
+| Base OS on the Dell | **Installed and booting from the HDD** |
+| Headless reconnect | **Proven** — rebooted with nobody at the keyboard, rejoined `BELL851 5.0 GHz` at −35 dBm, came back as `192.168.2.61` |
 | WiFi passphrases | Read from the G14's saved networks; never printed anywhere |
 
 Verified against the real ISO image (not assumed):
@@ -60,17 +82,45 @@ leaves filesystems in a half-mounted state; a real shutdown avoids it.
 
 Power on, tap **`F2`** at the Dell logo.
 
-Confirm only:
+> **The Inspiron 3590 uses InsydeH2O**, a plain text BIOS with tabs across the
+> top (`Main` `Advanced` `Security` `Boot` `Exit`) — *not* the graphical Dell
+> setup with a left-hand tree. An earlier draft of this runbook described the
+> graphical one and sent the owner hunting for settings that do not exist on his
+> machine. If you see a mouse cursor and a category tree, you have the other
+> BIOS and the labels below will differ.
 
-- **Secure Boot: Disabled** (you've done this)
-- **Boot Mode / Boot List Option: UEFI**, not Legacy
-- **USB Boot Support: Enabled** if you see it
+On InsydeH2O, everything you need is on the **`Boot`** tab:
+
+| Setting | Set to | Note |
+|---|---|---|
+| `Boot List Option` / `Boot Mode` | **UEFI** | not `Legacy` |
+| `Secure Boot` | **Disabled** | may live under `Security`; greyed out until you set a Supervisor Password on some builds |
+| `USB Boot Support` / `USB Boot` | **Enabled** | absent on some 3590 builds — that's fine, it's on by default |
+| `Fastboot` | **Thorough** | optional; `Minimal` can skip USB enumeration entirely |
 
 > **Change nothing else. In particular do NOT touch `SATA Operation`.** If it
 > says `RAID On`, leave it. Windows was installed against the Intel RST driver
 > and will not start without it. Linux reads the HDD either way.
 
-Exit saving changes.
+Exit saving changes (`Exit` tab → `Exit Saving Changes`, or `F10`).
+
+### If the USB stick still isn't in the `F12` menu
+
+Work down this list. Each step rules something out.
+
+1. **Is it a UEFI stick at all?** Ask me — I can mount its EFI partition from the
+   G14 and tell you in seconds whether `\EFI\BOOT\BOOTX64.EFI` is present. Don't
+   rewrite the stick on a hunch; we proved ours was fine and saved an hour.
+2. **Try the other physical port.** The 3590 has USB 2.0 and USB 3.0 ports, and
+   some BIOS builds enumerate only one of them early enough.
+3. **Look for it under `Boot` → `UEFI Boot Path Security`** — if set to
+   `Always`, it demands a password before booting any removable device.
+4. **The escape hatch: point the firmware at the file yourself.**
+   `F2` → `Boot` tab → **`Add Boot Option`** / `File Browser Add Boot Option` →
+   pick the USB volume → navigate `EFI` → `BOOT` → `BOOTX64.EFI`, give it any
+   name, save, then move it to the top of the boot order. This bypasses
+   auto-detection completely and works even when the stick never appears in
+   `F12`.
 
 ---
 
@@ -244,25 +294,24 @@ a minute to associate with WiFi.
 
 ## Phase 7 — Find it and log in
 
-From the G14:
+On this machine it came up at **`192.168.2.61`**. From the G14:
 
 ```bash
-ssh shawn@luminos-server -i ~/.ssh/luminos-server
+ssh -i ~/.ssh/luminos-server shawn@192.168.2.61
+# or by name, via mDNS:
+ssh -i ~/.ssh/luminos-server shawn@luminos-server.local
 ```
 
-If the name doesn't resolve, find the address:
+If neither works, sweep the subnet — `nmap` and `arp-scan` are not installed on
+the G14 and you don't need them:
 
 ```bash
-nmap -sn 192.168.2.0/24 | grep -B2 -i luminos
-# or just look at what's new:
-ip neigh | sort
+for i in $(seq 1 254); do ping -c1 -W1 192.168.2.$i >/dev/null 2>&1 & done; wait
+ip neigh | sort -t. -k4 -n
 ```
 
-Then:
-
-```bash
-ssh -i ~/.ssh/luminos-server shawn@192.168.2.xxx
-```
+The address can move between the ISO and the installed system (it went `.60` →
+`.61` here) because the DHCP client identifier differs. That is expected.
 
 No password — the key is the only accepted credential, and root login over SSH
 is disabled.
@@ -338,16 +387,34 @@ files themselves are a separate, much larger copy — do that once the rest work
 
 ---
 
-## Phase 10 — Boot order · **YOU**
+## Phase 10 — Boot order · *now automatic, verify only*
 
-Back into `F2` one last time.
+The installer sets this itself. **It did not, the first time, and that was a
+real bug** — worth reading, because the failure is silent:
 
-**Put the HDD (or "Luminos Server") first in the boot order.**
+`bootctl install` exited 0 and wrote every file correctly to the ESP, while
+creating **no firmware boot entry at all**. No error, no warning. The firmware
+then fell through to Dell's pre-existing `Boot0000 "UEFI Hard Drive"`, which
+points at *Windows'* EFI partition GUID. A headless box that quietly boots
+Windows looks exactly like a dead one from the far end of an SSH session.
 
-This matters more than it sounds. It is a headless machine: if the power blips
-and it comes back into Windows, it sits at a login screen where SSH is
-unreachable and you have to walk over to it. Windows then becomes the thing you
-pick deliberately with `F12`.
+The installer now finds or creates the entry with `efibootmgr` and forces it to
+the front of `BootOrder`, and stage-1 verification fails if either isn't true.
+Checking that the loader *files* exist — which is all it used to do — proves
+nothing about what the firmware will actually try.
+
+Confirm from the G14, no keyboard needed:
+
+```bash
+ssh shawn@$SERVER 'sudo efibootmgr | head -3'
+```
+
+The first ID in `BootOrder:` must be the `Luminos Server` entry.
+
+Why it has to be first: it is a headless machine on **AC power with no
+battery**, so any power blip is a cold boot. If that lands in Windows it sits at
+a login screen with no SSH and someone has to walk over. Windows becomes the
+thing you pick deliberately with `F12`.
 
 Accepted consequence: **while Windows is running, the media server is offline.**
 
@@ -370,7 +437,10 @@ this TV can and cannot take.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Stick not listed under `F12` | Secure Boot still on, or Legacy boot mode | `F2` → Secure Boot off, Boot Mode UEFI |
+| Stick not listed under `F12` | Secure Boot on, Legacy boot mode, or the BIOS just won't enumerate it | Phase 2 → work down the numbered list; `Add Boot Option` is the guaranteed way |
+| Boots straight into Windows after install | No firmware entry, or Windows ordered first | `sudo efibootmgr -v` — see Phase 10. This was a real bug, now fixed and verified |
+| Logged in over SSH but `sudo` asks for a password you never set | Admin account has no password and the `%wheel` rule demands one — total lockout | Fixed: installer writes a NOPASSWD drop-in and *functionally tests* it with `sudo -l -U`. On an older build, boot the ISO and add it by hand |
+| WiFi connects by hand but never at boot | `iwd` ignored the credential file because the filename wasn't hex-encoded | An SSID containing a `.` (e.g. `BELL851 5.0 GHz`) **must** be stored as `=<hex>.psk`. Fixed in the installer; verify with `ls /var/lib/iwd` |
 | `iwctl` → `device list` shows nothing | WiFi firmware not loaded | `dmesg \| grep -i firmware` — send me the output |
 | WiFi connects, `ping` fails | DHCP didn't complete | `networkctl status` — should say `routable` |
 | `ssh root@…` rejects the password | `passwd` wasn't run | Run `passwd` on the ISO |

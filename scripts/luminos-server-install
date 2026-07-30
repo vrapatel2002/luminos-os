@@ -29,6 +29,9 @@ set -euo pipefail
 
 HOSTNAME_NEW=${HOSTNAME_NEW:-luminos-server}
 ADMIN_USER=${ADMIN_USER:-shawn}
+# Optional. Only for physical-console recovery; ssh is key-only regardless.
+# Pass in the environment, never as a flag: argv is visible to every user via ps.
+ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
 TIMEZONE=${TIMEZONE:-America/Toronto}
 ROOT_GIB=${ROOT_GIB:-40}
 ESP_MIB=${ESP_MIB:-1024}
@@ -47,7 +50,8 @@ AUTHORIZED_KEY=${AUTHORIZED_KEY:-}
 WIFI_SSID=${WIFI_SSID:-}
 WIFI_PSK=${WIFI_PSK:-}
 WIFI_CREDS=${WIFI_CREDS:-}
-WIFI_NETS=()   # each entry: "SSID<TAB>passphrase"
+WIFI_NETS=()      # each entry: "SSID<TAB>passphrase"
+WIFI_PSK_FILES=() # the credential files actually written, for verification
 
 DRY_RUN=1
 CONFIRM_DISK=""
@@ -56,6 +60,34 @@ die()  { printf '\033[31mABORT\033[0m  %s\n' "$*" >&2; exit 1; }
 ok()   { printf '\033[32m  ok\033[0m    %s\n' "$*"; }
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 run()  { if [ "$DRY_RUN" = 1 ]; then printf '  would run: %s\n' "$*"; else printf '  + %s\n' "$*"; "$@"; fi; }
+
+# iwd's on-disk filename for a known network. It does NOT always equal the SSID:
+# anything outside [alnum], '-', '_' and space forces the hex-encoded '=<hex>'
+# form, and iwd SILENTLY IGNORES a file named the other way. A dot is enough to
+# trigger it, so a perfectly ordinary SSID like "BELL851 5.0 GHz" must be
+# written as "=42454c4c38353120352e302047487a.psk". Getting this wrong on a
+# wifi-only box costs you the box.
+# LC_ALL=C on the tr is load-bearing: bash's own [A-Za-z] bracket range follows
+# locale collation and happily matches accented letters, which would leave a
+# non-ASCII SSID misnamed and ignored.
+iwd_psk_name() {
+  local s=$1
+  if [ -n "$s" ] && [ -z "$(printf '%s' "$s" | LC_ALL=C tr -d 'A-Za-z0-9_ -')" ]; then
+    printf '%s.psk' "$s"
+  else
+    printf '=%s.psk' "$(printf '%s' "$s" | od -An -tx1 -v | tr -d ' \n')"
+  fi
+}
+
+# NVRAM boot entry that points at our loader, and whatever the firmware will
+# actually try first. Read from the live environment -- NVRAM is not per-root.
+efi_loader_bootnum() {
+  efibootmgr -v 2>/dev/null | grep -i 'systemd-bootx64\.efi' | head -1 \
+    | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/p'
+}
+efi_first_bootnum() {
+  efibootmgr 2>/dev/null | sed -n 's/^BootOrder: //p' | cut -d, -f1
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -301,7 +333,7 @@ step "Installing base system (this is the slow part on a HDD)"
 run pacstrap -K /mnt \
   base linux linux-firmware "$UCODE" \
   openssh sudo nano less \
-  systemd-resolvconf zram-generator \
+  systemd-resolvconf zram-generator efibootmgr \
   iwd \
   intel-media-driver libva-utils \
   git rsync htop python
@@ -347,9 +379,10 @@ EOF
   install -d -m700 /mnt/var/lib/iwd
   for n in "${WIFI_NETS[@]}"; do
     s=${n%%$'\t'*}; p=${n#*$'\t'}
-    psk_file="/mnt/var/lib/iwd/${s}.psk"
+    psk_file="/mnt/var/lib/iwd/$(iwd_psk_name "$s")"
     printf '[Security]\nPassphrase=%s\n' "$p" > "$psk_file"
     chmod 600 "$psk_file"
+    WIFI_PSK_FILES+=("$psk_file")
   done
   # Let systemd-networkd own addressing; iwd only does authentication. Without
   # this they both try to run DHCP and fight over the route.
@@ -406,6 +439,24 @@ passwd -l root
 echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel
 chmod 440 /etc/sudoers.d/10-wheel
 
+# LOCKOUT GUARD. Everything above conspires to make this machine unadministrable:
+# root's password is locked, sshd refuses root and refuses passwords entirely,
+# useradd leaves the admin account with no password either -- and %wheel above
+# demands a password sudo can never satisfy. Key auth gets you a shell that can
+# do nothing. The only remedy at that point is an install ISO and a keyboard,
+# which on a headless box in someone else's house is a lost weekend.
+#
+# NOPASSWD is not a weakening here. The sole way in is an SSH key we control;
+# a password prompt adds no attacker cost, only a hard lock on ourselves.
+printf '%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "$ADMIN_USER" > /etc/sudoers.d/20-$ADMIN_USER-nopasswd
+chmod 440 /etc/sudoers.d/20-$ADMIN_USER-nopasswd
+# A malformed sudoers file locks you out just as thoroughly as a missing one,
+# and sudo refuses the WHOLE ruleset on a syntax error. Check before trusting it.
+visudo -c -q || { echo "sudoers is invalid; refusing to leave the box unadministrable"; exit 1; }
+# Functional test, not a file test: can this user actually become root?
+sudo -l -U "$ADMIN_USER" | grep -q 'NOPASSWD: ALL' || {
+  echo "sudo does not grant $ADMIN_USER root access"; exit 1; }
+
 install -d -m700 -o "$ADMIN_USER" -g "$ADMIN_USER" "/home/$ADMIN_USER/.ssh"
 printf '%s\n' "$AUTHORIZED_KEY" > "/home/$ADMIN_USER/.ssh/authorized_keys"
 chmod 600 "/home/$ADMIN_USER/.ssh/authorized_keys"
@@ -434,6 +485,31 @@ ENTRY
   # Fallback path, so firmware that ignores NVRAM entries still boots the HDD.
   install -Dm644 /boot/EFI/systemd/systemd-bootx64.efi /boot/EFI/BOOT/BOOTX64.EFI
   [ -s /boot/loader/entries/luminos.conf ] || { echo "boot entry empty"; exit 1; }
+
+  # 'bootctl install' can exit 0 having created NO firmware boot entry at all --
+  # no error, no warning. Observed on a Dell Inspiron 3590. The machine then
+  # falls through to the firmware's pre-existing "UEFI Hard Drive" entry, which
+  # on a two-disk box points at the OTHER disk's Windows loader. A headless
+  # server that quietly boots Windows is indistinguishable from a dead one.
+  # So: find the entry, create it if absent, and make it first. Never assume.
+  loader_entry() {
+    efibootmgr -v | grep -i 'systemd-bootx64\.efi' | head -1 \
+      | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\).*/\1/p'
+  }
+  if [ -z "\$(loader_entry)" ]; then
+    echo "bootctl left no NVRAM entry; creating one directly"
+    efibootmgr --create --disk "$TARGET" --part 1 \
+      --label "Luminos Server" \
+      --loader '\EFI\systemd\systemd-bootx64.efi'
+  fi
+  BOOTNUM=\$(loader_entry)
+  [ -n "\$BOOTNUM" ] || { echo "firmware still has no entry for our loader"; exit 1; }
+
+  # Being present is not enough; it has to be tried FIRST.
+  ORDER=\$(efibootmgr | sed -n 's/^BootOrder: //p')
+  REST=\$(printf '%s' "\$ORDER" | tr ',' '\n' | grep -viFx "\$BOOTNUM" | paste -sd, -)
+  efibootmgr --bootorder "\$BOOTNUM\${REST:+,\$REST}" >/dev/null
+  echo "firmware boot entry: Boot\$BOOTNUM, ordered first"
 else
   pacman -S --noconfirm --needed grub
   grub-install --target=i386-pc "$TARGET"
@@ -445,6 +521,16 @@ CHROOT
 arch-chroot /mnt /root/stage1-chroot.sh
 rm -f /mnt/root/stage1-chroot.sh
 ok "chroot stage finished"
+
+# Optional console password, for the day wifi is down and someone has to walk
+# over with a keyboard. Piped, never in argv (ps is world-readable) and never
+# written into the chroot script, which lands on disk.
+if [ -n "$ADMIN_PASSWORD" ]; then
+  printf '%s:%s\n' "$ADMIN_USER" "$ADMIN_PASSWORD" | arch-chroot /mnt chpasswd
+  ok "console password set for $ADMIN_USER (ssh stays key-only)"
+else
+  ok "no console password set -- ssh key + NOPASSWD sudo is the only way in"
+fi
 
 # ------------------------------------------------------------- verify, loudly
 step "Verification (a failure here means do not reboot yet)"
@@ -458,19 +544,33 @@ chk "fstab has 3 entries"       '[ "$(grep -c ^UUID /mnt/etc/fstab)" -ge 2 ]'
 chk "admin user exists"         "grep -q '^$ADMIN_USER:' /mnt/etc/passwd"
 chk "ssh key installed"         "[ -s /mnt/home/$ADMIN_USER/.ssh/authorized_keys ]"
 chk "root login is locked"      "grep -q '^root:!' /mnt/etc/shadow"
+# "The user exists" and "root is locked" both passed on a box nobody could
+# administer. This asks sudo itself, in the installed system, the real question.
+chk "$ADMIN_USER can become root" "arch-chroot /mnt sudo -l -U '$ADMIN_USER' 2>/dev/null | grep -q 'NOPASSWD: ALL'"
+chk "sudoers parses cleanly"      'arch-chroot /mnt visudo -c -q'
 chk "sshd enabled"              '[ -L /mnt/etc/systemd/system/multi-user.target.wants/sshd.service ]'
 chk "networkd enabled"          '[ -L /mnt/etc/systemd/system/multi-user.target.wants/systemd-networkd.service ]'
 chk "lid switch ignored"        '[ -s /mnt/etc/systemd/logind.conf.d/99-server.conf ]'
 chk "a network unit exists"     '[ -s /mnt/etc/systemd/network/20-wired.network ] || [ -s /mnt/etc/systemd/network/25-wireless.network ]'
 if [ "$WIFI" = 1 ]; then
   chk "iwd enabled"             '[ -L /mnt/etc/systemd/system/multi-user.target.wants/iwd.service ]'
-  chk "wifi credentials written" "[ \$(ls -1 /mnt/var/lib/iwd/*.psk 2>/dev/null | wc -l) = ${#WIFI_NETS[@]} ]"
+  # Check each expected filename individually. A count would have passed happily
+  # while iwd ignored two of the three files for having the wrong name.
+  for n in "${WIFI_NETS[@]}"; do
+    s=${n%%$'\t'*}
+    chk "iwd will find '$s'"    "[ -s '/mnt/var/lib/iwd/$(iwd_psk_name "$s")' ]"
+  done
+  chk "no stray credential files" "[ \$(ls -1 /mnt/var/lib/iwd/*.psk 2>/dev/null | wc -l) = ${#WIFI_NETS[@]} ]"
   chk "all credentials are 0600" '! find /mnt/var/lib/iwd -name "*.psk" ! -perm 600 | grep -q .'
   chk "iwd leaves DHCP to networkd" "grep -q 'EnableNetworkConfiguration=false' /mnt/etc/iwd/main.conf"
 fi
 if [ "$FIRMWARE" = uefi ]; then
   chk "boot entry written"      '[ -s /mnt/boot/loader/entries/luminos.conf ]'
   chk "removable fallback"      '[ -s /mnt/boot/EFI/BOOT/BOOTX64.EFI ]'
+  # The files existing on the ESP proves nothing about what the firmware will do.
+  # These two are the checks that matter, and the ones this script used to skip.
+  chk "firmware has a boot entry for our loader" '[ -n "$(efi_loader_bootnum)" ]'
+  chk "our loader is FIRST in BootOrder"         '[ -n "$(efi_loader_bootnum)" ] && [ "$(efi_loader_bootnum)" = "$(efi_first_bootnum)" ]'
 fi
 
 echo
