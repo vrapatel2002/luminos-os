@@ -3,7 +3,9 @@
     Luminos sample wallpaper — cursor-reactive particle field.
     Pointer pushes particles away; they drift back. Pure canvas 2D, capped ~30fps.
     Works with the wallpaper's cursor forwarding (window 'mousemove').
-    [CHANGE: claude-code | 2026-07-22]
+    Autonomous drift: each home orbits slowly so particles never settle to rest
+    (looks "frozen") even with no cursor over the desktop.
+    [CHANGE: claude-code | 2026-07-22, drift 2026-07-23]
     SPDX-License-Identifier: GPL-3.0-or-later
 -->
 <meta charset="utf-8">
@@ -24,7 +26,11 @@
   var P=[];
   for(var i=0;i<N;i++)P.push({
     x:Math.random()*W, y:Math.random()*H,
-    hx:Math.random()*W, hy:Math.random()*H,   // home
+    bx:Math.random()*W, by:Math.random()*H,   // base home (the orbit centre)
+    hx:0, hy:0,                                // live home (orbits base)
+    ph:Math.random()*6.283,                    // drift phase
+    fr:0.4+Math.random()*0.6,                  // drift speed factor
+    amp:(20+Math.random()*40)*DPR,             // drift radius
     vx:0, vy:0
   });
 
@@ -38,8 +44,12 @@
     requestAnimationFrame(loop);
     if(t-last<FRAME)return; last=t;
     x.fillStyle="rgba(5,6,10,0.35)"; x.fillRect(0,0,W,H);
+    var ts=t*0.00035;   // slow global clock for the drift
     for(var i=0;i<N;i++){
       var p=P[i];
+      // autonomous drift: home orbits its base point → particles never settle
+      p.hx=p.bx+Math.cos(ts*p.fr+p.ph)*p.amp;
+      p.hy=p.by+Math.sin(ts*p.fr*1.3+p.ph)*p.amp;
       // spring home
       p.vx+=(p.hx-p.x)*0.006; p.vy+=(p.hy-p.y)*0.006;
       // cursor repel
