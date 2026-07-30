@@ -364,6 +364,50 @@ Steps 3–5 are now scripted. Sequence:
 > `luminos-media-import` and `luminos-servarr-health` are the only portable
 > pieces.
 
+### 7a. Getting into the BIOS — it's a Dell (confirmed 2026-07-29)
+
+Keys: **`F2` = setup, `F12` = one-time boot menu.**
+
+> **⚠️ BITLOCKER FIRST. This is the one step that can permanently destroy the
+> owner's data, and it is not reversible.**
+>
+> Booting the Arch ISO requires **Secure Boot off** (neither the official ISO
+> nor systemd-boot is signed). On a Windows 11 Dell, changing the Secure Boot
+> state can trigger a **BitLocker recovery prompt** on the next Windows boot,
+> because the volume key is sealed to the TPM against the Secure Boot
+> measurement. No 48-digit key means Windows never starts again. Windows 11
+> enables "Device Encryption" automatically on many Dells when the user signs in
+> with a Microsoft account, so assume it is ON until proven otherwise.
+>
+> Before touching the BIOS, in Windows, as administrator:
+> ```
+> manage-bde -status C:
+> ```
+> - `Protection Off` → nothing to do.
+> - `Protection On` → suspend it across the BIOS change, and save the key anyway:
+>   ```
+>   manage-bde -protectors -disable C: -rebootcount 3
+>   ```
+>   Key backup lives at `account.microsoft.com/devices/recoverykey`.
+
+> **⚠️ Do NOT change `SATA Operation` from `RAID On` to `AHCI`.** It is the
+> obvious-looking tidy-up and it stops Windows booting — an install made with
+> the Intel RST driver cannot start without it. Leave it as found. Linux reads
+> the SATA HDD either way. (Intel RST *does* tend to hide an NVMe SSD from
+> Linux, which for us is a bonus, not a problem: §4a requires the SSD be left
+> alone.)
+
+Order of operations:
+
+1. Windows: `manage-bde -status C:`, suspend if on, save the recovery key.
+2. **Full shutdown, not sleep and not "Restart"** — `shutdown /s /t 0`, or
+   Shift+click Shut Down. Fast Startup leaves the filesystems half-mounted.
+3. `F2` → **Secure Boot: Disabled**. Change nothing else.
+4. `F12` → boot the USB stick.
+5. On the ISO, before writing anything: `lsblk` and confirm which disk is the
+   rotational one. `luminos-server-install --dry-run` will name its choice; it
+   has to agree with what you see.
+
 ### Notes for whoever builds this
 
 - The laptop **battery is a free UPS** — a genuine advantage over a desktop server.
