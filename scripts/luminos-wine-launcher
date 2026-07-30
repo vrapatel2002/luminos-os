@@ -9,6 +9,28 @@ shift
 ARGS="$@"
 APP_NAME=$(basename "$EXE" .exe)
 
+# ---- Path A gate: loose installer → offer its own isolated prefix ----
+# When the file-manager hands us a bare .exe/.msi (no isolated WINEPREFIX, and
+# the file lives outside any per-app prefix), it's usually an installer the user
+# just downloaded. Offer to give it its OWN Wine space so uninstall is one clean
+# step later. Calls FROM a generated per-app launcher already set
+# WINEPREFIX=~/.local/share/wineprefixes/... → skip the prompt and just run.
+# [CHANGE: claude-code | 2026-07-08]
+_PFX="${WINEPREFIX:-$HOME/.wine}"
+case "$_PFX::$EXE" in
+  "$HOME/.local/share/wineprefixes/"*) : ;;                       # already isolated → run
+  *::"$HOME/.local/share/wineprefixes/"*) : ;;                    # exe inside a prefix → run
+  *)
+    if printf '%s' "$EXE" | grep -qiE '\.(exe|msi)$'; then
+      ACT="$(kdialog --title "Open Windows program" \
+        --menu "How should Luminos open '$(basename "$EXE")'?" \
+        install "Install as its own isolated app (recommended)" \
+        run     "Run once in the shared space" 2>/dev/null)" || exit 0
+      [ "$ACT" = "install" ] && exec /usr/local/bin/luminos-wine-install "$EXE"
+    fi
+    ;;
+esac
+
 # Show GPU selection dialog
 GPU_CHOICE=$(kdialog \
   --title "Luminos — $APP_NAME" \

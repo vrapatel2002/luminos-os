@@ -1,0 +1,347 @@
+#!/bin/bash
+# Luminos Wine Uninstaller — delete-by-location (the reliable way)
+#
+# `wine uninstaller` just runs each app's OWN Windows uninstaller, which often
+# no-ops (missing MSI cache, portable apps that never registered, ghost registry
+# entries). This does what a Windows uninstaller actually does — delete the app's
+# files/shortcuts by path — but without depending on that fragile middleman.
+#
+# For an app that has its OWN prefix (e.g. a game): don't use this, just delete
+# the whole prefix folder. This tool is for apps that SHARE a prefix (~/.wine).
+#
+# It also removes the app's Linux launcher/icon — not just Wine's auto-named
+# wine/Programs/<App>.desktop, but ANY .desktop whose Exec= references the app
+# (catches hand-made/renamed launchers). MT5's launchers are guarded out.
+# [CHANGE: claude-code | 2026-07-05]
+set -uo pipefail
+
+# ---- Wine built-in folders (NOT user apps) — never list or delete ----
+DENY="Common Files|Internet Explorer|Windows Media Player|Windows NT|Windows Mail|Windows Photo Viewer|Windows Defender|Windows Sidebar|Microsoft.NET|MSBuild|Reference Assemblies|Uninstall Information|Windows Multimedia Platform|Windows Portable Devices|Application Verifier|ModifiableWindowsApps|Windows Kits|Windows Security"
+# ---- Apps this tool must refuse to remove (live trading) ----
+PROTECT="MetaTrader 5"
+
+die(){ kdialog --error "$1" 2>/dev/null || echo "ERROR: $1" >&2; exit 1; }
+
+# ---- rebuild desktop/menu/icon caches so removals disappear immediately ----
+# [CHANGE: claude-code | 2026-07-08]
+refresh_caches(){
+  update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
+  command -v update-menus >/dev/null 2>&1 && update-menus >/dev/null 2>&1 || true
+  for kb in kbuildsycoca6 kbuildsycoca5; do
+    command -v "$kb" >/dev/null 2>&1 && { "$kb" --noincremental >/dev/null 2>&1; break; }
+  done
+  command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+  command -v update-mime-database >/dev/null 2>&1 && \
+    update-mime-database "$HOME/.local/share/mime" >/dev/null 2>&1 || true
+}
+
+# ---- backup dir so every removal is reversible ----
+GHOST_BK_ROOT="$HOME/.local/share/luminos-wine-ghost-backup"
+_bk_dir(){ local d="$GHOST_BK_ROOT/$1_$(date +%Y%m%d_%H%M%S)"; mkdir -p "$d"; printf '%s' "$d"; }
+
+# ---- sweep the Linux-desktop traces Wine scatters OUTSIDE the prefix ----
+# These are exactly what stock `wine uninstaller` (and older versions of THIS
+# tool) left orphaned: KDE/XDG menu-merge files, menu category .directory files,
+# winemenubuilder-extracted icons, and the wine-extension-*.desktop file-type
+# handlers that point at the app's ProgID (they also hijack .zip/.tar/... away
+# from Luminos's own extractor). Everything is backed up before deletion.
+# Appends removed paths to the global SWEPT array. [CHANGE: claude-code | 2026-07-08]
+SWEPT=()
+sweep_linux_traces(){
+  local app="$1" bk="$2" f
+  local MERGED="$HOME/.config/menus/applications-merged"
+  local DIRS="$HOME/.local/share/desktop-directories"
+  local ICONS="$HOME/.local/share/icons"
+  local APPS="$HOME/.local/share/applications"
+  local WMENU="$HOME/.local/share/applications/wine/Programs"
+  _grab(){ cp -a --parents "$1" "$bk" 2>/dev/null || cp -a "$1" "$bk/" 2>/dev/null; }
+  # 1) KDE/XDG menu-merge files: wine-Programs-<app>-*.menu, wine-<app>.menu
+  while IFS= read -r -d '' f; do _grab "$f"; rm -f -- "$f"; SWEPT+=("$f"); done \
+    < <(find "$MERGED" -maxdepth 1 -type f -iname "wine-*${app}*.menu" -print0 2>/dev/null)
+  # 2) menu category folders: wine-Programs-<app>.directory, wine-<app>.directory
+  while IFS= read -r -d '' f; do _grab "$f"; rm -f -- "$f"; SWEPT+=("$f"); done \
+    < <(find "$DIRS" -maxdepth 1 -type f -iname "wine-*${app}*.directory" -print0 2>/dev/null)
+  # 3) extracted icons named after the app
+  while IFS= read -r -d '' f; do _grab "$f"; rm -f -- "$f"; SWEPT+=("$f"); done \
+    < <(find "$ICONS" -type f -iname "*${app}*" -print0 2>/dev/null)
+  # 4) file-association handlers whose Exec opens this app's ProgID.
+  #    Guard: never touch a handler that also references the protected app.
+  while IFS= read -r -d '' f; do
+    grep -qiF "$PROTECT" "$f" && continue
+    if grep -qiE "ProgIDOpen \"${app}" "$f"; then
+      _grab "$f"; rm -f -- "$f"; SWEPT+=("$f")
+    fi
+  done < <(find "$APPS" -maxdepth 1 -type f -name 'wine-extension-*.desktop' -print0 2>/dev/null)
+  # 5) the app's own wine/Programs launcher dir/file
+  for f in "$WMENU/$app" "$WMENU/$app.desktop"; do
+    [ -e "$f" ] || continue
+    _grab "$f"; rm -rf -- "$f"; SWEPT+=("$f")
+  done
+}
+
+# ---- headless: list ghost apps (Linux traces present, app GONE from prefix) ----
+# A ghost is an app that left a menu/.directory trace but is genuinely gone: it
+# has NO install dir AND NO wine/Programs launcher. The launcher check is what
+# keeps live-but-oddly-installed apps off the list — e.g. Python 3.10 installs
+# into AppData\Local (not Program Files) yet keeps its launcher, so it is NOT a
+# ghost. WinRAR, by contrast, has only orphaned .directory/.menu/icons.
+# [CHANGE: claude-code | 2026-07-08]
+if [ "${1:-}" = "--list-ghosts" ]; then
+  PREFIX="${2:-$HOME/.wine}"
+  PF="$PREFIX/drive_c/Program Files"; PFX86="$PREFIX/drive_c/Program Files (x86)"
+  WMENU="$HOME/.local/share/applications/wine/Programs"
+  declare -A GH=()
+  while IFS= read -r n; do n="${n#wine-Programs-}"; n="${n%.directory}"; [ -n "$n" ] && GH["$n"]=1
+  done < <(ls -1 "$HOME/.local/share/desktop-directories" 2>/dev/null | grep -E '^wine-Programs-.*\.directory$')
+  for n in "${!GH[@]}"; do
+    [[ "$n" =~ ^($PROTECT)$ ]] && continue
+    [ -d "$PF/$n" ] && continue          # installed under Program Files
+    [ -d "$PFX86/$n" ] && continue       # …or Program Files (x86)
+    [ -e "$WMENU/$n" ] && continue        # …has a live wine/Programs launcher dir
+    [ -e "$WMENU/$n.desktop" ] && continue # …or a top-level launcher .desktop
+    echo "$n"
+  done | sort
+  exit 0
+fi
+
+# ---- headless: sweep one ghost by name (Linux traces + in-prefix shortcuts) ----
+# Registry is deliberately NOT touched here: editing system.reg/user.reg while a
+# wineserver is live risks it clobbering the change on its next flush. Registry
+# keys left behind are harmless dead keys — clean them with the prefix stopped.
+# [CHANGE: claude-code | 2026-07-08]
+if [ "${1:-}" = "--sweep-ghost" ]; then
+  APP="${2:-}"; PREFIX="${3:-$HOME/.wine}"
+  [ -n "$APP" ] || die "usage: luminos-wine-uninstall --sweep-ghost <AppName> [prefix]"
+  [[ "$APP" =~ ^($PROTECT)$ ]] && die "Refusing to sweep protected app: $APP"
+  bk="$(_bk_dir "sweep_${APP// /_}")"
+  sweep_linux_traces "$APP" "$bk"
+  # renamed launchers in the applications root that reference the app + wine
+  SELF="$HOME/.local/share/applications/luminos-wine-uninstall.desktop"
+  while IFS= read -r -d '' desk; do
+    [ "$desk" = "$SELF" ] && continue
+    el="$(grep -im1 '^Exec=' "$desk" 2>/dev/null)"; [ -z "$el" ] && continue
+    printf '%s' "$el" | grep -qiF "$PROTECT" && continue
+    if printf '%s' "$el" | grep -qiF "$APP" && printf '%s' "$el" | grep -qiE 'wine|WINEPREFIX'; then
+      cp -a "$desk" "$bk/" 2>/dev/null; rm -f -- "$desk"; SWEPT+=("$desk")
+    fi
+  done < <(find "$HOME/.local/share/applications" -maxdepth 1 -type f -name '*.desktop' -print0 2>/dev/null)
+  # in-prefix Start Menu / AppData shortcuts (plain files — safe even while live)
+  SMU="$PREFIX/drive_c/users/$USER/AppData/Roaming/Microsoft/Windows/Start Menu"
+  SMP="$PREFIX/drive_c/ProgramData/Microsoft/Windows/Start Menu"
+  for p in "$SMU/Programs/$APP" "$SMU/Programs/$APP.lnk" "$SMU/$APP.lnk" \
+           "$SMP/Programs/$APP" "$SMP/Programs/$APP.lnk" "$SMP/$APP.lnk" \
+           "$PREFIX/drive_c/users/$USER/AppData/Roaming/$APP" \
+           "$PREFIX/drive_c/users/$USER/AppData/Local/$APP"; do
+    [ -e "$p" ] || continue
+    cp -a "$p" "$bk/" 2>/dev/null; rm -rf -- "$p"; SWEPT+=("$p")
+  done
+  refresh_caches
+  echo "Swept ${#SWEPT[@]} trace(s) for '$APP'."
+  [ "${#SWEPT[@]}" -gt 0 ] && printf '  removed: %s\n' "${SWEPT[@]}"
+  echo "Backup: $bk"
+  echo "NOTE: registry keys left as-is (harmless; clean only with the prefix stopped)."
+  exit 0
+fi
+
+# ---- Path A: isolated per-app prefixes (~/.local/share/wineprefixes) ----
+# Installed by luminos-wine-install. "Uninstall" here = move the ENTIRE prefix +
+# its launcher + manifest to a timestamped backup (reversible, instant), then
+# refresh menus. No trace-sweeping needed — nothing ever leaked outside it.
+# [CHANGE: claude-code | 2026-07-08]
+PREFIX_ROOT="$HOME/.local/share/wineprefixes"
+_meta_field(){ grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2-; }
+
+remove_isolated_app(){   # $1 = slug OR name
+  local key="$1" meta="" m
+  if [ -f "$PREFIX_ROOT/$key.meta" ]; then
+    meta="$PREFIX_ROOT/$key.meta"
+  else
+    for m in "$PREFIX_ROOT"/*.meta; do
+      [ -f "$m" ] || continue
+      [ "$(_meta_field "$m" name)" = "$key" ] && { meta="$m"; break; }
+    done
+  fi
+  [ -n "$meta" ] || { echo "No isolated app found for: $key" >&2; return 1; }
+  local name slug prefix launcher
+  name="$(_meta_field "$meta" name)"; slug="$(_meta_field "$meta" slug)"
+  prefix="$(_meta_field "$meta" prefix)"; launcher="$(_meta_field "$meta" launcher)"
+  # hard guard: never remove the shared MT5 prefix through this path
+  case "$prefix" in "$HOME/.wine"|"$HOME/.wine/") echo "Refusing: that is the shared MT5 prefix." >&2; return 1;; esac
+  local bk; bk="$(_bk_dir "removed_${slug}")"
+  [ -n "$launcher" ] && [ -e "$launcher" ] && mv -- "$launcher" "$bk/" 2>/dev/null
+  mv -- "$meta" "$bk/" 2>/dev/null
+  find "$HOME/.local/share/icons" -type f -iname "*${slug}*" -exec mv -t "$bk/" {} + 2>/dev/null || true
+  if [ -d "$prefix" ]; then mkdir -p "$bk/prefix"; mv -- "$prefix" "$bk/prefix/" 2>/dev/null; fi
+  refresh_caches
+  echo "Removed isolated app '$name'. Everything moved to backup:"
+  echo "  $bk"
+  echo "  (restore: move items back; or delete the backup to reclaim disk space)"
+}
+
+if [ "${1:-}" = "--list-prefixes" ]; then
+  shopt -s nullglob
+  for m in "$PREFIX_ROOT"/*.meta; do
+    printf '%s\t%s\n' "$(_meta_field "$m" name)" "$(_meta_field "$m" prefix)"
+  done
+  exit 0
+fi
+
+if [ "${1:-}" = "--remove-prefix" ]; then
+  [ -n "${2:-}" ] || die "usage: luminos-wine-uninstall --remove-prefix \"<AppName-or-slug>\""
+  remove_isolated_app "$2" || die "Nothing removed."
+  exit 0
+fi
+
+# ---- choose the prefix / isolated app ----
+if [ "${1:-}" != "--list" ]; then
+  menu_args=()
+  shopt -s nullglob
+  for m in "$PREFIX_ROOT"/*.meta; do
+    menu_args+=("iso:$(_meta_field "$m" slug)" "[isolated] $(_meta_field "$m" name) — remove entirely")
+  done
+  menu_args+=("$HOME/.wine" "Main (~/.wine) — MT5 / Notepad++ (shared)")
+  menu_args+=("browse"      "Pick another prefix folder…")
+  CHOICE="$(kdialog --title "Luminos — Uninstall Wine App" \
+    --menu "What do you want to remove?" "${menu_args[@]}" 2>/dev/null)" || exit 0
+  [ -z "$CHOICE" ] && exit 0
+  case "$CHOICE" in
+    iso:*)
+      sg="${CHOICE#iso:}"; nm="$(_meta_field "$PREFIX_ROOT/$sg.meta" name)"
+      kdialog --warningcontinuecancel "Remove '$nm' completely?\n\nIts entire isolated prefix, launcher and icon move to a backup. This is the clean one-step uninstall." 2>/dev/null || exit 0
+      out="$(remove_isolated_app "$sg")" || die "Nothing removed."
+      kdialog --msgbox "$out" 2>/dev/null || echo "$out"
+      exit 0 ;;
+    browse)
+      PREFIX="$(kdialog --title "Select a Wine prefix (folder with drive_c)" \
+               --getexistingdirectory "$HOME" 2>/dev/null)" || exit 0 ;;
+    *)
+      PREFIX="$CHOICE" ;;
+  esac
+else
+  PREFIX="${2:-$HOME/.wine}"   # --list [prefix]  → headless candidate dump
+fi
+
+[ -d "$PREFIX/drive_c" ] || die "Not a Wine prefix (no drive_c): $PREFIX"
+
+PF="$PREFIX/drive_c/Program Files"
+PFX86="$PREFIX/drive_c/Program Files (x86)"
+USERDIR="$PREFIX/drive_c/users/$USER"
+SMU="$USERDIR/AppData/Roaming/Microsoft/Windows/Start Menu/Programs"
+SMP="$PREFIX/drive_c/ProgramData/Microsoft/Windows/Start Menu/Programs"
+WINEMENU="$HOME/.local/share/applications/wine/Programs"
+
+# ---- build candidate list from Program Files folders ----
+declare -A APPS=()
+for base in "$PF" "$PFX86"; do
+  [ -d "$base" ] || continue
+  while IFS= read -r -d '' d; do
+    n="$(basename "$d")"
+    [[ "$n" =~ ^($DENY)$ ]] && continue
+    [[ "$n" =~ ^($PROTECT)$ ]] && continue   # never even offer protected apps
+    APPS["$n"]=1
+  done < <(find "$base" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+done
+[ "${#APPS[@]}" -gt 0 ] || die "No removable Wine apps found in $PREFIX"
+
+# ---- headless list mode (for testing) ----
+if [ "${1:-}" = "--list" ]; then
+  printf '%s\n' "${!APPS[@]}" | sort
+  exit 0
+fi
+
+# ---- pick an app ----
+menu=(); for n in "${!APPS[@]}"; do menu+=("$n" "$n"); done
+APP="$(kdialog --title "Uninstall Wine App — $(basename "$PREFIX")" \
+       --menu "Pick an app to remove:" "${menu[@]}" 2>/dev/null)" || exit 0
+[ -z "$APP" ] && exit 0
+[[ "$APP" =~ ^($PROTECT)$ ]] && die "Refusing to remove protected app: $APP"
+
+# ---- step 1: run the app's OWN uninstaller if it still ships one ----
+# This is the proper Windows path — it runs whatever custom cleanup the app
+# defined. But it can be missing (ghost), so we ALWAYS sweep leftovers after.
+uninst=""
+for cand in "$PF/$APP" "$PFX86/$APP"; do
+  [ -d "$cand" ] || continue
+  uninst="$(find "$cand" -maxdepth 2 -type f \
+             \( -iname 'uninstall*.exe' -o -iname 'unins0*.exe' -o -iname 'uninst.exe' \) \
+             2>/dev/null | head -1)"
+  [ -n "$uninst" ] && break
+done
+if [ -n "$uninst" ]; then
+  if kdialog --yesno "Found the app's own uninstaller:\n$uninst\n\nRun it first (the proper way)? Any leftovers get swept afterward." 2>/dev/null; then
+    WINEPREFIX="$PREFIX" wine "$uninst" >/dev/null 2>&1
+  fi
+fi
+
+# ---- step 2: sweep leftover locations by path ----
+targets=()
+for p in "$PF/$APP" "$PFX86/$APP" \
+         "$USERDIR/AppData/Roaming/$APP" "$USERDIR/AppData/Local/$APP" \
+         "$SMU/$APP" "$SMU/$APP.lnk" "$SMP/$APP" "$SMP/$APP.lnk" \
+         "$WINEMENU/$APP" "$WINEMENU/$APP.desktop"; do
+  [ -e "$p" ] && targets+=("$p")
+done
+
+# ---- step 2b: find the app's Linux launcher(s) even if renamed ----
+# Wine auto-names launchers "wine/Programs/<App>.desktop", but hand-made or VM-era
+# launchers can live in the applications root under ANY name (e.g. the old
+# adobe-reader-vm.desktop). Catch those by scanning for a .desktop whose Exec=
+# references this app — by name OR by its Wine exe path — so uninstalling always
+# takes the icon with it. Guarded so we never grab MT5 or this tool's own entry.
+SELF="$HOME/.local/share/applications/luminos-wine-uninstall.desktop"
+for appdir in "$HOME/.local/share/applications" "/usr/share/applications"; do
+  [ -d "$appdir" ] || continue
+  while IFS= read -r -d '' desk; do
+    [ "$desk" = "$SELF" ] && continue
+    exec_line="$(grep -im1 '^Exec=' "$desk" 2>/dev/null)"
+    [ -z "$exec_line" ] && continue
+    # skip anything that would touch the protected app
+    printf '%s' "$exec_line" | grep -qiF "$PROTECT" && continue
+    # match: Exec mentions the app's install folder, OR the app name together
+    # with wine (so a generic "Adobe" doc-handler that isn't wine won't match).
+    if printf '%s' "$exec_line" | grep -qiF -e "$PF/$APP" -e "$PFX86/$APP" \
+       || { printf '%s' "$exec_line" | grep -qiF "$APP" \
+            && printf '%s' "$exec_line" | grep -qiE 'wine|WINEPREFIX'; }; then
+      # de-dup against paths already queued (e.g. the WINEMENU entry)
+      dup=0; for t in "${targets[@]}"; do [ "$t" = "$desk" ] && dup=1 && break; done
+      [ "$dup" -eq 0 ] && targets+=("$desk")
+    fi
+  done < <(find "$appdir" -type f -name '*.desktop' -print0 2>/dev/null)
+done
+
+# Nothing left to sweep: either its own uninstaller already cleaned everything,
+# or there was nothing on disk to begin with.
+if [ "${#targets[@]}" -eq 0 ]; then
+  if [ -n "$uninst" ]; then
+    WINEPREFIX="$PREFIX" wine reg delete \
+      "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$APP" /f >/dev/null 2>&1 || true
+    kdialog --msgbox "$APP removed by its own uninstaller. No leftovers found." 2>/dev/null \
+      || echo "$APP removed by its own uninstaller."
+    exit 0
+  fi
+  die "Found nothing on disk for: $APP"
+fi
+
+# ---- confirm, then delete the leftovers ----
+list="$(printf '  • %s\n' "${targets[@]}")"
+kdialog --title "Confirm removal of $APP" \
+  --warningcontinuecancel "Sweep these leftover locations?\n\n$list" 2>/dev/null || exit 0
+
+for t in "${targets[@]}"; do rm -rf -- "$t"; done
+
+# also sweep the Linux-desktop traces the path-list above doesn't cover:
+# menu-merge .menu files, .directory categories, icons, and extension handlers.
+# [CHANGE: claude-code | 2026-07-08]
+bk="$(_bk_dir "uninstall_${APP// /_}")"
+sweep_linux_traces "$APP" "$bk"
+
+# registry Uninstall entry (cosmetic — safe to fail). Goes through the running
+# wineserver, so it's safe even when the prefix is live.
+WINEPREFIX="$PREFIX" wine reg delete \
+  "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$APP" /f >/dev/null 2>&1 || true
+refresh_caches
+
+total=$(( ${#targets[@]} + ${#SWEPT[@]} ))
+kdialog --msgbox "Removed: $APP\n\nDeleted ${#targets[@]} path(s), swept ${#SWEPT[@]} desktop trace(s).\nBackup of swept traces: $bk" 2>/dev/null \
+  || echo "Removed $APP ($total locations; swept-trace backup: $bk)"

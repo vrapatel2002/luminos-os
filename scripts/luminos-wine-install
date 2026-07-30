@@ -1,0 +1,142 @@
+#!/bin/bash
+# Luminos Wine Installer — one app, one prefix (Path A / prefix-per-app)
+# =====================================================================
+# Installs a Windows app into its OWN isolated Wine prefix under
+#   ~/.local/share/wineprefixes/<slug>/
+# instead of the shared ~/.wine. The payoff: uninstall is a single, complete
+# step — delete that one folder + its launcher — with zero scattered traces,
+# because nothing the app does ever leaks into a space shared with other apps.
+#
+# It also writes a tiny manifest (<slug>.meta) and a launcher .desktop tagged
+# with X-Luminos-Wine-Prefix=<prefix>, so luminos-wine-uninstall can find and
+# remove the whole thing in one click.
+#
+# Usage:
+#   luminos-wine-install <installer.exe|.msi>     # GUI: name → install → pick exe
+#   luminos-wine-install --register "<Name>" "<prefix>" "<exe>"   # headless wiring
+#   luminos-wine-install --list                   # list isolated apps
+# [CHANGE: claude-code | 2026-07-08]
+set -uo pipefail
+
+PREFIX_ROOT="$HOME/.local/share/wineprefixes"
+APPDIR="$HOME/.local/share/applications"
+mkdir -p "$PREFIX_ROOT" "$APPDIR"
+
+die(){ kdialog --error "$1" 2>/dev/null || echo "ERROR: $1" >&2; exit 1; }
+info(){ kdialog --msgbox "$1" 2>/dev/null || echo "$1"; }
+
+slugify(){ echo "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed 's/-\+/-/g; s/^-//; s/-$//'; }
+
+refresh_caches(){
+  update-desktop-database "$APPDIR" >/dev/null 2>&1 || true
+  command -v update-menus >/dev/null 2>&1 && update-menus >/dev/null 2>&1 || true
+  for kb in kbuildsycoca6 kbuildsycoca5; do
+    command -v "$kb" >/dev/null 2>&1 && { "$kb" --noincremental >/dev/null 2>&1; break; }
+  done
+}
+
+# ---- write launcher .desktop + manifest for an installed app ----
+# register <Name> <prefix> <exe-path(unix or C:\...)>
+register_app(){
+  local name="$1" prefix="$2" exe="$3"
+  local slug; slug="$(slugify "$name")"
+  [ -n "$slug" ] || die "Could not derive a name for the app."
+  local desktop="$APPDIR/luminos-wine-$slug.desktop"
+  local meta="$PREFIX_ROOT/$slug.meta"
+
+  cat > "$desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$name
+GenericName=Windows application
+Comment=Isolated Wine app (Luminos prefix-per-app)
+Exec=env "WINEPREFIX=$prefix" /usr/local/bin/luminos-wine-launcher "$exe"
+Icon=wine
+Terminal=false
+Categories=Utility;Wine;
+StartupNotify=true
+X-Luminos-Wine-Prefix=$prefix
+X-Luminos-Wine-Slug=$slug
+EOF
+
+  cat > "$meta" <<EOF
+name=$name
+slug=$slug
+prefix=$prefix
+exe=$exe
+launcher=$desktop
+created=$(date -Iseconds)
+EOF
+
+  refresh_caches
+  echo "$desktop"
+}
+
+# ---- headless register (for scripting/testing) ----
+if [ "${1:-}" = "--register" ]; then
+  [ $# -ge 4 ] || die "usage: luminos-wine-install --register \"<Name>\" \"<prefix>\" \"<exe>\""
+  d="$(register_app "$2" "$3" "$4")"
+  echo "Registered isolated app '$2' → launcher: $d"
+  exit 0
+fi
+
+# ---- list isolated apps ----
+if [ "${1:-}" = "--list" ]; then
+  shopt -s nullglob
+  for m in "$PREFIX_ROOT"/*.meta; do
+    n="$(grep -m1 '^name=' "$m" | cut -d= -f2-)"
+    p="$(grep -m1 '^prefix=' "$m" | cut -d= -f2-)"
+    printf '%s\t%s\n' "$n" "$p"
+  done
+  exit 0
+fi
+
+# ---- interactive install ----
+INSTALLER="${1:-}"
+[ -n "$INSTALLER" ] || INSTALLER="$(kdialog --title "Luminos — Install Windows App" \
+  --getopenfilename "$HOME" 'application/x-ms-dos-executable application/x-msi' 2>/dev/null)" || exit 0
+[ -f "$INSTALLER" ] || die "Installer not found: $INSTALLER"
+
+# app name → slug → prefix
+def="$(basename "$INSTALLER" | sed 's/\.[Ee][Xx][Ee]$//; s/\.[Mm][Ss][Ii]$//')"
+NAME="$(kdialog --title "Install Windows App" \
+  --inputbox "Name this app (its own private Wine space will be created):" "$def" 2>/dev/null)" || exit 0
+[ -n "$NAME" ] || die "No name given."
+SLUG="$(slugify "$NAME")"
+PREFIX="$PREFIX_ROOT/$SLUG"
+
+if [ -e "$PREFIX" ]; then
+  kdialog --warningyesno "A prefix for '$NAME' already exists:\n$PREFIX\n\nReuse it (install into the same space)?" 2>/dev/null \
+    || die "Pick a different name."
+fi
+
+# iGPU by default for installs (cool/quiet; no NVIDIA wakeup)
+export DRI_PRIME=0
+export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json
+export WINEPREFIX="$PREFIX"
+
+# create the prefix (first run initialises it)
+( kdialog --title "$NAME" --passivepopup "Creating isolated Wine space…" 4 2>/dev/null & )
+WINEDLLOVERRIDES="mscoree=d;mshtml=d" wineboot --init >/dev/null 2>&1
+
+# run the installer inside the new prefix
+case "$INSTALLER" in
+  *.msi|*.MSI) wine msiexec /i "$INSTALLER" ;;
+  *)           wine "$INSTALLER" ;;
+esac
+
+# let the user point at the app's main .exe (robust across installer layouts)
+START="$PREFIX/drive_c/Program Files"
+[ -d "$START" ] || START="$PREFIX/drive_c"
+EXE="$(kdialog --title "Pick $NAME's main program (.exe)" \
+  --getopenfilename "$START" 'application/x-ms-dos-executable' 2>/dev/null)" || EXE=""
+if [ -z "$EXE" ]; then
+  kdialog --warningyesno "No main .exe chosen. Keep the prefix anyway (you can add a launcher later)?" 2>/dev/null \
+    || { rm -rf -- "$PREFIX"; die "Aborted; prefix removed."; }
+  info "Installed into isolated prefix:\n$PREFIX\n\nNo launcher created."
+  exit 0
+fi
+
+DESK="$(register_app "$NAME" "$PREFIX" "$EXE")"
+info "Installed '$NAME' in its own space.\n\nPrefix: $PREFIX\nLauncher: $DESK\n\nTo remove it later: it's one click in Luminos Uninstall — the whole prefix goes at once."
