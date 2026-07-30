@@ -186,7 +186,7 @@ fi
 
 step "AUR packages"
 # -bin variants: prebuilt .NET, no compile step. See design rule 3.
-AUR_PKGS=(sonarr-bin prowlarr-bin)
+AUR_PKGS=(sonarr-bin radarr-bin prowlarr-bin)
 runas yay -S --needed --noconfirm "${AUR_PKGS[@]}"
 
 # --------------------------------------------------------- users and the group
@@ -212,7 +212,7 @@ fi
 
 step "Group membership"
 # Every one of these must be able to read downloads AND write the library.
-for u in jellyfin sonarr prowlarr "$ADMIN_USER"; do
+for u in jellyfin sonarr radarr prowlarr "$ADMIN_USER"; do
   if id -u "$u" >/dev/null 2>&1; then
     run gpasswd -a "$u" media
   elif [ "$DRY_RUN" = 1 ]; then
@@ -273,7 +273,7 @@ fi
 
 # ------------------------------------------------------------------- services
 step "Enabling services"
-SERVICES=(jellyfin sonarr prowlarr "qbittorrent-nox@$ADMIN_USER")
+SERVICES=(jellyfin sonarr radarr prowlarr "qbittorrent-nox@$ADMIN_USER")
 run systemctl daemon-reload
 for s in "${SERVICES[@]}"; do
   run systemctl enable --now "$s"
@@ -397,14 +397,15 @@ chk "jellyfin-server installed"   'pacman -Q jellyfin-server >/dev/null 2>&1'
 chk "qbittorrent-nox installed"   'pacman -Q qbittorrent-nox >/dev/null 2>&1'
 chk "GUI qbittorrent NOT present" '! pacman -Q qbittorrent >/dev/null 2>&1'
 chk "sonarr-bin installed"        'pacman -Q sonarr-bin >/dev/null 2>&1'
+chk "radarr-bin installed"        'pacman -Q radarr-bin >/dev/null 2>&1'
 chk "prowlarr-bin installed"      'pacman -Q prowlarr-bin >/dev/null 2>&1'
 
-for s in jellyfin sonarr prowlarr "qbittorrent-nox@$ADMIN_USER"; do
+for s in jellyfin sonarr radarr prowlarr "qbittorrent-nox@$ADMIN_USER"; do
   chk "$s enabled"                "systemctl is-enabled --quiet '$s'"
   chk "$s running"                "systemctl is-active  --quiet '$s'"
 done
 
-for u in jellyfin sonarr prowlarr "$ADMIN_USER"; do
+for u in jellyfin sonarr radarr prowlarr "$ADMIN_USER"; do
   chk "$u is in group media"      "id -nG '$u' | tr ' ' '\n' | grep -qx media"
 done
 chk "jellyfin is in group render" "id -nG jellyfin | tr ' ' '\n' | grep -qx render"
@@ -424,12 +425,16 @@ chmod 664 "$probe"
 chk "sonarr can READ downloads"   "runuser -u sonarr -- test -r '$probe'"
 chk "sonarr can WRITE tv"         "runuser -u sonarr -- touch '$MEDIA_ROOT/tv/.sonarr-probe'"
 chk "jellyfin can READ tv"        "runuser -u jellyfin -- test -r '$MEDIA_ROOT/tv/.sonarr-probe'"
-rm -f "$probe" "$MEDIA_ROOT/tv/.sonarr-probe"
+chk "radarr can READ downloads"   "runuser -u radarr -- test -r '$probe'"
+chk "radarr can WRITE movies"     "runuser -u radarr -- touch '$MEDIA_ROOT/movies/.radarr-probe'"
+chk "jellyfin can READ movies"    "runuser -u jellyfin -- test -r '$MEDIA_ROOT/movies/.radarr-probe'"
+rm -f "$probe" "$MEDIA_ROOT/tv/.sonarr-probe" "$MEDIA_ROOT/movies/.radarr-probe"
 
 # Ports. A service can be "active" and still have failed to bind.
 chk "jellyfin listening on 8096"  'ss -lntH | grep -q ":8096"'
 chk "qbittorrent on 8080"         'ss -lntH | grep -q ":8080"'
 chk "sonarr on 8989"              'ss -lntH | grep -q ":8989"'
+chk "radarr on 7878"              'ss -lntH | grep -q ":7878"'
 chk "prowlarr on 9696"            'ss -lntH | grep -q ":9696"'
 
 echo
@@ -449,7 +454,8 @@ Stage 2 complete. The web UIs are up:
   qBittorrent   http://$IP:8080     user: admin
                 temporary password is printed in the log, get it with:
                 journalctl -u qbittorrent-nox@$ADMIN_USER | grep -i password
-  Sonarr        http://$IP:8989
+  Sonarr        http://$IP:8989    (TV)
+  Radarr        http://$IP:7878    (movies)
   Prowlarr      http://$IP:9696
 
 Still to do:
@@ -457,8 +463,9 @@ Still to do:
      you do).
   2. Migrate from the G14 rather than rebuilding by hand -- /var/lib/jellyfin
      carries the whole library, watch state and users; /var/lib/sonarr the
-     series list; /var/lib/prowlarr the indexers. Stop the services on BOTH
-     machines first, rsync -aHAX, then chown -R to the ids on this box.
+     series list; /var/lib/radarr the movie list; /var/lib/prowlarr the
+     indexers. Stop the services on BOTH machines first, rsync -aHAX, then
+     chown -R BY NAME to the ids on this box (uids and the media gid differ).
   3. Enable VAAPI in Jellyfin using whichever render node listed HEVC profiles
      above, then confirm from the playback log that it is actually used.
   4. Give this box a DHCP reservation on the Bell Home Hub so its address
