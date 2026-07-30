@@ -134,7 +134,34 @@ feel cramped, cheap enough that it isn't a painful mistake.
 
 ## 4. Hardware Shopping List
 
-### 4a. The server laptop — target ~$100–180 CAD
+### 4a. The server laptop — SETTLED 2026-07-29, nothing to buy
+
+> **Resolved. No purchase needed.** The box is a friend's laptop:
+> **Intel Core i5-10210U (10th gen Comet Lake), 4 cores / 8 threads, 16 GB RAM**,
+> with both an SSD and an HDD.
+>
+> Against the table below that lands in the **"8th–10th: same, more cores —
+> better"** row, i.e. two generations *past* the Kaby Lake threshold. Its
+> UHD Graphics 620 (Gen9.5) is spec'd for 4K HEVC 8-bit **and 10-bit** decode,
+> VP9 decode, and H.264/HEVC encode, so unlike the plan's worst case this box
+> has a real transcode fallback for the times direct play fails.
+>
+> **The one gap: no AV1, at all.** AV1 decode starts at 11th gen / Gen12. The
+> Roku can't do AV1 either, so an AV1 file would be software-decoded *and*
+> software-encoded on a 15 W chip — unwatchable. **Keep AV1 out of the library**
+> rather than trying to make it play.
+>
+> All of the above is **read off Intel's spec sheet, not measured.** Jellyfin
+> silently falls back to software transcoding, so `scripts/luminos-server-services`
+> runs `vainfo` on first setup and prints what the chip actually reports. Trust
+> that output, not this paragraph.
+>
+> **Hard constraint: the SSD is off limits.** The friend's Windows install stays
+> byte-identical. Arch goes entirely on the HDD, including its own EFI
+> partition, so the SSD is never opened for writing. `luminos-server-install`
+> enforces this by refusing any disk that isn't non-removable and rotational.
+
+The original buying guidance is kept below for reference.
 
 Because we're aiming for direct play, raw CPU barely matters. Buy on these,
 in priority order:
@@ -303,18 +330,39 @@ it's on the same LAN.
 
 ## 7. Build Order
 
-Nothing here is committed. Rough sequence when the hardware arrives:
+Steps 3–5 are now scripted. Sequence:
 
 1. **Verify the TV is actually 4K** (§1) — free, and it may quarter the storage budget.
 2. Run ethernet to the TV; confirm `network-type` flips from `wifi` to `ethernet`.
-3. Buy the laptop. Confirm gigabit port + Intel generation *before* paying.
-4. Buy the 8 TB external drive (wait for a sale if possible).
-5. Install a minimal Linux + `jellyfin-server`. Set `HandleLidSwitch=ignore` in
-   `/etc/systemd/logind.conf` or it sleeps the moment the lid shuts.
-6. Install the Jellyfin channel on the Roku; **verify a real direct play** —
+3. ~~Buy the laptop~~ — **done, see §4a.** Boot the friend's laptop from the Arch
+   ISO (`~/iso/archlinux-2026.07.01-x86_64.iso`, sha256 + GPG both verified),
+   enable sshd on the ISO, and drive the rest from the G14 over SSH.
+4. **Stage 1: `scripts/luminos-server-install`** — partitions and installs a
+   headless Arch onto the HDD only. Defaults to `--dry-run`; needs
+   `--confirm-disk /dev/sdX --yes --key "$(cat ~/.ssh/luminos-server.pub)"`.
+   Detects the target disk instead of assuming `/dev/sda`, aborts if detection
+   is ambiguous, and ends in 12 assertions that must all pass before rebooting.
+5. **Stage 2: `scripts/luminos-server-services`** — installs Jellyfin,
+   `qbittorrent-nox`, `sonarr-bin`, `prowlarr-bin`; builds the `media` group and
+   `/srv/media` layout; installs `informant` so a manual `pacman -Syu` can't
+   skip an Arch news item. Also defaults to `--dry-run`. It refuses to run on
+   any host not named `luminos-server`, so it can't be fired at the G14 by
+   accident.
+6. Buy the storage drive (wait for a sale — and not before step 1 is answered).
+7. Install the Jellyfin channel on the Roku; **verify a real direct play** —
    Jellyfin's dashboard shows "Direct Play" vs "Transcode" per stream.
    Don't assume it; watch the dashboard.
-7. Only then consider Samba / Syncthing (§6).
+8. Migrate `/var/lib/{jellyfin,sonarr,prowlarr}` off the G14 rather than
+   rebuilding the library by hand.
+9. Only then consider Samba / Syncthing (§6).
+
+> **Do not install the Luminos repo on the server.** It is not a distro. 241
+> files assume G14 hardware (ASUS fan tables, the NVIDIA gate, the 780M, the
+> NPU), and `scripts/install_luminos.sh` expects an archiso build context at
+> `/luminos-build/` and has `|| true` on nearly every step, so it reports
+> success while doing nothing. The two stage scripts above plus
+> `luminos-media-import` and `luminos-servarr-health` are the only portable
+> pieces.
 
 ### Notes for whoever builds this
 

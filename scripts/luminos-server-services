@@ -1,0 +1,394 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-07-29]
+#
+# Stage 2 of the Luminos media-server build.
+# Runs ON the server, over SSH from the G14, AFTER stage 1 has booted it.
+#
+# Installs the four services and nothing else: Jellyfin, qBittorrent (headless),
+# Sonarr, Prowlarr. No desktop, no display manager, no browser.
+#
+# DESIGN RULES
+#
+#   1. Refuse to run on the G14. This script creates system users and rewrites
+#      /srv/media ownership; doing that to the primary machine by accident
+#      would break the running library.
+#   2. qBittorrent must be the *nox* build. The GUI package only works while a
+#      desktop session is logged in, which never happens on a headless box.
+#   3. Sonarr and Prowlarr come from the AUR as the *-bin packages. The
+#      from-source packages build .NET, which on a 4-core U-series CPU writing
+#      to a spinning disk takes the better part of an hour for no benefit.
+#   4. AUR packages are built as the admin user. makepkg refuses to run as root
+#      and it is right to.
+#   5. One shared group, `media`, gid 945 to match the G14. Every service that
+#      touches the library is in it. This is the thing that was broken on the
+#      G14 for weeks: prowlarr/sonarr were in `media`, shawn was in `jellyfin`,
+#      and the two sets did not overlap, so Sonarr could not read downloads.
+#   6. No `|| true`. Every step is checked and the run stops on failure.
+#   7. Hardware video acceleration is REPORTED, not claimed. The script runs
+#      vainfo and prints what the chip actually says. Jellyfin silently falls
+#      back to software transcoding, so an unverified "it works" is worthless.
+#
+# Usage:
+#   ./luminos-server-services --dry-run
+#   ./luminos-server-services --yes
+#
+set -euo pipefail
+
+ADMIN_USER=${ADMIN_USER:-shawn}
+MEDIA_GID=${MEDIA_GID:-945}
+MEDIA_ROOT=${MEDIA_ROOT:-/srv/media}
+EXPECT_HOST=${EXPECT_HOST:-luminos-server}
+SCRIPTS_DIR=${SCRIPTS_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}
+
+DRY_RUN=1
+FORCE_HOST=0
+
+die()  { printf '\033[31mABORT\033[0m  %s\n' "$*" >&2; exit 1; }
+ok()   { printf '\033[32m  ok\033[0m    %s\n' "$*"; }
+warn() { printf '\033[33m  warn\033[0m  %s\n' "$*"; }
+step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+run()  { if [ "$DRY_RUN" = 1 ]; then printf '  would run: %s\n' "$*"; else printf '  + %s\n' "$*"; "$@"; fi; }
+
+# Same as run(), but for things that must happen as the unprivileged admin.
+runas() { if [ "$DRY_RUN" = 1 ]; then printf '  would run (as %s): %s\n' "$ADMIN_USER" "$*"; else printf '  + (as %s) %s\n' "$ADMIN_USER" "$*"; sudo -u "$ADMIN_USER" -- "$@"; fi; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)      DRY_RUN=1 ;;
+    --yes)          DRY_RUN=0 ;;
+    --force-host)   FORCE_HOST=1 ;;
+    --scripts-dir)  SCRIPTS_DIR=${2:?--scripts-dir needs a value}; shift ;;
+    *) die "unknown argument: $1" ;;
+  esac
+  shift
+done
+
+# ---------------------------------------------------------------- sanity gates
+step "Environment"
+[ "$(id -u)" = 0 ] || die "must run as root (try: sudo $0 $*)"
+command -v pacman >/dev/null || die "no pacman -- this is not Arch"
+
+HOST=$(cat /etc/hostname 2>/dev/null || hostname)
+if [ "$HOST" != "$EXPECT_HOST" ]; then
+  if [ "$FORCE_HOST" = 1 ]; then
+    warn "hostname is '$HOST', not '$EXPECT_HOST' -- continuing because --force-host"
+  else
+    die "hostname is '$HOST', expected '$EXPECT_HOST'.
+       This script is for the media server, not for this machine.
+       If you are certain, re-run with --force-host."
+  fi
+fi
+ok "host: $HOST"
+
+id -u "$ADMIN_USER" >/dev/null 2>&1 || die "admin user '$ADMIN_USER' does not exist -- did stage 1 finish?"
+ok "admin user present: $ADMIN_USER"
+
+# This script chgrp's and chmod's MEDIA_ROOT itself. Pointed at a system
+# directory that would be a very bad afternoon.
+MEDIA_ROOT=${MEDIA_ROOT%/}
+case "${MEDIA_ROOT:-/}" in
+  ''|/|/boot|/dev|/etc|/home|/proc|/root|/run|/srv|/sys|/tmp|/usr|/var)
+    die "MEDIA_ROOT='$MEDIA_ROOT' is a system directory. Refusing." ;;
+esac
+
+# /srv/media has to be the big spinning partition, not a directory that quietly
+# landed on the 40 GiB root filesystem.
+if ! findmnt -no SOURCE "$MEDIA_ROOT" >/dev/null 2>&1; then
+  die "$MEDIA_ROOT is not a separate mount point.
+       Stage 1 should have mounted the HDD's third partition there.
+       Check /etc/fstab before continuing -- otherwise downloads fill up root."
+fi
+MEDIA_SRC=$(findmnt -no SOURCE "$MEDIA_ROOT")
+MEDIA_AVAIL=$(findmnt -no AVAIL "$MEDIA_ROOT")
+ok "$MEDIA_ROOT is $MEDIA_SRC ($MEDIA_AVAIL free)"
+
+ping -c1 -W3 archlinux.org >/dev/null 2>&1 || die "no network -- pacman cannot reach the mirrors"
+ok "network reachable"
+
+# ------------------------------------------------------------------- packages
+step "Refreshing the system first"
+# Never install new packages onto a half-updated Arch. Partial upgrades are the
+# single most common way to break this distro.
+run pacman -Syu --noconfirm
+
+step "Repo packages"
+REPO_PKGS=(
+  jellyfin-server      # the media server itself
+  qbittorrent-nox      # HEADLESS build -- see design rule 2
+  base-devel           # needed to build the AUR packages below
+  git
+  intel-media-driver   # iHD VAAPI driver for the i5-10210U's UHD 620
+  libva-utils          # provides vainfo, used for the check at the end
+  ffmpeg               # for luminos-media-import's probing
+  jq
+  sqlite
+)
+run pacman -S --needed --noconfirm "${REPO_PKGS[@]}"
+
+# qbittorrent-nox is only useful here if it ships the templated unit.
+if [ "$DRY_RUN" = 0 ]; then
+  [ -f /usr/lib/systemd/system/qbittorrent-nox@.service ] \
+    || die "qbittorrent-nox did not install qbittorrent-nox@.service --
+       the packaging changed, do not guess at a unit file"
+  ok "qbittorrent-nox@.service present"
+fi
+
+# --------------------------------------------------------------- AUR helper
+step "AUR helper (yay-bin)"
+# yay-bin, not yay: the source package needs the Go toolchain, which is a
+# ~500 MB detour to end up with the identical binary.
+if command -v yay >/dev/null; then
+  ok "yay already installed"
+else
+  BUILD_DIR="/home/$ADMIN_USER/.cache/luminos-aur"
+  run install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$BUILD_DIR"
+  if [ "$DRY_RUN" = 0 ]; then
+    rm -rf "$BUILD_DIR/yay-bin"
+    sudo -u "$ADMIN_USER" git clone --depth 1 \
+      https://aur.archlinux.org/yay-bin.git "$BUILD_DIR/yay-bin"
+    ( cd "$BUILD_DIR/yay-bin" && sudo -u "$ADMIN_USER" makepkg -si --noconfirm )
+    command -v yay >/dev/null || die "yay still not on PATH after makepkg"
+    ok "yay installed"
+  else
+    printf '  would run (as %s): git clone aur/yay-bin && makepkg -si\n' "$ADMIN_USER"
+  fi
+fi
+
+step "AUR packages"
+# -bin variants: prebuilt .NET, no compile step. See design rule 3.
+AUR_PKGS=(sonarr-bin prowlarr-bin)
+runas yay -S --needed --noconfirm "${AUR_PKGS[@]}"
+
+# --------------------------------------------------------- users and the group
+step "The shared media group"
+# Design rule 5. gid is pinned so that a later rsync of /var/lib from the G14
+# lands with ownership already correct instead of silently unreadable.
+if getent group media >/dev/null; then
+  existing_gid=$(getent group media | cut -d: -f3)
+  if [ "$existing_gid" != "$MEDIA_GID" ]; then
+    warn "group media exists with gid $existing_gid, not $MEDIA_GID"
+    warn "leaving it alone -- changing a gid under running services corrupts ownership"
+    warn "when you migrate /var/lib from the G14 you will need: chown -R after rsync"
+  else
+    ok "group media already gid $MEDIA_GID"
+  fi
+else
+  run groupadd -g "$MEDIA_GID" media
+fi
+
+step "Group membership"
+# Every one of these must be able to read downloads AND write the library.
+for u in jellyfin sonarr prowlarr "$ADMIN_USER"; do
+  if id -u "$u" >/dev/null 2>&1; then
+    run gpasswd -a "$u" media
+  else
+    die "user '$u' does not exist -- its package should have created it"
+  fi
+done
+
+# VAAPI needs the render node. Without this Jellyfin cannot open /dev/dri and
+# falls back to software without saying so.
+run gpasswd -a jellyfin render
+run gpasswd -a jellyfin video
+
+# ------------------------------------------------------------------ the layout
+step "Library layout"
+# 2775 = rwxrwsr-x. The setgid bit is the important part: anything created
+# inside inherits group `media`, so Sonarr's moves stay readable by Jellyfin.
+for d in downloads tv movies .import-staging; do
+  run install -d -m2775 -o "$ADMIN_USER" -g media "$MEDIA_ROOT/$d"
+done
+# downloads is owned by the admin user on purpose: qBittorrent runs as
+# $ADMIN_USER and gets write access through the OWNER bits, so it keeps working
+# even before the group change takes effect on its next login.
+run chmod 2775 "$MEDIA_ROOT"
+run chgrp media "$MEDIA_ROOT"
+
+# ---------------------------------------------------------------- qBittorrent
+step "qBittorrent configuration"
+QBT_CONF="/home/$ADMIN_USER/.config/qBittorrent/qBittorrent.conf"
+if [ -f "$QBT_CONF" ]; then
+  ok "config already exists, not overwriting: $QBT_CONF"
+else
+  run install -d -m700 -o "$ADMIN_USER" -g "$ADMIN_USER" \
+    "/home/$ADMIN_USER/.config/qBittorrent"
+  if [ "$DRY_RUN" = 0 ]; then
+    cat > "$QBT_CONF" <<EOF
+[BitTorrent]
+Session\DefaultSavePath=$MEDIA_ROOT/downloads
+Session\TempPathEnabled=false
+Session\Preallocation=true
+
+[Preferences]
+WebUI\Address=*
+WebUI\Port=8080
+WebUI\LocalHostAuth=false
+EOF
+    chown "$ADMIN_USER:$ADMIN_USER" "$QBT_CONF"
+    chmod 600 "$QBT_CONF"
+    ok "wrote $QBT_CONF (save path -> $MEDIA_ROOT/downloads)"
+  else
+    printf '  would write %s\n' "$QBT_CONF"
+  fi
+fi
+
+# ------------------------------------------------------------------- services
+step "Enabling services"
+SERVICES=(jellyfin sonarr prowlarr "qbittorrent-nox@$ADMIN_USER")
+run systemctl daemon-reload
+for s in "${SERVICES[@]}"; do
+  run systemctl enable --now "$s"
+done
+
+# ------------------------------------------------------- manual-update guard
+step "Update guard (informant)"
+# He chose manual updates over SSH. informant makes pacman REFUSE to run until
+# the Arch news feed has been read, which is the actual failure mode on Arch:
+# an upgrade that needed a one-line manual step and nobody saw the announcement.
+runas yay -S --needed --noconfirm informant
+cat <<'GUARD'
+  Update workflow from now on, over SSH:
+
+      sudo informant read      # shows any news you have not seen
+      sudo pacman -Syu
+
+  If pacman aborts with "informant: You have unread news", that is the guard
+  doing its job. Read the item, then upgrade. Never work around it.
+GUARD
+
+# --------------------------------------------------- port the portable tools
+step "Luminos helper scripts"
+# Only these two are portable. The rest of the Luminos repo is G14-specific
+# (ASUS fan tables, NVIDIA gating, NPU) and must NOT be installed here.
+for tool in luminos-media-import luminos-servarr-health; do
+  if [ -f "$SCRIPTS_DIR/$tool" ]; then
+    run install -Dm755 "$SCRIPTS_DIR/$tool" "/usr/local/bin/$tool"
+  else
+    warn "$tool not found in $SCRIPTS_DIR -- copy it over from the G14:"
+    warn "    scp ~/luminos-os/scripts/$tool $ADMIN_USER@$HOST:/tmp/"
+    warn "    sudo install -Dm755 /tmp/$tool /usr/local/bin/$tool"
+  fi
+done
+
+# ------------------------------------------------- hardware decode: REPORT it
+step "Hardware video acceleration -- measured, not assumed"
+if [ "$DRY_RUN" = 0 ]; then
+  if [ ! -d /dev/dri ]; then
+    warn "/dev/dri does not exist. No GPU render node -> software transcode only."
+  else
+    echo "  render nodes: $(ls /dev/dri/renderD* 2>/dev/null || echo none)"
+    for node in /dev/dri/renderD*; do
+      echo "  --- $node ---"
+      # 2>&1 on purpose: a node that cannot initialise says so on stderr, and
+      # that answer is as useful as a profile list. Do not let it stop the run.
+      vainfo --display drm --device "$node" 2>&1 | sed 's/^/    /'
+    done
+    cat <<'VAHINT'
+
+  What to look for in the list above:
+    VAProfileHEVCMain      + VLD  -> 4K HEVC 8-bit decode
+    VAProfileHEVCMain10    + VLD  -> 4K HEVC 10-bit decode  (this is the one
+                                     that matters, most 4K rips are 10-bit)
+    VAProfileH264High      + EncSlice -> can re-encode to something the Roku
+                                     will always take
+    VAProfileAV1*                 -> will NOT be there. UHD 620 is Gen9.5 and
+                                     AV1 decode starts at 11th gen. The Roku
+                                     cannot do AV1 either, so keep AV1 out of
+                                     the library entirely rather than
+                                     transcoding it on both ends.
+
+  Nothing is enabled in Jellyfin yet. Turn it on in the web UI:
+    Dashboard -> Playback -> Transcoding
+      Hardware acceleration: Video Acceleration API (VAAPI)
+      VA-API device: the render node that actually listed profiles above
+    Then play a file and check the log says `-hwaccel vaapi`, not just
+    `-codec:v:0 copy`. Jellyfin does not warn you when it gives up.
+VAHINT
+  fi
+else
+  printf '  would run: vainfo on each /dev/dri/renderD* and print the profiles\n'
+fi
+
+# ------------------------------------------------------------- verify, loudly
+step "Verification"
+if [ "$DRY_RUN" = 1 ]; then
+  echo "  (dry run -- nothing was changed, so nothing to verify)"
+  echo
+  ok "dry run complete. Re-run with --yes to apply."
+  exit 0
+fi
+
+fail=0
+chk() { if eval "$2"; then ok "$1"; else printf '\033[31m  FAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); fi; }
+
+chk "jellyfin-server installed"   'pacman -Q jellyfin-server >/dev/null 2>&1'
+chk "qbittorrent-nox installed"   'pacman -Q qbittorrent-nox >/dev/null 2>&1'
+chk "GUI qbittorrent NOT present" '! pacman -Q qbittorrent >/dev/null 2>&1'
+chk "sonarr-bin installed"        'pacman -Q sonarr-bin >/dev/null 2>&1'
+chk "prowlarr-bin installed"      'pacman -Q prowlarr-bin >/dev/null 2>&1'
+
+for s in jellyfin sonarr prowlarr "qbittorrent-nox@$ADMIN_USER"; do
+  chk "$s enabled"                "systemctl is-enabled --quiet '$s'"
+  chk "$s running"                "systemctl is-active  --quiet '$s'"
+done
+
+for u in jellyfin sonarr prowlarr "$ADMIN_USER"; do
+  chk "$u is in group media"      "id -nG '$u' | tr ' ' '\n' | grep -qx media"
+done
+chk "jellyfin is in group render" "id -nG jellyfin | tr ' ' '\n' | grep -qx render"
+
+for d in downloads tv movies; do
+  chk "$MEDIA_ROOT/$d exists"     "[ -d '$MEDIA_ROOT/$d' ]"
+  chk "$MEDIA_ROOT/$d is setgid"  "[ -g '$MEDIA_ROOT/$d' ]"
+  chk "$MEDIA_ROOT/$d group=media" "[ \"\$(stat -c %G '$MEDIA_ROOT/$d')\" = media ]"
+done
+
+# The real test of the permissions design: can Sonarr read a download and write
+# the library? Prove it by actually doing it as the sonarr user.
+probe="$MEDIA_ROOT/downloads/.luminos-perm-probe"
+: > "$probe"
+chown "$ADMIN_USER:media" "$probe"
+chmod 664 "$probe"
+chk "sonarr can READ downloads"   "runuser -u sonarr -- test -r '$probe'"
+chk "sonarr can WRITE tv"         "runuser -u sonarr -- touch '$MEDIA_ROOT/tv/.sonarr-probe'"
+chk "jellyfin can READ tv"        "runuser -u jellyfin -- test -r '$MEDIA_ROOT/tv/.sonarr-probe'"
+rm -f "$probe" "$MEDIA_ROOT/tv/.sonarr-probe"
+
+# Ports. A service can be "active" and still have failed to bind.
+chk "jellyfin listening on 8096"  'ss -lntH | grep -q ":8096"'
+chk "qbittorrent on 8080"         'ss -lntH | grep -q ":8080"'
+chk "sonarr on 8989"              'ss -lntH | grep -q ":8989"'
+chk "prowlarr on 9696"            'ss -lntH | grep -q ":9696"'
+
+echo
+if [ "$fail" -gt 0 ]; then
+  die "$fail check(s) FAILED. Do not start configuring the web UIs yet --
+       fix the failures above, they are all permission or unit problems and
+       they get much harder to untangle once there is data in the databases."
+fi
+ok "all checks passed"
+
+IP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -1)
+cat <<NEXT
+
+Stage 2 complete. The web UIs are up:
+
+  Jellyfin      http://$IP:8096
+  qBittorrent   http://$IP:8080     user: admin
+                temporary password is printed in the log, get it with:
+                journalctl -u qbittorrent-nox@$ADMIN_USER | grep -i password
+  Sonarr        http://$IP:8989
+  Prowlarr      http://$IP:9696
+
+Still to do:
+  1. Change the qBittorrent password (it regenerates on every restart until
+     you do).
+  2. Migrate from the G14 rather than rebuilding by hand -- /var/lib/jellyfin
+     carries the whole library, watch state and users; /var/lib/sonarr the
+     series list; /var/lib/prowlarr the indexers. Stop the services on BOTH
+     machines first, rsync -aHAX, then chown -R to the ids on this box.
+  3. Enable VAAPI in Jellyfin using whichever render node listed HEVC profiles
+     above, then confirm from the playback log that it is actually used.
+  4. Give this box a DHCP reservation on the Bell Home Hub so its address
+     stops moving.
+NEXT
