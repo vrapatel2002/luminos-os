@@ -34,6 +34,12 @@ ROOT_GIB=${ROOT_GIB:-40}
 ESP_MIB=${ESP_MIB:-1024}
 AUTHORIZED_KEY=${AUTHORIZED_KEY:-}
 
+# WiFi is optional but the machine MUST come back on the network after reboot.
+# WIFI_PSK is taken from the environment, never from a command-line flag, so the
+# passphrase does not sit in the process list for every user on the box to read.
+WIFI_SSID=${WIFI_SSID:-}
+WIFI_PSK=${WIFI_PSK:-}
+
 DRY_RUN=1
 CONFIRM_DISK=""
 
@@ -48,6 +54,10 @@ while [ $# -gt 0 ]; do
     --yes)          DRY_RUN=0 ;;
     --confirm-disk) CONFIRM_DISK=${2:?--confirm-disk needs a value}; shift ;;
     --key)          AUTHORIZED_KEY=${2:?--key needs a value}; shift ;;
+    --wifi-ssid)    WIFI_SSID=${2:?--wifi-ssid needs a value}; shift ;;
+    --wifi-psk)     die "refusing --wifi-psk: a passphrase on the command line is
+       visible in the process list. Pass it in the environment instead:
+           WIFI_PSK='...' $0 --wifi-ssid '...' ..." ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
@@ -168,6 +178,7 @@ cat <<PLAN
   desktop            none
   swap               zram (no swap partition)
   lid closed         ignored -- machine keeps running
+  network            DHCP via systemd-networkd${WIFI_SSID:+ + iwd on '$WIFI_SSID'}
 PLAN
 
 if [ -z "$AUTHORIZED_KEY" ]; then
@@ -175,6 +186,41 @@ if [ -z "$AUTHORIZED_KEY" ]; then
        machine. Pass --key \"ssh-ed25519 AAAA...\""
 fi
 ok "ssh key supplied (${AUTHORIZED_KEY:0:28}...)"
+
+# ------------------------------------------------- will we be able to reach it?
+# This is the other unrecoverable failure, and it is quieter than wiping the
+# wrong disk: install a headless box with no working network and the only way
+# back in is a keyboard and a monitor. Refuse to build one.
+step "Post-reboot reachability"
+WIRED_IFACES=$(ls /sys/class/net | grep -E '^(en|eth)' || true)
+WIFI_IFACES=$(ls /sys/class/net | grep -E '^wl' || true)
+[ -n "$WIRED_IFACES" ] && ok "wired interface(s) present: $(echo "$WIRED_IFACES" | tr '\n' ' ')" \
+                       || printf '\033[33m  warn\033[0m  no wired interface -- this machine has no ethernet port\n'
+[ -n "$WIFI_IFACES" ]  && ok "wireless interface(s) present: $(echo "$WIFI_IFACES" | tr '\n' ' ')" \
+                       || printf '\033[33m  warn\033[0m  no wireless interface detected\n'
+
+WIFI=0
+if [ -n "$WIFI_SSID" ]; then
+  [ -n "$WIFI_PSK" ] || die "--wifi-ssid given but WIFI_PSK is empty.
+       Pass it in the environment: WIFI_PSK='...' $0 --wifi-ssid '$WIFI_SSID' ..."
+  [ -n "$WIFI_IFACES" ] || die "--wifi-ssid given but the kernel sees no wl* interface.
+       Either the card needs firmware that is not loaded, or there is no card.
+       Check: ip link ; dmesg | grep -i firmware"
+  WIFI=1
+  ok "wifi will be configured for SSID '$WIFI_SSID' (passphrase read from environment, ${#WIFI_PSK} chars)"
+fi
+
+if [ -z "$WIRED_IFACES" ] && [ "$WIFI" = 0 ]; then
+  die "this machine has no ethernet port and no wifi was configured.
+       After reboot it would have NO network and no way to SSH in -- you would
+       need a keyboard and monitor to recover it.
+       Either plug in ethernet (or a USB gigabit adapter), or re-run with:
+           WIFI_PSK='...' $0 --wifi-ssid 'YourSSID' ..."
+fi
+if [ -z "$WIRED_IFACES" ] && [ "$WIFI" = 1 ]; then
+  printf '\033[33m  warn\033[0m  wifi is the ONLY route in after reboot. If the passphrase is\n'
+  printf '\033[33m       \033[0m  wrong the box is unreachable and needs a monitor to fix.\n'
+fi
 
 if [ "$DRY_RUN" = 1 ]; then
   printf '\n\033[33mDRY RUN -- nothing was written. Re-run with --yes to execute.\033[0m\n'
@@ -226,8 +272,11 @@ run pacstrap -K /mnt \
   base linux linux-firmware "$UCODE" \
   openssh sudo nano less \
   systemd-resolvconf zram-generator \
+  iwd \
   intel-media-driver libva-utils \
   git rsync htop python
+# iwd goes on unconditionally, even when installing over ethernet. It is ~2 MB,
+# and the alternative is discovering you need it on a machine you cannot reach.
 
 step "fstab"
 genfstab -U /mnt >> /mnt/etc/fstab
@@ -248,6 +297,39 @@ Name=en* eth*
 [Network]
 DHCP=yes
 EOF
+
+if [ "$WIFI" = 1 ]; then
+  cat > /mnt/etc/systemd/network/25-wireless.network <<'EOF'
+[Match]
+Name=wl*
+
+[Network]
+DHCP=yes
+
+[DHCPv4]
+RouteMetric=600
+EOF
+  # RouteMetric 600 vs the wired default of 1024 is deliberate: if both come up,
+  # ethernet wins and wifi sits there as a hot spare.
+
+  # iwd stores credentials as one file per network. Passphrase in plaintext by
+  # necessity -- iwd needs it to re-auth unattended at boot -- so 600 and root.
+  install -d -m700 /mnt/var/lib/iwd
+  psk_file="/mnt/var/lib/iwd/${WIFI_SSID}.psk"
+  printf '[Security]\nPassphrase=%s\n' "$WIFI_PSK" > "$psk_file"
+  chmod 600 "$psk_file"
+  # Let systemd-networkd own addressing; iwd only does authentication. Without
+  # this they both try to run DHCP and fight over the route.
+  install -d -m755 /mnt/etc/iwd
+  cat > /mnt/etc/iwd/main.conf <<'EOF'
+[General]
+EnableNetworkConfiguration=false
+
+[Network]
+NameResolvingService=systemd
+EOF
+  ok "wifi credential written for '$WIFI_SSID' (mode 600, root only)"
+fi
 
 mkdir -p /mnt/etc/systemd/logind.conf.d
 cat > /mnt/etc/systemd/logind.conf.d/99-server.conf <<'EOF'
@@ -297,6 +379,7 @@ chmod 600 "/home/$ADMIN_USER/.ssh/authorized_keys"
 chown "$ADMIN_USER:$ADMIN_USER" "/home/$ADMIN_USER/.ssh/authorized_keys"
 
 systemctl enable sshd systemd-networkd systemd-resolved
+if [ "$WIFI" = 1 ]; then systemctl enable iwd; fi
 mkinitcpio -P
 
 if [ "$FIRMWARE" = uefi ]; then
@@ -345,6 +428,13 @@ chk "root login is locked"      "grep -q '^root:!' /mnt/etc/shadow"
 chk "sshd enabled"              '[ -L /mnt/etc/systemd/system/multi-user.target.wants/sshd.service ]'
 chk "networkd enabled"          '[ -L /mnt/etc/systemd/system/multi-user.target.wants/systemd-networkd.service ]'
 chk "lid switch ignored"        '[ -s /mnt/etc/systemd/logind.conf.d/99-server.conf ]'
+chk "a network unit exists"     '[ -s /mnt/etc/systemd/network/20-wired.network ] || [ -s /mnt/etc/systemd/network/25-wireless.network ]'
+if [ "$WIFI" = 1 ]; then
+  chk "iwd enabled"             '[ -L /mnt/etc/systemd/system/multi-user.target.wants/iwd.service ]'
+  chk "wifi credential written" "[ -s '/mnt/var/lib/iwd/${WIFI_SSID}.psk' ]"
+  chk "wifi credential is 0600" "[ \"\$(stat -c %a '/mnt/var/lib/iwd/${WIFI_SSID}.psk')\" = 600 ]"
+  chk "iwd leaves DHCP to networkd" "grep -q 'EnableNetworkConfiguration=false' /mnt/etc/iwd/main.conf"
+fi
 if [ "$FIRMWARE" = uefi ]; then
   chk "boot entry written"      '[ -s /mnt/boot/loader/entries/luminos.conf ]'
   chk "removable fallback"      '[ -s /mnt/boot/EFI/BOOT/BOOTX64.EFI ]'
