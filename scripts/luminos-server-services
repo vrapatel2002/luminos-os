@@ -105,6 +105,25 @@ ok "$MEDIA_ROOT is $MEDIA_SRC ($MEDIA_AVAIL free)"
 ping -c1 -W3 archlinux.org >/dev/null 2>&1 || die "no network -- pacman cannot reach the mirrors"
 ok "network reachable"
 
+# This script installs informant near the end, and informant then blocks pacman
+# until the Arch news feed has been read. So on any RE-RUN, every pacman call in
+# this script fails -- and it failed at the worst possible moment: mid-way
+# through `pacman -S`, after the download, with "failed to commit transaction".
+# Check it here instead, where the fix is still cheap and the message is clear.
+if command -v informant >/dev/null && ! informant check >/dev/null 2>&1; then
+  die "informant reports unread Arch news, so pacman will refuse to run.
+
+       This is the update guard THIS SCRIPT installed, working correctly.
+       Read the news -- do not work around it, the items sometimes contain a
+       required manual step:
+
+           informant list           # what is unread
+           informant read <n>       # read one, or omit <n> to walk them all
+
+       Then re-run this script."
+fi
+ok "no unread Arch news blocking pacman"
+
 # ------------------------------------------------------------------- packages
 step "Refreshing the system first"
 # Never install new packages onto a half-updated Arch. Partial upgrades are the
@@ -114,6 +133,11 @@ run pacman -Syu --noconfirm
 step "Repo packages"
 REPO_PKGS=(
   jellyfin-server      # the media server itself
+  jellyfin-web         # the browser UI. A SEPARATE package, and not a
+                       # dependency of jellyfin-server: without it the server
+                       # exits 1 on every start with "the provided content
+                       # directory is either invalid or empty", then trips
+                       # systemd's start limit. There is no degraded mode.
   qbittorrent-nox      # HEADLESS build -- see design rule 2
   base-devel           # needed to build the AUR packages below
   git
@@ -141,7 +165,13 @@ if command -v yay >/dev/null; then
   ok "yay already installed"
 else
   BUILD_DIR="/home/$ADMIN_USER/.cache/luminos-aur"
-  run install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$BUILD_DIR"
+  # Create this AS the user, not with `install -d -o`. install applies -o/-g
+  # only to the final component; any parent it has to create along the way is
+  # left root:root. That silently made ~/.cache root-owned, and qbittorrent-nox
+  # -- which runs as this user and mkdirs ~/.cache/qBittorrent on startup --
+  # aborted with SIGABRT on every boot. The service failure showed up nowhere
+  # near the cause.
+  run sudo -u "$ADMIN_USER" mkdir -p "$BUILD_DIR"
   if [ "$DRY_RUN" = 0 ]; then
     rm -rf "$BUILD_DIR/yay-bin"
     sudo -u "$ADMIN_USER" git clone --depth 1 \
@@ -161,8 +191,12 @@ runas yay -S --needed --noconfirm "${AUR_PKGS[@]}"
 
 # --------------------------------------------------------- users and the group
 step "The shared media group"
-# Design rule 5. gid is pinned so that a later rsync of /var/lib from the G14
-# lands with ownership already correct instead of silently unreadable.
+# Design rule 5. MEDIA_GID is a preference, not a guarantee, and usually loses:
+# sonarr-bin and prowlarr-bin both ship /usr/lib/sysusers.d entries containing
+# `g media -`, so systemd creates the group itself during package install with
+# whatever gid is free (965 on the first real build, not our 945). Do not fight
+# that -- the packages own the group. Consequence: never assume the numeric gid
+# matches the G14's, so a migration must chown by NAME after rsync.
 if getent group media >/dev/null; then
   existing_gid=$(getent group media | cut -d: -f3)
   if [ "$existing_gid" != "$MEDIA_GID" ]; then
@@ -181,6 +215,11 @@ step "Group membership"
 for u in jellyfin sonarr prowlarr "$ADMIN_USER"; do
   if id -u "$u" >/dev/null 2>&1; then
     run gpasswd -a "$u" media
+  elif [ "$DRY_RUN" = 1 ]; then
+    # On a fresh machine these users don't exist yet -- the packages above
+    # create them, and dry-run didn't install anything. Dying here would make
+    # --dry-run useless on exactly the machine it matters most on: a new one.
+    warn "user '$u' does not exist yet; the package install above creates it"
   else
     die "user '$u' does not exist -- its package should have created it"
   fi
@@ -246,10 +285,16 @@ step "Update guard (informant)"
 # the Arch news feed has been read, which is the actual failure mode on Arch:
 # an upgrade that needed a one-line manual step and nobody saw the announcement.
 runas yay -S --needed --noconfirm informant
+# informant's save file is group-owned by `informant`, so without this every
+# `informant read` needs sudo -- and its own post_install says so in a message
+# nobody reads. Cheap to fix here.
+if [ "$DRY_RUN" = 0 ] && getent group informant >/dev/null; then
+  run gpasswd -a "$ADMIN_USER" informant
+fi
 cat <<'GUARD'
   Update workflow from now on, over SSH:
 
-      sudo informant read      # shows any news you have not seen
+      informant read           # shows any news you have not seen
       sudo pacman -Syu
 
   If pacman aborts with "informant: You have unread news", that is the guard
@@ -276,13 +321,38 @@ if [ "$DRY_RUN" = 0 ]; then
   if [ ! -d /dev/dri ]; then
     warn "/dev/dri does not exist. No GPU render node -> software transcode only."
   else
-    echo "  render nodes: $(ls /dev/dri/renderD* 2>/dev/null || echo none)"
+    echo "  render nodes: $(ls /dev/dri/renderD* 2>/dev/null | tr '\n' ' ')"
+    BEST_NODE=""
     for node in /dev/dri/renderD*; do
       echo "  --- $node ---"
       # 2>&1 on purpose: a node that cannot initialise says so on stderr, and
-      # that answer is as useful as a profile list. Do not let it stop the run.
-      vainfo --display drm --device "$node" 2>&1 | sed 's/^/    /'
+      # that answer is as useful as a profile list.
+      #
+      # Captured rather than piped. `vainfo | sed` looks harmless but this
+      # script runs under `set -o pipefail`, so a node that fails to init took
+      # the whole install down with it -- after every package was already in
+      # place -- which is exactly what the comment above was trying to prevent.
+      # A diagnostic must never be able to fail the thing it is diagnosing.
+      if va_out=$(vainfo --display drm --device "$node" 2>&1); then
+        printf '%s\n' "$va_out" | sed 's/^/    /'
+        # Don't guess from the node number. On this Dell renderD128 is the
+        # useful Intel one; on the G14 renderD128 is NVIDIA and reports
+        # nothing. Pick by what the node actually claims it can decode.
+        if [ -z "$BEST_NODE" ] && printf '%s' "$va_out" | grep -q 'VAProfileHEVCMain10.*VLD'; then
+          BEST_NODE=$node
+        fi
+      else
+        printf '%s\n' "$va_out" | sed 's/^/    /'
+        warn "$node cannot initialise VAAPI -- unusable for transcoding."
+        warn "  Normal for a second/unsupported GPU. Do NOT put this node in Jellyfin."
+      fi
     done
+    echo
+    if [ -n "$BEST_NODE" ]; then
+      ok "use this node in Jellyfin: $BEST_NODE  (it reports HEVC 10-bit decode)"
+    else
+      warn "no render node reported HEVC 10-bit decode -- expect software transcoding"
+    fi
     cat <<'VAHINT'
 
   What to look for in the list above:
@@ -300,7 +370,9 @@ if [ "$DRY_RUN" = 0 ]; then
   Nothing is enabled in Jellyfin yet. Turn it on in the web UI:
     Dashboard -> Playback -> Transcoding
       Hardware acceleration: Video Acceleration API (VAAPI)
-      VA-API device: the render node that actually listed profiles above
+      VA-API device: the node named on the "use this node" line above.
+                     Do NOT assume renderD128 -- the numbering is assigned in
+                     PCI probe order and the first node is often the wrong GPU.
     Then play a file and check the log says `-hwaccel vaapi`, not just
     `-codec:v:0 copy`. Jellyfin does not warn you when it gives up.
 VAHINT
