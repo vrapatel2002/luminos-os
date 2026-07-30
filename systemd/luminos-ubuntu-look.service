@@ -1,0 +1,15 @@
+[Unit]
+Description=Luminos OS — re-affirm the Ubuntu (Yaru) look at login (heals Global-Theme resets)
+Documentation=https://github.com/luminos-os/luminos
+After=plasma-workspace.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+# Small settle delay so plasmashell has finished reading config before we re-affirm.
+ExecStartPre=/usr/bin/sleep 2
+ExecStart=%h/.local/bin/luminos-ubuntu-persist
+SyslogIdentifier=luminos-ubuntu-look
+
+[Install]
+WantedBy=plasma-workspace.target

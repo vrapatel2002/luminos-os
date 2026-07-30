@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# luminos-theme-sync — keep the SDDM login screen + KDE lock screen matched to the
+# CURRENT desktop wallpaper, automatically. Run manually, or on file change via
+# luminos-theme-sync.path (systemd). Idempotent + debounced (no-op if nothing changed).
+#
+# Why: SDDM (login) and the lock screen are separate theming systems from the Plasma
+# desktop, so changing the desktop wallpaper/theme leaves them mismatched. This pulls the
+# desktop wallpaper into both so login → lock → desktop all look the same.
+#
+# Needs root for the /etc + /usr/share (SDDM) writes; the lock-screen write is done as the
+# owning user so KDE keeps the file's ownership.
+#
+# [CHANGE: claude-code | 2026-07-22]
+set -euo pipefail
+
+USER_NAME="${SUDO_USER:-shawn}"
+USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
+STATE=/var/lib/luminos/theme-sync.wallpaper
+SDDM_THEME_CONF=/usr/share/sddm/themes/breeze/theme.conf.user
+
+log() { echo "luminos-theme-sync: $*"; }
+
+# Extract the first Image= value from a KDE config file, stripping any file:// prefix.
+read_image() {
+	local f="$1" v
+	v="$(grep -m1 -oP '(?<=^Image=).*' "$f" 2>/dev/null || true)"
+	printf '%s' "${v#file://}"
+}
+
+# 1. Find the desktop wallpaper. Fallback chain: desktop → lock screen → current SDDM bg.
+wall="$(read_image "$USER_HOME/.config/plasma-org.kde.plasma.desktop-appletsrc")"
+if [[ -z "$wall" || ! -f "$wall" ]]; then
+	wall="$(read_image "$USER_HOME/.config/kscreenlockerrc")"
+fi
+if [[ -z "$wall" || ! -f "$wall" ]]; then
+	wall="$(read_image "$SDDM_THEME_CONF")"
+fi
+if [[ -z "$wall" || ! -f "$wall" ]]; then
+	log "no usable wallpaper found — nothing to sync"
+	exit 0
+fi
+
+# 2. Debounce: skip if we already synced this exact wallpaper.
+if [[ -f "$STATE" && "$(cat "$STATE" 2>/dev/null)" == "$wall" ]]; then
+	exit 0
+fi
+
+# 3. Lock screen — write as the owning user so KDE keeps ownership + picks it up cleanly.
+if command -v kwriteconfig6 >/dev/null 2>&1; then
+	sudo -u "$USER_NAME" kwriteconfig6 --file kscreenlockerrc \
+		--group Greeter --group Wallpaper --group org.kde.image --group General \
+		--key Image "$wall" || log "warn: lock-screen write failed"
+fi
+
+# 4. SDDM (Breeze theme) — background image. Root-owned path.
+mkdir -p "$(dirname "$SDDM_THEME_CONF")"
+cat > "$SDDM_THEME_CONF" <<EOF
+[General]
+showClock=true
+type=image
+background=$wall
+EOF
+
+# 5. Remember what we synced (debounce state).
+mkdir -p "$(dirname "$STATE")"
+printf '%s' "$wall" > "$STATE"
+
+log "synced wallpaper → lock screen + SDDM: $wall"

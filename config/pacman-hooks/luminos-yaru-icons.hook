@@ -1,0 +1,21 @@
+# luminos-yaru-icons.hook — keep the Yaru icon fallback chain after package updates.
+#
+# yaru-icon-theme ships index.theme with Inherits=Humanity,hicolor. Humanity is not
+# packaged for Arch, so every icon Yaru lacks logs `Icon theme "Humanity" not found`
+# and falls straight through to hicolor, skipping Papirus and breeze. We rewrite the
+# chain, but a package upgrade restores the shipped file — silently, and the desktop
+# then slowly fills with mismatched icons again.
+#
+# Install to /etc/pacman.d/hooks/luminos-yaru-icons.hook
+# [CHANGE: claude-code | 2026-07-26] BUG-090
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = yaru-icon-theme
+
+[Action]
+Description = Restoring the Luminos icon fallback chain for Yaru...
+When = PostTransaction
+Exec = /bin/sh -c 'for t in Yaru Yaru-dark; do [ -f "/usr/share/icons/$t/index.theme" ] && /usr/local/bin/luminos-icon-inherits.py "/usr/share/icons/$t/index.theme" "Papirus,breeze,hicolor"; done; gtk-update-icon-cache -f -q /usr/share/icons/Yaru 2>/dev/null; exit 0'

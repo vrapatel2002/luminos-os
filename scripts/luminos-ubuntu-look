@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# luminos-ubuntu-look — apply an Ubuntu (Yaru) look to KDE Plasma without switching to GNOME.
+# Sets icons + cursor + fonts + a Ubuntu-orange color scheme, points GTK apps at Yaru, then
+# re-syncs the login/lock screens. Idempotent — safe to re-run. Reversible (see --revert).
+#
+# Requires (install first): yaru-icon-theme yaru-gtk-theme ttf-ubuntu-font-family
+#
+# [CHANGE: claude-code | 2026-07-22]
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+
+ICON_THEME=Yaru
+CURSOR_THEME=Yaru
+COLOR_SCHEME=Yaru
+UI_FONT="Ubuntu,10,-1,5,50,0,0,0,0,0"
+MONO_FONT="Ubuntu Mono,10,-1,5,50,0,0,0,0,0"
+
+log() { echo "luminos-ubuntu-look: $*"; }
+
+apply() {
+	# 1. Install the Ubuntu-orange color scheme into the user's KDE dir.
+	local dest="$HOME/.local/share/color-schemes"
+	mkdir -p "$dest"
+	install -m644 "$REPO_DIR/share/color-schemes/Yaru.colors" "$dest/Yaru.colors"
+
+	# 2. Color scheme (live, via D-Bus to the running session).
+	plasma-apply-colorscheme "$COLOR_SCHEME" 2>/dev/null || \
+		kwriteconfig6 --file kdeglobals --group General --key ColorScheme "$COLOR_SCHEME"
+
+	# 2b. Icon fallback chain — Yaru ships with only "Humanity,hicolor" as fallback and Humanity
+	# isn't installed, so any icon Yaru lacks renders as a broken "?" placeholder. Point the gaps at
+	# Papirus (near-complete) → breeze (KDE app icons) → hicolor. Idempotent; re-applied here so a
+	# `yaru-icon-theme` package update (which rewrites index.theme) can't reintroduce the "?" icons.
+	#
+	# [CHANGE: claude-code | 2026-07-26] BUG-090. Two fixes:
+	#   - "Humanity" was left at the FRONT of the chain even though it is not installed. Every
+	#     icon miss then logged `Icon theme "Humanity" not found` — 58 times in one day.
+	#   - This used `kwriteconfig6`, which rewrites the file with its groups sorted, burying
+	#     [Icon Theme] at line 651 of 789. The freedesktop Icon Theme spec requires [Icon Theme]
+	#     to be the FIRST group. Use the order-preserving helper instead.
+	for t in Yaru Yaru-dark; do
+		[[ -f "/usr/share/icons/$t/index.theme" ]] || continue
+		sudo python3 "$REPO_DIR/scripts/luminos-icon-inherits.py" \
+			"/usr/share/icons/$t/index.theme" "Papirus,breeze,hicolor" || \
+			log "warn: could not set the icon fallback chain for $t"
+	done
+	sudo gtk-update-icon-cache -f /usr/share/icons/Yaru 2>/dev/null || true
+
+	# 3. Icons — plasma-changeicons applies live; fall back to config write.
+	local changeicons=""
+	if command -v plasma-changeicons >/dev/null 2>&1; then changeicons="$(command -v plasma-changeicons)";
+	elif [[ -x /usr/lib/plasma-changeicons ]]; then changeicons=/usr/lib/plasma-changeicons; fi
+	[[ -n "$changeicons" ]] && "$changeicons" "$ICON_THEME" 2>/dev/null || true
+	kwriteconfig6 --file kdeglobals --group Icons --key Theme "$ICON_THEME"
+
+	# 4. Cursor (Yaru cursors ship inside yaru-icon-theme).
+	plasma-apply-cursortheme "$CURSOR_THEME" 2>/dev/null || \
+		kwriteconfig6 --file kcminputrc --group Mouse --key cursorTheme "$CURSOR_THEME"
+
+	# 5. Fonts → Ubuntu.
+	for key in font menuFont toolBarFont activeFont; do
+		kwriteconfig6 --file kdeglobals --group General --key "$key" "$UI_FONT"
+	done
+	kwriteconfig6 --file kdeglobals --group General --key fixed "$MONO_FONT"
+	kwriteconfig6 --file kdeglobals --group General --key smallestReadableFont "Ubuntu,8,-1,5,50,0,0,0,0,0"
+
+	# 6. GTK apps → Yaru (so Firefox/GTK apps match the Qt side).
+	for v in gtk-3.0 gtk-4.0; do
+		local ini="$HOME/.config/$v/settings.ini"
+		mkdir -p "$(dirname "$ini")"
+		{
+			echo "[Settings]"
+			echo "gtk-theme-name=Yaru"
+			echo "gtk-icon-theme-name=$ICON_THEME"
+			echo "gtk-cursor-theme-name=$CURSOR_THEME"
+			echo "gtk-font-name=Ubuntu 10"
+			echo "gtk-application-prefer-dark-theme=false"
+		} > "$ini"
+	done
+	if command -v gsettings >/dev/null 2>&1; then
+		gsettings set org.gnome.desktop.interface gtk-theme "Yaru"        2>/dev/null || true
+		gsettings set org.gnome.desktop.interface icon-theme "$ICON_THEME" 2>/dev/null || true
+		gsettings set org.gnome.desktop.interface cursor-theme "$CURSOR_THEME" 2>/dev/null || true
+		gsettings set org.gnome.desktop.interface font-name "Ubuntu 10"   2>/dev/null || true
+	fi
+
+	# 7. Re-sync login + lock screens to the current wallpaper.
+	if command -v luminos-theme-sync >/dev/null 2>&1; then
+		sudo luminos-theme-sync || log "warn: theme-sync failed (run it manually with sudo)"
+	fi
+
+	log "Ubuntu (Yaru) look applied. Some apps update on next launch; a full re-login makes it uniform."
+}
+
+revert() {
+	# Restore Papirus icons + Breeze defaults (previous Luminos look).
+	plasma-changeicons Papirus 2>/dev/null || kwriteconfig6 --file kdeglobals --group Icons --key Theme Papirus
+	plasma-apply-colorscheme BreezeLight 2>/dev/null || true
+	plasma-apply-cursortheme breeze_cursors 2>/dev/null || true
+	log "Reverted icons→Papirus, colors→Breeze. Re-login to finish. (Fonts/GTK left as-is.)"
+}
+
+case "${1:-apply}" in
+	apply)  apply ;;
+	--revert|revert) revert ;;
+	*) echo "usage: $0 [apply|--revert]"; exit 2 ;;
+esac

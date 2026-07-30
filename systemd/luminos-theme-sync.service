@@ -1,0 +1,11 @@
+[Unit]
+Description=Luminos OS — sync SDDM login + KDE lock screen to the desktop wallpaper
+Documentation=https://github.com/luminos-os/luminos
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-theme-sync
+# Small settle delay: KDE rewrites config files in bursts when a theme changes;
+# waiting a moment avoids reading a half-written file.
+ExecStartPre=/usr/bin/sleep 1
+SyslogIdentifier=luminos-theme-sync

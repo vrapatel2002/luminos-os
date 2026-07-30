@@ -1,0 +1,12 @@
+[Unit]
+Description=Luminos OS — watch desktop/lock theme config, re-sync SDDM automatically
+Documentation=https://github.com/luminos-os/luminos
+
+[Path]
+# Fires luminos-theme-sync.service whenever the desktop wallpaper or the lock-screen
+# config changes, so the login screen stays matched without any manual step.
+PathChanged=/home/shawn/.config/plasma-org.kde.plasma.desktop-appletsrc
+PathChanged=/home/shawn/.config/kscreenlockerrc
+
+[Install]
+WantedBy=multi-user.target
