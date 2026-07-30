@@ -368,8 +368,12 @@ Steps 3–5 are now scripted. Sequence:
 
 Keys: **`F2` = setup, `F12` = one-time boot menu.**
 
-> **⚠️ BITLOCKER FIRST. This is the one step that can permanently destroy the
-> owner's data, and it is not reversible.**
+> **✅ BITLOCKER: CLEARED 2026-07-29.** Protection reported **off on the SSD
+> (`C:`)**, so the TPM-seal hazard below does not apply to this machine. The
+> HDD *had* been encrypted — the owner formatted it, which both removed the
+> encryption and freed the disk. Both HDD partitions now report protection off.
+> **The paragraph below is retained because it is the reason we checked, and it
+> applies to any other machine this is ever repeated on.**
 >
 > Booting the Arch ISO requires **Secure Boot off** (neither the official ISO
 > nor systemd-boot is signed). On a Windows 11 Dell, changing the Secure Boot
@@ -399,7 +403,7 @@ Keys: **`F2` = setup, `F12` = one-time boot menu.**
 
 Order of operations:
 
-1. Windows: `manage-bde -status C:`, suspend if on, save the recovery key.
+1. ~~Windows: `manage-bde -status C:`~~ — **done, clear.**
 2. **Full shutdown, not sleep and not "Restart"** — `shutdown /s /t 0`, or
    Shift+click Shut Down. Fast Startup leaves the filesystems half-mounted.
 3. `F2` → **Secure Boot: Disabled**. Change nothing else.
@@ -407,6 +411,50 @@ Order of operations:
 5. On the ISO, before writing anything: `lsblk` and confirm which disk is the
    rotational one. `luminos-server-install --dry-run` will name its choice; it
    has to agree with what you see.
+
+### 7b. Secure Boot — what it costs and why it stays off
+
+Firmware refuses to hand control to a boot program that isn't carrying a
+signature it trusts — in practice, one of Microsoft's. It exists to stop
+bootkits, malware that loads *before* the OS where no antivirus can see it. It
+is a good feature; we are giving it up knowingly.
+
+Neither the official Arch ISO nor systemd-boot carries such a signature, so with
+Secure Boot on the stick either won't appear in the boot menu or fails with
+"Invalid signature detected."
+
+**It stays off for the life of this machine.** Turning it back on stops Linux
+booting. Signing our own bootloader with enrolled custom keys (`sbctl`) would
+allow both, but that is a separate project and not worth it for a LAN media box.
+
+What that costs the owner:
+
+- **Windows itself: nothing.** Secure Boot is enforced at Windows *install*
+  time, not on every boot. Windows 10/11 runs unchanged with it off.
+- **Kernel-anti-cheat games: possibly everything.** Valorant, Fortnite and
+  recent Battlefield titles refuse to launch on Windows 11 without Secure Boot
+  enabled. **Ask the owner before flipping it** — this is the one thing in the
+  whole plan he actually loses, and it is not obvious to him up front.
+
+If the BIOS toggle is **greyed out**, the usual causes are Boot Mode set to
+Legacy rather than UEFI, or the firmware wanting an admin password set first.
+Diagnose that specifically; do not start changing unrelated settings to make it
+selectable.
+
+### 7c. The HDD — cleared 2026-07-29
+
+The HDD (Windows calls it Disk 0) is **free**. It had been BitLocker-encrypted
+and the owner reformatted it, which both removed the encryption and released the
+disk. It currently holds two partitions.
+
+**Do not bother merging them.** `luminos-server-install` runs `wipefs -a` then
+`sgdisk --zap-all` and builds a fresh GPT with its own three partitions, so the
+existing table is discarded wholesale. Pre-tidying it is work that gets thrown
+away.
+
+Windows' Disk 0 / Disk 1 numbering is irrelevant to the installer, which selects
+by physical property (rotational + non-removable + not USB) rather than by index.
+That is deliberate: numbering can shuffle between boots, platters cannot.
 
 ### Notes for whoever builds this
 
