@@ -75,7 +75,20 @@ func clampPWM(v int) int {
 
 // writeFanDuty programs one fan channel to hold `duty` (0-255) across the normal
 // band, with the baked-in failsafe ramp above 70°C. It writes the temp anchors
-// (idempotent) and the PWM points. Requires root (the daemon runs as root).
+// (idempotent) and the PWM points, then FLUSHES the channel. Requires root (the
+// daemon runs as root).
+//
+// [CHANGE: claude-code | 2026-07-04] BUG-079 follow-up — the ACTUATOR FLUSH.
+// Load test 2 proved fixes 1-4 (feed-forward, pre-spin floor, slam) were inert:
+// the PID commanded correct duties into the sysfs points but the fan physically
+// stayed at 2100-3000 rpm while the CPU sat at 95°C. Root cause: the
+// asus_custom_fan_curve driver only updates its *cached* table when you write
+// pwmN_auto_pointX_pwm — it does NOT push that table to the EC until pwmN_enable
+// is (re-)latched. asusd flushes on `--enable-fan-curves true`; the Conductor
+// never did, so its point-writes never reached the hardware. Writing
+// pwmN_enable=1 after the points re-latches the cached table to the EC every tick,
+// finally giving the PID real-time authority over the fan. Verified on hardware:
+// point-writes with no flush → no rpm change; a single pwmN_enable=1 → fan tracks.
 func writeFanDuty(hwmon string, channel, duty int) error {
 	duty = clampPWM(duty)
 	for i := 0; i < 8; i++ {
@@ -91,6 +104,12 @@ func writeFanDuty(hwmon string, channel, duty int) error {
 		if err := writeSysfs(pPath, strconv.Itoa(pwm)); err != nil {
 			return fmt.Errorf("write %s: %w", pPath, err)
 		}
+	}
+	// FLUSH: re-latch the cached point table to the EC. Without this the writes
+	// above never reach the hardware. Idempotent (enable=1 = custom-curve mode).
+	ePath := fmt.Sprintf("%s/pwm%d_enable", hwmon, channel)
+	if err := writeSysfs(ePath, "1"); err != nil {
+		return fmt.Errorf("flush %s: %w", ePath, err)
 	}
 	return nil
 }
@@ -131,13 +150,23 @@ type FanController struct {
 	smoothedTemp float64 // EMA-filtered control temp (raw Tctl is too spiky to PID on)
 	tempSeeded   bool    // false until smoothedTemp is primed
 
+	// [CHANGE: claude-code | 2026-07-04] BUG-079 follow-up: feed-forward on temp slope.
+	// The load test showed the fan losing the race to a sudden spike because it only
+	// started ramping once the PID error had built up. A feed-forward term on the RATE
+	// of temperature rise starts the (EC-inertia-limited) fan ramp the instant the temp
+	// climbs, not after it's already hot. See docs/BUGS.md BUG-079.
+	prevSmoothedTemp float64 // previous smoothed temp, for the dT/dt feed-forward
+	slopeSeeded      bool    // false until prevSmoothedTemp is primed
+
 	// tuning knobs
 	TempAlpha     float64 // EMA weight on the newest temp sample (0..1); lower = smoother
 	Deadband      float64 // °C band around the target where error is treated as 0
 	Kbc           float64 // back-calculation anti-windup gain (≈ 1/tracking-time)
 	IntegralLeak  float64 // per-tick integral decay while comfortably inside the deadband
 	IntegralClamp float64 // backstop clamp on |integral|
-	MinDuty       int     // floor (0 = allow silent at idle)
+	Kff           float64 // feed-forward: PWM added per (°C/s) of RISING smoothed temp (0 = off)
+	SlamTempC     float64 // hard-slam trigger: at/above this RAW temp, command MaxDuty now (0 = off)
+	MinDuty       int     // pre-spin floor (0 = silent at idle; Conductor raises it under load)
 	MaxDuty       int     // ceiling (255 = full)
 	MaxStepUp     int     // max PWM increase per tick (slew up — fast)
 	MaxStepDown   int     // max PWM decrease per tick (slew down — gentle, avoids surging)
@@ -156,7 +185,9 @@ func NewFanController() *FanController {
 		Kbc:           0.5,  // bleed the integral while the output is saturated (Tt≈2s)
 		IntegralLeak:  0.90, // relax the integral each in-band tick so the fan settles down
 		IntegralClamp: 120.0,
-		MinDuty:       0,
+		Kff:           30.0, // a 1°C/s rise adds ~30 PWM now — start the ramp before it's hot
+		SlamTempC:     85.0, // ≥85°C → abandon the PID and slam to max (throttle is ~95°C)
+		MinDuty:       0,    // Conductor overrides per-workload (pre-spin floor)
 		MaxDuty:       255,
 		MaxStepUp:     60, // can jump ~23% per tick toward cooling
 		MaxStepDown:   18, // backs off ~7% per tick — no audible surging
@@ -183,6 +214,32 @@ func (c *FanController) Update(tempC, setpointC, dt float64) int {
 	} else {
 		c.smoothedTemp = (1-c.TempAlpha)*c.smoothedTemp + c.TempAlpha*tempC
 	}
+	if !c.slopeSeeded {
+		c.prevSmoothedTemp = c.smoothedTemp
+		c.slopeSeeded = true
+	}
+
+	// 1a. HARD SLAM (safety net). Triggered on the RAW temp so the emergency fires
+	//     immediately — smoothing would delay it. Above SlamTempC we abandon the PID and
+	//     command MaxDuty, bypassing the slew-down limit so the fan starts its (EC-inertia
+	//     limited) ramp to max at once. This replaces the 52°C thermal-burst curve that
+	//     conductorOwnsFan() suppresses. We update history so the exit is smooth and skip
+	//     the integral so it can't wind up while pinned. [CHANGE: claude-code | 2026-07-04]
+	if c.SlamTempC > 0 && tempC >= c.SlamTempC {
+		c.prevErr = c.smoothedTemp - setpointC
+		c.prevSmoothedTemp = c.smoothedTemp
+		c.prevDuty = c.MaxDuty
+		return c.MaxDuty
+	}
+
+	// Feed-forward on the rate of temperature rise (BUG-079): only positive slope adds
+	// fan (a cooling trend must never subtract), so a fast climb starts the ramp early.
+	tempSlope := (c.smoothedTemp - c.prevSmoothedTemp) / dt
+	c.prevSmoothedTemp = c.smoothedTemp
+	ff := 0.0
+	if tempSlope > 0 {
+		ff = c.Kff * tempSlope
+	}
 
 	// 2. Error with a deadband. Within ±Deadband of the target we command no
 	//    correction, so the fan settles at a steady low duty instead of surging to
@@ -207,8 +264,9 @@ func (c *FanController) Update(tempC, setpointC, dt float64) int {
 	deriv := (err - c.prevErr) / dt
 	c.prevErr = err
 
-	// 3. Tentative PID output using the integral carried from the last tick.
-	u := c.Kp*err + c.Ki*c.integral + c.Kd*deriv
+	// 3. Tentative PID output using the integral carried from the last tick, plus the
+	//    feed-forward boost so a rising temp is met before the error alone would react.
+	u := c.Kp*err + c.Ki*c.integral + c.Kd*deriv + ff
 	uSat := clampF(u, float64(c.MinDuty), float64(c.MaxDuty))
 
 	// 4. Integral update. In-band: leak toward 0 so a past hot spell doesn't keep the
@@ -247,8 +305,10 @@ func (c *FanController) Reset() {
 	c.integral = 0
 	c.prevErr = 0
 	c.seeded = false
-	c.tempSeeded = false // re-prime the temp EMA from the next real reading
-	// prevDuty intentionally retained so the next Update slews from the real fan state.
+	c.tempSeeded = false  // re-prime the temp EMA from the next real reading
+	c.slopeSeeded = false // re-prime the feed-forward slope too, so the first post-reset
+	// tick doesn't see a phantom jump. prevDuty intentionally retained so the next
+	// Update slews from the real fan state.
 }
 
 // fairTargetForWorkload returns the fair target temperature (°C) for a workload

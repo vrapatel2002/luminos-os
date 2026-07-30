@@ -45,6 +45,10 @@ const (
 	// telemetryMaxBytes caps the per-tick telemetry log; it rotates to .1 past this size
 	// so the always-on corpus can't grow unbounded on disk.
 	telemetryMaxBytes = 64 << 20 // 64 MiB
+	// minIntentDwell rate-limits DE-escalation (moving to LESS cooling) so adjacent
+	// classes can't flap every 1-3s — the flap reset the PID and jerked the fair target
+	// (BUG-079). Escalation to more cooling always bypasses this. [CHANGE: claude-code | 2026-07-04]
+	minIntentDwell = 12 * time.Second
 )
 
 // conductorOwnsFan reports whether the Conductor is the single writer of the fan
@@ -61,6 +65,13 @@ type Intent struct {
 	FanTarget float64 // fair chassis setpoint °C the CPU/chassis fan PID holds
 	GPUTarget float64 // fair GPU setpoint °C the GPU fan PID holds
 	PinGPUP0  bool    // pin dGPU to P0 + lock clocks so PCIe can't downtrain mid-job
+
+	// FanFloor is the pre-spin PWM floor for THIS workload (0-255). Idle keeps it 0
+	// (silent); any real load keeps the fan already moving so a sudden temp spike
+	// doesn't have to ramp the fan from near-silent through the EC's firmware inertia
+	// (the exact failure the static v5 curve avoided by idling pre-spun at ~140).
+	// [CHANGE: claude-code | 2026-07-04] BUG-079 follow-up — spike responsiveness.
+	FanFloor int
 }
 
 // IntentBroadcast is the cross-daemon wire form of the active Intent (Phase 4). The
@@ -164,13 +175,23 @@ func (f *fanLever) tick(cpuTempC, gpuTempC, dt float64, in Intent) {
 }
 
 // Apply resets the PID integrators on an Intent change so a stale integral from the
-// old fair target doesn't carry over and overshoot the new one.
+// old fair target doesn't carry over and overshoot the new one, and sets the pre-spin
+// PWM floors for the new workload (BUG-079). The GPU fan only pre-spins for GPU-heavy
+// work — the dGPU is usually RTD3-suspended, so spinning its fan for a CPU-only job
+// would be pure waste. [CHANGE: claude-code | 2026-07-04]
 func (f *fanLever) Apply(in Intent) {
 	if f.hwmon == "" {
 		return
 	}
 	f.cpu.Reset()
 	f.gpu.Reset()
+	f.cpu.MinDuty = in.FanFloor
+	switch in.Name {
+	case "gaming", "training":
+		f.gpu.MinDuty = in.FanFloor
+	default:
+		f.gpu.MinDuty = 0
+	}
 }
 
 // Revert hands the fan back to the asusctl curve. We don't write here — once the
@@ -235,11 +256,12 @@ func verifyPCIeLinkSpeed(when string) {
 // Conductor is the single policy engine: sense → classify → Intent → drive each
 // lever independently. It owns the fan PID and the PCIe/GPU pin.
 type Conductor struct {
-	fan      *fanLever
-	pcie     *pcieLever
-	levers   []Lever
-	cur      Intent
-	lastTick time.Time
+	fan         *fanLever
+	pcie        *pcieLever
+	levers      []Lever
+	cur         Intent
+	lastTick    time.Time
+	intentSince time.Time // when cur was committed — feeds the minIntentDwell anti-flap
 }
 
 func NewConductor() *Conductor {
@@ -260,19 +282,36 @@ func (c *Conductor) Tick(sig Signals) {
 	c.lastTick = now
 
 	in := c.classify(sig)
-	if in.Name != c.cur.Name {
-		lg.Info("conductor: intent %q → %q (fanTarget=%.0f°C gpuTarget=%.0f°C pinP0=%v cpu=%.0f%% dgpu=%.0f%% igpu=%.0f%%)",
-			c.cur.Name, in.Name, in.FanTarget, in.GPUTarget, in.PinGPUP0, sig.CPULoad, sig.DGPULoad, sig.IGPULoad)
+	if c.shouldSwitch(in, now) {
+		lg.Info("conductor: intent %q → %q (fanTarget=%.0f°C gpuTarget=%.0f°C floor=%d pinP0=%v cpu=%.0f%% dgpu=%.0f%% igpu=%.0f%%)",
+			c.cur.Name, in.Name, in.FanTarget, in.GPUTarget, in.FanFloor, in.PinGPUP0, sig.CPULoad, sig.DGPULoad, sig.IGPULoad)
 		for _, l := range c.levers {
 			l.Apply(in)
 		}
 		c.cur = in
+		c.intentSince = now
 		// Phase 4: only broadcast on change (levers Apply on change too) — ram/ai react
 		// in lock-step. Sockets are pushed off the loop so a slow peer can't stall the PID.
 		c.broadcast(in, sig)
 	}
-	c.fan.tick(sig.CPUTempC, sig.GPUTempC, dt, in)
-	c.logTelemetry(sig, in) // every tick: the sensor→action corpus for the Phase 5 model
+	// Drive the PID toward the COMMITTED intent (c.cur), not the raw classification —
+	// during a dwell hold we deliberately keep the more-aggressive posture. [CHANGE 2026-07-04]
+	c.fan.tick(sig.CPUTempC, sig.GPUTempC, dt, c.cur)
+	c.logTelemetry(sig, c.cur) // every tick: the sensor→action corpus for the Phase 5 model
+}
+
+// shouldSwitch decides whether to commit a newly-classified Intent. Escalation to
+// MORE cooling (a fair target ≥5°C lower, or a new GPU pin) is applied immediately for
+// safety; any lesser change is rate-limited by minIntentDwell so adjacent classes can't
+// flap every tick (BUG-079 — the flap reset the PID and jerked the target). [CHANGE 2026-07-04]
+func (c *Conductor) shouldSwitch(in Intent, now time.Time) bool {
+	if in.Name == c.cur.Name {
+		return false
+	}
+	if in.FanTarget <= c.cur.FanTarget-5 || (in.PinGPUP0 && !c.cur.PinGPUP0) {
+		return true // emergency escalation — cool harder now
+	}
+	return now.Sub(c.intentSince) >= minIntentDwell
 }
 
 // broadcast publishes the active Intent to the rest of the stack (Phase 4). It writes
@@ -403,8 +442,12 @@ func (c *Conductor) classify(s Signals) Intent {
 			class = "gaming"
 		}
 		pin = true
-	case s.IGPULoad >= 40:
-		class = "media" // iGPU decode dominating → 4K video / playback
+	case s.IGPULoad >= 40 && s.CPULoad < 40:
+		// media = iGPU decode DOMINATING (4K video). The `CPULoad < 40` guard is the
+		// BUG-079 fix for the compute↔media flap: a CPU-bound job that incidentally
+		// pushes the compositor's iGPU past 40% must stay "compute", not bounce to
+		// "media" every tick (which reset the PID and jerked the target 60↔55°C).
+		class = "media"
 	case s.CPULoad >= 50:
 		class = "compute" // CPU-bound (compile, archive) with the GPU idle
 	case s.CPULoad >= 15 || s.DGPULoad >= 10:
@@ -416,9 +459,29 @@ func (c *Conductor) classify(s Signals) Intent {
 		Name:      class,
 		FanTarget: fairTargetForWorkload(class),
 		GPUTarget: gpuFairTarget(class),
+		FanFloor:  fanFloorForWorkload(class),
 		// Only pin on AC: on battery we WANT the dGPU parked (power saving), and the
 		// training stall this fixes only ever happened on the 180W brick anyway.
 		PinGPUP0: pin && s.OnAC,
+	}
+}
+
+// fanFloorForWorkload is the pre-spin PWM floor per workload class (BUG-079 fix).
+// Idle stays silent (0 → the PID can drop the fan to its acoustic floor). Any real
+// load keeps the fan already moving so a sudden temp spike rides on top of a spun-up
+// fan instead of starting from silence and losing the race to the EC's ramp inertia.
+// These floors are well below the fair-target steady duty, so they add responsiveness
+// without making light work loud. [CHANGE: claude-code | 2026-07-04]
+func fanFloorForWorkload(class string) int {
+	switch class {
+	case "gaming", "training", "compute", "heavy":
+		return 110 // ~43% — heavy work: keep real headroom for a spike
+	case "media":
+		return 80 // ~31% — sustained but modest
+	case "light":
+		return 60 // ~23% — gently pre-spun, still quiet
+	default: // idle
+		return 0 // silent — the PID owns it fully
 	}
 }
 

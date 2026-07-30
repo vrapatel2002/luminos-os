@@ -8,10 +8,12 @@
 //   - WiFi power save, KSM, display Hz managed on AC transitions (ROOT-04, ROOT-06)
 //   - GPU gaming detection retained (asusctl profile Performance on AC only)
 //   - Emergency thermal: EPP=power immediately (no delay)
+//
 // [CHANGE: claude-code | 2026-05-15] v3.1 Thermal governor — 45°C target
 //   - 4 thermal zones with 5°C hysteresis, scaling_max_freq caps per zone
 //   - Gaming mode bypasses thermal capping on AC (user explicitly wants performance)
 //   - Hardware max freq read at startup (no hardcoded value)
+//
 // [CHANGE: claude-code | 2026-05-26] v4.0 Adaptive Dual Governor
 //   - Continuous CPU cap: baseCap + (smoothedLoad/100) × (maxCap - baseCap)
 //   - EMA smoothing (α=0.3) on CPU load — no snap changes
@@ -20,12 +22,14 @@
 //   - PSI watcher: poll /proc/pressure/cpu — event-driven wake when idle, tight loop when near cap
 //   - iGPU dominance penalty: when iGPU busier than CPU, up to 0.3 GHz CPU reduction (shared TDP)
 //   - App history table: known apps pre-allocate cap headroom on launch for smooth startup
+//
 // [CHANGE: claude-code | 2026-05-31] v4.1 Thermal Burst Cooling + Resource Coordinator
 //   - Thermal burst: 52°C → 100% fans until chassis drops to 40°C (or 3min safety timeout)
 //     Addresses aluminium heat-soak: curve was correct but body couldn't dissipate fast enough
 //   - Resource coordinator: reads /proc/meminfo RAM pressure into effective CPU load
 //     When RAM < 20% available + temp > 45°C → pressure bonus on effective load (up to 30%)
 //   - System pressure index logged each tick: combined thermal/CPU/GPU/RAM health score
+//
 // [CHANGE: claude-code | 2026-06-03] v4.2 GPU TGP dynamic switching
 //   - Switch NVIDIA GPU power limit 55W → 90W when draw ≥ 47W (85% of cap) on AC
 //   - Gate: GPU temp < 83°C (thermal headroom required before uplifting)
@@ -80,13 +84,13 @@ const (
 	// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU TGP dynamic switching
 	// When GPU power draw nears the 55W cap, uplift to 90W so the GPU isn't
 	// artificially constrained. Revert when idle, or temperature-override when too hot.
-	gpuTGPLowW         = 55.0            // default TGP (W)
-	gpuTGPHighW        = 90.0            // boosted TGP (W)
-	gpuTGPUpThreshW    = 47.0            // 85% of 55W → trigger uplift
-	gpuTGPDownPowerW   = 15.0            // revert when power draw < 15W …
-	gpuTGPDownUtilPct  = 20.0            // … AND GPU util < 20%
-	gpuTGPDownTicks    = 30              // 60s sustained idle at 2s poll before revert
-	gpuTGPThermalCeilC = 83.0            // do not run at 90W if GPU temp ≥ 83°C
+	gpuTGPLowW         = 55.0             // default TGP (W)
+	gpuTGPHighW        = 90.0             // boosted TGP (W)
+	gpuTGPUpThreshW    = 47.0             // 85% of 55W → trigger uplift
+	gpuTGPDownPowerW   = 15.0             // revert when power draw < 15W …
+	gpuTGPDownUtilPct  = 20.0             // … AND GPU util < 20%
+	gpuTGPDownTicks    = 30               // 60s sustained idle at 2s poll before revert
+	gpuTGPThermalCeilC = 83.0             // do not run at 90W if GPU temp ≥ 83°C
 	gpuTGPHysteresis   = 60 * time.Second // minimum time between any TGP switch
 
 	// CPU beast-mode thresholds — catches CPU-heavy work (ML training, compilation)
@@ -97,10 +101,10 @@ const (
 	// [CHANGE: claude-code | 2026-05-24] Load-based Quiet idle detection.
 	// Balanced→Quiet when CPU+iGPU+dGPU all idle for 60s on AC.
 	// Quiet→Balanced immediately when any load rises.
-	quietIdleCPUPct   = 25.0 // CPU% threshold for idle
-	quietIdleIGPUPct  = 15.0 // iGPU% threshold for idle (card2=AMD 780M)
-	quietIdleDGPUPct  = 5.0  // dGPU% threshold for idle (card1=NVIDIA)
-	quietIdleTicks    = 30   // 60s sustained idle (30 × 2s) → drop to Quiet
+	quietIdleCPUPct  = 25.0 // CPU% threshold for idle
+	quietIdleIGPUPct = 15.0 // iGPU% threshold for idle (card2=AMD 780M)
+	quietIdleDGPUPct = 5.0  // dGPU% threshold for idle (card1=NVIDIA)
+	quietIdleTicks   = 30   // 60s sustained idle (30 × 2s) → drop to Quiet
 	// Emergency thermal threshold
 	// [CHANGE: claude-code | 2026-05-24] BUG-055: raised from 85°C→92°C (ZoneHot entry raised to 87°C)
 	thermalEmergencyC = 92.0
@@ -119,15 +123,25 @@ const (
 	//
 	// Pre-allocation: when a known app launches, temporarily raise effective load estimate
 	// by the app's PreAllocPct for 30s, giving startup headroom without waiting for load to ramp.
-	adaptiveBaseCap    = 1800000  // kHz — floor cap when fully idle (1.8 GHz)
-	adaptiveMaxCapAC   = 0        // 0 = hardware max on AC (5.137 GHz)
-	adaptiveMaxCapBat  = 3500000  // kHz — max cap on battery (3.5 GHz, power saving)
-	adaptiveEMAAlpha   = 0.30     // EMA weight for new sample (0.7 old + 0.3 new)
-	adaptiveCapChangeThreshKHz = 150000 // only write sysfs if cap shifts by >150 MHz
-	preAllocDuration   = 30 * time.Second
+	adaptiveBaseCap            = 1800000 // kHz — floor cap when fully idle (1.8 GHz)
+	adaptiveMaxCapAC           = 0       // 0 = hardware max on AC (5.137 GHz)
+	adaptiveMaxCapBat          = 3500000 // kHz — max cap on battery (3.5 GHz, power saving)
+	adaptiveEMAAlpha           = 0.30    // EMA weight for new sample (0.7 old + 0.3 new)
+	adaptiveCapChangeThreshKHz = 150000  // only write sysfs if cap shifts by >150 MHz
+	preAllocDuration           = 30 * time.Second
 	// iGPU dominance: penalty per 1% of dominance delta, capped at 300 MHz total
 	dominancePenaltyPerPct = 12000 // kHz per 1% dominance (0.012 GHz/%)
 	dominanceMaxPenaltyKHz = 300000
+
+	// [CHANGE: claude-code | 2026-07-22] v4.4 interactive burst-boost tunables.
+	// Gated by LUMINOS_INTERACTIVE=1 (default OFF). When on, live user input briefly
+	// raises the effective-load estimate (→ higher cap) AND flips EPP to an eager mode so
+	// pointer/UI repaints ramp instantly. Both decay to the idle cap + EPP=power within
+	// interactiveWindow of the last input — the sustained/idle ceiling is NOT changed.
+	interactiveBonusPct      = 45.0                    // effective-load headroom injected on fresh input
+	interactiveWindow        = 1500 * time.Millisecond // bonus decays linearly to 0 over this window after last input
+	interactiveEPP           = "balance_performance"   // eager EPP applied only while interacting
+	interactiveInputThrottle = 100 * time.Millisecond  // min gap between lastInput timestamp updates (cheap)
 
 	// Thermal governor zones (ZoneCool→ZoneHot) with 5°C hysteresis for exit.
 	// Target: 45°C idle via EPP hints alone. Freq caps only for genuinely hot temps.
@@ -162,10 +176,10 @@ const (
 	// idle, making 45°C unreachable within 2 min → burst always timed out → fans blasted
 	// every 30 min permanently. 48°C is achievable and breaks the timeout cycle.
 	// Cooldown: 30 min after any burst before re-triggering, prevents constant loudness.
-	thermalBurstTriggerC        = 52.0
-	thermalBurstExitC           = 48.0          // [CHANGE: claude-code | 2026-06-08] was 45°C — unreachable under load
-	thermalBurstMaxDuration     = 2 * time.Minute
-	thermalBurstCooldownPeriod  = 30 * time.Minute // minimum quiet time between bursts
+	thermalBurstTriggerC       = 52.0
+	thermalBurstExitC          = 48.0 // [CHANGE: claude-code | 2026-06-08] was 45°C — unreachable under load
+	thermalBurstMaxDuration    = 2 * time.Minute
+	thermalBurstCooldownPeriod = 30 * time.Minute // minimum quiet time between bursts
 
 	// [CHANGE: claude-code | 2026-05-31] v4.1 — Resource coordinator RAM threshold
 	// When available RAM falls below 20%, treat the deficit as extra effective CPU load
@@ -185,16 +199,16 @@ type appProfile struct {
 // Update this table as new apps are added; unknown apps get no pre-alloc bonus.
 // [CHANGE: claude-code | 2026-05-26] v4.0 app history table
 var knownApps = map[string]appProfile{
-	"chrome":          {PreAllocPct: 20}, // Chrome GPU process + initial tab load
-	"terminal64.exe":  {PreAllocPct: 15}, // MetaTrader 5 (Wine) — heavy on launch
-	"python.exe":      {PreAllocPct: 10}, // Forex bot bridge (Wine Python)
-	"python3":         {PreAllocPct: 10}, // hive-daemon, forex bot
-	"claude":          {PreAllocPct: 18}, // Claude Desktop (Electron)
-	"konsole":         {PreAllocPct: 8},
-	"kwin_wayland":    {PreAllocPct: 5},
-	"plasmashell":     {PreAllocPct: 8},
-	"code":            {PreAllocPct: 20}, // VS Code (Electron)
-	"wine64":          {PreAllocPct: 12},
+	"chrome":         {PreAllocPct: 20}, // Chrome GPU process + initial tab load
+	"terminal64.exe": {PreAllocPct: 15}, // MetaTrader 5 (Wine) — heavy on launch
+	"python.exe":     {PreAllocPct: 10}, // Forex bot bridge (Wine Python)
+	"python3":        {PreAllocPct: 10}, // hive-daemon, forex bot
+	"claude":         {PreAllocPct: 18}, // Claude Desktop (Electron)
+	"konsole":        {PreAllocPct: 8},
+	"kwin_wayland":   {PreAllocPct: 5},
+	"plasmashell":    {PreAllocPct: 8},
+	"code":           {PreAllocPct: 20}, // VS Code (Electron)
+	"wine64":         {PreAllocPct: 12},
 }
 
 // ThermalZone represents current CPU temperature zone.
@@ -220,14 +234,19 @@ var (
 	quietTicks   int // ticks of all-idle load → Quiet profile
 
 	currentThermalZone  ThermalZone = ZoneCool
-	thermalDownholdTick int        // consecutive ticks below exit threshold before downgrading
-	cpuHardwareMaxFreq  int        // read from sysfs at startup, kHz
+	thermalDownholdTick int         // consecutive ticks below exit threshold before downgrading
+	cpuHardwareMaxFreq  int         // read from sysfs at startup, kHz
 
 	// [CHANGE: claude-code | 2026-05-26] v4.0 adaptive governor state
-	smoothedCPULoad    float64       // EMA-smoothed CPU% (α=0.3)
-	prevAppliedCapKHz  int           // last cap written to sysfs — avoid redundant writes
-	preAllocBonus      float64       // extra % added to load estimate (decays after preAllocDuration)
-	preAllocExpiry     time.Time     // when preAllocBonus expires
+	smoothedCPULoad   float64   // EMA-smoothed CPU% (α=0.3)
+	prevAppliedCapKHz int       // last cap written to sysfs — avoid redundant writes
+	preAllocBonus     float64   // extra % added to load estimate (decays after preAllocDuration)
+	preAllocExpiry    time.Time // when preAllocBonus expires
+
+	// [CHANGE: claude-code | 2026-07-22] v4.4 interactive burst-boost state (gated by LUMINOS_INTERACTIVE=1)
+	interactiveBoostEnabled = os.Getenv("LUMINOS_INTERACTIVE") == "1" // default OFF — see v4.4 tunables
+	lastInputNanos          atomic.Int64                              // unix-nanos of most recent user input (mouse/keyboard); 0 = none seen
+	interactiveEPPSet       bool                                      // true while the eager interactive EPP is applied (avoids per-tick EPP writes)
 
 	// /proc/stat snapshots for delta-based CPU load calculation
 	lastCPUStatIdle  uint64
@@ -352,10 +371,11 @@ func handleMessage(msg socket.Message) socket.Message {
 //   - Near cap (>60%): 500ms tight loop — fast trigger detection
 //
 // Cap strategy:
-//   adaptive cap = baseCap + (effectiveLoad/100) × (maxCap - baseCap), EMA smoothed
-//   effectiveLoad = smoothedCPULoad + preAllocBonus (decays 30s after app launch)
-//   thermal override: ZoneHot (87°C) → 3.0 GHz cap replaces adaptive cap if lower
-//   emergency: 92°C → 2.0 GHz, Quiet profile — overrides everything
+//
+//	adaptive cap = baseCap + (effectiveLoad/100) × (maxCap - baseCap), EMA smoothed
+//	effectiveLoad = smoothedCPULoad + preAllocBonus (decays 30s after app launch)
+//	thermal override: ZoneHot (87°C) → 3.0 GHz cap replaces adaptive cap if lower
+//	emergency: 92°C → 2.0 GHz, Quiet profile — overrides everything
 //
 // [CHANGE: claude-code | 2026-05-26] v4.0
 func monitorLoop(ctx context.Context) {
@@ -372,6 +392,12 @@ func monitorLoop(ctx context.Context) {
 	// Exec watcher — /proc scanner detects new app launches.
 	ew := newExecWatcher()
 	go ew.run(ctx)
+
+	// [CHANGE: claude-code | 2026-07-22] v4.4 Input watcher — detects user interaction
+	// (mouse/touchpad/keyboard) to drive the interactive burst-boost. Gated OFF by default.
+	if interactiveBoostEnabled {
+		startInputWatcher(ctx)
+	}
 
 	for {
 		select {
@@ -469,14 +495,20 @@ func monitorLoop(ctx context.Context) {
 			preAllocBonus = 0
 		}
 
+		// [CHANGE: claude-code | 2026-07-22] v4.4 interactive burst-boost signal.
+		// Computed once per tick; folded into effectiveLoad in the adaptive block below
+		// and used to keep the loop responsive (500ms band) while the user is interacting.
+		// Returns (0, false) when gated OFF, so this is inert unless LUMINOS_INTERACTIVE=1.
+		iBonus, iActive := interactiveBoost()
+
 		// === AC TRANSITION ===
 		if onAC != prevState.OnAC {
 			applyACTransition(onAC)
 			cpuHighTicks = 0
 			cpuLowTicks = 0
 			quietTicks = 0
-			smoothedCPULoad = cpuLoad    // reset EMA on AC change — old average no longer valid
-			smoothedMaxCore  = maxCoreLoad
+			smoothedCPULoad = cpuLoad // reset EMA on AC change — old average no longer valid
+			smoothedMaxCore = maxCoreLoad
 			prevAppliedCapKHz = cpuHardwareMaxFreq
 		}
 
@@ -648,6 +680,25 @@ func monitorLoop(ctx context.Context) {
 			// Beast-mode and quiet-idle detection remain average-driven (intentional).
 			effectiveLoad := math.Min(demand+preAllocBonus, 100)
 
+			// [CHANGE: claude-code | 2026-07-22] v4.4 interactive burst-boost:
+			// live input lifts the cap via effectiveLoad headroom, and flips EPP to an
+			// eager mode so the core sprints to the (now higher) cap. Both revert within
+			// interactiveWindow of the last input. EPP is written only on transitions to
+			// avoid per-tick sysfs churn. Suppressed in Performance/Emergency (those paths
+			// continue before reaching here). On battery the cap still clamps to maxCapBat.
+			if iBonus > 0 {
+				effectiveLoad = math.Min(effectiveLoad+iBonus, 100)
+			}
+			if interactiveBoostEnabled {
+				if iActive && !interactiveEPPSet {
+					setAllEPP(interactiveEPP)
+					interactiveEPPSet = true
+				} else if !iActive && interactiveEPPSet {
+					setAllEPP(prevState.EPP) // restore idle EPP (power)
+					interactiveEPPSet = false
+				}
+			}
+
 			// [CHANGE: claude-code | 2026-05-31] v4.1 Resource coordinator: RAM pressure.
 			// When available RAM < 20% and the machine is warm, treat the deficit as extra
 			// effective load to nudge the CPU cap down. Reduces memory allocation rate and
@@ -699,7 +750,13 @@ func monitorLoop(ctx context.Context) {
 
 		// Use demand (max of avg/maxCore) so single-threaded extract keeps the loop in 500ms
 		// band — not 10s PSI idle sleep — while the cap EMA ramps up.
-		sleepAdaptive(ctx, psiFile, demand, igpuLoad)
+		// [CHANGE: claude-code | 2026-07-22] v4.4 while interacting, force the fast band so
+		// the cap/EPP track input instead of napping in the 2s/10s idle bands.
+		sleepLoad := demand
+		if iActive && sleepLoad < 60 {
+			sleepLoad = 60
+		}
+		sleepAdaptive(ctx, psiFile, sleepLoad, igpuLoad)
 	}
 }
 
@@ -801,7 +858,6 @@ func eppForProfile(profile string) string {
 	}
 }
 
-
 // --- thermal zone tracking ---
 
 // advanceThermalZone updates currentThermalZone based on temperature.
@@ -896,7 +952,8 @@ func thermalCapForCurrentZone(onAC bool) int {
 // computeAdaptiveCap returns the target CPU cap in kHz based on smoothed load.
 //
 // Formula:
-//   cap = baseCap + (effectiveLoad/100) × (maxCap - baseCap)
+//
+//	cap = baseCap + (effectiveLoad/100) × (maxCap - baseCap)
 //
 // iGPU dominance penalty: when iGPU is running harder than CPU (e.g. video decode
 // while CPU is light), reduce CPU cap slightly to give shared TDP headroom to iGPU.
@@ -1079,6 +1136,118 @@ func (w *execWatcher) scan() {
 	for pid := range w.knownPIDs {
 		if _, alive := seen[pid]; !alive {
 			delete(w.knownPIDs, pid)
+		}
+	}
+}
+
+// --- interactive burst-boost (v4.4) ---
+// Detects user interaction and lifts the CPU cap + EPP briefly so pointer/UI repaints
+// feel instant, decaying back to the idle cap within interactiveWindow. Gated OFF unless
+// LUMINOS_INTERACTIVE=1. Privacy: only a timestamp is recorded — event bytes (including any
+// keycodes) are read into a scratch buffer and discarded; nothing is inspected or logged.
+//
+// [CHANGE: claude-code | 2026-07-22] v4.4
+
+// interactiveBoost returns the current decaying input-boost bonus (0..interactiveBonusPct)
+// and whether interaction is currently active. Full on fresh input, linear decay to 0 over
+// interactiveWindow. Returns (0, false) when the feature is gated OFF or no input seen yet.
+func interactiveBoost() (bonus float64, active bool) {
+	if !interactiveBoostEnabled {
+		return 0, false
+	}
+	last := lastInputNanos.Load()
+	if last == 0 {
+		return 0, false
+	}
+	since := time.Since(time.Unix(0, last))
+	if since >= interactiveWindow {
+		return 0, false
+	}
+	frac := 1.0 - float64(since)/float64(interactiveWindow)
+	return interactiveBonusPct * frac, true
+}
+
+// startInputWatcher discovers pointer/keyboard devices and spawns a blocking reader per
+// device. Reads are event-driven (kernel wakes them only on real input) so cost is ~0 at idle.
+func startInputWatcher(ctx context.Context) {
+	paths := discoverInputDevices()
+	if len(paths) == 0 {
+		lg.Warn("input watcher: no pointer/keyboard devices found — interactive boost inert")
+		return
+	}
+	lg.Info("input watcher active — %d device(s) for interactive boost", len(paths))
+	for _, p := range paths {
+		go watchInputDevice(ctx, p)
+	}
+}
+
+// discoverInputDevices parses /proc/bus/input/devices and returns the /dev/input/eventN paths
+// for devices reporting keyboard (EV_KEY bit) or pointer ("mouse" handler) capability. This
+// skips pure-sensor devices (e.g. accelerometers) that would wake the watcher needlessly.
+func discoverInputDevices() []string {
+	data, err := os.ReadFile("/proc/bus/input/devices")
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	var handlers string
+	var evKey bool
+	flush := func() {
+		if handlers == "" {
+			return
+		}
+		if strings.Contains(handlers, "mouse") || evKey {
+			for _, f := range strings.Fields(handlers) {
+				if strings.HasPrefix(f, "event") {
+					paths = append(paths, "/dev/input/"+f)
+				}
+			}
+		}
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		switch {
+		case strings.HasPrefix(line, "H: Handlers="):
+			handlers = strings.TrimPrefix(line, "H: Handlers=")
+		case strings.HasPrefix(line, "B: EV="):
+			v, _ := strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(line, "B: EV=")), 16, 64)
+			evKey = v&0x1 != 0 // EV_KEY
+		case strings.TrimSpace(line) == "": // blank line ends a device block
+			flush()
+			handlers, evKey = "", false
+		}
+	}
+	flush() // last block — file may not end with a blank line
+	return paths
+}
+
+// watchInputDevice blocks on the device fd; every input event refreshes lastInputNanos
+// (throttled to interactiveInputThrottle). Event content is read and discarded.
+func watchInputDevice(ctx context.Context, path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		lg.Warn("input watcher: open %s: %v", path, err)
+		return
+	}
+	defer f.Close()
+	buf := make([]byte, 256) // struct input_event is 24B; one read drains a burst
+	var lastStore int64
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		n, err := f.Read(buf)
+		if err != nil {
+			return // device unplugged or fd closed on shutdown
+		}
+		if n <= 0 {
+			continue
+		}
+		now := time.Now().UnixNano()
+		if now-lastStore >= int64(interactiveInputThrottle) {
+			lastInputNanos.Store(now)
+			lastStore = now
 		}
 	}
 }
@@ -1683,7 +1852,7 @@ func applyAggressiveFanCurve(mode string) {
 	// Mid fan is 67% of CPU/GPU curve throughout.
 	lg.Info("Applying fan curve to %s profile (v5: steep 47°C recovery)", mode)
 	cpuGpuCurve := "30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%"
-	midCurve    := "30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%"
+	midCurve := "30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%"
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "cpu", "--data", cpuGpuCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "gpu", "--data", cpuGpuCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "mid", "--data", midCurve)
@@ -1702,7 +1871,7 @@ func applyBurstFanCurve(profile string) {
 	}
 	lg.Info("burst fan curve → 100%% on %s profile (chassis cool-down mode)", profile)
 	cpuGpuBurst := "30c:0%,40c:100%,45c:100%,50c:100%,60c:100%,70c:100%,80c:100%,90c:100%"
-	midBurst    := "30c:0%,40c:88%,45c:88%,50c:88%,60c:88%,70c:88%,80c:88%,90c:100%"
+	midBurst := "30c:0%,40c:88%,45c:88%,50c:88%,60c:88%,70c:88%,80c:88%,90c:100%"
 	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--fan", "cpu", "--data", cpuGpuBurst)
 	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--fan", "gpu", "--data", cpuGpuBurst)
 	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--fan", "mid", "--data", midBurst)
