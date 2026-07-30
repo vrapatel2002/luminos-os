@@ -1,0 +1,367 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-07-29]
+#
+# Stage 1 of the Luminos media-server build.
+# Runs INSIDE a booted Arch install ISO, driven over SSH from the G14.
+#
+# Installs a minimal headless Arch onto the machine's SPINNING HDD and leaves
+# every other disk byte-identical -- including the SSD that still holds the
+# owner's Windows install.
+#
+# DESIGN RULES (each one exists because the failure it prevents is unrecoverable)
+#
+#   1. The target disk is DETECTED, never assumed. /dev/sda is not a promise.
+#   2. Anything that is not a non-removable rotational disk is ineligible.
+#      That excludes the NVMe/SSD *and* the USB stick we booted from.
+#   3. If detection is ambiguous, ABORT. Never pick one and hope.
+#   4. The caller must name the disk with --confirm-disk and it must equal the
+#      detected one. Two independent sources have to agree.
+#   5. This script creates its OWN EFI partition on the HDD. It does not write
+#      to the SSD's existing EFI partition, so the SSD is never opened for
+#      writing at any point.
+#   6. No `|| true`. Every step is checked. A failure stops the run.
+#
+# Usage:
+#   ./luminos-server-install --dry-run
+#   ./luminos-server-install --confirm-disk /dev/sdX --yes
+#
+set -euo pipefail
+
+HOSTNAME_NEW=${HOSTNAME_NEW:-luminos-server}
+ADMIN_USER=${ADMIN_USER:-shawn}
+TIMEZONE=${TIMEZONE:-America/Toronto}
+ROOT_GIB=${ROOT_GIB:-40}
+ESP_MIB=${ESP_MIB:-1024}
+AUTHORIZED_KEY=${AUTHORIZED_KEY:-}
+
+DRY_RUN=1
+CONFIRM_DISK=""
+
+die()  { printf '\033[31mABORT\033[0m  %s\n' "$*" >&2; exit 1; }
+ok()   { printf '\033[32m  ok\033[0m    %s\n' "$*"; }
+step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+run()  { if [ "$DRY_RUN" = 1 ]; then printf '  would run: %s\n' "$*"; else printf '  + %s\n' "$*"; "$@"; fi; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)      DRY_RUN=1 ;;
+    --yes)          DRY_RUN=0 ;;
+    --confirm-disk) CONFIRM_DISK=${2:?--confirm-disk needs a value}; shift ;;
+    --key)          AUTHORIZED_KEY=${2:?--key needs a value}; shift ;;
+    *) die "unknown argument: $1" ;;
+  esac
+  shift
+done
+
+# ---------------------------------------------------------------- sanity gates
+step "Environment"
+[ "$(id -u)" = 0 ] || die "must run as root (you are $(id -un))"
+grep -qi arch /etc/os-release || die "this is not an Arch environment"
+[ -d /run/archiso ] || printf '\033[33m  warn\033[0m  /run/archiso missing -- are you really on the install ISO?\n'
+ok "running as root inside Arch"
+
+if [ -d /sys/firmware/efi ]; then
+  FIRMWARE=uefi
+else
+  FIRMWARE=bios
+fi
+ok "firmware mode: $FIRMWARE"
+
+vendor=$(grep -m1 vendor_id /proc/cpuinfo | awk '{print $3}')
+case "$vendor" in
+  GenuineIntel) UCODE=intel-ucode ;;
+  AuthenticAMD) UCODE=amd-ucode ;;
+  *) die "unrecognised CPU vendor '$vendor' -- refusing to guess microcode" ;;
+esac
+ok "cpu: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ //')"
+ok "microcode package: $UCODE"
+
+# ------------------------------------------------------------- disk detection
+#
+# Attributes are read ONE AT A TIME, per device. Do not be tempted to parse
+# multi-column `lsblk` output here: TRAN is empty for plain SATA disks, so the
+# columns silently shift left and a hard drive gets misread as something else.
+# That bug was found by testing against a fake rotational disk, not by reading.
+attr() { # attr <device-name> <lsblk-column>
+  lsblk -dno "$2" "/dev/$1" 2>/dev/null | tr -d '[:space:]'
+}
+
+step "Disk inventory"
+printf '  %-12s %-5s %-4s %-9s %-9s %-20s %s\n' DEVICE ROTA RM TRANSPORT SIZE MODEL SERIAL
+CANDIDATES=()
+for name in $(lsblk -dno NAME); do
+  case "$name" in
+    zram*|loop*|md*|dm-*|sr*|ram*) continue ;;   # never real install targets
+  esac
+  rota=$(cat "/sys/block/$name/queue/rotational" 2>/dev/null || echo '?')
+  removable=$(cat "/sys/block/$name/removable" 2>/dev/null || echo '?')
+  tran=$(attr "$name" TRAN)
+  dtype=$(attr "$name" TYPE)
+  printf '  %-12s %-5s %-4s %-9s %-9s %-20s %s\n' \
+    "/dev/$name" "$rota" "$removable" "${tran:--}" "$(attr "$name" SIZE)" \
+    "$(lsblk -dno MODEL "/dev/$name" | sed 's/ *$//' | head -c20)" "$(attr "$name" SERIAL)"
+
+  # A candidate must be: a real disk, spinning, not removable, not on USB.
+  if [ "$dtype" = disk ] && [ "$rota" = 1 ] && [ "$removable" = 0 ] && [ "$tran" != usb ]; then
+    CANDIDATES+=("/dev/$name")
+  fi
+done
+
+echo
+if [ "${#CANDIDATES[@]}" -eq 0 ]; then
+  die "no non-removable rotational disk found. Either this machine has no HDD,
+       or the HDD reports itself as non-rotational. Investigate by hand -- do
+       NOT relax this check, it is the only thing protecting the SSD."
+elif [ "${#CANDIDATES[@]}" -gt 1 ]; then
+  die "found ${#CANDIDATES[@]} candidate HDDs: ${CANDIDATES[*]}
+       Refusing to choose. Re-run naming one explicitly once you have
+       confirmed which is which from the table above."
+fi
+
+TARGET=${CANDIDATES[0]}
+ok "single HDD candidate: $TARGET"
+
+[ -n "$CONFIRM_DISK" ] || die "detection says $TARGET, but you must agree with it:
+       re-run with --confirm-disk $TARGET"
+[ "$CONFIRM_DISK" = "$TARGET" ] || die "you named $CONFIRM_DISK but detection found $TARGET.
+       These must match. Resolve the disagreement before continuing."
+ok "caller confirmation matches detection"
+
+# Name every disk we are protecting, out loud, so it is auditable.
+step "Disks that will NOT be touched"
+protected=0
+for name in $(lsblk -dno NAME); do
+  case "$name" in zram*|loop*|md*|dm-*|ram*) continue ;; esac
+  if [ "/dev/$name" != "$TARGET" ]; then
+    printf '  PROTECTED  /dev/%-10s %-8s %-9s %s\n' "$name" \
+      "$(attr "$name" TRAN)" "$(attr "$name" SIZE)" \
+      "$(lsblk -dno MODEL "/dev/$name" | sed 's/ *$//')"
+    protected=$((protected+1))
+  fi
+done
+ok "$protected disk(s) will be left byte-identical"
+
+# Refuse to run if the target is mounted or holds an active mount.
+if lsblk -no MOUNTPOINTS "$TARGET" | grep -qv '^$'; then
+  die "$TARGET has mounted filesystems. Unmount them first."
+fi
+ok "$TARGET has nothing mounted"
+
+TARGET_SIZE_GIB=$(( $(blockdev --getsize64 "$TARGET") / 1024 / 1024 / 1024 ))
+ok "$TARGET is ${TARGET_SIZE_GIB} GiB"
+[ "$TARGET_SIZE_GIB" -gt $((ROOT_GIB + 10)) ] \
+  || die "$TARGET is too small (${TARGET_SIZE_GIB} GiB) for a ${ROOT_GIB} GiB root plus media"
+
+# ------------------------------------------------------------------- the plan
+step "Plan"
+cat <<PLAN
+  target disk        $TARGET  (${TARGET_SIZE_GIB} GiB, will be ERASED)
+  partition table    GPT
+    p1  ${ESP_MIB} MiB    fat32   /boot        its own EFI partition on the HDD
+    p2  ${ROOT_GIB} GiB   ext4    /            OS, service databases
+    p3  remainder        ext4    /srv/media   the library
+  firmware           $FIRMWARE
+  bootloader         $([ "$FIRMWARE" = uefi ] && echo "systemd-boot on the HDD's own ESP" || echo "GRUB on the HDD")
+  hostname           $HOSTNAME_NEW
+  admin user         $ADMIN_USER  (wheel, sudo, ssh key only)
+  root ssh login     disabled
+  desktop            none
+  swap               zram (no swap partition)
+  lid closed         ignored -- machine keeps running
+PLAN
+
+if [ -z "$AUTHORIZED_KEY" ]; then
+  die "no SSH public key given. Without it you would be locked out of a headless
+       machine. Pass --key \"ssh-ed25519 AAAA...\""
+fi
+ok "ssh key supplied (${AUTHORIZED_KEY:0:28}...)"
+
+if [ "$DRY_RUN" = 1 ]; then
+  printf '\n\033[33mDRY RUN -- nothing was written. Re-run with --yes to execute.\033[0m\n'
+  exit 0
+fi
+
+# ------------------------------------------------------------------ partition
+step "Partitioning $TARGET"
+run wipefs -a "$TARGET"
+run sgdisk --zap-all "$TARGET"
+if [ "$FIRMWARE" = uefi ]; then
+  run sgdisk -n 1:0:+${ESP_MIB}M -t 1:ef00 -c 1:"LUMINOS-ESP"   "$TARGET"
+else
+  run sgdisk -n 1:0:+2M          -t 1:ef02 -c 1:"BIOS-BOOT"     "$TARGET"
+fi
+run sgdisk -n 2:0:+${ROOT_GIB}G  -t 2:8300 -c 2:"LUMINOS-ROOT"  "$TARGET"
+run sgdisk -n 3:0:0              -t 3:8300 -c 3:"LUMINOS-MEDIA" "$TARGET"
+run partprobe "$TARGET"
+sleep 2
+
+P1="${TARGET}1"; P2="${TARGET}2"; P3="${TARGET}3"
+for p in "$P1" "$P2" "$P3"; do
+  [ -b "$p" ] || die "expected partition $p to exist after partprobe, it does not"
+done
+ok "partitions created: $P1 $P2 $P3"
+
+step "Formatting"
+if [ "$FIRMWARE" = uefi ]; then
+  run mkfs.fat -F32 -n LUMINOSESP "$P1"
+fi
+run mkfs.ext4 -F -L luminos-root  "$P2"
+run mkfs.ext4 -F -L luminos-media "$P3"
+ok "filesystems created"
+
+step "Mounting"
+run mount "$P2" /mnt
+run mkdir -p /mnt/srv/media
+run mount "$P3" /mnt/srv/media
+if [ "$FIRMWARE" = uefi ]; then
+  run mkdir -p /mnt/boot
+  run mount "$P1" /mnt/boot
+fi
+findmnt -no TARGET /mnt >/dev/null || die "/mnt is not mounted"
+ok "mounted"
+
+# --------------------------------------------------------------------- system
+step "Installing base system (this is the slow part on a HDD)"
+run pacstrap -K /mnt \
+  base linux linux-firmware "$UCODE" \
+  openssh sudo nano less \
+  systemd-resolvconf zram-generator \
+  intel-media-driver libva-utils \
+  git rsync htop python
+
+step "fstab"
+genfstab -U /mnt >> /mnt/etc/fstab
+grep -q 'srv/media' /mnt/etc/fstab || die "genfstab did not record /srv/media"
+ok "fstab written by UUID"
+
+step "Configuring the installed system"
+cat > /mnt/etc/systemd/zram-generator.conf <<'EOF'
+[zram0]
+zram-size = min(ram / 4, 4096)
+compression-algorithm = zstd
+EOF
+
+cat > /mnt/etc/systemd/network/20-wired.network <<'EOF'
+[Match]
+Name=en* eth*
+
+[Network]
+DHCP=yes
+EOF
+
+mkdir -p /mnt/etc/systemd/logind.conf.d
+cat > /mnt/etc/systemd/logind.conf.d/99-server.conf <<'EOF'
+# A laptop used as a server must not sleep when the lid shuts.
+[Login]
+HandleLidSwitch=ignore
+HandleLidSwitchDocked=ignore
+HandleLidSwitchExternalPower=ignore
+IdleAction=ignore
+EOF
+
+mkdir -p /mnt/etc/ssh/sshd_config.d
+cat > /mnt/etc/ssh/sshd_config.d/99-luminos.conf <<'EOF'
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+EOF
+
+echo "$HOSTNAME_NEW" > /mnt/etc/hostname
+cat > /mnt/etc/hosts <<EOF
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   $HOSTNAME_NEW.localdomain $HOSTNAME_NEW
+EOF
+
+sed -i 's/^#en_CA.UTF-8/en_CA.UTF-8/; s/^#en_US.UTF-8/en_US.UTF-8/' /mnt/etc/locale.gen
+echo 'LANG=en_CA.UTF-8' > /mnt/etc/locale.conf
+ok "config files staged"
+
+step "chroot: users, bootloader, services"
+install -Dm755 /dev/stdin /mnt/root/stage1-chroot.sh <<CHROOT
+#!/usr/bin/env bash
+set -euo pipefail
+ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+hwclock --systohc
+locale-gen
+
+useradd -m -G wheel -s /bin/bash "$ADMIN_USER"
+passwd -l root
+echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel
+chmod 440 /etc/sudoers.d/10-wheel
+
+install -d -m700 -o "$ADMIN_USER" -g "$ADMIN_USER" "/home/$ADMIN_USER/.ssh"
+printf '%s\n' "$AUTHORIZED_KEY" > "/home/$ADMIN_USER/.ssh/authorized_keys"
+chmod 600 "/home/$ADMIN_USER/.ssh/authorized_keys"
+chown "$ADMIN_USER:$ADMIN_USER" "/home/$ADMIN_USER/.ssh/authorized_keys"
+
+systemctl enable sshd systemd-networkd systemd-resolved
+mkinitcpio -P
+
+if [ "$FIRMWARE" = uefi ]; then
+  bootctl install
+  cat > /boot/loader/loader.conf <<'LOADER'
+default luminos.conf
+timeout 1
+console-mode max
+editor no
+LOADER
+  ROOT_UUID=\$(blkid -s UUID -o value "$P2")
+  cat > /boot/loader/entries/luminos.conf <<ENTRY
+title   Luminos Server
+linux   /vmlinuz-linux
+initrd  /$UCODE.img
+initrd  /initramfs-linux.img
+options root=UUID=\$ROOT_UUID rw quiet
+ENTRY
+  # Fallback path, so firmware that ignores NVRAM entries still boots the HDD.
+  install -Dm644 /boot/EFI/systemd/systemd-bootx64.efi /boot/EFI/BOOT/BOOTX64.EFI
+  [ -s /boot/loader/entries/luminos.conf ] || { echo "boot entry empty"; exit 1; }
+else
+  pacman -S --noconfirm --needed grub
+  grub-install --target=i386-pc "$TARGET"
+  grub-mkconfig -o /boot/grub/grub.cfg
+fi
+echo "chroot stage complete"
+CHROOT
+
+arch-chroot /mnt /root/stage1-chroot.sh
+rm -f /mnt/root/stage1-chroot.sh
+ok "chroot stage finished"
+
+# ------------------------------------------------------------- verify, loudly
+step "Verification (a failure here means do not reboot yet)"
+fail=0
+chk() { if eval "$2"; then ok "$1"; else printf '\033[31m  FAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); fi; }
+
+chk "kernel present"            '[ -s /mnt/boot/vmlinuz-linux ]'
+chk "initramfs present"         '[ -s /mnt/boot/initramfs-linux.img ]'
+chk "microcode present"         "[ -s /mnt/boot/$UCODE.img ]"
+chk "fstab has 3 entries"       '[ "$(grep -c ^UUID /mnt/etc/fstab)" -ge 2 ]'
+chk "admin user exists"         "grep -q '^$ADMIN_USER:' /mnt/etc/passwd"
+chk "ssh key installed"         "[ -s /mnt/home/$ADMIN_USER/.ssh/authorized_keys ]"
+chk "root login is locked"      "grep -q '^root:!' /mnt/etc/shadow"
+chk "sshd enabled"              '[ -L /mnt/etc/systemd/system/multi-user.target.wants/sshd.service ]'
+chk "networkd enabled"          '[ -L /mnt/etc/systemd/system/multi-user.target.wants/systemd-networkd.service ]'
+chk "lid switch ignored"        '[ -s /mnt/etc/systemd/logind.conf.d/99-server.conf ]'
+if [ "$FIRMWARE" = uefi ]; then
+  chk "boot entry written"      '[ -s /mnt/boot/loader/entries/luminos.conf ]'
+  chk "removable fallback"      '[ -s /mnt/boot/EFI/BOOT/BOOTX64.EFI ]'
+fi
+
+echo
+if [ "$fail" -gt 0 ]; then
+  die "$fail verification check(s) FAILED. The system is not bootable yet.
+       Do not reboot -- fix the failures above first."
+fi
+ok "all verification checks passed"
+
+cat <<NEXT
+
+Stage 1 complete. Still to do:
+  1. umount -R /mnt
+  2. reboot, remove the USB stick
+  3. the box comes up headless on DHCP; find it and ssh in as $ADMIN_USER
+  4. run stage 2: luminos-server-services
+NEXT

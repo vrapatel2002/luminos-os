@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-07-28]
+# Servarr stack health check.
+# Exits non-zero if any REQUIRED check fails. Optional checks warn only.
+#
+# Design note: every check reports what it actually observed. "Reachable" is
+# never reported as "working" -- a port that answers 403 is a FAIL, not a pass.
+
+set -uo pipefail
+
+SONARR_URL=${SONARR_URL:-http://localhost:8989}
+PROWLARR_URL=${PROWLARR_URL:-http://localhost:9696}
+QBIT_URL=${QBIT_URL:-http://localhost:8080}
+
+SONARR_KEY=${SONARR_KEY:-$(sudo -n grep -oP '(?<=<ApiKey>)[^<]+' /var/lib/sonarr/config.xml 2>/dev/null || true)}
+PROWLARR_KEY=${PROWLARR_KEY:-$(sudo -n grep -oP '(?<=<ApiKey>)[^<]+' /var/lib/prowlarr/config.xml 2>/dev/null || true)}
+
+fail=0
+warn=0
+
+ok()   { printf '  \033[32mOK\033[0m    %s\n' "$*"; }
+bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; fail=$((fail+1)); }
+note() { printf '  \033[33mWARN\033[0m  %s\n' "$*"; warn=$((warn+1)); }
+
+api() { # api <url> <key> ; prints body, returns curl's exit code
+  curl -sf --max-time 6 -H "X-Api-Key: $2" "$1"
+}
+
+echo "=== systemd units ==="
+for unit in sonarr prowlarr; do
+  state=$(systemctl is-active "$unit" 2>/dev/null || true)
+  [ "$state" = active ] && ok "$unit.service is active" || bad "$unit.service is ${state:-missing}"
+done
+if pgrep -x qbittorrent >/dev/null; then
+  ok "qbittorrent running (pid $(pgrep -x qbittorrent | paste -sd, -))"
+else
+  bad "qbittorrent not running (GUI build -- only runs while logged in)"
+fi
+
+echo
+echo "=== APIs ==="
+
+if [ -z "$SONARR_KEY" ]; then
+  note "Sonarr API key unknown (set SONARR_KEY=... or run with sudo) -- skipping API checks"
+elif body=$(api "$SONARR_URL/api/v3/system/status" "$SONARR_KEY"); then
+  ok "Sonarr v$(printf '%s' "$body" | python3 -c 'import sys,json;print(json.load(sys.stdin)["version"])')"
+
+  if clients=$(api "$SONARR_URL/api/v3/downloadclient" "$SONARR_KEY"); then
+    n=$(printf '%s' "$clients" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+    if [ "$n" -eq 0 ]; then
+      bad "Sonarr has no download client -- nothing can be fetched"
+    else
+      printf '%s' "$clients" | python3 -c '
+import sys, json
+for c in json.load(sys.stdin):
+    mark = "OK  " if c["enable"] else "WARN"
+    name, impl, en = c["name"], c["implementation"], c["enable"]
+    print("  %s  download client: %s (%s) enabled=%s" % (mark, name, impl, en))'
+      printf '%s' "$clients" | grep -q '"enable": *true' || note "download client present but disabled"
+    fi
+  else
+    bad "Sonarr downloadclient endpoint unreachable"
+  fi
+else
+  bad "Sonarr API unreachable at $SONARR_URL (bad key or service down)"
+fi
+
+if [ -z "$PROWLARR_KEY" ]; then
+  note "Prowlarr API key unknown (set PROWLARR_KEY=...) -- skipping API checks"
+elif body=$(api "$PROWLARR_URL/api/v1/system/status" "$PROWLARR_KEY"); then
+  ok "Prowlarr v$(printf '%s' "$body" | python3 -c 'import sys,json;print(json.load(sys.stdin)["version"])')"
+
+  if apps=$(api "$PROWLARR_URL/api/v1/applications" "$PROWLARR_KEY"); then
+    printf '%s' "$apps" | python3 -c '
+import sys, json
+a = json.load(sys.stdin)
+if not a:
+    print("  WARN  Prowlarr has no linked apps")
+for x in a:
+    print("  OK    app: %s syncLevel=%s enabled=%s" % (x["name"], x["syncLevel"], x["enable"]))'
+  else
+    bad "Prowlarr applications endpoint unreachable"
+  fi
+
+  if idx=$(api "$PROWLARR_URL/api/v1/indexer" "$PROWLARR_KEY"); then
+    n=$(printf '%s' "$idx" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+    [ "$n" -eq 0 ] && note "Prowlarr has no indexers -- searches will return nothing" \
+                   || ok "Prowlarr indexers: $n configured"
+  fi
+else
+  bad "Prowlarr API unreachable at $PROWLARR_URL (bad key or service down)"
+fi
+
+# qBittorrent: a 403 means the port answers but we cannot drive it. That is a
+# FAIL for automation purposes even though the daemon is clearly alive.
+ver=$(curl -sf --max-time 6 "$QBIT_URL/api/v2/app/version" 2>/dev/null || true)
+case "$ver" in
+  v*|[0-9]*) ok "qBittorrent WebUI API usable (v${ver#v})" ;;
+  "")
+    code=$(curl -so /dev/null -w '%{http_code}' --max-time 6 "$QBIT_URL" 2>/dev/null)
+    code=${code:-000}
+    if [ "$code" = 000 ]; then
+      bad "qBittorrent WebUI not listening on $QBIT_URL"
+    else
+      bad "qBittorrent WebUI answers HTTP $code but API is not authorised -- enable 'Bypass authentication for clients on localhost'"
+    fi ;;
+  *) bad "qBittorrent WebUI returned unexpected body: ${ver:0:40}" ;;
+esac
+
+echo
+if [ "$fail" -gt 0 ]; then
+  echo "RESULT: $fail failure(s), $warn warning(s)"
+  exit 1
+fi
+echo "RESULT: all required checks passed ($warn warning(s))"
