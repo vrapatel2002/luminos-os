@@ -550,6 +550,101 @@ Each bug entry:
   - Dead OpenRouter `env` block removed.
   - `luminos-verify --mcp` widened from 2 config files to 5, and now checks: per-client coverage, cross-client binary agreement, GUI `--repo`, hooks-in-user-scope, hooks-not-double-defined, hook commands executable, and **hook liveness**.
 - Verification: all three client configs spawned exactly as that client would spawn them, from a GUI-like `cwd=/` — mempalace v3.3.1 / 29 tools / 15 search hits and code-review-graph v2.14.7 / 24 tools / 3161 nodes, in every client. Eight negative tests (duplicate scope, missing client registration, divergent binary, missing `--repo`, hooks absent from user scope, hooks in both scopes, non-executable hook command, corrupted client JSON) each produced the expected failure and the check returned to PASS after restore.
-- **Open caveat — deliberately not overclaimed:** whether a *user-scope* hook actually fires inside Cowork is **still unproven**. Hooks do not run under `claude -p` at all (tested with `--setting-sources` unset, `user`, and `user,project`), so it cannot be settled headlessly. The hook wrappers now append to `~/.luminos-hooks.log` and `luminos-verify` warns while that log is missing, so **the next real session answers it**. If the warning persists after a fresh Cowork session, user-scope hooks do not fire there either and the graph must be refreshed another way (e.g. a systemd path unit).
+- **Open caveat — RESOLVED 2026-07-26, and the answer is NO.** <!-- [CHANGE: claude-code | 2026-07-26] --> A fresh Cowork session on 2026-07-26 (started 18:16, checked against `date -Is`) wrote **nothing** to `~/.luminos-hooks.log`: no `SessionStart` line, and no `PostToolUse` line after ~15 `Bash`/`Edit` tool calls. The log's only entry remains `2026-07-25T20:18:16 SessionStart pid=334453`, written by a *terminal* CLI session. So hooks fire in the Claude Code **CLI** and do **not** fire in **Cowork** — the registration is correct and simply never executed, which is precisely the failure shape this bug is about. `luminos-verify --mcp` correctly reports `PASS — 1 warning`, that warning being the dead `PostToolUse`. **Consequence: inside Cowork the code graph never refreshes by itself** (confirmed: `last_updated 2026-07-25T19:58:58` while editing on 2026-07-26). Options, none installed yet — user decision pending: a `systemd --user` **path** unit on `~/luminos-os/.git/index` running `~/.code-review-graph-venv/bin/code-review-graph update --skip-flows --repo ~/luminos-os` (~1.1 s, idle when nothing changes), or an explicit `build_or_update_graph_tool` call at the top of each Cowork session. Note that a plain `PathModified` on the repo *directory* is **not** sufficient — systemd path units are not recursive, so edits inside subdirectories would never fire it.
 - Gotcha for future work: two concurrent MemPalace servers against the one 2.0 GB store are fine for reads (tested: both handshook, concurrent searches in 0.6s, ~290 MB RSS each). Writes go through Chroma's embedded SQLite in `journal_mode=delete` with a 5 s busy timeout, so simultaneous heavy ingest from several clients can raise `database is locked` — contention, not corruption. Ingest paths take a real `fcntl.flock`.
 - Correction to BUG-085: the "5,951 stale locks" listed there were harmless zero-byte litter, not stuck locks — `flock` releases on process death. That entry overstated the fault count as six; five were real.
+
+### BUG-088 — Ubuntu (Yaru) look reverts to Breeze on every lock/idle; the heal script reported success while doing nothing
+<!-- [CHANGE: claude-code | 2026-07-26] -->
+- Status: **FIXED**
+- Severity: MEDIUM (cosmetic, but the "fix" actively lied about its own result)
+- Components: `~/.config/kdeglobals`, `scripts/luminos-ubuntu-persist`, `systemd/luminos-ubuntu-look.service`, kded module `lookandfeelautoswitcher`
+- Symptom (user): "the ubuntu theme is set back to plasma… I told you to make it hold reboot/sleep and more but it didn't even survive a lock and login back."
+- **Root cause 1 — the reset was never prevented, only cleaned up after.** `kdeglobals [KDE] AutomaticLookAndFeel=true` enables KDE's automatic Global-Theme switcher, served by the autoloaded kded module `/usr/lib/qt6/plugins/kf6/kded/lookandfeelautoswitcher.so` (confirmed loaded via `qdbus6 org.kde.kded6 /kded org.kde.kded6.loadedModules`; the binary links `KIdleTime` + `KDarkLightSchedule`). Per `/usr/share/config.kcfg/lookandfeelsettings.kcfg` it switches on **time of day** and, separately, on `AutomaticLookAndFeelOnIdle` — whose default is **`true`**, with `AutomaticLookAndFeelIdleInterval` defaulting to **5 seconds**. Applying a Look-and-Feel package rewrites colour scheme, icons, cursor, widget style, Plasma style and window decoration. So every lock, every resume, every 5 s of idle re-slammed `org.kde.breezedark.desktop` back on. A login-time oneshot can never win that race. **Both keys must be written explicitly — setting only `AutomaticLookAndFeel=false` leaves the on-idle path at its `true` default.**
+- **Root cause 2 — `plasma-apply-colorscheme` no-ops when the name key already matches.** The heal script wrote `ColorScheme=Yaru` *before* calling it, so the tool answered `The requested theme "Yaru" is already set…` and exited 0 **without writing the `[Colors:*]` blocks**. Result: the name said `Yaru` while the payload was Breeze Dark. Measured, not guessed: live `kdeglobals` matched `/usr/share/color-schemes/BreezeDark.colors` on **96 of 96** colour keys, and `Yaru.colors` on 4 of 60.
+- **Root cause 3 — the drift check read the name, so defect 2 made it self-blinding.** It saw `ColorScheme=Yaru`, concluded all was well, and printed `Ubuntu (Yaru) look re-affirmed.` on every login for four days while the desktop was visibly Breeze. The script had no failure path at all — that string was unconditional.
+- Fix:
+  - `AutomaticLookAndFeel=false` **and** `AutomaticLookAndFeelOnIdle=false`; kded module unloaded live so it stops in the running session, not only at next login. Backup: `~/.config/kdeglobals.bak-yaru-20260726`.
+  - `luminos-ubuntu-persist` now (a) re-asserts both keys and unloads the module on every run, (b) checks the colour **payload** (`[Colors:Button] DecorationFocus == 233,84,32`, Yaru's #E95420) instead of the name, (c) clears the name key before re-applying so `plasma-apply-colorscheme` cannot short-circuit, (d) exits **non-zero and prints the actual values** when the end state is wrong.
+- Verification: after the fix, live `kdeglobals` matches `Yaru.colors` on **60/60** keys and BreezeDark on 4/60; accent `233,84,32`; module absent from `loadedModules`; `kdeglobals` md5 unchanged across a 20 s idle window. Negative-tested by recreating the exact broken state (`plasma-apply-colorscheme BreezeDark` then `kwriteconfig6 ColorScheme Yaru`) — the old script would have printed "re-affirmed"; the new one printed `colour payload drifted (accent='61,174,233') — re-applying Yaru` and healed it.
+- Not a defect, do not "fix": `widgetStyle=Breeze` and Plasma style `default` are **intentional** per DECISION 30 — there is no maintained Yaru widget/Plasma theme; the Ubuntu identity comes from the orange colour scheme, Yaru icons/cursor and Ubuntu fonts.
+- Known cosmetic residue: `Icon theme "Humanity" not found.` spams the journal from every KDE process. `luminos-ubuntu-look` deliberately sets Yaru's `Inherits=Humanity,Papirus,breeze,hicolor` and `humanity-icon-theme` is not installed. Harmless (the chain falls through to Papirus) but noisy — drop `Humanity,` from that list if the spam matters.
+- Also observed while diagnosing: **Plasma is now 6.7.3**, not the 6.6.4 recorded in AGENTS.md §1. `plasma-apply-colorscheme` / `plasma-apply-cursortheme` have SIGABRT coredumps on 2026-06-24 and 2026-07-22 (same family as the known `kscreen-doctor` SIGABRTs). They do not crash today, but a crashing applier is a second way this heal can silently fail — which is why the script now verifies the end state rather than trusting the exit code.
+- Date Found: 2026-07-26 · Date Fixed: 2026-07-26
+
+### BUG-089 — `luminos-notes.sh` silently discarded any note containing an apostrophe, while printing "Note added"
+<!-- [CHANGE: claude-code | 2026-07-26] -->
+- Status: **FIXED**
+- Severity: HIGH (silent, ongoing loss of the project knowledge base)
+- Component: `scripts/luminos-notes.sh`
+- Root Cause: `add` and `search` interpolated their arguments straight into the SQL string —
+  `sqlite3 "$DB" "INSERT INTO notes (tag, note) VALUES ('$TAG', '$NOTE');"`. Any `'` in the text
+  ("KDE's", "don't", "user's") terminated the string literal and sqlite3 failed with a parse error.
+  **`echo "Note added to $TAG."` then ran unconditionally**, so the failure looked like a success.
+  Also a plain SQL-injection shape, in a script run with arbitrary text every task.
+- Impact: AGENTS.md §13 makes `luminos-notes.sh add` mandatory after **every** task, so every summary
+  containing an apostrophe was lost — silently, since 2026-04-26. Found by accident: the BUG-088
+  note above was written, reported added, and was not in the DB when searched back.
+- Fix: `sql_quote()` doubles single quotes (SQL's own escape) for tag, note and search term; `add`
+  now tests sqlite3's exit status and fails loudly with a non-zero exit instead of lying.
+- Verification: `add TESTTAG "KDE's auto-switcher won't survive a lock"` → stored and retrievable by
+  `search`; previously this produced a parse error and an empty table with a success message. The
+  three real notes for this session were re-added and confirmed present.
+- Related: same failure shape as BUG-088 root cause 3 — an unconditional success message on a path
+  that can fail. Worth grepping other `scripts/` helpers for `echo "…done"` after an unchecked command.
+- Also affected: `luminos-brain log` printed `Action logged to Brain and Notes.` past the identical
+  SQL error. Not fixed here (separate tool, outside this repo); re-log without apostrophes until it is.
+- Date Found: 2026-07-26 · Date Fixed: 2026-07-26
+
+### BUG-090 — GTK apps left on Breeze icons after a Global-Theme reset; Yaru's fallback chain pointed at an uninstalled theme
+- Status: ✅ FIXED
+- Severity: Low (cosmetic, but it is what made the desktop look "half Ubuntu")
+- Reported as: "still icons are not of yaru", "why do i have 2 different icons for folder",
+  "the dock is using old icons".
+- **First, what was NOT broken.** The Qt/KDE side was already fully Yaru. Proven by cropping a
+  fresh Dolphin window at native resolution and diffing against the theme files: `go`,
+  `Documents` and the `.md` file icons are pixel-identical to
+  `/usr/share/icons/Yaru/256x256/{places/folder.png, places/folder-documents.png,
+  mimetypes/text-markdown.png}`. The "two different folder icons" is Dolphin's
+  `directorythumbnail` preview plugin compositing content thumbnails onto the *same* Yaru
+  folder — a preview feature, not a second icon theme. Turn it off in
+  Configure Dolphin → Interface → Previews → uncheck *Folders*.
+- Root cause 1 — **GTK was never re-synced.** `~/.config/gtk-{3,4}.0/settings.ini` and
+  `gsettings org.gnome.desktop.interface` still read `icon-theme=breeze-dark` and
+  `cursor-theme=breeze_cursors` while `gtk-theme-name` was already `Yaru`. A Look-and-Feel
+  apply (BUG-088) rewrites the GTK files through the `kde-gtk-config` `gtkconfig` kded
+  module, and `luminos-ubuntu-persist` only ever re-affirmed the *Qt* keys — so GTK stayed
+  broken permanently once reset. `plasma-changeicons Yaru` exits 0 but does **not** push the
+  change into the GTK files, so it cannot be relied on for this.
+- Root cause 2 — **the fallback chain named a theme that is not installed.**
+  `Inherits=Humanity,Papirus,breeze,hicolor`; Humanity is not packaged for Arch. Every icon
+  miss logged `Icon theme "Humanity" not found` — **58 times in one day**. Now
+  `Inherits=Papirus,breeze,hicolor`; the log line is gone.
+- Root cause 3 — **`kwriteconfig6` mangled the theme index.** It rewrites a file with its
+  groups sorted, which pushed `[Icon Theme]` from line 1 to **line 651 of 789**. The
+  freedesktop Icon Theme spec requires `[Icon Theme]` to be the first group. Replaced with
+  `scripts/luminos-icon-inherits.py`, which edits `Inherits=` in place and keeps the group
+  order. Both `Yaru` and `Yaru-dark` are back to `[Icon Theme]` at line 1.
+- Not a defect — **the dock's launcher icons come from Papirus and always will.** Yaru is a
+  GNOME/Ubuntu theme and ships no `org.kde.dolphin`, `org.kde.konsole`, `firefox` or
+  `google-chrome`; breeze has none of those four either. `kiconfinder6` resolves all of them
+  to `/usr/share/icons/Papirus/32x32/apps/`. Papirus was the *previous* Luminos icon theme,
+  which is why they read as "old icons". The only way to change this is to pick a different
+  fallback theme, not to fix Yaru.
+- Conflicting setting (AGENTS.md Rule 11): `~/.config/kdedefaults/kdeglobals` (written by the
+  Look-and-Feel package, and on `XDG_CONFIG_DIRS`) carried `[Icons] Theme=breeze-dark`. The
+  user file outranks it, but it is a live disagreement, so it is now aligned to `Yaru` and
+  `luminos-ubuntu-persist` keeps it aligned. Backup: `kdeglobals.bak-yaru-20260726`.
+- Fix / survival:
+  - `scripts/luminos-ubuntu-persist` now re-affirms GTK icon/cursor/theme in gtk-3.0, gtk-4.0
+    and gsettings, aligns `kdedefaults/kdeglobals`, and its final verdict checks the GTK keys
+    too — so it can no longer print OK while GTK is on Breeze.
+  - `scripts/luminos-icon-inherits.py` (new) + `config/pacman-hooks/luminos-yaru-icons.hook`
+    (installed to `/etc/pacman.d/hooks/`) restore the chain after every `yaru-icon-theme`
+    upgrade, which previously reverted it silently.
+- Verification: positive run prints OK; **negative test 1** — set both GTK files back to
+  `breeze-dark`, re-ran, healed to `Yaru`; **negative test 2** — `chattr +i` on
+  `gtk-4.0/settings.ini` so the heal cannot succeed → script printed
+  `FAILED — … gtk4='breeze-dark'` and exited 1; **negative test 3** — restored the shipped
+  `Inherits=Humanity,hicolor` and ran the hook's `Exec` → repaired, `[Icon Theme]` at line 1.
+- Date Found: 2026-07-26 · Date Fixed: 2026-07-26

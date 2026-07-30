@@ -1126,7 +1126,6 @@ exec env \
   --enable-gpu-rasterization \
   --enable-features=VaapiVideoDecodeLinuxGL,VaapiVideoEncoder,MemorySaver \
   --ignore-gpu-blocklist \
-  --process-per-site --renderer-process-limit=8 \
   --remote-debugging-port=9222
 ```
 
@@ -1149,10 +1148,22 @@ exec env \
   --enable-gpu-rasterization \
   --enable-features=MemorySaver \
   --ignore-gpu-blocklist \
-  --process-per-site --renderer-process-limit=8 \
   --remote-debugging-port=9222 \
   --render-node-override=/dev/dri/renderD128
 ```
+
+> **Perceived-slowness work (2026-07-22):**
+> - **Fix #1 (applied):** removed `--process-per-site` + `--renderer-process-limit=8` from BOTH
+>   paths. They capped Chrome at 8 renderer processes and merged same-site tabs so a busy tab
+>   stalled its mates — a RAM-saving throttle from the old 6GB-anxious era, no longer warranted.
+>   Revert: `chrome-luminos.bak-20260721`.
+> - **Fix #2 (reverted — NOT applied):** briefly removed `MemorySaver`, then restored it by user
+>   request. MemorySaver stays ON (both paths). It is a built-in Chromium feature (tab discarding)
+>   — only toggleable via the flag, not externally rewritable.
+> - **Fix #3 (applied — the real cause of slow NEW-page loads):** added a local caching DNS
+>   resolver (`systemd-resolved`). See §11.5 below. Windows caches DNS locally by default; this
+>   box did not, so every new domain was a 30–50 ms round-trip to the router. Now cached locally
+>   (<1 ms on repeat, persistent).
 
 - `--ozone-platform=x11` (XWayland) — Wayland+Vulkan incompatible with NVIDIA PRIME offload. Cross-device DMA-BUF import fails (BUG-062). XWayland handles frame handoff via X11 protocol instead.
 - No VAAPI flags — NVIDIA VA-API on Linux is non-functional; removed to avoid init errors.
@@ -1171,7 +1182,32 @@ exec env \
 | BUG-061 | `radeon_icd.x86_64.json` doesn't exist on Arch → SwiftShader fallback | `radeon_icd.json` (no arch suffix) |
 | BUG-062 | `--ozone-platform=wayland` + Vulkan crashes on NVIDIA PRIME (DMA-BUF cross-device) | NVIDIA path uses `--ozone-platform=x11` |
 
-### 11.5 Desktop File
+### 11.5 DNS Caching Resolver (systemd-resolved) — Chrome new-page-load speed
+
+**Symptom:** a brand-new page/tab (e.g. type "youtube" → Enter) renders slower than on
+Windows — NOT discarded/slept tabs. **Root cause:** no local DNS cache. NetworkManager wrote
+`/etc/resolv.conf` straight to the router (`192.168.2.1`); `systemd-resolved` was disabled.
+Every new domain = a 30–50 ms round-trip, and a page like YouTube pulls 10+ domains. Windows
+caches DNS locally by default; this box did not.
+
+**Fix (2026-07-22, "Chrome fix #3"):** enable `systemd-resolved` as a local caching resolver.
+
+| Change | File / command |
+|--------|----------------|
+| Tell NetworkManager to hand DNS to resolved | `/etc/NetworkManager/conf.d/dns-systemd-resolved.conf` → `[main]\ndns=systemd-resolved` |
+| Enable the resolver | `systemctl enable --now systemd-resolved` |
+| Point resolv.conf at the caching stub | `/etc/resolv.conf` → symlink to `/run/systemd/resolve/stub-resolv.conf` (nameserver `127.0.0.53`) |
+| Backup of old resolv.conf | `/etc/resolv.conf.bak-20260722` |
+
+**Result:** upstream stays `192.168.2.1` (+ `207.164.234.129`); lookups now cache locally —
+fresh domain first hit ~50 ms, repeats **<1 ms and persistent**. Verify: `resolvectl statistics`
+(Cache Hits climbing), `resolvectl status` (Current DNS Server = 192.168.2.1).
+
+**Revert:** `rm /etc/NetworkManager/conf.d/dns-systemd-resolved.conf` → `systemctl disable --now
+systemd-resolved` → `cp /etc/resolv.conf.bak-20260722 /etc/resolv.conf` (replace the symlink) →
+`systemctl restart NetworkManager`. See LUMINOS_DECISIONS.md DECISION 27.
+
+### 11.6 Desktop File
 
 `~/.local/share/applications/google-chrome.desktop` (user override — takes priority over AUR system entry)
 
@@ -1544,7 +1580,7 @@ Usage: `luminos-120hz` (also called by luminos-power on AC plug)
 ### /usr/local/bin/chrome-luminos
 Source: `scripts/chrome-luminos`
 Purpose: Chrome wrapper. Sets AMD GPU env vars, adds Wayland and GPU flags, launches Flatpak Chrome.
-Key flags: `--ozone-platform=wayland`, `--remote-debugging-port=9222`, `--renderer-process-limit=8`
+Key flags: `--ozone-platform=wayland`, `--remote-debugging-port=9222` (renderer-process cap + MemorySaver removed 2026-07-22 — see Part 11)
 
 ### scripts/luminos-keyboard-smart
 Purpose: Smart keyboard backlight daemon. Reads `~/.config/luminos-keyboard.conf` and applies settings. Called by `luminos-keyboard.service` on start and wake.

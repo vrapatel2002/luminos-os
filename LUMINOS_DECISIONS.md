@@ -1287,6 +1287,32 @@ Files: `scripts/luminos-ubuntu-look`, `share/color-schemes/Yaru.colors`,
 `/usr/local/bin/luminos-ubuntu-look`, `~/.config/{kdeglobals,kcminputrc,gtk-3.0/settings.ini,gtk-4.0/settings.ini}`.
 Cross-ref DECISION 29 (auto-sync), AGENTS.md §9.
 
+### AMENDMENT — 2026-07-26: KDE's automatic Global Theme switching is OFF, and it is a hard conflict
+<!-- [CHANGE: claude-code | 2026-07-26] -->
+This decision was incomplete: it layered Yaru on top of Plasma but never disabled the thing that
+undoes it. **`kdeglobals [KDE] AutomaticLookAndFeel` and `AutomaticLookAndFeelOnIdle` are now both
+`false`** (BUG-088). The kded module `lookandfeelautoswitcher` re-applies a whole Look-and-Feel
+package — colours, icons, cursor, widget style, Plasma style, window decoration — on a time-of-day
+schedule **and after `AutomaticLookAndFeelIdleInterval` seconds of idle, which defaults to 5**. Any
+lock, resume or short idle therefore reverted the desktop to Breeze Dark within seconds.
+
+**These two features are mutually exclusive by design and cannot be reconciled.** Automatic
+day/night switching works by swapping between two *Look-and-Feel packages*, and there is no Yaru
+Look-and-Feel package to swap to (per the note above, there is not even a Yaru widget style). The
+tradeoff, stated plainly per Rule 11: **choosing the Ubuntu look means giving up KDE's automatic
+light/dark switching.** If the user ever wants day/night switching back, the Ubuntu look has to go
+with it — turning the setting back on in System Settings → Colors & Themes will silently undo
+DECISION 30 again, and the symptom will look like "the theme randomly resets", not like a setting.
+
+Two further traps recorded so they are not rediscovered:
+- **`AutomaticLookAndFeelOnIdle` defaults to `true`.** Writing only `AutomaticLookAndFeel=false`
+  is not enough; the idle path stays armed. Write both.
+- **`plasma-apply-colorscheme` refuses to act when the name key already matches** (`"…is already
+  set as the theme for the current Plasma session"`, exit 0). So the scheme *name* in
+  `[General] ColorScheme` and the actual `[Colors:*]` payload can disagree indefinitely. Anything
+  that verifies this look must check a real colour value — `[Colors:Button] DecorationFocus`
+  should be `233,84,32` (#E95420) — never the name.
+
 ## DECISION 31 — Keep web live-wallpapers animating while the desktop is covered
 Date: July 23, 2026
 Made by: claude-code

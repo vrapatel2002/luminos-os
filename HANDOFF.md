@@ -1,37 +1,34 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-07-25 — Response 9
+Last updated: 2026-07-28 — Response 1 (Antigravity session; Servarr stack integration guide — no code changes to Luminos OS)
 
-## FIRST ACTION IN A NEW CHAT — settle the one open question (hook liveness)
-Everything else in thread 4 is done and verified. **One thing could not be tested from the session
-that fixed it**, because it can only be answered by a *fresh* session. Do this before anything else:
+## FIRST ACTION IN A NEW CHAT
+Read this file, then `cat ~/luminos-os/AGENTS.md`. There is **no pending test** any more — the
+hook-liveness question that headed this file on 2026-07-25 is now **answered** (see below).
+Two things need a **user decision**, nothing needs investigation.
 
-```bash
-~/luminos-os/scripts/luminos-verify --mcp
-```
+## ANSWERED 2026-07-26 — user-scope hooks do NOT fire in Cowork
+The 2026-07-25 session left one question open: does a user-scope hook actually run inside Cowork?
+**No.** A fresh Cowork session on 2026-07-26 wrote **nothing** to `~/.luminos-hooks.log` — no
+`SessionStart`, and no `PostToolUse` after ~15 `Bash`/`Edit` calls. The log's only line is still
+`2026-07-25T20:18:16 SessionStart pid=334453`, from a *terminal* CLI session. The log had been
+deliberately cleared beforehand, so this is clean evidence.
 
-Expected today: `PASS — 1 warning(s), 0 failures`. Read that one warning:
-
-| What you see | What it means | What to do |
-|---|---|---|
-| The warning is **gone** (`0 warning(s)`) | User-scope hooks **do fire inside Cowork**. `SessionStart` ran and wrote to `~/.luminos-hooks.log`. | Nothing. Close the question in BUG-087 and drop the "unproven" caveat from AGENTS.md §6 and DECISION 34. |
-| `hooks are configured but have NEVER run — no /home/shawn/.luminos-hooks.log` | Cowork **does not execute hooks at all**. The graph will never refresh by itself in this host. | Build the fallback: a **systemd path unit** (below). |
-| `hook(s) PostToolUse … configured but never observed running` (SessionStart present, PostToolUse absent) | SessionStart fires, PostToolUse does not. Partial. | Same fallback — the graph is the part that needs freshness. |
-
-**Why this test is trustworthy:** `~/.luminos-hooks.log` was deliberately **cleared** at the end of
-Response 8, so any line in it now was written by *this* session. The log is appended to by
-`scripts/luminos-hook-session-check` (SessionStart) and `scripts/luminos-hook-crg-update`
-(PostToolUse); both write their trace line *before* their gate, so a line appears even when the
-hook correctly no-ops outside a repo.
-
-**Do NOT try to short-circuit this with `claude -p`.** Hooks do not run in headless mode at all —
-this was controlled for across `--setting-sources` unset / `user` / `user,project` and fired in
-none of them. A negative from `-p` proves nothing.
-
-**Fallback if hooks are dead here:** a systemd **path** unit (`--user`) watching
-`/home/shawn/luminos-os` and running
-`~/.code-review-graph-venv/bin/code-review-graph update --skip-flows --repo /home/shawn/luminos-os`.
-An update takes ~1.1 s. Use a path unit, not a timer, so it stays idle when nothing changes.
-Pattern to copy: `systemd/luminos-theme-sync.path` + `.service` already in the tree (untracked).
+- **Hooks work in the Claude Code CLI. They are dead in Cowork.** Registration is correct and simply
+  never executed. `luminos-verify --mcp` reporting `PASS — 1 warning` is the check working, not failing.
+- **Consequence: in Cowork the code graph never refreshes by itself.** Confirmed live —
+  `list_graph_stats_tool` said `last_updated 2026-07-25T19:58:58` while editing on 2026-07-26.
+  MemPalace is unaffected (queried on demand, not by a hook).
+- **MCP itself is healthy — do not go hunting for a broken server.** All three clients, one pinned
+  binary per tool, pyenv 3.12.13, no editable installs, handshakes OK (crg v2.14.7, mempalace v3.3.1).
+- **DECISION NEEDED (1 of 2):** install the fallback? A `systemd --user` **path** unit running
+  `~/.code-review-graph-venv/bin/code-review-graph update --skip-flows --repo ~/luminos-os` (~1.1 s).
+  **Correction to the plan this file carried on 2026-07-25:** watch **`~/luminos-os/.git/index`**, not
+  the repo *directory* — systemd path units are **not recursive**, so `PathModified` on the directory
+  would never fire for edits inside `src/`, `cmd/` or `scripts/`. Alternative: just call
+  `build_or_update_graph_tool` at the top of each Cowork session and skip the unit entirely.
+- **Practical rule for agents:** in Cowork nothing enforces AGENTS.md Rules 7 and 8. MemPalace and
+  code-graph queries happen only because the agent read AGENTS.md and chose to run them. Check the
+  graph's `last_updated` before trusting "this function has no callers".
 
 ## READ THIS FIRST — where MCP config actually lives (BUG-087)
 **Claude Code reads `~/.claude/settings.json` (USER scope) — not the repo's `.mcp.json`.**
@@ -46,8 +43,76 @@ not duplication. The invariant is **one binary**, not one file. Run `luminos-ver
 re-raise rotation. The second dead OpenRouter key that was pinning `ANTHROPIC_BASE_URL` in user
 scope has been removed, because it would have broken plain `claude` in a terminal.
 
+## DONE 2026-07-26 — thread 5: the Ubuntu (Yaru) look now survives lock, idle and resume (BUG-088)
+User report: *"the ubuntu theme is set back to plasma… I told you to make it hold reboot/sleep and
+more but it didn't even survive a lock and login back."* Fixed and verified. Three defects:
+
+1. **The reset was never prevented, only cleaned up after.** `kdeglobals [KDE]
+   AutomaticLookAndFeel=true` turns on KDE's Global-Theme auto-switcher (kded module
+   `lookandfeelautoswitcher`). Per `/usr/share/config.kcfg/lookandfeelsettings.kcfg` it switches on
+   time of day **and** on `AutomaticLookAndFeelOnIdle` — which **defaults to `true`** with an idle
+   interval that **defaults to 5 seconds**. Applying a Look-and-Feel package rewrites colours, icons,
+   cursor, widget style, Plasma style and decoration. So every lock/resume re-applied `breezedark`
+   within seconds, and a login-time oneshot could never win. **Write BOTH keys — `AutomaticLookAndFeel=false`
+   alone leaves the idle path armed.**
+2. **`plasma-apply-colorscheme` no-ops when the name key already matches** ("already set", exit 0)
+   **without writing the `[Colors:*]` blocks**. The heal script wrote `ColorScheme=Yaru` *first*, so
+   the name said Yaru while the payload stayed Breeze Dark — measured **96/96** BreezeDark keys.
+3. **The drift check read the name**, so (2) made it permanently self-blinding: it printed
+   `Ubuntu (Yaru) look re-affirmed.` on every login for four days, unconditionally, with no failure path.
+
+Now: both keys `false`, module unloaded live, `scripts/luminos-ubuntu-persist` rewritten to verify the
+**payload** (`[Colors:Button] DecorationFocus == 233,84,32`) and exit non-zero on failure. Verified
+60/60 Yaru keys; negative-tested by recreating the exact broken state.
+**DECISION NEEDED (2 of 2):** this is a hard tradeoff — **KDE's automatic light/dark switching is now
+off and cannot coexist with the Ubuntu look** (auto-switching swaps Look-and-Feel *packages*; there is
+no Yaru one). If the user re-enables it in System Settings it will silently undo DECISION 30 again.
+**Also NOT yet done:** `systemd/luminos-theme-sync.{path,service}` (DECISION 29, SDDM/lock follow the
+desktop wallpaper) exist in the repo but were **never installed** to `~/.config/systemd/user/` —
+`systemctl --user is-enabled` says `not-found`. Separate from BUG-088; ask before installing.
+
+## DONE 2026-07-26 — BUG-089: `luminos-notes.sh` was silently eating notes
+Found by accident while doing the mandatory post-task logging. `add` and `search` interpolated raw
+text into SQL, so **any apostrophe** ("KDE's", "don't") broke the INSERT — and `echo "Note added"`
+ran **unconditionally**, so it reported success with nothing stored. AGENTS.md §13 makes this call
+mandatory after every task, so this has been silently losing knowledge since 2026-04-26. Fixed with
+SQL quote-doubling + a real exit-status check; negative-tested. **`luminos-brain log` has the same
+bug** (printed `Action logged` past the identical SQL error) — it lives outside this repo and is
+NOT fixed; avoid apostrophes when calling it, or fix it next.
+
+## DONE 2026-07-26 — BUG-090: the icons. Qt was already Yaru; GTK was not, and the fallback chain named a theme that isn't installed
+User reported "still icons are not of yaru", "why do i have 2 different icons for folder", "the dock
+is using old icons". **Measure before believing a screenshot.** I opened a fresh Dolphin, captured it
+at native 3124×1836 and cropped individual icons: `go`, `Documents` and the `.md` files are
+pixel-identical to `Yaru/256x256/{places/folder.png, places/folder-documents.png,
+mimetypes/text-markdown.png}`. The Qt side was **already fully Yaru** — the mismatch was an artefact
+of the downscaled screenshot. The "two folder icons" is Dolphin's `directorythumbnail` plugin
+compositing content previews onto the *same* Yaru folder (Configure Dolphin → Interface → Previews →
+uncheck *Folders* to stop it).
+
+Three real defects, all fixed and negative-tested (details in `docs/BUGS.md` BUG-090):
+1. **GTK was left on `breeze-dark`.** A Look-and-Feel apply rewrites `~/.config/gtk-{3,4}.0/settings.ini`
+   through the `kde-gtk-config` `gtkconfig` kded module, and `luminos-ubuntu-persist` only ever
+   re-affirmed the *Qt* keys — so once BUG-088 reset it, GTK stayed Breeze forever. Note
+   `plasma-changeicons Yaru` exits 0 and does **not** fix these; write them directly.
+2. **`Inherits=Humanity,…` names a theme that is not packaged for Arch** — 58
+   `Icon theme "Humanity" not found` errors in one day. Now `Papirus,breeze,hicolor`.
+3. **`kwriteconfig6` mangled `/usr/share/icons/Yaru/index.theme`** — it sorts groups, which pushed
+   `[Icon Theme]` from line 1 to line 651 of 789. The freedesktop spec requires it first. Use the new
+   `scripts/luminos-icon-inherits.py`, never `kwriteconfig6`, on an `index.theme`.
+
+Survival: `luminos-ubuntu-persist` now re-affirms GTK + `kdedefaults/kdeglobals` and its final verdict
+**fails** if any of them drifted; `/etc/pacman.d/hooks/luminos-yaru-icons.hook` (new, installed)
+restores the chain after every `yaru-icon-theme` upgrade.
+
+**Settled, don't re-investigate:** the dock's launcher icons come from **Papirus** and cannot come
+from Yaru. Yaru ships no `org.kde.dolphin`, `org.kde.konsole`, `firefox` or `google-chrome` icon;
+breeze has none of those four either. Papirus was the previous Luminos icon theme, which is exactly
+why they read as "old icons". Changing them means choosing a different fallback theme — a taste
+decision for the user, not a bug.
+
 ## Goal (the durable end objective)
-Four threads:
+Five threads:
 1. **Make the desktop feel fast again.** DONE for the wallpaper (BUG-083 / DECISION 32) — it must
    never spend CPU/iGPU on frames nobody can see, nor be encoded above the panel resolution.
 2. **BUG-084 — stop the crash handler from taking the machine down.** This turned out to be the
@@ -62,13 +127,22 @@ Four threads:
    its environment and it stops working — how to solve it once and for all."*
 
 ## Aim right now
-Thread 4 is **done and verified across all three MCP clients**. One open question, deliberately not
-claimed as solved: whether a *user-scope hook* actually fires inside Cowork. See **FIRST ACTION IN A
-NEW CHAT** at the top — that is the next thing to do, and it takes one command.
-Thread 1 done. Thread 2 awaiting a yes/no on the `MemoryMax` drop-in. Thread 3: the hardware
-constraint has been explained to the user (Response 3) — **dGPU VRAM cannot be made into general 24/7
-system memory on this box**, and trying would destroy the true-0W idle work. Awaiting their direction;
-the real lead is the iGPU carve-out, not the dGPU.
+**Nothing is mid-flight. Four things are waiting on the user, none on investigation:**
+1. Thread 5 (BUG-088) — confirm the Yaru look now holds across a real lock/unlock and a suspend.
+   Accept the tradeoff: no KDE automatic light/dark switching. Also: install
+   `systemd/luminos-theme-sync.{path,service}`, or leave them parked?
+1b. BUG-090 — the dock/launcher icons are Papirus because Yaru has none for those apps. Keep Papirus
+   as the fallback (best coverage, flat/colourful), or reorder the chain to `breeze,Papirus,hicolor`
+   so KDE apps get Breeze icons recoloured to the Yaru orange? Taste call, needs the user.
+2. Hooks — install the `.git/index` path unit for the code graph, or refresh it manually in Cowork?
+3. Thread 2 (BUG-084) — yes/no on the `MemoryMax` drop-in for `drkonqi-coredump-launcher@.service`.
+   Until it lands, every app crash can repeat the whole-desktop memory stall.
+4. Thread 3 — direction. **dGPU VRAM cannot become general 24/7 system memory on this box** and
+   trying would destroy the true-0W idle work (explained in full below; do not re-litigate). The
+   real lead is the **iGPU carve-out**, not the dGPU.
+
+Thread 1 done. Thread 4 done, including its last open question (top of file).
+**`git push` is still on hold by explicit user decision** — 11+ commits unpushed.
 
 ## State — what is DONE (thread 4, BUG-085 / DECISION 33 — MCP tooling)
 **Key insight: neither tool was crashed.** Both answered an MCP handshake the whole time, which is
@@ -415,11 +489,10 @@ easier future rework; SPD located by searching `02 00 04 80 00 00 0`; checksum s
   load** (idle vs Chrome vs wallpaper vs HIVE) before proposing any allocator. Measure, then design.
 
 ## Next steps (ordered)
-0. **BUG-086 — ROTATE THE OPENROUTER KEY.** See the banner at the top of this file. Order matters:
-   (a) revoke/rotate at openrouter.ai — this is the only step that actually kills the credential;
-   (b) `git rm --cached .claude/settings1.json` — a plain `.gitignore` edit will NOT untrack it;
-   (c) commit. Purging it from history needs `git filter-repo` + a **force-push to a shared
-   remote** — destructive, user's decision only, and worthless before the key is revoked.
+0. ~~BUG-086 — rotate the OpenRouter key~~ — **CLOSED / WONTFIX**, user dropped that account on
+   2026-07-25. Do **not** re-raise rotation; an earlier version of this list still demanded it and
+   contradicted the banner at the top of this same file.
+0a. **Ask the user the two decisions at the top of this file** (theme-sync units; code-graph path unit).
 1. **BUG-084 durable fix** — user go-ahead for a systemd drop-in on
    `drkonqi-coredump-launcher@.service` with `MemoryMax=`/`MemoryHigh=`, so a runaway backtrace is
    OOM-killed in its own cgroup. Optionally also blank `DEBUGINFOD_URLS` for drkonqi and serialise
@@ -450,6 +523,17 @@ easier future rework; SPD located by searching `02 00 04 80 00 00 0`; checksum s
   pixels are decoded and then thrown away by the scaler.
 
 ## Gotchas / dead-ends / things NOT to redo
+- **Two scripts in this repo printed success on a path that had failed** (BUG-088's
+  `Ubuntu (Yaru) look re-affirmed.`, BUG-089's `Note added to $TAG.`). Both hid the fault for days.
+  When touching any `scripts/` helper, check that its "done" message is *conditional* — this is a
+  recurring shape here, not two coincidences. `luminos-brain log` still has it.
+- **Never verify a KDE colour scheme by its name.** `[General] ColorScheme` is just a label and can
+  disagree with the `[Colors:*]` payload indefinitely, because `plasma-apply-colorscheme` refuses to
+  act when the name already matches. Compare an actual colour value.
+- **`AutomaticLookAndFeelOnIdle` defaults to `true`.** Any "turn off KDE auto theme switching" that
+  writes only `AutomaticLookAndFeel=false` is incomplete and will look like an intermittent bug.
+- **systemd path units are not recursive.** `PathModified=/some/repo` fires only for direct children.
+  Do not use it to watch a source tree.
 - **Never `os.path.realpath()` a venv's `bin/python` to find its site-packages.** It resolves the
   symlink *out* of the venv into `~/.pyenv` or `~/.local/share/uv`, so you inspect the wrong tree.
   An early version of `luminos-verify` section [5] did this and reported a clean **PASS for a
@@ -487,6 +571,21 @@ easier future rework; SPD located by searching `02 00 04 80 00 00 0`; checksum s
   ~10 s, reopen). A plasmashell restart does not test that path.
 
 ## Files touched / relevant files
+### 2026-07-26 (BUG-088 / BUG-089 / BUG-087 closure) — all UNCOMMITTED
+- `scripts/luminos-ubuntu-persist` — rewritten heal logic; also `chmod +x` (was 644) and installed to
+  `~/.local/bin/luminos-ubuntu-persist`, which is the path `luminos-ubuntu-look.service` actually runs
+- `scripts/luminos-notes.sh` — SQL quoting + real exit status
+- `docs/BUGS.md` — BUG-088, BUG-089, and BUG-087's open caveat resolved
+- `LUMINOS_DECISIONS.md` — DECISION 30 amendment
+- `LUMINOS_STATUS.md` — Yaru row + Plasma-version drift row
+- `AGENTS.md` — §1 Plasma 6.6.4 → 6.7.3, §9 kdeglobals auto-look-and-feel row
+- Live config (not in repo): `~/.config/kdeglobals`; backup `~/.config/kdeglobals.bak-yaru-20260726`
+- **Untouched and still parked awaiting user OK:** `share/`, `scripts/luminos-wine-*`,
+  `scripts/luminos-ubuntu-look`, `systemd/luminos-theme-sync.*`, `systemd/luminos-ubuntu-look.service`,
+  the `cmd/luminos-power` conductor edits, three dirty `research/turboquant` submodules.
+  **Stage by name, never `git add -A`.**
+
+### earlier threads
 - `src/wallpapers/org.luminos.livewallpaper/contents/config/main.xml` — `ObscurePolicy` replaces `PauseWhenObscured`
 - `src/wallpapers/org.luminos.livewallpaper/contents/ui/main.qml` — graded `cover`, `coverDebounce`, `notVisible`, `shouldPlay`
 - `src/wallpapers/org.luminos.livewallpaper/contents/ui/config.qml` — 3-option combo + caption
