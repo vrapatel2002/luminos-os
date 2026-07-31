@@ -1526,3 +1526,64 @@ mode at all (tested across every `--setting-sources` value), so the log is the o
 ### Related
 BUG-087 (findings, verification, and the still-open question of whether user-scope hooks fire in
 Cowork). BUG-085 (the original rot). DECISION 33 (pinning, which still holds).
+
+---
+
+## DECISION 35 — The media server's BitTorrent port is open to the internet on purpose; everything else stays LAN-only
+<!-- [CHANGE: claude-code | 2026-07-31] -->
+**Date:** 2026-07-31
+**Status:** Accepted (user-consented)
+**Applies to:** the media server (Dell Inspiron 3590, `192.168.2.61`), not the G14.
+
+### Context
+qBittorrent had **uploaded 0 bytes in its entire life**. With no inbound port it can only dial
+*out*, which limits it to the minority of peers that are themselves reachable. On large,
+thinly-seeded 4K swarms that meant 1 connection and a stalled download — the symptom looked like a
+speed problem and was actually a reachability problem.
+
+Separately, an earlier audit found the router had **already** been forwarding port 25989 from the
+internet, created silently by qBittorrent's own UPnP with nobody's consent. So the honest choice was
+never "closed vs open" — it was "open by accident vs open on record."
+
+### Decision
+1. **Exactly one port is exposed: 25989/tcp + 25989/udp**, in `/etc/nftables.conf`, with a comment
+   saying why. It is a peer data port: no login, no admin surface, no directory listing.
+2. **Every service keeps its LAN-only rule** — WebUI 8080, Jellyfin 8096, Sonarr 8989, Radarr 7878,
+   Prowlarr 9696, ssh 22. nftables, not the router, is the authority; a stray UPnP mapping can no
+   longer open anything by itself.
+3. **The router forward is owned by us, not by the client.** `qbt-portmap.service` + `.timer`
+   (boot+90 s, hourly) re-assert the mapping at `192.168.2.61`. qBittorrent's own UPnP is **off**:
+   it had mapped the *ethernet* address `.62`, and later stopped mapping at all.
+4. **Firewall changes load behind an auto-rollback.** `nft -c -f` to syntax-check, then
+   `systemd-run --on-active=180` armed to restore the backup, cancelled only after SSH is confirmed
+   alive. A ruleset that locks you out of a headless box in another building is unrecoverable.
+
+### Why this is acceptable rather than merely convenient
+A listening BitTorrent port is the same class of exposure as any peer-to-peer client. The risk is
+concentrated in the *client binary*, not in the port, and `qbittorrent-nox` runs as an unprivileged
+user with no shell. Closing it again is one line and a `systemctl disable --now qbt-portmap.timer` —
+documented in `docs/MEDIA_SERVER_SECURITY.md` §2a.
+
+### How it was proven, and what lied
+- **An online port checker reported 25989 CLOSED. It was wrong.** Replaced with a positive control:
+  a throwaway port, `python3 -m http.server`, and a genuinely external fetcher that came back with
+  our sentinel string.
+- **Never test your own public IP from inside your own LAN.** Hairpin NAT makes every result
+  ambiguous — refused and timed-out become indistinguishable from open.
+- **`upnpc -l` prints an empty table on the Bell hub even while a mapping is live.** Only the `-d`
+  return code is trustworthy: 714 = nothing there, 0 = existed and is now deleted, 606 = refused.
+- The port-map unit was **negative-tested**: mappings deleted (714), unit run, mapping back (0).
+
+### Tradeoffs
+- Accepted: the box is now addressable from the internet on one port. Mitigated by scope (one port),
+  by ownership (our timer, not the client's UPnP), and by a written close-it-again procedure.
+- Accepted: the mapping depends on UPnP staying enabled on the Bell hub. If the owner disables it,
+  the timer fails quietly and throughput regresses — the doc says to check `qbt-portmap` first.
+- Not accepted: exposing the WebUI, even behind a password. There is no version of that trade that
+  pays.
+
+### Related
+`docs/MEDIA_SERVER_SECURITY.md` §2a (the exception) and §2b (ARP flux on a dual-homed host — the
+routing table does **not** tell you which cable a packet arrived on). Memory:
+`reference_linux_silent_failures.md`, same shape as every entry there — each of these checks asked
+whether a thing *existed* instead of whether it *worked*.

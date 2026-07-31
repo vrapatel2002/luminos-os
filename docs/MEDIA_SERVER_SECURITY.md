@@ -1,0 +1,400 @@
+# Media Server — Security Brief
+# [CHANGE: claude-code | 2026-07-30]
+
+**Machine:** `luminos-server` — Dell Inspiron 3590, i5-10210U, Arch on `/dev/sda`.
+**Addresses:** wlan0 `192.168.2.61` · enp2s0 `192.168.2.62` · public IP `76.64.36.43`
+**Admin access:** `ssh -i ~/.ssh/luminos-server shawn@192.168.2.61` from the G14 (`192.168.2.16`).
+**Services:** Jellyfin 8096 · qBittorrent WebUI 8080 · Sonarr 8989 · Radarr 7878 · Prowlarr 9696 · SSH 22
+
+This document is a standalone handover. It assumes no knowledge of the conversation
+that produced it. Everything marked **DONE** is already applied and verified on the
+box; everything marked **TODO** still needs doing, and each one says *why*.
+
+---
+
+## 0. One-paragraph summary
+
+The server was **reachable from the public internet** — not through any of the web
+apps, but because qBittorrent used UPnP to ask the router to forward port **25989**
+(TCP and UDP) from the internet straight to it — silently, without anyone choosing it.
+A LAN-only firewall is now installed and enabled at boot, and qBittorrent's UPnP is
+off so nothing can reopen a port behind your back. HTTPS was *not* the actual risk and
+is deliberately deferred — the reasoning is in §5.
+
+**Updated 2026-07-31:** port 25989 has since been reopened **on purpose**, with the
+owner's approval, because a fully unreachable client could not download (§2a). The
+difference from the original problem is consent and scope: it is now one named port
+with no login behind it, written down in the firewall file, re-asserted by a service
+that names the interface explicitly — instead of an unknown port opened by an app.
+Everything with a control surface is still LAN-only.
+
+Two things remain, both needing a human: check the router for **manual** port forwards
+(§4), and firewall the G14 itself (§7).
+
+---
+
+## 1. DONE — the internet-facing hole is closed
+
+### What was wrong
+qBittorrent's `upnp` preference was `true`. UPnP (Universal Plug and Play) lets any
+program on the LAN silently instruct the router to open a port from the internet to
+itself, with **no prompt and no log entry you would ever see**. qBittorrent used it to
+open its listen port so that torrent peers could connect inbound.
+
+Evidence it was real, not theoretical — with a temporary logging rule on the new
+firewall, over roughly 20 seconds:
+
+```
+SRC=92.247.115.73    DST=192.168.2.62  DPT=25989   (Bulgaria)
+SRC=89.238.177.246   DST=192.168.2.62  DPT=25989   (United Kingdom)
+754 packets / 775,744 bytes
+```
+
+### Why it matters
+For qBittorrent itself the traffic was legitimate — that is how seeding works. The
+problem is the *shape* of it: a program on the LAN could open a door to the internet
+whenever it felt like it, and nothing on the machine was positioned to say no. The
+next program to do it might not be one you chose.
+
+### What was done
+1. Deleted both mappings (`upnpc -d 25989 TCP` and `… UDP`, both returned `0`,
+   meaning "a mapping existed and is now removed").
+2. Set `upnp: false` via the qBittorrent API so it cannot re-create them:
+   ```bash
+   curl -X POST http://localhost:8080/api/v2/app/setPreferences \
+        --data-urlencode 'json={"upnp":false}'
+   ```
+3. Re-probed afterwards to confirm it stayed shut.
+
+### How to re-check later
+```bash
+upnpc -d 25989 TCP    # 714 = nothing forwarded (good).  0 = a mapping existed.
+upnpc -d 44444 TCP    # control port nobody uses — must also return 714
+```
+
+> **Trap — do not trust `upnpc -l` on this router.** It prints an **empty mapping
+> table even while a mapping is live.** This was proved: a throwaway mapping was
+> created on port 39555, the router itself confirmed it
+> (`external 76.64.36.43:39555 TCP is redirected to internal 192.168.2.61:39555`),
+> and `upnpc -l` still showed nothing. Only `upnpc -d` and its return code are
+> trustworthy here. Note `-d` is destructive by design, so **never probe a port that
+> something is legitimately using** — in particular the live torrent listen port.
+
+---
+
+## 2. DONE — LAN-only firewall
+
+`/etc/nftables.conf`, loaded by `nftables.service`, `systemctl is-enabled nftables` =
+`enabled`.
+
+```
+#!/usr/bin/nft -f
+# [CHANGE: claude-code | 2026-07-30] LAN-only firewall for luminos-server.
+flush ruleset
+
+table inet filter {
+  chain input {
+    type filter hook input priority filter; policy drop;
+
+    ct state invalid drop
+    ct state established,related accept
+    iif lo accept
+
+    icmp   type { echo-request, destination-unreachable, time-exceeded } accept
+    icmpv6 type { echo-request, destination-unreachable, packet-too-big, time-exceeded,
+                  nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert } accept
+
+    ip  saddr 192.168.2.0/24 accept     # the home network is trusted
+    ip6 saddr fe80::/10      accept
+
+    # [CHANGE: claude-code | 2026-07-31] see §2a — deliberately public
+    tcp dport 25989 accept comment "qbittorrent peer port"
+    udp dport 25989 accept comment "qbittorrent peer port (uTP/DHT)"
+
+    counter comment "everything else is dropped"
+  }
+
+  chain forward { type filter hook forward priority filter; policy drop; }
+  chain output  { type filter hook output  priority filter; policy accept; }
+}
+```
+
+**The rule in one sentence:** anything from `192.168.2.x` is welcome, plus the single
+torrent peer port from anywhere, and everything else is dropped.
+
+## 2a. The one deliberate exception — port 25989
+
+Added **2026-07-31**, with the owner's explicit approval. This reverses part of §1, so
+the reasoning matters.
+
+**Why it was needed.** With the port closed, qBittorrent had uploaded **0 bytes, ever**.
+No peer on the internet could open a connection to it, so it could only ever reach the
+minority of peers that are themselves connectable. Downloads of well-seeded 4K releases
+sat at **1 connected peer** and stalled at 0.00 MB/s.
+
+**Why this specific port is an acceptable exposure.** It is a BitTorrent peer data port:
+no login, no admin surface, no stored data reachable through it. It is the one port the
+protocol is designed to expose. Everything with a control surface stays LAN-only —
+qBittorrent's WebUI (8080), Jellyfin (8096), Sonarr (8989), Radarr (7878), Prowlarr
+(9696) and SSH (22) are all still covered by the subnet rule alone.
+
+**nftables is the authority, not the router.** The `dport 25989` rules are the thing
+that decides. The router forward is only convenience, and is re-asserted by
+`qbt-portmap.service` / `.timer` (hourly + 90 s after boot), pinned to
+`192.168.2.61`. qBittorrent's own UPnP is **off** — see §2b for why.
+
+**To close it again:** delete the two `dport 25989` lines from `/etc/nftables.conf`,
+`sudo systemctl restart nftables`, then `sudo systemctl disable --now qbt-portmap.timer`
+and `upnpc -d 25989 TCP; upnpc -d 25989 UDP`.
+
+### Verified from outside the network, not assumed
+A port checker website reported 25989 **closed** — it was wrong. The real test opened a
+throwaway port 39555, served a known string on it, and fetched
+`http://76.64.36.43:39555/` from a host outside the LAN, which returned
+`LUMINOS-REACHABILITY-OK`. That proves the whole chain — nftables rule, router forward,
+listener. The temporary rule, mapping and server were all removed afterwards.
+
+> **Do not test your own public IP from inside your own LAN.** Every port answered
+> ambiguously that way (`connection refused` vs `timeout`) because consumer routers
+> handle hairpin NAT inconsistently. Only an genuinely external client gives a real answer.
+
+## 2b. Trap — qBittorrent's UPnP mapped the *wrong* interface
+
+This box is dual-homed on one subnet: `wlan0` = `192.168.2.61`, `enp2s0` =
+`192.168.2.62`. With `upnp=true`, qBittorrent forwarded the router to **192.168.2.62**,
+the ethernet IP — a link negotiated at **100 Mb/s** because of a bad cable. Every
+inbound peer packet was therefore delivered over a path that caps the machine at about
+**12.5 MB/s**, and measured throughput sat at 10.7 MB/s, i.e. a saturated link that
+looked like "slow torrents".
+
+Caught with `tcpdump -i enp2s0 port 25989`, which showed tens of thousands of packets
+addressed to `192.168.2.62` while `wlan0` saw none.
+
+Fixes applied, in order:
+1. Bound qBittorrent to `wlan0` / `192.168.2.61` only.
+2. Turned qBittorrent's UPnP **off** and moved the mapping into `qbt-portmap.service`,
+   which names `192.168.2.61` explicitly. (Left on, qBittorrent later stopped creating
+   any mapping at all — the delete-probe returned `714`.)
+3. `/etc/sysctl.d/30-luminos-arp-flux.conf` sets `arp_ignore=1` and `arp_announce=2`.
+   Without these, Linux answers an ARP request for *any* local IP out of *any*
+   interface, so the router had learned `192.168.2.61` at the **ethernet** card's MAC
+   and delivered traffic for the wifi IP over the slow wire regardless of routing.
+
+> **The general lesson:** on a machine with two interfaces in one subnet, the routing
+> table tells you nothing about which cable a packet actually arrives on. `ip route get`
+> said `wlan0`; the bytes were on `enp2s0`. Only per-interface counters
+> (`/sys/class/net/<if>/statistics/rx_bytes`) and `tcpdump -i <if>` tell the truth.
+
+### Why this shape and not per-port rules
+Per-port allow-lists rot. Every new service means remembering to add a rule, and
+forgetting means either a broken app or an open port. Trusting the subnet instead
+means new services on the box work automatically for the house and are invisible from
+outside, with no maintenance. The cost is that it gives you nothing against a device
+*already on your wifi* — which is the correct trade for a home LAN, but see §7.
+
+### Verified, not assumed
+- All five services still answer from the G14: `8096→302` (Jellyfin's normal
+  redirect to `/web/`), `8080→200`, `8989→200`, `7878→200`, `9696→200`.
+- SSH from `192.168.2.16` works.
+- Dropped-packet counter after the UPnP mappings died: **t=0 → 0, t=60s → 0 (+0)**,
+  and a 15-second `tcpdump` of non-LAN inbound captured nothing.
+
+### If you ever need to change these rules — arm the rollback first
+```bash
+sudo systemd-run --unit=fw-rollback --on-active=240 /usr/bin/nft flush ruleset
+sudo nft -f /etc/nftables.conf
+# ... now open a NEW ssh session and prove it works ...
+sudo systemctl stop fw-rollback.timer 2>/dev/null; sudo systemctl reset-failed fw-rollback 2>/dev/null
+```
+An empty ruleset means *no table*, which means *accept everything* — so wiping the
+ruleset is a safe rollback, not a further lockout. Arm it **before** loading.
+
+> **Two traps.**
+> 1. Because `ct state established,related accept` comes first, **your current SSH
+>    session survives any rule change** — so testing in the session you are already
+>    sitting in proves nothing. You must open a fresh connection.
+> 2. `nftables.service` is a **oneshot**. After a *successful* load
+>    `systemctl is-active nftables` reads `inactive` and exits 3 (which will kill a
+>    `set -e` script). Use `is-enabled` plus a live `nft list ruleset` instead.
+
+---
+
+## 3. DONE / already good — SSH and accounts
+
+No changes were needed; recording it so nobody "fixes" it later.
+
+| Setting | Value | Why it matters |
+|---|---|---|
+| `PermitRootLogin` | `no` | root is the one username every scanner tries |
+| `PasswordAuthentication` | `no` | password guessing becomes impossible, not just hard |
+| `KbdInteractiveAuthentication` | `no` | closes the second password path people forget |
+| `PubkeyAuthentication` | `yes` | the only way in is a key held on the G14 |
+| `X11Forwarding` | `no` | headless box, no reason to expose it |
+| root account | `L` (locked) | no password exists to crack |
+| login users | only `shawn` | nothing else to attack |
+
+**Do not add a password to `shawn` and do not re-enable password auth.** On a key-only
+box a sudo password adds no attacker cost — the only way in already requires a key we
+control — but it does add a way to lock *ourselves* out of a machine with no keyboard
+attached.
+
+---
+
+## 4. TODO (user only) — check the router for manual port forwards
+
+**What to do:** log into the Bell Home Hub at `http://192.168.2.1`, find
+**Port Forwarding** (sometimes under Advanced → Firewall / NAT), and write down
+every rule listed. Delete anything that points at `192.168.2.61` or `192.168.2.62`
+unless you deliberately want it.
+
+**Why only you can do this:** the UPnP probe used above can only ever see mappings
+that were created *through UPnP*. A rule someone typed into the router by hand is
+invisible to it. A clean UPnP probe is therefore **not** a clean bill of health.
+
+**One specific loose end:** probing port **22** returns UPnP error code **606**
+(`Action not authorized`) on both the server and the G14 — the router refuses to
+discuss that port over UPnP. That is *inconclusive*, not *safe*. If SSH is forwarded
+from the internet, that is the single highest-value thing on this list to find and
+remove. The router page is the only place that can answer it.
+
+**What "good" looks like:** an empty port-forwarding table.
+
+---
+
+## 5. Decision — HTTPS is deliberately NOT enabled
+
+Shawn asked for HTTPS. The honest answer is that on this LAN it is a nice-to-have,
+not the thing that was at risk, and every cheap way of doing it breaks the TV.
+
+**What HTTPS defends against** is somebody positioned between your device and the
+server, reading or altering the traffic. Inside the house that person would have to
+already be on your wifi — and that hop is *already encrypted* by WPA2/WPA3
+regardless of what the browser bar says.
+
+| Option | Laptop / phone | Roku TV | Real cost |
+|---|---|---|---|
+| Self-signed certificate | warning on every visit | **breaks** — Jellyfin clients reject it | loses the TV, the main use case |
+| Private CA (own root cert) | works if installed per device | **breaks** — Roku has no way to add a CA | loses the TV |
+| Let's Encrypt + DNS-01 | works | works | needs a domain name (~$12/year) |
+
+Only the third row works everywhere. **DNS-01 validation is the important detail**:
+it proves domain ownership through a DNS TXT record, so **no port has to be opened**
+to get or renew the certificate. Any guide that tells you to forward port 80 or 443
+for HTTP-01 validation is describing the wrong method for this situation — that would
+undo §1 and §2.
+
+**Recommended order:** do §4, §6 and §7 first. Then, if you still want HTTPS, buy a
+domain and set up Let's Encrypt with DNS-01 behind a reverse proxy (Caddy is the
+least-effort choice; it does DNS-01 and renewal automatically).
+
+**For access from outside the house: use a VPN, never a forwarded port.** Tailscale
+installs on the server and on your phone and makes your phone a member of the home
+network from anywhere, with nothing opened at the router. This was declined earlier in
+the project; §1 is the reason to reconsider it.
+
+---
+
+## 6. DECIDED (2026-07-31) — the torrent port trade-off
+
+> **Outcome: option 2 was chosen and is implemented.** Port 25989 TCP+UDP is forwarded
+> to `192.168.2.61` and allowed in `/etc/nftables.conf`; `upnp` stays `false`. The
+> full reasoning, the outside-in proof, and how to undo it are in **§2a**. The section
+> below is kept as the record of the decision.
+>
+> The prediction below turned out to be exactly right, and worse than expected:
+> qBittorrent had uploaded **0 bytes for its entire lifetime** and 4K downloads sat at
+> **1 connected peer**.
+
+**This is a genuine cost of the fix in §1 and it should be a conscious choice.**
+
+qBittorrent now reports `connection_status: firewalled`. That means peers on the
+internet cannot start a connection *to* the server; the server can only reach *out*.
+Torrents still work, but a significant share of any swarm is itself behind a
+firewall — and **two firewalled peers can never connect to each other**, so the
+reachable pool shrinks and downloads get slower and less reliable.
+
+Three ways forward, in order of how much they give away:
+
+1. **Leave it closed.** Nothing is exposed. Torrents are slower, especially on small
+   swarms. *This was the state until 2026-07-31.*
+2. **Forward exactly one port, by hand, at the router** — `25989` TCP+UDP →
+   `192.168.2.61`, plus a matching `tcp dport 25989 accept` / `udp dport 25989 accept`
+   rule in `/etc/nftables.conf`. This is the standard setup. The difference from what
+   was wrong before is that it is **one known port you chose**, visible in the router
+   page, rather than any program opening whatever it likes whenever it likes. Keep
+   `upnp: false` either way.
+3. **Re-enable UPnP.** Do not. This is what created the problem.
+
+Option 2 is the reasonable middle. If you take it, note that the exposed surface is
+qBittorrent's BitTorrent protocol handler — keep the package updated
+(`pacman -Syu` over SSH, manually, which is already the policy for this box).
+
+**One caveat learned while implementing option 2:** forwarding to "the server" is not
+specific enough on this machine. It has two IPs on the same subnet and the router will
+happily forward to the slow one. Always name `192.168.2.61` (wifi), and confirm with
+`tcpdump -i enp2s0 port 25989` that the ethernet card is *not* carrying peer traffic.
+See §2b.
+
+**Do NOT forward port 8080.** That is the qBittorrent *WebUI*, which is a full
+remote-control panel, and `WebUI\LocalHostAuth=false` is set so connections from the
+machine itself skip authentication entirely. It must stay LAN-only.
+
+---
+
+## 7. TODO — the G14 itself has no firewall
+
+The laptop (`192.168.2.16`) was audited at the same time. **No firewall is
+configured.** Listening on non-loopback addresses:
+
+| Port | Process | Note |
+|---|---|---|
+| 22 | sshd | |
+| 5355 | systemd-resolved | LLMNR, normal |
+| 8080 | qBittorrent WebUI | full remote-control panel |
+| 21861 | qBittorrent | **live seeding port for 9 torrents — do not touch** |
+| 9091 | `luminos-ram` (pid 786) | a Luminos daemon, bound to `*` rather than localhost |
+
+A UPnP probe found **no** internet-facing holes for 8080 / 9091 / 8989 / 7878 / 9696 /
+8096, so nothing here is exposed to the internet — but nothing stops other devices on
+the wifi either.
+
+**What to do:** apply the same LAN-only ruleset from §2, adding an accept for port
+**21861** so seeding keeps working. `luminos-ram` on `*:9091` is worth a separate
+look — if nothing remote needs it, binding it to `127.0.0.1` is better than
+firewalling around it.
+
+**Why it matters less here than on the server:** the G14 is a laptop that leaves the
+house. On a café or airport network, `192.168.2.0/24` will not match anything, so a
+subnet-trust rule becomes an effective deny-all — which is the right behaviour, but it
+does mean the rule must be written to fail closed, not opened up per-network.
+
+---
+
+## 8. Checklist
+
+| # | Item | Who | Status |
+|---|---|---|---|
+| 1 | Remove UPnP port-forward on 25989 | done | ✅ |
+| 2 | Disable UPnP in qBittorrent so it cannot reopen | done | ✅ |
+| 3 | Install LAN-only nftables firewall, enable at boot | done | ✅ |
+| 4 | Verify all 5 services + SSH still reachable | done | ✅ |
+| 5 | Confirm SSH hardening + locked root | done | ✅ (already good) |
+| 6 | Check router page for **manual** port forwards | **Shawn** | ⬜ |
+| 7 | Resolve the port-22 UPnP code 606 unknown | **Shawn** | ⬜ |
+| 8 | Decide the torrent-port trade-off (§6) | **Shawn** | ⬜ |
+| 9 | Firewall the G14, keeping 21861 open | either | ⬜ |
+| 10 | Bind `luminos-ram` to localhost, or justify `*:9091` | either | ⬜ |
+| 11 | HTTPS via domain + Let's Encrypt DNS-01 | later | ⬜ deferred, see §5 |
+
+---
+
+## 9. Principle worth keeping
+
+Every finding here came from a check that could **fail**. The UPnP hole was only found
+because a deliberately-created test mapping proved that `upnpc -l` lies; the firewall
+was only trusted after a logging rule caught real packets from real strangers; the
+services were only declared reachable after a *new* connection was opened rather than
+the one already sitting open.
+
+A check that asks *"does this exist?"* instead of *"does this work?"* will eventually
+tell you what you want to hear. Write the negative test, or the check will lie.
