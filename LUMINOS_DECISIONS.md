@@ -1587,3 +1587,63 @@ documented in `docs/MEDIA_SERVER_SECURITY.md` §2a.
 routing table does **not** tell you which cable a packet arrived on). Memory:
 `reference_linux_silent_failures.md`, same shape as every entry there — each of these checks asked
 whether a thing *existed* instead of whether it *worked*.
+
+## DECISION 36 — Torrents take the ethernet cable and give up peak speed, so the wifi radio is free for the TV
+<!-- [CHANGE: claude-code | 2026-07-31] -->
+
+**Status:** Implemented and verified live, with someone watching at the time.
+
+### The problem this actually solves
+DECISION 35 opened the peer port and throughput went to ~10.7 MB/s. That worked, and it broke
+Jellyfin: LAN ping went to **256 ms average / 547 ms max with 12.5% packet loss**, and the phone
+could not open the app. The instinct was that the 100 Mb/s ethernet was the bottleneck. It was not.
+
+The **router's wifi radio** was. It is one shared medium and it was carrying two things at once:
+the torrent traffic on the server's `wlan0`, and the TV's stream on its last hop. Measured: the TV
+at `192.168.2.13` pings **2.8–10 ms with 2.1 ms jitter**, versus **0.21–1.45 ms** to the router over
+the wire — the TV is **wireless**, so its last hop needs that radio and cannot be moved off it.
+Torrents can be moved. So they were.
+
+### Why binding qBittorrent to .62 is not enough on its own
+Both NICs sit on `192.168.2.0/24` behind the same gateway, and `wlan0` wins the default route on
+metric (600 vs 1024). Read-only proof before changing anything:
+
+    ip route get 1.1.1.1 from 192.168.2.62
+    -> 1.1.1.1 from 192.168.2.62 via 192.168.2.1 dev wlan0
+
+Source address alone does not choose the exit. `/etc/systemd/network/20-wired.network` now gives
+.62 its own routing table (`RoutingPolicyRule From=192.168.2.62 Table=100`), after which the same
+lookup returns `dev enp2s0 table 100`. Peer sockets now show as `192.168.2.62%enp2s0`.
+
+### This reverses two earlier notes, on purpose
+- `qbt-portmap.service` used to pin the router forward to **.61** specifically to avoid the
+  12.5 MB/s wire. That trade is now taken deliberately: capped throughput beats a radio fight.
+- The old status note said *"do not pin `current_network_interface` — every tracker announce died."*
+  The setting was not the bug; **not restarting after changing it** was. See DECISION 35's lesson —
+  sockets bound under the old setting never re-bind. Pinned, restarted, verified: `dht_nodes 128`,
+  `connection_status connected`.
+
+### The cap, and why it is not the constraint it looks like
+Downloads are capped at **10 MB/s (80 Mb/s)** on a 100 Mb/s wire. Ethernet is **full duplex**, so
+downloads occupy the *inbound* channel (measured 10.92 MB/s in) while the stream occupies *outbound*
+(2.07 MB/s out). They do not collide. Replacing the cable with one that negotiates 1000 Mb/s removes
+the ceiling entirely and makes this strictly better than the old arrangement in every dimension.
+
+### Verified, under live load, mid-playback
+| | Before the split | After |
+|---|---|---|
+| TV latency | 256 ms avg / 547 ms max, 12.5% loss | **8.4 ms avg / 13.8 ms max, 0% loss** |
+| Torrent traffic on wifi | all of it | **0.00 MB/s** |
+| Torrent traffic on cable | none | **10.92 MB/s in** |
+| Stalled 2-seed torrent | 0.01 MB/s (9.8 day ETA) | **10.0 MB/s** |
+| Playback | — | never dropped: 25.87 → 30.8 min, 3 connections held |
+
+### Safety pattern reused
+Changes loaded behind `systemd-run --on-active=180` running `/usr/local/sbin/luminos-splitnet-revert`,
+cancelled only after the stream and SSH both survived. `networkctl reload` was **deliberately not run**
+— the live rules already do the job, and a reload could bounce the link under an active stream. The
+declarative config takes over at next reboot.
+
+### Known fragility
+`From=192.168.2.62` stops matching if the DHCP lease changes. A **router DHCP reservation for .62 is
+now load-bearing**, not cosmetic (owner-only task).
