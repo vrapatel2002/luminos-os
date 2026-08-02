@@ -1709,3 +1709,75 @@ confirms it.
   and buys nothing here.
 - `EnableTonemapping=false` — HDR→SDR tonemapping on Comet Lake needs OpenCL
   (`intel-compute-runtime`), which is not installed. Separate change, separate proof.
+
+---
+
+## DECISION 36a — Correction: it is the *socket* binding that holds the split, not the policy rule
+<!-- [CHANGE: claude-code | 2026-08-02] -->
+
+DECISION 36 said the `[RoutingPolicyRule] From=192.168.2.62 Table=100` was what forced
+torrents onto the cable. **That was wrong**, and it was caught by re-testing rather than
+by anything failing.
+
+### What was found
+`ip rule show` on 2026-08-02 listed **no rule at priority 100** — only the three defaults.
+Table 100 still held both routes. So the rule had been removed while the table survived.
+
+That rules out the auto-revert script: `luminos-splitnet-revert` does
+`ip route flush table 100` as well, and the table was intact.
+
+**The actual cause**, from the journal:
+```
+Jul 31 15:08:00  enp2s0: DHCP lease lost
+Jul 31 15:08:08  enp2s0: Link UP
+Jul 31 15:08:29  enp2s0: DHCPv4 address 192.168.2.62/24 acquired
+```
+The cable flapped. When systemd-networkd reconfigures a link it **flushes routing rules it
+does not own**. The rule was added by hand with `ip rule add`, and `networkctl reload` was
+deliberately never run (DECISION 36, to avoid bouncing the link mid-stream) — so networkd's
+in-memory config had no rule, and it cleaned mine up as foreign.
+
+### And yet the split never broke
+Measured with the rule absent:
+
+| interface | inbound |
+|---|---|
+| `wlan0` | **0.00 MB/s** |
+| `enp2s0` | **9.80 MB/s** |
+
+20 peer sockets on `.62`. The split was fully intact for ~2 days with no rule at all.
+
+**Why:** qBittorrent's `current_network_interface=enp2s0` is a bind to the *device*
+(`SO_BINDTODEVICE`), not to the address. That pins the exit interface at the socket layer and
+**overrides the routing table entirely**. `current_interface_address=192.168.2.62` is the
+weaker of the two settings and is the one that needs the policy rule.
+
+### The corrected model
+- **Load-bearing:** qBittorrent's device binding. If that setting is cleared, the split dies
+  instantly no matter what the routing rules say.
+- **Belt-and-braces:** the policy rule. It matters for *anything else* sourced from `.62`, and
+  for the `current_interface_address` path — not for qBittorrent as configured.
+
+The `ip route get 1.1.1.1 from 192.168.2.62` test in DECISION 36 is still the right test for
+**source-address** selection. It simply does not describe what qBittorrent does, so it was
+never evidence about the torrent path. Two different mechanisms were conflated.
+
+### Action taken
+Rule re-added live (`ip rule add from 192.168.2.62 lookup 100 priority 100`); route test now
+returns `dev enp2s0 table 100`. `networkctl reload` was **again not run** — 284 GB was
+downloading and the rule is demonstrably not load-bearing, so a link bounce buys nothing. The
+declarative block is present in `20-wired.network` and installs at next reboot, which is also
+the point at which networkd starts *owning* the rule and re-adding it after future flaps.
+
+### Lesson
+**A config that is "working" is not evidence that the thing you configured is what makes it
+work.** Two mechanisms were installed at once and credited to the wrong one. Re-verify the
+mechanism, not just the outcome — and prefer the test that exercises the actual code path
+(`ss` on live sockets, byte counters per interface) over one that models it.
+
+### Separate finding — wlan0 is dropping its wifi association
+48 × `wlan0: Lost carrier` → `DHCP lease lost` → reconnect to `BELL851 5.0 GHz` in the two days
+to 2026-08-01, **0 so far on 2026-08-02**. The address always came back as `.61`, so nothing
+broke permanently, but each drop is a ~1 s gap that would surface as a stutter on the TV.
+Cause not established — do not assume it was radio contention just because the timing is
+suggestive. This is an independent argument for **wiring the TV to the router**.
