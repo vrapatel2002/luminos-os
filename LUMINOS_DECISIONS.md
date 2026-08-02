@@ -1647,3 +1647,65 @@ declarative config takes over at next reboot.
 ### Known fragility
 `From=192.168.2.62` stops matching if the DHCP lease changes. A **router DHCP reservation for .62 is
 now load-bearing**, not cosmetic (owner-only task).
+
+---
+
+## DECISION 37 — Jellyfin transcodes on the Intel iGPU, and the render-node number is machine-specific
+<!-- [CHANGE: claude-code | 2026-08-02] -->
+
+**Context:** Jellyfin was reporting `PlayMethod: Transcode` to h264 with
+`HardwareAccelerationType: none` — every transcode was running on the CPU of a
+Dell Inspiron 3590 that also seeds torrents.
+
+**Decision:** enable VAAPI on `/dev/dri/renderD128`.
+
+### The trap: renderD128 is not the same GPU on every machine
+An earlier note (from the **G14**) says *"use renderD129, not renderD128 — renderD128 is
+the NVIDIA node and reports nothing."* That is true **on the G14 and nowhere else**. The
+number is just enumeration order. On this server it is the exact opposite:
+
+| node | driver | device |
+|---|---|---|
+| `renderD128` | `i915` | Intel CometLake-U UHD Graphics ← **the useful one** |
+| `renderD129` | `amdgpu` | AMD Radeon 520 (Jet PRO) |
+
+**Never carry a render-node number between machines.** Resolve it every time:
+`ls -l /sys/class/drm/renderD12*/device/driver`.
+
+### What the Intel chip actually supports (measured, not assumed)
+`vainfo --device /dev/dri/renderD128`, driver **Intel iHD 26.1.5**:
+- **Decode (VLD):** H264, HEVC Main, HEVC Main10, VP9 Profile0/Profile2, VP8, VC1, MPEG2, JPEG
+- **Encode (EncSlice):** H264, HEVC Main, MPEG2, VP8, JPEG
+- **No AV1** — absent from the profile list, so it is not enabled.
+
+`HardwareDecodingCodecs` was set to exactly that measured list
+(`h264, hevc, mpeg2video, vc1, vp8, vp9`) rather than the full menu Jellyfin offers.
+
+### Applied through the API, not the file
+`/etc/jellyfin/encoding.xml` was backed up (`.bak-2026-08-02`) but **not hand-edited** —
+Jellyfin rewrites that file from memory on shutdown and would have silently discarded the
+change. Set via `POST /System/Configuration/encoding` (http 204), then verified in **both**
+the API readback and the on-disk XML.
+
+### Proof it works, and proof it is not a silent software fallback
+Real job: the 4K HEVC 10-bit `True Detective S04E01` (3840x1920, yuv420p10le) → 1080p H264.
+
+| path | speed |
+|---|---|
+| `libx264 -preset veryfast` (CPU) | **1.22x** realtime |
+| `h264_vaapi` on renderD128 | **4.8x** realtime |
+
+1.22x means the CPU *barely* kept up with a single 4K stream — one extra viewer, or a busy
+torrent moment, and it stutters. 4.8x has real headroom.
+
+**Negative test (the part that makes the number trustworthy):** the same command against
+`renderD129` fails hard rather than quietly falling back —
+`libva: /usr/lib/dri/radeonsi_drv_video.so init failed` → `Device creation failed: -5`.
+So the 4.8x was genuinely the Intel encoder, and `encoder: h264_vaapi` in the output
+confirms it.
+
+### Left off deliberately
+- `AllowHevcEncoding=false` — the TV takes H264 happily; HEVC encode on Gen9.5 is slower
+  and buys nothing here.
+- `EnableTonemapping=false` — HDR→SDR tonemapping on Comet Lake needs OpenCL
+  (`intel-compute-runtime`), which is not installed. Separate change, separate proof.
