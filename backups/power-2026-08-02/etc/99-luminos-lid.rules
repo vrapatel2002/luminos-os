@@ -1,0 +1,5 @@
+# [CHANGE: claude-code | 2026-06-03]
+# On every lid state change, fire luminos-lid.service which reads the current
+# lid state and enables/disables the eDP panel accordingly.
+# --no-block: udev does not wait for the service to finish.
+ACTION=="change", KERNEL=="LID0", SUBSYSTEM=="button", RUN+="/bin/systemctl start --no-block luminos-lid.service"

@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-07-25 (BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted: hooks never ran, mempalace registered twice, crg on Arch's rolling python; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; cleared by hand, durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-08-02 (BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
 
@@ -153,6 +153,36 @@ Last Updated: 2026-07-25 (BUG-087 FIXED — MCP tooling now reaches Claude Code,
 - Date Found: 2026-06-11
 
 ## Fixed Bugs (new)
+
+### BUG-091 — Laptop never slept: lid close and idle were both disabled on purpose, and the fix went to a config file PowerDevil no longer reads
+<!-- [CHANGE: claude-code | 2026-08-02] -->
+- Status: **FIXED (2026-08-02) — VERIFIED END TO END (2026-08-03).** No longer pending. The journal caught a real, unprompted lid close by the user:
+  `00:50:11 systemd-logind: Lid closed.` → `suspend requested from client PID 27911 ('org_kde_powerde')` → `The system will suspend now!` → **40 h in s2idle** → `Aug 03 16:56:23 systemd-logind: Lid opened.` → `PM: suspend exit`, clean resume, session intact. `suspend_stats` success 2 / fail 1.
+  The ~41 `Timekeeping suspended for ~3600 s` lines all share one wallclock stamp because the kernel ring buffer only drains at full resume — they are the hourly s2idle re-arm cycles (`PM: Triggering wakeup from IRQ 9` → `ACPI: PM: Rearming ACPI SCI for wakeup`), **not** 41 separate suspends. Bracket by `PM: suspend entry`/`exit`, which occur exactly once each.
+- **Residual (minor, self-recovering): the FIRST lid close aborted the suspend.**
+  `PM: Wakeup pending, aborting suspend` / `PM: active wakeup source: mmc0` / `systemd-sleep: Failed to put system to sleep. System resumed again: Device or resource busy` — the **empty SD card reader** (`rtsx_pci_sdmmc`) raised a spurious wakeup 600 ms into device suspend. PowerDevil retried 11 s later and that attempt held for 40 h.
+  Note the PCI device's `power/wakeup` **already reads `disabled`**, so this is not a PCI PME wake — it is a kernel wakeup source registered by the mmc core (card-detect), and toggling PCI wakeup will not silence it. `/sys/kernel/debug/wakeup_sources` shows `mmc0` with `active_count 2`, `prevent_suspend_time 3295248`. Same device already logs ~12 errors per boot with no card inserted. Fixing it means constraining `rtsx_pci_sdmmc` — that removes SD-reader function, so it is a **user decision, not applied**.
+- Severity: MEDIUM (battery drain in a bag; the machine had already run flat once)
+- Component: `/etc/systemd/logind.conf.d/`, `~/.config/powerdevilrc`, `/etc/udev/rules.d/99-luminos-lid.rules`, `/etc/systemd/sleep.conf`
+- Symptom as reported: *"this laptop g14 is not going to sleep when lid is closed or after certain time of inactivity."*
+- **Not a bug in the suspend path.** Proven with a controlled `rtcwake -m freeze -s 30` before changing anything: slept the full 30 s, reached `s0i3`, `ACPI: \_SB_.PEP_: Successfully transitioned to state lps0 entry`, resumed on IRQ 9, `suspend_stats` success 0→1 / fail 0. An earlier reading of the journal that concluded "suspend bounces out after 5 s" was **wrong** — those were `upowerd` critical-battery suspends while the user repeatedly opened the lid, and the final one had no exit because the battery died.
+- Root cause — **deliberate configuration, three independent layers**, all from commit `f8e00ab0` (2026-06-03), task line *"keep all processes running on lid close, screen off only"*:
+  1. `luminos-nolidsleep.conf` → `HandleLidSwitch`/`ExternalPower`/`Docked` all `ignore` (confirmed live via `busctl`, **not** `systemctl show` — these are Manager properties and `systemctl show` returns empty for them, which reads as "unset" rather than erroring).
+  2. `powermanagementprofilesrc` → `lidAction=0` on both profiles.
+  3. `99-luminos-lid.rules` → `luminos-lid.service` → `kscreen-doctor` blanked the panel instead of sleeping.
+  Idle-suspend was never configured **at all** on either profile, and logind `IdleAction` is `ignore`.
+- **The silent-failure trap** (this is the reusable part): the first fix wrote `LidAction=1` into `~/.config/powerdevilrc` under a bare `[AC]` group. KConfig parsed it happily and PowerDevil **opened the file** — confirmed with `inotifywait` — and the setting did nothing. PowerDevil 6.7's `ProfileSettings` registers its items against **subgroups**, so the live key is `[AC][SuspendAndShutdown] LidAction`. Same shape as BUG-088/089: a write that succeeds into a location nothing reads.
+  Also note `powermanagementprofilesrc` is legacy: `ProfileSettings` is a `KConfigSkeleton` over **`powerdevilrc`**. Editing `[AC][DPMSControl] idleTime` in the old file provably changed nothing.
+- Verify (do this, do not assume):
+  ```
+  qdbus6 org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/HandleButtonEvents \
+    org.kde.Solid.PowerManagement.Actions.HandleButtonEvents.lidAction     # -> 1 (Sleep)
+  busctl get-property org.freedesktop.login1 /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager HandleLidSwitch                         # -> "suspend"
+  ```
+  ⚠️ Do **not** use `triggersLidAction()` as the check — it returns `true` for every configuration including `LidAction=0`. It reports that PowerDevil owns the lid event, not what it will do. Caught only by negative-testing.
+- Fix: see LUMINOS_DECISIONS.md DECISION 38. Backups in `backups/power-2026-08-02/`.
+- Date Found: 2026-08-02
 
 ### BUG-085 — MCP tooling (code-review-graph + MemPalace) silently rotted: hooks never ran, MemPalace was registered twice, crg rode Arch's rolling python
 <!-- [CHANGE: claude-code | 2026-07-25] -->

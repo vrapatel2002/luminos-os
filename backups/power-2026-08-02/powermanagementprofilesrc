@@ -1,0 +1,17 @@
+[AC][HandleButtonEvents]
+lidAction=0
+
+[AC][DPMSControl]
+idleTime=600
+
+[AC][KeyboardBrightness]
+value=100
+
+[Battery][HandleButtonEvents]
+lidAction=0
+
+[Battery][KeyboardBrightness]
+value=50
+
+[Migration]
+MigratedProfilesToPlasma6=powerdevilrc

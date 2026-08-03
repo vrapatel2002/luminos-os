@@ -1781,3 +1781,112 @@ to 2026-08-01, **0 so far on 2026-08-02**. The address always came back as `.61`
 broke permanently, but each drop is a ~1 s gap that would surface as a stutter on the TV.
 Cause not established — do not assume it was radio contention just because the timing is
 suggestive. This is an independent argument for **wiring the TV to the router**.
+
+---
+
+## DECISION 38 — The laptop sleeps on lid close again, and PowerDevil's real config file is `powerdevilrc`
+<!-- [CHANGE: claude-code | 2026-08-02] -->
+
+**Status:** Applied 2026-08-02. Reverses DECISION-era commit `f8e00ab0` (2026-06-03,
+*"keep all processes running on lid close, screen off only"*).
+
+### What the user asked for
+Lid close = sleep, on **both** AC and battery ("Sleep always"), and idle-suspend at
+**"whatever is the system default"** — i.e. KDE's own shipped numbers, not invented ones.
+
+### Why the machine was not sleeping — three independent layers, all deliberate
+1. `/etc/systemd/logind.conf.d/luminos-nolidsleep.conf` set `HandleLidSwitch`,
+   `HandleLidSwitchExternalPower` and `HandleLidSwitchDocked` all to `ignore`.
+2. `~/.config/powermanagementprofilesrc` had `lidAction=0` on both profiles.
+3. `/etc/udev/rules.d/99-luminos-lid.rules` → `luminos-lid.service` → `kscreen-doctor`
+   blanked the panel *instead of* sleeping.
+
+There was **no idle-suspend setting at all** on either profile, and logind's `IdleAction`
+is `ignore`, so nothing ever suspended on inactivity either.
+
+### The suspend path itself was never broken
+Proven, not assumed, with a controlled `rtcwake -m freeze -s 30`: the machine slept the full
+30 s, `Timekeeping suspended for 25.480 seconds`, `ACPI: \_SB_.PEP_: Successfully transitioned
+to state lps0 entry`, `amd_pmc: SMU idlemask s0i3: 0x3ffb3eb5`, woke on IRQ 9 (RTC),
+`suspend_stats` success 0→1, fail 0.
+
+The 2026-08-01 "suspend loop" in the journal was **not a fault**: `upowerd` was requesting
+suspend at critical battery while the user repeatedly opened the lid to wake the machine.
+The final suspend had no exit because the battery died. Do not re-open this as a bug.
+
+Known-benign and out of scope: the `\_SB.PCI0.GPP7.CADR` / `_SB.PEP._DSM` ACPI error fires
+only on the **exit** path and does not stop a clean resume (AMI GA403UU.306 firmware defect);
+`mmc0` (`rtsx_pci_sdmmc`) logs 12 errors per boot with no card inserted and fired one wakeup
+event during the test without preventing a full sleep.
+
+### The trap that cost the most time — and the evidence that settled it
+PowerDevil 6.7.3 **does not read `powermanagementprofilesrc` for these settings.**
+`PowerDevil::ProfileSettings` is a `KConfigSkeleton` over **`powerdevilrc`** (filename string
+recovered from the constructor's `KConfigSkeleton(QString,QObject*)` call), the group is the
+bare profile id (`"%1".arg(profileId)` → `[AC]`, `[Battery]`, `[LowBattery]`), and the items
+are registered against **subgroups** — `Keyboard`, `Display`, `SuspendAndShutdown`,
+`Performance`, `RunScript`.
+
+So the working path is `[AC][SuspendAndShutdown] LidAction=1`. Writing the same key to a bare
+`[AC]` group parses without complaint and **does nothing** — which is exactly what happened
+first, and is the same silent-success shape as BUG-088/089.
+
+Proved by driving the live daemon, not by reading source:
+`qdbus6 org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/Actions/HandleButtonEvents \
+  org.kde.Solid.PowerManagement.Actions.HandleButtonEvents.lidAction`
+returned `1` → `2` → `0` → `1` as the config was changed and PowerDevil restarted.
+Under a bare `[AC]` group the same edits moved nothing.
+
+⚠️ The sibling `triggersLidAction()` method reads `true` **regardless of configuration** — it
+reports that PowerDevil owns the lid event, not what it will do with it. It is useless as a
+health check. `lidAction()` is the one that tracks config.
+
+### Enum, recovered from the shipped binary rather than guessed
+`PowerDevil::ProfileDefaults::defaultAutoSuspendType()` compiles to `mov $0x1,%eax`, and
+`defaultLidAction()` returns `1` on the ordinary-laptop branch. The meta-object key order is
+`NoAction, Sleep, Hibernate, Shutdown, …`. **`LidAction=1` is Sleep**; `0` is Do-nothing,
+which is what the old config was set to.
+
+### The "system defaults" for idle suspend, read out of the binary
+`ProfileDefaults::defaultAutoSuspendIdleTimeoutSec()` disassembles to
+**AC = 900 s, Battery = 600 s, LowBattery = 300 s** (the branch for a non-mobile device).
+Those exact numbers were written explicitly rather than left implicit, so the behaviour cannot
+change under us if a future PowerDevil changes its defaults.
+
+### What was changed
+- **Added** `/etc/systemd/logind.conf.d/luminos-lidsleep.conf` — `HandleLidSwitch=suspend`,
+  `HandleLidSwitchExternalPower=suspend`, `HandleLidSwitchDocked=ignore`.
+  **Deleted** `luminos-nolidsleep.conf`. Verified live over `busctl`.
+  Docked stays `ignore` on purpose: closing the lid while driving an external display should
+  not black out the setup. This is also upstream's default.
+- **Added** `~/.config/powerdevilrc` with `LidAction=1`, `AutoSuspendAction=1` and the
+  900/600/300 timeouts under `[AC|Battery|LowBattery][SuspendAndShutdown]`.
+- **Set** the legacy `powermanagementprofilesrc` `lidAction` to `1` as well. It is inert today,
+  but its `[Migration] MigratedProfilesToPlasma6=powerdevilrc` marker means a future migration
+  could import it; leaving `0` there was a loaded gun.
+- **Deleted** `/etc/udev/rules.d/99-luminos-lid.rules` and reloaded udev. `luminos-lid.service`
+  is left installed but is now never triggered (it is `static` — the udev rule was its only
+  entry point). This also stops `kscreen-doctor` being invoked on every lid event, which
+  SIGABRTs on this box and arms a drkonqi launcher each time (BUG-084).
+- **Removed** the dead `SuspendMode=s2idle` line from `/etc/systemd/sleep.conf`.
+  systemd deleted that option; it logged `Support for option SuspendMode= has been removed and
+  it is ignored` twice per suspend attempt. `SuspendState=freeze` is the line that does the
+  work, and `freeze` is correct here — `/sys/power/mem_sleep` on this machine is `[s2idle]`
+  only, there is no S3 to fall back to.
+
+Backups of every touched file: `backups/power-2026-08-02/`.
+
+### Which layer actually fires
+While a Plasma session is running, PowerDevil holds a **`block`** inhibitor on
+`handle-lid-switch`, so **`powerdevilrc` decides what a lid close does**. The logind settings
+are the fallback for SDDM, a bare TTY, and the window after logout. Both were set so the
+behaviour is the same either way.
+
+### Lesson
+Two of them, and they are the same lesson the repo keeps re-learning:
+- **A config file that is read is not a config file that is used.** `inotifywait` proved
+  PowerDevil opened `powerdevilrc`; the values still did nothing, because the group was wrong.
+  "The daemon opened my file" is not evidence. Only a readback of the resulting *behaviour* is.
+- **Negative-test the readback.** `triggersLidAction()` looked like a perfect health check and
+  would have reported success for every wrong configuration tried. It was caught only because
+  the check was deliberately run against a config known to be wrong.
