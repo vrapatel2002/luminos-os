@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# luminos-hide-sessions — [CHANGE: claude-code | 2026-08-04]
+#
+# WHY THIS EXISTS
+# The login screen must offer exactly ONE session: "Hyprland (uwsm-managed)".
+# The two entries we hide live in pacman-owned files:
+#   /usr/share/wayland-sessions/hyprland.desktop  (restored by: hyprland)
+#   /usr/share/wayland-sessions/plasma.desktop    (restored by: plasma-workspace)
+# Any upgrade of those packages rewrites the file and the extra entries come
+# back SILENTLY — nothing errors, the login screen just quietly has 3 options
+# again. A pacman hook runs this after any transaction touching that directory.
+#
+# IT MUST USE NoDisplay, NEVER Hidden.
+#   hyprland-uwsm.desktop (the entry we keep) has:
+#       Exec=uwsm start -e -D Hyprland hyprland.desktop
+#   so it resolves hyprland.desktop BY ID at login. uwsm's entry validator
+#   (/usr/share/uwsm/modules/uwsm/main.py:472) does:
+#       if entry.getHidden(): raise RuntimeError("Entry ... is hidden")
+#   Setting Hidden=true therefore produces a login screen with no working
+#   session. uwsm never reads NoDisplay; SDDM's greeter honours both.
+#   Verified 2026-08-04: `uwsm start -n -e -D Hyprland hyprland.desktop`
+#   exits 0 with NoDisplay=true applied.
+#
+# Usage:
+#   luminos-hide-sessions           # apply (idempotent)
+#   luminos-hide-sessions --check   # report only, change nothing; exit 1 if drifted
+set -uo pipefail
+
+SESSIONS=(
+  /usr/share/wayland-sessions/hyprland.desktop
+  /usr/share/wayland-sessions/plasma.desktop
+)
+# The one entry that must stay visible. If this ever disappears there is no
+# session left to log into, so we refuse to hide anything.
+KEEP=/usr/share/wayland-sessions/hyprland-uwsm.desktop
+
+CHECK=0
+[ "${1:-}" = "--check" ] && CHECK=1
+
+if [ ! -f "$KEEP" ]; then
+    echo "luminos-hide-sessions: REFUSING — $KEEP is missing;" >&2
+    echo "  hiding the others would leave no session to log into." >&2
+    exit 1
+fi
+if grep -qE '^(NoDisplay|Hidden)=true' "$KEEP"; then
+    echo "luminos-hide-sessions: REFUSING — $KEEP is itself hidden;" >&2
+    echo "  that would leave no visible session." >&2
+    exit 1
+fi
+
+rc=0
+for f in "${SESSIONS[@]}"; do
+    if [ ! -f "$f" ]; then
+        echo "luminos-hide-sessions: $f absent (package removed) — nothing to do"
+        continue
+    fi
+
+    if [ "$CHECK" = "1" ]; then
+        if grep -qE '^NoDisplay=true' "$f"; then
+            echo "luminos-hide-sessions: OK      $f"
+        else
+            echo "luminos-hide-sessions: DRIFTED $f (visible at login)" >&2
+            rc=1
+        fi
+        continue
+    fi
+
+    # Hidden=true would break uwsm — convert it rather than leave it.
+    if grep -qE '^Hidden=true' "$f"; then
+        sed -i 's/^Hidden=true/NoDisplay=true/' "$f"
+    fi
+
+    if ! grep -qE '^NoDisplay=true' "$f"; then
+        printf 'NoDisplay=true\n' >> "$f"
+    fi
+
+    # Verify by reading back. Luminos scripts have a documented habit of
+    # printing success on a failed path (BUG-088, BUG-089).
+    if grep -qE '^NoDisplay=true' "$f"; then
+        echo "luminos-hide-sessions: hidden  $f"
+    else
+        echo "luminos-hide-sessions: FAILED to hide $f" >&2
+        rc=1
+    fi
+done
+
+exit $rc

@@ -1,0 +1,17 @@
+# luminos-hide-sessions.hook — [CHANGE: claude-code | 2026-08-04]
+#
+# Re-applies the single-session login policy after any package restores a
+# wayland-session entry. See /usr/local/bin/luminos-hide-sessions for why this
+# uses NoDisplay and never Hidden (uwsm refuses Hidden entries and the login
+# would break).
+
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Target = usr/share/wayland-sessions/*
+
+[Action]
+Description = Luminos: re-hiding extra login sessions (keep one entry)
+When = PostTransaction
+Exec = /usr/local/bin/luminos-hide-sessions

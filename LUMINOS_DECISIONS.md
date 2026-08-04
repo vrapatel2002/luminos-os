@@ -1861,3 +1861,124 @@ Lives in [`server/DECISIONS.md`](server/DECISIONS.md), like 35/36/36a/37. The nu
 kept in this sequence so references resolve:
 
 - **42** — all torrent traffic is halted until a VPN is in front of it (amends 35)
+
+---
+
+## DECISION 43 — Hyprland is the only session; Luminos UI standardizes on Qt6/QML, and GTK4 is rejected on measurement
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+
+**Status:** ACCEPTED, 2026-08-04. **Supersedes the scope clause of DECISION 39** ("KDE Plasma
+remains the default and the supported desktop"). Confirms and closes the GTK4 question.
+
+### What the user asked for
+> *"first move every things to gt4k base got it aim is there should be no fallback i want to use
+> one things only ... i dont want 2 or 3 things running right at same thime hogging the memory
+> unnecessary and also hyprland is made to work smooth with gtk4"*
+
+Two separable requests: **(A)** one desktop, no fallback, and **(B)** move the UI to GTK4.
+A was accepted. B was measured and rejected — with the user's agreement once the numbers were shown.
+
+---
+
+### Part A — one session at the login screen
+
+`hyprland.desktop` and `plasma.desktop` now carry `NoDisplay=true`. The login screen offers exactly
+one entry: **`hyprland-uwsm.desktop` ("Hyprland (uwsm-managed)")**, which is what SDDM already had
+saved in `/var/lib/sddm/state.conf`.
+
+**The trap, and why this uses `NoDisplay` and never `Hidden`.** The entry that *looks* redundant is
+the one actually in use. SDDM launches `hyprland-uwsm.desktop`, whose `Exec` is:
+
+```
+Exec=uwsm start -e -D Hyprland hyprland.desktop
+```
+
+— it resolves `hyprland.desktop` **by Desktop Entry ID at login**. And uwsm 0.26.6 validates that
+entry (`/usr/share/uwsm/modules/uwsm/main.py:472`):
+
+```python
+if entry.getHidden():
+    raise RuntimeError(f"Entry {entry.getFileName()} is hidden")
+```
+
+So `Hidden=true` on `hyprland.desktop` produces **a login screen with no working session.** uwsm
+never reads `NoDisplay`; SDDM's greeter honours both. Verified before and after the edit:
+`uwsm start -n -e -D Hyprland hyprland.desktop` → **exit 0**, resolving to `/usr/bin/start-hyprland`.
+
+`desktop-file-validate` reports two errors on these files (`DesktopNames` not `X-`-prefixed;
+`plasma.desktop` missing `Type`). Both were confirmed **pre-existing** by validating the untouched
+backups in `~/luminos-backups/sessions-2026-08-04/`. They are not caused by this change.
+
+**Plasma packages stay installed** (`plasma-desktop`, `plasma-workspace`, `kwin` — 6.7.3). The user
+chose "keep installed until proven". Removal is a separate, later decision, and is gated on the
+widgets/KCMs/wallpaper actually working under Hyprland (Part C).
+
+**Persistence.** `/usr/share/wayland-sessions/*.desktop` are pacman-owned, so a `hyprland` or
+`plasma-workspace` upgrade restores the entries *silently*. `/usr/local/bin/luminos-hide-sessions`
+re-applies the policy, driven by `/etc/pacman.d/hooks/luminos-hide-sessions.hook` (PostTransaction
+on `usr/share/wayland-sessions/*`). It refuses to run if `hyprland-uwsm.desktop` is missing or is
+itself hidden, converts any `Hidden=true` to `NoDisplay=true`, and verifies by reading back.
+`--check` reports drift without changing anything. All five paths negative-tested in a sandbox.
+
+---
+
+### Part B — GTK4 evaluated and rejected; Qt6/QML confirmed
+
+The stated reason for GTK4 was memory ("2 or 3 things running ... hogging the memory") and a belief
+that "hyprland is made to work smooth with gtk4". Both were measured on this machine, 2026-08-04:
+
+| Toolkit | Deduplicated resident (PSS) | Processes using it |
+|---|---|---|
+| `libgtk-3` | **6 MB** | 13 — 9× claude (Electron), chrome, thunar, nm-applet, xdg-desktop-portal |
+| `libgtk-4` | **0 MB** | **0** |
+| `libQt6` | **36 MB** | 5 — incl. `qs` (Caelestia) |
+
+**42 MB total against 6.2 GiB in use — 0.7%.** The actual consumers were chrome (~2000 MB), claude
+(670 + 377 MB) and `qs` (678 MB). Toolkit choice is not the memory lever.
+
+Three findings make GTK4 counterproductive rather than merely unnecessary:
+
+1. **Caelestia is Qt6 and cannot move.** `ldd /usr/bin/quickshell` → **12 Qt6 libraries, 0 GTK.**
+2. **GTK3 cannot be removed.** Chrome and Claude Desktop are Electron and hard-link GTK3. Claude
+   Desktop running under Hyprland is a standing acceptance criterion (DECISION 39).
+3. Therefore GTK4 widgets would mean GTK3 (stays) + Qt6 (stays) + GTK4 (new) — **three toolkits
+   where there are currently two** — plus a rewrite of all 16 QML files. The opposite of the goal.
+
+Hyprland is toolkit-agnostic C++; it does not prefer GTK. **All Luminos UI stays QML/Qt6, hosted in
+Quickshell.** This satisfies "one thing only" — the single base is Qt6, the one Caelestia already is.
+
+**GTK4 therefore remains banned under `AGENTS.md` §1, now on measured grounds rather than
+inherited ones.** HyprPanel stays banned with it, consistent with DECISION 39.
+
+---
+
+### Part C — the widgets were never a toolkit problem
+
+The reason Plasma still *felt* necessary is that these are **Plasma-shaped**, not GTK-shaped:
+
+| Component | Shape | Fate |
+|---|---|---|
+| `org.luminos.{ram,power,monitor}widget` | Plasma applets | re-host as Quickshell modules (stays QML) |
+| `kcm_luminos_{keyboard,hive,lid_light}` | Plasma KCMs | fold into `src/look/LookDashboard.qml` |
+| `org.luminos.livewallpaper` | Plasma wallpaper plugin | **cannot be ported** — retire |
+
+Nothing loads a Plasma applet under Hyprland, so they simply never appeared. Re-hosting them is
+what actually removes the fallback.
+
+**Live wallpaper:** replaced by **Caelestia's built-in wallpaper**, chosen by the user over
+`mpvpaper` and `swww`. Rationale: no persistent `mpv` process and no continuous GPU decode, which
+matters on a machine whose dGPU power gating is load-bearing (BUG-078, DECISION 25).
+
+### Acceptance criteria
+1. The login screen shows exactly one session, and it logs in. *(Verified only at next login.)*
+2. `luminos-hide-sessions --check` exits 0; exits 1 after a simulated upgrade restores an entry.
+3. The 5 Go daemons stay `active` — they are systemd services and must not care about the compositor.
+4. Claude Desktop still runs under Hyprland (carried over from DECISION 39).
+5. Plasma is not removed until 1–4 hold and the widgets/KCMs/wallpaper work.
+
+### How to reverse
+```bash
+sudo rm /etc/pacman.d/hooks/luminos-hide-sessions.hook
+sudo cp ~/luminos-backups/sessions-2026-08-04/*.desktop /usr/share/wayland-sessions/
+```
+Plasma reappears at the login screen immediately; nothing was uninstalled.
