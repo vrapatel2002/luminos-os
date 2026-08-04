@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# luminos-hypr-log-save — [CHANGE: claude-code | 2026-08-04]
+#
+# WHY THIS EXISTS
+# Hyprland writes its log to $XDG_RUNTIME_DIR/hypr/<instance>/hyprland.log.
+# $XDG_RUNTIME_DIR is a tmpfs that systemd-logind DELETES when the user's last session ends.
+# So the single most useful piece of evidence about why a Hyprland session misbehaved is destroyed
+# by the act of logging out to go and report it.
+#
+# This copies the log somewhere permanent. It is driven by
+# luminos-hypr-log-save.service, whose ExecStop fires while graphical-session.target is being
+# torn down — i.e. while the runtime dir still exists.
+#
+# Usage:
+#   luminos-hypr-log-save          # copy any Hyprland logs found for this session
+#   luminos-hypr-log-save --test   # same, but say what it found and copied
+set -uo pipefail
+
+DEST="${HOME}/luminos-backups/hypr-session"
+VERBOSE=0
+[ "${1:-}" = "--test" ] && VERBOSE=1
+
+log() { [ "$VERBOSE" = "1" ] && echo "$@"; return 0; }
+
+RD="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+SRCDIR="${RD}/hypr"
+
+if [ ! -d "$SRCDIR" ]; then
+    log "no Hyprland runtime dir at $SRCDIR — nothing to save (normal outside a Hyprland session)"
+    exit 0
+fi
+
+mkdir -p "$DEST" || { echo "luminos-hypr-log-save: cannot create $DEST" >&2; exit 1; }
+
+STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
+copied=0
+
+# There is one subdirectory per Hyprland instance signature. Copy the log out of each.
+while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    inst="$(basename "$(dirname "$f")")"
+    out="${DEST}/${STAMP}_${inst}_$(basename "$f")"
+    if cp -- "$f" "$out" 2>/dev/null; then
+        copied=$((copied + 1))
+        log "saved: $f -> $out ($(wc -l < "$out") lines)"
+    else
+        echo "luminos-hypr-log-save: FAILED to copy $f" >&2
+    fi
+done < <(find "$SRCDIR" -maxdepth 2 -name '*.log' -type f 2>/dev/null)
+
+# Keep the last 20 so this cannot grow without bound on a machine that is being logged in and out
+# of repeatedly during testing.
+if [ -d "$DEST" ]; then
+    ls -1t "$DEST"/*.log 2>/dev/null | tail -n +21 | while IFS= read -r old; do rm -f -- "$old"; done
+fi
+
+# Conditional status only. Luminos scripts have a documented habit of announcing success on a
+# path that did nothing (BUG-088, BUG-089), so say what actually happened.
+if [ "$copied" -gt 0 ]; then
+    log "luminos-hypr-log-save: saved $copied log(s) to $DEST"
+    exit 0
+else
+    log "luminos-hypr-log-save: runtime dir existed but contained no .log files"
+    exit 0
+fi

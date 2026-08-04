@@ -8,7 +8,7 @@ changed on disk, and the user has not yet approved the ban override.** Do not st
 
 ---
 
-# ACTIVE THREAD — Hyprland + Caelestia Shell — PHASES 0–2 DONE (REBOOT PENDING), PHASE 3 NEXT
+# ACTIVE THREAD — Hyprland + Caelestia — PHASE 3 INSTALLED, AWAITING FIRST LOGIN TEST
 
 ## Goal (the durable end objective)
 User (2026-08-04) sent https://youtu.be/Na7tPZv2ckk — *"Install Hyprland + Caelestia Shell
@@ -302,9 +302,81 @@ specific reason, and diff before ever merging one.
 `glibc` and `systemd` both moved, so a reboot is genuinely needed before trusting the system.
 This was left for the user to trigger because a reboot closes whatever they have open.
 
-## Status right now — 2026-08-04, Phase 2 upgraded but not rebooted
-**Phases 0, 1 and 2 are done. The upgrade is applied and verified but the machine has NOT been
-rebooted yet. Hyprland is still not installed — nothing about the compositor has changed.**
+## Post-reboot verification (2026-08-04 15:00) — all clean
+Rebooted at `2026-08-04 14:59:59`. `uname -r` = **7.0.5-arch1-1** (pin held). All 5 Go daemons
+active. **0 failed units** — even `forex-resume` is fine, it only fails after a resume, not a boot.
+dGPU `suspended` straight out of boot. `scripts/luminos-verify` → **PASS, 0 failures**, and the
+only warning left is the known "PostToolUse hook never observed" one.
+
+**The session recorder fired on its own at login** (`2026-08-04_15-00-24_KDE.txt`,
+`Result=success`, `ExecMainStatus=0`). The black box works unattended — which is the thing Phase 3
+depends on.
+
+# Phase 3 — Hyprland INSTALLED 2026-08-04, first login test still pending
+
+`hyprland 0.56.1-3` + `xdg-desktop-portal-hyprland 1.4.1-1` from **extra** (official repo, not AUR).
+16 packages, 52 MB, 0 errors.
+
+**It does not violate the GTK ban** — checked the dependency list before installing. Hyprland pulls
+cairo/pango, which are GTK-adjacent but not GTK. Nothing GTK4 was added. `xorg-xwayland` is already
+a hard dependency of Hyprland, which is convenient for Electron.
+
+Almost everything else was already present: `uwsm` 0.26.6, `kitty`, `polkit-kde-agent`,
+`qt6-wayland`, `xdg-desktop-portal` + `-kde` + `-gtk`.
+
+## ⚠️⚠️ THE SINGLE MOST IMPORTANT FACT IN THIS PHASE — GPU SELECTION
+**This laptop enumerates the NVIDIA dGPU FIRST:**
+
+| node | vendor | device | PCI |
+|---|---|---|---|
+| `card1` / `renderD128` | `0x10de` | **NVIDIA RTX 4050** | `0000:01:00.0` |
+| `card2` / `renderD129` | `0x1002` | **AMD iGPU** | `0000:65:00.0` |
+
+If Hyprland is left to pick, it can land on the NVIDIA card, which would (a) hold the dGPU awake
+forever and destroy the 0 W gating, and (b) probably fail to start at all, because
+`/etc/environment` forces **Mesa-only EGL** so there is no NVIDIA EGL vendor to use.
+
+So it is pinned to the iGPU **by PCI path, never by card number** (numbering is enumeration order
+and is not stable across boots — and here a wrong guess picks NVIDIA):
+
+    AQ_DRM_DEVICES=/dev/dri/by-path/pci-0000:65:00.0-card
+
+Set in **two** places on purpose — `~/.config/hypr/hyprland.conf` (`env =`) and
+`~/.config/uwsm/env-hyprland` (`export`) — because uwsm builds the environment before the
+compositor is exec'd while Hyprland applies its own `env` during config parse. Verified the path
+resolves to vendor `0x1002`. **No NVIDIA env vars anywhere.**
+
+## Config
+- `~/.config/hypr/hyprland.conf` — deliberately minimal, `hyprland --verify-config` → **`config ok`**.
+  Animations off for the first run (fewer moving parts while diagnosing). Repo copy at
+  `config/hypr/hyprland.conf`.
+- **`SUPER+SPACE` is deliberately NOT bound** — it is the Luminos HIVE popup shortcut and gets
+  wired up in Phase 5. Binding it now would create a conflict that is irritating to find later.
+- `SUPER+SHIFT+M` exits via `uwsm stop`, not Hyprland's `exit` dispatcher, so the systemd user
+  session tears down cleanly.
+
+## 🔑 USE THE uwsm SESSION ENTRY, NOT THE PLAIN ONE
+Hyprland ships **two** entries in `/usr/share/wayland-sessions/`:
+- `hyprland.desktop` — plain. **Does not join `graphical-session.target`**, so the session
+  recorder and the log rescue never fire.
+- `hyprland-uwsm.desktop` → **"Hyprland (uwsm-managed)"** — this is the one to pick. It runs
+  `uwsm start -e -D Hyprland hyprland.desktop`, which wires the session into systemd.
+
+## Hyprland log rescue — built and PROVEN, because the log deletes itself
+`scripts/luminos-hypr-log-save` + user unit `luminos-hypr-log-save.service` (enabled).
+
+Hyprland logs to `$XDG_RUNTIME_DIR/hypr/<instance>/hyprland.log`, and logind **deletes
+`$XDG_RUNTIME_DIR` when the last session ends** — so the evidence destroys itself in the act of
+logging out to report the problem. The unit uses `RemainAfterExit=yes` with a no-op `ExecStart`,
+so its **`ExecStop`** runs during `graphical-session.target` teardown, while the runtime dir still
+exists. Logs land in `~/luminos-backups/hypr-session/` (last 20 kept).
+
+Tested three ways, not assumed: clean no-op outside Hyprland; positive copy from a fake runtime
+log; and the real systemd path by starting the unit and stopping it, which rescued the file.
+
+## Status right now — 2026-08-04, Hyprland installed but NEVER STARTED
+**Plasma is untouched and still the default.** `/usr/share/wayland-sessions/` has `plasma.desktop`
+plus the two Hyprland entries. 0 failed units, dGPU still `suspended`.
 
 In place and verified:
 - `.gitmodules` (8 submodules, all URLs + pinned commits proven fetchable)
@@ -314,29 +386,43 @@ In place and verified:
 - `docs/ESCAPE-CARD.md`
 - session black-box recorder, enabled as a systemd user unit
 
-**IMMEDIATE NEXT STEP: reboot, then re-verify.** After the reboot, in order:
-1. `scripts/luminos-session-recorder --show`
-2. Confirm Plasma logs in normally.
-3. `scripts/luminos-verify` → expect PASS.
-4. `cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_status` → expect `suspended` once idle.
-5. `uname -r` → must still be **7.0.5-arch1-1**. If it is 7.1.5, the pin failed and
-   `nvidia-open-dkms` 595 will not have a module for it — that is the one scenario that could
-   break the display, and the fix is to select the previous kernel or restore snapshot
-   `2026-08-04_14-35-50`.
+## ▶ IMMEDIATE NEXT STEP — the first Hyprland login (user action required)
+Log out of Plasma, and at SDDM pick **"Hyprland (uwsm-managed)"** — not plain "Hyprland".
 
-**THEN Phase 3 — Hyprland only, no Caelestia yet.** Plan:
-- Install `hyprland` from the Arch repos. Launch it via **uwsm** (`/usr/bin/uwsm`, already
-  installed) so it joins `graphical-session.target` — the session recorder depends on that, and it
-  also fixes environment propagation and XDG autostart, which bare Hyprland does not do.
-- Minimal config. Compositor runs on the **AMD iGPU** (`0x1002`); resolve the card by reading
-  `/sys/class/drm/card*/device/vendor`, never by hardcoding a number.
-- **No NVIDIA env vars in `/etc/environment`.** The global Mesa EGL forcing is what holds the dGPU
-  at 0 W; adding NVIDIA vars for Hyprland's benefit would undo BUG-047/050.
-- **Acceptance test that matters most: Claude Desktop (`claude-desktop-bin`, Electron) must run
-  under Hyprland.** If Electron misbehaves on Wayland the launcher already supports
-  `CLAUDE_USE_XWAYLAND=1` and `CLAUDE_DISABLE_GPU=1|full` (`xorg-xwayland` is installed).
-- Log out, pick Hyprland at SDDM, confirm it starts, confirm dGPU still sleeps, log back into
-  Plasma. **Do not install Caelestia until Hyprland alone is known good.**
+**This session dies at logout.** Everything needed to resume is committed. On return, say
+**"resume"** and read, in order:
+1. `scripts/luminos-session-recorder --show`
+2. `ls -lt ~/luminos-backups/hypr-session/` then read the newest — that is Hyprland's own log,
+   rescued past the runtime-dir deletion.
+
+### What to check while inside Hyprland
+1. **Does it start at all** — a black screen or a bounce back to SDDM means the GPU pin failed.
+   `Ctrl+Alt+F3` → TTY → `cd ~/luminos-os && claude`, the CLI agent works with no desktop.
+2. **`SUPER+Return` opens kitty.** That is the only way to type commands in this minimal config —
+   there is no launcher yet by design.
+3. **🎯 THE ACCEPTANCE TEST: does Claude Desktop run?** In kitty: `claude-desktop`.
+   `claude-desktop-bin 1.11847.5-3` is installed. If it fails, try in order:
+   - `CLAUDE_USE_XWAYLAND=1 claude-desktop`
+   - `CLAUDE_DISABLE_GPU=1 claude-desktop`
+   - `CLAUDE_DISABLE_GPU=full claude-desktop`
+   Whichever works becomes permanent (wrapper or `.desktop` edit). DECISION 39 makes this a hard
+   criterion: a Hyprland session that cannot run the agent strands the user and is a FAILED phase.
+4. **dGPU must still sleep**: `cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_status`
+   → expect `suspended` at idle. **Never `nvidia-smi`** (BUG-078). If it says `active` and stays
+   there, the compositor is probably on the wrong card — check `AQ_DRM_DEVICES`.
+5. **Exit with `SUPER+SHIFT+M`**, then log back into Plasma from SDDM.
+
+### If it goes wrong
+Plasma was never modified — just pick it at SDDM. To remove the Hyprland entries entirely:
+
+    sudo rm -f /usr/share/wayland-sessions/hyprland.desktop \
+               /usr/share/wayland-sessions/hyprland-uwsm.desktop
+    sudo systemctl restart sddm
+
+Full details in `docs/ESCAPE-CARD.md`.
+
+**Phase 4 (Caelestia) must NOT start until Hyprland alone is known good**, including the Claude
+Desktop test.
 
 ---
 

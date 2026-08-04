@@ -1,0 +1,24 @@
+[Unit]
+# [CHANGE: claude-code | 2026-08-04]
+# Rescues Hyprland's log before logind deletes it.
+#
+# Hyprland logs to $XDG_RUNTIME_DIR/hypr/<instance>/hyprland.log, and $XDG_RUNTIME_DIR is a tmpfs
+# that systemd-logind removes when the user's last session ends. Without this, the log of a
+# session that misbehaved is gone by the time you log back in to investigate it.
+#
+# The trick is RemainAfterExit=yes with a no-op ExecStart: the unit sits "active" for the whole
+# session and its ExecStop runs during teardown of graphical-session.target — which is still
+# early enough that the runtime dir exists.
+Description=Persist Hyprland session log before XDG_RUNTIME_DIR is wiped
+Documentation=file:///home/shawn/luminos-os/scripts/luminos-hypr-log-save
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/home/shawn/luminos-os/scripts/luminos-hypr-log-save
+
+[Install]
+WantedBy=graphical-session.target

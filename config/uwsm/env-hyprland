@@ -1,0 +1,16 @@
+# uwsm environment, Hyprland session only — [CHANGE: claude-code | 2026-08-04]
+#
+# Belt-and-braces duplicate of the `env = AQ_DRM_DEVICES,...` line in hyprland.conf.
+#
+# Why both: hyprland.conf's `env` is applied by Hyprland itself while it parses its config, which
+# is fine, but uwsm builds the session environment BEFORE the compositor is exec'd. Setting it
+# here guarantees the variable is present no matter which one wins the race, and it also covers
+# anything uwsm starts alongside the compositor.
+#
+# This file is sourced by uwsm ONLY for the Hyprland session, so it cannot affect the Plasma
+# session in any way.
+#
+# The value is a PCI path, not /dev/dri/card2, because DRM card numbers are enumeration order and
+# are not stable across boots. On this machine the NVIDIA dGPU enumerates FIRST (card1), so a
+# hardcoded number is actively dangerous here — see hyprland.conf for the full explanation.
+export AQ_DRM_DEVICES=/dev/dri/by-path/pci-0000:65:00.0-card
