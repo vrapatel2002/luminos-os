@@ -414,6 +414,31 @@ Nova can run on CPU alongside a GPU model (AI Mode) — set n_gpu_layers=0.
 
 ---
 
+## LOOK TUNER (Hyprland) — added 2026-08-04
+
+| File | Purpose |
+|---|---|
+| `scripts/luminos-look` | Preset engine + CLI. `list / preview / next / prev / save / save-live / reset / current / set` |
+| `scripts/luminos-look-dashboard` | Launcher for the dashboard: resolves session env, sets `QML_XHR_ALLOW_FILE_READ=1`, toggles on second press |
+| `src/look/LookDashboard.qml` | Quickshell dashboard — sliders + toggles + preset buttons, 80 ms debounce |
+| `~/.config/caelestia/hypr-look.lua` | MACHINE-GENERATED saved look. Overwritten whole. Merged by `hypr-vars.lua` |
+
+Three things here are easy to get wrong and were each proven on the running compositor:
+
+1. **`hyprctl keyword` does not work under the Lua parser.** Hyprland 0.56 + Caelestia print
+   `keyword can't work with non-legacy parsers. Use eval.` and **still exit 0**. Anything built
+   on `keyword` silently does nothing forever. Use `hyprctl eval 'hl.config({...})'`.
+2. **Window opacity is not a decoration key.** Caelestia applies it as a window rule
+   (`rules.lua:43`), so it needs `hl.window_rule({...})`, not `decoration.active_opacity`.
+3. **`animations.enabled` is a literal in `animations.lua`, not a variable.** A saved preset
+   cannot turn animations off through `hypr-vars.lua` alone — `hypr-user.lua` re-issues it,
+   and it wins only because it is required last.
+
+The undo is `hyprctl reload`, which discards every live `eval`. That is what makes preview
+safe enough to leave unguarded: nothing previewed can outlive a reload.
+
+---
+
 ## AGENT UPDATE RULES
 
 When you modify files, update this doc:

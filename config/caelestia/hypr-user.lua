@@ -134,3 +134,30 @@ end)
 -- Confirmed free in stock Caelestia: its launcher is a bare SUPER tap (kbLauncher =
 -- "SUPER + SUPER_L") and SUPER+SPACE is not used by anything. The nearest neighbour is
 -- SUPER+ALT+Space (toggle floating), which does not clash.
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Look tuner — luminos-look / luminos-look-dashboard
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+local vars = require("variables")
+
+-- animations.lua sets `animations.enabled = true` as a literal, not from a variable, so a
+-- saved `performance` preset could never switch animations off through hypr-vars.lua alone.
+-- This file is required LAST, after every Caelestia module, so re-issuing the config here is
+-- what actually lets the saved value win. Guarded because the key only exists after a save.
+if vars.luminosAnimations ~= nil then
+    hl.config({ animations = { enabled = vars.luminosAnimations } })
+end
+
+-- Float the dashboard. Matched on TITLE, not class: its class is `org.quickshell`, which is
+-- also Caelestia's own bar and launcher — a class match would rip those out of the layer
+-- shell too.
+hl.window_rule({ match = { title = "^Luminos Look$" }, float = true })
+
+-- Binds. All five were confirmed free against `hyprctl binds` on the RUNNING compositor
+-- (SUPER+SHIFT is otherwise used only by C, Comma, Equal, L, M, Minus, S and the arrows),
+-- rather than against the config file, which would have missed anything bound at runtime.
+hl.bind("SUPER + SHIFT + T", hl.dsp.exec_cmd("luminos-look-dashboard"))     -- open/close tuner
+hl.bind("SUPER + SHIFT + N", hl.dsp.exec_cmd("luminos-look next"))          -- next look
+hl.bind("SUPER + SHIFT + P", hl.dsp.exec_cmd("luminos-look prev"))          -- previous look
+hl.bind("SUPER + SHIFT + Return", hl.dsp.exec_cmd("luminos-look save"))     -- keep this one
+hl.bind("SUPER + SHIFT + Backspace", hl.dsp.exec_cmd("luminos-look reset")) -- undo previews

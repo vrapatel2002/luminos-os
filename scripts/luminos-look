@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+# luminos-look — live Hyprland look switcher for Luminos
+# [CHANGE: claude-code | 2026-08-04]
+#
+# WHY THIS EXISTS
+# Picking a desktop look is a taste decision, and taste needs an A/B test, not a
+# config-file edit followed by a logout. This applies a complete look to the RUNNING
+# compositor instantly and writes nothing, so trying six looks costs six keypresses
+# and leaves no mess. Only `save` touches disk.
+#
+# HOW IT APPLIES (this is the non-obvious part)
+# Hyprland 0.56 + Caelestia use the LUA config parser. Under that parser
+# `hyprctl keyword` DOES NOT WORK — it prints "keyword can't work with non-legacy
+# parsers. Use eval." and still EXITS 0. Anything built on `hyprctl keyword` here
+# would silently do nothing forever. The working primitive is:
+#     hyprctl eval 'hl.config({ decoration = { rounding = 20 } })'
+# Verified on 0.56.1 (2026-08-04).
+#
+# THE UNDO
+# `hyprctl reload` re-reads hyprland.lua from disk and discards every live eval.
+# That makes preview risk-free: nothing you preview can survive a reload, and
+# `luminos-look reset` is exactly that reload. This is why preview never writes.
+#
+# PERSISTENCE
+# `save` writes ~/.config/caelestia/hypr-look.lua — a MACHINE-GENERATED file that is
+# always overwritten whole. It is merged over the hand-written hypr-vars.lua, so the
+# hand-written app/cursor/suspend settings there can never be clobbered by this tool.
+#
+# Usage:
+#   luminos-look list                 # show presets, mark the saved one
+#   luminos-look preview <name>       # apply live, write nothing
+#   luminos-look next | prev          # cycle live (bind this to a key)
+#   luminos-look save [name]          # persist (defaults to what's previewed)
+#   luminos-look reset                # hyprctl reload — drop live changes
+#   luminos-look current              # read the live values back out of Hyprland
+#   luminos-look set <k=v> [k=v ...]  # ad-hoc live tweak (used by the dashboard)
+set -uo pipefail
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/luminos"
+STATE_FILE="${STATE_DIR}/look-current"
+LOOK_LUA="${HOME}/.config/caelestia/hypr-look.lua"
+PRESETS=(caelestia soft glass sharp chunky performance)
+
+# ---- Resolve the compositor instance -------------------------------------------------
+# Never trust this process's own environment: a script launched from a keybind has
+# HYPRLAND_INSTANCE_SIGNATURE, one launched from a detached shell or an agent does not.
+# The runtime dir is the authority either way.
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    _rt="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [ -d "${_rt}/hypr" ]; then
+        HYPRLAND_INSTANCE_SIGNATURE="$(ls -1t "${_rt}/hypr" 2>/dev/null | head -1)"
+        export HYPRLAND_INSTANCE_SIGNATURE
+    fi
+fi
+
+die() { echo "luminos-look: $*" >&2; exit 1; }
+
+need_hypr() {
+    command -v hyprctl >/dev/null 2>&1 || die "hyprctl not found — is Hyprland installed?"
+    [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || die "no running Hyprland instance found"
+    hyprctl version >/dev/null 2>&1 || die "cannot talk to Hyprland (stale instance ${HYPRLAND_INSTANCE_SIGNATURE})"
+}
+
+# ---- Preset table --------------------------------------------------------------------
+# Every preset sets the SAME complete set of keys. A preset that left a key unset would
+# inherit it from whatever was previewed before, which makes A/B comparison a lie.
+load_preset() {
+    case "$1" in
+      caelestia)   # upstream Caelestia defaults — the baseline to compare against
+        rounding=15; gaps_in=5;  gaps_out=10; gaps_single=20; gaps_ws=20; border=1
+        blur=true;  blur_size=8;  blur_passes=2; blur_xray=false
+        shadow=true; shadow_range=15; opacity=0.95; anim=true ;;
+      soft)        # rounder and airier, still opaque enough to read code through
+        rounding=20; gaps_in=8;  gaps_out=16; gaps_single=24; gaps_ws=24; border=2
+        blur=true;  blur_size=12; blur_passes=3; blur_xray=false
+        shadow=true; shadow_range=25; opacity=0.92; anim=true ;;
+      glass)       # heavy frost, most transparent — the showpiece look
+        rounding=18; gaps_in=10; gaps_out=20; gaps_single=28; gaps_ws=28; border=2
+        blur=true;  blur_size=18; blur_passes=4; blur_xray=true
+        shadow=true; shadow_range=30; opacity=0.80; anim=true ;;
+      sharp)       # flat, square, fully opaque — maximum text clarity
+        rounding=0;  gaps_in=2;  gaps_out=4;  gaps_single=4;  gaps_ws=8;  border=2
+        blur=false; blur_size=8;  blur_passes=1; blur_xray=false
+        shadow=false; shadow_range=0; opacity=1.0; anim=true ;;
+      chunky)      # bold borders and big gaps — easiest to see focus at a glance
+        rounding=28; gaps_in=12; gaps_out=28; gaps_single=32; gaps_ws=32; border=4
+        blur=true;  blur_size=10; blur_passes=2; blur_xray=false
+        shadow=true; shadow_range=20; opacity=0.95; anim=true ;;
+      performance) # everything off incl. animations — battery and gaming on the G14
+        rounding=0;  gaps_in=0;  gaps_out=0;  gaps_single=0;  gaps_ws=0;  border=1
+        blur=false; blur_size=1;  blur_passes=1; blur_xray=false
+        shadow=false; shadow_range=0; opacity=1.0; anim=false ;;
+      *) return 1 ;;
+    esac
+    return 0
+}
+
+# ---- Emit the live-apply lua ---------------------------------------------------------
+apply_live() {
+    hyprctl eval "hl.config({
+        general = { gaps_in=${gaps_in}, gaps_out=${gaps_out}, gaps_workspaces=${gaps_ws}, border_size=${border} },
+        decoration = {
+            rounding = ${rounding},
+            blur   = { enabled=${blur}, size=${blur_size}, passes=${blur_passes}, xray=${blur_xray} },
+            shadow = { enabled=${shadow}, range=${shadow_range} },
+        },
+        animations = { enabled = ${anim} },
+    })" >/dev/null || return 1
+    # Opacity is not a decoration key in Caelestia — it is a window rule (rules.lua:43).
+    hyprctl eval "hl.window_rule({ match = { fullscreen = false }, opacity = '${opacity} override' })" >/dev/null || return 1
+    return 0
+}
+
+# ---- Emit the persisted lua ----------------------------------------------------------
+write_lua() {
+    mkdir -p "$(dirname "$LOOK_LUA")" || return 1
+    cat > "$LOOK_LUA" <<EOF
+-- hypr-look.lua — MACHINE-GENERATED by \`luminos-look save\`. Do not hand-edit.
+-- [CHANGE: claude-code | $(date +%Y-%m-%d)]
+--
+-- This file is overwritten WHOLE on every save. Hand-written variable overrides belong
+-- in hypr-vars.lua, which merges this file over itself — that split is what keeps a
+-- save from ever clobbering the app / cursor / suspend settings.
+--
+-- preset: ${preset_name}
+-- saved : $(date -Iseconds)
+
+return {
+    windowRounding      = ${rounding},
+    windowGapsIn        = ${gaps_in},
+    windowGapsOut       = ${gaps_out},
+    singleWindowGapsOut = ${gaps_single},
+    workspaceGaps       = ${gaps_ws},
+    windowBorderSize    = ${border},
+    windowOpacity       = ${opacity},
+
+    blurEnabled         = ${blur},
+    blurSize            = ${blur_size},
+    blurPasses          = ${blur_passes},
+    blurXray            = ${blur_xray},
+
+    shadowEnabled       = ${shadow},
+    shadowRange         = ${shadow_range},
+
+    luminosAnimations   = ${anim},
+    luminosLookPreset   = "${preset_name}",
+}
+EOF
+}
+
+saved_preset() {
+    [ -f "$LOOK_LUA" ] || { echo "caelestia"; return; }
+    local p
+    p="$(grep -oP 'luminosLookPreset\s*=\s*"\K[^"]+' "$LOOK_LUA" 2>/dev/null)"
+    [ -n "$p" ] && echo "$p" || echo "custom"
+}
+
+previewed_preset() {
+    [ -f "$STATE_FILE" ] && cat "$STATE_FILE" 2>/dev/null || saved_preset
+}
+
+notify() {
+    command -v notify-send >/dev/null 2>&1 || return 0
+    notify-send -a "Luminos" -i preferences-desktop-theme -t 1800 -h string:x-canonical-private-synchronous:luminos-look \
+        "$1" "$2" 2>/dev/null || true
+}
+
+cycle() {
+    local dir="$1" cur i idx=0
+    cur="$(previewed_preset)"
+    for i in "${!PRESETS[@]}"; do
+        [ "${PRESETS[$i]}" = "$cur" ] && idx=$i
+    done
+    local n=${#PRESETS[@]}
+    if [ "$dir" = next ]; then idx=$(( (idx + 1) % n )); else idx=$(( (idx - 1 + n) % n )); fi
+    do_preview "${PRESETS[$idx]}" "$(( idx + 1 ))/${n}"
+}
+
+do_preview() {
+    local name="$1" pos="${2:-}"
+    load_preset "$name" || die "unknown preset '$name' (try: luminos-look list)"
+    need_hypr
+    apply_live || die "hyprctl eval failed — look NOT applied"
+    mkdir -p "$STATE_DIR" && echo "$name" > "$STATE_FILE"
+    # Verify by reading the compositor back, rather than trusting that eval meant it.
+    local live_r
+    live_r="$(hyprctl getoption decoration:rounding 2>/dev/null | grep -oP 'int:\s*\K-?\d+')"
+    if [ "$live_r" != "$rounding" ]; then
+        die "applied '$name' but Hyprland reports rounding=$live_r, expected $rounding"
+    fi
+    echo "previewing '$name' ${pos} — rounding=$rounding gaps=${gaps_in}/${gaps_out} border=$border blur=$blur opacity=$opacity"
+    notify "Look: ${name} ${pos}" "SUPER+SHIFT+N/P to cycle · SUPER+SHIFT+Return to keep"
+}
+
+case "${1:-list}" in
+  list)
+    sp="$(saved_preset)"; pp="$(previewed_preset)"
+    echo "presets (saved=${sp}, previewing=${pp}):"
+    for p in "${PRESETS[@]}"; do
+        mark="  "; [ "$p" = "$pp" ] && mark="→ "
+        star=""; [ "$p" = "$sp" ] && star="  [saved]"
+        printf '%s%-13s%s\n' "$mark" "$p" "$star"
+    done ;;
+
+  preview) [ $# -ge 2 ] || die "usage: luminos-look preview <name>"; do_preview "$2" ;;
+  next)    cycle next ;;
+  prev)    cycle prev ;;
+
+  save)
+    preset_name="${2:-$(previewed_preset)}"
+    load_preset "$preset_name" || die "unknown preset '$preset_name'"
+    write_lua || die "could not write $LOOK_LUA"
+    # Verify the write landed rather than announcing a success we did not check.
+    if [ -s "$LOOK_LUA" ] && grep -q 'luminosLookPreset' "$LOOK_LUA"; then
+        need_hypr && apply_live
+        echo "saved '$preset_name' → $LOOK_LUA (survives reload, relogin and reboot)"
+        notify "Look saved: ${preset_name}" "This is now your default."
+    else
+        die "wrote $LOOK_LUA but it is empty or malformed"
+    fi ;;
+
+  save-live)
+    # Persist an arbitrary slider combination from the dashboard, rather than a named preset.
+    # Start from the Caelestia baseline so any key the dashboard does not expose still has a
+    # sane value instead of being emitted as an empty string into the lua.
+    shift
+    load_preset caelestia
+    got_gaps_out=0
+    for kv in "$@"; do
+        k="${kv%%=*}"; v="${kv#*=}"
+        case "$k" in
+          rounding) rounding=$v ;;      gaps_in) gaps_in=$v ;;
+          gaps_out) gaps_out=$v; got_gaps_out=1 ;;
+          border) border=$v ;;          blur) blur=$v ;;
+          blur_size) blur_size=$v ;;    blur_passes) blur_passes=$v ;;
+          blur_xray) blur_xray=$v ;;    shadow) shadow=$v ;;
+          shadow_range) shadow_range=$v ;; anim) anim=$v ;;
+          opacity) opacity=$v ;;
+          *) die "unknown key '$k'" ;;
+        esac
+    done
+    # The dashboard has no control for these two. Tying them to the outer gap keeps a custom
+    # look self-consistent — a zero-gap look really reaches zero instead of keeping a stray
+    # 20px workspace margin inherited from the baseline.
+    [ "$got_gaps_out" = 1 ] && { gaps_single=$gaps_out; gaps_ws=$gaps_out; }
+    preset_name="custom"
+    write_lua || die "could not write $LOOK_LUA"
+    if [ -s "$LOOK_LUA" ] && grep -q 'luminosLookPreset' "$LOOK_LUA"; then
+        mkdir -p "$STATE_DIR" && echo custom > "$STATE_FILE"
+        echo "saved custom look → $LOOK_LUA"
+        notify "Custom look saved" "This is now your default."
+    else
+        die "wrote $LOOK_LUA but it is empty or malformed"
+    fi ;;
+
+  reset)
+    need_hypr
+    hyprctl reload >/dev/null || die "hyprctl reload failed"
+    rm -f "$STATE_FILE"
+    echo "reverted to saved look ($(saved_preset)) — live previews discarded"
+    notify "Look reverted" "Back to saved: $(saved_preset)" ;;
+
+  current)
+    need_hypr
+    echo "saved preset : $(saved_preset)"
+    echo "previewing   : $(previewed_preset)"
+    echo "--- live values from the compositor ---"
+    for o in decoration:rounding general:gaps_in general:gaps_out general:border_size \
+             decoration:blur:enabled decoration:blur:size decoration:blur:passes \
+             decoration:shadow:enabled animations:enabled; do
+        printf '%-26s %s\n' "$o" "$(hyprctl getoption "$o" 2>/dev/null | head -1)"
+    done ;;
+
+  set)
+    # Ad-hoc single-key tweaks, used by the dashboard's sliders.
+    [ $# -ge 2 ] || die "usage: luminos-look set rounding=20 gaps_out=16 ..."
+    shift
+    need_hypr
+    for kv in "$@"; do
+        k="${kv%%=*}"; v="${kv#*=}"
+        case "$k" in
+          rounding)     hyprctl eval "hl.config({decoration={rounding=${v}}})" >/dev/null ;;
+          gaps_in)      hyprctl eval "hl.config({general={gaps_in=${v}}})" >/dev/null ;;
+          gaps_out)     hyprctl eval "hl.config({general={gaps_out=${v}}})" >/dev/null ;;
+          gaps_ws)      hyprctl eval "hl.config({general={gaps_workspaces=${v}}})" >/dev/null ;;
+          border)       hyprctl eval "hl.config({general={border_size=${v}}})" >/dev/null ;;
+          blur)         hyprctl eval "hl.config({decoration={blur={enabled=${v}}}})" >/dev/null ;;
+          blur_size)    hyprctl eval "hl.config({decoration={blur={size=${v}}}})" >/dev/null ;;
+          blur_passes)  hyprctl eval "hl.config({decoration={blur={passes=${v}}}})" >/dev/null ;;
+          blur_xray)    hyprctl eval "hl.config({decoration={blur={xray=${v}}}})" >/dev/null ;;
+          shadow)       hyprctl eval "hl.config({decoration={shadow={enabled=${v}}}})" >/dev/null ;;
+          shadow_range) hyprctl eval "hl.config({decoration={shadow={range=${v}}}})" >/dev/null ;;
+          anim)         hyprctl eval "hl.config({animations={enabled=${v}}})" >/dev/null ;;
+          opacity)      hyprctl eval "hl.window_rule({match={fullscreen=false},opacity='${v} override'})" >/dev/null ;;
+          *) die "unknown key '$k'" ;;
+        esac || die "eval failed for $kv"
+        # A live tweak makes the state file's preset name a lie.
+        echo "custom" > "$STATE_FILE" 2>/dev/null
+    done ;;
+
+  -h|--help|help)
+    sed -n '/^# Usage:/,/^set -uo/p' "$0" | sed 's/^# \?//;$d' ;;
+
+  *) die "unknown command '$1' — try: luminos-look help" ;;
+esac

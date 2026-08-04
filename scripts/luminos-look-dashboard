@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# luminos-look-dashboard — launcher for the live Hyprland look tuner
+# [CHANGE: claude-code | 2026-08-04]
+#
+# WHY A LAUNCHER AND NOT `qs -p ...` IN THE KEYBIND
+# Three things have to be true before the dashboard can draw, and none of them are
+# guaranteed for a process spawned from a keybind or a .desktop file:
+#
+#   1. WAYLAND_DISPLAY / XDG_RUNTIME_DIR / HYPRLAND_INSTANCE_SIGNATURE must be resolved.
+#      Same defensive pattern as luminos-hive-popup — never assume they were inherited.
+#   2. QML_XHR_ALLOW_FILE_READ=1. Qt6 blocks XMLHttpRequest on file:// URLs by default,
+#      which is how the dashboard reads the Caelestia colour scheme. Without it the
+#      dashboard still opens, but silently falls back to a hardcoded palette and stops
+#      following the desktop theme.
+#   3. /usr/local/bin must be on PATH, because every control shells out to `luminos-look`.
+#
+# It also toggles: pressing the key again closes the dashboard instead of stacking a
+# second copy on top of the first.
+set -uo pipefail
+
+QML_DEV="${HOME}/luminos-os/src/look/LookDashboard.qml"
+QML_SYS="/usr/local/share/luminos/LookDashboard.qml"
+QML="${LUMINOS_LOOK_QML:-}"
+if [ -z "$QML" ]; then
+    # Repo copy wins so that edits to the dashboard take effect without reinstalling.
+    if [ -f "$QML_DEV" ]; then QML="$QML_DEV"; else QML="$QML_SYS"; fi
+fi
+[ -f "$QML" ] || { echo "luminos-look-dashboard: no dashboard QML found (looked at $QML_DEV and $QML_SYS)" >&2; exit 1; }
+
+# ---- Toggle: if it is already up, take it down -----------------------------------------
+# Deliberately NOT `pkill -f LookDashboard.qml`. A -f pattern is matched against every
+# process's full command line, including the command line of whatever shell is running the
+# pattern itself — so `pkill -f` here kills its own caller. (Observed while building this:
+# it killed the terminal that ran it.) Matching `-x qs` first means only a process literally
+# named `qs` can ever be a candidate, and the cmdline check then narrows it to ours.
+dash_pids() {
+    local p
+    for p in $(pgrep -x qs 2>/dev/null); do
+        if tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q 'LookDashboard\.qml'; then
+            echo "$p"
+        fi
+    done
+}
+
+running="$(dash_pids)"
+if [ -n "$running" ]; then
+    # shellcheck disable=SC2086
+    kill $running 2>/dev/null
+    exit 0
+fi
+
+# ---- Resolve the session env (never trust what we inherited) ----------------------------
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for sock in "$XDG_RUNTIME_DIR"/wayland-[0-9]*; do
+        [ -S "$sock" ] || continue
+        export WAYLAND_DISPLAY="$(basename "$sock")"
+        break
+    done
+fi
+
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ -d "$XDG_RUNTIME_DIR/hypr" ]; then
+    export HYPRLAND_INSTANCE_SIGNATURE="$(ls -1t "$XDG_RUNTIME_DIR/hypr" | head -1)"
+fi
+
+export QT_QPA_PLATFORM=wayland
+export QML_XHR_ALLOW_FILE_READ=1
+export PATH="/usr/local/bin:$PATH"
+
+command -v qs >/dev/null 2>&1 || { echo "luminos-look-dashboard: quickshell (qs) not installed" >&2; exit 1; }
+command -v luminos-look >/dev/null 2>&1 || { echo "luminos-look-dashboard: luminos-look not on PATH" >&2; exit 1; }
+
+exec qs -p "$QML"

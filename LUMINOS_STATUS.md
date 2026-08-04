@@ -19,6 +19,7 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | KDE Plasma 6.6.4 | ✅ Working | Wayland session |
 | SDDM | ✅ Working | Defaults to Plasma Wayland |
 | Hyprland 0.56.1 + Caelestia Shell 2.2.0 | ✅ Working (opt-in 2nd session) | Real login proven 2026-08-04 16:32 with Claude Desktop native Wayland on the iGPU. Pinned to the iGPU via `AQ_DRM_DEVICES=/dev/dri/luminos-igpu` (colon-free udev alias — BUG-094). Config = upstream Caelestia verbatim in `~/.config/hypr/`; all Luminos settings in `~/.config/caelestia/hypr-{vars,user}.lua` (DECISION 41). Plasma remains the default session and is untouched. `power-profiles-daemon` MASKED, so Caelestia's power-profile buttons are inert by design (DECISION 40) |
+| Look tuner (`luminos-look`) | ✅ Working | Live A/B testing of the Hyprland look. 6 presets (caelestia/soft/glass/sharp/chunky/performance) + a Quickshell slider dashboard, `SUPER+SHIFT+T`. Preview writes nothing; `hyprctl reload` is the undo. Persists to `~/.config/caelestia/hypr-look.lua`, merged by `hypr-vars.lua` so a save can never clobber hand-written settings. **Applies via `hyprctl eval` — `hyprctl keyword` is a silent no-op under the Lua parser and still exits 0** |
 | NVIDIA 595.71.05 | ✅ Working | nvidia-dkms (Arch native — no Ubuntu dependency) |
 | AMD iGPU (Radeon 780M) | ✅ Working | Desktop rendering + KWin compositor |
 | RTX 4050 6GB | ✅ Working | HIVE AI models + gaming (power-gated when idle) |

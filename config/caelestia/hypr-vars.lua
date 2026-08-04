@@ -8,7 +8,7 @@
 -- For behaviour that is NOT a variable — env vars, autostarts, monitor rules — use
 -- hypr-user.lua instead. That one is required LAST, after every Caelestia module.
 
-return {
+local vars = {
     -- ── Apps ────────────────────────────────────────────────────────────────────────────
     -- Caelestia's defaults are foot / firefox / codium / thunar. None of those are installed
     -- here, and installing them would mean four redundant apps. These are the Luminos
@@ -37,3 +37,20 @@ return {
     -- is proven working — see the 2026-08-02 suspend work.
     sleepGestureCmd = "systemctl suspend",
 }
+
+-- ── Look preset ─────────────────────────────────────────────────────────────────────
+-- `luminos-look save` writes ~/.config/caelestia/hypr-look.lua and overwrites it WHOLE.
+-- Keeping it in its own file is the point: everything above this line is hand-written
+-- and reasoned about, so a theme tool must never be able to rewrite it. The merge runs
+-- last, so a saved look wins over any look value set above.
+--
+-- pcall, not require: the file legitimately does not exist until the first save, and a
+-- missing look must not take the whole Hyprland config down with it.
+local ok, look = pcall(require, "hypr-look")
+if ok and type(look) == "table" then
+    for k, v in pairs(look) do
+        vars[k] = v
+    end
+end
+
+return vars
