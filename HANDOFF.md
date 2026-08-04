@@ -8,7 +8,7 @@ changed on disk, and the user has not yet approved the ban override.** Do not st
 
 ---
 
-# ACTIVE THREAD — Hyprland + Caelestia Shell — APPROVED, PHASES 0–1 DONE, PHASE 2 NEXT
+# ACTIVE THREAD — Hyprland + Caelestia Shell — PHASES 0–2 DONE (REBOOT PENDING), PHASE 3 NEXT
 
 ## Goal (the durable end objective)
 User (2026-08-04) sent https://youtu.be/Na7tPZv2ckk — *"Install Hyprland + Caelestia Shell
@@ -185,10 +185,8 @@ Lessons that generalise:
   `AGENTS.md` §1 amended so the banned list no longer contradicts reality. HyprPanel stays banned.
   Checked the whole repo for other places still asserting the ban; the only remaining hits are
   historical records (`docs/PROJECT_AUDIT_2026-04-27.md`) and are correct as history.
-**Phase 2 — system upgrade, on its own, with nothing else changing.** Handle `IgnorePkg`
-  deliberately, `-Syu`, rebuild DKMS, reboot, confirm Plasma + dGPU 0 W gating still good
-  (`scripts/luminos-verify`). **Stop here for a day if anything looks off.** Do not stack an
-  upgrade and a compositor install into one blast radius.
+**Phase 2 — system upgrade — ✅ RUN 2026-08-04, 0 errors. REBOOT STILL PENDING.**
+  135 packages, 2.6 GB, `pacman -Syu`, completed clean. Details below.
 **Phase 3 — Hyprland only** (no Caelestia yet): install, minimal config, log out, pick Hyprland at
   SDDM, confirm it starts, confirm dGPU still asleep, log out, back to Plasma.
 **Phase 4 — Caelestia Shell** on top of a Hyprland that is already known good.
@@ -248,9 +246,65 @@ Useful fact discovered from the journal: **SDDM reads both `/usr/share/wayland-s
 - **Never `git add -A`** (AGENTS.md/notes rule — it is how the old API key got published, and the
   tree still holds parked work). Stage by name.
 
-## Status right now — 2026-08-04, end of Phase 1
-**Phases 0 and 1 are COMPLETE and committed. Nothing has been installed and no package has been
-upgraded. The system is exactly as it was, plus a safety net and corrected docs.**
+## Phase 2 result — what the upgrade actually did (2026-08-04)
+
+**135 packages, 2593 MB, `pacman -Syu`, exit clean, `grep -icE '^error|failed'` on the log → 0.**
+Full log preserved at `~/luminos-backups/postupgrade-2026-08-04/phase2-upgrade.log` (it was written
+to `/tmp`, which the reboot wipes). Post-upgrade package state is committed at
+`backups/postupgrade-2026-08-04/pkgs-all-with-versions.txt` — diff it against
+`backups/preflight-2026-08-04/pkgs-all-with-versions.txt` to see exactly what moved, and use the
+preflight file plus `/var/cache/pacman/pkg` to downgrade any single package.
+
+**The pins held, which was the whole point:**
+| Package | Installed (kept) | Available (deliberately skipped) |
+|---|---|---|
+| `linux` / `linux-headers` | **7.0.5.arch1-1** | 7.1.5.arch1-2 |
+| `nvidia-open-dkms` / `nvidia-utils` / `opencl-nvidia` | **595.71.05-2** | 610.43.03-5 |
+
+Because *both* the kernel and the NVIDIA stack are pinned, they stay mutually consistent and
+**no DKMS rebuild was required**. `mkinitcpio` still regenerated `/boot/initramfs-linux.img`
+against 7.0.5 as part of the transaction, successfully.
+
+`lib32-nvidia-utils` and `lib32-opencl-nvidia` are listed in `IgnorePkg` but **are not installed
+at all** — harmless, don't be confused by them not appearing in the "ignored" output.
+
+What did move: `glibc` 2.43→2.44, `systemd` 261.1→261.2, `mesa` 26.1.5→26.1.6, the vulkan/radeon
+set (consistent, all 26.1.6), `dkms` 3.4.1→3.4.2, `wine` 11.14-2 (+ new dep `ntsync-autoload`).
+**Plasma did not upgrade** — only a `qt6-tools` rebuild — so the desktop stack is nearly untouched
+and the blast radius is much smaller than the package count suggests.
+
+### ⚠️ Three `.pacnew` files exist and were deliberately NOT merged
+`/etc/locale.gen.pacnew`, `/etc/pacman.d/mirrorlist.pacnew`, `/etc/mkinitcpio.conf.pacnew`.
+
+**`mkinitcpio.conf.pacnew` must never be blindly applied.** It would:
+- reset `MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)` → `MODULES=()`, dropping the
+  NVIDIA early-load, and
+- swap `HOOKS=(base udev autodetect …)` → `HOOKS=(base systemd … sd-vconsole …)`, changing the
+  init system inside the initramfs.
+
+The current file is deliberate Luminos configuration. Leave all three alone unless there is a
+specific reason, and diff before ever merging one.
+
+### Post-upgrade verification (all run, not assumed)
+- `scripts/luminos-verify` → **PASS, 0 failures**, 2 warnings (one was the dGPU being awake at the
+  moment of checking, which the script itself says to recheck at idle; the other is the known
+  PostToolUse-hook-never-observed warning).
+- All 5 Go daemons `active`.
+- `/etc/environment` EGL forcing line **intact** (this is what holds the dGPU at 0 W — BUG-047/050).
+- **dGPU: went `active` during the upgrade, then re-suspended on its own after ~175 s.** Nothing
+  was holding `/dev/nvidia*` (`fuser -v` empty). The 0 W gating survived. Expect a transient
+  `active` after any big package transaction — it is not a regression, just recheck at idle.
+- `systemctl --failed` → only `forex-resume.service`, which is the **pre-existing** BUG-080
+  Wine/MT5 breakage on a demo account. User has explicitly said not to care about it. Not caused
+  by this upgrade, not a blocker.
+
+### ⏸️ NOT YET REBOOTED
+`glibc` and `systemd` both moved, so a reboot is genuinely needed before trusting the system.
+This was left for the user to trigger because a reboot closes whatever they have open.
+
+## Status right now — 2026-08-04, Phase 2 upgraded but not rebooted
+**Phases 0, 1 and 2 are done. The upgrade is applied and verified but the machine has NOT been
+rebooted yet. Hyprland is still not installed — nothing about the compositor has changed.**
 
 In place and verified:
 - `.gitmodules` (8 submodules, all URLs + pinned commits proven fetchable)
@@ -260,26 +314,29 @@ In place and verified:
 - `docs/ESCAPE-CARD.md`
 - session black-box recorder, enabled as a systemd user unit
 
-**NEXT: Phase 2 — the system upgrade.** This is the first phase that changes the machine, it is
-the single largest blast radius in the whole plan, and **it ends in a reboot that WILL kill the
-chat session.**
+**IMMEDIATE NEXT STEP: reboot, then re-verify.** After the reboot, in order:
+1. `scripts/luminos-session-recorder --show`
+2. Confirm Plasma logs in normally.
+3. `scripts/luminos-verify` → expect PASS.
+4. `cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_status` → expect `suspended` once idle.
+5. `uname -r` → must still be **7.0.5-arch1-1**. If it is 7.1.5, the pin failed and
+   `nvidia-open-dkms` 595 will not have a module for it — that is the one scenario that could
+   break the display, and the fix is to select the previous kernel or restore snapshot
+   `2026-08-04_14-35-50`.
 
-Before starting it: tell the user to photograph `docs/ESCAPE-CARD.md`.
-
-Phase 2 checklist:
-- `df -h /` first. There is ~98 G free; an upgrade needs far less, but a full root is how the
-  earlier disk incident silently corrupted a file, so check rather than assume.
-- Deal with `IgnorePkg` in `/etc/pacman.conf` **deliberately** — decision already made:
-  **keep the kernel and NVIDIA pins.** The dGPU 0 W gating is hard-won (BUG-078 chain) and there is
-  no reason to risk the NVIDIA/DKMS stack in the same window as a compositor change.
-- Refresh and upgrade in ONE command (`pacman -Syu`). Never `-Sy` followed by a separate `-S` —
-  that is the Arch partial-upgrade trap, and `IgnorePkg` makes it worse.
-- Run it inside `tmux` so it survives the desktop app dying: `tmux new -s upgrade`.
-- Rebuild DKMS, run `scripts/luminos-verify`, reboot.
-- After reboot, first thing: `scripts/luminos-session-recorder --show`, confirm Plasma is fine,
-  the 5 Go daemons are active, and dGPU `runtime_status` is still `suspended`.
-- **Stop there for a day if anything looks off.** Do not stack the upgrade and the compositor
-  install into one blast radius.
+**THEN Phase 3 — Hyprland only, no Caelestia yet.** Plan:
+- Install `hyprland` from the Arch repos. Launch it via **uwsm** (`/usr/bin/uwsm`, already
+  installed) so it joins `graphical-session.target` — the session recorder depends on that, and it
+  also fixes environment propagation and XDG autostart, which bare Hyprland does not do.
+- Minimal config. Compositor runs on the **AMD iGPU** (`0x1002`); resolve the card by reading
+  `/sys/class/drm/card*/device/vendor`, never by hardcoding a number.
+- **No NVIDIA env vars in `/etc/environment`.** The global Mesa EGL forcing is what holds the dGPU
+  at 0 W; adding NVIDIA vars for Hyprland's benefit would undo BUG-047/050.
+- **Acceptance test that matters most: Claude Desktop (`claude-desktop-bin`, Electron) must run
+  under Hyprland.** If Electron misbehaves on Wayland the launcher already supports
+  `CLAUDE_USE_XWAYLAND=1` and `CLAUDE_DISABLE_GPU=1|full` (`xorg-xwayland` is installed).
+- Log out, pick Hyprland at SDDM, confirm it starts, confirm dGPU still sleeps, log back into
+  Plasma. **Do not install Caelestia until Hyprland alone is known good.**
 
 ---
 
