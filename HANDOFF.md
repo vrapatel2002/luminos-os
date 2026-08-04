@@ -312,7 +312,10 @@ only warning left is the known "PostToolUse hook never observed" one.
 `Result=success`, `ExecMainStatus=0`). The black box works unattended — which is the thing Phase 3
 depends on.
 
-# Phase 3 — Hyprland INSTALLED 2026-08-04, first login test still pending
+# Phase 3 — Hyprland INSTALLED + PROVEN NESTED 2026-08-04; real-session login still pending
+#
+# The 15:20 "black screen crash" was a FALSE ALARM — Hyprland was never launched. See the
+# red section below before touching anything.
 
 `hyprland 0.56.1-3` + `xdg-desktop-portal-hyprland 1.4.1-1` from **extra** (official repo, not AUR).
 16 packages, 52 MB, 0 errors.
@@ -374,7 +377,74 @@ exists. Logs land in `~/luminos-backups/hypr-session/` (last 20 kept).
 Tested three ways, not assumed: clean no-op outside Hyprland; positive copy from a fake runtime
 log; and the real systemd path by starting the unit and stopping it, which rescued the file.
 
-## Status right now — 2026-08-04, Hyprland installed but NEVER STARTED
+## 🟥 FALSE ALARM 2026-08-04 15:20 — "Hyprland is crashing, black screen". It never ran.
+The user logged out to try Hyprland, saw black, and rebooted. **Hyprland was never launched.**
+Do not go looking for a Hyprland bug here; there wasn't one. What SDDM was actually told to start:
+
+    15:19:59  Session ".../plasma.desktop" selected ... for VT 3
+    15:21:50  Session ".../plasma.desktop" selected ... for VT 4
+
+The greeter *listed* both Hyprland entries at 15:19:53 (`sddm-greeter-qt6: Reading from
+".../hyprland-uwsm.desktop"`) — they are present and valid. The **session picker was simply never
+changed off Plasma**. So it was a Plasma→Plasma logout/login.
+
+Two things conspired to make that look like a crash. Both are now fixed:
+
+1. **The login screen had no wallpaper, so it was black.**
+   `/usr/share/sddm/themes/breeze/theme.conf.user` pointed at
+   `/home/shawn/luminos-wallpaper-tests/sample.jpg`, which does not exist — the greeter logged
+   `QML QQuickImage: Cannot open` and fell back to black. Worse, the greeter runs as user `sddm`,
+   which cannot read `/home/shawn` **at all**, so a wallpaper under `$HOME` was never going to
+   work there even if the file had existed. Now points at the package-owned
+   `/usr/share/wallpapers/Next/contents/images/5120x2880.png`, verified readable *as user sddm*.
+   Old file kept at `theme.conf.user.bak-2026-08-04`.
+2. **Plasma took 30 s of black screen to come up** — greeter exited 15:20:01, `kwin_wayland`
+   didn't start until 15:20:31. Not investigated further; not a Hyprland problem.
+
+**Lesson, and it generalises:** on this machine a black screen is the default appearance of at
+least three different healthy states. Never read black as "crashed" — read the logs. Ask "what
+did SDDM say it started?" before anything else:
+
+    journalctl -b -1 --no-pager | grep "selected, command:"
+
+## ✅ Hyprland PROVEN WORKING 2026-08-04 15:35 — including Claude Desktop
+Rather than send the user to log out again on a hope, Hyprland was smoke-tested **nested inside
+the running Plasma session** — no logout, no risk, full log. Recipe, because it is reusable:
+
+    WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000 Hyprland
+
+Aquamarine tries the DRM backend, fails (`libseat: ... Could not take control of session: Device
+or resource busy` — Plasma holds the seat), and falls back to its **Wayland backend**. That is
+expected and correct, not an error. Results:
+
+- Hyprland 0.56.1 starts, parses `~/.config/hypr/hyprland.conf`, runs indefinitely.
+- dmabuf formats negotiated are `GFX11,...` = **RDNA3 = the AMD iGPU**. Right card.
+- **🎯 Claude Desktop runs.** Window mapped with `class: claude`, **`xwayland: 0`** — a *native*
+  Wayland window, no XWayland fallback needed. Screenshotted via `grim`: renders fully.
+  Its GPU process picked `--render-node-override=/dev/dri/renderD129`, the AMD iGPU. **None of
+  the `CLAUDE_USE_XWAYLAND` / `CLAUDE_DISABLE_GPU` escape hatches were needed.**
+
+### ⚠️ Gotcha that will bite you again: Electron single-instance
+The first attempt to launch Claude Desktop inside the nested Hyprland appeared to do nothing.
+It was not a Hyprland failure — Claude Desktop was **already running under Plasma**, and Electron's
+single-instance lock just refocused that window. To get a genuinely separate instance you must
+give it its own profile:
+
+    /usr/lib/claude-desktop-bin/claude --no-sandbox --ozone-platform=wayland \
+      --user-data-dir=/tmp/claude-hypr-test \
+      /usr/lib/claude-desktop-bin/resources/app.asar
+
+Second gotcha, same test: `hyprctl dispatch exec` gives the child **Hyprland's own environment**.
+A nested Hyprland inherited `WAYLAND_DISPLAY=wayland-0`, so exec'd clients connected back to
+*Plasma*, not to Hyprland. Set `WAYLAND_DISPLAY=wayland-1` explicitly when testing nested.
+(Under a real session this is a non-issue — Hyprland sets it correctly for its children, proven
+by `exec-once = kitty` mapping inside the nested instance.)
+
+### What this test does NOT prove
+It ran on the **Wayland backend**, not DRM. So it does not prove `AQ_DRM_DEVICES` GPU pinning,
+real monitor/mode handling, or that the dGPU stays asleep. Those still need a real login.
+
+## Status right now — 2026-08-04
 **Plasma is untouched and still the default.** `/usr/share/wayland-sessions/` has `plasma.desktop`
 plus the two Hyprland entries. 0 failed units, dGPU still `suspended`.
 
@@ -385,9 +455,22 @@ In place and verified:
 - package/unit inventory in `backups/preflight-2026-08-04/`
 - `docs/ESCAPE-CARD.md`
 - session black-box recorder, enabled as a systemd user unit
+- SDDM greeter wallpaper fixed — the login screen is no longer black
+- `exec-once = kitty` in `hyprland.conf`, so a live Hyprland is visually unmistakable
 
 ## ▶ IMMEDIATE NEXT STEP — the first Hyprland login (user action required)
-Log out of Plasma, and at SDDM pick **"Hyprland (uwsm-managed)"** — not plain "Hyprland".
+Log out of Plasma. At SDDM the session picker is in the **bottom-left corner** of the Breeze
+greeter — it says "Plasma (Wayland)". Click it and pick **"Hyprland (uwsm-managed)"** — not plain
+"Hyprland". *Then* type the password. Selecting the session after typing does not help; SDDM sends
+whatever is selected when Enter is pressed.
+
+`/etc/sddm.conf.d/hidpi.conf` sets `DefaultSession=plasma.desktop` and `RememberLastSession=false`,
+so **the picker resets to Plasma at every single login**. This is deliberate and is being kept:
+it means a broken Hyprland can never trap the user in a login loop. The cost is that Hyprland must
+be picked by hand every time.
+
+**You will know it worked**: a kitty terminal appears on a mostly-empty screen. If you see the
+Plasma panel, you're in Plasma and the picker didn't take.
 
 **This session dies at logout.** Everything needed to resume is committed. On return, say
 **"resume"** and read, in order:
@@ -396,21 +479,24 @@ Log out of Plasma, and at SDDM pick **"Hyprland (uwsm-managed)"** — not plain 
    rescued past the runtime-dir deletion.
 
 ### What to check while inside Hyprland
-1. **Does it start at all** — a black screen or a bounce back to SDDM means the GPU pin failed.
-   `Ctrl+Alt+F3` → TTY → `cd ~/luminos-os && claude`, the CLI agent works with no desktop.
-2. **`SUPER+Return` opens kitty.** That is the only way to type commands in this minimal config —
-   there is no launcher yet by design.
-3. **🎯 THE ACCEPTANCE TEST: does Claude Desktop run?** In kitty: `claude-desktop`.
-   `claude-desktop-bin 1.11847.5-3` is installed. If it fails, try in order:
-   - `CLAUDE_USE_XWAYLAND=1 claude-desktop`
-   - `CLAUDE_DISABLE_GPU=1 claude-desktop`
-   - `CLAUDE_DISABLE_GPU=full claude-desktop`
-   Whichever works becomes permanent (wrapper or `.desktop` edit). DECISION 39 makes this a hard
-   criterion: a Hyprland session that cannot run the agent strands the user and is a FAILED phase.
-4. **dGPU must still sleep**: `cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_status`
+Only the things the nested test could **not** cover. Claude Desktop and basic compositor health
+are already proven above — don't re-litigate them, check the DRM-backend-specific things.
+
+1. **Did it start at all** — kitty should be on screen. A bounce back to SDDM means the GPU pin
+   failed. `Ctrl+Alt+F3` → TTY → `cd ~/luminos-os && claude`; the CLI agent works with no desktop.
+2. **🎯 GPU pinning — the real unknown.** This is what the nested test could not check:
+
+       hyprctl systeminfo | grep -i -A3 'GPU information'
+
+   Must be the **AMD** card. If it names NVIDIA, `AQ_DRM_DEVICES` did not take.
+3. **dGPU must still sleep**: `cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_status`
    → expect `suspended` at idle. **Never `nvidia-smi`** (BUG-078). If it says `active` and stays
-   there, the compositor is probably on the wrong card — check `AQ_DRM_DEVICES`.
-5. **Exit with `SUPER+SHIFT+M`**, then log back into Plasma from SDDM.
+   there for minutes, the compositor is on the wrong card.
+4. **Scaling/mode** — `monitor = ,preferred,auto,auto` is a guess. Plasma presents this panel as
+   1800x1125 logical, implying 2880x1800 at 1.6. If it looks wrong, set it explicitly.
+5. **Claude Desktop** — just `claude-desktop`. Expected to work with no flags; it did nested,
+   natively, on the iGPU. If it *doesn't*, that's DRM-backend-specific and worth logging properly.
+6. **Exit with `SUPER+SHIFT+M`**, then log back into Plasma from SDDM.
 
 ### If it goes wrong
 Plasma was never modified — just pick it at SDDM. To remove the Hyprland entries entirely:

@@ -678,3 +678,44 @@ Each bug entry:
   `FAILED — … gtk4='breeze-dark'` and exited 1; **negative test 3** — restored the shipped
   `Inherits=Humanity,hicolor` and ran the hook's `Exec` → repaired, `[Icon Theme]` at line 1.
 - Date Found: 2026-07-26 · Date Fixed: 2026-07-26
+
+### BUG-091 — SDDM login screen renders black; a healthy logout was mistaken for a Hyprland crash
+- Status: ✅ FIXED
+- Severity: Low technically, HIGH in consequence — it produced a false crash report and a reboot,
+  and it stalled Phase 3 of the Hyprland work.
+- Reported as: "hey the thing is crashing i only see black screen after log out so i rebooted"
+- **Hyprland was not involved.** SDDM's own log shows what it was told to start every time:
+
+      15:19:59  Session ".../plasma.desktop" selected, command: ... for VT 3
+      15:21:50  Session ".../plasma.desktop" selected, command: ... for VT 4
+
+  The greeter *had* read both Hyprland entries at 15:19:53, so they are installed and valid — the
+  session picker was simply never moved off Plasma. It was a Plasma → Plasma logout/login.
+- Root cause 1 — **the greeter had no wallpaper, so it painted black.**
+  `/usr/share/sddm/themes/breeze/theme.conf.user` contained
+  `background=/home/shawn/luminos-wallpaper-tests/sample.jpg`. That file does not exist; the
+  greeter logged `QML QQuickImage: Cannot open: file:///home/shawn/...` twice per start and fell
+  back to a black background.
+- Root cause 2 — **the path was unreachable regardless of the missing file.** The greeter runs as
+  user `sddm` (uid 966), which has no read access to `/home/shawn`. Any wallpaper under `$HOME`
+  is unusable here. This is the real lesson: it was never going to work, even unbroken.
+- Contributing — **Plasma itself took 30 s of black screen to start**: greeter exited 15:20:01,
+  `kwin_wayland` did not start until 15:20:31. Combined with root cause 1, the user saw black,
+  then more black, then a desktop, and reasonably concluded something had crashed.
+- Fix: `theme.conf.user` now points at the package-owned
+  `/usr/share/wallpapers/Next/contents/images/5120x2880.png`. Old file preserved as
+  `theme.conf.user.bak-2026-08-04`.
+- Verified, not assumed: `sudo -u sddm test -r <path>` → readable **as the greeter's own user**,
+  which is the check that root cause 2 shows actually matters. Confirming the file merely exists
+  would have reproduced the original mistake.
+- **Generalised lesson — belongs with the silent-failure family (BUG-088 / BUG-089).** On this
+  machine a black screen is the normal appearance of at least three healthy states: the SDDM
+  greeter with a broken wallpaper, the gap between greeter exit and compositor start, and a bare
+  Hyprland with no bar or wallpaper. *Black is not evidence of a crash.* Before diagnosing any
+  "session crashed", first ask what the display manager says it launched:
+
+      journalctl -b -1 --no-pager | grep "selected, command:"
+
+- Follow-on hardening: `exec-once = kitty` added to `~/.config/hypr/hyprland.conf` so a live
+  Hyprland session is visually unmistakable rather than an empty dark screen.
+- Date Found: 2026-08-04 · Date Fixed: 2026-08-04
