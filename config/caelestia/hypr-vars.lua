@@ -10,11 +10,14 @@
 
 local vars = {
     -- ── Apps ────────────────────────────────────────────────────────────────────────────
-    -- Caelestia's defaults are foot / firefox / codium / thunar. None of those are installed
-    -- here, and installing them would mean four redundant apps. These are the Luminos
-    -- equivalents that already exist on this machine.
+    -- Caelestia's defaults are foot / firefox / codium / thunar. Most are not installed here,
+    -- and installing them would mean redundant apps. These are the Luminos equivalents.
     terminal      = "kitty",                -- SUPER+T   (Caelestia default: foot)
-    fileExplorer  = "dolphin",              -- SUPER+E   (Caelestia default: thunar)
+    -- thunar installed 2026-08-04 at Shawn's request, replacing dolphin. This restores
+    -- Caelestia's own default. Dolphin is still installed and still works if launched by name;
+    -- it is only no longer what SUPER+E opens. Thunar is GTK3 (not GTK4/libadwaita) and pulls
+    -- no KDE/Plasma runtime into the Hyprland session, so it starts faster here.
+    fileExplorer  = "thunar",               -- SUPER+E   (Caelestia default: thunar)
     browser       = "google-chrome-stable", -- SUPER+W   matches xdg-settings default-web-browser
     audioSettings = "pavucontrol",          -- CTRL+ALT+V  unchanged, already installed
 

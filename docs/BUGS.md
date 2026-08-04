@@ -845,3 +845,63 @@ Each bug entry:
   It is a side effect of enumeration, **not** evidence that the compositor landed on the dGPU.
   Judge that with `hyprctl systeminfo` and the dGPU `runtime_status`, never by the presence of an
   NVRM line.
+
+---
+
+## BUG-095 — one keystroke deletes the whole desktop, and nothing brings it back
+**[CHANGE: claude-code | 2026-08-04] — FIXED**
+
+**Symptom.** Shawn: *"the left side pannel and notification and other thigns are gone"*. Hyprland
+itself was fine (pid 1532, windows still tiling). What was gone was **Quickshell** — and under
+Caelestia that single process is the bar, the launcher, the notification daemon, the lock screen
+and the wallpaper. Losing it looks like losing the desktop.
+
+**Diagnosis — how we know it was killed, not crashed.** `/run/user/1000/quickshell/by-id/ra1vok9jt/`
+(the login instance, started 17:22) ends at 18:01 with nothing but routine warnings — missing
+`~/.face`, null-property TypeErrors in `Notification.qml`. **No fatal, no stack, no coredump.** A
+log that simply stops mid-life is the signature of a signal, not a fault.
+
+**Cause.** Stock Caelestia, `~/.config/hypr/hyprland/keybinds.lua:68`:
+
+    create_bind("CTRL + SUPER + SHIFT + R", hl.dsp.exec_cmd("qs -c caelestia kill"), release)
+
+Kill with **no restart** — and it sits one finger from `CTRL+SUPER+ALT+R` on line 69, which *does*
+restart. Upstream this is a Quickshell-developer bind. On a daily-driver desktop it is a trapdoor:
+after pressing it there is no bar and no launcher left *with which to fix it*.
+
+**Fix.** `/usr/local/bin/luminos-shell-guard` + a second bind on the same combo in
+`~/.config/caelestia/hypr-user.lua`. The stock bind could not be removed — **the `hl` Lua API has
+no `unbind`** (`/usr/share/hypr/stubs/hl.meta.lua`), and a second `hl.bind` on the same combo
+*stacks* rather than replaces (`hyprctl binds` shows two entries at `modmask=69 key=R`, both fire).
+So the override is a **guard**, not a restart: stock kills at t≈0, the guard runs at t≈0.6s and
+starts the shell *only if nothing is running*. Healthy shell ⇒ no-op, so it is safe to run anytime.
+
+**Two traps that made every short version of this silently wrong:**
+
+1. **`pgrep -f` self-matches.** `pgrep -f "qs -c caelestia"` matches *any* command line containing
+   that string — its own, and the shell that invoked it. It twice reported a **dead** shell as
+   alive and produced a **passing test for a broken guard**. The `[q]s` bracket trick fixes the
+   self-match but *not* the invoker-match: a wrapper whose cmdline held `qs -c caelestia kill`
+   still matched. Detection now uses `pgrep -x qs` (process **name**) and only then reads that
+   pid's `/proc/PID/cmdline`.
+
+2. **`caelestia shell -d` does not reliably start the shell from a detached context.** Killed the
+   shell, ran it exactly as bound, got nothing — no process, no layers. `setsid qs -c caelestia`
+   works every time and is what the guard uses. Note `caelestia shell` with *no* flag is not a
+   start at all: it sends an empty IPC message and exits 0, which looks like success.
+
+**Proved, not asserted.** Killed the shell (`pgrep -x qs` empty, `hyprctl layers | grep -c
+caelestia-` = **0**), ran the guard, got `restarted Caelestia shell (pid 16801)` and **6** layers
+back. Re-run with the shell healthy: `shell already running — nothing to do`.
+
+**A third trap, in the test harness rather than the product:** `hyprctl dispatch exec '<cmd>'` is
+parsed as **Lua** on this build — it returned ``[string "return hl.dispatch(exec sh -c ..."]:1: ')'
+expected near 'sh'`` and did nothing. Two "tests" that appeared to show the bind was harmless had
+in fact never run the command. Same family as the known `hyprctl keyword` gotcha: **under the Lua
+config, `hyprctl` subcommands take Lua, and the classic string form fails without changing state.**
+
+**Related, same session:** the `Luminos Look` tuner (`FloatingWindow`, `qs -p`) had no titlebar
+under Hyprland, no close button, no Escape handler — Shawn: *"I CAN'T REMOVE THE THINGS THATS BEEN
+FLOATINIG RIGHT IN CENTRE"*. The only exits were `SUPER+SHIFT+T` (which you had to already know)
+or killing the pid. Added a `Shortcut` for **Escape / Ctrl+W** and a visible **✕** in the header.
+Lesson: a window with no server-side decoration must ship its own way out.

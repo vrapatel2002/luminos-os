@@ -161,3 +161,33 @@ hl.bind("SUPER + SHIFT + N", hl.dsp.exec_cmd("luminos-look next"))          -- n
 hl.bind("SUPER + SHIFT + P", hl.dsp.exec_cmd("luminos-look prev"))          -- previous look
 hl.bind("SUPER + SHIFT + Return", hl.dsp.exec_cmd("luminos-look save"))     -- keep this one
 hl.bind("SUPER + SHIFT + Backspace", hl.dsp.exec_cmd("luminos-look reset")) -- undo previews
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Make CTRL+SUPER+SHIFT+R survivable
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- [CHANGE: claude-code | 2026-08-04]
+-- Stock Caelestia binds CTRL+SUPER+SHIFT+R to `qs -c caelestia kill` with NO restart
+-- (hyprland/keybinds.lua:68). Pressing it removes the bar, the launcher, the notification
+-- daemon and the lock screen in one keystroke, and nothing brings them back — the desktop is
+-- simply gone until you find a terminal. That is a debugging bind for someone developing
+-- Quickshell, not something that should sit one slip away from CTRL+SUPER+ALT+R (the bind
+-- immediately next to it, which DOES restart).
+--
+-- On 2026-08-04 the shell died at ~18:07 during look-tuner testing. Its log ends with only
+-- routine warnings and no fatal error, which means it was signalled, not crashed — the exact
+-- signature of this bind firing. Shawn was left with no panel and no notifications.
+--
+-- The hl Lua API (/usr/share/hypr/stubs/hl.meta.lua) has NO unbind, so binding the same combo
+-- here does NOT replace keybinds.lua:68 — it stacks. `hyprctl binds` confirms two entries for
+-- modmask=69 key=R, and Hyprland fires both. So this must not be a second "kill and restart":
+-- that would race the stock kill against this one's restart.
+--
+-- Instead this is a GUARD. The stock bind kills at t≈0; this waits well clear of that, then
+-- starts the shell only if nothing is running. If the stock kill worked, the shell comes back.
+-- If it somehow did not, the live shell is left alone instead of being pointlessly bounced.
+-- The logic lives in /usr/local/bin/luminos-shell-guard rather than inline here, because two
+-- separate traps make the one-liner version silently wrong (both documented in that script):
+-- `pgrep -f` self-matches, and `caelestia shell -d` does not reliably start the shell from a
+-- detached context. The script was proven end to end on 2026-08-04: shell killed (0 layers),
+-- guard run, shell back with 6 layers.
+hl.bind("CTRL + SUPER + SHIFT + R", hl.dsp.exec_cmd("luminos-shell-guard"), { release = true })

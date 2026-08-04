@@ -52,6 +52,18 @@ FloatingWindow {
         ready = true;
     }
 
+    // ── Getting out ─────────────────────────────────────────────────────────────────────
+    // A FloatingWindow under Hyprland is drawn with no server-side decoration, so it has no
+    // titlebar and therefore no close button. Without the two escape hatches below the only
+    // ways out are SUPER+SHIFT+T (the toggle, which you have to already know about) or
+    // killing the pid from a terminal. That stranded Shawn on 2026-08-04 with the dashboard
+    // parked in the middle of the screen and no visible way to dismiss it. Never again:
+    // Escape and Ctrl+W both quit, and the header carries a visible ✕.
+    Shortcut {
+        sequences: ["Escape", "Ctrl+W"]
+        onActivated: Qt.quit()
+    }
+
     // Synchronous XHR rather than Quickshell's FileView: this runs once at startup, the file
     // is local, and XHR's API is stable across Qt/Quickshell versions.
     function loadScheme() {
@@ -322,19 +334,47 @@ FloatingWindow {
             spacing: 14
 
             // Header
-            ColumnLayout {
+            RowLayout {
                 Layout.fillWidth: true
-                spacing: 2
-                Text {
-                    text: "Luminos Look"
-                    color: root.cOnSurface
-                    font.pixelSize: 20
-                    font.bold: true
+                spacing: 8
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Text {
+                        text: "Luminos Look"
+                        color: root.cOnSurface
+                        font.pixelSize: 20
+                        font.bold: true
+                    }
+                    Text {
+                        text: "Live preview — nothing is saved until you press Save"
+                        color: root.cSubtle
+                        font.pixelSize: 11
+                    }
                 }
-                Text {
-                    text: "Live preview — nothing is saved until you press Save"
-                    color: root.cSubtle
-                    font.pixelSize: 11
+
+                // Close. Also Escape / Ctrl+W / SUPER+SHIFT+T.
+                Rectangle {
+                    id: closeBtn
+                    Layout.alignment: Qt.AlignTop
+                    implicitWidth: 28
+                    implicitHeight: 28
+                    radius: 14
+                    color: closeArea.containsMouse ? root.cCardHigh : root.cCard
+                    Text {
+                        anchors.centerIn: parent
+                        text: "✕"
+                        color: root.cOnSurface
+                        font.pixelSize: 13
+                    }
+                    MouseArea {
+                        id: closeArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: Qt.quit()
+                    }
                 }
             }
 

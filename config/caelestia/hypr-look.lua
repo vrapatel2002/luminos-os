@@ -6,7 +6,7 @@
 -- save from ever clobbering the app / cursor / suspend settings.
 --
 -- preset: custom
--- saved : 2026-08-04T18:19:12-04:00
+-- saved : 2026-08-04T18:22:43-04:00
 
 return {
     windowRounding      = 15,
@@ -18,9 +18,9 @@ return {
     windowOpacity       = 0.95,
 
     blurEnabled         = true,
-    blurSize            = 6,
-    blurPasses          = 1,
-    blurXray            = true,
+    blurSize            = 8,
+    blurPasses          = 2,
+    blurXray            = false,
 
     shadowEnabled       = true,
     shadowRange         = 15,

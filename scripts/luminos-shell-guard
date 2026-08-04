@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# luminos-shell-guard — bring the Caelestia shell back if it is not running
+# [CHANGE: claude-code | 2026-08-04]
+#
+# WHY THIS EXISTS
+# Stock Caelestia binds CTRL+SUPER+SHIFT+R to `qs -c caelestia kill` with NO restart
+# (~/.config/hypr/hyprland/keybinds.lua:68). That one keystroke removes the bar, the
+# launcher, the notification daemon and the lock screen, and nothing brings them back.
+# It sits one finger away from CTRL+SUPER+ALT+R, which does restart. On 2026-08-04 Shawn
+# was left staring at an empty desktop with no panel and no notifications.
+#
+# The hl Lua API has no `unbind` (see /usr/share/hypr/stubs/hl.meta.lua), so the stock bind
+# cannot be removed from hypr-user.lua — a second bind on the same combo STACKS and both
+# fire. This script is therefore a GUARD, not a restart: the stock bind kills at t≈0, this
+# runs slightly later and starts the shell only if nothing is running. If the shell is
+# healthy it does nothing at all, so it is safe to run at any time.
+#
+# TWO TRAPS THIS SCRIPT EXISTS TO AVOID, both found the hard way on 2026-08-04:
+#
+#   1. `pgrep -f "qs -c caelestia"` MATCHES ANY COMMAND LINE THAT MENTIONS THE STRING —
+#      including its own, and including the shell that invoked it. Written inline it finds
+#      itself, concludes the shell is alive, and never restarts it. This is not theoretical:
+#      it twice reported a dead shell as alive and faked a passing test. Detection here goes
+#      through `pgrep -x qs`, which matches the process NAME, and only then reads that
+#      process's /proc/PID/cmdline. Do not "simplify" it back to `pgrep -f`.
+#
+#   2. `caelestia shell -d` does NOT reliably start the shell from a detached context.
+#      Killed the shell, ran it exactly as bound, and got nothing: no process, no layers.
+#      `qs -c caelestia` under setsid works every time and is what is used here.
+#
+# Usage:
+#   luminos-shell-guard          # restart the shell only if it is not running
+#   luminos-shell-guard --force  # kill any running shell first, then start a fresh one
+set -uo pipefail
+
+FORCE=0
+[ "${1:-}" = "--force" ] && FORCE=1
+
+# Detection matches on the PROCESS NAME (pgrep -x qs) and only then inspects that process's
+# own /proc/PID/cmdline. `pgrep -f` is not used at all: it matches full command lines, so it
+# hits any shell, editor or test wrapper that merely MENTIONS the string. That is not
+# hypothetical — during development `pgrep -f` matched the test harness whose command line
+# contained `qs -c caelestia kill`, so the guard reported a shell that did not exist and
+# refused to restart it. `pgrep -x qs` matches only processes actually named `qs`.
+shell_pid() {
+    local p
+    for p in $(pgrep -x qs 2>/dev/null); do
+        if tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q -- '-c caelestia'; then
+            echo "$p"
+            return 0
+        fi
+    done
+    return 1
+}
+
+shell_running() { shell_pid >/dev/null 2>&1; }
+
+# ---- Resolve the session env. Never trust what was inherited: a keybind, a .desktop file
+# ---- and a terminal all hand over different amounts of it.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for sock in "$XDG_RUNTIME_DIR"/wayland-[0-9]*; do
+        [ -S "$sock" ] || continue
+        WAYLAND_DISPLAY="$(basename "$sock")"; export WAYLAND_DISPLAY
+        break
+    done
+fi
+
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && [ -d "$XDG_RUNTIME_DIR/hypr" ]; then
+    HYPRLAND_INSTANCE_SIGNATURE="$(ls -1t "$XDG_RUNTIME_DIR/hypr" | head -1)"
+    export HYPRLAND_INSTANCE_SIGNATURE
+fi
+
+export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-Hyprland}"
+export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+
+command -v qs >/dev/null 2>&1 || { echo "luminos-shell-guard: quickshell (qs) not installed" >&2; exit 1; }
+
+if [ "$FORCE" = "1" ] && shell_running; then
+    qs -c caelestia kill >/dev/null 2>&1
+    sleep 0.5
+fi
+
+# The stock kill bind fires at t≈0; give it room to finish before deciding.
+sleep 0.6
+
+if shell_running; then
+    echo "luminos-shell-guard: shell already running (pid $(shell_pid)) — nothing to do"
+    exit 0
+fi
+
+setsid nohup qs -c caelestia >/tmp/luminos-shell-guard.log 2>&1 < /dev/null &
+
+# ---- Verify by reading back. Luminos scripts have a documented habit of printing success on
+# ---- a failed path (BUG-088, BUG-089) — never report a restart that did not happen.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 0.5
+    shell_running && break
+done
+
+if shell_running; then
+    echo "luminos-shell-guard: restarted Caelestia shell (pid $(shell_pid))"
+    exit 0
+else
+    echo "luminos-shell-guard: FAILED to restart the shell — see /tmp/luminos-shell-guard.log" >&2
+    exit 1
+fi
