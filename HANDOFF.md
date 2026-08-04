@@ -1,223 +1,289 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-02 — Response 6 (Cowork session; sleep/suspend — **FIX LANDED**, awaiting one physical lid close)
+Last updated: 2026-08-04 — Response 1 (Cowork session; Hyprland + Caelestia — **PLANNING ONLY, NOTHING INSTALLED**)
 
 ## FIRST ACTION IN A NEW CHAT
-Read this file, then `cat ~/luminos-os/AGENTS.md`. The **active thread is sleep/suspend** (below) and
-it is essentially **done** — only a physical lid-close confirmation from the user is outstanding.
-Everything under "Settled — do not re-litigate" is closed knowledge; do not redo that work.
+Read this file, then `cat ~/luminos-os/AGENTS.md`. The **active thread is a proposed
+Hyprland + Caelestia Shell install** (below). **Nothing has been installed, nothing has been
+changed on disk, and the user has not yet approved the ban override.** Do not start installing.
 
 ---
 
-# ACTIVE THREAD — sleep on lid close and on idle — FIXED 2026-08-02
+# ACTIVE THREAD — Hyprland + Caelestia Shell — APPROVED, PHASE 0 DONE, PHASE 1 NEXT
 
 ## Goal (the durable end objective)
-User report 2026-08-02: *"this laptop g14 is not going to sleep when lid is closed or after certain
-time of inactivity. can you fix it?"*
+User (2026-08-04) sent https://youtu.be/Na7tPZv2ckk — *"Install Hyprland + Caelestia Shell
+(Complete Guide)"* by **Lau (@laustoic)** — and asked to install it, with two hard conditions:
+1. **Push everything to git first** so there is a way back if it breaks.
+2. **A detailed plan that assumes the Claude Desktop app may crash mid-install** —
+   "I don't want to be stranded in a broken OS."
 
-User's three answers (asked and answered the same day):
-1. **Lid close = sleep, always** — on battery **and** on AC. This deliberately reverses their own
-   2026-06-03 decision.
-2. **Live `rtcwake` suspend test — authorised**, and it was run.
-3. **Idle timer = "whatever is the system default"** — so the defaults had to be *determined*, not
-   invented. They were read out of the PowerDevil binary (see below).
+## ✅ BLOCKER CLEARED — the ban was lifted by the user on 2026-08-04
+The user's words, verbatim: *"bro its no longer banned now got it? you can start now working on
+all phase just make sure that you have claude desktop running in hyprland got it ?"*
+Plus, on ownership: *"its all your project got it ?"* — make the calls, don't ask permission for
+each step.
 
-## Status: DONE and VERIFIED END TO END
-| Item | State |
+**Two things follow from that message:**
+1. The ban is lifted; Phases 0–5 are all authorised in one go.
+2. **New hard acceptance criterion for Phase 3:** Claude Desktop (`claude-desktop-bin`, Electron)
+   must actually run *under Hyprland*. A Hyprland session that starts but cannot run the desktop
+   app is a FAILED phase, because it strands the user with no agent. Escape hatches already in the
+   launcher if Electron misbehaves on Wayland: `CLAUDE_USE_XWAYLAND=1`, `CLAUDE_DISABLE_GPU=1|full`
+   (`xorg-xwayland` is installed).
+
+The historical objection, kept for context:
+`AGENTS.md` §1 said **"PERMANENTLY BANNED: Hyprland, GTK4, HyprPanel, Python UI, Docker, Ollama,
+Snapd."** That line is now factually wrong and **still needs editing in Phase 1.**
+
+Also: **this ground was already covered and abandoned.** MemPalace surfaced BUG-035, BUG-036,
+BUG-037 (March 2026) — an earlier Hyprland attempt on Ubuntu 24.04 that hit missing packages,
+silent `set -e` build skips, and a too-old CMake. It was eventually built in a chroot, then the
+whole direction was dropped in favour of KDE Plasma. **Arch changes the difficulty completely**
+(Hyprland is a first-class Arch package now), so the old bugs are not predictive — but the
+*decision* to drop it was deliberate and needs an explicit reversal.
+
+**Required before any install:** a new numbered entry in `LUMINOS_DECISIONS.md` reversing the ban
+(scope it: Hyprland allowed as an *additional, opt-in session*, Plasma stays the default), plus an
+edit to `AGENTS.md` §1 so the banned list stops contradicting reality.
+
+Note: **Caelestia itself does not violate anything.** It is a Quickshell (Qt6/QML) shell — the same
+Qt/QML stack Luminos already standardised on. Only **Hyprland** is the banned component.
+
+## Git state — VERIFIED 2026-08-04, and it corrects two stale beliefs
+| Claim | Reality |
 |---|---|
-| Suspend path itself | ✅ Proven working *before* any change — see "Problem B was wrong" |
-| Lid close → sleep (AC + battery) | ✅ **Verified in the wild 2026-08-03** — see below. Not inferred |
-| Idle → sleep (900/600/300 s) | ✅ Configured. Still no D-Bus readback; the lid close beat the idle timer to it, so this specific path is still unobserved |
-| logind fallback (SDDM / TTY / logged out) | ✅ `suspend` on AC and battery, `ignore` when docked |
-| `/etc/systemd/sleep.conf` noise | ✅ Dead `SuspendMode=` line removed |
-| Docs (AGENTS.md §9, DECISION 38, BUG-091, LUMINOS_STATUS.md) | ✅ Written |
+| "two separate repos, luminos and server" | **One repo.** `server/` is a *directory* inside `luminos-os` (commit `01d33684` "give the media server its own directory"). One push covers both. |
+| HANDOFF's "11+ commits unpushed, push is on hold" | **STALE — delete this belief.** `git rev-list --left-right --count origin/main...main` → `0 0`. `main` is fully in sync with `origin/main` (`git@github.com:vrapatel2002/luminos-os.git`). Nothing is waiting to be pushed. |
 
-**The real-world proof** (the user closed the lid unprompted ~2 min after the fix landed):
-```
-Aug 02 00:50:11  systemd-logind: Lid closed.
-Aug 02 00:50:11  systemd-logind: suspend requested from client PID 27911 ('org_kde_powerde')
-Aug 02 00:50:11  systemd-logind: The system will suspend now!
-        ... 40 hours in s2idle ...
-Aug 03 16:56:23  systemd-logind: Lid opened.
-Aug 03 16:56:24  kernel: PM: suspend exit          # session intact
-```
-`suspend_stats`: success 2 / fail 1.
+Working tree is clean apart from **3 dirty submodules**, and the dirt is worthless:
+`research/turboquant/repo-{ggml,main,thetom-correct}` each have 4 deleted Windows `.bat` files
+(`examples/sycl/win-*.bat`, `scripts/install-oneapi.bat`), plus one stray `cmake_log.txt` in
+`repo-thetom-correct`. Those are *upstream llama.cpp* trees, not ours. Precedent (notes, 2026-07-30):
+**"Left the 3 research/turboquant nested repos alone."** Keep doing that.
 
-⚠️ **Reading that journal is itself a trap.** There are ~41 `Timekeeping suspended for ~3600 s`
-lines **all sharing one wallclock timestamp** (`Aug 03 16:56:23`). They are *not* 41 suspends. The
-kernel ring buffer only drains to journald at full resume, so a whole night's worth of messages get
-stamped at the same instant. They are the hourly s2idle re-arm cycles
-(`PM: Triggering wakeup from IRQ 9` → `ACPI: PM: Rearming ACPI SCI for wakeup`). **Count
-`PM: suspend entry` / `PM: suspend exit` — exactly one each.** Misreading this is almost certainly
-what produced the old, wrong "Problem B".
+### ⚠️ THE REAL BACKUP HOLE — 8 gitlinks and NO `.gitmodules`
+`git ls-files -s | awk '$1=="160000"'` returns 8 entries; **`.gitmodules` does not exist.**
+Consequence: **a fresh `git clone` of luminos-os produces 8 EMPTY directories.** The commit
+pointers are pushed, the mapping to fetch them is not. "Everything is pushed" is therefore false
+for these paths:
 
-## Residual: the FIRST lid close failed to suspend (minor, self-recovering, NOT fixed)
-```
-PM: Wakeup pending, aborting suspend
-PM: active wakeup source: mmc0
-systemd-sleep: Failed to put system to sleep. System resumed again: Device or resource busy
-```
-The **empty SD card reader** (`rtsx_pci_sdmmc`) raised a spurious wakeup 600 ms into device suspend.
-PowerDevil retried 11 s later and that attempt held for 40 h — so the user sees a working laptop,
-but roughly the first attempt can be lost.
+| Path | Upstream (read from the local checkout — NOT recorded in the repo) |
+|---|---|
+| `reference_code/Triton-XDNA` | https://github.com/amd/Triton-XDNA.git |
+| `reference_code/dragon-npu` | https://github.com/In2infinity/dragon-npu.git |
+| `reference_code/mlir-aie` | https://github.com/Xilinx/mlir-aie.git |
+| `reference_code/xdna-driver` | https://github.com/amd/xdna-driver.git |
+| `research/turboquant/repo-ggml` | https://github.com/ggml-org/llama.cpp |
+| `research/turboquant/repo-main` | https://github.com/ggerganov/llama.cpp |
+| `research/turboquant/repo-pytorch` | https://github.com/tonbistudio/turboquant-pytorch |
+| `research/turboquant/repo-thetom-correct` | https://github.com/TheTom/llama-cpp-turboquant |
 
-- The PCI device's `power/wakeup` **already reads `disabled`** — so this is *not* a PCI PME wake and
-  toggling PCI wakeup will not silence it. It is a kernel wakeup source registered by the mmc core
-  (card detect). `/sys/kernel/debug/wakeup_sources`: `mmc0  active_count 2  prevent_suspend_time 3295248`.
-- Same device already logs ~12 errors per boot **with no card inserted**.
-- **Not applied — needs a user decision**, because the plausible fixes (blacklisting / constraining
-  `rtsx_pci_sdmmc`) cost the SD reader entirely. Any such change is `/etc/` → Rule 10.
+Fix = write a `.gitmodules` with these 8 url/path pairs and commit it. Until then that table above
+is the only record of where they came from.
 
-## THE DIAGNOSIS — what was actually wrong
+## The thing the user most needs to hear
+**Git does not protect against a broken OS.** The repo holds source and docs. It does **not** hold
+`/etc`, `~/.config`, the KDE setup, or the installed package set. Pushing to GitHub is *not* a
+rollback plan for "stranded in a broken OS" — the OS-level safety net has to be built separately
+(see Pre-flight below).
 
-### Problem A — sleep was deliberately switched off, in three places (CONFIRMED, and it was the whole story)
-**Not a fault.** Built on purpose, commit `f8e00ab0` (2026-06-03), task line verbatim:
-*"keep all processes running on lid close, screen off only."*
+## Machine facts gathered 2026-08-04 (all verified, don't re-measure)
+- **Filesystem: ext4** on `/dev/nvme0n1p5` (629 G, 117 G free). **No btrfs → no cheap CoW
+  snapshots.** `/boot` is on root; `/boot/efi` is `nvme0n1p1` (vfat, 260 M).
+- **Timeshift IS installed and IS in rsync mode** (`btrfs_mode: false`). Two problems:
+  1. **It excludes `/home/shawn/**` and `/root/**`.** Every Hyprland/Caelestia config lands in
+     `~/.config` → **not covered by any snapshot.** Home must be backed up separately.
+  2. **Exactly one snapshot exists: `2026-07-21_18-48-09` (58 G), and every schedule is off.**
+  Backup target UUID `ff4655be-…` **is the root partition itself** — fine for undoing a bad config,
+  useless if the disk dies.
+- **`pacman -Sy` was last run 2026-07-21 — the package DB is ~14 days stale.** 5 upgrades pending
+  against that stale DB; against a fresh DB it will be far more.
+- **`/etc/pacman.conf` pins (live, verified):**
+  `IgnorePkg = linux linux-headers nvidia-utils nvidia-open-dkms opencl-nvidia lib32-nvidia-utils lib32-opencl-nvidia`
+- **`/etc/environment` (live, verified)** — the two lines that matter:
+  `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json` (global force-Mesa;
+  this is what keeps the dGPU at true 0 W — BUG-047/BUG-050) and
+  `KWIN_DRM_DEVICES=/dev/dri/card2` (KWin-only, inert under Hyprland).
+- **Sessions installed: `/usr/share/wayland-sessions/plasma.desktop` ONLY.** `/usr/share/xsessions/`
+  is empty. Hyprland would *add* `hyprland.desktop` — **additive, Plasma is not touched.** This is
+  the single most important safety property of the whole job.
+- Packages: 1365 total, 216 explicit, **61 foreign/AUR**. `yay` present, `paru`/`pikaur` absent.
+- **Nothing hypr/quickshell/caelestia is installed yet** — clean slate.
+- Repo is 10 G on disk, `.git` alone is 3.8 G.
 
-| Layer | Was | Now |
-|---|---|---|
-| `/etc/systemd/logind.conf.d/luminos-nolidsleep.conf` | `HandleLidSwitch`/`ExternalPower`/`Docked` = `ignore` | **Deleted**; replaced by `luminos-lidsleep.conf` → `suspend` / `suspend` / `ignore` (docked) |
-| PowerDevil lid action | `lidAction=0` (do nothing) | `LidAction=1` (Sleep) on **AC, Battery and LowBattery** |
-| Idle suspend | **no setting at all**, either profile | `AutoSuspendAction=1` + `AutoSuspendIdleTimeoutSec` 900 / 600 / 300 |
-| `/etc/udev/rules.d/99-luminos-lid.rules` → `luminos-lid.service` → `kscreen-doctor` panel blank | armed | **Rule deleted**, `udevadm control --reload-rules` run. The `.service` is left installed but is `static` and now unreachable — the udev rule was its only entry point |
-| logind `IdleAction` | `ignore` | **left `ignore` on purpose** — KDE owns the idle path; two idle timers would fight |
+## The four real landmines (in priority order)
+1. **PARTIAL UPGRADE — the top risk, and it is an Arch-killer.** The DB is 14 days stale *and*
+   kernel + NVIDIA are pinned in `IgnorePkg`. `pacman -Sy hyprland` (sync-then-install-one) is the
+   classic way to brick an Arch box. Hyprland pulls a live wayland/wlroots/mesa/libdrm stack that
+   will be built against packages the pins hold back. **Never `-Sy` + `-S`. Full `-Syu` only, and
+   decide deliberately what to do about the pins first** (AGENTS.md §9 documents the un-pin →
+   upgrade → rebuild DKMS → verify 0 W gating → re-pin ladder).
+2. **The NVIDIA env vars every Hyprland guide tells you to set.** Guides say to export
+   `GBM_BACKEND=nvidia-drm`, `__GLX_VENDOR_LIBRARY_NAME=nvidia`, `LIBVA_DRIVER_NAME=nvidia`,
+   `WLR_DRM_DEVICES=…`. On this box that **directly undoes BUG-047/BUG-050** — the dGPU stops
+   sleeping, ~8 W idle returns, and if it goes in `/etc/environment` it degrades **Plasma too**.
+   **Rule: nothing NVIDIA goes in `/etc/environment`. Session-scoped inside `hyprland.conf` only.**
+   The G14 renders on the **iGPU** (`card2`, renderD129, AMD); the dGPU is `card1`/renderD128 and
+   should stay asleep. Hyprland must be pointed at the AMD node, not NVIDIA.
+3. **What Plasma-only work stops existing under a Hyprland session** (none of it is *lost*, it just
+   does not run there): all 5 `kcm_luminos_*` System Settings modules; the 3 Plasma widgets
+   (`powerwidget`, `ramwidget`, `monitorwidget`); the **SUPER+SPACE HIVE popup** (a KDE global
+   shortcut — must be rebound in `hyprland.conf`); `luminos-ram`'s **KWin D-Bus** integration; the
+   `org.luminos.livewallpaper` plugin; the SDDM-Breeze/lock-screen match (DECISION 28).
+   **The 5 Go daemons are systemd *system* units and are unaffected** — power, thermal and fan
+   control keep working under Hyprland.
+4. **AUR churn.** `quickshell`/`caelestia-shell` are AUR (`yay`), source-built against whatever libs
+   are live at build time. With kernel/NVIDIA pinned, a mismatch is plausible. 61 foreign packages
+   already in play.
 
-### Problem B — "it bounces straight back out" — ❌ DISPROVEN, do not chase it
-The previous handoff called this "the real bug". **It was not a bug.** Proven *before* changing
-anything, with `sudo rtcwake -m freeze -s 30`:
-- slept the **full 30 s**; `Timekeeping suspended for 25.480 seconds`
-- `ACPI: \_SB_.PEP_: Successfully transitioned to state lps0 entry`
-- `amd_pmc: SMU idlemask s0i3: 0x3ffb3eb5`
-- woke on **IRQ 9 (RTC)** — i.e. the alarm we set, nothing spurious
-- `suspend_stats`: success 0→1, fail 0
+## Plan — phased, each phase independently resumable
+**Phase 0 — make "getting back" actually true — ✅ DONE 2026-08-04**
+  a. ✅ `.gitmodules` written from the 8-row table above. All 8 URLs reachable AND all 8 pinned
+     commits proven fetchable (`--filter=blob:none --depth=1`). Run the fetches as **flat top-level
+     statements** — the sandbox silently breaks `$(...)` and some commands inside `while` loops and
+     will report every repo as unfetchable, which is a lie.
+  b. ✅ Package set → `backups/preflight-2026-08-04/` (216 explicit, 61 AUR, 1365 total w/ versions,
+     plus enabled system+user units).
+  c. ✅ `/etc` (3.4M), `~/.config` (11M), `~/.local/share` desktop dirs (3.4M) →
+     `~/luminos-backups/preflight-2026-08-04/`. **These stay OUT of git — the repo is public and
+     they contain wifi passwords and tokens.**
+  d. ✅ Timeshift snapshot **`2026-08-04_14-35-50`** ("PRE-HYPRLAND baseline"). See the disk
+     incident below — the config had to be fixed first.
+  e. ✅ Escape card at `docs/ESCAPE-CARD.md`, every claim in it verified by running it.
+  f. ✅ Session black-box `scripts/luminos-session-recorder` + user unit
+     `luminos-session-recorder.service`, enabled and tested end-to-end.
 
-The 2026-08-01 "suspend loop" was `upowerd` firing **critical-battery** suspends while the user kept
-**opening the lid**. The final suspend had no exit because **the battery died.** Nothing to fix.
+### 🔥 Disk incident during Phase 0 — READ THIS, IT WILL RECUR
+The first timeshift run **filled the root filesystem to 0 bytes free** and, in doing so,
+**truncated `scripts/luminos-session-recorder` to 0 bytes** (it was untracked, so the work was
+simply gone and had to be rewritten). Timeshift snapshots root *onto root* — same partition,
+`/dev/nvme0n1p5`, 619 G.
 
-Corollaries that also turned out to be noise, not causes:
-- The `\_SB.PCI0.GPP7.CADR` / `ACPI Error: Aborting method \_SB.PEP._DSM` pair fires only on the
-  **exit** path and does not prevent s0ix. AMI GA403UU.306 firmware defect. **Benign — leave the
-  BIOS alone.**
-- `mmc0` / `rtsx_pci_sdmmc` logs ~12 errors per boot with **no card inserted** and fired one wakeup
-  event without preventing a full 30 s sleep.
+Cause: timeshift's exclude list was only `/home/shawn/**` and `/root/**`, so it was trying to copy
+`/srv/media` (82 G) and `/opt/rocm` + `/opt/cuda` (33 G) as if they were operating system. Its own
+config recorded `snapshot_size: 174 GB` against 117 G free. It could never have fitted.
 
-### Problem C — config hygiene — ✅ FIXED
-`/etc/systemd/sleep.conf` line 2 (`SuspendMode=s2idle`) was removed from systemd upstream and logged
-`Support for option SuspendMode= has been removed` twice per suspend. Line dropped, comment left in
-its place. `SuspendState=freeze` is the line that actually selects s2idle.
+Fix applied (original saved as `/etc/timeshift/timeshift.json.bak-2026-08-04`) — added excludes:
+`/srv/**`, `/opt/rocm/**`, `/opt/cuda/**`, `/var/cache/pacman/pkg/**`,
+`/var/lib/systemd/coredump/**`, `/swapfile`. Snapshot then took **135 s and 8 G**.
 
-Rule 10 debt from 2026-06-03 (no §9 rows, no DECISION entry for the lid config) is now cleared.
+Lessons that generalise:
+- **`df -h /` before anything that writes in bulk.** A full root presents as unrelated random
+  breakage — truncated files, failed logins, half-finished pacman transactions.
+- **Commit early.** Untracked work has no floor under it.
+- A `foo/**` exclude skips the *contents* and leaves an empty `foo/` — which is what you want,
+  the directory survives a restore. Verify with `ls -A`, not `test -e`; `test -e` says "present"
+  for the empty stub and looks like the exclude failed.
+- Excluding `/var/cache/pacman/pkg` is deliberate: it keeps the 12 G / 760-package downgrade
+  cache safe from being wiped by a restore.
 
-## ⚠️ THE TRAP THAT COST THIS THREAD ITS TIME — read before touching PowerDevil again
-**PowerDevil 6.7 keys live under a *subgroup*, and a wrong group is silently accepted.**
+**Phase 1 — decision + docs**: LUMINOS_DECISIONS.md ban reversal, AGENTS.md §1 amended.
+**Phase 2 — system upgrade, on its own, with nothing else changing.** Handle `IgnorePkg`
+  deliberately, `-Syu`, rebuild DKMS, reboot, confirm Plasma + dGPU 0 W gating still good
+  (`scripts/luminos-verify`). **Stop here for a day if anything looks off.** Do not stack an
+  upgrade and a compositor install into one blast radius.
+**Phase 3 — Hyprland only** (no Caelestia yet): install, minimal config, log out, pick Hyprland at
+  SDDM, confirm it starts, confirm dGPU still asleep, log out, back to Plasma.
+**Phase 4 — Caelestia Shell** on top of a Hyprland that is already known good.
+**Phase 5 — reconnect Luminos**: rebind SUPER+SPACE → HIVE popup, decide what replaces the widgets.
 
-The first fix wrote `LidAction=1` under a bare `[AC]` group in `~/.config/powerdevilrc`. KConfig
-parsed it. `inotifywait` proved PowerDevil **opened the file**. It did **nothing**.
+## Escape card — ✅ WRITTEN, at `docs/ESCAPE-CARD.md`
+Full version is in that file and every command in it was verified by running it. The user should
+photograph it before Phase 2 — a card readable only on the broken machine is not a card. Core:
+- **`Ctrl`+`Alt`+`F3`** → text login (TTY3). `F1`/`F2` gets back to the graphical one.
+- **The agent survives a dead GUI**: `/usr/bin/claude` → `claude-code` **v2.1.101**, confirmed
+  installed as a symlink to `../lib/node_modules/@anthropic-ai/claude-code/cli.js`.
+  `cd ~/luminos-os && claude` from any TTY, and it reads this file to pick up the thread.
+- **What broke, without needing memory**: `scripts/luminos-session-recorder --show`.
+- Plasma is still there and unmodified; pick it from the SDDM session picker.
+- Roll back the OS: `sudo timeshift --restore --snapshot '2026-08-04_14-35-50'` (works from a TTY).
+  **This does not touch `/home`, `/srv` or the pacman cache** — see the exclude list above — so it
+  cannot undo a bad `~/.config`; for that use `~/luminos-backups/preflight-2026-08-04/`.
+- Downgrade one package instead: 760 cached versions in `/var/cache/pacman/pkg` (12 G), exact
+  prior versions in `backups/preflight-2026-08-04/pkgs-all-with-versions.txt`.
+- **`systemctl status luminos-power`** — if fans are dead at high temp, `sudo systemctl restart luminos-power`.
 
-- PowerDevil ships **no `.kcfg`** — the schema is compiled in. `ProfileSettings` is a
-  `KConfigSkeleton` over **`powerdevilrc`**, group = the bare profile id (`AC`, `Battery`,
-  `LowBattery`), and items are registered against **subgroups**:
-  `SuspendAndShutdown`, `Display`, `Keyboard`, `Performance`, `RunScript`.
-- **The live key is `[AC][SuspendAndShutdown] LidAction`.** Same silent-success shape as
-  BUG-088/089.
-- `~/.config/powermanagementprofilesrc` is the **legacy Plasma-5** file. It is no longer read for
-  these settings. It was **kept, not deleted** (deleting could re-trigger migration) and its
-  `lidAction` values were aligned to `1` so a re-migration cannot reimport `0`.
-- KConfigXT getters are **inline**, so `nm -D` on the action plugins shows zero ProfileSettings
-  imports. Don't read that as "it doesn't use it".
+## Session black box — ✅ INSTALLED (this is how "resume" works)
+`scripts/luminos-session-recorder`, run by the **systemd user unit**
+`~/.config/systemd/user/luminos-session-recorder.service` (`WantedBy=graphical-session.target`),
+enabled and verified — it produced `2026-08-04_14-38-19_KDE.txt`, 180 lines.
 
-**Verify like this:**
-```
-qdbus6 org.kde.Solid.PowerManagement \
-  /org/kde/Solid/PowerManagement/Actions/HandleButtonEvents lidAction     # → 1 == Sleep
-busctl get-property org.freedesktop.login1 /org/freedesktop/login1 \
-  org.freedesktop.login1.Manager HandleLidSwitch                          # → "suspend"
-```
+**Why a systemd unit and not `~/.config/autostart`:** XDG autostart is processed by the *desktop
+environment*. KDE does it; a bare Hyprland does **not**. An autostart `.desktop` would have been
+missing for exactly the session it was written to observe. `graphical-session.target` is honoured
+by Plasma today and by Hyprland when launched via **uwsm — already installed at `/usr/bin/uwsm`**,
+which is a strong reason to start Hyprland through uwsm in Phase 3 (it also gives correct
+environment propagation and xdg-desktop-autostart).
 
-**⚠️ NEVER use `triggersLidAction()` as the health check.** It returns `true` for *every*
-configuration, **including `LidAction=0`**. It reports that PowerDevil owns the lid event, not what
-PowerDevil will do. It was caught only because it was deliberately run against a config known to be
-wrong. `lidAction()` (int) is the one that tracks config — it was watched moving 1→2→0→1 under test.
+Records land in `~/luminos-backups/session-log/`. It captures disk space, the systemd-logind
+login/logout ledger, session-manager lifecycle, errors, coredumps, Hyprland's own log, the 5 Go
+daemons, dGPU sysfs power state (**never `nvidia-smi`** — BUG-078), DRM vendor IDs, last 15 pacman
+transactions, installed sessions.
 
-## Where the numbers came from (not guessed)
-The user asked for "the system default", so it was disassembled out of
-`/usr/lib/libexec/org_kde_powerdevil` rather than invented:
-- `defaultLidAction()` → `1` on the ordinary-laptop branch
-- `defaultAutoSuspendType()` → `mov $0x1,%eax` → `PowerButtonAction::Sleep`
-  (enum: `NoAction=0, Sleep=1, Hibernate=2, …`)
-- `defaultAutoSuspendIdleTimeoutSec()` → **AC 900 / Battery 600 / LowBattery 300** (non-mobile branch)
+Two design points worth not re-deriving:
+- Filtering that section by *process name alone does not work*. kwin_wayland emits hundreds of
+  routine QML/portal warnings and the video wallpaper pipes ffmpeg stream metadata through
+  `kwin_wayland_wrapper`; both flood the tail and push the real login lines off the end. It now
+  requires a process **AND** a lifecycle verb, and logind gets its own separate line budget.
+- The final status block is **conditional and reads the file back** (greps for `=== END OF RECORD ===`)
+  because Luminos scripts have a documented habit of printing success on a failed path
+  (BUG-088/089). Negative-tested: with `HOME=/proc/nonexistent-readonly` it exits 1 and says so.
 
-These are **written explicitly** into `powerdevilrc` so behaviour cannot drift if upstream changes
-its defaults.
+Useful fact discovered from the journal: **SDDM reads both `/usr/share/wayland-sessions/` and
+`/usr/local/share/wayland-sessions/`** (the latter does not currently exist). Only
+`plasma.desktop` is installed today.
 
-## Live config now in place
-`~/.config/powerdevilrc`:
-```
-[AC][SuspendAndShutdown]
-AutoSuspendAction=1
-AutoSuspendIdleTimeoutSec=900
-LidAction=1
+## Crash-resilience rules for the install itself (the user's explicit ask)
+- **Every long build runs inside `tmux`**, detached, so it survives the agent/desktop app dying:
+  `tmux new -s hypr` → run → `Ctrl-b d` → reattach with `tmux attach -t hypr`.
+- **Update this file at the end of every phase** with exactly what was done and what is next.
+- **One phase per session.** Never two blast radii at once.
+- **Never `git add -A`** (AGENTS.md/notes rule — it is how the old API key got published, and the
+  tree still holds parked work). Stage by name.
 
-[Battery][SuspendAndShutdown]
-AutoSuspendAction=1
-AutoSuspendIdleTimeoutSec=600
-LidAction=1
+## Status right now — 2026-08-04, end of Phase 0
+**Phase 0 is COMPLETE and committed. Nothing has been installed and no package has been upgraded.
+The system is exactly as it was, plus a safety net.**
 
-[LowBattery][SuspendAndShutdown]
-AutoSuspendAction=1
-AutoSuspendIdleTimeoutSec=300
-LidAction=1
-```
+In place and verified:
+- `.gitmodules` (8 submodules, all URLs + pinned commits proven fetchable)
+- Timeshift snapshot `2026-08-04_14-35-50`, and a timeshift config that can actually complete
+- `/etc` + `~/.config` + `~/.local/share` tarballs in `~/luminos-backups/preflight-2026-08-04/`
+- package/unit inventory in `backups/preflight-2026-08-04/`
+- `docs/ESCAPE-CARD.md`
+- session black-box recorder, enabled as a systemd user unit
 
-## Known limits of the verification — state these, do not gloss them
-- **The idle timer has no D-Bus readback.** `SuspendSession` exposes only
-  `suspendToRam/suspendToDisk/suspendHybrid` plus the `aboutToSuspend`/`resumingFromSuspend`
-  signals, and PowerDevil logs no "registering idle timeout" line. Confidence rests on it living in
-  the same group that was *proven* live via `LidAction`. Not the same as a direct observation.
-- **The physical lid switch was never actuated** — no hinge, no hands. `lidAction()` returning `1`
-  says what PowerDevil *will* do, not that it did it.
+**NEXT: Phase 1** — add a numbered `LUMINOS_DECISIONS.md` entry reversing the Hyprland ban
+(scope: Hyprland is an *additional, opt-in session*; Plasma stays the default), and amend
+`AGENTS.md` §1 so the banned list stops contradicting reality. Phase 1 changes only documents —
+it is safe to do from a session that might die.
 
-## Ruled OUT — do not chase these
-- **`SYSTEMD_SLEEP_FREEZE_USER_SESSIONS=false` is NOT a Luminos customization.** It ships from
-  nvidia-utils at `/usr/lib/systemd/system/systemd-suspend.service.d/10-nvidia-no-freeze-session.conf`.
-  Vendor default. The "This is not recommended" log line is nvidia's, not ours.
-- **`/sys/power/mem_sleep` = `[s2idle]` only.** There is no `deep`/S3 on this platform. That is
-  normal for modern AMD laptops, not a misconfiguration.
-- **The forex bot was not a blocker** — `forex-bot.service` was `inactive` (down from BUG-080).
-  It **will** matter again once BUG-080 is fixed — it is **live trading**. Re-check `is-active`
-  before any future suspend test; do not assume.
-- `supergfxctl` is `enabled`/`active` in Hybrid mode; `/etc/modprobe.d/supergfxd.conf` is
-  auto-generated and dates to 2026-04-11. Not a new change.
+**Then Phase 2** (`pacman -Syu`) — that one ends in a reboot and WILL kill the chat session.
+Before starting it, tell the user to photograph `docs/ESCAPE-CARD.md`.
 
-## Gotchas for this thread
-- **`systemctl show systemd-logind -p HandleLidSwitch` prints NOTHING** — those are *Manager* D-Bus
-  properties, not unit properties, so it silently returns empty rather than erroring. Use `busctl`.
-  An empty result reads as "unset" and is a trap.
-- **PowerDevil, not logind, owns the lid** while Plasma runs — it holds a **`block`** inhibitor on
-  `handle-lid-switch`. The logind drop-in is only the SDDM / bare-TTY / post-logout fallback.
-  Changing only logind changes nothing for a logged-in user.
-- Kernel timestamps across a suspend are flushed at resume, so freeze→suspend→resume can share one
-  timestamp. Bracket with `PM: suspend entry` / `PM: suspend exit`, and cross-check
-  `Timekeeping suspended for N seconds`.
+---
 
-## Backups taken
-`~/luminos-os/backups/power-2026-08-02/` — `powermanagementprofilesrc`, and
-`etc/{luminos-nolidsleep.conf, 99-luminos-lid.rules, sleep.conf}`.
-Repo `systemd/`: `luminos-nolidsleep.conf` removed (also `git rm --cached`), `luminos-lidsleep.conf`
-added. `99-luminos-lid.rules` and `luminos-lid.service` kept **byte-identical** so the 2026-06-03
-behaviour is restorable.
-
-## Next steps
-1. **Decide on the `mmc0` residual above** — accept the occasional lost first attempt, or trade the
-   SD reader away. User's call.
-2. **BUG-082 (video wallpaper freezes on resume) — HALF-verified, do not close it yet.**
-   A real 40 h suspend/resume finally happened (2026-08-03 16:56). Confirmed after it: plasmashell
-   **never restarted** (`ActiveEnterTimestamp` still 2026-08-01 23:55, elapsed matches uptime), and
-   there are zero wallpaper/QML/gstreamer errors in the journal since resume. That is *necessary but
-   not sufficient* — plasmashell was at 0.0% CPU, which per BUG-083's `ObscurePolicy` is exactly what
-   a correctly-**paused** wallpaper looks like as well as a frozen one. **The remaining check needs a
-   human: show the desktop and confirm the video is actually moving.**
-3. The **idle** path (900/600/300 s) is configured but has never actually been observed firing —
-   the lid close always got there first. Worth catching once in the journal.
+# Recently closed — sleep/suspend (2026-08-02/03) — DONE, do not redo
+Lid close + idle suspend re-enabled and **proven in the wild** (40 h s2idle, `Aug 02 00:50` →
+`Aug 03 16:56`). BUG-091 / DECISION 38 / AGENTS.md §9 all written.
+Traps worth remembering:
+- **PowerDevil 6.7 keys live in a *subgroup*: `[AC][SuspendAndShutdown] LidAction`.** A bare `[AC]`
+  group parses fine and does nothing.
+- **Never health-check with `triggersLidAction()`** — it returns `true` for every config including
+  `LidAction=0`. Use `lidAction()` (int) via `qdbus6 … HandleButtonEvents lidAction`.
+- **`systemctl show systemd-logind -p HandleLidSwitch` prints nothing** (Manager D-Bus property, not
+  a unit property). Use `busctl`.
+- Kernel log timestamps all flush at resume — ~41 `Timekeeping suspended` lines sharing one
+  timestamp are **not** 41 suspends. Count `PM: suspend entry`/`exit`.
+Residuals still open:
+1. **`mmc0` (empty SD reader) eats roughly the first suspend attempt** — `PM: active wakeup source:
+   mmc0`, PowerDevil retries ~11 s later and succeeds. Fix costs the SD reader entirely → user's
+   call, untouched.
+2. **BUG-082 (video wallpaper on resume) is HALF-verified.** plasmashell never restarted and there
+   are no QML/gstreamer errors post-resume, but 0.0 % CPU looks identical for "correctly paused" and
+   "frozen". **Needs a human to look at the desktop and say whether the video moves.**
+3. The **idle** suspend path (900/600/300 s) is configured but has never been caught firing — the
+   lid always beat it.
 
 ---
 
@@ -258,6 +324,7 @@ behaviour is restorable.
   look. Re-enabling it in System Settings silently undoes DECISION 30.
 - **NOT installed:** `systemd/luminos-theme-sync.{path,service}` exist in the repo but were never
   copied to `~/.config/systemd/user/`. Ask before installing.
+- ⚠️ **All of this is Plasma-only and becomes irrelevant inside a Hyprland session.**
 
 ## Wallpaper (BUG-083 / BUG-082, DECISION 32) — DONE
 - `ObscurePolicy` (int: 0 never / 1 fullscreen / 2 desktop-hidden, **default 2**) replaced the old
@@ -267,9 +334,6 @@ behaviour is restorable.
   (`~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/`), not the repo. Deploy recipe at the
   bottom of this file.
 - **KWin's "Show Desktop" does NOT set `IsMinimized`** — useless for testing the occlusion guard.
-- BUG-082 (video freezes on resume) is **fixed but still never live-verified**. It needed a real
-  suspend/resume, which was blocked by the lid/suspend thread — **that block is now gone (2026-08-02).
-  Verify it on the next real resume.**
 
 ## Memory / hardware ceiling — settled
 - **15.6 GiB is the planning ceiling.** 4× soldered Micron LPDDR5, no SO-DIMM. But **"impossible to
@@ -298,12 +362,15 @@ behaviour is restorable.
   drkonqi launcher. `luminos-lid` called it on every lid event — **that path was removed 2026-08-02**
   with the udev rule, so this trigger is gone. Others may remain.
 - **BUG-086 (OpenRouter key) is CLOSED/WONTFIX** — dead account, user dropped it 2026-07-25.
-  **Do not re-raise rotation.**
+  **Do not re-raise rotation.** (`.claude/settings1.json` is still tracked in git; `.gitignore` has
+  `.claude/` but gitignore does not untrack an already-tracked file.)
 - **BUG-080 open** — Wine 11.8→11.13 broke the MT5/forex stack. Live-trading infra; needs a
-  deliberate window.
+  deliberate window. **Re-check `systemctl is-active forex-bot` before any reboot** — it is live
+  trading, and Phase 2/3 above both involve reboots.
 
 ## Repo hygiene — READ BEFORE COMMITTING
-- **`git push` is on hold by explicit user decision.** 11+ commits unpushed. Commit locally only.
+- **The old "push is on hold / 11 commits unpushed" note is STALE and was removed 2026-08-04.**
+  `main` == `origin/main`.
 - **Never `git add -A`.** That is how the API key got published, and the tree still holds parked
   work that must not ride along: `share/`, `scripts/luminos-wine-*`, `scripts/luminos-ubuntu-look`,
   `systemd/luminos-theme-sync.*`, `systemd/luminos-ubuntu-look.service`, the `cmd/luminos-power`
@@ -314,17 +381,6 @@ behaviour is restorable.
   `scripts/` helper, check its "done" message is *conditional*.
 - **`luminos-brain safe` keyword-matches, it does not reason** — it has blocked correct plans with an
   unrelated canned reason. That is open task 0b.
-
-## Files relevant to the active thread
-- `~/.config/powerdevilrc` — **the live one.** `[<profile>][SuspendAndShutdown]`, subgroup mandatory
-- `~/.config/powermanagementprofilesrc` — legacy Plasma-5; kept, values aligned, no longer read
-- `/etc/systemd/logind.conf.d/luminos-lidsleep.conf` (repo: `systemd/luminos-lidsleep.conf`)
-- `/etc/systemd/sleep.conf` — dead `SuspendMode=` line removed
-- `/etc/udev/rules.d/99-luminos-lid.rules` — **deleted** (backed up; repo copy kept for restore)
-- `/etc/systemd/system/luminos-lid.service` + `/usr/local/bin/luminos-lid` — still installed,
-  now unreachable (`static`, and its only trigger was the deleted udev rule)
-- Docs written for this: `AGENTS.md` §9, `LUMINOS_DECISIONS.md` **DECISION 38**, `docs/BUGS.md`
-  **BUG-091**, `LUMINOS_STATUS.md`
 
 ### Wallpaper deploy / reload recipe
 ```

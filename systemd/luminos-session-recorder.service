@@ -1,0 +1,26 @@
+[Unit]
+# [CHANGE: claude-code | 2026-08-04]
+# Runs the session black-box at every graphical login.
+#
+# WHY A SYSTEMD UNIT AND NOT ~/.config/autostart:
+# ~/.config/autostart is processed by the desktop environment. KDE Plasma does
+# it; a bare Hyprland does NOT. Since the entire reason this exists is to record
+# what happened during a Hyprland session, an autostart .desktop would be
+# missing for exactly the case it was written for.
+# graphical-session.target is honoured by Plasma today and by Hyprland when it
+# is launched through uwsm (already installed at /usr/bin/uwsm), so this unit
+# fires under both.
+Description=Luminos session recorder (graphical-login black box)
+Documentation=file:///home/shawn/luminos-os/scripts/luminos-session-recorder
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/shawn/luminos-os/scripts/luminos-session-recorder
+# The script is self-verifying and exits 1 if the record is short or missing;
+# leave that failure visible in the journal rather than swallowing it.
+RemainAfterExit=no
+
+[Install]
+WantedBy=graphical-session.target

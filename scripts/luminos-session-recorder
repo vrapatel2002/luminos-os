@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# luminos-session-recorder — [CHANGE: claude-code | 2026-08-04]
+#
+# WHY THIS EXISTS
+# When the user logs out to try a different compositor (Hyprland), the agent
+# helping them is inside a desktop app that dies with the session. Whatever went
+# wrong during that gap is invisible on return — and worse, Hyprland writes its
+# own log into $XDG_RUNTIME_DIR, which systemd-logind DELETES at the last logout.
+# The single most useful piece of evidence destroys itself in the act of coming
+# back to report the problem.
+#
+# This script runs at every graphical login (via ~/.config/autostart) and writes
+# a dated snapshot of what just happened to ~/luminos-backups/session-log/.
+# On return the user says one word and the agent reads a real record instead of
+# a description.
+#
+# It is deliberately READ-ONLY about hardware. It NEVER calls nvidia-smi:
+# nvidia-smi takes a runtime-PM reference and wakes a sleeping dGPU (BUG-078).
+# GPU state is read from sysfs, which is side-effect free.
+#
+# Usage:
+#   luminos-session-recorder            # normal: record this login
+#   luminos-session-recorder --test     # write to a temp dir, print path, no notify
+#   luminos-session-recorder --show     # print the most recent record
+set -uo pipefail
+
+OUTDIR="${HOME}/luminos-backups/session-log"
+NOTIFY=1
+case "${1:-}" in
+  --test) OUTDIR="$(mktemp -d /tmp/session-recorder-test.XXXX)"; NOTIFY=0 ;;
+  --show)
+      latest="$(ls -1t "${HOME}/luminos-backups/session-log"/*.txt 2>/dev/null | head -1)"
+      if [ -n "$latest" ]; then cat "$latest"; exit 0
+      else echo "no session records found in ${HOME}/luminos-backups/session-log" >&2; exit 1; fi ;;
+esac
+
+mkdir -p "$OUTDIR" || { echo "recorder: cannot create $OUTDIR" >&2; exit 1; }
+
+STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
+SESS="${XDG_SESSION_DESKTOP:-${DESKTOP_SESSION:-unknown}}"
+OUT="${OUTDIR}/${STAMP}_${SESS}.txt"
+
+# Everything below appends to $OUT. Each block is individually fault-tolerant:
+# a missing tool must not abort the record.
+{
+  echo "==============================================================="
+  echo " LUMINOS SESSION RECORD"
+  echo " written: $(date -Iseconds)"
+  echo "==============================================================="
+  echo
+  echo "--- WHICH SESSION AM I IN ---"
+  echo "XDG_SESSION_DESKTOP = ${XDG_SESSION_DESKTOP:-<unset>}"
+  echo "XDG_CURRENT_DESKTOP = ${XDG_CURRENT_DESKTOP:-<unset>}"
+  echo "DESKTOP_SESSION     = ${DESKTOP_SESSION:-<unset>}"
+  echo "XDG_SESSION_TYPE    = ${XDG_SESSION_TYPE:-<unset>}"
+  echo "HYPRLAND_INSTANCE_SIGNATURE = ${HYPRLAND_INSTANCE_SIGNATURE:-<unset>}"
+  echo "uptime: $(uptime -p 2>/dev/null || echo '?')"
+  echo "boot id: $(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo '?')"
+  echo
+
+  # A full root filesystem breaks logins, truncates files that are being written,
+  # and makes pacman fail halfway through a transaction. It is cheap to check and
+  # it is the first thing worth ruling out, so it goes near the top.
+  echo "--- DISK SPACE (a full root silently destroys sessions and files) ---"
+  df -h / /boot /home 2>/dev/null | grep -vE '^Filesystem' | sort -u \
+    || echo "(df unavailable)"
+  root_pct="$(df --output=pcent / 2>/dev/null | tr -dc '0-9')"
+  if [ -n "$root_pct" ] && [ "$root_pct" -ge 95 ] 2>/dev/null; then
+    echo "!! WARNING: root is ${root_pct}% full — treat this as the prime suspect."
+  fi
+  echo
+
+  echo "--- LOGIN / LOGOUT LEDGER THIS BOOT (authoritative) ---"
+  # systemd-logind is the only component that definitively knows a session began
+  # or ended. Give it its own line budget so a chatty compositor can never crowd
+  # it out of the record.
+  journalctl -b --no-pager -o short-iso -t systemd-logind 2>/dev/null | tail -25 \
+    || echo "(no logind lines found)"
+  echo
+
+  echo "--- SESSION MANAGER / COMPOSITOR LIFECYCLE THIS BOOT ---"
+  # Filtering on process name ALONE does not work here. kwin_wayland emits
+  # hundreds of routine QML/portal warnings, and the video wallpaper pipes
+  # ffmpeg's stream metadata through kwin_wayland_wrapper. Both flood the tail
+  # and push the handful of lines that matter off the end. So: require BOTH a
+  # relevant process AND a lifecycle verb, drop indented continuation lines,
+  # then drop the known-chatty recurring messages by name.
+  journalctl -b --no-pager -o short-iso 2>/dev/null \
+    | grep -iE 'sddm|startplasma|Hyprland|kwin_wayland|caelestia|quickshell' \
+    | grep -iE 'start|stop|exit|quit|crash|abort|kill|signal|segfault|fatal|died|terminat|launch|greeter|session' \
+    | grep -vE '\]:[[:space:]]{2,}' \
+    | grep -viE 'Failed to delay sleep|used before its declaration|kwin-portal-bridge' \
+    | tail -40 || echo "(no session-manager lines found)"
+  echo
+
+  echo "--- ERRORS / FAILURES THIS BOOT ---"
+  journalctl -b -p err --no-pager -o short-iso 2>/dev/null | tail -40 \
+    || echo "(journalctl unavailable)"
+  echo
+
+  echo "--- COREDUMPS THIS BOOT (a crash leaves one even if the log is gone) ---"
+  coredumpctl list --since "$(uptime -s 2>/dev/null || echo '-1 day')" --no-pager 2>/dev/null | tail -15 \
+    || echo "(none, or coredumpctl unavailable)"
+  echo
+
+  echo "--- HYPRLAND LOGS ---"
+  # Live session log (only present while Hyprland is the CURRENT session).
+  if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR}/hypr" ]; then
+    echo "runtime logs present under ${XDG_RUNTIME_DIR}/hypr:"
+    find "${XDG_RUNTIME_DIR}/hypr" -name '*.log' -exec ls -l {} \; 2>/dev/null
+    echo "--- tail of each ---"
+    find "${XDG_RUNTIME_DIR}/hypr" -name '*.log' -exec tail -40 {} \; 2>/dev/null
+  else
+    echo "(no live Hyprland runtime dir — expected when not in a Hyprland session)"
+  fi
+  echo
+  echo "persisted Hyprland session logs (written by luminos-hyprland-session wrapper):"
+  ls -lt "${HOME}/luminos-backups/hypr-session"/*.log 2>/dev/null | head -5 \
+    || echo "(none yet — wrapper not installed or Hyprland never started)"
+  echo
+
+  echo "--- LUMINOS GO DAEMONS (must survive any compositor) ---"
+  for u in luminos-power luminos-sentinel luminos-router luminos-ai luminos-ram; do
+    printf '%-20s %s\n' "$u" "$(systemctl is-active "$u" 2>/dev/null || echo unknown)"
+  done
+  echo
+
+  echo "--- dGPU POWER STATE (sysfs only — never nvidia-smi, see BUG-078) ---"
+  DG=/sys/bus/pci/devices/0000:01:00.0
+  if [ -d "$DG" ]; then
+    echo "runtime_status  : $(cat $DG/power/runtime_status 2>/dev/null || echo '?')"
+    echo "control         : $(cat $DG/power/control 2>/dev/null || echo '?')"
+    echo "d3cold_allowed  : $(cat $DG/d3cold_allowed 2>/dev/null || echo '?')"
+    echo "suspended_time  : $(cat $DG/power/runtime_suspended_time 2>/dev/null || echo '?') ms"
+    echo "active_time     : $(cat $DG/power/runtime_active_time 2>/dev/null || echo '?') ms"
+  else
+    echo "(dGPU PCI node not found at $DG)"
+  fi
+  echo
+
+  echo "--- DRM DEVICES (card numbering is NOT stable across machines) ---"
+  for c in /sys/class/drm/card*/device/vendor; do
+    [ -e "$c" ] || continue
+    card="${c%/device/vendor}"
+    printf '%-28s vendor=%s\n' "${card##*/}" "$(cat "$c" 2>/dev/null)"
+  done
+  echo "  (0x1002 = AMD iGPU / 0x10de = NVIDIA dGPU)"
+  echo
+
+  echo "--- LAST 15 PACMAN TRANSACTIONS ---"
+  grep -E '\[ALPM\] (installed|removed|upgraded)' /var/log/pacman.log 2>/dev/null | tail -15 \
+    || echo "(pacman log unreadable)"
+  echo
+
+  echo "--- INSTALLED SESSIONS (what the login screen offers) ---"
+  ls -1 /usr/share/wayland-sessions/ /usr/share/xsessions/ 2>/dev/null || echo "(none)"
+  echo
+  echo "=== END OF RECORD ==="
+} >> "$OUT" 2>&1
+
+# ---- Final status. MUST be conditional: Luminos scripts have a documented habit
+# ---- of printing success on a failed path (BUG-088, BUG-089). Verify by reading back.
+if [ -s "$OUT" ] && grep -q '=== END OF RECORD ===' "$OUT"; then
+    echo "luminos-session-recorder: wrote $OUT ($(wc -l < "$OUT") lines)"
+    if [ "$NOTIFY" = "1" ] && command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "Luminos" -i dialog-information \
+          "Session recorded" \
+          "Session: ${SESS}\nSay \"resume\" to Claude — the record is ready." 2>/dev/null || true
+    fi
+    exit 0
+else
+    echo "luminos-session-recorder: FAILED — $OUT is missing, empty, or truncated" >&2
+    exit 1
+fi

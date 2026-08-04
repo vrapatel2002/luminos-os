@@ -1,0 +1,53 @@
+; .gitmodules — [CHANGE: claude-code | 2026-08-04]
+;
+; WHY THIS FILE EXISTS
+; The repo has recorded 8 submodule commit pointers (mode 160000 entries in the
+; index) since long before this date, but no .gitmodules file was ever committed.
+; Git therefore stored *which commit* to check out but not *where to fetch it
+; from*, so `git clone git@github.com:vrapatel2002/luminos-os.git` produced 8
+; EMPTY directories with no error. The repo looked fully backed up and was not.
+;
+; The URLs below were recovered from the live local checkouts on the G14 with
+; `git -C <path> remote get-url origin`, and every one was confirmed reachable
+; with `git ls-remote` on 2026-08-04 before being written here.
+;
+; To restore all submodule content on a fresh clone:
+;   git clone --recurse-submodules git@github.com:vrapatel2002/luminos-os.git
+; or, in an existing clone:
+;   git submodule update --init --recursive
+;
+; NOTE: this file restores the *map*, not the content. Submodule content still
+; lives upstream. If an upstream repo disappears or force-pushes away the pinned
+; commit, only the local checkout on this machine holds it.
+
+[submodule "reference_code/Triton-XDNA"]
+	path = reference_code/Triton-XDNA
+	url = https://github.com/amd/Triton-XDNA.git
+
+[submodule "reference_code/dragon-npu"]
+	path = reference_code/dragon-npu
+	url = https://github.com/In2infinity/dragon-npu.git
+
+[submodule "reference_code/mlir-aie"]
+	path = reference_code/mlir-aie
+	url = https://github.com/Xilinx/mlir-aie.git
+
+[submodule "reference_code/xdna-driver"]
+	path = reference_code/xdna-driver
+	url = https://github.com/amd/xdna-driver.git
+
+[submodule "research/turboquant/repo-ggml"]
+	path = research/turboquant/repo-ggml
+	url = https://github.com/ggml-org/llama.cpp
+
+[submodule "research/turboquant/repo-main"]
+	path = research/turboquant/repo-main
+	url = https://github.com/ggerganov/llama.cpp
+
+[submodule "research/turboquant/repo-pytorch"]
+	path = research/turboquant/repo-pytorch
+	url = https://github.com/tonbistudio/turboquant-pytorch
+
+[submodule "research/turboquant/repo-thetom-correct"]
+	path = research/turboquant/repo-thetom-correct
+	url = https://github.com/TheTom/llama-cpp-turboquant
