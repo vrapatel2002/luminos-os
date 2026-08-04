@@ -1720,3 +1720,67 @@ Delete the session file and restart the login manager; nothing else is touched:
 
 Full OS rollback if an upgrade rather than the compositor is the problem: timeshift snapshot
 `2026-08-04_14-35-50`. See `docs/ESCAPE-CARD.md`.
+
+---
+
+## DECISION 40 — Caelestia Shell is the Hyprland shell; power-profiles-daemon is installed but permanently masked
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+
+**Status:** implemented 2026-08-04. Proven in a nested session; not yet exercised on a real login.
+
+### What was decided
+Caelestia Shell provides the bar, launcher, notifications and OSDs for the Hyprland session
+(DECISION 39). Installed from the AUR: `caelestia-shell 2.2.0-1`, `caelestia-cli 1.1.2-1`,
+`quickshell-git 0.3.0.r20.g28771c7-1`. Started by `exec-once = qs -c caelestia`.
+
+This does not violate the Qt-only UI rule. Caelestia is **Quickshell — Qt6/QML**. The banned shell
+was **HyprPanel**, which is GTK4, and it stays banned.
+
+### The awkward part: a forced dependency on power-profiles-daemon
+`caelestia-shell` **hard-depends** on `power-profiles-daemon`. It could not be installed without it,
+and the dependency is not optional.
+
+That is a direct threat to the thermal stack. `power-profiles-daemon` and `asusd` both write
+`/sys/firmware/acpi/platform_profile`. Everything this project has built on top of that file —
+`luminos-power`, the Conductor PID work (BUG-079), the workload-aware fan setpoints — assumes
+**`asusd` is the sole writer**. Two daemons fighting over one sysfs file is exactly the class of
+bug that is miserable to diagnose, because the symptom is intermittent thermal misbehaviour with
+nothing in any log.
+
+**Resolution: install it, then mask it.** `systemctl mask` was applied *before* it ever had a
+chance to start. Masking is the right tool rather than `disable`, because it blocks **D-Bus
+activation** as well as systemd start — and D-Bus activation is precisely how a desktop shell would
+have woken it. `/usr/share/dbus-1/system-services/*.service` delegates via `SystemdService=`, so
+the mask covers that path too.
+
+The mask was **negative-tested**, not assumed: an activation request over D-Bus returns
+`unit is masked`. (Checking `is-enabled` alone would not have proven the D-Bus path was closed —
+that is the BUG-088/089 "the tool reported success while doing nothing" failure mode.)
+
+### The accepted cost
+Caelestia's battery popout contains a power-profile switcher
+(`modules/bar/popouts/Battery.qml:205` — `onClicked: PowerProfiles.profile = parent.profile`).
+With ppd masked, those buttons do nothing.
+
+This is accepted, and it is the right way round: battery level and charge state still display
+correctly, and **profile switching is owned by `asusctl` / `luminos-power`**, which is where the
+tuned setpoints live. A shell button that silently fought the thermal daemon would be worse than a
+button that does nothing. Rewiring that widget to `asusd` is a candidate for Phase 5.
+
+**Do not unmask `power-profiles-daemon` to "fix" the battery widget.** That trades a cosmetic dead
+button for unpredictable thermal behaviour.
+
+### Why `qs -c caelestia` and not `caelestia shell -d`
+Both are supported upstream. `qs` is the direct Quickshell invocation with no CLI wrapper in the
+path, so a startup failure surfaces in the Hyprland log instead of being swallowed by a
+daemonising helper.
+
+It runs as an `exec-once`, **not** as a systemd user unit, because it needs
+`HYPRLAND_INSTANCE_SIGNATURE`. Without that variable the shell still loads and reports
+"Configuration Loaded", but every Hyprland binding is silently dead — the workspace widget and
+window list stop updating with no error. An `exec-once` inherits the variable for free.
+
+### Reversal
+Comment out `exec-once = qs -c caelestia`; Hyprland then runs bare. To remove entirely:
+`pacman -Rns caelestia-shell caelestia-cli quickshell-git`. Package inventory taken before the
+install is in `backups/pre-caelestia-2026-08-04/`. Plasma is unaffected either way.

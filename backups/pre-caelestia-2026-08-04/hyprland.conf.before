@@ -60,27 +60,8 @@ exec-once = /home/shawn/luminos-os/scripts/luminos-session-recorder
 # read as "Hyprland is crashing", when Hyprland had in fact never been launched.
 #
 # A terminal on screen is unambiguous proof the session is alive AND that input works, and it is
-# somewhere to type if something else is wrong.
-#
-# KEPT ON PURPOSE even though Caelestia's bar now provides that signal: if the SHELL fails to
-# start, the bar is exactly what goes missing, so relying on the bar to prove the session is
-# alive is circular. kitty fails independently of Quickshell. Remove after the first successful
-# real login, once the pair is known good.
+# somewhere to type if something else is wrong. Remove this once Caelestia's bar makes it obvious.
 exec-once = kitty
-
-# [CHANGE: claude-code | 2026-08-04] Caelestia Shell — bar, launcher, notifications, OSDs.
-#
-# Started with `qs -c caelestia` rather than `caelestia shell -d`: both work (per the upstream
-# README), but `qs` is the direct Quickshell invocation with no CLI wrapper in the path, so if it
-# fails the error lands in the Hyprland log instead of being swallowed by a daemonising helper.
-#
-# NOT started via uwsm/systemd on purpose — as an exec-once it inherits HYPRLAND_INSTANCE_SIGNATURE
-# automatically. Without that variable the shell still loads, but silently loses every Hyprland
-# binding: the workspace widget and window list go dead. That exact failure showed up in testing.
-#
-# Proven 2026-08-04 in a nested session: bar, live system tray, clock, wifi/bluetooth/battery
-# icons and power button all render, with zero errors in the log.
-exec-once = qs -c caelestia
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Input

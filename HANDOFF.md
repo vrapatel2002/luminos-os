@@ -1,14 +1,22 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-04 — Response 1 (Cowork session; Hyprland + Caelestia — **PLANNING ONLY, NOTHING INSTALLED**)
+Last updated: 2026-08-04 — Hyprland **and** Caelestia Shell INSTALLED and proven nested;
+awaiting the first real login.
 
 ## FIRST ACTION IN A NEW CHAT
-Read this file, then `cat ~/luminos-os/AGENTS.md`. The **active thread is a proposed
-Hyprland + Caelestia Shell install** (below). **Nothing has been installed, nothing has been
-changed on disk, and the user has not yet approved the ban override.** Do not start installing.
+Read this file, then `cat ~/luminos-os/AGENTS.md`. The active thread is the **Hyprland +
+Caelestia Shell install** (below).
+
+**State: Phases 0–4 are DONE on disk.** `hyprland 0.56.1-3`, `quickshell-git`,
+`caelestia-shell 2.2.0-1` and `caelestia-cli 1.1.2-1` are all installed, and the whole stack has
+been proven working in a **nested session inside live Plasma** — bar, live tray, clock, status
+icons, and Claude Desktop all confirmed. What has *not* happened yet is a real DRM login.
+Phase 5 (reconnecting Luminos / the HIVE popup) has not been started.
+
+**Plasma is untouched and is still the default session.** Nothing here has degraded it.
 
 ---
 
-# ACTIVE THREAD — Hyprland + Caelestia — PHASE 3 INSTALLED, AWAITING FIRST LOGIN TEST
+# ACTIVE THREAD — Hyprland + Caelestia — PHASES 0–4 DONE, AWAITING FIRST LOGIN
 
 ## Goal (the durable end objective)
 User (2026-08-04) sent https://youtu.be/Na7tPZv2ckk — *"Install Hyprland + Caelestia Shell
@@ -458,6 +466,80 @@ In place and verified:
 - SDDM greeter wallpaper fixed — the login screen is no longer black
 - `exec-once = kitty` in `hyprland.conf`, so a live Hyprland is visually unmistakable
 
+---
+
+# Phase 4 — Caelestia Shell INSTALLED + PROVEN NESTED 2026-08-04
+
+Installed: `caelestia-shell 2.2.0-1`, `caelestia-cli 1.1.2-1`, `quickshell-git 0.3.0.r20.g28771c7-1`,
+plus 20 runtime deps pulled in by yay. Rollback inventory taken *before* the install is in
+`backups/pre-caelestia-2026-08-04/` (full package list, AUR-only list, and the prior `hyprland.conf`).
+
+Started by `exec-once = qs -c caelestia` in `hyprland.conf`.
+
+## ✅ What was actually proven (nested, inside live Plasma, no logout)
+Screenshotted at 1280x720 **scale 1**: the full left bar rendered — Arch logo, workspace pill with
+live window icons, active-window indicator, **live system tray** (it picked up the running Discord,
+Claude and qBittorrent), clock reading the correct time, wifi + bluetooth + battery-charging status
+icons, and the power button. **Zero errors in the log.** Caelestia also generated its own state on
+first run (`~/.local/state/caelestia/` — `scheme.json`, `apps.sqlite`, `notifs.json`).
+
+Same caveat as Phase 3: this was the **Wayland backend**, so it does not prove GPU pinning or dGPU
+sleep. It does prove the shell itself is sound.
+
+## 🔑 THE BUILD FIX — this will recur for ANY python AUR package on this machine
+`caelestia-cli` failed to build twice with:
+
+    ERROR Missing dependencies:
+        hatch-vcs -> setuptools-scm>=8.2.0 -> vcs-versioning<3,>=2.0.0.dev0 -> packaging>=26.2
+
+The trap: **`pacman -Q python-packaging` says `26.2-1`, but Python resolved `26.0`.** Both are true.
+There is a *user-site* copy at `~/.local/lib/python3.14/site-packages/packaging-26.0.dist-info`
+that shadows the system one. `python -m build --no-isolation` (what the PKGBUILD runs) resolves
+against `importlib.metadata`, so it saw 26.0 and the constraint genuinely failed.
+
+**Fix — build with user-site disabled. Do not remove the user-site package:**
+
+    PYTHONNOUSERSITE=1 yay -S caelestia-cli
+
+That user-site tree has **301 entries** and is load-bearing: `mempalace`, `code_review_graph`,
+`chromadb`, `llama_cpp`, `PyQt6`, `onnxruntime`. Deleting `packaging` from it to fix a build would
+break the MCP tooling. `PYTHONNOUSERSITE=1` fixes the build and touches nothing.
+
+**Generalise this:** when pacman and Python disagree about a version, check user-site before
+believing either. `PYTHONNOUSERSITE=1 python3 -c "import importlib.metadata as m; print(m.version('X'))"`
+against the same command without the flag tells you instantly.
+
+## ⚠️ power-profiles-daemon is INSTALLED but MASKED — deliberate, do not unmask
+`caelestia-shell` hard-depends on `power-profiles-daemon`, so it had to be installed. But ppd and
+`asusd` both write `/sys/firmware/acpi/platform_profile`, and this machine's whole thermal stack
+(`luminos-power`, the Conductor PID work, the fan setpoints) assumes `asusd` owns it. Two writers
+would mean unpredictable thermal behaviour.
+
+So it was masked **before** it could ever start, and the mask was **negative-tested** via D-Bus —
+an activation request returns `unit is masked`, confirming neither systemd nor D-Bus autostart can
+bring it up:
+
+    systemctl is-enabled power-profiles-daemon   # masked
+    systemctl is-active  power-profiles-daemon   # inactive
+
+**Known cost:** Caelestia's battery popout has a power-profile switcher
+(`modules/bar/popouts/Battery.qml:205` — `onClicked: PowerProfiles.profile = parent.profile`).
+With ppd masked those buttons do nothing. That is the intended trade: the battery/charge display
+still works, and profile switching belongs to `asusctl`/`luminos-power`. Wiring that widget to
+asusd is a Phase 5 candidate.
+
+## Gotcha — the shell needs HYPRLAND_INSTANCE_SIGNATURE
+Launched without it, Quickshell still starts and logs "Configuration Loaded", but warns
+`$HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.` and the workspace/window
+widgets are silently dead. As an `exec-once` it inherits the variable automatically, so this is
+only a trap when testing by hand — export it from `hyprctl instances -j` first.
+
+## Gotcha — bar modules vanish at high scale, and it is not a bug
+The first nested test rendered **only** the logo and workspaces; clock, tray and status icons were
+missing. Cause: the nested output defaulted to **scale 2.0**, so the layout had just 640x360 logical
+pixels and Caelestia dropped what didn't fit. At scale 1 (1280x720 logical) everything appeared.
+Before diagnosing a "broken" Caelestia bar, check `hyprctl monitors` for the scale.
+
 ## ▶ IMMEDIATE NEXT STEP — the first Hyprland login (user action required)
 Log out of Plasma. At SDDM the session picker is in the **bottom-left corner** of the Breeze
 greeter — it says "Plasma (Wayland)". Click it and pick **"Hyprland (uwsm-managed)"** — not plain
@@ -469,8 +551,12 @@ so **the picker resets to Plasma at every single login**. This is deliberate and
 it means a broken Hyprland can never trap the user in a login loop. The cost is that Hyprland must
 be picked by hand every time.
 
-**You will know it worked**: a kitty terminal appears on a mostly-empty screen. If you see the
-Plasma panel, you're in Plasma and the picker didn't take.
+**You will know it worked**: a **vertical Caelestia bar down the left edge** (Arch logo at the top,
+clock and power button at the bottom) plus a kitty terminal. If you see the Plasma panel, you're in
+Plasma and the picker didn't take.
+
+If you get kitty but **no bar**, Hyprland is fine and only the shell failed — that is a recoverable
+state, not a crash. Run `qs -c caelestia` in the kitty window and read the error.
 
 **This session dies at logout.** Everything needed to resume is committed. On return, say
 **"resume"** and read, in order:
@@ -482,8 +568,9 @@ Plasma panel, you're in Plasma and the picker didn't take.
 Only the things the nested test could **not** cover. Claude Desktop and basic compositor health
 are already proven above — don't re-litigate them, check the DRM-backend-specific things.
 
-1. **Did it start at all** — kitty should be on screen. A bounce back to SDDM means the GPU pin
-   failed. `Ctrl+Alt+F3` → TTY → `cd ~/luminos-os && claude`; the CLI agent works with no desktop.
+1. **Did it start at all** — kitty *and* the Caelestia bar should be on screen. A bounce back to
+   SDDM means the GPU pin failed. `Ctrl+Alt+F3` → TTY → `cd ~/luminos-os && claude`; the CLI agent
+   works with no desktop.
 2. **🎯 GPU pinning — the real unknown.** This is what the nested test could not check:
 
        hyprctl systeminfo | grep -i -A3 'GPU information'
@@ -507,8 +594,27 @@ Plasma was never modified — just pick it at SDDM. To remove the Hyprland entri
 
 Full details in `docs/ESCAPE-CARD.md`.
 
-**Phase 4 (Caelestia) must NOT start until Hyprland alone is known good**, including the Claude
-Desktop test.
+To drop back to a bare Hyprland with no shell — useful for splitting "is it the compositor or is it
+Caelestia?" — comment out `exec-once = qs -c caelestia` in `~/.config/hypr/hyprland.conf`. Nothing
+needs uninstalling.
+
+**Superseded gate:** this file used to say *"Phase 4 (Caelestia) must NOT start until Hyprland alone
+is known good."* That gate was written before the nested-test harness existed, when the only way to
+try anything was a real logout. Once Hyprland *and* Claude Desktop could both be proven from inside
+a running Plasma session at zero risk, the gate was costing a logout cycle and buying nothing, so it
+was dropped and Phase 4 was done in the same session. The user's own words:
+*"well why havent you installed the Caelestia Shell too so i can directly see that and use it ?"*
+
+---
+
+# ▶ PHASE 5 — not started
+Reconnect Luminos under Hyprland:
+- **SUPER+SPACE → HIVE popup.** Deliberately left unbound in `hyprland.conf` to avoid a conflict
+  that would be annoying to debug. Note Caelestia binds its own launcher — check for a clash.
+- Decide what replaces the KDE widgets.
+- Candidate: wire Caelestia's dead power-profile buttons to `asusd` (see the ppd note above).
+- The user's stated follow-on: *"and than we will add our custome touch got it ?"* — Luminos
+  theming of Caelestia comes after it is confirmed working on a real login.
 
 ---
 

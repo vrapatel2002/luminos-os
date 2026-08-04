@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-08-02 (BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-08-04 (BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
 
@@ -679,7 +679,9 @@ Each bug entry:
   `Inherits=Humanity,hicolor` and ran the hook's `Exec` → repaired, `[Icon Theme]` at line 1.
 - Date Found: 2026-07-26 · Date Fixed: 2026-07-26
 
-### BUG-091 — SDDM login screen renders black; a healthy logout was mistaken for a Hyprland crash
+### BUG-092 — SDDM login screen renders black; a healthy logout was mistaken for a Hyprland crash
+<!-- [CHANGE: claude-code | 2026-08-04] Renumbered 091 → 092. It was first filed as BUG-091, which
+     collided with the existing suspend bug at line 157. This is the newer of the two, so it moved. -->
 - Status: ✅ FIXED
 - Severity: Low technically, HIGH in consequence — it produced a false crash report and a reboot,
   and it stalled Phase 3 of the Hyprland work.
@@ -719,3 +721,55 @@ Each bug entry:
 - Follow-on hardening: `exec-once = kitty` added to `~/.config/hypr/hyprland.conf` so a live
   Hyprland session is visually unmistakable rather than an empty dark screen.
 - Date Found: 2026-08-04 · Date Fixed: 2026-08-04
+
+### BUG-093 — pacman and Python disagreed about an installed version, and it silently broke every AUR python build
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+- Status: ✅ FIXED (worked around; nothing was removed)
+- Severity: Medium — it blocked the Caelestia install outright, and the error message pointed
+  nowhere near the actual cause.
+- Component: `~/.local/lib/python3.14/site-packages` (user-site) vs `/usr/lib/python3.14/site-packages`
+- Symptom: `yay -S caelestia-cli` failed in `build()` with:
+
+      ERROR Missing dependencies:
+          hatch-vcs -> setuptools-scm>=8.2.0 -> vcs-versioning<3,>=2.0.0.dev0 -> packaging>=26.2
+
+- **The false trail (recorded because it is convincing and wrong).** The obvious reading is a
+  missing makedep, so `python-hatch-vcs` and `python-vcs-versioning` were installed from `extra`.
+  **The build failed again with the byte-identical error.** The PKGBUILD had in fact declared
+  `python-hatch-vcs` in `makedepends` all along — the dependency was never missing.
+
+- **Root cause — two answers to "what version is installed", both true:**
+
+      pacman -Q python-packaging                          # 26.2-1
+      python3 -c "import importlib.metadata as m; print(m.version('packaging'))"   # 26.0
+
+  There is a **user-site copy** at `~/.local/lib/python3.14/site-packages/packaging-26.0.dist-info`
+  that shadows the pacman-owned 26.2 in `/usr/lib`. User-site precedes system site-packages on
+  `sys.path`. The PKGBUILD builds with `python -m build --wheel --no-isolation`, and `--no-isolation`
+  means the backend resolves against **`importlib.metadata`**, not against pacman. So Python
+  correctly saw 26.0, and `packaging>=26.2` genuinely was not satisfied. Both tools were telling
+  the truth about different files.
+
+- Fix — disable user-site for the build only:
+
+      PYTHONNOUSERSITE=1 yay -S caelestia-cli
+
+- **What NOT to do:** do not `rm` the user-site `packaging`, and do not `pip install -U` over it.
+  That tree has 301 entries and is load-bearing — `mempalace`, `code_review_graph`, `chromadb`,
+  `llama_cpp`, `PyQt6`, `onnxruntime` all live there. "Fixing" the version conflict by deleting
+  the shadowing copy would break the MCP tooling (BUG-085/087 territory) to fix a one-off build.
+  `PYTHONNOUSERSITE=1` is scoped to the single command and touches nothing.
+
+- **Generalised lesson — this will recur for any python AUR package on this machine.** A pacman
+  version number is a claim about `/usr`. It says nothing about what an interpreter will import.
+  When a build complains about a version constraint that pacman insists is satisfied, compare the
+  two views before believing either:
+
+      python3                  -c "import importlib.metadata as m; print(m.version('X'))"
+      PYTHONNOUSERSITE=1 python3 -c "import importlib.metadata as m; print(m.version('X'))"
+
+  Different answers = a shadowing user-site install. Also useful: `python3 -c "import X; print(X.__file__)"`
+  shows which copy actually wins.
+
+  This belongs to the same family as BUG-088/089 — a tool reporting success (or here, reporting a
+  version) for a path that is not the one in effect.
