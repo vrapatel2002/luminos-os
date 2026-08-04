@@ -128,12 +128,18 @@ end)
 -- caelestia shell -d) is installed and working.
 
 -- ═════════════════════════════════════════════════════════════════════════════════════════
--- Reserved: SUPER+SPACE
+-- HIVE chat popup — SUPER+SPACE
 -- ═════════════════════════════════════════════════════════════════════════════════════════
--- DELIBERATELY NOT BOUND. That is the Luminos HIVE popup shortcut and gets wired up in Phase 5.
+-- [CHANGE: claude-code | 2026-08-04] Phase 5: wired up, as this block promised.
 -- Confirmed free in stock Caelestia: its launcher is a bare SUPER tap (kbLauncher =
--- "SUPER + SUPER_L") and SUPER+SPACE is not used by anything. The nearest neighbour is
--- SUPER+ALT+Space (toggle floating), which does not clash.
+-- "SUPER + SUPER_L") and SUPER+SPACE is not used by anything. Verified against the live
+-- compositor with `hyprctl binds` — the only Space binds were modmask 72 (SUPER+ALT,
+-- toggle floating) and modmask 68 (SUPER+CTRL). Plain SUPER is modmask 64: free.
+--
+-- The launcher toggles: press once to open, again to close. It also brings
+-- luminos-hive.service up if 127.0.0.1:8078 is not listening, so the chat window never
+-- opens against a dead backend.
+hl.bind("SUPER + SPACE", hl.dsp.exec_cmd("luminos-hive-popup"))
 
 -- ═════════════════════════════════════════════════════════════════════════════════════════
 -- Look tuner — luminos-look / luminos-look-dashboard

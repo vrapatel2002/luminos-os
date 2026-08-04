@@ -54,14 +54,14 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | HATS + triton-xdna | ⚪ Verified 2026-04, not in production | xclbin compile proof in ~/.triton/cache; no daemon consumes it yet (Phase 3). luminos-npu.service / luminos-classifier.service from AGENTS.md §3 were never created. |
 | MobileLLM-R1-140M INT8 | 📋 Pending fine-tune | 64MB quantized weights on disk; deliberately not deployed until custom Sentinel training done |
 | VRAM Watchdog | ✅ Working | Auto-evict if >90% usage |
-| llama.cpp TurboQuant | ✅ Working | turbo4 (type_k=12, type_v=12) |
+| llama.cpp TurboQuant | ❌ Broken | [CHANGE: claude-code \| 2026-08-04] BUG-097. `/usr/local/bin/llama-server` has 7 unresolved `DT_NEEDED` libs; `libggml-cuda.so.0` exists nowhere on disk. The venv was refreshed 2026-05-09 to a CPU-only ggml 0.10.2, so the CUDA build the Apr-24 binary links against is gone. **No model can load.** Needs a CUDA rebuild, or a switch to `llama_cpp.server`. |
 | HIVE Idle Watchdog | ✅ Working | Auto-unloads models after 5 mins |
 | HIVE Orchestrator (orchestrator.py) | 🛠 Retired | Superseded by hive-daemon.py. luminos-hive.service updated + disabled. |
 | llama.cpp Python | ✅ Installed | v0.3.20 (system package) |
 | HIVE Swap Server | 🛠 Retired | Port 8079 functionality merged into HIVE Daemon |
-| HIVE Daemon | ✅ Working | Port 8078. Popup-managed lifecycle (pgrep guard). ThreadingHTTPServer, 60s timeout, lockfile. |
+| HIVE Daemon | ✅ Working | Port 8078. [CHANGE: claude-code \| 2026-08-04] Lifecycle is now **systemd's**, not the popup's — `luminos-hive.service` enabled + started under Hyprland. The popup no longer forks or kills it. `/health` verified. |
 | HIVE Web Search | ✅ Working | DuckDuckGo HTML scraping, no API key. Works without llama-server loaded. Auto-routes via [ROUTE:WEB] or keyword detection. |
-| HIVE popup (SUPER+SPACE) | ✅ Working | Persistent kdialog conversation loop. Starts hive-daemon.py on open, kills on close. |
+| HIVE popup (SUPER+SPACE) | ✅ Working (UI only) | [CHANGE: claude-code \| 2026-08-04] Rebound under Hyprland in `hypr-user.lua` (was kglobalaccel). Runs `qml6 src/hive/HiveChat.qml` — 1 process / 265 MB, vs 5 processes / 604 MB for the retired PyQt6+QWebEngine path. Toggle fixed (BUG-096) and proved over 4 presses. **Chat will not answer until BUG-097 is fixed** — the window opens, the backend has no model. |
 | Claude Code Router | ✅ Working | DeepSeek V4 Pro via OpenRouter. Key in .env, config in .claude/settings.local.json |
 | luminos-notes.sh | ✅ Working | SQLite knowledge base. Complements MemPalace (which is NOT retired — see below); AGENTS.md §8 says search both. |
 | MemPalace (MCP) | ✅ Working — pinned v3.3.1 | **NOT retired** (the old "hnswlib crash" note was stale). Registered in **user scope** `~/.claude/settings.json` (Cowork ignores project scope) **plus** Claude Desktop and Antigravity, all pointing at one binary `~/.mempalace-venv` (pyenv 3.12.13). 29 tools, 2.0 GB store at `~/.mempalace/palace`. Was silently running an unintended editable v3.1.0 for months — BUG-085 / DECISION 33; reached only one of three clients until BUG-087 / DECISION 34. Check: `luminos-verify --mcp` |

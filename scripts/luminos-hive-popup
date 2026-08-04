@@ -1,37 +1,32 @@
 #!/bin/bash
-# HIVE Chat Popup — Bash/kdialog + llama-cli + PyQt6
+# HIVE Chat Popup — qml6 + src/hive/HiveChat.qml
 # [CHANGE: antigravity | 2026-04-27]
-# Launched by SUPER+SPACE via kglobalaccel → luminos-hive-popup.desktop
-# 
-# 
-# 
-# 
+# [CHANGE: claude-code | 2026-08-04] Hyprland: bound in ~/.config/caelestia/hypr-user.lua,
+#          and the daemon is now owned by luminos-hive.service — not by this script.
 
 # ════════════════════════════════════════
-# CRITICAL SECTION — DO NOT MODIFY
-# KDE Wayland environment setup
-# Changing this breaks SUPER+SPACE shortcut
-# Last fixed: 2026-04-26 by Opus
-# Touch only if KDE Plasma version changes
+# SECTION: Session environment
+# PURPOSE: Resolve the compositor/bus env so the script works whether it is
+#          launched by Hyprland (which passes its env down) or by hand.
 # ════════════════════════════════════════
 
-# When kglobalaccel launches a process on KDE Plasma 6 Wayland,
-# the child process does NOT inherit WAYLAND_DISPLAY, DISPLAY,
-# DBUS_SESSION_BUS_ADDRESS, or XDG_RUNTIME_DIR. Without these,
-# kdialog cannot connect to the compositor and silently exits.
-# We resolve them from the user's runtime environment.
+# Kept from the KDE era, where kglobalaccel launched children with a minimal
+# env. Hyprland's exec_cmd does inherit its environment, so most of this is now
+# belt-and-braces — but it costs nothing and makes the script safe to run from
+# a terminal or a unit file.
 
 # XDG_RUNTIME_DIR — must be set first, others depend on it
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 # WAYLAND_DISPLAY — needed for kdialog to render on Wayland
 if [ -z "$WAYLAND_DISPLAY" ]; then
-    # Check the most common Wayland socket names
-    for sock in wayland-0 wayland-1; do
-        if [ -S "$XDG_RUNTIME_DIR/$sock" ]; then
-            export WAYLAND_DISPLAY="$sock"
-            break
-        fi
+    # [CHANGE: claude-code | 2026-08-04] Enumerate the sockets that actually
+    # exist instead of guessing. The Hyprland session came up on wayland-1, so a
+    # hardcoded two-name list is a silent failure waiting for a third socket.
+    for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
+        [ -S "$sock" ] || continue
+        export WAYLAND_DISPLAY="$(basename "$sock")"
+        break
     done
 fi
 
@@ -94,7 +89,13 @@ if [ -f "$LOCKFILE" ]; then
 fi
 
 echo $$ > "$LOCKFILE"
-trap "/usr/bin/rm -f $LOCKFILE; /usr/bin/pkill -f 'hive-daemon.py' 2>/dev/null; kill \$DAEMON_PID 2>/dev/null; kill \$LLAMA_START_PID 2>/dev/null" EXIT
+# [CHANGE: claude-code | 2026-08-04] Removed `pkill -f hive-daemon.py` from this
+# trap. The daemon is now started and supervised by luminos-hive.service, so
+# killing it on every popup close would tear down a systemd unit behind its back
+# and leave the backend dead for every other client.
+# [CHANGE: claude-code | 2026-08-04] The trap also kills the QML window now, so a
+# TERM aimed at this wrapper cannot orphan a visible window with no way to close it.
+trap "/usr/bin/rm -f $LOCKFILE; kill \$QML_PID 2>/dev/null; kill \$LLAMA_START_PID 2>/dev/null" EXIT
 # ════════════════════════════════════════
 # SECTION: Auto-start Nexus
 # PURPOSE: If llama-server isn't running, start it before the UI.
@@ -120,12 +121,16 @@ fi
 # Mark activity so idle-watchdog doesn't kill while popup is open
 /usr/bin/touch /tmp/hive-last-request
 
-# [CHANGE: gemini-cli | 2026-05-02] Start HIVE daemon if not running
-DAEMON_PID=""
-if ! /usr/bin/pgrep -f "hive-daemon.py" > /dev/null 2>&1; then
-    echo "[LAUNCHER] HIVE daemon not running, starting..."
-    /usr/bin/python3 /home/shawn/luminos-os/scripts/hive-daemon.py &
-    DAEMON_PID=$!
+# [CHANGE: claude-code | 2026-08-04] The daemon is a systemd user unit now.
+# Ask systemd for it rather than forking our own copy — two daemons would race
+# for 127.0.0.1:8078 and the loser dies with EADDRINUSE.
+if ! (exec 3<>/dev/tcp/127.0.0.1/8078) 2>/dev/null; then
+    echo "[LAUNCHER] HIVE daemon not listening, asking systemd to start it..."
+    systemctl --user start luminos-hive.service 2>/dev/null
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        (exec 3<>/dev/tcp/127.0.0.1/8078) 2>/dev/null && break
+        /usr/bin/sleep 0.3
+    done
 fi
 # ════════════════════════════════════════
 # SECTION: Watchdog Keep-Alive Loop
@@ -145,19 +150,30 @@ KEEP_ALIVE_PID=$!
 
 # ════════════════════════════════════════
 # SECTION: Launch QML UI
-# PURPOSE: Run qml6 in foreground (NOT exec) so this bash process
-#          stays alive to manage the keep-alive loop and lockfile.
+# PURPOSE: Run qml6 as a tracked child, not in the foreground, and publish ITS
+#          pid as the toggle target.
+# [CHANGE: claude-code | 2026-08-04]
+#          Previously this ran qml6 in the foreground while the lockfile held
+#          $$ — the wrapper's pid. The second SUPER+SPACE therefore TERMed bash
+#          and left qml6 running as an orphan: the window stayed on screen with
+#          no way to toggle it shut (its lockfile had just been removed by the
+#          trap, so the next press opened a SECOND window). Verified failing on
+#          2026-08-04. Writing the qml6 pid into the lockfile makes the toggle
+#          hit the thing that actually owns the window; `wait` keeps this shell
+#          alive so the keep-alive loop and cleanup below still run.
 # ════════════════════════════════════════
 
-/usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml
+/usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml &
+QML_PID=$!
+echo "$QML_PID" > "$LOCKFILE"
+wait "$QML_PID"
 
 # Cleanup: kill keep-alive loop and daemon after popup closes
 if [ -n "$KEEP_ALIVE_PID" ]; then
     /usr/bin/kill "$KEEP_ALIVE_PID" 2>/dev/null
     wait "$KEEP_ALIVE_PID" 2>/dev/null
 fi
-# [CHANGE: gemini-cli | 2026-05-02] Kill HIVE daemon on popup close
-if [ -n "$DAEMON_PID" ]; then
-    /usr/bin/kill "$DAEMON_PID" 2>/dev/null
-    wait "$DAEMON_PID" 2>/dev/null
-fi
+# [CHANGE: claude-code | 2026-08-04] Deliberately NOT killing the HIVE daemon
+# here. It is a long-lived service shared with the widgets and any other client;
+# closing one chat window is not a reason to take the backend down. Model unload
+# is the idle-watchdog's job, driven by /tmp/hive-last-request.

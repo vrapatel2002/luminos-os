@@ -905,3 +905,122 @@ under Hyprland, no close button, no Escape handler — Shawn: *"I CAN'T REMOVE T
 FLOATINIG RIGHT IN CENTRE"*. The only exits were `SUPER+SHIFT+T` (which you had to already know)
 or killing the pid. Added a `Shortcut` for **Escape / Ctrl+W** and a visible **✕** in the header.
 Lesson: a window with no server-side decoration must ship its own way out.
+
+---
+
+## BUG-096 — the HIVE popup toggle killed the wrong process, so the window could not be closed
+**[CHANGE: claude-code | 2026-08-04] — FIXED**
+
+**Symptom.** `SUPER+SPACE` opened the HIVE chat window. Pressing it again did nothing visible —
+the window stayed on screen. Pressing a third time opened a **second** window on top of the first.
+
+**Cause.** `luminos-hive-popup` claimed its toggle lock with `echo $$ > "$LOCKFILE"` — the pid of
+the **bash wrapper** — and then ran `qml6` in the foreground as a child. The comment above that
+line even explained the choice: *"Run qml6 in foreground (NOT exec) so this bash process stays
+alive to manage the keep-alive loop and lockfile."* That reasoning is sound for cleanup and wrong
+for the toggle. The second press did `kill -TERM` on the pid in the lockfile, which killed bash;
+bash's `EXIT` trap then removed the lockfile; and `qml6` — which is the process that actually owns
+the window — was never signalled and carried on as an orphan. With the lockfile now gone, the next
+press saw no lock and launched a fresh window.
+
+Measured on 2026-08-04: lockfile contained `56165`, the mapped window belonged to pid `56174`.
+
+**Fix.** Publish the pid of the thing that owns the window. `qml6` is started in the background,
+its pid is written over the lockfile, and the wrapper `wait`s on it — so the wrapper still lives
+long enough to run the keep-alive loop and cleanup, but the toggle now signals the window. The
+`EXIT` trap also kills `$QML_PID`, so the reverse failure (someone TERMs the wrapper) cannot strand
+a visible window either. Proved with four consecutive presses: open → close → open → close, window
+count `1 → 0 → 1 → 0`, with the lockfile resolving to `/usr/bin/qml6 .../HiveChat.qml` throughout.
+
+**General shape.** *A toggle must hold the pid of the process that owns the resource, not the pid of
+the script that started it.* Any wrapper-plus-child launcher has this bug latent in it.
+
+**Two other things fixed in the same script, both found by enabling `luminos-hive.service`:**
+
+1. The `EXIT` trap ran `pkill -f 'hive-daemon.py'`. That was harmless while the popup owned the
+   daemon, but the daemon is a **systemd user unit** now — so closing one chat window would have
+   torn down a service behind systemd's back and left the backend dead for every other client.
+   Removed. The popup also no longer forks its own daemon; it asks `systemctl --user start` and
+   waits for `127.0.0.1:8078` to listen. Two daemons would have raced for the port anyway, and the
+   loser dies with `EADDRINUSE`.
+2. The `WAYLAND_DISPLAY` fallback looped over a hardcoded `wayland-0 wayland-1`. The Hyprland
+   session came up on **`wayland-1`**, so this happened to work — but it is one socket away from a
+   silent failure. It now globs `"$XDG_RUNTIME_DIR"/wayland-*` and takes the first real socket.
+
+**Also note the launcher had simply drifted.** `/usr/local/bin/luminos-hive-popup` was still the
+PyQt6 + `QWebEngineView` version from 2026-05-08, while `scripts/luminos-hive-popup` in the repo
+had already been rewritten to use `qml6`. CLAUDE.md documented the qml6 behaviour, so the installed
+copy was the odd one out. Measured cost of the drift:
+
+| HIVE UI | processes | RSS |
+|---|---|---|
+| `qml6 src/hive/HiveChat.qml` | 1 | **265 MB** |
+| `hive-popup-app.py` (PyQt6 + QWebEngine) | 5 | **604 MB** |
+
+`QWebEngineView` embeds an entire Chromium to render local HTML, and it resolved PyQt6 out of
+`~/.local/lib/python3.14/site-packages` — the user-site path that shadows pacman (BUG-093).
+`HiveChat.qml` imports only QtQuick / QtQuick.Controls / QtQuick.Layouts / QtQuick.LocalStorage —
+zero Plasma, zero KDE — so it reuses the Qt6 libraries Quickshell already keeps resident.
+**Lesson: `/usr/local/bin` copies drift from the repo silently. Install, then `diff -q` to verify.**
+
+---
+
+## BUG-097 — llama-server cannot start: its CUDA build was replaced by a CPU-only one
+**[CHANGE: claude-code | 2026-08-04] — OPEN, needs a decision**
+
+**Symptom.** Opening the HIVE popup logs `[LAUNCHER] llama-server not running, starting...` and
+then nothing happens. `/tmp/hive-server.log` fills with:
+
+```
+/usr/local/bin/llama-server: error while loading shared libraries: libllama-common.so.0: cannot open shared object file
+```
+
+The dGPU stays `suspended`, `hive-daemon.py` reports `{"model": null, "ready": false}`, and no
+model ever loads. **HIVE answers nothing.**
+
+**This is not a Hyprland regression.** The UI, the keybind and the daemon all work; the inference
+backend underneath them is what is broken, and it has been for months.
+
+**Cause.** `/usr/local/bin/llama-server` (built 2026-04-24) has **seven** `DT_NEEDED` entries that
+nothing on the library path resolves — `ldd` reports all seven `not found`:
+
+```
+libllama-common.so.0  libmtmd.so.0  libllama.so.0
+libggml.so.0  libggml-cpu.so.0  libggml-cuda.so.0  libggml-base.so.0
+```
+
+They are not in `/usr/local/lib` (which holds only `default.sfx` and `rarfiles.lst`), `ldconfig -p`
+has never heard of them, and no pacman package owns the binary. They exist in **two** places on
+disk, and **neither set is complete for this binary**:
+
+| location | ggml version | `libllama-common.so.0` | `libggml-cuda.so.0` |
+|---|---|---|---|
+| `src/hive/.venv/lib/python3.12/site-packages/lib` (2026-05-09) | **0.10.2** | present | **missing** |
+| `~/.pyenv/versions/3.12.13/lib/python3.12/site-packages/lib` | **0.9.11** | **missing** | present |
+
+So the venv was refreshed on 2026-05-09 to a **newer, CPU-only** llama.cpp (0.10.2, no CUDA
+backend), and the CUDA-enabled 0.10.2 build the April binary was linked against no longer exists
+anywhere — including inside the Timeshift snapshots from 2026-07-21 and 2026-08-04, both of which
+have an empty `/usr/local/lib`. Pointing `LD_LIBRARY_PATH` at the venv gets six of seven libs and
+still dies on `libggml-cuda.so.0`. **Mixing the two directories is not a fix** — 0.9.11 and 0.10.2
+are different ABIs, and `libggml-cuda` is the one library that must match `libggml-base` exactly.
+
+Because `libggml-cuda.so.0` is a hard `DT_NEEDED` and not a `dlopen`ed backend, this binary cannot
+even fall back to CPU. It refuses to start at all.
+
+**Two ways out — Shawn's call:**
+
+1. **Rebuild llama.cpp with CUDA** and install the libraries to a path that survives, e.g.
+   `/usr/local/lib` plus an `/etc/ld.so.conf.d` entry so `ldconfig` resolves them without
+   `LD_LIBRARY_PATH`. Keeps the TurboQuant llama.cpp architecture that CLAUDE.md specifies. Costs a
+   CUDA compile, and the sources are already vendored under `research/turboquant/`.
+2. **Serve through `llama_cpp.server`** — `~/.pyenv/versions/3.12.13` has `llama_cpp` **0.3.20**
+   with its CUDA libs intact, and `python -m llama_cpp.server` exposes exactly the
+   `/v1/chat/completions` endpoint on `:8080` that `hive-daemon.py` already calls. No compile.
+   But it is a different process model from `hive-start-model.sh`, so the swap/idle logic in
+   `hive-daemon.py` would need adapting.
+
+**Lesson.** The libraries a hand-built `/usr/local/bin` binary needs must be installed somewhere
+`ldconfig` looks. Leaving them inside a **venv** means the next `pip install` can silently swap them
+for a differently-configured build, and the binary that depends on them breaks with no package
+manager, no version pin, and no warning.
