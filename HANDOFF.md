@@ -722,11 +722,23 @@ Caelestia luafied on 2026-06-19 (upstream commit `593c8b0`). Hyprland gained a L
     $ hyprctl systeminfo | grep configProvider     # in a nested test session
     configProvider: lua
 
-**`~/.config/hypr/hyprland.conf` is still on disk and is now INERT.** It was left there on purpose:
-the live session had it loaded, Hyprland watches loaded config files, and deleting it out from
-under a running compositor risks a reload into nothing while the user is mid-conversation.
-**Delete it after the next successful login** — leaving it is a silent-fallback landmine if
-`hyprland.lua` ever goes missing.
+The precedence is not a guess — it is the compositor's own branch, visible in the binary:
+
+    $ strings /usr/bin/Hyprland | grep '\[cfg\].*config'
+    [cfg] Using lua config found at {}
+    [cfg] Lua config not found, using legacy config at {}
+    [cfg] Config is lua, loading lua mgr
+    [cfg] Config is NOT lua, loading regular mgr
+
+`hyprland.lua` is checked first; the legacy path is only taken when it is **absent**. Both files
+were on disk during the nested test and it still reported `configProvider: lua`.
+
+**`~/.config/hypr/hyprland.conf` is still on disk and is now INERT — and that is fine.** It was
+originally left there because the live session had it loaded and Hyprland watches loaded config
+files, so deleting it under a running compositor risked a reload into nothing. Now that the
+precedence is proven, it can stay as a **rollback path**: it is the last known-good Phase 3
+config, and it only ever gets read if `hyprland.lua` disappears — which is exactly when you would
+want a fallback rather than a black screen. Delete it only if you want the failure to be loud.
 
 ## Proven before being applied (nested, zero risk to the live session)
 A second Hyprland was started on the live one's Wayland socket. Live session (PID 106680) was
