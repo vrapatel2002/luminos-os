@@ -152,7 +152,7 @@ feel cramped, cheap enough that it isn't a painful mistake.
 > rather than trying to make it play.
 >
 > All of the above is **read off Intel's spec sheet, not measured.** Jellyfin
-> silently falls back to software transcoding, so `scripts/luminos-server-services`
+> silently falls back to software transcoding, so `server/scripts/luminos-server-services`
 > runs `vainfo` on first setup and prints what the chip actually reports. Trust
 > that output, not this paragraph.
 >
@@ -337,12 +337,12 @@ Steps 3–5 are now scripted. Sequence:
 3. ~~Buy the laptop~~ — **done, see §4a.** Boot the friend's laptop from the Arch
    ISO (`~/iso/archlinux-2026.07.01-x86_64.iso`, sha256 + GPG both verified),
    enable sshd on the ISO, and drive the rest from the G14 over SSH.
-4. **Stage 1: `scripts/luminos-server-install`** — partitions and installs a
+4. **Stage 1: `server/scripts/luminos-server-install`** — partitions and installs a
    headless Arch onto the HDD only. Defaults to `--dry-run`; needs
    `--confirm-disk /dev/sdX --yes --key "$(cat ~/.ssh/luminos-server.pub)"`.
    Detects the target disk instead of assuming `/dev/sda`, aborts if detection
    is ambiguous, and ends in 12 assertions that must all pass before rebooting.
-5. **Stage 2: `scripts/luminos-server-services`** — installs Jellyfin,
+5. **Stage 2: `server/scripts/luminos-server-services`** — installs Jellyfin,
    `qbittorrent-nox`, `sonarr-bin`, `prowlarr-bin`; builds the `media` group and
    `/srv/media` layout; installs `informant` so a manual `pacman -Syu` can't
    skip an Arch news item. Also defaults to `--dry-run`. It refuses to run on
@@ -478,7 +478,7 @@ Running now, so §1-3 of the reference guide can be evaluated before spending mo
 | Hardware transcode | **verified** — 4K HEVC encode at 4.75-5.87x realtime on `renderD129` |
 | dGPU | deliberately excluded — `jellyfin` is in `render`,`video` but **not** `dgpu` |
 | Library root | `/srv/media/{movies,tv}`, owned `jellyfin:jellyfin`, mode `2775` |
-| Importer | `scripts/luminos-media-import` |
+| Importer | `server/scripts/luminos-media-import` |
 | **Setup wizard** | **NOT RUN** — needs a human to pick a password at `http://localhost:8096` |
 
 **Transcode verification was negative-tested**: the same ffmpeg command against
@@ -516,7 +516,7 @@ media, done. No reconfiguration, no re-scraping.
 
 ### Codec profile discovered for this TV
 
-Encoded into `scripts/luminos-media-import` so it's enforced, not remembered:
+Encoded into `server/scripts/luminos-media-import` so it's enforced, not remembered:
 
 | Stream | Direct plays | Forces transcode |
 |---|---|---|
@@ -537,18 +537,18 @@ The *organisational* value of that stack — consistent naming, correct folder
 layout, metadata scraping — is covered by `luminos-media-import` plus Jellyfin's
 built-in TMDb/OMDb scrapers, for content you supply yourself.
 
-### `scripts/luminos-media-import`
+### `server/scripts/luminos-media-import`
 
 Stdlib-only Python. Takes a file you already have, probes it, refuses it if it
 won't direct-play on the Roku, and files it under Jellyfin's naming convention.
 
 ```bash
 # movie
-scripts/luminos-media-import /path/to/file.mkv \
+server/scripts/luminos-media-import /path/to/file.mkv \
     --mode movie --title "Movie Name" --year 2008 [--copy] [--dry-run]
 
 # episode
-scripts/luminos-media-import /path/to/file.mkv \
+server/scripts/luminos-media-import /path/to/file.mkv \
     --mode tv --title "Show Name" --year 2013 \
     --season 1 --episode 4 --episode-title "Chapter 4"
 ```

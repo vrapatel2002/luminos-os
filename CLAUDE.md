@@ -63,3 +63,11 @@ AFTER adding new files or changing imports:
 Rule: Doc Updates (mandatory)
 After EVERY task check these and update if relevant:
   LUMINOS_STATUS.md, LUMINOS_DECISIONS.md, docs/BUGS.md, docs/CODE_REFERENCE.md.
+
+Rule: Media server work goes in server/ (mandatory)
+# [CHANGE: claude-code | 2026-08-02]
+The media server is a SEPARATE machine (Dell Inspiron 3590, ssh shawn@192.168.2.61).
+Nothing about it belongs in the G14 docs. For server work update instead:
+  server/STATUS.md, server/DECISIONS.md, server/docs/, server/scripts/
+Start at server/README.md — it has the machine, the network split, the ports, and the
+list of things that bite. Decision numbering continues the main sequence.

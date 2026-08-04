@@ -44,8 +44,8 @@ Design summary, so you know what you're agreeing to:
 | Arch ISO | Downloaded, sha256 + GPG verified |
 | USB stick | Written and **byte-verified** by reading it back (`e86295dc…a6c0`) |
 | SSH keypair | `~/.ssh/luminos-server` on the G14 |
-| Stage 1 installer | `scripts/luminos-server-install` — **run for real, 17/17 checks passed** |
-| Stage 2 services | `scripts/luminos-server-services`, dry-run tested — not yet run |
+| Stage 1 installer | `server/scripts/luminos-server-install` — **run for real, 17/17 checks passed** |
+| Stage 2 services | `server/scripts/luminos-server-services`, dry-run tested — not yet run |
 | BitLocker | Confirmed off on both disks |
 | Secure Boot | Confirmed off |
 | Base OS on the Dell | **Installed and booting from the HDD** |
@@ -227,7 +227,7 @@ for p in "BELL851 5.0 GHz" "BELL851 2.4 GHz" "BELL851"; do
   [ -n "$s" ] && [ -n "$k" ] && printf '%s\t%s\n' "$s" "$k" >> "$CREDS"
 done
 
-scp ~/luminos-os/scripts/luminos-server-install \
+scp ~/luminos-os/server/scripts/luminos-server-install \
     ~/.ssh/luminos-server.pub \
     "$CREDS" \
     root@$IP:/root/
@@ -326,8 +326,8 @@ moving. That is the single thing that makes everything afterwards easier.
 From the G14:
 
 ```bash
-scp ~/luminos-os/scripts/luminos-server-services \
-    ~/luminos-os/scripts/luminos-media-import \
+scp ~/luminos-os/server/scripts/luminos-server-services \
+    ~/luminos-os/server/scripts/luminos-media-import \
     ~/luminos-os/scripts/luminos-servarr-health \
     shawn@$SERVER:/tmp/
 

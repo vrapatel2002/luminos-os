@@ -88,6 +88,7 @@ systemd/          Service files
 scripts/          Build + install scripts
 build/            ISO output (gitignored)
 tests/            757 tests, all passing
+server/           Media server — a SEPARATE machine, see server/README.md
 
 ## Contributing
 

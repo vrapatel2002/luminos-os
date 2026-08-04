@@ -26,7 +26,7 @@ LIBRARY_ROOT = Path("/srv/media")
 FFPROBE = "/usr/lib/jellyfin-ffmpeg/ffprobe"
 
 # --- Roku playback profile -------------------------------------------------
-# Established empirically + from Roku's published spec. See docs/MEDIA_SERVER_PLAN.md
+# Established empirically + from Roku's published spec. See server/docs/MEDIA_SERVER_PLAN.md
 VIDEO_OK = {"hevc", "h264", "vp9"}
 VIDEO_BAD = {"av1", "vc1", "mpeg4"}
 AUDIO_OK = {"aac", "mp3", "ac3", "eac3", "flac", "opus"}
