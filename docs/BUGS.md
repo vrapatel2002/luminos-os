@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-08-04 (BUG-094 FIXED — the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-08-04 (BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
 
@@ -776,9 +776,17 @@ Each bug entry:
 
 ### BUG-094 — Hyprland session bounced straight back to the login screen: the GPU pin was written in a format aquamarine parses as a list
 <!-- [CHANGE: claude-code | 2026-08-04] -->
-- Status: ✅ FIXED (root-caused from the compositor's own log; awaiting confirmation on the next login)
+- Status: ✅ **FIXED AND VERIFIED ON A REAL LOGIN (2026-08-04 16:32).** Not "awaiting retry" — the
+  user logged in and is using the session. Live evidence: `AQ_DRM_DEVICES=/dev/dri/luminos-igpu` in
+  the compositor's own `/proc/<pid>/environ`, `XDG_CURRENT_DESKTOP=Hyprland`, panel up at
+  2880x1800@120, dGPU `0000:01:00.0` `runtime_status = suspended`, and Claude Desktop's GPU process
+  on `--render-node-override=/dev/dri/renderD129` — the **AMD** node. The pin works, the 0 W gating
+  survived, and the project's hard acceptance criterion is met.
 - Severity: **HIGH** — the Hyprland session was 100% unusable. Every attempt died in ~2 s.
-- Component: `AQ_DRM_DEVICES` in `~/.config/hypr/hyprland.conf` and `~/.config/uwsm/env-hyprland`
+- Component: `AQ_DRM_DEVICES` in `~/.config/hypr/hyprland.conf` and `~/.config/uwsm/env-hyprland`.
+  **Now lives in `~/.config/caelestia/hypr-user.lua`** — `hyprland.conf` was superseded by the
+  stock Caelestia Lua config (DECISION 41). The `uwsm/env-hyprland` copy is unchanged and is the
+  one that actually wins on a uwsm login.
 - Reported as: *"i select the Hyprland (uwsm-managed) enter password it shows black screen and than we are back to login screen"*
 - **This one was real.** Unlike BUG-092, SDDM confirms Hyprland genuinely ran — three attempts,
   two via uwsm and one plain, each `SIGABRT` within ~2 seconds:

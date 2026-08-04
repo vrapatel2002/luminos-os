@@ -1784,3 +1784,70 @@ window list stop updating with no error. An `exec-once` inherits the variable fo
 Comment out `exec-once = qs -c caelestia`; Hyprland then runs bare. To remove entirely:
 `pacman -Rns caelestia-shell caelestia-cli quickshell-git`. Package inventory taken before the
 install is in `backups/pre-caelestia-2026-08-04/`. Plasma is unaffected either way.
+
+---
+
+## DECISION 41 — Adopt Caelestia's stock Hyprland config verbatim; all Luminos hardware settings move to override files
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+**Date:** 2026-08-04
+**Status:** ACTIVE
+**Supersedes:** the hand-written `~/.config/hypr/hyprland.conf` from DECISION 39 / Phase 3.
+
+### Decision
+`~/.config/hypr/` is now a byte-for-byte copy of the `hypr/` tree from
+`github.com/caelestia-dots/caelestia`. It is **read-only** as far as Luminos is concerned.
+Everything specific to this laptop lives in two files that Caelestia loads last:
+
+- `~/.config/caelestia/hypr-vars.lua` — **values**: apps, cursor theme, sleep command.
+- `~/.config/caelestia/hypr-user.lua` — **behaviour**: the GPU pin, monitor rule, env vars,
+  autostarts. `hyprland.lua` `require`s it after every Caelestia module, so it always wins.
+
+Both are tracked in the repo at `config/caelestia/`.
+
+### Why
+The Phase 3 config was written from scratch to prove the compositor could start, and it did that
+job. But `caelestia-shell` is not a bar you bolt onto any config — it does not listen for
+keypresses at all. It registers **22 named global shortcuts** over the Wayland global-shortcuts
+protocol and waits for the compositor to fire them by name. The hand-written config bound none
+of them, so the bar rendered and nothing responded: no launcher, no sidebar, no lock, no OSDs, no
+media keys, no screenshot. Twenty binds existed where upstream has a hundred and forty.
+
+Hand-porting ~80 keybinds and eleven config modules would have to be redone at every upstream
+release, and Caelestia moved its whole config from hyprlang to **Lua** on 2026-06-19 — a format
+change that would have made a hand-maintained fork diverge permanently. Hyprland 0.56.1 supports
+the Lua provider (it is linked against `liblua` and ships `example/hyprland.lua`), and prefers
+`hyprland.lua` over `hyprland.conf` automatically.
+
+### What was deliberately NOT adopted
+Caelestia's installer also re-themes GTK, Qt, Firefox, VS Code and Discord — `adw-gtk-theme`,
+`papirus-folders`, `qtengine`, `darkly-bin`. Installing those would undo the Ubuntu/Yaru KDE look
+built in BUG-088 / BUG-090. Only the **Hyprland and shell** configuration was taken.
+Reversible at any time by running `caelestia install` and enabling those components.
+
+Related, and load-bearing: `QT_QPA_PLATFORMTHEME` is overridden from Caelestia's `qtengine` to
+`kde`, because `plasma-integration` is installed and `qtengine` is not — this keeps every Qt app
+looking identical in both sessions.
+
+### The non-negotiables that live in `hypr-user.lua`
+1. **`AQ_DRM_DEVICES=/dev/dri/luminos-igpu`** — the colon-free udev alias from BUG-094. Stock
+   Caelestia has no idea the NVIDIA dGPU enumerates first on this machine. Never write this as a
+   `by-path` value; also duplicated in `~/.config/uwsm/env-hyprland`, which wins on a uwsm login.
+2. **No NVIDIA environment variables, anywhere.** Every Hyprland guide online says to add them.
+   Adding them is exactly what would undo the 0 W runtime-PM gating from BUG-047/050/078.
+3. **`asusd` keeps sole ownership of `platform_profile`.** `power-profiles-daemon` is a hard
+   dependency of `caelestia-shell` and stays installed-but-masked (DECISION 40). Caelestia's
+   power-profile buttons therefore render and do nothing. That is expected. Do not unmask ppd to
+   "fix" them — wiring them to `asusd` is Phase 5 work.
+4. **`scale = 2` pinned explicitly**, not left to autodetection. Stock sets `scale = 1`, which on
+   this 2880x1800 14" panel is unreadable.
+
+### One upstream behaviour disabled by removing its binary
+`execs.lua` autostarts `trash-empty 30`, which permanently deletes trash older than 30 days at
+every login — here, 31 of 43 items and 8.9 GB, including Luminos project documents.
+`trash-cli` is therefore **not installed**, so the command no-ops and `execs.lua` stays identical
+to upstream. Do not reinstall it until that trash has been triaged.
+
+### Reversal
+`cp -a ~/luminos-backups/hypr-config-pre-caelestia-20260804-170302/hypr/. ~/.config/hypr/` and
+delete `hyprland.lua`, or `git show ed68e860:config/hypr/hyprland.conf`. Plasma is unaffected
+either way and remains selectable at SDDM.

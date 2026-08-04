@@ -1,29 +1,47 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-04 — Hyprland + Caelestia installed; **first real login FAILED (BUG-094),
-root-caused and fixed; awaiting a retry.**
+Last updated: 2026-08-04 — **Hyprland is the live session. BUG-094 fixed and PROVEN.** Stock
+Caelestia config adopted (DECISION 41); Luminos hardware bits moved into override files.
 
-## 🟥 READ FIRST — the first real login failed, and the fix is already applied
-The session bounced straight back to SDDM. **Cause: `AQ_DRM_DEVICES` is a colon-separated list and
-the GPU pin was written as a PCI by-path, which is full of colons** — so it was split into three
-nonexistent devices, no GPU was found, and Hyprland aborted in ~2 s. Full detail in BUG-094 and in
-the GPU section below. Fixed by pinning to a colon-free udev alias `/dev/dri/luminos-igpu`.
-**The retry has not happened yet.**
+## 🟩 READ FIRST — the login works. Hyprland is what the user is running right now.
+BUG-094 is **RESOLVED AND VERIFIED**, not "fixed, awaiting retry". Evidence taken from the live
+session on 2026-08-04, while the user was talking to Claude Desktop inside it:
+
+    Hyprland          PID 106680, up since 16:32:15, tty7, session 10
+    AQ_DRM_DEVICES    /dev/dri/luminos-igpu           <- the colon-free alias took effect
+    XDG_CURRENT_DESKTOP = Hyprland                    <- plasmashell not running at all
+    Panel eDP-2       2880x1800@120Hz, scale 2.00
+    dGPU 0000:01:00.0 runtime_status = suspended      <- 0 W gating intact under Hyprland
+    Claude Desktop    gpu-process --render-node-override=/dev/dri/renderD129   <- the AMD iGPU
+
+That last line is the hard acceptance criterion for the whole project, and it is met: Claude
+Desktop runs natively on Wayland, on the iGPU, with the dGPU asleep.
+
+### ⚠️ Diagnosis trap — never assert session state from your own environment
+An agent shell started from the *old Plasma session* keeps `XDG_CURRENT_DESKTOP=KDE` and an empty
+`HYPRLAND_INSTANCE_SIGNATURE` in its own environment **forever**, even after the user has logged
+into Hyprland. Reading your own `env` and concluding "Hyprland isn't running" is wrong — and it
+was asserted to the user before being checked, which was the one real mistake of this session.
+Ask the system, never yourself:
+
+    pgrep -a Hyprland                                    # is it running?
+    loginctl list-sessions                               # which seat / tty
+    tr '\0' '\n' < /proc/<pid>/environ | grep XDG_       # what the compositor actually has
+    hyprctl instances                                    # and its instance signature
 
 ## FIRST ACTION IN A NEW CHAT
 Read this file, then `cat ~/luminos-os/AGENTS.md`. The active thread is the **Hyprland +
 Caelestia Shell install** (below).
 
-**State: Phases 0–4 are DONE on disk, but the first real login failed (BUG-094, now fixed).** `hyprland 0.56.1-3`, `quickshell-git`,
-`caelestia-shell 2.2.0-1` and `caelestia-cli 1.1.2-1` are all installed, and the whole stack has
-been proven working in a **nested session inside live Plasma** — bar, live tray, clock, status
-icons, and Claude Desktop all confirmed. What has *not* happened yet is a real DRM login.
-Phase 5 (reconnecting Luminos / the HIVE popup) has not been started.
+**State: Phases 0–4 are DONE and PROVEN on a real login.** `hyprland 0.56.1-3`, `quickshell-git`,
+`caelestia-shell 2.2.0-1`, `caelestia-cli 1.1.2-1` installed; stock Caelestia Hyprland config
+deployed (DECISION 41). Phase 5 (reconnecting Luminos / the HIVE popup) has not been started.
 
-**Plasma is untouched and is still the default session.** Nothing here has degraded it.
+**Plasma is untouched and is still available at SDDM as a fallback session.** Nothing here has
+degraded it.
 
 ---
 
-# ACTIVE THREAD — Hyprland + Caelestia — PHASES 0–4 DONE, AWAITING FIRST LOGIN
+# ACTIVE THREAD — Hyprland + Caelestia — PHASES 0–4 DONE AND PROVEN
 
 ## Goal (the durable end objective)
 User (2026-08-04) sent https://youtu.be/Na7tPZv2ckk — *"Install Hyprland + Caelestia Shell
@@ -583,7 +601,14 @@ missing. Cause: the nested output defaulted to **scale 2.0**, so the layout had 
 pixels and Caelestia dropped what didn't fit. At scale 1 (1280x720 logical) everything appeared.
 Before diagnosing a "broken" Caelestia bar, check `hyprctl monitors` for the scale.
 
-## ▶ IMMEDIATE NEXT STEP — the first Hyprland login (user action required)
+## ✅ DONE — the first Hyprland login SUCCEEDED (2026-08-04 16:32)
+Kept below for the SDDM mechanics, which still apply at every login. All six "what to check"
+items were checked and passed — see the green banner at the top of this file for the evidence.
+The one item that changed: **scaling came out at 2.00, not the predicted 1.6**, and the user
+signed off on that look, so it is now pinned explicitly in `hypr-user.lua` rather than left to
+autodetection.
+
+## ▶ How to log in (mechanics — still true every time)
 Log out of Plasma. At SDDM the session picker is in the **bottom-left corner** of the Breeze
 greeter — it says "Plasma (Wayland)". Click it and pick **"Hyprland (uwsm-managed)"** — not plain
 "Hyprland". *Then* type the password. Selecting the session after typing does not help; SDDM sends
@@ -652,10 +677,110 @@ was dropped and Phase 4 was done in the same session. The user's own words:
 
 ---
 
+# Phase 4b — STOCK CAELESTIA CONFIG ADOPTED 2026-08-04 (DECISION 41)
+
+## Why this happened
+The user watched the install video again and reported *"we are not having the buttons for open
+close maximize"* and *"we are missing hymods"* and *"many other things"*. He was right, and the
+cause was bigger than any package list: **Phase 3 wrote a hand-rolled 180-line `hyprland.conf`
+from scratch, and Caelestia ships its own complete 16-file Hyprland config that was never
+installed.** The shell is designed around that config.
+
+The concrete symptom: `caelestia-shell` does not listen for keypresses. It registers **22 named
+global shortcuts** over the Wayland global-shortcuts protocol and waits for Hyprland to fire them.
+Verified on the live session with `hyprctl globalshortcuts`:
+
+    caelestia:launcher  caelestia:sidebar  caelestia:dashboard  caelestia:session  caelestia:lock
+    caelestia:unlock  caelestia:nexus  caelestia:showall  caelestia:utilities  caelestia:clearNotifs
+    caelestia:screenshot  caelestia:screenshotFreeze  caelestia:screenshotClip  ...Freeze Clip
+    caelestia:brightnessUp/Down  caelestia:media{Toggle,Next,Prev,Stop}  caelestia:refreshDevices
+
+The hand-written conf bound **none** of them. So the bar rendered and nothing responded: no
+launcher, no sidebar, no lock, no OSD, no media keys, no screenshot. That is not a broken shell,
+it is an unwired one. `hyprland/keybinds.lua` is the other half — `hl.dsp.global("caelestia:...")`.
+
+## The layout now — DO NOT hand-edit ~/.config/hypr again
+| Path | What it is |
+|---|---|
+| `~/.config/hypr/` | **Byte-identical copy of upstream `caelestia-dots/caelestia` `hypr/`.** Treat as read-only. |
+| `~/.config/caelestia/hypr-vars.lua` | Luminos **value** overrides — apps, cursor, sleep command. |
+| `~/.config/caelestia/hypr-user.lua` | Luminos **behaviour** overrides — GPU pin, monitor, env, autostarts. Required LAST by `hyprland.lua`, so it wins. |
+| repo `config/caelestia/` | Tracked copies of both override files. |
+
+`config/hypr/hyprland.conf` was **removed from the repo**. The proven-good Phase 3 version is
+recoverable at `git show ed68e860:config/hypr/hyprland.conf`, and a live copy sits in
+`~/luminos-backups/hypr-config-pre-caelestia-20260804-170302/`.
+
+## ⚠️ The config language changed to Lua
+Caelestia luafied on 2026-06-19 (upstream commit `593c8b0`). Hyprland gained a Lua provider in
+0.55.0, and 0.56.1 is linked against `liblua`. **Hyprland prefers `hyprland.lua` over
+`hyprland.conf` automatically** — proven:
+
+    $ Hyprland --verify-config
+    [cfg] Using lua config found at /home/shawn/.config/hypr/hyprland.lua
+    config ok
+    $ hyprctl systeminfo | grep configProvider     # in a nested test session
+    configProvider: lua
+
+**`~/.config/hypr/hyprland.conf` is still on disk and is now INERT.** It was left there on purpose:
+the live session had it loaded, Hyprland watches loaded config files, and deleting it out from
+under a running compositor risks a reload into nothing while the user is mid-conversation.
+**Delete it after the next successful login** — leaving it is a silent-fallback landmine if
+`hyprland.lua` ever goes missing.
+
+## Proven before being applied (nested, zero risk to the live session)
+A second Hyprland was started on the live one's Wayland socket. Live session (PID 106680) was
+untouched throughout. Results: `configProvider: lua`, **140 binds** registered (was 20), **zero**
+config errors. `scheme/current.lua` auto-created from `default.lua` by `hyprland.lua` itself.
+
+Nesting is safe *because* `caelestia shell -d` runs `qs -c caelestia -n`, and `-n/--no-duplicate`
+makes the second instance exit immediately rather than fighting the live bar. Check that flag is
+still there before nesting again.
+
+## 🟥 trash-cli is UNINSTALLED ON PURPOSE — do not "fix" it
+Stock `execs.lua` autostarts **`trash-empty 30`**, which permanently deletes anything in the trash
+older than 30 days, at **every login**. On this machine that was **31 of 43 items, 8.9 GB**,
+including `LUMINOS_MASTER_FILE.md`, `AGENT_HANDOFF.md`, `DECISION_HYPRLAND_TO_KDE.md`,
+`conversations.json` and `projects.json` — Luminos project documents.
+
+`trash-cli` was installed (it is in the Caelestia dependency set) and then **removed again** so the
+autostart no-ops. `execs.lua` stays byte-identical to upstream; the binary simply is not there.
+**Do not reinstall `trash-cli` until that trash has been triaged.** Awaiting a user decision.
+
+## Deliberate divergences from stock, and why
+| Stock | Here | Why |
+|---|---|---|
+| `foot` / `firefox` / `codium` / `thunar` | `kitty` / `google-chrome-stable` / `kitty -e vim` / `dolphin` | none of the stock four are installed; these already are |
+| `cursorTheme = sweet-cursors` | `Yaru` | sweet-cursors not installed → no cursor theme at all. Yaru matches Plasma's `kcminputrc` |
+| `QT_QPA_PLATFORMTHEME=qtengine` | `kde` | qtengine not installed, and it would take Qt styling away from KDE and undo the Yaru work (BUG-088/090) |
+| `polkit-gnome` agent | `polkit-kde` agent | polkit-gnome not installed; two agents would race the same D-Bus name. Without one, auth prompts fail **silently** |
+| `scale = 1` | `scale = 2` | 2880x1800 on 14" unscaled is unreadable. 2.00 is what the user signed off on |
+| `suspend-then-hibernate` | `suspend` | no hibernate image — swap is zram and cannot hold one |
+| GTK/Qt/Firefox/VSCode/Discord theming | **not installed** | `adw-gtk-theme`, `papirus-folders`, `qtengine`, `darkly-bin` would undo the Ubuntu/Yaru KDE look. Reversible: run `caelestia install` and enable those components |
+| `gammastep` + `geoclue` | not installed | night light; geoclue drags in avahi + ModemManager |
+
+Packages added for this: `hyprpicker`, `ydotool`, `app2unit`. (`trash-cli` — see above.)
+
+## Titlebar buttons — the answer is NO, by user decision
+Caelestia has **no window titlebars by design** — `env.lua` sets
+`QT_WAYLAND_DISABLE_WINDOWDECORATION=1` and windows are keyboard-controlled (`SUPER+Q` close,
+`SUPER+F` fullscreen). Asked directly, the user said the current look *"is exactly what i wanted
+and is same as video"*. **Do not add `hyprbars`.**
+
+For the record if it is ever wanted: `hyprpm` already has the `hyprland-plugins` repo added, and
+`hyprbars` builds against 0.56.1 — `hyprpm enable hyprbars`. (`hyprscrolling` and `hyprtrails` in
+that repo currently fail to build; neither is needed, 0.56.1 has a built-in scrolling layout.)
+Note "hymods" was never identified — best guess is the user meant `hyprpm`.
+
+---
+
 # ▶ PHASE 5 — not started
 Reconnect Luminos under Hyprland:
-- **SUPER+SPACE → HIVE popup.** Deliberately left unbound in `hyprland.conf` to avoid a conflict
-  that would be annoying to debug. Note Caelestia binds its own launcher — check for a clash.
+- **SUPER+SPACE → HIVE popup.** Still deliberately unbound. **Confirmed free** in stock Caelestia:
+  its launcher is a bare SUPER *tap* (`kbLauncher = "SUPER + SUPER_L"`), and the nearest neighbour
+  is `SUPER+ALT+Space` (toggle floating). Bind it in `hypr-user.lua`, never in `~/.config/hypr/`.
+  Also confirmed free of Claude Desktop, which registers its own global shortcut on
+  `Ctrl+Alt+Space` (visible in `hyprctl globalshortcuts` as `claude:...-Ctrl+Alt+Space`).
 - Decide what replaces the KDE widgets.
 - Candidate: wire Caelestia's dead power-profile buttons to `asusd` (see the ppd note above).
 - The user's stated follow-on: *"and than we will add our custome touch got it ?"* — Luminos
