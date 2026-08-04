@@ -5,26 +5,26 @@
 -- in hypr-vars.lua, which merges this file over itself — that split is what keeps a
 -- save from ever clobbering the app / cursor / suspend settings.
 --
--- preset: caelestia
--- saved : 2026-08-04T18:13:41-04:00
+-- preset: custom
+-- saved : 2026-08-04T18:19:12-04:00
 
 return {
     windowRounding      = 15,
     windowGapsIn        = 5,
     windowGapsOut       = 10,
-    singleWindowGapsOut = 20,
-    workspaceGaps       = 20,
+    singleWindowGapsOut = 10,
+    workspaceGaps       = 10,
     windowBorderSize    = 1,
     windowOpacity       = 0.95,
 
     blurEnabled         = true,
-    blurSize            = 8,
-    blurPasses          = 2,
-    blurXray            = false,
+    blurSize            = 6,
+    blurPasses          = 1,
+    blurXray            = true,
 
     shadowEnabled       = true,
     shadowRange         = 15,
 
     luminosAnimations   = true,
-    luminosLookPreset   = "caelestia",
+    luminosLookPreset   = "custom",
 }
