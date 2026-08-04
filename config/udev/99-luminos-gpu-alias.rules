@@ -1,0 +1,18 @@
+# [CHANGE: claude-code | 2026-08-04] Colon-free stable alias for the AMD iGPU DRM node.
+#
+# WHY THIS EXISTS (BUG-094):
+# Hyprland's aquamarine backend reads AQ_DRM_DEVICES as a COLON-SEPARATED list. The obvious
+# "stable" way to name a GPU — /dev/dri/by-path/pci-0000:65:00.0-card — contains colons, so
+# aquamarine split it into three garbage paths, found no GPU, and aborted the whole session:
+#
+#     drm: Failed to canonicalize path /dev/dri/by-path/pci-0000
+#     drm: Failed to canonicalize path 65
+#     drm: Explicit device 00.0-card not found
+#     drm: Found no gpus to use, cannot continue
+#
+# /dev/dri/cardN has no colons but its number is enumeration order and is NOT stable across
+# boots — on this machine the NVIDIA dGPU enumerates FIRST as card1. So neither stock name is
+# both stable and colon-free. This rule creates one that is.
+#
+# Matched on ID_PATH (the PCI address, fixed by the hardware), NOT on card number.
+SUBSYSTEM=="drm", KERNEL=="card*", ENV{ID_PATH}=="pci-0000:65:00.0", SYMLINK+="dri/luminos-igpu"

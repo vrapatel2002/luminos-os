@@ -1,12 +1,19 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-04 — Hyprland **and** Caelestia Shell INSTALLED and proven nested;
-awaiting the first real login.
+Last updated: 2026-08-04 — Hyprland + Caelestia installed; **first real login FAILED (BUG-094),
+root-caused and fixed; awaiting a retry.**
+
+## 🟥 READ FIRST — the first real login failed, and the fix is already applied
+The session bounced straight back to SDDM. **Cause: `AQ_DRM_DEVICES` is a colon-separated list and
+the GPU pin was written as a PCI by-path, which is full of colons** — so it was split into three
+nonexistent devices, no GPU was found, and Hyprland aborted in ~2 s. Full detail in BUG-094 and in
+the GPU section below. Fixed by pinning to a colon-free udev alias `/dev/dri/luminos-igpu`.
+**The retry has not happened yet.**
 
 ## FIRST ACTION IN A NEW CHAT
 Read this file, then `cat ~/luminos-os/AGENTS.md`. The active thread is the **Hyprland +
 Caelestia Shell install** (below).
 
-**State: Phases 0–4 are DONE on disk.** `hyprland 0.56.1-3`, `quickshell-git`,
+**State: Phases 0–4 are DONE on disk, but the first real login failed (BUG-094, now fixed).** `hyprland 0.56.1-3`, `quickshell-git`,
 `caelestia-shell 2.2.0-1` and `caelestia-cli 1.1.2-1` are all installed, and the whole stack has
 been proven working in a **nested session inside live Plasma** — bar, live tray, clock, status
 icons, and Claude Desktop all confirmed. What has *not* happened yet is a real DRM login.
@@ -347,15 +354,35 @@ If Hyprland is left to pick, it can land on the NVIDIA card, which would (a) hol
 forever and destroy the 0 W gating, and (b) probably fail to start at all, because
 `/etc/environment` forces **Mesa-only EGL** so there is no NVIDIA EGL vendor to use.
 
-So it is pinned to the iGPU **by PCI path, never by card number** (numbering is enumeration order
-and is not stable across boots — and here a wrong guess picks NVIDIA):
+So it is pinned to the iGPU:
 
-    AQ_DRM_DEVICES=/dev/dri/by-path/pci-0000:65:00.0-card
+    AQ_DRM_DEVICES=/dev/dri/luminos-igpu
+
+### ⚠️ DO NOT "fix" that to a by-path value — that is BUG-094 and it locks you out
+`AQ_DRM_DEVICES` is a **colon-separated list**. The obvious, more-correct-looking
+`/dev/dri/by-path/pci-0000:65:00.0-card` contains colons, so aquamarine split it into three
+nonexistent devices, found no GPU, and **aborted every login for ~2 s straight back to SDDM**.
+
+Neither stock name is usable on its own:
+- `by-path/...` — stable, **but has colons** → shredded by the list parser.
+- `/dev/dri/cardN` — colon-free, **but the number is enumeration order** and NVIDIA is `card1`
+  here, so a stale number pins the compositor to the dGPU: the exact thing pinning prevents.
+
+`/dev/dri/luminos-igpu` is a colon-free alias created by
+**`/etc/udev/rules.d/99-luminos-gpu-alias.rules`**, matched on `ID_PATH=pci-0000:65:00.0`.
+Stable *and* parseable. Repo copy at `config/udev/`. Verified: `-> card2`, vendor `0x1002`.
 
 Set in **two** places on purpose — `~/.config/hypr/hyprland.conf` (`env =`) and
 `~/.config/uwsm/env-hyprland` (`export`) — because uwsm builds the environment before the
-compositor is exec'd while Hyprland applies its own `env` during config parse. Verified the path
-resolves to vendor `0x1002`. **No NVIDIA env vars anywhere.**
+compositor is exec'd while Hyprland applies its own `env` during config parse. `env-hyprland`
+additionally falls back to `readlink -f` on the by-path link if the udev alias is ever missing
+(negative-tested; yields the colon-free `/dev/dri/card2`). **No NVIDIA env vars anywhere.**
+
+### aquamarine touches the dGPU no matter what you pin
+It enumerates **every** DRM device *before* applying `AQ_DRM_DEVICES`, so the NVIDIA card is opened
+briefly at every Hyprland start and the journal shows
+`NVRM: nvAssertFailedNoLog ... kernel_gsp.c:1447`. That is enumeration, **not** proof the
+compositor landed on the dGPU. Judge that with `hyprctl systeminfo` and `runtime_status`.
 
 ## Config
 - `~/.config/hypr/hyprland.conf` — deliberately minimal, `hyprland --verify-config` → **`config ok`**.
@@ -381,6 +408,22 @@ Hyprland logs to `$XDG_RUNTIME_DIR/hypr/<instance>/hyprland.log`, and logind **d
 logging out to report the problem. The unit uses `RemainAfterExit=yes` with a no-op `ExecStart`,
 so its **`ExecStop`** runs during `graphical-session.target` teardown, while the runtime dir still
 exists. Logs land in `~/luminos-backups/hypr-session/` (last 20 kept).
+
+### ⚠️ It did NOT catch the BUG-094 crash — and here is where the logs actually were
+When the compositor **aborts during startup**, `graphical-session.target` never comes up properly,
+so `ExecStop` never runs and nothing is copied to `~/luminos-backups/hypr-session/`. Worse, the
+directory still contains older logs, so it *looks* like it worked — the newest file there was from
+an unrelated nested test, which is exactly how you talk yourself into diagnosing the wrong run.
+
+**The real logs survived in the runtime dir**, because the user logged back into Plasma instead of
+rebooting, so `$XDG_RUNTIME_DIR` was never torn down:
+
+    ls -lt /run/user/1000/hypr/*/hyprland.log | head
+    tail -25 /run/user/1000/hypr/<newest-instance>/hyprland.log     # <- the actual error
+
+Match the instance to the crash by timestamp, and cross-check against
+`coredumpctl list | grep Hyprland`. **Do not trust `~/luminos-backups/hypr-session/` for a
+startup crash — check the mtime of what is in there before believing it.**
 
 Tested three ways, not assumed: clean no-op outside Hyprland; positive copy from a fake runtime
 log; and the real systemd path by starting the unit and stopping it, which rescued the file.
@@ -568,9 +611,11 @@ state, not a crash. Run `qs -c caelestia` in the kitty window and read the error
 Only the things the nested test could **not** cover. Claude Desktop and basic compositor health
 are already proven above — don't re-litigate them, check the DRM-backend-specific things.
 
-1. **Did it start at all** — kitty *and* the Caelestia bar should be on screen. A bounce back to
-   SDDM means the GPU pin failed. `Ctrl+Alt+F3` → TTY → `cd ~/luminos-os && claude`; the CLI agent
-   works with no desktop.
+1. **Did it start at all** — kitty *and* the Caelestia bar should be on screen. **A bounce back to
+   SDDM means the GPU pin failed — that is BUG-094's signature.** Read
+   `/run/user/1000/hypr/<newest>/hyprland.log` (see the log-rescue caveat above) and look for
+   `drm: Explicit device ... not found` / `Found no gpus to use`. `Ctrl+Alt+F3` → TTY →
+   `cd ~/luminos-os && claude`; the CLI agent works with no desktop.
 2. **🎯 GPU pinning — the real unknown.** This is what the nested test could not check:
 
        hyprctl systeminfo | grep -i -A3 'GPU information'

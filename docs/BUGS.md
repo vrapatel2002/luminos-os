@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-08-04 (BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-08-04 (BUG-094 FIXED — the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
 
@@ -773,3 +773,67 @@ Each bug entry:
 
   This belongs to the same family as BUG-088/089 — a tool reporting success (or here, reporting a
   version) for a path that is not the one in effect.
+
+### BUG-094 — Hyprland session bounced straight back to the login screen: the GPU pin was written in a format aquamarine parses as a list
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+- Status: ✅ FIXED (root-caused from the compositor's own log; awaiting confirmation on the next login)
+- Severity: **HIGH** — the Hyprland session was 100% unusable. Every attempt died in ~2 s.
+- Component: `AQ_DRM_DEVICES` in `~/.config/hypr/hyprland.conf` and `~/.config/uwsm/env-hyprland`
+- Reported as: *"i select the Hyprland (uwsm-managed) enter password it shows black screen and than we are back to login screen"*
+- **This one was real.** Unlike BUG-092, SDDM confirms Hyprland genuinely ran — three attempts,
+  two via uwsm and one plain, each `SIGABRT` within ~2 seconds:
+
+      sddm[891]: Session ".../hyprland-uwsm.desktop" selected, command: "uwsm start -e -D Hyprland hyprland.desktop"
+      uwsm_hyprland.desktop[98645]: terminate called after throwing an instance of 'std::runtime_error'
+      uwsm_hyprland.desktop[98645]:   what():  CBackend::create() failed!
+      systemd-coredump[98672]: Process 98645 (Hyprland) ... signal 6/ABRT
+
+- **Root cause — the pin was correct in intent and unparseable in form.** From Hyprland's own log:
+
+      drm: Enumerated device .../0000:01:00.0/drm/card1        <- NVIDIA, seen
+      drm: Enumerated device .../0000:65:00.0/drm/card2        <- AMD, seen, "supports kms"
+      drm: Explicit device list /dev/dri/by-path/pci-0000:65:00.0-card
+      ERR drm: Failed to canonicalize path /dev/dri/by-path/pci-0000
+      ERR drm: Failed to canonicalize path 65
+      ERR drm: Failed to canonicalize path 00.0-card
+      ERR drm: Explicit device /dev/dri/by-path/pci-0000 not found
+      ERR drm: Explicit device 65 not found
+      ERR drm: Explicit device 00.0-card not found
+      ERR drm: Found no gpus to use, cannot continue
+      ERR DRM Backend failed
+
+  **`AQ_DRM_DEVICES` is a COLON-SEPARATED LIST**, and a PCI by-path name is full of colons. One
+  device path was split into three nonexistent ones. aquamarine had *already enumerated the right
+  card* and confirmed it supports KMS — then discarded it because the filter matched nothing, found
+  no usable GPU, and aborted. Note the split is not inferred: one input produced exactly three
+  errors, cut at exactly the two colons.
+
+- **The irony worth remembering:** the by-path form was chosen *deliberately over* `/dev/dri/card2`,
+  and the config carried a comment explaining that card numbers are enumeration order and unstable.
+  That reasoning is correct — the NVIDIA dGPU really does enumerate first here as `card1`. The
+  mistake was assuming the more-correct-looking identifier was also a *legal value for this
+  variable*. **Neither stock name works: `by-path` is stable but has colons; `cardN` is colon-free
+  but unstable.**
+
+- Fix — create a name that is both, via udev, matched on the PCI address:
+
+      # /etc/udev/rules.d/99-luminos-gpu-alias.rules
+      SUBSYSTEM=="drm", KERNEL=="card*", ENV{ID_PATH}=="pci-0000:65:00.0", SYMLINK+="dri/luminos-igpu"
+
+  then `AQ_DRM_DEVICES=/dev/dri/luminos-igpu` in both `hyprland.conf` and `uwsm/env-hyprland`.
+  Verified: `/dev/dri/luminos-igpu -> card2`, vendor `0x1002` (AMD), zero colons.
+  `env-hyprland` also carries a `readlink -f` fallback for the case where the udev rule goes
+  missing — negative-tested by pointing it at a nonexistent alias, which correctly yielded the
+  colon-free `/dev/dri/card2`.
+
+- **Generalised lesson:** when an env var takes a *path*, find out whether it takes a **list**
+  before choosing the prettiest path form. Separators (`:` for paths, `,` for lists) silently
+  turn one valid value into several invalid ones. The tell is in the error text — three errors
+  from one input, split at the separator.
+
+- **Also worth knowing:** aquamarine enumerates **every** DRM device before applying
+  `AQ_DRM_DEVICES`, so the NVIDIA card is opened briefly at every Hyprland start regardless of
+  pinning. That is what produced `NVRM: nvAssertFailedNoLog ... kernel_gsp.c:1447` in the journal.
+  It is a side effect of enumeration, **not** evidence that the compositor landed on the dGPU.
+  Judge that with `hyprctl systeminfo` and the dGPU `runtime_status`, never by the presence of an
+  NVRM line.

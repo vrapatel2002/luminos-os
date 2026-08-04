@@ -10,7 +10,15 @@
 # This file is sourced by uwsm ONLY for the Hyprland session, so it cannot affect the Plasma
 # session in any way.
 #
-# The value is a PCI path, not /dev/dri/card2, because DRM card numbers are enumeration order and
-# are not stable across boots. On this machine the NVIDIA dGPU enumerates FIRST (card1), so a
-# hardcoded number is actively dangerous here — see hyprland.conf for the full explanation.
-export AQ_DRM_DEVICES=/dev/dri/by-path/pci-0000:65:00.0-card
+# ⚠️ DO NOT change this to a /dev/dri/by-path/... value. It looks more "correct" and it is what
+# was here first, but it CRASHED THE SESSION — aquamarine splits AQ_DRM_DEVICES on ':' and PCI
+# paths are full of colons, so the path was shredded into three nonexistent devices and the
+# compositor aborted with "Found no gpus to use". See BUG-094.
+#
+# Also do not hardcode /dev/dri/card2: colon-free, but the number is enumeration order and the
+# NVIDIA dGPU enumerates FIRST on this machine (card1), so a stale number would pin the
+# compositor to the dGPU — the exact outcome the pinning exists to prevent.
+#
+# /dev/dri/luminos-igpu is a colon-free alias from /etc/udev/rules.d/99-luminos-gpu-alias.rules,
+# matched on the PCI address. Stable AND parseable.
+export AQ_DRM_DEVICES=/dev/dri/luminos-igpu
