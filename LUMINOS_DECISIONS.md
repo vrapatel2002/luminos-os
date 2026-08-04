@@ -1851,3 +1851,13 @@ to upstream. Do not reinstall it until that trash has been triaged.
 `cp -a ~/luminos-backups/hypr-config-pre-caelestia-20260804-170302/hypr/. ~/.config/hypr/` and
 delete `hyprland.lua`, or `git show ed68e860:config/hypr/hyprland.conf`. Plasma is unaffected
 either way and remains selectable at SDDM.
+
+---
+
+## DECISION 42 — media server
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+
+Lives in [`server/DECISIONS.md`](server/DECISIONS.md), like 35/36/36a/37. The number is
+kept in this sequence so references resolve:
+
+- **42** — all torrent traffic is halted until a VPN is in front of it (amends 35)

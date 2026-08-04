@@ -341,6 +341,82 @@ machine itself skip authentication entirely. It must stay LAN-only.
 
 ---
 
+## 6a. HALTED (2026-08-04) — the ISP can see all of this, so torrenting is off until a VPN is in
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+
+Everything in §2a and §6 is about *who can reach in*. This section is about the
+opposite direction: **who can see what goes out.** The answer, today, is the ISP and
+anyone who cares to look, and that is why torrent traffic is currently stopped.
+
+Full record in [`../DECISIONS.md`](../DECISIONS.md) → **DECISION 42**.
+
+### What is actually visible
+
+| | |
+|---|---|
+| **The protocol** | BitTorrent is unencrypted by default and identifiable by its handshake signature. Running it on 25989 instead of 6881 does not disguise it — port choice is not obfuscation. |
+| **The IP, in a public list** | Because §2a opened an *inbound* port, this box is an **advertised** peer. It appears in the tracker's peer list and in DHT results for every torrent it carries, against **76.64.36.43**. That list is readable by anyone, which is precisely how monitoring firms build notices. |
+| **The volume** | `up_info_data` had reached **228.9 GB** uploaded against 389.9 GB down. Seeding is the conspicuous half — an outbound-only client is a face in the crowd, a seeder is on the list. |
+
+Note the interaction: **§2a made §6a worse.** Opening the port was the right call for
+throughput and it is what made seeding work at all, but working seeding is exactly what
+puts the IP on a public list. The two decisions are correct individually and in tension
+together, which is the whole reason a VPN is now required rather than optional.
+
+### Current state — verified 2026-08-04
+
+Four layers, so that undoing any one of them does not resume traffic:
+
+```
+1. all 22 torrents          -> stopped   (POST /api/v2/torrents/stop, hashes=all)
+2. qbittorrent-nox@shawn    -> stopped AND disabled  (nothing listens, survives reboot)
+3. qbt-portmap.timer        -> stopped AND disabled  (was still re-punching the router
+                                           forward hourly, armed to fire in 15 min)
+4. Sonarr/Radarr rssSync    -> 0         (no grab backlog builds behind the halt)
+```
+
+Layer 3 is the one that is easy to miss: the thing keeping the port open at the *router*
+is a **separate unit from the service it serves** (§2b — qBittorrent's own UPnP stopped
+mapping, so a timer took over). Stopping qBittorrent does not stop it.
+
+Proven from the G14, with a control so the probe cannot lie:
+
+```
+192.168.2.62:25989   Connection refused    <- peer port dead
+192.168.2.61:8080    Connection refused    <- WebUI dead (same process)
+192.168.2.61:8096    OPEN                  <- CONTROL: the probe can still see
+                                              an open port, so the two above mean
+                                              something
+```
+
+The nftables `accept` rules for 25989 were **deliberately left in place**. They are
+inert while nothing is listening, and removing them is a real reversal of §2a /
+DECISION 35 rather than a side effect of this halt.
+
+### Not affected
+Jellyfin keeps serving. That is LAN traffic between the server and the TV; it never
+crosses the ISP. Prowlarr can still query indexers — ordinary HTTPS, not swarm
+participation, and it does not put the IP in a peer list.
+
+### Before this is switched back on
+A VPN client alone is not enough. All three of these have to be true and none are yet:
+
+- [ ] **The tunnel exits via `enp2s0`, and qBittorrent binds to the tunnel.** DECISION 36
+      keeps torrents off the wifi radio by `SO_BINDTODEVICE`. Get this wrong and the
+      encrypted tunnel rides the radio, and the TV stutters again for a reason that will
+      look nothing like a VPN problem.
+- [ ] **Kill-switch tested, not assumed.** Down the tunnel interface mid-transfer and
+      confirm the byte counters go to zero. Binding to a dead interface *should* stall
+      rather than fall back — verify that it does.
+- [ ] **Port forwarding through the provider decided.** Most do not offer it. Without it
+      the inbound port from §2a is gone and the client is outbound-only again — an
+      acceptable cost, but it should be known in advance rather than discovered.
+
+**Provider choice is the user's** — it is a paid subscription and a decision about who
+gets to see the traffic instead of the ISP.
+
+---
+
 ## 7. TODO — the G14 itself has no firewall
 
 The laptop (`192.168.2.16`) was audited at the same time. **No firewall is
@@ -385,6 +461,10 @@ does mean the rule must be written to fail closed, not opened up per-network.
 | 9 | Firewall the G14, keeping 21861 open | either | ⬜ |
 | 10 | Bind `luminos-ram` to localhost, or justify `*:9091` | either | ⬜ |
 | 11 | HTTPS via domain + Let's Encrypt DNS-01 | later | ⬜ deferred, see §5 |
+| 12 | Halt all torrent traffic until a VPN is in place (§6a) | done | ✅ 2026-08-04 |
+| 13 | **Choose a VPN provider** — paid, and a trust decision | **Shawn** | ⬜ |
+| 14 | Install the VPN so the tunnel exits `enp2s0` (§6a, DECISION 36) | either | ⬜ blocked on 13 |
+| 15 | Test the kill-switch by downing the tunnel mid-transfer | either | ⬜ blocked on 14 |
 
 ---
 

@@ -263,3 +263,127 @@ confirms it.
   and buys nothing here.
 - `EnableTonemapping=false` — HDR→SDR tonemapping on Comet Lake needs OpenCL
   (`intel-compute-runtime`), which is not installed. Separate change, separate proof.
+
+---
+
+## DECISION 42 — All torrent traffic is halted until a VPN is in front of it
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+**Date:** 2026-08-04
+**Status:** Accepted (user-directed) — **active halt, not a plan**
+**Applies to:** the media server (Dell Inspiron 3590), not the G14.
+**Amends:** DECISION 35, which opened port 25989 to the internet on purpose.
+
+### Context
+DECISION 35 deliberately exposed the BitTorrent peer port so the client could accept
+inbound connections and actually seed. It worked — `up_info_data` reached **228.9 GB**
+uploaded against **389.9 GB** downloaded.
+
+That is exactly the problem. Every one of those transfers is visible to the ISP:
+
+- BitTorrent peer traffic is **unencrypted by default** and trivially identifiable by
+  protocol signature, regardless of port number. Moving off 6881 hides nothing.
+- With an **inbound** port open the machine is not just a client, it is an advertised
+  peer. It appears in the tracker's peer list and in every DHT lookup for those
+  torrents, tied to the public IP **76.64.36.43**. Anyone can enumerate that list —
+  monitoring outfits do exactly this, and it is the usual source of ISP notices.
+- Seeding is the half that draws attention. Uploading 228.9 GB is a far louder signal
+  than downloading the same volume.
+
+### Decision
+**No torrent download and no torrent upload until a VPN is in place.** Halted on
+2026-08-04, enforced at three independent layers so undoing one does not restart traffic:
+
+1. All 22 torrents set to `stopped` via `POST /api/v2/torrents/stop` with `hashes=all`.
+2. `qbittorrent-nox@shawn.service` **stopped and disabled** — so it does not come back
+   on reboot, and nothing is listening on 25989 at all.
+3. `qbt-portmap.timer` **stopped and disabled**. This is the hourly job that keeps the
+   router's forward to 25989 alive, since qBittorrent's own UPnP stopped mapping. It was
+   still armed and due to fire 15 minutes later. It could not have restarted traffic —
+   nothing is listening — but it would have kept re-advertising a forward to a machine
+   that is meant to be silent, which is the opposite of the intent. Easy to miss,
+   because it is a *separate unit from the thing it serves*.
+
+Plus a fourth layer to stop a backlog building up behind the halt:
+
+4. `rssSyncInterval` set to **0** in both Sonarr and Radarr. Left at their defaults they
+   would keep polling indexers, grabbing releases, and failing to hand them to a dead
+   download client — filling the queue with retries and possibly blocklisting good
+   releases. Original values recorded below for restore.
+
+The nftables `accept` rules for 25989 were **left in place**. They are inert while
+nothing listens on the port, and removing them is a real DECISION 35 reversal that
+should be a deliberate act rather than a side effect of this halt.
+
+### Verified, not assumed
+Stopping was confirmed by measurement at both ends, with a control to prove the test
+could detect the failure case:
+
+```
+after stop:  dl_info_speed 0   up_info_speed 0   (was up 1,013,529 B/s)
+             Counter({'stoppedUP': 20, 'stoppedDL': 2})
+from the G14:
+  192.168.2.62:25989  Connection refused     <- peer port dead
+  192.168.2.61:8080   Connection refused     <- WebUI dead (same process)
+  192.168.2.61:8096   OPEN                   <- CONTROL: proves the probe
+                                                can still see an open port
+```
+
+Without that third line the first two prove nothing — a probe that cannot detect
+anything reports every port as closed.
+
+`rssSyncInterval=0` was confirmed by reading the value back from both APIs, not from
+the fact that the `PUT` returned success.
+
+### What is NOT affected
+Jellyfin keeps running. Streaming to the TV is LAN-only traffic that never leaves the
+house, and nothing about it is of interest to the ISP. The library is untouched —
+610 GB already on disk stays fully playable.
+
+Prowlarr can still reach indexers. Those are ordinary HTTPS requests, not swarm
+participation, and they do not put the IP in a peer list.
+
+### Restore procedure — only after the VPN is up and leak-tested
+The values to put back, recorded now so they are not guesses later:
+
+```bash
+# 1. ONLY after the VPN is confirmed working AND kill-switched
+sudo systemctl enable --now qbittorrent-nox@shawn.service
+sudo systemctl enable --now qbt-portmap.timer   # only if the VPN does NOT forward a port
+
+# 2. restore RSS polling (these were the values before the halt)
+#    Sonarr rssSyncInterval 15, Radarr rssSyncInterval 30
+curl -X PUT -H "X-Api-Key: $SONARR_KEY" -H 'Content-Type: application/json' \
+  -d '{"minimumAge":0,"retention":0,"maximumSize":0,"rssSyncInterval":15,"id":1}' \
+  http://127.0.0.1:8989/api/v3/config/indexer/1
+
+# 3. resume torrents
+curl -b /tmp/qbc.txt -d 'hashes=all' http://127.0.0.1:8080/api/v2/torrents/start
+```
+
+### The hard part, which is not yet decided
+A VPN on this box is **not** just "install a client". Three things have to be true, and
+none of them are true today:
+
+- **The VPN must not break DECISION 36.** Torrents are pinned to `enp2s0` by
+  `SO_BINDTODEVICE` (`current_network_interface=enp2s0`) so the wifi radio stays free
+  for the TV. A VPN introduces a `wg0`/`tun0` interface, and qBittorrent must be
+  re-pinned to *that* — but the VPN's own encrypted tunnel must still exit via
+  `enp2s0`, or the torrent traffic lands back on the radio inside the tunnel and the
+  TV stutters again. This is the fiddly part.
+- **A kill-switch is mandatory, not optional.** If the tunnel drops and qBittorrent is
+  bound to a dead interface it should stall, not fall back to the bare connection. The
+  binding gives this mostly for free — a dead `wg0` means no route — but it must be
+  *tested* by downing the interface mid-transfer and confirming the counters go to zero.
+- **Port forwarding through the VPN** decides whether seeding still works at all. Most
+  providers do not offer it; on those, DECISION 35's inbound port is simply gone and
+  the client is back to outbound-only. That is an acceptable cost but it should be a
+  known one, not a surprise.
+
+**Provider choice is the user's call** — it is a paid subscription and a trust decision
+about who gets to see the traffic instead of the ISP.
+
+### Lesson
+The halt is enforced by *stopping the service*, not by unticking something in the app.
+An app-level pause is one settings write away from being undone, including by the app
+itself on restart. When the requirement is "no traffic", the enforcement belongs at a
+layer the app does not control.

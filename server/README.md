@@ -48,11 +48,40 @@ The TV is a Philips 65PUL7973 (Roku) at 192.168.2.13. Public IP 76.64.36.43.
 | service | port | exposure |
 |---|---|---|
 | Jellyfin | 8096 | LAN only |
-| qBittorrent WebUI | 8080 | LAN only |
+| qBittorrent WebUI | 8080 | **stopped** — see the halt below |
 | Sonarr | 8989 | LAN only |
 | Radarr | 7878 | LAN only |
 | Prowlarr | 9696 | LAN only |
-| BitTorrent peer port | 25989 | **open to the internet on purpose** — DECISION 35 |
+| BitTorrent peer port | 25989 | **stopped** — rule still in nftables, nothing listening |
+
+## ⛔ Torrenting is halted until a VPN is installed
+
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+
+**Nothing downloads and nothing uploads right now, on purpose.** Halted 2026-08-04 —
+DECISION 42 has the full reasoning, the proof, and the restore commands.
+
+The short version: BitTorrent traffic is unencrypted and easy to identify by protocol
+signature, so the port number hides nothing. With an inbound port open this box was an
+*advertised* peer — listed in trackers and DHT against the public IP 76.64.36.43, where
+anyone can enumerate it. It had uploaded **228.9 GB**, and the uploading half is the
+loud half. A VPN goes in front of all of it before any of this restarts.
+
+Enforced in four places so undoing one does not restart traffic:
+
+| layer | state |
+|---|---|
+| all 22 torrents | `stopped` |
+| `qbittorrent-nox@shawn.service` | stopped **and disabled** — survives reboot |
+| `qbt-portmap.timer` | stopped **and disabled** — it was still re-punching the router forward hourly |
+| Sonarr + Radarr `rssSyncInterval` | `0`, so no grab backlog builds up behind the halt |
+
+Jellyfin is untouched and still streams — that traffic never leaves the house.
+
+**Do not just restart qBittorrent when the VPN is installed.** The VPN has to be pinned
+so the tunnel exits via `enp2s0` and qBittorrent binds to the tunnel, or torrents end up
+back on the wifi radio and the TV stutters (DECISION 36). Kill-switch must be tested by
+downing the interface mid-transfer, not assumed.
 
 API keys are deliberately **not** stored in this repo. Read them off the box:
 
@@ -69,6 +98,11 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   Windows booting. It is also why Linux cannot see the NVMe at all — Intel RST hides it.
 - **Never clear qBittorrent's `current_network_interface`.** That single setting is what keeps
   torrents on the cable and off the wifi radio. The routing rules are backup, not the mechanism.
+- **A stopped torrent is not a stopped service.** An app-level pause is one settings write from
+  being undone. When the requirement is "no traffic", stop and *disable* the unit — DECISION 42.
+- **Jellyfin's `SubtitleMode: Default` means "only tracks the file flags as default".** Most web
+  releases flag none, so subtitles silently never appear even though they are right there in the
+  file. `Always` + a language preference is what actually turns them on.
 - **A quality profile that matches nothing fails silently and forever.** Sonarr will sit on an
   empty season indefinitely rather than tell you. Search before assuming the chain is broken.
 - **Public indexer seeder counts are fiction.** Check `GET /api/v2/torrents/trackers` after adding.
