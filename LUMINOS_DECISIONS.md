@@ -1649,3 +1649,74 @@ Two of them, and they are the same lesson the repo keeps re-learning:
 - **Negative-test the readback.** `triggersLidAction()` looked like a perfect health check and
   would have reported success for every wrong configuration tried. It was caught only because
   the check was deliberately run against a config known to be wrong.
+
+---
+
+## DECISION 39 — Hyprland is unbanned, as an opt-in second session; Plasma stays the default
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+
+**Status:** ACCEPTED, 2026-08-04. Reverses the standing ban in `AGENTS.md` §1.
+
+### What changed
+`AGENTS.md` §1 read **"PERMANENTLY BANNED: Hyprland, GTK4, HyprPanel, Python UI, Docker, Ollama,
+Snapd."** The user lifted the Hyprland part explicitly:
+
+> *"bro its no longer banned now got it? you can start now working on all phase just make sure that
+> you have claude desktop running in hyprland got it ?"*
+
+The trigger was a video — *"Install Hyprland + Caelestia Shell (Complete Guide)"* by Lau
+(@laustoic) — that the user wants reproduced on this machine.
+
+### Why the ban existed, and why it no longer applies
+The ban was not arbitrary. BUG-035, BUG-036 and BUG-037 (March 2026) record a real Hyprland
+attempt that failed: missing packages, a `set -e` that skipped build steps silently, and a CMake
+too old to proceed. It was eventually forced through in a chroot, and then the whole direction was
+abandoned in favour of KDE Plasma.
+
+**That evidence is no longer predictive, for one specific reason: it was gathered on Ubuntu 24.04.**
+Luminos is now Arch, where Hyprland is a first-class repo package with maintained dependencies.
+Every one of those three bugs was a consequence of building from source against a distro that
+did not carry the dependencies. None of them describe a problem with Hyprland itself.
+
+The old *decision*, however, was deliberate, so it needed an explicit reversal rather than being
+quietly ignored — hence this entry.
+
+### Scope — this is a narrow reversal
+- Hyprland is installed as an **additional session**, selectable at SDDM. It does not replace
+  anything.
+- **KDE Plasma remains the default and the supported desktop.** If a change is needed to make
+  Hyprland work and it degrades Plasma, Plasma wins.
+- **HyprPanel stays banned** — it is GTK4, which is still banned on its own merits. The shell for
+  the Hyprland session is **Caelestia**, built on Quickshell (Qt6/QML). Caelestia never violated
+  the constitution; it sits inside the existing Qt/QML rule. Only Hyprland itself was the banned
+  component.
+- The 5 Go daemons (`luminos-ai`, `luminos-power`, `luminos-sentinel`, `luminos-router`,
+  `luminos-ram`) are systemd services and must keep running identically under either session. A
+  compositor-dependent daemon would be a defect.
+
+### Acceptance criteria
+1. Plasma still logs in and behaves exactly as before. Non-negotiable.
+2. **Claude Desktop (`claude-desktop-bin`, Electron) actually runs under Hyprland.** The user made
+   this an explicit condition. A Hyprland session that starts but cannot run the agent is a failure,
+   because it strands the user with no way to ask for help. Escape hatches already present in the
+   launcher: `CLAUDE_USE_XWAYLAND=1`, `CLAUDE_DISABLE_GPU=1|full` (`xorg-xwayland` is installed).
+3. dGPU still reaches true 0 W under Hyprland. The mechanism is global, not Plasma-specific —
+   `/etc/environment` forces Mesa EGL (`__EGL_VENDOR_LIBRARY_FILENAMES=.../50_mesa.json`, BUG-047 /
+   BUG-050) — so **no NVIDIA-specific env vars go into `/etc/environment` for Hyprland's benefit.**
+   Check with `/sys/bus/pci/devices/0000:01:00.0/power/runtime_status`, never `nvidia-smi` (BUG-078).
+4. The compositor runs on the **AMD iGPU** (`0x1002`), as KWin already does. Card numbering is not
+   stable — resolve it by reading `/sys/class/drm/card*/device/vendor`, never by hardcoding.
+
+### How it gets installed
+Launch Hyprland through **uwsm** (already installed at `/usr/bin/uwsm`). uwsm wires the session
+into systemd's `graphical-session.target`, which gives correct environment propagation and makes
+XDG autostart work — a bare Hyprland does neither, and the session recorder depends on that target.
+
+### Reversal path
+Delete the session file and restart the login manager; nothing else is touched:
+
+    sudo rm -f /usr/share/wayland-sessions/hyprland.desktop
+    sudo systemctl restart sddm
+
+Full OS rollback if an upgrade rather than the compositor is the problem: timeshift snapshot
+`2026-08-04_14-35-50`. See `docs/ESCAPE-CARD.md`.

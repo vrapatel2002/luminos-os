@@ -93,7 +93,18 @@ Custom Arch Linux on ASUS ROG G14 GA403UU. Privacy-first, AI-native Windows repl
 - **AI Stack:** llama.cpp TurboQuant (NOT Ollama, NOT Docker) + HATS NPU
 - **Triple boot:** Windows / Default Arch / Luminos OS
 
-**PERMANENTLY BANNED:** Hyprland, GTK4, HyprPanel, Python UI, Docker, Ollama, Snapd
+**BANNED:** GTK4, HyprPanel, Python UI, Docker, Ollama, Snapd
+
+<!-- [CHANGE: claude-code | 2026-08-04] Hyprland removed from the banned list per DECISION 39.
+     User lifted it explicitly: "bro its no longer banned now got it?" -->
+**Hyprland — NO LONGER BANNED (DECISION 39, 2026-08-04), but scoped:**
+- Allowed as an **additional, opt-in session** you pick at the SDDM login screen.
+- **KDE Plasma remains the default and the supported session.** Anything that only works under
+  Hyprland is a nice-to-have; anything that breaks Plasma is a regression and gets reverted.
+- The ban on **HyprPanel** stands — it is GTK4. The Hyprland-side shell is **Caelestia**, which is
+  Quickshell (Qt6/QML) and therefore already inside the Qt/QML rule.
+- The 5 Go daemons must keep running unchanged under either session; they are systemd services and
+  must never depend on a compositor.
 
 ---
 

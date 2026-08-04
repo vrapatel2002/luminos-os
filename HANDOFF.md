@@ -8,7 +8,7 @@ changed on disk, and the user has not yet approved the ban override.** Do not st
 
 ---
 
-# ACTIVE THREAD — Hyprland + Caelestia Shell — APPROVED, PHASE 0 DONE, PHASE 1 NEXT
+# ACTIVE THREAD — Hyprland + Caelestia Shell — APPROVED, PHASES 0–1 DONE, PHASE 2 NEXT
 
 ## Goal (the durable end objective)
 User (2026-08-04) sent https://youtu.be/Na7tPZv2ckk — *"Install Hyprland + Caelestia Shell
@@ -45,9 +45,12 @@ whole direction was dropped in favour of KDE Plasma. **Arch changes the difficul
 **Required before any install:** a new numbered entry in `LUMINOS_DECISIONS.md` reversing the ban
 (scope it: Hyprland allowed as an *additional, opt-in session*, Plasma stays the default), plus an
 edit to `AGENTS.md` §1 so the banned list stops contradicting reality.
+**✅ Both done 2026-08-04 — see `LUMINOS_DECISIONS.md` DECISION 39 and `AGENTS.md` §1.**
 
-Note: **Caelestia itself does not violate anything.** It is a Quickshell (Qt6/QML) shell — the same
-Qt/QML stack Luminos already standardised on. Only **Hyprland** is the banned component.
+Note: **Caelestia itself never violated anything.** It is a Quickshell (Qt6/QML) shell — the same
+Qt/QML stack Luminos already standardised on. Only **Hyprland** was the banned component, and that
+ban is now lifted. **HyprPanel remains banned** — it is GTK4, banned on its own merits, and is not
+part of this work.
 
 ## Git state — VERIFIED 2026-08-04, and it corrects two stale beliefs
 | Claim | Reality |
@@ -177,7 +180,11 @@ Lessons that generalise:
 - Excluding `/var/cache/pacman/pkg` is deliberate: it keeps the 12 G / 760-package downgrade
   cache safe from being wiped by a restore.
 
-**Phase 1 — decision + docs**: LUMINOS_DECISIONS.md ban reversal, AGENTS.md §1 amended.
+**Phase 1 — decision + docs — ✅ DONE 2026-08-04.** `LUMINOS_DECISIONS.md` **DECISION 39** written
+  (ban reversed, scoped to an opt-in session, with acceptance criteria and a reversal path), and
+  `AGENTS.md` §1 amended so the banned list no longer contradicts reality. HyprPanel stays banned.
+  Checked the whole repo for other places still asserting the ban; the only remaining hits are
+  historical records (`docs/PROJECT_AUDIT_2026-04-27.md`) and are correct as history.
 **Phase 2 — system upgrade, on its own, with nothing else changing.** Handle `IgnorePkg`
   deliberately, `-Syu`, rebuild DKMS, reboot, confirm Plasma + dGPU 0 W gating still good
   (`scripts/luminos-verify`). **Stop here for a day if anything looks off.** Do not stack an
@@ -241,9 +248,9 @@ Useful fact discovered from the journal: **SDDM reads both `/usr/share/wayland-s
 - **Never `git add -A`** (AGENTS.md/notes rule — it is how the old API key got published, and the
   tree still holds parked work). Stage by name.
 
-## Status right now — 2026-08-04, end of Phase 0
-**Phase 0 is COMPLETE and committed. Nothing has been installed and no package has been upgraded.
-The system is exactly as it was, plus a safety net.**
+## Status right now — 2026-08-04, end of Phase 1
+**Phases 0 and 1 are COMPLETE and committed. Nothing has been installed and no package has been
+upgraded. The system is exactly as it was, plus a safety net and corrected docs.**
 
 In place and verified:
 - `.gitmodules` (8 submodules, all URLs + pinned commits proven fetchable)
@@ -253,13 +260,26 @@ In place and verified:
 - `docs/ESCAPE-CARD.md`
 - session black-box recorder, enabled as a systemd user unit
 
-**NEXT: Phase 1** — add a numbered `LUMINOS_DECISIONS.md` entry reversing the Hyprland ban
-(scope: Hyprland is an *additional, opt-in session*; Plasma stays the default), and amend
-`AGENTS.md` §1 so the banned list stops contradicting reality. Phase 1 changes only documents —
-it is safe to do from a session that might die.
+**NEXT: Phase 2 — the system upgrade.** This is the first phase that changes the machine, it is
+the single largest blast radius in the whole plan, and **it ends in a reboot that WILL kill the
+chat session.**
 
-**Then Phase 2** (`pacman -Syu`) — that one ends in a reboot and WILL kill the chat session.
-Before starting it, tell the user to photograph `docs/ESCAPE-CARD.md`.
+Before starting it: tell the user to photograph `docs/ESCAPE-CARD.md`.
+
+Phase 2 checklist:
+- `df -h /` first. There is ~98 G free; an upgrade needs far less, but a full root is how the
+  earlier disk incident silently corrupted a file, so check rather than assume.
+- Deal with `IgnorePkg` in `/etc/pacman.conf` **deliberately** — decision already made:
+  **keep the kernel and NVIDIA pins.** The dGPU 0 W gating is hard-won (BUG-078 chain) and there is
+  no reason to risk the NVIDIA/DKMS stack in the same window as a compositor change.
+- Refresh and upgrade in ONE command (`pacman -Syu`). Never `-Sy` followed by a separate `-S` —
+  that is the Arch partial-upgrade trap, and `IgnorePkg` makes it worse.
+- Run it inside `tmux` so it survives the desktop app dying: `tmux new -s upgrade`.
+- Rebuild DKMS, run `scripts/luminos-verify`, reboot.
+- After reboot, first thing: `scripts/luminos-session-recorder --show`, confirm Plasma is fine,
+  the 5 Go daemons are active, and dGPU `runtime_status` is still `suspended`.
+- **Stop there for a day if anything looks off.** Do not stack the upgrade and the compositor
+  install into one blast radius.
 
 ---
 
