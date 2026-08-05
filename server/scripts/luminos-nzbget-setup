@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+# Luminos media server — NZBGet setup, driven from server/.env
+# [CHANGE: claude-code | 2026-08-05]
+#
+# Run ON the server, as root:   sudo luminos-nzbget-setup /path/to/.env
+#
+# Idempotent: safe to re-run after editing .env. It rewrites only the keys it
+# owns and leaves everything else in nzbget.conf alone.
+#
+# WHY A SCRIPT AND NOT A HANDFUL OF COMMANDS: the credentials have to get from
+# .env into nzbget.conf without ever being echoed to a terminal or a shell
+# history, and the file has to end up mode 600 owned by nzbget. Doing that by
+# hand is exactly the kind of thing that half-works silently.
+
+import grp
+import os
+import pwd
+import re
+import secrets
+import shutil
+import string
+import subprocess
+import sys
+
+CONF = "/var/lib/nzbget/nzbget.conf"
+TEMPLATE = "/usr/share/nzbget/nzbget.conf"
+MAINDIR = "/var/lib/nzbget"
+USENET_ROOT = "/srv/media/usenet"
+COMPLETE = "/srv/media/usenet/complete"
+INCOMPLETE = "/srv/media/usenet/incomplete"
+USER = "nzbget"
+MEDIA_GROUP = "media"
+
+
+def die(msg):
+    print("FAIL  %s" % msg)
+    sys.exit(1)
+
+
+def load_env(path):
+    values = {}
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            values[key.strip()] = val.strip()
+    return values
+
+
+def ensure_user():
+    """Create the nzbget system user and put it in the media group.
+
+    The Arch package ships no sysusers file, so the unit's User=nzbget refers
+    to an account that does not exist until we make it. Membership of `media`
+    is what lets Sonarr and NZBGet share /srv/media -- the tree is setgid
+    root:media, so without it every download lands unreadable.
+    """
+    try:
+        pwd.getpwnam(USER)
+        print("ok    user %s already exists" % USER)
+    except KeyError:
+        subprocess.run(
+            ["useradd", "--system", "--home-dir", MAINDIR, "--no-create-home",
+             "--shell", "/usr/bin/nologin", USER],
+            check=True)
+        print("ok    created system user %s" % USER)
+
+    try:
+        grp.getgrnam(MEDIA_GROUP)
+    except KeyError:
+        die("group '%s' does not exist -- the media tree expects it" % MEDIA_GROUP)
+
+    if USER not in grp.getgrnam(MEDIA_GROUP).gr_mem:
+        subprocess.run(["usermod", "-aG", MEDIA_GROUP, USER], check=True)
+        print("ok    added %s to group %s" % (USER, MEDIA_GROUP))
+    else:
+        print("ok    %s already in group %s" % (USER, MEDIA_GROUP))
+
+
+def ensure_dirs():
+    uid = pwd.getpwnam(USER).pw_uid
+    gid = grp.getgrnam(MEDIA_GROUP).gr_gid
+
+    # 2775 = setgid, so anything created inside inherits group `media`.
+    # Without the setgid bit, Sonarr cannot read what NZBGet writes.
+    #
+    # USENET_ROOT must be listed explicitly. os.makedirs() creates missing
+    # PARENT directories using the process umask, not the mode we chmod onto
+    # the leaves — under sudo that umask is 0077, which made /srv/media/usenet
+    # drwx--S--- and locked nzbget out of its own download directories even
+    # though the leaves underneath were perfect.
+    for path in (MAINDIR, USENET_ROOT, COMPLETE, INCOMPLETE):
+        os.makedirs(path, exist_ok=True)
+        os.chown(path, uid, gid)
+        os.chmod(path, 0o2775)
+        print("ok    %s  (nzbget:%s, 2775)" % (path, MEDIA_GROUP))
+
+
+def find_binary(*names):
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return found
+    return ""
+
+
+def build_settings(env, control_password):
+    unrar = find_binary("unrar")
+    sevenzip = find_binary("7z", "7za", "7zz")
+
+    return {
+        # --- paths -------------------------------------------------------
+        "MainDir": MAINDIR,
+        "DestDir": COMPLETE,
+        "InterDir": INCOMPLETE,
+        "NzbDir": "${MainDir}/nzb",
+        "QueueDir": "${MainDir}/queue",
+        "TempDir": "${MainDir}/tmp",
+        "ScriptDir": "${MainDir}/scripts",
+        "LockFile": "",
+        "LogFile": "${MainDir}/nzbget.log",
+        "WriteLog": "rotate",
+        "RotateLog": "3",
+
+        # --- web ui ------------------------------------------------------
+        # 0.0.0.0 is fine here: nftables already drops everything that is not
+        # from 192.168.2.0/24, so this is LAN-only in practice.
+        "ControlIP": "0.0.0.0",
+        "ControlPort": env.get("NZBGET_PORT", "6789"),
+        "ControlUsername": env.get("NZBGET_USER", "luminos"),
+        "ControlPassword": control_password,
+        "RestrictedUsername": "",
+        "RestrictedPassword": "",
+
+        # --- the news server ---------------------------------------------
+        "Server1.Active": "yes",
+        "Server1.Name": "UsenetServer",
+        "Server1.Level": "0",
+        "Server1.Host": env["USENET_HOST"],
+        "Server1.Port": env.get("USENET_PORT", "563"),
+        "Server1.Username": env["USENET_USER"],
+        "Server1.Password": env["USENET_PASS"],
+        "Server1.Encryption": "yes" if env.get("USENET_SSL", "yes").lower()
+                              in ("yes", "true", "1") else "no",
+        "Server1.Connections": env.get("USENET_CONNECTIONS", "15"),
+        "Server1.Retention": "0",
+
+        # CertCheck=yes is the one that matters. With it off, an intercepted
+        # or spoofed certificate is accepted silently and the "encrypted"
+        # connection protects nothing. It refuses to start without CertStore
+        # pointing at a real CA bundle, which is fair — validating against no
+        # trust anchors would be theatre.
+        "CertCheck": "yes",
+        "CertStore": "/etc/ssl/certs/ca-certificates.crt",
+
+        # --- disk behaviour ----------------------------------------------
+        # This is a 5400rpm 2.5" HDD shared with Jellyfin streaming. DirectWrite
+        # plus a large article cache keeps the head from thrashing between the
+        # download and whatever the TV is reading.
+        "ArticleCache": "500",
+        "WriteBuffer": "1024",
+        "DirectWrite": "yes",
+        "FlushQueue": "yes",
+        "ContinuePartial": "yes",
+        "ParTimeLimit": "0",
+
+        # 0002 so files land group-writable and Sonarr can hardlink/move them.
+        "UMask": "0002",
+
+        # --- unpacking ----------------------------------------------------
+        "Unpack": "yes",
+        "DirectUnpack": "no",
+        "ParCheck": "auto",
+        "ParRepair": "yes",
+        "UnrarCmd": unrar or "unrar",
+        "SevenZipCmd": sevenzip or "7z",
+        "ParScan": "extended",
+        "HealthCheck": "delete",
+
+        # --- categories ---------------------------------------------------
+        # These names must match what Sonarr and Radarr send, or NZBGet drops
+        # everything into DestDir root and the two apps fight over the same
+        # folder. The package ships Movies/Series/Music/Software; rename the
+        # first two rather than adding more.
+        "Category1.Name": "tv",
+        "Category2.Name": "movies",
+    }
+
+
+def apply_settings(settings):
+    if not os.path.exists(CONF):
+        if not os.path.exists(TEMPLATE):
+            die("no config template at %s" % TEMPLATE)
+        shutil.copy2(TEMPLATE, CONF)
+        print("ok    seeded %s from package template" % CONF)
+
+    with open(CONF, "r", encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+
+    remaining = dict(settings)
+    out = []
+    for line in lines:
+        match = re.match(r"^(\s*)([A-Za-z0-9_.]+)(\s*)=", line)
+        if match:
+            key = match.group(2)
+            for want in list(remaining):
+                if want.lower() == key.lower():
+                    out.append("%s=%s" % (want, remaining.pop(want)))
+                    break
+            else:
+                out.append(line)
+        else:
+            out.append(line)
+
+    if remaining:
+        out.append("")
+        out.append("### [CHANGE: claude-code | 2026-08-05] added by luminos-nzbget-setup")
+        for key, val in sorted(remaining.items()):
+            out.append("%s=%s" % (key, val))
+
+    with open(CONF, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(out) + "\n")
+
+    uid = pwd.getpwnam(USER).pw_uid
+    gid = pwd.getpwnam(USER).pw_gid
+    os.chown(CONF, uid, gid)
+    os.chmod(CONF, 0o600)   # it holds the news server password
+    print("ok    wrote %s (%d keys set, mode 600, owner %s)"
+          % (CONF, len(settings), USER))
+
+
+def verify(settings):
+    """Read the file back. A config write that silently did nothing looks
+    exactly like one that worked, so never trust the write itself."""
+    with open(CONF, "r", encoding="utf-8") as fh:
+        content = fh.read()
+
+    bad = []
+    for key, want in settings.items():
+        # [ \t]* not \s* — in Python \s matches newlines, so on a key with an
+        # empty value ("LockFile=") a greedy \s* swallows the line break and
+        # captures the NEXT line, failing a key that was written correctly.
+        found = re.search(r"^%s[ \t]*=[ \t]*(.*)$" % re.escape(key), content, re.M)
+        if not found or found.group(1).strip() != str(want).strip():
+            bad.append(key)
+
+    if bad:
+        print("FAIL  these keys did not read back as written: %s" % ", ".join(bad))
+        return False
+    print("ok    all %d keys verified by reading the file back" % len(settings))
+    return True
+
+
+def main():
+    if os.geteuid() != 0:
+        die("must run as root")
+    if len(sys.argv) < 2:
+        die("usage: luminos-nzbget-setup /path/to/.env")
+
+    env_path = sys.argv[1]
+    if not os.path.exists(env_path):
+        die("no env file at %s" % env_path)
+    env = load_env(env_path)
+
+    for required in ("USENET_HOST", "USENET_USER", "USENET_PASS"):
+        if not env.get(required):
+            die(".env is missing %s" % required)
+
+    control_password = env.get("NZBGET_PASS", "")
+    generated = False
+    if not control_password:
+        alphabet = string.ascii_letters + string.digits
+        control_password = "".join(secrets.choice(alphabet) for _ in range(24))
+        generated = True
+
+    ensure_user()
+    ensure_dirs()
+    settings = build_settings(env, control_password)
+    apply_settings(settings)
+    ok = verify(settings)
+
+    if generated:
+        print("")
+        print("NOTE  a web password was generated. It is in %s only." % CONF)
+        print("      Write it into .env as NZBGET_PASS so it survives a rebuild.")
+        print("      NZBGET_PASS=%s" % control_password)
+
+    sys.exit(0 if ok else 2)
+
+
+if __name__ == "__main__":
+    main()

@@ -117,6 +117,30 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 - **qBittorrent preallocates**, so a 1% torrent already occupies its full size on disk.
 - **Render node numbers are machine-specific.** `renderD128` is Intel here and NVIDIA on the G14.
   Resolve with `ls -l /sys/class/drm/renderD12*/device/driver`, never carry the number over.
+- **In `systemd-resolved`, DNS set on a *link* beats DNS set globally.** Configuring
+  DNS-over-TLS in `resolved.conf.d/` and stopping there leaves DHCP handing the ISP's
+  resolver to each interface, and every lookup keeps leaving in cleartext while the global
+  config sits there looking correct. `UseDNS=false` on the `.network` files is the other
+  half. And use `DNSOverTLS=yes`, never `opportunistic` — opportunistic falls back to
+  plaintext silently. DECISION 48.
+- **`os.makedirs()` creates missing *parent* directories with the process umask**, not the
+  mode you `chmod` onto the leaves. Under `sudo` that umask is `0077`, so a perfect `2775`
+  leaf can sit under a `drwx--S---` parent that nobody can traverse. List every directory
+  in the chain explicitly. It cost an afternoon on `/srv/media/usenet`.
+- **`tcpdump` lies about quiet networks unless you make it flush.** Without `-U` it buffers;
+  under `timeout` a `-w` capture loses the whole pcap because SIGTERM does not flush it; and
+  backgrounding it over SSH holds the channel open and **kills the session** (exit 255). All
+  three present as "0 packets captured", which reads exactly like "no traffic found". A
+  capture that catches nothing has proven nothing.
+- **In Python, `\s` matches newlines.** A config verifier using `\s*` after `=` will swallow
+  the line break on any key with an empty value and compare against the *next* line, failing
+  keys that were written perfectly. Use `[ \t]*`.
+- **`systemctl is-active` returning `active` is not proof the service works.** NZBGet came
+  up `active` with a permissions error and a `CertStore` error both live in the journal.
+  Read the journal, then exercise the thing.
+- **A news server is not an indexer.** UsenetServer stores the articles; Sonarr needs a
+  *Newznab* search API to know which articles hold which episode. The bundled "Global
+  Search" is a website with no API. That is a second, separate subscription.
 - `bc` is not installed. Use python for arithmetic in scripts.
 
 ## Owner-only tasks
@@ -124,5 +148,11 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 Things that need physical access or the router admin page:
 
 - Two Cat 6 cables: router→server (the current one downshifts to 100 Mb/s) and router→TV.
+  **Now measured, not theoretical:** Usenet does 11.45 MB/s and is sitting exactly on the
+  wifi ceiling, while the router reports a ~1 Gbps line. The cable is worth about 10x.
 - A DHCP reservation for 192.168.2.62.
 - The BIOS boot order must keep the HDD first, or a power blip boots Windows and SSH is gone.
+- **A Usenet indexer subscription** (NZBGeek or DrunkenSlug, ~USD 15–20/yr). It is the only
+  thing left before downloads are automatic again. DECISION 48.
+- **A choice on remote Jellyfin access** — Tailscale (an account signup) or self-hosted
+  WireGuard (a router port forward + dynamic DNS). Either needs the owner; see STATUS.md.

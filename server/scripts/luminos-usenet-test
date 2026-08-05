@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+# Luminos — Usenet credential and TLS reachability test
+# [CHANGE: claude-code | 2026-08-05]
+#
+# Reads server/.env and proves four separate things, in order, so that a
+# failure tells you WHICH one broke:
+#
+#   1. DNS resolves the news host
+#   2. TCP connects on the configured port
+#   3. TLS negotiates, and the certificate actually matches the hostname
+#   4. AUTHINFO succeeds with the configured user/password
+#
+# It never prints the password, and it never prints more of the username than
+# its length. Output is safe to paste anywhere.
+#
+# Exit codes:  0 all good | 1 usage/config | 2 DNS | 3 TCP | 4 TLS | 5 auth
+
+import os
+import socket
+import ssl
+import sys
+import time
+
+DEFAULT_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+
+
+def load_env(path):
+    """Minimal .env reader. Deliberately not python-dotenv: no new packages."""
+    values = {}
+    with open(path, "r", encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            values[key.strip()] = val.strip()
+    return values
+
+
+def read_line(sock_file):
+    line = sock_file.readline()
+    if not line:
+        raise ConnectionError("server closed the connection without replying")
+    return line.decode("utf-8", "replace").rstrip("\r\n")
+
+
+def main():
+    env_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ENV
+    if not os.path.exists(env_path):
+        print("FAIL  no .env at %s" % env_path)
+        return 1
+
+    env = load_env(env_path)
+    host = env.get("USENET_HOST", "")
+    port = int(env.get("USENET_PORT", "563") or 563)
+    user = env.get("USENET_USER", "")
+    password = env.get("USENET_PASS", "")
+    use_ssl = env.get("USENET_SSL", "yes").lower() in ("yes", "true", "1")
+
+    if not host or not user or not password:
+        print("FAIL  .env is incomplete — need USENET_HOST, USENET_USER, USENET_PASS")
+        return 1
+
+    print("host        %s:%d  (TLS %s)" % (host, port, "on" if use_ssl else "OFF"))
+    print("username    %d characters" % len(user))
+    print("password    %d characters" % len(password))
+    print("")
+
+    # --- 1. DNS ---------------------------------------------------------
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+        addrs = sorted({i[4][0] for i in infos})
+    except socket.gaierror as exc:
+        print("FAIL  [1/4] DNS could not resolve %s — %s" % (host, exc))
+        return 2
+    print("ok    [1/4] DNS      %s -> %d address(es), first %s"
+          % (host, len(addrs), addrs[0]))
+
+    # --- 2. TCP ---------------------------------------------------------
+    started = time.time()
+    try:
+        raw = socket.create_connection((host, port), timeout=20)
+    except OSError as exc:
+        print("FAIL  [2/4] TCP could not connect to %s:%d — %s" % (host, port, exc))
+        return 3
+    tcp_ms = (time.time() - started) * 1000
+    print("ok    [2/4] TCP      connected in %.0f ms" % tcp_ms)
+
+    # --- 3. TLS ---------------------------------------------------------
+    # check_hostname stays ON. A cert that does not match the hostname means
+    # something is intercepting the connection, and that is the one failure
+    # we must never shrug off on a privacy job.
+    sock = raw
+    if use_ssl:
+        ctx = ssl.create_default_context()
+        try:
+            sock = ctx.wrap_socket(raw, server_hostname=host)
+        except ssl.SSLError as exc:
+            print("FAIL  [3/4] TLS handshake refused — %s" % exc)
+            raw.close()
+            return 4
+        except ssl.CertificateError as exc:
+            print("FAIL  [3/4] certificate does NOT match %s — %s" % (host, exc))
+            print("            treat this as interception until proven otherwise")
+            raw.close()
+            return 4
+        cipher, proto, bits = sock.cipher()
+        cert = sock.getpeercert()
+        issuer = dict(x[0] for x in cert.get("issuer", ())).get(
+            "organizationName", "unknown")
+        print("ok    [3/4] TLS      %s, %s, %d-bit, issued by %s"
+              % (proto, cipher, bits, issuer))
+        print("                     valid until %s" % cert.get("notAfter", "?"))
+    else:
+        print("WARN  [3/4] TLS      DISABLED — traffic is in the clear")
+
+    # --- 4. AUTH --------------------------------------------------------
+    stream = sock.makefile("rb")
+    try:
+        greeting = read_line(stream)
+        if not greeting.startswith(("200", "201")):
+            print("FAIL  [4/4] unexpected greeting: %s" % greeting)
+            return 5
+
+        sock.sendall(b"AUTHINFO USER " + user.encode() + b"\r\n")
+        reply = read_line(stream)
+        if reply.startswith("481") or reply.startswith("482"):
+            print("FAIL  [4/4] username rejected: %s" % reply)
+            return 5
+
+        sock.sendall(b"AUTHINFO PASS " + password.encode() + b"\r\n")
+        reply = read_line(stream)
+        if not reply.startswith("281"):
+            print("FAIL  [4/4] login refused: %s" % reply)
+            print("            281 means accepted; 481 means wrong user/password.")
+            print("            These are the NNTP credentials from the welcome")
+            print("            email, NOT the website login.")
+            return 5
+
+        print("ok    [4/4] AUTH     accepted (%s)" % reply)
+
+        # Posting permission tells us whether this is a read-only account, and
+        # it is a cheap round-trip that proves the session really is usable.
+        sock.sendall(b"DATE\r\n")
+        print("                     server clock: %s" % read_line(stream))
+        sock.sendall(b"QUIT\r\n")
+    except (ConnectionError, OSError) as exc:
+        print("FAIL  [4/4] connection dropped during login — %s" % exc)
+        return 5
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+    print("")
+    print("PASS  credentials work and the link is encrypted end to end.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

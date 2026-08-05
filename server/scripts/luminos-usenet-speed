@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+# Luminos — real Usenet throughput measurement
+# [CHANGE: claude-code | 2026-08-05]
+#
+#   luminos-usenet-speed /path/to/.env [connections] [seconds]
+#
+# Opens N real NNTP-over-TLS connections to the configured provider and pulls
+# article bodies for a fixed number of seconds, then reports MB/s.
+#
+# WHY THIS EXISTS: "is Usenet fast enough" cannot be answered by a ping or by
+# the provider's marketing. Usenet throughput is the product of per-connection
+# speed and connection count, and the interesting question on this box is where
+# it saturates -- the wifi radio caps the server at ~12.5 MB/s, so if 15
+# connections already hit that, buying more connections would change nothing
+# and only a cable would.
+#
+# It reads real articles from a real group, which is exactly what a download
+# does; there is no synthetic test file on Usenet.
+
+import socket
+import ssl
+import sys
+import threading
+import time
+
+GROUP = "alt.binaries.test"
+
+total_bytes = 0
+articles = 0
+errors = []
+lock = threading.Lock()
+stop_at = 0.0
+
+
+def load_env(path):
+    values = {}
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            values[key.strip()] = val.strip()
+    return values
+
+
+def connect(env):
+    host = env["USENET_HOST"]
+    port = int(env.get("USENET_PORT", "563"))
+    sock = socket.create_connection((host, port), timeout=25)
+    if env.get("USENET_SSL", "yes").lower() in ("yes", "true", "1"):
+        sock = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
+    stream = sock.makefile("rb")
+    stream.readline()                                    # greeting
+    sock.sendall(b"AUTHINFO USER " + env["USENET_USER"].encode() + b"\r\n")
+    stream.readline()
+    sock.sendall(b"AUTHINFO PASS " + env["USENET_PASS"].encode() + b"\r\n")
+    if not stream.readline().startswith(b"281"):
+        raise RuntimeError("authentication refused")
+    return sock, stream
+
+
+def worker(env, first, last, step):
+    global total_bytes, articles
+    try:
+        sock, stream = connect(env)
+        sock.sendall(b"GROUP " + GROUP.encode() + b"\r\n")
+        stream.readline()
+    except Exception as exc:                             # noqa: BLE001
+        with lock:
+            errors.append(str(exc))
+        return
+
+    number = first
+    try:
+        while time.time() < stop_at and number <= last:
+            sock.sendall(b"BODY %d\r\n" % number)
+            number += step
+
+            head = stream.readline()
+            if not head:
+                break
+            if not head.startswith(b"22"):               # 222 = body follows
+                continue
+
+            got = 0
+            while True:
+                line = stream.readline()
+                if not line or line == b".\r\n":
+                    break
+                got += len(line)
+
+            with lock:
+                total_bytes += got
+                articles += 1
+    except Exception as exc:                             # noqa: BLE001
+        with lock:
+            errors.append(str(exc))
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def main():
+    global stop_at
+
+    if len(sys.argv) < 2:
+        print("usage: luminos-usenet-speed /path/to/.env [connections] [seconds]")
+        return 1
+    env = load_env(sys.argv[1])
+    threads = int(sys.argv[2]) if len(sys.argv) > 2 else int(
+        env.get("USENET_CONNECTIONS", "15"))
+    seconds = int(sys.argv[3]) if len(sys.argv) > 3 else 20
+
+    # One probe connection to learn the group's article range.
+    sock, stream = connect(env)
+    sock.sendall(b"GROUP " + GROUP.encode() + b"\r\n")
+    reply = stream.readline().decode("utf-8", "replace").split()
+    sock.close()
+    if reply[0] != "211":
+        print("FAIL  could not open group %s: %s" % (GROUP, " ".join(reply)))
+        return 1
+    count, first, last = int(reply[1]), int(reply[2]), int(reply[3])
+    print("group       %s — %d articles, range %d..%d" % (GROUP, count, first, last))
+    print("test        %d connections, %d seconds" % (threads, seconds))
+    print("")
+
+    # Start near the end: recent articles are the ones that definitely still
+    # have bodies on the spool.
+    start_from = max(first, last - 40000)
+
+    stop_at = time.time() + seconds
+    began = time.time()
+    pool = []
+    for i in range(threads):
+        t = threading.Thread(target=worker,
+                             args=(env, start_from + i, last, threads),
+                             daemon=True)
+        t.start()
+        pool.append(t)
+    for t in pool:
+        t.join(timeout=seconds + 20)
+    elapsed = time.time() - began
+
+    mb = total_bytes / (1024.0 * 1024.0)
+    rate = mb / elapsed if elapsed else 0.0
+    print("articles    %d" % articles)
+    print("downloaded  %.1f MB in %.1f s" % (mb, elapsed))
+    print("throughput  %.2f MB/s  (%.0f Mb/s)" % (rate, rate * 8))
+    if errors:
+        print("")
+        print("errors      %d — first: %s" % (len(errors), errors[0]))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

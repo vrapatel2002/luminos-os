@@ -481,3 +481,126 @@ A health check that only ever runs against healthy input has never been tested. 
 real bugs here — the wrong-season trim and the question of whether the systemd unit
 could read the API key as root — were invisible until the check was fed something it
 was supposed to catch. Break it on purpose, once, before trusting it on a timer.
+
+---
+
+## DECISION 48 — Downloads move to Usenet over TLS, and the server's own DNS stops leaking
+<!-- [CHANGE: claude-code | 2026-08-05] -->
+**Date:** 2026-08-05
+**Status:** Accepted (user-directed) — NZBGet installed, running, wired into Sonarr + Radarr
+**Applies to:** the media server (Dell Inspiron 3590), not the G14.
+**Follows:** DECISION 42, which halted all torrent traffic until a VPN was in front of it.
+
+### The decision
+The user bought a **UsenetServer** subscription. Downloads now arrive over **NNTP-over-TLS
+on port 563**, through **NZBGet**, instead of over BitTorrent. Torrenting stays halted
+exactly as DECISION 42 left it — this does not restart it, it replaces the need for it.
+
+### Why this closes what a VPN was going to close
+DECISION 42 halted torrents for two separate reasons, and Usenet answers both without a
+subscription to a third party who can see the traffic:
+
+| | BitTorrent | Usenet |
+|---|---|---|
+| Is the transfer encrypted? | No — protocol signature is identifiable on the wire | Yes, TLS 1.3 to the provider |
+| Is there a peer list? | Yes — the box was *advertised* in trackers and DHT against 76.64.36.43 | No. One connection, to one server |
+| Does anyone else learn our IP? | Every peer in the swarm | The provider only |
+| Do we upload? | 228.9 GB uploaded, and seeding is the conspicuous half | **Structurally impossible** — see below |
+
+The account is **read-only**. The server's own greeting says so:
+`281 Welcome to UsenetServer (No Posting)`. It cannot upload even if something were
+misconfigured to try, which is a stronger guarantee than a setting that says "don't".
+
+**A VPN was therefore not bought for this.** NNTP/563 is already TLS and there is no peer
+list, so a VPN would add a hop and protect nothing that is not already protected. The
+bundled PrivadoVPN stays unconfigured; it is only relevant if torrents ever restart, and
+their free SOCKS5 proxy is explicitly **not encrypted** (their own documentation), so it
+would change the exit IP and nothing else.
+
+### Encrypted DNS, and why the obvious configuration is not enough
+Before this the box asked `mtrlpq02dnsvp1.srvr.bell.ca` for every name, in cleartext.
+Encrypting the downloads while broadcasting *what you are downloading from* to the ISP's
+resolver is theatre, so DNS is now **DNS-over-TLS to Quad9**, strict mode.
+
+The trap: **DNS configured on a link beats DNS configured globally** in
+`systemd-resolved`. Writing `/etc/systemd/resolved.conf.d/luminos-dot.conf` alone leaves
+DHCP handing Bell's resolver to `wlan0` and `enp2s0`, and every lookup keeps going out in
+cleartext through the *link* setting while the global config sits there looking correct.
+Both `.network` files therefore got a drop-in with `UseDNS=false` for DHCPv4, DHCPv6 and
+IPv6 RA. Drop-ins rather than edits, so the hand-commented originals stay readable.
+
+`DNSOverTLS=yes` and not `opportunistic`. Opportunistic falls back to plaintext when the
+handshake fails and tells you nothing — the exact silent-failure shape this project keeps
+running into. Strict mode fails closed: no DNS at all is a problem you notice.
+
+### Proven by packet capture, and the capture had to be fixed first
+`resolvectl status` claiming `+DNSOverTLS` is the service reporting on itself. The wire
+is the only witness:
+
+```
+total packets: 51
+PLAINTEXT port 53: 0
+ENCRYPTED port 853: 51        all to 9.9.9.9
+```
+
+Three earlier attempts at this test returned `0 / 0` and would have been read as "no
+plaintext, success" by anyone in a hurry. **They were all broken tests, not clean results:**
+- `tcpdump -c 40` to a file buffers, and the buffer is lost — `-U` (packet-buffered) is required.
+- Backgrounding `tcpdump` over SSH holds the channel open and **kills the session** (exit 255).
+- `tcpdump -w` under `timeout` loses the pcap entirely: SIGTERM does not flush it.
+
+The result above is trustworthy *because* it captured 51 packets. A test that captures
+nothing cannot distinguish "no plaintext DNS" from "not listening".
+
+### Measured, because "is it fast enough" is not a matter of opinion
+`server/scripts/luminos-usenet-speed` opens N real TLS connections and pulls real article
+bodies, which is what a download actually does — there is no synthetic test file on Usenet.
+
+**15 connections, 20 seconds: 307 articles, 235.7 MB, 11.45 MB/s (92 Mb/s).**
+
+That is **above** the best BitTorrent ever managed here (10.74 MB/s, DECISION 44 notes) and
+it is sitting on the 100 Mb/s wifi ceiling. The plan allows 50 connections; raising the
+count would buy **nothing**, because the radio is the bound, not the provider. The router
+reports `MaxBitRateDown : 1024000000 bps` — the line is ~1 Gbps. **Only a Cat 6 cable
+changes this number**, which makes the already-pending cable worth about 10x rather than a
+nicety.
+
+### What is installed
+- **NZBGet** on `0.0.0.0:6789`, LAN-only in practice because nftables is `policy drop` with
+  a single `192.168.2.0/24` accept. User `luminos`.
+- Downloads land in `/srv/media/usenet/{complete,incomplete}`, deliberately **separate from
+  the torrent download dir** so a half-finished job can never be confused with a torrent and
+  the arrival path is obvious from the filename.
+- Added to **Sonarr and Radarr as download client id=2**, both confirmed with `testall`
+  returning `valid=True`. (`id=1` is qBittorrent, `valid=False`, which is DECISION 42
+  working as intended and not a fault.)
+- Credentials live in `server/.env`, mode 600, **gitignored** — verified with
+  `git check-ignore -v` and `git status --porcelain --ignored`.
+
+### Three real bugs the setup script caught by reading its own work back
+`luminos-nzbget-setup` writes the config, then re-reads the file and compares every key.
+That is not ceremony; it found all three of these:
+
+1. **The verifier itself was wrong.** In Python, `\s` matches newlines — so `\s*` after `=`
+   on an empty value (`LockFile=`) swallowed the line break and captured the *next* line,
+   failing three keys that had been written perfectly. `[ \t]*` is the fix.
+2. **`os.makedirs()` creates missing *parent* directories using the process umask**, not the
+   mode you `chmod` onto the leaves. Under `sudo` that umask is `0077`, so
+   `/srv/media/usenet` came out `drwx--S---` and nzbget could not traverse into its own
+   download directories even though the leaves underneath were a perfect `2775`. Every
+   directory in the chain has to be listed explicitly.
+3. **`CertCheck=yes` refuses to start without `CertStore`.** Fair — validating against no
+   trust anchors would be theatre. Pointed at `/etc/ssl/certs/ca-certificates.crt`.
+   Certificate checking stays **on**: with it off, a spoofed certificate is accepted
+   silently and the "encrypted" connection protects nothing.
+
+`systemctl is-active` said `active` while two of these were live in the journal. **Service
+active is not service working.**
+
+### What is still missing
+**An indexer.** The news server stores the articles; an *indexer* is the search engine that
+tells Sonarr which articles hold which episode, and they are separate purchases. UsenetServer's
+bundled "Global Search" is a website with no API, so Sonarr cannot drive it. NZBGeek or
+DrunkenSlug, roughly USD 15-20 a year. Until one exists, NZBGet can be fed a `.nzb` by hand
+but nothing is automatic. `INDEXER_NAME` / `INDEXER_URL` / `INDEXER_APIKEY` are waiting in
+`server/.env`.
