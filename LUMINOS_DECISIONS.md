@@ -1993,3 +1993,64 @@ kept in this sequence so references resolve:
 
 - **44** — a series may hold at most 2 seasons, enforced by `luminos-season-limit.timer`;
   171.83 GB reclaimed from orphaned downloads and unwanted seasons
+
+---
+
+## DECISION 45 — Every window floats by default, and hyprbars supplies minimize / maximize / close
+<!-- [CHANGE: claude-code | 2026-08-05] -->
+
+**Supersedes the last paragraph of DECISION 41**, which recorded "no hyprbars/titlebars added —
+Caelestia has none by design and user confirmed current look is correct." That is no longer what
+the user wants.
+
+### The problem, stated correctly
+Shawn reported windows "locked to a certain position — all I can do is left or right." That is not
+a bug. Stock Caelestia is `general:layout = dwindle`, so a second window splits the screen and the
+two cannot overlap. He wants the Plasma/Windows model: windows that open free, stack on top of one
+another, and carry buttons.
+
+### What was decided
+1. **Everything floats**, via a catch-all rule in `hypr-user.lua` (required last, so it wins):
+   `hl.window_rule({ match = { class = ".*" }, float = true })`.
+   Deliberately **not** `general:layout = floating` — that would turn `SUPER+ALT+Space`
+   (kbToggleWindowFloating) into a no-op and remove tiling permanently. A rule floats at map time
+   while leaving dwindle available on demand. The rule sets **only** `float`, so the sized floaters
+   in `rules.lua` keep their own geometry.
+2. **Titlebars via the hyprbars plugin**, configured in a new `~/.config/caelestia/hypr-bars.lua`.
+   It is a separate module so the nested test compositor loads the *same file* that ships.
+3. **Actions go through `luminos-win`** (`scripts/luminos-win` → `/usr/local/bin`), not inline
+   command strings, so each action can be run and tested on its own.
+4. **`SUPER+ALT+M` restores minimized windows.** `SUPER+SHIFT+M` was the obvious choice and is
+   already volume mute (`variables.lua:133`).
+
+### Why the implementation looks odd, in three places
+- **Buttons are added from a timer, not inline.** `hl.plugin` holds only `load` while the config is
+  parsing; `hl.plugin.hyprbars` appears later. Adding buttons inline is a race that fails silently.
+- **`min` issues two dispatches.** Moving a window to a special workspace also *opens* it, so the
+  window stays on screen — a move, not a minimize. There is no `move_silent` in the Lua dispatcher
+  table, and `silent = true` is accepted and ignored, because **dispatcher tables are not validated
+  and any unknown field returns `ok`**. The second dispatch closes the workspace, guarded on it
+  actually being open.
+- **The three button colours are hardcoded** while the bar itself is themed from the live Caelestia
+  scheme. The scheme *does* define `red`/`green`/`yellow`, which is the trap: they are harmonised
+  into the wallpaper palette, so `red` was `c1a5fd` (purple) and `green` was `c8e3ff` (pale blue).
+  A close button must read as "close" under every look.
+
+### Risk accepted, and how it is contained
+hyprbars is a **compiled** plugin pinned `hyprland>=0.56.0 <0.57.0`. Upgrading Hyprland without
+rebuilding it in the same transaction breaks the load. The `require` is wrapped in `pcall`, so a
+stale plugin costs the titlebars and nothing else — unguarded, a config error drops Hyprland into
+emergency mode with **no binds registered**, which is a black screen with no keyboard way out.
+
+### Verified live, 2026-08-05
+Reload clean, 0 config errors, 150 binds (steady across two reloads), 7 layers, shell alive.
+`plugin:hyprbars:bar_height` reads back `26` and `bar_color` `4280295203` = `0xff201f23`, the
+scheme's `surfaceContainer`, proving the theming applies rather than defaults. On a throwaway
+window: `min` parked it on `special:minimized` **and left the workspace hidden**, `restore` brought
+it back, `max` gave fullscreen mode 1 at 1368x852 (work area — the panel stays visible), `close`
+removed it. Desktop returned to its 3-client baseline.
+
+### How to reverse
+Delete the titlebar block at the end of `~/.config/caelestia/hypr-user.lua` (or restore
+`hypr-user.lua.bak-prebars`) and `hyprctl reload`. To go back to tiling as well, delete the
+`hl.window_rule` float line (or restore `hypr-user.lua.bak-prefloat`).

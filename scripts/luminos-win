@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# luminos-win — [CHANGE: claude-code | 2026-08-05]
+#
+# WHY THIS EXISTS
+# hyprbars titlebar buttons run their action as a plain shell command. The obvious
+# action string — `hyprctl dispatch killactive` — DOES NOT WORK on this machine.
+# Caelestia configures Hyprland with the Lua parser, and under a non-legacy parser
+# `hyprctl dispatch` expects a Lua expression, not a classic dispatcher name:
+#
+#   $ hyprctl dispatch togglefloating class:google-chrome
+#   error: [string "return hl.dispatch(togglefloating class:googl..."]:1: ')' expected
+#
+# So every button action has to be spelled in Lua. Embedding those quotes directly in
+# the button definition is fragile, so the commands live here instead, where they can
+# be run and tested on their own.
+#
+# Hyprland has no "minimize" concept. The standard equivalent is to throw the window
+# onto a special workspace and pull it back with a keybind, which is what `min` does.
+#
+# Usage: luminos-win close|max|min|restore
+set -uo pipefail
+
+MIN_WS="minimized"
+
+die() { echo "luminos-win: $*" >&2; exit 1; }
+
+[ -n "${1:-}" ] || die "usage: luminos-win close|max|min|restore"
+
+# Fail loudly if there is no compositor to talk to, rather than silently doing nothing
+# (Luminos scripts have a documented habit of reporting success on a dead path).
+hyprctl version >/dev/null 2>&1 || die "no running Hyprland instance"
+
+case "$1" in
+  close)
+      hyprctl dispatch 'hl.dsp.window.close()' ;;
+  max)
+      # "maximized" fills the work area but keeps the bar visible, which is what a
+      # maximize button should do. Plain "fullscreen" would hide the panel entirely.
+      hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized" })' ;;
+  min)
+      hyprctl dispatch "hl.dsp.window.move({ workspace = 'special:${MIN_WS}' })"
+      # Moving a window to a special workspace also OPENS that workspace, so on its
+      # own this is a move, not a minimize — the window stays on screen as an overlay.
+      # Measured, not assumed: specialWorkspace reads back as 'special:minimized'
+      # immediately after the move. Classic Hyprland would use
+      # `movetoworkspacesilent`, but the Lua dispatcher table has no silent variant
+      # (hl.dsp.window has: move, but no move_silent), and passing `silent = true`
+      # is accepted and ignored — the table is not validated, so ANY unknown field
+      # returns "ok". So close it again by hand.
+      # Guarded on it actually being open, so this never toggles it back ON.
+      if hyprctl -j monitors | grep -q "\"special:${MIN_WS}\""; then
+          hyprctl dispatch "hl.dsp.workspace.toggle_special('${MIN_WS}')"
+      fi ;;
+  restore)
+      # POSITIONAL, not a table. Every table form — { name = }, { workspace = },
+      # { special = } — returns "ok" and then silently opens the DEFAULT special
+      # workspace instead of this one. Verified by reading specialWorkspace back out
+      # of `hyprctl monitors` after each attempt; only the bare string was correct.
+      hyprctl dispatch "hl.dsp.workspace.toggle_special('${MIN_WS}')" ;;
+  *)
+      die "unknown action '$1' (expected close|max|min|restore)" ;;
+esac
+
+rc=$?
+[ "$rc" -eq 0 ] || die "dispatch for '$1' failed with rc=$rc"

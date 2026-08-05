@@ -197,3 +197,58 @@ hl.bind("SUPER + SHIFT + Backspace", hl.dsp.exec_cmd("luminos-look reset")) -- u
 -- detached context. The script was proven end to end on 2026-08-04: shell killed (0 layers),
 -- guard run, shell back with 6 layers.
 hl.bind("CTRL + SUPER + SHIFT + R", hl.dsp.exec_cmd("luminos-shell-guard"), { release = true })
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Float everything — [CHANGE: claude-code | 2026-08-04]
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Shawn wants a Plasma/Windows-style desktop: windows that open free, stack on top of each
+-- other and get dragged where he wants them. Stock Caelestia is `general:layout = dwindle`,
+-- so two windows split the screen left/right and cannot overlap — that is the "locked to a
+-- position" problem, not a bug.
+--
+-- Why a catch-all window rule and NOT `general:layout = floating`:
+-- the dwindle layout is still wanted for the times he DOES want a split, and
+-- kbToggleWindowFloating (SUPER+ALT+Space) toggles a window between float and the ACTIVE
+-- layout. Switching the layout itself to `floating` would make that toggle a no-op and
+-- permanently remove tiling. A rule floats windows at map time while leaving the layout
+-- intact, so SUPER+ALT+Space still snaps a window back into a tile on demand.
+--
+-- Ordering matters and works in our favour: this file is required LAST, so this rule is
+-- evaluated after every Caelestia rule. It sets ONLY `float`, so the sized floaters in
+-- rules.lua (float_50_60 / float_60_70 / float_70_80) keep their own size and centring —
+-- setting a size here would have flattened all of them to one dimension.
+--
+-- `class = ".*"` rather than an omitted match: an absent match is untested against this
+-- Lua parser, and `.*` also matches the empty class that some XWayland windows report.
+--
+-- Caelestia's bar, launcher and OSDs are layer-shell surfaces, NOT windows, so no window
+-- rule can reach them — confirmed by `hyprctl layers` still showing 6 layers after reload.
+hl.window_rule({ match = { class = ".*" }, float = true })
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Titlebars with minimize / maximize / close — [CHANGE: claude-code | 2026-08-05]
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Floating windows on their own gave Shawn nothing to grab and no buttons, so this adds the
+-- hyprbars plugin. The setup lives in hypr-bars.lua because the exact same file is loaded by
+-- a throwaway nested Hyprland during testing — the code that gets proven is the code that
+-- ships. Read that file's header for the two non-obvious plugin gotchas.
+--
+-- HAZARD, and the reason this is stated here and not only in the module:
+-- hyprbars is a COMPILED plugin, and Hyprland refuses to load one built against a different
+-- version. hyprland-plugin-hyprbars currently depends `hyprland>=0.56.0 <0.57.0`. If
+-- Hyprland is upgraded to 0.57 and the plugin is not rebuilt in the same transaction, this
+-- fails at session start. It is wrapped in pcall so a stale plugin costs the titlebars and
+-- nothing else — unguarded, a config error puts Hyprland in emergency mode with NO BINDS
+-- REGISTERED, which is a black screen with no keyboard way out. Losing titlebars is
+-- recoverable; losing every keybind is not.
+local ok_bars, err_bars = pcall(function() require("hypr-bars").setup() end)
+if not ok_bars then
+    print("hypr-user: titlebars disabled, hyprbars failed to load: " .. tostring(err_bars))
+end
+
+-- Minimize parks a window on the `minimized` special workspace and then hides it (see the
+-- luminos-win script for why hiding takes a second dispatch). Without a way back, those
+-- windows are unreachable, so this is the drawer. SUPER+ALT+M sits deliberately next to
+-- SUPER+ALT+Space, the float toggle. SUPER+SHIFT+M was the obvious pick and is already
+-- volume mute at variables.lua:133.
+hl.bind("SUPER + ALT + M", hl.dsp.exec_cmd("luminos-win restore"))
