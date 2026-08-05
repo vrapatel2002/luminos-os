@@ -455,6 +455,7 @@ safe enough to leave unguarded: nothing previewed can outlive a reload.
 |---|---|
 | `/var/cache/hyprpm/$USER/state.toml` | **The** hyprpm state — which repos exist, which plugins are enabled, and the Hyprland build hash they were compiled for. **Not** in `$XDG_DATA_HOME`; that is upstream's location, Arch moved it here |
 | `/var/cache/hyprpm/$USER/headersRoot/` | Hyprland headers hyprpm fetched to build against |
+| `/var/cache/hyprpm/$USER/<repo>/<plugin>.so` | The built plugins, grouped **per source repo** — `hyprland-plugins/borders-plus-plus.so`, `hyprexpo/hyprexpo.so`. `hyprctl plugin list` does **not** print these paths, and `hyprctl plugin unload <wrong-path>` changes nothing quietly, so a load/unload test against a guessed path is a test that proves nothing. Get them with `find /var/cache/hyprpm/$USER -name '*.so'` |
 | `config/caelestia/hypr-user.lua` | The plugin **configuration** (`hl.config { plugin = {…} }`), the `SUPER+G` bind, the `hyprexpo` submap, and the `hyprpm reload -n` line in `hyprland.start` |
 
 Loaded: `borders-plus-plus`, `hyprfocus`, `hyprexpo`. Available but **deliberately disabled**:
