@@ -2491,3 +2491,118 @@ sudo sed -i 's/dgpu-exec-v2/dgpu-exec/g' /usr/local/bin/chrome-luminos   # back 
 sudo install -m0755 /usr/local/bin/chrome-luminos.bak-bug102-20260805 /usr/local/bin/chrome-luminos
 sudo rm /usr/local/bin/dgpu-exec-v2
 ```
+
+---
+
+## DECISION 53 — a real policy for the dGPU gate, instead of one universal door
+# [CHANGE: claude-code | 2026-08-05]
+**Status:** PROPOSED — designed and researched, not built. Nothing in this section is installed.
+**Supersedes nothing.** Builds on DECISION 25 (the gate) and DECISION 52 (`dgpu-exec-v2`).
+
+### What is actually wrong with the gate we have
+DECISION 25 gives us a **door, not a policy**. The device nodes are `0660 root:dgpu`, the `dgpu`
+group is empty, and `dgpu-exec-v2` is a setgid binary that hands that group to whatever you point it
+at. That is a genuine default-deny — an app that just enumerates GPUs gets nothing, which is the
+whole reason Claude Desktop and antigravity stopped poking the card. But it has three gaps:
+
+1. **It cannot tell apps apart.** `dgpu-exec-v2 chrome` and `dgpu-exec-v2 anything-else` are the
+   same operation. Everything on this box runs as `shawn`, so there is no identity to check against.
+2. **It keeps no record.** Grepped the whole gate — `install-dgpu-gate.sh`, `dgpu-exec*`,
+   `luminos-gpu-launch`, `chrome-luminos` — and there is **not one line of logging anywhere.** This
+   is precisely why BUG-102 hid for a month: a wrong answer and a right answer look identical from
+   the outside. Silence was the bug's habitat.
+3. **It has nowhere to put the "afterwards".** The launchers `exec`, so there is no point at which
+   the card can be released — which is BUG-103.
+
+So "smarter" here does not primarily mean "harder to break". It means: **decide per application,
+remember the decision, and leave a trace.**
+
+### The design: one choke point, one root-owned policy file, one log
+
+Everything already funnels through a single setgid binary. Make that binary the decision point
+rather than a rubber stamp.
+
+```
+/etc/luminos/dgpu-policy.conf        root:root 0644 — authoritative, system-wide
+    allow  /opt/google/chrome/chrome
+    deny   /usr/bin/antigravity
+    ask    *
+~/.config/luminos/dgpu-user.conf     shawn — remembered answers, consulted ONLY for `ask`
+/var/log/luminos/dgpu.log            every decision, one line, append-only
+```
+
+`dgpu-exec-v3` then does, before `setresgid`:
+
+1. Resolve `argv[1]` through `PATH`, then `realpath()` it. Compare the **resolved path**, never the
+   string you were handed.
+2. Look it up: `deny` → log, `notify-send`, exit 77. `allow` → log, grant. Unknown → `kdialog`
+   *"X wants the RTX 4050 — Allow once / Always / Never"*, record the answer in the user file, log it.
+3. Grant = `setresgid` + `exec` exactly as v2 does today.
+4. On the way in, take the card up; register a release so BUG-103 stops happening — see below.
+
+Why this shape and not something cleverer: it is ~80 lines of C on top of a binary that already
+exists and is already proven, it needs no new packages, no kernel work, and no daemon. And it turns
+the invisible into the visible, which is the failure mode that actually cost us a month.
+
+### The release problem, solved in the same place
+Because every grant now passes through one binary, that binary is the only sane place to own the
+card's power state. Instead of `echo on` scattered across three launchers with no counterpart:
+`dgpu-exec-v3` does **not** `exec` blindly — it `fork()`s, waits for the child, and on exit writes
+`auto` back if it was the last grant outstanding (a counter/lockfile under `/run/luminos/`). Wake
+and release finally live at the same address. This is the fix path for BUG-103 if the simpler
+"just stop writing `on`" test fails.
+
+### Be honest about what this does *not* buy
+An allowlist keyed on the executable is a **usability and visibility** win. It is not a security
+boundary, for one specific and unavoidable reason: several allowlisted programs will happily run
+arbitrary code for you. Chrome's `--gpu-launcher='sh -c "…"'` is the textbook case — the moment
+Chrome is on the allowlist, anything that can spawn Chrome with a flag is effectively on the
+allowlist too. This is a classic confused deputy and no amount of path checking in userspace fixes
+it. Anyone reading this later: do not oversell the allowlist.
+
+It is also worth stating plainly that the current gate has the same ceiling. Anything running as
+`shawn` can type `dgpu-exec-v2`. The gate stops **accidental** access — apps that probe every GPU
+they can see — not a determined one.
+
+### The version that *is* a boundary — BPF-LSM (later, deliberately)
+Verified on this machine, today, that the kernel supports it:
+
+```
+/sys/kernel/security/lsm          = capability,landlock,lockdown,yama,bpf
+CONFIG_BPF_LSM=y  CONFIG_BPF_SYSCALL=y  CONFIG_DEBUG_INFO_BTF=y  CONFIG_DEBUG_INFO_BTF_MODULES=y
+/sys/kernel/btf/vmlinux           present, 6.4 MB
+clang                             /usr/bin/clang
+kernel                            7.0.5-arch1-1
+MISSING: bpftool, bpftrace        (pacman package `bpf`)
+```
+
+A `BPF_PROG(file_open)` hook that checks the opening task's executable inode against a pinned BPF map
+decides **at the kernel**, on the real process, regardless of how it got there. That is qualitatively
+different from the setgid door in three ways:
+
+- It sees the process that is *actually opening the device*. Chrome's GPU process is `chrome`; a
+  `--gpu-launcher`'d `sh` is `sh` and gets denied. The confused deputy above closes.
+- It removes the fragile part of DECISION 25. Today the whole gate rests on
+  `NVreg_DeviceFileMode=0660`, needed only because setuid-root `nvidia-modprobe` resets the nodes to
+  `0666` on every wake. With an LSM deciding, the nodes can go back to `0666`, the `dgpu` group and
+  the modprobe param can both be retired, and a driver update can no longer quietly reopen the gate.
+- It can log every denial with the exact binary, for free.
+
+Cost: install `bpf`, write a CO-RE program, and a systemd unit to load and pin it. Real work, and a
+real dependency on kernel internals that Arch will churn. Worth doing when the gate needs to be a
+boundary; not worth doing to make Chrome's picker pleasant.
+
+### Rejected: polkit
+`pkexec` and `pkaction` are present and polkit could front the "may this app use the GPU" prompt.
+Rejected because the only identity involved is `shawn`, so the prompt reduces to Shawn approving
+Shawn — it adds a password dialog and no decision the user wasn't already making in `kdialog`.
+Landlock is present too but only ever **self-restricts** a process; it cannot grant, so it is
+irrelevant here.
+
+### Recommended order
+1. **Logging first, on its own.** Cheapest possible change to `dgpu-exec-v2` and it retires the
+   condition that produced BUG-102. Also finally answers "what is holding my dGPU awake", which is
+   the question that started all of this.
+2. Fix BUG-103 (test "stop writing `on`" first; fall back to fork-and-release).
+3. Promote v2 over v1 everywhere, then the policy file + `ask` dialog.
+4. BPF-LSM, if and when the gate needs to be a boundary rather than a filter.

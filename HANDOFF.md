@@ -1,8 +1,88 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-05 — Response 3. **Chrome's GPU picker actually switches GPUs now** (BUG-102 /
-DECISION 52). `luminos-notepad` built, installed and proven. Caelestia config adopted (DECISION 41).
+Last updated: 2026-08-05 — Response 4. **🟥 Long-term memory was silently discarding every write for
+ten days — fixed (BUG-104).** dGPU found parked awake with nothing using it (BUG-103, open). A real
+policy for the gate designed but not built (DECISION 53). **Chrome's GPU picker actually switches
+GPUs now** (BUG-102 / DECISION 52). `luminos-notepad` built and proven. Caelestia adopted (DECISION 41).
 
-## ✅ MOST RECENT WORK — the Chrome GPU picker was lying (BUG-102 / DECISION 52), FIXED
+## 🟥 READ THIS FIRST — mempalace was throwing your memories away (BUG-104), FIXED
+While filing the BUG-102 write-up, I read a drawer back immediately after writing it. It wasn't there.
+
+`mempalace_add_drawer` returns `{"success": true, "drawer_id": "…"}`. The write-ahead log records the
+call. **The drawer does not exist.** `~/.mempalace/wal/write_log.jsonl` shows `"result": null` on
+**every** `add_drawer` since **2026-07-26**, and the WAL redacts content — so nothing written in that
+window can be recovered, and every "filed to mempalace" in those sessions was a lie.
+
+The bug is in **ChromaDB 0.6.3**, not MemPalace. Chroma's write path is a log plus per-segment
+consumers, and each segment skips records at or below its stored `max_seq_id`. The palace held
+`max_seq_id ≈ 1.23e18` (a nanosecond timestamp) while `embeddings_queue` — `INTEGER PRIMARY KEY`, no
+AUTOINCREMENT — had been emptied and restarted numbering at **1**. So every new record was numbered 1,
+2, 3 against a watermark of 1.23e18 and was dropped by `if log_offset <= sub.start: continue`.
+`upsert()` raises nothing, so MemPalace's `try/except` saw success.
+
+**Repair (already applied, DB backed up to `~/.luminos-backups/chroma.sqlite3.bak-maxseqid-20260805-192814`):**
+```sql
+UPDATE max_seq_id SET seq_id = (SELECT max(seq_id) FROM embeddings_queue);
+```
+**Do NOT set it to 0** — that fails differently and cost an hour. `_validate_range` does
+`start = start or self._next_seq_id()`, and `0` is falsy, so a zeroed segment starts *after*
+everything queued and still drops writes. It must be **truthy and below the next row id**.
+
+Things that will bite you here:
+- **The running MCP server keeps the poisoned subscription in memory, and `mempalace_reconnect` does
+  NOT rebuild segments** — it only reopens the client. After the repair, a drawer filed through the
+  MCP tool still failed to read back immediately while the same call through the library worked.
+  Restart the MCP server, or file via
+  `/home/shawn/.mempalace-venv/bin/python3 -c "import mempalace.mcp_server as m; m.tool_add_drawer(...)"`.
+- **Always read the drawer back.** `mempalace_get_drawer` on the returned id, every time. That single
+  habit is the only reason this was found at all.
+- The client prints *"you upgraded from a version below 0.5.6 and could benefit from vacuuming"* on
+  every open. **Do not run `chromadb utils vacuum`** — emptying the log is what reset the row-id
+  counter and created this in the first place.
+
+Five drawers were filed after the repair (BUG-102, BUG-103, BUG-104, DECISION 52, DECISION 53 — the
+verbatim doc sections), each verified by readback: collection went 13575 → 13580.
+
+## 🟠 ALSO NEW — the dGPU never goes back to sleep (BUG-103, OPEN)
+Hours after the last NVIDIA Chrome died, with **zero** processes holding any `/dev/nvidia*` fd:
+`power/control=on`, `runtime_status=active`, **1.63 W at P8**.
+
+All three launchers write `on` to force the card up — `chrome-luminos:174`, `luminos-gpu-launch:76`,
+`luminos-wine-launcher:40` — and **nothing anywhere ever writes `auto` back**. `on` doesn't just wake
+the card, it **disables runtime PM for the device**, so it outlives the app and the session. The
+structural reason: all three end in `exec`, so there is no "after" for a trap to run in.
+`luminos-verify:76` already calls anything but `auto` a failure — our launcher creates a state our own
+verifier condemns.
+
+Restored by hand (`auto` → `suspended`). **Code unchanged on purpose.** The likely fix is to stop
+writing `on` at all, since `auto` means "let the kernel decide" and the driver takes a runtime-PM
+reference when a node is opened. Test it before shipping it: set `auto`, launch NVIDIA Chrome through
+`chrome-luminos`, confirm via DevTools `SystemInfo.getInfo` that `glRenderer` is still the RTX 4050.
+The `echo on` is probably a leftover from the PCIe link-training stall era — probably is not proven.
+
+## 🔵 DECISION 53 — the "smarter gate" answer (designed, NOT built)
+Shawn asked: *"any way how to give access but in smart way?"* Full write-up in LUMINOS_DECISIONS.md.
+The short version, so nobody re-derives it:
+- Today's gate is a **door, not a policy**: it can't tell apps apart (everything is `shawn`), it has
+  **zero logging anywhere** (grepped — that silence is why BUG-102 hid for a month), and it has
+  nowhere to release the card (BUG-103).
+- Proposed: keep the one choke point, make `dgpu-exec` decide. Root-owned
+  `/etc/luminos/dgpu-policy.conf` with `allow`/`deny`/`ask` keyed on the **realpath** of the target;
+  remembered answers in a user file; kdialog *"X wants the RTX 4050 — Allow once / Always / Never"*
+  for unknowns; every decision appended to `/var/log/luminos/dgpu.log`. ~80 lines of C, no new deps.
+- **Say this out loud when you propose it:** an executable allowlist is a *visibility* win, not a
+  security boundary. Chrome's `--gpu-launcher='sh -c …'` means allowlisting Chrome allowlists
+  arbitrary code. Confused deputy; userspace path checks cannot fix it.
+- The version that **is** a boundary is a BPF-LSM `file_open` hook, and this kernel supports it today:
+  LSMs `capability,landlock,lockdown,yama,bpf`; `CONFIG_BPF_LSM=y`, `CONFIG_BPF_SYSCALL=y`,
+  `CONFIG_DEBUG_INFO_BTF=y`; `/sys/kernel/btf/vmlinux` present (6.4 MB); `clang` present; kernel
+  7.0.5-arch1-1. **Missing: `bpftool`, `bpftrace` (pacman `bpf`).** It would decide on the *real*
+  process however it got there, and would let the `dgpu` group **and** the fragile
+  `NVreg_DeviceFileMode` param be retired with the nodes back at 0666.
+- Rejected: polkit (only identity is `shawn`, so it's Shawn approving Shawn). Landlock only
+  self-restricts — it cannot grant.
+- Order: **logging first**, then BUG-103, then promote v2 everywhere + policy file, then BPF-LSM.
+
+## ✅ PREVIOUS WORK — the Chrome GPU picker was lying (BUG-102 / DECISION 52), FIXED
 User's report: *"when i say use nvidia gpu it should work on nvidia… it is that gate does not open
 at all lol!"* He was right, and it was worse than one bug.
 

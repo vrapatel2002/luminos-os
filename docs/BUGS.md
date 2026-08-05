@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-08-05 (BUG-102 FIXED — picking "NVIDIA" in the Chrome GPU dialog silently gave you the AMD iGPU for a month, with a notification claiming otherwise. Three stacked causes: `chrome-luminos` never called the dGPU gate at all; the gate itself is defeated by **any launcher written in shell**, because setgid raises only the *effective* gid and bash resets it (fixed by `dgpu-exec-v2`, which `setresgid`s so the group is real); and Chrome is single-instance per profile, so the picker could never take effect while a window was open. Now proven on the card — `ANGLE (NVIDIA, Vulkan …RTX 4050…)`, 20 fds on `/dev/nvidia0`, listed in `nvidia-smi`. Two Chromes on two GPUs at once works, given separate `--user-data-dir`. BUG-101 FIXED — the SUPER launcher's app list "barely scrolled", on the touchpad only: Caelestia ships `input:touchpad:scroll_factor = 0.3`, and in a viewport only `maxShown` rows tall, 30% of a swipe travels less than one row. The mouse wheel uses the **separate** `input:scroll_factor`, already 1.0 — which is why the two devices behaved differently. Overridden to 1.0 in `hypr-vars.lua`; no QML touched. BUG-100 FIXED — every hyprpm plugin was dead because hyprpm was still building against an April compositor. BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-08-05 (BUG-104 FIXED — **mempalace reported "success" and threw every memory away, for at least ten days.** `add_drawer` returned a drawer_id, the WAL logged the call, and the drawer did not exist; the WAL shows `"result": null` on every add since 2026-07-26, and content is redacted there so none of it is recoverable. Root cause is in ChromaDB 0.6.3, not MemPalace: the palace's per-segment `max_seq_id` watermark held a poisoned ~1.23e18 timestamp while `embeddings_queue` — an `INTEGER PRIMARY KEY` with no AUTOINCREMENT — had been emptied and restarted numbering at 1, so `_notify_one` skipped every record as "already consumed" and `upsert()` raised nothing. Repaired by setting each watermark to the queue's current max row id; zeroing it does NOT work, because `start = start or self._next_seq_id()` treats 0 as falsy. Verified by readback in a fresh process. **The running MCP server keeps the poisoned subscription in memory and `mempalace_reconnect` does not rebuild it** — restart the server or file through the library. BUG-103 OPEN — the dGPU never goes back to sleep after you use it: all three GPU launchers write `on` to `power/control`, which *disables runtime PM for the device*, and nothing anywhere ever writes `auto` back, so the card sat at 1.63 W / P8 / `active` with zero processes holding it. Restored by hand; the code is unchanged and `luminos-verify` already calls this state a failure. BUG-102 FIXED — picking "NVIDIA" in the Chrome GPU dialog silently gave you the AMD iGPU for a month, with a notification claiming otherwise. Three stacked causes: `chrome-luminos` never called the dGPU gate at all; the gate itself is defeated by **any launcher written in shell**, because setgid raises only the *effective* gid and bash resets it (fixed by `dgpu-exec-v2`, which `setresgid`s so the group is real); and Chrome is single-instance per profile, so the picker could never take effect while a window was open. Now proven on the card — `ANGLE (NVIDIA, Vulkan …RTX 4050…)`, 20 fds on `/dev/nvidia0`, listed in `nvidia-smi`. Two Chromes on two GPUs at once works, given separate `--user-data-dir`. BUG-101 FIXED — the SUPER launcher's app list "barely scrolled", on the touchpad only: Caelestia ships `input:touchpad:scroll_factor = 0.3`, and in a viewport only `maxShown` rows tall, 30% of a swipe travels less than one row. The mouse wheel uses the **separate** `input:scroll_factor`, already 1.0 — which is why the two devices behaved differently. Overridden to 1.0 in `hypr-vars.lua`; no QML touched. BUG-100 FIXED — every hyprpm plugin was dead because hyprpm was still building against an April compositor. BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
 
@@ -1383,3 +1383,171 @@ including `luminos-gpu-launch`, still calls v1 — and therefore still has Cause
 it launches is a shell script. Chrome first, the rest once they are re-verified. See DECISION 52.
 
 **Revert:** `/usr/local/bin/chrome-luminos.bak-bug102-20260805`
+
+---
+
+## BUG-103 — the dGPU never goes back to sleep after you use it
+# [CHANGE: claude-code | 2026-08-05]
+**Status:** OPEN (live leak stopped by hand; the code that causes it is unchanged)
+**Severity:** Low-impact, always-on — 1.63 W burned continuously for nothing
+**Found:** 2026-08-05, while auditing the gate for BUG-102
+
+### The symptom
+Hours after the last NVIDIA Chrome was closed and killed, with **zero processes holding any
+`/dev/nvidia*` file descriptor**, the card was still awake:
+
+```
+/sys/bus/pci/devices/0000:01:00.0/power/control        = on
+/sys/bus/pci/devices/0000:01:00.0/power/runtime_status = active
+nvidia-smi: 1.63 W, 2 MiB, P8, 55 °C
+```
+
+P8 with 2 MiB allocated is an *idle* card — nothing is using it. It is simply not allowed to sleep.
+
+### The cause
+Every GPU launcher writes `on` to `power/control` to force the card up before launch, and **nothing,
+anywhere in the tree, ever writes `auto` back.** Confirmed by grep — these are all the writers:
+
+| File | Line | Writes |
+|---|---|---|
+| `/usr/local/bin/chrome-luminos` | 174 | `echo "on" > …/power/control` |
+| `/usr/local/bin/luminos-gpu-launch` | 76 | `echo "on" > …/power/control` |
+| `/usr/local/bin/luminos-wine-launcher` | 40 | `echo "on" > …/power/control` |
+
+and the only readers — `luminos-verify:74` and `luminos-session-recorder:144` — never write.
+
+`power/control=on` doesn't merely wake the card, it **disables runtime power management for the
+device entirely**. So the setting outlives the app, outlives the session, and persists until
+something writes `auto` or the machine reboots. Nothing does.
+
+The structural reason nobody noticed: all three launchers end in `exec`, which replaces the shell.
+There is no "after the app exits" for a trap to run in. So the wake is trivially easy to write and
+the release has nowhere to live.
+
+### Why this is a real bug and not a preference
+The project's own verifier already says so. `scripts/luminos-verify:76-79`:
+
+```sh
+if [ "$ctrl" = "auto" ]; then ok "power/control=auto (runtime PM enabled)"
+else bad "power/control='$ctrl' (expected 'auto' — RTD3 gating disabled; a driver update can reset this)"
+```
+
+So after any single use of the GPU picker, `luminos-verify` reports a failure — for a state our own
+launcher created. `d3cold_allowed=1`, meaning the hardware *can* reach true-0 W; we are preventing it.
+
+Counters at the time of discovery: `runtime_active_time=5198354 ms` vs
+`runtime_suspended_time=49928507 ms` — 9.4 % of tracked time awake, a good chunk of which was
+today's BUG-102 testing.
+
+### Immediate mitigation (done, by hand, not in code)
+```
+echo auto | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control
+→ control=auto  status=suspended
+```
+
+### Fix not yet applied — and why it needs a test first
+The obvious fix is **stop writing `on` at all.** `auto` does not mean "keep asleep", it means "let
+the kernel decide"; the NVIDIA driver takes a runtime-PM reference the moment a device node is
+opened, so the card wakes on demand anyway. The `echo on` is very likely a leftover belt-and-braces
+from the era of the PCIe link-training stall (see the AC/DPM P-state finding), not a live requirement.
+
+**Do not remove it on that reasoning alone.** Test it: set `auto`, launch NVIDIA Chrome through
+`chrome-luminos`, and confirm via DevTools `SystemInfo.getInfo` that `glRenderer` still reports the
+RTX 4050 and the card actually woke. If it does, delete all three `echo on` lines. If it doesn't,
+the release belongs in the single choke point instead — see DECISION 53, which puts wake **and**
+release in one place because everything already has to pass through it.
+
+---
+
+## BUG-104 — mempalace reported "success" and threw every memory away, for at least ten days
+# [CHANGE: claude-code | 2026-08-05]
+**Status:** FIXED (root-caused in ChromaDB, repaired in the palace database, verified by readback)
+**Severity:** HIGH — total, silent loss of everything written to long-term memory
+**Found:** 2026-08-05, only because I read back what I had just written
+
+### The symptom
+`mempalace_add_drawer` returned `{"success": true, "drawer_id": "drawer_…"}`. The write-ahead log
+recorded the call. And the drawer did not exist:
+
+```
+add_drawer  -> success: true, drawer_id: drawer_luminos_os_decisions_5c38628748735ade94749871
+get_drawer  -> error: "Drawer not found: drawer_luminos_os_decisions_5c38628748735ade94749871"
+```
+
+`mempalace_list_drawers` for `luminos_os/decisions` returned the same **two April drawers** it had
+returned before the writes. Nothing had been added since 2026-04-18.
+
+`~/.mempalace/wal/write_log.jsonl` shows `"result": null` on **every** `add_drawer` going back to
+**2026-07-26**. The WAL redacts content, so nothing written in that window is recoverable. Every
+"filed to mempalace" claimed in those sessions was false.
+
+### Root cause — a falsy-zero bug in ChromaDB 0.6.3, triggered by a poisoned counter
+MemPalace stores drawers in ChromaDB. Chroma's local write path is a log plus per-segment consumers:
+`upsert()` appends to `embeddings_queue`, then notifies each segment, which applies records whose
+`log_offset` is greater than the segment's stored `max_seq_id`.
+
+`~/.mempalace/palace/chroma.sqlite3` held this:
+
+```
+max_seq_id (per segment) = 1229819390157206833      (~1.23e18, a nanosecond timestamp)
+max seq_id in embeddings =             280552
+embeddings_queue rows    =                  0
+```
+
+`embeddings_queue.seq_id` is `INTEGER PRIMARY KEY` with **no AUTOINCREMENT** and there is no
+`sqlite_sequence` table, so an emptied queue restarts numbering at 1. Every new record therefore
+arrived with an offset of 1, 2, 3 — against a stored watermark of 1.23e18. In
+`chromadb/db/mixins/embeddings_queue.py::_notify_one`:
+
+```python
+if embedding["log_offset"] <= sub.start:
+    continue          # silently skipped
+```
+
+Every record was discarded as "already consumed". `upsert()` raised nothing, so MemPalace's
+`try/except` around it saw success and reported success. `automatically_purge` then deleted the
+orphaned queue rows. The data was gone with no error at any layer.
+
+The second half of the trap, which cost an hour: setting the watermark to `0` does **not** fix it.
+`_validate_range` does
+
+```python
+start = start or self._next_seq_id()
+```
+
+and `0` is falsy, so a zeroed segment silently starts *after* everything currently in the queue —
+still dropping writes. The watermark must be **truthy and below the next row id**.
+
+### The repair
+```bash
+cp -a ~/.mempalace/palace/chroma.sqlite3 ~/.luminos-backups/chroma.sqlite3.bak-maxseqid-20260805-192814
+# set every segment watermark to the queue's current max row id (was 4 at repair time)
+UPDATE max_seq_id SET seq_id = (SELECT max(seq_id) FROM embeddings_queue);
+```
+
+This is self-sustaining afterwards: chroma's purge deletes rows strictly *below* the lowest
+subscriber position, so the queue always keeps its highest row and the row-id counter never resets
+again. The original reset was almost certainly a `chromadb utils vacuum` — the client still prints
+*"It looks like you upgraded from a version below 0.5.6 and could benefit from vacuuming"* on every
+open, and vacuuming empties the log.
+
+**Verified after the repair** — count moved and the content read back, in a fresh process:
+```
+before 13575 -> upsert -> after 13576, get(['zzz_probe6']) -> ['zzz_probe6']
+two more consecutive writes -> 13578, both readable
+fresh process -> still readable
+4 real drawers filed -> 13579, all four VERIFIED_READBACK=True
+```
+
+### The part that will bite the next agent
+The **running MCP server process keeps the poisoned subscription in memory**, and
+`mempalace_reconnect` does *not* rebuild segments — it only reopens the client. After repairing the
+database, a drawer filed through the `mempalace_add_drawer` MCP tool still failed to read back
+immediately, while the identical call through the library succeeded. **Restart the MCP server, or
+file through `/home/shawn/.mempalace-venv/bin/python3 -c "import mempalace.mcp_server as m; m.tool_add_drawer(...)"`,
+and always read the drawer back before believing the write.**
+
+### The general lesson, which is the one that matters
+This is the same shape as BUG-088/089 and `luminos-brain log`: **a Luminos tool printed success while
+doing nothing.** Memory tooling is the worst possible place for it, because the failure erases the
+evidence of itself and nobody notices for ten days. Never trust a write receipt. Read it back.
