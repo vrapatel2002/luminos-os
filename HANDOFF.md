@@ -1,6 +1,36 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-04 — **Hyprland is the live session. BUG-094 fixed and PROVEN.** Stock
+Last updated: 2026-08-05 — Response 1. `luminos-notepad` built, installed and proven.
 Caelestia config adopted (DECISION 41); Luminos hardware bits moved into override files.
+
+## ✅ MOST RECENT WORK — `luminos-notepad` (2026-08-05), DONE
+The user asked for "a simple tool through which i can edit files, something like notepad".
+**The box had no graphical text editor at all** — `pacman -Q` showed nano and vim only, and
+`xdg-mime query default text/plain` returned **Okular**, a read-only PDF viewer. So double-clicking
+a config file gave you something you could not type into.
+
+Built as **one QML file run by the stock `qml6` binary** — no new packages, no build step, and it
+stays inside the Qt/QML rule (every packaged alternative is GTK4, which AGENTS.md §1 bans).
+
+  - `src/notepad/Notepad.qml`      — the editor (open/save/save-as/find/wrap/zoom, close guard)
+  - `scripts/luminos-notepad`      — launcher → `/usr/local/bin/luminos-notepad`
+  - `config/luminos-notepad.desktop` → `~/.local/share/applications/`, default for text/plain etc.
+
+**The one non-obvious thing, and the reason the code looks the way it does:** QML has no file API,
+so disk access is `XMLHttpRequest` `GET`/`PUT` on `file://` URLs (needs
+`QML_XHR_ALLOW_FILE_READ/WRITE=1`, exported by the launcher). **A PUT that fails and a PUT that
+succeeds are indistinguishable — both return `readyState=DONE, status=0`.** Measured directly, not
+assumed. So `saveFile()` reads the file back and compares it to the buffer; that comparison is the
+only honest success signal. Negative-tested by saving to an unwritable `/proc/` path → status line
+reads `SAVE FAILED` and the buffer stays marked modified. Do **not** "simplify" that read-back away.
+
+Proven, not asserted: real Hyprland login screenshot with a file loaded; save/truncate/fail paths
+driven through the real `save()` via a throwaway harness appended to a copy of the QML; close-guard
+blocks then saves; guard rails reject dir/binary/unreadable args; launch from `env -i` (proves the
+launcher resolves its own Wayland/DBus, so keybinds and .desktop launches work).
+
+**Revert:** see AGENTS.md §9 row `/usr/local/bin/luminos-notepad`.
+
+---
 
 ## 🟩 READ FIRST — the login works. Hyprland is what the user is running right now.
 BUG-094 is **RESOLVED AND VERIFIED**, not "fixed, awaiting retry". Evidence taken from the live

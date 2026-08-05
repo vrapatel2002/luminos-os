@@ -1,0 +1,16 @@
+[Desktop Entry]
+# [CHANGE: claude-code | 2026-08-05]
+# No OnlyShowIn= — this must appear in both the Plasma launcher and the
+# Caelestia/Hyprland one (DECISION 39 made Hyprland a real session).
+Name=Luminos Notepad
+GenericName=Text Editor
+Comment=Open and edit plain text files
+Exec=/usr/local/bin/luminos-notepad %f
+Icon=accessories-text-editor
+Terminal=false
+Type=Application
+Categories=Utility;TextEditor;
+Keywords=text;editor;notepad;plaintext;write;luminos;
+MimeType=text/plain;text/markdown;text/x-markdown;application/json;application/x-yaml;text/x-yaml;text/csv;text/x-log;application/x-shellscript;text/x-shellscript;text/x-python;text/x-go;text/x-c;text/x-c++;text/x-java;text/x-sql;text/html;text/css;text/xml;application/xml;application/javascript;text/x-ini;application/x-desktop;
+StartupNotify=true
+StartupWMClass=org.qt-project.qml

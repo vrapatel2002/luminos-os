@@ -2157,3 +2157,61 @@ rather than decided here.
 Delete `shell.json` for the bar icons. For the rest, remove the "Locked apps" and "Window action
 binds" blocks at the end of `~/.config/caelestia/hypr-user.lua` and `hyprctl reload`. To get the
 titlebars back, restore `config/caelestia/hypr-bars.lua` from git and re-add its `require`.
+
+---
+
+## DECISION 47 — The text editor is a single QML file on the stock `qml6` runtime, not a package
+# [CHANGE: claude-code | 2026-08-05]
+
+**Ask:** *"bro add as simple tool through which i can edit files somethings like notepad. make it
+real quick"*
+
+### The finding that shaped the decision
+There was **no graphical text editor on this machine at all.** `pacman -Q` came back empty for
+kwrite, kate, gedit, featherpad and mousepad; the only editors installed were `nano` and `vim`.
+And `xdg-mime query default text/plain` returned **`org.kde.okular.desktop`** — a PDF *viewer*. So
+double-clicking a config file opened it read-only, in a program that cannot type.
+
+### The decision
+Write the editor as **one `.qml` file executed by the stock `/usr/bin/qml6`**, rather than
+installing anything.
+
+- Every packaged lightweight editor on Arch is **GTK4**, which AGENTS.md §1 bans outright.
+- `qt6-base` and `qml6` are already installed, so this costs **zero new packages and zero build
+  step** — no CMake target, no `.so`, nothing to rebuild after a Qt upgrade.
+- It lands inside the project's existing Qt/QML rule instead of opening a second UI toolkit.
+
+Shipped as `src/notepad/Notepad.qml` + `scripts/luminos-notepad` (→ `/usr/local/bin`) +
+`config/luminos-notepad.desktop`, registered as the default handler for text/plain, markdown,
+json, yaml, csv, ini, shell, python and log.
+
+### The tradeoff this buys — and the trap it creates
+QML has **no file API**. The only way a plain `qml6` document touches the disk is
+`XMLHttpRequest` against a `file://` URL, unlocked by `QML_XHR_ALLOW_FILE_READ=1` /
+`QML_XHR_ALLOW_FILE_WRITE=1` (both exported by the launcher). That is the price of avoiding a
+compiled backend, and it comes with a genuinely dangerous property:
+
+> **A `PUT` that fails and a `PUT` that succeeds are byte-identical from QML's side —
+> both report `readyState = DONE`, `status = 0`.**
+
+Measured, not assumed. A probe wrote to `/tmp` (status 0, file appeared) and to
+`/proc/luminos-cannot-write` (status 0, nothing written). **Status can never detect a failed
+save.** So `saveFile()` issues a `GET` after every `PUT` and compares the result to the buffer;
+only a match sets `savedText` and prints "Saved". On mismatch it prints `SAVE FAILED` and leaves
+the buffer marked modified, so the unsaved-changes guard still fires. Negative-tested.
+
+This is the same silent-success shape as **BUG-088/089** — a tool reporting success for work it
+never did. Anyone "simplifying" the read-back away reintroduces it.
+
+Two smaller traps recorded in `docs/CODE_REFERENCE.md`: assign `savedText` **before** `editor.text`
+in `loadFile()` or the titlebar flashes a modified dot on every open; and the launcher — not the
+QML — rejects directories, unreadable files and binaries, because XHR reports a *missing* file and
+an *empty* file identically (status 0, empty body) while the shell still has the real errno.
+
+### How to reverse
+```bash
+xdg-mime default org.kde.okular.desktop text/plain
+rm ~/.local/share/applications/luminos-notepad.desktop
+sudo rm /usr/local/bin/luminos-notepad
+```
+Recorded in AGENTS.md §9.

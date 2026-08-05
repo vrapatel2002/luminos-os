@@ -1,0 +1,79 @@
+#!/bin/bash
+# Luminos Notepad — plain text editor (Qt/QML, no new packages)
+# [CHANGE: claude-code | 2026-08-05]
+#
+# Usage:  luminos-notepad [FILE]
+#
+# WHY A WRAPPER: the editor is a single .qml file run by the stock `qml6`
+# runtime, and it needs three things the runtime will not set for itself —
+# a resolvable Wayland/DBus session (so it works when launched from a keybind
+# or a .desktop entry, which inherit almost nothing), and the two XHR file
+# permission flags that are the only way pure QML can touch the disk.
+
+set -u
+
+QML_FILE="/home/shawn/luminos-os/src/notepad/Notepad.qml"
+
+# ── Session environment ───────────────────────────────────────────────────
+# Hyprland's exec and systemd --user both pass a thinner env than a terminal.
+# Resolve rather than guess: the socket name is not stable across sessions
+# (this box has come up on both wayland-0 and wayland-1).
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
+        [ -S "$sock" ] || continue
+        WAYLAND_DISPLAY="$(basename "$sock")"
+        export WAYLAND_DISPLAY
+        break
+    done
+fi
+
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+fi
+
+export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+
+# ── File access ───────────────────────────────────────────────────────────
+# Without these, XHR against a file:// URL is refused and the editor can
+# neither open nor save anything.
+export QML_XHR_ALLOW_FILE_READ=1
+export QML_XHR_ALLOW_FILE_WRITE=1
+
+# ── Argument check ────────────────────────────────────────────────────────
+# The QML side cannot tell "missing file" from "empty file" — XHR reports both
+# as status 0 with an empty body. So the cases that are genuinely wrong get
+# rejected out here, where the real errno is still available.
+TARGET=""
+if [ $# -gt 0 ]; then
+    TARGET="$1"
+
+    if [ -d "$TARGET" ]; then
+        echo "luminos-notepad: '$TARGET' is a directory" >&2
+        exit 1
+    fi
+
+    if [ -e "$TARGET" ] && [ ! -r "$TARGET" ]; then
+        echo "luminos-notepad: '$TARGET' is not readable (try: sudo -e '$TARGET')" >&2
+        exit 1
+    fi
+
+    # Binary files would be mangled on save — the editor round-trips text only.
+    if [ -f "$TARGET" ] && ! grep -qI . "$TARGET" 2>/dev/null && [ -s "$TARGET" ]; then
+        echo "luminos-notepad: '$TARGET' looks like a binary file, refusing to open" >&2
+        exit 1
+    fi
+
+    # QML resolves the path as given; a relative one would be resolved against
+    # the QML document, not the shell's cwd.
+    TARGET="$(realpath -m -- "$TARGET")"
+fi
+
+# ── Launch ────────────────────────────────────────────────────────────────
+if [ -n "$TARGET" ]; then
+    exec /usr/bin/qml6 "$QML_FILE" -- "$TARGET"
+else
+    exec /usr/bin/qml6 "$QML_FILE"
+fi

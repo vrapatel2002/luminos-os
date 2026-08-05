@@ -74,6 +74,15 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 - `scripts/luminos-120hz` — Switch display to 120Hz (same mechanism; deployed to /usr/local/bin/luminos-120hz)
 - `scripts/luminos-gpu-launch` — Single universal GPU launcher: styled QML picker (`scripts/dgpu-gate/luminos-gpu-picker.qml`), AMD or NVIDIA env vars, wakes PCI power gate inline, routes NVIDIA via the dgpu-exec gate (DECISION 25); deployed to /usr/local/bin/luminos-gpu-launch. (luminos-nvidia-run deleted 2026-07-04 — folded into this.)
 - `scripts/luminos-train-mode` — ML-training max-perf toggle (`on [pgrep-pattern]`/`off`/`status`): nvidia-powerd Dynamic Boost 55→88W + 100% fan pin via keep-alive transient unit, auto-off when watched process exits; BUG-069 interim; deployed to /usr/local/bin/luminos-train-mode
+- `scripts/luminos-notepad` — Text editor launcher (`luminos-notepad [FILE]`); deployed to /usr/local/bin/luminos-notepad. Resolves WAYLAND_DISPLAY/DBUS by enumerating `$XDG_RUNTIME_DIR/wayland-*` (the socket name is not stable — this box has come up on both wayland-0 and wayland-1), exports `QML_XHR_ALLOW_FILE_READ/WRITE=1`, rejects directories, unreadable files and binaries, then `realpath`s the argument (QML would otherwise resolve a relative path against the .qml document, not the shell cwd) and `exec`s `qml6 src/notepad/Notepad.qml -- <path>`. [CHANGE: claude-code | 2026-08-05]
+
+### Text Editor (src/notepad/) [CHANGE: claude-code | 2026-08-05]
+- `src/notepad/Notepad.qml` — the whole editor, one file, ~470 lines, no build step. Root is `ApplicationWindow`; colours come from LUMINOS_DESIGN_SYSTEM.md; editor font is JetBrains Mono.
+  - **File I/O:** QML has no file API. `loadFile()` is `XMLHttpRequest GET file://…`, `saveFile()` is `PUT`. Both require the launcher's `QML_XHR_ALLOW_FILE_*` env vars. Paths are percent-encoded per segment by `toUrl()` so spaces and unicode survive; `toPath()` reverses it for `FileDialog.selectedFile`.
+  - **Why `saveFile()` reads the file back:** a PUT to an unwritable path returns `readyState=DONE, status=0` — byte-identical to a successful PUT. Status alone can never detect a failed save. The read-back comparison is the only real signal; on mismatch the status line shows `SAVE FAILED` and `savedText` is left untouched so the buffer stays marked modified.
+  - **Ordering trap in `loadFile()`:** set `savedText` *before* `editor.text`. `modified` is a binding on `editor.text !== savedText`, so the other order flashes a "•" modified marker in the titlebar for a frame on every open.
+  - Shortcuts: Ctrl+N/O/S, Ctrl+Shift+S, Ctrl+F, F3/Shift+F3, Ctrl+± / Ctrl+0, Esc, Ctrl+Q. Close is guarded by `onClosing` + a `Dialog` with Save/Discard/Cancel; `forceClose` is the flag that lets the post-save `close()` through.
+- `config/luminos-notepad.desktop` — app entry + MIME registration. No `OnlyShowIn=` (must show under both Plasma and Caelestia/Hyprland). `StartupWMClass=org.qt-project.qml` because that is the class `qml6` reports.
 
 ### KDE Service Menus (~/.local/share/kio/servicemenus/)
 - `luminos-gpu-select.desktop` — Dolphin right-click for executables/ELF: "Ask GPU...", "Run on AMD", "Run on NVIDIA RTX 4050"
@@ -81,6 +90,7 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 
 ### KDE App Launcher Entries (~/.local/share/applications/)
 - `luminos-display-hz.desktop` — "Display Refresh Rate" in KDE Settings (Categories=System;Settings;HardwareSettings)
+- `luminos-notepad.desktop` — "Luminos Notepad" (Categories=Utility;TextEditor;) + default handler for text/plain and friends. Was Okular, a read-only PDF viewer. [CHANGE: claude-code | 2026-08-05]
 
 ### System Config Changes
 - `/etc/environment` — `QT_LOGGING_RULES=kwin_libinput.warning=false` (suppresses ASUP1208 touchpad Touch Jump log spam)
