@@ -140,7 +140,15 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   Read the journal, then exercise the thing.
 - **A news server is not an indexer.** UsenetServer stores the articles; Sonarr needs a
   *Newznab* search API to know which articles hold which episode. The bundled "Global
-  Search" is a website with no API. That is a second, separate subscription.
+  Search" is a website with no API. That is a second, separate subscription — **NZBGeek**,
+  bought 2026-08-05. DrunkenSlug was not a choice: its registration is closed to all but
+  invites. **One indexer serves both Sonarr and Radarr** via Prowlarr's `fullSync`.
+- **Retention belongs to the news server, not the indexer.** If an old release turns up
+  "not found", that is UsenetServer's article retention. Swapping indexers will not fix it,
+  and it is an easy thing to misdiagnose as a broken search chain.
+- **Prowlarr's "Test Successful" only proves the API key was accepted.** It does not prove a
+  search returns anything usable. Run a real `/api/v3/release?seriesId=` query and count the
+  results per indexer.
 - `bc` is not installed. Use python for arithmetic in scripts.
 
 ## Owner-only tasks
@@ -152,7 +160,5 @@ Things that need physical access or the router admin page:
   wifi ceiling, while the router reports a ~1 Gbps line. The cable is worth about 10x.
 - A DHCP reservation for 192.168.2.62.
 - The BIOS boot order must keep the HDD first, or a power blip boots Windows and SSH is gone.
-- **A Usenet indexer subscription** (NZBGeek or DrunkenSlug, ~USD 15–20/yr). It is the only
-  thing left before downloads are automatic again. DECISION 48.
 - **A choice on remote Jellyfin access** — Tailscale (an account signup) or self-hosted
   WireGuard (a router port forward + dynamic DNS). Either needs the owner; see STATUS.md.
