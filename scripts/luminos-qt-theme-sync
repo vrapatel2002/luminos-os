@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# luminos-qt-theme-sync — [CHANGE: claude-code | 2026-08-05]
+#
+# WHY THIS EXISTS
+# Caelestia regenerates its Material You palette whenever the wallpaper or the
+# colour scheme changes. It writes the result for every toolkit it knows about:
+#
+#   GTK   -> ~/.config/gtk-{3,4}.0/{gtk,colors}.css     (picked up automatically)
+#   Qt    -> ~/.config/qtengine/caelestia.colors        (picked up by NOBODY)
+#
+# That last file is a valid KDE colour scheme, but it targets `qtengine`, which
+# is not installed on this machine. We run QT_QPA_PLATFORMTHEME=kde instead
+# (hypr-user.lua), and that reads ~/.config/kdeglobals — a file Caelestia never
+# touches. So Qt/KDE apps (Dolphin, System Settings, Ark, Gwenview) keep whatever
+# palette they had and silently drift out of sync with the rest of the desktop.
+#
+# This script closes that gap: it copies Caelestia's generated scheme into the
+# KDE scheme directory and applies it to kdeglobals. Driven by
+# luminos-qt-theme-sync.path, it runs every time Caelestia rewrites the file.
+#
+# WHY NOT plasma-apply-colorscheme
+# Because it matches on the scheme NAME, not its contents:
+#     $ plasma-apply-colorscheme Caelestia
+#     The requested theme "Caelestia" is already set ...   (exit 0, nothing written)
+# Caelestia always regenerates under the same name, so that tool no-ops on every
+# single run that matters and still exits 0. Verified 2026-08-05 with kdeglobals
+# holding #ff0000. We therefore merge the colour groups into kdeglobals ourselves
+# and read the value back (BUG-088/089 house rule: never trust a success message).
+#
+# Usage:
+#   luminos-qt-theme-sync           # sync now
+#   luminos-qt-theme-sync --check   # report drift, change nothing (exit 1 if drifted)
+set -uo pipefail
+
+SRC="${HOME}/.config/qtengine/caelestia.colors"
+DEST_DIR="${HOME}/.local/share/color-schemes"
+DEST="${DEST_DIR}/Caelestia.colors"
+KDEGLOBALS="${HOME}/.config/kdeglobals"
+SCHEME_NAME="Caelestia"
+
+# Pull [Colors:Window]/BackgroundNormal out of a kdeglobals-format file.
+# This is the value we compare on, so "did it work" is answered by colour, not by
+# scheme name — a name can match while the colours are stale.
+bg_of() {
+    awk '/^\[Colors:Window\]/{f=1;next} /^\[/{f=0} f && /^BackgroundNormal=/{sub(/^BackgroundNormal=/,"");print;exit}' "$1" 2>/dev/null
+}
+
+[ -r "$SRC" ] || { echo "qt-theme-sync: no Caelestia scheme at $SRC" >&2; exit 1; }
+
+want="$(bg_of "$SRC")"
+have="$(bg_of "$KDEGLOBALS")"
+[ -n "$want" ] || { echo "qt-theme-sync: $SRC has no [Colors:Window] BackgroundNormal" >&2; exit 1; }
+
+if [ "${1:-}" = "--check" ]; then
+    if [ "$want" = "$have" ]; then
+        echo "qt-theme-sync: in sync (window bg $have)"; exit 0
+    else
+        echo "qt-theme-sync: DRIFTED — caelestia says $want, kdeglobals says ${have:-<unset>}"; exit 1
+    fi
+fi
+
+if [ "$want" = "$have" ]; then
+    echo "qt-theme-sync: already in sync (window bg $have)"; exit 0
+fi
+
+mkdir -p "$DEST_DIR" || { echo "qt-theme-sync: cannot create $DEST_DIR" >&2; exit 1; }
+cp -f "$SRC" "$DEST" || { echo "qt-theme-sync: copy to $DEST failed" >&2; exit 1; }
+chmod 644 "$DEST"
+
+# Merge the colour groups from the scheme into kdeglobals. Only palette groups are
+# touched: [Colors:*], [ColorEffects:*], [WM], plus General/ColorScheme. Everything
+# else in kdeglobals (fonts, widgetStyle, icon theme, BrowserApplication) is left
+# exactly as it was. Group headers are treated as opaque strings so nested ones
+# like [Colors:Header][Inactive] survive intact.
+SRC="$SRC" KDEGLOBALS="$KDEGLOBALS" SCHEME_NAME="$SCHEME_NAME" python3 - <<'PY' || { echo "qt-theme-sync: merge into kdeglobals failed" >&2; exit 1; }
+import os, re, tempfile
+
+src, dst, name = os.environ["SRC"], os.environ["KDEGLOBALS"], os.environ["SCHEME_NAME"]
+hdr = re.compile(r'^\[.+\]\s*$')
+
+def parse(path):
+    pre, groups, cur = [], [], None
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except FileNotFoundError:
+        lines = []
+    for ln in lines:
+        if hdr.match(ln):
+            cur = (ln.strip(), [])
+            groups.append(cur)
+        else:
+            (cur[1] if cur else pre).append(ln)
+    return pre, groups
+
+def is_palette(h):
+    return h.startswith("[Colors:") or h.startswith("[ColorEffects:") or h == "[WM]"
+
+_, sgroups = parse(src)
+pre, dgroups = parse(dst)
+
+index = {h: i for i, (h, _) in enumerate(dgroups)}
+for h, body in sgroups:
+    if not is_palette(h):
+        continue
+    if h in index:
+        dgroups[index[h]] = (h, list(body))
+    else:
+        dgroups.append((h, list(body)))
+        index[h] = len(dgroups) - 1
+
+# Keep the scheme name in sync so KDE's own tooling reports the right thing.
+if "[General]" not in index:
+    dgroups.append(("[General]", []))
+    index["[General]"] = len(dgroups) - 1
+gh, gbody = dgroups[index["[General]"]]
+gbody = [l for l in gbody if not l.startswith("ColorScheme=")]
+insert = next((i for i, l in enumerate(gbody) if l.strip() == ""), len(gbody))
+gbody.insert(insert, f"ColorScheme={name}")
+dgroups[index["[General]"]] = (gh, gbody)
+
+out = list(pre)
+for h, body in dgroups:
+    out.append(h)
+    out.extend(body)
+
+d = os.path.dirname(dst) or "."
+fd, tmp = tempfile.mkstemp(dir=d, prefix=".kdeglobals.sync.")
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(out).rstrip("\n") + "\n")
+    os.replace(tmp, dst)
+except BaseException:
+    os.path.exists(tmp) and os.unlink(tmp)
+    raise
+PY
+
+got="$(bg_of "$KDEGLOBALS")"
+if [ "$got" = "$want" ]; then
+    echo "qt-theme-sync: applied $SCHEME_NAME (window bg $got)"
+    exit 0
+else
+    echo "qt-theme-sync: FAILED — wanted window bg $want, kdeglobals still has ${got:-<unset>}" >&2
+    exit 1
+fi

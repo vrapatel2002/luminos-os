@@ -1,0 +1,13 @@
+# [CHANGE: claude-code | 2026-08-05]
+# Caelestia rewrites this file (atomic write + rename) every time the wallpaper or
+# colour scheme changes. Without this watch, Qt/KDE apps silently keep the old
+# palette while GTK apps and the shell move on.
+[Unit]
+Description=Watch Caelestia's generated Qt colour scheme
+
+[Path]
+PathChanged=%h/.config/qtengine/caelestia.colors
+Unit=luminos-qt-theme-sync.service
+
+[Install]
+WantedBy=default.target

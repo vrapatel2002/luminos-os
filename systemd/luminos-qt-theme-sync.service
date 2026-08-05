@@ -1,0 +1,9 @@
+# [CHANGE: claude-code | 2026-08-05]
+# Pushes Caelestia's generated palette into kdeglobals so Qt/KDE apps match the
+# shell. Triggered by luminos-qt-theme-sync.path; also runnable by hand.
+[Unit]
+Description=Sync Caelestia colour scheme into kdeglobals for Qt/KDE apps
+
+[Service]
+Type=oneshot
+ExecStart=%h/luminos-os/scripts/luminos-qt-theme-sync
