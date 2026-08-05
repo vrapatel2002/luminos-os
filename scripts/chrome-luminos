@@ -1,13 +1,199 @@
 #!/bin/bash
-# [CHANGE: gemini-cli | 2026-05-09] Cleaned up flags and ensured remote debugging
-export DRI_PRIME=0
-export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
+# Luminos Chrome Launcher — GPU selector
+# [CHANGE: gemini-cli | 2026-05-09] Initial wrapper
+# [CHANGE: claude-code | 2026-05-14] BUG-046 re-fix: GPU selector dialog
+# [CHANGE: claude-code | 2026-05-15] BUG-046 render-node hotfix: renderD128=NVIDIA, renderD129=AMD
+# [CHANGE: claude-code | 2026-05-21] GPU-specific GL flags
+# [CHANGE: claude-code | 2026-05-24] BUG-053-056: zero-copy removed, VAAPI, MemorySaver
+# [CHANGE: claude-code | 2026-05-27] BUG-057-058: Flatpak env fixes, chrome-flags.conf stripped
+# [CHANGE: claude-code | 2026-05-27] BUG-059: switched to native google-chrome-stable (AUR)
+# [CHANGE: claude-code | 2026-05-28] BUG-060: --use-gl=egl is not in native Chrome's allowed GL
+#   implementations. Native Chrome 148 only allows ANGLE backends:
+#     (gl=egl-angle,angle=opengl), (gl=egl-angle,angle=opengles), (gl=egl-angle,angle=vulkan)
+#   --use-gl=egl requests gl=egl-gles2,angle=none → not allowed → GPU process crashes 7x →
+#   Chrome disables all GPU features → --use-gl=disabled → 81% CPU software rendering.
+#   Fix: --use-gl=angle --use-angle=vulkan for both paths.
+#   AMD uses Mesa radv (VK_ICD=radeon_icd), NVIDIA uses proprietary Vulkan (VK_ICD=nvidia_icd).
+#   Render node facts: renderD128=NVIDIA (0x10de), renderD129=AMD (0x1002)
+# [CHANGE: claude-code | 2026-05-28] BUG-061: AMD Vulkan ICD filename wrong — radeon_icd.x86_64.json
+#   does not exist. Arch Mesa installs radeon_icd.json (no arch suffix). Wrong path → Vulkan loader
+#   finds no AMD ICD → only SwiftShader visible → ANGLE Vulkan uses CPU fallback → --use-gl=disabled.
+#   Fix: radeon_icd.x86_64.json → radeon_icd.json
+# [CHANGE: claude-code | 2026-05-28] BUG-062: NVIDIA path crashed — --ozone-platform=wayland
+#   incompatible with Vulkan on PRIME offload. NVIDIA renders offscreen, hands frames to AMD KWin
+#   via DMA-BUF. Cross-device DMA-BUF import fails (wayland error 7). Chrome explicitly rejects
+#   wayland+vulkan. Fix: NVIDIA path uses --ozone-platform=x11 (XWayland). Frame handoff via X11
+#   instead of Wayland DMA-BUF — works reliably with NVIDIA PRIME. VAAPI flags removed (not
+#   functional on the NVIDIA Linux path). AMD path unchanged (native Wayland, same device as KWin).
+# [CHANGE: claude-code | 2026-07-21] Perceived-slowness fix #1: removed --process-per-site and
+#   --renderer-process-limit=8 from both paths. Those two throttles capped Chrome at 8 renderer
+#   processes and consolidated all same-site tabs into one process — Windows Chrome has no such
+#   cap. With many tabs open, a busy tab stalled its process-mates (jank / slow loads). RAM is
+#   healthy now (8.3Gi free, swap empty) so the memory-saving cap is no longer warranted. This
+#   restores Chrome's default process-per-site-instance model (same as Windows). Revert: re-add
+#   both flags, or restore /usr/local/bin/chrome-luminos.bak-20260721.
+#
+# [CHANGE: claude-code | 2026-08-05] BUG-102 — "pick NVIDIA, still get the iGPU".
+#   The NVIDIA branch never opened the DECISION 25 dGPU gate. Since the gate went live on
+#   2026-07-03, picking "NVIDIA" produced a Chrome that could not see the card at all: NVIDIA's
+#   Vulkan ICD and GLX/EGL libs open /dev/nvidiactl and /dev/nvidia0, which the gate sets to
+#   0660 root:dgpu — and user `shawn` is deliberately NOT in the `dgpu` group. Proven side by side:
+#       VK_ICD_FILENAMES=…/nvidia_icd.json vulkaninfo --summary
+#         → ERROR: Failed to detect any valid GPUs in the current config
+#       …the identical command wrapped in `dgpu-exec`
+#         → deviceName = NVIDIA GeForce RTX 4050 Laptop GPU
+#   `/dev/dri/renderD128` being world-readable (0666) is a red herring: that is the DRM render
+#   node, which the NVIDIA proprietary stack does not use the way Mesa does. Access to the DRM
+#   node without /dev/nvidiactl buys nothing.
+#   The failure was SILENT — ANGLE quietly fell back to the iGPU while notify-send still announced
+#   "Running on NVIDIA RTX 4050", which is why this went unnoticed for a month. The sibling
+#   launcher `luminos-gpu-launch` was updated for DECISION 25 on 2026-07-03; this script predates
+#   it (May) and was never brought in line.
+#   Three changes, in order of importance:
+#     1. NVIDIA branch now execs through the setgid dgpu gate — the only sanctioned door.
+#     2. Preflight: read /dev/nvidiactl back through the gate before promising NVIDIA. On failure,
+#        say so and fall back to the iGPU explicitly. Never claim a GPU we did not get.
+#     3. Single-instance guard (below) — the second, independent reason switching never worked.
+#   Revert: /usr/local/bin/chrome-luminos.bak-bug102-20260805
+#
+# [CHANGE: claude-code | 2026-08-05] BUG-102 part 2 — plain `dgpu-exec` was NOT enough.
+#   Inserting v1 `dgpu-exec` was necessary but did not work, because v1 only raises the
+#   EFFECTIVE gid. Chrome is started through two bash wrappers
+#   (/usr/bin/google-chrome-stable -> /opt/google/chrome/google-chrome -> chrome), and bash
+#   deliberately resets egid->rgid at startup as setgid protection. The dgpu group was therefore
+#   dropped at the FIRST wrapper and the browser that finally ran had no dGPU access at all.
+#   Skipping the wrappers and exec'ing /opt/google/chrome/chrome directly does not help either:
+#   a setgid exec sets AT_SECURE=1, and Chrome's setuid-root chrome-sandbox then refuses with
+#   "Running as root without --no-sandbox is not supported."
+#   Fix: `dgpu-exec-v2`, which calls setresgid(dgpu,dgpu,dgpu) so the group is REAL, not just
+#   effective. Real == effective means bash keeps it and AT_SECURE is not set, so both problems
+#   go away. Source: scripts/dgpu-gate/dgpu-exec-v2.c.
+#   PROVEN end to end 2026-08-05: Chrome's GPU process held 20 fds on /dev/nvidia0 plus
+#   /dev/nvidiactl and /dev/nvidia-modeset, loaded libnvidia-glcore + libGLX_nvidia with ZERO
+#   Mesa/radeon libs, and `nvidia-smi` listed it in the card's own process table.
+#   v1 `dgpu-exec` is deliberately left alone for now — `luminos-gpu-launch` and every other
+#   gated app still call it. Chrome first, the rest after they are re-verified.
 
-exec /usr/bin/flatpak run com.google.Chrome \
-  --ozone-platform=wayland \
-  --enable-gpu-rasterization \
-  --enable-zero-copy \
-  --process-per-site \
-  --renderer-process-limit=8 \
-  --remote-debugging-port=9222 \
-  "$@"
+# ─────────────────────────────────────────────────────────────────────────────
+# Single-instance guard — the second reason the GPU switch never took effect
+# ─────────────────────────────────────────────────────────────────────────────
+# [CHANGE: claude-code | 2026-08-05] Chrome permits ONE browser process per --user-data-dir. If a
+# browser already owns this profile, a second launch does not start a browser: it passes the URLs
+# to the running process over SingletonSocket and exits, DISCARDING every command-line flag —
+# including all the GPU ones. So showing the GPU picker while Chrome is running is a lie; whatever
+# you pick, you get the GPU the running instance already has. Skip the dialog and hand off, which
+# is also exactly what makes `chrome-luminos <url>` behave as the system link handler.
+# To actually change GPU you must close every Chrome window first.
+# SingletonLock is a symlink of the form "<hostname>-<pid>"; the /proc test rejects a stale lock.
+# [CHANGE: claude-code | 2026-08-05] Resolve the profile dir the same way /usr/bin/google-chrome-stable
+# does — ${XDG_CONFIG_HOME:-$HOME/.config} — not a hardcoded $HOME/.config. Your login session does
+# not set XDG_CONFIG_HOME so the two agree there, but they diverge under any shell that does set it,
+# and then the guard watches a lock file Chrome never writes.
+RUNNING_PID=""
+_lock="${XDG_CONFIG_HOME:-$HOME/.config}/google-chrome/SingletonLock"
+if [ -L "$_lock" ]; then
+  _p="$(readlink "$_lock" 2>/dev/null)"; _p="${_p##*-}"
+  case "$_p" in
+    ''|*[!0-9]*) : ;;
+    *) [ -d "/proc/$_p" ] && RUNNING_PID="$_p" ;;
+  esac
+fi
+
+if [ -n "$RUNNING_PID" ]; then
+  # Hand off to the existing browser. No dialog, no GPU claim.
+  exec google-chrome-stable "$@"
+fi
+
+# [CHANGE: claude-code | 2026-08-05] LUMINOS_GPU skips the dialog. This is the seam that makes
+# the NVIDIA branch testable without a human clicking kdialog — the absence of any such seam is
+# part of why BUG-102 went unverified for a month. It is also the hook for a fixed
+# "Chrome (NVIDIA)" .desktop entry. Anything other than igpu/nvidia falls through to the dialog.
+GPU_CHOICE=""
+case "${LUMINOS_GPU:-}" in
+  igpu|nvidia) GPU_CHOICE="$LUMINOS_GPU" ;;
+esac
+
+if [ -z "$GPU_CHOICE" ]; then
+  GPU_CHOICE=$(kdialog \
+    --title "Luminos — Chrome" \
+    --menu "Select GPU for Chrome:" \
+    "igpu" "AMD Radeon 780M (Battery Saver — default)" \
+    "nvidia" "NVIDIA RTX 4050 (WebGL / GPU-heavy sites)" \
+    2>/dev/null)
+fi
+
+# Default to AMD if cancelled
+if [ -z "$GPU_CHOICE" ]; then
+  GPU_CHOICE="igpu"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Preflight the dGPU gate before promising NVIDIA
+# ─────────────────────────────────────────────────────────────────────────────
+# [CHANGE: claude-code | 2026-08-05] Read the device back THROUGH the gate rather than assuming it
+# opened. The absence of this check is precisely what made BUG-102 silent for a month. If the node
+# still cannot be opened we fall back to the iGPU *and say so*, instead of letting ANGLE do it
+# behind your back under an NVIDIA banner.
+#
+# TWO TRAPS, both hit while writing this check — do not "simplify" it back into either:
+#   1. `[ -r ]` / `[ -w ]` call access(2), which tests the REAL gid. dgpu-exec raises the
+#      EFFECTIVE gid only, so those tests report DENIED even when the device opens fine. A
+#      permission test that consults the wrong identity is worse than no test.
+#   2. Plain `sh -c` cannot be used at all: bash/sh deliberately reset egid→gid at startup as
+#      setgid protection, so the group is dropped before the test even runs. `sh -p` preserves it.
+#      (`dgpu-exec <binary>` is unaffected — only an interposed shell drops it.)
+# So: a real open(2), through `sh -p`. Verified both ways — OPEN OK with the gate, DENIED without.
+#
+# (`sh -p` is kept even though dgpu-exec-v2 makes the real gid real, so this check stays honest
+# if anyone ever points the line below back at v1.)
+if [ "$GPU_CHOICE" = "nvidia" ]; then
+  if ! dgpu-exec-v2 sh -p -c 'exec 3<>/dev/nvidiactl; exec 4<>/dev/nvidia0' 2>/dev/null; then
+    kdialog --title "Luminos — Chrome" --sorry \
+      "The dGPU gate did not open — /dev/nvidiactl is still denied.\n\nFalling back to the AMD iGPU.\n\nDiagnose with:  dgpu-exec nvidia-smi" 2>/dev/null
+    notify-send "Chrome" "dGPU gate denied — using AMD iGPU" --icon=dialog-warning 2>/dev/null
+    GPU_CHOICE="igpu"
+  fi
+fi
+
+if [ "$GPU_CHOICE" = "igpu" ]; then
+  notify-send "Chrome" "Running on AMD Radeon 780M (HW accel)" --icon=dialog-information
+  exec env \
+    DRI_PRIME=0 \
+    VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json \
+    LIBVA_DRIVER_NAME=radeonsi \
+    google-chrome-stable \
+    --ozone-platform=wayland \
+    --use-gl=angle \
+    --use-angle=vulkan \
+    --enable-gpu-rasterization \
+    --enable-features=VaapiVideoDecodeLinuxGL,VaapiVideoEncoder,MemorySaver \
+    --ignore-gpu-blocklist \
+    --remote-debugging-port=9222 \
+    "$@"
+else
+  echo "on" | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control > /dev/null
+  notify-send "Chrome" "Running on NVIDIA RTX 4050 (XWayland)" --icon=dialog-information
+  # [CHANGE: claude-code | 2026-08-05] BUG-102: the dGPU gate is opened here. It preserves the
+  # environment (verified — VK_ICD_FILENAMES and friends survive) and yields gid 948(dgpu) as
+  # BOTH real and effective, which is what lets the NVIDIA Vulkan/GLX libs open /dev/nvidiactl
+  # and survive Chrome's two bash wrapper scripts. Without it Chrome silently renders on the
+  # iGPU while still announcing NVIDIA. Do not remove, and do not downgrade to v1 `dgpu-exec`
+  # — v1 raises the effective gid only and bash drops it before Chrome ever starts.
+  exec env \
+    DRI_PRIME=1 \
+    VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json \
+    __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/60_nvidia.json \
+    __NV_PRIME_RENDER_OFFLOAD=1 \
+    __GLX_VENDOR_LIBRARY_NAME=nvidia \
+    dgpu-exec-v2 \
+    google-chrome-stable \
+    --ozone-platform=x11 \
+    --use-gl=angle \
+    --use-angle=vulkan \
+    --enable-gpu-rasterization \
+    --enable-features=MemorySaver \
+    --ignore-gpu-blocklist \
+    --remote-debugging-port=9222 \
+    --render-node-override=/dev/dri/renderD128 \
+    "$@"
+fi

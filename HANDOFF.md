@@ -1,8 +1,83 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-05 — Response 1. `luminos-notepad` built, installed and proven.
-Caelestia config adopted (DECISION 41); Luminos hardware bits moved into override files.
+Last updated: 2026-08-05 — Response 3. **Chrome's GPU picker actually switches GPUs now** (BUG-102 /
+DECISION 52). `luminos-notepad` built, installed and proven. Caelestia config adopted (DECISION 41).
 
-## ✅ MOST RECENT WORK — `luminos-notepad` (2026-08-05), DONE
+## ✅ MOST RECENT WORK — the Chrome GPU picker was lying (BUG-102 / DECISION 52), FIXED
+User's report: *"when i say use nvidia gpu it should work on nvidia… it is that gate does not open
+at all lol!"* He was right, and it was worse than one bug.
+
+Picking **NVIDIA** had been silently delivering the **AMD iGPU** since the gate went live on
+2026-07-03, while `notify-send` cheerfully announced "Running on NVIDIA RTX 4050". **Three
+independent causes**, stacked — fixing any one alone changed nothing, which is what made it hard:
+
+1. **`chrome-luminos` never called the gate.** Written in May; the sibling `luminos-gpu-launch` was
+   updated for DECISION 25 on 2026-07-03 and this one was forgotten.
+   *The trap:* `/dev/dri/renderD128` is `0666` and opens fine, so access **looks** granted. It buys
+   nothing — the NVIDIA proprietary Vulkan/GLX/EGL libs need the **gated character devices**
+   `/dev/nvidiactl` + `/dev/nvidia0`. Only Mesa/AMD lives entirely in DRM.
+
+2. **🟥 The gate is defeated by ANY launcher written in shell — this affects every gated app, not
+   just Chrome.** `dgpu-exec` (v1) relies purely on the setgid bit, which raises the **effective**
+   gid only. `bash`/`sh` deliberately reset egid→rgid at startup as setgid protection (unless `-p`),
+   and Chrome runs through **two bash wrappers**, so the group was gone before the browser started.
+   Exec'ing the ELF directly is not a workaround: a setgid exec sets `AT_SECURE=1`, and Chrome's
+   setuid-root `chrome-sandbox` then refuses with *"Running as root without --no-sandbox is not
+   supported."* And `access(2)` — i.e. shell `[ -r ]` / `[ -w ]` — consults the **real** gid, so any
+   obvious health check reports DENIED on a device that opens fine. (That one cost a false trail.)
+   **Fix: `dgpu-exec-v2` calls `setresgid(g,g,g)`** so the gid is real as well as effective. Real ==
+   effective ⇒ the process is not privileged ⇒ all three symptoms vanish at once.
+
+3. **Chrome is single-instance per `--user-data-dir`.** A second launch hands its URLs to the
+   running browser over `SingletonSocket` and **discards every command-line flag**, GPU flags
+   included — so showing a picker while a window was open was theatre. The script now detects a
+   live browser and hands off silently (which is also what makes it a correct link handler).
+   **To change GPU you must close every Chrome window first.**
+
+**Proven on the card, not asserted** — Chrome's own DevTools `SystemInfo.getInfo`:
+
+    glRenderer  ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA GeForce RTX 4050 Laptop GPU (0x000028E1)),
+                NVIDIA-595.71.5.0)
+    GPU process Gid: 948,948,948,948 — 20 fds on /dev/nvidia0, + /dev/nvidiactl, /dev/nvidia-modeset
+    libs        libnvidia-glcore + libGLX_nvidia, ZERO Mesa/radeon libraries
+    nvidia-smi  the card's own process table lists the Chrome PID
+
+**Both GPUs at once is real.** While the above ran on the 4050, the everyday Chrome (pid 131073) was
+simultaneously on the iGPU (`renderD129`, `libvulkan_radeon.so`). Two Chromes, two GPUs, same
+moment. The only requirement is a **separate `--user-data-dir`** — that, not the GPU, is what the
+single-instance rule is about.
+
+Files: `scripts/dgpu-gate/dgpu-exec-v2.c` → `/usr/local/bin/dgpu-exec-v2` (`root:dgpu`, `2755`);
+`scripts/chrome-luminos` → `/usr/local/bin/chrome-luminos`.
+Revert: `/usr/local/bin/chrome-luminos.bak-bug102-20260805`. New: `LUMINOS_GPU=igpu|nvidia` skips
+the dialog (this is the seam that finally made the NVIDIA branch testable without a human clicking).
+
+### 🔜 PICK UP HERE — the user explicitly asked for Chrome first, "than we will make it for other too"
+- **v2 is wired into `chrome-luminos` ONLY.** `luminos-gpu-launch` and every other gated app still
+  call v1 `dgpu-exec` and therefore **still have cause 2** whenever what they launch is a shell
+  script. Promote v2 over `dgpu-exec` and retire the `-v2` name once each is re-verified.
+- `luminos-gpu-launch:65` still points at **`radeon_icd.x86_64.json`, which does not exist on Arch**
+  (BUG-061 established this for `chrome-luminos`; the sibling was never corrected). Latent.
+- `--remote-debugging-port=9222` is **dead** — current Chrome refuses DevTools on a *default* data
+  dir, nothing listens on 9222, and it prints a confusing error on every fresh launch. Left in
+  place deliberately (not my call to remove); flagged for the user.
+- Earlier ANGLE findings (backend choice, ozone platform) were all measured **under the broken v1
+  gate** and should be re-validated before being trusted.
+
+### Method notes that will save the next agent an hour
+- **Never build a setgid binary in `/tmp`** — it is mounted `nosuid`, the bit is ignored, and the
+  binary reports `egid=1000` and looks broken for entirely the wrong reason.
+- **Never test device access with `[ -r ]`.** Use a real `open(2)`:
+  `dgpu-exec-v2 sh -p -c 'exec 3<>/dev/nvidiactl; exec 4<>/dev/nvidia0'`
+- **Never trust the notification** — ask Chrome: non-default `--user-data-dir` + a free
+  `--remote-debugging-port`, then DevTools `SystemInfo.getInfo` → `auxAttributes.glRenderer`.
+- `pkill -f <pattern>` will match **your own shell's command line** and kill your session. Test
+  Chromes are cleanly identified by `Gid: 948` in `/proc/PID/status`; the user's real Chrome is 1000.
+- A dead Chrome **browser** process does not mean the test failed — orphaned `--type=gpu-process`
+  children survive and keep holding the card. Check gid, not just the tree.
+
+---
+
+## ✅ PREVIOUS WORK — `luminos-notepad` (2026-08-05), DONE
 The user asked for "a simple tool through which i can edit files, something like notepad".
 **The box had no graphical text editor at all** — `pacman -Q` showed nano and vim only, and
 `xdg-mime query default text/plain` returned **Okular**, a read-only PDF viewer. So double-clicking

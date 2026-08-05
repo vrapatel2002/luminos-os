@@ -2432,3 +2432,62 @@ hyprctl reload
 ```
 Full-file backups: `~/.config/caelestia/hypr-user.lua.bak-prefloatoff` and
 `~/.config/caelestia/hypr-locked.conf.bak-prefloatoff`.
+
+---
+
+## DECISION 52 — The dGPU gate must make the group **real**, not just effective; `dgpu-exec-v2` supersedes `dgpu-exec`
+**[CHANGE: claude-code | 2026-08-05]** — Chrome only, for now. See BUG-102.
+
+### The decision
+`dgpu-exec` grants dGPU access by being setgid `dgpu`. That raises only the **effective** gid.
+As of today the gate also calls `setresgid(g, g, g)`, making the `dgpu` gid **real** as well,
+before it execs the target. Shipped as `dgpu-exec-v2`; source in `scripts/dgpu-gate/dgpu-exec-v2.c`.
+
+### Why — effective-only was silently useless for most apps
+A raised-egid-only process is "privileged", and that privilege breaks the very thing it grants:
+
+| | consequence |
+|---|---|
+| `bash`/`sh` reset egid → rgid at startup as setgid protection (unless `-p`) | the group is **dropped at the first shell wrapper**, so any app launched by a shell script gets nothing |
+| `access(2)` consults the **real** gid | `[ -r ]` / `[ -w ]` report DENIED on devices that open fine — health checks lie |
+| a setgid exec sets `AT_SECURE=1` | Chrome's setuid-root `chrome-sandbox` refuses: *"Running as root without --no-sandbox is not supported"* |
+
+Chrome goes through **two** bash wrappers before the real binary, so it hit the first and third at
+once. `setresgid` removes all three, because real == effective means the process is not privileged.
+
+This was never caught because the only test anyone ran was `dgpu-exec nvidia-smi` — a **direct ELF
+exec**, the one case v1 handles correctly.
+
+### Why this does not widen the gate
+Access is still granted **only** to processes launched through the setgid binary; everything else
+is denied by the `0660 root:dgpu` device nodes. The change is that the grant now *survives the exec
+chain* instead of evaporating at the first shell. If anything the posture improves: v1's failure
+mode was **silent and dishonest** — it announced NVIDIA and delivered the iGPU.
+
+### Scope, deliberately narrow
+`dgpu-exec-v2` is installed alongside v1 and wired into `chrome-luminos` **only**. `luminos-gpu-launch`
+and every other gated app still call v1, and therefore still lose the group whenever the thing they
+launch is a shell script. Chrome first, by explicit request; the rest once each is re-verified.
+
+**Follow-ups this leaves open:**
+- Promote v2 over `dgpu-exec` and retire the `-v2` name, after re-verifying the other gated apps.
+- `luminos-gpu-launch:65` still points at `radeon_icd.x86_64.json`, which **does not exist** on Arch
+  (BUG-061 established this for `chrome-luminos`; the sibling was never corrected). Latent.
+- `--remote-debugging-port=9222` no longer works on Chrome's default profile and only emits a
+  confusing error; candidate for removal.
+
+### Operating notes
+- Never build the binary in `/tmp` — it is mounted `nosuid`, the setgid bit is ignored, and the
+  result reports `egid=1000` and looks broken for the wrong reason.
+- Verify the gate with a **real `open(2)`**, never `[ -r ]`:
+  `dgpu-exec-v2 sh -p -c 'exec 3<>/dev/nvidiactl; exec 4<>/dev/nvidia0'`
+- Ask **Chrome** which GPU it got, don't trust the notification: launch with a non-default
+  `--user-data-dir` plus a free `--remote-debugging-port`, then call DevTools `SystemInfo.getInfo`
+  and read `auxAttributes.glRenderer`.
+
+### Rollback
+```bash
+sudo sed -i 's/dgpu-exec-v2/dgpu-exec/g' /usr/local/bin/chrome-luminos   # back to v1 behaviour
+sudo install -m0755 /usr/local/bin/chrome-luminos.bak-bug102-20260805 /usr/local/bin/chrome-luminos
+sudo rm /usr/local/bin/dgpu-exec-v2
+```

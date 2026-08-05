@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-08-05 (BUG-101 FIXED — the SUPER launcher's app list "barely scrolled", on the touchpad only: Caelestia ships `input:touchpad:scroll_factor = 0.3`, and in a viewport only `maxShown` rows tall, 30% of a swipe travels less than one row. The mouse wheel uses the **separate** `input:scroll_factor`, already 1.0 — which is why the two devices behaved differently. Overridden to 1.0 in `hypr-vars.lua`; no QML touched. BUG-100 FIXED — every hyprpm plugin was dead because hyprpm was still building against an April compositor. BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-08-05 (BUG-102 FIXED — picking "NVIDIA" in the Chrome GPU dialog silently gave you the AMD iGPU for a month, with a notification claiming otherwise. Three stacked causes: `chrome-luminos` never called the dGPU gate at all; the gate itself is defeated by **any launcher written in shell**, because setgid raises only the *effective* gid and bash resets it (fixed by `dgpu-exec-v2`, which `setresgid`s so the group is real); and Chrome is single-instance per profile, so the picker could never take effect while a window was open. Now proven on the card — `ANGLE (NVIDIA, Vulkan …RTX 4050…)`, 20 fds on `/dev/nvidia0`, listed in `nvidia-smi`. Two Chromes on two GPUs at once works, given separate `--user-data-dir`. BUG-101 FIXED — the SUPER launcher's app list "barely scrolled", on the touchpad only: Caelestia ships `input:touchpad:scroll_factor = 0.3`, and in a viewport only `maxShown` rows tall, 30% of a swipe travels less than one row. The mouse wheel uses the **separate** `input:scroll_factor`, already 1.0 — which is why the two devices behaved differently. Overridden to 1.0 in `hypr-vars.lua`; no QML touched. BUG-100 FIXED — every hyprpm plugin was dead because hyprpm was still building against an April compositor. BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
 
@@ -1276,3 +1276,110 @@ in one command; run it **before** believing an unchanged screenshot.
 
 One more hazard for anyone scripting input here: `kbLauncher` is `SUPER + SUPER_L`, so any
 synthetic bare `SUPER` press opens the launcher on release and it then swallows the user's typing.
+
+---
+
+## BUG-102 — "pick NVIDIA" gave you the iGPU, silently, for a month
+**[CHANGE: claude-code | 2026-08-05] — FIXED and proven on the card**
+
+**Symptom.** `chrome-luminos` pops a dialog asking which GPU to use. Picking **NVIDIA RTX 4050**
+produced a notification saying "Running on NVIDIA RTX 4050" — and a Chrome rendering on the AMD
+iGPU. No error, no log line, no crash. The lie was in the notification, which is why it survived
+a month unnoticed.
+
+There were **three** independent causes stacked on top of each other. Fixing any one alone
+changed nothing, which is what made this hard to see.
+
+### Cause 1 — the launcher never opened the gate at all
+DECISION 25 made `/dev/nvidia*` default-deny (`0660 root:dgpu`, and user `shawn` is deliberately
+not in `dgpu`). The sibling launcher `luminos-gpu-launch` was updated on 2026-07-03 to route the
+NVIDIA choice through `dgpu-exec`. `chrome-luminos` was written in May and **was never brought in
+line** — its NVIDIA branch just set env vars and exec'd Chrome.
+
+The trap that hides this: `/dev/dri/renderD128` (the NVIDIA **DRM render node**) is `0666` and
+opens fine, so it looks like access works. It buys nothing. The NVIDIA proprietary Vulkan/GLX/EGL
+libraries need `/dev/nvidiactl` + `/dev/nvidia0` — the gated nodes. Proven side by side:
+
+```
+VK_ICD_FILENAMES=…/nvidia_icd.json vulkaninfo --summary
+  → ERROR: Failed to detect any valid GPUs in the current configuration
+…the identical command under `dgpu-exec`
+  → deviceName = NVIDIA GeForce RTX 4050 Laptop GPU
+```
+Only **Mesa/AMD** lives entirely in DRM. Anything NVIDIA — browser, game, CUDA — needs the gated
+character devices.
+
+### Cause 2 — the gate itself was defeated by any launcher written in shell
+Inserting `dgpu-exec` was necessary and **still did not work**. `dgpu-exec` (v1) relies purely on
+the setgid bit, which raises only the **effective** gid and leaves the real gid at 1000. That is
+fine for a direct ELF exec — `dgpu-exec nvidia-smi`, the one test anyone ever ran — and broken for
+almost everything else:
+
+1. **bash/sh reset egid → rgid at startup** as setgid protection, unless given `-p`. Chrome is
+   launched through *two* bash wrappers (`/usr/bin/google-chrome-stable` →
+   `/opt/google/chrome/google-chrome` → `chrome`), so the `dgpu` group was dropped at the **first**
+   wrapper. This breaks the gate for **every app whose launcher is a shell script**, not just Chrome.
+2. **`access(2)` consults the REAL gid** — so the shell tests `[ -r ]` / `[ -w ]` report DENIED even
+   when the device opens fine. A permission check that consults the wrong identity is worse than
+   no check, and it sent this investigation down a false trail once already.
+3. **A setgid exec sets `AT_SECURE=1`**, and Chrome's setuid-root `chrome-sandbox` then refuses to
+   start: *"Running as root without --no-sandbox is not supported."* So bypassing the wrappers and
+   exec'ing the ELF directly does not rescue it either.
+
+**Fix:** `dgpu-exec-v2` (`scripts/dgpu-gate/dgpu-exec-v2.c`) calls `setresgid(g, g, g)` before
+exec, making the `dgpu` gid **real** as well as effective. Real == effective means the process is
+no longer privileged, so all three problems vanish at once — bash keeps the group, `access(2)`
+tells the truth, and `AT_SECURE` is not set.
+
+```
+                       rgid/egid     via bash       direct ELF
+  v1 dgpu-exec         1000 / 948    DENIED         chrome-sandbox refuses
+  v2 dgpu-exec-v2       948 / 948    OPEN           starts normally
+  no gate              1000 / 1000   DENIED         — (gate still intact)
+```
+
+### Cause 3 — Chrome is single-instance, so the dialog was theatre
+Chrome permits **one** browser process per `--user-data-dir`. A second launch does not start a
+browser: it hands the URLs to the running process over `SingletonSocket` and exits, **discarding
+every command-line flag**, GPU flags included. So showing a GPU picker while Chrome is already
+running is a lie — whatever you pick, you get the GPU the running instance already has.
+The script now detects this and hands off silently instead of asking (which is also exactly what
+makes `chrome-luminos <url>` work as the system link handler). **To change GPU you must close
+every Chrome window first.**
+
+### Proven, not asserted
+Launched through the installed `/usr/local/bin/chrome-luminos`, then asked Chrome itself via the
+DevTools `SystemInfo.getInfo` endpoint:
+
+```
+glRenderer: ANGLE (NVIDIA, Vulkan 1.4.329
+            (NVIDIA GeForce RTX 4050 Laptop GPU (0x000028E1)), NVIDIA-595.71.5.0)
+glVendor:   Google Inc. (NVIDIA)
+```
+Corroborated three more ways, at the same moment:
+- GPU process credentials `Gid: 948,948,948,948`, holding **20 fds on `/dev/nvidia0`** plus
+  `/dev/nvidiactl` and `/dev/nvidia-modeset`.
+- Loaded `libnvidia-glcore` + `libGLX_nvidia`, with **zero** Mesa/radeon libraries.
+- `nvidia-smi`'s own process table listed the Chrome PID.
+
+And **both GPUs at once is real**: while the above ran on the RTX 4050, the everyday Chrome
+(pid 131073) was simultaneously on the iGPU — its GPU process holding `/dev/dri/renderD129` and
+`libvulkan_radeon.so`. Two Chromes, two GPUs, same moment. The only requirement is a **separate
+`--user-data-dir`**; that, not the GPU, is what the single-instance rule is about.
+
+### Two side findings worth keeping
+- **`--remote-debugging-port=9222` is dead weight now.** Current Chrome (150.0.7871.128) refuses
+  DevTools on a *default* data directory — `ss -ltn` shows nothing listening on 9222 even though
+  the running browser carries the flag. It only prints a confusing error on every fresh launch.
+  Left in place for now, flagged for removal.
+- **The single-instance guard must resolve the profile the way Chrome does**, i.e.
+  `${XDG_CONFIG_HOME:-$HOME/.config}`, not a hardcoded `$HOME/.config`. Your login session does not
+  set `XDG_CONFIG_HOME` so the two agree there, but they diverge under any shell that does — and
+  then the guard watches a lock file Chrome never writes. Fixed.
+
+### Scope
+`dgpu-exec-v2` is installed **alongside** v1 and wired into `chrome-luminos` only. Everything else,
+including `luminos-gpu-launch`, still calls v1 — and therefore still has Cause 2 whenever the app
+it launches is a shell script. Chrome first, the rest once they are re-verified. See DECISION 52.
+
+**Revert:** `/usr/local/bin/chrome-luminos.bak-bug102-20260805`
