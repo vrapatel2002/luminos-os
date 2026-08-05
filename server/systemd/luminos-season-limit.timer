@@ -1,0 +1,14 @@
+# [CHANGE: claude-code | 2026-08-04]
+# Daily, not hourly: the rule only needs to catch newly-added series, and a slow
+# cadence keeps it from fighting a hand edit made minutes earlier.
+[Unit]
+Description=Daily cap on monitored Sonarr seasons
+
+[Timer]
+OnCalendar=daily
+# The server is powered on and off by hand, so a missed run must still happen.
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

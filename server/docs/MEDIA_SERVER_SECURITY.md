@@ -415,6 +415,45 @@ A VPN client alone is not enough. All three of these have to be true and none ar
 **Provider choice is the user's** — it is a paid subscription and a decision about who
 gets to see the traffic instead of the ISP.
 
+### 6b. A VPN is not the only answer, and for this box it is not the best one
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+
+Asked directly: *"we can use vpn right? or is there something better?"* Yes, and yes.
+The trap is that "hide it from the ISP" is **two** exposures, and a VPN only closes one.
+
+| # | Exposure | Who sees it | Closed by VPN? |
+|---|---|---|---|
+| 1 | BitTorrent on the wire — unencrypted, obvious protocol signature | the ISP | **yes** |
+| 2 | The IP published in every swarm's peer list, enumerable by anyone, permanently | anyone | **no** — it becomes the VPN's IP, still listed |
+
+Exposure 2 is the larger one and the one people forget. Seeding is what puts an address
+at the top of those lists, and this box had uploaded **228.9 GB**.
+
+**Usenet — best fit here.** No swarm, so no peer list, no seeding, nothing to enumerate;
+an encrypted NNTP connection to one provider, which is all the ISP sees. Sonarr and
+Radarr support it natively through **SABnzbd or NZBGet — both native Arch packages**, so
+it satisfies the NO DOCKER rule. It also closes a *separate* open problem: downloads
+were **swarm-limited at 10.74 MB/s** while the network measured **46.34 MB/s**. Usenet
+has no swarm to be limited by, so it is the only option that fixes the privacy problem
+and the "46 MB/s" goal at once. Costs two subscriptions (provider + indexer). The real
+downside is **retention** — old or obscure material can simply be gone, where a torrent
+survives as long as one seeder does.
+
+**Seedbox — second.** Torrenting happens on a rented remote machine and the finished
+file comes down over HTTPS/SFTP. The home IP never enters a peer list at all. Dearer,
+and it is another host to maintain.
+
+**VPN — third.** Cheapest and simplest, genuinely closes exposure 1, and moves the trust
+from the ISP to the VPN company. But the address is still in the swarm.
+
+**Ruled out: qBittorrent's built-in protocol encryption (MSE/PE).** It obfuscates the
+peer-to-peer payload against naive traffic shaping. It does **not** remove the IP from
+the peer list, so it does nothing about exposure 2. Do not mistake that checkbox for a
+solution.
+
+**Recommendation:** Usenet as the primary path, with a VPN only for the residue that
+Usenet cannot supply. Which providers, and whether to pay for both, is Shawn's call.
+
 ---
 
 ## 7. TODO — the G14 itself has no firewall
@@ -462,7 +501,7 @@ does mean the rule must be written to fail closed, not opened up per-network.
 | 10 | Bind `luminos-ram` to localhost, or justify `*:9091` | either | ⬜ |
 | 11 | HTTPS via domain + Let's Encrypt DNS-01 | later | ⬜ deferred, see §5 |
 | 12 | Halt all torrent traffic until a VPN is in place (§6a) | done | ✅ 2026-08-04 |
-| 13 | **Choose a VPN provider** — paid, and a trust decision | **Shawn** | ⬜ |
+| 13 | **Choose the path: Usenet, seedbox or VPN** (§6b — Usenet recommended) | **Shawn** | ⬜ |
 | 14 | Install the VPN so the tunnel exits `enp2s0` (§6a, DECISION 36) | either | ⬜ blocked on 13 |
 | 15 | Test the kill-switch by downing the tunnel mid-transfer | either | ⬜ blocked on 14 |
 

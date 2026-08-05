@@ -387,3 +387,97 @@ The halt is enforced by *stopping the service*, not by unticking something in th
 An app-level pause is one settings write away from being undone, including by the app
 itself on restart. When the requirement is "no traffic", the enforcement belongs at a
 layer the app does not control.
+
+---
+
+## DECISION 44 — A series may hold at most 2 seasons, and the rule is a timer, not a habit
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+**Date:** 2026-08-04
+**Status:** Accepted (user-directed) — enforced daily by `luminos-season-limit.timer`
+**Applies to:** the media server (Dell Inspiron 3590), not the G14.
+
+### Context
+The disk had **222 GB free of 876 GB** and was heading down. Two separate things were
+eating it, and they needed different fixes.
+
+**1. Orphaned downloads — 131.10 GB.** 45 files in `/srv/media/downloads` that Sonarr
+had never imported, or had imported by *copying* rather than hardlinking, leaving a
+second full copy behind. They were being seeded and would be re-fetched by a
+"resume all" the moment torrenting came back.
+
+**2. Seasons nobody asked for.** House of Cards was monitored on all six seasons and
+had already pulled S03–S06. Sonarr has **no maximum-seasons setting** — its per-series
+Monitor options are All / Future / Missing / Existing / First Season / Last Season /
+Pilot / None. There is nothing between *one* season and *every* season. On a disk
+holding Bluray remuxes at roughly **12 GB an episode**, "All" is how 876 GB disappears.
+
+### Decision
+1. Delete the 131.10 GB of orphans, with a manifest and a torrent-state backup first.
+2. Delete House of Cards S03–S06 (user-confirmed).
+3. Cap every series at **2 monitored seasons**, enforced by a script on a daily timer.
+4. Remove the dead torrents from qBittorrent's state so the halt cannot un-delete them.
+
+### How the cap decides which two to keep
+`luminos-season-limit` (`server/scripts/`, installed at `/usr/local/bin/`). Two rules
+carry all the weight, and both exist because the obvious version was wrong:
+
+**Rule 1 — anything already at or under the limit is left completely alone.**
+True Detective is monitored on **S01 + S04** on purpose: those are the two that exist
+on disk. A "first N seasons" rule would silently rewrite that to S01+S02 and queue
+~90 GB of remuxes for a season nobody wanted. Respecting a hand-picked pair is what
+makes the script safe to run unattended.
+
+**Rule 2 — when trimming, seasons that have files on disk beat empty ones; season
+number only breaks the tie.** This one was caught by negative test, not by reading.
+The first implementation ranked purely by season number. Fed the real True Detective
+with a third season monitored (S01 = 8 files, S02 = empty, S04 = 6 files) it planned
+to **keep S01+S02 and drop S04** — throwing away **47.46 GB** of files already on disk
+in favour of an empty season, and queueing the replacements. The sort key is now
+`(episodeFileCount == 0, seasonNumber)`.
+
+It **never deletes**. Unmonitoring stops Sonarr *acquiring*; existing episodes stay put.
+Over-limit seasons that still hold files are printed at the end with a reclaimable
+total, so the choice to delete stays a human one. Default is a **dry run**; `--apply`
+is required, and after writing it **re-reads state from Sonarr and verifies** every
+change landed, exiting 2 if not — an HTTP 202 from Sonarr is not proof.
+
+### Why a timer and not "run it when you remember"
+The user asked for a *setting*. A script you have to remember to run is not a setting —
+it is a chore, and the failure mode is silent (a new series quietly monitors 9 seasons
+until the disk fills). `luminos-season-limit.timer` runs daily with `Persistent=true`,
+because this box is powered on and off by hand and a missed run must still happen.
+Daily rather than hourly so it does not fight a deliberate hand edit made minutes ago.
+
+### Verified, not assumed
+- **Never deleted a file with a second link.** The delete pass asserted `nlink == 1`
+  and would have aborted on any hardlink. It nearly mattered: two True Detective
+  S01 files looked like duplicates of library files but had **different inodes**
+  (downloads 42205243/42205247 vs library 50331738/50331739) — Sonarr had *copied*,
+  not hardlinked. Checking made the deletion provably safe rather than probably safe.
+- **Library re-verified after the deletions** — 522.81 GB, every file readable.
+- **Reversibility bought before the destructive step:** `qbt-BT_backup-20260804-193838.tar.gz`
+  (46 entries) and `deleted-orphans-20260804.json`, both in `/home/shawn`.
+- **The unit was negative-tested, not just started.** Running it against an already-
+  compliant library proves nothing — it prints "nothing to change" whether it works or
+  is broken. So House of Cards S03 was deliberately re-monitored and the unit run:
+  it reported `trim 3 -> 2, keeping S01,S02`, unmonitored S03, and verified the
+  read-back. Then it was run again to confirm idempotency.
+- **Torrents removed offline**, by deleting `<hash>.torrent` + `<hash>.fastresume`
+  from `BT_backup` with the daemon down — 22 entries to 14. Zero network traffic,
+  which matters because DECISION 42 forbids exactly that.
+
+### Result
+| | Free on `/srv/media` |
+|---|---|
+| before | 222 GB |
+| after orphan delete | 345 GB |
+| after House of Cards S03–S06 | **382 GB** |
+
+**171.83 GB reclaimed.** Final library: House of Cards S01 (151.95 GB) + S02 (132.41 GB),
+MobLand S01 (49.93 GB), True Detective S01 (100.32 GB) + S04 (47.46 GB).
+
+### Lesson
+A health check that only ever runs against healthy input has never been tested. Both
+real bugs here — the wrong-season trim and the question of whether the systemd unit
+could read the API key as root — were invisible until the check was fed something it
+was supposed to catch. Break it on purpose, once, before trusting it on a timer.

@@ -1,0 +1,15 @@
+# [CHANGE: claude-code | 2026-08-04]
+# Caps every Sonarr series at 2 monitored seasons. See DECISION 44.
+# Runs as root because it reads the API key out of /var/lib/sonarr/config.xml.
+[Unit]
+Description=Cap monitored seasons per Sonarr series (max 2)
+Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
+After=sonarr.service
+Wants=sonarr.service
+
+[Service]
+Type=oneshot
+# Exit 2 means "applied but the read-back disagreed" — systemd will mark the unit
+# failed on it, which is what we want: a silent partial write is the failure mode.
+ExecStart=/usr/local/bin/luminos-season-limit --limit 2 --apply
+Nice=10

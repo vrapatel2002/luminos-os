@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+# [CHANGE: claude-code | 2026-08-04]
+"""Keep every Sonarr series to at most N monitored seasons (default 2).
+
+Why this exists
+---------------
+Sonarr has no "maximum seasons" setting. Its per-series Monitor options are
+All / Future / Missing / Existing / First Season / Last Season / Pilot / None —
+there is nothing between "one season" and "every season". So a long-running show
+added with the default monitors every season it has ever had, and on a 1 TB disk
+holding Bluray remuxes (~12 GB an episode) that is how the disk fills.
+
+The rule
+--------
+A series may have at most LIMIT monitored seasons. Specials (season 0) never
+count and are never touched.
+
+  * more than LIMIT monitored  -> keep the LIMIT lowest-numbered, unmonitor the rest.
+    This is what a newly-added series looks like, and it lands on S01+S02.
+
+  * LIMIT or fewer monitored   -> LEAVE ALONE.
+    This is deliberate. It means a hand-picked pair survives contact with this
+    script: True Detective is set to S01+S04 on purpose (those are the two that
+    exist on disk), and a naive "first N" rule would silently undo that and
+    queue ~90 GB of S02 remuxes. Respecting anything already within the limit
+    is what makes the script safe to run on a timer.
+
+What it will NOT do
+-------------------
+Never deletes files. Unmonitoring stops Sonarr *acquiring* more; existing
+episodes stay on disk. Seasons that are over the limit AND still have files are
+reported at the end so the choice to delete stays a human one.
+
+Usage
+-----
+  luminos-season-limit                 # dry run, changes nothing (the default)
+  luminos-season-limit --apply         # actually write, then read back and verify
+  luminos-season-limit --limit 3 --apply
+
+Exit codes: 0 ok · 1 error · 2 applied but read-back did not match.
+"""
+
+import argparse
+import json
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+SONARR = "http://127.0.0.1:8989"
+CONFIG = "/var/lib/sonarr/config.xml"
+
+
+def api_key():
+    try:
+        out = subprocess.run(
+            ["sudo", "-n", "grep", "-oP", r"(?<=<ApiKey>)[^<]+", CONFIG],
+            capture_output=True, text=True, timeout=15,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    import os
+    k = os.environ.get("SONARR_API_KEY", "").strip()
+    if k:
+        return k
+    sys.exit("ERROR: could not read the Sonarr API key from %s (needs passwordless sudo)\n"
+             "       and SONARR_API_KEY is not set in the environment." % CONFIG)
+
+
+def call(key, path, method="GET", body=None):
+    req = urllib.request.Request(
+        SONARR + path, method=method,
+        headers={"X-Api-Key": key, "Content-Type": "application/json"},
+        data=json.dumps(body).encode() if body is not None else None,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as e:
+        sys.exit("ERROR: %s %s -> HTTP %s: %s" % (method, path, e.code, e.read()[:300]))
+    except urllib.error.URLError as e:
+        sys.exit("ERROR: cannot reach Sonarr at %s (%s). Is it running?" % (SONARR, e.reason))
+
+
+def plan_for(series, limit):
+    """Return (list of season numbers to unmonitor, reason).
+
+    When trimming, seasons that already have episodes on disk win over empty
+    ones, and only then does the lower season number break the tie.
+
+    That ordering is not cosmetic. True Detective is monitored on S01+S04
+    because those are the two that exist on disk. A plain "keep the lowest
+    numbered" rule would, the moment anything re-monitored a third season,
+    drop S04's 47 GB and keep an empty S02 — throwing away real files and
+    queueing ~90 GB of remuxes to replace them. Never discard a season you
+    already downloaded in favour of one you have not.
+    """
+    real = [s for s in series["seasons"] if s["seasonNumber"] != 0]
+    monitored = [s for s in real if s["monitored"]]
+    if len(monitored) <= limit:
+        return [], "within limit (%d monitored)" % len(monitored)
+
+    def files(s):
+        return (s.get("statistics") or {}).get("episodeFileCount", 0)
+
+    ranked = sorted(monitored, key=lambda s: (files(s) == 0, s["seasonNumber"]))
+    keep = sorted(s["seasonNumber"] for s in ranked[:limit])
+    drop = sorted(s["seasonNumber"] for s in ranked[limit:])
+    return drop, "trim %d -> %d, keeping %s" % (
+        len(monitored), limit, ",".join("S%02d" % n for n in keep))
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Cap monitored seasons per Sonarr series.")
+    ap.add_argument("--limit", type=int, default=2, help="max monitored seasons (default 2)")
+    ap.add_argument("--apply", action="store_true", help="write changes (default is a dry run)")
+    args = ap.parse_args()
+    if args.limit < 1:
+        sys.exit("ERROR: --limit must be at least 1")
+
+    key = api_key()
+    all_series = call(key, "/api/v3/series")
+    if not isinstance(all_series, list):
+        sys.exit("ERROR: unexpected response from /api/v3/series")
+
+    changed, orphan_files = [], []
+    print("Sonarr season limit = %d   (%s)\n" % (
+        args.limit, "APPLYING" if args.apply else "dry run, nothing will be written"))
+
+    for s in sorted(all_series, key=lambda x: x["title"]):
+        drop, why = plan_for(s, args.limit)
+        print("%-34s %s" % (s["title"][:34], why))
+        if drop:
+            for season in s["seasons"]:
+                if season["seasonNumber"] in drop:
+                    season["monitored"] = False
+            print("     unmonitor: %s" % ", ".join("S%02d" % n for n in drop))
+            if args.apply:
+                call(key, "/api/v3/series/%d" % s["id"], "PUT", s)
+            changed.append((s["id"], s["title"], drop))
+
+    # Report — never delete — seasons that are unmonitored but still hold files.
+    for s in call(key, "/api/v3/series"):
+        for season in s["seasons"]:
+            if season["seasonNumber"] == 0 or season["monitored"]:
+                continue
+            st = season.get("statistics") or {}
+            if st.get("episodeFileCount", 0) > 0:
+                orphan_files.append((s["title"], season["seasonNumber"],
+                                     st["episodeFileCount"], st.get("sizeOnDisk", 0)))
+
+    if not changed:
+        print("\nNothing to change — every series is already within the limit.")
+
+    if orphan_files:
+        print("\nOver-limit seasons that still have files on disk (NOT deleted — your call):")
+        total = 0
+        for t, n, c, sz in sorted(orphan_files, key=lambda x: -x[3]):
+            print("   %-30s S%02d  %2d file(s)  %7.2f GB" % (t[:30], n, c, sz / 1e9))
+            total += sz
+        print("   %s\n   reclaimable: %.2f GB" % ("-" * 52, total / 1e9))
+
+    # Read back and prove the write landed, rather than trusting HTTP 200.
+    if args.apply and changed:
+        print("\nVerifying by reading state back from Sonarr...")
+        fresh = {x["id"]: x for x in call(key, "/api/v3/series")}
+        bad = 0
+        for sid, title, drop in changed:
+            still = [n for n in drop
+                     if any(se["seasonNumber"] == n and se["monitored"]
+                            for se in fresh[sid]["seasons"])]
+            if still:
+                bad += 1
+                print("   FAIL %s: still monitored %s" % (title, still))
+            else:
+                print("   ok   %s" % title)
+        if bad:
+            print("\n%d series did not take the change." % bad)
+            return 2
+        print("\nAll changes verified against a fresh read.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

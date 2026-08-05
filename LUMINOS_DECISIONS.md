@@ -1982,3 +1982,14 @@ sudo rm /etc/pacman.d/hooks/luminos-hide-sessions.hook
 sudo cp ~/luminos-backups/sessions-2026-08-04/*.desktop /usr/share/wayland-sessions/
 ```
 Plasma reappears at the login screen immediately; nothing was uninstalled.
+
+---
+
+## DECISION 44 — media server
+<!-- [CHANGE: claude-code | 2026-08-04] -->
+
+Lives in [`server/DECISIONS.md`](server/DECISIONS.md), like 35/36/36a/37/42. The number is
+kept in this sequence so references resolve:
+
+- **44** — a series may hold at most 2 seasons, enforced by `luminos-season-limit.timer`;
+  171.83 GB reclaimed from orphaned downloads and unwanted seasons

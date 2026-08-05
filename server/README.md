@@ -103,6 +103,12 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 - **Jellyfin's `SubtitleMode: Default` means "only tracks the file flags as default".** Most web
   releases flag none, so subtitles silently never appear even though they are right there in the
   file. `Always` + a language preference is what actually turns them on.
+- **Sonarr has no maximum-seasons setting** — there is nothing between "First Season" and "All".
+  `luminos-season-limit.timer` supplies one, capping every series at 2 monitored seasons. It
+  leaves anything already within the limit completely alone, so a hand-picked pair like True
+  Detective S01+S04 survives it. DECISION 44.
+- **Sonarr sometimes copies on import instead of hardlinking**, so `nlink == 1` in `downloads`
+  does *not* by itself mean "not in the library". Compare inodes before deleting anything.
 - **A quality profile that matches nothing fails silently and forever.** Sonarr will sit on an
   empty season indefinitely rather than tell you. Search before assuming the chain is broken.
 - **Public indexer seeder counts are fiction.** Check `GET /api/v2/torrents/trackers` after adding.
