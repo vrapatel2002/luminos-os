@@ -2054,3 +2054,106 @@ removed it. Desktop returned to its 3-client baseline.
 Delete the titlebar block at the end of `~/.config/caelestia/hypr-user.lua` (or restore
 `hypr-user.lua.bak-prebars`) and `hyprctl reload`. To go back to tiling as well, delete the
 `hl.window_rule` float line (or restore `hypr-user.lua.bak-prefloat`).
+
+---
+
+## DECISION 46 — Titlebars removed; float is the default and tiling is opt-in per app
+<!-- [CHANGE: claude-code | 2026-08-05] -->
+
+**Supersedes the hyprbars half of DECISION 45.** The floating half of 45 stands unchanged —
+everything still floats by default. Shawn's verdict on the buttons was simply: *"i do not like
+the 3buttons remve that things."* So the plugin is gone and the same four actions are keys now.
+
+### What was removed
+`hypr-bars.lua` is deleted and its `require` is out of `hypr-user.lua`. Confirmed by measurement,
+not by assuming a reload is enough: after `hyprctl reload`, `hyprctl plugin list` reports **no
+plugins loaded** — the compositor drops a plugin when the config stops loading it, so no session
+restart was needed. Bind count moved 150 → 152 (one retired, three added) with 0 config errors and
+all three open windows surviving.
+
+This also retires the DECISION 45 upgrade hazard: hyprbars was a compiled plugin pinned
+`hyprland >=0.56.0 <0.57.0`, and a Hyprland bump without a matching rebuild would have failed at
+session start. Nothing now depends on that pin. The package is left installed but unloaded, so
+reversing this is a one-line `require`, not an AUR build.
+
+### Minimize had to be rescued first
+Two Chrome windows were sitting on the `special:minimized` workspace, put there by the button that
+was about to be deleted. Removing hyprbars first would have stranded them with no button and no
+bind. They were moved back before anything else changed.
+
+That rescue turned up something the old code did not know: **`window = 'address:0x…'` inside the
+Lua move table IS honoured.** `luminos-win restore` previously just toggled the special workspace
+open, which showed the parked windows as an overlay that vanished again — they were never actually
+put back. It now moves every parked window to the current workspace and re-reads the workspace list
+to confirm none are left behind.
+
+### Float by default, tile by exception
+"Locked" means pinned into the dwindle tiling layout instead of floating free. The catch-all
+`float = true` rule stays; classes listed in `~/.config/caelestia/hypr-locked.conf` get a later
+`float = false` rule that overrides it.
+
+That ordering was proven in a throwaway nested Hyprland before shipping, because window-rule tables
+are **not validated** — an unknown key returns ok and does nothing, so "it reloaded cleanly" proves
+nothing. Three kitty windows, `floating` read back off each:
+
+| rule applied | `floating` |
+|---|---|
+| catch-all `float = true` only | 1 |
+| later `float = false` | 0 |
+| later `tile = true` | 0 |
+
+Both spellings work; `float = false` is used as the direct inverse of the rule it overrides.
+
+### Why the locked list is a text file and not Lua
+`luminos-win` rewrites it on every lock/unlock. If it were Lua, one bad write would be a config
+**syntax error**, and a config syntax error puts Hyprland in emergency mode with no binds
+registered — a black screen with no keyboard way out. A text file that goes wrong costs one missing
+rule. For the same reason the class is allow-listed to `[A-Za-z0-9._-]` twice, once in the script
+and again in the Lua reader: these strings are interpolated into a Lua pattern, so a stray quote is
+a syntax error rather than a cosmetic bug. Negative-tested by appending `bad";class="evil` to the
+file and reloading — 0 config errors, binds still 152, line skipped.
+
+### Keys
+Only minimize actually needed inventing. Close, maximize and the one-shot float/tile toggle already
+existed in stock Caelestia, so the rest of the desktop is untouched.
+
+| Key | Action |
+|---|---|
+| `SUPER + H` | minimize (hide) the focused window |
+| `SUPER + SHIFT + H` | bring every minimized window back |
+| `SUPER + SHIFT + Space` | lock/unlock this **app** to tiled — persists |
+| `SUPER + ALT + Space` | float/tile this **one window** — stock, until it closes |
+| `SUPER + Q` / `SUPER + ALT + F` / `SUPER + P` | close / maximize / pin — all stock |
+
+`SUPER + ALT + M` (restore, added yesterday) is retired so hide and un-hide sit together.
+`SUPER + SHIFT + M` was never available — it is volume mute at `variables.lua:133`.
+
+All combos were checked free against `hyprctl binds` on the **running** compositor. Note that this
+only answers "is it taken": every Lua bind reports `dispatcher: "__lua"` with an opaque numeric
+arg, so the live compositor cannot say what a bind *does*. Meaning has to come from the config.
+
+### Bar shows all windows, not just the focused one
+`~/.config/caelestia/shell.json` sets `bar.workspaces.showWindows` + `maxWindowIcons: 8`, so each
+workspace pill lists one icon per open window instead of the bar naming only the active one.
+
+The config path was **found, not guessed**. It is not in the QML tree or in any string inside the
+plugin — Caelestia 2.2.0 moved config to C++ and ships the QML as a Qt resource (`prefer
+:/qt/qml/Caelestia/Config/`). Candidate files were created at both plausible paths and the shell
+restarted under `inotifywait`; it opened `~/.config/caelestia/shell.json` and ignored
+`~/.config/quickshell/caelestia/shell.json`. Confirmed authoritative by flipping `showWindows` to
+false and watching the icons disappear — and it live-reloads, no restart needed.
+
+**Known limit, not yet solved.** These are `Icons.getAppCategoryIcon(class)` **category** glyphs
+(Chrome and Claude both render as generic marks), and the `Repeater` has no `MouseArea`, so they
+are an indicator and not a click-to-focus taskbar. Caelestia 2.2.0 has no Tasks/WindowList/dock
+module at all — `modules/bar/components/` holds only ActiveWindow, Clock, OsIcon, Power,
+StatusIcons, Tray and workspaces. A real taskbar means a custom Quickshell module plus a patch to
+`Bar.qml`'s `DelegateChooser`, and `Bar.qml` is package-owned under `/etc/xdg/quickshell/caelestia/`,
+so it would need the whole tree forked into `~/.config/quickshell/caelestia/` — which stops
+`caelestia update` from ever updating it again. That trade is Shawn's to make, so it is deferred
+rather than decided here.
+
+### How to reverse
+Delete `shell.json` for the bar icons. For the rest, remove the "Locked apps" and "Window action
+binds" blocks at the end of `~/.config/caelestia/hypr-user.lua` and `hyprctl reload`. To get the
+titlebars back, restore `config/caelestia/hypr-bars.lua` from git and re-add its `require`.

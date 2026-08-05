@@ -1,0 +1,8 @@
+{
+  "bar": {
+    "workspaces": {
+      "showWindows": true,
+      "maxWindowIcons": 8
+    }
+  }
+}

@@ -226,29 +226,63 @@ hl.bind("CTRL + SUPER + SHIFT + R", hl.dsp.exec_cmd("luminos-shell-guard"), { re
 hl.window_rule({ match = { class = ".*" }, float = true })
 
 -- ═════════════════════════════════════════════════════════════════════════════════════════
--- Titlebars with minimize / maximize / close — [CHANGE: claude-code | 2026-08-05]
+-- Locked apps — float by default, tile by exception — [CHANGE: claude-code | 2026-08-05]
 -- ═════════════════════════════════════════════════════════════════════════════════════════
--- Floating windows on their own gave Shawn nothing to grab and no buttons, so this adds the
--- hyprbars plugin. The setup lives in hypr-bars.lua because the exact same file is loaded by
--- a throwaway nested Hyprland during testing — the code that gets proven is the code that
--- ships. Read that file's header for the two non-obvious plugin gotchas.
+-- The catch-all above floats EVERYTHING. Shawn wants some apps pinned into the tiling
+-- layout instead, so this reads a list of window classes and claws just those back.
 --
--- HAZARD, and the reason this is stated here and not only in the module:
--- hyprbars is a COMPILED plugin, and Hyprland refuses to load one built against a different
--- version. hyprland-plugin-hyprbars currently depends `hyprland>=0.56.0 <0.57.0`. If
--- Hyprland is upgraded to 0.57 and the plugin is not rebuilt in the same transaction, this
--- fails at session start. It is wrapped in pcall so a stale plugin costs the titlebars and
--- nothing else — unguarded, a config error puts Hyprland in emergency mode with NO BINDS
--- REGISTERED, which is a black screen with no keyboard way out. Losing titlebars is
--- recoverable; losing every keybind is not.
-local ok_bars, err_bars = pcall(function() require("hypr-bars").setup() end)
-if not ok_bars then
-    print("hypr-user: titlebars disabled, hyprbars failed to load: " .. tostring(err_bars))
+-- Ordering is what makes this work, and it was measured rather than assumed. In a throwaway
+-- nested Hyprland (2026-08-05) three kitty windows were opened under exactly this rule
+-- shape and `floating` was read back off each one:
+--     catch-all float=true only ....... floating: 1
+--     later rule float=false .......... floating: 0
+--     later rule tile=true ............ floating: 0
+-- So a later rule DOES override the catch-all, and `float = false` is a real key rather than
+-- one of the many that this parser accepts and silently ignores. Worth checking, because
+-- window-rule tables are NOT validated: an unknown key returns ok and does nothing.
+--
+-- Why a plain text file and not a .lua list: luminos-win rewrites it on every lock/unlock.
+-- If that file were Lua, one bad write would be a config SYNTAX ERROR, which puts Hyprland
+-- in emergency mode with no binds registered — a black screen with no keyboard way out.
+-- A text file that goes wrong costs at most one missing rule. For the same reason the class
+-- is allow-listed to [%w%._%-] here as well as in the script: these strings are interpolated
+-- into a Lua pattern, so a stray quote is a syntax error, not a cosmetic bug.
+local locked_path = os.getenv("HOME") .. "/.config/caelestia/hypr-locked.conf"
+local ok_locked, err_locked = pcall(function()
+    local fh = io.open(locked_path, "r")
+    if not fh then return end -- no file yet is the normal case, not an error
+    for line in fh:lines() do
+        local cls = line:match("^%s*(.-)%s*$")
+        if cls ~= "" and cls:sub(1, 1) ~= "#" then
+            if cls:match("^[%w%._%-]+$") then
+                hl.window_rule({ match = { class = "^" .. cls:gsub("%.", "%%.") .. "$" }, float = false })
+            else
+                print("hypr-user: skipping unsafe class in hypr-locked.conf: " .. cls)
+            end
+        end
+    end
+    fh:close()
+end)
+if not ok_locked then
+    print("hypr-user: could not read " .. locked_path .. ": " .. tostring(err_locked))
 end
 
--- Minimize parks a window on the `minimized` special workspace and then hides it (see the
--- luminos-win script for why hiding takes a second dispatch). Without a way back, those
--- windows are unreachable, so this is the drawer. SUPER+ALT+M sits deliberately next to
--- SUPER+ALT+Space, the float toggle. SUPER+SHIFT+M was the obvious pick and is already
--- volume mute at variables.lua:133.
-hl.bind("SUPER + ALT + M", hl.dsp.exec_cmd("luminos-win restore"))
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Window action binds — [CHANGE: claude-code | 2026-08-05]
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- These replace the hyprbars titlebar buttons, which were removed on Shawn's say-so
+-- ("i do not like the 3 buttons"). Only MINIMIZE actually needed a new bind — stock
+-- Caelestia already has close (SUPER+Q), maximize (SUPER+ALT+F) and float/tile
+-- (SUPER+ALT+Space) — so the rest of the desktop is unchanged.
+--
+-- All three combos were confirmed free against `hyprctl binds` on the RUNNING compositor
+-- rather than against the config file, which would have missed anything bound at runtime.
+-- SUPER+ALT+M, used for restore until today, is retired in favour of SUPER+SHIFT+H so that
+-- hide and un-hide sit next to each other. SUPER+SHIFT+M was never available: it is volume
+-- mute at variables.lua:133.
+-- SUPER+ALT+Space (stock) floats/tiles ONE window until it closes. SUPER+SHIFT+Space makes
+-- that choice stick for the whole app by writing its class to hypr-locked.conf, so the
+-- pairing is deliberate: same key, one modifier apart, temporary vs permanent.
+hl.bind("SUPER + H", hl.dsp.exec_cmd("luminos-win min"))                    -- hide (minimize)
+hl.bind("SUPER + SHIFT + H", hl.dsp.exec_cmd("luminos-win restore"))        -- bring them all back
+hl.bind("SUPER + SHIFT + SPACE", hl.dsp.exec_cmd("luminos-win togglelock")) -- lock app tiled/floating

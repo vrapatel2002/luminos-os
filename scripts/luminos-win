@@ -2,63 +2,145 @@
 # luminos-win — [CHANGE: claude-code | 2026-08-05]
 #
 # WHY THIS EXISTS
-# hyprbars titlebar buttons run their action as a plain shell command. The obvious
-# action string — `hyprctl dispatch killactive` — DOES NOT WORK on this machine.
-# Caelestia configures Hyprland with the Lua parser, and under a non-legacy parser
+# Caelestia configures Hyprland with the LUA parser, and under a non-legacy parser
 # `hyprctl dispatch` expects a Lua expression, not a classic dispatcher name:
 #
 #   $ hyprctl dispatch togglefloating class:google-chrome
 #   error: [string "return hl.dispatch(togglefloating class:googl..."]:1: ')' expected
 #
-# So every button action has to be spelled in Lua. Embedding those quotes directly in
-# the button definition is fragile, so the commands live here instead, where they can
-# be run and tested on their own.
+# So every action has to be spelled in Lua. Keeping those quoted expressions here
+# rather than inline in keybinds means they can be run and tested on their own.
 #
 # Hyprland has no "minimize" concept. The standard equivalent is to throw the window
-# onto a special workspace and pull it back with a keybind, which is what `min` does.
+# onto a special workspace and pull it back later, which is what min/restore do.
 #
-# Usage: luminos-win close|max|min|restore
+# Usage: luminos-win close|max|min|restore|lock|unlock|togglelock|list|pin
 set -uo pipefail
 
 MIN_WS="minimized"
+LOCK_FILE="${HOME}/.config/caelestia/hypr-locked.conf"
 
 die() { echo "luminos-win: $*" >&2; exit 1; }
 
-[ -n "${1:-}" ] || die "usage: luminos-win close|max|min|restore"
+[ -n "${1:-}" ] || die "usage: luminos-win close|max|min|restore|lock|unlock|togglelock|list|pin"
 
 # Fail loudly if there is no compositor to talk to, rather than silently doing nothing
 # (Luminos scripts have a documented habit of reporting success on a dead path).
 hyprctl version >/dev/null 2>&1 || die "no running Hyprland instance"
 
+# A class is interpolated into a Lua regex inside the config. A stray quote there is
+# not a cosmetic problem: a Lua syntax error puts Hyprland in EMERGENCY MODE with no
+# binds registered, i.e. a black screen with no keyboard way out. So the character set
+# is allow-listed here at the point of writing, and again in the Lua reader.
+valid_class() { printf '%s' "$1" | grep -qE '^[A-Za-z0-9._-]+$'; }
+
+active_class() { hyprctl activewindow -j | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("class",""))
+except Exception: pass'; }
+
+active_floating() { hyprctl activewindow -j | python3 -c 'import json,sys
+try: print("1" if json.load(sys.stdin).get("floating") else "0")
+except Exception: print("")'; }
+
 case "$1" in
   close)
       hyprctl dispatch 'hl.dsp.window.close()' ;;
+
   max)
       # "maximized" fills the work area but keeps the bar visible, which is what a
       # maximize button should do. Plain "fullscreen" would hide the panel entirely.
       hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized" })' ;;
+
+  pin)
+      hyprctl dispatch 'hl.dsp.window.pin()' ;;
+
   min)
       hyprctl dispatch "hl.dsp.window.move({ workspace = 'special:${MIN_WS}' })"
       # Moving a window to a special workspace also OPENS that workspace, so on its
       # own this is a move, not a minimize — the window stays on screen as an overlay.
       # Measured, not assumed: specialWorkspace reads back as 'special:minimized'
-      # immediately after the move. Classic Hyprland would use
-      # `movetoworkspacesilent`, but the Lua dispatcher table has no silent variant
-      # (hl.dsp.window has: move, but no move_silent), and passing `silent = true`
-      # is accepted and ignored — the table is not validated, so ANY unknown field
-      # returns "ok". So close it again by hand.
+      # immediately after the move. Classic Hyprland would use `movetoworkspacesilent`,
+      # but the Lua dispatcher table has no silent variant (hl.dsp.window has move, but
+      # no move_silent), and passing `silent = true` is accepted and ignored — the table
+      # is not validated, so ANY unknown field returns "ok". So close it again by hand.
       # Guarded on it actually being open, so this never toggles it back ON.
       if hyprctl -j monitors | grep -q "\"special:${MIN_WS}\""; then
           hyprctl dispatch "hl.dsp.workspace.toggle_special('${MIN_WS}')"
       fi ;;
+
   restore)
-      # POSITIONAL, not a table. Every table form — { name = }, { workspace = },
-      # { special = } — returns "ok" and then silently opens the DEFAULT special
-      # workspace instead of this one. Verified by reading specialWorkspace back out
-      # of `hyprctl monitors` after each attempt; only the bare string was correct.
-      hyprctl dispatch "hl.dsp.workspace.toggle_special('${MIN_WS}')" ;;
+      # This used to just toggle the special workspace open, which showed the windows
+      # as a temporary overlay that vanished again — they were never actually put back.
+      # `window = 'address:0x...'` in the move table IS honoured (verified 2026-08-05 by
+      # moving two stranded Chrome windows back and reading `workspace` off each one), so
+      # a real un-minimize is possible: move every parked window to the CURRENT workspace.
+      wins=$(hyprctl clients -j | python3 -c 'import json,sys
+for c in json.load(sys.stdin):
+    if c["workspace"]["name"] == "special:'"${MIN_WS}"'":
+        print(c["address"])')
+      if [ -z "$wins" ]; then
+          echo "luminos-win: nothing is minimized"; exit 0
+      fi
+      n=0
+      for w in $wins; do
+          hyprctl dispatch "hl.dsp.window.move({ workspace = 'e+0', window = 'address:${w}' })" >/dev/null
+          n=$((n+1))
+      done
+      # Read back rather than trusting the "ok" — the whole point of this script.
+      left=$(hyprctl clients -j | python3 -c 'import json,sys
+print(sum(1 for c in json.load(sys.stdin) if c["workspace"]["name"] == "special:'"${MIN_WS}"'"))')
+      [ "$left" = "0" ] || die "restored $n but $left still stuck on special:${MIN_WS}"
+      echo "luminos-win: restored $n window(s)" ;;
+
+  lock|unlock|togglelock)
+      cls="$(active_class)"
+      [ -n "$cls" ] || die "no focused window to $1"
+      valid_class "$cls" || die "refusing to $1 class '$cls' — contains characters that are unsafe to write into the Lua config"
+      mkdir -p "$(dirname "$LOCK_FILE")"
+      [ -f "$LOCK_FILE" ] || : > "$LOCK_FILE"
+
+      # One keybind should flip the app either way, so resolve the direction from the
+      # file rather than making the user remember which of two commands they need.
+      action="$1"
+      if [ "$action" = "togglelock" ]; then
+          if grep -qxF "$cls" "$LOCK_FILE" 2>/dev/null; then action="unlock"; else action="lock"; fi
+      fi
+
+      if [ "$action" = "lock" ]; then
+          if grep -qxF "$cls" "$LOCK_FILE" 2>/dev/null; then
+              echo "luminos-win: '$cls' is already locked"
+          else
+              printf '%s\n' "$cls" >> "$LOCK_FILE"
+              grep -qxF "$cls" "$LOCK_FILE" || die "failed to write '$cls' to $LOCK_FILE"
+              echo "luminos-win: locked '$cls' — it will open tiled from now on"
+          fi
+          # The rule only applies to windows created AFTER a reload, so tile this one now.
+          # float() is a TOGGLE, so it is only safe to call when the window is floating.
+          [ "$(active_floating)" = "1" ] && hyprctl dispatch 'hl.dsp.window.float()' >/dev/null
+      else
+          grep -qxF "$cls" "$LOCK_FILE" 2>/dev/null || { echo "luminos-win: '$cls' was not locked"; exit 0; }
+          tmp="$(mktemp)"
+          grep -vxF "$cls" "$LOCK_FILE" > "$tmp" && mv "$tmp" "$LOCK_FILE"
+          grep -qxF "$cls" "$LOCK_FILE" && die "failed to remove '$cls' from $LOCK_FILE"
+          echo "luminos-win: unlocked '$cls' — it will float again"
+          [ "$(active_floating)" = "0" ] && hyprctl dispatch 'hl.dsp.window.float()' >/dev/null
+      fi
+      hyprctl reload >/dev/null || die "config reload failed after editing $LOCK_FILE" ;;
+
+  list)
+      # Test on the ENTRIES, not on file size: the file ships with a comment header, so
+      # `[ -s ]` is true even when nothing is locked and would print an empty list.
+      entries="$(grep -vE '^\s*(#|$)' "$LOCK_FILE" 2>/dev/null)"
+      if [ -n "$entries" ]; then
+          echo "locked to tiled (from $LOCK_FILE):"
+          printf '%s\n' "$entries" | sed 's/^/  /'
+      else
+          echo "no locked apps — everything floats"
+      fi
+      exit 0 ;;
+
   *)
-      die "unknown action '$1' (expected close|max|min|restore)" ;;
+      die "unknown action '$1' (expected close|max|min|restore|lock|unlock|togglelock|list|pin)" ;;
 esac
 
 rc=$?
