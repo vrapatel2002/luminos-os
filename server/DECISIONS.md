@@ -685,3 +685,115 @@ The machine key expires **2027-02-01**. When it does, the server drops off the t
 silently and remote access simply stops working, months from now, with no error anywhere on
 the box. Disabling expiry for `luminos-server` is one toggle in the Tailscale admin console
 and cannot be done from the command line. **Do it, or diarise it.**
+
+---
+
+## DECISION 52 — Requesting media gets its own front door (Jellyseerr), built from source because the AUR package is a year stale
+
+<!-- [CHANGE: claude-code | 2026-08-05] -->
+
+**Decision:** searching for a film or show and asking for it now happens in **Jellyseerr
+3.4.1** on port 5055, signed in with the same Jellyfin account, wired to Sonarr and Radarr.
+Built from upstream source rather than installed from the AUR. No Docker.
+
+### Why not "just add it to Jellyfin's search"
+
+The original ask was for Jellyfin's own search box to also show things you don't own yet,
+with a download button. **Jellyfin's search is not extensible** — there is no plugin hook
+that injects Sonarr/Radarr results into it, and the Roku and Android clients are native, so
+even a web-only hack would not reach the two places the library actually gets used. A
+separate request app is the standard answer to this and the only one that works on a phone.
+
+### Why build 3.4.1 instead of `pacman -S jellyseerr`
+
+The project was renamed to **`seerr-team/seerr`** and moved on; the AUR recipe is pinned to
+**2.7.3 (2025-08-14)** while upstream is **3.4.1 (2026-07-30)**. Roughly a year of fixes.
+The AUR PKGBUILD was used as the starting point and adapted — vendored at
+`server/packaging/jellyseerr/PKGBUILD`, with `PKGBUILD.orig` kept on the box for diffing.
+
+Three things had to change, and one thing deliberately did **not**:
+
+- **The upstream file renames.** `jellyseerr-api.yml` → `seerr-api.yml`, `next.config.js` →
+  `next.config.ts`. The old `package()` copies these by name and would have failed.
+- **`engines.node`, because of `engine-strict=true`.** The repo ships an `.npmrc` with
+  `engine-strict=true`, which makes pnpm **hard-refuse to install** on a version mismatch —
+  it is not a warning. The server runs **Node 26.5.0**; seerr declares `^22.19.0`. Installing
+  `nodejs-lts-jod` was not an option: it conflicts with `nodejs`, which `python-playwright`
+  requires, and that is Byparr. So `engines.node` was relaxed to `>=22.19.0` in `prepare()`
+  and the result tested empirically instead. It builds and runs clean.
+- **`arch.patch` is not applied.** Its pnpm hunk is obsolete in 3.4.1, and its other hunk
+  rewrites `server.use(csurf({...}))` to `server.use(() => csurf({...}))` — which does not
+  fix CSRF, it **silently disables** it, because an arrow function handed to `use()` is
+  treated as middleware that never calls anything. Carrying that patch forward would have
+  quietly removed a protection.
+
+**Noted for the next upgrade:** the build prints `The "pnpm" field in package.json is no
+longer read by pnpm`. pnpm 11 dropped it, so `onlyBuiltDependencies` and `overrides` are
+being ignored. That did **not** bite here — `bcrypt@6.0.0` and `sqlite3@5.1.7` both compiled
+— but if a future build produces a package that starts and then throws on a native module,
+this is the first place to look. Build took 2m21s and produced a 220,903,491-byte package.
+
+### Wiring, and the one setting that matters
+
+Both `*arr` services point at **quality profile id=7**, `Max Bitrate (4K if there, else best
+1080p)`, with `is4k: false` and `movie4kEnabled` / `series4kEnabled` left **off**. This is
+deliberate and it is the whole lesson of the True Detective failure: profile **5**
+`Ultra-HD` accepts only 2160p, and turning on Jellyseerr's separate "4K" request path would
+route requests down exactly that kind of strict profile and reject everything, silently,
+forever. There is one request path here and it degrades to 1080p when 4K does not exist.
+
+**No firewall change was needed.** `/etc/nftables.conf` accepts `ip saddr 192.168.2.0/24`
+and `iifname "tailscale0"` wholesale, not per-port, so 5055 was already reachable from the
+LAN and over Tailscale the moment it started listening — with nothing opened to the internet.
+Worth knowing in both directions: **any new service on this box is LAN-and-tailnet-exposed
+by default.** That is convenient here and would be a mistake for something unauthenticated.
+
+### Proof — a real request, not the test button
+
+Following the standing rule (Prowlarr's "Test Successful" only ever proved the API key was
+accepted), the chain was exercised with a genuine request for *Interstellar* (tmdb 157336):
+
+```
+Jellyseerr  POST /api/v1/request         -> 201, request id 1, auto-approved
+Radarr      GET  /api/v3/movie           -> Interstellar 2014, profileId 7,
+                                            root /srv/media/movies, monitored true
+Radarr      GET  /api/v3/history         -> grabbed: Interstellar.2014.2160p.PROPER.IMAX
+                                            .REMUX.DV.HDR10.TrueHD.7.1.Atmos
+NZBGet      listgroups                   -> 103.5 GB, DOWNLOADING
+```
+
+Reachability was tested **from the G14**, a genuinely different machine —
+`http://192.168.2.61:5055/api/v1/status` → 200, and `GET /` → 200 redirecting to `/login`
+with 298 KB of rendered HTML. The Tailscale path is **untested**: this laptop is not on the
+tailnet (no `tailscale` binary), so a 000 from `100.82.125.26:5055` proves nothing either
+way. The Pixel 9 is the peer that would prove it.
+
+### What the proof exposed: there are no size limits anywhere
+
+Every quality definition in Radarr reads `maxSize: None` — 1080p and 2160p alike. So
+"max bitrate" means literally *the largest file the indexer offers*, and it chose a
+**103.5 GB** Dolby Vision / TrueHD Atmos remux. At the measured 11.5 MB/s wifi ceiling that
+is ~2.4 hours of the only link, for one film.
+
+**Left as-is by choice**, because the owner treats films as watch-then-delete and the disk
+has 382 GB free. Recorded because it is a standing property of the setup, not a one-off: a
+size cap on the quality definitions is the lever if a request ever needs to be smaller, and
+it is the same lever for TV, where the same profile is attached to season packs.
+
+### The trap found while pausing it
+
+**NZBGet's `pausedownload` over `GET` returns an empty body and does nothing.** It requires
+POST — `{"error":{"code":4,"message":"Not safe procedure for HTTP-Method GET"}}` only appears
+when the response is actually read. The first pause was silently a no-op and downloading
+continued at 11.8 MB/s. Confirmed properly with POST and then proven by three status samples
+12 s apart, all `paused=True`, `0.00 MB/s`, bytes frozen at 0.803 GB — one sample would not
+have distinguished a pause from a stalled article.
+
+### Interaction with the 2-season cap (DECISION 44)
+
+Jellyseerr will happily accept a request for more than two seasons — it has no per-series
+season limit and its "quota" is a rolling request count, not a cap. `luminos-season-limit.timer`
+is still the thing that enforces it, trimming to two monitored seasons within a day. As
+designed, it keeps **any** two, not the first two, and prefers seasons that already hold
+files. Live evidence rather than a reading of the code: True Detective is currently monitored
+on **S01 and S04**.

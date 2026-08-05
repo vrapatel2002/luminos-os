@@ -7,11 +7,13 @@ machine** from the G14 that the rest of this repo describes — nothing here run
 server/
 ├── README.md      you are here — the map
 ├── STATUS.md      what is built, what works, what is pending
-├── DECISIONS.md   why it is built this way (decisions 35, 36, 36a, 37)
+├── DECISIONS.md   why it is built this way (decisions 35-52)
 ├── docs/
 │   ├── SERVER_INSTALL_RUNBOOK.md   step-by-step build, as actually executed
 │   ├── MEDIA_SERVER_PLAN.md        the design, codec rules, hardware notes
 │   └── MEDIA_SERVER_SECURITY.md    what is exposed, why, and how to close it
+├── packaging/
+│   └── jellyseerr/PKGBUILD         builds 3.4.1 from source — the AUR one is a year stale
 └── scripts/
     ├── luminos-server-install      stage 1 — partition + install Arch
     ├── luminos-server-services     stage 2 — Jellyfin, qBittorrent, Sonarr, Prowlarr
@@ -55,6 +57,7 @@ Away from the house, it is also on a Tailscale tailnet as **100.82.125.26**
 | Sonarr | 8989 | LAN only |
 | Radarr | 7878 | LAN only |
 | Prowlarr | 9696 | LAN only |
+| Jellyseerr | 5055 | LAN + Tailscale — request films/shows, DECISION 52 |
 | Tailscale | — | outbound only — remote access to Jellyfin, opens nothing |
 | BitTorrent peer port | 25989 | **stopped** — rule still in nftables, nothing listening |
 
@@ -98,6 +101,24 @@ sudo grep -oP '(?<=<ApiKey>)[^<]+' /etc/jellyfin/... 2>/dev/null  # or Jellyfin 
 
 These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 
+- **Any new service on this box is LAN- and tailnet-exposed the moment it listens.** The
+  nftables rules accept `ip saddr 192.168.2.0/24` and `iifname "tailscale0"` *wholesale*, not
+  per-port. Convenient — Jellyseerr on 5055 needed no firewall work at all — and a mistake
+  waiting to happen for anything unauthenticated. Nothing is open to the internet either way.
+- **`engine-strict=true` in an `.npmrc` makes pnpm refuse, not warn.** A Node version mismatch
+  stops the build dead. Hit building Jellyseerr 3.4.1 against the box's Node 26. DECISION 52.
+- **pnpm 11 no longer reads the `pnpm` field in `package.json`.** `onlyBuiltDependencies` and
+  `overrides` are ignored and it only prints a notice. If a rebuilt Node package installs fine
+  and then dies on a native module, look here first.
+- **NZBGet's `pausedownload` does nothing over `GET`.** It returns an empty body and keeps
+  downloading; it needs POST. And one status sample cannot tell a pause from a stalled
+  article — take several, spaced out, and watch the byte counter.
+- **There are no download size caps.** Every quality definition is `maxSize: None`, so
+  "Max Bitrate" can and does pull 100 GB+ remuxes. That is on purpose, but know it before
+  requesting a whole season pack. DECISION 52.
+- **Jellyseerr's "4K" request toggle is the profile-5 trap in a new costume.** Leave
+  `is4k`/`movie4kEnabled`/`series4kEnabled` off — a strict 2160p profile rejects everything
+  with no 4K release, silently and forever, which is what happened to True Detective.
 - **Never flip `SATA Operation` from `RAID On` to `AHCI` in the BIOS.** It stops the owner's
   Windows booting. It is also why Linux cannot see the NVMe at all — Intel RST hides it.
 - **Never clear qBittorrent's `current_network_interface`.** That single setting is what keeps

@@ -1,0 +1,92 @@
+# Adapted from the AUR jellyseerr package (txtsd, fryfrog) by claude-code 2026-08-05.
+# [CHANGE: claude-code | 2026-08-05]
+# Upstream AUR is pinned to 2.7.3 (Aug 2025). This builds 3.4.1 (Jul 2026).
+# Differences from the AUR recipe, all forced by upstream changes:
+#   * project renamed jellyseerr -> seerr, repo moved to seerr-team/seerr
+#   * jellyseerr-api.yml  -> seerr-api.yml
+#   * next.config.js      -> next.config.ts
+#   * package.json already carries pnpm.onlyBuiltDependencies and overrides,
+#     so that half of the old arch.patch is obsolete
+#   * the old arch.patch also wrapped csurf in an arrow function, which would
+#     silently neuter CSRF protection if it were ever enabled. NOT carried over.
+# The only patch applied is the engines bump: .npmrc sets engine-strict=true and
+# this box runs nodejs 26, which does not satisfy upstream's "^22.19.0".
+pkgname=jellyseerr
+_pkgname=seerr
+pkgver=3.4.1
+pkgrel=1
+pkgdesc='Request management and media discovery tool for Jellyfin (built from seerr 3.4.1)'
+arch=(x86_64)
+url='https://github.com/seerr-team/seerr'
+license=('MIT')
+depends=(bash gcc-libs glibc nodejs)
+makedepends=(pnpm python)
+backup=(etc/conf.d/jellyseerr)
+options=(!strip !debug)
+install=jellyseerr.install
+source=(
+  "${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz"
+  jellyseerr.sysusers
+  jellyseerr.tmpfiles
+  jellyseerr.service
+  jellyseerr.conf.d
+)
+sha256sums=('38bb1f2c90ea648a327244352d5b4b13b19526e384655be8779bbfe7f6a8f447'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP')
+
+prepare() {
+  cd "${_pkgname}-${pkgver}"
+
+  # Allow nodejs 26. .npmrc sets engine-strict=true so this is not cosmetic:
+  # without it pnpm refuses to install at all.
+  python - <<'PY'
+import json, io
+p = 'package.json'
+d = json.load(io.open(p, encoding='utf-8'))
+old = d['engines']['node']
+d['engines']['node'] = '>=22.19.0'
+json.dump(d, io.open(p, 'w', encoding='utf-8'), indent=2)
+print('engines.node: %s -> %s' % (old, d['engines']['node']))
+PY
+
+  sed -i 's/husky install//' package.json
+  echo "{\"commitTag\": \"${pkgver}\"}" > committag.json
+
+  export NEXT_TELEMETRY_DISABLED=1
+  pnpm install --frozen-lockfile
+}
+
+build() {
+  cd "${_pkgname}-${pkgver}"
+  export NEXT_TELEMETRY_DISABLED=1
+  export CYPRESS_INSTALL_BINARY=0
+  export SHARP_IGNORE_GLOBAL_LIBVIPS=1
+  pnpm build
+  pnpm prune --prod --ignore-scripts
+}
+
+package() {
+  cd "${_pkgname}-${pkgver}"
+  install -dm755 "${pkgdir}/usr/lib/jellyseerr"
+
+  cp -dr --no-preserve='ownership' ./{.next,dist,public,node_modules} "${pkgdir}/usr/lib/jellyseerr"
+  cp -d  --no-preserve='ownership' ./package.json "${pkgdir}/usr/lib/jellyseerr"
+  cp -d  --no-preserve='ownership' ./seerr-api.yml "${pkgdir}/usr/lib/jellyseerr/"
+  cp -d  --no-preserve='ownership' ./next.config.ts "${pkgdir}/usr/lib/jellyseerr/"
+
+  rm -rf "${pkgdir}/usr/lib/jellyseerr/.next/cache"
+
+  find "${pkgdir}/usr/lib/jellyseerr/.next" -type f -print0 \
+    | xargs -0 sed -i "s^${srcdir}/${_pkgname}-${pkgver}^/usr/lib/jellyseerr^g"
+
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+
+  cd "${srcdir}"
+  install -Dm644 jellyseerr.conf.d  "${pkgdir}/etc/conf.d/jellyseerr"
+  install -Dm644 jellyseerr.sysusers "${pkgdir}/usr/lib/sysusers.d/jellyseerr.conf"
+  install -Dm644 jellyseerr.tmpfiles "${pkgdir}/usr/lib/tmpfiles.d/jellyseerr.conf"
+  install -Dm644 jellyseerr.service  "${pkgdir}/usr/lib/systemd/system/jellyseerr.service"
+}
