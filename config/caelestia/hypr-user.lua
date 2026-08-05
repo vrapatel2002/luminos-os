@@ -104,6 +104,17 @@ hl.on("hyprland.start", function()
     -- one session most in need of a record would be the one with no record.
     -- Idempotent — a duplicate run just writes a second file.
     hl.exec_cmd("/home/shawn/luminos-os/scripts/luminos-session-recorder")
+
+    -- Load the hyprpm plugins. Hyprland does NOT do this itself: `hyprpm enable` only records
+    -- the choice in /var/cache/hyprpm/shawn/state.toml, and without this line the plugins are
+    -- simply absent after every logout, with nothing on screen to say so.
+    -- [CHANGE: claude-code | 2026-08-05]
+    --
+    -- `-n` means NOTIFY, not "no". It is deliberate. A plugin built against the wrong Hyprland
+    -- version fails to load SILENTLY, so the login toast is the only positive confirmation
+    -- that the borders and focus flash are actually live. If it ever stops appearing, run
+    -- `hyprpm update && hyprpm reload`. Warnings and errors notify regardless of this flag.
+    hl.exec_cmd("hyprpm reload -n")
 end)
 
 -- NOT autostarted any more: `kitty`. It existed only as proof-of-life while we could not tell a
@@ -317,3 +328,129 @@ end
 hl.bind("SUPER + H", hl.dsp.exec_cmd("luminos-win min"))                    -- hide (minimize)
 hl.bind("SUPER + SHIFT + H", hl.dsp.exec_cmd("luminos-win restore"))        -- bring them all back
 hl.bind("SUPER + SHIFT + SPACE", hl.dsp.exec_cmd("luminos-win togglelock")) -- lock app tiled/floating
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Hyprland plugins (hyprpm) — [CHANGE: claude-code | 2026-08-05]
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Three plugins are enabled: borders-plus-plus, hyprfocus and hyprexpo. Enable/disable is NOT
+-- done here — it lives in hyprpm's own state at /var/cache/hyprpm/shawn/state.toml, set with
+-- `hyprpm enable <name>` / `hyprpm disable <name>`. This block only CONFIGURES them.
+--
+-- ⚠️ THE ONE THING THAT WILL BREAK THIS: a Hyprland version bump.
+-- hyprpm plugins are C++ .so files compiled against the EXACT Hyprland commit in use. After
+-- any `pacman -Syu` that moves Hyprland off 0.56.1, every plugin silently STOPS LOADING —
+-- the compositor still starts, nothing errors on screen, the borders and focus flash just
+-- quietly vanish. The fix is always the same:
+--
+--     hyprpm update && hyprpm reload
+--
+-- That is exactly the state this machine was found in on 2026-08-05: hyprpm's headers were
+-- pinned to an April build (0.54.3, hash 521ece46…) while Hyprland had moved to 0.56.1, so
+-- 2 of the plugins would not build and NONE were loaded.
+--
+-- Also note the plugin roster shrank upstream: hyprexpo, hyprtrails, hyprwinwrap,
+-- hyprscrolling and xtra-dispatchers were DELETED from hyprwm/hyprland-plugins in May 2026
+-- ("it's been removed. It was unmaintained" — vaxry, issue #672). Only borders-plus-plus,
+-- csgo-vulkan-fix, hyprbars and hyprfocus still ship. Do not go looking for the others in
+-- that repo; they are not coming back.
+--
+-- hyprexpo therefore comes from a DIFFERENT repo: github.com/sandwichfarm/hyprexpo, the
+-- maintained fork that picked the plugin up after the retirement. It is a second hyprpm
+-- source, so `hyprpm update` covers it too — but if it ever goes unmaintained as well, the
+-- symptom will be hyprexpo alone failing to build after a Hyprland bump while the two
+-- official ones rebuild fine. If that happens, `hyprpm remove` it rather than pinning
+-- Hyprland back.
+--
+-- NOT enabled, deliberately:
+--   * hyprbars       — it builds fine and is one command away, but the titlebars and their
+--                      3 buttons were removed on 2026-08-05 at Shawn's request. Re-enabling
+--                      it would undo that. SUPER+H / SUPER+Q / SUPER+ALT+F replace it.
+--   * csgo-vulkan-fix — fixes mouse offsets in CS:GO under Vulkan. Not installed here.
+hl.config({
+    plugin = {
+        -- One extra border drawn OUTSIDE the normal 1px one, as a soft dark outline.
+        -- Deliberately a neutral translucent black rather than an accent colour: Caelestia
+        -- regenerates its Material palette from the wallpaper at runtime, so any accent
+        -- hardcoded here would go stale and clash the moment the wallpaper changes. A dark
+        -- outline just reads as definition against every palette.
+        -- natural_rounding makes it follow the 15px window rounding instead of squaring off.
+        borders_plus_plus = {
+            add_borders      = 1,
+            natural_rounding = true,
+            border_size_1    = 2,
+            col = {
+                border_1 = "rgba(ffffff26)",
+            },
+        },
+
+        -- Flash the window briefly when focus moves to it. Keyboard only: the mouse already
+        -- tells you where focus went because your hand is on it, and flashing on every
+        -- pointer cross is distracting with focus-follows-mouse.
+        hyprfocus = {
+            enable                   = true,
+            animate_floating         = true,
+            keyboard_focus_animation = "flash",
+            mouse_focus_animation    = "none",
+            fade_opacity             = 0.8,
+        },
+
+        -- Expose-style grid of every workspace at once, bound to SUPER+G below.
+        -- 3 columns because this is a single 14" 2880x1800 panel — 4 would make each tile
+        -- too small to recognise a window from, and 2 wastes half the screen.
+        hyprexpo = {
+            columns          = 3,
+            gaps_in          = 6,
+            gaps_out         = 0,
+            -- Matches the dark shell background rather than pure black, so the overview
+            -- reads as part of the desktop instead of a modal that blanks it.
+            bg_col           = "rgb(111111)",
+            -- Keeps the workspace you are already on in the centre of the grid, so the
+            -- tile under your eyes does not jump when the overview opens.
+            workspace_method = "center current",
+            gesture_distance = 200,
+            cancel_key       = "escape",
+            show_cursor      = 1,
+            -- OFF on purpose. With drag-drop on, a click whose pointer drifts even a few
+            -- pixels is read as "move this window to that workspace" instead of "switch
+            -- to that workspace". On a touchpad that drift is constant.
+            drag_drop_enable = 0,
+            -- Arrow/hjkl selection inside the overview. See the submap further down.
+            keynav_enable    = 1,
+            -- Digits pick the Nth VISIBLE tile, not the global workspace ID, which is what
+            -- you actually mean when you are looking at a grid.
+            number_key_mode  = "index",
+            show_workspace_names = 1,
+        },
+    },
+})
+
+-- SUPER+G opens the overview. SUPER+G, SUPER+grave and SUPER+Tab were all confirmed free
+-- by querying the RUNNING compositor (`hyprctl binds`) rather than reading the config —
+-- Caelestia binds a lot of keys from Lua, so grepping the files under-reports. G was picked
+-- over the other two simply as the easiest one-handed reach next to the existing SUPER row.
+-- "toggle" rather than "select": pressing it again closes the overview.
+--
+-- Testing this from a terminal is misleading. `hyprctl dispatch 'hl.plugin.hyprexpo.expo("toggle")'`
+-- OPENS the overview and then prints "error: expected a dispatcher" — the plugin call fires as
+-- a side effect and returns nil, which hyprctl's own wrapper then rejects. The error is about
+-- hyprctl, not the plugin. Check `hyprctl submap` (it reads "hyprexpo") to see the truth.
+hl.bind("SUPER + G", function()
+    hl.plugin.hyprexpo.expo("toggle")
+end)
+
+-- While the overview is open, hyprexpo activates a submap named "hyprexpo" and ONLY these
+-- keys are live — the rest of the desktop's binds are suspended until it closes. That is
+-- why escape has to be re-bound here explicitly: without it the overview is only closable
+-- by clicking, and a keyboard-only exit would be impossible.
+hl.define_submap("hyprexpo", function()
+    hl.bind("left",   function() hl.plugin.hyprexpo.kb_focus("left") end)
+    hl.bind("right",  function() hl.plugin.hyprexpo.kb_focus("right") end)
+    hl.bind("up",     function() hl.plugin.hyprexpo.kb_focus("up") end)
+    hl.bind("down",   function() hl.plugin.hyprexpo.kb_focus("down") end)
+    hl.bind("h",      function() hl.plugin.hyprexpo.kb_focus("left") end)
+    hl.bind("l",      function() hl.plugin.hyprexpo.kb_focus("right") end)
+    hl.bind("k",      function() hl.plugin.hyprexpo.kb_focus("up") end)
+    hl.bind("j",      function() hl.plugin.hyprexpo.kb_focus("down") end)
+    hl.bind("return", function() hl.plugin.hyprexpo.kb_confirm() end)
+    hl.bind("escape", function() hl.plugin.hyprexpo.expo("cancel") end)
+end)

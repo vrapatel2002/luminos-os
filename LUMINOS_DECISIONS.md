@@ -2215,3 +2215,124 @@ rm ~/.local/share/applications/luminos-notepad.desktop
 sudo rm /usr/local/bin/luminos-notepad
 ```
 Recorded in AGENTS.md §9.
+
+## DECISION 49 — Hyprland plugins run again; hyprpm is version-pinned state that must be rebuilt after every Hyprland upgrade
+# [CHANGE: claude-code | 2026-08-05]
+
+**Ask:** "make it run the hyprmods here … install whatever it takes."
+**Outcome:** three plugins are built, enabled, loaded and reloaded automatically at every login —
+`borders-plus-plus`, `hyprfocus`, `hyprexpo`. Before this, `hyprpm list` showed nine plugins,
+**all disabled, two failing to build, zero loaded.**
+
+### The root cause was one stale line
+hyprpm plugins are C++ `.so` files compiled against the **exact Hyprland commit** in use. hyprpm
+stores which commit it built for:
+
+```
+# /var/cache/hyprpm/shawn/state.toml   (BEFORE)
+hash = '521ece463c4a9d3d128670688a34756805a4328f_aq_0.10_hu_0.12_hg_0.5_hc_0.1_hlg_0.6'
+```
+
+`521ece46…` is Hyprland **0.54.3, from April**. The running compositor is **0.56.1
+(`5c9377c1…`)**, and the support libraries had moved with it — aquamarine 0.10 → 0.14,
+hyprutils 0.12 → 0.14. That single mismatch explains **both** symptoms at once: the two plugins
+that touch changed APIs failed to compile, and the rest were never loaded because nothing had
+been rebuilt. `hyprpm update` pulled matching headers and rebuilt everything:
+
+```
+# /var/cache/hyprpm/shawn/state.toml   (AFTER)
+hash = '5c9377c15f85c50648f35ca5a213754f95b93ca0_aq_0.14_hu_0.14_hg_0.5_hc_0.1_hlg_0.6'
+```
+
+> **This will happen again.** Any `pacman -Syu` that moves Hyprland off 0.56.1 re-breaks every
+> plugin, and it breaks them **silently** — the compositor starts normally, nothing errors on
+> screen, the borders and the overview simply stop existing. The fix is always
+> `hyprpm update && hyprpm reload`.
+
+### The state is not in $HOME — that cost real time
+Upstream hyprpm documents `$XDG_DATA_HOME/hyprpm`. **Arch's package puts it in
+`/var/cache/hyprpm/$USER/`.** Every search under `~` returned nothing while `hyprpm list`
+happily printed a repo, which reads exactly like a phantom. Settled by
+`env HOME=/tmp/fakehome hyprpm list` producing **identical output** — proving the state could
+not be HOME-based — then finding it under `/var/cache`. Anyone debugging plugins should start
+at `/var/cache/hyprpm/$USER/state.toml`, not in the home directory.
+
+### Half the plugin roster no longer exists
+`hyprexpo`, `hyprtrails`, `hyprwinwrap`, `hyprscrolling` and `xtra-dispatchers` were **deleted**
+from `hyprwm/hyprland-plugins` in May 2026 — *"it's been removed. It was unmaintained"* (vaxry,
+issue #672). They were not moved to another `hyprwm` repo; checked, they are not there. Only
+`borders-plus-plus`, `csgo-vulkan-fix`, `hyprbars` and `hyprfocus` still ship.
+
+`hyprexpo` was recovered from **`github.com/sandwichfarm/hyprexpo`**, the maintained community
+fork that picked it up after the retirement, added as a second hyprpm source. Its `hyprpm.toml`
+pins stop at 0.56.0 while we run 0.56.1. **That is not a runtime risk:** hyprpm compiles against
+the *installed* headers, so a genuine API break shows up as a **build failure at install time**,
+which is harmless and loud. It built clean and loaded. (I initially called this "an ABI gamble I
+won't take on a live session" — that was wrong, and the correction is the useful part: an unpinned
+version is a build-time question, not a crash-at-login question.)
+
+### What is enabled, and what is deliberately not
+| Plugin | State | Why |
+|---|---|---|
+| `borders-plus-plus` | ✅ enabled | One extra 2px border outside the normal one, `natural_rounding` so it follows the 15px corner radius |
+| `hyprfocus` | ✅ enabled | Brief flash when **keyboard** focus lands on a window. Mouse animation off — with focus-follows-mouse it fires on every pointer cross |
+| `hyprexpo` | ✅ enabled | Expose-style grid of all workspaces, `SUPER+G` |
+| `hyprbars` | ❌ **left disabled on purpose** | It builds fine and is one command away, but titlebars and their three buttons were **removed earlier the same day at the user's request** (DECISION 46). Enabling it would silently undo that work |
+| `csgo-vulkan-fix` | ❌ not enabled | Fixes mouse offsets in CS:GO under Vulkan. Not installed here |
+
+### Nothing loaded plugins at login
+`hyprpm enable` only records a choice in `state.toml`; **Hyprland does not act on it.** Without an
+explicit load the plugins are absent after every logout, with nothing on screen to say so. Added
+to the `hyprland.start` handler in `hypr-user.lua`:
+
+```lua
+hl.exec_cmd("hyprpm reload -n")
+```
+
+`-n` is `--notify`, i.e. **send** a notification — not "no notify". Kept on purpose: a
+wrong-version plugin fails to load silently, so the login toast is the only positive confirmation
+that any of this is live. **Proven, not assumed** — both `.so`s were unloaded (`hyprctl plugin
+list` → nothing), the exact login command was run, and both came back with their config intact
+and no root needed.
+
+### Three traps worth keeping
+1. **`hyprctl keyword plugin:…` is refused under the Lua parser** — *"keyword can't work with
+   non-legacy parsers. Use eval."* This is the same shape as the `luminos-look` finding. Plugin
+   options must be set in the Lua config (`hl.config { plugin = { … } }`) and applied with
+   `hyprctl reload`. Note the names differ by punctuation: **underscores in Lua**
+   (`borders_plus_plus`), **hyphens in the namespace** (`plugin:borders-plus-plus:…`).
+2. **`hyprctl dispatch` reports a failure for a call that worked.**
+   `hyprctl dispatch 'hl.plugin.hyprexpo.expo("toggle")'` **opens the overview** and then prints
+   `error: expected a dispatcher` — the plugin fires as a side effect and returns nil, which
+   hyprctl's own wrapper rejects. The error is about hyprctl, not the plugin. `hyprctl submap`
+   reads `hyprexpo` and tells the truth. This is the *inverse* of the BUG-088/089 shape: a tool
+   reporting failure for work it actually did.
+3. **A colour can be "applied" and still be invisible.** The first border colour chosen here
+   (`rgba(00000066)`) read as *set: true* in `hyprctl getoption` and could not be seen at all
+   against the dark wallpaper. Config state is not visual proof. Settled by temporarily setting
+   a 6px `rgb(00ff00)` border, screenshotting it to prove the plugin actually renders, then
+   shipping `rgba(ffffff26)` at 2px and screenshotting again to confirm it is visible.
+
+### hyprexpo bindings
+`SUPER+G` toggles the overview. `SUPER+G`, `SUPER+grave` and `SUPER+Tab` were all confirmed free
+by querying the **running compositor** (`hyprctl binds`), not by grepping the config — Caelestia
+registers most of its keys from Lua, so the files under-report. While the overview is open,
+hyprexpo activates a submap named `hyprexpo` and **only that submap's keys are live**; the rest of
+the desktop is suspended until it closes. That is why `escape` is re-bound explicitly — without it
+the overview would be closable only by mouse. Arrows and `hjkl` move the selection, `return`
+confirms, and digits select the **Nth visible tile** (`number_key_mode = index`) rather than a
+global workspace ID, which is what you actually mean when looking at a grid. `drag_drop_enable = 0`
+because a click whose pointer drifts a few pixels — constant on a touchpad — otherwise **moves a
+window** instead of switching workspace.
+
+Verified with a screenshot: a 3×3 grid, numbered tiles, workspace 1 showing its real windows.
+
+### How to reverse
+```bash
+hyprpm disable hyprexpo && hyprpm remove https://github.com/sandwichfarm/hyprexpo
+hyprpm disable borders-plus-plus && hyprpm disable hyprfocus
+hyprpm reload
+# then delete the plugin block + SUPER+G bind + submap from
+# ~/.config/caelestia/hypr-user.lua, and the `hyprpm reload -n` line in hyprland.start
+```
+A full-file backup sits at `~/.config/caelestia/hypr-user.lua.bak-preplugins`.

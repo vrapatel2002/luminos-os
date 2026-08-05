@@ -1157,3 +1157,67 @@ nothing.
 **Lesson.** "It looks ugly" and "it is too small" felt like one theming problem and were two
 independent ones. Also: dark ≠ themed. A dark fallback is the most convincing way for a broken theme
 to look deliberately applied.
+
+## BUG-100 — every Hyprland plugin was dead, because hyprpm was still building for an April compositor
+**[CHANGE: claude-code | 2026-08-05] — FIXED**
+
+**Symptom.** The plugins simply were not there. No error, no notification, nothing on screen.
+`hyprctl plugin list` reported **no plugins loaded**, and `hyprpm list` showed **nine plugins, all
+disabled, two of them failing to build**.
+
+### The cause is one line of state
+hyprpm plugins are C++ shared objects compiled against the **exact Hyprland commit** in use, so
+hyprpm records which commit it last built for:
+
+```
+# /var/cache/hyprpm/shawn/state.toml   (BEFORE)
+hash = '521ece463c4a9d3d128670688a34756805a4328f_aq_0.10_hu_0.12_hg_0.5_hc_0.1_hlg_0.6'
+```
+
+`521ece46…` is Hyprland **0.54.3, April**. The compositor is **0.56.1** (`5c9377c1…`), and the
+support libraries moved with it — aquamarine 0.10 → 0.14, hyprutils 0.12 → 0.14. One stale hash
+produces **both** symptoms: the plugins touching changed APIs fail to compile, and none of the
+rest were ever rebuilt or loaded.
+
+```bash
+hyprpm update      # pulls headers matching the RUNNING Hyprland, rebuilds every plugin
+hyprpm reload
+```
+
+### Two things that made this hard to find
+**1. The state is not in `$HOME`.** Upstream documents `$XDG_DATA_HOME/hyprpm`. Arch's package
+uses **`/var/cache/hyprpm/$USER/`**. Every search under `~` came back empty while `hyprpm list`
+cheerfully printed a repository — which reads like a phantom. Settled without guessing:
+
+```bash
+env HOME=/tmp/fakehome hyprpm list    # identical output → the state cannot be HOME-based
+```
+
+**2. `hyprpm enable` does not load anything.** It only writes the choice into `state.toml`.
+Hyprland never acts on it, so even after a successful rebuild the plugins are absent again after
+the next logout — silently. Fixed by adding to the `hyprland.start` handler in `hypr-user.lua`:
+
+```lua
+hl.exec_cmd("hyprpm reload -n")
+```
+
+`-n` is `--notify` — it **sends** a notification, it does not suppress one. Deliberate: a
+wrong-version plugin fails to load with no visible sign, so the login toast is the only positive
+confirmation. Verified by unloading both `.so`s (`hyprctl plugin list` → empty) and running that
+exact command; both returned with their config intact, no root required.
+
+### ⚠️ This bug will come back on schedule
+Any `pacman -Syu` that moves Hyprland off 0.56.1 re-breaks every plugin, silently and completely.
+The compositor starts fine, nothing errors, the borders and the overview just stop existing.
+**If a plugin feature vanishes after an update, run `hyprpm update && hyprpm reload` before
+debugging anything else.**
+
+### Related trap, opposite shape
+While proving the fix: `hyprctl dispatch 'hl.plugin.hyprexpo.expo("toggle")'` **opens the
+overview and then prints `error: expected a dispatcher`.** The plugin call executes as a side
+effect and returns nil, which hyprctl's own Lua wrapper rejects — the error describes hyprctl,
+not the plugin. `hyprctl submap` returns `hyprexpo` and tells the truth. This is the **inverse**
+of the BUG-088/089 family: a tool reporting failure for work it actually completed. Both shapes
+cost the same amount of time; neither exit code can be trusted alone.
+
+Full context and the configuration in **DECISION 49**.

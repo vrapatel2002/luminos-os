@@ -449,6 +449,42 @@ safe enough to leave unguarded: nothing previewed can outlive a reload.
 
 ---
 
+## HYPRLAND PLUGINS (hyprpm) — added 2026-08-05
+
+| Path | Purpose |
+|---|---|
+| `/var/cache/hyprpm/$USER/state.toml` | **The** hyprpm state — which repos exist, which plugins are enabled, and the Hyprland build hash they were compiled for. **Not** in `$XDG_DATA_HOME`; that is upstream's location, Arch moved it here |
+| `/var/cache/hyprpm/$USER/headersRoot/` | Hyprland headers hyprpm fetched to build against |
+| `config/caelestia/hypr-user.lua` | The plugin **configuration** (`hl.config { plugin = {…} }`), the `SUPER+G` bind, the `hyprexpo` submap, and the `hyprpm reload -n` line in `hyprland.start` |
+
+Loaded: `borders-plus-plus`, `hyprfocus`, `hyprexpo`. Available but **deliberately disabled**:
+`hyprbars` (DECISION 46 removed titlebars), `csgo-vulkan-fix` (game not installed).
+
+Five things here are easy to get wrong; each was proven against the running compositor:
+
+1. **Enabling is not loading.** `hyprpm enable` writes a line to `state.toml` and nothing else —
+   Hyprland never reads it at startup. Without `hl.exec_cmd("hyprpm reload -n")` in
+   `hyprland.start`, the plugins are gone after every logout with no message. `-n` is
+   `--notify`: it **sends** the toast, it does not suppress it.
+2. **Plugins are pinned to one Hyprland commit.** Any version bump makes every plugin stop
+   loading **silently**. Recovery is always `hyprpm update && hyprpm reload`. See BUG-100.
+3. **`hyprctl keyword plugin:…` is refused under the Lua parser** — same trap as the Look Tuner
+   above. Plugin options go in `hl.config`, applied with `hyprctl reload`.
+4. **The names are punctuated differently in the two places.** Lua tables use **underscores**
+   (`borders_plus_plus`); `hyprctl getoption` namespaces use **hyphens**
+   (`plugin:borders-plus-plus:border_size_1`). Getting this wrong reads as "the option does
+   not exist".
+5. **`hyprctl dispatch` lies in the failing direction.**
+   `hyprctl dispatch 'hl.plugin.hyprexpo.expo("toggle")'` **opens the overview** and *then*
+   prints `error: expected a dispatcher`, because the call executes as a side effect and returns
+   nil. Verify with `hyprctl submap` (reads `hyprexpo`), not the exit code.
+
+`getoption` returning `set: true` proves a value was *parsed*, not that it is *visible* — the
+first border colour chosen here was applied correctly and completely invisible against the
+wallpaper. Screenshot with `grim` before believing a visual change landed.
+
+---
+
 ## AGENT UPDATE RULES
 
 When you modify files, update this doc:
