@@ -688,7 +688,7 @@ and cannot be done from the command line. **Do it, or diarise it.**
 
 ---
 
-## DECISION 52 — Requesting media gets its own front door (Jellyseerr), built from source because the AUR package is a year stale
+## DECISION 54 — Requesting media gets its own front door (Jellyseerr), built from source because the AUR package is a year stale
 
 <!-- [CHANGE: claude-code | 2026-08-05] -->
 

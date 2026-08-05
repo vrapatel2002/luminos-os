@@ -57,7 +57,7 @@ Away from the house, it is also on a Tailscale tailnet as **100.82.125.26**
 | Sonarr | 8989 | LAN only |
 | Radarr | 7878 | LAN only |
 | Prowlarr | 9696 | LAN only |
-| Jellyseerr | 5055 | LAN + Tailscale — request films/shows, DECISION 52 |
+| Jellyseerr | 5055 | LAN + Tailscale — request films/shows, DECISION 54 |
 | Tailscale | — | outbound only — remote access to Jellyfin, opens nothing |
 | BitTorrent peer port | 25989 | **stopped** — rule still in nftables, nothing listening |
 
@@ -106,7 +106,7 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   per-port. Convenient — Jellyseerr on 5055 needed no firewall work at all — and a mistake
   waiting to happen for anything unauthenticated. Nothing is open to the internet either way.
 - **`engine-strict=true` in an `.npmrc` makes pnpm refuse, not warn.** A Node version mismatch
-  stops the build dead. Hit building Jellyseerr 3.4.1 against the box's Node 26. DECISION 52.
+  stops the build dead. Hit building Jellyseerr 3.4.1 against the box's Node 26. DECISION 54.
 - **pnpm 11 no longer reads the `pnpm` field in `package.json`.** `onlyBuiltDependencies` and
   `overrides` are ignored and it only prints a notice. If a rebuilt Node package installs fine
   and then dies on a native module, look here first.
@@ -115,7 +115,7 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   article — take several, spaced out, and watch the byte counter.
 - **There are no download size caps.** Every quality definition is `maxSize: None`, so
   "Max Bitrate" can and does pull 100 GB+ remuxes. That is on purpose, but know it before
-  requesting a whole season pack. DECISION 52.
+  requesting a whole season pack. DECISION 54.
 - **Jellyseerr's "4K" request toggle is the profile-5 trap in a new costume.** Leave
   `is4k`/`movie4kEnabled`/`series4kEnabled` off — a strict 2160p profile rejects everything
   with no 4K release, silently and forever, which is what happened to True Detective.
