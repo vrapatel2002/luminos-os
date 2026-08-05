@@ -43,6 +43,9 @@ Dual-homed, both NICs on the same subnet, deliberately:
 
 The TV is a Philips 65PUL7973 (Roku) at 192.168.2.13. Public IP 76.64.36.43.
 
+Away from the house, it is also on a Tailscale tailnet as **100.82.125.26**
+(`luminos-server.tail1fd435.ts.net`). No router port is open for this — DECISION 51.
+
 ## Services
 
 | service | port | exposure |
@@ -52,6 +55,7 @@ The TV is a Philips 65PUL7973 (Roku) at 192.168.2.13. Public IP 76.64.36.43.
 | Sonarr | 8989 | LAN only |
 | Radarr | 7878 | LAN only |
 | Prowlarr | 9696 | LAN only |
+| Tailscale | — | outbound only — remote access to Jellyfin, opens nothing |
 | BitTorrent peer port | 25989 | **stopped** — rule still in nftables, nothing listening |
 
 ## ⛔ Torrenting is halted until a VPN is installed
@@ -149,6 +153,18 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 - **Prowlarr's "Test Successful" only proves the API key was accepted.** It does not prove a
   search returns anything usable. Run a real `/api/v3/release?seriesId=` query and count the
   results per indexer.
+- **A LAN `ip saddr` firewall rule does not cover a VPN tunnel.** Tailscale peers arrive on
+  `tailscale0` carrying `100.64.0.0/10` (CGNAT) addresses, which `ip saddr 192.168.2.0/24`
+  never matches. Under `policy drop` the tunnel comes up, `tailscale status` looks perfect,
+  and every service is unreachable through it. Needs `iifname "tailscale0" accept`.
+  Tailscale's own accept rules sit in the `iptables-nft` filter table and do **not** override
+  a drop policy in another table. DECISION 51.
+- **`tailscale up` hijacks DNS unless you pass `--accept-dns=false`.** On this box that would
+  have silently undone the DNS-over-TLS to Quad9. Record `resolvectl status` before, compare
+  after — the failure mode is invisible.
+- **A local `curl` to your own tailnet IP does not test the firewall.** Loopback traffic never
+  crosses `iifname tailscale0`, so the rule's counter stays 0. It proves the listener, nothing
+  more. Only a real peer proves the rule.
 - `bc` is not installed. Use python for arithmetic in scripts.
 
 ## Owner-only tasks
@@ -160,5 +176,6 @@ Things that need physical access or the router admin page:
   wifi ceiling, while the router reports a ~1 Gbps line. The cable is worth about 10x.
 - A DHCP reservation for 192.168.2.62.
 - The BIOS boot order must keep the HDD first, or a power blip boots Windows and SSH is gone.
-- **A choice on remote Jellyfin access** — Tailscale (an account signup) or self-hosted
-  WireGuard (a router port forward + dynamic DNS). Either needs the owner; see STATUS.md.
+- **Disable Tailscale key expiry for `luminos-server`** in the admin console. The machine key
+  expires **2027-02-01**, and when it does the server drops off the tailnet silently — remote
+  access just stops, months from now, with nothing logged on the box. There is no CLI for it.

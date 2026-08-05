@@ -604,3 +604,84 @@ bundled "Global Search" is a website with no API, so Sonarr cannot drive it. NZB
 DrunkenSlug, roughly USD 15-20 a year. Until one exists, NZBGet can be fed a `.nzb` by hand
 but nothing is automatic. `INDEXER_NAME` / `INDEXER_URL` / `INDEXER_APIKEY` are waiting in
 `server/.env`.
+
+---
+
+## DECISION 51 — Remote Jellyfin goes over Tailscale, and no port is opened to do it
+<!-- [CHANGE: claude-code | 2026-08-05] -->
+
+**Decided 2026-08-05.** DECISION 48 left one question open: how to watch Jellyfin away from
+the house. The three candidates were Tailscale, self-hosted WireGuard, and a plain port
+forward. **Tailscale.** Installed, authenticated, and proven the same day.
+
+### Why not the other two
+
+| option | what it costs | verdict |
+|---|---|---|
+| Port-forward 8096 | a login page on the public internet, permanently | **No.** Jellyfin has shipped auth-bypass bugs. A reverse proxy makes it less bad, not good. |
+| Self-hosted WireGuard | one open UDP port on the Bell router + dynamic DNS (76.64.36.43 is not permanent) + a router admin session | Viable, no third party. Rejected only because it needs the owner at the router and it still opens a port. |
+| **Tailscale** | a third-party coordination server learns device names and connect times | **Chosen.** Both ends dial *out*, so **nothing is opened**. The box stays invisible from the internet — `upnpc -l` still shows zero forwards. |
+
+The video itself is end-to-end encrypted between the two devices; Tailscale's servers
+carry key exchange and NAT-traversal coordination, not media. Personal tier is $0,
+unlimited devices, up to 6 users.
+
+**The Roku can run none of them.** Remote means a phone or a laptop. Watching *on the TV*
+from outside the house was never on the table.
+
+### What was actually done
+
+- `pacman -S tailscale` — `extra/tailscale 1.98.10-1`, native, dependency is glibc only.
+  **NO DOCKER is satisfied by the package, not worked around.**
+- `tailscale up --hostname=luminos-server --accept-dns=false`
+- Firewall opened for the tunnel interface only (see below).
+- `tailscaled` enabled + active. Tailnet IP **100.82.125.26**, MagicDNS name
+  `luminos-server.tail1fd435.ts.net`.
+
+### The trap: the LAN rule does not cover the tunnel
+
+nftables had `ip saddr 192.168.2.0/24 accept` under a `policy drop`. Tailscale peers do
+**not** arrive with a 192.168.2.x address — they arrive on `tailscale0` carrying
+`100.64.0.0/10` (CGNAT space). That rule misses them entirely. Without an explicit rule the
+tunnel comes up, `tailscale status` looks perfect, and **every service is silently
+unreachable through it**. Added to `/etc/nftables.conf`:
+
+```
+iifname "tailscale0" accept comment "tailscale mesh"
+```
+
+Tailscale also installs its own accept rules, but they live in the `iptables-nft` `filter`
+table. Those do not override a `drop` policy in a separate table, so **our rule is the one
+doing the work.** `nftables.service` is `enabled`, so it survives reboot.
+Backups: `/etc/nftables.conf.pre-tailscale`, `/root/nft-pre-tailscale.rules`.
+
+### `--accept-dns=false` is not optional here
+
+Tailscale takes over DNS by default. That would have quietly undone the DNS-over-TLS to
+Quad9 set up hours earlier in DECISION 48 — lookups would go back out in cleartext while
+`resolved.conf.d/` still looked correct. The before-state was recorded so the after could be
+compared, and it is unchanged:
+
+```
+Global      Protocols: +DNSOverTLS   DNS Servers: 9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net
+Link 5 (tailscale0)   Current Scopes: none      (no DNS claimed)
+resolvectl query news.usenetserver.com -> "acquired via local or encrypted transport: yes"
+```
+
+The cost is that the server cannot resolve other peers by their MagicDNS name. It does not
+need to — it is the thing being connected *to*.
+
+### Proof, and the limit of it
+
+`curl --interface 100.82.125.26 http://100.82.125.26:8096/System/Info/Public` → **200**.
+That proves Jellyfin listens on the tunnel address. It does **not** prove the firewall rule,
+because traffic from the box to itself never traverses `iifname tailscale0` — the rule's
+counter is still 0. **The firewall rule is only proven the first time a real peer connects.**
+Recorded here so it is not mistaken for a completed test.
+
+### Owner-only: key expiry
+
+The machine key expires **2027-02-01**. When it does, the server drops off the tailnet
+silently and remote access simply stops working, months from now, with no error anywhere on
+the box. Disabling expiry for `luminos-server` is one toggle in the Tailscale admin console
+and cannot be done from the command line. **Do it, or diarise it.**
