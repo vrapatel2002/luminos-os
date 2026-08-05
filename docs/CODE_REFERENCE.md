@@ -486,6 +486,42 @@ wallpaper. Screenshot with `grim` before believing a visual change landed.
 
 ---
 
+## HYPRLAND INPUT — SCROLLING — added 2026-08-05
+
+Hyprland has **two independent scroll multipliers**, and Caelestia sets them to different values.
+Confusing them wastes an entire debugging session.
+
+| Option | Device | Caelestia default | Luminos value |
+|---|---|---|---|
+| `input:touchpad:scroll_factor` | touchpad two-finger | `0.3` (`~/.config/hypr/variables.lua:17`) | **`1.0`** via `touchpadScrollFactor` in `config/caelestia/hypr-vars.lua` |
+| `input:scroll_factor` | mouse wheel | unset → `1.0` | unchanged |
+
+`0.3` means the compositor forwards three-tenths of the distance libinput actually reported. On a
+tall web page that only reads as "a bit slow". In a **short** viewport it reads as *broken* — the
+Caelestia launcher's app list is exactly `Config.launcher.maxShown` rows tall
+(`/etc/xdg/quickshell/caelestia/modules/launcher/AppList.qml:64`), so a whole two-finger swipe
+moved it less than one row and the list looked frozen. Nothing in the QML was wrong; the input was
+being scaled down before it ever arrived.
+
+Applied at `~/.config/hypr/hyprland/input.lua:14`. The override lives in `hypr-vars.lua` because
+`hyprland.lua` merges that file over `variables.lua` **before** `require("hyprland.input")` runs —
+which keeps `~/.config/hypr/` byte-identical to upstream so `caelestia update` never conflicts.
+Takes effect on write (Hyprland auto-reloads); no logout. Lower toward `0.3` if it overshoots.
+
+Two traps when verifying scroll with synthetic input:
+
+1. **`ydotool` injects a virtual *mouse*, so it exercises `input:scroll_factor` — never the
+   touchpad one.** A wheel test can therefore *not* validate a touchpad fix. Only fingers can.
+2. **`ydotool mousemove -a` coordinates are raw panel pixels, not Hyprland logical coordinates.**
+   On eDP-2 (2880x1800 at `scale 2.0`) asking for `746,600` puts the pointer at logical
+   `373,300` — a different window entirely. Confirm with `hyprctl cursorpos` **before** trusting a
+   before/after screenshot; an unchanged image usually means you scrolled the wrong surface.
+
+Also note `SUPER` alone is `kbLauncher` (`SUPER + SUPER_L`). Any synthetic `SUPER` keypress opens
+the launcher on release and starts swallowing keystrokes — do not press it on a live session.
+
+---
+
 ## AGENT UPDATE RULES
 
 When you modify files, update this doc:

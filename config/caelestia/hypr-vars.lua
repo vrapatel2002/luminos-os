@@ -33,6 +33,21 @@ local vars = {
     cursorTheme   = "Yaru",
     cursorSize    = 24,
 
+    -- ── Touchpad ────────────────────────────────────────────────────────────────────────
+    -- [CHANGE: claude-code | 2026-08-05]
+    -- Caelestia ships touchpadScrollFactor = 0.3, i.e. three-tenths of the scroll distance
+    -- libinput actually reports. In a tall page that only reads as "slow", but the SUPER
+    -- launcher's app list is a short viewport — it shows Config.launcher.maxShown rows and
+    -- nothing more — so a whole two-finger swipe moved it well under one row and the list
+    -- looked frozen. The list was never broken; the input was being scaled down before it
+    -- got there. 1.0 is Hyprland's own default (untouched libinput delta).
+    --
+    -- Applied at ~/.config/hypr/hyprland/input.lua:14 as input:touchpad:scroll_factor.
+    -- Mouse-wheel scrolling uses the separate input:scroll_factor, which was already 1.0 —
+    -- that is why the two devices behaved differently. Lower this toward 0.3 if it now
+    -- overshoots; it takes effect on `hyprctl reload`, no logout needed.
+    touchpadScrollFactor = 1.0,
+
     -- ── Suspend ─────────────────────────────────────────────────────────────────────────
     -- Caelestia's sleep gesture defaults to `systemctl suspend-then-hibernate`. This laptop
     -- has no hibernate image configured (swap is zram, which cannot hold one), so that command

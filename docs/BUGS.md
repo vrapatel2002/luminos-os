@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-08-04 (BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-08-05 (BUG-101 FIXED — the SUPER launcher's app list "barely scrolled", on the touchpad only: Caelestia ships `input:touchpad:scroll_factor = 0.3`, and in a viewport only `maxShown` rows tall, 30% of a swipe travels less than one row. The mouse wheel uses the **separate** `input:scroll_factor`, already 1.0 — which is why the two devices behaved differently. Overridden to 1.0 in `hypr-vars.lua`; no QML touched. BUG-100 FIXED — every hyprpm plugin was dead because hyprpm was still building against an April compositor. BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
 
@@ -1221,3 +1221,58 @@ of the BUG-088/089 family: a tool reporting failure for work it actually complet
 cost the same amount of time; neither exit code can be trusted alone.
 
 Full context and the configuration in **DECISION 49**.
+
+---
+
+## BUG-101 — the SUPER launcher's app list barely scrolled, because the touchpad was turned down to 30%
+**[CHANGE: claude-code | 2026-08-05] — FIXED**
+
+**Symptom.** In the Caelestia launcher (SUPER), a full two-finger swipe on the touchpad moved the
+app list a hair, or looked like it did nothing at all. Mouse wheel scrolled it fine. Nothing was
+logged, and the list was visibly longer than its viewport, so it read as a broken widget.
+
+### It was never the widget
+Hyprland exposes **two separate** scroll multipliers, and Caelestia sets only one of them:
+
+```
+input:scroll_factor            = 1.0    # mouse wheel     — untouched
+input:touchpad:scroll_factor   = 0.3    # touchpad        — ~/.config/hypr/variables.lua:17
+```
+
+`0.3` forwards three-tenths of the distance libinput reported. On a tall page that reads as
+"slow". The launcher list is deliberately **short** — its height is exactly
+`Config.launcher.maxShown` rows (`modules/launcher/AppList.qml:64`) while its content is every
+installed app — so 30% of one swipe travels **less than a single row**, and a list that moves less
+than one row looks frozen. Two devices, two multipliers, one of them cut to a third: that is the
+whole bug.
+
+Fixed by overriding the variable, not the upstream file:
+
+```lua
+-- ~/.config/caelestia/hypr-vars.lua   (mirrored at config/caelestia/hypr-vars.lua)
+touchpadScrollFactor = 1.0,
+```
+
+`hyprland.lua` merges `hypr-vars.lua` over `variables.lua` **before** `require("hyprland.input")`,
+so `~/.config/hypr/` stays byte-identical to upstream and `caelestia update` never conflicts.
+Hyprland auto-reloads on write; `hyprctl getoption input:touchpad:scroll_factor` → `1.000000`.
+
+### Three dead ends, all worth writing down
+**1. Reading QML and guessing is not evidence.** Two separate MouseAreas were accused of eating
+the wheel event — `StateLayer`, then the full-screen `CustomMouseArea` in `Interactions.qml`. Both
+were wrong. `QQuickMouseArea` only *accepts* a wheel event if an `onWheel` handler is connected
+(`isWheelConnected()`), and `ContentWindow.qml:262` nests `Panels` **inside** `Interactions`, so
+the list is the child and receives the wheel first regardless.
+
+**2. `ydotool` cannot test a touchpad fix.** It creates a virtual **mouse** emitting `REL_WHEEL`,
+which is governed by `input:scroll_factor` — the option that was already correct. A green wheel
+test would have proved nothing about the option actually changed.
+
+**3. `ydotool mousemove -a` takes raw panel pixels, not logical coordinates.** eDP-2 is 2880x1800
+at `scale 2.0`. Asking for `746,600` landed the pointer at logical `373,300`, inside a different
+window. The resulting before/after screenshots were byte-identical — which looked exactly like a
+frozen list and was in fact a correctly scrolling *other* window. `hyprctl cursorpos` settles it
+in one command; run it **before** believing an unchanged screenshot.
+
+One more hazard for anyone scripting input here: `kbLauncher` is `SUPER + SUPER_L`, so any
+synthetic bare `SUPER` press opens the launcher on release and it then swallows the user's typing.
