@@ -165,6 +165,15 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 - **A local `curl` to your own tailnet IP does not test the firewall.** Loopback traffic never
   crosses `iifname tailscale0`, so the rule's counter stays 0. It proves the listener, nothing
   more. Only a real peer proves the rule.
+- **Jellyfin's "Forgot Password" cannot recover an admin account.** It fails twice over:
+  it refuses any request not from the LAN (a Tailscale `100.x` peer logs *"Password reset
+  process initiated from outside the local network"* and gets nothing), and even from the
+  LAN it resets the password to **empty**, which `UserManager.ChangePassword` then rejects
+  with `ArgumentException: Admin user passwords must not be empty`. Recover via the API key
+  in the `ApiKeys` table of `/var/lib/jellyfin/data/jellyfin.db`:
+  `POST /Users/{id}/Password` with `{"CurrentPw":"","NewPw":"<new>","ResetPassword":false}`.
+- **Changing a Jellyfin password revokes every logged-in device.** The `Devices` table went
+  from 4 rows to 0 — Roku, phone and browser all have to sign in again. Warn before doing it.
 - `bc` is not installed. Use python for arithmetic in scripts.
 
 ## Owner-only tasks
