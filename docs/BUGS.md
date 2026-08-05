@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-08-05 (BUG-104 FIXED — **mempalace reported "success" and threw every memory away, for at least ten days.** `add_drawer` returned a drawer_id, the WAL logged the call, and the drawer did not exist; the WAL shows `"result": null` on every add since 2026-07-26, and content is redacted there so none of it is recoverable. Root cause is in ChromaDB 0.6.3, not MemPalace: the palace's per-segment `max_seq_id` watermark held a poisoned ~1.23e18 timestamp while `embeddings_queue` — an `INTEGER PRIMARY KEY` with no AUTOINCREMENT — had been emptied and restarted numbering at 1, so `_notify_one` skipped every record as "already consumed" and `upsert()` raised nothing. Repaired by setting each watermark to the queue's current max row id; zeroing it does NOT work, because `start = start or self._next_seq_id()` treats 0 as falsy. Verified by readback in a fresh process. **The running MCP server keeps the poisoned subscription in memory and `mempalace_reconnect` does not rebuild it** — restart the server or file through the library. BUG-103 OPEN — the dGPU never goes back to sleep after you use it: all three GPU launchers write `on` to `power/control`, which *disables runtime PM for the device*, and nothing anywhere ever writes `auto` back, so the card sat at 1.63 W / P8 / `active` with zero processes holding it. Restored by hand; the code is unchanged and `luminos-verify` already calls this state a failure. BUG-102 FIXED — picking "NVIDIA" in the Chrome GPU dialog silently gave you the AMD iGPU for a month, with a notification claiming otherwise. Three stacked causes: `chrome-luminos` never called the dGPU gate at all; the gate itself is defeated by **any launcher written in shell**, because setgid raises only the *effective* gid and bash resets it (fixed by `dgpu-exec-v2`, which `setresgid`s so the group is real); and Chrome is single-instance per profile, so the picker could never take effect while a window was open. Now proven on the card — `ANGLE (NVIDIA, Vulkan …RTX 4050…)`, 20 fds on `/dev/nvidia0`, listed in `nvidia-smi`. Two Chromes on two GPUs at once works, given separate `--user-data-dir`. BUG-101 FIXED — the SUPER launcher's app list "barely scrolled", on the touchpad only: Caelestia ships `input:touchpad:scroll_factor = 0.3`, and in a viewport only `maxShown` rows tall, 30% of a swipe travels less than one row. The mouse wheel uses the **separate** `input:scroll_factor`, already 1.0 — which is why the two devices behaved differently. Overridden to 1.0 in `hypr-vars.lua`; no QML touched. BUG-100 FIXED — every hyprpm plugin was dead because hyprpm was still building against an April compositor. BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-08-05 (BUG-104 FIXED — **mempalace reported "success" and threw every memory away, for at least ten days.** `add_drawer` returned a drawer_id, the WAL logged the call, and the drawer did not exist; the WAL shows `"result": null` on every add since 2026-07-26, and content is redacted there so none of it is recoverable. Root cause is in ChromaDB 0.6.3, not MemPalace: the palace's per-segment `max_seq_id` watermark held a poisoned ~1.23e18 timestamp while `embeddings_queue` — an `INTEGER PRIMARY KEY` with no AUTOINCREMENT — had been emptied and restarted numbering at 1, so `_notify_one` skipped every record as "already consumed" and `upsert()` raised nothing. Repaired by setting each watermark to the queue's current max row id; zeroing it does NOT work, because `start = start or self._next_seq_id()` treats 0 as falsy. Verified by readback in a fresh process. **The running MCP server keeps the poisoned subscription in memory and `mempalace_reconnect` does not rebuild it** — restart the server or file through the library. BUG-103 FIXED — the dGPU never went back to sleep after you used it: all three GPU launchers wrote `on` to `power/control`, which *disables runtime PM for the device*, and nothing anywhere ever wrote `auto` back, so the card sat at 1.63 W / P8 / `active` with zero processes holding it. The fix was to **stop writing `on`** — with `control=auto` the driver takes a runtime-PM reference when a device node is opened, so the card wakes on demand and re-suspends by itself ~20 s after the last close. No release mechanism was needed; the one line meant to help was the only thing preventing sleep. Proven end to end: NVIDIA Chrome came up on `renderD128` with `glRenderer = ANGLE (NVIDIA, … RTX 4050 …)`, then the card returned to `suspended` on its own, and `luminos-verify` section 3 now passes all three checks. Two side-findings: `luminos-wine-launcher` had silently diverged from its installed copy (repo newer but missing both EGL exports — reconciled), and it **never calls the dGPU gate at all**, so Wine-on-NVIDIA is still denied like BUG-102. `luminos-gpu-launch` was also promoted from `dgpu-exec` to `dgpu-exec-v2` in the same pass. BUG-102 FIXED — picking "NVIDIA" in the Chrome GPU dialog silently gave you the AMD iGPU for a month, with a notification claiming otherwise. Three stacked causes: `chrome-luminos` never called the dGPU gate at all; the gate itself is defeated by **any launcher written in shell**, because setgid raises only the *effective* gid and bash resets it (fixed by `dgpu-exec-v2`, which `setresgid`s so the group is real); and Chrome is single-instance per profile, so the picker could never take effect while a window was open. Now proven on the card — `ANGLE (NVIDIA, Vulkan …RTX 4050…)`, 20 fds on `/dev/nvidia0`, listed in `nvidia-smi`. Two Chromes on two GPUs at once works, given separate `--user-data-dir`. BUG-101 FIXED — the SUPER launcher's app list "barely scrolled", on the touchpad only: Caelestia ships `input:touchpad:scroll_factor = 0.3`, and in a viewport only `maxShown` rows tall, 30% of a swipe travels less than one row. The mouse wheel uses the **separate** `input:scroll_factor`, already 1.0 — which is why the two devices behaved differently. Overridden to 1.0 in `hypr-vars.lua`; no QML touched. BUG-100 FIXED — every hyprpm plugin was dead because hyprpm was still building against an April compositor. BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
 
@@ -1388,7 +1388,7 @@ it launches is a shell script. Chrome first, the rest once they are re-verified.
 
 ## BUG-103 — the dGPU never goes back to sleep after you use it
 # [CHANGE: claude-code | 2026-08-05]
-**Status:** OPEN (live leak stopped by hand; the code that causes it is unchanged)
+**Status:** FIXED 2026-08-05 — all three `echo "on"` lines deleted, tested end to end on the card
 **Severity:** Low-impact, always-on — 1.63 W burned continuously for nothing
 **Found:** 2026-08-05, while auditing the gate for BUG-102
 
@@ -1456,6 +1456,74 @@ from the era of the PCIe link-training stall (see the AC/DPM P-state finding), n
 RTX 4050 and the card actually woke. If it does, delete all three `echo on` lines. If it doesn't,
 the release belongs in the single choke point instead — see DECISION 53, which puts wake **and**
 release in one place because everything already has to pass through it.
+
+### THE FIX — applied and proven on the card, 2026-08-05
+# [CHANGE: claude-code | 2026-08-05]
+The test above was run, it passed, and all three `echo "on"` lines are gone. **The card now sleeps
+by itself and no release mechanism was needed at all** — which is the interesting part. `auto` does
+not mean "stay asleep"; the nvidia driver takes a runtime-PM reference when a device node is opened,
+so the kernel wakes the card on demand and re-suspends it when the last fd closes.
+
+Full measured cycle, with `control=auto` the whole way through and never written by anything:
+
+```
+BEFORE  control=auto status=suspended     nvidia fd holders: 0
+        ↓  LUMINOS_GPU=nvidia chrome-luminos --user-data-dir=/tmp/chrome-bug103 …
+DURING  control=auto status=active        nvidia fd holders: chrome 367925
+        gpu-process cmdline: --render-node-override=/dev/dri/renderD128  (the NVIDIA node)
+        DevTools SystemInfo.getInfo → auxAttributes.glRenderer =
+          ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 4050 Laptop GPU
+                 (0x000028E1)), NVIDIA-595.71.5.0)
+        ↓  close Chrome
+19:52:34 control=auto status=active     nvidia_fds=0
+19:52:44 control=auto status=active     nvidia_fds=0
+19:52:54 control=auto status=suspended  nvidia_fds=0     ← asleep on its own, ~20 s after close
+19:53:04 … 19:53:25  control=auto status=suspended
+```
+
+`luminos-verify` section 3 now passes all three checks instead of failing the first:
+```
+[3] dGPU power gating (RTX 4050 — read-only, no nvidia-smi)
+  ✓ power/control=auto (runtime PM enabled)
+  ✓ runtime_status=suspended (true-0W idle achieved)
+  ✓ NVreg_DynamicPowerManagement=0x02 (fine-grained)
+```
+
+So the answer to "how do we put it back to sleep when it isn't being used" turned out to be:
+**stop telling it not to.** There is nothing to add — the kernel was always willing to do this, and
+the one line meant to help was the only thing preventing it.
+
+Changed (all with `[CHANGE: claude-code | 2026-08-05]` comments explaining *why*, so nobody
+"restores" the wake later): `scripts/chrome-luminos`, `scripts/luminos-gpu-launch`,
+`scripts/luminos-wine-launcher`; installed to `/usr/local/bin/` (previous copies backed up to
+`~/.luminos-backups/launchers-bug103-20260805-195035/`).
+
+**Two things found while testing — do not lose these:**
+
+1. **`scripts/luminos-wine-launcher` had silently diverged from the installed copy.** The repo copy
+   was newer (it has the isolated-Wine-prefix picker, 2026-07-08) but had *lost* both
+   `__EGL_VENDOR_LIBRARY_FILENAMES` exports that the installed 2026-05-14 copy still had — someone
+   edited an older base and committed over the top. Reconciled by hand: repo features kept, the two
+   EGL lines restored, then installed. If you diff a launcher and the *repo* side looks older in one
+   place, do not assume the repo wins wholesale.
+2. **The Wine launcher never calls the dGPU gate at all.** It sets the NVIDIA env vars and ends in
+   `exec wine …` — no `dgpu-exec`, so its NVIDIA path is denied exactly the way `chrome-luminos` was
+   in BUG-102. Removing `echo on` does not make that worse (a woken card you cannot open is no more
+   useful than a sleeping one), but Wine-on-NVIDIA is still broken until it is gated. Not fixed here.
+
+Also promoted in the same pass: `luminos-gpu-launch` now calls **`dgpu-exec-v2`** instead of v1, so
+every app launched through the universal picker gets the real-gid fix from BUG-102, not just Chrome.
+
+**A trap in testing this, worth writing down:** the first NVIDIA test looked like a total failure —
+the GPU process came up on `renderD129` (the iGPU) with none of the NVIDIA flags. The cause was not
+the GPU at all: `chrome-luminos`'s singleton guard saw the everyday Chrome's `SingletonLock` and
+took its hand-off branch, `exec google-chrome-stable "$@"`, which drops every GPU flag. That guard
+keys on the **default profile's** lock even when you pass your own `--user-data-dir`, so a
+throwaway-profile test is hijacked by whatever Chrome you already have open. Work around it with
+`XDG_CONFIG_HOME=/tmp/somewhere` so the guard looks for the lock somewhere it isn't.
+(Two smaller ones: DevTools rejects a websocket whose Origin it did not expect — use
+`suppress_origin=True` or `--remote-allow-origins`; and `pkill -f 'chrome-bug103'` matches **your own
+shell's command line** and kills the shell running it — write the pattern as `chrome-bug10[3]`.)
 
 ---
 

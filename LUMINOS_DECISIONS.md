@@ -2603,6 +2603,16 @@ irrelevant here.
 1. **Logging first, on its own.** Cheapest possible change to `dgpu-exec-v2` and it retires the
    condition that produced BUG-102. Also finally answers "what is holding my dGPU awake", which is
    the question that started all of this.
-2. Fix BUG-103 (test "stop writing `on`" first; fall back to fork-and-release).
+2. ~~Fix BUG-103 (test "stop writing `on`" first; fall back to fork-and-release).~~
+   **DONE 2026-08-05 — and it removes a requirement from this design.** "Stop writing `on`" was
+   tested and passed: with `control=auto` the driver takes a runtime-PM reference on device open, so
+   the card wakes on demand and re-suspends itself ~20 s after the last fd closes. **So `dgpu-exec-v3`
+   does NOT need to fork-and-wait in order to release the card** — the kernel already does it.
+   Fork-and-wait is now justified only by *logging* (a "released at HH:MM:SS after Ns" line) and by
+   nothing else; if that isn't worth a resident supervisor process per launch, keep `exec`.
 3. Promote v2 over v1 everywhere, then the policy file + `ask` dialog.
+   **Partly done 2026-08-05** — `luminos-gpu-launch` now calls `dgpu-exec-v2`, so the universal
+   picker is covered. Still on v1 or ungated: **`luminos-wine-launcher`, which never called the gate
+   at all** (bare `exec wine`, so Wine-on-NVIDIA is denied exactly as Chrome was in BUG-102), plus
+   any `.desktop` entry or script invoking `dgpu-exec` directly.
 4. BPF-LSM, if and when the gate needs to be a boundary rather than a filter.

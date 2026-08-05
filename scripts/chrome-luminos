@@ -171,7 +171,15 @@ if [ "$GPU_CHOICE" = "igpu" ]; then
     --remote-debugging-port=9222 \
     "$@"
 else
-  echo "on" | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control > /dev/null
+  # [CHANGE: claude-code | 2026-08-05] BUG-103: removed
+  #   echo "on" > /sys/bus/pci/devices/0000:01:00.0/power/control
+  # `on` does not merely wake the card, it DISABLES runtime power management for
+  # the device, and nothing anywhere wrote `auto` back — so the RTX 4050 stayed
+  # awake burning ~1.6 W forever, long after Chrome exited. This script ends in
+  # `exec`, so there was no "after" in which to restore it.
+  # No wake is needed: with power/control=auto the nvidia driver takes a runtime-PM
+  # reference when a device node is opened, so the card comes up on demand and
+  # re-suspends by itself ~18 s after the last close. Measured 2026-08-05.
   notify-send "Chrome" "Running on NVIDIA RTX 4050 (XWayland)" --icon=dialog-information
   # [CHANGE: claude-code | 2026-08-05] BUG-102: the dGPU gate is opened here. It preserves the
   # environment (verified — VK_ICD_FILENAMES and friends survive) and yields gid 948(dgpu) as

@@ -47,16 +47,27 @@ fi
 if [ "$GPU_CHOICE" = "igpu" ]; then
   export DRI_PRIME=0
   export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json
+  # [CHANGE: claude-code | 2026-08-05] restored from the installed copy, which
+  # had these and the repo copy had lost them.
+  export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
   export WINEDLLOVERRIDES="d3d11=b;d3d10core=b;d3d9=b;dxgi=b"
   notify-send "HIVE" \
     "$APP_NAME running on AMD iGPU (cool mode)" \
     --icon=dialog-information
-  
+
 elif [ "$GPU_CHOICE" = "nvidia" ]; then
   export DRI_PRIME=1
   export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
-  # Wake NVIDIA
-  echo "on" | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control > /dev/null
+  export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/60_nvidia.json
+  # [CHANGE: claude-code | 2026-08-05] BUG-103: removed
+  #   echo "on" > /sys/bus/pci/devices/0000:01:00.0/power/control
+  # `on` does not merely wake the card, it DISABLES runtime power management for
+  # the device, and nothing anywhere wrote `auto` back — so the RTX 4050 stayed
+  # awake burning ~1.6 W forever, long after the app exited. All three launchers
+  # end in `exec`, so there was no "after" in which to restore it.
+  # No wake is needed: with power/control=auto the nvidia driver takes a runtime-PM
+  # reference when a device node is opened, so the card comes up on demand and
+  # re-suspends by itself ~18 s after the last close. Measured 2026-08-05.
   notify-send "HIVE" \
     "$APP_NAME running on NVIDIA RTX 4050" \
     --icon=dialog-information

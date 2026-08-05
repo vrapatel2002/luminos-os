@@ -72,9 +72,20 @@ else
   export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/60_nvidia.json
   export __NV_PRIME_RENDER_OFFLOAD=1
   export __GLX_VENDOR_LIBRARY_NAME=nvidia
-  # Wake NVIDIA from the RTD3 power gate.
-  echo "on" | sudo tee /sys/bus/pci/devices/0000:01:00.0/power/control > /dev/null 2>&1 || true
+  # [CHANGE: claude-code | 2026-08-05] BUG-103: removed
+  #   echo "on" > /sys/bus/pci/devices/0000:01:00.0/power/control
+  # `on` does not merely wake the card, it DISABLES runtime power management for
+  # the device, and nothing anywhere wrote `auto` back — so the RTX 4050 stayed
+  # awake burning ~1.6 W forever, long after the app exited. This script ends in
+  # `exec`, so there was no "after" in which to restore it.
+  # No wake is needed: with power/control=auto the nvidia driver takes a runtime-PM
+  # reference when a device node is opened, so the card comes up on demand and
+  # re-suspends by itself ~18 s after the last close. Measured 2026-08-05.
   notify-send "GPU Launcher" "$APP → NVIDIA RTX 4050" --icon=dialog-information 2>/dev/null
   # DECISION 25: grant dGPU device access via the setgid gate (default-deny nodes).
-  exec dgpu-exec "$CMD" "${ARGS[@]}"
+  # [CHANGE: claude-code | 2026-08-05] BUG-102: v1 dgpu-exec raises only the EFFECTIVE gid, and
+  # bash/sh drop it at startup as setgid protection — so any app whose launcher is a shell script
+  # (Chrome, Steam, most of them) lost the group before it started. v2 calls setresgid(g,g,g) so
+  # the gid is real as well as effective. Do not downgrade to v1.
+  exec dgpu-exec-v2 "$CMD" "${ARGS[@]}"
 fi

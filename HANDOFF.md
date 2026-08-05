@@ -1,7 +1,8 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-05 — Response 4. **🟥 Long-term memory was silently discarding every write for
-ten days — fixed (BUG-104).** dGPU found parked awake with nothing using it (BUG-103, open). A real
-policy for the gate designed but not built (DECISION 53). **Chrome's GPU picker actually switches
+Last updated: 2026-08-05 — Response 5. **🟥 Long-term memory was silently discarding every write for
+ten days — fixed (BUG-104).** **The dGPU sleeps again (BUG-103, FIXED)** — it was parked awake by our
+own launchers; the fix was to stop writing `on`, and the kernel handles wake *and* sleep by itself. A
+real policy for the gate designed but not built (DECISION 53). **Chrome's GPU picker actually switches
 GPUs now** (BUG-102 / DECISION 52). `luminos-notepad` built and proven. Caelestia adopted (DECISION 41).
 
 ## 🟥 READ THIS FIRST — mempalace was throwing your memories away (BUG-104), FIXED
@@ -42,7 +43,7 @@ Things that will bite you here:
 Five drawers were filed after the repair (BUG-102, BUG-103, BUG-104, DECISION 52, DECISION 53 — the
 verbatim doc sections), each verified by readback: collection went 13575 → 13580.
 
-## 🟠 ALSO NEW — the dGPU never goes back to sleep (BUG-103, OPEN)
+## 🟢 FIXED — the dGPU sleeps again (BUG-103)
 Hours after the last NVIDIA Chrome died, with **zero** processes holding any `/dev/nvidia*` fd:
 `power/control=on`, `runtime_status=active`, **1.63 W at P8**.
 
@@ -53,11 +54,36 @@ structural reason: all three end in `exec`, so there is no "after" for a trap to
 `luminos-verify:76` already calls anything but `auto` a failure — our launcher creates a state our own
 verifier condemns.
 
-Restored by hand (`auto` → `suspended`). **Code unchanged on purpose.** The likely fix is to stop
-writing `on` at all, since `auto` means "let the kernel decide" and the driver takes a runtime-PM
-reference when a node is opened. Test it before shipping it: set `auto`, launch NVIDIA Chrome through
-`chrome-luminos`, confirm via DevTools `SystemInfo.getInfo` that `glRenderer` is still the RTX 4050.
-The `echo on` is probably a leftover from the PCIe link-training stall era — probably is not proven.
+**The test was run, it passed, and all three `echo "on"` lines are now gone.** The surprise: **no
+release mechanism was needed.** `auto` never meant "stay asleep" — the nvidia driver takes a
+runtime-PM reference when a device node is opened, so the kernel wakes the card on demand and
+re-suspends it once the last fd closes. The one line meant to help was the only thing preventing it.
+
+Measured with `control=auto` throughout, never written by anything:
+```
+suspended → launch NVIDIA Chrome → active, gpu-process on --render-node-override=/dev/dri/renderD128
+   DevTools glRenderer = ANGLE (NVIDIA, Vulkan 1.4.329 (… RTX 4050 …), NVIDIA-595.71.5.0)
+→ close Chrome → 19:52:44 active … 19:52:54 suspended  (on its own, ~20 s) … still asleep at +60 s
+```
+`luminos-verify` section 3 now passes all three checks. Old copies in
+`~/.luminos-backups/launchers-bug103-20260805-195035/`.
+
+**Three things to carry forward:**
+1. **`luminos-gpu-launch` now calls `dgpu-exec-v2`**, not v1 — so every app in the universal picker
+   gets the BUG-102 real-gid fix, not just Chrome.
+2. **`scripts/luminos-wine-launcher` had silently diverged from its installed copy** — repo side
+   newer (isolated-prefix picker) but *missing* both `__EGL_VENDOR_LIBRARY_FILENAMES` exports the
+   older installed copy had. Reconciled by hand. Diff before you install any launcher; newer is not
+   automatically a superset.
+3. **The Wine launcher still never calls the gate at all** — bare `exec wine`, so Wine-on-NVIDIA is
+   denied exactly like Chrome was in BUG-102. Not fixed. That is the next obvious one-word change.
+
+**Testing trap that cost a cycle:** the first NVIDIA run came up on the iGPU with no NVIDIA flags,
+and the GPU had nothing to do with it — `chrome-luminos`'s singleton guard saw the everyday Chrome's
+`SingletonLock` and took `exec google-chrome-stable "$@"`, which drops every GPU flag. The guard
+watches the **default profile's** lock even when you pass your own `--user-data-dir`. Use
+`XDG_CONFIG_HOME=/tmp/somewhere` to hide it. Also: DevTools rejects an unexpected websocket Origin
+(`suppress_origin=True`), and `pkill -f 'chrome-bug103'` **kills your own shell** — write `chrome-bug10[3]`.
 
 ## 🔵 DECISION 53 — the "smarter gate" answer (designed, NOT built)
 Shawn asked: *"any way how to give access but in smart way?"* Full write-up in LUMINOS_DECISIONS.md.
