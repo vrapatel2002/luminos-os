@@ -14,7 +14,7 @@
 # Hyprland has no "minimize" concept. The standard equivalent is to throw the window
 # onto a special workspace and pull it back later, which is what min/restore do.
 #
-# Usage: luminos-win close|max|min|restore|lock|unlock|togglelock|list|pin
+# Usage: luminos-win close|max|min|restore|lock|unlock|togglelock|list|pin|default
 set -uo pipefail
 
 MIN_WS="minimized"
@@ -22,7 +22,49 @@ LOCK_FILE="${HOME}/.config/caelestia/hypr-locked.conf"
 
 die() { echo "luminos-win: $*" >&2; exit 1; }
 
-[ -n "${1:-}" ] || die "usage: luminos-win close|max|min|restore|lock|unlock|togglelock|list|pin"
+[ -n "${1:-}" ] || die "usage: luminos-win close|max|min|restore|lock|unlock|togglelock|list|pin|default"
+
+# ── Placement default ────────────────────────────────────────────────────────────────────
+# [CHANGE: claude-code | 2026-08-05] Windows used to float unconditionally. That is now a
+# `default = tiled|floating` directive in LOCK_FILE, and the class list below it means "the
+# OPPOSITE of the default" rather than "tiled". Both readings of that file — this script and
+# the Lua in hypr-user.lua — must agree, including on the fallback, or the message this
+# script prints will not match what the compositor actually did.
+#
+# The fallback is deliberately "anything that is not exactly `floating` means tiled", mirrored
+# verbatim in hypr-user.lua, so a typo like `default = floatng` fails to the safe side in
+# BOTH readers instead of them disagreeing.
+current_default() {
+    local v
+    v="$(grep -oE '^[[:space:]]*default[[:space:]]*=[[:space:]]*[A-Za-z]+' "$LOCK_FILE" 2>/dev/null \
+         | tail -1 | sed 's/.*=[[:space:]]*//')"
+    case "$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')" in
+        floating) echo floating ;;
+        *)        echo tiled ;;
+    esac
+}
+
+set_default() {
+    local want="$1" tmp
+    mkdir -p "$(dirname "$LOCK_FILE")"
+    [ -f "$LOCK_FILE" ] || : > "$LOCK_FILE"
+    tmp="$(mktemp)"
+    if grep -qE '^[[:space:]]*default[[:space:]]*=' "$LOCK_FILE" 2>/dev/null; then
+        sed "s/^[[:space:]]*default[[:space:]]*=.*/default = ${want}/" "$LOCK_FILE" > "$tmp" \
+            && mv "$tmp" "$LOCK_FILE"
+    else
+        rm -f "$tmp"
+        printf '\ndefault = %s\n' "$want" >> "$LOCK_FILE"
+    fi
+    # Read back. Writing and then reporting success without checking is the exact failure
+    # this whole script exists to avoid.
+    [ "$(current_default)" = "$want" ] || die "failed to set default to '${want}' in $LOCK_FILE"
+}
+
+# The class list is everything that is neither a comment, a blank line, nor the directive.
+list_exceptions() {
+    grep -vE '^[[:space:]]*(#|$)' "$LOCK_FILE" 2>/dev/null | grep -vE '^[[:space:]]*default[[:space:]]*='
+}
 
 # Fail loudly if there is no compositor to talk to, rather than silently doing nothing
 # (Luminos scripts have a documented habit of reporting success on a dead path).
@@ -106,41 +148,78 @@ print(sum(1 for c in json.load(sys.stdin) if c["workspace"]["name"] == "special:
           if grep -qxF "$cls" "$LOCK_FILE" 2>/dev/null; then action="unlock"; else action="lock"; fi
       fi
 
+      # What "locked" means now depends on the default: an entry in the file always means
+      # THE OPPOSITE of it. Naming the outcome rather than the bookkeeping, so the message
+      # says what Shawn will actually see happen.
+      def="$(current_default)"
+      if [ "$def" = "floating" ]; then exc_state="tiled"; def_state="floating"
+      else                             exc_state="floating"; def_state="tiled"; fi
+
       if [ "$action" = "lock" ]; then
           if grep -qxF "$cls" "$LOCK_FILE" 2>/dev/null; then
-              echo "luminos-win: '$cls' is already locked"
+              echo "luminos-win: '$cls' is already set to open $exc_state"
           else
               printf '%s\n' "$cls" >> "$LOCK_FILE"
               grep -qxF "$cls" "$LOCK_FILE" || die "failed to write '$cls' to $LOCK_FILE"
-              echo "luminos-win: locked '$cls' — it will open tiled from now on"
+              echo "luminos-win: '$cls' will now open $exc_state (default is $def_state)"
           fi
-          # The rule only applies to windows created AFTER a reload, so tile this one now.
-          # float() is a TOGGLE, so it is only safe to call when the window is floating.
-          [ "$(active_floating)" = "1" ] && hyprctl dispatch 'hl.dsp.window.float()' >/dev/null
+          want_float=$([ "$exc_state" = "floating" ] && echo 1 || echo 0)
       else
-          grep -qxF "$cls" "$LOCK_FILE" 2>/dev/null || { echo "luminos-win: '$cls' was not locked"; exit 0; }
+          grep -qxF "$cls" "$LOCK_FILE" 2>/dev/null \
+              || { echo "luminos-win: '$cls' already follows the default ($def_state)"; exit 0; }
           tmp="$(mktemp)"
           grep -vxF "$cls" "$LOCK_FILE" > "$tmp" && mv "$tmp" "$LOCK_FILE"
           grep -qxF "$cls" "$LOCK_FILE" && die "failed to remove '$cls' from $LOCK_FILE"
-          echo "luminos-win: unlocked '$cls' — it will float again"
-          [ "$(active_floating)" = "0" ] && hyprctl dispatch 'hl.dsp.window.float()' >/dev/null
+          echo "luminos-win: '$cls' goes back to opening $def_state (the default)"
+          want_float=$([ "$def_state" = "floating" ] && echo 1 || echo 0)
       fi
+
+      # The rule only applies to windows mapped AFTER a reload, so bring THIS window into
+      # line by hand. float() is a TOGGLE, so it is only ever safe to call when the current
+      # state is known and actually wrong — calling it unconditionally would flip windows
+      # that were already correct.
+      [ "$(active_floating)" = "$want_float" ] || hyprctl dispatch 'hl.dsp.window.float()' >/dev/null
       hyprctl reload >/dev/null || die "config reload failed after editing $LOCK_FILE" ;;
 
+  default)
+      if [ -z "${2:-}" ]; then
+          echo "windows open $(current_default) by default"
+          echo "change it with: luminos-win default tile|float"
+          exit 0
+      fi
+      case "$2" in
+          tile|tiled)     want="tiled" ;;
+          float|floating) want="floating" ;;
+          *) die "unknown default '$2' (expected tile or float)" ;;
+      esac
+      if [ "$(current_default)" = "$want" ]; then
+          echo "luminos-win: default is already $want"
+          exit 0
+      fi
+      set_default "$want"
+      hyprctl reload >/dev/null || die "config reload failed after setting default=$want"
+      echo "luminos-win: new windows will now open $want"
+      echo "  (already-open windows keep their current state — SUPER+ALT+Space flips one)"
+      exit 0 ;;
+
   list)
-      # Test on the ENTRIES, not on file size: the file ships with a comment header, so
-      # `[ -s ]` is true even when nothing is locked and would print an empty list.
-      entries="$(grep -vE '^\s*(#|$)' "$LOCK_FILE" 2>/dev/null)"
+      # Test on the ENTRIES, not on file size: the file ships with a comment header and a
+      # `default =` line, so `[ -s ]` is true even when no app has an exception and would
+      # print an empty list under a heading that claims otherwise.
+      def="$(current_default)"
+      [ "$def" = "floating" ] && other="tiled" || other="floating"
+      echo "default: new windows open $def"
+      entries="$(list_exceptions)"
       if [ -n "$entries" ]; then
-          echo "locked to tiled (from $LOCK_FILE):"
+          echo "exceptions — these open $other instead (from $LOCK_FILE):"
           printf '%s\n' "$entries" | sed 's/^/  /'
       else
-          echo "no locked apps — everything floats"
+          echo "exceptions: none — every app opens $def"
       fi
       exit 0 ;;
 
   *)
-      die "unknown action '$1' (expected close|max|min|restore|lock|unlock|togglelock|list|pin)" ;;
+      die "unknown action '$1' (expected close|max|min|restore|lock|unlock|togglelock|list|pin|default)" ;;
 esac
 
 rc=$?

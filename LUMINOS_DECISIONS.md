@@ -2336,3 +2336,99 @@ hyprpm reload
 # ~/.config/caelestia/hypr-user.lua, and the `hyprpm reload -n` line in hyprland.start
 ```
 A full-file backup sits at `~/.config/caelestia/hypr-user.lua.bak-preplugins`.
+
+---
+
+## DECISION 50 — Tiling is the default, floating is the exception, and the layout is dwindle again
+**Date:** 2026-08-05
+**Agent:** claude-code
+**Supersedes:** the floating half of DECISION 45 and DECISION 46
+
+Shawn asked for three things in one sentence: what the window-lock shortcut is, that windows stop
+hanging off the edge of the screen, and that float-by-default be removed — *and to be told where the
+switch is*, so he can flip it back himself.
+
+### The switch
+`~/.config/caelestia/hypr-locked.conf` now opens with a directive:
+
+```
+default = tiled       # or: default = floating
+```
+
+and `luminos-win default tile|float` (bare `luminos-win default` prints the current one) edits it and
+reloads. The switch deliberately lives in the **text** file rather than `hypr-vars.lua`, for the same
+reason the class list does: `luminos-win` rewrites this file on a keypress, and a bad write to a Lua
+file is a syntax error, which is emergency mode, which is a black screen with no binds to escape with.
+
+### The list now means "the opposite of the default"
+It used to mean "force this app tiled", which becomes meaningless once tiled is the default. Every
+class listed gets the **inverse** of the directive above it, so the same file keeps working when the
+default is flipped. `luminos-win list` prints the default first and then the exceptions in those terms,
+and the lock/unlock messages name the outcome ("will now open floating (default is tiled)") instead of
+the bookkeeping.
+
+The fallback — *anything that is not exactly `floating` means tiled* — is written **twice, verbatim**:
+once in `luminos-win`, once in the Lua reader in `hypr-user.lua`. Both files parse the same directive,
+so a typo like `default = floatng` has to fail the same way in both, or the script prints a message
+that does not match what the compositor did.
+
+### The real cause of "windows going out the area"
+Not floating. `hyprctl getoption general:layout` read back **`scrolling`**, despite
+`~/.config/hypr/hyprland/general.lua:5` declaring `dwindle`. The override was in
+`~/.config/hypr/hyprland-gui.lua:9`, written by the HyprMod settings GUI — and that file is
+`require`d **last** in `hyprland.lua`, after `hypr-user.lua`, so it beats every Luminos override.
+
+A scrolling layout lays tiled windows out in an endless horizontal strip and keeps only the focused
+column in view. Measured before the fix: three tiled windows at x = 72 / 1427 / 2102, spaced 1355
+apart on a **1440**-wide screen. That is the symptom, exactly.
+
+Set back to `dwindle` **in `hyprland-gui.lua` itself** rather than by overriding it elsewhere, so the
+HyprMod GUI keeps showing the truth. Anything appended to `hypr-user.lua` would have been silently
+re-overridden by the file loaded after it.
+
+### Floating windows are clamped as well
+A late `hl.window_rule({ match = { float = true }, max_size = "(monitor_w*0.9) (monitor_h*0.9)",
+center = true })` catches the other half of the complaint: `antigravity` was floating at 1416x916 on a
+1440x900 screen (over the right edge by 49 and the bottom by 59) and `Pdf4QtEditor` over the right by
+11. Proven in a nested Hyprland first — control window 2000x1200 unclamped, `"600 400"` → 600x400,
+`"(monitor_w*0.5) (monitor_h*0.5)"` → 640x400, and a **tiled** window under the same rule untouched at
+1278x798, confirming the `float = true` match does not leak.
+
+Note the spelling: `maxsize` is **not** a Lua-parser key. `max_size` is.
+
+### `Hyprland --verify-config` — correcting a standing project note
+Earlier decisions record that rule tables are "not validated". They are not validated **at runtime**,
+which remains true and is why behaviour still has to be read back. But
+`Hyprland --verify-config -c <file>` checks a config **without starting a compositor** and names every
+unknown key. That is what caught `maxsize`.
+
+Used it as a regression gate rather than a spot check: a `/tmp/verifybase` tree of symlinks to the real
+config plus the *pre-edit* `hypr-user.lua`, run under `HOME=/tmp/verifybase`, line numbers normalized
+and sorted. Before and after are **identical** — 21 findings, all of them pre-existing `plugin.*` keys
+that are absent only because `--verify-config` does not load hyprpm plugins.
+
+### Proven, not assumed
+- Layout reads back `dwindle`; all six open windows now inside the 1370x880 work area (`0/6` overhanging, was `4/6`).
+- A brand-new window: tiled **PASS**, inside the work area **PASS** (spawned, measured, closed).
+- `togglelock` round-tripped on a live window: lock → "will now open floating (default is tiled)",
+  `list` shows the exception; unlock → "goes back to opening tiled", `list` shows none. Window state
+  followed in both directions.
+- The immediate flip is guarded on the *current* state, because `hl.dsp.window.float()` is a **toggle** —
+  calling it unconditionally would flip windows that were already correct.
+
+### Keys (unchanged — this is the answer to the question asked)
+| Key | Action |
+|---|---|
+| `SUPER + SHIFT + Space` | flip this **app** and remember it — writes `hypr-locked.conf` |
+| `SUPER + ALT + Space` | flip just **this window**, until it closes |
+| `SUPER + H` / `SUPER + SHIFT + H` | minimize / restore all |
+| `SUPER + Q` / `SUPER + ALT + F` / `SUPER + P` | close / maximize / pin |
+
+### Rollback
+```bash
+luminos-win default float
+sed -i 's/layout = "dwindle"/layout = "scrolling"/' ~/.config/hypr/hyprland-gui.lua
+hyprctl reload
+```
+Full-file backups: `~/.config/caelestia/hypr-user.lua.bak-prefloatoff` and
+`~/.config/caelestia/hypr-locked.conf.bak-prefloatoff`.
