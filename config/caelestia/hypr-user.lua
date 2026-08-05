@@ -226,6 +226,37 @@ hl.bind("CTRL + SUPER + SHIFT + R", hl.dsp.exec_cmd("luminos-shell-guard"), { re
 hl.window_rule({ match = { class = ".*" }, float = true })
 
 -- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Give Thunar a sane opening size — [CHANGE: claude-code | 2026-08-05]
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Thunar opened at 640x480 on a 1440x900 logical desktop — a postage stamp next to Claude
+-- (1348x858) and Chrome (668x858). Measured with `hyprctl clients -j`, not eyeballed.
+--
+-- The cause is NOT the catch-all above. It is that Thunar has never saved a window size:
+--     $ xfconf-query -c thunar -l
+--     /last-icon-view-zoom-level  /last-separator-position  /last-view  /last-window-maximized
+-- There is no /last-window-width or /last-window-height, so Thunar falls back to its
+-- compiled-in 640x480. It only writes those two keys when it is closed un-maximized, so it
+-- can sit in that state indefinitely. Stock rules.lua hands sized-floater tags to
+-- pavucontrol, nwg-look, GNOME Settings and the file *dialogs* — but never to Thunar
+-- itself, so nothing was sizing it.
+--
+-- Deliberately sets ONLY size + center, not float:
+--   * the catch-all above already floats it, and
+--   * leaving `float` alone means the hypr-locked.conf block below can still claw Thunar
+--     into the tiling layout if it is ever locked. Setting float = true here would quietly
+--     defeat SUPER+SHIFT+SPACE for this one app.
+-- 0.6 x 0.7 matches the stock float_60_70 tag (rules.lua:182) = 864x630 logical.
+--
+-- Window-rule tables are NOT validated by this parser — an unknown key returns ok and does
+-- nothing — so this was confirmed by reading the size back off the live window after a
+-- reload, not by trusting the config to have applied.
+hl.window_rule({
+    match  = { class = "^thunar$" },
+    size   = "(monitor_w*0.6) (monitor_h*0.7)",
+    center = true,
+})
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════
 -- Locked apps — float by default, tile by exception — [CHANGE: claude-code | 2026-08-05]
 -- ═════════════════════════════════════════════════════════════════════════════════════════
 -- The catch-all above floats EVERYTHING. Shawn wants some apps pinned into the tiling

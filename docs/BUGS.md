@@ -1076,3 +1076,84 @@ This is the write-side twin of the existing rule **never verify a colour scheme 
 **Lesson.** A generator writing a file is not the same as anything reading it. When a theme "doesn't
 apply", check the *consumer* exists before touching the generator — here the whole Qt palette was
 being written correctly all along, to a path belonging to a package that was never installed.
+
+---
+
+## BUG-099 — Thunar was the one ugly window: the GTK theme it was told to use was never installed
+**[CHANGE: claude-code | 2026-08-05] — FIXED**
+
+**Symptom.** Every window matched the dark Caelestia palette except Thunar, which rendered as plain
+grey stock Adwaita — and it opened at a postage-stamp size while everything around it filled the
+screen. Two unrelated causes wearing one complaint.
+
+### Half 1 — the theme
+
+BUG-098 above set `gtk-theme-name=Adwaita-dark`. That made GTK *dark*, which is why it looked fixed,
+but it did not make GTK **Caelestia-coloured**. Caelestia writes its palette into
+`~/.config/gtk-3.0/gtk.css` using **libadwaita** variable names:
+
+```
+@define-color window_bg_color #131317;   @define-color headerbar_bg_color #131317;
+@define-color view_bg_color   #131317;   @define-color accent_color       #c2c1ff;
+```
+
+Stock GTK3 Adwaita **does not use those names** — they are GTK4/libadwaita. So the file parsed
+cleanly, reported no error, and applied almost nothing. `adw-gtk3` is precisely the theme that
+backports those names to GTK3, which is why Caelestia is built around it.
+
+And the machine was already *asking* for it — but with two sources disagreeing, and the winner
+pointing at nothing:
+
+```
+$ gsettings get org.gnome.desktop.interface gtk-theme     → 'adw-gtk3-dark'   ← portal uses this
+$ grep gtk-theme-name ~/.config/gtk-3.0/settings.ini      → Adwaita-dark
+$ ls -d /usr/share/themes/adw-gtk3-dark                    → No such file or directory
+```
+
+A GTK theme name that does not resolve is **not an error** — GTK silently falls back to built-in
+Adwaita. Nothing logs, nothing warns. Same shape as BUG-090 (Yaru's fallback chain pointing at an
+uninstalled theme): *the config was right and the package was missing.*
+
+**Fix.** `pacman -S adw-gtk-theme` (official **extra** repo, 0.12 MiB — not AUR), then name it in
+`settings.ini` so both sources agree. Verified by asking a real GTK client what it resolved, not by
+reading the config back:
+
+```
+$ python3 -c "import gi;gi.require_version('Gtk','3.0');from gi.repository import Gtk;
+              print(Gtk.Settings.get_default().get_property('gtk-theme-name'))"
+adw-gtk3-dark
+```
+…and then by screenshotting the window with `grim` and looking at it.
+
+> **Do NOT "fix" this by installing `qtengine`.** The header of `scripts/luminos-qt-theme-sync` says
+> qtengine is not installed, which invites exactly that. qtengine is the **Qt** side and is already
+> solved via `kdeglobals` (BUG-098); it is not in the official repos; and per `hypr-user.lua:85` it
+> would seize Qt styling from KDE. Thunar is **GTK**. Different toolkit, different bug.
+
+### Half 2 — the size
+
+Measured, not eyeballed: `hyprctl clients -j` → Thunar `640x480` on a `1440x900` logical desktop,
+next to Claude at `1348x858`. `640x480` is Thunar's compiled-in fallback, used because it has never
+saved a size:
+
+```
+$ xfconf-query -c thunar -l
+/last-icon-view-zoom-level  /last-separator-position  /last-view  /last-window-maximized
+```
+
+No `/last-window-width`, no `/last-window-height`. Thunar only writes those when closed
+*un-maximized*, so it can stay in that state forever. The float-everything catch-all in
+`hypr-user.lua` was **not** at fault — it sets only `float`, deliberately, so the stock sized-floater
+tags keep their own dimensions. Those tags cover pavucontrol, nwg-look, GNOME Settings and file
+*dialogs*, but never Thunar itself, so nothing sized it.
+
+**Fix.** A window rule in `hypr-user.lua` setting **only** `size` + `center` (never `float`, so
+`hypr-locked.conf` can still tile it), at the stock 0.6×0.7 → `864x630`. Confirmed by reading the
+size back off the live window after `hyprctl reload`, because window-rule tables are not validated —
+an unknown key returns ok and does nothing. Also widened `/last-separator-position` 170 → 215, which
+needs a Thunar **restart**: it is read at window construction, so setting it live appears to do
+nothing.
+
+**Lesson.** "It looks ugly" and "it is too small" felt like one theming problem and were two
+independent ones. Also: dark ≠ themed. A dark fallback is the most convincing way for a broken theme
+to look deliberately applied.
