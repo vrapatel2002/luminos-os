@@ -1,5 +1,9 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-05 — Response 5. **🟥 Long-term memory was silently discarding every write for
+Last updated: 2026-08-05 — Response 6. **🟩 jobhunt Phase 0 is DONE — a local LLM now runs on the
+RTX 4050** (`/opt/luminos/venv-jobhunt`, llama-cpp-python 0.3.34 + CUDA 13.3, proven with a real
+generation). **The next thing is Shawn's resume, and only he can supply it.** OpenClaw is Phase 5
+and optional — do not install it next.
+**🟥 Long-term memory was silently discarding every write for
 ten days — fixed (BUG-104).** **The dGPU sleeps again (BUG-103, FIXED)** — it was parked awake by our
 own launchers; the fix was to stop writing `on`, and the kernel handles wake *and* sleep by itself. A
 real policy for the gate designed but not built (DECISION 53). **Chrome's GPU picker actually switches
@@ -42,6 +46,35 @@ Things that will bite you here:
 
 Five drawers were filed after the repair (BUG-102, BUG-103, BUG-104, DECISION 52, DECISION 53 — the
 verbatim doc sections), each verified by readback: collection went 13575 → 13580.
+
+## 🟩 NEWEST — jobhunt Phase 0 DONE, and what to do next
+A local LLM runs on the RTX 4050. `/opt/luminos/venv-jobhunt` holds **llama-cpp-python 0.3.34**
+built against CUDA 13.3; HIVE's `/opt/luminos/venv` was not touched. Build and proof scripts are
+`scripts/jobhunt/build-cuda-venv.sh` and `verify-cuda-venv.sh`. Full detail in
+`scripts/jobhunt/PLAN.md` → "PHASE 0 COMPLETE".
+
+```
+ungated              : supports_gpu_offload = False  ("no CUDA-capable device")
+via dgpu-exec-v2     : RTX 4050 found, 5772 MiB, True
+real generation      : "Django, Flask, FastAPI"  (Qwen2.5-Coder-7B-Q4_K_M, ctx 4096)
+VRAM resident        : 4892 MiB      ← over the 4.6 GB budget already
+card afterwards      : suspended, by itself
+```
+
+**➡️ THE NEXT ACTION IS TO ASK SHAWN FOR HIS RESUME.** Phase 1 (`profile.yaml` + `bullet_bank`)
+needs no GPU, and Phases 3/4/5 all gate on it. It is now the critical path.
+**Do NOT install OpenClaw next** — it is Phase 5, and the plan states the pipeline must stay fully
+usable from the CLI without it.
+
+Carry forward:
+- **Do not "align" the two venvs.** 0.3.20 *cannot* compile against CUDA 13.3 (vendored
+  `ggml-cuda/argsort.cu` calls `cuda::make_counting_iterator`, absent from this CCCL). Different
+  versions is the fix, not a mistake.
+- CUDA 13.3 refuses gcc > 15 (system is 16.1.1) → `-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-15`.
+  Pin `-DCMAKE_CUDA_ARCHITECTURES=89` or you compile every architecture.
+- **A 7B is too big for batch scoring** — 4892 MiB at ctx 4096, and Phase 2 wanted 32k. Get a ~4B.
+- **Never run `sudo usermod -aG dgpu shawn`** — the old plan listed it as a blocker; it would give
+  every process on the box the card and destroy DECISION 25. `dgpu-exec-v2` is the route.
 
 ## 🟢 FIXED — the dGPU sleeps again (BUG-103)
 Hours after the last NVIDIA Chrome died, with **zero** processes holding any `/dev/nvidia*` fd:
