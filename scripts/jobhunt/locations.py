@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+# [CHANGE: claude-code | 2026-08-05]
+# ============================================
+# Location classifier for remote job postings.
+# PURPOSE: Decide whether a posting can actually put a Canada-resident on payroll.
+#          "Remote" is not a location. "Remote - US" cannot hire you; "Remote -
+#          Worldwide" can. This single function is the whole funnel.
+# DEPS: stdlib only.
+# ============================================
+
+import re
+
+# Buckets, best -> worst. OPEN_BUCKETS are the ones worth an application.
+CANADA = "canada"
+GLOBAL = "global"
+AMERICAS = "americas"
+US_ONLY = "us_only"
+OTHER_COUNTRY = "other_country"
+ONSITE = "onsite"
+UNKNOWN = "unknown"
+
+OPEN_BUCKETS = (CANADA, GLOBAL, AMERICAS)
+
+_CANADA = re.compile(
+    r"\bcanada\b|\bcanadian\b|\bontario\b|\bquebec\b|\bqu[ée]bec\b|\balberta\b"
+    r"|\bmanitoba\b|\bsaskatchewan\b|\bnova scotia\b|\bnew brunswick\b"
+    r"|\bnewfoundland\b|british columbia|\bbc\b|\bon, ca\b"
+    r"|\btoronto\b|\bottawa\b|\bmontreal\b|\bmontr[ée]al\b|\bvancouver\b"
+    r"|\bcalgary\b|\bedmonton\b|\bwaterloo\b|\bkitchener\b|\bmississauga\b"
+    r"|\bhamilton\b|\bwinnipeg\b|\bhalifax\b|\bvictoria, bc\b|\bburnaby\b",
+    re.I,
+)
+
+# "Anywhere", "Worldwide", "Global", or a bare "Remote" with no country qualifier.
+_GLOBAL = re.compile(
+    r"\banywhere\b|\bworld\s*wide\b|\bworldwide\b|\bglobal\b|\bany location\b"
+    r"|\bfully remote\b|\blocation:?\s*flexible\b|\bno location\b|\bemea/amer\b",
+    re.I,
+)
+_BARE_REMOTE = re.compile(r"^\s*(100%\s*)?remote\s*$", re.I)
+
+_AMERICAS = re.compile(r"\bamericas\b|north america|\blatam\b|latin america", re.I)
+
+_US = re.compile(
+    r"united states|\bu\.?s\.?a\.?\b|\bus\b|\busa\b|\bstateside\b"
+    r"|new york|san francisco|\bseattle\b|\baustin\b|\bboston\b|\bchicago\b"
+    r"|\bdenver\b|\batlanta\b|los angeles|\bnyc\b|\bsf\b|bay area|\bmiami\b"
+    r"|\bportland\b|\bdallas\b|\bhouston\b|\bphoenix\b|san jose|\bwashington\b"
+    r"|\bvirginia\b|\bcalifornia\b|\btexas\b|\bflorida\b|\bcolorado\b",
+    re.I,
+)
+
+# Countries that are neither Canada nor US. A "Remote - Germany" role needs
+# German work authorisation and German payroll; it is not open to you.
+_OTHER = re.compile(
+    r"\bindia\b|\bgermany\b|\bfrance\b|\bspain\b|\bportugal\b|\bpoland\b"
+    r"|\bnetherlands\b|\bireland\b|\bunited kingdom\b|\bu\.?k\.?\b|\blondon\b"
+    r"|\bberlin\b|\bparis\b|\bmadrid\b|\bamsterdam\b|\bdublin\b|\bwarsaw\b"
+    r"|\blisbon\b|\bbangalore\b|\bbengaluru\b|\bmumbai\b|\bdelhi\b|\bpune\b"
+    r"|\bhyderabad\b|\bsingapore\b|\bjapan\b|\btokyo\b|\bchina\b|\bbeijing\b"
+    r"|\bshanghai\b|\baustralia\b|\bsydney\b|\bmelbourne\b|\bbrazil\b"
+    r"|\bmexico\b|\bargentina\b|\bcolombia\b|\bisrael\b|\btel aviv\b"
+    r"|\bemea\b|\bapac\b|\beurope\b|\beuropean union\b|\beu\b|\bnordics\b"
+    r"|\bswitzerland\b|\bzurich\b|\bsweden\b|\bstockholm\b|\bkorea\b|\bseoul\b"
+    r"|\btaiwan\b|\bvietnam\b|\bphilippines\b|\bindonesia\b|\bnigeria\b"
+    r"|\bkenya\b|\bsouth africa\b|\begypt\b|\bturkey\b|\bdubai\b|\buae\b",
+    re.I,
+)
+
+_REMOTE_HINT = re.compile(r"\bremote\b|\banywhere\b|\bwork from home\b|\bwfh\b|\bdistributed\b", re.I)
+
+
+def is_remote(location, title="", extra=""):
+    """True if the posting looks like a work-from-home role."""
+    return bool(_REMOTE_HINT.search(" ".join(filter(None, (location, title, extra)))))
+
+
+def classify(location, title="", extra=""):
+    """Map a free-text location to a hireability bucket.
+
+    Returns one of CANADA, GLOBAL, AMERICAS, US_ONLY, OTHER_COUNTRY, ONSITE, UNKNOWN.
+
+    Order matters. Canada wins outright: a "Remote - US, Canada" posting is open
+    to you even though it also names the US. Global beats a country mention for
+    the same reason -- "Worldwide (excl. China)" is still worldwide.
+    """
+    loc = (location or "").strip()
+    if not loc:
+        # Some boards leave location blank on remote-native listings.
+        return GLOBAL if _GLOBAL.search(title or "") or _BARE_REMOTE.search(title or "") else UNKNOWN
+
+    if _CANADA.search(loc):
+        return CANADA
+    if _GLOBAL.search(loc) or _BARE_REMOTE.search(loc):
+        # Aggregators (notably WeWorkRemotely) stamp "Anywhere in the World" on
+        # the feed even when the posting itself is pinned to one country. Trust
+        # a hard constraint in the title over the board's generic label.
+        t = title or ""
+        if _CANADA.search(t):
+            return CANADA
+        if _OTHER.search(t):
+            return OTHER_COUNTRY
+        if _US.search(t):
+            return US_ONLY
+        return GLOBAL
+    if _AMERICAS.search(loc):
+        return AMERICAS
+    if _US.search(loc):
+        return US_ONLY
+    if _OTHER.search(loc):
+        return OTHER_COUNTRY
+
+    # Named somewhere we do not recognise. If it reads remote, keep it for review
+    # rather than silently discarding a possible match.
+    return UNKNOWN if is_remote(loc, title, extra) else ONSITE
+
+
+def is_open(location, title="", extra=""):
+    """True if this posting can plausibly hire a Canada-resident."""
+    return classify(location, title, extra) in OPEN_BUCKETS
+
+
+if __name__ == "__main__":
+    CASES = [
+        ("Toronto, Canada", CANADA),
+        ("Remote - Canada", CANADA),
+        ("Remote - US, Canada", CANADA),
+        ("Ottawa, ON", CANADA),
+        ("Remote - Worldwide", GLOBAL),
+        ("Anywhere", GLOBAL),
+        ("Remote", GLOBAL),
+        ("Worldwide (excl. China)", GLOBAL),
+        ("Americas, Europe, Asia, Africa, Oceania", AMERICAS),
+        ("North America", AMERICAS),
+        ("United States", US_ONLY),
+        ("Remote - US", US_ONLY),
+        ("San Francisco, CA", US_ONLY),
+        ("Berlin, Germany", OTHER_COUNTRY),
+        ("Remote - India", OTHER_COUNTRY),
+        ("London, United Kingdom", OTHER_COUNTRY),
+        ("", UNKNOWN),
+    ]
+    # Aggregator says "anywhere" but the title pins a country.
+    TITLED = [
+        ("Anywhere in the World", "Customer Engineer, India (Based in Mumbai)", OTHER_COUNTRY),
+        ("Anywhere in the World", "Account Executive, US Federal", US_ONLY),
+        ("Anywhere in the World", "Backend Engineer, Toronto", CANADA),
+        ("Anywhere in the World", "Senior Backend Engineer", GLOBAL),
+    ]
+    bad = 0
+    for loc, want in CASES:
+        got = classify(loc)
+        flag = "ok " if got == want else "FAIL"
+        if got != want:
+            bad += 1
+        print(f"  {flag} {loc!r:45} -> {got:14} (want {want})")
+    for loc, title, want in TITLED:
+        got = classify(loc, title)
+        flag = "ok " if got == want else "FAIL"
+        if got != want:
+            bad += 1
+        print(f"  {flag} {title[:45]!r:47} -> {got:14} (want {want})")
+    total = len(CASES) + len(TITLED)
+    print(f"\n{total - bad}/{total} passed")
+    raise SystemExit(1 if bad else 0)
