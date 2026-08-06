@@ -1,0 +1,66 @@
+// Point OpenClaw at the local GPU LLM instead of a cloud API.
+// [CHANGE: claude-code | 2026-08-05] Phase 0b — jobhunt infrastructure.
+//
+// Apply with:  openclaw config patch --file scripts/jobhunt/openclaw-provider.json5
+// (add --dry-run first; patch is a single validated write, objects merge)
+//
+// WHY api: "openai-completions" — llama-cpp-python's server speaks the OpenAI
+// wire format, so OpenClaw needs no special adapter. baseUrl must include /v1.
+//
+// WHY a dummy apiKey — the local server has NO auth (that is why it binds to
+// 127.0.0.1 only). OpenClaw still wants the field populated, so this is a
+// placeholder, not a secret. Do not treat it as one.
+//
+// WHY the model id is an alias and not a path — llm-server.sh passes
+// --model_alias, so swapping the 7B for a 4B does not break this config.
+{
+  models: {
+    mode: "merge",
+    providers: {
+      luminos: {
+        // PORT 8082 IS THE PROXY, NOT THE MODEL SERVER (8081). Pointing this
+        // straight at 8081 works for plain chat and then silently breaks every
+        // tool call — the model's <tool_call> text arrives as prose and the agent
+        // hangs waiting on a result it never asked for. See toolcall-proxy.py.
+        baseUrl: "http://127.0.0.1:8082/v1",
+        apiKey: "local-no-auth",
+        api: "openai-completions",
+        models: [
+          {
+            id: "luminos-local",
+            name: "Luminos local (GPU, llama.cpp)",
+            // MUST match llm-server.sh's CTX. OpenClaw assumes 200k for unknown
+            // models and would build a prompt 8x larger than the server's window.
+            //
+            // This is a floor, not a preference. OpenClaw's system prompt plus
+            // tool schemas TOKENIZE to 19929 on an empty session — note its own
+            // preflight estimate says 9456, which is less than half the truth, so
+            // trust the 400 from the server and not the estimate.
+            contextWindow: 24576,
+            maxTokens: 2048,
+          },
+        ],
+      },
+    },
+  },
+  agents: {
+    defaults: {
+      model: {
+        primary: "luminos/luminos-local",
+      },
+      // OpenClaw's defaults are tuned for 200k cloud models, where holding half
+      // the window back costs nothing. On a 16k local model those defaults make
+      // the agent unusable: measured promptBudget of 8000 against a fixed 9456
+      // token system prompt, so it overflowed before reading the user's message.
+      compaction: {
+        // Let the prompt use most of the window instead of ~half.
+        maxHistoryShare: 0.9,
+        // Headroom for the reply. 2048 matches the model entry's maxTokens.
+        reserveTokens: 2048,
+        // The floor guard was silently raising the reserve to 8384 — over half
+        // the window — which is what actually caused the overflow. 0 disables it.
+        reserveTokensFloor: 0,
+      },
+    },
+  },
+}

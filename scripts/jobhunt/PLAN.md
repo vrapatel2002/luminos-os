@@ -141,6 +141,63 @@ so it cannot degrade into a check that always says yes.
 
 ---
 
+### ✅ PHASE 0b COMPLETE — 2026-08-05, agent stack proven end to end
+# [CHANGE: claude-code | 2026-08-05]
+Shawn asked for the infrastructure first — OpenClaw, the LLM, and web access —
+with the resume deliberately postponed. All three are working and were tested,
+not assumed.
+
+**The stack is three processes, and the order matters:**
+```
+scripts/jobhunt/llm-server.sh          # 8081 — model on the GPU (start first)
+scripts/jobhunt/toolcall-proxy.py      # 8082 — tool-call translation
+openclaw agent --local --session-key X -m "..."
+```
+OpenClaw is configured to talk to **8082, not 8081** (`openclaw-provider.json5`,
+applied with `openclaw config patch --file`). Pointing it at 8081 gives working
+chat and silently broken tools.
+
+**Proven, with the command that proves it:**
+
+| Claim | Evidence |
+|---|---|
+| OpenClaw reaches the local GPU model | `openclaw agent --local` returned `openclaw reached the local model`, HTTP 200 in 54 ms |
+| The model runs on the dGPU, not the CPU | 37/37 layers offloaded, 4630 MiB VRAM resident |
+| Tool calling works | agent called `web_fetch` with the correct URL and consumed the result |
+| The stack reaches the live web | agent fetched a real Greenhouse board and reported "188 jobs available" |
+| Playwright renders JS pages | `verify-web.py` pulled **50 job titles** off Greenhouse, incl. "Remote, Canada" roles |
+
+**Model changed: Qwen3-4B-Instruct-2507-Q4_K_M is now the default, not the 7B.**
+Not a preference — a measurement. OpenClaw's system prompt plus tool schemas
+tokenize to **19,929 tokens before the user types anything**, and the 7B cannot
+reach that context (OOMs at 16k). The 4B serves 24576 in 4606 MiB, just under the
+4.6 GB rule. Keep the 7B for Phase 3 tailoring, where the prompt is one posting.
+
+**Four traps found here, each of which looked like a different problem:**
+1. **`--logits_all` defaults to TRUE** in llama-cpp-python's server, keeping logits
+   for every prompt token: 19k × 151,936 vocab × 4 B ≈ **11.5 GB of system RAM**.
+   Long prompts got the server OOM-killed (rc=137) while VRAM sat half empty and
+   the log printed a tidy "Shutting down". Every symptom pointed at the GPU.
+2. **Only the GGUF's built-in template emits tool calls.** `--chat_format chatml`
+   makes the model narrate calls as markdown; `chatml-function-calling` returns
+   empty. Unset works — but llama-cpp-python then fails to parse its own output,
+   hence `toolcall-proxy.py`.
+3. **The proxy must translate BOTH directions.** Replaying history sends the
+   assistant turn back with `content: null`, which the server's schema rejects.
+   Tools appear to work for exactly one turn without this.
+4. **OpenClaw's own token estimate is less than half the truth** (9,456 estimated
+   vs 19,929 actual). Trust the server's 400, never the preflight number.
+
+**Not fixed, and fine for now:** `example.com` and `example.org` do not resolve on
+this box — the DNS provider (DECISION 48) returns NXDOMAIN for the IANA example
+domains. Every real job board resolves. Do not use them as connectivity tests.
+
+**Still to do before Phase 5:** OpenClaw's tools run on the host unsandboxed, and
+no channel (WhatsApp/Telegram/etc.) is connected yet. Both matter before it is
+allowed to act on inbound messages.
+
+---
+
 ## Phase 1 — Profile
 
 **Blocked on Shawn:** the resume file, plus answers to the knockout questions.

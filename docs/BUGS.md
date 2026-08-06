@@ -1,5 +1,5 @@
 # Luminos OS — Bug Tracker
-Last Updated: 2026-08-05 (BUG-104 FIXED — **mempalace reported "success" and threw every memory away, for at least ten days.** `add_drawer` returned a drawer_id, the WAL logged the call, and the drawer did not exist; the WAL shows `"result": null` on every add since 2026-07-26, and content is redacted there so none of it is recoverable. Root cause is in ChromaDB 0.6.3, not MemPalace: the palace's per-segment `max_seq_id` watermark held a poisoned ~1.23e18 timestamp while `embeddings_queue` — an `INTEGER PRIMARY KEY` with no AUTOINCREMENT — had been emptied and restarted numbering at 1, so `_notify_one` skipped every record as "already consumed" and `upsert()` raised nothing. Repaired by setting each watermark to the queue's current max row id; zeroing it does NOT work, because `start = start or self._next_seq_id()` treats 0 as falsy. Verified by readback in a fresh process. **The running MCP server keeps the poisoned subscription in memory and `mempalace_reconnect` does not rebuild it** — restart the server or file through the library. BUG-103 FIXED — the dGPU never went back to sleep after you used it: all three GPU launchers wrote `on` to `power/control`, which *disables runtime PM for the device*, and nothing anywhere ever wrote `auto` back, so the card sat at 1.63 W / P8 / `active` with zero processes holding it. The fix was to **stop writing `on`** — with `control=auto` the driver takes a runtime-PM reference when a device node is opened, so the card wakes on demand and re-suspends by itself ~20 s after the last close. No release mechanism was needed; the one line meant to help was the only thing preventing sleep. Proven end to end: NVIDIA Chrome came up on `renderD128` with `glRenderer = ANGLE (NVIDIA, … RTX 4050 …)`, then the card returned to `suspended` on its own, and `luminos-verify` section 3 now passes all three checks. Two side-findings: `luminos-wine-launcher` had silently diverged from its installed copy (repo newer but missing both EGL exports — reconciled), and it **never calls the dGPU gate at all**, so Wine-on-NVIDIA is still denied like BUG-102. `luminos-gpu-launch` was also promoted from `dgpu-exec` to `dgpu-exec-v2` in the same pass. BUG-102 FIXED — picking "NVIDIA" in the Chrome GPU dialog silently gave you the AMD iGPU for a month, with a notification claiming otherwise. Three stacked causes: `chrome-luminos` never called the dGPU gate at all; the gate itself is defeated by **any launcher written in shell**, because setgid raises only the *effective* gid and bash resets it (fixed by `dgpu-exec-v2`, which `setresgid`s so the group is real); and Chrome is single-instance per profile, so the picker could never take effect while a window was open. Now proven on the card — `ANGLE (NVIDIA, Vulkan …RTX 4050…)`, 20 fds on `/dev/nvidia0`, listed in `nvidia-smi`. Two Chromes on two GPUs at once works, given separate `--user-data-dir`. BUG-101 FIXED — the SUPER launcher's app list "barely scrolled", on the touchpad only: Caelestia ships `input:touchpad:scroll_factor = 0.3`, and in a viewport only `maxShown` rows tall, 30% of a swipe travels less than one row. The mouse wheel uses the **separate** `input:scroll_factor`, already 1.0 — which is why the two devices behaved differently. Overridden to 1.0 in `hypr-vars.lua`; no QML touched. BUG-100 FIXED — every hyprpm plugin was dead because hyprpm was still building against an April compositor. BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
+Last Updated: 2026-08-05 (BUG-105 FIXED — **the local LLM server was OOM-killed by long prompts, and every symptom pointed at the GPU.** `llama-cpp-python`'s server defaults `--logits_all` to True, keeping a logit vector for every prompt token: 19k tokens x 151,936 vocab x 4 B = ~11.5 GB of SYSTEM RAM on a 14 GB box. Short prompts worked, long ones died at ~30 s with a tidy `Shutting down` in the log — which is a lie; the real exit was rc=137/SIGKILL from the OOM killer, while VRAM sat at 4630 of 6141 MiB. Fixed with `--logits_all false`: peak RSS 8830 MB -> 817 MB, same request now answers in 13.4 s. Lesson: get the exit code before theorising, and don't assume the accelerator is at fault just because the workload runs on it. BUG-104 FIXED — **mempalace reported "success" and threw every memory away, for at least ten days.** `add_drawer` returned a drawer_id, the WAL logged the call, and the drawer did not exist; the WAL shows `"result": null` on every add since 2026-07-26, and content is redacted there so none of it is recoverable. Root cause is in ChromaDB 0.6.3, not MemPalace: the palace's per-segment `max_seq_id` watermark held a poisoned ~1.23e18 timestamp while `embeddings_queue` — an `INTEGER PRIMARY KEY` with no AUTOINCREMENT — had been emptied and restarted numbering at 1, so `_notify_one` skipped every record as "already consumed" and `upsert()` raised nothing. Repaired by setting each watermark to the queue's current max row id; zeroing it does NOT work, because `start = start or self._next_seq_id()` treats 0 as falsy. Verified by readback in a fresh process. **The running MCP server keeps the poisoned subscription in memory and `mempalace_reconnect` does not rebuild it** — restart the server or file through the library. BUG-103 FIXED — the dGPU never went back to sleep after you used it: all three GPU launchers wrote `on` to `power/control`, which *disables runtime PM for the device*, and nothing anywhere ever wrote `auto` back, so the card sat at 1.63 W / P8 / `active` with zero processes holding it. The fix was to **stop writing `on`** — with `control=auto` the driver takes a runtime-PM reference when a device node is opened, so the card wakes on demand and re-suspends by itself ~20 s after the last close. No release mechanism was needed; the one line meant to help was the only thing preventing sleep. Proven end to end: NVIDIA Chrome came up on `renderD128` with `glRenderer = ANGLE (NVIDIA, … RTX 4050 …)`, then the card returned to `suspended` on its own, and `luminos-verify` section 3 now passes all three checks. Two side-findings: `luminos-wine-launcher` had silently diverged from its installed copy (repo newer but missing both EGL exports — reconciled), and it **never calls the dGPU gate at all**, so Wine-on-NVIDIA is still denied like BUG-102. `luminos-gpu-launch` was also promoted from `dgpu-exec` to `dgpu-exec-v2` in the same pass. BUG-102 FIXED — picking "NVIDIA" in the Chrome GPU dialog silently gave you the AMD iGPU for a month, with a notification claiming otherwise. Three stacked causes: `chrome-luminos` never called the dGPU gate at all; the gate itself is defeated by **any launcher written in shell**, because setgid raises only the *effective* gid and bash resets it (fixed by `dgpu-exec-v2`, which `setresgid`s so the group is real); and Chrome is single-instance per profile, so the picker could never take effect while a window was open. Now proven on the card — `ANGLE (NVIDIA, Vulkan …RTX 4050…)`, 20 fds on `/dev/nvidia0`, listed in `nvidia-smi`. Two Chromes on two GPUs at once works, given separate `--user-data-dir`. BUG-101 FIXED — the SUPER launcher's app list "barely scrolled", on the touchpad only: Caelestia ships `input:touchpad:scroll_factor = 0.3`, and in a viewport only `maxShown` rows tall, 30% of a swipe travels less than one row. The mouse wheel uses the **separate** `input:scroll_factor`, already 1.0 — which is why the two devices behaved differently. Overridden to 1.0 in `hypr-vars.lua`; no QML touched. BUG-100 FIXED — every hyprpm plugin was dead because hyprpm was still building against an April compositor. BUG-094 FIXED **AND VERIFIED ON A REAL LOGIN** — Hyprland is now the live session, the pin took effect, the dGPU is `suspended`, and Claude Desktop runs on the AMD `renderD129`. Original report: the Hyprland session bounced straight back to SDDM: `AQ_DRM_DEVICES` is a COLON-separated list and the GPU pin was written as a PCI by-path, so one device path split into three nonexistent ones and the compositor aborted with "Found no gpus to use". Neither stock name works (by-path has colons, cardN is unstable), so a colon-free udev alias `/dev/dri/luminos-igpu` was created. BUG-093 FIXED — a user-site `packaging` copy shadowed the pacman one, so pacman said 26.2 while Python said 26.0 and every AUR python build failed; fixed with `PYTHONNOUSERSITE=1`, nothing removed. BUG-092 FIXED — SDDM greeter wallpaper pointed at a missing file *under `$HOME`*, which the `sddm` user could never read anyway; the resulting black login screen was misread as a Hyprland crash. **Note:** BUG-092 was first filed as BUG-091 and renumbered — 091 was already taken by the suspend bug below. BUG-091 FIXED — lid close and idle now suspend; the machine never had a suspend bug, only three layers of deliberate config, and the first fix landed in a PowerDevil config group nothing reads. BUG-087 FIXED — MCP tooling now reaches Claude Code, Claude Desktop and Antigravity; hooks moved to user scope because Cowork ignores project scope. BUG-085 FIXED — MCP tooling silently rotted; now pinned + verified by `luminos-verify --mcp`. BUG-086 CLOSED/WONTFIX — leaked OpenRouter key accepted by user as a dead account, no rotation. BUG-084 OPEN — DrKonqi gdb+debuginfod ate 7.4GB and filled zram; durable MemoryMax cap NOT yet applied. BUG-083 FIXED + measured. BUG-082 FIXED (pending live verify). BUG-080 still OPEN — Wine/MT5.)
 
 ## Open Bugs
 
@@ -1619,3 +1619,84 @@ and always read the drawer back before believing the write.**
 This is the same shape as BUG-088/089 and `luminos-brain log`: **a Luminos tool printed success while
 doing nothing.** Memory tooling is the worst possible place for it, because the failure erases the
 evidence of itself and nobody notices for ten days. Never trust a write receipt. Read it back.
+
+---
+
+## BUG-105 — the local LLM server was OOM-killed by long prompts, and blamed the GPU
+# [CHANGE: claude-code | 2026-08-05]
+**Status:** FIXED (one flag; verified by reproducing the kill, then not reproducing it)
+**Severity:** HIGH — made the whole agent stack unusable, and pointed at the wrong subsystem
+**Found:** 2026-08-05, while wiring OpenClaw to the local model
+
+### What it looked like
+Short prompts worked perfectly. Any prompt over roughly 15k tokens made the server vanish
+about 30 seconds in. The client saw a dropped connection or an HTTP 500 from the proxy.
+The server's own log ended with:
+
+```
+INFO:     Uvicorn running on http://127.0.0.1:8081
+INFO:     Shutting down
+INFO:     Waiting for connections to close. (CTRL+C to force quit)
+```
+
+That reads like a clean, deliberate shutdown. It is not. Wrapping the launcher to report
+its exit code gave **rc=137 — SIGKILL**, which nothing can catch and which uvicorn cannot
+have handled. The "Shutting down" line is emitted as the process is torn down and is
+actively misleading.
+
+### Why it looked like a GPU problem, and wasn't
+Everything about the context pointed at VRAM: a GPU-offloaded model, a 6 GB card, a
+context increase immediately before the failures started, and a known 4.6 GB budget.
+VRAM was fine the whole time — 4630 MiB of 6141 MiB.
+
+Sampling `/proc/<pid>/status` once a second during a failing request showed the truth:
+
+```
+t=7s  rss=4955MB avail=5932MB swapfree=5000MB
+t=16s rss=8830MB avail=1898MB swapfree=4937MB
+t=24s rss=5678MB avail=1828MB swapfree=0MB     <- zram exhausted
+t=29s rss=7418MB avail=334MB  swapfree=5MB
+t=30s rss=0MB    avail=7466MB                  <- killed
+```
+
+**System RAM**, not VRAM. The process ate 14 GB of RAM and all 5 GB of zram, and the
+kernel killed it.
+
+### Root cause
+`llama-cpp-python`'s bundled server defaults **`--logits_all` to True**. That keeps the
+full logit vector for *every* prompt token instead of just the last one. With Qwen3's
+151,936-token vocabulary:
+
+```
+19,000 tokens x 151,936 vocab x 4 bytes = ~11.5 GB
+```
+
+on a machine with 14 GB of RAM. Chat generation never needs those logits; only
+perplexity/scoring work does.
+
+### The fix
+`--logits_all false` in `scripts/jobhunt/llm-server.sh`.
+
+Measured on the identical 19,380-token request that previously killed it:
+
+| | before | after |
+|---|---|---|
+| peak RSS | 8830 MB | **817 MB** |
+| outcome | rc=137 at ~30 s | answered in 13.4 s |
+
+### Testing traps hit while chasing this
+- **`pkill -f 'llama_cpp.server'` kills the shell running it**, because the pattern matches
+  that shell's own command line. It cost two shells here. The bracket trick does not save
+  you if the *rest* of the command also contains the literal string — put the pattern in a
+  script, or kill a PID you captured earlier. Same shape as the `chrome-bug10[3]` trap in
+  BUG-103.
+- A background server started from a tool-call shell dies when that shell is reset. Use
+  `setsid nohup ... < /dev/null &`, or a crash and a cleanup look identical.
+- `journalctl -k` showed nothing for an OOM kill under this user, so "no OOM in the log"
+  was not evidence of no OOM. Watching RSS directly was what settled it.
+
+### The general lesson
+**A tidy shutdown message is not evidence of a tidy shutdown.** When a process disappears,
+get its exit code before theorising — rc=137 would have redirected this from "GPU/CUDA" to
+"memory" immediately. And when a component runs on an accelerator, the accelerator is the
+first thing everyone suspects and often the last thing at fault; measure both sides.

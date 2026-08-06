@@ -1,8 +1,8 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-05 — Response 6. **🟩 jobhunt Phase 0 is DONE — a local LLM now runs on the
-RTX 4050** (`/opt/luminos/venv-jobhunt`, llama-cpp-python 0.3.34 + CUDA 13.3, proven with a real
-generation). **The next thing is Shawn's resume, and only he can supply it.** OpenClaw is Phase 5
-and optional — do not install it next.
+Last updated: 2026-08-05 — Response 7. **🟩 jobhunt Phase 0b is DONE — OpenClaw, the local GPU LLM
+and live web access are wired together and PROVEN by running them.** An agent on this box reached the
+model on the RTX 4050, made a real tool call, and read a live job board. **The next thing is Shawn's
+resume, and only he can supply it** — he deferred it deliberately to get the infrastructure up first.
 **🟥 Long-term memory was silently discarding every write for
 ten days — fixed (BUG-104).** **The dGPU sleeps again (BUG-103, FIXED)** — it was parked awake by our
 own launchers; the fix was to stop writing `on`, and the kernel handles wake *and* sleep by itself. A
@@ -47,7 +47,54 @@ Things that will bite you here:
 Five drawers were filed after the repair (BUG-102, BUG-103, BUG-104, DECISION 52, DECISION 53 — the
 verbatim doc sections), each verified by readback: collection went 13575 → 13580.
 
-## 🟩 NEWEST — jobhunt Phase 0 DONE, and what to do next
+## 🟩 NEWEST — jobhunt Phase 0b DONE: an agent, a local model, and the live web, all talking
+Shawn asked for the infrastructure before the resume: *"we are now just making the infrastructure
+openclaw llm and connecting to web try if they can access those items or not"*. All three were built
+**and tested by running them**, not asserted. Full write-up: `scripts/jobhunt/PLAN.md` → "PHASE 0b".
+
+**The stack is three processes and the order matters:**
+```
+scripts/jobhunt/llm-server.sh       # 8081 — the model, on the GPU. Start FIRST.
+scripts/jobhunt/toolcall-proxy.py   # 8082 — turns Qwen's tool-call text into real tool_calls
+~/.npm-global/bin/openclaw agent --local --session-key X -m "..."
+```
+**Point OpenClaw at 8082, never 8081.** 8081 gives you working chat and *silently broken* tool
+calls — the model's `<tool_call>` arrives as prose and the agent hangs on a result it never asked
+for. Config lives in `scripts/jobhunt/openclaw-provider.json5`, applied with
+`openclaw config patch --file <that>`.
+
+| Claim | How it was proven |
+|---|---|
+| OpenClaw reaches the local model | agent returned `openclaw reached the local model`; `status=200 elapsedMs=54` |
+| It runs on the dGPU, not the CPU | `offloaded 37/37 layers to GPU`, 4630 MiB VRAM resident |
+| Tool calling works end to end | the agent called `web_fetch` itself and consumed the result |
+| The agent reaches the live web | fetched a real Greenhouse board, reported *"188 jobs available"* |
+| JS-rendered boards can be read | `verify-web.py` pulled **50 job titles**, incl. "Remote, Canada" |
+
+**The default model is now Qwen3-4B, not the 7B.** An agent harness spends ~20k tokens on its system
+prompt and tool schemas before the user says a word, so a 4096-token model cannot host one at all.
+Measured: the 7B OOMs at ctx 16384; the 4B reaches 24576 for 4606 MiB with a q8_0 KV cache. Keep the
+7B for single-shot resume tailoring in Phase 3, where the prompt is one job posting.
+
+**Four traps, each of which cost real time:**
+1. **`--logits_all` defaults to TRUE** in llama-cpp-python's server and OOM-killed the box on long
+   prompts (BUG-105). It looked exactly like a GPU failure and was not. See `docs/BUGS.md`.
+2. **`pkill -f 'llama_cpp.server'` kills your own shell** — your command line contains the pattern.
+   Capture a PID and `kill $PID`.
+3. **`example.com` does not resolve here.** The DECISION 48 DNS provider NXDOMAINs the IANA example
+   domains. Every real job board resolves fine. Don't debug networking against it.
+4. A background server started with plain `nohup … &` dies when the tool shell resets, printing a
+   tidy `Shutting down`. Use `setsid nohup … < /dev/null &`.
+
+**Still open before Phase 5:** OpenClaw's tools run on the host **unsandboxed** (its own README says
+so) and no messaging channel is connected. Both need a decision before it drives anything unattended.
+
+**Side finding worth chasing:** six of the seven libs missing in **BUG-097** exist inside the new
+venv (`/opt/luminos/venv-jobhunt/lib/python3.14/site-packages/llama_cpp/lib`); only
+`libllama-common.so.0` is genuinely absent. If `llama-server` can be revived, its `--jinja` parses
+Qwen tool calls natively and `toolcall-proxy.py` should be **deleted**, not maintained.
+
+## 🟩 jobhunt Phase 0 — the local LLM itself
 A local LLM runs on the RTX 4050. `/opt/luminos/venv-jobhunt` holds **llama-cpp-python 0.3.34**
 built against CUDA 13.3; HIVE's `/opt/luminos/venv` was not touched. Build and proof scripts are
 `scripts/jobhunt/build-cuda-venv.sh` and `verify-cuda-venv.sh`. Full detail in
@@ -63,8 +110,8 @@ card afterwards      : suspended, by itself
 
 **➡️ THE NEXT ACTION IS TO ASK SHAWN FOR HIS RESUME.** Phase 1 (`profile.yaml` + `bullet_bank`)
 needs no GPU, and Phases 3/4/5 all gate on it. It is now the critical path.
-**Do NOT install OpenClaw next** — it is Phase 5, and the plan states the pipeline must stay fully
-usable from the CLI without it.
+*(An earlier version of this note said "do NOT install OpenClaw next". Shawn overruled that on
+2026-08-05 and asked for the infrastructure first — it is installed and proven. See Phase 0b above.)*
 
 Carry forward:
 - **Do not "align" the two venvs.** 0.3.20 *cannot* compile against CUDA 13.3 (vendored
@@ -72,7 +119,8 @@ Carry forward:
   versions is the fix, not a mistake.
 - CUDA 13.3 refuses gcc > 15 (system is 16.1.1) → `-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-15`.
   Pin `-DCMAKE_CUDA_ARCHITECTURES=89` or you compile every architecture.
-- **A 7B is too big for batch scoring** — 4892 MiB at ctx 4096, and Phase 2 wanted 32k. Get a ~4B.
+- **A 7B is too big for batch scoring** — 4892 MiB at ctx 4096, and Phase 2 wanted 32k. ✅ Done in
+  Phase 0b: `Qwen3-4B-Instruct-2507-Q4_K_M.gguf` is downloaded and is now the server default.
 - **Never run `sudo usermod -aG dgpu shawn`** — the old plan listed it as a blocker; it would give
   every process on the box the card and destroy DECISION 25. `dgpu-exec-v2` is the route.
 
