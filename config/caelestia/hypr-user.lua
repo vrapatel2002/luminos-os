@@ -210,14 +210,19 @@ hl.bind("SUPER + SHIFT + Backspace", hl.dsp.exec_cmd("luminos-look reset")) -- u
 hl.bind("CTRL + SUPER + SHIFT + R", hl.dsp.exec_cmd("luminos-shell-guard"), { release = true })
 
 -- ═════════════════════════════════════════════════════════════════════════════════════════
--- Float everything — [CHANGE: claude-code | 2026-08-04]
+-- Float or tile by default — [CHANGE: claude-code | 2026-08-05]
 -- ═════════════════════════════════════════════════════════════════════════════════════════
--- Shawn wants a Plasma/Windows-style desktop: windows that open free, stack on top of each
--- other and get dragged where he wants them. Stock Caelestia is `general:layout = dwindle`,
--- so two windows split the screen left/right and cannot overlap — that is the "locked to a
--- position" problem, not a bug.
+-- 2026-08-04 this floated EVERYTHING, because Shawn wanted a Plasma/Windows-style desktop.
+-- 2026-08-05 he asked for it back off ("remove the float things i dont want it"), so the
+-- behaviour is now a switch rather than a hardcoded rule, and the default is TILED.
 --
--- Why a catch-all window rule and NOT `general:layout = floating`:
+-- The switch lives in hypr-locked.conf, NOT here, for two reasons:
+--   * that file is plain text, so a bad edit costs one rule. This file is Lua, where a
+--     syntax error puts Hyprland in emergency mode with NO binds — a black screen with no
+--     keyboard way out. The thing Shawn is most likely to hand-edit belongs in the safe file.
+--   * luminos-win already reads and writes that file, so one file holds the whole policy.
+--
+-- Why a catch-all window rule and NOT `general:layout = floating` when floating IS on:
 -- the dwindle layout is still wanted for the times he DOES want a split, and
 -- kbToggleWindowFloating (SUPER+ALT+Space) toggles a window between float and the ACTIVE
 -- layout. Switching the layout itself to `floating` would make that toggle a no-op and
@@ -234,7 +239,41 @@ hl.bind("CTRL + SUPER + SHIFT + R", hl.dsp.exec_cmd("luminos-shell-guard"), { re
 --
 -- Caelestia's bar, launcher and OSDs are layer-shell surfaces, NOT windows, so no window
 -- rule can reach them — confirmed by `hyprctl layers` still showing 6 layers after reload.
-hl.window_rule({ match = { class = ".*" }, float = true })
+--
+-- Parsing is pcall-wrapped and every failure path falls back to tiled-with-no-exceptions.
+-- A missing file is the normal first-run case, not an error.
+local locked_path  = os.getenv("HOME") .. "/.config/caelestia/hypr-locked.conf"
+local float_by_default = false -- fallback when the file is missing or has no directive
+local flip_classes = {}        -- classes that get the OPPOSITE of the default
+
+local ok_locked, err_locked = pcall(function()
+    local fh = io.open(locked_path, "r")
+    if not fh then return end
+    for line in fh:lines() do
+        local s = line:match("^%s*(.-)%s*$")
+        if s ~= "" and s:sub(1, 1) ~= "#" then
+            local dir = s:match("^default%s*=%s*(%a+)$")
+            if dir then
+                -- Only the two known words count. A typo (`default = tiledd`) must not be
+                -- read as "floating" by accident, so this tests for the positive spelling
+                -- and anything unrecognised stays on the tiled fallback.
+                float_by_default = (dir:lower() == "floating")
+            elseif s:match("^[%w%._%-]+$") then
+                flip_classes[#flip_classes + 1] = s
+            else
+                print("hypr-user: skipping unsafe class in hypr-locked.conf: " .. s)
+            end
+        end
+    end
+    fh:close()
+end)
+if not ok_locked then
+    print("hypr-user: could not read " .. locked_path .. ": " .. tostring(err_locked))
+end
+
+if float_by_default then
+    hl.window_rule({ match = { class = ".*" }, float = true })
+end
 
 -- ═════════════════════════════════════════════════════════════════════════════════════════
 -- Give Thunar a sane opening size — [CHANGE: claude-code | 2026-08-05]
@@ -268,10 +307,16 @@ hl.window_rule({
 })
 
 -- ═════════════════════════════════════════════════════════════════════════════════════════
--- Locked apps — float by default, tile by exception — [CHANGE: claude-code | 2026-08-05]
+-- Exceptions — the apps that get the OPPOSITE of the default — [CHANGE: claude-code | 2026-08-05]
 -- ═════════════════════════════════════════════════════════════════════════════════════════
--- The catch-all above floats EVERYTHING. Shawn wants some apps pinned into the tiling
--- layout instead, so this reads a list of window classes and claws just those back.
+-- The classes were parsed further up, alongside the `default =` directive; this is only the
+-- point where they turn into rules, which has to be AFTER the catch-all to override it.
+--
+-- The direction is derived, not hardcoded. When floating is the default a listed app tiles;
+-- when tiling is the default a listed app floats. That is what keeps one keybind
+-- (SUPER+SHIFT+Space) and one list meaningful no matter which way the default is set — the
+-- older version wrote `float = false` unconditionally, which silently became a no-op the
+-- moment the default stopped being "float everything".
 --
 -- Ordering is what makes this work, and it was measured rather than assumed. In a throwaway
 -- nested Hyprland (2026-08-05) three kitty windows were opened under exactly this rule
@@ -279,34 +324,17 @@ hl.window_rule({
 --     catch-all float=true only ....... floating: 1
 --     later rule float=false .......... floating: 0
 --     later rule tile=true ............ floating: 0
--- So a later rule DOES override the catch-all, and `float = false` is a real key rather than
--- one of the many that this parser accepts and silently ignores. Worth checking, because
--- window-rule tables are NOT validated: an unknown key returns ok and does nothing.
+-- So a later rule DOES override the catch-all, and `float = false` is a real key.
 --
--- Why a plain text file and not a .lua list: luminos-win rewrites it on every lock/unlock.
--- If that file were Lua, one bad write would be a config SYNTAX ERROR, which puts Hyprland
--- in emergency mode with no binds registered — a black screen with no keyboard way out.
--- A text file that goes wrong costs at most one missing rule. For the same reason the class
--- is allow-listed to [%w%._%-] here as well as in the script: these strings are interpolated
--- into a Lua pattern, so a stray quote is a syntax error, not a cosmetic bug.
-local locked_path = os.getenv("HOME") .. "/.config/caelestia/hypr-locked.conf"
-local ok_locked, err_locked = pcall(function()
-    local fh = io.open(locked_path, "r")
-    if not fh then return end -- no file yet is the normal case, not an error
-    for line in fh:lines() do
-        local cls = line:match("^%s*(.-)%s*$")
-        if cls ~= "" and cls:sub(1, 1) ~= "#" then
-            if cls:match("^[%w%._%-]+$") then
-                hl.window_rule({ match = { class = "^" .. cls:gsub("%.", "%%.") .. "$" }, float = false })
-            else
-                print("hypr-user: skipping unsafe class in hypr-locked.conf: " .. cls)
-            end
-        end
-    end
-    fh:close()
-end)
-if not ok_locked then
-    print("hypr-user: could not read " .. locked_path .. ": " .. tostring(err_locked))
+-- Worth checking every key, because window-rule tables silently accept unknown fields AT
+-- RUNTIME. They are not unvalidated though — see the note on the clamp at the end of this
+-- file: `Hyprland --verify-config -c <file>` DOES report every unknown field by name, and
+-- is the cheap way to check a rule before reloading the live session.
+for _, cls in ipairs(flip_classes) do
+    hl.window_rule({
+        match = { class = "^" .. cls:gsub("%.", "%%.") .. "$" },
+        float = not float_by_default,
+    })
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════════════════
@@ -454,3 +482,116 @@ hl.define_submap("hyprexpo", function()
     hl.bind("return", function() hl.plugin.hyprexpo.kb_confirm() end)
     hl.bind("escape", function() hl.plugin.hyprexpo.expo("cancel") end)
 end)
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Keep floating windows on the screen — [CHANGE: claude-code | 2026-08-05]
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Shawn: "some app windows are going out the area so they are kinda cut". Measured on the
+-- live session rather than eyeballed — the desktop is 1440x900 logical (2880x1800 @ scale 2)
+-- with reserved margins l60 t10 r10 b10 for the Caelestia bar:
+--     antigravity     at (73,43)  size 1416x916  -> over the right edge by 49, bottom by 59
+--     Pdf4QtEditor    at (647,280) size 804x450  -> over the right edge by 11
+-- An app that asks for a window bigger than the screen gets one, and the overflow is simply
+-- not rendered. Stock rules.lua:46 centres floaters, but centring an OVERSIZED window still
+-- overflows — and that rule is `xwayland = false`, so XWayland apps never even get centred.
+--
+-- Tiling is the default now, so most windows can no longer do this at all: dwindle always
+-- fits them to the work area. This clamp is the guard for what is still deliberately
+-- floating — dialogs, pickers, and the float_50_60 / 60_70 / 70_80 tags.
+--
+-- 0.9 x 0.9 = 1296x810, and centred on 1440x900 that spans x 72..1368, y 45..855. That
+-- clears the 60px bar on the left and stays inside all four reserved margins. Expressed as
+-- a proportion, not fixed pixels, so an external monitor gets the same treatment.
+--
+-- `match = { float = true }` deliberately, NOT a class match: this must not touch tiled
+-- windows, where a max_size leaves dead gaps in the layout.
+--
+-- All of this was proven in a throwaway nested Hyprland (1280x800) on 2026-08-05 before it
+-- was written here, because a window rule that is wrong in a silent way is the failure mode
+-- this config keeps hitting:
+--     control, no clamp, asked for 2000x1200 ...... got 2000x1200  (so the ask is real)
+--     max_size = "600 400" ........................ got 600x400    (absolute form works)
+--     max_size = "(monitor_w*0.5) (monitor_h*0.5)"  got 640x400    (expression form works)
+--     tiled window under the same clamp ........... got 1278x798   (tiled left alone)
+--
+-- CORRECTION to a long-standing note in this repo: window-rule tables ARE validated, just
+-- not at runtime. `Hyprland --verify-config -c <file>` reports every unknown field by name
+-- and exits without starting a compositor. It is how `maxsize` was caught as wrong here
+-- (the Lua parser wants `max_size`; the classic-config spelling is silently a different,
+-- unknown key). Run it before every reload.
+hl.window_rule({
+    match    = { float = true },
+    max_size = "(monitor_w*0.9) (monitor_h*0.9)",
+    center   = true,
+})
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Stop the dashboard drawer from eating window titlebar clicks
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- [CHANGE: claude-code | 2026-08-06] BUG-110.
+--
+-- Symptom Shawn reported: Claude Desktop's minimize/maximize/close buttons do nothing, and
+-- double-clicking its titlebar does not maximize — while double-clicking Chrome's TOP-LEFT
+-- corner works fine.
+--
+-- It is not an app bug and not a Wayland/Electron bug. Caelestia's `caelestia-drawers`
+-- layer surface is full-screen (0,0 1440x900) on the TOP layer. Its dashboard panel opens
+-- on hover of the top edge of the screen — modules/drawers/Interactions.qml:211 calls
+-- inTopPanel(), whose trigger band is `y < max(border.minThickness, border.thickness)` =
+-- the top 10 logical px, spanning roughly x 285..1185. Once open the panel hangs down to
+-- about y 660 and, being a layer surface above every window, it SWALLOWS the clicks.
+--
+-- Under DECISION 50 every window is tiled at y=20, so its titlebar sits directly under
+-- that panel. Measured on 2026-08-06 with ydotool + grim:
+--   dashboard OPEN  -> close button on a throwaway Claude window: click dead, 3 attempts
+--   dashboard SHUT  -> same pixel, single click, window closed immediately
+--   dashboard SHUT  -> maximize button on the live Claude window: fullscreen 0 -> 1
+-- Chrome "works" only because Shawn double-clicks its top-LEFT corner (x 70..285), which
+-- is outside the panel's horizontal span.
+--
+-- Fix is one line in ~/.config/caelestia/shell.json: dashboard.showOnHover = false. The
+-- dashboard then only appears when asked for, so nothing hovers over a titlebar uninvited.
+-- That would leave it unreachable, hence the bind below. SUPER+B was confirmed free
+-- against `hyprctl binds` on the RUNNING compositor (SUPER+D is kbCommunicationWs, a
+-- workspace). SUPER+K still toggles everything at once via caelestia:showall.
+--
+-- NOTE ON MINIMIZE: the minimize button stays dead and cannot be fixed here. Hyprland has
+-- no minimize concept at all, so there is nothing for the app's request to land on.
+-- SUPER+H (luminos-win min) is the working equivalent, and SUPER+SHIFT+H brings them back.
+hl.bind("SUPER + B", hl.dsp.global("caelestia:dashboard"))
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- Cut the window-open animation in half
+-- ═════════════════════════════════════════════════════════════════════════════════════════
+-- [CHANGE: claude-code | 2026-08-06]
+--
+-- Symptom Shawn reported: apps launched from the Caelestia launcher feel slow, KDE felt
+-- instant. The spawn path was measured on 2026-08-06 and is NOT the problem:
+--   app2unit overhead ............ 33 ms
+--   systemd-run --user --scope ... 15 ms
+--   kitty spawn -> mapped ....... 236 ms
+--   thunar ...................... 452 ms
+--   dolphin ..................... 465 ms
+--   pavucontrol ................. 674 ms
+-- modules/launcher/services/Apps.qml calls entry.execute() BEFORE the launcher closes, so
+-- there is no debounce either. The shell renders on renderD129 (the AMD iGPU), no llvmpipe.
+--
+-- What is left is the animation. Caelestia's hyprland/animations.lua ships windowsIn at
+-- speed 5 and the global node at 8 — and the `speed` unit here is DECISECONDS, so that is
+-- a 500 ms window-open on top of an 800 ms global envelope, with the launcher fading out
+-- over another 400-500 ms underneath it. KDE's window-open is ~150-250 ms. The app is
+-- already on screen; you are watching it arrive.
+--
+-- These are halved, not switched off — the desktop should still feel alive. animations.lua
+-- is upstream Caelestia and must NOT be edited in place or `caelestia update` will conflict;
+-- this file is required last, so re-issuing the leaves here is what wins. Set
+-- vars.luminosAnimations = false (the block near the top of this file) to kill them outright.
+hl.animation({ leaf = "global",     enabled = true, speed = 4, bezier = "standard" })
+hl.animation({ leaf = "windowsIn",  enabled = true, speed = 2, bezier = "emphasizedDecel" })
+hl.animation({ leaf = "windowsOut", enabled = true, speed = 2, bezier = "emphasizedAccel" })
+hl.animation({ leaf = "windowsMove",enabled = true, speed = 3, bezier = "standard" })
+hl.animation({ leaf = "layersIn",   enabled = true, speed = 2, bezier = "emphasizedDecel", style = "slide" })
+hl.animation({ leaf = "layersOut",  enabled = true, speed = 2, bezier = "emphasizedAccel", style = "slide" })
+hl.animation({ leaf = "fadeLayers", enabled = true, speed = 2, bezier = "standard" })
+hl.animation({ leaf = "workspaces", enabled = true, speed = 3, bezier = "standard" })
+hl.animation({ leaf = "fade",       enabled = true, speed = 3, bezier = "standard" })

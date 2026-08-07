@@ -1,8 +1,17 @@
 {
-  "bar": {
-    "workspaces": {
-      "showWindows": true,
-      "maxWindowIcons": 8
+    "bar": {
+        "workspaces": {
+            "maxWindowIcons": 8,
+            "showWindows": true
+        }
+    },
+    "dashboard": {
+        "showOnHover": false
+    },
+    "launcher": {
+        "showOnHover": true,
+        "useFuzzy": {
+            "apps": false
+        }
     }
-  }
 }

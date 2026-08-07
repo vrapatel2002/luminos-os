@@ -1767,3 +1767,138 @@ agent session had started it by hand, so it died whenever Cowork restarted.
 **A successful handshake is not a successful connection.** Auth here failed *after* the
 WebSocket upgrade, so every layer-4 check passed and pointed away from the real cause. When a
 status line and an error message disagree, believe the error message.
+
+---
+
+## BUG-107 — the free filter put European-only roles in the Canadian pool
+**Status: FIXED 2026-08-06** · `scripts/jobhunt/locations.py`
+
+`classify()` returned `global` for **"Anywhere in France, Belgium, Spain"**. The `_GLOBAL`
+regex contains a bare `\banywhere\b`, and that branch only cross-checks the **title** for a
+country — never the location string it just matched. So 16 European-only roles reached the
+scored pool, where they cost GPU time and would have cost application time.
+
+**"Anywhere IN <somewhere>" is a scope, not the absence of one.** Fixed with a dedicated
+`_SCOPED_ANYWHERE = r"\banywhere\s+in\s+(?!the\s+world\b)"`; when it matches, the global
+branch is skipped so the country checks below get their turn. The negative lookahead is what
+keeps "Anywhere in the World" global. It deliberately does **not** catch
+"Worldwide (excl. China)" — an exclusion list is still worldwide, and treating the named
+country as a scope there would be the same bug pointing the other way.
+
+**How it was found matters: not by a test.** `locations.py`'s 17 built-in cases all passed
+before and after. It surfaced from reading `SELECT location, bucket, COUNT(*)` over the live
+pool — i.e. by looking at what the classifier actually did to real data, not at what it was
+asked to do. Five regression cases added; 26/26 now pass.
+
+**Consequence for the design:** `score.py` now **recomputes the bucket on every rules pass**
+instead of trusting what `ingest.py` stored. Bucket is derived data, and derived data that is
+only computed at crawl time means a classifier fix cannot land without a full re-crawl of
+every board.
+
+---
+
+## BUG-108 — the scorer promoted jobs the filter had already rejected
+**Status: FIXED 2026-08-06** · `scripts/jobhunt/score.py`
+
+A Twilio posting whose location read **`Remote - US`** appeared at the top of the shortlist,
+with `bucket = us_only` still correctly set on the row.
+
+The same role is posted for both Canada and the US and shares one `dedup_key`. The scorer
+writes a score across every listing of the same role — correct, since one job on three boards
+is one job and scoring it three times wastes the GPU. But the `UPDATE ... WHERE dedup_key=?`
+had **no status predicate**, so it also set `status='shortlist'` on the sibling row the rules
+pass had put in `filtered`. Fixed by adding `AND status IN ('pool','scored','shortlist')`.
+
+The failure is worth remembering for its shape: **the visible number was right and the row
+underneath it was wrong.** The score of 88 was computed from the Canadian listing and was
+defensible; only the location column gave it away.
+
+---
+
+## BUG-109 — the model scored four out of five jobs as exactly 40
+**Status: FIXED 2026-08-06** · `scripts/jobhunt/score.py`
+
+First run of the Phase 2 scorer: five jobs, four scored **40**, one scored 59. A ranking in
+which most rows share one value is not a ranking.
+
+The model was not confused. Its written reasoning was correct every time — it found "requires
+7 years", "requires 5+ years", "requires 2+ years" straight out of the postings. It was asked
+for a 0-100 rating against a banded rubric (`0-39 / 40-59 / 60-79 / 80-100`) and **parked on
+the floor of a band**. The same hedging showed up in `seniority_match`, which came back
+`unclear` on 5 of 5 even where the posting stated a number.
+
+**Fix: the model reports facts, Python does the arithmetic.** The schema now asks for
+`years_required` (integer), `degree_required`, `hard_blocker`, and a `fit_signal` enum, and
+`compute_score()` derives the number. Measured on 15 jobs afterwards: nine distinct values
+across 20-88.
+
+Two further defects were only visible *because* the number came apart into its inputs:
+- A posting returned `fit_signal: strong` while listing **thirteen** required technologies the
+  candidate lacks, with a `one_line_why` that said exactly that. The prose was right, the
+  label was wrong. `missing_skills` (a reading) now overrides `fit_signal` (a judgement).
+- The `Remote - US` row above — see BUG-108.
+
+**The general lesson: an LLM is a reliable reader and an unreliable judge.** Ask it what a
+document says, not what it is worth. A side benefit is that re-tuning is now free —
+`score.py --recompute` re-ranks from stored answers in about a second instead of a 25-minute
+GPU pass.
+
+---
+
+## BUG-110 — the desktop's own dashboard was swallowing every window's titlebar clicks
+**Status: FIXED 2026-08-06** · `~/.config/caelestia/shell.json`, `~/.config/caelestia/hypr-user.lua`
+
+Shawn: *"when i double click any other window like chrome top left corner it goes to fullscreen
+and back to normal but this does not work with claude desktop … and the buttons even are not
+working."*
+
+It reads like an Electron bug. It is not. It is not an app bug at all.
+
+Caelestia's `caelestia-drawers` is a **full-screen layer surface** — `hyprctl layers` reports it
+at `0,0 1440x900` on level 2, above every window on the screen. Its dashboard panel opens on
+hover: `modules/drawers/Interactions.qml:211` calls `inTopPanel()`, whose trigger band is
+`y < max(border.minThickness, border.thickness)` — the **top 10 logical pixels**, spanning
+roughly `x 285..1185`. Reaching for a titlebar button means slamming the pointer at the top edge
+of the screen, which is exactly that band. The panel drops down to about `y 660` and, being a
+layer surface, it is what receives the click. The window underneath never hears it.
+
+DECISION 50 made this unavoidable: every window is tiled at `y=20`, so its titlebar sits
+directly under the panel.
+
+**Measured, not reasoned** — throwaway `claude-desktop --profile=tbtest`, ydotool + grim:
+
+| dashboard | target | result |
+|---|---|---|
+| open | close button | dead, three attempts |
+| **shut** | **same pixel, one click** | **window closed immediately** |
+| shut | maximize button, live Claude window | `fullscreen 0 -> 1` |
+| shut | double-click titlebar | `fullscreen 0 -> 1` |
+
+So the buttons were never broken. Chrome "worked" only because Shawn double-clicks its **top-left
+corner** (`x 70..285`) — the one part of a titlebar that falls outside the panel's span. Chrome
+in fact draws no window buttons at all under Wayland; it has only a tab strip.
+
+**Fix:** `dashboard.showOnHover = false` in `shell.json`, plus `SUPER+B` bound to
+`caelestia:dashboard` so it is still reachable (`SUPER+D` is `kbCommunicationWs`; `SUPER+K` still
+toggles every panel at once). Verified after reload by sweeping the whole top edge — the panel
+stays shut — then maximizing Claude by double-clicking the strip it used to cover.
+
+**Minimize is a separate, unfixable case.** Hyprland has no minimize concept, so the app's request
+has nothing to land on and no `minimize>>` event is emitted. `SUPER+H` (`luminos-win min`) and
+`SUPER+SHIFT+H` are the working equivalents. A titlebar that offers a button the compositor cannot
+honour will keep generating this bug report.
+
+**The transferable lesson:** *a hover-triggered overlay on a screen edge is in direct competition
+with every window's titlebar.* Any edge-hover panel — dashboard, launcher, sidebar, OSD — is a
+click sink for whatever it covers. `launcher.showOnHover` is still `true` here and owns the bottom
+edge for the same reason; it is left on only because nothing clickable lives there.
+
+**Two traps found on the way, both worth remembering:**
+- `hyprctl dispatch <classic-dispatcher>` is **dead** in Hyprland 0.56.1. The argument is parsed as
+  Lua now: `hyprctl dispatch 'hl.dsp.window.close()'`. The old spelling errors out rather than
+  doing nothing, but every script written against 0.4x needs checking. `luminos-win` was already
+  correct.
+- `ydotool mousemove --absolute` coordinates on this machine are **logical / 2** (raw / 4), not raw
+  pixels, and the mapping drifts across a session. Read `hyprctl cursorpos` back after every move;
+  never trust the number you sent. A negative Y clamps to 1 — straight into the hover band, which
+  is what made the first round of tests look random.

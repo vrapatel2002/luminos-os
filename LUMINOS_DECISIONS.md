@@ -2695,3 +2695,118 @@ openclaw agent --agent main --message "hi" --model claude-cli/claude-sonnet-4-6
 ```
 Use `claude-cli/claude-haiku-4-5-20251001` instead if the loop turns out to be chatty enough
 that Sonnet is wasteful — the job is tool calling and JSON, not prose.
+
+---
+
+## DECISION 56 — The jobhunt pipeline filters with regexes before it thinks, and the model reports facts rather than verdicts
+**Date: 2026-08-06** · Supersedes nothing · Implements PLAN.md Phase 2
+
+Shawn's brief was three things: *"i want to just look on progress"*, *"may in future add or
+remove type of jobs that i am targeting for"*, and *"make sure to use cheapest model for bulk
+applying"*. Three architectural choices follow from those, and each has a cheaper-looking
+alternative that is wrong.
+
+### 1. The cheapest model is not calling a model
+Measured on the live database of 9,788 postings:
+
+| approach | tokens read by an LLM |
+|---|---|
+| score every posting | ~18,220,000 |
+| rule-filter first, then score survivors | ~367,000 |
+
+**50x less work for the same answer.** Location eligibility, remote-or-not, and title
+seniority are exact string questions; a language model adds nothing but latency and heat.
+The free pass runs the whole database in **0.95 seconds** and cuts 9,788 to 192 distinct
+roles. Only those reach the GPU.
+
+Bulk scoring therefore runs on **Qwen3-4B locally**, not on any paid API — no key, no
+per-token bill, no postings leaving the laptop. A cloud model is reserved for Phase 3, where
+there are a handful of calls and the output is a document a human sends.
+
+### 2. `targets.yaml` is the only file Shawn edits
+Everything tunable lives in one commented YAML file: location buckets, the remote
+requirement, exclude/include title lanes, seniority patterns, and the scoring knobs. Editing
+it and running `score.py --rules-only` re-filters the entire database in about a second, for
+free, as many times as he likes. The include lanes are kept as **separate regexes rather than
+one fused pattern** specifically so the funnel report can name which lane admitted each job —
+a fused regex would be marginally faster and would tell him nothing about why his shortlist
+looks the way it does.
+
+`status.py --rejects` samples what each rule threw away. An unaudited filter quietly stops
+working, and this is the habit that catches it.
+
+### 3. The model reads; Python judges
+The first implementation asked the model for a 0-100 `fit`. Four of the first five jobs came
+back at exactly **40** (BUG-109). Its prose was correct every time; it simply anchored on the
+floor of a rubric band.
+
+The schema now asks only for things a reader can extract — `years_required`,
+`degree_required`, `hard_blocker`, `missing_skills`, and a coarse `fit_signal` enum — and
+`compute_score()` does the arithmetic. Three consequences:
+
+- **Scores spread.** 15 jobs produced nine distinct values across 20-88.
+- **Contradictions become correctable.** One posting returned `fit_signal: strong` while
+  listing 13 required technologies the candidate lacks. A reading now overrides a judgement.
+- **Re-tuning is free.** `score.py --recompute` re-ranks the whole pool from stored answers
+  in ~1 second. Raising `max_years_experience` as Shawn gains experience costs nothing;
+  under the old design it meant another 25-minute GPU pass.
+
+The output is grammar-constrained (`response_format.schema` -> GBNF), so malformed JSON is
+not unlikely, it is unreachable. PLAN.md requires this and it is not an optimisation: "reply
+with JSON only" is a request, and over 200 jobs a 4B model will decline it a few times.
+
+### 4. The model service is on-demand, and that is a power decision
+`jobhunt-llm.service` is installed but **deliberately not enabled**. `score.py` starts it,
+uses it, and stops it — because an idle llama server pins ~4.6 GB of VRAM and holds the dGPU
+out of runtime suspend indefinitely, which is precisely BUG-103. `status.py` reports
+`inactive` for that unit **in green**, with the note "idle (correct — GPU asleep)", so the
+correct state does not read as a fault.
+
+`jobhunt-pipeline.timer` (03:30 daily) carries `Persistent=true`. On a laptop that is the
+load-bearing line: without it, a machine asleep at 03:30 silently skips the run and Shawn
+finds stale data with nothing in the log to explain it.
+
+### What this does NOT decide
+Scores remain **provisional** until `profile.yaml` exists. Today the model compares postings
+against a placeholder ("recent CS/IT grad, 0-2 years, Python/Linux/SQL/Git"), and `score.py`
+prints that caveat on every run rather than presenting invented rankings as final. The
+resume is still the critical path for Phases 3-5.
+
+---
+
+## DECISION 57 — Screen-edge hover panels do not get to sit on top of window titlebars
+# [CHANGE: claude-code | 2026-08-06]
+
+**Context.** Caelestia's drawers are one full-screen layer surface per monitor, above every
+window, and each panel opens when the pointer touches the screen edge it lives on. That is the
+shell's signature interaction. It is also, structurally, a click sink: while a panel is open,
+every pixel it covers belongs to the shell and not to the window underneath.
+
+Under DECISION 50 every window is tiled at `y=20`. Its titlebar — buttons and the double-click
+strip both — is therefore always directly beneath the top edge panel. BUG-110 is the result:
+Claude Desktop's window controls appeared completely dead for days, and the actual cause was
+that the dashboard had dropped over them. Nothing was wrong with the app, the compositor, or
+Wayland.
+
+**Decision.** An edge-hover panel is allowed only on an edge where nothing clickable lives.
+
+- **Top edge — hover OFF.** `dashboard.showOnHover = false`. Titlebars own the top edge.
+  Reached by `SUPER+B` (`caelestia:dashboard`), or `SUPER+K` for all panels at once.
+- **Bottom edge — hover stays ON.** `launcher.showOnHover = true`. Windows put nothing
+  clickable at their bottom edge, so there is no competition.
+- **Right edge — hover stays OFF** (Caelestia's own default for `sidebar.showOnHover`). Close
+  buttons live in the top-right corner; this must not be turned on.
+
+**Why not the alternatives.** Narrowing the trigger band, or adding a delay, only makes the
+collision rarer — and a control that works nine times in ten is worse than one that never
+works, because you stop trusting it. Moving windows down to clear the panel gives up screen
+height permanently to a panel that is usually not there. Turning the drawers off entirely
+throws away the shell.
+
+**The rule to apply going forward:** before enabling any `showOnHover`, ask what a *window*
+puts at that edge. If the answer is anything the user clicks, the answer is no.
+
+**Corollary — do not ship a button the compositor cannot honour.** Hyprland has no minimize.
+An app's minimize button will always be dead, and no configuration fixes it. This is why
+DECISION 50 removed hyprbars' three buttons rather than wiring them up: `SUPER+H` /
+`SUPER+SHIFT+H` (`luminos-win min|restore`) is honest about what the system can actually do.
