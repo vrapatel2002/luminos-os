@@ -25,12 +25,28 @@ Usage
     from luminos_moe_offload import moe_cpu_offload
 
     with moe_cpu_offload():
-        llm = Llama(model_path=..., n_gpu_layers=99, ...)
+        llm = Llama(model_path=..., ...)          # n_gpu_layers is handled for you
 
-``n_gpu_layers`` must be high. The override is subtractive: llama.cpp assigns
-every layer to the GPU first, then this pulls the matching tensors back to RAM.
-With a low ``n_gpu_layers`` you get whole layers on the CPU *and* the experts on
-the CPU, which is the opposite of the point.
+You do not pass ``n_gpu_layers``. The override is subtractive -- llama.cpp puts
+every layer on the GPU, then this pulls the expert tensors back to RAM -- so the
+only correct setting is "all of them", and the context manager forces it and says
+so on stderr. Getting it wrong strands whole layers on the CPU *as well as* the
+experts, which is the opposite of the point, so it is not left to the caller.
+
+Who computes what
+-----------------
+Putting a weight in RAM does not mean the CPU is stuck with the arithmetic:
+
+* **Generating** (one token at a time) the expert math runs on the **CPU**, on
+  weights already in RAM at 47 GB/s. Correct: shipping ~0.9 GB across a ~13 GB/s
+  PCIe link to save a little compute would be slower than doing it in place.
+* **Reading a prompt** (512 tokens at once) llama.cpp copies the RAM-resident
+  weight to the **GPU** and computes there, because at that batch size the
+  compute saving dwarfs the transfer cost.
+
+llama.cpp decides that per batch, via ``op_offload`` (on by default). It is the
+single most important flag here -- with it off, prompt processing falls from
+677 tok/s to 7.1 tok/s on this machine. This module refuses to let it be off.
 
 Verify, don't trust
 -------------------
@@ -59,6 +75,11 @@ import tempfile
 EXPERT_TENSORS = r"\.ffn_(gate|up|down)_exps\."
 
 _ggml = None
+
+
+def _note(msg):
+    """Say what was changed underneath the caller. Silent magic is worse than none."""
+    print(f"[luminos-moe] {msg}", file=sys.stderr)
 
 
 def _load_ggml():
@@ -118,13 +139,31 @@ def _build_override_array(patterns):
     return arr, keepalive
 
 
+ALL_LAYERS = 999   # "every layer on the GPU"; llama.cpp clamps to the real count
+
+
 @contextlib.contextmanager
-def moe_cpu_offload(patterns=(EXPERT_TENSORS,), enabled=True):
+def moe_cpu_offload(patterns=(EXPERT_TENSORS,),
+                    n_gpu_layers=ALL_LAYERS,
+                    require_op_offload=True,
+                    enabled=True):
     """Within this block, any model loaded keeps `patterns` tensors in RAM.
 
     Scoped on purpose: a global monkeypatch would silently change the behaviour
     of every other model this process loads, including the little Qwen3-4B that
     wants to be entirely on the card.
+
+    This owns two settings that the caller must not be able to get wrong:
+
+    ``n_gpu_layers`` -- forced to ALL_LAYERS. The override is *subtractive*:
+        llama.cpp assigns every layer to the GPU, then this pulls the matching
+        tensors back to RAM. Passing a low value would strand whole layers on
+        the CPU *in addition to* the experts, which is the opposite of the
+        point. There is no sensible reason to hand-tune this alongside an
+        expert override, so the parameter is set here rather than trusted.
+
+    ``op_offload`` -- must stay on. See the note below; it is the difference
+        between a usable prompt-processing speed and an unusable one.
     """
     if not enabled:
         yield
@@ -133,18 +172,44 @@ def moe_cpu_offload(patterns=(EXPERT_TENSORS,), enabled=True):
     from llama_cpp import _internals
 
     arr, _keepalive = _build_override_array(list(patterns))
-    original = _internals.LlamaModel.__init__
+    orig_model = _internals.LlamaModel.__init__
+    orig_ctx = _internals.LlamaContext.__init__
 
-    def patched(self, *, path_model, params, verbose=True):
+    def patched_model(self, *, path_model, params, verbose=True):
+        if n_gpu_layers is not None and params.n_gpu_layers != n_gpu_layers:
+            _note(f"n_gpu_layers {params.n_gpu_layers} -> {n_gpu_layers} "
+                  f"(expert override is subtractive; all layers must start on the GPU)")
+            params.n_gpu_layers = n_gpu_layers
         params.tensor_buft_overrides = ctypes.cast(arr, ctypes.c_void_p)
         self._luminos_override_keepalive = (arr, _keepalive)
-        return original(self, path_model=path_model, params=params, verbose=verbose)
+        return orig_model(self, path_model=path_model, params=params, verbose=verbose)
 
-    _internals.LlamaModel.__init__ = patched
+    def patched_ctx(self, *, model, params, verbose=True):
+        # Prompt processing is COMPUTE-bound, not bandwidth-bound. Measured on
+        # this machine: the CPU reads a prompt at 7.1 tok/s, the GPU at 677 --
+        # 95x. With the experts in RAM, every expert matmul would land on the
+        # CPU and prompt processing would collapse to the 7 tok/s number.
+        #
+        # op_offload is what prevents that. For a large batch llama.cpp copies
+        # the RAM-resident weight across PCIe and runs the matmul on the GPU,
+        # because at 512 tokens at once the compute saving dwarfs the transfer.
+        # For single-token generation it correctly does NOT -- shipping ~0.9 GB
+        # over a ~13 GB/s link to save arithmetic is slower than just reading it
+        # locally at 47 GB/s. llama.cpp makes that call per batch; we only have
+        # to not disable it.
+        if require_op_offload and not params.op_offload:
+            _note("op_offload was OFF - forcing it back ON. With experts in RAM "
+                  "this is the difference between ~677 and ~7 tok/s prompt eval.")
+            params.op_offload = True
+        return orig_ctx(self, model=model, params=params, verbose=verbose)
+
+    _internals.LlamaModel.__init__ = patched_model
+    _internals.LlamaContext.__init__ = patched_ctx
     try:
         yield
     finally:
-        _internals.LlamaModel.__init__ = original
+        _internals.LlamaModel.__init__ = orig_model
+        _internals.LlamaContext.__init__ = orig_ctx
 
 
 @contextlib.contextmanager
@@ -175,7 +240,7 @@ def buffer_report(log_text):
     return {m.group(1): float(m.group(2)) for m in _BUF_RE.finditer(log_text)}
 
 
-def _selftest(model_path, n_ctx=4096, n_gpu_layers=99, pattern=EXPERT_TENSORS):
+def _selftest(model_path, n_ctx=4096, n_gpu_layers=ALL_LAYERS, pattern=EXPERT_TENSORS):
     from llama_cpp import Llama
 
     def load(use_override):
@@ -228,7 +293,18 @@ def _selftest(model_path, n_ctx=4096, n_gpu_layers=99, pattern=EXPERT_TENSORS):
         return 1
 
     moved = off.get("CUDA0", 0.0) - on.get("CUDA0", 0.0)
-    print(f"VERDICT: PASS - {moved:.0f} MiB moved off the GPU into RAM")
+    if moved > 0:
+        print(f"VERDICT: PASS - {moved:.0f} MiB moved off the GPU into RAM")
+    else:
+        # Happens when the baseline itself was crippled: the caller passed a low
+        # n_gpu_layers, so the "without" run had barely anything on the GPU to
+        # begin with, and the override run repaired it. The override still fired
+        # (the allocations differ), but "moved N MiB" would be a lie here.
+        print(f"VERDICT: PASS - override fired, but the baseline is not comparable: "
+              f"it had only {off.get('CUDA0', 0.0):.0f} MiB on the GPU because a low "
+              f"n_gpu_layers was passed. The override run forced all layers on and "
+              f"landed at {on.get('CUDA0', 0.0):.0f} MiB. Re-run without the "
+              f"n_gpu_layers argument for a like-for-like number.")
     return 0
 
 
@@ -238,6 +314,6 @@ if __name__ == "__main__":
     sys.exit(_selftest(
         sys.argv[1],
         n_ctx=int(sys.argv[2]) if len(sys.argv) > 2 else 4096,
-        n_gpu_layers=int(sys.argv[3]) if len(sys.argv) > 3 else 99,
+        n_gpu_layers=int(sys.argv[3]) if len(sys.argv) > 3 else ALL_LAYERS,
         pattern=sys.argv[4] if len(sys.argv) > 4 else EXPERT_TENSORS,
     ))
