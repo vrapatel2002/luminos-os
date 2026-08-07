@@ -195,6 +195,31 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   `POST /Users/{id}/Password` with `{"CurrentPw":"","NewPw":"<new>","ResetPassword":false}`.
 - **Changing a Jellyfin password revokes every logged-in device.** The `Devices` table went
   from 4 rows to 0 — Roku, phone and browser all have to sign in again. Warn before doing it.
+- **`preferredProtocol=usenet` does not stop torrent grabs.** "Preferred" ranks a protocol
+  first; it does not forbid the other one. That flag was already set while MobLand, House of
+  Cards and two Odyssey grabs all still came over torrent. The flag that actually forbids a
+  protocol is `enableTorrent` on the **delay profile**. See DECISION 59.
+- **Prowlarr disables indexers in Sonarr/Radarr but never deletes them.** After an
+  `ApplicationIndexerSync` the torrent entries stay visible in the UI with `enableRss`,
+  `enableAutomaticSearch` and `enableInteractiveSearch` all `False`. Seeing "The Pirate Bay"
+  in the indexer list does not mean the torrent path is open — read the three flags.
+- **A download client can be enabled while the program does not exist.** qBittorrent was
+  `enable=True` in both apps at NZBGet's priority, but `systemctl is-enabled qbittorrent`
+  returns `not-found`. Grabs went to a nonexistent client and failed with no error — the item
+  simply never arrived. Check the *unit*, not just the app's client list.
+- **Jellyfin extracts embedded subtitles on first play, not at import.** A cold track on a
+  2160p remux takes minutes to demux while the viewer sees nothing; a cached one serves in
+  ~6 ms. There is no library option and no scheduled task for it in 10.11.11 — run
+  `server/scripts/luminos-subtitle-warm`. New downloads are cold until you do.
+- **Nothing here fetches subtitles.** Bazarr is not installed, so the only subtitles that exist
+  are the ones already inside the release file.
+- **NZBGeek is a US/English indexer, and it is now the only source.** A search for two
+  well-known French titles returned **0** French-tagged results out of 100 each. Non-English
+  audio is effectively unavailable; widen with another *Usenet* indexer, not with torrents.
+- **Jellyfin over wifi crosses the radio twice.** server→router→G14 shares airtime, measuring
+  ~35 Mbit/s against a 32.3 Mbit/s remux — about 5% headroom, which stutters. The idle wired
+  `.62` measures 89.8 Mbit/s on the same file. YouTube working proves nothing here: it is
+  ~5 Mbit/s over one hop.
 - `bc` is not installed. Use python for arithmetic in scripts.
 
 ## Owner-only tasks

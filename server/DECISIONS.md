@@ -797,3 +797,114 @@ is still the thing that enforces it, trimming to two monitored seasons within a 
 designed, it keeps **any** two, not the first two, and prefers seasons that already hold
 files. Live evidence rather than a reading of the code: True Detective is currently monitored
 on **S01 and S04**.
+
+---
+
+## DECISION 59 — Downloads are Usenet-only, and that is enforced in three places rather than assumed
+# [CHANGE: claude-code | 2026-08-07]
+
+**Decision.** Sonarr and Radarr may acquire media over **Usenet only**. The torrent path is
+disabled at every layer that can independently re-open it.
+
+**Why now.** DECISION 42 halted torrenting and DECISION 48 moved downloads to Usenet, but
+neither actually *closed* the torrent path — it was left preferred-but-permitted. An audit of
+the grab history on 2026-08-07 showed torrents were still being used well after those
+decisions. Sonarr's history records `data.protocol` as `1` = usenet, `2` = torrent:
+
+```
+sonarr: 1  The Sopranos S01E02..E11        usenet
+sonarr: 2  MobLand S01E01..E10             torrent
+sonarr: 2  House of Cards 2013 S01 REMUX   torrent
+radarr: 1  Interstellar 2014 IMAX REMUX    usenet
+radarr: 2  The Odyssey 2026 WEBRip LAMA    torrent
+radarr: 2  www.1TamilMV... Odyssey PreDVD  torrent
+```
+
+**The silent failure this was causing.** `qbittorrent` is **not installed** —
+`systemctl is-enabled qbittorrent` returns `not-found`. But the qBittorrent *client entry* was
+still `enable=True` in both apps at the same priority as NZBGet. So every torrent grab was
+handed to a client that does not exist: no error surfaced, the item simply never arrived. The
+two Odyssey grabs in the history with no corresponding file are the evidence.
+
+**What was changed (all reversible toggles, nothing deleted):**
+
+| layer | before | after |
+|---|---|---|
+| qBittorrent client, Sonarr | `enable=True` | `enable=False` |
+| qBittorrent client, Radarr | `enable=True` | `enable=False` |
+| Delay profile, both apps | `enableTorrent=True` | `enableTorrent=False` |
+| Prowlarr torrent indexers | 9 enabled | 9 disabled |
+
+**Three layers, because any one of them alone is not enough.** `preferredProtocol=usenet` was
+*already* set and did nothing to stop torrent grabs — "preferred" means ranked first, not
+exclusive. The delay profile's `enableTorrent` is the flag that actually forbids the protocol
+at the decision layer; the client toggle and the indexer toggle are the belt and braces.
+
+**Verified by negative test, not by trusting the writes.** Real searches run against both apps
+after the change:
+
+```
+sonarr, episode search : 59 releases, 59 usenet, TORRENT: 0
+radarr, movie search   :  3 releases,  3 usenet, TORRENT: 0
+sonarr queue           : 26 items, all protocols: {'usenet'}
+```
+
+**The trap to remember: Prowlarr disables indexers in the apps but never deletes them.**
+Triggering `ApplicationIndexerSync` pushes `enableRss`, `enableAutomaticSearch` and
+`enableInteractiveSearch` to `False`, but the indexer *entries* remain visible in the Sonarr
+and Radarr UI. "The Pirate Bay" still appears in the indexer list and is inert. Do not read
+its presence as a live torrent path — read the three flags.
+
+**Consequence to accept.** NZBGeek is now the single acquisition source. It is a US/English
+indexer, so non-English content is effectively unavailable (see DECISION 60's note on French).
+Adding a second *Usenet* indexer is the supported way to widen coverage; re-enabling torrents
+is not.
+
+---
+
+## DECISION 60 — Embedded subtitles are pre-extracted on a sweep, because Jellyfin only demuxes them on first play
+# [CHANGE: claude-code | 2026-08-07]
+
+**Decision.** Run `server/scripts/luminos-subtitle-warm` over the library so embedded text
+subtitle tracks are already in Jellyfin's cache before anyone presses play.
+
+**The symptom.** "Subs are gone" on MobLand S01E02. The subtitles were not missing: the track
+was present at index 2, the settings were intact, and the server was selecting it correctly.
+
+**The real cause is latency, not absence.** Jellyfin demuxes an embedded subtitle out of the
+MKV **on demand, on first request**, caching to
+`/var/lib/jellyfin/data/subtitles/<2-char>/<uuid>/<index>.srt`. The extraction has to read the
+whole file, which on a 2160p remux on a spinning disk takes minutes. The log showed extraction
+running 23:08:40 → 23:11:04 (**144 s**) while playback had already been abandoned at 23:09:53
+(69 s in). The subtitles arrived after the viewer gave up.
+
+**Proven with a timed control rather than inference:**
+
+```
+E02 (cached)   served in 0.005923 s
+E03 (uncached) still not served after 2 minutes
+```
+
+Only **5** cached `.srt` files existed library-wide at that point.
+
+**Why a sweep and not a setting.** Jellyfin 10.11.11 has **no library option and no scheduled
+task** for pre-extracting subtitles. There is nothing to switch on; the work has to be driven
+externally by requesting each track once.
+
+**Result.** 78 embedded text tracks across 51 items; **77 ok, 1 failed** (Interstellar,
+`TimeoutError` — the largest file). Cache went from 5 to **290** files.
+
+**Known weaknesses, recorded rather than papered over:**
+- The script reads its credentials from `/tmp/jftoken` and `/tmp/jfuid`, which do not survive a
+  reboot. It must be given a durable credential source before it can run unattended.
+- It is **not yet on a timer**, so newly downloaded episodes are still cold and will show the
+  same "missing subtitles" symptom on first play. This is the obvious next step.
+- It only handles **text** codecs (`subrip`, `ass`, `ssa`, `mov_text`, `subviewer`, `webvtt`).
+  Image-based subtitles (PGS/VOBSUB) are untouched — those need OCR or burn-in, not extraction.
+
+**Related finding — no subtitle *fetching* exists on this box.** Bazarr is not installed, so
+the only subtitles available are the ones already inside the release file. This is what makes
+"French audio with English subtitles" unachievable today: a search of the one live indexer
+returned **0** French/MULTI-tagged results for two well-known French titles, and no Oggy
+release advertises English subtitles at all. Bazarr plus a French-capable Usenet indexer would
+both be required.
