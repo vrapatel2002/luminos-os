@@ -5,7 +5,8 @@
 - **OS**: Arch Linux on ASUS ROG G14
 - **Core**: Go daemons, KDE Plasma, Qt/QML
 - **AI**: MobileLLM on NPU (Driver), HIVE on GPU/CPU (llama.cpp TurboQuant)
-- **Constraint**: 4.6GB Safe VRAM (6GB Total)
+- **Constraint**: 4.6GB Safe VRAM (6GB Total) — applies to **resident/background** models only.
+  A **foreground** model the user launched on purpose may use the **full 6GB** (DECISION 58).
 - **Rules**: NO DOCKER, NO OLLAMA, IDENTITY TAGS MANDATORY.
 
 ## HIVE Models (llama.cpp GGUF — NOT Ollama)

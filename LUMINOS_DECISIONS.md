@@ -2810,3 +2810,40 @@ puts at that edge. If the answer is anything the user clicks, the answer is no.
 An app's minimize button will always be dead, and no configuration fixes it. This is why
 DECISION 50 removed hyprbars' three buttons rather than wiring them up: `SUPER+H` /
 `SUPER+SHIFT+H` (`luminos-win min|restore`) is honest about what the system can actually do.
+
+---
+
+## DECISION 58 — The 4.6 GB VRAM budget governs background models; a foreground model gets the whole card
+# [CHANGE: claude-code | 2026-08-07]
+
+**Context.** "4.6 GB Safe VRAM (6 GB Total)" has been repeated in ~35 files since the project
+started, and it has been read as a hardware limit. It is not. The RTX 4050 has 6,141 MiB and
+will happily allocate all of it. The 4.6 GB figure was a *policy* number protecting against a
+specific failure: a model server left **resident** pins its VRAM indefinitely, which starves the
+compositor and — worse — holds the dGPU out of runtime suspend forever (the same class of
+problem as BUG-103, and the reason `jobhunt-llm.service` is start-use-stop rather than a
+long-running daemon).
+
+That reasoning applies to a model nobody is looking at. It does not apply to a model the user
+deliberately launched and is sitting in front of.
+
+**Decision.** Split the rule by lifecycle rather than by number.
+
+- **Background / resident / timer-driven** (HIVE swap targets, `jobhunt-llm.service`, anything a
+  systemd unit starts): **4.6 GB cap stands, unchanged.** These must also still exit when idle.
+- **Foreground / interactive / user-launched** (a big model run by hand for a session):
+  **the full 6,141 MiB is available.** The desktop is allowed to give up headroom for something
+  the user is actively using, because the user can see it and can close it.
+
+**Measured, 2026-08-07** — `gemma-4-12b-it-qat-q4_0` at `n_gpu_layers=32`, ctx 4096, q8_0 KV:
+**5,652 MiB of 6,141 used**, 677 tok/s prompt eval, 9.56 tok/s generation, no compositor stutter,
+dGPU returned to `suspended` cleanly after exit. 33 layers fails with
+`Failed to create llama_context` — that, not 4.6 GB, is the real ceiling.
+
+**What this does NOT license.** Two models at once still does not fit and never will; the
+one-model-at-a-time rule is untouched. And the exception is void the moment the process becomes
+long-lived — if a foreground session is going to idle, it exits instead.
+
+**Why this matters now.** The Gemma 4 26B A4B MoE plan depends on it: the non-expert tensors plus
+the KV cache come to ~1.3 GB and want to sit on the card alongside as many attention layers as
+fit. Sizing that split against 4.6 GB instead of 6.1 GB would throw away 1.5 GB for no reason.

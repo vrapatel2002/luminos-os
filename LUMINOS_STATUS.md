@@ -52,9 +52,23 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 
 ## Max Speed Geometry (G14/4050)
 - **Full-GPU Threshold:** < 8.5B parameters (Q4_K_M)
-- **Safe VRAM Buffer:** 4.6 GB
+- **Safe VRAM Buffer:** 4.6 GB for **background/resident** models; **6.1 GB (the whole card)**
+  for a **foreground** model launched by hand — DECISION 58, 2026-08-07
 - **VRAM/RAM Split Penalty:** -1.8 TPS per offloaded layer
 - **Peak Performance:** 38.6 TPS (Qwen2.5-Coder-7B Q4 100% GPU)
+
+### Measured 2026-08-07 — gemma-4-12b-it-qat-q4_0 (dense, 48 layers), q8_0 KV
+| n_gpu_layers | ctx | prompt eval | generation | VRAM |
+|---|---|---|---|---|
+| 0 (CPU only) | 8192 | **7.1 t/s** | 4.03 t/s | — |
+| 29 | 8192 | 457.9 t/s | 8.89 t/s | 5650 MiB |
+| 32 (max) | 4096 | 677.0 t/s | 9.56 t/s | 5652 MiB |
+| 33 | — | won't load — `Failed to create llama_context` | | |
+
+Sustained DRAM read bandwidth measured at **47.1 GB/s** (STREAM-style, 2 GiB arrays), i.e. 46% of
+the 102.4 GB/s theoretical. **4 threads saturates it** — 8 and 16 threads are both slower.
+Prompt processing is compute-bound, not bandwidth-bound, which is why CPU-only is 95x slower at
+reading than the GPU and is not a viable path for agent work.
 
 ## AI Stack
 | Component | Status | Notes |
