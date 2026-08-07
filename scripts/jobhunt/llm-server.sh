@@ -52,6 +52,21 @@ CHAT_FORMAT="${LLM_CHAT_FORMAT:-}"
 # served id is the absolute .gguf path, so every client config would break the
 # moment a model moves or gets swapped for the 4B.
 ALIAS="${LLM_ALIAS:-luminos-local}"
+# -1 = every layer on the GPU, which is what you want whenever the model fits.
+# A POSITIVE NUMBER SPLITS THE MODEL: that many layers on the card, the rest left in
+# system RAM. That is the only way a 12B runs on a 6 GB card at all.
+#
+# THE COST IS RAM BANDWIDTH, NOT PCIe. A CPU-resident layer is COMPUTED on the CPU;
+# only a small activation vector crosses the bus. What costs real time is the CPU
+# reading that layer's weights out of system RAM, once per token. So the only lever
+# that matters is BYTES LEFT IN RAM — push ngl as high as it still loads.
+# Measured 2026-08-06 on gemma-4-12b-it-qat-q4_0 at ctx 8192: ngl=0 -> 5.6 tok/s,
+# ngl=25 -> 9.6, ngl=29 -> 10.7. ngl=31 will not load.
+#
+# THIS OFFLOADS WEIGHTS, NOT THE KV CACHE. Do not also reach for --offload_kqv false
+# to buy headroom: measured on Qwen3-4B that cost 25% on an empty cache and 57% at
+# 5.5k tokens, because the cache is re-read on every token. Drop a layer instead.
+NGL="${LLM_NGL:--1}"
 
 [ -x "$VENV/bin/python" ] || { echo "FAIL: $VENV missing — run build-cuda-venv.sh"; exit 1; }
 [ -f "$MODEL" ] || { echo "FAIL: model not found: $MODEL"; exit 1; }
@@ -84,7 +99,7 @@ exec dgpu-exec-v2 "$VENV/bin/python" -m llama_cpp.server \
   --model "$MODEL" \
   --model_alias "$ALIAS" \
   --host "$HOST" --port "$PORT" \
-  --n_gpu_layers -1 \
+  --n_gpu_layers "$NGL" \
   --n_ctx "$CTX" \
   --flash_attn true \
   --type_k "$KV_TYPE" --type_v "$KV_TYPE" \

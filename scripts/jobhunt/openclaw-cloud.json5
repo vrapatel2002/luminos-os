@@ -1,0 +1,122 @@
+// Give OpenClaw's agent loop a model that can actually drive tools.
+// [CHANGE: claude-code | 2026-08-06] Phase 0c.
+//
+// Apply with:
+//   openclaw config patch --file scripts/jobhunt/openclaw-cloud.json5 --dry-run
+//   openclaw config patch --file scripts/jobhunt/openclaw-cloud.json5
+//
+// ── WHY WE ARE HERE ──────────────────────────────────────────────────────────
+// Gemma 4 12B runs fine for chat (port 8081, ~10 tok/s) but cannot drive the
+// agent, for two INDEPENDENT reasons, both measured:
+//   1. It only loads at ctx 8192 on a 6 GB card, and OpenClaw's system prompt
+//      plus tool schemas alone tokenize to 19929 before you type anything.
+//   2. It emits a non-JSON tool-call format toolcall-proxy.py cannot parse, so
+//      tools silently never fire. The proxy's regex is Qwen-specific.
+//
+// ── OPTION 1 (RECOMMENDED, NO API KEY) — claude-cli ──────────────────────────
+// Shawn already pays for Claude Code. OpenClaw's bundled Anthropic plugin
+// registers a `claude-cli` backend that shells out to the installed `claude`
+// binary, so the SUBSCRIPTION drives the agent and there is no per-token bill.
+//
+// I PREVIOUSLY WROTE THAT THIS WAS IMPOSSIBLE. That was wrong, and the mistake
+// is worth recording: "claude-cli" is NOT a value for a provider's `api` field
+// — that enum really does reject it. It is an AGENT RUNTIME, selected either by
+// using a `claude-cli/<model>` model ref directly or by setting
+// `agentRuntime: { id: "claude-cli" }` on a model. Right value, wrong field.
+//
+// Tools DO work on this path, contrary to the doc's "text-only fallback"
+// framing: the gateway stands up a loopback MCP bridge and hands Claude Code
+// the OpenClaw toolset. Verified in the gateway log — 22 tools listed, and the
+// child is launched with `--allowedTools mcp__openclaw__*`.
+//
+// TWO PREREQUISITES, BOTH REAL, BOTH ALREADY HIT:
+//   a. Claude Code >= 2.1.206. OpenClaw waits for the `msg_lifecycle_v1`
+//      capability in Claude's system/init record. On 2.1.152 the turn does NOT
+//      error — it HANGS until a watchdog kills it, which reads like a network
+//      problem and is not one. Upgraded to 2.1.223 on 2026-08-06.
+//      NOTE: npm here blocks postinstall scripts, and the upgrade left a stub
+//      that answered `claude --version` with "native binary not installed".
+//      Fix: node ~/.npm-global/lib/node_modules/@anthropic-ai/claude-code/install.cjs
+//   b. A LIVE login in ~/.claude/.credentials.json. This is the current
+//      blocker: the stored token expired 2026-05-27. Only Shawn can fix it —
+//      run `claude` in a terminal and `/login`. An env var inherited from some
+//      other session does NOT count; the gateway logs `cli env auth: child=none`
+//      and the child falls back to that file.
+//
+// ── OPTION 2 — Google AI Studio (free tier, needs a key) ─────────────────────
+// Needs a key from aistudio.google.com/apikey. NOT the Gemini CLI OAuth: that
+// path died 2026-08-06. ~/.gemini/oauth_creds.json is still a valid login but
+// Google now rejects the client itself — IneligibleTierError /
+// UNSUPPORTED_CLIENT, "no longer supported for Gemini Code Assist for
+// individuals". Not a local fault and not fixable locally. An AI Studio API key
+// is a different product and still works.
+//
+// ── OPTION 3 — Anthropic API key (paid, per token) ───────────────────────────
+// Only worth it if you want the agent to run unattended without a Claude Code
+// login present. Haiku is the right default for an agent loop: the job is tool
+// calling and JSON, not prose, and the loop runs thousands of times.
+//
+// ── THE LOCAL MODEL STAYS ────────────────────────────────────────────────────
+// This MERGES providers; it does not delete luminos/luminos-local. PLAN.md's
+// design rule stands: the pipeline must remain usable with no cloud dependency.
+// Only the `agents.defaults.model` block below decides which one is used.
+{
+  models: {
+    mode: "merge",
+    providers: {
+      // OPTION 3 — needs: openclaw models auth paste-api-key
+      anthropic: {
+        api: "anthropic-messages",
+        apiKey: "${ANTHROPIC_API_KEY}",
+        models: [
+          { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5",
+            contextWindow: 200000, maxTokens: 8192 },
+          { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6",
+            contextWindow: 200000, maxTokens: 8192 },
+        ],
+      },
+
+      // OPTION 2
+      google: {
+        api: "google-generative-ai",
+        apiKey: "${GEMINI_API_KEY}",
+        models: [
+          { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash",
+            contextWindow: 1000000, maxTokens: 8192 },
+        ],
+      },
+
+      // OPTION 1 needs NO provider block at all. `claude-cli` is a runtime
+      // registered by a bundled plugin, and OpenClaw auto-loads that plugin the
+      // moment a `claude-cli/...` model ref is selected. Adding a provider here
+      // named "claude-cli" would be wrong and would shadow the real one.
+    },
+  },
+
+  agents: {
+    defaults: {
+      model: {
+        // SWITCH THIS LINE to choose. Left on the local model on purpose so
+        // that merging this file changes nothing until you decide.
+        //   primary: "claude-cli/claude-sonnet-4-6",   // <- subscription, no key
+        //   primary: "claude-cli/claude-haiku-4-5-20251001",
+        //   primary: "google/gemini-2.5-flash",
+        //   primary: "anthropic/claude-haiku-4-5-20251001",
+        primary: "luminos/luminos-local",
+
+        // Keep the local model reachable if the cloud/CLI path fails. Fallbacks
+        // stay eligible even when they are not in modelPolicy.allow.
+        fallbacks: ["luminos/luminos-local"],
+      },
+
+      // These overrides were needed for a 24k local window. A 200k model does
+      // not need them, but they are harmless there — leaving them means
+      // switching back to local does not silently break the agent again.
+      compaction: {
+        maxHistoryShare: 0.9,
+        reserveTokens: 2048,
+        reserveTokensFloor: 0,
+      },
+    },
+  },
+}

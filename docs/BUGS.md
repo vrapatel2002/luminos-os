@@ -1700,3 +1700,70 @@ Measured on the identical 19,380-token request that previously killed it:
 get its exit code before theorising — rc=137 would have redirected this from "GPU/CUDA" to
 "memory" immediately. And when a component runs on an accelerator, the accelerator is the
 first thing everyone suspects and often the last thing at fault; measure both sides.
+
+## BUG-106 — the OpenClaw dashboard could not connect, and `openclaw status` said auth was off
+# [CHANGE: claude-code | 2026-08-06]
+**Status:** FIXED (config + supervision; verified in a real browser, not by assertion)
+**Severity:** HIGH — the Control UI was the only way to drive the agent, and it was unusable.
+Also CRITICAL-adjacent: it closes `gateway.loopback_no_auth`, and OpenClaw's tools run
+**unsandboxed on the host**.
+**Found:** 2026-08-06
+
+### What it looked like
+`http://127.0.0.1:18789/chat` rendered "Could not connect" forever. Everything below the UI
+looked healthy, which is what made it slow to place:
+- the gateway was listening on 18789,
+- the WebSocket handshake **succeeded** — `curl` got `101 Switching Protocols` and a
+  `connect.challenge` nonce back,
+- `openclaw status` reported **`auth none`**.
+
+### Root cause
+The gateway had **no token configured**, but it still *requires* one for control RPCs on
+loopback. So the browser had nothing to send, and the server hung up right after the
+handshake. The real message was only visible by pulling it out of the page with JS:
+
+```
+unauthorized: gateway token missing
+(open the dashboard URL and paste the token in Control UI settings)
+```
+
+**`auth none` is a description of the config, not of the requirement.** Read as "no auth is
+needed" it sends you looking for a network fault. The CLI said the same thing more honestly:
+`openclaw gateway health` -> *"reachable, but this CLI has no token/password or paired
+device token"*.
+
+### Fix
+1. Generated a token into `~/.openclaw/gateway-token` (`chmod 600`, never echoed).
+2. Set `gateway.auth.mode: "token"` with the token as a **literal** value.
+3. Restarted the gateway under a supervised systemd user unit.
+
+Verified by loading the Control UI in Chrome: it now renders **"Ready to chat"** with the
+model line `luminos-local · luminos · Off`.
+
+### Three traps found on the way, all silent
+- **`${ENV_VAR}` in `openclaw.json` is stored VERBATIM and resolved at read time**, not baked
+  in at write time. Setting the token as `"${OPENCLAW_GATEWAY_TOKEN}"` therefore works only
+  for a process that inherited that variable — start the gateway from a plain shell and it
+  comes back unauthenticated. The log is explicit once you look:
+  `SECRETS_RELOADER_DEGRADED ... Environment variable "OPENCLAW_GATEWAY_TOKEN" is missing`.
+  Credit where due: the gateway **stayed on last-known-good** rather than opening up.
+- **A SecretRef token disables dashboard auto-auth.** `{source:"file", provider, id}` is the
+  tidier design and it works, but then `openclaw dashboard` refuses to put the token in the
+  URL and a human has to paste the secret by hand. Two non-obvious sub-rules: the provider
+  must be declared under `secrets.providers.*` *first* or the patch is rejected, and `id` is
+  **not a path** — for a `singleValue` provider it must be the literal string `"value"`.
+- **The gateway does a full process restart when `gateway.auth.token` changes and expects a
+  supervisor to bring it back.** Under a transient unit with `Restart=on-failure` it exited
+  0, so nothing restarted it and the unit was garbage-collected — looking exactly like "the
+  fix crashed it". `Restart=always` is required.
+
+### Still open
+The gateway runs as a **transient** unit (`systemd-run --user`), so it does not survive a
+reboot. `openclaw gateway install` writes a permanent unit — not done, needs Shawn's OK.
+Before this it was worse: it was running inside `claude-cowork.service`'s own cgroup, i.e. an
+agent session had started it by hand, so it died whenever Cowork restarted.
+
+### The general lesson
+**A successful handshake is not a successful connection.** Auth here failed *after* the
+WebSocket upgrade, so every layer-4 check passed and pointed away from the real cause. When a
+status line and an error message disagree, believe the error message.

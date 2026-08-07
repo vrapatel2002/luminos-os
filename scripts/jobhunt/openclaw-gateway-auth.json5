@@ -1,0 +1,64 @@
+// Give the OpenClaw gateway a shared token so the Control UI can connect.
+// [CHANGE: claude-code | 2026-08-06] Fixes the "Could not connect" dashboard error.
+//
+// Apply with:
+//   openclaw config patch --file scripts/jobhunt/openclaw-gateway-auth.json5 --dry-run
+//   openclaw config patch --file scripts/jobhunt/openclaw-gateway-auth.json5
+//
+// ── THE SYMPTOM ──────────────────────────────────────────────────────────────
+// http://127.0.0.1:18789/chat says "Could not connect". The WebSocket handshake
+// itself SUCCEEDS (curl gets 101 Switching Protocols and a connect.challenge
+// nonce) — the server hangs up a moment later with:
+//   unauthorized: gateway token missing
+//   (open the dashboard URL and paste the token in Control UI settings)
+// `openclaw status` printing "auth none" is MISLEADING: no token was configured,
+// but the gateway still demands one for loopback control RPCs. So the browser had
+// nothing to send. `openclaw gateway health` admits the same thing from the CLI
+// side: "reachable, but this CLI has no token/password or paired device token".
+//
+// ── WHY source:"file" AND NOT A LITERAL OR AN ENV VAR ────────────────────────
+// A literal would put the secret in openclaw.json, which is world-unreadable but
+// still gets committed by accident and shows up in every `config get` dump.
+// "${OPENCLAW_GATEWAY_TOKEN}" validates, but then the token only exists for a
+// process that inherited that variable — restart the gateway from a plain shell
+// and it silently comes back unauthenticated. A file is read by the gateway
+// itself at start, so it survives any restart path.
+//
+// The token file is chmod 600 and is NOT in this repo. Regenerate with:
+//   umask 077; python3 -c "import secrets; \
+//     open('/home/shawn/.openclaw/gateway-token','w').write(secrets.token_urlsafe(32))"
+//
+// ── WHY THIS MATTERS BEYOND THE UI ───────────────────────────────────────────
+// OpenClaw's tools run UNSANDBOXED ON THE HOST. An open gateway on 127.0.0.1 is
+// reachable by anything that can make a loopback connection — including a browser
+// tab hitting it via DNS rebinding. This closes that, it is not just cosmetic.
+{
+  // The token field below is a SecretRef, not a value. It names a provider, and
+  // the provider must already exist or the patch is rejected with
+  // "Secret provider "luminos" is not configured" — so declare it here first.
+  // mode singleValue = the whole file IS the secret (no JSON key lookup).
+  secrets: {
+    providers: {
+      luminos: {
+        source: "file",
+        path: "/home/shawn/.openclaw/gateway-token",
+        mode: "singleValue",
+      },
+    },
+  },
+
+  gateway: {
+    auth: {
+      mode: "token",
+      token: {
+        source: "file",
+        provider: "luminos",
+        // id IS NOT A PATH. The path lives on the provider above; here `id`
+        // selects a value inside it, and a singleValue provider only has one,
+        // whose name is the literal string "value". Anything else fails with
+        // 'singleValue file provider "luminos" expects ref id "value"'.
+        id: "value",
+      },
+    },
+  },
+}

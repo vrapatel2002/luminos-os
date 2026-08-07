@@ -2616,3 +2616,82 @@ irrelevant here.
    at all** (bare `exec wine`, so Wine-on-NVIDIA is denied exactly as Chrome was in BUG-102), plus
    any `.desktop` entry or script invoking `dgpu-exec` directly.
 4. BPF-LSM, if and when the gate needs to be a boundary rather than a filter.
+
+## DECISION 55 — The jobhunt agent runs on the Claude Code **subscription** via `claude-cli`, not on an API key and not on the local 12B
+# [CHANGE: claude-code | 2026-08-06]
+
+**Status:** decided and proven up to the login step. Config written, not yet switched on —
+the flip is one line and is blocked on Shawn re-authenticating `claude` (see below).
+
+### The problem
+The local model cannot host OpenClaw's agent loop. Two independent, measured blockers:
+1. **Context.** Gemma 4 12B only loads at `ctx 8192` on the 6 GB card (16384 and 24576 both
+   fail to allocate). OpenClaw's system prompt plus tool schemas tokenize to **19929** on an
+   empty session — before you type anything. Note OpenClaw's own preflight estimate says
+   9456, **less than half the truth**; trust the server's 400, not the estimate.
+2. **Tool calls.** Gemma emits a non-JSON tool-call format. `toolcall-proxy.py`'s regex is
+   Qwen-specific (`<tool_call>{...}</tool_call>`), so tools silently never fire — which
+   presents as a stupid model and is actually a parsing gap.
+
+Qwen3-4B parses correctly and fits 24576, but 24576 is still barely above the 19929 floor,
+which leaves almost nothing for the actual conversation.
+
+### The decision
+Use **`claude-cli`** as the agent runtime. OpenClaw's bundled Anthropic plugin shells out to
+the installed `claude` binary, so the **existing Claude Code subscription** drives the agent
+and there is no per-token bill and no API key to store.
+
+### Why not the alternatives
+- **An Anthropic API key** — works, but it is a second bill for something already paid for.
+  Kept documented in `scripts/jobhunt/openclaw-cloud.json5` as the option to use if the agent
+  ever needs to run unattended with no Claude Code login present.
+- **Gemini CLI (free)** — **dead as of 2026-08-06, not fixable locally.**
+  `~/.gemini/oauth_creds.json` is still a valid login, but Google rejects the *client*:
+  `IneligibleTierError` / `UNSUPPORTED_CLIENT`, "no longer supported for Gemini Code Assist
+  for individuals". A Google **AI Studio** API key is a different product and still works —
+  that stays as the free-tier fallback.
+- **The local model** — stays configured as a fallback. PLAN.md's design rule is that the
+  pipeline must remain usable with no cloud dependency, and that rule is not being relaxed;
+  it just cannot be the *agent* driver.
+
+### Correcting an earlier wrong call, on the record
+A previous session concluded `claude-cli` was impossible because
+`openclaw config patch` rejected `api: "claude-cli"`. **The rejection was real; the
+conclusion was wrong.** `claude-cli` is not a provider *api* — it is an **agent runtime**,
+selected by a `claude-cli/<model>` model ref or by `agentRuntime: { id: "claude-cli" }` on a
+model. Right value, wrong field. The lesson: a schema rejection tells you a value is invalid
+*there*, not that the capability is absent.
+
+### Tools do work on this path
+The docs frame CLI backends as a "text-only fallback", which undersells it. The gateway
+stands up a **loopback MCP bridge** and hands Claude Code the OpenClaw toolset. Verified in
+the gateway log: `mcp-loopback ... toolCount: 22`, and the child is launched with
+`--allowedTools mcp__openclaw__*`. Claude Code also brings its own Bash/WebFetch tools,
+mapped onto OpenClaw's exec policy.
+
+### Two prerequisites, both hit for real
+1. **Claude Code >= 2.1.206.** OpenClaw waits for the `msg_lifecycle_v1` capability in
+   Claude's `system/init` record. On the installed 2.1.152 the turn did **not** error — it
+   **hung** until a watchdog killed it after ~163 s, which reads like a network problem and
+   is not one. Upgraded 2.1.152 -> 2.1.223.
+   **npm here blocks postinstall scripts**, and the upgrade left a stub whose
+   `claude --version` answered `Error: claude native binary not installed`. Repair:
+   `node ~/.npm-global/lib/node_modules/@anthropic-ai/claude-code/install.cjs`.
+   Rollback if ever needed: `npm install -g @anthropic-ai/claude-code@2.1.152`.
+2. **A live login in `~/.claude/.credentials.json`** — **this is the open blocker.** The
+   stored token expired **2026-05-27** and was never refreshed, because Shawn uses the
+   desktop app and Cowork rather than the npm CLI. The turn now fails cleanly and honestly:
+   `FailoverError: OAuth access token has expired. Re-authenticate to continue.`
+   **Only Shawn can fix this** — run `claude` in a terminal and `/login`.
+   An inherited `CLAUDE_CODE_OAUTH_TOKEN` in some other shell does **not** count: the gateway
+   logs `cli env auth: host=none child=none`, so the child reads that file and nothing else.
+   This is why `claude -p` can succeed from one shell while OpenClaw fails.
+
+### How to switch it on, after logging in
+```bash
+openclaw config set agents.defaults.model.primary claude-cli/claude-sonnet-4-6
+systemctl --user restart openclaw-gateway
+openclaw agent --agent main --message "hi" --model claude-cli/claude-sonnet-4-6
+```
+Use `claude-cli/claude-haiku-4-5-20251001` instead if the loop turns out to be chatty enough
+that Sonnet is wasteful — the job is tool calling and JSON, not prose.
