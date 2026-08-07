@@ -55,10 +55,27 @@ def unit_state(unit):
 
 
 def counts(conn):
+    # One role, one row in the funnel. A dedup group can legitimately hold two
+    # statuses at once — Twilio posting the same job for Canada and for the US
+    # means the Canadian row is scored while its us_only twin stays filtered.
+    # Counting DISTINCT dedup_key per status counted that group twice, so the
+    # funnel summed to more than the crawl total. Collapse each group to its
+    # furthest-along status instead, so the columns actually add up.
+    #
+    # This leans on a documented SQLite behaviour: in a query whose only
+    # aggregate is a single MIN()/MAX(), a bare column takes its value from the
+    # row that produced that min. So `s` is the status of the best-ranked row in
+    # the group. This is NOT portable to other databases — if this ever moves
+    # off SQLite, rewrite it as a window function.
     out = {}
     for status, n in conn.execute(
-            "SELECT COALESCE(status,'new'), COUNT(DISTINCT dedup_key)"
-            " FROM jobs GROUP BY 1"):
+            "SELECT s, COUNT(*) FROM ("
+            "  SELECT dedup_key, MIN(CASE COALESCE(status,'new')"
+            "      WHEN 'applied'   THEN 1 WHEN 'shortlist' THEN 2"
+            "      WHEN 'scored'    THEN 3 WHEN 'pool'      THEN 4"
+            "      WHEN 'filtered'  THEN 5 ELSE 6 END) AS rank,"
+            "    COALESCE(status,'new') AS s"
+            "  FROM jobs GROUP BY dedup_key) GROUP BY s", ):
         out[status] = n
     return out
 
