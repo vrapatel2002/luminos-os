@@ -1,0 +1,21 @@
+# When the nightly run happens. [CHANGE: claude-code | 2026-08-06]
+[Unit]
+Description=Run the jobhunt pipeline daily
+[Timer]
+# 03:30 local. Late enough that the laptop is idle, early enough that the
+# results are waiting at breakfast. Job boards publish on business hours, so
+# anything more frequent than daily mostly re-reads the same postings.
+OnCalendar=*-*-* 03:30:00
+
+# THIS IS THE IMPORTANT LINE ON A LAPTOP. Without it, a machine that was asleep
+# at 03:30 simply skips the run and you find a stale database. Persistent=true
+# makes systemd notice the missed trigger and fire once on the next resume.
+Persistent=true
+
+# Do not let every timer on the box fire at once on resume. This also means the
+# run is never at exactly 03:30, which is fine and is why Persistent matters
+# more than the calendar precision.
+RandomizedDelaySec=20m
+
+[Install]
+WantedBy=timers.target

@@ -39,6 +39,18 @@ _GLOBAL = re.compile(
 )
 _BARE_REMOTE = re.compile(r"^\s*(100%\s*)?remote\s*$", re.I)
 
+# [CHANGE: claude-code | 2026-08-06] "Anywhere IN <somewhere>" is a scope, not a
+# lack of one. WeWorkRemotely writes "Anywhere in France, Belgium, Spain" and the
+# bare \banywhere\b in _GLOBAL above matched it, so 16 European-only roles landed
+# in the Canadian pool and got scored on the GPU. Caught by reading the pool's
+# location column, not by a test — the unit tests all passed.
+#
+# The negative lookahead is what keeps "Anywhere in the World" global. Note this
+# deliberately does NOT catch "Worldwide (excl. China)": an exclusion list is
+# still worldwide, and treating a named country as a scope there would be the
+# same bug pointing the other way.
+_SCOPED_ANYWHERE = re.compile(r"\banywhere\s+in\s+(?!the\s+world\b)", re.I)
+
 _AMERICAS = re.compile(r"\bamericas\b|north america|\blatam\b|latin america", re.I)
 
 _US = re.compile(
@@ -91,7 +103,16 @@ def classify(location, title="", extra=""):
 
     if _CANADA.search(loc):
         return CANADA
-    if _GLOBAL.search(loc) or _BARE_REMOTE.search(loc):
+    # "Anywhere in France, Belgium, Spain" reads as global to a bare keyword
+    # match and is not. Skip the global branch entirely so the country checks
+    # below get their turn. Canada was already checked above, so a listing that
+    # names Canada among its scopes has already been kept.
+    if _SCOPED_ANYWHERE.search(loc):
+        if _OTHER.search(loc):
+            return OTHER_COUNTRY
+        if _US.search(loc):
+            return US_ONLY
+    elif _GLOBAL.search(loc) or _BARE_REMOTE.search(loc):
         # Aggregators (notably WeWorkRemotely) stamp "Anywhere in the World" on
         # the feed even when the posting itself is pinned to one country. Trust
         # a hard constraint in the title over the board's generic label.
@@ -130,6 +151,13 @@ if __name__ == "__main__":
         ("Anywhere", GLOBAL),
         ("Remote", GLOBAL),
         ("Worldwide (excl. China)", GLOBAL),
+        # [CHANGE: claude-code | 2026-08-06] the scoped-anywhere regressions.
+        # All four of these were classified GLOBAL before the fix.
+        ("Anywhere in the World", GLOBAL),
+        ("Anywhere in France, Belgium, Spain", OTHER_COUNTRY),
+        ("Anywhere in France", OTHER_COUNTRY),
+        ("Anywhere in France, Belgium, Spain | Toronto, ON, Canada", CANADA),
+        ("Anywhere in the US", US_ONLY),
         ("Americas, Europe, Asia, Africa, Oceania", AMERICAS),
         ("North America", AMERICAS),
         ("United States", US_ONLY),

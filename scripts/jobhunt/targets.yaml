@@ -1,0 +1,166 @@
+# ============================================================================
+# WHAT JOBS AM I LOOKING FOR?
+# [CHANGE: claude-code | 2026-08-06] Phase 2 — the one file Shawn edits.
+# ============================================================================
+#
+# THIS IS THE FILE YOU EDIT. Nothing else in the pipeline needs touching to
+# change what it hunts for. Edit, save, then re-run:
+#
+#     ~/luminos-os/scripts/jobhunt/score.py --rules-only
+#
+# That re-runs the free filter over every job already in the database and
+# reprints the funnel in about two seconds. No model, no GPU, no cost. Only
+# once you like the survivor count do you spend the model on them.
+#
+# ── HOW THE FILTER THINKS ───────────────────────────────────────────────────
+# Every job runs a gauntlet. The FIRST rule it fails is the reason it dies, and
+# that reason is written into the database so `status.py --why` can show you
+# exactly what the filter threw away and on what grounds. If the pipeline is
+# missing jobs you wanted, that report tells you which rule to loosen.
+#
+# The order is deliberate — cheapest and most certain checks first:
+#   1. location   can this employer legally put a Canada resident on payroll?
+#   2. remote     is it actually work-from-home?
+#   3. exclude    a title you never want, no matter what else it says
+#   4. seniority  does it demand more experience than you have?
+#   5. include    is it a kind of work you DO want?
+# A job that survives all five costs money to look at. Everything above is free.
+#
+# ── ON THE REGEXES ──────────────────────────────────────────────────────────
+# These are regular expressions, matched case-insensitively. If you have never
+# written one, you only need three things:
+#   plain words match themselves      support
+#   |  means OR                       support|helpdesk|service desk
+#   \b means "word boundary"          \bai\b matches "AI" but not "said"
+# That \b matters more than it looks. Without it, `go` matches "Golang" AND
+# "Marketing Manager" (mana-GE-r... no — but "go" matches "Django", "Bingo",
+# "category"). When in doubt, wrap the word in \b.
+# ============================================================================
+
+# ── 1. LOCATION ─────────────────────────────────────────────────────────────
+# Which location buckets are worth applying to. locations.py sorts every
+# posting into exactly one of: canada, global, americas, us_only,
+# other_country, onsite, unknown.
+#
+# "us_only" is EXCLUDED ON PURPOSE and it is the single biggest cut in the
+# funnel. A US-only listing is not a formality — the employer has no Canadian
+# payroll entity and legally cannot hire you without one. Adding it back gets
+# you thousands more rows and near-zero more offers.
+#
+# "unknown" is also excluded. Those are postings whose location text the
+# classifier could not read at all. There are real jobs in there, but the ratio
+# is bad. Turn it on if the funnel ever runs dry.
+location_buckets:
+  - canada
+  - global
+  - americas
+
+# ── 2. REMOTE ───────────────────────────────────────────────────────────────
+# Require the posting to be marked remote. You want work-from-home, so this
+# stays true. Set false only if you would take a Sault Ste. Marie office job.
+require_remote: true
+
+# ── 3. EXCLUDE ──────────────────────────────────────────────────────────────
+# Kill on sight, whatever else the title says. This runs BEFORE the include
+# list, so a "Senior Sales Engineer" dies on "sales" and never gets a chance to
+# match "engineer".
+#
+# Sales and recruiting dominate remote job boards and will otherwise flood your
+# shortlist. The clinical/teaching entries are here because "clinical data
+# analyst" and "curriculum developer" both match the tech include list below
+# and neither is a job you want.
+exclude_titles:
+  - \b(sales|account executive|\bae\b|business development|\bbdr\b|\bsdr\b)\b
+  - \b(recruiter|recruiting|talent acquisition|sourcer)\b
+  - \b(nurse|clinical|physician|therapist|pharmacist|dental)\b
+  - \b(teacher|tutor|instructor|professor|curriculum)\b
+  - \b(driver|warehouse|delivery|courier|technician on-site)\b
+  - \b(intern|internship|co-?op|apprentice|volunteer|unpaid)\b
+  - \b(insurance agent|real estate|mortgage|loan officer)\b
+
+# ── 4. SENIORITY ────────────────────────────────────────────────────────────
+# Titles demanding more experience than a recent graduate has. This is the
+# second-biggest cut and the one most worth tuning.
+#
+# HONEST WARNING: this is a title filter, not a requirements filter. A job
+# called "Software Engineer" can still ask for 5 years in its body text. The
+# model catches that in the scoring pass and reports it under knockout_risks —
+# that is one of the things you are paying the model to notice.
+#
+# The `iii|iv` entry catches "Engineer III". The number pattern catches "8+
+# YOE" and "5 years experience" in a title. Note it starts at 4 — "2 years" and
+# "3 years" are survivable for a recent grad, so they are deliberately allowed
+# through.
+exclude_seniority: true
+seniority_patterns:
+  - \b(senior|sr\.?|staff|principal|lead|head of|director|vp|vice president)\b
+  - \b(manager|architect|distinguished|fellow|chief|iii|iv)\b
+  - \b([4-9]|1[0-9])\s*\+?\s*(yoe|years?)\b
+  - \blevel\s*[3-9]\b|\bL[4-9]\b
+
+# ── 5. INCLUDE ──────────────────────────────────────────────────────────────
+# The kinds of work you want. A job must match AT LEAST ONE of these.
+#
+# THIS IS THE LIST TO GROW when the funnel is too narrow, and the list to trim
+# when your shortlist fills with roles you would not take. Each entry is one
+# lane — keeping them separate rather than as one giant regex means the funnel
+# report can tell you which lane brought each job in.
+include_titles:
+  # Software — the main lane
+  - \b(software|backend|back-end|frontend|front-end|full ?stack|web) (engineer|developer|dev)\b
+  - \b(engineer|developer|programmer)\b
+  # Data
+  - \b(data|business|reporting|bi) (analyst|engineer|scientist)\b
+  - \b(analytics|analyst)\b
+  # Infrastructure
+  - \b(devops|sre|site reliability|platform|infrastructure|cloud|systems?) \w*\b
+  - \b(sysadmin|system administrator|network)\b
+  # AI/ML
+  - \b(machine learning|\bml\b|\bai\b|\bllm\b|prompt|annotation)\b
+  # Quality
+  - \b(qa|quality assurance|test|sdet|automation)\b
+  # IT support — realistic entry points for a recent grad, and they are remote
+  - \b(technical support|support engineer|it support|help ?desk|service desk)\b
+  - \b(solutions? engineer|implementation|onboarding|technical account)\b
+  # Security
+  - \b(security|soc analyst|infosec|cyber)\b
+  # Adjacent roles that hire grads with a CS degree
+  - \b(technical writer|documentation)\b
+  - \b(product|project|program) (analyst|coordinator|associate)\b
+
+# ── SCORING ─────────────────────────────────────────────────────────────────
+# Everything below controls the paid/GPU half. The defaults are sized against
+# the 4.6 GB VRAM budget in CLAUDE.md — read the notes before raising them.
+scoring:
+  # Endpoint of the local model. score.py starts this service if it is down and
+  # STOPS IT AGAIN when finished, so the dGPU can go back to sleep. That is
+  # deliberate: an idle model server pins ~4.6 GB of VRAM and keeps the card
+  # awake, which is exactly the bug we fixed in BUG-103.
+  endpoint: http://127.0.0.1:8081/v1
+  model: luminos-local
+  service: jobhunt-llm.service
+
+  # How much of the job description the model reads. 6000 characters is roughly
+  # 1500 tokens — enough for the requirements section, which is where the
+  # knockouts live (degree, years, work authorisation, timezone). The rest of a
+  # posting is company boilerplate and benefits.
+  description_chars: 6000
+
+  # How many years of experience you can credibly claim. This is the single
+  # most influential number in the whole ranking — a posting demanding more
+  # than this gets penalised, steeply for the first couple of years over and
+  # then flattening off.
+  #
+  # Raise it as you get hired and stay employed. Raising it by one does NOT
+  # need another GPU run: the model reports the posting's demand as a plain
+  # number and Python does the arithmetic, so `score.py --recompute` re-ranks
+  # everything from stored answers in about a second.
+  max_years_experience: 2
+
+  # Jobs scored below this are not worth your time. It does NOT delete them —
+  # they stay in the database and `status.py --top 50` will still show them.
+  shortlist_min: 60
+
+  # Safety rail. A run that would score more than this many jobs stops and asks
+  # first, so a loosened filter cannot silently commit the GPU to eight hours.
+  max_per_run: 400

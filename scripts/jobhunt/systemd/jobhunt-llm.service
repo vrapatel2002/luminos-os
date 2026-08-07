@@ -1,0 +1,35 @@
+# Local scoring model on the RTX 4050. [CHANGE: claude-code | 2026-08-06]
+#
+# DELIBERATELY NOT ENABLED AT BOOT. This is an on-demand unit: score.py starts
+# it, uses it, and stops it again. Leaving it running would pin ~4.6 GB of VRAM
+# and hold the dGPU out of its suspended state permanently — the exact failure
+# mode of BUG-103. `systemctl --user enable jobhunt-llm` would undo that fix.
+#
+# Start it by hand only when you want to chat with the model directly:
+#   systemctl --user start jobhunt-llm
+#   systemctl --user stop  jobhunt-llm      <- remember this half
+[Unit]
+Description=Jobhunt local LLM (Qwen3-4B, RTX 4050 via dgpu-exec-v2)
+Documentation=file:///home/shawn/luminos-os/scripts/jobhunt/PLAN.md
+
+[Service]
+Type=simple
+ExecStart=/home/shawn/luminos-os/scripts/jobhunt/llm-server.sh
+
+# Restart=no ON PURPOSE. If this dies it is almost always the OOM killer or a
+# cudaMalloc failure, and both mean the context or model is too big for the
+# card. Restarting would loop on that forever, holding the GPU awake and
+# burning battery while looking healthy in `systemctl status`. Fail loudly.
+Restart=no
+
+# Loading a 4B onto the GPU takes 10-25s; nothing should give up before then.
+TimeoutStartSec=300
+# On stop, llama.cpp needs a moment to release VRAM cleanly. SIGKILL here can
+# leave the card in a state where the next start fails to allocate.
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+# NoNewPrivileges MUST stay off: dgpu-exec-v2 is a setgid helper, and that flag
+# silently strips the setgid bit. The server would then start fine, find no GPU,
+# and fall back to the CPU without saying anything — see verify-cuda-venv.sh.
+NoNewPrivileges=no

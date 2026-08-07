@@ -1,0 +1,30 @@
+# Tool-call translator in front of the local model. [CHANGE: claude-code | 2026-08-06]
+#
+# WHY IT EXISTS: llama-cpp-python serves Qwen3's <tool_call> blocks as plain
+# text and never parses them into tool_calls[], so an agent silently never
+# fires a tool. This shim does that parsing. Point OpenClaw at 8082, NEVER at
+# 8081 — 8081 gives working chat and invisibly broken tools, which is the worst
+# possible failure because everything looks fine.
+#
+# score.py does NOT need this — it talks to 8081 directly and does not use
+# tools. Only the OpenClaw agent path does.
+[Unit]
+Description=Jobhunt tool-call proxy (8082 -> 8081)
+# BindsTo, not Requires: if the model server goes away this proxy is useless
+# and should go away with it rather than sit there answering with 502s.
+BindsTo=jobhunt-llm.service
+After=jobhunt-llm.service
+
+[Service]
+Type=simple
+Environment=PROXY_UPSTREAM=http://127.0.0.1:8081
+# Run the FILE, not `uvicorn toolcall-proxy:app`. The filename has a hyphen in
+# it, which is not a legal Python module name, so the -m/import form is a coin
+# flip across importlib versions. The script has its own __main__ block that
+# calls uvicorn.run directly; use it.
+ExecStart=/opt/luminos/venv-jobhunt/bin/python /home/shawn/luminos-os/scripts/jobhunt/toolcall-proxy.py
+WorkingDirectory=/home/shawn/luminos-os/scripts/jobhunt
+# This one is pure Python with no GPU involvement, so a restart is cheap and
+# usually the right answer.
+Restart=on-failure
+RestartSec=3

@@ -1,0 +1,36 @@
+# The nightly run: fetch new postings, then rank them. [CHANGE: claude-code | 2026-08-06]
+#
+# This is the unit that makes "I just want to look at progress" true. It is a
+# oneshot driven by jobhunt-pipeline.timer — it is not a daemon and holds
+# nothing open between runs.
+[Unit]
+Description=Jobhunt nightly — ingest new postings, then score them
+Documentation=file:///home/shawn/luminos-os/scripts/jobhunt/PLAN.md
+# No network, no point. This is the user-slice equivalent of network-online.
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/shawn/luminos-os/scripts/jobhunt
+
+# Without this the journal shows NOTHING for the whole run and then the entire
+# output at once at the end. Python block-buffers stdout when it is not a
+# terminal, and under systemd it never is — so a 25-minute scoring pass looks
+# like a hung service right up until the moment it finishes.
+Environment=PYTHONUNBUFFERED=1
+
+# Two separate ExecStart lines rather than a shell one-liner: systemd runs them
+# in order and ABORTS ON THE FIRST FAILURE, and journalctl attributes the exit
+# code to the step that actually failed. A `sh -c 'a && b'` gives you one
+# opaque status for both.
+ExecStart=/usr/bin/python3 /home/shawn/luminos-os/scripts/jobhunt/ingest.py
+ExecStart=/usr/bin/python3 /home/shawn/luminos-os/scripts/jobhunt/score.py --quiet
+
+# The whole job — crawl plus GPU scoring — must not run away overnight. score.py
+# also has its own max_per_run rail in targets.yaml; this is the outer one.
+TimeoutStartSec=4h
+
+# If the run is killed mid-scoring, score.py's finally-block stops the model
+# service itself. This is the belt to that suspenders: if score.py is SIGKILLed
+# it never runs its cleanup, and the dGPU would stay awake until reboot.
+ExecStopPost=/usr/bin/systemctl --user stop jobhunt-llm.service

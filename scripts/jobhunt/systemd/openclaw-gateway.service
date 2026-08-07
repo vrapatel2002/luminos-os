@@ -1,0 +1,30 @@
+# OpenClaw gateway + Control UI. [CHANGE: claude-code | 2026-08-06]
+#
+# WHY THIS FILE EXISTS: the gateway was previously started by hand from an
+# agent tool-call shell, which put it inside claude-cowork.service's cgroup. It
+# therefore died every time Cowork restarted, and Shawn saw "Could not connect"
+# with no obvious cause. A user unit gives it its own cgroup and its own life.
+[Unit]
+Description=OpenClaw gateway (Control UI on 127.0.0.1:18789)
+Documentation=file:///home/shawn/luminos-os/docs/BUGS.md
+
+[Service]
+Type=simple
+ExecStart=/home/shawn/.npm-global/bin/openclaw gateway
+
+# Restart=always IS LOAD-BEARING, and on-failure is NOT enough. Changing
+# gateway.auth.token makes the gateway perform a deliberate "supervisor
+# restart": it exits ZERO and expects something to bring it back. Under
+# on-failure, nothing does — so the moment you fix the auth config the gateway
+# disappears, which reads exactly like the fix having broken it.
+Restart=always
+RestartSec=3
+
+# The gateway reads its token from ~/.openclaw/openclaw.json at start. Do NOT
+# add an Environment= line for it: "${VAR}" in that config is stored verbatim
+# and resolved at read time, so the token would silently become empty on any
+# start from a shell without the variable, and the UI would fail to connect
+# while `openclaw status` still cheerfully reported "auth token".
+
+[Install]
+WantedBy=default.target
