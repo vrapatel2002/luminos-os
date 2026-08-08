@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Luminos Tab Sleeper",
+  "version": "1.0",
+  "description": "Discards background tabs on our schedule, not Chrome's.",
+  "permissions": ["tabs", "alarms", "storage"],
+  "background": { "service_worker": "background.js" }
+}
