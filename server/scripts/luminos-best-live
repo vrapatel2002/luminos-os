@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+"""[CHANGE: claude-code | 2026-08-07]
+Grab the best quality that is actually *downloadable*, not the best that is merely listed.
+
+An indexer keeps a listing long after the news server has dropped the articles. Sonarr
+cannot tell the difference: it ranks a 16 GB remux top, grabs it, and only discovers the
+articles are gone after burning through the whole file and failing on health. It then
+picks the next-best release, which is usually dead for the same reason, and loops.
+
+This walks candidates best-first, asks the news server whether the articles actually
+exist (NNTP STAT, which transfers no article body), and pushes the first one that passes.
+Every decision is appended to the tracking log so there is a record of what was chosen
+and what was rejected.
+
+  luminos-best-live --series "The Sopranos"          # dry run, shows what it would grab
+  luminos-best-live --series "The Sopranos" --apply  # actually push the grabs
+  luminos-best-live --all --apply                    # every monitored missing episode
+  luminos-best-live --report                         # print the tracking log summary
+"""
+import argparse
+import json
+import os
+import random
+import re
+import socket
+import ssl
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+SONARR = "http://127.0.0.1:8989/api/v3"
+RADARR = "http://127.0.0.1:7878/api/v3"
+NZBGET_CONF = "/var/lib/nzbget/nzbget.conf"
+TRACK = "/var/lib/luminos/best-live.jsonl"
+
+SAMPLE = 12          # articles to STAT per candidate
+ALIVE_MIN = 0.90     # fraction that must be present to accept
+MAX_CANDIDATES = 12  # give up after this many per episode
+
+
+# ---------------------------------------------------------------- helpers
+
+def read_conf(key):
+    """Read a key out of nzbget.conf. Values may have spaces around '='."""
+    out = subprocess.run(["sudo", "sed", "-n", "s/^%s[ ]*=[ ]*//p" % key, NZBGET_CONF],
+                         capture_output=True, text=True).stdout.strip()
+    return out.splitlines()[0].strip() if out else ""
+
+
+def api_key(app):
+    cfg = "/var/lib/%s/config.xml" % app
+    out = subprocess.run(["sudo", "grep", "-oP", r"(?<=<ApiKey>)[^<]+", cfg],
+                         capture_output=True, text=True).stdout.strip()
+    if not out:
+        sys.exit("could not read %s api key" % app)
+    return out
+
+
+def call(base, key, path, method="GET", body=None, timeout=120):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(base + path, data=data, method=method,
+                                 headers={"X-Api-Key": key,
+                                          "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as f:
+        raw = f.read()
+    return json.loads(raw) if raw else None
+
+
+def track(entry):
+    os.makedirs(os.path.dirname(TRACK), exist_ok=True)
+    entry["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    with open(TRACK, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+# ---------------------------------------------------------------- nntp
+
+class News:
+    """One authenticated NNTP-TLS connection, reused across every STAT."""
+
+    def __init__(self):
+        self.host = read_conf(r"Server1\.Host") or "news.usenetserver.com"
+        self.port = int(read_conf(r"Server1\.Port") or 563)
+        self.user = read_conf(r"Server1\.Username")
+        self.pw = read_conf(r"Server1\.Password")
+        self.sock = None
+        self.f = None
+
+    def connect(self):
+        ctx = ssl.create_default_context()
+        self.sock = ctx.wrap_socket(
+            socket.create_connection((self.host, self.port), timeout=30),
+            server_hostname=self.host)
+        self.f = self.sock.makefile("rb")
+        self.f.readline()
+        self._cmd("AUTHINFO USER " + self.user)
+        resp = self._cmd("AUTHINFO PASS " + self.pw)
+        if not resp.startswith("281"):
+            raise RuntimeError("news server auth failed: %s" % resp)
+
+    def _cmd(self, c):
+        self.sock.sendall((c + "\r\n").encode())
+        return self.f.readline().decode(errors="replace").strip()
+
+    def alive_fraction(self, message_ids):
+        """STAT a random sample. 223 = present, 430 = gone. Transfers no bodies."""
+        if not message_ids:
+            return 0.0
+        sample = random.sample(message_ids, min(SAMPLE, len(message_ids)))
+        ok = 0
+        for mid in sample:
+            try:
+                if self._cmd("STAT <%s>" % mid).startswith("223"):
+                    ok += 1
+            except Exception:
+                self.close()
+                self.connect()
+        return ok / len(sample)
+
+    def close(self):
+        try:
+            if self.sock:
+                self._cmd("QUIT")
+                self.sock.close()
+        except Exception:
+            pass
+        self.sock = None
+
+
+def segments_of(url, timeout=90):
+    req = urllib.request.Request(url, headers={"User-Agent": "luminos-best-live"})
+    raw = urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8", "replace")
+    return re.findall(r"<segment[^>]*>([^<]+)</segment>", raw)
+
+
+# ---------------------------------------------------------------- core
+
+def rank(rel):
+    """Best first: Sonarr's own quality weight, then raw size."""
+    q = (rel.get("quality") or {}).get("quality") or {}
+    return (q.get("resolution", 0), rel.get("size", 0))
+
+
+def best_live_for(news, base, key, params, label, apply_it):
+    try:
+        rels = call(base, key, "/release?" + params, timeout=180)
+    except Exception as e:
+        print("  %-52s search failed: %s" % (label[:52], type(e).__name__))
+        return None
+
+    usenet = [r for r in rels if r.get("protocol") == "usenet" and not r.get("rejected")]
+    usenet.sort(key=rank, reverse=True)
+    if not usenet:
+        print("  %-52s no usenet candidates" % label[:52])
+        track({"item": label, "result": "no_candidates"})
+        return None
+
+    tried = []
+    for rel in usenet[:MAX_CANDIDATES]:
+        title = rel.get("title", "")
+        size = (rel.get("size") or 0) / 1e9
+        qual = ((rel.get("quality") or {}).get("quality") or {}).get("name", "?")
+        try:
+            segs = segments_of(rel["downloadUrl"])
+        except Exception as e:
+            tried.append({"title": title, "verdict": "fetch_" + type(e).__name__})
+            continue
+        frac = news.alive_fraction(segs)
+        tried.append({"title": title, "gb": round(size, 2), "quality": qual,
+                      "alive": round(frac, 3)})
+        mark = "ALIVE" if frac >= ALIVE_MIN else "dead "
+        print("     %s %5.1f%% alive  %6.2f GB  %-18s %s"
+              % (mark, frac * 100, size, qual, title[:46]))
+        if frac >= ALIVE_MIN:
+            if apply_it:
+                call(base, key, "/release", "POST",
+                     {"guid": rel["guid"], "indexerId": rel["indexerId"]})
+            track({"item": label, "result": "grabbed" if apply_it else "would_grab",
+                   "chosen": title, "gb": round(size, 2), "quality": qual,
+                   "alive": round(frac, 3), "rejected": tried[:-1]})
+            return rel
+
+    print("  %-52s NOTHING ALIVE (%d tried)" % (label[:52], len(tried)))
+    track({"item": label, "result": "nothing_alive", "rejected": tried})
+    return None
+
+
+def report():
+    if not os.path.exists(TRACK):
+        sys.exit("no tracking log yet at %s" % TRACK)
+    rows = [json.loads(l) for l in open(TRACK) if l.strip()]
+    counts = {}
+    for r in rows:
+        counts[r["result"]] = counts.get(r["result"], 0) + 1
+    print("tracking log: %s  (%d decisions)" % (TRACK, len(rows)))
+    for k, v in sorted(counts.items()):
+        print("   %-16s %d" % (k, v))
+    print("\nmost recent 15:")
+    for r in rows[-15:]:
+        if r["result"] in ("grabbed", "would_grab"):
+            print("   %s  %-40s -> %.2f GB %s (%d rejected first)"
+                  % (r["ts"][5:16], r["item"][:40], r.get("gb", 0),
+                     r.get("quality", "?"), len(r.get("rejected", []))))
+        else:
+            print("   %s  %-40s -> %s" % (r["ts"][5:16], r["item"][:40], r["result"]))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--series")
+    ap.add_argument("--all", action="store_true")
+    ap.add_argument("--movies", action="store_true")
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--report", action="store_true")
+    ap.add_argument("--limit", type=int, default=0)
+    a = ap.parse_args()
+
+    if a.report:
+        return report()
+    if not (a.series or a.all or a.movies):
+        sys.exit("need --series NAME, --all, --movies, or --report")
+
+    print("mode: %s   (alive threshold %.0f%%, %d articles sampled)"
+          % ("APPLYING" if a.apply else "DRY RUN", ALIVE_MIN * 100, SAMPLE))
+
+    news = News()
+    news.connect()
+    print("news server: connected and authenticated\n")
+
+    targets = []
+    if a.series or a.all:
+        sk = api_key("sonarr")
+        for s in call(SONARR, sk, "/series"):
+            if a.series and a.series.lower() not in s["title"].lower():
+                continue
+            mon = {x["seasonNumber"] for x in s["seasons"] if x["monitored"]}
+            eps = call(SONARR, sk, "/episode?seriesId=%d" % s["id"])
+            for e in eps:
+                if (e["seasonNumber"] in mon and e["monitored"]
+                        and not e.get("hasFile")):
+                    targets.append((SONARR, sk, "episodeId=%d" % e["id"],
+                                    "%s S%02dE%02d" % (s["title"], e["seasonNumber"],
+                                                       e["episodeNumber"])))
+    if a.movies:
+        rk = api_key("radarr")
+        for m in call(RADARR, rk, "/movie"):
+            if m["monitored"] and not m.get("hasFile"):
+                targets.append((RADARR, rk, "movieId=%d" % m["id"], m["title"]))
+
+    if a.limit:
+        targets = targets[:a.limit]
+    print("%d item(s) missing and monitored\n" % len(targets))
+
+    got = missed = 0
+    for base, key, params, label in targets:
+        print("  %s" % label)
+        if best_live_for(news, base, key, params, label, a.apply):
+            got += 1
+        else:
+            missed += 1
+    news.close()
+
+    print("\n%s: %d found alive, %d had nothing alive" %
+          ("grabbed" if a.apply else "would grab", got, missed))
+    print("tracking log: %s   (--report to summarise)" % TRACK)
+
+
+main()
