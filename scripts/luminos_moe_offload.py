@@ -68,11 +68,22 @@ import re
 import sys
 import tempfile
 
-# Expert FFN tensors in every MoE llama.cpp supports: blk.N.ffn_gate_exps.weight
-# and its up/down siblings. Matched with std::regex_search, ECMAScript syntax --
-# this is a regex, not a glob. The shared expert (ffn_*_shexp) is deliberately
-# NOT matched: it runs on every single token, so it belongs on the GPU.
-EXPERT_TENSORS = r"\.ffn_(gate|up|down)_exps\."
+# Every expert-bank tensor, whatever the architecture chose to call it. Matched
+# with std::regex_search, ECMAScript syntax -- this is a regex, not a glob.
+#
+# Do NOT spell out the projection names. The obvious pattern,
+# `\.ffn_(gate|up|down)_exps\.`, silently half-works on Gemma 4: it fuses gate
+# and up into ONE tensor called `ffn_gate_up_exps`, which matches neither
+# `gate` nor `up`. The result was 272 MiB x 30 layers = 7.97 GiB left on the
+# card and a cudaMalloc failure, while the log cheerfully reported overrides
+# firing -- on the 0 MiB `.scale` tensors that DID match. Anchoring on the
+# `_exps` suffix alone is naming-agnostic and survives whatever the next
+# architecture fuses together.
+#
+# What this deliberately does NOT match, and must not:
+#   ffn_gate_inp.*  - the router. Tiny, runs every token, belongs on the GPU.
+#   ffn_{gate,up,down}.weight (no _exps) - the SHARED expert. Also every token.
+EXPERT_TENSORS = r"_exps\."
 
 _ggml = None
 
@@ -140,6 +151,33 @@ def _build_override_array(patterns):
 
 
 ALL_LAYERS = 999   # "every layer on the GPU"; llama.cpp clamps to the real count
+
+
+def expert_pattern(keep_on_gpu=0):
+    """Offload experts from every layer EXCEPT the first `keep_on_gpu` of them.
+
+    Sending all experts to RAM leaves VRAM unused, and the spare capacity buys
+    back a surprising amount of prompt-processing speed. Measured on the 26B
+    A4B, 1947-token prompt + 200 generated:
+
+        keep_on_gpu  VRAM MiB   prompt eval   generation   wall
+              0        3556       72.2 t/s     17.21 t/s   38.73 s
+              3        4918      134.5 t/s     22.31 t/s   23.60 s   <-- best
+              4        5372      121.2 t/s     22.92 t/s   24.95 s
+              5        OOM (failed to create context)
+
+    Note that 4 is *worse* than 3 despite holding more on the card: past ~4.9 GB
+    the allocator is fighting the KV cache and compute buffers for what is left,
+    and the loss outweighs the saved PCIe traffic. More on the GPU is not
+    monotonically better. Re-measure on any other model rather than assuming 3.
+    """
+    if keep_on_gpu <= 0:
+        return EXPERT_TENSORS
+    # Layers keep_on_gpu..99, written out because llama.cpp matches with
+    # std::regex on the tensor name -- there is no numeric comparison available.
+    lo = keep_on_gpu
+    alts = [str(n) for n in range(lo, 10)] + [r"\d{2,}"]
+    return r"blk\.(" + "|".join(alts) + r")\..*_exps\."
 
 
 @contextlib.contextmanager
@@ -293,7 +331,13 @@ def _selftest(model_path, n_ctx=4096, n_gpu_layers=ALL_LAYERS, pattern=EXPERT_TE
         return 1
 
     moved = off.get("CUDA0", 0.0) - on.get("CUDA0", 0.0)
-    if moved > 0:
+    if off_err and not on_err:
+        # The strongest possible result: the card cannot hold this model at all,
+        # and the override is the only reason it loads.
+        print(f"VERDICT: PASS - decisive. WITHOUT the override the model does not load "
+              f"({type(off_err).__name__}). WITH it, {on.get('CUDA0', 0.0):.0f} MiB on the "
+              f"GPU and {on.get('CPU_Mapped', 0.0):.0f} MiB in RAM.")
+    elif moved > 0:
         print(f"VERDICT: PASS - {moved:.0f} MiB moved off the GPU into RAM")
     else:
         # Happens when the baseline itself was crippled: the caller passed a low
