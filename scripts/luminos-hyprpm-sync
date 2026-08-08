@@ -1,0 +1,89 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-08-08]
+# Keep the hyprpm plugins loadable across Hyprland upgrades. Run at session start.
+#
+# THE PROBLEM THIS EXISTS TO SOLVE (DECISION 49 / BUG-100, and again on 2026-08-08):
+# hyprpm plugins are C++ .so files linked against ONE EXACT Hyprland commit. Arch ships a
+# new Hyprland every few weeks. The moment the compositor commit moves, every plugin the
+# machine has stops loading -- and it does so SILENTLY. Nothing crashes. The features just
+# quietly disappear, and the only visible symptom is the config error
+#
+#     unknown config key 'plugin.hyprexpo...'
+#
+# ...because `hl.config { plugin = {...} }` is parsed before any plugin exists to own those
+# keys. Chasing that message leads you into the Lua config, which is not where the fault is.
+# This has now bitten twice (0.54.3 -> 0.56.1, then 0.56.1 -> 0.56.2), so it is automated.
+#
+# WHY THIS RUNS AT SESSION START AND NOT FROM A PACMAN HOOK:
+# the obvious fix is a pacman hook on the hyprland package, and it does not work. `hyprpm`
+# builds against the *running* compositor -- it literally reports "checked out to running
+# ver". During a pacman transaction the running compositor is still the OLD one, so a hook
+# would faithfully rebuild every plugin against the version being replaced and change
+# nothing. The first moment the new version is actually running is session start. That is
+# also the only moment we are the right UID: hyprpm's state lives in
+# /var/cache/hyprpm/$USER, so a root hook would read and write root's state, not Shawn's.
+#
+# COST: the mismatch path clones and configures the Hyprland source to get headers, so it
+# takes minutes and needs network. That is why it only runs on an actual hash mismatch, and
+# why the caller must not block on it -- `hl.exec_cmd` in hypr-user.lua spawns and moves on.
+
+set -u
+
+STATE="/var/cache/hyprpm/${USER}/state.toml"
+LOG="${XDG_STATE_HOME:-$HOME/.local/state}/luminos-hyprpm-sync.log"
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/luminos-hyprpm-sync.lock"
+
+mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+
+log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG" 2>/dev/null || true; }
+notify() { notify-send -a "Luminos" "$1" "$2" 2>/dev/null || true; }
+
+# Only meaningful inside a live Hyprland session -- there is no "running ver" otherwise.
+hyprctl version >/dev/null 2>&1 || { log "no running Hyprland, skipping"; exit 0; }
+
+# Serialise. A session restart while a rebuild is in flight would otherwise run two
+# hyprpm builds over the same source tree and corrupt both.
+exec 9>"$LOCK"
+flock -n 9 || { log "another sync holds the lock, skipping"; exit 0; }
+
+running=$(hyprctl version 2>/dev/null | grep -oP 'commit \K[0-9a-f]{40}')
+built=$(sed -n "s/^hash = '\([0-9a-f]\{40\}\).*/\1/p" "$STATE" 2>/dev/null)
+
+if [ -z "$running" ]; then
+    log "could not parse running commit from 'hyprctl version'"
+    notify "Hyprland plugins" "Could not read the running version. Plugins not checked."
+    exit 1
+fi
+
+if [ "$running" != "$built" ]; then
+    log "hash mismatch: built=${built:-none} running=$running -- rebuilding"
+    notify "Hyprland plugins" "Hyprland changed version. Rebuilding plugins, this takes a few minutes..."
+    if hyprpm update >>"$LOG" 2>&1; then
+        log "hyprpm update finished"
+    else
+        log "hyprpm update FAILED (exit $?)"
+        notify "Hyprland plugins" "Rebuild failed. See $LOG"
+        exit 1
+    fi
+else
+    log "hash matches ($running)"
+fi
+
+# Load whatever is enabled. Needed even on the matching path: `hyprpm enable` only records
+# a choice in state.toml, it never loads anything into a running compositor.
+hyprpm reload -n >>"$LOG" 2>&1
+
+# VERIFY, do not assume. `hyprpm update` prints a cheerful "Loaded <plugin>" for each one
+# and still leaves you with nothing loaded if the .so is stale -- that cheerful output is
+# exactly what made this failure invisible for three days. Ask the compositor instead.
+enabled=$(hyprpm list 2>/dev/null | grep -c 'enabled: .*true')
+loaded=$(hyprctl plugin list 2>/dev/null | grep -c '^Plugin ')
+
+log "enabled=$enabled loaded=$loaded"
+
+if [ "$loaded" -lt "$enabled" ]; then
+    notify "Hyprland plugins" "Only $loaded of $enabled plugins loaded. See $LOG"
+    exit 1
+fi
+
+exit 0

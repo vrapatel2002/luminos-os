@@ -110,11 +110,23 @@ hl.on("hyprland.start", function()
     -- simply absent after every logout, with nothing on screen to say so.
     -- [CHANGE: claude-code | 2026-08-05]
     --
-    -- `-n` means NOTIFY, not "no". It is deliberate. A plugin built against the wrong Hyprland
-    -- version fails to load SILENTLY, so the login toast is the only positive confirmation
-    -- that the borders and focus flash are actually live. If it ever stops appearing, run
-    -- `hyprpm update && hyprpm reload`. Warnings and errors notify regardless of this flag.
-    hl.exec_cmd("hyprpm reload -n")
+    -- This was a bare `hyprpm reload -n` until 2026-08-08. That was not enough. `reload` only
+    -- loads the .so files that already exist; it cannot notice that they were compiled against
+    -- a Hyprland that is no longer installed, which is what actually happens every few weeks
+    -- when Arch bumps the package. The plugins then vanish silently and the only symptom is
+    -- `unknown config key 'plugin.hyprexpo...'` from the hl.config block further down — which
+    -- points at the Lua config, i.e. at entirely the wrong file. That cost a debugging session
+    -- twice (0.54.3 -> 0.56.1, then 0.56.1 -> 0.56.2).
+    --
+    -- luminos-hyprpm-sync compares hyprpm's build hash against the running compositor commit
+    -- and rebuilds first if they differ, so the upgrade heals itself at the next login instead
+    -- of waiting to be noticed. Session start is the earliest point this CAN work: hyprpm
+    -- builds against the *running* Hyprland, so a pacman hook would rebuild against the
+    -- version being replaced. See the header of the script for the full reasoning.
+    --
+    -- Async on purpose — hl.exec_cmd spawns and returns, so the rare rebuild (minutes, needs
+    -- network) never holds up the session. The script notifies on both start and outcome.
+    hl.exec_cmd("/home/shawn/luminos-os/scripts/luminos-hyprpm-sync")
 end)
 
 -- NOT autostarted any more: `kitty`. It existed only as proof-of-life while we could not tell a
@@ -366,15 +378,30 @@ hl.bind("SUPER + SHIFT + SPACE", hl.dsp.exec_cmd("luminos-win togglelock")) -- l
 --
 -- ⚠️ THE ONE THING THAT WILL BREAK THIS: a Hyprland version bump.
 -- hyprpm plugins are C++ .so files compiled against the EXACT Hyprland commit in use. After
--- any `pacman -Syu` that moves Hyprland off 0.56.1, every plugin silently STOPS LOADING —
--- the compositor still starts, nothing errors on screen, the borders and focus flash just
--- quietly vanish. The fix is always the same:
+-- any `pacman -Syu` that moves Hyprland, every plugin silently STOPS LOADING — the compositor
+-- still starts, nothing errors on screen, the borders and focus flash just quietly vanish.
+-- The manual fix is always the same:
 --
 --     hyprpm update && hyprpm reload
 --
 -- That is exactly the state this machine was found in on 2026-08-05: hyprpm's headers were
 -- pinned to an April build (0.54.3, hash 521ece46…) while Hyprland had moved to 0.56.1, so
 -- 2 of the plugins would not build and NONE were loaded.
+--
+-- [CHANGE: claude-code | 2026-08-08] It happened AGAIN on the very next bump — 0.56.1 -> 0.56.2,
+-- three days later (BUG-111). So it is no longer a thing anyone has to remember: the
+-- `hyprland.start` handler above runs luminos-hyprpm-sync, which rebuilds automatically when the
+-- hash and the running commit disagree. The command above is now for debugging, not maintenance.
+--
+-- Note the symptom you will actually SEE is not "the borders are gone". It is a config-error
+-- popup naming THIS FILE and the hl.config line below:
+--
+--     hypr-user.lua:NNN: unknown config key 'plugin.hyprexpo...'
+--
+-- Nothing is wrong with that line. Hyprland parses the config before plugins load, so an
+-- unloaded plugin turns its whole option namespace into unknown keys. Do not edit the Lua —
+-- check `hyprctl plugin list` first. A BRIEF flash of this at the first login after an upgrade
+-- is normal and clears itself; only a popup that STAYS means the rebuild failed.
 --
 -- Also note the plugin roster shrank upstream: hyprexpo, hyprtrails, hyprwinwrap,
 -- hyprscrolling and xtra-dispatchers were DELETED from hyprwm/hyprland-plugins in May 2026

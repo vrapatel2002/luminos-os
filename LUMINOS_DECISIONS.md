@@ -2333,9 +2333,30 @@ hyprpm disable hyprexpo && hyprpm remove https://github.com/sandwichfarm/hyprexp
 hyprpm disable borders-plus-plus && hyprpm disable hyprfocus
 hyprpm reload
 # then delete the plugin block + SUPER+G bind + submap from
-# ~/.config/caelestia/hypr-user.lua, and the `hyprpm reload -n` line in hyprland.start
+# ~/.config/caelestia/hypr-user.lua, and the luminos-hyprpm-sync line in hyprland.start
 ```
 A full-file backup sits at `~/.config/caelestia/hypr-user.lua.bak-preplugins`.
+
+### Amendment, 2026-08-08 — the rebuild is no longer manual
+# [CHANGE: claude-code | 2026-08-08]
+This decision closed with a standing instruction to run `hyprpm update && hyprpm reload` by hand
+after every Hyprland upgrade. That instruction was correct and it was still not enough: Hyprland
+went 0.56.1 → 0.56.2 on 2026-08-05 and every plugin died again three days later (**BUG-111**).
+A maintenance step that depends on a human remembering it, for a failure whose only symptom
+points at the wrong file, is not a fix.
+
+`hyprland.start` now calls **`scripts/luminos-hyprpm-sync`** instead of a bare `hyprpm reload -n`.
+It compares hyprpm's stored build hash with the running compositor commit, rebuilds only on a
+mismatch, and then reads the loaded-plugin count back out of `hyprctl` rather than trusting
+hyprpm's own success output.
+
+**Session start is the only correct trigger, and this is worth writing down because a pacman hook
+looks obviously better and is obviously wrong:** hyprpm builds against the *running* compositor,
+so during the pacman transaction it would rebuild against the version being uninstalled; and
+pacman hooks run as root, whose hyprpm state is not Shawn's. Both problems disappear at login.
+
+The manual command still works and is still the right thing to type if you are debugging. It just
+should no longer be *needed*.
 
 ---
 
