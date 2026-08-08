@@ -6,7 +6,7 @@
         }
     },
     "dashboard": {
-        "showOnHover": false
+        "showOnHover": true
     },
     "launcher": {
         "showOnHover": true,

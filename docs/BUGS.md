@@ -1850,7 +1850,29 @@ GPU pass.
 ---
 
 ## BUG-110 — the desktop's own dashboard was swallowing every window's titlebar clicks
-**Status: FIXED 2026-08-06** · `~/.config/caelestia/shell.json`, `~/.config/caelestia/hypr-user.lua`
+**Status: FIXED 2026-08-06, then DELIBERATELY REVERTED 2026-08-08 — see the box below before
+"fixing" this again** · `~/.config/caelestia/shell.json`, `~/.config/caelestia/hypr-user.lua`
+
+> ### ⚠️ 2026-08-08 — `dashboard.showOnHover` is back to `true`, on purpose
+> # [CHANGE: claude-code | 2026-08-08]
+> Shawn asked for the top-edge drop-down back, was shown the trade-off below in full, and chose
+> to take it. **The titlebar-click problem described in this entry is therefore LIVE again and is
+> now accepted behaviour, not an open bug.** In apps that draw their own titlebar (Claude Desktop
+> and similar Electron apps) the close/maximize buttons and double-click-to-maximize at the very
+> top edge will be swallowed by the dashboard.
+>
+> **Do not "fix" this by flipping `showOnHover` back to `false`** — that just restarts the loop.
+> If it becomes annoying, the real fix is a hover *dwell delay* (only open once the pointer
+> **rests** at the top edge for ~200 ms, so an overshoot while reaching for a button does not
+> trigger it). That was offered and declined as too much machinery for now. It needs a patch to
+> `inTopPanel`/the hover handler at `modules/drawers/Interactions.qml:211`, which is **owned by
+> the `caelestia-shell` package**, so it would also need a pacman hook to survive upgrades.
+>
+> Re-verified working after the revert (config hot-reloads, no shell restart needed): sweeping
+> the cursor down x=720 with `hl.dsp.cursor.move`, `drawers isOpen dashboard` returns `0` at
+> y≥12 and `1` at y≤4, and the panel renders. Note the trigger band is **~4 logical px**, not the
+> 10 estimated below, and once open the hover region expands to the panel's full ~660 px height —
+> which is why it stays open until you move well clear of it.
 
 Shawn: *"when i double click any other window like chrome top left corner it goes to fullscreen
 and back to normal but this does not work with claude desktop … and the buttons even are not

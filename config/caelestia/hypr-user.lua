@@ -576,11 +576,24 @@ hl.window_rule({
 -- Chrome "works" only because Shawn double-clicks its top-LEFT corner (x 70..285), which
 -- is outside the panel's horizontal span.
 --
--- Fix is one line in ~/.config/caelestia/shell.json: dashboard.showOnHover = false. The
+-- Fix was one line in ~/.config/caelestia/shell.json: dashboard.showOnHover = false. The
 -- dashboard then only appears when asked for, so nothing hovers over a titlebar uninvited.
 -- That would leave it unreachable, hence the bind below. SUPER+B was confirmed free
 -- against `hyprctl binds` on the RUNNING compositor (SUPER+D is kbCommunicationWs, a
 -- workspace). SUPER+K still toggles everything at once via caelestia:showall.
+--
+-- ⚠️ [CHANGE: claude-code | 2026-08-08] THAT FIX IS REVERTED. showOnHover is `true` again —
+-- Shawn missed the top-edge drop-down, was shown the trade-off, and chose to take it back.
+-- So the swallowed-titlebar-click behaviour above is LIVE and ACCEPTED, not an open bug.
+-- Do NOT set it back to false as a "fix"; that just swaps one complaint for the other. The
+-- real answer, if it ever gets annoying enough, is a hover DWELL DELAY so an overshoot on
+-- the way to a button does not trigger the panel — that means patching Interactions.qml,
+-- which belongs to the caelestia-shell package and would need a pacman hook to survive
+-- upgrades. Measured after the revert: the trigger band is ~4 logical px (not 10), and an
+-- open panel keeps itself open until the pointer leaves its full ~660 px height.
+--
+-- SUPER+B below is kept anyway — it still works and is the reliable way to open the
+-- dashboard without fishing for the top edge.
 --
 -- NOTE ON MINIMIZE: the minimize button stays dead and cannot be fixed here. Hyprland has
 -- no minimize concept at all, so there is nothing for the app's request to land on.
