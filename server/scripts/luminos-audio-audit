@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""[CHANGE: claude-code | 2026-08-07]
+Find media whose audio is descriptive-narration or commentary rather than the real thing.
+
+A "with Audio Description" release carries a narrator reading the action aloud over the
+dialogue. It parses as a normal WEBDL, Sonarr grabs it happily, and nothing complains --
+the file plays, so no health check fires. You only find out by watching it.
+
+Two shapes of the problem, and they need different fixes:
+
+  NO CLEAN AUDIO   the only track is descriptive. No player setting can help; the file
+                   has to be replaced. Exit code 1.
+  MISLABELLED      a clean track exists but a descriptive/commentary one is flagged
+                   default, so it plays first. Fixed by preferring a language in the
+                   player rather than trusting the file's default flag.
+
+Detection is by track TITLE, not by disposition flag. The flags exist -- ffmpeg exposes
+DISPOSITION:visual_impaired and :comment -- but real releases routinely leave them at 0
+while naming the track "British (Descriptive)". Checking only the flag finds nothing.
+
+  luminos-audio-audit              # audit the library, exit 1 if anything is unwatchable
+  luminos-audio-audit --json       # machine-readable, for a timer or another script
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+
+ROOTS = ["/srv/media/tv", "/srv/media/movies"]
+EXTS = (".mkv", ".mp4", ".m4v", ".avi")
+# Matched against the track title. Kept narrow on purpose: "AD" alone is far too
+# common in real titles to be safe here.
+WORDS = ("descri", "commentary", "narrat", "audio description")
+
+
+def audio_streams(path):
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a",
+         "-show_entries",
+         "stream=index,codec_name,channels:stream_tags=language,title"
+         ":stream_disposition=default,visual_impaired,comment",
+         "-of", "json", path],
+        capture_output=True, text=True, timeout=60).stdout
+    return json.loads(out).get("streams", [])
+
+
+def is_descriptive(stream):
+    d = stream.get("disposition", {}) or {}
+    title = ((stream.get("tags", {}) or {}).get("title") or "").lower()
+    return bool(d.get("visual_impaired") or d.get("comment")
+                or any(w in title for w in WORDS))
+
+
+def audit():
+    files = [os.path.join(dp, f)
+             for root in ROOTS
+             for dp, _, fn in os.walk(root)
+             for f in fn if f.lower().endswith(EXTS)]
+
+    broken, mislabelled, probe_failed = [], [], []
+    for p in files:
+        try:
+            streams = audio_streams(p)
+        except Exception as e:
+            probe_failed.append({"path": p, "error": type(e).__name__})
+            continue
+
+        bad = [s for s in streams if is_descriptive(s)]
+        if not bad:
+            continue
+        clean = [s for s in streams if s not in bad]
+        rec = {"path": p,
+               "tracks": len(streams),
+               "descriptive": [{
+                   "index": s["index"],
+                   "language": (s.get("tags", {}) or {}).get("language"),
+                   "title": (s.get("tags", {}) or {}).get("title"),
+                   "default": bool((s.get("disposition", {}) or {}).get("default")),
+               } for s in bad]}
+        if not clean:
+            broken.append(rec)
+        elif any((s.get("disposition", {}) or {}).get("default") for s in bad):
+            mislabelled.append(rec)
+
+    return files, broken, mislabelled, probe_failed
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+
+    files, broken, mislabelled, probe_failed = audit()
+
+    if a.json:
+        print(json.dumps({"scanned": len(files), "broken": broken,
+                          "mislabelled": mislabelled, "probe_failed": probe_failed},
+                         indent=2))
+        return 1 if broken else 0
+
+    print("scanned %d media files" % len(files))
+
+    if broken:
+        print("\nUNWATCHABLE -- descriptive narration is the ONLY audio (replace the file):")
+        for r in broken:
+            print("  %s" % os.path.basename(r["path"]))
+            for t in r["descriptive"]:
+                print("       idx=%s [%s] '%s'" % (t["index"], t["language"], t["title"]))
+
+    if mislabelled:
+        print("\nWRONG TRACK PLAYS FIRST -- a clean track exists but is not the default:")
+        for r in mislabelled:
+            print("  %s" % os.path.basename(r["path"]))
+            for t in r["descriptive"]:
+                print("       idx=%s [%s] default=%s '%s'"
+                      % (t["index"], t["language"], t["default"], t["title"]))
+        print("     fix in the player, not the file: set a preferred audio language and")
+        print("     turn off 'play default audio track'.")
+
+    if probe_failed:
+        print("\ncould not probe %d file(s):" % len(probe_failed))
+        for r in probe_failed:
+            print("  %s (%s)" % (os.path.basename(r["path"]), r["error"]))
+
+    if not broken and not mislabelled:
+        print("no descriptive-audio problems found")
+    return 1 if broken else 0
+
+
+sys.exit(main())

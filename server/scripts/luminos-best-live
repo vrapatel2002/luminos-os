@@ -39,6 +39,12 @@ SAMPLE = 12          # articles to STAT per candidate
 ALIVE_MIN = 0.90     # fraction that must be present to accept
 MAX_CANDIDATES = 12  # give up after this many per episode
 
+# Descriptive-audio / commentary releases. Sonarr scores these -10000 via a custom
+# format, so they normally arrive pre-rejected -- but an upgrade search can still
+# surface one, and a silent narrator track is worse than no file. Second layer.
+AD_RE = re.compile(r"(?i)\b(Audio[. _-]?Descri(ption|bed)|Descriptive|Commentary)\b"
+                   r"|[. _-]AD[. _-](1080p|720p|2160p|WEB|WEBRip|BluRay)")
+
 
 # ---------------------------------------------------------------- helpers
 
@@ -162,6 +168,10 @@ def best_live_for(news, base, key, params, label, apply_it):
         title = rel.get("title", "")
         size = (rel.get("size") or 0) / 1e9
         qual = ((rel.get("quality") or {}).get("quality") or {}).get("name", "?")
+        if AD_RE.search(title):
+            print("     SKIP  descriptive/commentary audio   %s" % title[:46])
+            tried.append({"title": title, "verdict": "audio_description"})
+            continue
         try:
             segs = segments_of(rel["downloadUrl"])
         except Exception as e:
@@ -210,6 +220,9 @@ def report():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--series")
+    ap.add_argument("--episode-id", type=int,
+                    help="one episode by Sonarr id, even if it already has a file "
+                         "(used to replace a bad grab with a better one)")
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--movies", action="store_true")
     ap.add_argument("--apply", action="store_true")
@@ -219,8 +232,8 @@ def main():
 
     if a.report:
         return report()
-    if not (a.series or a.all or a.movies):
-        sys.exit("need --series NAME, --all, --movies, or --report")
+    if not (a.series or a.all or a.movies or a.episode_id):
+        sys.exit("need --series NAME, --episode-id N, --all, --movies, or --report")
 
     print("mode: %s   (alive threshold %.0f%%, %d articles sampled)"
           % ("APPLYING" if a.apply else "DRY RUN", ALIVE_MIN * 100, SAMPLE))
@@ -230,6 +243,13 @@ def main():
     print("news server: connected and authenticated\n")
 
     targets = []
+    if a.episode_id:
+        sk = api_key("sonarr")
+        e = call(SONARR, sk, "/episode/%d" % a.episode_id)
+        s = call(SONARR, sk, "/series/%d" % e["seriesId"])
+        targets.append((SONARR, sk, "episodeId=%d" % e["id"],
+                        "%s S%02dE%02d" % (s["title"], e["seasonNumber"],
+                                           e["episodeNumber"])))
     if a.series or a.all:
         sk = api_key("sonarr")
         for s in call(SONARR, sk, "/series"):

@@ -908,3 +908,110 @@ the only subtitles available are the ones already inside the release file. This 
 returned **0** French/MULTI-tagged results for two well-known French titles, and no Oggy
 release advertises English subtitles at all. Bazarr plus a French-capable Usenet indexer would
 both be required.
+
+## DECISION 61 — Descriptive audio is blocked at four layers, because one file proved the flags cannot be trusted
+# [CHANGE: claude-code | 2026-08-07]
+
+**Decision.** Treat audio-description and commentary releases as a grab-time rejection, not a
+thing to notice afterwards. Four layers, because any single one of them can be bypassed.
+
+**The symptom.** MobLand played with a narrator describing the picture out loud. The file was
+not corrupt and the wrong track was not selected by accident — the release itself carried
+descriptive narration as its only usable English audio.
+
+**The trap that made this invisible.** Descriptive audio is supposed to be marked by the
+container. On the actual offending file it was not:
+
+```
+disposition.visual_impaired = 0
+disposition.comment         = 0
+tags.title                  = "British (Descriptive)"
+```
+
+**Only the track title said it.** Any detector keyed on the disposition flags — which is the
+documented, obvious way to do this — reads that file as clean. Detection must look at the
+title string, and treat the flags as a bonus signal rather than the source of truth.
+
+**The four layers:**
+1. **Grab time.** A Sonarr/Radarr custom format scoring `-10000`, applied to all 7 quality
+   profiles in both apps. `minFormatScore = 0`, so a negative score is a hard rejection.
+2. **Self-healing.** The already-imported bad file scores below `cutoffFormatScore`, which
+   makes *any* clean release an upgrade. Sonarr replaces it on the next search on its own —
+   no manual delete was needed.
+3. **Playback.** Jellyfin's per-user `AudioLanguagePreference` now pins English rather than
+   deferring to the file's default-track flag, so a mislabelled file still plays the right track.
+4. **Audit.** `server/scripts/luminos-audio-audit`, weekly, ffprobes the library and splits
+   **UNWATCHABLE** (no clean track at all) from **MISLABELLED** (a clean track exists but the
+   descriptive one is default — fixable in the player, not worth a re-download).
+
+**Why the audit unit is allowed to fail.** It exits 1 when a file has no usable audio, and the
+service deliberately does not mask that. `systemctl list-units --failed` then surfaces the
+finding, instead of it sitting unread in a log nobody opens.
+
+**The regex was nearly a bug.** The first version matched `\bAD\b`, which would have rejected
+*Ad Astra* and anything else with "Ad" as a word. Tightened to require an adjacent quality
+token (`[. _-]AD[. _-](1080p|720p|2160p|WEB|...)`) and negative-tested against 13 real titles,
+0 false positives. Same reasoning in the audit's word list: `"AD"` alone is far too common in
+real titles to be safe, so it matches `descri`, `commentary`, `narrat` instead.
+
+**Honest note on how this was missed.** The offending release title was on screen during an
+earlier torrent audit. That row was read for its protocol number and the title was never read.
+The fix for that is the scheduled audit, not a promise to be more careful.
+
+## DECISION 62 — Library space gets its own web view, and it does hardlink accounting properly
+# [CHANGE: claude-code | 2026-08-08]
+
+**Decision.** `server/scripts/luminos-space` on **port 8099**, a small Chrome-friendly page
+showing what is using the disk, with delete by movie, by season and by episode, plus live
+download control. Filelight for the media library, minus everything that is not media.
+
+**Why not Filelight.** Filelight shows directories. The question being asked is "which show,
+which season" — and the answer has to come with a *correct* number for how much deleting it
+would actually free, which is not the file size.
+
+**The hardlink trap, which is the whole reason this is not a `du` wrapper.** Sonarr and Radarr
+import by **hardlink**, so the library file and the copy under `/srv/media/downloads` are the
+same inode. Measured across the library:
+
+```
+links = 1 :   0.0 GB
+links > 1 : 369.9 GB
+```
+
+Deleting the library name frees **nothing** while the download twin still points at the inode.
+So the tool matches twins by `(st_dev, st_ino)` — never by filename — snapshots the inodes
+*before* the API delete, and unlinks the twins after. It reports `frees` (bytes that will
+actually come back) separately from `bytes` (apparent size). Negative-tested on the case that
+would make it lie: an inode also linked from outside the deletion set correctly reports 0.
+
+**Corollary worth remembering:** `links = 1` in the downloads tree means Sonarr **copied**
+instead of hardlinking, and those are true orphans. MobLand had 49.94 GB of them, which is why
+deleting the show freed 221 GB and not 275 GB.
+
+**Download control, and the two ways NZBGet lies about pausing.**
+- **`pausedownload` over GET is a silent no-op.** Empty body, downloading continues, looks
+  exactly like success. It must be POSTed.
+- **`PausedSizeMB > 0` is not a pause flag.** It is the par2 repair set, which NZBGet holds
+  back on *every* healthy group — measured 1.6 GB of 21.9 GB on an actively downloading item.
+  The correct test is `PausedSizeMB >= RemainingSizeMB`.
+- **`Status` lags by up to 16 seconds.** Pausing the item that is actively downloading leaves
+  `Status = DOWNLOADING` while its connections drain. Measured: bytes froze at t+4s
+  (2690 MB, unchanged thereafter) but `Status` did not read `PAUSED` until **t+16s**. The
+  `PausedSizeMB >= RemainingSizeMB` test flips at t+4s, so the UI uses it and is *more*
+  truthful than NZBGet's own status string.
+
+**Every action is read back, and a wrong id must not read as success.** `editqueue` returns
+success for a command that matched no group at all — so "gone afterwards" only means something
+if it was there beforehand, otherwise a bad id looks like a completed delete. The tool checks
+the queue before *and* after, and polls across the drain window rather than reading once (a
+single eager read reported a working pause as a failure).
+
+**Access.** A token in the URL, not the network. nftables here accepts `192.168.2.0/24` and
+`iifname tailscale0` **wholesale**, not per port, so anything that listens is already reachable
+from the whole LAN and the tailnet the moment it starts.
+
+**Runs as root** for exactly two reasons, both required: reading the Sonarr/Radarr API keys out
+of `/var/lib/*/config.xml`, and unlinking hardlink twins under `/srv/media/downloads`, which is
+owned `nzbget:media`. The NZBGet credentials are read once and cached — the panel polls every
+5 seconds, and re-shelling `sudo` three times per poll floods the auth log for values that
+never change.

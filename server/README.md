@@ -113,6 +113,31 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 - **NZBGet's `pausedownload` does nothing over `GET`.** It returns an empty body and keeps
   downloading; it needs POST. And one status sample cannot tell a pause from a stalled
   article — take several, spaced out, and watch the byte counter.
+- **Deleting a library file can free zero bytes.** Sonarr and Radarr import by **hardlink**, so
+  the library file and its twin under `/srv/media/downloads` are the same inode — measured
+  `links=1: 0.0 GB` against `links>1: 369.9 GB`. Match twins by `(st_dev, st_ino)`, never by
+  filename. The flip side: `links=1` in the downloads tree means Sonarr *copied*, and those are
+  real orphans worth reclaiming (MobLand had 49.94 GB of them). DECISION 62.
+- **NZBGet's `PausedSizeMB` is not a pause flag, and `Status` lags.** `PausedSizeMB` is the par2
+  repair set that every healthy group holds back (1.6 of 21.9 GB while downloading), so the real
+  test is `PausedSizeMB >= RemainingSizeMB`. And pausing the *active* item leaves
+  `Status = DOWNLOADING` for up to **16 s** while its connections drain — its bytes stop long
+  before its status admits it. DECISION 62.
+- **`editqueue` reports success for a command that matched no group.** So does a delete against a
+  nonexistent id, which then looks exactly like a completed delete. Check the queue *before* as
+  well as after, and poll across the drain window — a single eager read reports a working pause
+  as a failure. DECISION 62.
+- **Descriptive-audio releases do not set the flags that would identify them.** The real offender
+  had `visual_impaired=0` and `comment=0`; only `tags.title` said "British (Descriptive)". Key
+  detection on the **track title**. And keep the pattern narrow — `\bAD\b` would reject
+  *Ad Astra*. DECISION 61.
+- **Sonarr applies `addOptions.monitor` asynchronously, after the add.** It overwrites monitored
+  flags set in the same POST body, so a series can silently unmonitor itself moments after you
+  added it. Set monitoring as a separate `PUT` afterwards, then re-read to confirm it settled.
+- **Radarr and Sonarr delete files asynchronously.** Checking that the directory is gone straight
+  after the API call is a false positive — it will still be there, and then it won't be.
+- **Backgrounding a long command over SSH returns exit 255 and kills the session.** Use
+  `systemd-run --unit=NAME --collect` on the server instead of `&` or `nohup`.
 - **There are no download size caps.** Every quality definition is `maxSize: None`, so
   "Max Bitrate" can and does pull 100 GB+ remuxes. That is on purpose, but know it before
   requesting a whole season pack. DECISION 54.

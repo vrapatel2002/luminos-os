@@ -1,0 +1,22 @@
+# [CHANGE: claude-code | 2026-08-08]
+# Web view of library space usage, with delete by movie and by season. See DECISION 62.
+#
+# Runs as root for two reasons, both needed: reading the Sonarr/Radarr API keys out of
+# /var/lib/*/config.xml, and unlinking hardlink twins under /srv/media/downloads, which
+# is owned by nzbget:media. Access is gated by a token in the URL, not by the network --
+# nftables already accepts the whole LAN and the tailnet on every port.
+[Unit]
+Description=Luminos library space browser
+Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
+After=sonarr.service radarr.service
+Wants=sonarr.service radarr.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/luminos-space --port 8099
+Restart=on-failure
+RestartSec=5s
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

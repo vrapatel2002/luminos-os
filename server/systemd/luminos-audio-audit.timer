@@ -1,0 +1,15 @@
+# [CHANGE: claude-code | 2026-08-07]
+# Weekly, not daily: this ffprobes every file in the library off a spinning disk,
+# and a bad grab is rare. Nice/idle IO plus a wide jitter keeps it off the disk
+# while anything is streaming or importing.
+[Unit]
+Description=Weekly descriptive-audio audit of the media library
+
+[Timer]
+OnCalendar=weekly
+# The server is powered on and off by hand, so a missed run must still happen.
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

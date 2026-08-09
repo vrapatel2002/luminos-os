@@ -1,0 +1,20 @@
+# [CHANGE: claude-code | 2026-08-07]
+# Flags media whose only audio is descriptive narration. See DECISION 61.
+# Runs as root purely to read every file under /srv/media; it writes nothing.
+[Unit]
+Description=Audit the library for descriptive-audio-only media
+Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
+After=jellyfin.service
+Wants=jellyfin.service
+
+[Service]
+Type=oneshot
+# Exit 1 means "at least one file has no usable audio". Letting systemd mark the
+# unit failed is the point: `systemctl list-units --failed` then surfaces it, so
+# the finding does not sit unread in a log.
+ExecStart=/usr/local/bin/luminos-audio-audit
+Nice=15
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

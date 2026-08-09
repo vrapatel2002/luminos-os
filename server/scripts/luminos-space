@@ -1,0 +1,736 @@
+#!/usr/bin/env python3
+"""[CHANGE: claude-code | 2026-08-08]
+A small web view of what the media library is using, plus live control of the downloads.
+
+Filelight shows every directory on the disk. This shows the things that actually grow --
+movies, TV seasons, individual episodes -- and lets you remove them from a browser, and
+pause or cancel anything that is downloading.
+
+The part that matters: DELETING A FILE HERE MAY FREE NOTHING, and this tool is built
+around that. Sonarr and Radarr import by hardlink, so a season sitting in the library
+is usually the *same bytes* as a copy under the downloads directory -- one inode, two
+names. Removing the library name drops the link count to 1 and frees zero. On this
+server that affects ~370 GB, so a tool that reported apparent size would be lying in
+the only situation where you care.
+
+So every file is stat'ed for (st_dev, st_ino), twins are located in the downloads tree
+by inode rather than by guessing at names, and the figure shown is what will really come
+back. A row that frees less than its size says so.
+
+Deletes go through the Sonarr/Radarr API, never straight to the filesystem, so their
+databases stay consistent. Deleting a season also UNMONITORS it, and deleting a single
+episode unmonitors that episode -- otherwise Sonarr notices the gap within minutes and
+downloads it all over again.
+
+  luminos-space                  # serve on 0.0.0.0:8099, prints the URL with its token
+  luminos-space --port 9000
+  luminos-space --print-url      # show the URL of a server already configured
+
+The token is generated once into /var/lib/luminos/space-token and required on every
+request. This box accepts the whole LAN and the tailnet at the firewall, so an
+unauthenticated delete button would be reachable by anything on the network.
+"""
+import argparse
+import base64
+import http.server
+import json
+import os
+import secrets
+import shutil
+import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+import urllib.request
+
+SONARR = "http://127.0.0.1:8989/api/v3"
+RADARR = "http://127.0.0.1:7878/api/v3"
+NZBGET_CONF = "/var/lib/nzbget/nzbget.conf"
+DOWNLOADS = "/srv/media/downloads"
+MEDIA = "/srv/media"
+TOKEN_FILE = "/var/lib/luminos/space-token"
+
+_twin_cache = {"built": 0.0, "map": {}}
+_cache_lock = threading.Lock()
+
+
+# ---------------------------------------------------------------- plumbing
+
+def api_key(app):
+    out = subprocess.run(["sudo", "-n", "grep", "-oP", r"(?<=<ApiKey>)[^<]+",
+                          "/var/lib/%s/config.xml" % app],
+                         capture_output=True, text=True).stdout.strip()
+    if not out:
+        sys.exit("could not read the %s api key (needs passwordless sudo)" % app)
+    return out
+
+
+def call(base, key, path, method="GET", body=None, timeout=180):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(base + path, data=data, method=method,
+                                 headers={"X-Api-Key": key,
+                                          "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as f:
+        raw = f.read()
+    return json.loads(raw) if raw else None
+
+
+_NZB_CREDS = {}
+
+
+def nzb_conf(key):
+    # Cached: the download panel polls every few seconds, and re-shelling sudo three
+    # times per poll floods the auth log for credentials that never change.
+    if key not in _NZB_CREDS:
+        out = subprocess.run(["sudo", "-n", "sed", "-n", "s/^%s[ ]*=[ ]*//p" % key,
+                              NZBGET_CONF], capture_output=True, text=True).stdout.strip()
+        _NZB_CREDS[key] = out.splitlines()[0].strip() if out else ""
+    return _NZB_CREDS[key]
+
+
+def nzb_rpc(method, params=None, timeout=45):
+    """NZBGet JSON-RPC. Always POST: `pausedownload` over GET returns an empty body
+    and quietly does nothing, which looks exactly like success."""
+    user = nzb_conf("ControlUsername") or "nzbget"
+    pw = nzb_conf("ControlPassword")
+    port = nzb_conf("ControlPort") or "6789"
+    auth = base64.b64encode(("%s:%s" % (user, pw)).encode()).decode()
+    body = json.dumps({"method": method, "params": params or []}).encode()
+    req = urllib.request.Request("http://127.0.0.1:%s/jsonrpc" % port, data=body,
+                                 headers={"Content-Type": "application/json",
+                                          "Authorization": "Basic " + auth})
+    with urllib.request.urlopen(req, timeout=timeout) as f:
+        return json.loads(f.read()).get("result")
+
+
+def token():
+    if os.path.exists(TOKEN_FILE):
+        t = open(TOKEN_FILE).read().strip()
+        if t:
+            return t
+    t = secrets.token_urlsafe(18)
+    os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
+    with open(TOKEN_FILE, "w") as f:
+        f.write(t)
+    os.chmod(TOKEN_FILE, 0o600)
+    return t
+
+
+def lan_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("192.168.2.1", 1))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+# ---------------------------------------------------------------- hardlinks
+
+def twin_map(max_age=300):
+    """inode -> [paths] for everything under the downloads tree.
+
+    Only metadata is read, so this is cheap even on a spinning disk, but it is
+    cached anyway because the page rebuilds it on every load.
+    """
+    with _cache_lock:
+        if time.time() - _twin_cache["built"] < max_age and _twin_cache["map"]:
+            return _twin_cache["map"]
+        m = {}
+        for dp, _, fn in os.walk(DOWNLOADS, onerror=lambda e: None):
+            for name in fn:
+                p = os.path.join(dp, name)
+                try:
+                    st = os.stat(p)
+                except OSError:
+                    continue
+                if st.st_nlink > 1:
+                    m.setdefault((st.st_dev, st.st_ino), []).append(p)
+        _twin_cache["map"] = m
+        _twin_cache["built"] = time.time()
+        return m
+
+
+def weigh(paths):
+    """Return (apparent_bytes, freed_bytes, twin_paths).
+
+    freed_bytes counts a file only when deleting the library copy *and* every twin
+    we know about would drop its link count to zero. If some other name elsewhere
+    still points at the inode, the space does not come back and we must not claim it.
+    """
+    twins = twin_map()
+    apparent = freed = 0
+    found = []
+    for p in paths:
+        try:
+            st = os.stat(p)
+        except OSError:
+            continue
+        apparent += st.st_size
+        mine = twins.get((st.st_dev, st.st_ino), [])
+        found.extend(mine)
+        if st.st_nlink <= 1 + len(mine):
+            freed += st.st_size
+    return apparent, freed, found
+
+
+# ---------------------------------------------------------------- data
+
+def gather():
+    sk, rk = api_key("sonarr"), api_key("radarr")
+
+    series_rows = []
+    for s in call(SONARR, sk, "/series"):
+        files = call(SONARR, sk, "/episodefile?seriesId=%d" % s["id"]) or []
+        if not files:
+            continue
+        eps = {e.get("episodeFileId"): e
+               for e in (call(SONARR, sk, "/episode?seriesId=%d" % s["id"]) or [])
+               if e.get("episodeFileId")}
+        by_season = {}
+        for f in files:
+            by_season.setdefault(f["seasonNumber"], []).append(f)
+
+        seasons = []
+        for sn in sorted(by_season):
+            ep_rows = []
+            for f in sorted(by_season[sn],
+                            key=lambda x: eps.get(x["id"], {}).get("episodeNumber", 0)):
+                e = eps.get(f["id"], {})
+                apparent, freed, twins = weigh([f["path"]])
+                ep_rows.append({"fileId": f["id"],
+                                "episode": e.get("episodeNumber", 0),
+                                "title": e.get("title", ""),
+                                "bytes": apparent, "frees": freed,
+                                "twins": len(twins)})
+            monitored = next((x["monitored"] for x in s["seasons"]
+                              if x["seasonNumber"] == sn), False)
+            seasons.append({"season": sn, "episodes": len(ep_rows),
+                            "bytes": sum(x["bytes"] for x in ep_rows),
+                            "frees": sum(x["frees"] for x in ep_rows),
+                            "monitored": monitored, "eps": ep_rows})
+
+        series_rows.append({"id": s["id"], "title": s["title"],
+                            "bytes": sum(x["bytes"] for x in seasons),
+                            "frees": sum(x["frees"] for x in seasons),
+                            "seasons": seasons})
+
+    movie_rows = []
+    for m in call(RADARR, rk, "/movie"):
+        if not m.get("hasFile"):
+            continue
+        mf = m.get("movieFile") or {}
+        paths = [mf["path"]] if mf.get("path") else []
+        apparent, freed, twins = weigh(paths)
+        movie_rows.append({"id": m["id"], "title": m["title"], "year": m.get("year"),
+                           "bytes": apparent, "frees": freed, "twins": len(twins)})
+
+    series_rows.sort(key=lambda r: -r["bytes"])
+    movie_rows.sort(key=lambda r: -r["bytes"])
+    du = shutil.disk_usage(MEDIA)
+    return {"series": series_rows, "movies": movie_rows,
+            "disk": {"total": du.total, "used": du.used, "free": du.free}}
+
+
+def group_paused(g):
+    """Is this queue item paused?
+
+    Two signals, both needed. `Status == "PAUSED"` is the definitive one, but it lags:
+    pausing the item that is actively downloading takes 3-6s to land, because NZBGet
+    first drains its open connections, and it reads DOWNLOADING for that whole window.
+    `PausedSizeMB` covering the entire remainder is the early signal -- it flips within
+    ~3s. On its own PausedSizeMB is NOT a pause flag: it is the par2 repair set, which
+    every healthy group holds back (measured ~1.6 of 21.9 GB), hence the >= remaining
+    test rather than > 0.
+    """
+    left = g.get("RemainingSizeMB", 0)
+    return g.get("Status") == "PAUSED" or (left > 0 and g.get("PausedSizeMB", 0) >= left)
+
+
+def downloads():
+    try:
+        st = nzb_rpc("status") or {}
+        groups = nzb_rpc("listgroups") or []
+    except Exception as e:
+        return {"error": "%s: %s" % (type(e).__name__, e), "items": []}
+    items = []
+    for g in groups:
+        total = g.get("FileSizeMB", 0) * 1048576
+        left = g.get("RemainingSizeMB", 0) * 1048576
+        status = g.get("Status", "")
+        items.append({"id": g.get("NZBID"), "name": g.get("NZBName", ""),
+                      "bytes": total, "done": max(0, total - left),
+                      "status": status,
+                      "paused": group_paused(g),
+                      "health": g.get("Health", 0) / 10.0})
+    du = shutil.disk_usage(MEDIA)
+    return {"globalPaused": bool(st.get("DownloadPaused")),
+            "rate": st.get("DownloadRate", 0),
+            "remaining": st.get("RemainingSizeMB", 0) * 1048576,
+            "free": du.free, "items": items}
+
+
+def download_action(action, nzb_id=None):
+    if action == "pauseall":
+        nzb_rpc("pausedownload")
+        return {"ok": True, "message": "all downloads paused"}
+    if action == "resumeall":
+        nzb_rpc("resumedownload")
+        return {"ok": True, "message": "downloads resumed"}
+    if nzb_id is None:
+        return {"ok": False, "message": "no download id given"}
+    cmd = {"pause": "GroupPause", "resume": "GroupResume",
+           "delete": "GroupDelete", "top": "GroupMoveTop"}.get(action)
+    if not cmd:
+        return {"ok": False, "message": "unknown action"}
+    nzb_id = int(nzb_id)
+    # Look before as well as after. editqueue returns success for a command that
+    # matched no group at all, so "gone afterwards" only means anything if it was
+    # actually there beforehand -- otherwise a wrong id reads as a completed delete.
+    def find(gs):
+        return [g for g in (gs or []) if g.get("NZBID") == nzb_id]
+    if not find(nzb_rpc("listgroups")):
+        return {"ok": False, "message": "no download with id %d in the queue" % nzb_id}
+    nzb_rpc("editqueue", [cmd, 0, "", [nzb_id]])
+    # editqueue is applied asynchronously. Pausing the item that is actively
+    # downloading took a measured 3-6s to land, so poll across that window instead of
+    # reading once -- a single eager read reports a working pause as a failure.
+    def settled(g):
+        if action == "pause":
+            return group_paused(g)
+        if action == "resume":
+            return not group_paused(g)
+        return True
+    got, still = None, []
+    for _ in range(20):
+        still = find(nzb_rpc("listgroups"))
+        if action == "delete":
+            if not still:
+                break
+        elif still and settled(still[0]):
+            got = still[0].get("Status")
+            break
+        got = still[0].get("Status") if still else None
+        time.sleep(0.5)
+    if action == "delete":
+        return {"ok": not still,
+                "message": "download cancelled" if not still else "it is still in the queue"}
+    if not still:
+        return {"ok": False, "message": "%s: it vanished from the queue" % action}
+    if not settled(still[0]):
+        return {"ok": False, "message": "%s did not take -- still %s" % (action, got)}
+    if action in ("pause", "resume"):
+        # Report the pause state, not the raw Status: a just-paused item still reads
+        # DOWNLOADING while its connections drain, and "pause -> DOWNLOADING" looks
+        # like the command failed when it did not.
+        return {"ok": True, "message": "paused" if action == "pause" else "resumed"}
+    return {"ok": True, "message": "%s -> %s" % (action, got)}
+
+
+# ---------------------------------------------------------------- deletion
+
+def drop_twins(paths_before):
+    """Remove download-tree names sharing an inode with something we just deleted.
+
+    Inodes are captured *before* the API delete, because afterwards the library path
+    is gone and there is nothing left to match on.
+    """
+    removed = 0
+    for p in paths_before:
+        for t in p["twins"]:
+            try:
+                os.remove(t)
+                removed += 1
+            except OSError:
+                pass
+    for dp, dn, fn in os.walk(DOWNLOADS, topdown=False, onerror=lambda e: None):
+        if dp != DOWNLOADS and not os.listdir(dp):
+            try:
+                os.rmdir(dp)
+            except OSError:
+                pass
+    with _cache_lock:
+        _twin_cache["built"] = 0.0
+    return removed
+
+
+def snapshot(paths):
+    twins = twin_map()
+    out = []
+    for p in paths:
+        try:
+            st = os.stat(p)
+        except OSError:
+            continue
+        out.append({"path": p, "twins": twins.get((st.st_dev, st.st_ino), [])})
+    return out
+
+
+def _unmonitor_episodes(sk, episode_ids):
+    if episode_ids:
+        call(SONARR, sk, "/episode/monitor", "PUT",
+             {"episodeIds": episode_ids, "monitored": False})
+
+
+def delete_season(series_id, season):
+    sk = api_key("sonarr")
+    files = [f for f in (call(SONARR, sk, "/episodefile?seriesId=%d" % series_id) or [])
+             if f["seasonNumber"] == season]
+    if not files:
+        return {"ok": False, "message": "no files for that season"}
+
+    before = shutil.disk_usage(MEDIA).free
+    snap = snapshot([f["path"] for f in files])
+    for f in files:
+        call(SONARR, sk, "/episodefile/%d" % f["id"], "DELETE")
+
+    # Unmonitor, or Sonarr treats the season as missing and grabs it all back.
+    s = call(SONARR, sk, "/series/%d" % series_id)
+    for x in s["seasons"]:
+        if x["seasonNumber"] == season:
+            x["monitored"] = False
+    call(SONARR, sk, "/series/%d" % series_id, "PUT", s)
+
+    twins = drop_twins(snap)
+    time.sleep(1.5)
+    freed = shutil.disk_usage(MEDIA).free - before
+    return {"ok": True, "message":
+            "deleted %d episode(s), removed %d duplicate copy(ies), unmonitored S%02d "
+            "- %.2f GB freed" % (len(files), twins, season, freed / 1e9)}
+
+
+def delete_episode(file_id):
+    sk = api_key("sonarr")
+    f = call(SONARR, sk, "/episodefile/%d" % file_id)
+    if not f:
+        return {"ok": False, "message": "no such file"}
+
+    before = shutil.disk_usage(MEDIA).free
+    snap = snapshot([f["path"]])
+    eps = [e["id"] for e in (call(SONARR, sk, "/episode?seriesId=%d" % f["seriesId"]) or [])
+           if e.get("episodeFileId") == file_id]
+    call(SONARR, sk, "/episodefile/%d" % file_id, "DELETE")
+    _unmonitor_episodes(sk, eps)
+
+    twins = drop_twins(snap)
+    time.sleep(1.5)
+    freed = shutil.disk_usage(MEDIA).free - before
+    return {"ok": True, "message":
+            "deleted the episode, removed %d duplicate copy(ies), unmonitored it "
+            "- %.2f GB freed" % (twins, freed / 1e9)}
+
+
+def delete_movie(movie_id):
+    rk = api_key("radarr")
+    m = call(RADARR, rk, "/movie/%d" % movie_id)
+    mf = m.get("movieFile") or {}
+    if not mf.get("path"):
+        return {"ok": False, "message": "that movie has no file"}
+
+    before = shutil.disk_usage(MEDIA).free
+    snap = snapshot([mf["path"]])
+    call(RADARR, rk, "/moviefile/%d" % mf["id"], "DELETE")
+    m = call(RADARR, rk, "/movie/%d" % movie_id)
+    m["monitored"] = False
+    call(RADARR, rk, "/movie/%d" % movie_id, "PUT", m)
+
+    twins = drop_twins(snap)
+    time.sleep(1.5)
+    freed = shutil.disk_usage(MEDIA).free - before
+    return {"ok": True, "message":
+            "deleted the file, removed %d duplicate copy(ies), unmonitored - %.2f GB freed"
+            % (twins, freed / 1e9)}
+
+
+# ---------------------------------------------------------------- page
+
+PAGE = r"""<!doctype html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Luminos - library space</title>
+<style>
+ :root{--bg:#14161a;--fg:#e6e8eb;--dim:#8b949e;--bar:#3d7eff;--go:#3fb950;
+       --warn:#e3b341;--bad:#f85149;--line:#262b33;--panel:#1b1f26}
+ *{box-sizing:border-box}
+ body{margin:0;padding:22px;background:var(--bg);color:var(--fg);
+      font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+ h1{font-size:17px;margin:0 0 4px}
+ h2{font-size:12px;margin:26px 0 8px;color:var(--dim);text-transform:uppercase;
+    letter-spacing:.09em;display:flex;align-items:center;gap:10px}
+ .disk{color:var(--dim);margin-bottom:6px} .disk b{color:var(--fg)}
+ .row{display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:7px}
+ .row:hover{background:var(--panel)}
+ .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .sz{width:86px;text-align:right;font-variant-numeric:tabular-nums;color:var(--dim)}
+ .act{width:132px;text-align:right;white-space:nowrap}
+ .barwrap{width:170px;height:7px;background:var(--line);border-radius:4px;overflow:hidden}
+ .bar{height:100%;background:var(--bar)}
+ .bar.go{background:var(--go)}
+ .lvl2{margin-left:22px;font-size:13px}
+ .lvl3{margin-left:48px;font-size:13px;color:var(--dim)}
+ .lvl3 .name{color:var(--fg)}
+ button{background:#21262d;color:var(--fg);border:1px solid #30363d;border-radius:6px;
+        padding:3px 9px;cursor:pointer;font-size:12px;margin-left:4px}
+ button:hover{border-color:#6e7681}
+ button.del:hover{background:var(--bad);border-color:var(--bad)}
+ button.on{background:var(--go);border-color:var(--go);color:#06210d}
+ .caret{cursor:pointer;user-select:none;width:13px;color:var(--dim)}
+ .note{color:var(--warn);font-size:12px}
+ .pausedtag{color:var(--warn);font-size:12px}
+ .hidden{display:none}
+ #msg{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;background:#21262d;
+      border:1px solid #30363d;padding:10px 16px;border-radius:8px;max-width:80%}
+ .empty{color:var(--dim);padding:6px 10px}
+</style>
+<h1>Library space</h1>
+<div class="disk" id="disk"></div>
+
+<h2>Downloads <span id="dlrate" style="text-transform:none;letter-spacing:0"></span>
+    <button id="allbtn"></button></h2>
+<div id="dl">loading...</div>
+
+<div id="app">loading...</div>
+<div id="msg" class="hidden"></div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const gb = b => (b/1e9).toFixed(2) + ' GB';
+const esc = s => String(s).replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const open = new Set();   // which rows are expanded, so a refresh does not collapse them
+
+function say(t){ const m=document.getElementById('msg');
+  m.textContent=t; m.classList.remove('hidden');
+  clearTimeout(window._t); window._t=setTimeout(()=>m.classList.add('hidden'),9000); }
+
+function btn(label, cls, data){
+  const attrs = Object.entries(data).map(([k,v])=>'data-'+k+'="'+esc(v)+'"').join(' ');
+  return '<button class="'+cls+'" '+attrs+'>'+label+'</button>';
+}
+
+// ---------------- downloads
+async function loadDl(){
+  const r = await fetch('/api/downloads?token='+encodeURIComponent(TOKEN));
+  if(!r.ok){ document.getElementById('dl').textContent='bad or missing token'; return; }
+  const d = await r.json();
+  if(d.error){ document.getElementById('dl').innerHTML =
+     '<div class="empty">cannot reach NZBGet: '+esc(d.error)+'</div>'; return; }
+
+  document.getElementById('dlrate').innerHTML = d.items.length
+    ? '<span style="color:var(--dim)">'+(d.rate/1e6).toFixed(2)+' MB/s &middot; '
+      +gb(d.remaining)+' left</span>' : '';
+  const ab = document.getElementById('allbtn');
+  ab.textContent = d.globalPaused ? 'resume all' : 'pause all';
+  ab.className = d.globalPaused ? 'on' : '';
+  ab.dataset.act = d.globalPaused ? 'resumeall' : 'pauseall';
+  ab.dataset.kind = 'dl';
+
+  if(!d.items.length){ document.getElementById('dl').innerHTML =
+    '<div class="empty">nothing downloading</div>'; return; }
+
+  let h='';
+  for(const it of d.items){
+    const pct = it.bytes ? (it.done/it.bytes*100) : 0;
+    h += '<div class="row"><span style="width:13px"></span><span class="name">'
+      + esc(it.name)
+      + (it.paused ? ' <span class="pausedtag">&#10073;&#10073; PAUSED</span>' : '')
+      + (it.health < 100 ? ' <span class="note">health '+it.health.toFixed(0)+'%</span>' : '')
+      + '</span>'
+      + '<span class="barwrap"><span class="bar'+(it.paused?'':' go')
+      + '" style="width:'+pct.toFixed(1)+'%"></span></span>'
+      + '<span class="sz">'+gb(it.done)+' / '+gb(it.bytes)+'</span>'
+      + '<span class="act">'
+      + btn(it.paused?'resume':'pause','', {kind:'dl', act: it.paused?'resume':'pause', id: it.id})
+      + btn('top','', {kind:'dl', act:'top', id: it.id})
+      + btn('cancel','del', {kind:'dl', act:'delete', id: it.id, label: it.name})
+      + '</span></div>';
+  }
+  document.getElementById('dl').innerHTML = h;
+}
+
+// ---------------- library
+async function loadLib(){
+  const r = await fetch('/api/data?token='+encodeURIComponent(TOKEN));
+  if(!r.ok){ document.getElementById('app').textContent='bad or missing token'; return; }
+  const d = await r.json();
+  const pct = (d.disk.used/d.disk.total*100).toFixed(0);
+  document.getElementById('disk').innerHTML =
+    '<b>'+gb(d.disk.free)+'</b> free of '+gb(d.disk.total)+' &middot; '+pct+'% used';
+
+  const max = Math.max(1, ...d.series.map(s=>s.bytes), ...d.movies.map(m=>m.bytes));
+  const bar = b => '<span class="barwrap"><span class="bar" style="width:'
+                   +(b/max*100).toFixed(1)+'%"></span></span>';
+  const warn = o => o.bytes>o.frees
+    ? ' <span class="note">frees only '+gb(o.frees)+'</span>' : '';
+
+  let h = '<h2>TV shows</h2>';
+  for(const s of d.series){
+    const sk='s'+s.id;
+    h += '<div class="row"><span class="caret" data-tog="'+sk+'">'
+      +  (open.has(sk)?'&#9662;':'&#9656;')+'</span>'
+      +  '<span class="name">'+esc(s.title)+'</span>'+bar(s.bytes)
+      +  '<span class="sz">'+gb(s.bytes)+'</span><span class="act"></span></div>'
+      +  '<div id="'+sk+'"'+(open.has(sk)?'':' class="hidden"')+'>';
+    for(const se of s.seasons){
+      const ek=sk+'e'+se.season;
+      h += '<div class="row lvl2"><span class="caret" data-tog="'+ek+'">'
+        +  (open.has(ek)?'&#9662;':'&#9656;')+'</span>'
+        +  '<span class="name">Season '+se.season+' &middot; '+se.episodes+' ep'
+        +  (se.monitored?'':' &middot; not monitored')+warn(se)+'</span>'+bar(se.bytes)
+        +  '<span class="sz">'+gb(se.bytes)+'</span><span class="act">'
+        +  btn('delete season','del',{kind:'season', id:s.id, season:se.season,
+              label:s.title+' Season '+se.season, frees:se.frees})
+        +  '</span></div><div id="'+ek+'"'+(open.has(ek)?'':' class="hidden"')+'>';
+      for(const ep of se.eps){
+        h += '<div class="row lvl3"><span style="width:13px"></span>'
+          +  '<span class="name">E'+String(ep.episode).padStart(2,'0')+' '
+          +  esc(ep.title)+warn(ep)+'</span>'+bar(ep.bytes)
+          +  '<span class="sz">'+gb(ep.bytes)+'</span><span class="act">'
+          +  btn('delete','del',{kind:'episode', id:ep.fileId,
+                label:s.title+' S'+se.season+'E'+ep.episode, frees:ep.frees})
+          +  '</span></div>';
+      }
+      h += '</div>';
+    }
+    h += '</div>';
+  }
+
+  h += '<h2>Movies</h2>';
+  for(const m of d.movies){
+    h += '<div class="row"><span style="width:13px"></span><span class="name">'
+      +  esc(m.title)+' <span style="color:var(--dim)">('+(m.year||'')+')</span>'
+      +  warn(m)+'</span>'+bar(m.bytes)
+      +  '<span class="sz">'+gb(m.bytes)+'</span><span class="act">'
+      +  btn('delete','del',{kind:'movie', id:m.id, label:m.title, frees:m.frees})
+      +  '</span></div>';
+  }
+  if(!d.movies.length) h += '<div class="empty">no movies with files</div>';
+  document.getElementById('app').innerHTML = h;
+}
+
+// ---------------- one listener for every button, so no inline quoting to get wrong
+document.addEventListener('click', async ev => {
+  const t = ev.target.closest('[data-tog],button');
+  if(!t) return;
+
+  if(t.dataset.tog){
+    const k=t.dataset.tog, el=document.getElementById(k);
+    if(open.has(k)) open.delete(k); else open.add(k);
+    el.classList.toggle('hidden');
+    t.innerHTML = open.has(k) ? '\u25BE' : '\u25B8';
+    return;
+  }
+  const d = t.dataset;
+  if(d.kind === 'dl'){
+    if(d.act==='delete' && !confirm('Cancel this download?\n\n'+d.label)) return;
+    const r = await fetch('/api/download-action?token='+encodeURIComponent(TOKEN),{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action:d.act, id:d.id?Number(d.id):null})});
+    say((await r.json()).message); loadDl(); return;
+  }
+  if(d.kind==='season' || d.kind==='movie' || d.kind==='episode'){
+    if(!confirm('Delete '+d.label+'?\n\nThis frees '
+        +(Number(d.frees)/1e9).toFixed(2)+' GB and cannot be undone.')) return;
+    say('deleting '+d.label+'...');
+    const r = await fetch('/api/delete?token='+encodeURIComponent(TOKEN),{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({kind:d.kind, id:Number(d.id),
+                            season: d.season?Number(d.season):0})});
+    say((await r.json()).message);
+    loadLib(); loadDl();
+  }
+});
+
+loadLib(); loadDl();
+setInterval(loadDl, 5000);
+</script>
+"""
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "luminos-space"
+
+    def _auth(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        return secrets.compare_digest((q.get("token") or [""])[0], self.server.token)
+
+    def _send(self, code, body, ctype="application/json"):
+        raw = body if isinstance(body, bytes) else body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _json(self, fn):
+        try:
+            return self._send(200, json.dumps(fn()))
+        except Exception as e:
+            return self._send(500, json.dumps({"error": "%s: %s" % (type(e).__name__, e)}))
+
+    def do_GET(self):
+        path = urllib.parse.urlparse(self.path).path
+        if not self._auth():
+            if path == "/":
+                return self._send(403, "add ?token=... to the URL", "text/plain")
+            return self._send(403, json.dumps({"error": "bad token"}))
+        if path == "/":
+            return self._send(200, PAGE, "text/html; charset=utf-8")
+        if path == "/api/data":
+            return self._json(gather)
+        if path == "/api/downloads":
+            return self._json(downloads)
+        self._send(404, json.dumps({"error": "not found"}))
+
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        if not self._auth():
+            return self._send(403, json.dumps({"ok": False, "message": "bad token"}))
+        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            req = json.loads(self.rfile.read(n) or b"{}")
+            if path == "/api/delete":
+                kind = req.get("kind")
+                if kind == "season":
+                    out = delete_season(int(req["id"]), int(req["season"]))
+                elif kind == "movie":
+                    out = delete_movie(int(req["id"]))
+                elif kind == "episode":
+                    out = delete_episode(int(req["id"]))
+                else:
+                    out = {"ok": False, "message": "unknown kind"}
+            elif path == "/api/download-action":
+                out = download_action(req.get("action"), req.get("id"))
+            else:
+                return self._send(404, json.dumps({"error": "not found"}))
+        except Exception as e:
+            out = {"ok": False, "message": "%s: %s" % (type(e).__name__, e)}
+        self._send(200, json.dumps(out))
+
+    def log_message(self, fmt, *args):
+        pass
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--port", type=int, default=8099)
+    ap.add_argument("--print-url", action="store_true")
+    a = ap.parse_args()
+
+    t = token()
+    url = "http://%s:%d/?token=%s" % (lan_ip(), a.port, t)
+    if a.print_url:
+        print(url)
+        return
+
+    srv = http.server.ThreadingHTTPServer(("0.0.0.0", a.port), Handler)
+    srv.token = t
+    print("luminos-space on port %d\nopen this in Chrome:\n\n  %s\n" % (a.port, url))
+    sys.stdout.flush()
+    srv.serve_forever()
+
+
+main()
