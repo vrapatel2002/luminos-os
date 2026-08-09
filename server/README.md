@@ -113,6 +113,12 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 - **NZBGet's `pausedownload` does nothing over `GET`.** It returns an empty body and keeps
   downloading; it needs POST. And one status sample cannot tell a pause from a stalled
   article — take several, spaced out, and watch the byte counter.
+- **NZBGet ignores a config line written `Name = value` with spaces.** It falls back to the
+  built-in default and says nothing — no warning, no log line. `DiskSpace = 25000` sat in the
+  file for days while the live value stayed at the default **250 MB**, i.e. the disk-full guard
+  was effectively off. Every other line in `nzbget.conf` is `Name=value`; match that. **Verify
+  settings by reading them back out of the running process** (`{"method":"config"}` over
+  JSON-RPC), never by grepping the file.
 - **Deleting a library file can free zero bytes.** Sonarr and Radarr import by **hardlink**, so
   the library file and its twin under `/srv/media/downloads` are the same inode — measured
   `links=1: 0.0 GB` against `links>1: 369.9 GB`. Match twins by `(st_dev, st_ino)`, never by
