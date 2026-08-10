@@ -1989,3 +1989,89 @@ notifies; 5 enabled but 3 loaded → script exits 1 and notifies.
 A **brief** config-error flash at login on the first boot after a Hyprland upgrade is normal and
 unavoidable: the config is parsed before plugins load, always. It clears as soon as the reload
 completes. Only a popup that *stays* means something is wrong.
+
+---
+
+## BUG-112 — `XDG_MENU_PREFIX=hyprland-` silently emptied the KService cache, killing every KDE global shortcut
+# [CHANGE: claude-code | 2026-08-09]
+**Status: FIXED.** Present since ~2026-04-19.
+
+### Symptom
+No KDE global shortcut registered. Not the new Caelestia ones, and — the clue that this was
+older and bigger than the task at hand — **not Shawn's own `net.local.*` custom shortcuts
+either.** They had simply never worked and nobody had connected the two.
+
+### The two-part cause
+**Part one, the thing everyone gets wrong.** A shortcut is registered by
+`X-KDE-Shortcuts=<accel>` **inside the `.desktop` file**. The `[services][<id>.desktop] _launch=`
+group in `kglobalshortcutsrc` is only a *user override store* and does nothing on its own.
+Proof: `org.kde.dolphin.desktop` is a live component with `Meta+E` bound and **has no group in
+`kglobalshortcutsrc` at all**. Confirmed against upstream `globalshortcutsregistry.cpp` —
+`loadSettings()` explicitly `continue`s past the `services` group and any group ending in
+`.desktop`; the real work is `detectAppsWithShortcuts()` calling `KApplicationTrader::query`.
+
+**Part two, the actual fault.** `KApplicationTrader` reads the sycoca service cache — and the
+cache contained **zero applications**. `XDG_MENU_PREFIX` selects which file in `/etc/xdg/menus`
+`kbuildsycoca6` reads. Only `plasma-applications.menu` ships on this box, but the Hyprland
+session sets `XDG_MENU_PREFIX=hyprland-`. With no matching menu file `kbuildsycoca6`
+**exits 0 and writes a 264 KB database containing nothing.** Silently. Every rebuild from inside
+the Hyprland session wiped the cache.
+
+A C++ `KService` probe is what finally proved it: `allServices() == 0` even for Dolphin.
+
+Also worth knowing: **the sycoca filename is a hash of `XDG_DATA_DIRS`**, so a rebuild run from
+the wrong environment writes a different file and leaves the live one stale.
+
+### Fix, in three places
+1. `ln -sfn plasma-applications.menu /etc/xdg/menus/hyprland-applications.menu` — additive, and it
+   repairs the *Hyprland* session's cache too, which is why Shawn's own shortcuts now work.
+2. `export XDG_MENU_PREFIX=plasma-` in `scripts/luminos-caelestia-kwin`.
+3. `kbuildsycoca6 --noincremental` from the launcher **before kwin starts, in kwin's own
+   environment** — kwin hosts kglobalaccel and scans for shortcuts once at startup, so a cache
+   written later, or under another prefix, is too late.
+
+Verified by `busctl --user tree org.kde.kglobalaccel` showing all seven `luminos_cael_*`
+components, and by `invokeShortcut _launch` flipping a real drawer's state 0 → 1.
+
+### Dead ends, recorded so they are not re-run
+- `X-KDE-GlobalAccel-CommandShortcut=true` — red herring; Shawn's entries had it and still failed.
+- `NoDisplay=true` — red herring; the working trader query returns `NoDisplay` entries fine.
+- "user `~/.local/share/applications` isn't scanned" — disproved with a clean probe in
+  `/usr/share/applications`, which also failed.
+- `grep -a` on the sycoca binary returned 0 for our entries **and 0 for `dolphin`** — the negative
+  control invalidated the test. Do not draw conclusions from it.
+- A standalone `/usr/lib/kglobalacceld` exits instantly with an empty log: on Plasma 6
+  **`kwin_wayland` itself owns `org.kde.kglobalaccel`** (only kwin links `libKGlobalAccelD.so`).
+- `busctl list` shows *activatable* names too, which makes a missing service look present. Use
+  `busctl --user list --acquired`.
+
+---
+
+## BUG-113 — Caelestia's drawers all no-op on KWin because `ShellState.forActive()` returns null
+# [CHANGE: claude-code | 2026-08-09]
+**Status: FIXED** (patched in the overlay; upstream unchanged).
+
+Every drawer toggle resolves its target screen through `Hypr.focusedMonitor`. With no Hyprland
+IPC that is null, `Hypr.monitorFor()` never matches, and the function falls out to `return null`.
+Callers then throw in `modules/Shortcuts.qml` at `Object.keys(screenState)` and
+`typeof screenState[drawer]`, and `drawers list` comes back as an **empty string**. Nothing
+errors visibly. This is *the* reason Caelestia looks dead on KWin; everything else is cosmetic.
+
+**The fallback must go after the loop, not before it.** An earlier version bailed out on
+`if (!focusedMonitor)` and that was not enough: `focusedMonitor` can be non-null and still match
+none of KWin's screens, because a reachable Hyprland socket describes *Hyprland's* outputs. That
+case fell straight through to `return null` and the drawers were dead again — with the patch
+present and looking correct. Patching the exit covers both.
+
+Related: `scripts/luminos-caelestia-kwin` now `unset`s `HYPRLAND_INSTANCE_SIGNATURE` and
+`HYPRLAND_CMD`. A greeter login never sets them; a session started by hand from a Hyprland
+terminal does, and the shell then quietly describes the *wrong compositor*.
+
+### Testing notes that cost time
+- **`qs ipc` is display-scoped.** Nested testing needs `WAYLAND_DISPLAY=wayland-0` for `qs ipc`
+  (kwin's socket) and `wayland-1` for `grim` (Hyprland). `grim` on wayland-0 fails outright —
+  the nested kwin offers no wlr-screencopy.
+- **zsh does not word-split unquoted variables.** `Q="qs -p … ipc call"; $Q drawers toggle bar`
+  is "command not found", and with `>/dev/null 2>&1` attached it is *silent*. Two rounds of
+  "the bar does not render" were this and nothing else. The bar, launcher and dashboard all
+  render correctly under KWin.

@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+# [CHANGE: claude-code | 2026-08-09]
+#
+# Build ~/.config/quickshell/caelestia-kwin — Caelestia with the handful of edits
+# it needs to work under KWin instead of Hyprland.
+#
+# WHY AN OVERLAY AND NOT A FORK
+#   Caelestia is 269 QML files.  Copying all of them means the next `caelestia`
+#   package upgrade silently does nothing for us: we would keep running whatever
+#   we copied, with no error and no hint.  So every file is a SYMLINK back to
+#   /etc/xdg/quickshell/caelestia, and only the patched files are real.  Upstream
+#   fixes arrive for free; our diff stays visible and tiny.
+#
+# WHY THE PATCHES ARE RE-DERIVED EVERY RUN
+#   The patched files are generated from the CURRENT upstream text, not stored.
+#   If upstream moves the code we anchor on, the anchor stops matching and this
+#   script FAILS LOUDLY instead of quietly shipping a stale file.  Re-running
+#   this script is therefore the entire maintenance story after an upgrade.
+#
+# Usage:
+#   luminos-caelestia-kwin-overlay            # build / rebuild
+#   luminos-caelestia-kwin-overlay --check    # verify, change nothing, exit 1 if stale
+#   luminos-caelestia-kwin-overlay --remove   # delete the overlay
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+SRC = Path("/etc/xdg/quickshell/caelestia")
+DST = Path.home() / ".config/quickshell/caelestia-kwin"
+MARKER = ".luminos-overlay"   # refuse to delete a directory that is not ours
+
+# ---------------------------------------------------------------------------
+# The patches.  Each entry is (relative path, [(anchor, replacement), ...]).
+# Anchors are exact text and must match EXACTLY ONCE.
+# ---------------------------------------------------------------------------
+PATCHES = {
+    # Hypr.focusedMonitor is null with no Hyprland IPC socket.  Every drawer
+    # toggle resolves the target screen through it, so on KWin the launcher,
+    # dashboard, sidebar and session menu all no-op in complete silence -
+    # `drawers list` even returns an empty string.  This is THE reason
+    # Caelestia looks dead on KWin; everything else is cosmetic by comparison.
+    # The fallback goes AFTER the loop, not before it. An earlier version bailed out
+    # on `if (!focusedMonitor)` and that was not enough: focusedMonitor can be
+    # non-null and still match none of KWin's screens - a reachable Hyprland socket
+    # describes Hyprland's outputs, not KWin's. That case fell straight through the
+    # loop to `return null` and the drawers were dead again, with the patch present
+    # and looking correct. Patching the exit instead covers both.
+    "services/ShellState.qml": [
+        (
+            "    function forActive(): ScreenState {\n"
+            "        const mon = Hypr.focusedMonitor;\n"
+            "        for (const s of states.instances)\n"
+            "            if (Hypr.monitorFor(s.modelData) === mon)\n"
+            "                return s;\n"
+            "        return null;\n"
+            "    }",
+            "    function forActive(): ScreenState {\n"
+            "        const mon = Hypr.focusedMonitor;\n"
+            "        for (const s of states.instances)\n"
+            "            if (Hypr.monitorFor(s.modelData) === mon)\n"
+            "                return s;\n"
+            "        // [LUMINOS-KWIN] No Hyprland IPC means focusedMonitor is null and\n"
+            "        // monitorFor() never matches, so this returned null and EVERY drawer\n"
+            "        // silently did nothing - `drawers list` even came back empty.  On one\n"
+            "        // monitor the first instance is the active one, so this is not a guess.\n"
+            "        return states.instances[0] ?? null;\n"
+            "    }",
+        ),
+        (
+            "    function componentsForActive(): Components {\n"
+            "        const mon = Hypr.focusedMonitor;\n"
+            "        for (const c of components.instances)\n"
+            "            if (Hypr.monitorFor(c.modelData) === mon)\n"
+            "                return c;\n"
+            "        return null;\n"
+            "    }",
+            "    function componentsForActive(): Components {\n"
+            "        const mon = Hypr.focusedMonitor;\n"
+            "        for (const c of components.instances)\n"
+            "            if (Hypr.monitorFor(c.modelData) === mon)\n"
+            "                return c;\n"
+            "        return components.instances[0] ?? null;   // [LUMINOS-KWIN] see forActive()\n"
+            "    }",
+        ),
+    ],
+    # getMonitor("active") is how the brightness keys find a screen.  Without
+    # Hyprland it returns undefined and increase/decreaseBrightness() return
+    # early - the keys appear to work and change nothing.
+    "services/Brightness.qml": [
+        (
+            '        if (query === "active") {\n'
+            "            return monitors.find(m => Hypr.monitorFor(m.modelData)?.focused); "
+            "// qmllint disable missing-property\n"
+            "        }",
+            '        if (query === "active") {\n'
+            "            // [LUMINOS-KWIN] No Hyprland -> nothing is ever `.focused` -> the\n"
+            "            // brightness keys silently do nothing.  Fall back to the first monitor.\n"
+            "            return monitors.find(m => Hypr.monitorFor(m.modelData)?.focused) "
+            "?? monitors[0]; // qmllint disable missing-property\n"
+            "        }",
+        ),
+    ],
+}
+
+
+def patched_text(rel: str) -> str:
+    text = (SRC / rel).read_text()
+    for anchor, replacement in PATCHES[rel]:
+        n = text.count(anchor)
+        if n != 1:
+            sys.exit(
+                f"ERROR: {rel}: anchor matched {n} times, expected exactly 1.\n"
+                f"Upstream Caelestia has changed. Re-read the file and update the\n"
+                f"anchor in {__file__} - do NOT relax the check.\n"
+                f"--- anchor ---\n{anchor}\n"
+            )
+        text = text.replace(anchor, replacement)
+    return text
+
+
+def build() -> None:
+    if DST.exists():
+        if not (DST / MARKER).exists():
+            sys.exit(f"ERROR: {DST} exists but has no {MARKER} - refusing to delete "
+                     f"something this script did not create.")
+        shutil.rmtree(DST)
+
+    links = 0
+    DST.mkdir(parents=True)
+    (DST / MARKER).write_text(
+        "Generated by luminos-caelestia-kwin-overlay. Every file here is a symlink\n"
+        "into /etc/xdg/quickshell/caelestia except the patched ones listed below.\n"
+        "Do not edit in place - edit the script and rebuild.\n\n"
+        + "".join(f"  {p}\n" for p in sorted(PATCHES))
+    )
+
+    for root, _dirs, files in os.walk(SRC):
+        rel_dir = Path(root).relative_to(SRC)
+        (DST / rel_dir).mkdir(parents=True, exist_ok=True)
+        for name in files:
+            rel = (rel_dir / name).as_posix().removeprefix("./")
+            if rel in PATCHES:
+                continue
+            (DST / rel).symlink_to(SRC / rel)
+            links += 1
+
+    for rel in PATCHES:
+        if not (SRC / rel).exists():
+            sys.exit(f"ERROR: upstream file {SRC / rel} is gone. Caelestia has been "
+                     f"restructured; the overlay needs rewriting.")
+        (DST / rel).write_text(patched_text(rel))
+
+    print(f"built {DST}")
+    print(f"  {links} symlinks to {SRC}")
+    print(f"  {len(PATCHES)} patched files: {', '.join(sorted(PATCHES))}")
+
+
+def check() -> int:
+    if not DST.exists():
+        print(f"MISSING: {DST} does not exist")
+        return 1
+    bad = 0
+    for root, _dirs, files in os.walk(DST):
+        for name in files:
+            p = Path(root) / name
+            rel = p.relative_to(DST).as_posix()
+            if rel == MARKER:
+                continue
+            if rel in PATCHES:
+                if p.is_symlink():
+                    print(f"DRIFT: {rel} should be a real patched file, found a symlink")
+                    bad += 1
+                elif p.read_text() != patched_text(rel):
+                    print(f"STALE: {rel} does not match the patch applied to current upstream")
+                    bad += 1
+            elif not p.is_symlink():
+                print(f"DRIFT: {rel} should be a symlink, found a real file")
+                bad += 1
+            elif not p.resolve().exists():
+                print(f"DANGLING: {rel} -> {os.readlink(p)}")
+                bad += 1
+    # New upstream files that the overlay never linked.
+    for root, _dirs, files in os.walk(SRC):
+        for name in files:
+            rel = (Path(root).relative_to(SRC) / name).as_posix().removeprefix("./")
+            if not (DST / rel).exists() and not (DST / rel).is_symlink():
+                print(f"MISSING: upstream has {rel}, the overlay does not")
+                bad += 1
+    if bad:
+        print(f"\n{bad} problem(s). Run without --check to rebuild.")
+        return 1
+    print(f"OK: {DST} is in sync with {SRC}, {len(PATCHES)} patched files apply cleanly")
+    return 0
+
+
+if __name__ == "__main__":
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if not SRC.is_dir():
+        sys.exit(f"ERROR: {SRC} not found - is the caelestia package installed?")
+    if arg == "--check":
+        sys.exit(check())
+    if arg == "--remove":
+        if DST.exists() and not (DST / MARKER).exists():
+            sys.exit(f"ERROR: {DST} is not ours ({MARKER} missing) - refusing to delete")
+        shutil.rmtree(DST, ignore_errors=True)
+        print(f"removed {DST}")
+    elif arg in ("", "--build"):
+        build()
+        sys.exit(check())
+    else:
+        sys.exit(f"usage: {sys.argv[0]} [--build|--check|--remove]")

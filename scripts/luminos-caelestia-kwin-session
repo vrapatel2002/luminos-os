@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-08-09]
+#
+# Install / verify / remove the "Luminos (Caelestia on KWin)" login session.
+#
+# ADDITIVE ONLY. This adds a THIRD entry to the greeter. It does not touch
+# hyprland-uwsm.desktop, the Hyprland config, or plasma.desktop, so if the new
+# session is broken you pick Hyprland at the login screen and nothing is lost.
+#
+#   luminos-caelestia-kwin-session install
+#   luminos-caelestia-kwin-session check      # report only, exit 1 if incomplete
+#   luminos-caelestia-kwin-session uninstall
+#
+# Needs sudo for the two root-owned files:
+#   /usr/local/bin/luminos-caelestia-kwin
+#   /usr/share/wayland-sessions/luminos-caelestia-kwin.desktop
+
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+LAUNCHER_SRC="$REPO/scripts/luminos-caelestia-kwin"
+LAUNCHER="/usr/local/bin/luminos-caelestia-kwin"
+SESSION="/usr/share/wayland-sessions/luminos-caelestia-kwin.desktop"
+SHELL_DIR="$HOME/.config/quickshell/caelestia-kwin"
+APPS="$HOME/.local/share/applications"
+UNITS="$HOME/.config/systemd/user"
+LAUNCH_UNIT="$UNITS/luminos-caelestia-launcher.service"
+
+# id|Name|Accel|Exec
+#
+# HOW A SHORTCUT ACTUALLY REGISTERS (this cost an evening to find)
+#   Writing [services][x.desktop] _launch= into kglobalshortcutsrc does NOTHING on
+#   its own. That file only stores USER OVERRIDES for components that already
+#   exist. Proof: org.kde.dolphin.desktop is a live kglobalaccel component with
+#   Meta+E bound, and it has no group in kglobalshortcutsrc at all - its key comes
+#   from `X-KDE-Shortcuts=Meta+E` inside /usr/share/applications/org.kde.dolphin.desktop.
+#   So X-KDE-Shortcuts in the .desktop is the registration; kbuildsycoca6 is what
+#   makes KService see a NEW .desktop; kglobalshortcutsrc is only the override
+#   store, and a stale override there will silently beat the desktop file.
+#
+# Keys were conflict-checked against every X-KDE-Shortcuts on the system AND every
+# active binding in kglobalshortcutsrc, not picked out of the air.
+#   Meta+R is NOT used: org.kde.spectacle.desktop already ships Meta+R (record
+#   region). Meta+P is free. The launcher's real key is bare Meta anyway.
+# Deliberately NOT bound, because KDE's own handler is already on the key and is
+# the better one here:
+#   Meta+L        ksmserver Lock Session  (kscreenlocker, not Caelestia's lock)
+#   Ctrl+Alt+Del  ksmserver Log Out
+# Deliberately avoided because they are taken:
+#   Meta+D  KWin Show Desktop      Meta+E  Dolphin
+#   Meta+A  plasmashell activities Meta+Space  luminos-hive-popup
+SHORTCUTS=(
+  "launcher|Caelestia Launcher|Meta+P|drawers toggle launcher"
+  "dashboard|Caelestia Dashboard|Meta+K|drawers toggle dashboard"
+  "sidebar|Caelestia Sidebar|Meta+N|drawers toggle sidebar"
+  "utilities|Caelestia Utilities|Meta+U|drawers toggle utilities"
+  "session|Caelestia Session Menu|Meta+Escape|drawers toggle session"
+  "clearnotifs|Clear Notifications|Ctrl+Alt+C|notifs clear"
+)
+
+ok()   { printf '  \033[32mok\033[0m   %s\n' "$1"; }
+bad()  { printf '  \033[31mMISS\033[0m %s\n' "$1"; FAIL=1; }
+info() { printf '%s\n' "$1"; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# One shortcut = one .desktop carrying its own key. See the SHORTCUTS comment for
+# why the key lives here and not in kglobalshortcutsrc.
+write_shortcut_desktop() {
+    local id=$1 name=$2 accel=$3 exec_line=$4
+    cat >"$APPS/luminos-cael-$id.desktop" <<EOF
+[Desktop Entry]
+# [CHANGE: claude-code | 2026-08-09] Target for a KDE global shortcut.
+# Caelestia's own shortcuts use hyprland_global_shortcuts_v1, which KWin does not
+# implement, so every one of them is dead here. Quickshell's IPC is the way back
+# in: KDE holds the key, this .desktop is what it launches, and the IPC call does
+# exactly what the dead shortcut would have done.
+Type=Application
+Name=$name
+Exec=$exec_line
+X-KDE-Shortcuts=$accel
+X-KDE-GlobalAccel-CommandShortcut=true
+NoDisplay=true
+Terminal=false
+EOF
+    # A leftover override in kglobalshortcutsrc BEATS X-KDE-Shortcuts, so an old
+    # key would keep working and the new one would look broken. Clear it.
+    kwriteconfig6 --file kglobalshortcutsrc \
+        --group "services" --group "luminos-cael-$id.desktop" \
+        --key "_launch" --delete 2>/dev/null
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+install_all() {
+    [ -x "$LAUNCHER_SRC" ] || chmod +x "$LAUNCHER_SRC"
+
+    info "Building the patched Caelestia overlay..."
+    "$REPO/scripts/luminos-caelestia-kwin-overlay" || exit 1
+
+    info "Installing the session launcher (needs sudo)..."
+    sudo install -Dm755 "$LAUNCHER_SRC" "$LAUNCHER" || exit 1
+
+    sudo tee "$SESSION" >/dev/null <<EOF
+[Desktop Entry]
+# [CHANGE: claude-code | 2026-08-09] Installed by luminos-caelestia-kwin-session.
+# Not pacman-owned, so luminos-hide-sessions (which only touches hyprland.desktop
+# and plasma.desktop) will never hide this one.
+Name=Luminos (Caelestia on KWin)
+Comment=KWin compositor with the Caelestia shell instead of plasmashell
+Exec=$LAUNCHER
+TryExec=$LAUNCHER
+Type=Application
+DesktopNames=KDE
+EOF
+    info "  $SESSION"
+
+    info "Installing shortcut launchers..."
+    mkdir -p "$APPS"
+    for s in "${SHORTCUTS[@]}" "terminal|Terminal|Meta+Return|"; do
+        IFS='|' read -r id name accel call <<<"$s"
+        # The terminal entry is the escape hatch: it must work with NO shell running,
+        # so it launches kitty directly instead of talking to Quickshell.
+        local exec_line="/usr/bin/qs -p $SHELL_DIR ipc call $call"
+        [ "$id" = "terminal" ] && exec_line="kitty"
+        write_shortcut_desktop "$id" "$name" "$accel" "$exec_line"
+        info "  $accel  ->  $name"
+    done
+    # kglobalaccel finds these through KService, and KService only sees a new
+    # .desktop after the cache is rebuilt. Without this the keys are dead and
+    # nothing anywhere says why.
+    kbuildsycoca6 --noincremental >/dev/null 2>&1
+
+    # Bare Meta for the launcher, the way it behaves under Hyprland.
+    # KWin's ModifierOnlyShortcuts can only make a DBus call, and Quickshell has
+    # no DBus interface - so the call goes to systemd, which runs the IPC command.
+    # UNVERIFIED: modifier-only shortcuts cannot be tested from a nested session.
+    mkdir -p "$UNITS"
+    cat >"$LAUNCH_UNIT" <<EOF
+[Unit]
+Description=Toggle the Caelestia launcher (target of the bare-Meta shortcut)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/qs -p $SHELL_DIR ipc call drawers toggle launcher
+EOF
+    systemctl --user daemon-reload
+    kwriteconfig6 --file kwinrc --group ModifierOnlyShortcuts --key Meta \
+        "org.freedesktop.systemd1,/org/freedesktop/systemd1,org.freedesktop.systemd1.Manager,StartUnit,luminos-caelestia-launcher.service,replace"
+    info "  Meta (tap)   ->  Caelestia Launcher  [unverified until first login]"
+
+    echo
+    check_all
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+check_all() {
+    FAIL=0
+    info "Checking the Caelestia-on-KWin session:"
+    [ -x "$LAUNCHER" ] && ok "$LAUNCHER" || bad "$LAUNCHER"
+    if [ -x "$LAUNCHER" ] && ! cmp -s "$LAUNCHER_SRC" "$LAUNCHER"; then
+        bad "$LAUNCHER differs from $LAUNCHER_SRC - re-run install"
+    fi
+    [ -f "$SESSION" ] && ok "$SESSION" || bad "$SESSION"
+    grep -q "^Exec=$LAUNCHER$" "$SESSION" 2>/dev/null \
+        && ok "greeter entry points at the launcher" \
+        || bad "greeter entry Exec is wrong"
+    "$REPO/scripts/luminos-caelestia-kwin-overlay" --check >/dev/null 2>&1 \
+        && ok "$SHELL_DIR overlay in sync" \
+        || bad "$SHELL_DIR overlay stale - run luminos-caelestia-kwin-overlay"
+
+    for s in "${SHORTCUTS[@]}" "terminal|Terminal|Meta+Return|"; do
+        IFS='|' read -r id name accel _ <<<"$s"
+        local f="$APPS/luminos-cael-$id.desktop" override
+        if [ ! -f "$f" ]; then
+            bad "$accel  $name  (no $f)"
+        elif ! grep -qx "X-KDE-Shortcuts=$accel" "$f"; then
+            bad "$accel  $name  (desktop file does not declare X-KDE-Shortcuts=$accel)"
+        else
+            # An override here silently wins over the desktop file.
+            override=$(kreadconfig6 --file kglobalshortcutsrc --group "services" \
+                       --group "luminos-cael-$id.desktop" --key "_launch" 2>/dev/null)
+            if [ -n "$override" ] && [ "${override%%,*}" != "$accel" ]; then
+                bad "$accel  $name  (kglobalshortcutsrc overrides it to '${override%%,*}')"
+            else
+                ok "$accel  $name"
+            fi
+        fi
+    done
+
+    # The only proof that matters: is the component actually loaded? This can only
+    # be answered from inside a running KDE session, so it is a report, not a fail.
+    if busctl --user status org.kde.kglobalaccel >/dev/null 2>&1; then
+        local live
+        live=$(busctl --user tree org.kde.kglobalaccel 2>/dev/null \
+               | grep -c 'component/luminos_cael_')
+        if [ "$live" -ge 7 ]; then
+            ok "kglobalaccel has all $live luminos-cael components registered"
+        else
+            info "  ..   only $live/7 components registered here - expected outside"
+            info "       the Caelestia session; re-check after logging into it."
+        fi
+    fi
+
+    [ -f "$LAUNCH_UNIT" ] && ok "bare-Meta unit" || bad "bare-Meta unit"
+    kreadconfig6 --file kwinrc --group ModifierOnlyShortcuts --key Meta 2>/dev/null \
+        | grep -q luminos-caelestia-launcher \
+        && ok "bare-Meta wired in kwinrc" || bad "bare-Meta not in kwinrc"
+
+    # The Hyprland session must be untouched. This is the whole safety net.
+    [ -f /usr/share/wayland-sessions/hyprland-uwsm.desktop ] \
+        && ok "Hyprland session still present (fallback intact)" \
+        || bad "Hyprland session entry is GONE - do not reboot"
+
+    echo
+    if [ "$FAIL" = "0" ]; then
+        info "All good. Log out and pick 'Luminos (Caelestia on KWin)' at the greeter."
+    else
+        info "Incomplete - run: $0 install"
+    fi
+    return "$FAIL"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+uninstall_all() {
+    info "Removing the Caelestia-on-KWin session (needs sudo)..."
+    sudo rm -f "$SESSION" "$LAUNCHER"
+    for s in "${SHORTCUTS[@]}" "terminal|||"; do
+        IFS='|' read -r id _ _ _ <<<"$s"
+        rm -f "$APPS/luminos-cael-$id.desktop"
+        kwriteconfig6 --file kglobalshortcutsrc \
+            --group "services" --group "luminos-cael-$id.desktop" --key "_launch" --delete
+    done
+    kwriteconfig6 --file kwinrc --group ModifierOnlyShortcuts --key Meta --delete
+    rm -f "$LAUNCH_UNIT"
+    systemctl --user daemon-reload
+    kbuildsycoca6 --noincremental >/dev/null 2>&1
+    "$REPO/scripts/luminos-caelestia-kwin-overlay" --remove
+    info "Done. The Hyprland session was never touched."
+}
+
+case "${1:-}" in
+    install)   install_all ;;
+    check)     check_all ;;
+    uninstall) uninstall_all ;;
+    *) echo "usage: $0 {install|check|uninstall}" >&2; exit 2 ;;
+esac

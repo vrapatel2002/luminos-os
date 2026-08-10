@@ -2868,3 +2868,74 @@ long-lived — if a foreground session is going to idle, it exits instead.
 **Why this matters now.** The Gemma 4 26B A4B MoE plan depends on it: the non-expert tensors plus
 the KV cache come to ~1.3 GB and want to sit on the card alongside as many attention layers as
 fit. Sizing that split against 4.6 GB instead of 6.1 GB would throw away 1.5 GB for no reason.
+
+---
+
+## DECISION 63 — Caelestia runs on KWin as a third, additive session; Hyprland stays the default
+# [CHANGE: claude-code | 2026-08-09]
+
+Shawn wanted the Caelestia look under KDE. The first attempt — dressing Plasma in Caelestia's
+colour tokens — he rejected outright, and correctly: tokens are not a shell. Copying the palette
+gives you a Plasma panel painted purple, not Caelestia's launcher, dashboard or animations.
+
+So the shell itself now runs on KWin. **The real Caelestia QML, unmodified except for two
+functions, hosted by `kwin_wayland` instead of Hyprland.**
+
+### It is a third greeter entry, not a replacement
+`/usr/share/wayland-sessions/luminos-caelestia-kwin.desktop` sits alongside the Hyprland entry.
+Nothing about the Hyprland session was edited. If the new one is broken the cost is one reboot
+and picking the other line at the greeter. This was the condition the whole piece of work was
+built under and it is worth stating as policy: **a new session is only ever additive.**
+
+### Why bare `kwin_wayland` and not `startplasma-wayland`
+The obvious route is a normal Plasma session with plasmashell suppressed by a
+`ConditionEnvironment=` drop-in keyed on `LUMINOS_SHELL=caelestia`. That needs
+`systemctl --user set-environment`, and **this user has `Linger=yes`** — the systemd user manager
+outlives logout, so the variable would still be set the next time Shawn picked plain Plasma from
+the greeter, handing him a Plasma session with no shell at all and no clue why. Rejected. The
+session is therefore `kwin_wayland` plus the three daemons that are actually wanted (polkit
+agent, xdg-desktop-portal-kde, and the shell), which is the same shape the working Hyprland
+session already has.
+
+`powerdevil` is deliberately **not** started: logind already owns the lid, and powerdevil would
+double-handle the brightness keys against Caelestia's own handler. Consequence, stated plainly:
+no idle screen-off in this session yet.
+
+### The shell is an overlay, not a fork
+`scripts/luminos-caelestia-kwin-overlay` builds `~/.config/quickshell/caelestia-kwin` as **281
+symlinks** into `/etc/xdg/quickshell/caelestia` plus **two real, patched files**. A fork of 269
+QML files would mean the next `caelestia` package upgrade silently does nothing for us.
+
+The patches are **re-derived from current upstream on every run**, never stored. If upstream
+moves the code the anchor stops matching and the build *fails loudly* instead of shipping a stale
+file. Re-running the script is the entire maintenance story after a Caelestia upgrade.
+
+Both patches fix the same class of bug — a Hyprland-only lookup that returns nothing on KWin and
+is never checked:
+
+- `services/ShellState.qml` — `forActive()` / `componentsForActive()` resolve the target screen
+  through `Hypr.focusedMonitor`. No Hyprland IPC means null, no match, `return null`, and **every
+  drawer no-ops in complete silence**. See BUG-113.
+- `services/Brightness.qml` — `getMonitor("active")` finds nothing `.focused`, so the brightness
+  keys return early and appear to work while changing nothing.
+
+### Global shortcuts go through KDE, because Caelestia's own cannot work
+Caelestia binds its keys with `hyprland_global_shortcuts_v1`, which KWin does not implement — the
+shell says so in its log, once per shortcut. The route back in is a `.desktop` file per shortcut
+carrying `X-KDE-Shortcuts=`, whose `Exec=` is a Quickshell IPC call that does exactly what the
+dead shortcut would have done. See BUG-112 for why this took so long to get working.
+
+| Key | Does |
+|---|---|
+| `Meta+P` | launcher (Meta+R was taken — Spectacle owns it) |
+| `Meta+K` | dashboard |
+| `Meta+N` | sidebar |
+| `Meta+U` | utilities |
+| `Meta+Escape` | session menu |
+| `Ctrl+Alt+C` | clear notifications |
+| `Meta+Return` | terminal — the escape hatch, works with no shell running |
+
+### What is knowingly unfinished
+Workspace pills are empty and the active-window readout always says "Desktop" (both read Hyprland
+IPC), there is no idle screen-off, and windows get KWin titlebars and float rather than tiling.
+Shipped anyway, at Shawn's call: *"lets move with it than once we are in it we will fix bugs."*

@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-08-09]
+#
+# Luminos session: KWin as the compositor, Caelestia as the shell.
+# Installed to /usr/local/bin/luminos-caelestia-kwin by luminos-caelestia-kwin-session.
+#
+# WHY NOT startplasma-wayland
+#   The obvious route is a normal Plasma session with plasmashell suppressed. That
+#   needs `systemctl --user set-environment LUMINOS_SHELL=caelestia` plus a
+#   ConditionEnvironment= drop-in on plasma-plasmashell.service. This user has
+#   Linger=yes, so the systemd user manager OUTLIVES logout and that variable would
+#   still be set the next time they picked plain Plasma from the greeter - giving
+#   them a Plasma session with no shell at all and no clue why. Not worth it.
+#   So: bare kwin_wayland plus the handful of daemons we actually want, which is
+#   exactly the shape the working Hyprland session already has.
+#
+# WHAT THIS DELIBERATELY DOES NOT START
+#   powerdevil - logind already owns the lid (HandleLidSwitch=suspend in
+#   /etc/systemd/logind.conf.d), and powerdevil would double-handle the brightness
+#   keys against Caelestia's own handler. Consequence: no idle screen-off yet.
+#
+# Logs: ~/.local/state/luminos/caelestia-kwin/
+
+set -u
+
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/luminos/caelestia-kwin"
+mkdir -p "$STATE"
+exec >>"$STATE/session.log" 2>&1
+echo "=== $(date -Is) session start (pid $$) ==="
+
+SHELL_DIR="$HOME/.config/quickshell/caelestia-kwin"
+
+# ── GPU ──────────────────────────────────────────────────────────────────────
+# /etc/environment pins KWIN_DRM_DEVICES=/dev/dri/card2 for the dGPU 0 W gating.
+# card numbers are enumeration order and the NVIDIA card enumerates FIRST here
+# (card1 = 0x10de, card2 = 0x1002). If that order ever flips, card2 becomes the
+# NVIDIA card and KWin holds the dGPU awake forever. /dev/dri/luminos-igpu is the
+# udev alias matched on the PCI address, and - unlike the by-path name - it has no
+# colons in it. KWIN_DRM_DEVICES is colon-separated; a colon in the path is
+# precisely what killed the Hyprland session in BUG-094.
+if [ -e /dev/dri/luminos-igpu ]; then
+    export KWIN_DRM_DEVICES=/dev/dri/luminos-igpu
+    echo "GPU: KWIN_DRM_DEVICES=$KWIN_DRM_DEVICES -> $(readlink -f /dev/dri/luminos-igpu)"
+else
+    echo "GPU: WARNING /dev/dri/luminos-igpu missing, falling back to /etc/environment"
+fi
+
+# If this leaks in, Caelestia's Hypr service connects to a FOREIGN Hyprland and
+# starts describing its monitors and workspaces instead of KWin's. Nothing errors;
+# the shell just quietly talks about the wrong compositor. A greeter login never
+# sets it, but a session started by hand from a Hyprland terminal does.
+unset HYPRLAND_INSTANCE_SIGNATURE HYPRLAND_CMD
+
+export XDG_CURRENT_DESKTOP=KDE
+export XDG_SESSION_DESKTOP=KDE
+export QT_QPA_PLATFORM=wayland
+export LUMINOS_SHELL=caelestia   # for anything that wants to know, incl. our own logs
+
+# XDG_MENU_PREFIX decides which file in /etc/xdg/menus kbuildsycoca6 reads, and if
+# that file does not exist the resulting service cache contains ZERO applications -
+# silently, exit code 0, a 264 KB database with nothing in it. Only plasma-applications.menu
+# ships here, so under the Hyprland session (which sets hyprland-) every rebuild wipes
+# the cache. That is what made every KDE global shortcut dead: kglobalaccel finds
+# shortcuts with KApplicationTrader, and an empty cache means it finds none.
+# (/etc/xdg/menus/hyprland-applications.menu is now a symlink to the plasma one so the
+# other session stops doing this too, but do not rely on it from here.)
+export XDG_MENU_PREFIX=plasma-
+
+# ── inner session ────────────────────────────────────────────────────────────
+# kwin_wayland runs this and exits when it returns, so this script IS the session.
+cat >"$STATE/inner.sh" <<'INNER'
+#!/usr/bin/env bash
+set -u
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/luminos/caelestia-kwin"
+SHELL_DIR="$HOME/.config/quickshell/caelestia-kwin"
+
+# Start a background daemon and RECORD ITS EXIT CODE. Doing this the obvious way
+# (`daemon &`) is how a daemon dies in the first second leaving a zero-byte log and
+# no explanation - which is exactly what happened while building this.
+start() {
+    local name=$1; shift
+    (
+        "$@" >"$STATE/$name.log" 2>&1
+        echo "$(date -Is) $name exited rc=$?" >>"$STATE/$name.log"
+    ) &
+}
+
+# Authentication prompts. Without an agent, anything asking for a password fails
+# silently - no dialog, no error.
+start polkit /usr/lib/polkit-kde-authentication-agent-1
+
+# Screenshots, screen sharing, file pickers.
+start portal-kde /usr/lib/xdg-desktop-portal-kde
+
+# NOT started: /usr/lib/kglobalacceld. On Plasma 6 KWin owns org.kde.kglobalaccel
+# itself (verified: busctl --acquired shows the name held by the kwin_wayland pid),
+# so a standalone kglobalacceld finds the name taken and exits instantly with an
+# empty log. Global shortcuts work without it.
+
+# ── the shell ────────────────────────────────────────────────────────────────
+# BUG-092's lesson: a black screen is not evidence of a crash, and three healthy
+# states also render black. If the shell dies there is nothing on screen to say
+# so, so this loop makes the failure visible instead of mysterious: retry a few
+# times, then put a terminal up. A terminal is proof the compositor and input are
+# both alive and it is somewhere to type.
+tries=0
+while : ; do
+    echo "$(date -Is) starting shell (attempt $((tries + 1)))" >>"$STATE/shell.log"
+    qs -p "$SHELL_DIR" >>"$STATE/shell.log" 2>&1
+    rc=$?
+    echo "$(date -Is) shell exited rc=$rc" >>"$STATE/shell.log"
+    [ "$rc" = "0" ] && break          # clean exit means someone asked it to stop
+    tries=$((tries + 1))
+    if [ "$tries" -ge 3 ]; then
+        echo "$(date -Is) giving up after $tries attempts, opening a terminal" >>"$STATE/shell.log"
+        kitty -e sh -c "echo 'Caelestia failed to start 3 times. Log:'; \
+            tail -n 40 '$STATE/shell.log'; exec \$SHELL" &
+        break
+    fi
+    sleep 1
+done
+
+# Keep the session alive after the shell stops so a logout is deliberate, not a
+# side effect of the bar crashing. Ctrl+Alt+Backspace / the session menu ends it.
+wait
+INNER
+chmod +x "$STATE/inner.sh"
+
+if [ ! -d "$SHELL_DIR" ]; then
+    echo "FATAL: $SHELL_DIR missing - run luminos-caelestia-kwin-overlay first"
+    exit 1
+fi
+
+# Rebuild the service cache BEFORE kwin starts, in kwin's own environment. kwin
+# hosts kglobalaccel and scans for shortcuts once at startup, so a cache written
+# later (or by another session, under another XDG_MENU_PREFIX) is too late. The
+# cache filename is a hash of XDG_DATA_DIRS, which is why this has to happen here
+# and not from a shell with a different environment.
+kbuildsycoca6 --noincremental >>"$STATE/sycoca.log" 2>&1
+echo "sycoca: rebuilt with XDG_MENU_PREFIX=$XDG_MENU_PREFIX (rc=$?)"
+
+echo "starting kwin_wayland"
+exec /usr/lib/plasma-dbus-run-session-if-needed \
+     /usr/bin/kwin_wayland --xwayland "$STATE/inner.sh"
