@@ -2075,3 +2075,67 @@ terminal does, and the shell then quietly describes the *wrong compositor*.
   is "command not found", and with `>/dev/null 2>&1` attached it is *silent*. Two rounds of
   "the bar does not render" were this and nothing else. The bar, launcher and dashboard all
   render correctly under KWin.
+
+---
+
+## BUG-114 — The trackpad goes dead on KWin: KDE ships tap-to-click off, Hyprland ships it on
+# [CHANGE: claude-code | 2026-08-09]
+**Status: FIXED.**
+
+### Symptom
+In the Caelestia-on-KWin session the cursor moves normally and **taps do nothing at all**.
+Reported as *"i can move the cursore but when i click nothing happen."* Nothing on screen, and
+nothing in any log, says why.
+
+### Cause
+`~/.config/kcminputrc` held exactly one key for the touchpad — `NaturalScroll=true`. No
+`TapToClick`. **KDE's libinput default for tap-to-click is `false`; Hyprland's is `true`.**
+`~/.config/hypr/hyprland/input.lua` never mentions tap, so on Hyprland it has always worked by
+default and there was nothing to carry over.
+
+### Fix
+`TapToClick`, `TapAndDrag` on; `TapDragLock` off; `DisableWhileTyping` on — written into the
+`[Libinput][2362][12305][ASUP1208:00 093A:3011 Touchpad]` group and **read back to confirm**
+(`kwriteconfig6` has mangled a config before — BUG-090). Done from
+`luminos-caelestia-kwin-session install`, not by hand, because `kcminputrc` is not in the repo
+and a reinstall elsewhere would land on a dead trackpad again. Negative-tested: key deleted,
+installer run, key confirmed restored. Only KDE sessions read this file, so Hyprland is
+untouched either way.
+
+### The wrong answer that looked right
+This was first blamed on BUG-113's sibling — a screen-edge drag band swallowing clicks — and
+that patch was written and shipped. **Timestamps disproved it:** the patch was built 21:53:49 and
+the second failing login was 21:56:36, so the clicks were already dead with the fix in place.
+The drag-band patch is still correct (that code genuinely cannot disarm itself without Hyprland)
+but it was never this bug. Check *when* a fix landed against *when* the symptom was seen before
+crediting it.
+
+---
+
+## BUG-115 — The KWin session felt sluggish: VRR was forced on for the internal panel
+# [CHANGE: claude-code | 2026-08-09]
+**Status: fix applied, awaiting confirmation.**
+
+`~/.config/kwinoutputconfig.json` had `vrrPolicy: "Always"` on `eDP-2`. Adaptive sync on a laptop
+panel lets the refresh rate follow the content, and a mostly-static desktop drops it to the
+panel's floor — which reads as **input lag**, not as a low frame rate. Set to `Never`. This file
+is KWin's alone, so it is a true KWin-vs-Hyprland difference and Hyprland never saw it. The
+nested test had also left a fake `WL-0` output in there; removed, after asserting it was the last
+entry so the positional `outputIndex` in `setups` could not shift.
+
+### Ruled out, with evidence
+- **`[Compositing] AnimationSpeed=4` in kwinrc** — looks like "slow animations", is a **dead
+  legacy key**. Current KWin reads `animationDurationFactor()`, watched on group `KDE`, key
+  `AnimationDurationFactor`, which is `1.0`. Confirmed in upstream `options.cpp`.
+- **The GPU** — `eglinfo -B` gives AMD Radeon 780M / Mesa 26.1.6 on the GBM platform. Mesa's EGL
+  vendor JSON is present and the dGPU gate only touches `/dev/nvidia*`.
+
+### Still unresolved: are the EGL errors real?
+Both real logins log `eglInitialize failed` / `EGL_NOT_INITIALIZED` **twice**. That is *not*
+enough to declare software rendering — KWin probes EGL several ways and some probes fail
+normally, and the same log mentions an OpenGL "render time query" at shutdown, which a QPainter
+session would not have. Rather than guess, the session now asks the compositor directly 8 s after
+start and appends `supportInformation` to `kwin-render.log`. One login answers it in plain text.
+
+**Unrelated but worth knowing:** the panel is 2880x1800 **@120 Hz** and the *Hyprland* session is
+currently running it at **60 Hz**. KWin's saved mode already asks for 120.
