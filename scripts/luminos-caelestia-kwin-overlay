@@ -85,6 +85,32 @@ PATCHES = {
             "    }",
         ),
     ],
+    # The drawers window covers the whole screen and lets clicks through with a
+    # mask.  dragMaskPadding widens that mask around the screen edges so a drawer
+    # can be DRAGGED open - and upstream switches it off the moment the workspace
+    # holds a window, so it never sits over anything real.  That check reads
+    # Hyprland's monitor, which is null here, so it can never fire: the drag bands
+    # stay armed forever and the shell eats every click near an edge.  Reported as
+    # "the windows are not responding" - the windows were fine, an invisible band
+    # over the titlebar was taking the clicks.
+    # Cost: no drag-to-open on KWin.  The keyboard shortcuts do the same job, and a
+    # desktop you cannot click is not a trade.
+    "modules/drawers/ContentWindow.qml": [
+        (
+            "        if (monitor?.lastIpcObject.specialWorkspace?.name || "
+            "monitor?.activeWorkspace?.lastIpcObject.windows > 0)\n"
+            "            return 0;",
+            "        // [LUMINOS-KWIN] With no Hyprland monitor the check below is always\n"
+            "        // `undefined > 0` == false, so the drag bands never turned off and\n"
+            "        // swallowed clicks meant for windows.  No monitor -> no padding.\n"
+            "        if (!monitor)\n"
+            "            return 0;\n"
+            "\n"
+            "        if (monitor?.lastIpcObject.specialWorkspace?.name || "
+            "monitor?.activeWorkspace?.lastIpcObject.windows > 0)\n"
+            "            return 0;",
+        ),
+    ],
     # getMonitor("active") is how the brightness keys find a screen.  Without
     # Hyprland it returns undefined and increase/decreaseBrightness() return
     # early - the keys appear to work and change nothing.
