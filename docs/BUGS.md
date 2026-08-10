@@ -2114,7 +2114,7 @@ crediting it.
 
 ## BUG-115 — The KWin session felt sluggish: VRR was forced on for the internal panel
 # [CHANGE: claude-code | 2026-08-09]
-**Status: fix applied, awaiting confirmation.**
+**Status: fixed. The instrumentation answered the open question on 2026-08-10.**
 
 `~/.config/kwinoutputconfig.json` had `vrrPolicy: "Always"` on `eDP-2`. Adaptive sync on a laptop
 panel lets the refresh rate follow the content, and a mostly-static desktop drops it to the
@@ -2130,12 +2130,134 @@ entry so the positional `outputIndex` in `setups` could not shift.
 - **The GPU** — `eglinfo -B` gives AMD Radeon 780M / Mesa 26.1.6 on the GBM platform. Mesa's EGL
   vendor JSON is present and the dGPU gate only touches `/dev/nvidia*`.
 
-### Still unresolved: are the EGL errors real?
-Both real logins log `eglInitialize failed` / `EGL_NOT_INITIALIZED` **twice**. That is *not*
-enough to declare software rendering — KWin probes EGL several ways and some probes fail
-normally, and the same log mentions an OpenGL "render time query" at shutdown, which a QPainter
-session would not have. Rather than guess, the session now asks the compositor directly 8 s after
-start and appends `supportInformation` to `kwin-render.log`. One login answers it in plain text.
+### Were the EGL errors real? No — answered 2026-08-10
+Both real logins log `eglInitialize failed` / `EGL_NOT_INITIALIZED` **twice**, which was not
+enough to declare software rendering: KWin probes EGL several ways and some probes fail normally.
+So the session now asks the compositor directly 8 s in and appends `supportInformation` to
+`kwin-render.log`. Two logins later it says, in KWin's own words:
+
+```
+Scale: 2            Refresh Rate: 120000      Adaptive Sync: never
+Compositing Type: OpenGL
+OpenGL renderer string: AMD Radeon 780M Graphics (radeonsi, phoenix, ACO, DRM 3.64, 7.0.5-arch1-1)
+OpenGL version string: 4.6 (Core Profile) Mesa 26.1.6-arch1.1
+```
+
+Hardware OpenGL on the iGPU, 120 Hz, adaptive sync off — so the VRR change took, the dGPU is not
+being held awake, and **the `eglInitialize failed` lines are noise**. Do not chase them again.
+Keep the `kwin-render.log` block: it is four seconds of work and it converts "it feels slow" from
+an argument into a lookup.
 
 **Unrelated but worth knowing:** the panel is 2880x1800 **@120 Hz** and the *Hyprland* session is
 currently running it at **60 Hz**. KWin's saved mode already asks for 120.
+
+---
+
+## BUG-116 — Every Caelestia popup stays locked open on KWin: clicking away is a Hyprland-only protocol
+# [CHANGE: claude-code | 2026-08-10]
+**Status: fixed in the overlay. Click-outside proven with a real synthetic click; see "What was
+actually clicked" for the part that was not.**
+
+Reported as: *"if i open a launcher than if i want to close i will put the curose any thing out of
+that are and it has to close but its not its just locked it same for all pops got it volume
+brightness notification and more"*.
+
+### Root cause
+`modules/drawers/ContentWindow.qml` has exactly **one** code path that closes a drawer when you
+click away — `HyprlandFocusGrab.onCleared`, which sets `launcher/session/sidebar/dashboard = false`,
+`popouts.hasCurrent = false` and calls `bar.closeTray()`. There is no other. And the shell log has
+been saying, verbatim, twice per run since the session was built:
+
+```
+WARN: The active compositor does not support the hyprland_focus_grab_v1 protocol.
+      HyprlandFocusGrab will not work.
+```
+
+`modules/bar/popouts/Wrapper.qml` has a second one for **detached** popouts (the volume,
+brightness and notification panels the user was complaining about) — same protocol, same silence.
+
+There are really two layers to the problem, and fixing only one does nothing:
+
+1. **The click never arrives.** The drawers window covers the whole screen but its input mask
+   deliberately leaves the middle click-*through*, so a click "outside the launcher" is delivered
+   to the app underneath. Upstream does not need to see it; the focus-grab protocol intercepts it
+   at the compositor.
+2. **Nothing acts on it.** Even with the click delivered, no handler closes anything.
+
+### The trap that cost the first attempt: `focusGrab.active` reads back false forever
+The obvious fix is `mask: ... focusGrab.active ? null : regions`. It does not work, and it does not
+error. The QML binding *assigns* to `active`, but `HyprlandFocusGrab` drops the write when the
+protocol is missing, so the property never changes value and **nothing that depends on it ever
+re-evaluates**. Measured, not reasoned: with that version the launcher opened and the debug line
+printed `maskIsNull=false` every time.
+
+The same trap explains a line of upstream code that looked fine and is dead here — `dragMaskPadding`
+opens with `if (focusGrab.active || ...) return 0;`, which on KWin can never fire.
+
+So the condition is **copied out of** `focusGrab.active` and evaluated in our own property.
+
+### The fix (two patched files, both in `luminos-caelestia-kwin-overlay`)
+- `modules/drawers/ContentWindow.qml` — a `luminosGrab` property mirroring `focusGrab.active` plus
+  `popouts.isDetached`, and `mask: hasFullscreen ? emptyRegion : (luminosGrab ? null : regions)`.
+  A null mask means the whole surface is ours, which is exactly what a focus grab does.
+- `modules/drawers/Interactions.qml` — `onPressed` now runs the `onCleared` body (plus
+  `popouts.close()`, so a *detached* popout also goes away — clearing `hasCurrent` alone leaves
+  `detachedMode` set) when the press is dismissible and lands outside every open panel. The
+  geometry test reuses upstream's own `inBottomPanel` / `inTopPanel` / `inRightPanel` /
+  `inLeftPanel` helpers so "inside a panel" means the same thing here as it does for hover.
+
+**Accepted cost:** while a drawer is open the shell owns the whole screen, so clicks and scrolls do
+not reach the app below. That is not a new bargain — it is what the focus grab did on Hyprland.
+
+### What was actually clicked (and what was not)
+Verified in a nested KWin with a real pointer, not by reading the diff:
+- launcher open, click at (690, 280) → debug says `dismissible=true onPanel=false`, and
+  `drawers isOpen launcher` flips **1 → 0**. Before the `luminosGrab` fix the same click produced
+  no press at all.
+- Geometry checked against real numbers: with the launcher open the panel measured
+  `x 409..1041, y 356..890` on a 1400x900 screen, and `inBottomPanel` computes its threshold as
+  `900 - (thickness + 534) = 356` — the panel top exactly.
+
+Not clicked: the **detached popout** path. Nothing in the nested instance would detach one (the
+bar icon positions were unknown and probing five points found none), so volume/brightness/
+notifications rest on the same mechanism but were not exercised by hand.
+
+### Two testing notes worth keeping
+- **`ydotool mousemove --absolute` teleports the cursor to (1,1)** on this setup. Relative moves
+  work but are scaled and accelerated: `-x 100` moved 183 logical px. The only reliable method is
+  to converge in a loop, reading the truth back from KWin each step via a scripted
+  `print(workspace.cursorPos)`. Absolute positioning is not available; do not trust one move.
+- **Hover events do not reach the shell in a nested KWin** even though clicks do, so hover-based
+  instrumentation silently logs nothing. It works on the real session (that is how the popouts
+  open in the first place). Do not conclude hover is broken from a nested test.
+
+## BUG-117 — The `luminos-maximize` KWin script is enabled and has never once loaded
+# [CHANGE: claude-code | 2026-08-10]
+**Status: open, not fixed. Ruled OUT as the cause of the "apps open fullscreen then jump" report.**
+
+`kwinrc` has `luminos-maximizeEnabled=true`, and every KWin startup logs:
+
+```
+KPackageStructure of KPluginMetaData(pluginId:"luminos-maximize", ...metadata.json)
+does not match requested format "KWin/Script"
+```
+
+`~/.local/share/kwin/scripts/luminos-maximize/metadata.json` has only a `KPlugin` block. A KWin
+script also needs `"KPackageStructure": "KWin/Script"` and an `X-Plasma-API` entry, so KPackage
+refuses it. The script — "maximize toggles to 80% centered" — has therefore never run, in any
+session, while the settings UI happily shows it ticked. Another entry for the
+"reports success, does nothing" list.
+
+It was the first suspect for *"the apps ... open in full screen mode and than crash and try to
+reopen in hyperland style the split"*, because 80%-centered-on-unmaximize is exactly that shape.
+It is not the cause: it does not load. Also ruled out for that report, with evidence:
+- **No app crashes.** `coredumpctl --since -3h` lists only three `spectacle` SIGABRTs, which were
+  mine (that is also why screenshots kept silently producing no file).
+- **No tiling is armed.** The four `[Tiling]` blocks in `kwinrc` are KWin's stock 25/50/25 custom
+  layout, inert unless you drag with Shift. `kwinrulesrc` holds one unrelated Wine rule.
+- **A control window behaves.** Launching `kitty` under a KWin script watching `windowAdded` and
+  `frameGeometryChanged` gave `geo=448,41 594x818 fs=false tile=no` and then no geometry churn at
+  all — normal centred placement, no maximize, no jump.
+
+So the remaining hypothesis is app-specific state restore (a window that was fullscreen/tiled under
+Hyprland asking for that geometry back). Needs the name of one app that does it.

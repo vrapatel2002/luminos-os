@@ -110,6 +110,123 @@ PATCHES = {
             "monitor?.activeWorkspace?.lastIpcObject.windows > 0)\n"
             "            return 0;",
         ),
+        # Click-outside-to-close, half one of two.  The drawers window covers the
+        # screen but its input mask deliberately leaves the middle click-THROUGH,
+        # so a click "outside the launcher" is delivered to the app underneath and
+        # the shell never sees it.  Upstream does not need to see it: the
+        # hyprland_focus_grab_v1 protocol takes that click instead and fires
+        # HyprlandFocusGrab.onCleared, which is the ONLY code path in the whole
+        # shell that closes a drawer by clicking away.  KWin does not implement the
+        # protocol - the shell log says so verbatim, twice per run - so nothing
+        # ever closed.  Reported as "its just locked".
+        # Taking the whole surface while a dismissible drawer is up is exactly what
+        # a focus grab does, so this is the same bargain, not a new one: while the
+        # launcher is open, clicks and scrolls do not reach the app below.
+        #
+        # DO NOT write this as `focusGrab.active`.  That reads back FALSE FOREVER on
+        # KWin: the QML binding assigns to it, but HyprlandFocusGrab drops the write
+        # when the protocol is missing, so the property never changes and nothing
+        # that depends on it ever re-evaluates.  Measured, not guessed - an earlier
+        # version of this patch used focusGrab.active and the mask never went null.
+        # (Same trap explains why upstream's own `if (focusGrab.active) return 0`
+        # in dragMaskPadding above is dead code here.)  So the condition is copied
+        # out of focusGrab.active and evaluated ourselves.
+        (
+            "    mask: hasFullscreen ? emptyRegion : regions",
+            "    // [LUMINOS-KWIN] No hyprland_focus_grab_v1 on KWin, so an outside click\n"
+            "    // has to actually REACH us before Interactions.qml can act on it.  A null\n"
+            "    // mask means the whole surface is ours, which is exactly what the focus\n"
+            "    // grab would have done.  Mirrors focusGrab.active, plus detached popouts\n"
+            "    // (volume/brightness/notifications), whose only other way out is the\n"
+            "    // second focus grab in modules/bar/popouts/Wrapper.qml.\n"
+            "    readonly property bool luminosGrab: {\n"
+            "        const s = screenState;\n"
+            "        const conf = contentItem.Config;\n"
+            "        if ((s.launcher && conf.launcher.enabled) || (s.session && conf.session.enabled) "
+            "|| (s.sidebar && conf.sidebar.enabled))\n"
+            "            return true;\n"
+            "        if (!conf.dashboard.showOnHover && s.dashboard && conf.dashboard.enabled)\n"
+            "            return true;\n"
+            "        if (panels.popouts.currentName.startsWith(\"traymenu\") "
+            "&& (panels.popouts.current as StackView)?.depth > 1)\n"
+            "            return true;\n"
+            "        return panels.popouts.isDetached;\n"
+            "    }\n"
+            "\n"
+            "    mask: hasFullscreen ? emptyRegion : (luminosGrab ? null : regions)",
+        ),
+    ],
+    # Click-outside-to-close, half two: turn the press we now receive into the
+    # same close that HyprlandFocusGrab.onCleared would have done.
+    # Presses that land on real panel content never arrive here - a child
+    # MouseArea takes them first - but presses on a panel's empty background do,
+    # hence the geometry test.  It reuses the same helpers upstream already uses
+    # for hover, so "inside a panel" means the same thing in both places.
+    "modules/drawers/Interactions.qml": [
+        (
+            "    onPressed: event => dragStart = Qt.point(event.x, event.y)",
+            "    // [LUMINOS-KWIN] ---- click outside to close ----------------------------\n"
+            "    // See modules/drawers/ContentWindow.qml: KWin has no focus-grab protocol,\n"
+            "    // so upstream's only click-away close path never fires and the launcher,\n"
+            "    // session menu, sidebar and detached popouts stay open forever.\n"
+            "    function luminosDismissible(): bool {\n"
+            "        if (popouts.isDetached)\n"
+            "            return true;\n"
+            "        if (screenState.launcher && Config.launcher.enabled)\n"
+            "            return true;\n"
+            "        if (screenState.session && Config.session.enabled)\n"
+            "            return true;\n"
+            "        if (screenState.sidebar && Config.sidebar.enabled)\n"
+            "            return true;\n"
+            "        if (!Config.dashboard.showOnHover && screenState.dashboard && "
+            "Config.dashboard.enabled)\n"
+            "            return true;\n"
+            "        return popouts.currentName.startsWith(\"traymenu\") "
+            "&& ((popouts.current as StackView)?.depth ?? 0) > 1;\n"
+            "    }\n"
+            "\n"
+            "    function luminosOnOpenPanel(x: real, y: real): bool {\n"
+            "        if (x < bar.clampedWidth)\n"
+            "            return true;   // the bar is part of the shell, not 'outside'\n"
+            "        if (popouts.isDetached) {\n"
+            "            // Detached popouts are centred, so the hover helpers (which think in\n"
+            "            // screen edges) do not describe them.  Plain rect test instead.\n"
+            "            const p = panels.popoutsWrapper;\n"
+            "            const px = bar.implicitWidth + p.x;\n"
+            "            const py = borderThickness + p.y;\n"
+            "            return x >= px && x <= px + p.width && y >= py && y <= py + p.height;\n"
+            "        }\n"
+            "        if (screenState.launcher && inBottomPanel(panels.launcher, x, y))\n"
+            "            return true;\n"
+            "        if (screenState.dashboard && inTopPanel(panels.dashboard, x, y))\n"
+            "            return true;\n"
+            "        if (screenState.session && inRightPanel(panels.sessionWrapper, x, y))\n"
+            "            return true;\n"
+            "        if (screenState.sidebar && inRightPanel(panels.sidebar, x, y))\n"
+            "            return true;\n"
+            "        if (popouts.hasCurrent && inLeftPanel(panels.popoutsWrapper, x, y))\n"
+            "            return true;\n"
+            "        return false;\n"
+            "    }\n"
+            "\n"
+            "    // Same body as HyprlandFocusGrab.onCleared, plus popouts.close() so a\n"
+            "    // DETACHED popout also goes away (hasCurrent alone does not clear\n"
+            "    // detachedMode, and a detached popout ignores every hover path).\n"
+            "    function luminosClickOutside(): void {\n"
+            "        popouts.close();\n"
+            "        screenState.launcher = false;\n"
+            "        screenState.session = false;\n"
+            "        screenState.sidebar = false;\n"
+            "        screenState.dashboard = false;\n"
+            "        bar.closeTray();\n"
+            "    }\n"
+            "\n"
+            "    onPressed: event => {\n"
+            "        dragStart = Qt.point(event.x, event.y);\n"
+            "        if (luminosDismissible() && !luminosOnOpenPanel(event.x, event.y))\n"
+            "            luminosClickOutside();\n"
+            "    }",
+        ),
     ],
     # getMonitor("active") is how the brightness keys find a screen.  Without
     # Hyprland it returns undefined and increase/decreaseBrightness() return

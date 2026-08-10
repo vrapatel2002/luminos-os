@@ -2939,3 +2939,18 @@ dead shortcut would have done. See BUG-112 for why this took so long to get work
 Workspace pills are empty and the active-window readout always says "Desktop" (both read Hyprland
 IPC), there is no idle screen-off, and windows get KWin titlebars and float rather than tiling.
 Shipped anyway, at Shawn's call: *"lets move with it than once we are in it we will fix bugs."*
+
+**Caelestia's own lock screen cannot work here.** The shell logs
+`Cannot start session lock: The current compositor does not support the ext-session-lock-v1
+protocol`. That is not something the overlay can patch around — a lock screen has to be a
+compositor-enforced session lock or it is theatre. Use KDE's locker if a lock is wanted.
+
+### The shape every KWin bug in this session has taken
+Four for four now (BUG-113, the brightness keys, the drag bands, BUG-116): Caelestia asks Hyprland
+a question, Hyprland is not there, the answer is `null` or `undefined`, and the expression
+**silently evaluates to false** instead of failing. Nothing logs, nothing throws, the feature is
+just quietly absent. BUG-116 added a nastier variant — a property that is *written* and drops the
+write, so it reads back false forever and every binding depending on it stops updating.
+So: when something on this session does nothing at all, look for a Hyprland dependency in the
+condition before looking anywhere else, and **verify the property changed** rather than assuming
+the assignment took.

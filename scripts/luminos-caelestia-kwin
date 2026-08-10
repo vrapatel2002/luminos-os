@@ -118,13 +118,21 @@ start portal-kde /usr/lib/xdg-desktop-portal-kde
 # so, so this loop makes the failure visible instead of mysterious: retry a few
 # times, then put a terminal up. A terminal is proof the compositor and input are
 # both alive and it is somewhere to type.
+#
+# The budget is for STARTUP failures, not for the whole session. Without the
+# uptime reset below, three restarts spread over a day - which is what happens
+# while working on the overlay, since picking up an edit means killing `qs` -
+# leave the user with a terminal instead of a bar, hours after the last one, for
+# no reason they can see. A shell that lived a minute started fine.
 tries=0
 while : ; do
     echo "$(date -Is) starting shell (attempt $((tries + 1)))" >>"$STATE/shell.log"
+    started=$SECONDS
     qs -p "$SHELL_DIR" >>"$STATE/shell.log" 2>&1
     rc=$?
-    echo "$(date -Is) shell exited rc=$rc" >>"$STATE/shell.log"
+    echo "$(date -Is) shell exited rc=$rc after $((SECONDS - started))s" >>"$STATE/shell.log"
     [ "$rc" = "0" ] && break          # clean exit means someone asked it to stop
+    [ $((SECONDS - started)) -ge 60 ] && tries=0
     tries=$((tries + 1))
     if [ "$tries" -ge 3 ]; then
         echo "$(date -Is) giving up after $tries attempts, opening a terminal" >>"$STATE/shell.log"
