@@ -147,6 +147,21 @@ EOF
         "org.freedesktop.systemd1,/org/freedesktop/systemd1,org.freedesktop.systemd1.Manager,StartUnit,luminos-caelestia-launcher.service,replace"
     info "  Meta (tap)   ->  Caelestia Launcher  [unverified until first login]"
 
+    # Tap-to-click. Hyprland turns this on by default and KDE does not, so a
+    # trackpad that has always worked suddenly does nothing here: the cursor still
+    # moves, taps just vanish. Reported as "I can move the cursor but when I click
+    # nothing happens", and it is not obvious from anything on screen.
+    # kcminputrc is not in the repo, so without this line the setting is invisible
+    # and a reinstall on a fresh machine walks straight back into it.
+    # Only KDE sessions read this file - Hyprland is unaffected either way.
+    local tp=(--group Libinput --group 2362 --group 12305
+              --group "ASUP1208:00 093A:3011 Touchpad")
+    kwriteconfig6 --file kcminputrc "${tp[@]}" --key TapToClick true
+    kwriteconfig6 --file kcminputrc "${tp[@]}" --key TapAndDrag true
+    kwriteconfig6 --file kcminputrc "${tp[@]}" --key TapDragLock false
+    kwriteconfig6 --file kcminputrc "${tp[@]}" --key DisableWhileTyping true
+    info "  touchpad     ->  tap-to-click on (KDE ships it off; Hyprland ships it on)"
+
     echo
     check_all
 }
