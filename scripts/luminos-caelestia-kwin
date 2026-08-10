@@ -92,6 +92,21 @@ start polkit /usr/lib/polkit-kde-authentication-agent-1
 # Screenshots, screen sharing, file pickers.
 start portal-kde /usr/lib/xdg-desktop-portal-kde
 
+# Record what KWin ACTUALLY chose, once, a few seconds in. Without this the only
+# evidence of a rendering problem is the user saying it feels slow, and the session
+# log's `eglInitialize failed` lines do not settle it - KWin probes EGL more than
+# one way and some of those probes are expected to fail. supportInformation is the
+# compositor answering directly: OpenGL or QPainter, which driver, which mode.
+(
+    sleep 8
+    {
+        echo "=== $(date -Is) ==="
+        qdbus6 org.kde.KWin /KWin supportInformation 2>&1 |
+            grep -iE "compositing type|opengl (vendor|renderer|version)|driver|refresh rate|adaptive|^scale" |
+            head -n 20
+    } >>"$STATE/kwin-render.log" 2>&1
+) &
+
 # NOT started: /usr/lib/kglobalacceld. On Plasma 6 KWin owns org.kde.kglobalaccel
 # itself (verified: busctl --acquired shows the name held by the kwin_wayland pid),
 # so a standalone kglobalacceld finds the name taken and exits instantly with an
