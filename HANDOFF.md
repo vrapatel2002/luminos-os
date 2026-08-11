@@ -51,7 +51,7 @@ SDDM greeter. **The Hyprland session is the fallback and must never break.**
 |---|---|
 | Session installed as a greeter entry, "Luminos (Caelestia on KWin)" | ✅ logs in |
 | Overlay build + `--check` + `--remove` guard | ✅ clean, 279 symlinks / 4 patches |
-| `check` subcommand — 16 assertions incl. "Hyprland session still present" | ✅ all green |
+| `check` subcommand — 14 assertions incl. "Hyprland session still present" | ✅ all green |
 | BUG-112 — empty KService cache killed every KDE global shortcut | ✅ fixed |
 | BUG-113 — all drawers no-op (`ShellState.forActive()` null under KWin) | ✅ fixed |
 | BUG-114 — trackpad click dead (KDE ships tap-to-click **off**) | ✅ fixed |

@@ -2945,6 +2945,16 @@ Shipped anyway, at Shawn's call: *"lets move with it than once we are in it we w
 protocol`. That is not something the overlay can patch around — a lock screen has to be a
 compositor-enforced session lock or it is theatre. Use KDE's locker if a lock is wanted.
 
+*Verified from both ends 2026-08-11, rather than taken from the log message.* Quickshell's
+`WlSessionLock` — the type `modules/lock/Lock.qml` is built on — is generated from
+`ext-session-lock-v1` (`/usr/src/debug/quickshell-git/…/src/wayland/session_lock/wl-proto/`).
+And `ext_session_lock_manager_v1` appears **nowhere** in KWin: a recursive search of `/usr/lib`
+finds it only in `libwlroots`, `libgtk4-layer-shell` and `libhyprtoolkit`, while kwin 6.7.4 ships
+its own `lockscreen_overlay_v1` instead. So this is a genuine protocol gap in both directions, not
+a misconfiguration — **do not go looking for a setting that turns it on.** (Method note: `strings`
+on `libkwin.so` *does* find protocol names — it returns 10 hits for layer-shell — so the zero for
+session-lock is a real absence, not a failure of the technique.)
+
 ### The shape every KWin bug in this session has taken
 Four for four now (BUG-113, the brightness keys, the drag bands, BUG-116): Caelestia asks Hyprland
 a question, Hyprland is not there, the answer is `null` or `undefined`, and the expression
