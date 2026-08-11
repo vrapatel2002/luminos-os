@@ -2964,3 +2964,68 @@ write, so it reads back false forever and every binding depending on it stops up
 So: when something on this session does nothing at all, look for a Hyprland dependency in the
 condition before looking anywhere else, and **verify the property changed** rather than assuming
 the assignment took.
+
+## DECISION 65 — Tab sleeping moves out of the RAM daemon and into the browser, and only the tab you are looking at stays resident
+# [CHANGE: claude-code | 2026-08-11]
+
+**Decision.** `scripts/chrome-tab-sleeper` v2.0 becomes the browser arm of memory management.
+It runs **aggressive by default**: every tab except the one on screen is discarded. It reads
+pressure from `luminos-ram`'s own `http://127.0.0.1:9091/meminfo` and escalates. The CDP path in
+`cmd/luminos-ram` is declared dead (BUG-118) and is not being revived.
+
+**Why the daemon lost this job.** Chrome 136+ refuses `--remote-debugging-port` on the default
+profile, so port 9222 has been closed since at least 2026-06-26 and `discardBrowserTabs()` has
+never run once. Reopening it means permanently moving the everyday browser onto a throwaway
+`--user-data-dir` so a daemon can drive it from outside — a big change to how the machine starts,
+to buy back an API the browser hands to an in-process extension for free. `chrome.tabs.discard()`
+also beats CDP on its own merits: it knows which tab is *active*, which is *audible*, which is
+*pinned*, and it keeps the tab strip intact so the page comes back on click.
+
+**The integration is one-directional and needs no Go change.** The MV3 service worker fetches
+`/meminfo` every 20 s with `host_permissions: ["http://127.0.0.1:9091/*"]`. Proven live from
+inside the worker: `{level:"normal", effective_available: 8.41, ok: true}`. **No CORS header was
+required and none was added** — `host_permissions` exempts the extension from the same-origin
+check, which is the whole reason the daemon stays untouched. It uses `effective_available`, not
+`available`, so a HIVE model reservation counts as pressure the moment it is taken.
+
+**The ladder** (thresholds live in the options page):
+| Level | `effective_available` | Behaviour |
+|---|---|---|
+| NORMAL | ≥ 3.0 GB | 10 s grace after you leave a tab, then it sleeps. Pinned and typed-into tabs stay. |
+| PRESSURE | < 3.0 GB | Grace drops to **0** — leave a tab, it sleeps. Pinned/typed still protected. |
+| CRITICAL | < 1.5 GB | Protections drop. Pinned and typed tabs go, and the active tab of every window **except the focused one** goes too. |
+
+**If the daemon is down the extension stays aggressive and simply stops escalating.** A dependency
+that can take the browser with it would be a worse bargain than the one it replaces.
+
+**Four things deliberately kept resident at every level:** the focused tab, anything playing
+unmuted audio, anything already discarded, and anything you ticked *"Never sleep this tab"*
+(`autoDiscardable`). The manual Alt+S / toolbar / right-click path **ignores all four** — asking
+for it by hand is an instruction, not a hint.
+
+**Typed-in tabs are protected, because `chrome.tabs.discard()` does not run `beforeunload`.**
+A half-written comment would vanish with no prompt. A `<all_urls>` content script marks a tab dirty
+on the first `input` event. That mark lives in **`chrome.storage.session`, not a module-scope Set** —
+an MV3 worker is torn down after ~30 s idle, which would wipe every mark and delete the protection
+silently, *and only in production*, since a worker being actively debugged never idles long enough
+to die. Proven by force-killing the worker with `Target.closeTarget` and re-reading:
+`workerUptime_s: 8`, `typedStillProtected: true`.
+
+**Measured, not asserted.** Same profile, before and after, page renderers only (extension
+processes excluded because sleeping tabs does not free those): **8 renderers / 1266 MB → 3
+renderers / 424 MB**, ~842 MB freed. Form protection was proven **with a negative control** — a
+typed page and an untouched page under identical conditions gave `typed: false` (survived) vs
+`control: true` (slept). Pinned was proven at both ends: kept at NORMAL, slept at CRITICAL.
+
+**Accepted costs, stated plainly:**
+- The content script means Chrome will warn *"Read and change all your data on all websites"* at
+  install. It only listens for `input` and sends one message; it reads nothing.
+- Chrome's own **Memory Saver is also enabled** by `chrome-luminos` (`--enable-features=MemorySaver`).
+  Two systems now decide about the same tabs. The extension is strictly more aggressive so it wins
+  in practice, but Memory Saver should be turned off in `chrome://settings/performance` to keep the
+  behaviour explainable.
+- **Chrome will not auto-load it.** Chrome 137+ disabled the `--load-extension` switch outright, so
+  the `chromium-flags.conf` recipe from the previous session is wrong for Chrome — it works only on
+  Chromium, which is how this was tested (Chromium 151 loaded it as `hgfbdcgceicmkinniepllkoajkdjjiji`,
+  which also proves the manifest is valid). On Chrome the only route is
+  `chrome://extensions` → Developer mode → **Load unpacked**.

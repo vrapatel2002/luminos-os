@@ -515,6 +515,16 @@ Task: [what was asked]" && git push origin main
     Known gaps accepted for now: empty workspace pills, active window reads "Desktop", no
     idle screen-off, no lock screen (KWin has no `ext-session-lock-v1`), KWin titlebars.
     [CHANGE: claude-code | 2026-08-11]
+0e. **Tab sleeper — needs one manual install (DECISION 65).** `scripts/chrome-tab-sleeper` v2.0 is
+    written, tested and measured, but **Shawn has to load it himself**: `chrome://extensions` →
+    Developer mode → **Load unpacked** → that folder. Chrome 137+ disabled `--load-extension`, so
+    no script can do it. While there, turn OFF Memory Saver in `chrome://settings/performance` —
+    `chrome-luminos` enables it and two systems would be deciding about the same tabs.
+    Related: **BUG-118** left deliberately unrepaired — `luminos-ram` still logs
+    `Chrome CDP unavailable (port 9222)` every 60 s and still calls `luminos-brain log` each time,
+    which is junk in the brain log. Muting it is one line in `cmd/luminos-ram/main.go:305`, but
+    `cmd/` is off limits without explicit instruction (§11). Ask before touching it.
+    [CHANGE: claude-code | 2026-08-11]
 1. Eye model download + wire vision route in hive-daemon.py
 2. KDE right-click service menus for HIVE (kcm_luminos_hive.so already installed)
 3. ydotool type-into-apps integration

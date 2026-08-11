@@ -33,7 +33,7 @@ This ensures that the current window and all recently used visible windows (e.g.
 ### Cold Set (HIR - High Inter-Reference Recency)
 - **Eviction Entry**: Immediate `MADV_PAGEOUT`.
 - **15 Minute Rule**:
-    - **Browser Tabs**: Discard via CDP (freed 100%).
+    - **Browser Tabs**: ⛔ **This daemon does not do this and never has.** See "Browser tabs" below.
     - **Native Apps**: `SIGSTOP` if safety checks pass.
 - **2 Hour Rule**:
     - **Non-essential Apps**: `SIGKILL`.
@@ -60,8 +60,32 @@ Inter-Reference Recency (IRR) is defined as the number of *unique other windows*
 
 ## Integration
 - **KWin**: Subscribes to `activeWindowChanged`, `windowMinimized`, `windowUnminimized`.
-- **CDP**: Connects to port 9222 for browser tab management.
+- **CDP**: ⛔ dead — see "Browser tabs" below.
 - **D-Bus**: Uses `org.kde.KWin` for window-to-PID mapping.
+
+## Browser tabs — handled outside this daemon
+# [CHANGE: claude-code | 2026-08-11] BUG-118 / DECISION 65
+
+Everything this document used to claim about CDP was **false**. `checkCDPHealth()` polls
+`localhost:9222` and has failed on every attempt since at least **2026-06-26** (339 errors in the
+last 24 h alone), because Chrome 136+ refuses `--remote-debugging-port` on the default profile.
+`checkCDPHealth()` returns only on success, so `scanAndCompressChrome()` and
+`manageChromeMemory()`/`discardBrowserTabs()` are unreachable code. **No tab has ever been
+discarded by luminos-ram.**
+
+Browser tabs are now the job of **`scripts/chrome-tab-sleeper` v2.0**, a Chrome MV3 extension that
+uses `chrome.tabs.discard()` from inside the browser. It is aggressive by default — only the tab on
+screen stays resident — and it reads pressure from **this daemon's own `/meminfo`** on `:9091`,
+so both halves of memory management agree on one number.
+
+The daemon's only obligation to it is to keep serving `effective_available` on `/meminfo`. There is
+no callback, no socket, and no CORS header: the extension declares `host_permissions` for
+`127.0.0.1:9091` and polls every 20 s. **If this daemon is down the extension keeps sleeping tabs**
+and simply stops escalating.
+
+Note that Chrome renderers are still touched by the generic `MADV_PAGEOUT` path as ordinary
+processes. That pushes them into zram; a discard frees them outright. The two are complementary,
+not duplicates.
 
 ## Restore Speed Optimizations (v3.1)
 - **MADV_WILLNEED Prefetch**: Before `SIGCONT`, `process_madvise(MADV_WILLNEED)` is called on process memory to warm up pages from ZRAM/Disk.

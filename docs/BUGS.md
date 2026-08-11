@@ -2261,3 +2261,46 @@ It is not the cause: it does not load. Also ruled out for that report, with evid
 
 So the remaining hypothesis is app-specific state restore (a window that was fullscreen/tiled under
 Hyprland asking for that geometry back). Needs the name of one app that does it.
+
+## BUG-118 — luminos-ram has never discarded a single browser tab, and has said so every 60 seconds since June
+# [CHANGE: claude-code | 2026-08-11]
+**Status: root-caused. Superseded rather than repaired — see DECISION 65.**
+
+`cmd/luminos-ram/main.go:288 checkCDPHealth()` polls `http://localhost:9222/json/list`, and on
+failure logs and retries forever:
+
+```
+Aug 11 18:46:15 archlinux luminos-ram[775]: [ERROR] Chrome CDP unavailable (port 9222) - retrying in 60s
+```
+
+**339 of those in the last 24 hours. The first is `Jun 26 12:50:54`.** Nothing has ever listened on
+9222: `ss -ltn` shows the port closed and no `DevToolsActivePort` file exists in the profile.
+
+The cause is already written down in BUG-102 as a footnote — *"`--remote-debugging-port=9222` is now
+dead on Chrome's default profile"* — because Chrome 136+ refuses DevTools when the data dir is the
+default one. `/usr/local/bin/chrome-luminos` still passes the flag (lines 171 and 204); Chrome still
+ignores it. What nobody connected at the time is what **else** hangs off that port:
+
+- `checkCDPHealth()` `return`s only on success, so it never reaches `scanAndCompressChrome()`.
+- `manageChromeMemory()` / `discardBrowserTabs()` (main.go:739-807) are therefore unreachable.
+- `docs/LUMINOS_RAM_ARCHITECTURE.md` advertised **"Browser Tabs: Discard via CDP (freed 100%)"** as
+  the 15-minute rule for the single largest memory consumer on the machine. It has been false since
+  at least 2026-06-26.
+
+**Second-order damage:** the same loop runs `luminos-brain log "Chrome CDP unavailable"` on every
+failed pass, so the brain log has been taking a junk entry a minute for six weeks.
+
+**What was NOT wrong.** The rest of luminos-ram is fine — `/meminfo` serves live numbers and
+`process_madvise` works (BUG-065/066/067). Only the browser arm is dead. And the ordinary
+`MADV_PAGEOUT` path does still touch Chrome renderers as generic processes; it just pushes them to
+zram instead of freeing them, which is a fraction of the win a discard gives.
+
+**Why it is not being fixed in Go.** Reopening CDP means running the everyday browser on a
+non-default `--user-data-dir` purely so a daemon can talk to it — a large, permanent change to how
+the user's browser starts, to regain a capability the browser will hand over for free to an
+extension. Replaced by `scripts/chrome-tab-sleeper` v2.0, which reads the same `/meminfo` the RAM
+widget reads. See DECISION 65.
+
+**Left in place on purpose:** the Go code and the 60s log line. Ripping out `manageChromeMemory()`
+touches `cmd/` (AGENTS.md §11, "only when explicitly instructed") and the log line is now the honest
+statement of a known-dead path. Muting it is a one-line change whenever Shawn wants it.

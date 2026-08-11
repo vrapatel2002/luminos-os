@@ -1,15 +1,30 @@
 {
   "manifest_version": 3,
   "name": "Luminos Tab Sleeper",
-  "version": "1.1",
-  "description": "Sleep a tab on demand, or on our schedule. Not Chrome's.",
-  "permissions": ["tabs", "alarms", "contextMenus"],
+  "version": "2.0",
+  "description": "Only the tab you are looking at stays in RAM. Escalates with luminos-ram pressure.",
+  "permissions": ["tabs", "alarms", "contextMenus", "storage"],
+  "host_permissions": ["http://127.0.0.1:9091/*"],
   "action": { "default_title": "Sleep this tab (Alt+S)" },
+  "options_page": "options.html",
   "commands": {
     "sleep-current-tab": {
       "suggested_key": { "default": "Alt+S" },
       "description": "Sleep the current tab"
+    },
+    "sleep-other-tabs": {
+      "suggested_key": { "default": "Alt+Shift+S" },
+      "description": "Sleep every other tab in this window"
     }
   },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": false
+    }
+  ],
   "background": { "service_worker": "background.js" }
 }

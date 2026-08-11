@@ -113,6 +113,23 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 - `~/.var/app/com.google.Chrome/config/chrome-flags.conf` — `--ozone-platform=wayland` globally; removed ANGLE/Vulkan flags
 - `/usr/local/bin/chrome-luminos` — GPU-specific GL: AMD uses `--use-gl=egl`, NVIDIA uses `--use-gl=desktop`. AMD path: no `--enable-zero-copy` (BUG-054). Both paths: `--enable-features=MemorySaver` (tab sleep).
 
+### Chrome Tab Sleeper (scripts/chrome-tab-sleeper/) — MV3 extension
+# [CHANGE: claude-code | 2026-08-11] v2.0, BUG-118 / DECISION 65. Replaces luminos-ram's dead CDP path.
+- `manifest.json` — MV3. `host_permissions: ["http://127.0.0.1:9091/*"]` is what lets the worker read
+  luminos-ram's `/meminfo` with no CORS header on the daemon side. Commands: Alt+S / Alt+Shift+S.
+- `background.js` — the whole policy. `DEFAULTS` at the top holds the seven settings; `mayDiscard()`
+  is the single place a tab is judged; `sweep()` runs on tab activation, window focus change, a 30 s
+  alarm, and a short self-scheduled timer so a 10 s grace fires on time. **Dirty tabs live in
+  `chrome.storage.session`, never a module-scope Set** — MV3 tears the worker down after ~30 s idle
+  and would silently drop the marks in production only. `sweep()` also prunes dead ids, because a
+  discard gives the tab a *new* id and Chrome recycles the old one.
+- `content.js` — `<all_urls>`, capture-phase `input` listener, sends `{type:'dirty'}` once.
+  Exists because `chrome.tabs.discard()` does **not** run `beforeunload`.
+- `options.html` / `options.js` — settings + a live status readout that hits the same `/meminfo`
+  URL the worker does, deliberately, so the two cannot drift.
+- **Install: `chrome://extensions` → Developer mode → Load unpacked.** `--load-extension` does not
+  work — Chrome 137+ disabled the switch. Chromium still honours it (that is how it was tested).
+
 ### Archive (archive/)
 - `archive/windows-hive-2026/` — Old Windows HIVE (Ollama/Docker) — DO NOT RESTORE
 - `archive/gtk4-ui/` — Retired GTK4/Python UI

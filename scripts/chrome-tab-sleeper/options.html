@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<!-- [CHANGE: claude-code | 2026-08-11] -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Luminos Tab Sleeper</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 620px; margin: 2rem auto; padding: 0 1rem;
+         color: #e5e7eb; background: #111827; }
+  h1 { font-size: 1.25rem; margin-bottom: .25rem; }
+  p.sub { color: #9ca3af; margin-top: 0; }
+  fieldset { border: 1px solid #374151; border-radius: 8px; margin: 1rem 0; padding: 1rem; }
+  legend { color: #9ca3af; padding: 0 .4rem; }
+  label { display: block; margin: .55rem 0; }
+  input[type=number] { width: 5rem; background: #1f2937; color: #e5e7eb;
+                       border: 1px solid #374151; border-radius: 4px; padding: .2rem .4rem; }
+  .hint { color: #6b7280; font-size: .85em; margin: .1rem 0 .8rem 1.6rem; }
+  #status { margin-top: 1rem; padding: .75rem; border-radius: 8px; background: #1f2937;
+            font-variant-numeric: tabular-nums; white-space: pre-wrap; }
+  .warn { color: #fbbf24; }
+</style>
+</head>
+<body>
+  <h1>Luminos Tab Sleeper</h1>
+  <p class="sub">Only the tab you are looking at stays in RAM.</p>
+
+  <fieldset>
+    <legend>Policy</legend>
+    <label><input type="checkbox" id="aggressive"> Aggressive — sleep every tab except the active one</label>
+    <div class="hint">Off = the extension only sleeps tabs when you ask it to, by click, Alt+S or right-click.</div>
+
+    <label>Grace period <input type="number" id="graceSeconds" min="0" max="600"> seconds</label>
+    <div class="hint">How long a tab survives after you switch away from it. Drops to 0 automatically under memory pressure.</div>
+
+    <label><input type="checkbox" id="exemptPinned"> Keep pinned tabs awake</label>
+    <label><input type="checkbox" id="exemptDirty"> Keep tabs you have typed into awake</label>
+    <div class="hint">Both are overridden when memory goes CRITICAL. Tabs playing sound are always kept, with no exception.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>luminos-ram integration</legend>
+    <label><input type="checkbox" id="ramEnabled"> Escalate using the RAM daemon (port 9091)</label>
+    <label>Pressure below <input type="number" id="pressureGB" min="0" max="16" step="0.1"> GB free</label>
+    <div class="hint">Grace period drops to 0 — tabs sleep the moment you leave them.</div>
+    <label>Critical below <input type="number" id="criticalGB" min="0" max="16" step="0.1"> GB free</label>
+    <div class="hint">Pinned and typed-in tabs sleep too, and only the window you are actually focused on keeps a live tab.</div>
+  </fieldset>
+
+  <div id="status">reading…</div>
+  <script src="options.js"></script>
+</body>
+</html>
