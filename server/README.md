@@ -171,6 +171,16 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 - **Sonarr does not search when you change a profile.** Only on RSS (new uploads) or an explicit
   search. An old show will never self-trigger.
 - **qBittorrent preallocates**, so a 1% torrent already occupies its full size on disk.
+- **A Jellyfin plugin cannot draw a Skip button.** Since 10.10, Intro Skipper is a *Media
+  Segment Provider* — it only writes timestamps, and the button is rendered by the **client**.
+  Ask-to-skip vs auto-skip is a per-device setting on the Roku/phone, not something settable
+  from the server. DECISION 64.
+- **Two ffmpegs are not always faster than one on this box.** The library is on a spinning
+  HDD; Intro Skipper's workers sat at 15% and 8% CPU, so a full-library scan is bound by disk
+  seeks, not cores. Raising `MaxParallelism` buys nothing and fights playback.
+- **`ffmpeg` on `$PATH` is not the ffmpeg Jellyfin uses.** Jellyfin runs
+  `/usr/lib/jellyfin-ffmpeg/ffmpeg`. The system build has no `chromaprint`; the Jellyfin one
+  does. Check the right binary before concluding a codec or muxer is missing.
 - **Render node numbers are machine-specific.** `renderD128` is Intel here and NVIDIA on the G14.
   Resolve with `ls -l /sys/class/drm/renderD12*/device/driver`, never carry the number over.
 - **In `systemd-resolved`, DNS set on a *link* beats DNS set globally.** Configuring

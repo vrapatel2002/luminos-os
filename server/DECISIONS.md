@@ -1015,3 +1015,59 @@ of `/var/lib/*/config.xml`, and unlinking hardlink twins under `/srv/media/downl
 owned `nzbget:media`. The NZBGet credentials are read once and cached — the panel polls every
 5 seconds, and re-shelling `sudo` three times per poll floods the auth log for values that
 never change.
+
+## DECISION 64 — Skip intro and skip credits come from Intro Skipper, and the button is drawn by the client, not the server
+# [CHANGE: claude-code | 2026-08-11]
+
+**Decision.** The **Intro Skipper** plugin (`intro-skipper/intro-skipper`, branch `10.11`,
+**v1.10.11.22**) is installed on the Jellyfin server. It fingerprints episodes, finds the
+opening titles and the end credits, and writes them into Jellyfin's own `MediaSegments` table.
+Detection re-runs **daily at 00:00** via the built-in `Detect and Analyze Media Segments`
+scheduled task, so new episodes are picked up without anyone asking.
+
+**Installed by hand, not from the catalogue.** The plugin repository
+`https://manifest.intro-skipper.org/manifest.json` is version-aware and serves nothing to a
+plain browser, so the release zip was fetched from GitHub and unpacked into
+`/var/lib/jellyfin/plugins/Intro Skipper_1.10.11.22/`. The zip contains **only
+`IntroSkipper.dll`** — no `meta.json`. Jellyfin loads it anyway and reports
+`Status: Active`; do not go hunting for a missing metadata file.
+
+**Since Jellyfin 10.10 this plugin does not touch the web UI at all.** It is a *Media Segment
+Provider*. It only produces timestamps; **the Skip button is rendered by the client**. That is
+the single most important thing to know here, because it means:
+- a client that does not implement media segments will show no button no matter what the
+  server does, and
+- the *behaviour* (ask-to-skip vs auto-skip) is a **per-client, per-device setting** that only
+  the person holding the remote can change. It is not a server setting and cannot be set from
+  here.
+
+The Roku client does support it — "Skip Segments", with a per-segment-type **Ask to skip**
+option, and segments drawn on the progress bar. This server's Roku is **3.2.3**, well past the
+3.1.8 that introduced the setting.
+
+**The dependency that actually matters is chromaprint, and Arch is not on the plugin's
+supported list.** Detection shells out to `jellyfin-ffmpeg` with `-f chromaprint`. Checked
+directly rather than trusted: `jellyfin-ffmpeg 1:7.1.4p1-2` at
+`/usr/lib/jellyfin-ffmpeg/ffmpeg` reports the `chromaprint` muxer and `--enable-chromaprint`
+in its build flags. The **system** `ffmpeg 8.1.2` has no chromaprint and is irrelevant —
+Jellyfin is launched with `--ffmpeg=/usr/lib/jellyfin-ffmpeg/ffmpeg`.
+
+**It compares episodes within a season, so a one-episode season can never work.** The method
+is acoustic fingerprinting of the first 10 minutes (`AnalysisLengthLimit=10`) looking for the
+audio that repeats. A season holding a single episode has nothing to compare against and will
+be skipped silently — that is not a fault.
+
+**Tuned for a weak box, deliberately left alone.** Defaults are `MaxParallelism=2` and
+`ProcessPriority=BelowNormal`. On this machine (i5-10210U, library on a spinning HDD) the two
+ffmpeg workers sat at **15% and 8% CPU** — the scan is **I/O bound on the disk, not the CPU**,
+so raising parallelism would buy nothing and would fight playback. Leave it at 2.
+
+**Proven, not assumed.** First results, read back out of the client-facing
+`GET /MediaSegments/{itemId}` endpoint and not just the database:
+Better Call Saul S02E01 intro `340s → 355s`, credits `2781s → 2828s`; S02E02 intro
+`391s → 406s`, credits `2802s → 2852s`. Better Call Saul puts its title card several minutes
+into the episode, so those late intro timestamps are correct, not a misdetection.
+
+**An API key was added** to the Jellyfin database as `luminos-admin` (row 3, alongside the
+existing `Sonarr` and `Seerr` keys) so the task can be driven over the API. It is stored at
+`/root/.jellyfin-token`, mode 600. Delete the row to revoke it.
