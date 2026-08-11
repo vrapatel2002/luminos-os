@@ -2,7 +2,7 @@
 Before concluding ANY task, you MUST update `luminos-notes.sh` to reflect all file changes, deleted directories, and architectural shifts. You must also verify that `LUMINOS_STATUS.md` matches the current reality. Do not output a final report until these state files are synchronized.
 
 # AGENTS.md — Luminos OS Agent Constitution
-# Last Updated: 2026-05-28
+# Last Updated: 2026-08-11
 
 You are a **senior systems software engineer** and sole maintainer of Luminos OS — a custom Arch Linux distribution on the ASUS ROG G14. You own every layer: kernel driver config, Go daemons, KDE/Qt UI, AI inference, hardware quirks. Work like a production engineer: verify current state before acting, document every decision, treat every `/etc/` change as a future incident risk. This file is your operating brief — read it before every task.
 
@@ -76,6 +76,14 @@ the rules in this file. Two lightweight, always-on habits make that forgetting
 - If the goal genuinely *changes* to a different objective, don't spawn a new file —
   update the `## Goal` field in the same `HANDOFF.md` (git history preserves the old
   goal). One file, always.
+- **Size tripwire — if `HANDOFF.md` is over ~400 lines, the overwrite rule has already been
+  broken and the file must be RESET, not extended.** [CHANGE: claude-code | 2026-08-11]
+  It reached **1221 lines / 82 KB** by 2026-08-10, stacked with dated sections going back
+  weeks, and its newest content was six days stale — so the one file that exists to let a
+  fresh chat continue had become the one file too big for a fresh chat to read. It is not
+  an archive: history already lives in git, `luminos-notes.sh`, `LUMINOS_DECISIONS.md` and
+  `docs/BUGS.md`. Carry forward only what a newcomer must not re-learn or re-break, and
+  say in the file that it was reset and where the old one is (`git show <sha>:HANDOFF.md`).
 
 **Where the rest of this file hooks in:** read `HANDOFF.md` as step 0 of the Session
 Start Checklist (§8); overwrite `HANDOFF.md` + confirm the `Response N` line as part of
@@ -398,8 +406,8 @@ luminos-brain safe "<action>"
 | `scripts/luminos-train-ram` | ML training RAM-headroom toggle (CPU-side companion to train-mode): runtime swapfile `/swapfile.train` at low prio (NOT in fstab) + `vm.swappiness` 60→10 + optional memory-cgroup via `run`; `on`/`off`/`status`/`run -- <cmd>`. **Fully reverts on `off` — nothing permanent (no /etc, no fstab, no sysctl.d).** Fixes zram-only OOM during training (BUG-070). |
 | `scripts/luminos-hyprpm-sync` | Self-heals the Hyprland plugins after a compositor upgrade; run from `hyprland.start` in `hypr-user.lua`, referenced by repo path (not deployed to /usr/local/bin). Compares hyprpm's build hash in `/var/cache/hyprpm/$USER/state.toml` to the running commit, rebuilds via `hyprpm update` only on mismatch, then **reads `hyprctl plugin list` back** because `hyprpm update` reports `✔ Loaded` even when nothing loads. Exits 1 + notifies if loaded < enabled. **Do not "improve" this into a pacman hook** — hyprpm builds against the *running* compositor (mid-transaction that is the version being replaced) and hooks run as root (wrong hyprpm state dir). Symptom it prevents: a login popup reading `hypr-user.lua:NNN: unknown config key 'plugin.hyprexpo...'`, which blames the Lua config for an unloaded plugin. BUG-100/BUG-111, DECISION 49. [CHANGE: claude-code \| 2026-08-08] |
 | `scripts/luminos-caelestia-kwin-session` | Installs/checks/uninstalls the **third greeter session**, "Luminos (Caelestia on KWin)" (DECISION 63). Writes `/usr/local/bin/luminos-caelestia-kwin`, `/usr/share/wayland-sessions/luminos-caelestia-kwin.desktop`, and one `.desktop` per global shortcut in `~/.local/share/applications/luminos-cael-*.desktop`. **`X-KDE-Shortcuts=` in the .desktop IS the registration** — the `[services]` group in `kglobalshortcutsrc` is only a user *override* and beats it, so the installer deletes any stale `_launch` key. Runs `kbuildsycoca6 --noincremental` after, because kglobalaccel finds shortcuts through `KApplicationTrader`/sycoca. `check` verifies 14 things incl. live `busctl --user tree` registration and that the Hyprland fallback is still present. `uninstall` reverts everything. BUG-112. [CHANGE: claude-code \| 2026-08-09] |
-| `scripts/luminos-caelestia-kwin` | The session itself, deployed to `/usr/local/bin`. Bare `kwin_wayland --xwayland` (**not** `startplasma-wayland` — `Linger=yes` would leak `LUMINOS_SHELL` into a later plain-Plasma login and hand Shawn a shell-less desktop) plus polkit agent, xdg-desktop-portal-kde and `qs -p ~/.config/quickshell/caelestia-kwin`. Pins `KWIN_DRM_DEVICES=/dev/dri/luminos-igpu` (**colon-separated list** — a PCI by-path name splits into garbage, BUG-094), `unset`s `HYPRLAND_INSTANCE_SIGNATURE`/`HYPRLAND_CMD` (BUG-113), forces `XDG_MENU_PREFIX=plasma-` and rebuilds sycoca **before** kwin starts (BUG-112). Retries the shell 3× then opens kitty with the log, because a black screen is not evidence of a crash (BUG-092). No powerdevil, so no idle screen-off. Logs: `~/.local/state/luminos/caelestia-kwin/`. [CHANGE: claude-code \| 2026-08-09] |
-| `scripts/luminos-caelestia-kwin-overlay` | Builds `~/.config/quickshell/caelestia-kwin`: **281 symlinks** into `/etc/xdg/quickshell/caelestia` + **2 real patched files**, so a `caelestia` package upgrade still reaches us. Patches are **re-derived from current upstream every run** and each anchor must match *exactly once* — an upstream change fails the build loudly instead of shipping a stale file. `--check` reports DRIFT/STALE/DANGLING/MISSING; `--remove` refuses to delete a directory without the `.luminos-overlay` marker. Rerunning it is the whole maintenance story after a Caelestia upgrade. BUG-113. [CHANGE: claude-code \| 2026-08-09] |
+| `scripts/luminos-caelestia-kwin` | The session itself, deployed to `/usr/local/bin`. Bare `kwin_wayland --xwayland` (**not** `startplasma-wayland` — `Linger=yes` would leak `LUMINOS_SHELL` into a later plain-Plasma login and hand Shawn a shell-less desktop) plus polkit agent, xdg-desktop-portal-kde and `qs -p ~/.config/quickshell/caelestia-kwin`. Pins `KWIN_DRM_DEVICES=/dev/dri/luminos-igpu` (**colon-separated list** — a PCI by-path name splits into garbage, BUG-094), `unset`s `HYPRLAND_INSTANCE_SIGNATURE`/`HYPRLAND_CMD` (BUG-113), forces `XDG_MENU_PREFIX=plasma-` and rebuilds sycoca **before** kwin starts (BUG-112). Retries the shell 3× then opens kitty with the log, because a black screen is not evidence of a crash (BUG-092) — the budget **resets after 60 s of uptime**, so restarts spread across a day of overlay work cannot strand the user with a terminal instead of a bar. Also records what KWin *actually* chose (`supportInformation` → `kwin-render.log`) 8 s in, which is what settled BUG-115: hardware OpenGL on the 780M, 120 Hz, VRR off — the `eglInitialize failed` lines are expected probe noise, do not chase them. No powerdevil, so no idle screen-off. Logs: `~/.local/state/luminos/caelestia-kwin/`. [CHANGE: claude-code \| 2026-08-10] |
+| `scripts/luminos-caelestia-kwin-overlay` | Builds `~/.config/quickshell/caelestia-kwin`: **279 symlinks** into `/etc/xdg/quickshell/caelestia` + **4 real patched files** (`modules/drawers/ContentWindow.qml`, `modules/drawers/Interactions.qml`, `services/Brightness.qml`, `services/ShellState.qml`), so a `caelestia` package upgrade still reaches us. **It is Python — run it with `python3`, not bash.** Patches are **re-derived from current upstream every run** and each anchor must match *exactly once* — an upstream change fails the build loudly instead of shipping a stale file. `--check` reports DRIFT/STALE/DANGLING/MISSING; `--remove` refuses to delete a directory without the `.luminos-overlay` marker. Rerunning it is the whole maintenance story after a Caelestia upgrade. BUG-113, BUG-116. [CHANGE: claude-code \| 2026-08-10] |
 
 ### Archive (DO NOT RESTORE)
 `archive/windows-hive-2026/`, `archive/gtk4-ui/`, `archive/hyprland/`, `archive/stale-docs/`
@@ -498,6 +506,15 @@ Task: [what was asked]" && git push origin main
 0a. Sentinel fine-tune: build training dataset (sentinel_*.jsonl, same pattern as nexus_*.jsonl), fine-tune MobileLLM-R1-140M, re-quantize INT8, THEN create `src/npu/npu_daemon.py` + `luminos-npu.service` (blocked 2026-06-10 by luminos-brain safe NO).
 0c. **BUG-069**: fix luminos-power setGPUTGP — `nvidia-smi -pl` is a no-op on mobile (exit 0 despite "not supported"); TGP logs since 2026-06-03 were fiction. Use nvidia-powerd lifecycle + read-back verification. Interim: `scripts/luminos-train-mode` wraps the working mechanism (nvidia-powerd + fan pin) for training runs.
 0b. Fix `luminos-brain safe` to output the actual REASON for a block — currently returns unrelated canned incident lines (e.g. KWin fullscreen crash note when asked about an NPU file), making NO decisions unreviewable.
+0d. **Caelestia-on-KWin session (DECISION 63) — two items open.** (a) **User-reported, not
+    root-caused:** some apps open fullscreen, appear to crash, then reopen in a split shape.
+    Crashes, `luminos-maximize`, KWin tiling and a control window are all ruled out with
+    evidence — **blocked on the user naming one offending app.** Do NOT port Hyprland tiling.
+    (b) **BUG-117:** `luminos-maximize`'s `metadata.json` lacks `KPackageStructure` /
+    `X-Plasma-API`, so KWin rejects it every startup while `kwinrc` says it is enabled.
+    Known gaps accepted for now: empty workspace pills, active window reads "Desktop", no
+    idle screen-off, no lock screen (KWin has no `ext-session-lock-v1`), KWin titlebars.
+    [CHANGE: claude-code | 2026-08-11]
 1. Eye model download + wire vision route in hive-daemon.py
 2. KDE right-click service menus for HIVE (kcm_luminos_hive.so already installed)
 3. ydotool type-into-apps integration
