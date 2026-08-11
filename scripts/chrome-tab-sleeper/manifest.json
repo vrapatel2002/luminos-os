@@ -1,8 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Luminos Tab Sleeper",
-  "version": "1.0",
-  "description": "Discards background tabs on our schedule, not Chrome's.",
-  "permissions": ["tabs", "alarms", "storage"],
+  "version": "1.1",
+  "description": "Sleep a tab on demand, or on our schedule. Not Chrome's.",
+  "permissions": ["tabs", "alarms", "contextMenus"],
+  "action": { "default_title": "Sleep this tab (Alt+S)" },
+  "commands": {
+    "sleep-current-tab": {
+      "suggested_key": { "default": "Alt+S" },
+      "description": "Sleep the current tab"
+    }
+  },
   "background": { "service_worker": "background.js" }
 }
