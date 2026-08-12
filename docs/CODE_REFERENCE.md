@@ -114,21 +114,55 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 - `/usr/local/bin/chrome-luminos` — GPU-specific GL: AMD uses `--use-gl=egl`, NVIDIA uses `--use-gl=desktop`. AMD path: no `--enable-zero-copy` (BUG-054). Both paths: `--enable-features=MemorySaver` (tab sleep).
 
 ### Chrome Tab Sleeper (scripts/chrome-tab-sleeper/) — MV3 extension
-# [CHANGE: claude-code | 2026-08-11] v2.0, BUG-118 / DECISION 65. Replaces luminos-ram's dead CDP path.
+# [CHANGE: claude-code | 2026-08-11] v3.0, BUG-118 / DECISION 65 + 66. Replaces luminos-ram's dead CDP path.
+> ⚠️ **The 2-tab cap is an admitted haste decision** — it counts tabs, not megabytes. Read
+> DECISION 66 §"What is dumb about this, and what smart looks like" before extending it.
 - `manifest.json` — MV3. `host_permissions: ["http://127.0.0.1:9091/*"]` is what lets the worker read
-  luminos-ram's `/meminfo` with no CORS header on the daemon side. Commands: Alt+S / Alt+Shift+S.
-- `background.js` — the whole policy. `DEFAULTS` at the top holds the seven settings; `mayDiscard()`
-  is the single place a tab is judged; `sweep()` runs on tab activation, window focus change, a 30 s
-  alarm, and a short self-scheduled timer so a 10 s grace fires on time. **Dirty tabs live in
-  `chrome.storage.session`, never a module-scope Set** — MV3 tears the worker down after ~30 s idle
-  and would silently drop the marks in production only. `sweep()` also prunes dead ids, because a
-  discard gives the tab a *new* id and Chrome recycles the old one.
+  luminos-ram's `/meminfo` **and POST to `/tabs`** with no CORS header on the daemon side.
+  Commands: Alt+S / Alt+Shift+S.
+- `background.js` — the whole policy. **Two modes, and this is the thing to understand first:**
+  - *Uncapped* (the normal case): `mayDiscard()` asks of each tab "may this one go?" — exemption
+    based, honours the grace period, pinned and typed-into tabs survive.
+  - *Capped* (a model is loaded, or memory is under pressure): `pickKeepers()` instead picks the few
+    that **stay** and discards everything else. An exemption test can never enforce a total, because
+    every tab can answer "no" independently — that is why the cap needed a second function, not a
+    flag. Slot order: opted-out (kept, consumes no slot) → the tab on screen → one audio tab →
+    most-recently-used. No grace, no pinned/typed exemption.
+  - `awayFor()` — Chrome unfocused past `awaySeconds` (60) drops the on-screen slot too. This is the
+    "I am not using any tab, so all tabs sleep" rule. Focus is read **directly** from
+    `chrome.windows.getLastFocused().focused` every sweep, never tracked through `onFocusChanged`,
+    because the MV3 worker dies between events and would resume believing a stale value.
+  - `report()` — POSTs `{asleep, awake, discarded, level, model, cap, free_gb}` to `/tabs` after every
+    sweep. Fire-and-forget: a failed report must never stop a sweep.
+  - `sweep()` runs on tab activation, window focus change, a 30 s alarm, and a short self-scheduled
+    timer so a 10 s grace fires on time. It also prunes dead ids, because a discard gives the tab a
+    *new* id and Chrome recycles the old one.
+  - **Dirty tabs and the away clock live in `chrome.storage.session`, never module-scope** — MV3
+    tears the worker down after ~30 s idle and would silently drop them, in production only.
+- `test-policy.js` — `node test-policy.js` (add `--live` to also POST to the running daemon). Loads
+  the **real background.js**, not a copy, under a stubbed Chrome; 22 checks. The stub throws if the
+  visible active tab is ever passed to `discard()`. **Run it after any policy edit** — it is the only
+  way to check the cap without opening six tabs and loading a model by hand.
 - `content.js` — `<all_urls>`, capture-phase `input` listener, sends `{type:'dirty'}` once.
   Exists because `chrome.tabs.discard()` does **not** run `beforeunload`.
 - `options.html` / `options.js` — settings + a live status readout that hits the same `/meminfo`
-  URL the worker does, deliberately, so the two cannot drift.
+  URL the worker does, deliberately, so the two cannot drift. ⚠️ `DEFAULTS` is **duplicated** here
+  and in `background.js`; nothing enforces the match and a mismatch fails silently.
 - **Install: `chrome://extensions` → Developer mode → Load unpacked.** `--load-extension` does not
   work — Chrome 137+ disabled the switch. Chromium still honours it (that is how it was tested).
+  **Chrome does not auto-reload unpacked extensions** — after editing, click Reload or nothing changes.
+
+### scripts/luminos-tabs — "is that tab actually asleep?"
+# [CHANGE: claude-code | 2026-08-11] v1.0, DECISION 66. Installed to /usr/local/bin/luminos-tabs.
+Prints two **independent** halves, because when they disagree the disagreement is the finding:
+1. **What the extension says** — GET `:9091/tabs`. Flagged `STALE` past 90 s, and says
+   **NEVER REPORTED** in as many words rather than printing a comfortable zero.
+2. **What the kernel shows** — Chrome page renderers from `/proc`, summed by **PSS, not RSS**
+   (RSS counts shared libraries once per process: 528 MB claimed vs 195 MB real on this machine).
+   Filters on `readlink /proc/<pid>/exe` — `pgrep -f "type=renderer"` alone matches every
+   Chromium-based app on the box.
+If the report claims more tabs awake than the cap allows, it says outright that Chrome is refusing
+`discard()` calls and points at `chrome://discards`. `-w` to watch, `-j` for raw JSON.
 
 ### Archive (archive/)
 - `archive/windows-hive-2026/` — Old Windows HIVE (Ollama/Docker) — DO NOT RESTORE

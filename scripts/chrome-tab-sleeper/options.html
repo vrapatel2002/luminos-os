@@ -34,7 +34,34 @@
 
     <label><input type="checkbox" id="exemptPinned"> Keep pinned tabs awake</label>
     <label><input type="checkbox" id="exemptDirty"> Keep tabs you have typed into awake</label>
-    <div class="hint">Both are overridden when memory goes CRITICAL. Tabs playing sound are always kept, with no exception.</div>
+    <div class="hint">Both are overridden when memory goes CRITICAL, and both are ignored entirely while
+      the hard cap below is in force. Only "never sleep this tab" survives everything.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Hard cap — when an AI model is loaded</legend>
+    <label><input type="checkbox" id="capEnabled"> Cap live tabs while a model is in RAM</label>
+    <div class="hint">luminos-ram scans for a resident llama-server / .gguf / MoE process and says so on
+      <code>/meminfo</code>. While one is loaded, only the tabs below stay in memory — everything else
+      sleeps immediately, with no grace period.</div>
+
+    <label>Cap at <input type="number" id="tabCap" min="1" max="20"> tabs</label>
+    <div class="hint">The tab you are looking at, plus the rest of the budget. Default 2.</div>
+
+    <label>Reserve <input type="number" id="audioSlots" min="0" max="5"> of those for tabs playing audio</label>
+    <div class="hint">This is the background-music slot. If more tabs are making noise than there are slots,
+      the most recently opened one survives and the others sleep.</div>
+
+    <label>Sleep the last tab after Chrome is unused for <input type="number" id="awaySeconds" min="5" max="3600"> seconds</label>
+    <div class="hint">Switch to another app and leave it, and even the tab you were reading sleeps.
+      Tabs playing audio and "never sleep" tabs still survive. The delay is there so glancing at a
+      terminal does not blank the page you were on.</div>
+
+    <label><input type="checkbox" id="capOnPressure"> Also cap on memory pressure alone, with no model loaded</label>
+
+    <div class="hint warn">⚠️ This is a deliberately blunt rule. It counts tabs, not megabytes — the third
+      tab sleeps whether it holds 8 MB or 800 MB, and it does not check how much the model actually needs.
+      Built this way to be provably correct in one pass; the measured version is future work.</div>
   </fieldset>
 
   <fieldset>

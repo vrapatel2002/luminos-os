@@ -266,6 +266,8 @@ func main() {
 		// [CHANGE: gemini-cli | 2026-05-08] Added /meminfo endpoint for Plasma widget
 		http.Handle("/metrics", promhttp.Handler())
 		http.HandleFunc("/meminfo", handleMemInfo)
+		// [CHANGE: claude-code | 2026-08-11] DECISION 66 — tab sleeper mailbox.
+		http.HandleFunc("/tabs", handleTabs)
 		lg.Info("metrics server on :9091")
 		if err := http.ListenAndServe(":9091", nil); err != nil {
 			lg.Error("metrics server: %v", err)
@@ -1411,6 +1413,10 @@ func getMemStats() MemStats {
 		}
 	}
 
+	// [CHANGE: claude-code | 2026-08-11] DECISION 66 — tell the tab sleeper whether a model
+	// is resident, so it can cap Chrome at 2 tabs while one is.
+	stats.ModelRunning, stats.ModelName, stats.ModelRSSGB = detectModel()
+
 	// zram stats
 	b, err := os.ReadFile("/sys/block/zram0/mm_stat")
 	if err == nil {
@@ -1441,6 +1447,167 @@ type MemStats struct {
 	// [CHANGE: claude-code | 2026-06-28] Phase 2 — offload reservation (GB).
 	OffloadReservedGB  float64 `json:"offload_reserved_gb"`
 	EffectiveAvailable float64 `json:"effective_available"`
+	// [CHANGE: claude-code | 2026-08-11] DECISION 66 — is an LLM resident right now?
+	// The tab sleeper caps Chrome at 2 tabs when this is true. Deliberately NOT derived
+	// from OffloadReservedGB: nothing in hive-daemon.py ever calls the reserve path, so
+	// that field stays 0 for every HIVE model and would have made the cap dead code.
+	ModelRunning bool    `json:"model_running"`
+	ModelName    string  `json:"model_name"`
+	ModelRSSGB   float64 `json:"model_rss_gb"`
+}
+
+// [CHANGE: claude-code | 2026-08-11] DECISION 66 — model-presence detection.
+//
+// Scans /proc directly rather than shelling out to pgrep, which matters for more than
+// speed: `pgrep -f llama` matches the pgrep invocation itself and any agent shell that
+// happens to have the word on its command line, so it reports a model running when none
+// is. Reading /proc/<pid>/cmdline cannot make that mistake.
+var modelPatterns = []string{"llama-server", "llama_cpp.server", "llama-cli", ".gguf", "moe-server.py", "luminos_moe_offload.py"}
+
+// A grep, an editor with the path open, or a shell echoing the name all match the string
+// but hold no weights. Anything actually serving a model is far larger than this.
+// Variable rather than const so the tests can prove the matcher fires, independently of
+// whether a real model happens to be loaded on the machine running them.
+var modelMinRSSGB = 0.2
+
+var (
+	modelCacheMu  sync.Mutex
+	modelCacheAt  time.Time
+	modelCacheVal struct {
+		running bool
+		name    string
+		rssGB   float64
+	}
+)
+
+func detectModel() (bool, string, float64) {
+	modelCacheMu.Lock()
+	defer modelCacheMu.Unlock()
+	// /meminfo is polled by the RAM widget and the tab sleeper; a /proc walk per request
+	// would be wasteful, and model state does not change on a 5-second scale.
+	if time.Since(modelCacheAt) < 5*time.Second {
+		return modelCacheVal.running, modelCacheVal.name, modelCacheVal.rssGB
+	}
+
+	running, name, rssGB := false, "", 0.0
+	entries, err := os.ReadDir("/proc")
+	if err == nil {
+		for _, e := range entries {
+			pid, err := strconv.Atoi(e.Name())
+			if err != nil {
+				continue
+			}
+			raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+			if err != nil || len(raw) == 0 {
+				continue
+			}
+			cmd := strings.ReplaceAll(string(raw), "\x00", " ")
+			matched := ""
+			for _, p := range modelPatterns {
+				if strings.Contains(cmd, p) {
+					matched = p
+					break
+				}
+			}
+			if matched == "" {
+				continue
+			}
+			rss := procRSSGB(pid)
+			if rss < modelMinRSSGB {
+				continue
+			}
+			if rss > rssGB {
+				running, name, rssGB = true, matched, rss
+			}
+		}
+	}
+
+	modelCacheAt = time.Now()
+	modelCacheVal.running, modelCacheVal.name, modelCacheVal.rssGB = running, name, rssGB
+	return running, name, rssGB
+}
+
+func procRSSGB(pid int) float64 {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
+	if err != nil {
+		return 0
+	}
+	fields := strings.Fields(string(b))
+	if len(fields) < 2 {
+		return 0
+	}
+	pages, err := strconv.ParseFloat(fields[1], 64)
+	if err != nil {
+		return 0
+	}
+	return pages * float64(os.Getpagesize()) / 1024 / 1024 / 1024
+}
+
+// [CHANGE: claude-code | 2026-08-11] DECISION 66 — tab sleeper mailbox.
+//
+// The Chrome extension is the only thing that knows which tabs it slept, and an extension
+// cannot write a file. Without this the only way to check its work was to read TCP byte
+// counters on its /meminfo socket, which is not a way to run a system. It POSTs a summary
+// after each sweep; `luminos-tabs` GETs it back.
+//
+// This is a mailbox, nothing more. It holds one report in memory, it is never consulted by
+// the LIRS ranking or the madvise path, and losing it costs visibility only.
+type TabReport struct {
+	Asleep    int     `json:"asleep"`
+	Awake     int     `json:"awake"`
+	Discarded int     `json:"discarded"`
+	Level     string  `json:"level"`
+	Model     bool    `json:"model"`
+	Cap       int     `json:"cap"`
+	FreeGB    float64 `json:"free_gb"`
+	At        int64   `json:"at"`
+	AgeSec    float64 `json:"age_seconds"`
+}
+
+var (
+	tabReportMu sync.Mutex
+	tabReport   *TabReport
+)
+
+func handleTabs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
+	switch r.Method {
+	case http.MethodOptions:
+		w.WriteHeader(http.StatusNoContent)
+
+	case http.MethodPost:
+		var rep TabReport
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&rep); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		rep.At = time.Now().Unix()
+		tabReportMu.Lock()
+		tabReport = &rep
+		tabReportMu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+
+	case http.MethodGet:
+		tabReportMu.Lock()
+		rep := tabReport
+		tabReportMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if rep == nil {
+			// Distinguishable from a zeroed report on purpose — "the extension has never
+			// reported" and "the extension reported zero asleep" are different problems.
+			json.NewEncoder(w).Encode(map[string]any{"reported": false})
+			return
+		}
+		out := *rep
+		out.AgeSec = time.Since(time.Unix(out.At, 0)).Seconds()
+		json.NewEncoder(w).Encode(map[string]any{"reported": true, "report": out})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func handleMemInfo(w http.ResponseWriter, r *http.Request) {

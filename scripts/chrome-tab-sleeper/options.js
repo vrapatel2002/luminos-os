@@ -1,4 +1,7 @@
 // [CHANGE: claude-code | 2026-08-11]
+// Must stay in step with DEFAULTS in background.js — the two are separate contexts
+// and nothing enforces it. Adding a key here without adding it there silently does
+// nothing; adding it there without adding it here just leaves it un-editable.
 const DEFAULTS = {
   aggressive: true,
   graceSeconds: 10,
@@ -6,7 +9,12 @@ const DEFAULTS = {
   exemptDirty: true,
   ramEnabled: true,
   pressureGB: 3.0,
-  criticalGB: 1.5
+  criticalGB: 1.5,
+  capEnabled: true,
+  capOnPressure: true,
+  tabCap: 2,
+  audioSlots: 1,
+  awaySeconds: 60
 };
 
 const fields = Object.keys(DEFAULTS);
@@ -44,8 +52,14 @@ async function refresh() {
     const free = typeof m.effective_available === 'number' ? m.effective_available : m.available;
     const cfg = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
     const level = free < cfg.criticalGB ? 'CRITICAL' : free < cfg.pressureGB ? 'PRESSURE' : 'normal';
+    const capped = cfg.capEnabled && (m.model_running || (cfg.capOnPressure && level !== 'normal'));
+    const modelLine = m.model_running
+      ? `model: ${m.model_name || 'loaded'} holding ${m.model_rss_gb.toFixed(2)} GB`
+      : 'model: none loaded';
     ramLine = `luminos-ram: ${free.toFixed(2)} GB free of ${m.total.toFixed(1)} GB  —  ${level}`
-            + `\nzram: ${m.zram_used.toFixed(2)} GB used, ${m.zram_saved.toFixed(2)} GB saved by compression`;
+            + `\nzram: ${m.zram_used.toFixed(2)} GB used, ${m.zram_saved.toFixed(2)} GB saved by compression`
+            + `\n${modelLine}`
+            + `\ncap: ${capped ? `ACTIVE — ${cfg.tabCap} tabs max` : 'not in force'}`;
   } catch (e) {
     ramLine = 'luminos-ram: not reachable on 127.0.0.1:9091 '
             + '— aggressive mode still works, it just will not escalate.';

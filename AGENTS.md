@@ -348,6 +348,8 @@ luminos-brain safe "<action>"
 | `~/.config/kwinoutputconfig.json` | `sharpness: 0.35`, `vrrPolicy: "Never"` | Intentional display tuning. |
 | `~/.local/share/applications/google-chrome.desktop` | Routes all Chrome launches through `chrome-luminos`. | AUR entry bypassed GPU picker. |
 | `~/.local/share/kio/servicemenus/luminos-gpu-*.desktop` | Dolphin right-click GPU picker for executables and .desktop files. | Universal GPU launcher (Decision 16). |
+| `/usr/local/bin/luminos-ram` (rebuilt + reinstalled 2026-08-11 21:19) | DECISION 66. Adds two things to the daemon and **changes nothing about the memory algorithm**: `/meminfo` now also carries `model_running`/`model_name`/`model_rss_gb` from a cached `/proc/*/cmdline` scan (0.2 GB RSS floor), and a new `/tabs` endpoint that is a one-report **mailbox** for the Chrome tab sleeper — never read by the LIRS ranking or the `madvise` path. Tests: `cd cmd/luminos-ram && go test ./...` (8 tests, 7 negative). Rebuild: `go build -o /tmp/luminos-ram ./cmd/luminos-ram && sudo install -m 755 /tmp/luminos-ram /usr/local/bin/luminos-ram && sudo systemctl restart luminos-ram`. **The daemon sleeps 30 s before it starts listening** — curl exits 7 until then, which is not a failure. | Revert: `sudo install -m 755 ~/.luminos-backups/luminos-ram.bak-pre-tabs-20260811-211949 /usr/local/bin/luminos-ram && sudo systemctl restart luminos-ram`. [CHANGE: claude-code \| 2026-08-11] |
+| `/usr/local/bin/luminos-tabs` | DECISION 66. Read-only readout answering "is that tab actually asleep?" — the extension's own report next to what `/proc` shows. Source: `scripts/luminos-tabs`. | New file, no revert needed beyond `sudo rm`. [CHANGE: claude-code \| 2026-08-11] |
 | `/etc/systemd/system/luminos-{ai,power,router,sentinel,ram}.service` | `RuntimeDirectoryPreserve=yes` on all five (shared `/run/luminos` no longer wiped when one daemon restarts). luminos-ram: + `RuntimeDirectory=luminos` (was undeclared) + caps `CAP_SYS_PTRACE CAP_SYS_NICE CAP_KILL` (process_madvise/kill/setpriority were EPERM). | BUG-065/066/067. ✅ Active since one-time restart 2026-06-12 (post-HOPE-training). |
 | `/etc/sddm.conf.d/{luminos,hidpi,kde_settings}.conf` (`Current=breeze`) + `/usr/share/sddm/themes/breeze/theme.conf.user` (`background=…/Sugar-Candy/Backgrounds/Mountain.jpg`) | SDDM login theme switched Sugar-Candy → **Breeze** to match the KDE lock screen (same Breeze widgets + same Mountain wallpaper the lock screen uses). All conf.d files consolidated to `breeze`. Backup: `/etc/sddm-luminos.conf.bak-20260722` (moved OUT of conf.d). | DECISION 28. Reason: user wanted the login screen to match the lock screen ("use the KDE theme everywhere"). Lock screen can't load an SDDM theme, so the match was made by moving SDDM to Breeze. Revert: set `Current=Sugar-Candy` in luminos.conf. [CHANGE: claude-code \| 2026-07-22] |
 | `/etc/NetworkManager/conf.d/dns-systemd-resolved.conf` + `/etc/resolv.conf` (→ symlink to `/run/systemd/resolve/stub-resolv.conf`, nameserver `127.0.0.53`) | Enables `systemd-resolved` as a **local caching DNS resolver**; NM hands upstream DNS (`192.168.2.1`) to resolved. Gives Windows-parity DNS caching (repeat lookups <1 ms, persistent). Backup: `/etc/resolv.conf.bak-20260722`. | DECISION 27. Reason: no local DNS cache made every new domain a 30–50 ms round-trip → "new pages load slower than Windows" (Chrome fix #3). Revert: rm the NM drop-in + `systemctl disable --now systemd-resolved` + restore resolv.conf from backup + restart NM. [CHANGE: claude-code \| 2026-07-22] |
@@ -371,7 +373,7 @@ luminos-brain safe "<action>"
 | `cmd/luminos-power/main.go` | EPP thermal, fan curve v5, beast mode, AC/battery |
 | `cmd/luminos-sentinel/main.go` | Process security — CAP_SYS_PTRACE, /proc scan |
 | `cmd/luminos-router/main.go` | .exe classifier — 80% rules + 20% ONNX fallback |
-| `cmd/luminos-ram/main.go` | v3.0 — LIRS IRR, HotSet N=8, OnScreen guard, KWin D-Bus |
+| `cmd/luminos-ram/main.go` | v3.6 — LIRS IRR, HotSet N=8, OnScreen guard, KWin D-Bus. + `detectModel()` and the `/tabs` mailbox (DECISION 66); tests in `cmd/luminos-ram/tabs_test.go` |
 
 ### HIVE
 | Path | Description |
@@ -396,6 +398,7 @@ luminos-brain safe "<action>"
 |--------|-------------|
 | `scripts/luminos-notes.sh` | SQLite knowledge base |
 | `scripts/luminos-monitor` | System monitor v1.3: btop/nvtop/snapshot/watch/stats. dGPU sleep-guard (BUG-078) — reads runtime_status before nvidia-smi, never wakes a suspended GPU. `stats` = KEY=VALUE feed for monitorwidget. Meta+M/Ctrl+M → `watch` (was konsole+btop) |
+| `scripts/luminos-tabs` | DECISION 66. "Is that Chrome tab actually asleep?" — prints the tab sleeper extension's own sweep report **next to** what `/proc` independently shows, because when the two disagree that disagreement is the finding. Says **NEVER REPORTED** or **STALE** in as many words rather than printing a comfortable zero. Two traps it exists to avoid: `pgrep -f "type=renderer"` matches every Chromium app on the box (filter on `readlink /proc/<pid>/exe`), and summing **RSS** across Chrome renderers double-counts shared libraries — 528 MB claimed vs 195 MB real here, so it sums **PSS**. `-w` watch, `-j` JSON. [CHANGE: claude-code \| 2026-08-11] |
 | `scripts/luminos-display-hz` | Hz settings dialog (kdialog) |
 | `scripts/luminos-60hz` / `luminos-120hz` | Direct Hz switch |
 | `scripts/luminos-gpu-launch` | Single GPU launcher: styled QML picker, wakes NVIDIA PCI gate inline, routes NVIDIA via dgpu-exec gate (DECISION 25) |
@@ -515,11 +518,18 @@ Task: [what was asked]" && git push origin main
     Known gaps accepted for now: empty workspace pills, active window reads "Desktop", no
     idle screen-off, no lock screen (KWin has no `ext-session-lock-v1`), KWin titlebars.
     [CHANGE: claude-code | 2026-08-11]
-0e. **Tab sleeper — needs one manual install (DECISION 65).** `scripts/chrome-tab-sleeper` v2.0 is
-    written, tested and measured, but **Shawn has to load it himself**: `chrome://extensions` →
-    Developer mode → **Load unpacked** → that folder. Chrome 137+ disabled `--load-extension`, so
-    no script can do it. While there, turn OFF Memory Saver in `chrome://settings/performance` —
-    `chrome-luminos` enables it and two systems would be deciding about the same tabs.
+0e. **Tab sleeper v3.0 — needs ONE CLICK from Shawn (DECISION 65 + 66).** v2.0 is installed and
+    running. v3.0 is on disk, tested and deployed, but **Chrome does not auto-reload unpacked
+    extensions**, so the live worker is still v2.0 and the 2-tab cap is not in force yet.
+    Fix: `chrome://extensions` → Luminos Tab Sleeper → **Reload**. No script can do it — Chrome
+    137+ disabled `--load-extension`. Verify with **`luminos-tabs`**: it reads `NEVER REPORTED`
+    until v3.0 runs, then shows live counts. While there, turn OFF Memory Saver in
+    `chrome://settings/performance` — `chrome-luminos` enables it and two systems would be
+    deciding about the same tabs.
+    ⚠️ **The 2-tab cap is an admitted haste decision**: it counts tabs, not megabytes, and ignores
+    `model_rss_gb` even though the daemon publishes it. DECISION 66 §"What is dumb about this, and
+    what smart looks like" lists the six specific things to fix. **Making it measurement-driven is
+    the actual follow-up task** — do not treat the current version as settled.
     Related: **BUG-118** left deliberately unrepaired — `luminos-ram` still logs
     `Chrome CDP unavailable (port 9222)` every 60 s and still calls `luminos-brain log` each time,
     which is junk in the brain log. Muting it is one line in `cmd/luminos-ram/main.go:305`, but

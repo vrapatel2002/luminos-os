@@ -73,15 +73,32 @@ last 24 h alone), because Chrome 136+ refuses `--remote-debugging-port` on the d
 `manageChromeMemory()`/`discardBrowserTabs()` are unreachable code. **No tab has ever been
 discarded by luminos-ram.**
 
-Browser tabs are now the job of **`scripts/chrome-tab-sleeper` v2.0**, a Chrome MV3 extension that
+Browser tabs are now the job of **`scripts/chrome-tab-sleeper` v3.0**, a Chrome MV3 extension that
 uses `chrome.tabs.discard()` from inside the browser. It is aggressive by default — only the tab on
 screen stays resident — and it reads pressure from **this daemon's own `/meminfo`** on `:9091`,
 so both halves of memory management agree on one number.
 
-The daemon's only obligation to it is to keep serving `effective_available` on `/meminfo`. There is
-no callback, no socket, and no CORS header: the extension declares `host_permissions` for
+**The daemon owes the extension exactly two things** (DECISION 66), and nothing else:
+
+1. **`/meminfo`** — `effective_available` as before, plus `model_running` / `model_name` /
+   `model_rss_gb`. `detectModel()` scans `/proc/*/cmdline` (cached 5 s) for `llama-server`,
+   `llama_cpp.server`, `llama-cli`, `.gguf`, `moe-server.py`, `luminos_moe_offload.py`, and requires
+   **≥ 0.2 GB RSS** before believing it. When `model_running` is true the extension caps Chrome at
+   **2 live tabs**.
+   > Do **not** rewire this to `offload_reserved_gb`. That field looks right and is always `0` —
+   > nothing in `hive-daemon.py` ever calls the reserve path, so the cap would be dead code that
+   > tests green. Do not rewire it to `pgrep -f` either: that matches the `pgrep` itself.
+2. **`/tabs`** — a **mailbox, and nothing more**. The extension POSTs a one-line summary of each
+   sweep; `luminos-tabs` GETs it back. It holds one report in memory, the daemon stamps the
+   timestamp server-side so a client cannot backdate it, and **it is never consulted by the LIRS
+   ranking or the `madvise` path**. Losing it costs visibility only. It exists because an extension
+   cannot write a file, and without it the only evidence a sweep was running was TCP byte counters
+   on the extension's `/meminfo` socket — which says nothing about whether `discard()` succeeded.
+
+There is no callback and no CORS header: the extension declares `host_permissions` for
 `127.0.0.1:9091` and polls every 20 s. **If this daemon is down the extension keeps sleeping tabs**
-and simply stops escalating.
+and simply stops escalating — including the 30 s at every restart when this daemon is deliberately
+not yet listening.
 
 Note that Chrome renderers are still touched by the generic `MADV_PAGEOUT` path as ordinary
 processes. That pushes them into zram; a discard frees them outright. The two are complementary,

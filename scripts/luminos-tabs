@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-08-11] DECISION 66 — v1.0
+#
+# "Is that tab actually asleep?" — answered from outside the browser.
+#
+# There are two independent halves here on purpose, and they are printed separately
+# because when they disagree that disagreement IS the finding:
+#
+#   1. What the extension SAYS   — the sweep summary it POSTs to luminos-ram on :9091
+#   2. What the kernel SHOWS     — real memory held by Chrome's page renderers, /proc
+#
+# Half 1 alone can lie (an extension that thinks it discarded a tab Chrome refused to
+# discard). Half 2 alone cannot name tabs. Together they are conclusive.
+#
+# Design note: "reachable" is never reported as "working". If the extension has never
+# reported, this says so in as many words rather than printing a comfortable zero.
+
+set -uo pipefail
+
+RAM_URL=${RAM_URL:-http://127.0.0.1:9091}
+CHROME_EXE_MATCH=${CHROME_EXE_MATCH:-/opt/google/chrome}
+
+# The extension's badge counts tabs; this counts processes. They are not the same
+# number and never will be: Chrome gives cross-site iframes their own renderer, so
+# one tab can be several processes. Counting `--type=renderer` without this filter
+# also sweeps in every other Electron app on the box — Claude Desktop and friends —
+# which once produced 9 renderers / 1266 MB when Chrome's real share was 5 / 499 MB.
+scan_renderers() {
+  local pid exe cmd rss pss total_rss=0 total_pss=0 n=0
+  for pid in $(pgrep -f -- '--type=renderer' 2>/dev/null); do
+    exe=$(readlink "/proc/$pid/exe" 2>/dev/null) || continue
+    [[ "$exe" == "$CHROME_EXE_MATCH"* ]] || continue
+    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || continue
+    # Extension processes are renderers too, but they are not pages and never sleep.
+    [[ "$cmd" == *"--extension-process"* ]] && continue
+
+    rss=$(awk '/^VmRSS:/{print $2}' "/proc/$pid/status" 2>/dev/null)
+    [[ -n "$rss" ]] || continue
+    # PSS divides shared pages by the number of sharers, so summing it across Chrome's
+    # renderers does not count the same shared libraries five times. RSS does, and
+    # overstates the total badly. Fall back to RSS only if the kernel will not say.
+    pss=$(awk '/^Pss:/{print $2}' "/proc/$pid/smaps_rollup" 2>/dev/null)
+    [[ -n "$pss" ]] || pss=$rss
+
+    total_rss=$((total_rss + rss))
+    total_pss=$((total_pss + pss))
+    n=$((n + 1))
+  done
+  echo "$n $total_rss $total_pss"
+}
+
+fmt_mb() { awk -v k="$1" 'BEGIN{printf "%.0f MB", k/1024}'; }
+
+hr() { printf '%s\n' '────────────────────────────────────────────────────────────'; }
+
+report() {
+  local body meminfo
+  body=$(curl -sf --max-time 2 "$RAM_URL/tabs" 2>/dev/null)
+  meminfo=$(curl -sf --max-time 2 "$RAM_URL/meminfo" 2>/dev/null)
+
+  hr
+  echo "  LUMINOS TAB SLEEPER"
+  hr
+
+  # ---- half 1: what the extension says --------------------------------
+  if [[ -z "$body" ]]; then
+    echo "  extension report : luminos-ram is NOT ANSWERING on ${RAM_URL}"
+    echo "                     (systemctl status luminos-ram — note it waits 30s after start)"
+  elif [[ "$(jq -r '.reported' <<<"$body")" != "true" ]]; then
+    echo "  extension report : NEVER REPORTED"
+    echo "                     The daemon is up but the Chrome extension has not POSTed once."
+    echo "                     Either it is not loaded, or it is loaded but has not swept yet"
+    echo "                     (it sweeps every 30s, and MV3 wakes it on tab events)."
+    echo "                     Check: chrome://extensions → Luminos Tab Sleeper → service worker"
+  else
+    local age asleep awakec disc level model cap free stale
+    age=$(jq -r '.report.age_seconds'  <<<"$body")
+    asleep=$(jq -r '.report.asleep'    <<<"$body")
+    awakec=$(jq -r '.report.awake'     <<<"$body")
+    disc=$(jq -r '.report.discarded'   <<<"$body")
+    level=$(jq -r '.report.level'      <<<"$body")
+    model=$(jq -r '.report.model'      <<<"$body")
+    cap=$(jq -r '.report.cap'          <<<"$body")
+    free=$(jq -r '.report.free_gb'     <<<"$body")
+
+    # A sweep runs at least every 30 s. Anything much older means the extension has
+    # stopped, and a stale count is exactly the thing this tool exists to catch.
+    stale=$(awk -v a="$age" 'BEGIN{print (a > 90) ? "STALE" : "fresh"}')
+    printf '  extension report : %s tabs asleep, %s awake  (%s, %.0fs old)\n' \
+      "$asleep" "$awakec" "$stale" "$age"
+    printf '  last sweep       : discarded %s tab(s)\n' "$disc"
+    if [[ "$cap" != "0" ]]; then
+      printf '  cap              : ACTIVE — %s tabs max' "$cap"
+      [[ "$model" == "true" ]] && printf ' (a model is loaded)' || printf ' (memory pressure)'
+      printf '\n'
+    else
+      echo   "  cap              : not in force"
+    fi
+    printf '  memory level     : %s, %.2f GB effectively free\n' "$level" "$free"
+    if [[ "$stale" == "STALE" ]]; then
+      echo "  ⚠  that report is over 90s old — the extension has probably stopped sweeping."
+    fi
+  fi
+
+  # ---- half 2: what the kernel shows ----------------------------------
+  hr
+  read -r n rss pss < <(scan_renderers)
+  if [[ "$n" == "0" ]]; then
+    echo "  chrome renderers : none — Chrome is not running, or every tab is asleep"
+  else
+    printf '  chrome renderers : %s page process(es) holding %s\n' "$n" "$(fmt_mb "$pss")"
+    printf '                     (%s counted the naive way, which double-counts shared pages)\n' "$(fmt_mb "$rss")"
+    printf '                     ~%s per process\n' "$(fmt_mb $((pss / n)))"
+  fi
+
+  # ---- the model, since it is the reason the cap exists ---------------
+  if [[ -n "$meminfo" ]]; then
+    hr
+    if [[ "$(jq -r '.model_running' <<<"$meminfo")" == "true" ]]; then
+      printf '  model            : %s holding %.2f GB — cap should be ACTIVE\n' \
+        "$(jq -r '.model_name' <<<"$meminfo")" "$(jq -r '.model_rss_gb' <<<"$meminfo")"
+    else
+      echo   "  model            : none loaded"
+    fi
+  fi
+
+  # ---- the one comparison worth making --------------------------------
+  # A sleeping tab has no renderer. If the extension claims tabs are asleep but the
+  # process count has not come down, its discard() calls are being refused.
+  if [[ -n "$body" && "$(jq -r '.reported' <<<"$body")" == "true" && "$n" != "0" ]]; then
+    local awakec cap
+    awakec=$(jq -r '.report.awake' <<<"$body")
+    cap=$(jq -r '.report.cap' <<<"$body")
+    if [[ "$cap" != "0" && "$awakec" -gt "$cap" ]]; then
+      hr
+      echo "  ⚠  the extension reports $awakec tabs awake under a cap of $cap."
+      echo "     Chrome is refusing some discard() calls. Open chrome://discards to see why."
+    fi
+  fi
+  hr
+}
+
+case "${1:-}" in
+  -w|--watch) while :; do clear; report; sleep "${2:-5}"; done ;;
+  -j|--json)  curl -sf --max-time 2 "$RAM_URL/tabs" || { echo '{"error":"daemon unreachable"}'; exit 1; } ;;
+  -h|--help)
+    echo "usage: luminos-tabs [-w|--watch [seconds]] [-j|--json]"
+    echo "  Shows what the Chrome tab sleeper says it did, next to what the kernel shows."
+    ;;
+  *) report ;;
+esac

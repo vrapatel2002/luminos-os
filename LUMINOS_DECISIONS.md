@@ -3029,3 +3029,162 @@ typed page and an untouched page under identical conditions gave `typed: false` 
   Chromium, which is how this was tested (Chromium 151 loaded it as `hgfbdcgceicmkinniepllkoajkdjjiji`,
   which also proves the manifest is valid). On Chrome the only route is
   `chrome://extensions` → Developer mode → **Load unpacked**.
+
+## DECISION 66 — While a model is loaded, Chrome gets a hard two-tab budget; and the sleeper now reports its work to the daemon so it can be checked from outside the browser
+# [CHANGE: claude-code | 2026-08-11]
+
+> ⚠️ **This is a haste decision and it is written down as one.** The cap counts tabs,
+> not megabytes. It is deliberately blunt, it was built to be provably correct in a
+> single pass, and it is *not* the right long-term design. The section
+> **"What is dumb about this, and what smart looks like"** at the end says exactly what
+> to fix. Do not treat this as settled architecture.
+
+**Decision, in one line.** When an AI model is resident in RAM, only **2 Chrome tabs** stay in
+memory — the one you are looking at and one playing audio — and everything the extension does is
+now POSTed to `luminos-ram` so `luminos-tabs` can show whether it really happened.
+
+This extends DECISION 65. Everything there still holds; this adds a second, harder mode on top.
+
+### The two problems this solves
+
+1. **A model and a browser were competing for the same 15.6 GB with no arbiter.** DECISION 65's
+   ladder reacts to pressure *after* free memory has already fallen. Loading an 8B Q4 model takes
+   ~5 GB in one step, faster than a 20-second poll and a 10-second grace can respond.
+2. **Nothing outside Chrome could tell whether a tab was actually asleep.** The only proof
+   available was reading TCP byte counters on the extension's `/meminfo` socket to infer that
+   *some* loop was running — which says nothing about whether `discard()` succeeded. That is not a
+   way to run a system.
+
+### How it works, end to end
+
+```
+  /proc scan                    HTTP GET /meminfo            HTTP POST /tabs
+ ┌────────────┐   model_running  ┌──────────────┐   sweep    ┌──────────────┐
+ │ luminos-ram│ ───────────────► │ background.js│ ─────────► │ luminos-ram  │
+ │  (daemon)  │                  │ (MV3 worker) │  summary   │  /tabs mailbox│
+ └────────────┘                  └──────────────┘            └──────┬───────┘
+                                        │                           │ GET
+                                 chrome.tabs.discard()              ▼
+                                                              `luminos-tabs`
+```
+
+**1. The daemon learns a model is loaded.** `detectModel()` in `cmd/luminos-ram/main.go` scans
+`/proc/*/cmdline` every 5 s (cached) for `llama-server`, `llama_cpp.server`, `llama-cli`, `.gguf`,
+`moe-server.py` or `luminos_moe_offload.py`, and requires **≥ 0.2 GB RSS** before believing it.
+Three new fields appear on `/meminfo`: `model_running`, `model_name`, `model_rss_gb`.
+
+> **Why a `/proc` scan and not the obvious thing.** The obvious thing was
+> `offload_reserved_gb`, which already existed on `/meminfo`. Grepping `scripts/hive-daemon.py`
+> showed **nothing ever calls the reserve path**, so that field is `0` for every HIVE model and the
+> whole cap would have been dead code that tested green. The second obvious thing was
+> `pgrep -f llama` — which matches the `pgrep` process itself and any agent shell with the word on
+> its command line. Reading `/proc` directly is the only version that does not lie. The RSS floor
+> is what separates *"a model is loaded"* from *"something mentions a model"*.
+
+**2. The extension switches from exemptions to a budget.** This is the real change. Below the cap,
+`mayDiscard()` asks of each tab *"may this one go?"* — which can never enforce a total, because
+every tab can answer "no" independently. Under the cap, `pickKeepers()` instead chooses the few
+that **stay** and everything else goes. Slots are filled in this order:
+
+| # | Slot | Notes |
+|---|---|---|
+| — | *"Never sleep this tab"* | Kept, and **does not consume a slot** — otherwise ticking it on three tabs would silently evict the tab you are reading |
+| 1 | The tab you are looking at | Skipped once you have left Chrome for `awaySeconds` |
+| 2 | One tab playing audio | The background-music slot. More noise than slots → the most recently opened survives |
+| 3+ | Most recently used | Only if `tabCap` is raised above 2 |
+
+Under the cap there is **no grace period and no pinned/typed-into exemption**. Those exist to make
+normal browsing pleasant; when a model is holding 5 GB they are the wrong trade.
+
+**3. "If I am not using any tab, all tabs sleep."** Asked for directly. Implemented as: Chrome
+unfocused for `awaySeconds` (default **60**) → the active-tab slot is skipped too, so only audio
+and opted-out tabs remain. The delay exists because without it, glancing at a terminal for ten
+seconds blanks the page you were reading. Focus is read directly from
+`chrome.windows.getLastFocused().focused` on every sweep rather than tracked through
+`onFocusChanged` events — the MV3 worker dies between those events and would come back believing
+whatever it last saw. The away clock lives in `chrome.storage.session` for the same reason.
+
+**4. The sweep reports itself.** After every sweep the extension POSTs
+`{asleep, awake, discarded, level, model, cap, free_gb}` to `http://127.0.0.1:9091/tabs`. The
+daemon stamps it with a server-side timestamp — a client cannot backdate it — and serves it back
+with an `age_seconds`. It holds exactly one report in memory. It is **never consulted by the LIRS
+ranking or the `madvise` path**; losing it costs visibility and nothing else. A failed POST never
+interrupts a sweep, because the sweep is the half that actually saves memory.
+
+**Why `:9091` and not a file:** an extension cannot write a file, and the extension already holds
+`host_permissions` for `127.0.0.1:9091`. Any other port needs a new permission and a fresh install
+prompt. No new attack surface: the port was already open and already listening on loopback only.
+
+**5. `luminos-tabs` reads it back — and does not trust it.** The readout prints two independent
+halves, because *when they disagree, the disagreement is the finding*:
+
+- **What the extension says** — the report, flagged **STALE** past 90 s (a sweep runs at least
+  every 30 s, so a stale count is exactly what this tool exists to catch), or **NEVER REPORTED**
+  in as many words if it has not POSTed once. A comfortable zero is never printed in place of
+  "I do not know".
+- **What the kernel shows** — Chrome page renderers from `/proc`, summed by **PSS**, not RSS.
+
+If the extension claims more tabs awake than the cap allows, `luminos-tabs` says outright that
+Chrome is refusing `discard()` calls and points at `chrome://discards`.
+
+> **Two measurement traps baked into that script.** (a) `pgrep -f "type=renderer"` matches **every**
+> Chromium-based app on the box — it once reported 9 renderers / 1266 MB when Chrome's real share
+> was 5 / 499 MB, with three of the counted processes having started *before* Chrome did. It filters
+> on `readlink /proc/<pid>/exe`. (b) Summing **RSS** across Chrome's renderers counts the same
+> shared libraries once per process: on this machine that is **528 MB claimed vs 195 MB real**.
+> PSS divides shared pages by the number of sharers, so it sums honestly.
+
+### How it was proven
+
+- **Go side:** 8 unit tests in `cmd/luminos-ram/tabs_test.go`, all but one a negative test — garbage
+  is rejected *without clobbering the last good report*, oversized bodies are cut off by
+  `MaxBytesReader`, never-reported is distinguishable from reported-zero, the model cache expires,
+  and `detectModel()` both **fires** on a real `/proc` process holding `.gguf` and **does not fire**
+  on the test binary itself.
+- **Extension side:** `scripts/chrome-tab-sleeper/test-policy.js` (`node test-policy.js`) loads the
+  **real `background.js`** — not a copy, so it cannot drift — against a stubbed Chrome. 22 checks
+  covering the cap, the audio slot, three-tabs-making-noise, the away rule and its grace, returning
+  to Chrome, opted-out tabs not consuming slots, the uncapped path still honouring its grace, and
+  the daemon being down. The stub **throws if the visible active tab is ever handed to
+  `discard()`**, which would otherwise surface only as a console warning nobody reads.
+- **The test was negative-tested, twice.** Setting `tabCap: 99` produced 8 failures; removing the
+  `if (!chromeAway)` guard produced exactly the 2 failures for the away rule. A green test that has
+  never been made to go red is not evidence.
+- **On the wire:** `node test-policy.js --live` sends the reports the extension really emits to the
+  running daemon and reads the mailbox back, which is the only check that the bytes `background.js`
+  produces are the bytes the Go handler accepts.
+
+### What is dumb about this, and what smart looks like
+
+Stated plainly so nobody mistakes it for a considered design:
+
+1. **It counts tabs, not memory.** The third tab sleeps whether it holds 8 MB or 800 MB. Measured
+   spread on this machine is **8 MB to 190 MB**, so the cap can evict four cheap tabs and free less
+   than one expensive one. *Smart:* rank live tabs by real per-renderer PSS and free only the
+   shortfall.
+2. **It does not know what the model needs.** `model_rss_gb` is already published and is ignored by
+   the policy. A 1.4 GB MoE gets the same cap as an 8B Q4 holding 5 GB. *Smart:* target
+   `effective_available ≥ model_rss_gb + headroom` and stop discarding once it is met.
+3. **The cap is a constant, not a budget.** *Smart:* derive the tab count from free memory.
+4. **One tab ≠ one renderer.** Chrome gives cross-site iframes their own processes, so sleeping a
+   tab can free anywhere from one process to five. The policy is blind to this.
+5. **`awaySeconds` is a fixed 60 s** rather than anything to do with actual idleness.
+   `chrome.idle` exists and is not used.
+6. **The mailbox holds one report, in memory.** A daemon restart erases it, and there is no history
+   to answer "was the cap holding an hour ago?".
+
+The honest summary: this is a **correct, testable, blunt instrument** that does what was asked and
+can be watched doing it. The measured version is a strictly better design and is not built.
+
+### Accepted costs
+
+- **A capped tab that comes back is a blank page that must reload.** Under the cap this happens more
+  often, including to the tab you were reading if you leave Chrome for a minute. Judged worth it
+  *only while a model is loaded* — which is why it is not the default.
+- **Audio can be killed.** With `audioSlots: 1` and three tabs making noise, two go silent. This is
+  the literal instruction ("one background music"), and the survivor is the most recently opened.
+- **`DEFAULTS` is duplicated** between `background.js` and `options.js` and nothing enforces the
+  match. Adding a key to one and not the other fails silently.
+- **Reloading the extension is a manual click.** Chrome does not auto-reload unpacked extensions and
+  Chrome 137+ removed `--load-extension`. Verified: after writing v3.0 to disk the daemon still
+  showed `NEVER REPORTED` 70 s later, because the running worker was still v2.0.
