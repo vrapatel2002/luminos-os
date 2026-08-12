@@ -2304,3 +2304,46 @@ widget reads. See DECISION 65.
 **Left in place on purpose:** the Go code and the 60s log line. Ripping out `manageChromeMemory()`
 touches `cmd/` (AGENTS.md §11, "only when explicitly instructed") and the log line is now the honest
 statement of a known-dead path. Muting it is a one-line change whenever Shawn wants it.
+
+## BUG-119 — a model offload took the whole machine down with 8 GB of swap sitting free
+**Status: FIXED 2026-08-07** · `scripts/jobhunt/llm-server.sh`, `scripts/luminos_moe_offload.py`
+
+Loading the 26B MoE with its experts offloaded to system RAM produced a **kernel panic**, not an
+OOM kill:
+
+```
+unevictable:14512768kB   mlocked:12347344kB
+Free swap  = 8041640kB        <-- 8 GB of spill space, never touched
+Out of memory and no killable processes...
+Kernel panic - not syncing: System is deadlocked on memory
+```
+
+Two separate faults, and it is worth keeping them apart.
+
+**The architectural one.** llama.cpp hands CPU-side offloaded weights to CUDA as **pinned**
+(page-locked) host memory via `cudaHostRegister`, so the GPU can DMA them across PCIe without a
+bounce buffer. Pinned pages cannot be swapped or evicted, ever. That silently deletes the bottom
+tier of this box's VRAM → RAM → NVMe hierarchy: for those weights RAM stops being a spill point
+and becomes a hard wall. 14.5 GB of the machine's 15.3 GiB was locked down while a full 8 GB of
+swap sat untouched, because not one page was legally movable.
+
+Fixed with `GGML_CUDA_NO_PINNED=1`, confirmed present in the `venv-jobhunt` build. Weights become
+ordinary pageable memory; transfers cost more, the machine survives. Verified by measurement, not
+assertion — `Unevictable` held at **3 MB** through a full load, against **14.5 GB** before.
+
+**The self-inflicted one.** The process had been OOM-killed twice, so it was given
+`oom_score_adj = -1000` to stop that. That is what turned a survivable kill into a panic: the
+kernel went looking for something to kill and found every candidate protected. The OOM kills were
+the *diagnosis* — a model that did not fit — and disabling the safety net treated them as the
+obstacle. **Never do this.** Same reasoning applies to `earlyoom`'s exempt regex.
+
+**The third failure, once the first two were fixed.** With paging working, `earlyoom` SIGTERMs the
+largest process at *mem avail ≤5% AND swap free ≤90%*, killing the model at 12.4 GB RSS. It leaves
+**no traceback and nothing in the process's own log**, so it reads as a crash inside llama.cpp. It
+is not. Check `journalctl -u earlyoom` before debugging the library.
+
+**Root cause under all three: the file was too big.** `Q4_K_XL` is 15.84 GiB and needs ~12.4 GB
+resident. `IQ4_XS` is 12.66 GiB and needs ~8.2 GB, which coexists with a browser. See DECISION 67.
+
+**Guard added:** `llm-server.sh` now refuses to start when the model exceeds free RAM + swap, and
+prints the shortfall instead of taking the box down.

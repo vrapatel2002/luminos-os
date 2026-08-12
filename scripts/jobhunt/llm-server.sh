@@ -23,7 +23,22 @@ MODELS="$HOME/.local/share/luminos/models/hive"
 # fails on a 958 MiB compute buffer). The 4B reaches 24576. The 7B is still the
 # better writer — keep it for single-shot resume tailoring in Phase 3, where the
 # prompt is one job posting and 4096 is plenty.
-MODEL="${LLM_MODEL:-$MODELS/Qwen3-4B-Instruct-2507-Q4_K_M.gguf}"
+# [CHANGE: claude-code | 2026-08-07] With LLM_MOE=1 the default becomes the 26B MoE,
+# and specifically the IQ4_XS quant — NOT the Q4_K_XL that was downloaded first.
+# Measured head-to-head, keep=3, 1947-token prompt + 200 generated:
+#   IQ4_XS  12.66 GiB   4588 MiB VRAM   8.2 GB RAM   206 t/s read  17.5 t/s write  21.0 s  loads in 15 s
+#   Q4_K_XL 15.84 GiB   4918 MiB VRAM  12.4 GB RAM   134 t/s read  22.3 t/s write  23.6 s  loads in 8+ min
+# IQ4_XS is faster overall and leaves 4.2 GB more RAM, which is the whole point: the
+# Q4_K_XL needs ~12.4 GB resident and cannot coexist with a browser on a 15.3 GiB box.
+# It writes ~22% slower because IQ quants decode through a codebook and the experts
+# run on the CPU during generation — that is the trade being made on purpose.
+# Q5/Q6/Q8 of this model are 19.7/21.6/25.0 GiB and are not runnable here at all,
+# so IQ4_XS is the quality ceiling, not a compromise pick.
+if [ "${LLM_MOE:-0}" = "1" ]; then
+  MODEL="${LLM_MODEL:-$MODELS/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf}"
+else
+  MODEL="${LLM_MODEL:-$MODELS/Qwen3-4B-Instruct-2507-Q4_K_M.gguf}"
+fi
 HOST=127.0.0.1
 PORT="${LLM_PORT:-8081}"
 # 24576 is chosen against the VRAM ceiling, not picked round: it measures 4606 MiB
@@ -68,6 +83,23 @@ ALIAS="${LLM_ALIAS:-luminos-local}"
 # 5.5k tokens, because the cache is re-read on every token. Drop a layer instead.
 NGL="${LLM_NGL:--1}"
 
+# [CHANGE: claude-code | 2026-08-07] MoE path. Set LLM_MOE=1 to serve a
+# mixture-of-experts model whose weights do not fit on the card, by pinning the
+# expert banks to system RAM (DECISION 58, scripts/luminos_moe_offload.py).
+#
+# This is NOT a general "make big models fit" switch — it only helps MoE, because
+# only MoE has weights that are idle on most tokens. Turning it on for a DENSE model
+# does nothing (no tensor matches `_exps.`) and the model will simply fail to load.
+#
+# Measured 2026-08-07, gemma-4-26b-a4b, 1947-token prompt + 200 generated:
+#   LLM_MOE_KEEP=0 -> 3556 MiB, 72.2 t/s read, 17.21 t/s write, 38.73 s
+#   LLM_MOE_KEEP=3 -> 4918 MiB, 134.5 t/s read, 22.31 t/s write, 23.60 s  <- default
+#   LLM_MOE_KEEP=4 -> 5372 MiB, 121.2 t/s read, 22.92 t/s write, 24.95 s
+#   LLM_MOE_KEEP=5 -> OOM
+# Note 4 is WORSE than 3 despite holding more on the card. Not monotonic — if you
+# swap models, re-measure rather than assuming the number carries over.
+MOE="${LLM_MOE:-0}"
+
 [ -x "$VENV/bin/python" ] || { echo "FAIL: $VENV missing — run build-cuda-venv.sh"; exit 1; }
 [ -f "$MODEL" ] || { echo "FAIL: model not found: $MODEL"; exit 1; }
 
@@ -94,8 +126,55 @@ fi
 FORMAT_ARGS=()
 [ -n "$CHAT_FORMAT" ] && FORMAT_ARGS=(--chat_format "$CHAT_FORMAT")
 
+# The MoE launcher takes the SAME arguments — it only patches how the model loads.
+# It also forces n_gpu_layers to ALL, deliberately: the expert override is
+# subtractive, so every layer must start on the card for it to subtract from.
+ENTRY=(-m llama_cpp.server)
+MOE_ENV=()
+if [ "$MOE" = "1" ]; then
+  ENTRY=("$(dirname "$(readlink -f "$0")")/moe-server.py")
+  NGL=-1
+
+  # GGML_CUDA_NO_PINNED=1 IS LOAD-BEARING AND COST A KERNEL PANIC TO LEARN.
+  # [CHANGE: claude-code | 2026-08-07] BUG-111.
+  #
+  # llama.cpp hands CPU-side offloaded weights to CUDA as PINNED (page-locked)
+  # host memory via cudaHostRegister, because pinned pages can be DMA'd across
+  # PCIe without a bounce buffer. Pinned pages are also, by definition,
+  # UNEVICTABLE AND UNSWAPPABLE.
+  #
+  # That silently deletes the bottom tier of this box's memory hierarchy. The
+  # design is VRAM -> RAM -> NVMe; pinning turns RAM into a hard wall instead of
+  # a spill point. The panic dump is unambiguous:
+  #     unevictable:14512768kB   mlocked:12347344kB
+  #     Free swap = 8041640kB        <-- 8 GB of spill space, untouched
+  #     Out of memory and no killable processes... Kernel panic
+  # Eight gigabytes of swap sat free while the machine starved, because not one
+  # page of the model was legally movable.
+  #
+  # With this unset the ONLY symptom is the process being OOM-killed mid-load
+  # with no error in its own log -- it looks like a crash in llama.cpp. It is not.
+  MOE_ENV=(GGML_CUDA_NO_PINNED=1)
+  echo "MoE mode: expert banks -> system RAM (keep=${LLM_MOE_KEEP:-3} layers on GPU)"
+  echo "MoE mode: pinned host memory DISABLED so RAM can spill to swap/NVMe"
+
+  # A model whose CPU-side half exceeds free RAM + swap cannot be rescued by
+  # paging -- it just thrashes. Refuse rather than take the box down with it.
+  # This is not the "models must fit in RAM" caveat: NVMe is a legitimate tier.
+  # It is a check that the tier BELOW RAM is actually big enough to hold the
+  # spill, which on 2026-08-07 it was not.
+  need_mb=$(( $(stat -c %s "$MODEL") / 1048576 ))
+  have_mb=$(( $(awk '/MemAvailable/{print $2}' /proc/meminfo) / 1024
+              + $(awk '/SwapFree/{print $2}' /proc/meminfo) / 1024 ))
+  if [ "$need_mb" -gt "$have_mb" ]; then
+    echo "REFUSING: model is ${need_mb} MiB but only ${have_mb} MiB of RAM+swap is free."
+    echo "  Close something, or raise LLM_MOE_KEEP to hold more experts on the card."
+    exit 1
+  fi
+fi
+
 echo "serving $(basename "$MODEL") as '$ALIAS' on http://$HOST:$PORT  (ctx=$CTX, all layers on GPU)"
-exec dgpu-exec-v2 "$VENV/bin/python" -m llama_cpp.server \
+exec env "${MOE_ENV[@]}" dgpu-exec-v2 "$VENV/bin/python" "${ENTRY[@]}" \
   --model "$MODEL" \
   --model_alias "$ALIAS" \
   --host "$HOST" --port "$PORT" \

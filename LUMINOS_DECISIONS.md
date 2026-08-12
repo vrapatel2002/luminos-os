@@ -3188,3 +3188,47 @@ can be watched doing it. The measured version is a strictly better design and is
 - **Reloading the extension is a manual click.** Chrome does not auto-reload unpacked extensions and
   Chrome 137+ removed `--load-extension`. Verified: after writing v3.0 to disk the daemon still
   showed `NEVER REPORTED` 70 s later, because the running worker was still v2.0.
+
+## DECISION 67 — the 26B MoE runs at IQ4_XS, not Q4_K_XL, and pinned host memory stays off
+# [CHANGE: claude-code | 2026-08-07]
+
+**Decision:** the foreground 26B MoE is `gemma-4-26B-A4B-it-UD-IQ4_XS.gguf` (12.66 GiB), served
+with `GGML_CUDA_NO_PINNED=1` and `LLM_MOE_KEEP=3`. `LLM_MOE=1` selects it automatically.
+
+**Why not the bigger quant.** Measured head-to-head, `keep=3`, 1947-token prompt + 200 generated:
+
+| quant | file | VRAM | RAM | read | write | wall | load |
+|---|---|---|---|---|---|---|---|
+| **IQ4_XS** | **12.66 GiB** | **4588 MiB** | **8.2 GB** | **206.1 t/s** | 17.5 t/s | **20.99 s** | **15 s** |
+| Q4_K_XL | 15.84 GiB | 4918 MiB | 12.4 GB | 134.5 t/s | 22.3 t/s | 23.60 s | 8+ min |
+
+IQ4_XS is faster on the clock, reads 53% faster, loads in **15 seconds instead of eight minutes**,
+and leaves **4.2 GB more RAM** — which is the entire point. Q4_K_XL needs ~12.4 GB resident and
+cannot coexist with Chrome (2.1 GB) and the Claude desktop app (1.7 GB) on a 15.3 GiB box. It is
+not that it is slow; it is that it takes the machine down (BUG-119).
+
+**The trade being made on purpose:** IQ4_XS writes ~22% slower (17.5 vs 22.3 t/s). `IQ` quants
+decode through a codebook, which costs more CPU work per weight, and the experts run on the CPU
+during generation. Five tokens per second bought 4.2 GB of RAM and a model that starts. Taken.
+
+**This is the ceiling, not a compromise.** Q5_K_M is 19.70 GiB, Q6_K 21.58, Q8_0 25.02 — none are
+runnable on 15.3 GiB of RAM. IQ4_XS is the best quality this machine can host for this model. The
+only thing that changes that is 32 GB of RAM, which is a soldered-chip rework.
+
+**`keep=3` remains the optimum and remains non-monotonic.** Measured on IQ4_XS: keep=3 → 20.99 s,
+keep=5 → 24.37 s (worse despite more on the card), keep=7 → VRAM OOM. Same shape as the old quant.
+Re-measure per model; never assume the number transfers.
+
+**Pinned host memory stays off, permanently.** See BUG-119. `GGML_CUDA_NO_PINNED=1` is what keeps
+RAM a spill point instead of a hard wall. It is wired into `llm-server.sh` behind `LLM_MOE=1` and
+must not be "optimised away" — the speed it costs is real and the crash it prevents is worse.
+
+> ### ⚠️ Haste decision — here is what smart looks like
+> The RAM guard in `llm-server.sh` compares **file size** against free RAM + swap. That is
+> conservative and wrong in both directions: the file is mmap'd, so the real requirement is closer
+> to the resident set (~8.2 GB for a 12.66 GiB file), and it ignores what `LLM_MOE_KEEP` will move
+> onto the card. Smart would compute the expected CPU-side buffer from the tensor list and the
+> keep pattern, which `luminos_moe_offload.buffer_report()` already parses out of the load log.
+> It would also watch `earlyoom`'s thresholds rather than raw free memory, since earlyoom fires
+> first. Left blunt because a guard that occasionally refuses a load that would have worked is a
+> much cheaper failure than the kernel panic it exists to prevent.

@@ -65,6 +65,17 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | 32 (max) | 4096 | 677.0 t/s | 9.56 t/s | 5652 MiB |
 | 33 | — | won't load — `Failed to create llama_context` | | |
 
+### Measured 2026-08-07 — gemma-4-26B-A4B (MoE, 30 layers), experts offloaded, `keep=3`, q8_0 KV
+| quant | file | VRAM | RAM (RSS) | read | write | wall | load |
+|---|---|---|---|---|---|---|---|
+| **IQ4_XS ← default** | 12.66 GiB | 4588 MiB | 8.2 GB | **206.1 t/s** | 17.5 t/s | **20.99 s** | **15 s** |
+| Q4_K_XL | 15.84 GiB | 4918 MiB | 12.4 GB | 134.5 t/s | **22.3 t/s** | 23.60 s | 8+ min |
+
+`LLM_MOE=1` selects IQ4_XS. `GGML_CUDA_NO_PINNED=1` is mandatory — without it CUDA pins the
+CPU-side weights, RAM stops being a spill tier, and the box **kernel-panics** (BUG-119, DECISION 67).
+`keep=5` is *worse* than `keep=3` (24.37 s) and `keep=7` OOMs the card; the curve is not monotonic.
+Q5/Q6/Q8 of this model are 19.7/21.6/25.0 GiB and are not runnable on this machine at all.
+
 Sustained DRAM read bandwidth measured at **47.1 GB/s** (STREAM-style, 2 GiB arrays), i.e. 46% of
 the 102.4 GB/s theoretical. **4 threads saturates it** — 8 and 16 threads are both slower.
 Prompt processing is compute-bound, not bandwidth-bound, which is why CPU-only is 95x slower at
