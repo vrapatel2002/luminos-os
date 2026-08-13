@@ -2398,7 +2398,11 @@ resident. `IQ4_XS` is 12.66 GiB and needs ~8.2 GB, which coexists with a browser
 **Guard added:** `llm-server.sh` now refuses to start when the model exceeds free RAM + swap, and
 prints the shortfall instead of taking the box down.
 
-## BUG-120 — the hover launcher on the Plasma shell has no way to close, and both panels float 10px off the edge
+## BUG-122 — the hover launcher on the Plasma shell has no way to close, and both panels float 10px off the edge
+<!-- [CHANGE: claude-code | 2026-08-13] Filed as BUG-120 on 2026-08-13 and renumbered
+     the same day: 120 and 121 were already taken by the Chrome-hang and dead-media-keys
+     reports in the Open Bugs section above. Same renumbering mistake BUG-092 records. -->
+
 # [CHANGE: claude-code | 2026-08-13]
 **Status: FIXED 2026-08-13** · `config/quickshell/caelestia-bar/shell.qml`
 
@@ -2474,3 +2478,95 @@ Synthetic pointer via ydotool, position read back from KWin each step, state rea
   (ownership flag doing its job). Escape then closes it.
 - logo button toggles open and closed; dashboard hover open/close unaffected; volume OSD unaffected.
 - screenshots confirm both panels now sit flat on their screen edge, with no desktop showing.
+
+---
+
+## BUG-123 — the dashboard stutters when you switch tabs (Caelestia on Plasma)
+**Status:** FIXED — 2026-08-13 · **Component:** `config/quickshell/caelestia-bar/shell.qml`
+
+### The symptom, narrowed down by the user
+"It only stutters when I switch from Weather to Media to Performance to Dashboard. It stutters in
+animation." Not the drop-down, not the drop-up — the **tab switch**, and only in the dashboard.
+The user also noted this never happened in the Hyprland session, which was the clue that mattered:
+it is not the machine, it is this port.
+
+### An earlier diagnosis in this project was wrong
+A previous pass blamed the CPU governor and the iGPU sitting pinned at 800 MHz of 2700. Those are
+real (measured: CPU capped at 3.12 GHz of 5.14, EPP `balance_power`, iGPU 23–27% busy and never
+ramping) and they make everything a bit worse, but they are **not** this bug. Refresh rate is
+identical between the two sessions (`hypr-user.lua:75-80` is `2880x1800@120, scale 2`, same as
+KWin's), and KWin blur, HDR, VRR, plasmashell CPU and log spam were all ruled out by measurement.
+
+### Root cause — one line, and it is ours, not upstream's
+Upstream's `modules/dashboard/Content.qml:190-196` deliberately animates the dashboard's own size:
+
+```qml
+Behavior on implicitWidth  { Anim {} }
+Behavior on implicitHeight { Anim {} }
+```
+
+That is how the panel grows and shrinks smoothly between tabs, and it is fine upstream, because
+upstream's `ContentWindow` is **the whole screen and never resizes** — only the Item inside it does.
+
+This port gave the dashboard a window of its own and sized the window to the panel:
+
+```qml
+anchors.top: true
+implicitWidth:  dashboardPanel.implicitWidth    // ← animated
+implicitHeight: dashboardPanel.implicitHeight   // ← animated
+```
+
+So the **layer-shell surface itself was resized on every frame of the tab animation** — a configure
+round trip with the compositor and a new render target, per frame. The animation the resizing was
+supposed to follow is the thing it stalled.
+
+**Measured**, with a temporary counter on the window's `widthChanged`/`heightChanged` and a timer
+cycling `screenState.dashboardTab` 0→1→2→3:
+
+| tab switch | surface resizes (before) | after |
+|---|---|---|
+| → Media | 26 | 0 |
+| → Performance | 24 | 0 |
+| → Weather | 38 | 0 |
+| → Dashboard | 12 | 0 |
+
+### The fix — copy upstream's shape, which was right all along
+`ContentWindow.qml:73-79`: cover the whole screen, never resize, and use a `mask` so only the
+panel's rectangle takes pointer input.
+
+```qml
+anchors.top: true
+anchors.bottom: true
+anchors.left: true
+anchors.right: true
+
+mask: Region { item: dashboardPanel }
+```
+
+The `HoverHandler` moved off the window and onto `dashboardPanel`. On a full-screen window it would
+have reported "hovered" everywhere and the dashboard would never have closed on unhover.
+
+### This does NOT bring back the swallow-the-screen bug
+Full-screen shell surfaces are exactly what the separate-windows design was adopted to escape, so
+this was tested rather than argued. With the dashboard open, a `Region` masked to the panel:
+- moving the pointer over an unrelated window's sidebar **renders its hover highlight** — proof the
+  compositor is delivering pointer events there, and a Wayland input region governs hover and
+  clicks identically;
+- a click into another window's text field **placed the caret**;
+- `isOpen dashboard` stayed 1 throughout, so wandering outside the panel does not close it.
+
+The old bug was a surface with **no** mask. The window size was never the problem; the input region
+was.
+
+### Also verified
+- hover the top edge → opens (`isOpen` 0 → 1); move away → closes (1 → 0), with the handler in its
+  new home on the panel;
+- clicking the Performance tab switches and the wider pane draws in full — the mask tracks the
+  panel as it grows, so the tab row stays clickable at the new width;
+- launcher toggle unaffected.
+
+### Still open, separately
+The remaining ~90 ms hitch on every dashboard **open** is a different thing: `Wrapper.qml`'s
+`Loader.active` destroys the content on close and rebuilds it on open. And the Media tab's
+`CoverVisualiser` rebuilds one `ShapePath` per bar per cava frame, which is what puts that tab at
+~66% of a core. Neither is fixed here.

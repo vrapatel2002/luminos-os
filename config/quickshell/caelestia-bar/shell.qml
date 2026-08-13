@@ -414,22 +414,49 @@ ShellRoot {
                 // screen - the same rule as the launcher and the OSD.
                 exclusiveZone: 0
 
-                // Anchoring ONLY `top` makes layer-shell centre it
-                // horizontally, exactly as the launcher uses bottom-only. Note
-                // that centres it on the WHOLE output, while upstream centres
-                // it in the space to the RIGHT of the bar, so it sits about
-                // half the bar width to the left of upstream's position. The
-                // launcher already has that same offset; the two agreeing with
-                // each other matters more than either matching upstream.
+                // The window covers the output, so the centring is done by
+                // `dashboardPanel.anchors.horizontalCenter` below rather than
+                // by layer-shell. That centres it on the WHOLE output, while
+                // upstream centres it in the space to the RIGHT of the bar, so
+                // it sits about half the bar width to the left of upstream's
+                // position. The launcher has that same offset; the two agreeing
+                // with each other matters more than either matching upstream.
                 //
                 // [CHANGE: claude-code | 2026-08-13] margins.top deleted, same
                 // reason as the launcher: upstream's 10px gap is filled by a
                 // frame it paints around the whole screen, and we paint no
                 // such frame, so the gap was just desktop showing through.
+                //
+                // [CHANGE: claude-code | 2026-08-13] BUG-123. This window used
+                // to be anchored `top` only and sized to the panel:
+                //     implicitWidth:  dashboardPanel.implicitWidth
+                //     implicitHeight: dashboardPanel.implicitHeight
+                // That looked tidy and was the cause of the tab-switch stutter.
+                // Upstream's dashboard/Content.qml:190-196 puts a `Behavior
+                // { Anim {} }` on BOTH implicitWidth and implicitHeight, so the
+                // dashboard grows and shrinks smoothly when you move between
+                // Weather, Media, Performance and Dashboard. Bound straight to
+                // a window, that means the layer-shell SURFACE is resized on
+                // every frame of that animation - measured at 24 to 38 resizes
+                // per switch, each one a configure round trip with the
+                // compositor and a fresh render target. The animation the
+                // resizing is meant to follow is the thing it stalls.
+                //
+                // So do what upstream does: cover the whole screen, never
+                // resize, and use a mask so only the panel's own rectangle
+                // takes pointer input - ContentWindow.qml:73-79 is exactly
+                // this. Outside the mask the clicks go to whatever is behind,
+                // so this does NOT bring back the swallow-the-screen bug that
+                // separate windows were adopted to fix; the masked region is
+                // the dashboard and nothing else.
                 anchors.top: true
+                anchors.bottom: true
+                anchors.left: true
+                anchors.right: true
 
-                implicitWidth: dashboardPanel.implicitWidth
-                implicitHeight: dashboardPanel.implicitHeight
+                mask: Region {
+                    item: dashboardPanel
+                }
 
                 // Upstream paints this backdrop with the sheet's blob, which
                 // we do not have. A rounded rect is the honest equivalent,
@@ -446,13 +473,6 @@ ShellRoot {
                     opacity: dashboardPanel.opacity
                 }
 
-                // Once the dashboard is down, the pointer is on IT and not on
-                // the tripwire strip. Without this it would drop down and
-                // immediately close again under your cursor.
-                HoverHandler {
-                    id: dashboardSurfaceHover
-                }
-
                 Dashboard.Wrapper {
                     id: dashboardPanel
 
@@ -460,6 +480,19 @@ ShellRoot {
                     anchors.horizontalCenter: parent.horizontalCenter
 
                     screenState: scope.screenState
+
+                    // Once the dashboard is down, the pointer is on IT and not
+                    // on the tripwire strip. Without this it would drop down
+                    // and immediately close again under your cursor.
+                    //
+                    // [CHANGE: claude-code | 2026-08-13] This sits on the PANEL
+                    // now, not on the window. The window is the whole screen as
+                    // of BUG-123, and a hover handler that size would report
+                    // "hovered" no matter where the pointer was, so the
+                    // dashboard would never close on unhover.
+                    HoverHandler {
+                        id: dashboardSurfaceHover
+                    }
                 }
             }
 
