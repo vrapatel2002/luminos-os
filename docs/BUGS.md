@@ -2397,3 +2397,80 @@ resident. `IQ4_XS` is 12.66 GiB and needs ~8.2 GB, which coexists with a browser
 
 **Guard added:** `llm-server.sh` now refuses to start when the model exceeds free RAM + swap, and
 prints the shortfall instead of taking the box down.
+
+## BUG-120 — the hover launcher on the Plasma shell has no way to close, and both panels float 10px off the edge
+# [CHANGE: claude-code | 2026-08-13]
+**Status: FIXED 2026-08-13** · `config/quickshell/caelestia-bar/shell.qml`
+
+Reported as: *"the hover launcher should go back when i click any where else. but it snot it just
+stuck also can you make it stick to corners both the top dashboad and bottom app launcher"*.
+
+### Why BUG-116 did not already cover this
+BUG-116 is the same disease and its cure does not reach here. That fix lives in
+`luminos-caelestia-kwin-overlay`, patching upstream's `ContentWindow.qml` and `Interactions.qml`.
+DECISION 68 moved us onto full Plasma with our **own** `shell.qml`, which builds the drawers itself
+and loads neither patched file. The overlay is still correct for what it patches; it simply is not
+in this path.
+
+### Root cause — one thing, not two
+`HyprlandFocusGrab.onCleared` (`ContentWindow.qml:112-135`) is the **only** code upstream has that
+closes a drawer on a click elsewhere. It is `hyprland_focus_grab_v1`, and KWin does not implement
+it:
+
+```
+$ strings $(which kwin_wayland) | grep -c hyprland_focus_grab
+0
+```
+
+So on this machine that handler is dead code. `Interactions.qml:200-202` opens the launcher on
+hover with a bare `if` and no `else`, because upstream does not need one. Our shell copied that
+asymmetry, so the launcher had no way out but Escape, Meta+P, the logo button, or launching
+something.
+
+**Correction to an earlier note in this file.** BUG-116 lists "the click never arrives" as a
+separate layer. It is not a second cause — `Regions.qml` shows the root region is
+`Intersection.Xor` with the panels `Subtract`ed, so **upstream cannot see a click in the middle of
+the screen either**. It never needed to. Nothing is being blocked: Wayland only delivers a click to
+the surface under the pointer, so the shell is simply never told one happened.
+
+### The fix — no new windows, no new mechanism
+Mirrors the pattern already proven for the dashboard and the OSD in this same file:
+
+- `launcherHovered` ORs the bottom tripwire's `MouseArea.containsMouse` with a `HoverHandler` on
+  the launcher window. The strip and the launcher are two surfaces and the pointer is only ever on
+  one; without the OR, reaching for the search box reads as a leave.
+- `onLauncherHoveredChanged` supplies the missing `else`, gated by a `launcherOwnedByHover` flag —
+  only hover may close what hover opened, so a launcher opened by Meta+P or the logo button with
+  the pointer parked elsewhere is not killed by the next stray mouse move.
+- The old edge-triggered open handler on the strip is gone. It existed so a pointer resting on the
+  strip could not instantly undo Escape; with the margin deleted (below) the launcher now covers
+  the strip whenever it is open, so that hazard cannot arise.
+
+**Accepted cost:** hover it open, then move the pointer off it while typing, and it closes under
+you. Keyboard-opened ones are safe. This is the price of not adding a full-screen click-catcher
+window, which was considered and rejected as more machinery than the problem is worth.
+
+### The 10px gap, same root, different symptom
+Both panels carried `margins.{top,bottom}: Config.border.thickness`, copied from upstream. Upstream
+earns that gap: it paints a 10px frame around the entire screen (`BlobInvertedRect`), and the
+panel's edge meets the frame's edge. We paint no such frame, so the margin was just 10px of
+desktop showing through — visible as YouTube content in a band under the launcher's search box.
+Margins deleted; the two corners that now touch the screen edge are squared off, since a rounded
+corner there would show the same sliver.
+
+### The trap that made every earlier test lie
+`shell.qml:49` sets `settings.watchFiles: false`. **Quickshell hot-reload is off in this config.**
+Edits change nothing until the process is restarted, and the old behaviour is a perfectly plausible
+"the fix did not work". Restart with `kill <qs pid>` — `~/.local/state/luminos/caelestia-plasma/
+shell.sh` supervises it and restarts on any non-zero exit, so SIGTERM (rc=143) reloads it and a
+clean rc=0 does not.
+
+### Verified by hand on the live session
+Synthetic pointer via ydotool, position read back from KWin each step, state read from
+`qs ... ipc call drawers isOpen launcher`, plus screenshots:
+- bottom strip → launcher **opens**; walk up into its body → **stays open**; leave it → **closes**
+  (`isOpen` 1 → 0). This is the behaviour that did not exist before.
+- opened by IPC with the pointer far away, then jiggled around the screen → **stays open**
+  (ownership flag doing its job). Escape then closes it.
+- logo button toggles open and closed; dashboard hover open/close unaffected; volume OSD unaffected.
+- screenshots confirm both panels now sit flat on their screen edge, with no desktop showing.

@@ -114,6 +114,44 @@ ShellRoot {
                 }
             }
 
+            // [CHANGE: claude-code | 2026-08-13] The launcher gets the same
+            // treatment as the dashboard above, because it had the same problem
+            // and none of the cure. The bottom tripwire and the launcher are
+            // two separate surfaces; the pointer is only ever on one. Without
+            // the OR, walking off the strip and up into the launcher reads as a
+            // leave and would slam it shut before you could type in it.
+            readonly property bool launcherHovered: launcherStripHover.containsMouse || launcherSurfaceHover.hovered
+
+            // Upstream never closes the launcher on unhover - Interactions.qml
+            // :200-202 is a bare `if` with no `else`. It does not need one,
+            // because it closes on click-outside instead, via
+            // HyprlandFocusGrab (ContentWindow.qml:112-135). That is
+            // hyprland_focus_grab_v1, which KWin does not implement - the KWin
+            // binary has zero references to it - so on this machine that
+            // handler is dead code and the launcher had no way out but Escape,
+            // Meta+P, the logo button, or launching something.
+            //
+            // Closing on unhover is not the same signal, but it covers the
+            // same ground: you cannot click on another window without moving
+            // the pointer there, and moving there is the leave. The ownership
+            // flag is why a launcher opened by Meta+P, with the pointer parked
+            // over some other window, is not closed instantly by the next
+            // stray mouse move - only hover may close what hover opened.
+            //
+            // ACCEPTED COST: hover-open it, then park the pointer off it while
+            // typing, and it closes under you. Keyboard-opened ones are safe.
+            property bool launcherOwnedByHover
+
+            onLauncherHoveredChanged: {
+                if (launcherHovered) {
+                    launcherOwnedByHover = true;
+                    screenState.launcher = true;
+                } else if (launcherOwnedByHover) {
+                    launcherOwnedByHover = false;
+                    screenState.launcher = false;
+                }
+            }
+
             // The launcher wants a `panels` object. In the upstream shell that is
             // the whole Panels item. It only ever reads four things off it:
             // `bar.implicitWidth` and `popouts.*` (WallpaperList.qml:26-31) and
@@ -223,8 +261,14 @@ ShellRoot {
 
                 exclusiveZone: 0
 
+                // [CHANGE: claude-code | 2026-08-13] Margin deleted. It used to
+                // be Config.border.thickness, mirroring upstream, but upstream
+                // earns that gap: it paints a 10px frame around the whole
+                // screen and the panel's edge meets the frame's edge, so
+                // nothing shows through. We do not paint that frame, so the
+                // margin was just 10px of desktop showing under the launcher.
+                // The OSD never had one, which is why it already looked right.
                 anchors.bottom: true
-                margins.bottom: Config.border.thickness
 
                 implicitWidth: launcher.implicitWidth
                 implicitHeight: launcher.implicitHeight
@@ -235,8 +279,20 @@ ShellRoot {
                 StyledRect {
                     anchors.fill: launcher
                     radius: Tokens.rounding.extraLarge
+                    // Now that it sits flat on the screen edge, rounding the
+                    // two corners that touch it would show a sliver of desktop
+                    // through each one. Square them off.
+                    bottomLeftRadius: 0
+                    bottomRightRadius: 0
                     color: Colours.tPalette.m3surface
                     opacity: launcher.opacity
+                }
+
+                // The other half of scope.launcherHovered. Without this the
+                // pointer leaving the tripwire to enter the launcher reads as
+                // a leave, and the launcher closes as you reach for it.
+                HoverHandler {
+                    id: launcherSurfaceHover
                 }
 
                 Launcher.Wrapper {
@@ -268,9 +324,12 @@ ShellRoot {
             //
             // Upstream OPENS on hover and never closes on unhover -
             // Interactions.qml:200-202 is a bare `if (!launcher) launcher =
-            // true`, with no matching else. That asymmetry is copied on
-            // purpose. Escape, launching an app, Meta+P and the logo button
-            // all still close it.
+            // true`, with no matching else. That asymmetry was copied at
+            // first and it was wrong here: upstream gets away with it because
+            // click-outside closes the launcher for it, and that mechanism
+            // does not exist on KWin. See scope.onLauncherHoveredChanged
+            // above, which supplies the missing `else`. Escape, launching an
+            // app, Meta+P and the logo button all still close it too.
             //
             // KNOWN COST, same shape as the OSD strip below: a layer-shell
             // surface eats pointer input over its whole area, and Wayland has
@@ -300,6 +359,14 @@ ShellRoot {
                 implicitWidth: launcher.implicitWidth + Config.border.rounding * 2
                 implicitHeight: Config.border.thickness
 
+                // [CHANGE: claude-code | 2026-08-13] Now a bare hover source,
+                // exactly like the dashboard strip. Opening AND closing both
+                // moved up to scope.onLauncherHoveredChanged, which sees this
+                // strip and the launcher surface as one zone. The old
+                // edge-triggered open handler lived here to stop Escape being
+                // undone by a pointer resting on the strip; that hazard is
+                // gone, because with the margin deleted the launcher now
+                // covers this strip whenever it is open.
                 MouseArea {
                     id: launcherStripHover
 
@@ -309,15 +376,6 @@ ShellRoot {
                     // through either (see above), but at least nothing here
                     // silently swallows a press it might have acted on.
                     acceptedButtons: Qt.NoButton
-
-                    // Edge-triggered, and that matters. launcherWindow sits
-                    // 10px up (margins.bottom), so the launcher never covers
-                    // this strip - the pointer can rest here with the launcher
-                    // already open. A plain binding would therefore re-open it
-                    // the instant Escape closed it, and Escape would look
-                    // broken. Only a fresh enter opens it.
-                    onContainsMouseChanged: if (containsMouse && !scope.screenState.launcher)
-                        scope.screenState.launcher = true
                 }
             }
 
@@ -363,8 +421,12 @@ ShellRoot {
                 // half the bar width to the left of upstream's position. The
                 // launcher already has that same offset; the two agreeing with
                 // each other matters more than either matching upstream.
+                //
+                // [CHANGE: claude-code | 2026-08-13] margins.top deleted, same
+                // reason as the launcher: upstream's 10px gap is filled by a
+                // frame it paints around the whole screen, and we paint no
+                // such frame, so the gap was just desktop showing through.
                 anchors.top: true
-                margins.top: Config.border.thickness
 
                 implicitWidth: dashboardPanel.implicitWidth
                 implicitHeight: dashboardPanel.implicitHeight
@@ -375,6 +437,11 @@ ShellRoot {
                 StyledRect {
                     anchors.fill: dashboardPanel
                     radius: Tokens.rounding.extraLarge
+                    // Flat against the top edge now, so the two corners that
+                    // touch it get squared off - a rounded corner there would
+                    // show a sliver of desktop through it.
+                    topLeftRadius: 0
+                    topRightRadius: 0
                     color: Colours.tPalette.m3surface
                     opacity: dashboardPanel.opacity
                 }
