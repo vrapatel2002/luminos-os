@@ -1,0 +1,316 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-08-13]
+#
+# Luminos session: FULL Plasma, with Caelestia's bar on top of it.
+# Installed to /usr/local/bin/luminos-caelestia-plasma by
+# luminos-caelestia-plasma-session. DECISION 68, STEP A.
+#
+# WHY THIS EXISTS, AND WHY IT REVERSES THE OLD REASONING
+#   Its sibling, luminos-caelestia-kwin, runs bare kwin_wayland and hand-starts
+#   the handful of daemons we think we need. Two days of real use showed that
+#   list is not short - it is most of Plasma. Chrome hung ~25 s on every launch
+#   (BUG-120), volume and brightness keys were dead (BUG-121), no notifications,
+#   no idle screen-off, no password safe. Every one of those is something Plasma
+#   already does correctly, for free, and every hand-built replacement is a new
+#   bug of its own. So: run the whole of Plasma and put Caelestia's bar on top.
+#
+#   The reason bare KWin was chosen originally is still sound, but it does NOT
+#   apply here. That reason was: suppressing plasmashell needs
+#   `systemctl --user set-environment LUMINOS_SHELL=caelestia` plus a
+#   ConditionEnvironment= drop-in, and this user has Linger=yes, so the systemd
+#   user manager OUTLIVES logout - the variable would still be set the next time
+#   they picked plain Plasma and hand them a desktop with no shell and no clue
+#   why. We are not switching plasmashell off. plasmashell KEEPS RUNNING here.
+#   No env variable, no drop-in, no ConditionEnvironment=, so the linger trap
+#   never arises. Later we take away the PANEL it draws, which is one config
+#   file and one right-click to undo.
+#
+# WHAT THIS DELIBERATELY DOES NOT START
+#   The polkit agent and xdg-desktop-portal-kde. luminos-caelestia-kwin starts
+#   both by hand because nothing else would. Plasma starts both itself. Starting
+#   them twice is exactly the sort of added patch the scope rules forbid.
+#
+# Logs: ~/.local/state/luminos/caelestia-plasma/
+#   session.log  - this script + everything startplasma-wayland prints
+#   shell.log    - the wait, then Caelestia's own output
+#   sycoca.log   - the service-cache rebuild
+
+set -u
+
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/luminos/caelestia-plasma"
+mkdir -p "$STATE"
+exec >>"$STATE/session.log" 2>&1
+echo "=== $(date -Is) session start (pid $$) ==="
+
+# Which quickshell config this session runs. caelestia-bar hosts upstream's real
+# BarWrapper and real launcher, each in its own PanelWindow, so nothing covers
+# the screen and clicks land where you aim them. Its subdirectories are symlinks
+# into caelestia-kwin, so it inherits the patched Brightness/ShellState services.
+export SHELL_DIR="$HOME/.config/quickshell/caelestia-bar"
+
+# ── GPU ──────────────────────────────────────────────────────────────────────
+# /etc/environment pins KWIN_DRM_DEVICES=/dev/dri/card2 for the dGPU 0 W gating.
+# card numbers are enumeration order and the NVIDIA card enumerates FIRST here
+# (card1 = 0x10de, card2 = 0x1002). If that order ever flips, card2 becomes the
+# NVIDIA card and KWin holds the dGPU awake forever. /dev/dri/luminos-igpu is the
+# udev alias matched on the PCI address, and - unlike the by-path name - it has no
+# colons in it. KWIN_DRM_DEVICES is a COLON-SEPARATED LIST; a colon inside the
+# path splits it into garbage, which is precisely what killed the Hyprland
+# session in BUG-094.
+if [ -e /dev/dri/luminos-igpu ]; then
+    export KWIN_DRM_DEVICES=/dev/dri/luminos-igpu
+    echo "GPU: KWIN_DRM_DEVICES=$KWIN_DRM_DEVICES -> $(readlink -f /dev/dri/luminos-igpu)"
+else
+    echo "GPU: WARNING /dev/dri/luminos-igpu missing, falling back to /etc/environment"
+fi
+
+# If this leaks in, Caelestia's Hypr service connects to a FOREIGN Hyprland and
+# starts describing its monitors and workspaces instead of KWin's. Nothing errors;
+# the shell just quietly talks about the wrong compositor. A greeter login never
+# sets it, but a session started by hand from a Hyprland terminal does.
+unset HYPRLAND_INSTANCE_SIGNATURE HYPRLAND_CMD
+
+# For anything that wants to know which shell is on top, including our own logs.
+# NOTE: deliberately a plain export, NOT `systemctl --user set-environment`.
+# See the linger trap in the header.
+export LUMINOS_SHELL=caelestia
+
+# XDG_CURRENT_DESKTOP / XDG_SESSION_DESKTOP / QT_QPA_PLATFORM are NOT set here.
+# startplasma-wayland sets all three itself, and the greeter entry's
+# DesktopNames=KDE covers the pre-start case. Setting them twice is a patch we
+# do not need.
+
+# XDG_MENU_PREFIX decides which file in /etc/xdg/menus kbuildsycoca6 reads, and if
+# that file does not exist the resulting service cache contains ZERO applications -
+# silently, exit code 0, a 264 KB database with nothing in it. Only
+# plasma-applications.menu ships here, so a session that sets anything else wipes
+# the cache on every rebuild. That is what made every KDE global shortcut dead
+# (BUG-112): kglobalaccel finds shortcuts through KApplicationTrader, and an empty
+# cache means it finds none. This session lives or dies on Plasma's shortcuts, so
+# this line matters more here than anywhere else.
+export XDG_MENU_PREFIX=plasma-
+
+if [ ! -d "$SHELL_DIR" ]; then
+    echo "FATAL: $SHELL_DIR missing - run luminos-caelestia-kwin-overlay first"
+    exit 1
+fi
+
+# Rebuild the service cache BEFORE Plasma starts, in Plasma's own environment.
+# KWin hosts kglobalaccel and scans for shortcuts once at startup, so a cache
+# written later - or by another session, under another XDG_MENU_PREFIX - is too
+# late. The cache filename is a hash of XDG_DATA_DIRS, which is why this has to
+# happen here and not from a shell with a different environment.
+kbuildsycoca6 --noincremental >>"$STATE/sycoca.log" 2>&1
+echo "sycoca: rebuilt with XDG_MENU_PREFIX=$XDG_MENU_PREFIX (rc=$?)"
+
+# ── the shell supervisor ─────────────────────────────────────────────────────
+# Runs alongside Plasma, not inside it. It waits for the compositor, then keeps
+# Caelestia's bar alive.
+#
+# HOW IT WAITS, AND WHY NOT A SLEEP
+#   `sleep 8 && qs` is the obvious version and it is wrong in both directions: on
+#   a cold boot Plasma can still be coming up at 8 s, and on a warm login we have
+#   burned 8 s of an otherwise instant desktop. Worse, it gives qs no WAYLAND_DISPLAY
+#   - the supervisor is a SIBLING of startplasma-wayland, not a child, so it never
+#   inherits the one the compositor created.
+#
+#   So we observe instead. We record which wayland-* sockets exist BEFORE Plasma
+#   starts, then wait for a NEW one to appear. That socket is unambiguously this
+#   session's: it cannot match a compositor that was already running, it cannot
+#   fire before the compositor exists, and it is the display name KWin actually
+#   created rather than one we guessed.
+#
+#   Then we cross-check. plasmashell is started by plasma-session only after the
+#   compositor is up, and it INHERITS WAYLAND_DISPLAY in its initial environment,
+#   so /proc/<pid>/environ is a second, independent reading of the same fact.
+#   If the two disagree we trust plasmashell, because plasmashell is a client that
+#   demonstrably connected. Waiting for it is also what stops us racing Plasma's
+#   own startup.
+#
+#   Two traps worth naming, both measured on this machine on 2026-08-13:
+#     1. /proc/<pid>/environ CANNOT be read for kwin_wayland at all - not even by
+#        its own user. /usr/bin/kwin_wayland carries `cap_sys_nice=ep`, so it
+#        exec's with elevated privileges, the kernel clears its dumpable flag, and
+#        every read returns EACCES. Asking the compositor directly is not an
+#        option that exists; a client is the only readable witness.
+#     2. /proc/<pid>/environ is the environment a process was EXEC'd with, not its
+#        current one - later setenv() calls are invisible there. So even without
+#        the capability, kwin setting WAYLAND_DISPLAY on itself would not show up.
+#
+#   And one staleness hole the cross-check has to plug: under Linger=yes a
+#   plasmashell from an EARLIER session can still be alive. Its environ would then
+#   name an OLD socket. So plasmashell only gets to overrule the socket scan when
+#   the display it names is itself new - i.e. also absent from the before-snapshot.
+#   Otherwise it is a leftover and we say so and ignore it.
+cat >"$STATE/shell.sh" <<'SUPERVISOR'
+#!/usr/bin/env bash
+set -u
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/luminos/caelestia-plasma"
+SHELL_DIR="${SHELL_DIR:-$HOME/.config/quickshell/caelestia-bar}"
+RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+BEFORE="${LUMINOS_WL_BEFORE:-|}"
+
+log() { echo "$(date -Is) $*" >>"$STATE/shell.log"; }
+
+QS_PID=
+cleanup() {
+    if [ -n "$QS_PID" ]; then
+        log "session ending, stopping shell pid $QS_PID"
+        kill "$QS_PID" 2>/dev/null
+    fi
+    exit 0
+}
+trap cleanup TERM INT HUP
+
+# The value of a named variable in a process's INITIAL environment. Empty if the
+# process is gone, unreadable, or never had it.
+environ_of() {
+    tr '\0' '\n' <"/proc/$1/environ" 2>/dev/null | sed -n "s/^$2=//p" | head -n1
+}
+
+# A wayland-* socket that did not exist when this session started.
+new_wayland_socket() {
+    local sock name
+    for sock in "$RUNTIME"/wayland-*; do
+        [ -S "$sock" ] || continue
+        name=${sock##*/}
+        case "$BEFORE" in *"|$name|"*) continue ;; esac
+        printf '%s\n' "$name"
+        return 0
+    done
+    return 1
+}
+
+# ── wait 1: the compositor's socket ──────────────────────────────────────────
+WD=
+deadline=$((SECONDS + 90))
+while [ "$SECONDS" -lt "$deadline" ]; do
+    WD=$(new_wayland_socket) && break
+    sleep 0.25
+done
+if [ -z "$WD" ]; then
+    log "FATAL no new wayland socket in ${SECONDS}s - existing were: $BEFORE"
+    log "     giving up; Plasma should still be usable, just without the bar"
+    exit 1
+fi
+log "compositor socket appeared after ${SECONDS}s: $WD"
+
+# ── wait 2: a client that actually connected ─────────────────────────────────
+# Not strictly required to start the bar, so a timeout here is a warning, not a
+# failure: a bar with no Plasma is still better than no bar and no explanation.
+deadline=$((SECONDS + 60))
+PS_PID=
+while [ "$SECONDS" -lt "$deadline" ]; do
+    PS_PID=$(pgrep -x -u "$(id -u)" plasmashell 2>/dev/null | head -n1)
+    [ -n "$PS_PID" ] && break
+    sleep 0.25
+done
+if [ -n "$PS_PID" ]; then
+    ps_wd=$(environ_of "$PS_PID" WAYLAND_DISPLAY)
+    if [ -n "$ps_wd" ] && [ "$ps_wd" != "$WD" ]; then
+        # Only believe it if the display it names is ALSO new. A plasmashell that
+        # is still pointing at a socket which existed before we started is a
+        # survivor of an earlier session, not a witness to this one.
+        case "$BEFORE" in
+            *"|$ps_wd|"*)
+                log "NOTE plasmashell($PS_PID) names '$ps_wd', which pre-dates this"
+                log "     session - treating it as a leftover and keeping '$WD'" ;;
+            *)
+                log "NOTE plasmashell($PS_PID) is on '$ps_wd', not '$WD' - trusting plasmashell"
+                WD=$ps_wd ;;
+        esac
+    fi
+    log "plasmashell up (pid $PS_PID) at ${SECONDS}s, WAYLAND_DISPLAY=$WD"
+else
+    log "WARNING plasmashell never appeared in 60s - starting the bar anyway"
+fi
+
+if [ ! -S "$RUNTIME/$WD" ]; then
+    log "FATAL $RUNTIME/$WD vanished before the shell could start"
+    exit 1
+fi
+
+export WAYLAND_DISPLAY="$WD"
+export QT_QPA_PLATFORM=wayland
+
+# ── the shell ────────────────────────────────────────────────────────────────
+# BUG-092's lesson: a black screen is not evidence of a crash, and three healthy
+# states also render black. If the bar dies there is nothing on screen to say so,
+# so this loop makes the failure visible instead of mysterious: retry a few times,
+# then put a terminal up. A terminal is proof the compositor and input are both
+# alive, and it is somewhere to type.
+#
+# The budget is for STARTUP failures, not for the whole session. Without the
+# uptime reset below, three restarts spread over a day - which is what happens
+# while working on the overlay, since picking up an edit means killing `qs` -
+# leave the user with a terminal instead of a bar, hours after the last one, for
+# no reason they can see. A shell that lived a minute started fine.
+#
+# Unlike the bare-KWin session, a dead bar here is NOT a dead desktop: Plasma's
+# own panel, launcher and shortcuts are all still there. So this is a convenience,
+# not a rescue.
+tries=0
+while : ; do
+    log "starting shell (attempt $((tries + 1))) -p $SHELL_DIR"
+    started=$SECONDS
+    qs -p "$SHELL_DIR" >>"$STATE/shell.log" 2>&1 &
+    QS_PID=$!
+    wait "$QS_PID"
+    rc=$?
+    QS_PID=
+    log "shell exited rc=$rc after $((SECONDS - started))s"
+    [ "$rc" = "0" ] && break          # clean exit means someone asked it to stop
+    [ $((SECONDS - started)) -ge 60 ] && tries=0
+    tries=$((tries + 1))
+    if [ "$tries" -ge 3 ]; then
+        log "giving up after $tries attempts, opening a terminal"
+        kitty -e sh -c "echo 'Caelestia failed to start 3 times. Plasma is fine - \
+this is only the bar. Log:'; tail -n 40 '$STATE/shell.log'; exec \$SHELL" &
+        break
+    fi
+    sleep 1
+done
+SUPERVISOR
+chmod +x "$STATE/shell.sh"
+
+# ── inner session ────────────────────────────────────────────────────────────
+# Runs INSIDE the D-Bus session, so the supervisor (and therefore Caelestia)
+# inherits DBUS_SESSION_BUS_ADDRESS. That is the reason for the extra file: if we
+# forked the supervisor outside plasma-dbus-run-session-if-needed it would land on
+# a different bus, or none, and Quickshell's tray/MPRIS/notification clients would
+# silently find nothing.
+cat >"$STATE/inner.sh" <<'INNER'
+#!/usr/bin/env bash
+set -u
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/luminos/caelestia-plasma"
+RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+# Snapshot the compositor sockets that already exist. Taken HERE, before Plasma
+# is started, so the "new socket" test the supervisor does cannot be fooled by a
+# socket that was already there.
+before='|'
+for s in "$RUNTIME"/wayland-*; do
+    [ -S "$s" ] && before="${before}${s##*/}|"
+done
+export LUMINOS_WL_BEFORE="$before"
+echo "wayland sockets already present: $before"
+
+"$STATE/shell.sh" &
+SUP=$!
+echo "shell supervisor started (pid $SUP)"
+
+echo "starting startplasma-wayland"
+/usr/bin/startplasma-wayland
+rc=$?
+echo "$(date -Is) startplasma-wayland exited rc=$rc"
+
+# Plasma has ended, so the session has ended. Take the bar down with it rather
+# than leaving an orphan holding a layer-shell surface on a dead compositor.
+kill "$SUP" 2>/dev/null
+wait "$SUP" 2>/dev/null
+echo "$(date -Is) session end"
+exit "$rc"
+INNER
+chmod +x "$STATE/inner.sh"
+
+exec /usr/lib/plasma-dbus-run-session-if-needed "$STATE/inner.sh"

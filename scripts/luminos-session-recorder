@@ -85,6 +85,18 @@ OUT="${OUTDIR}/${STAMP}_${SESS}.txt"
   # and push the handful of lines that matter off the end. So: require BOTH a
   # relevant process AND a lifecycle verb, drop indented continuation lines,
   # then drop the known-chatty recurring messages by name.
+  #
+  # STATUS: BEST-EFFORT, DELIBERATELY NOT PERFECTED.
+  # [CHANGE: claude-code | 2026-08-05]
+  # Every filter round so far has just uncovered the next noise source, and each
+  # new chatty message means another name in the exclude list. That is
+  # whack-a-mole with no end, so tuning it was stopped on purpose.
+  # Treat this section as a HINT, never as proof. If it looks like junk, that is
+  # the known failure mode and not a bug worth chasing.
+  # The authoritative answers are elsewhere and are NOT name-filtered:
+  #   - LOGIN / LOGOUT LEDGER above  (systemd-logind: who logged in and out)
+  #   - ERRORS and COREDUMPS below   (what actually failed or crashed)
+  # A crash will always show up in those two. It does not need to show up here.
   journalctl -b --no-pager -o short-iso 2>/dev/null \
     | grep -iE 'sddm|startplasma|Hyprland|kwin_wayland|caelestia|quickshell' \
     | grep -iE 'start|stop|exit|quit|crash|abort|kill|signal|segfault|fatal|died|terminat|launch|greeter|session' \

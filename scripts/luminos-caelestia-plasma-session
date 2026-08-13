@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-08-13]
+#
+# Install / verify / remove the "Luminos (Caelestia on Plasma)" login session.
+# DECISION 68, STEP A.
+#
+# ADDITIVE ONLY. This adds a FOURTH entry to the greeter and touches nothing
+# else. hyprland-uwsm.desktop, plasma.desktop and luminos-caelestia-kwin.desktop
+# are all left exactly as they are - the bare-KWin session in particular stays,
+# because it is the only place Caelestia can be tested without Plasma helping,
+# and because it currently works.
+#
+#   luminos-caelestia-plasma-session install
+#   luminos-caelestia-plasma-session check      # report only, exit 1 if incomplete
+#   luminos-caelestia-plasma-session uninstall
+#
+# WHY THIS IS A SIBLING OF luminos-caelestia-kwin-session AND NOT AN EDIT TO IT
+#   The two sessions share exactly two things: the patched overlay under
+#   ~/.config/quickshell/caelestia-kwin, and the global-shortcut .desktop files in
+#   ~/.local/share/applications/luminos-cael-*.desktop. Both are per-USER, not
+#   per-session, and luminos-caelestia-kwin-session already owns and installs
+#   them. Writing them from two scripts is how they drift apart. So this script
+#   CHECKS them and points at the other script rather than rewriting them.
+#
+# Needs sudo for the two root-owned files:
+#   /usr/local/bin/luminos-caelestia-plasma
+#   /usr/share/wayland-sessions/luminos-caelestia-plasma.desktop
+
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+LAUNCHER_SRC="$REPO/scripts/luminos-caelestia-plasma"
+LAUNCHER="/usr/local/bin/luminos-caelestia-plasma"
+SESSION="/usr/share/wayland-sessions/luminos-caelestia-plasma.desktop"
+
+# Must match SHELL_DIR inside scripts/luminos-caelestia-plasma.
+SHELL_DIR="$HOME/.config/quickshell/caelestia-bar"
+SHELL_DIR_FULL="$HOME/.config/quickshell/caelestia-kwin"
+APPS="$HOME/.local/share/applications"
+KWIN_SESSION_SCRIPT="$REPO/scripts/luminos-caelestia-kwin-session"
+
+# The greeter entries this script must never disturb. If any of these vanish the
+# user can lose their way back in, so they are checked, not assumed.
+OTHER_SESSIONS=(
+  /usr/share/wayland-sessions/hyprland-uwsm.desktop
+  /usr/share/wayland-sessions/plasma.desktop
+  /usr/share/wayland-sessions/luminos-caelestia-kwin.desktop
+)
+
+# Shortcuts owned by luminos-caelestia-kwin-session. Listed here only so `check`
+# can say which of them this session will and will not answer.
+#   Meta+P is the launcher and it points at caelestia-bar, which IS what this
+#   session runs, so it works here.
+#   The rest point at caelestia-kwin, which is NOT running here, so they do
+#   nothing at all. That is deliberate: `drawers toggle dashboard` against the bar
+#   config would SUCCEED, set screenState.dashboard true with nothing rendering
+#   it, and the launcher would then read maxHeight off a zero-size stand-in, get
+#   NaN, and break the one panel that works. A dead key beats that.
+SHARED_SHORTCUTS=(
+  "launcher|Meta+P|works here"
+  "terminal|Meta+Return|works here"
+  "dashboard|Meta+K|inert here (aims at caelestia-kwin)"
+  "sidebar|Meta+N|inert here (aims at caelestia-kwin)"
+  "utilities|Meta+U|inert here (aims at caelestia-kwin)"
+  "session|Meta+Escape|inert here (aims at caelestia-kwin)"
+  "clearnotifs|Ctrl+Alt+C|inert here (aims at caelestia-kwin)"
+)
+
+ok()   { printf '  \033[32mok\033[0m   %s\n' "$1"; }
+bad()  { printf '  \033[31mMISS\033[0m %s\n' "$1"; FAIL=1; }
+note() { printf '  \033[33m..\033[0m   %s\n' "$1"; }
+info() { printf '%s\n' "$1"; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The session script writes two more scripts at runtime, from quoted heredocs.
+# A syntax error in either of those would not show up until login, as a missing
+# bar and a log nobody reads. `bash -n` on the outer file cannot see inside a
+# quoted heredoc, so pull the bodies out and check them directly.
+syntax_check() {
+    local rc=0 marker body
+    if ! bash -n "$LAUNCHER_SRC"; then
+        echo "  syntax error in $LAUNCHER_SRC" >&2
+        return 1
+    fi
+    for marker in SUPERVISOR INNER; do
+        body=$(sed -n "/<<'$marker'\$/,/^$marker\$/p" "$LAUNCHER_SRC" | sed '1d;$d')
+        if [ -z "$body" ]; then
+            echo "  could not extract the $marker heredoc - did it get renamed?" >&2
+            rc=1
+            continue
+        fi
+        if ! printf '%s\n' "$body" | bash -n; then
+            echo "  syntax error inside the $marker heredoc" >&2
+            rc=1
+        fi
+    done
+    return "$rc"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+install_all() {
+    info "Syntax-checking the session script and both embedded scripts..."
+    syntax_check || { info "Refusing to install a script that does not parse."; exit 1; }
+    ok "bash -n clean: outer, supervisor, inner"
+
+    if [ ! -d "$SHELL_DIR" ] || [ ! -d "$SHELL_DIR_FULL" ]; then
+        info "The Caelestia overlay is not built. This session runs the same shell"
+        info "config as the KWin one, so build it there first:"
+        info "    $KWIN_SESSION_SCRIPT install"
+        exit 1
+    fi
+    if [ ! -x /usr/bin/startplasma-wayland ]; then
+        info "FATAL: /usr/bin/startplasma-wayland missing - is plasma-workspace installed?"
+        exit 1
+    fi
+
+    [ -x "$LAUNCHER_SRC" ] || chmod +x "$LAUNCHER_SRC"
+
+    info "Installing the session launcher (needs sudo)..."
+    sudo install -Dm755 "$LAUNCHER_SRC" "$LAUNCHER" || exit 1
+    # `install` reporting success is not proof the bytes landed. Read it back.
+    if ! cmp -s "$LAUNCHER_SRC" "$LAUNCHER"; then
+        info "FATAL: $LAUNCHER does not match $LAUNCHER_SRC after install"
+        exit 1
+    fi
+    ok "$LAUNCHER (verified by read-back)"
+
+    # Deliberately NO NoDisplay= line: luminos-hide-sessions hides plasma.desktop
+    # and hyprland.desktop, and this entry has to stay visible or there is no way
+    # to pick it.
+    sudo tee "$SESSION" >/dev/null <<EOF
+[Desktop Entry]
+# [CHANGE: claude-code | 2026-08-13] Installed by luminos-caelestia-plasma-session.
+# Not pacman-owned, so luminos-hide-sessions (which only touches hyprland.desktop
+# and plasma.desktop) will never hide this one.
+Name=Luminos (Caelestia on Plasma)
+Comment=Full KDE Plasma with the Caelestia bar on top
+Exec=$LAUNCHER
+TryExec=$LAUNCHER
+Type=Application
+DesktopNames=KDE
+EOF
+    ok "$SESSION"
+
+    echo
+    check_all
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+check_all() {
+    FAIL=0
+    info "Checking the Caelestia-on-Plasma session:"
+
+    if syntax_check >/dev/null 2>&1; then
+        ok "bash -n clean: outer, supervisor, inner"
+    else
+        bad "the session script or one of its embedded scripts does not parse"
+    fi
+
+    [ -x "$LAUNCHER" ] && ok "$LAUNCHER" || bad "$LAUNCHER"
+    if [ -x "$LAUNCHER" ] && ! cmp -s "$LAUNCHER_SRC" "$LAUNCHER"; then
+        bad "$LAUNCHER differs from $LAUNCHER_SRC - re-run install"
+    fi
+
+    # Guarded on existence on purpose. `grep -q ... || bad` and
+    # `grep -q ... && bad || ok` both give a confident answer about a file that is
+    # not there - one of them a PASS. A check that reports "visible at the login
+    # screen" about a greeter entry that does not exist is worse than no check.
+    if [ ! -f "$SESSION" ]; then
+        bad "$SESSION"
+    else
+        ok "$SESSION"
+        grep -q "^Exec=$LAUNCHER$" "$SESSION" \
+            && ok "greeter entry points at the launcher" \
+            || bad "greeter entry Exec is wrong"
+        grep -qE '^(NoDisplay|Hidden)=true' "$SESSION" \
+            && bad "greeter entry is hidden - it would not be selectable" \
+            || ok "greeter entry is visible at the login screen"
+    fi
+
+    [ -x /usr/bin/startplasma-wayland ] \
+        && ok "/usr/bin/startplasma-wayland" || bad "/usr/bin/startplasma-wayland"
+    [ -x /usr/lib/plasma-dbus-run-session-if-needed ] \
+        && ok "/usr/lib/plasma-dbus-run-session-if-needed" \
+        || bad "/usr/lib/plasma-dbus-run-session-if-needed"
+    [ -x /usr/bin/qs ] && ok "/usr/bin/qs (quickshell)" || bad "/usr/bin/qs (quickshell)"
+
+    # The shell config, and the overlay it symlinks into.
+    [ -d "$SHELL_DIR" ] && ok "$SHELL_DIR" || bad "$SHELL_DIR (run the KWin installer)"
+    [ -e "$SHELL_DIR/shell.qml" ] \
+        && ok "$SHELL_DIR/shell.qml resolves" \
+        || bad "$SHELL_DIR/shell.qml is a dangling symlink"
+    if [ -x "$REPO/scripts/luminos-caelestia-kwin-overlay" ]; then
+        "$REPO/scripts/luminos-caelestia-kwin-overlay" --check >/dev/null 2>&1 \
+            && ok "$SHELL_DIR_FULL overlay in sync" \
+            || bad "$SHELL_DIR_FULL overlay stale - run luminos-caelestia-kwin-overlay"
+    fi
+
+    # The iGPU alias. Missing is a warning, not a failure - the session still
+    # starts, it just falls back to /etc/environment's card2 and can hold the
+    # dGPU awake if enumeration order ever flips (BUG-094's neighbourhood).
+    [ -e /dev/dri/luminos-igpu ] \
+        && ok "/dev/dri/luminos-igpu -> $(readlink -f /dev/dri/luminos-igpu)" \
+        || note "/dev/dri/luminos-igpu missing - session falls back to /etc/environment"
+
+    # Shared shortcuts. Reported, never rewritten - see the header.
+    info "Global shortcuts (owned by luminos-caelestia-kwin-session):"
+    for s in "${SHARED_SHORTCUTS[@]}"; do
+        IFS='|' read -r id accel status <<<"$s"
+        if [ -f "$APPS/luminos-cael-$id.desktop" ]; then
+            case "$status" in
+                works*) ok  "$accel  $id  - $status" ;;
+                *)      note "$accel  $id  - $status" ;;
+            esac
+        else
+            bad "$accel  $id  - missing; run: $KWIN_SESSION_SCRIPT install"
+        fi
+    done
+
+    # The whole safety net: every other way in must still be there.
+    info "Other greeter entries (must be untouched):"
+    for f in "${OTHER_SESSIONS[@]}"; do
+        [ -f "$f" ] && ok "$(basename "$f") present" || bad "$(basename "$f") is GONE"
+    done
+    if grep -qE '^(NoDisplay|Hidden)=true' /usr/share/wayland-sessions/plasma.desktop 2>/dev/null; then
+        note "plain Plasma is hidden at the greeter by luminos-hide-sessions."
+        note "     That is pre-existing, not something this script did - but it means"
+        note "     STEP B's 'plain Plasma also loses its panel' cost is currently"
+        note "     invisible, because plain Plasma cannot be selected anyway."
+    fi
+
+    echo
+    if [ "$FAIL" = "0" ]; then
+        info "All good. Log out and pick 'Luminos (Caelestia on Plasma)' at the greeter."
+        info "Expect TWO bars - Plasma's panel and Caelestia's. That is STEP A working."
+    else
+        info "Incomplete - run: $0 install"
+    fi
+    return "$FAIL"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+uninstall_all() {
+    info "Removing the Caelestia-on-Plasma session (needs sudo)..."
+    sudo rm -f "$SESSION" "$LAUNCHER"
+    # Read back rather than trusting rm's exit code.
+    [ -e "$SESSION" ]  && info "  WARNING $SESSION still present"  || info "  removed $SESSION"
+    [ -e "$LAUNCHER" ] && info "  WARNING $LAUNCHER still present" || info "  removed $LAUNCHER"
+    # Runtime scratch only - logs are left on purpose, they are the evidence.
+    rm -f "${XDG_STATE_HOME:-$HOME/.local/state}/luminos/caelestia-plasma/inner.sh" \
+          "${XDG_STATE_HOME:-$HOME/.local/state}/luminos/caelestia-plasma/shell.sh"
+    info "Nothing else was touched: the shortcuts, the overlay, the KWin session,"
+    info "the Hyprland session and plain Plasma are all owned elsewhere."
+}
+
+case "${1:-}" in
+    install)   install_all ;;
+    check)     check_all ;;
+    uninstall) uninstall_all ;;
+    *) echo "usage: $0 {install|check|uninstall}" >&2; exit 2 ;;
+esac

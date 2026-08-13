@@ -1,0 +1,25 @@
+[1]
+Description=Wine Window Fix
+decorrule=Wine Window Fix
+skipswitcher=false
+skipswitcherrule=2
+skiptaskbar=false
+skiptaskbarrule=2
+wmclass=winrar.exe wine
+wmclasscomplete=false
+wmclassmatch=1
+
+[2]
+Description=Luminos: hide Plasma OSD (Caelestia owns it)
+opacityactive=0
+opacityactiverule=2
+opacityinactive=0
+opacityinactiverule=2
+types=65536
+wmclass=org.kde.plasmashell
+wmclasscomplete=false
+wmclassmatch=1
+
+[General]
+count=2
+rules=1,2

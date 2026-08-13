@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# brightnessctl — Luminos shim  [CHANGE: claude-code | 2026-08-05]
+# Installed as /usr/local/bin/brightnessctl, which PATH puts ahead of /usr/bin.
+# It does exactly one thing: pick the right backlight device when the caller
+# didn't name one. Everything else is handed straight to the real binary.
+#
+# WHY THIS EXISTS (BUG-098)
+# This laptop has TWO backlight devices:
+#
+#   amdgpu_bl2   max 399000   .../0000:65:00.0/drm/card2/card2-eDP-2/amdgpu_bl2
+#   nvidia_0     max 100      .../0000:01:00.0/backlight/nvidia_0
+#
+# The panel is wired to the AMD iGPU, so amdgpu_bl2 is the one that changes the
+# screen. nvidia_0 is a phantom the NVIDIA driver registers for a panel it does
+# not drive: writes to it change nothing, and it reads a permanent 0.
+#
+# brightnessctl with no -d takes the FIRST device in readdir order, and on this
+# box that is nvidia_0. Caelestia's services/Brightness.qml calls bare
+# `brightnessctl g` / `m` / `s N%` with no device, so the shell read 0/100 and
+# wrote to a device attached to nothing — the OSD bar sat at 0% and the keys did
+# nothing to the screen. Upstream has no config option for the device (the only
+# knob is services.brightnessIncrement), so it cannot be fixed in config.
+#
+# Detection is by sysfs topology, NOT by hardcoding "amdgpu_bl2":
+#   1. a backlight whose real path hangs off a DRM eDP connector — that is by
+#      definition the internal panel's own backlight
+#   2. else the first backlight that is not an nvidia_* phantom
+#   3. else nothing, and the real binary's default applies unchanged
+# Rule 1 matters because the card NUMBER is PCIe enumeration order (NVIDIA
+# enumerates first here — same trap as BUG-094/AQ_DRM_DEVICES), so anything
+# spelled cardN or blN is a guess that breaks on a reboot that reorders.
+set -uo pipefail
+
+REAL=/usr/bin/brightnessctl
+
+[ -x "$REAL" ] || { echo "brightnessctl: real binary missing at $REAL" >&2; exit 127; }
+
+# Caller already chose a device or a class (e.g. -c leds for the keyboard
+# backlight) — do not second-guess it.
+for a in "$@"; do
+    case "$a" in
+        -d|--device|-c|--class|--device=*|--class=*) exec "$REAL" "$@" ;;
+    esac
+done
+
+pick_device() {
+    local d name real
+    # 1. the backlight that belongs to a DRM eDP connector = the internal panel
+    for d in /sys/class/backlight/*; do
+        [ -e "$d" ] || continue
+        real=$(readlink -f "$d") || continue
+        case "$real" in
+            */drm/card*/card*-eDP-*) basename "$d"; return 0 ;;
+        esac
+    done
+    # 2. anything that is not an NVIDIA phantom
+    for d in /sys/class/backlight/*; do
+        [ -e "$d" ] || continue
+        name=$(basename "$d")
+        case "$name" in
+            nvidia_*) continue ;;
+            *) echo "$name"; return 0 ;;
+        esac
+    done
+    return 1
+}
+
+if dev=$(pick_device); then
+    exec "$REAL" -d "$dev" "$@"
+fi
+
+# No better answer than the real binary's own default. Say so rather than
+# pretending the shim did something.
+echo "brightnessctl: no panel backlight found, using default device" >&2
+exec "$REAL" "$@"

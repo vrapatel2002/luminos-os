@@ -15,16 +15,43 @@ Last Updated: 2026-08-08 (BUG-111 FIXED — **the plugin death BUG-100 predicted
 - **The measurement that settles it, and it is a stopwatch:** a consistent **~25 s** (or 120 s) is a D-Bus timeout and is eerily repeatable. **8 s once and 40 s the next** is I/O or memory and the wallet theory is dead. These point in opposite directions and one timing run separates them. Then: launch from a terminal and read stderr; check the waiting process's kernel wait-channel (socket read and disk wait look nothing alike); `busctl --user list | grep -E 'kwallet|portal|secrets'`.
 - **The one-flag confirmation:** start Chrome once with `--password-store=basic`. That is exactly what it already does under Hyprland. Instant launch confirms the cause and the fix is a permanent flag.
 - **Do NOT fix this by bolting `kwalletd6` + the portal frontend + a keyring onto the session.** That is three new moving parts to fix an unmeasured guess, and it cuts against the scope rule. Under **DECISION 68** this bug is expected to disappear entirely, because full Plasma starts the wallet itself.
+- **2026-08-13 — DECISION 68 STEP A is now installed, so the measurement is available.** The
+  "Luminos (Caelestia on Plasma)" greeter entry runs full Plasma, which starts `kwalletd6` itself.
+  Time Chrome cold-start **three times in each session** (`time chrome-luminos`, from a terminal, with
+  no Chrome already running):
+  - Slow in KWin, instant in Plasma, and the KWin figure clusters tightly around 25 s → **theory confirmed**, close this as fixed by the session change.
+  - Slow in **both** → the wallet theory is wrong; do not patch around it, go measure the blocked process directly (`cat /proc/<pid>/wchan`, `busctl --user list`, strace on the connect).
+  - Times that scatter (8 s, then 40 s) → **the theory was wrong regardless of the outcome**; that is memory/IO, and it must be written up as wrong rather than quietly dropped because the symptom went away.
 
 ### BUG-121 — Volume and brightness keys do nothing in the Caelestia-on-KWin session
 <!-- [CHANGE: claude-code | 2026-08-13] -->
 - Status: **OPEN.** Reported by Shawn from a real login, 2026-08-13.
 - Severity: High
 - Component: the bare-`kwin_wayland` session — again the session, not the shell
-- Root cause: **two possible handlers, both absent, for different reasons.** (1) Under Hyprland, Caelestia listens for the media keys itself via `hyprland_global_shortcuts_v1`; **KWin does not implement that protocol**, so Caelestia's handler is loaded, running, and deaf. (2) Plasma's own handler lives in plasmashell/`plasma-pa`, and **plasmashell is not running** in this session by design. Nobody is listening.
+- Root cause: **two possible handlers, both absent, for different reasons.** (1) Under Hyprland, Caelestia listens for the media keys itself via `hyprland_global_shortcuts_v1`; **KWin does not implement that protocol**, so Caelestia's handler is loaded, running, and deaf. (2) Plasma's own handler is not running in this session by design — see the correction below for *which* piece of Plasma that actually is. Nobody is listening.
 - This is the same shape as BUG-113 and BUG-116: a Hyprland-only mechanism evaluating to nothing on KWin, with no error anywhere.
 - **Expected to be fixed by DECISION 68** (full Plasma handles media keys natively). **Do not hand-build a media-key handler for the bare session** — that is precisely the "rebuild the desktop from parts" road that DECISION 68 retired.
-- ⚠️ **Watch out during DECISION 68 STEP B:** if the volume shortcuts turn out to be registered by the `plasma-pa` applet *inside the panel*, then removing the panel re-breaks this. **Check before deleting the panel**; auto-hiding it instead keeps the applet loaded and is non-destructive.
+- ✅ **The STEP B watch-out is ANSWERED — measured 2026-08-13, from disk, before anything was deleted.**
+  The earlier note guessed the volume keys might belong to the `plasma-pa` **applet inside the panel**.
+  **They do not.** `plasma-pa` ships the applet and the shortcut handler as **two separate plugin binaries**:
+  ```
+  /usr/lib/qt6/plugins/plasma/applets/org.kde.plasma.volume.so   <- the panel applet
+  /usr/lib/qt6/plugins/kf6/kded/audioshortcutsservice.so         <- the shortcut handler
+  ```
+  The handler is a **KDED module** loaded into `kded6` — its own process, started by
+  `plasma-workspace.target`, with no dependency on plasmashell and none on the panel. It declares
+  `X-KDE-Kded-autoload`, and `kded6rc` carries no `Module-audioshortcutsservice` override disabling it.
+  `kglobalshortcutsrc` independently agrees: the component that owns `increase_volume` / `mute` /
+  `mic_mute` is **`[kmix]`**, not any applet.
+  Brightness is the same story one level further out — the owner is **`[org_kde_powerdevil]`**, the
+  PowerDevil daemon, a systemd user service that was never in the panel to begin with.
+  **Conclusion: removing the Plasma panel does not re-break this bug.** Auto-hide remains the gentler
+  and preferred option on its own merits, but it is no longer *required* in order to protect the keys.
+  ⚠️ **The limit of this evidence, stated plainly:** this is packaging and config evidence, not a live
+  test. Confirm it inside the new session before STEP B deletes anything —
+  `pgrep -x kded6` should show the process, and
+  `busctl --user tree org.kde.kglobalaccel | grep -iE 'kmix|powerdevil'` should show it holding both
+  components. If either is missing, stop and use auto-hide.
 
 ### BUG-086 — Live OpenRouter API key committed to git AND pushed to GitHub
 <!-- [CHANGE: claude-code | 2026-07-25] -->

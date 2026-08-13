@@ -16,6 +16,17 @@ covering the screen. Clicks land where you aim them.
 
 ---
 
+## Aim right now
+
+**Shawn is LIVE in "Luminos (Caelestia on Plasma)" as of 2026-08-13.** STEP A shipped, STEP B is
+done (he deleted the Plasma panel himself), and STEP C parts 1–3 are done: Caelestia's OSD shows
+**volume** and **brightness** from the right edge, and **Plasma's own OSD is silenced**.
+
+The next thing on the list is **STEP 4 — hover-to-peek** (the OSD should nose out when the cursor
+reaches the right edge). Shawn asked for it and explicitly parked it as step 4. It is **not built.**
+
+---
+
 ## THE PIVOT — 2026-08-13. Read this before proposing anything.
 
 The previous plan was: **bare `kwin_wayland`, and rebuild every desktop feature by hand.**
@@ -46,22 +57,6 @@ with no shell at all and no clue why.
 We are not doing that. **plasmashell keeps running.** We only remove the *panel it draws*. No env
 variable, no systemd drop-in, no `ConditionEnvironment=`, so the linger trap never exists.
 
-### The one real cost, and why it is acceptable
-
-`plasma-org.kde.plasma.desktop-appletsrc` is **per-user, not per-session**. There is exactly one of
-it. Remove the panel and **plain Plasma loses its panel too.**
-
-Explained to Shawn in these terms, and accepted:
-
-| | plasmashell OFF (rejected) | panel removed (chosen) |
-|---|---|---|
-| What you see | black screen, nothing | desktop + wallpaper, no panel |
-| Right-click | dead | works |
-| Way out | none, no clue why | right-click → Add Panel, ~10 s |
-
-Different class of problem entirely. One is a landmine; the other is a light switch you can find
-in the dark.
-
 ---
 
 ## Shawn's answers — decided, do not re-litigate
@@ -74,6 +69,7 @@ in the dark.
 | Keep the current bare-KWin session? | **"for now its working good so do not delete it."** It stays as the fallback and as the only place to test Caelestia without Plasma helping. |
 | How much of Caelestia does he want? | **All of it.** Bar, launcher, dashboard, **volume bar, brightness bar, notifications, "and more"**, plus **Caelestia's window styling**. |
 | Caelestia's own settings panel | He pointed at it — bottom-right → popup → gear icon — as a **reference to lift from later**. Explicitly *"this but for later part."* Do not build it now. |
+| Two bars during STEP A — can't we just turn Plasma's off? | Asked 2026-08-13. Answer given: **yes, and he can do it himself from the GUI in ~10 s** (right-click panel → Enter Edit Mode → More Options → Auto Hide), which is also the safest version of STEP B. Deliberately left as his switch to flip rather than a config edit, so STEP A's login tests one change, not two. |
 
 ---
 
@@ -87,6 +83,11 @@ in the dark.
 3. **Porting Hyprland's tiling to KWin.** He asked for the opposite. KWin's window behaviour stays
    **stock**.
 4. **Switching plasmashell off via a systemd environment variable.** See the linger trap above.
+5. **Reading `WAYLAND_DISPLAY` out of `kwin_wayland`'s `/proc/<pid>/environ`.** Measured
+   2026-08-13: it returns **EACCES even to its own user**, because `/usr/bin/kwin_wayland` carries
+   `cap_sys_nice=ep` and the kernel therefore clears the process's dumpable flag. It is also the
+   wrong file even without the capability — `environ` is the environment a process was *exec'd*
+   with, so later `setenv()` calls never appear there.
 
 ---
 
@@ -100,7 +101,7 @@ in the dark.
 
 ---
 
-## 📋 NEW RULE — how a "step" is defined from now on
+## 📋 RULE — how a "step" is defined
 
 Shawn caught a real failure: *"one step at a time"* meant two different things to us. I meant
 "take Caelestia's shell apart one panel at a time." He heard "everything else keeps working."
@@ -114,73 +115,119 @@ Both are fair readings; mine silently hid ~15 broken things.
 
 ---
 
-## THE PLAN
+## STATE — what is DONE
 
-### STEP A — a fourth greeter entry: full Plasma + Caelestia's bar
+### ✅ STEP A — built and installed 2026-08-13. NOT yet logged into.
 
-1. **When this is done, you will be able to:** log in to "Luminos (Caelestia on Plasma)" and get a
-   complete, working KDE desktop with Caelestia's bar on the left — volume keys, brightness keys,
-   notifications, Chrome opening instantly, idle screen-off, all working because Plasma is doing them.
-2. **These will still be broken:** Plasma's own panel is still on screen (STEP B removes it), so
-   there are two bars. Caelestia's dashboard / sidebar / session menu / OSD / notifications are
-   still absent. Workspace pips and the active-window entry still read wrong — they are Hyprland
-   IPC and always will be here.
-3. **You'll know it worked when:** volume keys move the volume, and Chrome opens in under 2 seconds.
+Two new files, additive only. No existing file was edited.
 
-**How:** copy `scripts/luminos-caelestia-kwin` to a new script. Replace the `exec kwin_wayland …`
-tail with `startplasma-wayland`, and keep the shell-retry loop, but start it **after** Plasma is up.
+| File | What |
+|---|---|
+| `scripts/luminos-caelestia-plasma` | the session → `/usr/local/bin/luminos-caelestia-plasma` |
+| `scripts/luminos-caelestia-plasma-session` | `install` / `check` / `uninstall` |
+| `/usr/share/wayland-sessions/luminos-caelestia-plasma.desktop` | greeter entry **"Luminos (Caelestia on Plasma)"** |
 
-**⚠️ The one thing to get right here.** Do **not** start Caelestia from an XDG autostart `.desktop`
-— Plasma 6 runs those through the **systemd user manager**, which under `Linger=yes` has a stale
-environment from whichever session ran last, and it would also fire in plain Plasma. Start it from
-the session script itself, after waiting for the Wayland socket. That is the same shape the
-existing script already uses, so it is mostly copy-paste.
+The greeter now offers three visible entries — Hyprland (uwsm), Caelestia on KWin, Caelestia on
+Plasma. All verified present and unmodified. `check` passes every item.
 
-Keep: the `KWIN_DRM_DEVICES=/dev/dri/luminos-igpu` pin, the `unset HYPRLAND_INSTANCE_SIGNATURE`,
-the `XDG_MENU_PREFIX=plasma-` line (BUG-112), and the logging to
-`~/.local/state/luminos/caelestia-plasma/`.
+**Kept from the KWin session** (each was paid for once already): the
+`KWIN_DRM_DEVICES=/dev/dri/luminos-igpu` pin (BUG-094), `unset HYPRLAND_INSTANCE_SIGNATURE`,
+`XDG_MENU_PREFIX=plasma-` + sycoca rebuild before start (BUG-112), and the 3-try retry loop with
+the kitty escape hatch and 60 s uptime reset (BUG-092).
 
-Drop: the hand-started polkit agent and portal — **Plasma starts both itself.** Starting them twice
-is exactly the kind of added patch the scope rules say to avoid.
+**Dropped:** the hand-started polkit agent and `xdg-desktop-portal-kde`. Plasma starts both.
 
-### STEP B — remove the Plasma panel
+**`config/quickshell/caelestia-bar/shell.qml` was not touched.** Same file, same symlinks.
 
-1. **When this is done, you will be able to:** see only Caelestia's bar. One bar, not two.
-2. **These will still be broken:** plain Plasma also has no panel until you right-click → Add Panel.
-   Everything else in plain Plasma is untouched.
-3. **You'll know it worked when:** the bottom strip is gone in both sessions, and right-clicking the
-   desktop in plain Plasma still offers "Add Panel".
+**How it waits for Plasma** (asked for explicitly, so it is written down): it snapshots which
+`wayland-*` sockets exist *before* Plasma starts, then waits for a **new** one. That cannot match a
+leftover, cannot fire before the compositor exists, and yields the display name KWin actually
+created. `plasmashell` appearing is a second, independent reading (it inherits `WAYLAND_DISPLAY` at
+exec, so its `environ` is readable) and proof a client connected. Under `Linger=yes` an old
+plasmashell can outlive its session, so it may only overrule the socket scan when the display it
+names is *also* new. Socket names are matched `|`-delimited so `wayland-1` cannot be masked by
+`wayland-10`; positive, negative and substring cases were all tested against the live runtime dir.
 
-**Back up `~/.config/plasma-org.kde.plasma.desktop-appletsrc` before touching it.** Restoring that
-one file is the whole undo.
+### ✅ The STEP B blocking question is ANSWERED
 
-**Open question to settle first, with a measurement, not a guess:** does removing the panel also
-kill the **volume keys**? On Plasma 6 the media-key shortcuts may be registered by the `plasma-pa`
-applet, which lives in the panel. If so, removing the panel re-breaks the exact thing STEP A fixed.
-**Check this before deleting anything.** If it is true, the fallback is auto-hide instead of
-removal — the panel still exists, still owns its shortcuts, and just is not drawn. Auto-hide is
-also non-destructive to plain Plasma, so it may be the better answer regardless.
+Whether the volume keys belong to the `plasma-pa` **applet inside the panel**: **they do not.**
+`plasma-pa` ships two separate plugin binaries —
+`plasma/applets/org.kde.plasma.volume.so` (applet) and
+`kf6/kded/audioshortcutsservice.so` (shortcut handler). The handler is a **KDED module** in
+`kded6`, its own process, started by `plasma-workspace.target`, independent of plasmashell and of
+the panel. `kglobalshortcutsrc` agrees: owning component is `[kmix]`. Brightness is
+`[org_kde_powerdevil]`, a systemd user service that was never in the panel.
 
-### STEP C — prove the gaps are actually closed
+**Removing the panel does not re-break BUG-121.** Auto-hide is still the preferred option because
+it is non-destructive and less work — not because it is needed to protect the keys.
 
-Not a build step, a measurement step. Confirm on the real login: volume keys, brightness keys,
-notification popups, Chrome launch time, idle screen-off, the password safe. Close BUG-120 and
-BUG-121 with evidence, or find out the plan is wrong early.
+⚠️ **This is packaging evidence, not a live test.** Confirm inside the session before deleting:
+`pgrep -x kded6` and `busctl --user tree org.kde.kglobalaccel | grep -iE 'kmix|powerdevil'`.
 
-### STEP D — bring Caelestia's own surfaces across, one at a time
+### ✅ Finding that changes STEP B's cost
 
-Order, easiest first: launcher (**already built and working**, see below) → volume/brightness OSD →
-notifications → dashboard → sidebar → session menu.
+`plasma.desktop` already has `NoDisplay=true` (applied by `scripts/luminos-hide-sessions`, re-applied
+by a pacman hook). **Plain Plasma is not selectable at the greeter today.** So the accepted cost
+"plain Plasma loses its panel too" is currently unobservable — there is no way to log in and see it.
+It also means the new session becomes the only Plasma in practice, which argues further for
+auto-hide over deletion.
 
-**Rule for every one of these:** Plasma's version keeps working until Caelestia's replacement is
-proven. Never remove Plasma's until Caelestia's is on screen and working. That is what makes this
-plan cheap to abandon at any point.
+`~/.config/plasma-org.kde.plasma.desktop-appletsrc` backed up, byte-verified, **unmodified**:
+`~/.luminos-backups/appletsrc.bak-pre-step-b-20260813-111935`
+
+---
+
+### ✅ STEP C parts 1–3 — the OSD — SHIPPED 2026-08-13, all three proven on screen
+
+Full reasoning in `LUMINOS_DECISIONS.md`. The short version:
+
+1. **Volume** — added `Osd.Wrapper` in its own right-anchored `PanelWindow` in
+   `config/quickshell/caelestia-bar/shell.qml`. **No shortcut was wired and none was needed:**
+   `modules/osd/Wrapper.qml:51-73` reacts to PipeWire's volume *value* changing, whoever changed it.
+   Wiring a key would have needed KDE's handler unbound first, or every press double-steps.
+2. **Brightness** — Caelestia **observes** the backlight instead of taking the keys, so powerdevil
+   keeps brightness plus its battery/lid/idle logic. `FileView` + 250 ms `Timer` on
+   `/sys/class/backlight/<dev>/brightness` assigns `monitor.brightness`, which is what shows the OSD;
+   it never calls `setBrightness()`, so it never writes hardware. Polling is required, not lazy —
+   **sysfs raises no inotify events.** Device comes from `brightnessctl -m` (the BUG-098 shim), never
+   hardcoded. First read only primes, or the OSD flies out at login.
+3. **Plasma's OSD silenced** — there is no setting; a **KWin window rule** forces opacity 0.
+   `~/.config/kwinrulesrc` `[2]`, snapshot at `config/kde/kwinrulesrc`.
+
+Two traps worth keeping:
+- **`wmclass=plasmashell` matches nothing.** KWin reports the OSD's class as `org.kde.plasmashell`.
+  The wrong rule looks perfect and silently does nothing.
+- **Never edit `/usr/lib/qt6/qml/org/kde/plasma/workspace/osd/Osd.qml`.** That `qmldir` says
+  `prefer :/qt/qml/...`, so the live QML is compiled into `libplasmashell_osd.so`. Editing the file
+  on disk changes nothing and reports no error.
+- **Screenshot timing lies.** Firing the OSD over D-Bus then starting `spectacle` loses the race
+  about half the time — the control shot "proved" a fix that was not there. Read the real opacity
+  from a throwaway KWin script instead, and negative-test by forcing **50%**, not by removing the
+  rule (removal leaves the last forced value on the still-existing window).
+
+---
+
+## NEXT STEPS (ordered)
+
+### 1. STEP 4 — hover-to-peek from the right edge (Shawn asked; NOT built)
+
+The OSD should nose out when the cursor reaches the right edge. It does not, because upstream's
+reveal-on-hover lives in the drawers sheet's `Interactions.qml` — the full-screen surface this
+config deliberately does not have. Needs a **thin** always-present hover strip that sets
+`screenState.osd`. **The strip must not swallow clicks** — that is exactly BUG-110.
+
+### 2. STEP D — Caelestia's remaining surfaces, one at a time
+
+Remaining, easiest first: notifications → dashboard → sidebar → session menu.
+(Launcher and OSD are done.)
+
+**Rule for every one:** Plasma's version keeps working until Caelestia's replacement is proven on
+screen. Never remove Plasma's first. That is what makes this plan cheap to abandon at any point.
 
 ### LATER — explicitly deferred by Shawn
 
 - **Caelestia window styling / decorations.**
-- **Caelestia's settings panel** (bottom-right popup → gear). Lift the design from upstream when
-  we get there.
+- **Caelestia's settings panel** (bottom-right popup → gear). Lift the design from upstream later.
 
 ---
 
@@ -226,8 +273,11 @@ over three open/close cycles with 0 surfaces after each close. Shawn confirmed i
 ### Shortcuts
 
 `~/.local/share/applications/luminos-cael-*.desktop`, each carrying its own `X-KDE-Shortcuts=`.
-**Meta+P → launcher** is repointed at `caelestia-bar` and its generator
-(`scripts/luminos-caelestia-kwin-session`) was changed to match, so a re-install cannot clobber it.
+**They are per-USER, not per-session, and `luminos-caelestia-kwin-session` owns them.**
+`luminos-caelestia-plasma-session` deliberately only *reports* them — writing the same files from
+two installers is how they drift apart.
+
+**Meta+P → launcher** is repointed at `caelestia-bar`, so it works in both sessions.
 
 **The other five (Meta+K, Meta+N, Meta+Escape, Meta+U, Ctrl+Alt+C) deliberately still point at
 `caelestia-kwin`.** Do not "fix" this. `drawers toggle dashboard` against the bar config would
@@ -240,26 +290,21 @@ aimed at a config that is not running does nothing at all, silently.
 
 ---
 
-## Open bugs this plan is expected to close
+## Open bugs
 
 - **BUG-120** — Chrome hangs ~25 s on launch in the bare-KWin session. Leading theory:
-  `XDG_CURRENT_DESKTOP=KDE` makes Chrome pick KWallet for password storage, and no `kwalletd6`
-  is running, so it blocks until the D-Bus timeout. **Not yet measured.** The tell is the clock: a
-  consistent ~25 s says D-Bus timeout; a variable delay says memory/disk and the theory is wrong.
-- **BUG-121** — volume and brightness keys dead. Caelestia's own handler needs
-  `hyprland_global_shortcuts_v1` (KWin has no such protocol) and Plasma's handler is not running.
-  Two possible handlers, both absent for different reasons.
-
----
-
-## Still open, carried forward
-
+  `XDG_CURRENT_DESKTOP=KDE` makes Chrome pick KWallet, no `kwalletd6` is running, so it blocks
+  until the D-Bus timeout. **Still not measured.** STEP A makes the measurement possible.
+- **BUG-121 — CLOSED live 2026-08-13.** `busctl --user call org.kde.kded6 /kded org.kde.kded6
+  loadedModules` lists `audioshortcutsservice` **with the Plasma panel deleted**, so the volume keys
+  never belonged to the panel. That upgrades the earlier packaging-only evidence to a live test.
 - **BUG-117** — the `luminos-maximize` KWin script is marked enabled and has never once loaded.
 - Unreproduced report: some apps open fullscreen, appear to crash, then reopen split. Crashes,
   `luminos-maximize`, KWin tiling and a control window are all ruled out with evidence. **Blocked
   on Shawn naming one offending app.** Do not "fix" it by porting Hyprland tiling.
 - Tab Sleeper v3.0 needs Shawn to click Reload at `chrome://extensions`.
-- **5 commits unpushed. Ask before pushing.**
+- Pushing: Shawn authorised a push on 2026-08-13 **for the OSD work specifically**. That is not
+  standing permission — ask again next time.
 - Deferred: delete the four `[Tiling]` groups from `~/.config/kwinrc` (back it up; **not proven**
   these cause anything — this is "restore stock default", not "fix confirmed bug").
 
@@ -273,5 +318,7 @@ aimed at a config that is not running does nothing at all, silently.
   right to. Say "leading suspect, not yet measured" when that is what it is.
 - **He is good at this even though he says he is not.** He spotted that all the Chrome windows
   appeared *simultaneously* — the single most diagnostic fact in that bug. He caught the "one step
-  at a time" ambiguity. He proposed the step-definition rule. Take his observations seriously.
+  at a time" ambiguity. He proposed the step-definition rule. He asked "can't we turn it off?"
+  about the two bars, which was the right question and had a better answer than the plan assumed.
+  Take his observations seriously.
 - **Show him before killing a test instance.** He asked for this explicitly.

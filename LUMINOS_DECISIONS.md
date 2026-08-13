@@ -3329,3 +3329,252 @@ mine hid roughly fifteen broken things behind a friendly phrase.
 **Every step is now written down before work starts, in three lines: what you will be able to do,
 what will still be broken (named individually), and how you will know it worked.** The middle line
 is the one that was missing and it is the one that matters.
+
+### STEP A — SHIPPED 2026-08-13 (installed, not yet logged into)
+
+Two new files, both additive. Nothing existing was edited.
+
+- `scripts/luminos-caelestia-plasma` → `/usr/local/bin/luminos-caelestia-plasma`
+- `scripts/luminos-caelestia-plasma-session` — install / check / uninstall
+- creates `/usr/share/wayland-sessions/luminos-caelestia-plasma.desktop`,
+  **"Luminos (Caelestia on Plasma)"** — the fourth greeter entry
+
+Carried over from the KWin session because each line was paid for once already: the
+`KWIN_DRM_DEVICES=/dev/dri/luminos-igpu` pin (colon-separated list — BUG-094), the
+`unset HYPRLAND_INSTANCE_SIGNATURE`, `XDG_MENU_PREFIX=plasma-` plus a sycoca rebuild before the
+compositor starts (BUG-112 — the wrong prefix empties the service cache *silently, exit 0*, and
+kills every global shortcut), and the 3-try shell retry loop with the kitty escape hatch and the
+60-second uptime reset (BUG-092 — a black screen is not evidence of a crash).
+
+Dropped on purpose: the hand-started polkit agent and `xdg-desktop-portal-kde`. **Plasma starts
+both.** Starting them twice is exactly the added patch the scope rules forbid.
+
+`config/quickshell/caelestia-bar/shell.qml` carries forward **unchanged** — same file, same symlinks
+into the `caelestia-kwin` overlay, not rewritten and not extended.
+
+#### How the session waits for Plasma, and why it is not a sleep
+
+The bar cannot start until the compositor exists, and the supervisor is a **sibling** of
+`startplasma-wayland`, not a child, so it never inherits `WAYLAND_DISPLAY`. `sleep 8 && qs` is wrong
+in both directions — too short on a cold boot, wasted on a warm login — and still leaves `qs` with
+no display name.
+
+Instead the session **observes**: it snapshots which `wayland-*` sockets exist *before* Plasma
+starts, then waits for a **new** one. That socket cannot be a leftover, cannot appear before the
+compositor does, and is the name KWin actually created rather than one we guessed. `plasmashell`
+appearing is used as a second, independent reading (it inherits `WAYLAND_DISPLAY` at exec, so
+`/proc/<pid>/environ` shows it) and as proof that a client really connected.
+
+Three things measured on this machine on 2026-08-13, each of which shaped the code:
+
+1. **`/proc/<pid>/environ` cannot be read for `kwin_wayland` at all** — not even by its own user.
+   `/usr/bin/kwin_wayland` carries `cap_sys_nice=ep`, so it exec's with elevated privileges, the
+   kernel clears its dumpable flag, and every read returns EACCES. Asking the compositor directly is
+   not an option that exists; a client is the only readable witness.
+2. `/proc/<pid>/environ` is the environment a process was **exec'd** with, not its current one —
+   later `setenv()` calls are invisible there. So even without the capability, KWin setting
+   `WAYLAND_DISPLAY` on itself would not have shown up.
+3. Under `Linger=yes` a `plasmashell` from an **earlier** session can still be alive, and would name
+   an **old** socket. So plasmashell may only overrule the socket scan when the display it names is
+   *also* new; otherwise it is logged as a leftover and ignored.
+
+The socket match is `|`-delimited on both sides specifically so `wayland-1` cannot be masked by
+`wayland-10`. Positive, negative and substring cases were all tested against the live runtime
+directory before installing.
+
+#### The STEP B open question is ANSWERED — measured, not guessed
+
+The plan said to settle, before removing the panel, whether the volume shortcuts belong to the
+`plasma-pa` **applet inside the panel**. **They do not.** `plasma-pa` ships two separate plugin
+binaries — `plasma/applets/org.kde.plasma.volume.so` (the applet) and
+`kf6/kded/audioshortcutsservice.so` (the shortcut handler). The handler is a **KDED module** loaded
+into `kded6`: its own process, started by `plasma-workspace.target`, independent of both plasmashell
+and the panel. `kglobalshortcutsrc` agrees — the owning component is `[kmix]`. Brightness belongs to
+`[org_kde_powerdevil]`, a systemd user service that was never in the panel.
+
+**So removing the panel does not re-break BUG-121.** Auto-hide is still preferred — it is
+non-destructive and less work, which is what the haste-decision note above already argued — but it
+is no longer *required* in order to protect the keys. This is packaging evidence, not a live test:
+confirm with `pgrep -x kded6` and `busctl --user tree org.kde.kglobalaccel` from inside the session
+before STEP B deletes anything.
+
+#### One finding that changes STEP B's stated cost
+
+`plasma.desktop` already carries `NoDisplay=true`, applied by `scripts/luminos-hide-sessions` and
+re-applied by a pacman hook — **plain Plasma is not selectable at the greeter today.** The "plain
+Plasma also loses its panel" cost that this decision spelled out, and that Shawn accepted, is
+therefore currently unobservable: there is no way to log into plain Plasma and see it. That does not
+change the decision, but the accepted downside is smaller than it was described as, and the new
+session becomes in practice the *only* Plasma — which argues further for auto-hide over deletion.
+
+`~/.config/plasma-org.kde.plasma.desktop-appletsrc` was backed up to
+`~/.luminos-backups/appletsrc.bak-pre-step-b-20260813-111935` and verified byte-identical. Nothing
+in it has been modified.
+
+### STEP B done by Shawn, and STEP C part 1 — SHIPPED 2026-08-13 (proven on screen)
+
+**STEP B did not need building.** Shawn deleted the Plasma panel himself from the panel's own
+right-click menu, in the live session, in seconds. No config file was edited by an agent and
+`plasma-org.kde.plasma.desktop-appletsrc` was never touched by one. Two things were confirmed
+immediately afterwards on the running machine, which closes the open question from STEP A:
+
+- `busctl --user call org.kde.kded6 /kded org.kde.kded6 loadedModules` lists **`audioshortcutsservice`**
+  with the panel gone. This is the live confirmation of the packaging-only evidence recorded above:
+  the volume keys never belonged to the panel. **BUG-121 stays closed.**
+- Deleting the panel is what made Caelestia's launcher usable — it had been competing with
+  Plasma's.
+
+#### STEP C part 1 — Caelestia's OSD, volume half
+
+`config/quickshell/caelestia-bar/shell.qml` now instantiates `Osd.Wrapper` in its own right-edge
+layer-shell window. Verified on screen: the pill renders at the right edge, vertically centred,
+and the volume slider tracks the keys.
+
+**No shortcut was wired, and none was needed.** This is the load-bearing fact.
+`modules/osd/Wrapper.qml:51-73` is a `Connections { target: Audio }` — it calls `show()` when
+**PipeWire's volume value changes**, regardless of who changed it. KDE's `audioshortcutsservice`
+moves PipeWire; Quickshell observes the same node; the OSD appears. Rebinding the volume keys to
+Caelestia would have been pure invented work, and would have had to unbind KDE's handler first to
+avoid double-stepping. *Prefer letting Plasma do a job over rebuilding it* paid out literally here.
+
+Three traps that had to be handled, all of them already-learned lessons:
+
+1. **The threaded-render-loop trap, again.** `Wrapper.qml:41` is `visible: offsetScale < 1`, driven
+   by a `Behavior` animation, and under `QSG_RENDER_LOOP=threaded` a hidden window gets no frames to
+   advance that animation with — so it would show once and never again. Same fix as the launcher:
+   `visible: screenState.osd || osd.visible`, OR-ing the instant bool with the animated one.
+2. **`Content.qml` paints no background of its own** — upstream sits on the sheet's blob, which this
+   config does not have. It needed the same explicit `StyledRect` backdrop the launcher needed.
+3. **`ScreenState` was checked for an `osd` property before relying on it** (`components/ScreenState.qml:8`,
+   `property bool osd`). A missing QML property accepts writes silently and reads `false` forever.
+
+Validation method worth repeating: quickshell has **no `--check` flag**, so the only way to validate
+a config is to run it. Rather than test by breaking the live bar, the new window was first run as an
+OSD-only throwaway config in `/tmp` symlinked against the same modules. It loaded clean there, then
+was promoted. Restarting the real `qs` is safe: `kill` gives `rc != 0`, and the supervisor's 60-second
+uptime reset means a restart does not spend one of its three tries.
+
+#### Still open after this
+
+- **Brightness is NOT symmetrical and does not work yet.** `services/Brightness.qml:225-237` reads
+  the backlight once at `Component.onCompleted` and thereafter only updates when Caelestia itself
+  sets it. Nothing watches `/sys/class/backlight`. So powerdevil moving the backlight is invisible,
+  `onBrightnessChanged` never fires, and the slider goes stale. The *initial* value is correct —
+  `/usr/local/bin/brightnessctl` (the BUG-098 shim) precedes `/usr/bin` on `PATH` and reports
+  `139651 / 399000` = 35% from `amdgpu_bl2`, correctly ignoring the phantom `nvidia_0` that reads a
+  fake 100%. Fix options: (A) poll the backlight so Caelestia notices powerdevil — blunt, adds a
+  patch, but leaves powerdevil's dimming/battery/ambient logic completely intact; (B) rebind the keys
+  to Caelestia's brightness IPC — cleaner-looking, but powerdevil must be unbound first or every
+  press moves brightness twice, and its other jobs are then ours. **(A) is recommended**, per
+  *prefer letting Plasma do a job over rebuilding it*.
+- **Plasma's OSD cannot be switched off.** Confirmed by grepping the `plasmashell` binary rather than
+  guessing: there is no `[OSD] Enabled` key. It is not undocumented, it does not exist. The OSD is a
+  QML file inside the look-and-feel package (`org.kde.plasma.workspace.osd`); overriding it with an
+  empty one in `~/.local/share/plasma/look-and-feel/` is the likely route, **untested**, and must be
+  checked against the look-and-feel auto-switcher that caused BUG-088. Until then, both indicators
+  show — visible in the verification screenshot.
+
+#### STEP C part 2 — brightness — SHIPPED 2026-08-13 (proven on screen)
+
+Option (A) was taken: Caelestia now *observes* the backlight instead of owning the keys. powerdevil
+keeps the brightness keys and keeps its battery, lid and idle logic; Caelestia only displays.
+
+Implemented in `config/quickshell/caelestia-bar/shell.qml` — deliberately **not** in
+`services/Brightness.qml`, because that file lives in `~/.config/quickshell/caelestia-kwin/` and is
+**not version-controlled**. Putting the change in the repo-owned `shell.qml` keeps it revertible with
+one `git checkout`.
+
+- `brightnessctl -m` is asked once at startup for `device,class,current,percent,max`. That is the
+  **Luminos shim** in `/usr/local/bin`, which picks the backlight hanging off the DRM eDP connector
+  rather than the phantom `nvidia_0`. Asking it beats re-walking sysfs here: one tested place knows
+  which device is real (BUG-098), and anything spelled `cardN`/`blN` is PCIe enumeration order and
+  breaks on a reboot that reorders (BUG-094's lesson).
+- A `FileView` + 250 ms `Timer` re-reads `/sys/class/backlight/<dev>/brightness` and assigns
+  `monitor.brightness`. **Assigning that property is what shows the OSD** (`Osd/Wrapper.qml:75-82`).
+  It never calls `setBrightness()`, so it never writes hardware and cannot fight powerdevil.
+- **Polling is not laziness here.** sysfs attributes do not raise inotify events, so
+  `FileView.watchChanges` genuinely cannot see this file change; the only event-driven alternative is
+  a D-Bus subscription to powerdevil. A sysfs read costs microseconds and forks nothing — cheaper
+  than the `brightnessctl` subprocess the service already spawns on every set. `FileView`+`Timer` is
+  the pattern `SysInfo.qml` and `NetworkUsage.qml` already use.
+- **The first read only primes**, and does not display. Without it the OSD flew out once at login for
+  a change the user never made.
+- Changes are compared at 1% granularity, matching `Brightness.qml:203-205`, so dragging Caelestia's
+  own slider (which *does* write hardware) does not bounce back as a fresh "change".
+
+Verified in an isolated `/tmp` config before promotion: it resolved `amdgpu_bl2` (max 399000), primed
+at 40% silently, then reported the external change to 65% and back to 40%. On screen the brightness
+slider became a sun at 65% and the OSD appeared **from a brightness change alone, with no volume
+involved.**
+
+**The auto-dim risk was checked, not assumed:** `~/.config/powermanagementprofilesrc` has
+`[AC][DPMSControl] idleTime=600` but **no `DimDisplay` section**, so powerdevil blanks the screen
+rather than fading the backlight, and the poller will not pop the OSD while Shawn is away. If a
+`DimDisplay` action is ever enabled, expect the OSD to appear during the fade — that is the known
+cost of option (A), and the fix would be suppressing on idle, not abandoning the approach.
+
+#### STEP 4 (requested by Shawn 2026-08-13, NOT built)
+
+**Hover-to-peek.** The OSD should nose out from the right edge when the cursor reaches that edge,
+the way upstream Caelestia does. It does not today, because the reveal-on-hover machinery lives in
+the drawers sheet's `Interactions.qml` — the same full-screen surface this config deliberately does
+not have (it is what caused the "cursor moves but clicks do nothing" bug on KWin). So this needs a
+*thin* always-present hover-catching layer-shell strip at the right edge that sets `screenState.osd`,
+not the sheet. Note the constraint: that strip must not swallow clicks, which is exactly the trap
+BUG-110 records for the top-edge drawer.
+
+#### STEP C part 3 — silence Plasma's own OSD — SHIPPED 2026-08-13 (proven on screen)
+# [CHANGE: claude-code | 2026-08-13]
+
+Shawn's step 3: with Caelestia's OSD working, Plasma was still drawing **its** pill in the middle of
+the screen, so every volume or brightness key produced two OSDs. This turns Plasma's off.
+
+**There is no setting for this. That was established, not assumed.**
+- `plasmashell` owns the D-Bus service `org.kde.osdService`; `strings /usr/bin/plasmashell` shows the
+  OSD strings and **no config key** anywhere near them.
+- `audioshortcutsservice.so` (the kded module that owns the volume keys) references
+  `/org/kde/osdService` and `VolumeFeedback::play` but carries **no OSD-disable setting** either.
+- Editing `/usr/lib/qt6/qml/org/kde/plasma/workspace/osd/Osd.qml` would have been a **silent no-op**:
+  that directory's `qmldir` contains `prefer :/qt/qml/org/kde/plasma/workspace/osd/`, so the real QML
+  is the copy compiled into `libplasmashell_osd.so` as a Qt resource. The `.qml` files on disk are
+  decorative. This is a new entry in the "tools that report success doing nothing" family — nothing
+  errors, nothing changes.
+- Turning off the *callers* was rejected: killing kded's `audioshortcutsservice` takes the volume keys
+  with it, and killing powerdevil takes battery, lid and idle handling with it.
+
+**So: a KWin window rule, forcing opacity to 0.** `~/.config/kwinrulesrc` group `[2]`:
+`wmclass=org.kde.plasmashell`, `wmclassmatch=1`, `types=65536`, `opacityactive=0`,
+`opacityinactive=0`, both `rule=2` (Force). Snapshot kept at `config/kde/kwinrulesrc`.
+
+**This is a blunt fix and here is what smart looks like.** Smart would be a patched plasma-workspace
+with the OSD service stubbed, or a Plasma upstream setting. Blunt is leaving the window alive and
+transparent. The window still exists, still gets mapped for ~1.8 s, and still costs a frame — it is
+simply invisible. The reason blunt wins: it is one config file, it survives package upgrades, and it
+reverts with `count=1`.
+
+**Known cost, stated honestly.** The rule matches the window *type*, so it silences **every**
+plasmashell OSD, not just volume and brightness: touchpad-enabled toggle, keyboard-layout change,
+power-profile change, wifi/bluetooth toggles, and `showText`. Caelestia replaces the volume and
+brightness ones. The rest go quiet with no replacement. That was accepted deliberately — a
+per-message filter is not expressible in a window rule.
+KWin's *own* OSDs (virtual-desktop switcher, zoom) are class `kwin_wayland`, so they are untouched.
+
+**Two things nearly produced a false result, and both were caught:**
+1. **The obvious `wmclass=plasmashell` does not match.** KWin reports the OSD's `resourceClass` as
+   `org.kde.plasmashell`. The first rule looked completely correct and did exactly nothing. Found by
+   loading a throwaway KWin script that printed `resourceClass`/`windowType` on `windowAdded` —
+   `busctl --user call org.kde.KWin /Scripting org.kde.kwin.Scripting loadScript ss <path> <name>`
+   then `start`, output lands in `journalctl --user` as `kwin_wayland[...]`. Note the script would
+   **not** load from `~/.local/share/kwin/scripts/` (`isScriptLoaded` returned false with no error);
+   loading the `.js` by absolute path over D-Bus worked. Probe removed afterwards.
+2. **Screenshot timing lies both ways.** Firing the OSD over D-Bus and then starting `spectacle`
+   loses the race about half the time — the "rule off" control shot came back with no OSD in it,
+   which would have "proved" a fix that was not there. The trustworthy test was reading the window's
+   actual opacity from the KWin script, and the trustworthy *causation* test was forcing opacity to
+   **50%** and watching the probe report `opacity=0.5`. Also: a rule change applies to the
+   already-existing OSD window on the next map, but *removing* the rule leaves the last forced value
+   on it — so "I turned the rule off and it was still hidden" is stale window state, not a live rule.
+   Use `spectacle -d 1400` started *before* the trigger for the visual confirmation.
+
+Verified on screen: `/tmp/osd-final.png` shows Caelestia's pill at the right edge with both sliders
+and **no** Plasma pill in the middle. Test side effects restored (volume back to 0.23).
