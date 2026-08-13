@@ -1650,6 +1650,60 @@ Two of them, and they are the same lesson the repo keeps re-learning:
   would have reported success for every wrong configuration tried. It was caught only because
   the check was deliberately run against a config known to be wrong.
 
+### Amendment, 2026-08-13 — the screen stays awake much longer on AC, and the map of PowerDevil's groups is now complete
+*[CHANGE: claude-code | 2026-08-13]*
+
+Shawn asked for this while we were working on the Caelestia notifications: the session kept
+**locking at 5 minutes** and blanking behind it, which made every screenshot come back black and
+made it impossible to prove anything on screen.
+
+**Measured before, on AC:** dim at **300 s**, screen off at **600 s**, auto-suspend at 900 s,
+lock at **5 min**.
+
+**Now, on AC:** dim at **1500 s (25 min)**, screen off at **1800 s (30 min)**, auto-suspend at
+**3600 s (60 min)**, lock at **60 min**. **Battery and LowBattery are deliberately untouched** —
+those numbers protect the battery, and the complaint was about the machine sitting on the charger.
+`Autolock` and `LockOnResume` both stay `true`; the timeout moved, the safety net did not come out.
+
+**The group for the display keys is `Display`.** So:
+
+```ini
+[AC][Display]
+DimDisplayIdleTimeoutSec=1500
+TurnOffDisplayIdleTimeoutSec=1800
+```
+
+**Five plausible group names were tried first and every one of them was accepted and ignored** —
+`[AC]` bare, `[AC][DisplayAndBrightness]`, `[AC][DPMSControl]`, `[AC][DimDisplay]`,
+`[AC][DisplayBrightness]`, plus the legacy `powermanagementprofilesrc [AC][DPMSControl] idleTime`.
+No warning, no error, the daemon simply kept using its built-in defaults. Exactly the shape this
+decision already warns about, one year on and still costing time.
+
+**How it was finally settled:** by reading `PowerDevilProfileSettings.kcfg` from upstream, which
+declares the whole map — `<group name="$(ProfileId)">` with child groups **`Display`**,
+**`SuspendAndShutdown`**, `Keyboard`, `Performance`, `RunScript`. Byte-grepping the shipped library
+had found the key names but **not** the group `Display`, because it is a plain word and the search
+was filtering for CamelCase.
+
+**How it was proven:** PowerDevil logs the timeout it actually registers. Turn it on with
+`~/.config/QtProject/qtlogging.ini` containing `[Rules]` / `org.kde.powerdevil.debug=true`, restart
+`plasma-powerdevil.service`, and read:
+
+```
+DPMS: registering idle timeout after 1800000ms
+DimDisplay: registering idle timeout after 1500000ms
+```
+
+That is the daemon stating its own number, which is the readback this decision demanded and did not
+previously have for the display actions. The logging file was **removed again afterwards** — it is a
+diagnostic, not part of the setup, and one line brings it back.
+
+Backups of both files before the change: `~/.luminos-backups/idle-timeouts-20260813/`.
+
+⚠️ **Still not proven by the clock:** the lock timeout was applied and `org.kde.screensaver.configure()`
+accepted it, but kscreenlocker offers no equivalent read-back, so the only real proof is the screen
+*not* locking after five idle minutes.
+
 ---
 
 ## DECISION 39 — Hyprland is unbanned, as an opt-in second session; Plasma stays the default
