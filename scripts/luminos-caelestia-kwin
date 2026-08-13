@@ -28,7 +28,19 @@ mkdir -p "$STATE"
 exec >>"$STATE/session.log" 2>&1
 echo "=== $(date -Is) session start (pid $$) ==="
 
-SHELL_DIR="$HOME/.config/quickshell/caelestia-kwin"
+# [CHANGE: claude-code | 2026-08-13]
+# Which quickshell config this session runs. One word, flip it either way:
+#   caelestia-kwin = the full upstream shell + KWin patches. One surface covering
+#                    the whole screen; this is the one with the dead-click bug.
+#   caelestia-bar  = Caelestia's real bar in its own 60px window, plus the real
+#                    launcher in a second window. No sheet at all, so nothing
+#                    covers the screen and clicks land where you aim them.
+#                    Still missing: dashboard, sidebar, session menu, OSD,
+#                    notifications, utilities, bar popouts.
+#                    Escape hatch in that session is Meta+Return (kitty) or
+#                    Ctrl+Alt+T (konsole); the launcher is Meta+P.
+# Exported so the inner script below inherits it instead of repeating the path.
+export SHELL_DIR="$HOME/.config/quickshell/caelestia-bar"
 
 # ── GPU ──────────────────────────────────────────────────────────────────────
 # /etc/environment pins KWIN_DRM_DEVICES=/dev/dri/card2 for the dGPU 0 W gating.
@@ -72,7 +84,9 @@ cat >"$STATE/inner.sh" <<'INNER'
 #!/usr/bin/env bash
 set -u
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/luminos/caelestia-kwin"
-SHELL_DIR="$HOME/.config/quickshell/caelestia-kwin"
+# [CHANGE: claude-code | 2026-08-13] exported by the outer script; the fallback is
+# only here so this file still runs if it is ever executed on its own.
+SHELL_DIR="${SHELL_DIR:-$HOME/.config/quickshell/caelestia-kwin}"
 
 # Start a background daemon and RECORD ITS EXIT CODE. Doing this the obvious way
 # (`daemon &`) is how a daemon dies in the first second leaving a zero-byte log and

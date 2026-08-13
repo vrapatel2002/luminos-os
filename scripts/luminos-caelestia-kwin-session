@@ -21,7 +21,19 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 LAUNCHER_SRC="$REPO/scripts/luminos-caelestia-kwin"
 LAUNCHER="/usr/local/bin/luminos-caelestia-kwin"
 SESSION="/usr/share/wayland-sessions/luminos-caelestia-kwin.desktop"
-SHELL_DIR="$HOME/.config/quickshell/caelestia-kwin"
+# [CHANGE: claude-code | 2026-08-13]
+# SHELL_DIR is the config the session ACTUALLY runs - it has to match SHELL_DIR in
+# scripts/luminos-caelestia-kwin, because `ipc call` only ever talks to an already
+# running instance and never starts one. Point a shortcut at a config that is not
+# running and the key silently does nothing.
+SHELL_DIR="$HOME/.config/quickshell/caelestia-bar"
+# The full upstream shell. Only still referenced by the five shortcuts whose panels
+# the bar config does not have. They are LEFT pointing here on purpose: `drawers
+# toggle dashboard` against the bar config would succeed and set screenState.dashboard
+# true with nothing rendering it, and the launcher then computes its maxHeight from
+# panels.dashboard.nonAnimHeight - which is the zero-size stand-in - giving NaN and
+# breaking the one panel that does work. Failing is better than that.
+SHELL_DIR_FULL="$HOME/.config/quickshell/caelestia-kwin"
 APPS="$HOME/.local/share/applications"
 UNITS="$HOME/.config/systemd/user"
 LAUNCH_UNIT="$UNITS/luminos-caelestia-launcher.service"
@@ -119,7 +131,12 @@ EOF
         IFS='|' read -r id name accel call <<<"$s"
         # The terminal entry is the escape hatch: it must work with NO shell running,
         # so it launches kitty directly instead of talking to Quickshell.
-        local exec_line="/usr/bin/qs -p $SHELL_DIR ipc call $call"
+        # [CHANGE: claude-code | 2026-08-13] launcher is the only drawer the running
+        # config implements, so it is the only one aimed at SHELL_DIR. See the
+        # SHELL_DIR_FULL comment at the top for why the rest are not.
+        local dir="$SHELL_DIR_FULL"
+        [ "$id" = "launcher" ] && dir="$SHELL_DIR"
+        local exec_line="/usr/bin/qs -p $dir ipc call $call"
         [ "$id" = "terminal" ] && exec_line="kitty"
         write_shortcut_desktop "$id" "$name" "$accel" "$exec_line"
         info "  $accel  ->  $name"
@@ -178,9 +195,11 @@ check_all() {
     grep -q "^Exec=$LAUNCHER$" "$SESSION" 2>/dev/null \
         && ok "greeter entry points at the launcher" \
         || bad "greeter entry Exec is wrong"
+    # [CHANGE: claude-code | 2026-08-13] The overlay builds SHELL_DIR_FULL, not
+    # SHELL_DIR. caelestia-bar inherits it through symlinks, so this still covers both.
     "$REPO/scripts/luminos-caelestia-kwin-overlay" --check >/dev/null 2>&1 \
-        && ok "$SHELL_DIR overlay in sync" \
-        || bad "$SHELL_DIR overlay stale - run luminos-caelestia-kwin-overlay"
+        && ok "$SHELL_DIR_FULL overlay in sync" \
+        || bad "$SHELL_DIR_FULL overlay stale - run luminos-caelestia-kwin-overlay"
 
     for s in "${SHORTCUTS[@]}" "terminal|Terminal|Meta+Return|"; do
         IFS='|' read -r id name accel _ <<<"$s"
