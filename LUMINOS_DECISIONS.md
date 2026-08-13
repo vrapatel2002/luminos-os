@@ -3743,8 +3743,56 @@ pointer was returned to within 3 px of where Shawn left it.
 
 ##### Still not built
 
-Notifications, sidebar, session menu, utilities, the rounded screen border, and bar popouts. The
-dashboard has no bar button (upstream does not give it one) — shortcut and hover only.
+Sidebar (the notification **list** drawer), session menu, utilities, the rounded screen border, and
+bar popouts. The dashboard has no bar button (upstream does not give it one) — shortcut and hover
+only.
+
+#### Amendment, 2026-08-13 — notifications move from Plasma to Caelestia (step 1 of 2)
+
+*[CHANGE: claude-code | 2026-08-13]*
+
+Shawn's instruction:
+
+> "we are going to route all the notification to caelestia notification … the notification is on
+> right top corner and list of all notification is at right side next to volume button than power
+> button … so first step may be divert it to top right with the caelestia"
+
+So this is deliberately **two steps**: toasts in the top-right corner now, the right-edge list
+drawer next. This amendment covers step 1 only.
+
+**What it takes to own the notifications.** `org.freedesktop.Notifications` is a D-Bus name and only
+one process can hold it. plasmashell claims it at login and does **not** offer it up — its
+`RequestName` carries no `ALLOW_REPLACEMENT` flag, so ours comes back with reply code **3 (EXISTS)**
+and is simply refused. Quickshell has no "replace" option and cannot force a takeover. What it does
+have is a watch on `NameOwnerChanged` and a retry, so the handover is one restart of plasmashell
+*while our shell is already up*. `scripts/luminos-caelestia-plasma` now does exactly that, once, and
+**conditionally**: if Caelestia already owns the name it does nothing, and if the handover fails it
+logs and stops rather than looping — a failed handover leaves Plasma drawing notifications, which is
+a working desktop, and that is the migration rule this project already follows.
+
+**Proven, not assumed:** with `qs` holding the name, plasmashell was restarted and came back as a new
+PID; `qs` still owned the name afterwards. plasmashell does not steal it back.
+
+**Owning the server was not enough — see BUG-124.** The notification arrived, was stored, and drew
+nothing. The cause is the same class as BUG-123: upstream code written for a single always-repainting
+full-screen sheet, moved into a window of its own. `notifications/Content.qml` sizes itself by
+*calling* `list.itemAtIndex(i)` — a method call registers no reactive dependency, so the height
+binding re-runs on `list.count` alone. `Wrapper.qml` is `visible: height > 0`. And an invisible
+ListView with a negative height never runs its layout pass, so it creates no delegate on insert and
+therefore never emits `countChanged`. Nothing ever kicks it. One `forceLayout()` on
+`Notifs.popupsChanged` fixes it, in our file; upstream is untouched.
+
+**What this leaves.** Toasts appear top-right and disappear on expiry, notifications no longer come
+from Plasma, and the window is unmapped while idle so nothing is in the way. **Still missing:** the
+right-edge list drawer, which is `Sidebar.Wrapper` plus a way to open it — that is step 2, and it is
+also what replaces the zero-size `sidebarStandin` in `shell.qml`. Note for step 2 that the sidebar
+holds only the notification dock; the volume pill and the power menu are the separate OSD and
+session panels.
+
+**Not yet verified in pixels.** The session was locked throughout testing (`LockedHint=yes`,
+`kscreenlocker_greet` running), so every screenshot came back black. All the evidence is geometry
+and state — heights, delegate counts, D-Bus ownership. Under this project's own rule that is not
+"proven"; it needs one look at an unlocked screen.
 
 ---
 

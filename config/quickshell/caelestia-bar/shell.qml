@@ -19,7 +19,7 @@
 // bug.  Windows this size cannot do that: outside them there is no surface.
 //
 // Still NOT here (deliberately - one step at a time, per Shawn 2026-08-13):
-//   - dashboard / sidebar / session menu / notifications / utilities
+//   - sidebar (the notification LIST drawer) / session menu / utilities
 //   - the rounded screen border and 10px gap (painted by the sheet's blob)
 //   - bar popouts.  A popouts Wrapper is instantiated because BarWrapper
 //     requires one, but it is never shown and `checkPopout()` is never called
@@ -41,6 +41,7 @@ import qs.modules.bar
 import qs.modules.bar.popouts as BarPopouts
 import qs.modules.dashboard as Dashboard
 import qs.modules.launcher as Launcher
+import qs.modules.notifications as Notifications
 import qs.modules.osd as Osd
 
 ShellRoot {
@@ -693,6 +694,193 @@ ShellRoot {
                     // through either (see above), but at least nothing here
                     // silently swallows a press it might have acted on.
                     acceptedButtons: Qt.NoButton
+                }
+            }
+
+            // ── notification toasts, top right ───────────────────────────────
+            // [CHANGE: claude-code | 2026-08-13] STEP 1 of routing ALL
+            // notifications through Caelestia, asked for by Shawn.
+            //
+            // This hosts upstream's notifications/Wrapper.qml unmodified. The
+            // notification SERVER is not here - it lives in
+            // services/Notifs.qml, a singleton that owns a NotificationServer.
+            // Simply referencing Notifs (which Content.qml does, for its list
+            // model) is what brings the singleton to life and makes us claim
+            // the org.freedesktop.Notifications D-Bus name.
+            //
+            // THE HANDOVER PROBLEM, written down because it will bite again:
+            // plasmashell claims that same name at login and REFUSES to give
+            // it up - its RequestName has no ALLOW_REPLACEMENT flag, so our
+            // request comes back with reply code 3 (EXISTS) and nothing
+            // happens. Quickshell has no "replace" option and cannot force it.
+            // What it DOES do is watch NameOwnerChanged and retry the moment
+            // the name is released. So the handover is:
+            //     systemctl --user restart plasma-plasmashell.service
+            // once, while this shell is up. plasmashell drops the name on the
+            // way down, we grab it in the gap, and plasmashell comes back
+            // without it and stays healthy. Verified: after that,
+            // `busctl --user call ... GetNameOwner` points at our qs process.
+            //
+            // Window shape is BUG-123's, not the OSD's: notifications/
+            // Content.qml puts a `Behavior { Anim {} }` on implicitHeight, so
+            // binding a window to that size would resize the wl_surface on
+            // every frame of every notification arriving or leaving. Cover the
+            // output, never resize, and mask down to the panel instead.
+            PanelWindow {
+                id: notifWindow
+
+                screen: scope.modelData
+                color: "transparent"
+
+                // Not mapped at all while there is nothing to show. The mask
+                // below should already make an idle full-screen surface
+                // harmless - an empty panel is 0px tall, so the region is
+                // empty - but "an empty Region means no input" is exactly the
+                // kind of assumption that, if wrong, turns the whole screen
+                // into a click sink. Not worth betting the desktop on when
+                // simply not mapping the surface costs nothing.
+                //
+                // Two terms, same pattern as the OSD above: the popup count
+                // flips instantly and gets the window up BEFORE the panel
+                // starts growing, and the panel's own visibility keeps it up
+                // through the collapse animation on the way back down.
+                visible: Notifs.popups.length > 0 || notifPanel.visible
+
+                WlrLayershell.namespace: "caelestia-notifications"
+                // Overlay: a notification you cannot see over a fullscreen
+                // video is not a notification.
+                WlrLayershell.layer: WlrLayer.Overlay
+                // Never take the keyboard. A toast that steals focus while you
+                // are typing is worse than no toast at all.
+                WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+                exclusiveZone: 0
+
+                anchors.top: true
+                anchors.bottom: true
+                anchors.left: true
+                anchors.right: true
+
+                mask: Region {
+                    item: notifPanel
+                }
+
+                // Content.qml:38-42 clamps the list so it stops above the OSD,
+                // but it does that by reading `osdPanel.y`. Our OSD lives in a
+                // DIFFERENT window, where its own y is 0 - passing it straight
+                // in would clamp the list to a negative height and make every
+                // notification vanish the moment you touched the volume. This
+                // is a zero-size marker inside THIS window, sitting where the
+                // OSD actually is on screen (right edge, vertically centred,
+                // same as osdWindow above).
+                Item {
+                    id: osdStandin
+
+                    width: 0
+                    height: 0
+                    y: (parent.height - osd.implicitHeight) / 2
+                }
+
+                // We have no sidebar, session menu or utilities panel yet.
+                // Content.qml only dereferences those three inside
+                // `if (screenState.session)` / `if (screenState.utilities)`,
+                // and Wrapper.qml only reads sidebarPanel.width for alignment,
+                // so empty Items are safe rather than merely convenient. They
+                // get replaced by the real thing in step 2.
+                Item {
+                    id: sidebarStandin
+                }
+
+                Item {
+                    id: sessionStandin
+                }
+
+                Item {
+                    id: utilitiesStandin
+                }
+
+                Notifications.Wrapper {
+                    id: notifPanel
+
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+
+                    screenState: scope.screenState
+                    sidebarPanel: sidebarStandin
+                    osdPanel: osdStandin
+                    sessionPanel: sessionStandin
+                    utilitiesPanel: utilitiesStandin
+                }
+
+                // ── the one kick this port needs ─────────────────────────────
+                // [CHANGE: claude-code | 2026-08-13] BUG-124.
+                //
+                // Without this, notifications arrive, are stored, and NEVER
+                // draw. It is a genuine deadlock in upstream's own code that
+                // only opens up when the panel is alone in a window:
+                //
+                //   notifications/Content.qml:29-57 sizes itself by asking the
+                //   ListView for each delegate: `list.itemAtIndex(i).
+                //   nonAnimHeight`. A function call is NOT a reactive
+                //   dependency, so that binding re-runs on exactly one signal:
+                //   `list.count` changing.
+                //   Wrapper.qml:13 is `visible: height > 0`, and with nothing
+                //   in the list the height is 0 - so the ListView starts life
+                //   invisible and 0 (in fact -27) pixels tall.
+                //   A ListView in that state never runs its layout pass, so
+                //   when the model gains a row it creates no delegate and
+                //   never emits countChanged. Measured: count reads 1 (that
+                //   query goes straight to the model) while contentHeight is
+                //   0 and the content item has no children at all.
+                //   So the height binding never re-runs, the height stays 0,
+                //   the panel stays invisible, and the view stays unlaid-out.
+                //
+                // Upstream never trips over it because its panels share ONE
+                // window with the bar and the border, which are painting and
+                // animating constantly; that traffic keeps the view's layout
+                // pass running. Ours is a window of its own with nothing else
+                // in it, so nothing ever pokes it. Same class of bug as
+                // BUG-123: upstream code that assumed the single full-screen
+                // sheet it was written for.
+                //
+                // forceLayout() runs that pass on demand. Measured, from an
+                // empty list and one notify-send: before - contentHeight 0,
+                // 0 delegates, panel height 0, invisible; after - contentHeight
+                // 66, 1 delegate, panel height 88, visible.
+                //
+                // It fires on popupsChanged, so it covers the list emptying
+                // again as well as filling. Qt.callLater collapses a burst of
+                // notifications into one call after the bindings have settled.
+                Connections {
+                    target: Notifs
+
+                    function onPopupsChanged(): void {
+                        Qt.callLater(notifWindow.layOutNotifs);
+                    }
+                }
+
+                // Upstream gives the ListView an id but no way to reach it
+                // from outside, so find it by the thing we actually need.
+                // Looking for the capability rather than walking a fixed path
+                // of child indices means a reshuffle upstream leaves this
+                // finding nothing - the same as today's behaviour - instead of
+                // grabbing the wrong item.
+                function layOutNotifs(): void {
+                    const found = (function find(item) {
+                        if (!item)
+                            return null;
+                        if (typeof item.forceLayout === "function")
+                            return item;
+                        for (const child of item.children ?? []) {
+                            const hit = find(child);
+                            if (hit)
+                                return hit;
+                        }
+                        return null;
+                    })(notifPanel);
+
+                    if (found)
+                        found.forceLayout();
                 }
             }
 

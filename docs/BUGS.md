@@ -2570,3 +2570,125 @@ The remaining ~90 ms hitch on every dashboard **open** is a different thing: `Wr
 `Loader.active` destroys the content on close and rebuilds it on open. And the Media tab's
 `CoverVisualiser` rebuilds one `ShapePath` per bar per cava frame, which is what puts that tab at
 ~66% of a core. Neither is fixed here.
+
+---
+
+## BUG-124 — notifications arrive, are stored, and never draw (Caelestia on Plasma)
+**Status:** FIXED — 2026-08-13 · **Component:** `config/quickshell/caelestia-bar/shell.qml`
+
+### The symptom
+`notify-send` returns rc=0. `busctl --user list` shows `org.freedesktop.Notifications` owned by
+`qs`, so the D-Bus server is genuinely ours. The notification is written to
+`~/.local/state/caelestia/notifs.json`. And **nothing appears on screen**. No error, no warning, no
+log line — the toast simply does not exist.
+
+This is the failure mode that keeps costing days in this port: everything reports success.
+
+### Root cause — a ListView that is too short to lay out, and a height that only re-reads on `count`
+Three upstream lines have to line up for this, and in this port they do.
+
+**1.** `notifications/Content.qml:29-57` computes its height by *calling a function*:
+
+```qml
+implicitHeight: {
+    const count = list.count;
+    if (count === 0)
+        return 0;
+    let height = (count - 1) * Tokens.spacing.medium;
+    for (let i = 0; i < count; i++)
+        height += (list.itemAtIndex(i) as NotifWrapper)?.nonAnimHeight ?? 0;
+    ...
+}
+```
+
+`itemAtIndex()` is a method call, not a property read, so QML registers **no dependency on it**. The
+only reactive thing in that whole block is `list.count`. The binding therefore re-runs on exactly
+one signal: `countChanged`.
+
+**2.** `notifications/Wrapper.qml:13` is `visible: height > 0`.
+
+**3.** So with an empty list the panel is invisible, and the ListView inside it is born **-27 px
+tall** (padding arithmetic on a zero height). **A ListView that is invisible and has a negative
+height never runs its layout pass.** On a model insert it creates no delegate — and because no
+delegate was created, it never emits `countChanged`.
+
+That closes the loop:
+
+> no layout → no delegate → no `countChanged` → the height binding never re-runs → height stays 0 →
+> the panel stays invisible → the view is never laid out.
+
+**Measured, live**, with a temporary IPC probe: after one `notify-send`, `list.count` reads **1**
+(that query goes straight to the model, bypassing the view) while `contentHeight` is **0** and
+`contentItem.children.length` is **0**. The model has the row. The view has never looked at it.
+
+### Why upstream never trips it
+Upstream puts every panel in **one full-screen window** shared with the bar and the border, which
+repaint constantly. That traffic keeps the layout pass running, so the view is always laid out and
+the deadlock has nothing to bite. This port gives each panel its own window; a window with nothing
+in it does nothing at all. Same class as BUG-123: **upstream code written for a single always-busy
+sheet, moved into a window of its own.**
+
+### Two theories that were wrong, recorded so they are not re-tried
+- **"The height is negative, make it zero."** Set `anchors.topMargin: 22` so the ListView started at
+  0 px instead of -27. Measured: still no delegate. A non-negative height is **not** sufficient —
+  the view has to actually be laid out. Reverted.
+- **"The `Behavior` animation driver has stalled."** Disproved by forcing the value: it read 0
+  immediately and 400 two seconds later, i.e. the animation runs normally.
+
+Also worth knowing: the binding **short-circuits on `if (count === 0) return 0;`** before it ever
+touches `screenState.osd` / `session` / `utilities`, so those dependencies are never registered
+either. Proven by toggling `screenState.session` from outside and watching nothing happen.
+
+### The fix — one kick, in our file, upstream untouched
+`ListView.forceLayout()` runs the layout pass on demand. Hang it off the one signal that *is*
+reliable, the service's own:
+
+```qml
+Connections {
+    target: Notifs
+    function onPopupsChanged(): void {
+        Qt.callLater(notifWindow.layOutNotifs);
+    }
+}
+```
+
+Upstream gives the ListView an `id` but no way to reach it from outside, so `layOutNotifs()` walks
+`notifPanel`'s children looking for **anything with a `forceLayout` method**. Searching for the
+capability rather than a fixed path of child indices means an upstream reshuffle makes this find
+nothing — the same as today's behaviour — instead of silently grabbing the wrong item.
+
+### Measured, before and after
+| state | popups | window visible | panel height | list contentHeight | delegates |
+|---|---|---|---|---|---|
+| idle | 0 | false | 0 | 0 | 0 |
+| one notification, **before** the fix | 1 | false | 0 | 0 | 0 |
+| one notification, **after** | 1 | true | 88 | 66 | 1 |
+| burst of 3 more | 4 | true | 322 | 300 | 5 |
+| after they expire | 0 | false | 0 | 0 | 0 |
+
+### The other half: getting the D-Bus name at all
+Only one process can own `org.freedesktop.Notifications`. plasmashell claims it at login **without
+the ALLOW_REPLACEMENT flag**, so Quickshell's `RequestName` comes back with reply code 3 (EXISTS)
+and is simply refused. Quickshell has no "replace" option and cannot force a takeover — but it does
+watch `NameOwnerChanged` and retry the moment the name is released. So the handover is one restart:
+
+```bash
+systemctl --user restart plasma-plasmashell.service
+```
+
+**Verified that plasmashell does not steal it back:** with `qs` holding the name, plasmashell was
+restarted (came back as a new PID) and `qs` still owned it afterwards. `scripts/luminos-caelestia-plasma`
+now does this once at login, **conditionally** — if Caelestia already owns the name it does nothing,
+and if the handover fails it logs and stops rather than looping, leaving Plasma drawing notifications
+and the desktop intact.
+
+### Input region
+The window covers the output and never resizes (BUG-123's shape, because `Content.qml` animates
+`implicitHeight`), masked with `mask: Region { item: notifPanel }`. It is **also** gated on
+`visible: Notifs.popups.length > 0 || notifPanel.visible`, so it is not even mapped while idle.
+"An empty Region yields an empty input region" is probably true, but it is not worth betting the
+whole screen on when not mapping the surface costs nothing.
+
+### Not yet proven
+No toast has been **seen on screen** — the session was locked during testing (`LockedHint=yes`), so
+every screenshot came back black. All the evidence above is geometry and state, not pixels.

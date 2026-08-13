@@ -249,6 +249,64 @@ export QT_QPA_PLATFORM=wayland
 # Unlike the bare-KWin session, a dead bar here is NOT a dead desktop: Plasma's
 # own panel, launcher and shortcuts are all still there. So this is a convenience,
 # not a rescue.
+
+# ── hand org.freedesktop.Notifications to Caelestia ──────────────────────────
+# [CHANGE: claude-code | 2026-08-13]
+#
+# Whoever owns that bus name draws every notification on this desktop. Only one
+# process can. plasmashell claims it while starting, and it claims it WITHOUT
+# the "allow replacement" flag - so Caelestia's request is simply refused
+# (RequestName replies 3, EXISTS) and it silently falls back to drawing nothing.
+# Since plasma-session starts plasmashell before we even have a socket to wait
+# on, plasmashell always wins the race, every login.
+#
+# Quickshell cannot take a name by force. What it DOES do is watch
+# NameOwnerChanged and retry the instant the name is released. So the whole
+# handover is: make plasmashell let go once, and Caelestia catches it.
+# Restarting the unit is the clean way to do that - it is a supervised
+# Type=dbus unit with Restart=on-failure, so plasmashell comes straight back,
+# just without this name.
+#
+# Deliberately CONDITIONAL and deliberately ONE attempt:
+#   - if Caelestia already owns it (a restarted shell mid-session), do nothing.
+#     A restart nobody needs is a flicker nobody asked for.
+#   - if the handover fails, log it and stop. Plasma keeps the name and keeps
+#     drawing notifications. That is a worse look, not a broken desktop, and it
+#     is a far better failure than a restart loop.
+notif_owner() {
+    busctl --user list --no-pager 2>/dev/null \
+        | awk '$1 == "org.freedesktop.Notifications" { print $3; exit }'
+}
+
+(
+    # Let the shell come up and make its first claim. It claims as soon as the
+    # Notifs singleton loads, which is while the notification panel builds.
+    sleep 8
+
+    owner=$(notif_owner)
+    if [ "$owner" = "qs" ]; then
+        log "notifications: Caelestia already owns the name, nothing to do"
+        exit 0
+    fi
+
+    log "notifications: held by '${owner:-nobody}' - restarting plasmashell to release it"
+    systemctl --user restart plasma-plasmashell.service
+
+    deadline=$((SECONDS + 20))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        [ "$(notif_owner)" = "qs" ] && break
+        sleep 0.5
+    done
+
+    owner=$(notif_owner)
+    if [ "$owner" = "qs" ]; then
+        log "notifications: handed to Caelestia after ${SECONDS}s"
+    else
+        log "notifications: FAILED to hand over, still '${owner:-nobody}'"
+        log "                Plasma keeps drawing them; the desktop is fine"
+    fi
+) &
+
 tries=0
 while : ; do
     log "starting shell (attempt $((tries + 1))) -p $SHELL_DIR"
