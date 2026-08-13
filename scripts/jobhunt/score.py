@@ -14,7 +14,7 @@
 # ============================================
 #
 # ── WHY TWO PASSES: THE WHOLE COST ARGUMENT ─────────────────────────────────
-# Shawn's instruction was "use cheapest model for bulk applying". The cheapest
+# The design instruction was "use cheapest model for bulk applying". The cheapest
 # model is not calling a model. Measured on the real database, 2026-08-06:
 #
 #   read all 9,788 descriptions with an LLM   ~18,220,000 tokens
@@ -35,7 +35,7 @@
 # An idle llama server holds ~4.6 GB of VRAM and keeps the dGPU out of its
 # suspended state forever. BUG-103 was exactly that class of bug. So this
 # script starts jobhunt-llm.service if it is down, and stops it again on the
-# way out UNLESS it was already running when we arrived — if Shawn started it
+# way out UNLESS it was already running when we arrived — if the operator started it
 # by hand for something else, taking it away from him would be rude.
 #
 # ── WHY A JSON SCHEMA AND NOT A PROMPT INSTRUCTION ──────────────────────────

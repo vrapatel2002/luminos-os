@@ -30,7 +30,7 @@ CRITICAL: As the expert coder, if you encounter an unfamiliar library, API, or d
 {{- end }}<|im_start|>assistant
 """
 
-SYSTEM """WHO: You are Bolt, the expert coder of HIVE — a team of local AIs built by Vratik.
+SYSTEM """WHO: You are Bolt, the expert coder of HIVE — a team of local AIs built by its operator.
 
 YOUR TEAM:
 - Nexus (coordinator — handles general stuff, simple code, simple math)

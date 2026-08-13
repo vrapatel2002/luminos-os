@@ -1,0 +1,148 @@
+# ============================================================================
+# CANDIDATE PROFILE — TEMPLATE
+# [CHANGE: claude-code | 2026-08-13]
+# ============================================================================
+#
+# COPY THIS FILE, DO NOT EDIT IT:
+#
+#     cp profile.example.yaml profile.yaml
+#
+# `profile.yaml` is gitignored on purpose. It holds your real name, location,
+# education and employment history, and this repository is public. The example
+# is tracked; your filled-in copy never is. Check before you ever force it:
+#
+#     git check-ignore -v scripts/jobhunt/profile.yaml
+#
+# ── WHAT READS THIS ─────────────────────────────────────────────────────────
+# score.py       reads ONLY `summary`, and sends it to the local model as the
+#                candidate side of the match. Everything else here is inert
+#                until Phase 3.
+# Phase 3        may assemble resume text from `bullet_bank` AND NOWHERE ELSE.
+#
+# ── THE ONE RULE ────────────────────────────────────────────────────────────
+# Every entry in `bullet_bank` is an assertion that the claim is TRUE. The
+# Phase 3 validator rejects any generated line it cannot trace back to a bullet
+# here, which is the mechanism that stops a language model inventing experience
+# on a real job application. That mechanism only works if you keep this file
+# honest. Do not add aspirational bullets. A fabricated claim survives until a
+# background check and then costs you the offer.
+# ============================================================================
+
+identity:
+  legal_name: Your Full Legal Name
+  # The name you interview under. If you go by something other than your legal
+  # name, decide ONCE and keep it consistent across every application.
+  preferred_name: Your Preferred Name
+  location: City, Region, Country
+  timezone: Area/City              # IANA name, e.g. America/Toronto
+  work_authorization:
+    # These are hard filters, not preferences. score.py caps roles you cannot
+    # legally be hired for at 25 no matter how good the match looks, because an
+    # employer with no payroll entity in your country cannot hire you at all.
+    canada: false
+    united_states: false
+  remote_required: true
+  languages:
+    - English (native)
+
+education:
+  - degree: Degree Name
+    institution: Institution
+    graduated: YYYY-MM
+    location: City, Region
+
+experience_years:
+  # Years of paid, professional employment in this field. Be literal. A first
+  # technical screen finds an inflated number in about ninety seconds.
+  professional: 0
+  # Optional. Serious self-directed work, stated SEPARATELY rather than folded
+  # into the number above. Delete the key if it does not apply to you.
+  hands_on_systems: 0
+
+# ---------------------------------------------------------------------------
+# SUMMARY — the only field score.py sends to the model.
+#
+# Keep it dense and factual. It is read by a small local model with a limited
+# context window, so every word has to earn its place. Prefer measured numbers
+# over adjectives: "5 daemons, ~7,000 lines" beats "extensive experience".
+#
+# State your hard blockers explicitly (work authorization, remote requirement).
+# The model uses them, and stating a weakness plainly scores better than hiding
+# it, because the alternative is a wasted application.
+# ---------------------------------------------------------------------------
+summary: |
+  One or two lines: qualification, where you are, what you are authorised to
+  do. Name the blockers outright.
+
+  Then the evidence, as bullets with numbers in them:
+
+  - What you built, how big it was, what it does.
+  - A hard problem you diagnosed, and how you proved the diagnosis.
+  - Anything with a measurement attached — throughput, memory, a before/after.
+
+  Close with where you are strongest and where you are weakest. The weakness
+  line is not modesty; it stops the pipeline shortlisting jobs you would fail.
+
+skills:
+  strong:                # you could be technically interviewed on these today
+    - Skill
+  working:               # you have shipped something with these
+    - Skill
+  familiar:              # you have touched these, do not claim depth
+    - Skill
+  # NOT OPTIONAL. Phase 3 is forbidden from claiming anything listed here, and
+  # score.py's missing-skills signal is only meaningful if this list is real.
+  # Listing a gap costs you nothing; claiming it and failing the screen does.
+  not_yet:
+    - Skill
+
+# ---------------------------------------------------------------------------
+# BULLET BANK — Phase 3 may use ONLY these lines.
+#
+# Group by project or job. Each group has a `context` (what the thing was, when,
+# and whether it was paid, coursework or personal — this changes how a recruiter
+# reads every bullet under it) and `bullets` (the claims themselves).
+#
+# A good bullet has a verb, a specific object, and a number that someone could
+# check. "Improved performance" is not a bullet. "Cut resident memory from
+# 2.1 GB to 130 MB by suspending background tabs" is.
+# ---------------------------------------------------------------------------
+bullet_bank:
+
+  project_key:
+    context: >
+      What this was, over what period, and in what capacity — employment,
+      contract, capstone, coursework, or personal project. Say which.
+    bullets:
+      - Built <specific thing>, <measured size or scope>, which <what it does>.
+      - Diagnosed <specific failure> to <actual root cause>; fixed by <change>
+        and verified by <the measurement that proved it>.
+
+  employment_key:
+    context: Job title, employer, dates.
+    bullets:
+      - What you were responsible for and what measurably came of it.
+
+# ---------------------------------------------------------------------------
+# TARGETS — Phase 3/4 use these to decide what to apply to.
+# ---------------------------------------------------------------------------
+targets:
+  role_types:
+    - Role title you would accept
+  salary_floor: null               # a number, in your currency, or null
+  currency: CAD
+  employment_type: [full-time, contract]
+  open_to_hybrid_local: false      # would you take an on-site job in your city?
+
+positioning:
+  # The single most important framing decision. Written once here so that every
+  # tailored resume argues the same thing instead of drifting per posting.
+  angle: >
+    In one sentence: who you are, and what the honest shape of your gap is.
+    Naming the gap yourself is what lets you lead with your strength instead of
+    writing defensively around it.
+  # Hard prohibitions. Phase 3 treats these as failures, not style notes.
+  avoid:
+    - Claiming years of employment you do not have
+    - Claiming any skill listed under skills.not_yet
+    - Any bullet not present in bullet_bank

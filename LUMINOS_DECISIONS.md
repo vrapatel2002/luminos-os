@@ -3745,3 +3745,49 @@ pointer was returned to within 3 px of where Shawn left it.
 
 Notifications, sidebar, session menu, utilities, the rounded screen border, and bar popouts. The
 dashboard has no bar button (upstream does not give it one) — shortcut and hover only.
+
+---
+
+## DECISION 69
+
+**The repo carries the architecture, not the person. Identity is a setting, and the resume is a template.**
+*[CHANGE: claude-code | 2026-08-13]*
+
+This repository is public — `github.com/vrapatel2002/luminos-os` returns 200 to anyone. It had the
+author's legal first name hardcoded in eighteen tracked files, and the jobhunt module was written as
+a set of instructions addressed to one named individual rather than as a tool.
+
+**What changed:**
+
+- **The HIVE greeting name is now `LUMINOS_USER_NAME`**, read by `hive-daemon.py`. Empty is the
+  default *and a supported value* — the greeting prompt drops the name clause entirely rather than
+  greeting an empty string. `HiveChat.qml`'s instant fallback greeting is name-free, because that
+  fallback is what a fresh clone renders before the daemon answers `/greeting`; a hardcoded name
+  there means a stranger's machine greets the author.
+- **`scripts/jobhunt/profile.example.yaml` is the tracked artefact.** `profile.yaml` — real name,
+  location, education, employment — is gitignored and stays that way.
+- **The archived Windows-HIVE personas and the whole jobhunt module say "the operator"**, not a name.
+
+**Why a template rather than deletion.** The point of `profile.yaml` is the `bullet_bank`: Phase 3
+may only emit lines traceable to an entry in it, which is the mechanism that stops a language model
+inventing experience on a real job application. Deleting the file would have taken the safety
+mechanism with it. The example preserves the schema *and* documents why the rule exists, so someone
+cloning this gets the guarantee, not just the shape.
+
+**What this does NOT fix, stated plainly:**
+
+- **Git history still contains the name** across 507 commits, mostly in `archive/windows-hive-2026/`
+  and in paths that predate the archive move (`config.yaml`, `HIVE_README.md`, `modelfiles/`,
+  `orchestrator/brain.py`). Scrubbing the working tree does not touch a single historical blob.
+  Fixing it means `git filter-repo --replace-text` plus a force-push, which rewrites all 507 SHAs.
+- **`vrapatel2002` appears in 8 files** as the clone URL. Removing the string hides nothing while
+  the account is named that; this is an account-rename decision, not a code one.
+- **`/home/shawn` is hardcoded 118 times across 46 files.** That is a *portability* defect, not a
+  privacy one — `shawn` is the public git author handle. Deliberately out of scope here; folding it
+  in would have turned a privacy fix into a refactor and buried the thing that mattered.
+
+**Haste decision.** The scrub used ordered string replacements plus a `\bName\b` fallback. That is
+the lightest thing that works and it was verified by re-grepping the tree to zero hits. What smart
+looks like: the name should never have been in a prompt string at all — the greeting prompt should
+take a caller-supplied identity, and `PROMPTS_DIR` should be config rather than an absolute path
+under one user's home.

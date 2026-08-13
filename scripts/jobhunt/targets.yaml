@@ -1,6 +1,6 @@
 # ============================================================================
 # WHAT JOBS AM I LOOKING FOR?
-# [CHANGE: claude-code | 2026-08-06] Phase 2 — the one file Shawn edits.
+# [CHANGE: claude-code | 2026-08-06] Phase 2 — the one file you edit.
 # ============================================================================
 #
 # THIS IS THE FILE YOU EDIT. Nothing else in the pipeline needs touching to
@@ -56,8 +56,8 @@ location_buckets:
   - americas
 
 # ── 2. REMOTE ───────────────────────────────────────────────────────────────
-# Require the posting to be marked remote. You want work-from-home, so this
-# stays true. Set false only if you would take a Sault Ste. Marie office job.
+# Require the posting to be marked remote. Leave true for work-from-home only.
+# Set false if you would also take an on-site job in your own city.
 require_remote: true
 
 # ── 3. EXCLUDE ──────────────────────────────────────────────────────────────

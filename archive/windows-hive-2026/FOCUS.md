@@ -93,7 +93,7 @@ Do not think about training, deployment, or orchestrator changes yet.
 - Chat B (fresh instances) = generation factory, one mega-prompt per file
 - IDE Agents (Antigravity) = audits, file ops, code changes
 - Claude Code = local execution only
-- Vratik = boss, moves data between chats, final decisions
+- Operator = boss, moves data between chats, final decisions
 - Dataset workflow: generate → audit → fix → re-audit → lock → next file
 
 ---

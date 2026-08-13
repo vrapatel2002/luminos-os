@@ -202,17 +202,33 @@ while OpenClaw still fails.
 
 Nothing above Phase 5 needs this. Scoring and browsing work fine without it.
 
-### 2. Give me your resume
+### 2. Write your `profile.yaml`
 
 **This is the real blocker, and it gates everything that produces an
-application.** Any format — PDF, a Word doc, a text dump, or just talking at me.
+application.**
 
-Right now the model is scoring against a *placeholder*: "recent CS/IT grad,
-0-2 years, knows Python, Linux, SQL, Git". `score.py` says so on every run. The
-rankings are directionally useful and **not** final, because the model is
-comparing postings against a person I invented.
+```bash
+cp scripts/jobhunt/profile.example.yaml scripts/jobhunt/profile.yaml
+```
 
-With the real thing I can build `profile.yaml` with a `bullet_bank`, and then:
+Then fill it in. The template documents every field and, more importantly, the
+rule that makes the whole thing safe: **Phase 3 may only use lines from
+`bullet_bank`**, so a claim that is not in that file cannot reach an employer.
+
+`profile.yaml` is **gitignored** — it holds your real name, location, education
+and employment history, and this repository is public. Only the `.example` file
+is tracked. Verify rather than assume:
+
+```bash
+git check-ignore -v scripts/jobhunt/profile.yaml
+```
+
+Until that file exists the model scores against a *placeholder*: "recent CS/IT
+grad, 0-2 years, knows Python, Linux, SQL, Git". `score.py` says so on every
+run. The rankings are directionally useful and **not** final, because the model
+is comparing postings against a person nobody has met.
+
+With a real profile in place:
 
 - scores compare against **you**, not a guess
 - Phase 3 writes a resume tailored per posting, using only bullets that are

@@ -2,7 +2,7 @@
 #
 # WHY THIS FILE EXISTS: the gateway was previously started by hand from an
 # agent tool-call shell, which put it inside claude-cowork.service's cgroup. It
-# therefore died every time Cowork restarted, and Shawn saw "Could not connect"
+# therefore died every time Cowork restarted, and the operator saw "Could not connect"
 # with no obvious cause. A user unit gives it its own cgroup and its own life.
 [Unit]
 Description=OpenClaw gateway (Control UI on 127.0.0.1:18789)

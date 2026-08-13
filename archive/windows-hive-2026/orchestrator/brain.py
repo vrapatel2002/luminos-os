@@ -174,7 +174,7 @@ class Brain:
                     f"Reason: {reason}\n"
                     f"Task: {summary}\n"
                     f"Recent summary: {await self._get_recent_summary_str()}\n"
-                    f"Continue from here. The user is Vratik."
+                    f"Continue from here. Address the user directly."
                 )
                 return await self._run_model_turn(handoff_note=handoff, start_time=start_time)
                 

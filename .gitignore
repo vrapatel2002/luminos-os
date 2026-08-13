@@ -34,3 +34,11 @@ CMakeFiles/
 .notes.db
 .claude/settings.local.json
 src/hive/.venv/
+
+# [CHANGE: claude-code | 2026-08-07] The jobhunt profile is Shawn's real resume —
+# name, address, education, employment history. THIS REPO IS PUBLIC
+# (github.com/vrapatel2002/luminos-os returns 200 to anyone). Never commit it.
+# Phase 3 output is tailored resumes, which are the same data; keep those out too.
+scripts/jobhunt/profile.yaml
+scripts/jobhunt/applications/
+scripts/jobhunt/tailored/

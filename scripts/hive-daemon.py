@@ -45,6 +45,12 @@ LOCKFILE = "/tmp/hive-daemon.lock"
 WL_COPY_BIN = "/usr/bin/wl-copy"
 GREETING_CACHE_PATH = os.path.expanduser("~/.cache/luminos/hive-greeting.txt")
 
+# [CHANGE: claude-code | 2026-08-13] The operator's name used to be hardcoded in
+# the greeting prompt. It is personal data in a public repo, so it is now a
+# setting. Empty is the default and is a supported value — the prompt below
+# drops the name entirely rather than greeting an empty string.
+USER_NAME = os.environ.get("LUMINOS_USER_NAME", "").strip()
+
 ALLOWED_MODELS = {"nexus", "bolt", "nova", "web"}
 
 # Chip name → model alias
@@ -701,14 +707,18 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(500, {"status": "error", "error": swap_err})
             return
 
+        # [CHANGE: claude-code | 2026-08-13] Name comes from LUMINOS_USER_NAME.
+        # When it is unset the whole clause disappears, which is why the "too
+        # generic" rule below is phrased without an example name.
+        who = f"{USER_NAME} opening" if USER_NAME else "the user opening"
         system_prompt = (
-            "You are Nexus. Generate ONE punchy greeting for Vratik opening a fresh chat. RULES: "
+            f"You are Nexus. Generate ONE punchy greeting for {who} a fresh chat. RULES: "
             "- MAXIMUM 4 words. "
             "- No full sentences. "
-            "- No 'Hey Sam' or 'Hey Vratik' — too generic. "
+            "- Do not open with 'Hey <name>' — too generic. "
             "- Vary tone: curious, hyped, chill, playful. "
             "- Output ONLY the greeting, no quotes, no explanation. "
-            "Good examples: 'Inspired, Vratik?' / 'What's cooking?' / 'Back at it?' / 'Let's build.' / 'Yo, ready?'. "
+            "Good examples: 'Inspired?' / 'What's cooking?' / 'Back at it?' / 'Let's build.' / 'Yo, ready?'. "
             "Bad examples: 'Hey, what's up? Ready to dive in' / 'Hello! How can I help you today?'"
         )
         messages = [

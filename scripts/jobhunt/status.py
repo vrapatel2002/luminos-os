@@ -2,7 +2,7 @@
 # [CHANGE: claude-code | 2026-08-06]
 # ============================================
 # The dashboard. One screen that answers "is this thing working?"
-# PURPOSE: Shawn asked to "just look on progress". This is that surface.
+# PURPOSE: a "just look at progress" surface. This is that surface.
 # DEPS: stdlib only.
 # USAGE:
 #   ./status.py              # everything: health, funnel, top matches

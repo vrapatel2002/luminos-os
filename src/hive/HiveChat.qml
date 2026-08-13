@@ -70,11 +70,16 @@ Window {
     // [CHANGE: gemini-cli | 2026-05-04] Greeting state with instant fallback
     property string greetingText: getTimeBasedGreeting()
 
+    // [CHANGE: claude-code | 2026-08-13] Name removed — it was personal data in a
+    // public repo. This is only the INSTANT FALLBACK shown before the daemon
+    // answers /greeting; the daemon owns the personalised greeting and takes the
+    // name from LUMINOS_USER_NAME. Keeping the fallback name-free means a fresh
+    // clone greets a stranger correctly instead of greeting the author.
     function getTimeBasedGreeting() {
         var hour = new Date().getHours()
-        if (hour < 12) return "Morning, Vratik ✳"
-        if (hour < 17) return "Afternoon, Vratik ✳"
-        return "Evening, Vratik ✳"
+        if (hour < 12) return "Morning ✳"
+        if (hour < 17) return "Afternoon ✳"
+        return "Evening ✳"
     }
 
     function addStatusMessage(text) {

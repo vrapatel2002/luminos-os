@@ -32,7 +32,7 @@ These are load-bearing. Every phase below is constrained by them.
 | Filter + browse | working | 1,650 distinct open roles |
 | **Phase 0 — local LLM on GPU** | **DONE 2026-08-05** | real generation on the RTX 4050, 4892 MiB VRAM, negative-tested |
 | Score | ready to build | LLM unblocked; needs prompt + GBNF grammar |
-| Tailor | not started | **needs Shawn's resume** (Phase 1) |
+| Tailor | not started | **needs your `profile.yaml`** (Phase 1) |
 | Apply | not started | needs tailor |
 | Approve | not started | needs apply |
 | Inbox | not started | independent, can run early |
@@ -49,7 +49,7 @@ Verified blockers — **re-checked 2026-08-05, two of the original four were wro
   run `sudo usermod -aG dgpu shawn`.** That would hand the RTX 4050 to every process
   on the box permanently and delete the entire point of DECISION 25. The correct
   invocation is to prefix the jobhunt python with `dgpu-exec-v2`. Removed from
-  "What only Shawn can do" — nothing is blocked on him for Phase 0.
+  "What only you can do" — nothing is blocked on the operator for Phase 0.
 - ❌ **WRONG:** "No GGUF models on disk." There are **four, 18 GB**, in
   `~/.local/share/luminos/models/hive/`: Dolphin3.0-Llama3.1-8B, Qwen2.5-Coder-7B,
   DeepSeek-R1-0528-Qwen3-8B, DeepSeek-R1-Distill-Qwen-8B (all Q4_K_M). Phase 2 can
@@ -65,7 +65,7 @@ New blocker found 2026-08-05 (real, and the actual reason a CUDA build will fail
 
 ## Phase 0 — Unblock the brain
 
-**Not blocked on Shawn at all** (corrected 2026-08-05 — the old `usermod -aG dgpu`
+**Not blocked on the operator at all** (corrected 2026-08-05 — the old `usermod -aG dgpu`
 line was wrong and would have destroyed the gate; see blockers above).
 
 Work:
@@ -143,7 +143,7 @@ so it cannot degrade into a check that always says yes.
 
 ### ✅ PHASE 0b COMPLETE — 2026-08-05, agent stack proven end to end
 # [CHANGE: claude-code | 2026-08-05]
-Shawn asked for the infrastructure first — OpenClaw, the LLM, and web access —
+The operator asked for the infrastructure first — OpenClaw, the LLM, and web access —
 with the resume deliberately postponed. All three are working and were tested,
 not assumed.
 
@@ -200,7 +200,7 @@ allowed to act on inbound messages.
 
 ## Phase 1 — Profile
 
-**Blocked on Shawn:** the resume file, plus answers to the knockout questions.
+**Blocked on the operator:** the `profile.yaml` file, plus answers to the knockout questions.
 
 Build `profile.yaml` — the single source of truth:
 
@@ -238,7 +238,7 @@ Verification:
 - Runs after each ingest via systemd timer.
 
 Verification — this is the phase most likely to silently do nothing useful:
-- Shawn hand-labels 30 jobs good/bad. Compare against model scores and report
+- The operator hand-labels 30 jobs good/bad. Compare against model scores and report
   agreement. If the model rates everything 65-75, the prompt is broken.
 - Assert score variance across the pool is non-trivial.
 - Spot-check the 10 highest and 10 lowest scored roles by hand.
@@ -310,7 +310,7 @@ Independent of Phases 2–5. Can be built in parallel.
 - Classify each reply: rejection / recruiter interest / assessment request /
   interview invite / automated acknowledgement.
 - Update the tracker, draft a response, notify via OpenClaw.
-- Auto-send only for the lowest-risk category, and only after Shawn has
+- Auto-send only for the lowest-risk category, and only after the operator has
   approved that category's drafts several times by hand.
 - Day-7 follow-up nudge on anything still silent.
 
@@ -341,7 +341,7 @@ what tells us which of those two is true.
 | OpenClaw instability | Loses phone approvals | CLI path always works |
 | Ingest source rate-limits | Smaller pool that day | Official APIs, low risk; back off and retry |
 
-## What only Shawn can do
+## What only the operator can do
 
 - ~~`sudo usermod -aG dgpu shawn` (Phase 0)~~ — **withdrawn 2026-08-05, do not do
   this.** It was never needed and would give every process on the machine

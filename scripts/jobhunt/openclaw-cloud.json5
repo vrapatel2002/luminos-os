@@ -14,7 +14,7 @@
 //      tools silently never fire. The proxy's regex is Qwen-specific.
 //
 // ── OPTION 1 (RECOMMENDED, NO API KEY) — claude-cli ──────────────────────────
-// Shawn already pays for Claude Code. OpenClaw's bundled Anthropic plugin
+// If you already pay for Claude Code. OpenClaw's bundled Anthropic plugin
 // registers a `claude-cli` backend that shells out to the installed `claude`
 // binary, so the SUBSCRIPTION drives the agent and there is no per-token bill.
 //
@@ -38,7 +38,7 @@
 //      that answered `claude --version` with "native binary not installed".
 //      Fix: node ~/.npm-global/lib/node_modules/@anthropic-ai/claude-code/install.cjs
 //   b. A LIVE login in ~/.claude/.credentials.json. This is the current
-//      blocker: the stored token expired 2026-05-27. Only Shawn can fix it —
+//      blocker: the stored token expired 2026-05-27. Only the operator can fix it —
 //      run `claude` in a terminal and `/login`. An env var inherited from some
 //      other session does NOT count; the gateway logs `cli env auth: child=none`
 //      and the child falls back to that file.
