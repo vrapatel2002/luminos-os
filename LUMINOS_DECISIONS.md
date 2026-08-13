@@ -3625,3 +3625,123 @@ KWin's *own* OSDs (virtual-desktop switcher, zoom) are class `kwin_wayland`, so 
 
 Verified on screen: `/tmp/osd-final.png` shows Caelestia's pill at the right edge with both sliders
 and **no** Plasma pill in the middle. Test side effects restored (volume back to 0.23).
+
+#### STEP D part 1 — launcher hover + the dashboard — SHIPPED 2026-08-13 (proven live)
+# [CHANGE: claude-code | 2026-08-13]
+
+Shawn asked for two things: **three ways into the launcher** — shortcut, button, cursor hover — and
+**the dashboard, the panel that drops down from the top.** Both are in
+`config/quickshell/caelestia-bar/shell.qml`, both use upstream's own modules unmodified.
+
+##### The launcher: the third way in
+
+Two of the three already existed and were **not touched**:
+- **Shortcut** — `Meta+P` → `luminos-cael-launcher.desktop` → `ipc call drawers toggle launcher`.
+- **Button** — the distro logo at the top of the bar, `modules/bar/components/OsIcon.qml:16-20`,
+  which flips the same `screenState.launcher` bool.
+
+The third is a **10px-tall always-present layer-shell strip** across the bottom centre. The geometry
+is upstream's, not invented: `Interactions.qml:49-51` counts a point as "in the bottom panel" when
+`y > height - max(Config.border.minThickness, Config.border.thickness + panelHeight)` — a 10px band
+with the launcher up — and `Interactions.qml:31-33` widens the launcher's own width by
+`Config.border.rounding` (25) at each end, giving ~680 × 10 px.
+
+**Hover opens and never closes — that asymmetry is copied on purpose.** `Interactions.qml:200-202`
+is a bare `if (!launcher) launcher = true` with no matching `else`. Escape, launching an app, `Meta+P`
+and the logo button all still close it.
+
+**The re-entry trap, and why the handler is edge-triggered.** `launcherWindow` sits 10 px up
+(`margins.bottom`), so the launcher **never covers this strip** — the pointer can rest on it with the
+launcher already open. A plain binding would therefore re-open the launcher the instant Escape closed
+it, and **Escape would look broken**. `onContainsMouseChanged` only fires on a transition, so only a
+fresh enter opens it. Proven: closed with the cursor still on the strip, it stayed closed for 2 s,
+then opened again after a leave-and-return.
+
+##### The dashboard
+
+Upstream's `modules/dashboard/Wrapper.qml` in a top-anchored window of its own — tabs, media,
+performance and weather all Caelestia's own pixels. `WlrKeyboardFocus.None`: nothing in it accepts
+typing, and since it opens on hover, taking focus would mean brushing the top of the screen silently
+redirected your next keystroke.
+
+`panelsShim.dashboard` now points at the real wrapper instead of the zero-sized `absent` stand-in, so
+`launcher/Wrapper.qml:20-24` can shrink the launcher when the dashboard is down and the two cannot
+overlap. That read never fired before, because it sits behind `if (screenState.dashboard)` and the
+dashboard could not be opened at all.
+
+**The dashboard has no hide timer — it follows the pointer.** `Interactions.qml:211` is a bare
+`screenState.dashboard = showDashboard`, so leaving closes it immediately. But upstream also keeps
+`dashboardShortcutActive` (`Interactions.qml:22, 213-219`) so a dashboard opened by `Meta+K`, with the
+pointer somewhere else entirely, is not closed by the next unrelated mouse move. That flag is
+reproduced here **from the other side**: hover takes ownership when it opens or touches the dashboard,
+and only an owner may close it.
+
+**Two surfaces, one hover state — same shape as the OSD.** The dashboard is `Overlay`, the strip is
+`Top`, and the strip only covers `y < 10` while the dashboard starts at `y = 10`. So the pointer is
+only ever on one of them, and `dashHovered` is the OR of the strip's `MouseArea` and a `HoverHandler`
+on the dashboard window. Without it the panel drops down and immediately closes under your cursor.
+
+`Meta+K` was **repointed** in `~/.local/share/applications/luminos-cael-dashboard.desktop` from
+`caelestia-kwin` to `caelestia-bar`. `ipc call` talks to an already-running instance and never starts
+one, so the path must match the shell the session actually runs — same repoint the launcher entry got
+earlier the same day. The `Exec=` line was run by hand to prove it, then `kbuildsycoca6` re-run.
+
+##### KNOWN COST, and this one is the worst of the three strips
+
+Each hover strip is dead to clicks: a layer-shell surface takes pointer input across its whole area
+and Wayland has no way to say "send me motion but pass clicks through". Running total:
+
+| strip | size | where it hurts |
+|---|---|---|
+| OSD | 2 × 50 px, right edge centre | outer 2 px of a maximised window's scrollbar |
+| launcher | ~680 × 10 px, bottom centre | empty desktop now the Plasma panel is gone |
+| dashboard | ~900 × 10 px, **top centre** | **a maximised browser's tab strip lives exactly there** |
+
+The top one is expensive real estate — throwing the pointer at the top edge to hit a tab is a real
+thing people do. It is the same trade BUG-110 already records for Hyprland's top drawer, over a wider
+band. **Knobs if it turns out to matter:** drop `implicitHeight` to `Config.border.minThickness` (2)
+to shrink it 5×, or pin `implicitWidth` to ~200 so only the very centre trips. Both are one-line
+changes in `shell.qml`. `acceptedButtons: Qt.NoButton` is set on all three so nothing *pretends* to
+handle a press it swallowed.
+
+##### Verified live, every path, plus regressions
+
+Launcher — IPC toggle ✓; **logo button click ✓**; hover-in from y=599 → y=899 opens ✓; leaving with it
+open keeps it open ✓ (upstream); closed-while-hovering stays closed, re-entry re-opens ✓.
+Dashboard — `Meta+K` path via the repointed `Exec=` ✓ and rendered on screen (`/tmp/dash-crop.png`:
+tabs, weather, calendar, media, system rings) ✓; hover-in at the top edge opens ✓; leaving closes ✓;
+**strip → body handoff holds** ✓; shortcut-opened with the pointer away survives three unrelated
+mouse moves, then hover takes ownership and leaving closes it ✓.
+Regressions — launcher hover still works after the dashboard landed ✓; OSD hover still works ✓;
+`wpctl` volume change still pops the OSD ✓ (volume restored to 0.23).
+
+##### Test-method notes worth keeping
+
+**`ydotoold --keyboard-off` silently swallows mouse clicks.** `mousemove` worked, `ydotool click 0xC0`
+printed `c0 110` and did nothing, and the logo button looked dead. It is not: mouse buttons are
+`EV_KEY` events (`BTN_LEFT`), so a device started without key capability drops them with no error.
+Restarting `ydotoold` **without** `--keyboard-off` made the same click work first try.
+
+**The cursor shape is a free hover probe.** Before that was understood, `spectacle -p` (include
+pointer) showed the cursor rendered as a **pointing hand** over the logo — `OsIcon`'s `MouseArea` sets
+`cursorShape: Qt.PointingHandCursor`. That proved the hover was landing and isolated the fault to the
+click, with no code change and no risk.
+
+**A wrong test looked like a real bug.** The first strip→body handoff test read "closed" and looked
+like a genuine flicker-close. It was the test: at x=294 the pointer left the strip and landed
+*beside* the dashboard, because the strip is 25 px wider than the panel at each end. Re-run at x=691
+it held. **Measure the panel before believing a hover failure.**
+
+**Screenshots are 2880×1800, KWin coordinates are 1440×900.** The display is 2× scaled, so every
+pixel measured in a screenshot must be halved before it can be fed to `ydotool`. The logo's true
+centre was found by scanning for pink pixels: physical bbox x 45-76 / y 35-65 → logical centre
+**(30.25, 25.0)**.
+
+`ydotoold` was again started **temporarily** as root on a private socket and killed after; the KWin
+cursor probe was loaded by absolute path, stopped, and `~/.config/kwinrc` verified untouched; the
+pointer was returned to within 3 px of where Shawn left it.
+
+##### Still not built
+
+Notifications, sidebar, session menu, utilities, the rounded screen border, and bar popouts. The
+dashboard has no bar button (upstream does not give it one) — shortcut and hover only.

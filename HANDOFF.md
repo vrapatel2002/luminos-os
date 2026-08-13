@@ -25,8 +25,13 @@ done (he deleted the Plasma panel himself), and STEP C parts 1–3 are done: Cae
 **STEP 4 — hover-to-peek — is also done**: the OSD noses out when the cursor reaches the right edge,
 proven in both directions on the live session.
 
-Next on the list is **STEP D** — Caelestia's remaining surfaces: notifications, dashboard, sidebar,
-session menu.
+**STEP D part 1 — done 2026-08-13.** The **launcher now has all three ways in** Shawn asked for —
+shortcut (`Meta+P`), the bar's distro-logo button, and a new bottom-edge hover strip — and the
+**dashboard** (the panel that drops down from the top) is live via `Meta+K` and hover. Both use
+upstream's own modules unmodified. Every path was exercised on the live session, plus regression
+checks on the launcher and the OSD.
+
+Next on the list is the rest of **STEP D** — notifications, sidebar, session menu, utilities.
 
 ---
 
@@ -221,11 +226,26 @@ Two traps worth keeping:
 
 ### 1. STEP D — Caelestia's remaining surfaces, one at a time
 
-Remaining, easiest first: notifications → dashboard → sidebar → session menu.
-(Launcher and OSD are done.)
+Remaining, easiest first: notifications → sidebar → session menu → utilities.
+(Launcher, OSD and **dashboard** are done.)
 
 **Rule for every one:** Plasma's version keeps working until Caelestia's replacement is proven on
 screen. Never remove Plasma's first. That is what makes this plan cheap to abandon at any point.
+
+**The pattern is now established — copy it, do not reinvent it.** Every surface is: upstream's
+`modules/<name>/Wrapper.qml` unmodified, in its own `PanelWindow`, anchored to ONE edge so
+layer-shell centres it on the other axis, `exclusiveZone: 0`, a `StyledRect` backdrop standing in for
+the sheet's blob, and `visible: screenState.<name> || wrapper.visible` — never bind `visible` to the
+animated property alone. If it opens on hover, add a strip on `WlrLayer.Top` (the panel is `Overlay`,
+so it comes out on top of the strip) and OR the strip's `MouseArea` with a `HoverHandler` on the panel
+window, because the pointer is only ever on one of the two surfaces.
+
+**Two open questions to settle before adding more hover strips.** (1) The running dead-click cost is
+now `2×50` on the right, `~680×10` at the bottom and `~900×10` across the **top centre** — the top one
+overlaps a maximised browser's tab strip and is the first thing likely to annoy Shawn. Ask before
+adding a fourth. (2) `~/.local/share/applications/luminos-cael-*.desktop` are **not tracked in the
+repo** and are the only thing making the shortcuts work; `config/caelestia/` holds only the hypr and
+shell.json files. Worth snapshotting, but it needs a decision on where they live.
 
 ### LATER — explicitly deferred by Shawn
 

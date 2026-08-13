@@ -39,6 +39,7 @@ import qs.services
 import qs.modules
 import qs.modules.bar
 import qs.modules.bar.popouts as BarPopouts
+import qs.modules.dashboard as Dashboard
 import qs.modules.launcher as Launcher
 import qs.modules.osd as Osd
 
@@ -87,6 +88,32 @@ ShellRoot {
             onOsdHoveredChanged: if (osdHovered || screenState.osd)
                 osd.show()
 
+            // Same two-surface problem as the OSD: the top edge tripwire and
+            // the dashboard itself are separate windows, and the pointer is
+            // only ever on one of them.
+            readonly property bool dashHovered: dashboardStripHover.containsMouse || dashboardSurfaceHover.hovered
+
+            // The dashboard has no hide timer. Upstream drives it straight off
+            // the pointer - Interactions.qml:211 is a bare
+            // `screenState.dashboard = showDashboard` - so moving away closes
+            // it immediately. But upstream also keeps a `dashboardShortcutActive`
+            // flag (Interactions.qml:22, 213-219) so that a dashboard opened by
+            // Meta+K, with the pointer somewhere else entirely, is not closed by
+            // the next unrelated mouse move. This is that flag from the other
+            // side: hover takes ownership the moment it opens or touches the
+            // dashboard, and only an owner is allowed to close it.
+            property bool dashOwnedByHover
+
+            onDashHoveredChanged: {
+                if (dashHovered) {
+                    dashOwnedByHover = true;
+                    screenState.dashboard = true;
+                } else if (dashOwnedByHover) {
+                    dashOwnedByHover = false;
+                    screenState.dashboard = false;
+                }
+            }
+
             // The launcher wants a `panels` object. In the upstream shell that is
             // the whole Panels item. It only ever reads four things off it:
             // `bar.implicitWidth` and `popouts.*` (WallpaperList.qml:26-31) and
@@ -97,7 +124,14 @@ ShellRoot {
                 readonly property var bar: barWindow.bar
                 readonly property var popouts: barWindow.popouts
                 readonly property var utilities: absent
-                readonly property var dashboard: absent
+                // [CHANGE: claude-code | 2026-08-13] Now a real panel. The
+                // launcher reads `dashboard.nonAnimHeight` (launcher/Wrapper
+                // .qml:20-24) to shrink itself when the dashboard is down, so
+                // the two cannot overlap. While this was `absent` that read
+                // would have produced undefined; it never fired, because it
+                // sits behind `if (screenState.dashboard)` and the dashboard
+                // could not be opened.
+                readonly property var dashboard: dashboardPanel
             }
 
             // Zero-sized stand-in for the panels that do not exist here. Never
@@ -214,6 +248,205 @@ ShellRoot {
                     screen: scope.modelData
                     screenState: scope.screenState
                     panels: scope.panelsShim
+                }
+            }
+
+            // ── hover-to-open: nose the launcher up from the bottom edge ─────
+            // [CHANGE: claude-code | 2026-08-13] The third way in, asked for by
+            // Shawn. The other two already exist and are untouched here:
+            // Meta+P (luminos-cael-launcher.desktop -> `ipc call drawers toggle
+            // launcher`) and the distro logo at the top of the bar
+            // (bar/components/OsIcon.qml:16-20, which flips the same bool).
+            //
+            // The numbers are upstream's, not invented. Interactions.qml:49-51
+            // counts a point as "in the bottom panel" when
+            //   y > height - max(Config.border.minThickness,
+            //                    Config.border.thickness + <panel height>)
+            // which with the launcher closed is a 10px band (thickness), and
+            // withinPanelWidth (Interactions.qml:31-33) widens the launcher's
+            // own width by Config.border.rounding (25) at each end.
+            //
+            // Upstream OPENS on hover and never closes on unhover -
+            // Interactions.qml:200-202 is a bare `if (!launcher) launcher =
+            // true`, with no matching else. That asymmetry is copied on
+            // purpose. Escape, launching an app, Meta+P and the logo button
+            // all still close it.
+            //
+            // KNOWN COST, same shape as the OSD strip below: a layer-shell
+            // surface eats pointer input over its whole area, and Wayland has
+            // no way to say "send me motion but pass clicks through". So this
+            // ~680 x 10 band at the bottom centre is dead to clicks. There is
+            // no Plasma panel down there any more so it is empty desktop most
+            // of the time, but a maximised window loses its bottom 10px in the
+            // middle. Drop `implicitHeight` to Config.border.minThickness (2)
+            // to shrink that 5x at the cost of a harder target.
+            PanelWindow {
+                id: launcherHoverStrip
+
+                screen: scope.modelData
+                color: "transparent"
+
+                WlrLayershell.namespace: "caelestia-launcher-hover"
+                // Top, not Overlay: the launcher is Overlay, so it comes out
+                // ON TOP of this rather than fighting it for the pointer.
+                WlrLayershell.layer: WlrLayer.Top
+                // Never take the keyboard. A surface that steals focus at the
+                // screen edge is a bug you cannot type your way out of.
+                WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+                exclusiveZone: 0
+                anchors.bottom: true
+
+                implicitWidth: launcher.implicitWidth + Config.border.rounding * 2
+                implicitHeight: Config.border.thickness
+
+                MouseArea {
+                    id: launcherStripHover
+
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    // Do not pretend to handle clicks. It cannot pass them
+                    // through either (see above), but at least nothing here
+                    // silently swallows a press it might have acted on.
+                    acceptedButtons: Qt.NoButton
+
+                    // Edge-triggered, and that matters. launcherWindow sits
+                    // 10px up (margins.bottom), so the launcher never covers
+                    // this strip - the pointer can rest here with the launcher
+                    // already open. A plain binding would therefore re-open it
+                    // the instant Escape closed it, and Escape would look
+                    // broken. Only a fresh enter opens it.
+                    onContainsMouseChanged: if (containsMouse && !scope.screenState.launcher)
+                        scope.screenState.launcher = true
+                }
+            }
+
+            // ── the dashboard ────────────────────────────────────────────────
+            // [CHANGE: claude-code | 2026-08-13] DECISION 68, STEP D part 1.
+            // Upstream's own modules/dashboard/Wrapper.qml, unmodified, in a
+            // window of its own - the same shape as the launcher and the OSD.
+            // Tabs, media controls, system performance and weather all come
+            // from Caelestia; nothing here re-creates any of them.
+            PanelWindow {
+                id: dashboardWindow
+
+                screen: scope.modelData
+                color: "transparent"
+
+                // Same threaded-render-loop trap as the launcher and the OSD:
+                // dashboard/Wrapper.qml:37 is `visible: offsetScale < 1` and
+                // offsetScale is driven by a Behavior animation. A hidden
+                // window gets no frames to advance that animation with, so
+                // this would drop down once and then never again. The plain
+                // bool flips instantly; OR-ing the animated one keeps the
+                // window alive for the slide back up.
+                visible: scope.screenState.dashboard || dashboardPanel.visible
+
+                WlrLayershell.namespace: "caelestia-dashboard"
+                WlrLayershell.layer: WlrLayer.Overlay
+                // Never take the keyboard. Nothing in the dashboard accepts
+                // typing - the tabs, media buttons, performance readouts and
+                // weather are all pointer-driven, and the profile-picture
+                // chooser opens a window of its own. Since this thing can open
+                // on hover, taking focus would mean brushing the top of the
+                // screen silently redirected your next keystroke.
+                WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+                // It floats over whatever is there and must never reflow the
+                // screen - the same rule as the launcher and the OSD.
+                exclusiveZone: 0
+
+                // Anchoring ONLY `top` makes layer-shell centre it
+                // horizontally, exactly as the launcher uses bottom-only. Note
+                // that centres it on the WHOLE output, while upstream centres
+                // it in the space to the RIGHT of the bar, so it sits about
+                // half the bar width to the left of upstream's position. The
+                // launcher already has that same offset; the two agreeing with
+                // each other matters more than either matching upstream.
+                anchors.top: true
+                margins.top: Config.border.thickness
+
+                implicitWidth: dashboardPanel.implicitWidth
+                implicitHeight: dashboardPanel.implicitHeight
+
+                // Upstream paints this backdrop with the sheet's blob, which
+                // we do not have. A rounded rect is the honest equivalent,
+                // exactly as for the launcher and the OSD.
+                StyledRect {
+                    anchors.fill: dashboardPanel
+                    radius: Tokens.rounding.extraLarge
+                    color: Colours.tPalette.m3surface
+                    opacity: dashboardPanel.opacity
+                }
+
+                // Once the dashboard is down, the pointer is on IT and not on
+                // the tripwire strip. Without this it would drop down and
+                // immediately close again under your cursor.
+                HoverHandler {
+                    id: dashboardSurfaceHover
+                }
+
+                Dashboard.Wrapper {
+                    id: dashboardPanel
+
+                    anchors.top: parent.top
+                    anchors.horizontalCenter: parent.horizontalCenter
+
+                    screenState: scope.screenState
+                }
+            }
+
+            // ── hover-to-open: drop the dashboard down from the top edge ─────
+            // [CHANGE: claude-code | 2026-08-13]
+            //
+            // The numbers are upstream's. Interactions.qml:43-46 counts a point
+            // as "in the top panel" when
+            //   y < max(Config.border.minThickness,
+            //           Config.border.thickness + <panel height>)
+            // which with the dashboard up is a 10px band (thickness), and
+            // withinPanelWidth (Interactions.qml:31-33) widens the dashboard's
+            // own width by Config.border.rounding (25) at each end.
+            //
+            // KNOWN COST, and it is the worst of the three strips: this is
+            // roughly 900 x 10px across the TOP CENTRE of the screen, and it is
+            // dead to clicks, because a layer-shell surface takes all pointer
+            // input over its area and Wayland has no "motion yes, clicks no".
+            // The top edge is expensive real estate - a maximised browser's tab
+            // strip lives exactly there, and throwing the pointer at the top
+            // edge to hit a tab is a real thing people do. Same trade BUG-110
+            // already records for Hyprland's top drawer, over a wider band.
+            // Drop `implicitHeight` to Config.border.minThickness (2) to shrink
+            // it 5x, or cut `implicitWidth` to a fixed 200 or so, if the tab
+            // strip turns out to matter more than the convenience.
+            PanelWindow {
+                id: dashboardHoverStrip
+
+                screen: scope.modelData
+                color: "transparent"
+
+                WlrLayershell.namespace: "caelestia-dashboard-hover"
+                // Top, not Overlay: the dashboard is Overlay, so it comes down
+                // ON TOP of this rather than fighting it for the pointer.
+                WlrLayershell.layer: WlrLayer.Top
+                // Never take the keyboard, for the same reason as the
+                // dashboard itself.
+                WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+                exclusiveZone: 0
+                anchors.top: true
+
+                implicitWidth: dashboardPanel.implicitWidth + Config.border.rounding * 2
+                implicitHeight: Config.border.thickness
+
+                MouseArea {
+                    id: dashboardStripHover
+
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    // Do not pretend to handle clicks. It cannot pass them
+                    // through either (see above), but at least nothing here
+                    // silently swallows a press it might have acted on.
+                    acceptedButtons: Qt.NoButton
                 }
             }
 
