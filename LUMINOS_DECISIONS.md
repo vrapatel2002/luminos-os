@@ -3513,15 +3513,62 @@ rather than fading the backlight, and the poller will not pop the OSD while Shaw
 `DimDisplay` action is ever enabled, expect the OSD to appear during the fade — that is the known
 cost of option (A), and the fix would be suppressing on idle, not abandoning the approach.
 
-#### STEP 4 (requested by Shawn 2026-08-13, NOT built)
+#### STEP 4 — hover-to-peek — SHIPPED 2026-08-13 (proven on screen, both directions)
 
-**Hover-to-peek.** The OSD should nose out from the right edge when the cursor reaches that edge,
-the way upstream Caelestia does. It does not today, because the reveal-on-hover machinery lives in
-the drawers sheet's `Interactions.qml` — the same full-screen surface this config deliberately does
-not have (it is what caused the "cursor moves but clicks do nothing" bug on KWin). So this needs a
-*thin* always-present hover-catching layer-shell strip at the right edge that sets `screenState.osd`,
-not the sheet. Note the constraint: that strip must not swallow clicks, which is exactly the trap
-BUG-110 records for the top-edge drawer.
+**Hover-to-peek.** The OSD noses out from the right edge when the cursor reaches it, the way
+upstream Caelestia does. Upstream's reveal-on-hover lives in the drawers sheet's `Interactions.qml`
+— the same full-screen surface this config deliberately does not have, because it is what caused the
+"cursor moves but clicks do nothing" bug on KWin. So the mechanism is rebuilt as a **thin
+always-present layer-shell strip**, in `config/quickshell/caelestia-bar/shell.qml`.
+
+**The geometry is upstream's, not invented.** `Interactions.qml:41` defines "in the right panel" as
+`x > width - Config.border.minThickness`, and `Interactions.qml:26-29` widens the vertical band by
+`Config.border.rounding` at each end. Those were read at runtime rather than guessed:
+**`minThickness = 2`, `rounding = 25`, `thickness = 10`.** So the strip is `2px` wide.
+
+**The height deliberately collapses when the OSD is closed, and that is the good behaviour.**
+`Wrapper.qml`'s content `Loader` is inactive while hidden, so `implicitHeight` is 0 and the strip is
+**2 × 50 px** at the vertical centre of the right edge. Once the OSD is out the strip grows to the
+OSD's full height — which is what keeps the pointer inside a hover zone during the slide-out
+animation, before the OSD surface itself is under the cursor. This matches upstream, which measures
+the same collapsing panel. **Do not "fix" this by pinning a height:** a smaller strip is a smaller
+dead zone.
+
+**Two surfaces, one hover state.** The OSD is `WlrLayer.Overlay`, the strip is `WlrLayer.Top`, so the
+OSD comes out *on top of* the strip and the strip immediately stops seeing the pointer. Left alone,
+the thing would slide out and then time out under your own cursor. Fixed by OR-ing a `HoverHandler`
+on the OSD window with the strip's `MouseArea` and binding the result to `Wrapper.hovered` — the
+property upstream sets from `Interactions.qml`, whose only consumer is the hide `Timer`
+(`Wrapper.qml:84-92`).
+
+**One code path in, one timer.** Hovering calls the same `show()` a volume key press calls. On leave,
+`show()` is called *again* — it is the only handle `Wrapper` exposes on its hide countdown, and
+re-arming it makes the timer read `hovered == false` and close. So there is no second timer to keep
+in sync. Guarded on `screenState.osd` so that leaving cannot resurrect an OSD that already closed.
+
+**KNOWN COST, accepted deliberately.** A layer-shell surface takes pointer input across its whole
+area, and Wayland has no way to say "send me motion but pass clicks through" — so those 2 × 50 px are
+dead to clicks. It is the same trade BUG-110 records for the top edge, at about a thousandth of the
+area. Where it can be felt: a maximised window's scrollbar is ~14 px wide, so you lose its outermost
+2 px for 50 px of its travel. `acceptedButtons: Qt.NoButton` is set so nothing *pretends* to handle a
+press it swallowed.
+
+**Verified on the live session, both directions plus a regression check:**
+- Hover in — pointer driven to the right edge, OSD out on a screenshot, with no volume change and no
+  key press.
+- Hover out — pointer returned to the middle, OSD fully retracted. This half matters: proving `show`
+  works proves nothing about `hide`.
+- No regression — a `wpctl` volume change with the cursor nowhere near the edge still pops it.
+
+**Test-method notes worth keeping.** `ydotoold` was not running and Shawn is not in the `input` group,
+so it was started **temporarily** as root on a private socket, mouse-only
+(`sudo ydotoold --socket-path=/tmp/.ydotool_test_socket --socket-own=1000:1000 --keyboard-off`) and
+killed straight after; nothing persists and `ydotool.service` stays disabled. **Relative** moves
+sidestep the recorded trap that ydotool's *absolute* coordinates are unusable here — a single
+`mousemove -- 5000 0` just clamps at the right edge, which needs no coordinate maths at all. Reading
+the cursor back is `workspace.cursorPos` from a throwaway KWin script. Restoring it exactly is
+fiddlier than it looks: **relative moves go through the pointer acceleration curve**, so one big
+corrective move overshot by 73 px; a loop of 5 px steps lands within 2 px.
 
 #### STEP C part 3 — silence Plasma's own OSD — SHIPPED 2026-08-13 (proven on screen)
 # [CHANGE: claude-code | 2026-08-13]

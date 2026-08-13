@@ -22,8 +22,11 @@ covering the screen. Clicks land where you aim them.
 done (he deleted the Plasma panel himself), and STEP C parts 1–3 are done: Caelestia's OSD shows
 **volume** and **brightness** from the right edge, and **Plasma's own OSD is silenced**.
 
-The next thing on the list is **STEP 4 — hover-to-peek** (the OSD should nose out when the cursor
-reaches the right edge). Shawn asked for it and explicitly parked it as step 4. It is **not built.**
+**STEP 4 — hover-to-peek — is also done**: the OSD noses out when the cursor reaches the right edge,
+proven in both directions on the live session.
+
+Next on the list is **STEP D** — Caelestia's remaining surfaces: notifications, dashboard, sidebar,
+session menu.
 
 ---
 
@@ -193,6 +196,13 @@ Full reasoning in `LUMINOS_DECISIONS.md`. The short version:
    hardcoded. First read only primes, or the OSD flies out at login.
 3. **Plasma's OSD silenced** — there is no setting; a **KWin window rule** forces opacity 0.
    `~/.config/kwinrulesrc` `[2]`, snapshot at `config/kde/kwinrulesrc`.
+4. **Hover-to-peek (STEP 4)** — a 2px always-present layer-shell strip at the right edge, using
+   upstream's own numbers (`Config.border.minThickness = 2`, `rounding = 25`). Its height **collapses
+   to 50px when the OSD is closed** because `Wrapper`'s content Loader is inactive — that is
+   deliberate, not a bug: smaller strip, smaller dead zone, and it grows during the slide-out.
+   `Wrapper.hovered` is OR-ed from a `HoverHandler` on the OSD window **and** the strip, because the
+   OSD (Overlay) covers the strip (Top) once it is out. Cost accepted: those 2×50px are dead to
+   clicks — Wayland has no "motion yes, clicks no" — same trade as BUG-110.
 
 Two traps worth keeping:
 - **`wmclass=plasmashell` matches nothing.** KWin reports the OSD's class as `org.kde.plasmashell`.
@@ -209,14 +219,7 @@ Two traps worth keeping:
 
 ## NEXT STEPS (ordered)
 
-### 1. STEP 4 — hover-to-peek from the right edge (Shawn asked; NOT built)
-
-The OSD should nose out when the cursor reaches the right edge. It does not, because upstream's
-reveal-on-hover lives in the drawers sheet's `Interactions.qml` — the full-screen surface this
-config deliberately does not have. Needs a **thin** always-present hover strip that sets
-`screenState.osd`. **The strip must not swallow clicks** — that is exactly BUG-110.
-
-### 2. STEP D — Caelestia's remaining surfaces, one at a time
+### 1. STEP D — Caelestia's remaining surfaces, one at a time
 
 Remaining, easiest first: notifications → dashboard → sidebar → session menu.
 (Launcher and OSD are done.)

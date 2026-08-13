@@ -73,6 +73,20 @@ ShellRoot {
 
             readonly property ScreenState screenState: ShellState.forScreen(modelData)
 
+            // True while the pointer is on the edge tripwire OR on the OSD
+            // itself. It has to be both, because they are two separate
+            // surfaces: the strip loses the pointer the instant the OSD slides
+            // out over the top of it.
+            readonly property bool osdHovered: osdStripHover.containsMouse || osdSurfaceHover.hovered
+
+            // show() is the only handle Wrapper.qml gives us on its hide Timer.
+            // On ENTER it opens the OSD. On LEAVE it re-arms the same countdown,
+            // which then reads hovered == false and closes - so hovering does
+            // not need a second timer of its own. Guarded on screenState.osd so
+            // that leaving cannot resurrect an OSD that already closed.
+            onOsdHoveredChanged: if (osdHovered || screenState.osd)
+                osd.show()
+
             // The launcher wants a `panels` object. In the upstream shell that is
             // the whole Panels item. It only ever reads four things off it:
             // `bar.implicitWidth` and `popouts.*` (WallpaperList.qml:26-31) and
@@ -259,6 +273,13 @@ ShellRoot {
                     opacity: osd.opacity
                 }
 
+                // Once the OSD is out it covers the hover strip below, so the
+                // strip stops seeing the pointer. Without this the thing would
+                // slide out and then immediately time out under your cursor.
+                HoverHandler {
+                    id: osdSurfaceHover
+                }
+
                 Osd.Wrapper {
                     id: osd
 
@@ -271,6 +292,74 @@ ShellRoot {
                     // nothing here for the OSD to step aside for. Wrapper.qml:20
                     // only uses this to add a 12px nudge.
                     sidebarOrSessionVisible: false
+
+                    // Wrapper's own hide Timer (Wrapper.qml:84-92) only hides
+                    // when this is false, which is how "hover to keep it open"
+                    // works. Upstream sets it from Interactions.qml - the
+                    // full-screen sheet we deliberately do not have - so it is
+                    // set here instead.
+                    hovered: scope.osdHovered
+                }
+            }
+
+            // ── hover-to-peek: nose the OSD out from the right edge ──────────
+            // [CHANGE: claude-code | 2026-08-13] STEP 4, asked for by Shawn.
+            //
+            // A 2px-wide always-present strip at the right edge. Hovering it
+            // calls the SAME show() a volume key press calls, so there is one
+            // code path in and one hide Timer, not two.
+            //
+            // The numbers are upstream's, not invented: Interactions.qml:41
+            // treats "in the right panel" as x > width - Config.border
+            // .minThickness (= 2), and Interactions.qml:26-29 widens the
+            // vertical band by Config.border.rounding (= 25) at each end.
+            //
+            // The height deliberately tracks the OSD and therefore COLLAPSES
+            // when it is closed: Wrapper's content Loader is inactive while
+            // hidden, so implicitHeight is 0 and this strip is 2x50px in the
+            // middle of the right edge. Once the OSD is out it grows to cover
+            // it, which is what carries the pointer through the slide-out
+            // animation before the OSD surface itself is under the cursor.
+            // That is not a bug to "fix" by pinning a height - a smaller strip
+            // is a smaller dead zone, see below.
+            //
+            // KNOWN COST, accepted deliberately: a layer-shell surface eats
+            // pointer input over its whole area, and Wayland has no way to say
+            // "send me motion but pass clicks through". So those 2px x 50px
+            // are dead to clicks. That is the same trade BUG-110 records for
+            // the top edge, at roughly a thousandth of the area. It matters
+            // most for a maximised window's scrollbar, which is ~14px wide -
+            // you lose its outermost 2px for 50px of its travel.
+            PanelWindow {
+                id: osdHoverStrip
+
+                screen: scope.modelData
+                color: "transparent"
+
+                WlrLayershell.namespace: "caelestia-osd-hover"
+                // Top, not Overlay: the OSD itself is Overlay, so it comes out
+                // ON TOP of this strip rather than fighting it for the pointer.
+                WlrLayershell.layer: WlrLayer.Top
+                // Never take the keyboard. This is a pointer tripwire, and a
+                // surface that steals focus at the screen edge would be a bug
+                // you could not type your way out of.
+                WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+                exclusiveZone: 0
+                anchors.right: true
+
+                implicitWidth: Config.border.minThickness
+                implicitHeight: osd.implicitHeight + Config.border.rounding * 2
+
+                MouseArea {
+                    id: osdStripHover
+
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    // Do not pretend to handle clicks. It cannot pass them
+                    // through either (see above), but at least nothing here
+                    // silently swallows a press it might have acted on.
+                    acceptedButtons: Qt.NoButton
                 }
             }
 
