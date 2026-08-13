@@ -1,332 +1,277 @@
-# HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-08-13 — Response 7 (step 1 BUILT and proven on screen)
+# HANDOFF — Caelestia desktop on KDE
 # [CHANGE: claude-code | 2026-08-13]
 
-> One file, overwritten in place every response (AGENTS.md §0.2). A snapshot, not a log.
-> Do not append to it — it reached 82 KB that way once already.
+**Read this whole file before touching anything. The direction changed on 2026-08-13 and most of
+the older reasoning in git history is now superseded.**
 
-## Goal (durable)
+---
 
-Caelestia shell running on KWin as a usable everyday session (DECISION 63), alongside the
-untouched Hyprland session, which stays the fallback.
+## The goal, in Shawn's words
 
-## Aim right now
+> "i want the exact shell but not as shell."
 
-Shawn's words on 2026-08-13: *"i want the exact shell but not as shell so can we edit kwin default
-and write the calestia code over there?"*
+The Caelestia **look** — its bar, launcher, dashboard, volume and brightness bars, notifications,
+and eventually its window styling — on a desktop that otherwise behaves like normal KDE. Nothing
+covering the screen. Clicks land where you aim them.
 
-So: keep **Caelestia's real code**, stop it being a screen-covering shell. Diagnosis is done
-(below). A new one step is proposed and awaiting a go. No code changed yet.
+---
 
-## 🚫 DEAD END — do not propose again
+## THE PIVOT — 2026-08-13. Read this before proposing anything.
 
-**The colour/token theming route is rejected.** `scripts/luminos-kde-caelestia-theme` +
-`scripts/luminos-kde-caelestia-panel` + `config/kde/caelestia-design-spec.json` (DECISION 63
-"Option 3") pour Caelestia's palette, fonts and geometry into Plasma's own panel. Shawn tried it
-on 2026-08-09 (backups show it applied 19:01:27 and was rolled back 19:01:59, 32 s later) and his
-verdict on 2026-08-13 was: *"this was shit i mean it never look like anything from shell."*
-A matching palette is not the shell. Do not resurrect this.
+The previous plan was: **bare `kwin_wayland`, and rebuild every desktop feature by hand.**
+That plan is **retired.** It was my call, and it was the wrong one.
 
-**Porting the QML into Plasma applets is also out** — measured, not guessed: of 269 QML files,
-**226 import `Caelestia.*`** and **134 import `Quickshell.*`**. Plasma has neither module. That is
-a rewrite of nearly the whole shell, plus `Caelestia.Blobs`/`Caelestia.Config` are compiled C++
-plugins. Fails the scope rule on its face.
+**Why it was wrong.** I assumed the list of things we'd need to add back was short. It is not —
+it is most of Plasma. Two days of real use produced: Chrome hanging ~25 s on every launch
+(BUG-120), dead volume keys, dead brightness keys, no notifications, no idle screen-off, no
+password safe. Every one of those is a separate hand-built piece with its own bugs, and each one
+is something Plasma already does correctly for free.
 
-## 🔒 Scope rule Shawn restated on 2026-08-13 — this now governs the whole session
+Shawn named the constraint plainly, and it governs from here:
 
-> *"keep the default kwin got it do not try to copy hyperland style. keep it simple we just want it
-> to look like Caelestia. nothing more one step at a time got it?"*
+> "we have to as much less work as possible to avoid bugs and save time"
 
-Caelestia is a **look**. KWin's window behaviour stays **stock**. When a Caelestia feature only
-works because Hyprland does something special, the default answer is **drop the feature**, not
-rebuild the mechanism. **Prefer removing a patch over adding one.** Ship one step at a time — no
-numbered plans. This is the second time he has said it (DECISION 63 already says "never port the
-tiling"), so treat it as hard scope, not a preference.
+**The new plan: run FULL Plasma, and take away its panel. Caelestia goes on top.**
 
-## Answers Shawn gave
+### The trap that made me reject this originally — and why it does not apply
 
-1. Session = **Caelestia-on-KWin**. (Note the box is booted into **Hyprland** right now — `Hyprland`
-   PID 1497 + `qs -c caelestia` PID 1683, up since 2026-08-11 16:33 — so nothing can be reproduced
-   without him logging into the other session.)
-2. Whether the bottom edge / top-right corner triggers it: **he does not know.** So the exact stuck
-   boolean is still unidentified — see step 1, which is deliberately chosen to not need that answer.
-3. Tiling: **remove it, keep KWin default.** Not yet done (holding to one step at a time).
+DECISION 63 rejected `startplasma-wayland` because suppressing plasmashell needs
+`systemctl --user set-environment LUMINOS_SHELL=caelestia` plus a `ConditionEnvironment=` drop-in,
+and **this user has `Linger=yes`** — the systemd user manager outlives logout, so the variable
+would still be set the next time Shawn picked plain Plasma at the greeter, handing him a session
+with no shell at all and no clue why.
 
-## What was established this response (evidence, not theory)
+**That reasoning is still correct — but it only applies if you switch plasmashell OFF.**
 
-### The shell is ONE whole-screen surface — this answers question 3
+We are not doing that. **plasmashell keeps running.** We only remove the *panel it draws*. No env
+variable, no systemd drop-in, no `ConditionEnvironment=`, so the linger trap never exists.
 
-`hyprctl layers` on the live session, verbatim:
+### The one real cost, and why it is acceptable
 
-```
-Layer level 0 (background):
-  0 0 1440 900   caelestia-background
-Layer level 2 (top):
-  0   450  1 1   caelestia-border-exclusion
-  750 0    1 1   caelestia-border-exclusion
-  1439 455 1 1   caelestia-border-exclusion
-  745 899  1 1   caelestia-border-exclusion
-  0 0 1440 900   caelestia-drawers          <-- the entire screen
-```
+`plasma-org.kde.plasma.desktop-appletsrc` is **per-user, not per-session**. There is exactly one of
+it. Remove the panel and **plain Plasma loses its panel too.**
 
-- `caelestia-drawers` is **the full 1440×900 logical screen**, on the **top** layer, i.e. above
-  every normal window, permanently. Source: `modules/drawers/ContentWindow.qml:99-102`
-  (`anchors.top/bottom/left/right: true`) and `:75` (`exclusionMode: ExclusionMode.Ignore` — it
-  reserves *no* space). The bar, the rounded border, the launcher and the dashboard are all drawn
-  inside that one surface.
-- The only things that reserve space are the **four 1×1 px `border-exclusion` windows**, one per
-  edge — `modules/drawers/Exclusions.qml:15-30`. Left = `bar.exclusiveZone`, the other three =
-  `Config.border.thickness`.
-- So there is **no separate "window area" surface**. Windows always live underneath the shell.
-  "Windows hiding under the shell" is the architecture, not a bug — it only *looks* wrong when the
-  four exclusion markers do not reserve the right amount, which is the thing to measure next.
+Explained to Shawn in these terms, and accepted:
 
-### Clicks: the input region, not the compositor — this answers question 1
+| | plasmashell OFF (rejected) | panel removed (chosen) |
+|---|---|---|
+| What you see | black screen, nothing | desktop + wallpaper, no panel |
+| Right-click | dead | works |
+| Way out | none, no clue why | right-click → Add Panel, ~10 s |
 
-What decides whether a click hits your window or the shell is the surface's input region, `mask:`
-at **`ContentWindow.qml:97`**:
+Different class of problem entirely. One is a landmine; the other is a light switch you can find
+in the dark.
 
-```qml
-mask: hasFullscreen ? emptyRegion : (luminosGrab ? null : regions)
-```
+---
 
-- Normally `mask: regions` (`Regions.qml`, `intersection: Intersection.Xor`) punches the interior
-  **out**, so clicks fall through to windows.
-- **`mask: null` means the whole surface takes input** — the patch's own comment at
-  `ContentWindow.qml:79-84` says exactly that. It was added deliberately because KWin has no
-  `hyprland_focus_grab_v1` (confirmed in `shell.log`: *"The active compositor does not support the
-  hyprland_focus_grab_v1 protocol"*), so an outside click has to physically reach the shell.
-- `luminosGrab` (`ContentWindow.qml:85-95`) is true for: launcher, session menu, sidebar,
-  non-hover dashboard, nested tray menu, **or any detached popout**.
-- `~/.config/caelestia/shell.json` has **`launcher.showOnHover: true`**. So brushing the bottom
-  edge opens the launcher → `luminosGrab` → the whole screen swallows input.
+## Shawn's answers — decided, do not re-litigate
 
-**The trap (hypothesis, not yet reproduced):** once the mask is null, the `Interactions` MouseArea
-covers the whole screen, so `containsMouse` can never go false, so `onContainsMouseChanged`
-(`Interactions.qml:125`) — the handler that closes hover-opened panels — can never fire. The state
-that makes the mask null is the state that stops the code from clearing it. The only remaining exit
-is `onPressed` → `luminosClickOutside()` (`Interactions.qml:120-124`), and **that click is
-consumed** — one dead click, then the next works. If `luminosOnOpenPanel()` (`:84-106`) wrongly
-reports the press as *inside* an open panel, the panel never closes and **every** click is dead
-until something else resets it. That is the "stuck" state.
+| Question | His answer |
+|---|---|
+| Shortcut conflicts between Plasma and Caelestia | **"May be keep the plasma ones."** Plasma wins by default. Only take a key for Caelestia when its version is clearly better AND he has said so. |
+| plasmashell's RAM cost (~300–500 MB) | **"got it no problem."** Accepted. Do not re-raise it as a concern. |
+| Two wallpapers (Plasma's and Caelestia's) | **Decide later, after seeing both live.** Do not pick for him. |
+| Keep the current bare-KWin session? | **"for now its working good so do not delete it."** It stays as the fallback and as the only place to test Caelestia without Plasma helping. |
+| How much of Caelestia does he want? | **All of it.** Bar, launcher, dashboard, **volume bar, brightness bar, notifications, "and more"**, plus **Caelestia's window styling**. |
+| Caelestia's own settings panel | He pointed at it — bottom-right → popup → gear icon — as a **reference to lift from later**. Explicitly *"this but for later part."* Do not build it now. |
 
-Ruled out: **BUG-114 (tap-to-click) is genuinely fixed** — `~/.config/kcminputrc` has
-`TapToClick=true` under `[Libinput][2362][12305][ASUP1208:00 093A:3011 Touchpad]`, written by
-`luminos-caelestia-kwin-session:159`. Still worth confirming bare `kwin_wayland` applies kcminputrc
-with no kded6 running.
+---
 
-### "Hyprland layout" is actually KWin's own custom tiling — this answers question 2
+## 🚫 DEAD ENDS — do not propose these again
 
-`~/.config/kwinrc` contains **four** `[Tiling][<output-uuid>][<desktop-uuid>]` groups, every one of
-them:
+1. **Porting Caelestia to Plasma applets.** Measured 2026-08-13: **269 QML files, 226 import
+   `Caelestia.*`, 134 import `Quickshell.*`**, and `Caelestia.Config` is a compiled C++ plugin
+   with its QML embedded as a Qt resource. Plasma has none of that. This is a rewrite, not a port.
+2. **Repainting Plasma in Caelestia's colours.** Shawn rejected this outright on 2026-08-09 and was
+   right: tokens are not a shell. A purple Plasma panel is not Caelestia's launcher.
+3. **Porting Hyprland's tiling to KWin.** He asked for the opposite. KWin's window behaviour stays
+   **stock**.
+4. **Switching plasmashell off via a systemd environment variable.** See the linger trap above.
 
-```
-padding=4
-tiles={"layoutDirection":"horizontal","tiles":[{"width":0.25},{"width":0.5},{"width":0.25}]}
-```
+---
 
-A saved **25% / 50% / 25% three-column** custom tile layout (KWin 6's Meta+T feature), for two
-different output UUIDs and three desktop UUIDs. Bare `kwin_wayland` reads the same `~/.config/kwinrc`
-as Plasma, so it applies in the Caelestia-on-KWin session too. This is very likely what AGENTS.md
-§14 item **0d(a)** describes as apps that "open fullscreen, appear to crash, then reopen in a split
-shape" — it looks like Hyprland dwindle, but nothing Hyprland is involved.
-`~/.config/kwinrulesrc` holds only one unrelated rule (Wine/WinRAR).
+## 🔒 Standing scope rules
 
-## STEP 1 — DONE 2026-08-13, verified on screen
+- Caelestia is a **look**. KWin's window behaviour stays stock.
+- **Drop a feature rather than rebuild a Hyprland mechanism.**
+- **Prefer removing a patch to adding one.**
+- **A new session is only ever additive.** Never edit an existing greeter entry.
+- **Least work that works.** This is now the governing rule, stated by Shawn directly.
 
-**`config/quickshell/caelestia-bar/shell.qml` (new, tracked in the repo) runs Caelestia's REAL bar
-in its own thin left-edge `PanelWindow`, with no full-screen sheet anywhere.**
+---
 
-Wiring:
-- `~/.config/quickshell/caelestia-bar/` — `assets components modules services utils` are symlinks
-  into `~/.config/quickshell/caelestia-kwin/` (so it inherits the KWin patches to
-  `services/{Brightness,ShellState}.qml`), and `shell.qml` is a symlink to the repo file.
-- Nothing in `luminos-caelestia-kwin-overlay` or `caelestia-kwin/` was touched. Existing session
-  is untouched and remains the fallback.
-- Run it with `qs -c caelestia-bar`.
+## 📋 NEW RULE — how a "step" is defined from now on
 
-Why it works at all: `modules/bar/BarWrapper.qml` is a plain QML `Item`, not a window, with four
-required properties (`screen`, `screenState`, `popouts`, `fullscreen`) and an already-computed
-`readonly property int exclusiveZone`. It is *designed* to be dropped into a container. Upstream's
-container is the full-screen `Drawers` sheet; ours is a `PanelWindow` whose `implicitWidth` and
-`exclusiveZone` bind straight to the wrapper's. No bar code was copied or rewritten.
+Shawn caught a real failure: *"one step at a time"* meant two different things to us. I meant
+"take Caelestia's shell apart one panel at a time." He heard "everything else keeps working."
+Both are fair readings; mine silently hid ~15 broken things.
 
-**Proof (not a claim):** launched live on the running Hyprland session 2026-08-13 01:09.
-`hyprctl layers` showed `xywh: 60 10 60 880, namespace: caelestia-bar, pid 71557` — its own 60 px
-surface, correctly excluded, nothing covering the screen. `grim` capture at
-`/tmp/caelestia-bar-shot.png` (crop `/tmp/caelestia-bar-compare.png`) shows the new bar next to the
-real one: logo, workspace pill, status icons, clock, tray pill, power button — identical geometry,
-colour, font and rounding. Test instance killed afterwards; `qs -c caelestia` PID 1683 untouched.
+**Every step from now on is written down BEFORE work starts, with three lines:**
 
-**Differences actually observed, do not overstate the win:**
-- The active-window entry read **"Desktop"** on the new bar while the original read
-  "Claude (legacy)". That widget is `Hypr.activeToplevel`, i.e. Hyprland IPC. On KWin expect it
-  permanently "Desktop". Same for the workspace pips — they rendered, but they are
-  `Quickshell.Hyprland` backed and were mirroring the *original* instance's IPC, so **they are not
-  proven to work on KWin**. Measure there before claiming anything.
-- No rounded screen border / 10 px gap — that is painted by the sheet's blob. Expected, stated
-  up front, would need its own thin window later.
-- Bar popouts (hover a status icon) do nothing. `checkPopout()` is only ever called from
-  `Interactions.qml`, which belongs to the sheet. A `BarPopouts.Wrapper` is instantiated only
-  because `BarWrapper` requires one; it is `visible: false`.
-- `PowerProfiles` DBus warning on launch is the masked `power-profiles-daemon` (DECISION 39/41),
-  not new.
+1. **When this is done, you will be able to:** _(the concrete thing he can do)_
+2. **These will still be broken:** _(named individually — this is the line that was missing)_
+3. **You'll know it worked when:** _(what he looks at)_
 
-## STEP 2 — ARMED 2026-08-13, waiting on Shawn to log in
+---
 
-`scripts/luminos-caelestia-kwin` now has ONE switch near the top:
+## THE PLAN
 
-```bash
-export SHELL_DIR="$HOME/.config/quickshell/caelestia-bar"   # was caelestia-kwin
-```
+### STEP A — a fourth greeter entry: full Plasma + Caelestia's bar
 
-The inner script picks it up via the environment (`SHELL_DIR="${SHELL_DIR:-...caelestia-kwin}"`),
-so there is no second path to forget. Installed to `/usr/local/bin/luminos-caelestia-kwin` with
-`sudo install -m755` and read back to confirm (line 40 / line 86). `bash -n` clean.
+1. **When this is done, you will be able to:** log in to "Luminos (Caelestia on Plasma)" and get a
+   complete, working KDE desktop with Caelestia's bar on the left — volume keys, brightness keys,
+   notifications, Chrome opening instantly, idle screen-off, all working because Plasma is doing them.
+2. **These will still be broken:** Plasma's own panel is still on screen (STEP B removes it), so
+   there are two bars. Caelestia's dashboard / sidebar / session menu / OSD / notifications are
+   still absent. Workspace pips and the active-window entry still read wrong — they are Hyprland
+   IPC and always will be here.
+3. **You'll know it worked when:** volume keys move the volume, and Chrome opens in under 2 seconds.
 
-**Revert = change that one word back to `caelestia-kwin` and re-install.**
+**How:** copy `scripts/luminos-caelestia-kwin` to a new script. Replace the `exec kwin_wayland …`
+tail with `startplasma-wayland`, and keep the shell-retry loop, but start it **after** Plasma is up.
 
-Shawn has to log out and pick **Caelestia-on-KWin** at the greeter. Only he can do that part.
+**⚠️ The one thing to get right here.** Do **not** start Caelestia from an XDG autostart `.desktop`
+— Plasma 6 runs those through the **systemd user manager**, which under `Linger=yes` has a stale
+environment from whichever session ran last, and it would also fire in plain Plasma. Start it from
+the session script itself, after waiting for the Wayland socket. That is the same shape the
+existing script already uses, so it is mostly copy-paste.
 
-What that session will have: **the bar and the launcher**. Still missing: dashboard, sidebar,
-session menu, OSD, notifications, utilities, bar popouts — those live in the sheet, which is gone.
-Their five `~/.local/share/applications/luminos-cael-*.desktop` shortcuts (Meta+K, Meta+N,
-Meta+Escape, Meta+U, Ctrl+Alt+C) still `ipc call` into `caelestia-kwin`, which will not be
-running, so they fail. **That is deliberate** — see STEP 2b. Escape hatches: **Meta+Return →
-kitty** (`luminos-cael-terminal.desktop`) and **Ctrl+Alt+T → konsole**.
+Keep: the `KWIN_DRM_DEVICES=/dev/dri/luminos-igpu` pin, the `unset HYPRLAND_INSTANCE_SIGNATURE`,
+the `XDG_MENU_PREFIX=plasma-` line (BUG-112), and the logging to
+`~/.local/state/luminos/caelestia-plasma/`.
 
-The four things to actually judge there:
-1. Do clicks work everywhere on screen? (the whole point)
-2. Do the workspace pips render/work, or are they dead? (`Quickshell.Hyprland`)
-3. Does the active-window entry say "Desktop"? (expected yes)
-4. Does Meta+P open the launcher, and **can you type into the search field**? Only Shawn can
-   answer 4 — see the keyboard-focus note in STEP 2b.
+Drop: the hand-started polkit agent and portal — **Plasma starts both itself.** Starting them twice
+is exactly the kind of added patch the scope rules say to avoid.
 
-## STEP 2b — the launcher, added 2026-08-13 (asked for: "make the launcher also work there")
+### STEP B — remove the Plasma panel
 
-Same trick as the bar: upstream's `modules/launcher/Wrapper.qml` unmodified, in its own
-bottom-anchored `PanelWindow` inside a per-screen `Scope`. Nothing about the launcher was rewritten.
+1. **When this is done, you will be able to:** see only Caelestia's bar. One bar, not two.
+2. **These will still be broken:** plain Plasma also has no panel until you right-click → Add Panel.
+   Everything else in plain Plasma is untouched.
+3. **You'll know it worked when:** the bottom strip is gone in both sessions, and right-clicking the
+   desktop in plain Plasma still offers "Add Panel".
 
-Two things made it fit:
-- **`Launcher.Wrapper.panels` is `var`, not a typed `Panels`.** Grep proved only four sub-properties
-  are ever read: `panels.bar.implicitWidth` and `panels.popouts.{hasCurrent,currentName,currentCenter}`
-  at `launcher/WallpaperList.qml:26-31`, and `panels.utilities.implicitWidth` /
-  `panels.dashboard.nonAnimHeight` — both behind `if (screenState.…)` guards for panels we do not
-  have. So a 4-property `QtObject` shim replaces the whole `Panels` item.
-- `Shortcuts {}` is instantiated for the `drawers` IPC target, which is what Meta+P calls. Its
-  `CustomShortcuts` are Hyprland-only and will log "unsupported" on KWin — expected noise.
+**Back up `~/.config/plasma-org.kde.plasma.desktop-appletsrc` before touching it.** Restoring that
+one file is the whole undo.
 
-**Proof:** run live on Hyprland 2026-08-13, `qs -c caelestia-bar`, PID 78431.
-`qs -p …/caelestia-bar ipc call drawers toggle launcher` → rc=0, then `drawers isOpen launcher` → 1.
-`hyprctl layers`: `caelestia-launcher xywh: 459 346 632 534` — bottom edge at 880 on a 900 px
-screen, i.e. bottom-anchored, not floating in the middle. `grim` capture shows the app list, icons,
-descriptions and the `Type ">" for commands` field rendering exactly like upstream.
+**Open question to settle first, with a measurement, not a guess:** does removing the panel also
+kill the **volume keys**? On Plasma 6 the media-key shortcuts may be registered by the `plasma-pa`
+applet, which lives in the panel. If so, removing the panel re-breaks the exact thing STEP A fixed.
+**Check this before deleting anything.** If it is true, the fallback is auto-hide instead of
+removal — the panel still exists, still owns its shortcuts, and just is not drawn. Auto-hide is
+also non-destructive to plain Plasma, so it may be the better answer regardless.
 
-**Meta+P now points at the running config.** `luminos-cael-launcher.desktop` `Exec=` was repointed
-from `caelestia-kwin` to `caelestia-bar`, and `luminos-caelestia-kwin-session` was changed to match
-so a re-install does not clobber it (`SHELL_DIR` = the running config, new `SHELL_DIR_FULL` = the
-old one). **The other five shortcuts were deliberately NOT repointed**: `drawers toggle dashboard`
-against the bar config would *succeed*, set `screenState.dashboard = true` with nothing rendering
-it, and then the launcher's `maxHeight` reads `panels.dashboard.nonAnimHeight` off the zero-size
-stand-in → `NaN` → the one panel that works breaks. A shortcut that fails is better than one that
-quietly breaks something else.
+### STEP C — prove the gaps are actually closed
 
-**UNVERIFIED, and only Shawn can settle it — `WlrKeyboardFocus.Exclusive`.** KWin has no
-`hyprland_focus_grab_v1`, so without an exclusive grab the search field never receives the keyboard
-and the launcher is a picture you cannot type into. The window takes `Exclusive` only while
-`screenState.launcher` is true, and hiding it hands the keyboard straight back. Exits if it ever
-sticks: **Escape** (`launcher/Content.qml:86`), **Meta+P** again, or **Ctrl+Alt+Backspace**.
+Not a build step, a measurement step. Confirm on the real login: volume keys, brightness keys,
+notification popups, Chrome launch time, idle screen-off, the password safe. Close BUG-120 and
+BUG-121 with evidence, or find out the plan is wrong early.
 
-**Known cosmetic difference, stated up front:** the launcher's rounded backdrop is a plain
-`StyledRect` with `Tokens.rounding.extraLarge`. Upstream's is a blob in the sheet that stretches
-toward the bar as it opens. Ours does not do the goo and will not pretend to.
+### STEP D — bring Caelestia's own surfaces across, one at a time
 
-**Two gotchas found the hard way:**
+Order, easiest first: launcher (**already built and working**, see below) → volume/brightness OSD →
+notifications → dashboard → sidebar → session menu.
 
-1. `Tokens` is an *attached property* from the compiled `Caelestia.Config` plugin, not a global.
-   Using `Tokens.rounding.*` without `import Caelestia.Config` fails at **runtime** with
-   `ReferenceError: Tokens is not defined`, not at load.
+**Rule for every one of these:** Plasma's version keeps working until Caelestia's replacement is
+proven. Never remove Plasma's until Caelestia's is on screen and working. That is what makes this
+plan cheap to abandon at any point.
+
+### LATER — explicitly deferred by Shawn
+
+- **Caelestia window styling / decorations.**
+- **Caelestia's settings panel** (bottom-right popup → gear). Lift the design from upstream when
+  we get there.
+
+---
+
+## What already exists and works — reuse it, do not rebuild it
+
+### `config/quickshell/caelestia-bar/shell.qml` — bar + launcher in their own windows
+
+Commit `296d0586`. This is the piece that carries forward **unchanged** into the Plasma session.
+It hosts upstream's `modules/bar/BarWrapper.qml` and `modules/launcher/Wrapper.qml` **unmodified**,
+each in its own `PanelWindow`. No Caelestia code was copied or rewritten.
+
+Why it works: `BarWrapper` is a plain QML `Item`, not a window, with four required properties and
+an already-computed `readonly property int exclusiveZone`. It is *designed* to be dropped into a
+container. Upstream's container is the full-screen sheet; ours is a thin `PanelWindow`.
+
+`Launcher.Wrapper.panels` is a plain `var`, and only four sub-properties are ever read
+(`panels.bar.implicitWidth`, `panels.popouts.{hasCurrent,currentName,currentCenter}` at
+`launcher/WallpaperList.qml:26-31`, plus `utilities.implicitWidth` / `dashboard.nonAnimHeight`
+behind guards). So a 4-property `QtObject` shim replaces the entire `Panels` item.
+
+Config dir `~/.config/quickshell/caelestia-bar/` — `assets components modules services utils` are
+symlinks into `~/.config/quickshell/caelestia-kwin/`, so it inherits the KWin patches to
+`services/{Brightness,ShellState}.qml`. Run by hand: `qs -c caelestia-bar`.
+
+**Proven:** bar `xywh: 60 10 60 880`; launcher `xywh: 459 346 632 534`, bottom-anchored, verified
+over three open/close cycles with 0 surfaces after each close. Shawn confirmed it live on KWin.
+
+### Two QML gotchas that cost real time — do not rediscover them
+
+1. **`Tokens` is an attached property from the compiled `Caelestia.Config` plugin, not a global.**
+   `Tokens.rounding.*` without `import Caelestia.Config` fails at **runtime** with
+   `ReferenceError: Tokens is not defined` — it loads fine, then breaks.
 
 2. **Never bind a `PanelWindow.visible` to an animated property of its own contents.** The first
-   version was `visible: launcher.visible`, and `Wrapper.qml:34` is `visible: offsetScale < 1`
-   where `offsetScale` is driven by a `Behavior` animation. Under `QSG_RENDER_LOOP=threaded` a
-   hidden window gets no frames, the animation never advances, `visible` never leaves `false` —
-   so **the launcher opened exactly once and the key was dead forever after**. It failed silently
-   from every angle: no warning in the log, and `ipc call drawers isOpen launcher` kept answering
-   `1`. Only `hyprctl layers` showed there was no surface. Fix is
-   `visible: scope.screenState.launcher || launcher.visible` — the plain bool opens it instantly,
-   the animated one keeps it up through the close animation. **Verified with three open/close
-   cycles**, `xywh: 459 346 632 534` each time, 0 surfaces after each close.
+   launcher build used `visible: launcher.visible`, and `Wrapper.qml:34` is `visible: offsetScale < 1`
+   driven by a `Behavior` animation. Under `QSG_RENDER_LOOP=threaded` a hidden window gets **no
+   frames**, so the animation never advances and `visible` never leaves `false`. **The launcher
+   opened exactly once, then the key was dead forever.** It failed silently from every angle: no
+   log warning, and `ipc call drawers isOpen launcher` cheerfully answered `1` the entire time.
+   Only `hyprctl layers` revealed there was no surface. Fix:
+   `visible: scope.screenState.launcher || launcher.visible`.
 
-## After that, in order (do NOT start these yet)
+### Shortcuts
 
-1. ~~Give the launcher its own small window the same way~~ — DONE, see STEP 2b. Next the
-   dashboard, then the sidebar — one per step. When a panel lands, repoint its
-   `luminos-cael-*.desktop` at `SHELL_DIR` in `luminos-caelestia-kwin-session` (add its id to the
-   `[ "$id" = "launcher" ]` test) and drop its `absent` entry from the `panelsShim`.
-3. Delete the four `[Tiling]` groups from `~/.config/kwinrc` (Shawn approved: "keep the default
-   kwin"). Back the file up first. Note it is **not proven** these cause the reshaping — KWin custom
-   tiles apply on quick-tile/drag, not to newly-opened windows — so removing them is "restore stock
-   default", not "fix confirmed bug". Do not oversell it.
-4. Measure whether KWin honours `exclusiveZone` at all in a bare `kwin_wayland` session: does the
-   work area actually shrink, or do maximized windows still cover 0,0–1440×900?
+`~/.local/share/applications/luminos-cael-*.desktop`, each carrying its own `X-KDE-Shortcuts=`.
+**Meta+P → launcher** is repointed at `caelestia-bar` and its generator
+(`scripts/luminos-caelestia-kwin-session`) was changed to match, so a re-install cannot clobber it.
 
-## Superseded (kept so it is not re-proposed as new)
+**The other five (Meta+K, Meta+N, Meta+Escape, Meta+U, Ctrl+Alt+C) deliberately still point at
+`caelestia-kwin`.** Do not "fix" this. `drawers toggle dashboard` against the bar config would
+*succeed*, set `screenState.dashboard = true` with nothing rendering it, and then the launcher's
+`maxHeight` reads `panels.dashboard.nonAnimHeight` off the zero-size stand-in → `NaN` → the one
+panel that works breaks. **A shortcut that fails is better than one that quietly breaks something else.**
 
-The previous one step — deleting the click-outside patch (`luminosGrab` + `mask: ... null ...` in
-`ContentWindow.qml`, and the whole `Interactions.qml` patch) from the overlay — is still a correct
-fix **for the existing session**, and remains the fallback if the separate-windows route is refused.
-Keep the other `ContentWindow.qml` patch either way (`if (!monitor) return 0` in `dragMaskPadding`)
-— that one *fixes* clicking by disarming the invisible edge drag bands. Cost of that route: clicking
-empty desktop no longer closes an open panel; Escape still works
-(`modules/launcher/Content.qml:86`, `modules/session/Content.qml:104`).
+`ipc call` only ever talks to an **already running** instance and never starts one — so a shortcut
+aimed at a config that is not running does nothing at all, silently.
 
-## Gotchas / do NOT redo
+---
 
-- **Never port Hyprland's tiling into this session** — Shawn has said so directly.
-- Every bug in this shell so far has the same shape: **a Hyprland API returns null, and null
-  silently evaluates false**. No error, no log line, the feature takes the wrong branch. Suspect the
-  compositor bridge before suspecting the QML.
-- Worse variant: a *write* to a stub component (`HyprlandFocusGrab.active`) is dropped, so it reads
-  back **false forever** and every binding on it freezes. Never depend on it.
-- `shell.log` shows `hyprland_global_shortcuts_v1` unsupported ~22×. That is expected and already
-  worked around with `X-KDE-Shortcuts=` .desktop files — not a new finding, do not re-chase it.
-- The `eglInitialize failed` lines in the session log are **probe noise**, settled by BUG-115.
-- Do not judge session state from the agent shell's own env — it is frozen at the session that
-  spawned it. Use `pgrep -a`, `loginctl`, `/proc/<pid>/environ`.
+## Open bugs this plan is expected to close
 
-## Standing repo rules (carry forward)
+- **BUG-120** — Chrome hangs ~25 s on launch in the bare-KWin session. Leading theory:
+  `XDG_CURRENT_DESKTOP=KDE` makes Chrome pick KWallet for password storage, and no `kwalletd6`
+  is running, so it blocks until the D-Bus timeout. **Not yet measured.** The tell is the clock: a
+  consistent ~25 s says D-Bus timeout; a variable delay says memory/disk and the theory is wrong.
+- **BUG-121** — volume and brightness keys dead. Caelestia's own handler needs
+  `hyprland_global_shortcuts_v1` (KWin has no such protocol) and Plasma's handler is not running.
+  Two possible handlers, both absent for different reasons.
 
-- **NEVER `git add -A`.** An API key got published that way (BUG-086, WONTFIX per Shawn — do not
-  re-raise rotation). The tree holds unrelated in-flight work: `_to_delete/`, `reference_code/`,
-  `config/kde/caelestia-design-spec.json`, `scripts/luminos-kde-caelestia-{panel,theme}`,
-  `scripts/brightnessctl`, `switch-to-old-claude.sh`, `fix-claude-legacy.sh`, dirty
-  `research/turboquant` submodules, modified `scripts/luminos-session-recorder`. **Stage by name.**
-- **Luminos scripts print success on failed paths.** Verify writes by reading them back.
-- **`luminos-brain safe` NOs are usually false** — it greps its own header banner.
-- **BUG-080: the forex bot is live trading.** Check before anything that reboots or kills processes.
+---
 
-## Still open from the previous round (unchanged)
+## Still open, carried forward
 
-- **Tab sleeper v3.0 needs one click from Shawn**: `chrome://extensions` → Luminos Tab Sleeper →
-  **Reload**. Chrome does not auto-reload unpacked extensions, so the live worker is still v2.0 and
-  the 2-tab cap is not in force. Verify with `luminos-tabs` (says `NEVER REPORTED` until v3.0 runs).
-  While there, turn Memory Saver off at `chrome://settings/performance`.
-- Nothing from the DECISION 66 round is committed. Also unpushed: `5321eada`, `fc84917f`,
-  and now `72a773b1`/`cbeb42cb`. **Ask before pushing.**
-- **BUG-117** still open: `luminos-maximize`'s `metadata.json` lacks `KPackageStructure`, so KWin
-  rejects it every startup while `kwinrc` says it is enabled. Ruled out as the cause of 0d(a).
+- **BUG-117** — the `luminos-maximize` KWin script is marked enabled and has never once loaded.
+- Unreproduced report: some apps open fullscreen, appear to crash, then reopen split. Crashes,
+  `luminos-maximize`, KWin tiling and a control window are all ruled out with evidence. **Blocked
+  on Shawn naming one offending app.** Do not "fix" it by porting Hyprland tiling.
+- Tab Sleeper v3.0 needs Shawn to click Reload at `chrome://extensions`.
+- **5 commits unpushed. Ask before pushing.**
+- Deferred: delete the four `[Tiling]` groups from `~/.config/kwinrc` (back it up; **not proven**
+  these cause anything — this is "restore stock default", not "fix confirmed bug").
 
-## Files read (nothing modified except this file)
+---
 
-`AGENTS.md`, `HANDOFF.md`, `~/.config/quickshell/caelestia-kwin/modules/drawers/{ContentWindow,Interactions}.qml`,
-`/etc/xdg/quickshell/caelestia/shell.qml`,
-`/etc/xdg/quickshell/caelestia/modules/drawers/{Exclusions,Regions}.qml`,
-`/etc/xdg/quickshell/caelestia/modules/bar/BarWrapper.qml`,
-`scripts/luminos-caelestia-kwin-overlay`, `scripts/luminos-kde-caelestia-{theme,panel}`,
-`config/kde/caelestia-design-spec.json`,
-`~/.config/caelestia/shell.json`, `~/.config/kwinrc`, `~/.config/kwinrulesrc`, `~/.config/kcminputrc`,
-`~/.local/state/luminos/caelestia-kwin/shell.log`, `~/.local/share/luminos-kde-backup/`.
+## Working with Shawn — what actually helps
 
-Import census (measured with ripgrep, 2026-08-13): 269 QML files under
-`/etc/xdg/quickshell/caelestia`; **226 import `Caelestia.*`**, **134 import `Quickshell.*`**.
+- **He cannot open screenshots I save to disk.** Run things live on his session instead.
+- **Plain words, full depth.** Strip the jargon, keep the exact numbers and the analogies.
+- **Separate what I measured from what I am guessing.** He fact-checks confident claims, and he is
+  right to. Say "leading suspect, not yet measured" when that is what it is.
+- **He is good at this even though he says he is not.** He spotted that all the Chrome windows
+  appeared *simultaneously* — the single most diagnostic fact in that bug. He caught the "one step
+  at a time" ambiguity. He proposed the step-definition rule. Take his observations seriously.
+- **Show him before killing a test instance.** He asked for this explicitly.

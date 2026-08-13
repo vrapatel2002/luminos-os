@@ -3232,3 +3232,100 @@ must not be "optimised away" — the speed it costs is real and the crash it pre
 > It would also watch `earlyoom`'s thresholds rather than raw free memory, since earlyoom fires
 > first. Left blunt because a guard that occasionally refuses a load that would have worked is a
 > much cheaper failure than the kernel panic it exists to prevent.
+
+---
+
+## DECISION 68 — Caelestia rides on a FULL Plasma session with its panel removed; DECISION 63's bare-KWin session is demoted to a fallback
+# [CHANGE: claude-code | 2026-08-13]
+
+**This supersedes the "why bare `kwin_wayland` and not `startplasma-wayland`" half of DECISION 63.
+The rest of 63 — additive sessions, the real Caelestia QML, no Plasma repaint — still stands.**
+
+### What changed
+
+DECISION 63 built the Caelestia-on-KWin session as bare `kwin_wayland` plus three daemons, on the
+reasoning that only a short list of Plasma pieces would need adding back.
+
+**That estimate was wrong and two days of real use proved it.** The bill so far: Chrome hanging
+~25 s on every launch (BUG-120), dead volume keys and dead brightness keys (BUG-121), no
+notifications, no idle screen-off, no password safe. Each one is a separate hand-built component
+with its own bugs — and each is something Plasma already does correctly, for free, today.
+
+Shawn set the governing constraint himself:
+
+> "we have to as much less work as possible to avoid bugs and save time"
+
+Measured against that constraint, "rebuild the desktop from parts" is the expensive road and
+"use the desktop that already works" is the cheap one.
+
+### The new shape
+
+**`startplasma-wayland` (everything) + KWin stock + Caelestia's surfaces on top, with the Plasma
+panel removed.** plasmashell *keeps running*. Only the panel it draws goes away.
+
+### Why the linger trap in DECISION 63 does not apply
+
+63 rejected Plasma because suppressing plasmashell needs
+`systemctl --user set-environment LUMINOS_SHELL=caelestia` + a `ConditionEnvironment=` drop-in, and
+**this user has `Linger=yes`** — the systemd user manager outlives logout, so the variable would
+survive into the next plain-Plasma login and hand Shawn a session with no shell and no explanation.
+
+**That reasoning was correct, and it is still correct — for switching plasmashell OFF.** We are not
+doing that. Leaving plasmashell running means no environment variable, no drop-in, no condition,
+and therefore no trap. The rejection was sound; it was aimed at a solution we no longer need.
+
+This is worth recording as a general lesson: *the objection was to one implementation, not to the
+goal, and it took two days of accumulated breakage to notice I had thrown out the goal with it.*
+
+### The cost, stated plainly and accepted
+
+`~/.config/plasma-org.kde.plasma.desktop-appletsrc` is **per-user, not per-session** — there is one
+of it. Removing the panel removes it from the plain Plasma session too.
+
+Accepted by Shawn after the two outcomes were spelled out side by side:
+
+| | plasmashell OFF (what 63 rejected) | panel removed (what we are doing) |
+|---|---|---|
+| What you get | black screen | desktop + wallpaper, no panel |
+| Right-click | dead | works |
+| Recovery | none, and nothing says why | right-click → Add Panel, ~10 s |
+
+A landmine versus a light switch you can find in the dark. **Back up that file before touching it;
+restoring it is the entire undo.**
+
+### Decided alongside, do not re-litigate
+
+- **Shortcut conflicts: Plasma wins by default.** Shawn: *"May be keep the plasma ones."*
+- **plasmashell's ~300–500 MB is accepted.** Shawn: *"got it no problem."* Do not re-raise it.
+- **Two wallpapers: undecided on purpose.** He wants to see both live before choosing.
+- **The bare-KWin session is NOT deleted.** Shawn: *"for now its working good so do not delete it."*
+  It stays as the fallback and as the only environment that tests Caelestia without Plasma's help.
+- **Target scope is all of Caelestia** — bar, launcher, dashboard, volume and brightness bars,
+  notifications, and eventually its window styling. Its own settings panel (bottom-right popup →
+  gear) is a **reference to lift from later**, explicitly deferred.
+
+### The migration rule that keeps this cheap to abandon
+
+**Plasma's version of a feature keeps working until Caelestia's replacement is proven on screen.**
+Never remove Plasma's first. At every point in this migration the desktop is fully usable, and
+backing out is deleting one greeter entry.
+
+> ### ⚠️ Haste decision — here is what smart looks like
+> Removing the panel is a per-user config edit, so it leaks into the plain Plasma session. Smart
+> would give the Caelestia session its own Plasma profile — a separate `XDG_CONFIG_HOME`, or a
+> custom shell package with no panel in its default layout — so the two sessions could not affect
+> each other at all. Both are real work: a separate config home drags every application's settings
+> along with it, and a shell package is a new artifact to maintain across Plasma upgrades. Left
+> blunt because the failure mode is a missing panel in a session Shawn rarely uses, recoverable by
+> right-click in ten seconds, and **auto-hiding the panel instead of deleting it may sidestep the
+> whole thing** — that should be tried first, since it is both non-destructive and less work.
+
+### Process change adopted at the same time
+
+Shawn caught that *"one step at a time"* meant two different things: I meant "take Caelestia's
+shell apart one panel at a time", he heard "everything else keeps working". Both readings are fair;
+mine hid roughly fifteen broken things behind a friendly phrase.
+
+**Every step is now written down before work starts, in three lines: what you will be able to do,
+what will still be broken (named individually), and how you will know it worked.** The middle line
+is the one that was missing and it is the one that matters.

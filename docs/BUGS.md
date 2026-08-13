@@ -3,6 +3,29 @@ Last Updated: 2026-08-08 (BUG-111 FIXED — **the plugin death BUG-100 predicted
 
 ## Open Bugs
 
+### BUG-120 — Chrome takes ~25 s to open in the Caelestia-on-KWin session, then opens every window you asked for at once
+<!-- [CHANGE: claude-code | 2026-08-13] -->
+- Status: **OPEN — theory only, NOT measured.** Reported by Shawn from a real login, 2026-08-13.
+- Severity: High (the session is unusable as a daily driver with this in it)
+- Component: the bare-`kwin_wayland` session (`scripts/luminos-caelestia-kwin`) — **not Chrome, and not Caelestia**
+- Symptom: Claude Desktop launched normally. Chrome then took so long that Shawn assumed it had crashed and relaunched it several times. After "a few seconds" **all of the windows appeared together**.
+- **The diagnostic fact is the simultaneity, and it came from the user, not from me.** Genuine slowness — disk, CPU, memory pressure — produces *staggered* windows, each launch making the next worse. Windows arriving together mean one process was **blocked on a single shared thing and then released**: Chrome's singleton check handed each later launch to the first process as a queued "open a window" request, and the queue drained in one go when it unblocked. So exactly **one** Chrome ever started. This is not a crash and not N browsers fighting.
+- **Leading theory (unverified): Chrome is waiting on a password safe that is not running.** The session exports `XDG_CURRENT_DESKTOP=KDE` (it must — the portal keys off it). Chrome reads that same variable to choose a password store and picks **KWallet**. The session deliberately starts almost nothing and **`kwalletd6` is not among it**, so Chrome blocks on a D-Bus call whose default reply timeout is **25 s**. Under Hyprland the variable reads `Hyprland`, Chrome does not recognise it, falls back to its own plaintext store, and starts instantly — which is why this is new and session-specific.
+- Alternative suspects, ranked: the **portal** (the session starts `xdg-desktop-portal-kde`, the backend, but not the frontend multiplexer apps actually talk to — same 25 s wall on the startup dark-mode query); the **dGPU** (Chrome probes DRM devices, does not know about `KWIN_DRM_DEVICES`, and waking the card from D3cold on AC is slow — ranked lower because a GPU stall gives a *blank window*, not *no window*); **memory** (Electron + Chrome on a 15.6 GiB box, paging in from zram/NVMe — **not excluded**, because the queued windows would arrive together either way).
+- **The measurement that settles it, and it is a stopwatch:** a consistent **~25 s** (or 120 s) is a D-Bus timeout and is eerily repeatable. **8 s once and 40 s the next** is I/O or memory and the wallet theory is dead. These point in opposite directions and one timing run separates them. Then: launch from a terminal and read stderr; check the waiting process's kernel wait-channel (socket read and disk wait look nothing alike); `busctl --user list | grep -E 'kwallet|portal|secrets'`.
+- **The one-flag confirmation:** start Chrome once with `--password-store=basic`. That is exactly what it already does under Hyprland. Instant launch confirms the cause and the fix is a permanent flag.
+- **Do NOT fix this by bolting `kwalletd6` + the portal frontend + a keyring onto the session.** That is three new moving parts to fix an unmeasured guess, and it cuts against the scope rule. Under **DECISION 68** this bug is expected to disappear entirely, because full Plasma starts the wallet itself.
+
+### BUG-121 — Volume and brightness keys do nothing in the Caelestia-on-KWin session
+<!-- [CHANGE: claude-code | 2026-08-13] -->
+- Status: **OPEN.** Reported by Shawn from a real login, 2026-08-13.
+- Severity: High
+- Component: the bare-`kwin_wayland` session — again the session, not the shell
+- Root cause: **two possible handlers, both absent, for different reasons.** (1) Under Hyprland, Caelestia listens for the media keys itself via `hyprland_global_shortcuts_v1`; **KWin does not implement that protocol**, so Caelestia's handler is loaded, running, and deaf. (2) Plasma's own handler lives in plasmashell/`plasma-pa`, and **plasmashell is not running** in this session by design. Nobody is listening.
+- This is the same shape as BUG-113 and BUG-116: a Hyprland-only mechanism evaluating to nothing on KWin, with no error anywhere.
+- **Expected to be fixed by DECISION 68** (full Plasma handles media keys natively). **Do not hand-build a media-key handler for the bare session** — that is precisely the "rebuild the desktop from parts" road that DECISION 68 retired.
+- ⚠️ **Watch out during DECISION 68 STEP B:** if the volume shortcuts turn out to be registered by the `plasma-pa` applet *inside the panel*, then removing the panel re-breaks this. **Check before deleting the panel**; auto-hiding it instead keeps the applet loaded and is non-destructive.
+
 ### BUG-086 — Live OpenRouter API key committed to git AND pushed to GitHub
 <!-- [CHANGE: claude-code | 2026-07-25] -->
 - Status: **CLOSED — WONTFIX (accepted by user, 2026-07-25).** User: *"fuck the OpenRouter thing its dropped deal"* — the account/arrangement is dead, so the key has no value to protect and no rotation is being done. **No further action; do not re-raise this.** The file stays as-is unless the user says otherwise.
