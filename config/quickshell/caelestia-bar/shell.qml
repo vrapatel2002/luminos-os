@@ -959,19 +959,44 @@ ShellRoot {
 
                     onPressed: event => dragStart = Qt.point(event.x, event.y)
 
-                    // Upstream Interactions.qml:67-92. Leaving the surface
-                    // closes what hover opened. containsMouse goes false as soon
-                    // as the pointer leaves the input region, which with this
-                    // mask means "left the strip and every open panel" - the
-                    // right meaning.
+                    // ── how these close again ────────────────────────────────
+                    // Upstream Interactions.qml:67-92. Moving the pointer off
+                    // the panels closes them; `containsMouse` goes false the
+                    // moment the pointer leaves the input region, which with the
+                    // mask above means "left the strip and every open panel".
                     //
-                    // The sidebar is left alone here on purpose: Meta+N opens it
-                    // with the pointer somewhere else entirely, and upstream
-                    // needs a whole `*ShortcutActive` flag machine to stop the
-                    // next stray mouse move from slamming it shut. Not closing
-                    // it on leave gets the same result with no machine.
-                    onContainsMouseChanged: if (!containsMouse) {
-                        scope.screenState.session = false;
+                    // Note it is LEAVING that closes them, not clicking outside.
+                    // Clicking outside cannot work and never will: everything
+                    // outside the mask is handed to the window underneath, so
+                    // this surface is never told the click happened. Upstream is
+                    // the same. Grabbing the whole screen to hear about outside
+                    // clicks would be the click-swallowing bug on purpose.
+                    //
+                    // [CHANGE: claude-code | 2026-08-13] The ownership flag is
+                    // the fix for the drawer getting STUCK OPEN. I first left
+                    // the sidebar out of this handler entirely, reasoning that
+                    // Meta+N opens it with the pointer somewhere else and a bare
+                    // leave-closes rule would let a stray mouse move slam it
+                    // shut. True, but it traded a small annoyance for a real
+                    // one: nothing closed it at all.
+                    //
+                    // This is upstream's `*ShortcutActive` idea in one variable,
+                    // and the same shape as `dashOwnedByHover` further up this
+                    // file: the pointer only earns the right to close a panel by
+                    // having been inside it. So a drag opens and a leave closes;
+                    // Meta+N with the pointer elsewhere is left alone until you
+                    // actually go and touch the thing.
+                    property bool ownedByPointer
+
+                    onContainsMouseChanged: {
+                        if (containsMouse) {
+                            if (scope.screenState.sidebar || scope.screenState.session)
+                                ownedByPointer = true;
+                        } else if (ownedByPointer) {
+                            ownedByPointer = false;
+                            scope.screenState.session = false;
+                            scope.screenState.sidebar = false;
+                        }
                     }
 
                     onPositionChanged: event => {
@@ -983,6 +1008,16 @@ ShellRoot {
                         // Upstream Interactions.qml:122-127.
                         scope.screenState.osd = overOsd;
 
+                        // Covers the last way the pointer can end up inside an
+                        // open panel without a containsMouse edge: Meta+N fired
+                        // while the pointer happened to be resting on the strip.
+                        // A motion event only reaches us at all if the pointer is
+                        // within the mask, so this cannot fire for a shortcut
+                        // pressed with the pointer out in the middle of the
+                        // screen - which is the case the flag exists to protect.
+                        if (scope.screenState.sidebar || scope.screenState.session)
+                            ownedByPointer = true;
+
                         if (!pressed)
                             return;
 
@@ -993,13 +1028,24 @@ ShellRoot {
                             // LAYER 3 once layer 2 is all the way out.
                             // Upstream Interactions.qml:145-157.
                             if (startedAtEdge && withinPanelHeight(sessionWrapper, y)) {
-                                if (dragX < -Config.session.dragThreshold)
+                                if (dragX < -Config.session.dragThreshold) {
                                     scope.screenState.session = true;
-                                else if (dragX > Config.session.dragThreshold)
+                                    // The pointer opened it, so the pointer is
+                                    // allowed to close it. Setting the flag here
+                                    // and not only in onContainsMouseChanged is
+                                    // the whole fix: during a drag the pointer is
+                                    // ALREADY inside, so containsMouse never
+                                    // changes and that handler never runs. Miss
+                                    // this and the panel opens and never closes.
+                                    ownedByPointer = true;
+                                } else if (dragX > Config.session.dragThreshold) {
                                     scope.screenState.session = false;
+                                }
 
-                                if (session.offsetScale <= 0 && dragX < -Config.sidebar.dragThreshold)
+                                if (session.offsetScale <= 0 && dragX < -Config.sidebar.dragThreshold) {
                                     scope.screenState.sidebar = true;
+                                    ownedByPointer = true;
+                                }
                             }
                         } else {
                             // Sidebar open: dragging back out towards the edge

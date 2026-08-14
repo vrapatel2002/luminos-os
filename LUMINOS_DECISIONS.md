@@ -3959,6 +3959,27 @@ had, so this costs nothing new. **Two windows were deleted and none added.**
 dispatches — under Plasma they will do nothing at all, silently, in the usual way. Replacing them
 with `loginctl` / `qdbus` calls is the follow-up.
 
+**Follow-up the same hour — the drawer got stuck open, and the reason is worth keeping.** I first
+left the sidebar out of the "pointer left, close it" handler, reasoning that Meta+N opens it with the
+pointer somewhere else entirely and a bare leave-closes rule would let a stray mouse move slam it
+shut. The reasoning was sound and the trade was wrong: it swapped a small annoyance for nothing
+closing it at all. Shawn found it in minutes — *"if i click any thing out of that notification list
+box it should go back its stuck now"*.
+
+The fix is upstream's `*ShortcutActive` idea in one variable, the same shape as `dashOwnedByHover`
+already in this file: **the pointer only earns the right to close a panel by having been inside it.**
+
+**The trap inside the fix, which cost a second pass:** `onContainsMouseChanged` fires on a *change*.
+Open a panel by dragging and the pointer is **already** inside, so `containsMouse` never changes and
+that handler never runs — the flag stays false and the panel is stuck exactly as before. The flag has
+to be set where the panel is *opened*, not only where the pointer arrives. Same family as BUG-124: a
+signal that never fires because the thing it reports never transitioned.
+
+**Also worth writing down for the next "why doesn't clicking outside close it":** it cannot, and this
+is not a gap to fix. Everything outside the mask is handed to the window underneath, so this surface
+is never told the click happened. Upstream behaves the same way. Grabbing the whole screen in order
+to hear about outside clicks would be BUG-123 committed deliberately.
+
 **Tooling note, because it cost time.** `qmllint` exits 255 with **no output at all** on this file,
 and `qmlformat` exits 1 with no message — and both do the same to the last *committed* version, so
 neither is a signal about the edit. This is the `scripts lie about success` pattern from the other
