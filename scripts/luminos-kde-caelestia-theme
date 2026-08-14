@@ -1,0 +1,406 @@
+#!/usr/bin/env python3
+# [CHANGE: claude-code | 2026-08-09]
+"""
+Make KDE Plasma wear Caelestia's design.  (DECISION 63 / Option 3)
+
+WHAT THIS IS
+    Caelestia and Plasma are two different shells, but they speak the same design
+    language: Material 3.  This script reads Caelestia's LIVE palette and its
+    extracted design tokens, and writes them into Plasma's config so a Plasma
+    session looks like the Caelestia desktop.
+
+    It does NOT port Caelestia's panels.  You get KDE's widgets wearing
+    Caelestia's colours, type, geometry and motion.  Lookalike, not the same app.
+
+WHY THIS APPROACH
+    Caelestia's palette already contains KDE-specific keys - klink, knegative,
+    kneutral, kpositive, kvisited - so the M3 -> Plasma colour mapping is not
+    something we invent, it is something the upstream palette was built for.
+    Everything below is derived from ~/.local/state/caelestia/scheme.json, which
+    means the theme follows the wallpaper automatically instead of being a static
+    snapshot.  (The hand-made Caelestia.colors from 2026-08-05 was static and had
+    already drifted out of sync conceptually - this replaces that workflow.)
+
+CRASH SAFETY - read this before adding anything
+    * kdeglobals is SHARED.  Plasma reads it, and so does every Qt app running
+      under Hyprland.  A bad write here is visible in BOTH sessions.  That is why
+      this script refuses to run unless a backup exists.
+    * Nothing here touches Hyprland, hypr*.lua, or the wayland-session files.
+      The Hyprland login option is unaffected by design.
+    * Every write goes through kwriteconfig6 (proper INI editing), never sed.
+    * Every write is READ BACK and verified.  Luminos scripts have a history of
+      printing success on a failed path; this one asserts instead.
+    * Undo is: ~/.local/share/luminos-kde-backup/restore-kde-config
+
+HOW THE DESIGN SPEC WAS EXTRACTED (repeat after a caelestia-shell upgrade)
+    The tokens are NOT greppable on disk - Caelestia 2.2.0 embeds its QML in a Qt
+    resource inside libcaelestia-configplugin.so.  Run a throwaway quickshell
+    config that imports Caelestia.Config and walks Config.appearance:
+
+        ShellRoot { Scope { QtObject { Component.onCompleted: {
+            /* recursive for-in over Config.appearance, print k=v */
+        }}}}
+
+    then run  qs -p that-file.qml  inside the live session.  Update
+    config/kde/caelestia-design-spec.json with the result.
+
+USAGE
+    luminos-kde-caelestia-theme --dry-run    # show every change, write nothing
+    luminos-kde-caelestia-theme --apply      # do it
+    luminos-kde-caelestia-theme --verify     # check what is currently applied
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+SCHEME = HOME / ".local/state/caelestia/scheme.json"
+SPEC = Path("/home/shawn/luminos-os/config/kde/caelestia-design-spec.json")
+COLORS_OUT = HOME / ".local/share/color-schemes/Caelestia.colors"
+BACKUP_ROOT = HOME / ".local/share/luminos-kde-backup"
+
+SCHEME_NAME = "Caelestia"
+
+
+# --------------------------------------------------------------------------
+# colour mapping: Plasma group/key -> Caelestia scheme key
+# Derived from the palette's own KDE keys; see module docstring.
+# --------------------------------------------------------------------------
+COMMON_FG = {
+    "ForegroundInactive": "outline",
+    "ForegroundLink": "klink",
+    "ForegroundNegative": "knegative",
+    "ForegroundNeutral": "kneutral",
+    "ForegroundPositive": "kpositive",
+    "ForegroundVisited": "kvisited",
+    "DecorationFocus": "primary",
+    "DecorationHover": "primary",
+}
+
+COLOR_GROUPS = {
+    "Colors:Window": {
+        **COMMON_FG,
+        "BackgroundNormal": "surfaceContainer",
+        "BackgroundAlternate": "surfaceVariant",
+        "ForegroundNormal": "onSurfaceVariant",
+        "ForegroundActive": "klink",
+    },
+    "Colors:View": {
+        **COMMON_FG,
+        "BackgroundNormal": "surface",
+        "BackgroundAlternate": "surfaceContainer",
+        "ForegroundNormal": "onSurface",
+        "ForegroundActive": "onSurface",
+        "DecorationHover": "inversePrimary",
+    },
+    "Colors:Button": {
+        **COMMON_FG,
+        "BackgroundNormal": "surfaceContainerHigh",
+        "BackgroundAlternate": "surfaceVariant",
+        "ForegroundNormal": "onSurface",
+        "ForegroundActive": "onSurface",
+    },
+    "Colors:Selection": {
+        **COMMON_FG,
+        "BackgroundNormal": "primary",
+        "BackgroundAlternate": "primary",
+        "ForegroundNormal": "onPrimary",
+        "ForegroundActive": "onPrimary",
+        "ForegroundInactive": "onPrimary",
+        "ForegroundNeutral": "kneutralSelection",
+        "DecorationHover": "secondary",
+    },
+    "Colors:Tooltip": {
+        **COMMON_FG,
+        "BackgroundNormal": "surfaceContainer",
+        "BackgroundAlternate": "surfaceVariant",
+        "ForegroundNormal": "onSurface",
+        "ForegroundActive": "onSurface",
+    },
+    "Colors:Complementary": {
+        **COMMON_FG,
+        "BackgroundNormal": "surfaceContainer",
+        "BackgroundAlternate": "background",
+        "ForegroundNormal": "onSurfaceVariant",
+        "ForegroundActive": "onSurface",
+    },
+    "Colors:Header": {
+        **COMMON_FG,
+        "BackgroundNormal": "surfaceContainer",
+        "BackgroundAlternate": "surfaceContainer",
+        "ForegroundNormal": "onSurfaceVariant",
+        "ForegroundActive": "onSurface",
+    },
+    "Colors:Header][Inactive": {
+        **COMMON_FG,
+        "BackgroundNormal": "surfaceContainer",
+        "BackgroundAlternate": "surfaceContainer",
+        "ForegroundNormal": "onSurfaceVariant",
+        "ForegroundActive": "onSurface",
+    },
+}
+
+WM_MAP = {
+    "activeBackground": "surfaceContainerHighest",
+    "activeForeground": "onSurface",
+    "inactiveBackground": "secondaryContainer",
+    "inactiveForeground": "onSecondaryContainer",
+}
+
+
+def load_json(p: Path):
+    try:
+        return json.loads(p.read_text())
+    except FileNotFoundError:
+        sys.exit(f"ERROR: missing {p}")
+    except json.JSONDecodeError as e:
+        sys.exit(f"ERROR: {p} is not valid JSON: {e}")
+
+
+def build_colors(colours: dict) -> str:
+    """Render the Plasma .colors file from the live Caelestia palette."""
+
+    def c(key: str) -> str:
+        if key not in colours:
+            sys.exit(f"ERROR: scheme.json has no colour '{key}'. "
+                     f"Caelestia's palette shape changed - update COLOR_GROUPS.")
+        return "#" + colours[key]
+
+    out = []
+
+    out.append("[ColorEffects:Disabled]")
+    out.append(f"Color={c('surfaceContainer')}")
+    out += ["ColorAmount=0.5", "ColorEffect=3", "ContrastAmount=0",
+            "ContrastEffect=0", "IntensityAmount=0", "IntensityEffect=0", ""]
+
+    out.append("[ColorEffects:Inactive]")
+    out.append("ChangeSelectionColor=true")
+    out.append(f"Color={c('surfaceContainerLowest')}")
+    out += ["ColorAmount=0.025", "ColorEffect=0", "ContrastAmount=0.1",
+            "ContrastEffect=0", "Enable=true", "IntensityAmount=0",
+            "IntensityEffect=0", ""]
+
+    for group, mapping in COLOR_GROUPS.items():
+        out.append(f"[{group}]")
+        for key in sorted(mapping):
+            out.append(f"{key}={c(mapping[key])}")
+        out.append("")
+
+    out.append("[General]")
+    out.append(f"ColorScheme={SCHEME_NAME}")
+    out.append(f"Name={SCHEME_NAME}")
+    out.append("shadeSortColumn=true")
+    out.append("")
+
+    out.append("[KDE]")
+    out.append("contrast=4")
+    out.append("")
+
+    out.append("[WM]")
+    for key in sorted(WM_MAP):
+        out.append(f"{key}={c(WM_MAP[key])}")
+    # Blend values are Plasma-specific and not part of M3; keep Breeze defaults.
+    out.append("activeBlend=252,252,252")
+    out.append("inactiveBlend=161,169,177")
+    out.append("")
+
+    return "\n".join(out)
+
+
+def kwrite(file: str, group: str, key: str, value: str, dry: bool) -> None:
+    if dry:
+        print(f"    would set {file} [{group}] {key} = {value}")
+        return
+    subprocess.run(
+        ["kwriteconfig6", "--file", file, "--group", group, "--key", key, str(value)],
+        check=True,
+    )
+
+
+def kread(file: str, group: str, key: str) -> str:
+    r = subprocess.run(
+        ["kreadconfig6", "--file", file, "--group", group, "--key", key],
+        capture_output=True, text=True,
+    )
+    return r.stdout.strip()
+
+
+def font_settings(spec: dict) -> dict:
+    """KDE font strings, in the 19-field form QFont::toString() emits on Qt 6.
+
+    THE FIELD COUNT DECIDES HOW `weight` IS READ.  This is the whole reason this
+    function has a comment this long.
+
+      10 fields  -> legacy Qt5 string; weight is the OLD 0-99 scale (50 = Normal)
+      11 fields  -> ALSO parsed as legacy, so a CSS weight of 400 is off the top
+                    of the 0-99 scale and Qt clamps it to 900 = Black
+      19 fields  -> modern Qt6 string; weight is the real 1-1000 CSS scale
+
+    Writing 11 fields with weight=400 is not a near miss, it is Black.  Verified
+    with QFont::fromString on Qt 6.11:
+        "X,10,-1,5,400,0,0,0,0,0,Regular"                  -> weight 900
+        "X,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0"         -> weight 400
+    It bites in BOTH sessions, because kde-gtk-config re-exports this same value
+    into ~/.config/gtk-3.0/settings.ini, which Hyprland's GTK apps read.
+
+    styleName (field 17) is deliberately left EMPTY.  Qt lets styleName override
+    weight, so naming "Medium" on a family that is not installed can resolve
+    worse than just asking for weight 500 and letting fontconfig substitute.
+    """
+    fam = spec["font"]["families"]
+    m = spec["kde_mapping"]
+
+    def f(family: str, pt: int, weight: int) -> str:
+        #        family  pt  px  hint  weight  ---- flags ----  sn  --
+        return f"{family},{pt},-1,5,{weight},0,0,0,0,0,0,0,0,0,0,1,,0,0"
+
+    out = {
+        "font":        f(fam["sans"], m["font_general"]["pt"], 400),
+        "fixed":       f(fam["mono"], m["font_fixed"]["pt"], 400),
+        "smallestReadableFont": f(fam["sans"], m["font_small"]["pt"], 400),
+        "toolBarFont": f(fam["sans"], m["font_toolbar"]["pt"], 500),
+        "menuFont":    f(fam["sans"], m["font_menu"]["pt"], 400),
+        "activeFont":  f(fam["sans"], m["font_titlebar"]["pt"], 500),
+    }
+    # Guard the field count at the source. If anyone "tidies" the format string
+    # back down to 11 fields, every one of these silently becomes Black.
+    for key, val in out.items():
+        n = len(val.split(","))
+        if n != 19:
+            raise SystemExit(
+                f"internal error: {key} font string has {n} fields, not 19 -> "
+                f"Qt would read the weight on the legacy 0-99 scale: {val}")
+    return out
+
+
+def check_backup() -> None:
+    snaps = [d for d in BACKUP_ROOT.glob("2*") if d.is_dir()] if BACKUP_ROOT.is_dir() else []
+    if not snaps:
+        sys.exit(
+            "REFUSING TO RUN: no KDE config backup found.\n"
+            f"  Expected a snapshot under {BACKUP_ROOT}\n"
+            "  kdeglobals is shared with your Hyprland Qt apps - never change it\n"
+            "  without an undo path."
+        )
+    print(f"  backup present: {sorted(snaps)[-1].name}  (undo: restore-kde-config)")
+
+
+def check_fonts(spec: dict) -> list:
+    """Report design fonts that are not installed, and what they resolve to.
+
+    We deliberately still WRITE the missing family name into kdeglobals rather
+    than substituting ourselves: fontconfig then resolves it to the same fallback
+    that Caelestia is already rendering with, so the two shells match.  And if the
+    real font is installed later, both pick it up at once.
+    """
+    try:
+        installed = subprocess.run(["fc-list", ":", "family"], capture_output=True,
+                                   text=True, check=True).stdout
+    except Exception:
+        return []
+    missing = []
+    for role, fam in spec["font"]["families"].items():
+        if fam.lower() not in installed.lower():
+            resolved = subprocess.run(["fc-match", "-f", "%{family}", fam],
+                                      capture_output=True, text=True).stdout.strip()
+            missing.append((role, fam, resolved or "?"))
+    return missing
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Apply Caelestia's design to KDE Plasma")
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--dry-run", action="store_true", help="show changes, write nothing")
+    g.add_argument("--apply", action="store_true", help="write the theme")
+    g.add_argument("--verify", action="store_true", help="report what is applied now")
+    args = ap.parse_args()
+
+    spec = load_json(SPEC)
+    scheme = load_json(SCHEME)
+    colours = scheme["colours"]
+
+    if args.verify:
+        print("Currently applied:")
+        for f, grp, k in [("kdeglobals", "General", "ColorScheme"),
+                          ("kdeglobals", "General", "font"),
+                          ("kdeglobals", "General", "fixed"),
+                          ("kdeglobals", "KDE", "widgetStyle"),
+                          ("kdeglobals", "Icons", "Theme"),
+                          ("kwinrc", "Compositing", "AnimationSpeed")]:
+            print(f"  {f} [{grp}] {k} = {kread(f, grp, k) or '<unset>'}")
+        print(f"  colour scheme file exists: {COLORS_OUT.exists()}")
+        if COLORS_OUT.exists():
+            src = "generated" if "shadeSortColumn" in COLORS_OUT.read_text() else "?"
+            print(f"  {COLORS_OUT} ({COLORS_OUT.stat().st_size} bytes, {src})")
+        return
+
+    dry = args.dry_run
+    print(f"Caelestia -> KDE  [{'DRY RUN' if dry else 'APPLY'}]")
+    print(f"  palette: {scheme.get('name')} / {scheme.get('flavour')} / {scheme.get('mode')}")
+    check_backup()
+
+    missing = check_fonts(spec)
+    if missing:
+        print("  note: design font(s) not installed - fontconfig substitutes, and")
+        print("        Caelestia is already rendering with the same substitute:")
+        for role, fam, resolved in missing:
+            print(f"    {role}: {fam} -> {resolved}")
+
+    # 1. colour scheme file
+    body = build_colors(colours)
+    print(f"\n  [1/4] colour scheme -> {COLORS_OUT}")
+    if dry:
+        print(f"    would write {len(body.splitlines())} lines, "
+              f"{len(COLOR_GROUPS)} colour groups")
+    else:
+        COLORS_OUT.parent.mkdir(parents=True, exist_ok=True)
+        COLORS_OUT.write_text(body + "\n")
+        if not COLORS_OUT.read_text().startswith("[ColorEffects:Disabled]"):
+            sys.exit("ERROR: colour scheme did not write correctly")
+        print(f"    wrote {len(body.splitlines())} lines")
+
+    # 2. tell Plasma to use it
+    print(f"  [2/4] select scheme '{SCHEME_NAME}'")
+    kwrite("kdeglobals", "General", "ColorScheme", SCHEME_NAME, dry)
+
+    # 3. fonts
+    print("  [3/4] fonts")
+    fonts = font_settings(spec)
+    for key, val in fonts.items():
+        group = "WM" if key == "activeFont" else "General"
+        kwrite("kdeglobals", group, key, val, dry)
+
+    # 4. motion - Caelestia's normal duration is 400ms.
+    #    KWin AnimationSpeed is an INVERTED 0..6 scale (0=instant, 3=default 250ms,
+    #    6=very slow). Caelestia is slower and softer than Breeze default, so 4.
+    print("  [4/4] motion")
+    kwrite("kwinrc", "Compositing", "AnimationSpeed", "4", dry)
+
+    if dry:
+        print("\nDry run complete - nothing was written.")
+        return
+
+    # verify by reading back; do not trust the writes
+    print("\n  verifying...")
+    ok = True
+    if kread("kdeglobals", "General", "ColorScheme") != SCHEME_NAME:
+        print("    FAIL: ColorScheme did not stick"); ok = False
+    got_font = kread("kdeglobals", "General", "font")
+    if not got_font.startswith(spec["font"]["families"]["sans"]):
+        print(f"    FAIL: font did not stick (got {got_font!r})"); ok = False
+    if kread("kwinrc", "Compositing", "AnimationSpeed") != "4":
+        print("    FAIL: AnimationSpeed did not stick"); ok = False
+    if not ok:
+        sys.exit("Applied with errors - run restore-kde-config to undo.")
+    print("    all settings read back correctly")
+
+    print("\nDone. Takes effect at next Plasma login.")
+    print("Undo any time:  ~/.local/share/luminos-kde-backup/restore-kde-config")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,114 @@
+{
+  "_comment": [
+    "[CHANGE: claude-code | 2026-08-09]",
+    "Caelestia's design system, extracted from the LIVE Config.appearance singleton",
+    "(Caelestia.Config C++ plugin, caelestia-shell 2.2.0-1) on 2026-08-09.",
+    "",
+    "This is the source of truth for making KDE Plasma wear Caelestia's design.",
+    "It is DESIGN ONLY - geometry, type and motion. Colours are NOT here on purpose:",
+    "they change with the wallpaper and live in ~/.local/state/caelestia/scheme.json,",
+    "which luminos-kde-caelestia-theme reads directly at apply time.",
+    "",
+    "How this was obtained (repeat it if caelestia-shell is upgraded):",
+    "  the values are NOT greppable on disk - Caelestia 2.2.0 embeds its QML in a Qt",
+    "  resource inside libcaelestia-configplugin.so. Run a throwaway quickshell config",
+    "  that imports Caelestia.Config and walks Config.appearance. See the header of",
+    "  scripts/luminos-kde-caelestia-theme for the exact recipe."
+  ],
+
+  "source": {
+    "package": "caelestia-shell 2.2.0-1",
+    "extracted": "2026-08-09",
+    "singleton": "Caelestia.Config / Config.appearance"
+  },
+
+  "rounding": {
+    "_unit": "logical px",
+    "extraSmall": 4,
+    "small": 8,
+    "medium": 12,
+    "large": 16,
+    "largeIncreased": 20,
+    "extraLarge": 28,
+    "extraLargeIncreased": 32,
+    "extraExtraLarge": 48
+  },
+
+  "spacing": {
+    "_comment": "identical scale to rounding - Material 3 4pt grid",
+    "extraSmall": 4, "small": 8, "medium": 12, "large": 16,
+    "largeIncreased": 20, "extraLarge": 28, "extraLargeIncreased": 32,
+    "extraExtraLarge": 48
+  },
+
+  "padding": {
+    "extraSmall": 4, "small": 8, "medium": 12, "large": 16,
+    "largeIncreased": 20, "extraLarge": 28, "extraLargeIncreased": 32,
+    "extraExtraLarge": 48
+  },
+
+  "font": {
+    "_unit": "size in logical px, weight in CSS units",
+    "families": {
+      "sans": "GoogleSansFlex",
+      "mono": "CaskaydiaCove NF",
+      "icon": "Material Symbols Rounded",
+      "clock": "Rubik",
+      "workspaces": "Rubik"
+    },
+    "headline": { "large": [32, 500], "medium": [28, 500], "small": [24, 500] },
+    "title":    { "large": [22, 500], "medium": [16, 500], "small": [14, 500] },
+    "body":     { "large": [16, 400], "medium": [14, 400], "small": [12, 400] },
+    "label":    { "large": [14, 500], "medium": [12, 500], "small": [11, 400] },
+    "mono":     { "large": [16, 400], "medium": [14, 400], "small": [12, 400] },
+    "icon":     { "extraLarge": [36, 400], "large": [24, 400], "medium": [18, 400], "small": [15, 400] }
+  },
+
+  "anim": {
+    "_unit": "milliseconds",
+    "small": 200,
+    "normal": 400,
+    "large": 600,
+    "extraLarge": 1000,
+    "expressiveFastSpatial": 350,
+    "expressiveDefaultSpatial": 500,
+    "expressiveSlowSpatial": 650,
+    "expressiveFastEffects": 150,
+    "expressiveDefaultEffects": 200,
+    "expressiveSlowEffects": 300
+  },
+
+  "border": {
+    "_comment": "the gap Caelestia reserves around the screen, and its corner radius",
+    "thickness": 10,
+    "rounding": 25,
+    "smoothing": 20,
+    "minThickness": 2
+  },
+
+  "transparency": {
+    "enabled": false,
+    "base": 0.85,
+    "layers": 0.4
+  },
+
+  "layout": {
+    "_comment": "Caelestia's bar is a VERTICAL strip on the LEFT edge, not a top/bottom bar.",
+    "bar": { "edge": "left", "orientation": "vertical" },
+    "reserved": "[l60, t10, r10, b10] on eDP-2 (1440x900 logical)"
+  },
+
+  "kde_mapping": {
+    "_comment": [
+      "px -> pt conversion for KDE font settings: pt = round(px * 72 / 96) = round(px * 0.75).",
+      "KDE stores fonts in POINTS; Caelestia's tokens are logical PIXELS. Do not paste px",
+      "straight into kdeglobals or every label will be ~33% too big."
+    ],
+    "font_general":  { "from": "body.medium",  "px": 14, "pt": 10 },
+    "font_small":    { "from": "label.small",  "px": 11, "pt": 8 },
+    "font_fixed":    { "from": "mono.medium",  "px": 14, "pt": 10 },
+    "font_toolbar":  { "from": "label.large",  "px": 14, "pt": 10 },
+    "font_menu":     { "from": "body.medium",  "px": 14, "pt": 10 },
+    "font_titlebar": { "from": "title.small",  "px": 14, "pt": 10 }
+  }
+}

@@ -4222,3 +4222,110 @@ already tested and the streaming rewrite touches the QML rendering loop.
 **Still broken, on purpose:** BUG-097 is not fixed. The chips are dead until
 `llama-server`'s libraries are rebuilt, and they will fail with an empty bubble
 rather than a message, because that failure lives in the legacy path.
+
+---
+
+## DECISION 71
+
+**Native windows get Caelestia's shape from the compositor, not from a widget theme.**
+*[CHANGE: claude-code | 2026-08-13]*
+
+Shawn asked for the obvious next thing after DECISION 68: *"every window looks
+same like that … color fonts the shapes and style"*, then narrowed it himself —
+*"i want the native windows to follow it like setting and other things"*, Chrome
+and Electron explicitly dropped, and *"may be first try doing it on setting"*.
+
+**Two thirds of the ask was already done and nobody had noticed.** Colour, fonts
+and motion were applied on **2026-08-09** by `scripts/luminos-kde-caelestia-theme`,
+written for the now-retired DECISION 63 and still correct unchanged under 68. It
+writes `~/.local/share/color-schemes/Caelestia.colors` from the live Caelestia
+palette, sets six font keys in `kdeglobals`, and sets
+`kwinrc [Compositing] AnimationSpeed=4`. The design tokens it works from live in
+`config/kde/caelestia-design-spec.json`.
+
+So the real gap was never colour. It was **shape**: Breeze draws widgets at
+roughly 3–5 px while Nexus rounds at 28 px.
+
+**Corner radius now comes from KWin.** `kwin-effect-rounded-corners` (effect id
+`kwin4_effect_shapecorners`) writes `~/.config/kwinrc`:
+
+```ini
+[Round-Corners]
+Size=25
+InactiveCornerRadius=25
+UseSquircleShape=true
+OutlineThickness=1
+ActiveOutlineUsePalette=true
+ActiveOutlinePalette=12          ; QPalette::Highlight, a UInt role index
+AnimationDuration=400            ; Caelestia anim.normal
+Inclusions=systemsettings
+IncludeNormalWindows=false
+IncludeDialogs=false
+DisableRoundMaximize=false
+DisableRoundTile=false
+DisableOutlineMaximize=false
+DisableOutlineTile=false
+```
+
+Plus `[Plugins] kwin4_effect_shapecornersEnabled=true`. Backup taken first at
+`~/.local/share/luminos-kde-backup/pre-shapecorners-20260813-214640/kwinrc`.
+`Inclusions` is matched **substring, case-insensitive**, against the window class
+or the caption after an em-dash (`src/Window.cpp:71-90`), so scoping the pilot to
+one app is a supported mode, not a hack.
+
+**Five things that cost time, all worth writing down:**
+
+1. **The config group is `Round-Corners`, not `Effect-shapecorners`.** Two
+   guessed groups were written and then removed. The answer is in
+   `src/kcm/options.kcfg` in the source, which points at `kwinrc`.
+2. **0.8.7-1 was a silent ABI break.** `isEffectSupported` returned **false**
+   while blur returned true and OpenGL was healthy. Nothing in
+   `journalctl --user -u plasma-kwin_wayland`, nothing missing in `ldd`. A
+   throwaway `dlopen()` probe printed
+   `undefined symbol: _ZN4KWin6Effect14prePaintScreenERNS_18ScreenPrePaintDataENSt6chrono8durationIlSt5ratioILl1ELl1000EEEE`
+   — built May 2026 against an older KWin, we run 6.7.4. Fixed by building AUR
+   **0.9.0-3**. `luminos-brain safe` said NO on `torch`/`xgboost`/`mt5linux`,
+   the known false negative; overridden with `--reason` since this is a C++ KWin
+   plugin with no Python anywhere near it.
+3. **`isMaximized` is computed geometrically**, not read from window state
+   (`src/WindowManager.cpp:227-240`): if the window's region against the screen
+   minus panels is empty, it counts as maximized. Every window on this desktop
+   fills the work area beside Caelestia's 60 px bar, so the shipped defaults
+   (`DisableRoundMaximize=true`) made the effect **completely invisible**. All
+   four `Disable*` keys are false on purpose.
+4. **The effect rewrites `~/.config/breezerc`** on load — `RoundedCorners=false`,
+   `OutlineEnabled=false`, `OutlineIntensity=OutlineOff`. It takes over Breeze's
+   decoration rounding rather than stacking on top of it. Not our edit, but ours
+   to remember when Breeze suddenly looks square without the effect.
+5. **The first negative test proved nothing.** Nexus looked rounded too, and
+   unloading the effect left a near-identical corner — that was Breeze's own
+   decoration rounding. The decisive test was `Size=60`: System Settings drew a
+   huge radius, Nexus (`org.quickshell`) was untouched.
+
+**Kvantum was rejected for shape.** Grepped all 37 stock themes: the only radius
+keys anywhere are `menu_blur_radius` and `tooltip_blur_radius`. Widget shape is
+**hand-drawn 9-slice SVG** (`button-normal-topleft`, `-top`, `-left`, …), so
+matching a 28 px radius means drawing art, not setting a number. Every one of the
+37 themes also ships `[GeneralColors]`, which would overwrite the palette match
+we already have. That makes Kvantum a project, not a step.
+
+**Haste decision.** This rounds the **window**, not the widgets inside it. Buttons,
+list selections and sliders in System Settings are still Breeze at 3–5 px, so the
+frame is Caelestia and the contents are not. What smart looks like: a hand-drawn
+Kvantum SVG theme carrying Caelestia's 4/8/12/16/28 scale with `[GeneralColors]`
+stripped so `Caelestia.colors` still wins. Not done, because that is art-asset
+work and the pilot only needed to answer "does this look right at all".
+
+**Still broken, on purpose:** GTK, Electron and Chrome are out of scope by
+Shawn's own instruction and will keep their own shapes. `GoogleSansFlex` is
+written into `kdeglobals` but is **not installed** — fontconfig substitutes Noto
+Sans, so nothing on this machine is showing Caelestia's real typeface yet, Nexus
+included. `~/.local/state/caelestia/scheme.json` is a snapshot from Aug 5: change
+the wallpaper and Plasma's colours will not follow until
+`luminos-kde-caelestia-theme --apply` is run again.
+
+**Next steps, each needing a look first:** widen `Inclusions` to all native
+windows; install the real GoogleSansFlex; then decide on Kvantum. The biggest
+remaining mismatch found by actually comparing the two windows side by side is
+**not** the corner radius — it is that System Settings uses colourful Papirus
+icons where Nexus uses monochrome Material Symbols in circular tinted containers.

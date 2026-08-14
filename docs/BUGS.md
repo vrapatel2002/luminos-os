@@ -2810,3 +2810,48 @@ file so it cannot re-register at the next login.
   list with no error**, which reads exactly like "the shortcut is not registered" — it fooled me into
   thinking a working Meta+Space was broken too. Cross-check any such answer against a shortcut you
   know works before believing it.
+
+---
+
+## BUG-127 — a KWin effect that is installed, enabled and healthy, and silently does nothing
+*[CHANGE: claude-code | 2026-08-13]* — **FIXED 2026-08-13**
+
+**Symptom.** `kwin-effect-rounded-corners` 0.8.7-1 was installed and enabled in
+`kwinrc [Plugins]`. Windows stayed square. `isEffectLoaded` returned false and
+`isEffectSupported kwin4_effect_shapecorners` returned **false** — with no
+explanation anywhere.
+
+**Everything that should have reported it, didn't:**
+
+- `journalctl --user -u plasma-kwin_wayland` — **not one line** about the effect.
+- `ldd` on the plugin `.so` — **no missing libraries**. Everything resolved.
+- The blur effect returned `isEffectSupported` = true from the same call, and
+  OpenGL was healthy (kwin 6.7.4, radeonsi/phoenix, Mesa 26.1.6, GL 4.6 Core),
+  so "supported = false" looked like a driver or capability problem and it was
+  neither.
+
+**What it actually was.** An **ABI break**. A five-line C probe that just called
+`dlopen(..., RTLD_NOW|RTLD_LOCAL)` on the plugin and printed `dlerror()`:
+
+```
+undefined symbol: _ZN4KWin6Effect14prePaintScreenERNS_18ScreenPrePaintDataENSt6chrono8durationIlSt5ratioILl1ELl1000EEEE
+```
+
+`KWin::Effect::prePaintScreen` changed signature. The package was built in **May
+2026** against the older KWin; we run 6.7.4. KWin's plugin loader catches the
+failure and reports it as "not supported", which is true and useless.
+
+**Fix.** Built AUR **0.9.0-3** from its PKGBUILD and installed it.
+`isEffectSupported` then returned true and the journal started logging
+`ShapeCorners: shaders loaded.`
+
+**The lesson worth keeping.** `ldd` only checks that the **libraries** are
+findable; it does not check that the **symbols inside them** still exist. When a
+plugin is "unsupported" for no visible reason, `dlopen` it by hand — it is the
+only thing that prints the real error. Applies to every KWin effect, every Qt
+plugin and every Plasma applet after a system upgrade.
+
+**Related.** DECISION 71 (what the effect was being installed for) and
+`reference_linux_silent_failures` — this is the same shape as the rest of that
+list: a tool that reports success, or reports a plausible wrong reason, while
+doing nothing.
