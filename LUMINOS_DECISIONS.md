@@ -3797,9 +3797,10 @@ pointer was returned to within 3 px of where Shawn left it.
 
 ##### Still not built
 
-Session menu, utilities, the rounded screen border, and bar popouts. The dashboard has no bar button
+Utilities, the rounded screen border, and bar popouts. The dashboard has no bar button
 (upstream does not give it one) — shortcut and hover only. *(The sidebar — the notification list
-drawer — was built on 2026-08-13; see the step-2 amendment below.)*
+drawer — was built on 2026-08-13; see the step-2 amendment below. The session menu was built the
+same day; see the three-layer amendment. **Its buttons are drawn but not wired.**)*
 
 #### Amendment, 2026-08-13 — notifications move from Plasma to Caelestia (step 1 of 2)
 
@@ -3888,6 +3889,82 @@ session is not worth the risk.
 separate window and cannot, so a volume bar raised while the drawer is open will sit under it. Not
 worth a second window-manager of our own; DECISION 68's rule is to drop the feature rather than
 rebuild the mechanism.
+
+> ~~**Superseded the same day** by the three-layer amendment below, which merged the right-edge
+> panels into one window. The OSD now steps aside exactly as upstream's does. Worth keeping the
+> paragraph, because the reasoning was correct and the conclusion still went stale in hours: "not
+> worth a mechanism of our own" was true, and the fix was not to build one but to stop splitting the
+> windows in the first place.~~
+
+#### Amendment, 2026-08-13 — the three-layer right edge, and why it had to be one window
+
+*[CHANGE: claude-code | 2026-08-13]*
+
+Shawn's instruction, describing real Caelestia:
+
+> "if i drag the cursor to right the volume button pop out and than if i futher drag that voolume
+> and brightness part to right a second pop up comes out which is power off, logout, reboot and all
+> and if i futher drag it out 3rd ting comes and that 3rd thing is notifcation list … look at the
+> code from real caelestia shell"
+
+and then, after I laid out the options:
+
+> "lets go this way 'They're the same answer. Going Caelestia's way is the least work, because we
+> get to copy instead of invent.' first just add the icons and every things do not worry about
+> button working will do it later on"
+
+**What was built.** Layer 2 — upstream's `modules/session/Wrapper.qml`, unmodified — plus the drag
+chain that links all three. Layers 1 and 3 already existed; they had to be moved.
+
+**The structural finding, which is the durable part.** Up to now this port's rule of thumb was "host
+each upstream panel in a small window of its own", and that rule earned its keep: it is what fixed
+the original click-swallowing. It cannot produce this gesture, for two reasons that are both about
+Wayland rather than QML.
+
+1. **The panels push each other left.** Upstream `drawers/Panels.qml:41-97` is a chain of
+   `anchors.rightMargin` bindings — the OSD reads the session panel's margin and adds however much
+   of it is on screen, the session panel reads the sidebar's. Anchors do not cross windows, so in
+   three windows the chain simply cannot be expressed.
+2. **A drag has to survive leaving the strip it started in.** On Wayland a button press gives the
+   surface an implicit pointer grab: motion keeps flowing to *that* surface until release, however
+   far the pointer travels — but only to that one. A gesture that begins in a 2 px tripwire window
+   dies the moment it crosses into the panel window.
+
+So the right edge is now **one `PanelWindow`** holding the OSD, the toasts, the power menu and the
+notification list, shaped exactly like upstream's `ContentWindow`: cover the output, never resize,
+and hand back every pixel it is not using through `mask`.
+
+**This is not a relapse.** BUG-123 records that the old click-swallowing bug's cause was a *missing
+mask*, not a large window. Size was never the problem; the input region was. Re-reading our own bug
+report is what made this safe to do, and is the reason it took an hour rather than a day.
+
+**The window is permanently mapped now**, where it used to appear only when there was something to
+show. It has to be: the catch strip *is* the tripwire, and a tripwire that only exists once a panel
+is already open catches nothing. With everything closed the whole input footprint is a **2 × 50 px**
+ribbon at the right edge — the identical dead zone the now-deleted `osdHoverStrip` window already
+had, so this costs nothing new. **Two windows were deleted and none added.**
+
+**Two deliberate departures from upstream, both toward less:**
+
+- Upstream's border runs the **full height** of the screen, so the gesture can start anywhere down
+  the right edge. Ours tracks the OSD's band instead, holding the dead zone at 50 px. If Shawn wants
+  to start the drag from anywhere, that is a one-line change with a known price.
+- Upstream's `dragMaskPadding` (`ContentWindow.qml:47-59`) widens the catch area when the workspace
+  is empty. It decides that by asking Hyprland for the window list, which under KWin returns null,
+  and **null silently counts as false** — the same trap behind most of this port's bugs. It would be
+  a permanent 0 here, so it is left out rather than carried as dead code that looks like it works.
+
+**The power buttons are drawn but not wired, on Shawn's explicit instruction.** They run
+`Config.session.commands.{logout,shutdown,hibernate,reboot}`, whose defaults are Hyprland
+dispatches — under Plasma they will do nothing at all, silently, in the usual way. Replacing them
+with `loginctl` / `qdbus` calls is the follow-up.
+
+**Tooling note, because it cost time.** `qmllint` exits 255 with **no output at all** on this file,
+and `qmlformat` exits 1 with no message — and both do the same to the last *committed* version, so
+neither is a signal about the edit. This is the `scripts lie about success` pattern from the other
+direction: a tool that fails silently is as useless as one that succeeds falsely. The only honest
+check here is restarting the shell and reading `~/.local/state/luminos/caelestia-plasma/shell.log`
+for `Configuration Loaded`, then taking a screenshot.
 
 ---
 

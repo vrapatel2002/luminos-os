@@ -43,6 +43,7 @@ import qs.modules.dashboard as Dashboard
 import qs.modules.launcher as Launcher
 import qs.modules.notifications as Notifications
 import qs.modules.osd as Osd
+import qs.modules.session as Session
 import qs.modules.sidebar as Sidebar
 
 ShellRoot {
@@ -76,11 +77,13 @@ ShellRoot {
 
             readonly property ScreenState screenState: ShellState.forScreen(modelData)
 
-            // True while the pointer is on the edge tripwire OR on the OSD
-            // itself. It has to be both, because they are two separate
-            // surfaces: the strip loses the pointer the instant the OSD slides
-            // out over the top of it.
-            readonly property bool osdHovered: osdStripHover.containsMouse || osdSurfaceHover.hovered
+            // [CHANGE: claude-code | 2026-08-13] Used to be two surfaces OR-ed
+            // together - a 2px tripwire window and a HoverHandler on the OSD's
+            // own window - because they were separate windows and the pointer
+            // is only ever on one of them. The right edge is ONE window now
+            // (see rightEdge below), so there is one pointer source and this is
+            // just a rename.
+            readonly property bool osdHovered: rightEdgeMouse.overOsd
 
             // show() is the only handle Wrapper.qml gives us on its hide Timer.
             // On ENTER it opens the OSD. On LEAVE it re-arms the same countdown,
@@ -552,155 +555,41 @@ ShellRoot {
                 }
             }
 
-            // ── the OSD (volume / brightness) ────────────────────────────────
-            // [CHANGE: claude-code | 2026-08-13] DECISION 68 follow-up.
+            // ══ THE RIGHT EDGE: one window, four panels ══════════════════════
+            // [CHANGE: claude-code | 2026-08-13] DECISION 68, the three-layer
+            // right edge Shawn asked for:
             //
-            // Nothing here drives the OSD. Osd/Wrapper.qml:51-73 is a
-            // `Connections { target: Audio }` that calls show() whenever
-            // PipeWire's volume changes - no matter WHO changed it. KDE's
-            // kded `audioshortcutsservice` owns the volume keys and moves
-            // PipeWire; Quickshell sees the same PipeWire node change and
-            // pops this out. So there is deliberately no shortcut wiring
-            // here, and none is needed.
+            //     drag in from the right edge  ->  1. volume / brightness (OSD)
+            //     keep dragging                ->  2. power menu (session)
+            //     keep dragging                ->  3. notification list (sidebar)
             //
-            // Brightness is NOT symmetrical - it needed the poller below.
-            PanelWindow {
-                id: osdWindow
-
-                screen: scope.modelData
-                color: "transparent"
-
-                // Same threaded-render-loop trap as the launcher above:
-                // Wrapper.qml:41 is `visible: offsetScale < 1`, and offsetScale
-                // is driven by a Behavior animation. A hidden window gets no
-                // frames to advance that animation with, so it would show once
-                // and then never again. screenState.osd is a plain bool that
-                // flips instantly; OR-ing the animated one keeps the window
-                // alive long enough to play the slide back out.
-                visible: scope.screenState.osd || osd.visible
-
-                WlrLayershell.namespace: "caelestia-osd"
-                // Overlay, not Top: an OSD that hides behind a fullscreen
-                // video is not doing its job.
-                WlrLayershell.layer: WlrLayer.Overlay
-
-                // It floats on top of whatever is there. It must never shove
-                // windows aside - a volume press should not reflow your screen.
-                exclusiveZone: 0
-
-                // Anchoring ONLY `right` makes layer-shell centre it vertically
-                // against the right edge, which is where Caelestia puts it -
-                // the same trick the launcher uses with bottom-only to get
-                // horizontal centring. No margin: we do not paint upstream's
-                // screen border, so there is no border to sit inside of.
-                anchors.right: true
-
-                implicitWidth: osd.implicitWidth
-                implicitHeight: osd.implicitHeight
-
-                // Upstream paints this backdrop with the sheet's blob, which we
-                // do not have. A rounded rect is the honest equivalent, exactly
-                // as for the launcher above.
-                StyledRect {
-                    anchors.fill: osd
-                    radius: Tokens.rounding.extraLarge
-                    color: Colours.tPalette.m3surface
-                    opacity: osd.opacity
-                }
-
-                // Once the OSD is out it covers the hover strip below, so the
-                // strip stops seeing the pointer. Without this the thing would
-                // slide out and then immediately time out under your cursor.
-                HoverHandler {
-                    id: osdSurfaceHover
-                }
-
-                Osd.Wrapper {
-                    id: osd
-
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    screen: scope.modelData
-                    screenState: scope.screenState
-                    // We have no sidebar and no session menu, so there is
-                    // nothing here for the OSD to step aside for. Wrapper.qml:20
-                    // only uses this to add a 12px nudge.
-                    sidebarOrSessionVisible: false
-
-                    // Wrapper's own hide Timer (Wrapper.qml:84-92) only hides
-                    // when this is false, which is how "hover to keep it open"
-                    // works. Upstream sets it from Interactions.qml - the
-                    // full-screen sheet we deliberately do not have - so it is
-                    // set here instead.
-                    hovered: scope.osdHovered
-                }
-            }
-
-            // ── hover-to-peek: nose the OSD out from the right edge ──────────
-            // [CHANGE: claude-code | 2026-08-13] STEP 4, asked for by Shawn.
+            // plus the toasts, which sit at the top right and are not part of
+            // the drag chain.
             //
-            // A 2px-wide always-present strip at the right edge. Hovering it
-            // calls the SAME show() a volume key press calls, so there is one
-            // code path in and one hide Timer, not two.
+            // WHY ONE WINDOW. These four used to be two or three separate
+            // PanelWindows. That cannot produce the gesture, for two reasons
+            // that are both about Wayland rather than QML:
             //
-            // The numbers are upstream's, not invented: Interactions.qml:41
-            // treats "in the right panel" as x > width - Config.border
-            // .minThickness (= 2), and Interactions.qml:26-29 widens the
-            // vertical band by Config.border.rounding (= 25) at each end.
+            //   - The panels have to PUSH EACH OTHER LEFT as they come out
+            //     (upstream drawers/Panels.qml:41-97 is a chain of
+            //     `anchors.rightMargin` bindings, one panel reading the next
+            //     panel's margin and width). Anchors do not cross windows.
+            //   - The drag has to keep receiving motion after the pointer has
+            //     left the 2px edge strip it started in. On Wayland a button
+            //     press gives the surface an implicit pointer grab, so motion
+            //     keeps flowing to THAT surface until release - but only that
+            //     one. Start the drag in the strip window and it dies the
+            //     moment you cross into the panel window.
             //
-            // The height deliberately tracks the OSD and therefore COLLAPSES
-            // when it is closed: Wrapper's content Loader is inactive while
-            // hidden, so implicitHeight is 0 and this strip is 2x50px in the
-            // middle of the right edge. Once the OSD is out it grows to cover
-            // it, which is what carries the pointer through the slide-out
-            // animation before the OSD surface itself is under the cursor.
-            // That is not a bug to "fix" by pinning a height - a smaller strip
-            // is a smaller dead zone, see below.
+            // So this is upstream's own shape: cover the whole output, never
+            // resize, and use `mask` to hand back every pixel we are not
+            // actually using. That is not a return of the old click-swallowing
+            // bug - BUG-123 records that its cause was a MISSING mask, not a
+            // big window. Size was never the problem; the input region was.
             //
-            // KNOWN COST, accepted deliberately: a layer-shell surface eats
-            // pointer input over its whole area, and Wayland has no way to say
-            // "send me motion but pass clicks through". So those 2px x 50px
-            // are dead to clicks. That is the same trade BUG-110 records for
-            // the top edge, at roughly a thousandth of the area. It matters
-            // most for a maximised window's scrollbar, which is ~14px wide -
-            // you lose its outermost 2px for 50px of its travel.
-            PanelWindow {
-                id: osdHoverStrip
-
-                screen: scope.modelData
-                color: "transparent"
-
-                WlrLayershell.namespace: "caelestia-osd-hover"
-                // Top, not Overlay: the OSD itself is Overlay, so it comes out
-                // ON TOP of this strip rather than fighting it for the pointer.
-                WlrLayershell.layer: WlrLayer.Top
-                // Never take the keyboard. This is a pointer tripwire, and a
-                // surface that steals focus at the screen edge would be a bug
-                // you could not type your way out of.
-                WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-
-                exclusiveZone: 0
-                anchors.right: true
-
-                implicitWidth: Config.border.minThickness
-                implicitHeight: osd.implicitHeight + Config.border.rounding * 2
-
-                MouseArea {
-                    id: osdStripHover
-
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    // Do not pretend to handle clicks. It cannot pass them
-                    // through either (see above), but at least nothing here
-                    // silently swallows a press it might have acted on.
-                    acceptedButtons: Qt.NoButton
-                }
-            }
-
             // ── notification toasts, top right ───────────────────────────────
-            // [CHANGE: claude-code | 2026-08-13] STEP 1 of routing ALL
-            // notifications through Caelestia, asked for by Shawn.
+            // STEP 1 of routing ALL notifications through Caelestia, asked for
+            // by Shawn.
             //
             // This hosts upstream's notifications/Wrapper.qml unmodified. The
             // notification SERVER is not here - it lives in
@@ -728,51 +617,40 @@ ShellRoot {
             // every frame of every notification arriving or leaving. Cover the
             // output, never resize, and mask down to the panel instead.
             PanelWindow {
-                id: notifWindow
+                id: rightEdge
 
                 screen: scope.modelData
                 color: "transparent"
 
-                // Not mapped at all while there is nothing to show. The mask
-                // below should already make an idle full-screen surface
-                // harmless - an empty panel is 0px tall, so the region is
-                // empty - but "an empty Region means no input" is exactly the
-                // kind of assumption that, if wrong, turns the whole screen
-                // into a click sink. Not worth betting the desktop on when
-                // simply not mapping the surface costs nothing.
+                // [CHANGE: claude-code | 2026-08-13] ALWAYS MAPPED now, where
+                // this used to appear only when there was something to show.
                 //
-                // Two terms, same pattern as the OSD above: the popup count
-                // flips instantly and gets the window up BEFORE the panel
-                // starts growing, and the panel's own visibility keeps it up
-                // through the collapse animation on the way back down.
-                // [CHANGE: claude-code | 2026-08-13] two more terms: the
-                // sidebar drawer lives in this same window (upstream anchors it
-                // to the notification panel's bottom edge, so they have to
-                // share one coordinate space), and it must be able to hold the
-                // window up on its own when there are no toasts at all.
+                // It has to be. The catch strip in the mask below is what the
+                // pointer trips over to start the gesture, and a strip that
+                // only exists once a panel is already open catches nothing.
+                // Upstream's window is always up for exactly this reason.
                 //
-                // `shouldBeActive` and not `sidebarDrawer.visible`, and the
-                // reason is a trap: QML's `visible` is EFFECTIVE visibility,
-                // inherited from the parent. A child of a hidden window reads
-                // back false no matter what its own binding says. So
-                // "show the window when the child is visible" is circular -
-                // window hidden -> child reads hidden -> window stays hidden,
-                // forever. Same shape as BUG-124. `shouldBeActive` is the
-                // Wrapper's own `screenState.sidebar && Config.sidebar.enabled`
-                // and owes nothing to the window, so it breaks the loop; the
-                // `.visible` term then holds the window up through the slide
-                // -out animation on the way back down, exactly like the
-                // notification panel's term above.
-                visible: Notifs.popups.length > 0 || notifPanel.visible || sidebarDrawer.shouldBeActive || sidebarDrawer.visible
+                // What makes that safe is that the mask is never empty and
+                // never the whole screen: with everything closed it is a 2px
+                // ribbon at the right edge, which is the entire cost of this
+                // window when idle. The old worry - "an empty Region might mean
+                // ALL input, turning the screen into a click sink" - does not
+                // apply, because the region below always contains the strip.
+                visible: true
 
-                WlrLayershell.namespace: "caelestia-notifications"
+                WlrLayershell.namespace: "caelestia-right-edge"
                 // Overlay: a notification you cannot see over a fullscreen
-                // video is not a notification.
+                // video is not a notification, and an OSD behind a video is
+                // not doing its job either.
                 WlrLayershell.layer: WlrLayer.Overlay
                 // Never take the keyboard. A toast that steals focus while you
-                // are typing is worse than no toast at all.
+                // are typing is worse than no toast at all - and this surface
+                // is now permanently mapped, so taking focus would be a bug you
+                // could not type your way out of.
                 WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
+                // It floats on top of whatever is there and must never shove
+                // windows aside - a volume press should not reflow your screen.
                 exclusiveZone: 0
 
                 anchors.top: true
@@ -780,15 +658,56 @@ ShellRoot {
                 anchors.left: true
                 anchors.right: true
 
-                // [CHANGE: claude-code | 2026-08-13] two panels now, so the
-                // mask is a union of both. An outer Region with no item and no
-                // size is the empty region (upstream uses `Region {}` exactly
-                // that way in Exclusions.qml to make a window click-through);
-                // child Regions default to Union, so this is "notifications OR
-                // sidebar, nothing else".
+                // [CHANGE: claude-code | 2026-08-13] The input region: a thin
+                // catch strip, plus whichever panels are out.
+                //
+                // An outer Region with no item and no size is the empty region
+                // (upstream uses `Region {}` exactly that way in Exclusions.qml
+                // to make a window click-through); child Regions default to
+                // Union, so this reads "the strip OR any open panel, and
+                // nothing else". A closed panel is 0px wide, so it contributes
+                // nothing.
+                //
+                // The strip's numbers are upstream's, not invented:
+                // Interactions.qml:41 treats "in the right panel" as
+                // x > width - Config.border.minThickness (= 2), and
+                // Interactions.qml:26-29 widens the vertical band by
+                // Config.border.rounding (= 25) at each end.
+                //
+                // DELIBERATELY NARROWER THAN UPSTREAM: upstream's border runs
+                // the full height of the screen, so you can start the gesture
+                // anywhere down the right edge. This tracks the OSD's band
+                // instead, which collapses to 2x50px in the middle of the edge
+                // when everything is closed. The reason is the known cost
+                // below; the gesture Shawn described starts where the volume
+                // pops out, so that is where the tripwire is.
+                //
+                // KNOWN COST, accepted deliberately and unchanged from the old
+                // hover strip: a layer-shell surface eats pointer input over
+                // its whole area, and Wayland has no way to say "send me motion
+                // but pass clicks through". So those 2x50px are dead to clicks.
+                // Same trade BUG-110 records for the top edge, at roughly a
+                // thousandth of the area. It matters most for a maximised
+                // window's scrollbar, which is ~14px wide - you lose its
+                // outermost 2px for 50px of its travel.
                 mask: Region {
                     Region {
+                        x: rightEdge.width - Config.border.minThickness
+                        y: osdWrapper.y - Config.border.rounding
+                        width: Config.border.minThickness
+                        height: osdWrapper.height + Config.border.rounding * 2
+                    }
+
+                    Region {
+                        item: osdWrapper
+                    }
+
+                    Region {
                         item: notifPanel
+                    }
+
+                    Region {
+                        item: sessionWrapper
                     }
 
                     Region {
@@ -796,30 +715,127 @@ ShellRoot {
                     }
                 }
 
-                // Content.qml:38-42 clamps the list so it stops above the OSD,
-                // but it does that by reading `osdPanel.y`. Our OSD lives in a
-                // DIFFERENT window, where its own y is 0 - passing it straight
-                // in would clamp the list to a negative height and make every
-                // notification vanish the moment you touched the volume. This
-                // is a zero-size marker inside THIS window, sitting where the
-                // OSD actually is on screen (right edge, vertically centred,
-                // same as osdWindow above).
+                // ── LAYER 1: volume / brightness ─────────────────────────────
+                // [CHANGE: claude-code | 2026-08-13] Moved in here from a
+                // window of its own. The wrapper Item and the margin chain are
+                // copied verbatim from upstream drawers/Panels.qml:41-58.
+                //
+                // The `rightMargin` binding is the push-left chain: the OSD
+                // sits to the left of the session panel, which sits to the left
+                // of the sidebar. Each panel reads the NEXT one's margin and
+                // adds however much of it is currently on screen
+                // (`width * (1 - offsetScale)`, which is 0 when closed and the
+                // full width when open), so the whole row slides as one.
+                //
+                // `clip` matters more than it looks: while a panel to the right
+                // is out, this one is squeezed and would otherwise draw over it.
+                //
+                // Nothing here DRIVES the OSD open on a volume key.
+                // Osd/Wrapper.qml:51-73 is a `Connections { target: Audio }`
+                // that calls show() whenever PipeWire's volume changes - no
+                // matter who changed it. KDE's kded `audioshortcutsservice`
+                // owns the volume keys and moves PipeWire; Quickshell sees the
+                // same node change and pops this out. So there is deliberately
+                // no shortcut wiring, and none is needed. Brightness is NOT
+                // symmetrical - it needed the poller further down.
                 Item {
-                    id: osdStandin
+                    id: osdWrapper
 
-                    width: 0
-                    height: 0
-                    y: (parent.height - osd.implicitHeight) / 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: sessionWrapper.anchors.rightMargin + session.width * (1 - session.offsetScale)
+
+                    clip: sidebarDrawer.visible || session.visible
+
+                    implicitWidth: osd.implicitWidth * (1 - osd.offsetScale)
+                    implicitHeight: osd.implicitHeight
+
+                    // Upstream paints this backdrop with the sheet's blob,
+                    // which we do not have; osd/Content.qml draws no background
+                    // of its own (checked - unlike sidebar/Content.qml, which
+                    // does, and therefore needs nothing here). A rounded rect is
+                    // the honest equivalent, exactly as for the launcher above.
+                    StyledRect {
+                        anchors.fill: osd
+                        radius: Tokens.rounding.extraLarge
+                        color: Colours.tPalette.m3surface
+                        opacity: osd.opacity
+                    }
+
+                    Osd.Wrapper {
+                        id: osd
+
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        screen: scope.modelData
+                        screenState: scope.screenState
+                        // Wrapper.qml:20 uses this for a 12px nudge so the OSD
+                        // steps aside when something is out to its right. It
+                        // was hard-coded false while those panels did not
+                        // exist; they do now.
+                        sidebarOrSessionVisible: sidebarDrawer.visible || session.visible
+
+                        // Wrapper's own hide Timer (Wrapper.qml:84-92) only
+                        // hides when this is false, which is how "hover to keep
+                        // it open" works. Upstream sets it from
+                        // Interactions.qml; we set it from the mouse area at
+                        // the bottom of this window, which is the same thing.
+                        hovered: scope.osdHovered
+                    }
                 }
 
-                // We have no session menu or utilities panel yet. Content.qml
-                // only dereferences those two inside `if (screenState.session)`
-                // / `if (screenState.utilities)`, so empty Items are safe
-                // rather than merely convenient.
+                // ── LAYER 2: the power menu ──────────────────────────────────
+                // [CHANGE: claude-code | 2026-08-13] NEW - this is the layer
+                // that was missing. Structure copied verbatim from upstream
+                // drawers/Panels.qml:74-97.
+                //
+                // session/Wrapper.qml needs exactly two things - `screenState`
+                // and `sidebarVisible` - and session/Content.qml imports no
+                // Hyprland anything (checked), so unlike most of this port
+                // there is no stub to worry about.
+                //
+                // THE BUTTONS ARE NOT WIRED YET, on purpose: Shawn asked for
+                // the three-layer gesture first and said the buttons come
+                // later. They run `Config.session.commands.*`, whose defaults
+                // are Hyprland dispatches that will silently do nothing under
+                // Plasma - the usual null-is-false trap. Replacing them with
+                // loginctl/qdbus is the follow-up, not this change.
                 Item {
-                    id: sessionStandin
+                    id: sessionWrapper
+
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: sidebarDrawer.width * (1 - sidebarDrawer.offsetScale)
+
+                    clip: sidebarDrawer.visible
+
+                    implicitWidth: session.implicitWidth * (1 - session.offsetScale)
+                    implicitHeight: session.implicitHeight
+
+                    // Same reason as the OSD's backdrop above.
+                    StyledRect {
+                        anchors.fill: session
+                        radius: Tokens.rounding.extraLarge
+                        color: Colours.tPalette.m3surface
+                        opacity: session.opacity
+                    }
+
+                    Session.Wrapper {
+                        id: session
+
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        screenState: scope.screenState
+                        sidebarVisible: sidebarDrawer.visible
+                    }
                 }
 
+                // Still no utilities panel (upstream's bottom-right dock).
+                // notifications/Content.qml only dereferences it inside
+                // `if (screenState.utilities)`, which nothing ever sets here,
+                // so an empty Item is safe rather than merely convenient.
                 Item {
                     id: utilitiesStandin
                 }
@@ -832,12 +848,18 @@ ShellRoot {
 
                     screenState: scope.screenState
                     sidebarPanel: sidebarDrawer
-                    osdPanel: osdStandin
-                    sessionPanel: sessionStandin
+                    // [CHANGE: claude-code | 2026-08-13] These two used to be
+                    // zero-size stand-ins, because the real panels lived in
+                    // other windows and Content.qml:38-42 clamps the toast list
+                    // by reading `osdPanel.y` - a coordinate that is meaningless
+                    // across windows. One window now, so they are the real
+                    // things, exactly as upstream passes them.
+                    osdPanel: osdWrapper
+                    sessionPanel: sessionWrapper
                     utilitiesPanel: utilitiesStandin
                 }
 
-                // ── step 2: the notification LIST, as a right-edge drawer ────
+                // ── LAYER 3: the notification LIST, as a right-edge drawer ───
                 // [CHANGE: claude-code | 2026-08-13] DECISION 68.
                 //
                 // Same window as the toasts on purpose, not convenience:
@@ -864,6 +886,128 @@ ShellRoot {
                     anchors.bottom: parent.bottom
                     anchors.right: parent.right
                     anchors.topMargin: -notifPanel.anchors.topMargin
+                }
+
+                // ── the gesture: press at the edge and drag inward ───────────
+                // [CHANGE: claude-code | 2026-08-13] The three-layer chain
+                // Shawn asked for. This is upstream's drawers/Interactions.qml
+                // with everything that is not the right edge left out - it also
+                // drives the bar, the launcher, the dashboard and the tray
+                // popouts, and all of those already have their own working
+                // handling in this file. Copying the lot would replace four
+                // things that work in order to gain one that does not exist.
+                //
+                // THE DIRECTION IS INWARD, i.e. leftward, and that surprised me
+                // enough to write down: you press ON the right edge and pull
+                // TOWARDS the middle of the screen, like sliding a drawer out.
+                // Upstream opens on `dragX < -threshold` (Interactions.qml:
+                // 146-156) and closes on `dragX > threshold`.
+                //
+                // Why a press-drag works at all when the mask is 2px wide: on
+                // Wayland a button press gives this surface an implicit pointer
+                // grab, so every motion event keeps coming here until release,
+                // however far out of the strip the pointer travels. Hover
+                // without a button does NOT get that, which is why the OSD -
+                // the only one that opens on hover alone - is the one panel
+                // whose band the strip is cut to.
+                //
+                // NOT copied, deliberately: upstream's `dragMaskPadding`
+                // (ContentWindow.qml:47-59) widens the catch area when the
+                // workspace is empty. It decides that by asking Hyprland for
+                // the window list, which under KWin returns null, and null
+                // silently counts as false - so it would be a permanent 0 here
+                // and is honest to leave out rather than carry as dead code.
+                MouseArea {
+                    id: rightEdgeMouse
+
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.AllButtons
+
+                    property point dragStart
+
+                    // Upstream Interactions.qml:26-42, with two terms dropped:
+                    // it offsets by the bar width and the border thickness
+                    // because its panels live in an Item inset by both. Ours
+                    // fill the output, so panel coordinates are already screen
+                    // coordinates.
+                    function withinPanelHeight(panel: Item, y: real): bool {
+                        return y >= panel.y - Config.border.rounding && y <= panel.y + panel.height + Config.border.rounding;
+                    }
+
+                    function inRightPanel(panel: Item, x: real, y: real): bool {
+                        return x > Math.min(width - Config.border.minThickness, panel.x) && withinPanelHeight(panel, y);
+                    }
+
+                    // Feeds scope.osdHovered, which feeds both the OSD's own
+                    // hide Timer and the show() that opens it in the first
+                    // place. The `Math.min` above is what makes one expression
+                    // cover both states: closed, the panel is 0px wide and sits
+                    // at x == width, so the test collapses to "within 2px of the
+                    // edge"; open, it is the panel's own left edge.
+                    //
+                    // A binding, not an assignment in onPositionChanged, and it
+                    // is worth knowing why it is sound: a function CALL inside a
+                    // binding registers no reactive dependency (that is
+                    // BUG-124's first half), so this re-evaluates only on the
+                    // properties it reads directly - containsMouse, mouseX,
+                    // mouseY. Those are exactly the pointer, which is the only
+                    // input that matters here. Panel geometry changing without
+                    // the pointer moving would go unnoticed, and that is fine:
+                    // the panel only moves because the pointer did.
+                    readonly property bool overOsd: containsMouse && inRightPanel(osdWrapper, mouseX, mouseY)
+
+                    onPressed: event => dragStart = Qt.point(event.x, event.y)
+
+                    // Upstream Interactions.qml:67-92. Leaving the surface
+                    // closes what hover opened. containsMouse goes false as soon
+                    // as the pointer leaves the input region, which with this
+                    // mask means "left the strip and every open panel" - the
+                    // right meaning.
+                    //
+                    // The sidebar is left alone here on purpose: Meta+N opens it
+                    // with the pointer somewhere else entirely, and upstream
+                    // needs a whole `*ShortcutActive` flag machine to stop the
+                    // next stray mouse move from slamming it shut. Not closing
+                    // it on leave gets the same result with no machine.
+                    onContainsMouseChanged: if (!containsMouse) {
+                        scope.screenState.session = false;
+                    }
+
+                    onPositionChanged: event => {
+                        const x = event.x;
+                        const y = event.y;
+                        const dragX = x - dragStart.x;
+
+                        // LAYER 1 opens on hover alone, no button needed.
+                        // Upstream Interactions.qml:122-127.
+                        scope.screenState.osd = overOsd;
+
+                        if (!pressed)
+                            return;
+
+                        const startedAtEdge = dragStart.x > Math.min(width - Config.border.minThickness, sessionWrapper.x);
+
+                        if (sidebarDrawer.offsetScale === 1) {
+                            // Sidebar closed: the drag opens LAYER 2, and then
+                            // LAYER 3 once layer 2 is all the way out.
+                            // Upstream Interactions.qml:145-157.
+                            if (startedAtEdge && withinPanelHeight(sessionWrapper, y)) {
+                                if (dragX < -Config.session.dragThreshold)
+                                    scope.screenState.session = true;
+                                else if (dragX > Config.session.dragThreshold)
+                                    scope.screenState.session = false;
+
+                                if (session.offsetScale <= 0 && dragX < -Config.sidebar.dragThreshold)
+                                    scope.screenState.sidebar = true;
+                            }
+                        } else {
+                            // Sidebar open: dragging back out towards the edge
+                            // closes it. Upstream Interactions.qml:194-196.
+                            if (inRightPanel(sidebarDrawer, dragStart.x, dragStart.y) && dragX > Config.sidebar.dragThreshold)
+                                scope.screenState.sidebar = false;
+                        }
+                    }
                 }
 
                 // ── the one kick this port needs ─────────────────────────────
@@ -909,7 +1053,7 @@ ShellRoot {
                     target: Notifs
 
                     function onPopupsChanged(): void {
-                        Qt.callLater(notifWindow.layOutNotifs);
+                        Qt.callLater(rightEdge.layOutNotifs);
                     }
                 }
 

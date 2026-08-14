@@ -2760,3 +2760,53 @@ anchors do not cross windows.
   loop on any non-zero exit, so `kill <qs-pid>` **is** the restart (`settings.watchFiles: false`
   means every edit needs one). Launching `qs` by hand on top of that gives two shells drawing two
   bars — the tell is a doubled bar down the left edge.
+
+---
+
+## BUG-126 — a global shortcut keeps running the OLD command after you edit its .desktop
+*[CHANGE: claude-code | 2026-08-13]* — **FIXED 2026-08-13**
+
+**Symptom.** Meta+N did nothing. The key was in `~/.config/kglobalshortcutsrc`, the `.desktop` file
+had the right `Exec=`, and editing the file changed nothing at all — including after
+`kbuildsycoca6 --noincremental`.
+
+**What it actually was.** KDE caches every `.desktop`'s `Exec` line in **ksycoca**, and the shortcut
+service keeps using the cached copy. The journal is where it admits this:
+
+```
+qs[85453]: No running instances for ".../caelestia-kwin/shell.qml"
+```
+
+— a path that had **already been edited out of the file**. The rebuild did not dislodge it. A **new
+filename** did: `net.local.luminos-cael-sidebar.desktop`, plus
+`unregister("luminos-cael-sidebar.desktop", "_launch")` and stripping `X-KDE-Shortcuts` from the old
+file so it cannot re-register at the next login.
+
+### Three things worth keeping, each of which cost a wrong turn
+
+- **KWin owns the global-shortcut server in Plasma 6.7, not kglobalaccel.** `org.kde.kglobalaccel`
+  is owned by `kwin_wayland`; `plasma-kglobalaccel.service` reads `inactive` and is a dead stub.
+  "Restart kglobalaccel" is a **no-op**, and it looks exactly like a fix that did not take.
+- **`X-KDE-Shortcuts=` is the line that makes a `.desktop` register at all.** A probe file without it
+  never produced a component. That is the autoloading trigger, not `X-KDE-GlobalAccel-CommandShortcut`.
+- **`invokeShortcut` is the perfect non-intrusive test** — it is the exact call KWin makes when the
+  key fires, so it separates "the key is not reaching the action" from "the action does not work":
+
+  ```bash
+  busctl --user call org.kde.kglobalaccel /component/<mangled_desktop_name> \
+      org.kde.kglobalaccel.Component invokeShortcut s "_launch"
+  ```
+
+  And to check the **key** side, which is the half `invokeShortcut` skips:
+
+  ```bash
+  # who holds this key? Meta+N == Qt::MetaModifier|Qt::Key_N == 0x1000004E == 268435534
+  busctl --user call org.kde.kglobalaccel /kglobalaccel org.kde.KGlobalAccel \
+      getGlobalShortcutsByKey i 268435534
+  ```
+
+  ⚠️ `shortcutKeys` takes a **four**-element action id
+  (`component`, `action`, `componentFriendly`, `actionFriendly`). Passing three returns an **empty
+  list with no error**, which reads exactly like "the shortcut is not registered" — it fooled me into
+  thinking a working Meta+Space was broken too. Cross-check any such answer against a shortcut you
+  know works before believing it.
