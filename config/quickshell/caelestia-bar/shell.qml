@@ -43,6 +43,7 @@ import qs.modules.dashboard as Dashboard
 import qs.modules.launcher as Launcher
 import qs.modules.notifications as Notifications
 import qs.modules.osd as Osd
+import qs.modules.sidebar as Sidebar
 
 ShellRoot {
     id: root
@@ -744,7 +745,25 @@ ShellRoot {
                 // flips instantly and gets the window up BEFORE the panel
                 // starts growing, and the panel's own visibility keeps it up
                 // through the collapse animation on the way back down.
-                visible: Notifs.popups.length > 0 || notifPanel.visible
+                // [CHANGE: claude-code | 2026-08-13] two more terms: the
+                // sidebar drawer lives in this same window (upstream anchors it
+                // to the notification panel's bottom edge, so they have to
+                // share one coordinate space), and it must be able to hold the
+                // window up on its own when there are no toasts at all.
+                //
+                // `shouldBeActive` and not `sidebarDrawer.visible`, and the
+                // reason is a trap: QML's `visible` is EFFECTIVE visibility,
+                // inherited from the parent. A child of a hidden window reads
+                // back false no matter what its own binding says. So
+                // "show the window when the child is visible" is circular -
+                // window hidden -> child reads hidden -> window stays hidden,
+                // forever. Same shape as BUG-124. `shouldBeActive` is the
+                // Wrapper's own `screenState.sidebar && Config.sidebar.enabled`
+                // and owes nothing to the window, so it breaks the loop; the
+                // `.visible` term then holds the window up through the slide
+                // -out animation on the way back down, exactly like the
+                // notification panel's term above.
+                visible: Notifs.popups.length > 0 || notifPanel.visible || sidebarDrawer.shouldBeActive || sidebarDrawer.visible
 
                 WlrLayershell.namespace: "caelestia-notifications"
                 // Overlay: a notification you cannot see over a fullscreen
@@ -761,8 +780,20 @@ ShellRoot {
                 anchors.left: true
                 anchors.right: true
 
+                // [CHANGE: claude-code | 2026-08-13] two panels now, so the
+                // mask is a union of both. An outer Region with no item and no
+                // size is the empty region (upstream uses `Region {}` exactly
+                // that way in Exclusions.qml to make a window click-through);
+                // child Regions default to Union, so this is "notifications OR
+                // sidebar, nothing else".
                 mask: Region {
-                    item: notifPanel
+                    Region {
+                        item: notifPanel
+                    }
+
+                    Region {
+                        item: sidebarDrawer
+                    }
                 }
 
                 // Content.qml:38-42 clamps the list so it stops above the OSD,
@@ -781,16 +812,10 @@ ShellRoot {
                     y: (parent.height - osd.implicitHeight) / 2
                 }
 
-                // We have no sidebar, session menu or utilities panel yet.
-                // Content.qml only dereferences those three inside
-                // `if (screenState.session)` / `if (screenState.utilities)`,
-                // and Wrapper.qml only reads sidebarPanel.width for alignment,
-                // so empty Items are safe rather than merely convenient. They
-                // get replaced by the real thing in step 2.
-                Item {
-                    id: sidebarStandin
-                }
-
+                // We have no session menu or utilities panel yet. Content.qml
+                // only dereferences those two inside `if (screenState.session)`
+                // / `if (screenState.utilities)`, so empty Items are safe
+                // rather than merely convenient.
                 Item {
                     id: sessionStandin
                 }
@@ -806,10 +831,39 @@ ShellRoot {
                     anchors.right: parent.right
 
                     screenState: scope.screenState
-                    sidebarPanel: sidebarStandin
+                    sidebarPanel: sidebarDrawer
                     osdPanel: osdStandin
                     sessionPanel: sessionStandin
                     utilitiesPanel: utilitiesStandin
+                }
+
+                // ── step 2: the notification LIST, as a right-edge drawer ────
+                // [CHANGE: claude-code | 2026-08-13] DECISION 68.
+                //
+                // Same window as the toasts on purpose, not convenience:
+                // upstream anchors this to the notification panel's bottom
+                // edge (drawers/Panels.qml:145-154) so the two stack down the
+                // right side, and anchoring across windows is not a thing.
+                //
+                // Safe to bind an anchor to, unlike the notification panel:
+                // sidebar/Wrapper.qml has a CONSTANT implicitWidth and slides
+                // by animating anchors.rightMargin through `offsetScale`. It
+                // never resizes, so BUG-123 (a wl_surface resized every frame)
+                // cannot happen here.
+                //
+                // Upstream anchors the bottom to the utilities panel; we have
+                // none, so it goes to the bottom of the screen. topMargin
+                // cancels the -5 that notifications/Wrapper.qml:14 applies to
+                // itself, exactly as upstream does.
+                Sidebar.Wrapper {
+                    id: sidebarDrawer
+
+                    screenState: scope.screenState
+
+                    anchors.top: notifPanel.bottom
+                    anchors.bottom: parent.bottom
+                    anchors.right: parent.right
+                    anchors.topMargin: -notifPanel.anchors.topMargin
                 }
 
                 // ── the one kick this port needs ─────────────────────────────

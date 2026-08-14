@@ -3797,9 +3797,9 @@ pointer was returned to within 3 px of where Shawn left it.
 
 ##### Still not built
 
-Sidebar (the notification **list** drawer), session menu, utilities, the rounded screen border, and
-bar popouts. The dashboard has no bar button (upstream does not give it one) — shortcut and hover
-only.
+Session menu, utilities, the rounded screen border, and bar popouts. The dashboard has no bar button
+(upstream does not give it one) — shortcut and hover only. *(The sidebar — the notification list
+drawer — was built on 2026-08-13; see the step-2 amendment below.)*
 
 #### Amendment, 2026-08-13 — notifications move from Plasma to Caelestia (step 1 of 2)
 
@@ -3843,10 +3843,51 @@ also what replaces the zero-size `sidebarStandin` in `shell.qml`. Note for step 
 holds only the notification dock; the volume pill and the power menu are the separate OSD and
 session panels.
 
-**Not yet verified in pixels.** The session was locked throughout testing (`LockedHint=yes`,
-`kscreenlocker_greet` running), so every screenshot came back black. All the evidence is geometry
-and state — heights, delegate counts, D-Bus ownership. Under this project's own rule that is not
-"proven"; it needs one look at an unlocked screen.
+**Verified in pixels, 2026-08-13.** The first attempt was not: the session was locked throughout
+testing and every screenshot came back black. Worse, `loginctl` said otherwise, because session **1**
+is `Class=manager` and always reports `LockedHint=no` — the real session is **3**. Once genuinely
+unlocked, a `notify-send` toast was legible top-right, and nine seconds later Chrome's own window
+buttons were visible in exactly that spot, which is the half that matters: nothing is left covering
+the corner.
+
+#### Amendment, 2026-08-13 — the notification list, as a right-edge drawer (step 2 of 2)
+
+The other half of Shawn's instruction: *"list of all notification is at right side next to volume
+button than power button"*. `shell.qml` now hosts upstream's `modules/sidebar/Wrapper.qml`
+**unmodified**, in place of the zero-size `sidebarStandin`.
+
+**Almost nothing had to be built**, which is the point. The drawer needs **only** `screenState` — no
+other panel reference. A way to open it already existed: upstream's `Shortcuts {}` carries an
+`IpcHandler { target: "drawers" }` with `toggle(drawer)`, so `qs -p … ipc call drawers toggle
+sidebar` works as-is. And it needs no keyboard, so the window stays `WlrKeyboardFocus.None`.
+
+**It goes in the same window as the toasts on purpose.** Upstream anchors the sidebar to the
+notification panel's bottom edge (`drawers/Panels.qml:145-154`) so the two stack down the right side,
+and anchors do not cross windows. This is also safe in a way the notification panel was not: the
+sidebar has a **constant** `implicitWidth` and slides by animating `anchors.rightMargin` through
+`offsetScale`, so BUG-123 — a `wl_surface` resized every frame — cannot recur here. Its bottom
+anchors to the screen rather than upstream's utilities panel, which we do not have.
+
+**BUG-125, and the rule it leaves behind.** The drawer reported `isOpen 1` and drew nothing. The
+obvious window gate, `|| sidebarDrawer.visible`, is **circular**: QML's `visible` is *effective*
+visibility, inherited from the parent, so a child of a hidden window reads back `false` regardless of
+its own binding. Window hidden → child reads hidden → window stays hidden. The notification term next
+to it only looks like the same thing; it works because `Notifs.popups.length` — a service property,
+outside the window's visibility chain — flips first and maps the surface, leaving `.visible` as
+merely a *hold* through the collapse animation. **A hold with no bootstrap is a deadlock.** Fixed by
+gating on `sidebarDrawer.shouldBeActive`, upstream's own `screenState.sidebar &&
+Config.sidebar.enabled`.
+
+**Meta+N reaches it now, and did not before.** The `.desktop` that KDE launches was still pointing at
+the **fallback** `caelestia-kwin` config, whose shell is not running — and the key had never been
+registered with kglobalaccel at all, so it was doing nothing twice over. Both fixed; the component is
+live on D-Bus. Shawn to confirm the keypress itself, since driving synthetic input at his live
+session is not worth the risk.
+
+**One cosmetic gap, accepted.** Upstream slides the OSD left when the sidebar opens. Ours lives in a
+separate window and cannot, so a volume bar raised while the drawer is open will sit under it. Not
+worth a second window-manager of our own; DECISION 68's rule is to drop the feature rather than
+rebuild the mechanism.
 
 ---
 

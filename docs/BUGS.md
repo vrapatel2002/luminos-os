@@ -2689,6 +2689,74 @@ The window covers the output and never resizes (BUG-123's shape, because `Conten
 "An empty Region yields an empty input region" is probably true, but it is not worth betting the
 whole screen on when not mapping the surface costs nothing.
 
-### Not yet proven
-No toast has been **seen on screen** — the session was locked during testing (`LockedHint=yes`), so
-every screenshot came back black. All the evidence above is geometry and state, not pixels.
+### Seen on screen — 2026-08-13
+Confirmed in pixels once the session was genuinely unlocked. A `notify-send` produced a toast at the
+top right: icon, title row, body text, chevron, all legible in an `-pix_fmt rgb24` crop. Roughly nine
+seconds later it was gone and Chrome's own window buttons were visible in exactly that spot, which is
+the useful half — it proves nothing is left covering the corner.
+
+Two traps in the *verification*, both of which produced a confident wrong answer first:
+- `loginctl` session **1** is `Class=manager` and always reports `LockedHint=no`. The real session is
+  **3** (`Type=wayland, Class=user`). Checking the wrong one says "unlocked" while the lock screen is
+  up and every screenshot comes back black.
+- `spectacle -b -n -o` PNGs carry an alpha channel; re-render with `ffmpeg -pix_fmt rgb24` before
+  believing what you see.
+
+---
+
+## BUG-125 — the sidebar drawer opens in state but never on screen (Caelestia on Plasma)
+# [CHANGE: claude-code | 2026-08-13]
+**Status:** ✅ Fixed 2026-08-13 · **Component:** `config/quickshell/caelestia-bar/shell.qml`
+
+### Symptom
+`qs -p … ipc call drawers toggle sidebar` returned cleanly, `ipc call drawers isOpen sidebar`
+answered `1`, and the screen showed nothing at all. No error, no warning in the shell log.
+
+### Root cause — QML `visible` is *effective* visibility, so reading a child's is circular
+The notification window is gated so it is not mapped while idle:
+
+```qml
+visible: Notifs.popups.length > 0 || notifPanel.visible
+```
+
+Adding the sidebar, the obvious third term is `|| sidebarDrawer.visible`. It cannot work. In QML,
+`visible` is **inherited**: a child of a hidden parent reads back `false` no matter what its own
+binding says. So the window is hidden → the child reads hidden → the window stays hidden. Nothing
+ever breaks the loop.
+
+The notification term only *looks* like the same thing. It works because of the term next to it:
+`Notifs.popups.length` is a service property that owes nothing to the window, so it flips first and
+maps the surface; `notifPanel.visible` is then merely a **hold**, keeping the window up through the
+collapse animation on the way back down. A hold with no bootstrap is a deadlock.
+
+### Fix
+Use the panel's own intent, not its rendered state:
+
+```qml
+visible: Notifs.popups.length > 0 || notifPanel.visible
+      || sidebarDrawer.shouldBeActive || sidebarDrawer.visible
+```
+
+`shouldBeActive` is upstream's own `screenState.sidebar && Config.sidebar.enabled`
+(`modules/sidebar/Wrapper.qml`) — plain properties, no window in the chain. It bootstraps; `.visible`
+holds through the slide-out.
+
+### The rule
+**Never gate a window on a descendant's `visible`.** Every such binding needs two terms: something
+outside the window's own visibility chain to turn it on, and the child's state to keep it on.
+
+### Why the sidebar is safe to anchor to, and the notification panel is not
+`sidebar/Wrapper.qml` has a **constant** `implicitWidth` and slides by animating
+`anchors.rightMargin` through `offsetScale`. It never resizes, so BUG-123 (a `wl_surface` resized
+every frame) cannot recur here. It also lives in the **same** window as the toasts on purpose:
+upstream anchors it to the notification panel's bottom edge (`drawers/Panels.qml:145-154`), and
+anchors do not cross windows.
+
+### Two smaller things found on the way
+- **`sidebarPanel: sidebarPanel` is a self-binding.** Name resolution checks the scope object's own
+  properties *before* component ids, so the right-hand side resolves to the property being assigned,
+  not to the `id`. The drawer is `id: sidebarDrawer` for that reason.
+- **The shell is supervised.** `~/.local/state/luminos/caelestia-plasma/shell.sh` re-runs `qs` in a
+  loop on any non-zero exit, so `kill <qs-pid>` **is** the restart (`settings.watchFiles: false`
+  means every edit needs one). Launching `qs` by hand on top of that gives two shells drawing two
+  bars — the tell is a doubled bar down the left edge.
