@@ -106,6 +106,11 @@ Window {
     WebEngineView {
         id: view
         anchors.fill: parent
+        // [CHANGE: claude-code | 2026-08-14] The view owns the keyboard from
+        // the first frame, so you can type into the message box without
+        // clicking it first. Nothing may be layered over this with
+        // `focus: true` — see the Keys section at the bottom.
+        focus: true
         // The page paints its own dark background; matching it here stops a
         // white flash on the first frame.
         backgroundColor: root.color
@@ -173,20 +178,33 @@ Window {
 
     // ============================================
     // SECTION: Keys
-    // PURPOSE: Esc closes (matching the HIVE popup), Ctrl+R reloads.
-    // NOTE: the WebEngineView keeps focus, so these live on a focused Item
-    //       layered above it rather than on the Window.
+    // PURPOSE: Esc closes (matching HiveChat.qml), Ctrl+R reloads.
+    //
+    // DO NOT go back to `Item { focus: true }` layered over the view.
+    // [CHANGE: claude-code | 2026-08-14] That was the first attempt and it
+    // ATE THE KEYBOARD: a focused Item covering a WebEngineView holds active
+    // focus from the moment the window opens, so anything typed before you
+    // first click into the page goes to the Item and is dropped. The window
+    // looked alive, the gateway logged UI traffic, and not one keystroke
+    // reached the message box — no error anywhere. Verified in the gateway
+    // journal: zero `[model-fetch] start` lines for the whole period.
+    //
+    // `Shortcut` is global to the window and takes no focus, which is why
+    // HiveChat.qml has always used it.
+    //
+    // TUNE: Escape is claimed at window level, so it closes the window rather
+    //       than reaching the page. That matches the old popup's habit.
     // ============================================
-    Item {
-        anchors.fill: parent
-        focus: true
-        Keys.onEscapePressed: root.close()
-        Keys.onPressed: function (event) {
-            if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
-                root.loadError = "";
-                view.reload();
-                event.accepted = true;
-            }
+    Shortcut {
+        sequence: "Escape"
+        onActivated: root.close()
+    }
+
+    Shortcut {
+        sequence: StandardKey.Refresh
+        onActivated: {
+            root.loadError = "";
+            view.reload();
         }
     }
 }
