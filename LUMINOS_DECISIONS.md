@@ -4439,3 +4439,99 @@ that text to the delegate. Icons are still full-colour Papirus rather than
 monochrome glyphs in tinted circles; the circle lives in kirigami-addons and the
 icons are an icon-theme decision that collides with the Yaru work in BUG-090.
 Both are separate jobs, and the icons are now the largest remaining difference.
+
+---
+
+## DECISION 73
+
+# The HIVE window IS OpenClaw's Control UI now
+# [CHANGE: claude-code | 2026-08-14]
+
+**Status:** DONE, running, proven on screen.
+**Supersedes the UI half of DECISION 70** (which kept the bespoke QML chat and
+only swapped what answered behind it). Does not change the backend.
+
+SUPER+SPACE now opens `src/hive/HiveWeb.qml` — a QtWebEngine window rendering
+OpenClaw's own Control UI, the same thing that used to require a Chrome tab at
+`http://127.0.0.1:18789`. The old hand-written chat is still there behind
+`HIVE_UI=qml`.
+
+### Why
+
+DECISION 70 made OpenClaw the only backend that answers (the chip path has been
+dead since BUG-097). That left `HiveChat.qml` as a *thinner* face on the same
+engine: no session list, no model picker, no `/` commands, no file browser, no
+streaming. Rebuilding those in QML means rebuilding them again after every
+`openclaw` npm upgrade. Embedding the shipped UI costs one file and stays
+current for free.
+
+### How it hangs together
+
+    SUPER+SPACE
+      └─ luminos-hive-popup            HIVE_UI=web (default)
+           ├─ waits for the gateway PORT 18789   (blocking — no port, no window)
+           ├─ warms jobhunt-llm + jobhunt-toolproxy in the BACKGROUND
+           └─ qml6 HiveWeb.qml -- <gatewayBase> <tokenPATH>
+                └─ WebEngineView → http://127.0.0.1:18789/#token=<TOKEN>
+                     └─ gateway → agent → 8082 tool proxy → 8081 llama.cpp
+
+### Three things that will bite
+
+**The token lives in the URL FRAGMENT.** `#token=...` is never sent to the
+server; the JS app reads it client-side. Strip or re-encode the fragment and you
+get the login form instead of the dashboard, with no error.
+
+**The token FILE path is passed on the command line — never the token.** Every
+argument is world-readable through `/proc/<pid>/cmdline`. `HiveWeb.qml` reads
+`~/.openclaw/gateway-token` (0600) itself, which needs `QML_XHR_ALLOW_FILE_READ=1`
+— already exported by the launcher.
+
+**A `file://` XHR reports status 0 on success, not 200.** Checking only for 200
+rejects every good token read, and the failure mode is a silent login screen.
+
+### What this leaves broken
+
+**The legacy chip path is still dead** — BUG-097, unchanged. `HIVE_UI=qml` gets
+the old window back, and it will still render empty bubbles for Nexus/Bolt/Nova.
+This decision does not fix it and does not pretend to.
+
+**The web path deliberately does NOT start `hive-start-model.sh` or
+`hive-daemon.py`.** Nothing in the Control UI's chain uses them, the former has
+exited 1 since BUG-097, and a second `llama-server` would spend VRAM the agent's
+own model needs. Consequence worth knowing: with `HIVE_UI=web`, port 8078 may be
+down and the desktop widgets that poll it will show nothing.
+
+**Two chat histories now exist and they do not merge.** The QML window's
+LocalStorage conversations and OpenClaw's server-side sessions are separate
+stores. Nothing migrates.
+
+**Haste decision.** This is the shipped web app in a frame — Luminos theming
+stops at the window title and background colour, and the page paints itself. The
+window is a plain 1040x780 `Window`, not the styled popup geometry `HiveChat.qml`
+uses. What smart looks like: inject a Luminos stylesheet via
+`WebEngineScript`/`runJavaScript` so the Control UI picks up the same tokens as
+`design/luminos-tokens.json`, and match the popup's frameless geometry. Not done,
+because the point was to find out whether the real product is usable in a native
+window at all. It is.
+
+### How it was proven
+
+Not asserted — screenshotted, twice, on the live KWin session:
+
+| Test | Result |
+|---|---|
+| QtWebEngine renders at all under KWin/Wayland | yes — dashboard login screen drew |
+| Bare URL, no token | red **"Could not connect"** box (correct) |
+| `#token=<TOKEN>` from the 0600 file | **"Nexus · Ready to chat"**, model picker reading `luminos-local · luminos · Off` |
+| Dead port 18999 | the failure panel drew `net::ERR_CONNECTION_REFUSED` + the fix command — *not* a blank pane |
+| Real launcher, clean env | started, warmed the backend, 8081 + 8082 came up LISTEN |
+| Token absent from argv | confirmed — `pgrep -a qml6` shows only the file path |
+| SUPER+SPACE toggle (second press) | window closed, exit 0 |
+| `qmllint HiveWeb.qml` | clean |
+
+The connection is proven by the UI's own state: an unauthenticated load draws the
+red error box, the authenticated one draws live gateway data (agent name, session
+breadcrumb, model selector). **What was not done:** no message was typed into the
+window — driving the live session with synthetic input has interrupted the user
+mid-work before, so the round trip is inferred from DECISION 70's measured 7.3 s
+warm agent call, not re-measured here.

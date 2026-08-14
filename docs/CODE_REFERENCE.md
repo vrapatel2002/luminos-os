@@ -40,6 +40,11 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 - `src/hive/nova.py` — Reasoning (DeepSeek-R1-7B)
 - `src/hive/eye.py` — Vision (Qwen2.5-VL-7B, pending)
 
+### HIVE windows (src/hive/*.qml) [CHANGE: claude-code | 2026-08-14]
+- `src/hive/HiveWeb.qml` — **the default window (DECISION 73).** QtWebEngine view onto OpenClaw's own Control UI at `http://127.0.0.1:18789/#token=<TOKEN>`. Reads the token itself from a 0600 file whose *path* arrives on argv (never the token — argv is world-readable). Draws a named error panel instead of a blank pane when the gateway is down. Gotcha: a `file://` XHR returns status **0** on success, not 200.
+- `src/hive/HiveChat.qml` — the older bespoke chat window, behind `HIVE_UI=qml`. Talks to `hive-daemon.py` on 8078; its chip path is still dead (BUG-097).
+- `src/hive/HistorySidebar.qml` — conversation list for `HiveChat.qml` only. OpenClaw keeps its own sessions server-side; the two stores do not merge.
+
 ### KDE KCM Plugins (src/kcms/)
 - `src/kcms/kcm_luminos_keyboard/` — Keyboard backlight C++/QML KCM
 - `src/kcms/kcm_luminos_hive/` — HIVE AI Settings C++/QML KCM (mode toggle, model roster, VRAM, shortcut)
@@ -353,7 +358,7 @@ C:\Users\vrati\VSCODE\Luminos\
 ```
 
 ├── scripts/
-│   ├── luminos-hive-popup          ← [EXISTS] HIVE popup launcher — Wayland env setup, toggle lock, auto-start Nexus, swap server start, keep-alive loop, qml6 launch
+│   ├── luminos-hive-popup          ← [EXISTS] HIVE popup launcher — Wayland env setup, toggle lock, keep-alive loop, qml6 launch. [CHANGE: claude-code | 2026-08-14] Two faces: HIVE_UI=web (default) waits on gateway port 18789 and launches HiveWeb.qml; HIVE_UI=qml keeps the old HiveChat.qml + llama-server path. Passes the token FILE PATH, never the token (argv is world-readable via /proc)
 │   ├── hive-start-model.sh         ← [EXISTS] Model launcher — kills existing llama-server, starts new one with GGUF, health check loop (30s timeout)
 │   ├── hive-swap-server.py         ← [EXISTS] Model swap HTTP server — port 8079, /swap/<model> (nexus|bolt|nova), /status, /copy (wl-copy), stdlib only
 │   ├── hive-daemon.py              ← [EXISTS] Consolidated HIVE orchestration daemon — port 8078, /chat (routing+inference), /state, /health, /copy; thread-safe model state, chip routing, smart [ROUTE:X] routing via Nexus, retry logic, timing breakdown; stdlib only, parallel to swap server until QML migration

@@ -74,6 +74,32 @@ export LD_LIBRARY_PATH="/opt/cuda/lib64:/usr/lib:/usr/local/lib${LD_LIBRARY_PATH
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
 # ════════════════════════════════════════
+# SECTION: Which UI
+# PURPOSE: Choose between OpenClaw's own Control UI in a native window (default)
+#          and the hand-written QML chat.
+# [CHANGE: claude-code | 2026-08-14]
+#
+#   HIVE_UI=web   (default) src/hive/HiveWeb.qml — a QtWebEngine window showing
+#                 the OpenClaw Control UI that previously needed a Chrome tab.
+#                 The full product: sessions, model picker, commands, files.
+#   HIVE_UI=qml   src/hive/HiveChat.qml — the older bespoke chat window.
+#
+# WHY WEB IS THE DEFAULT: DECISION 70 already made OpenClaw the only backend
+# that answers, so the QML window had become a thinner, less capable face on
+# the same engine. See DECISION 71.
+#
+# TUNE: `HIVE_UI=qml luminos-hive-popup` restores the old window, no edit needed.
+# ════════════════════════════════════════
+
+HIVE_UI="${HIVE_UI:-web}"
+GATEWAY_BASE="${OPENCLAW_GATEWAY_BASE:-http://127.0.0.1:18789}"
+GATEWAY_PORT="$(echo "$GATEWAY_BASE" | /usr/bin/sed -E 's#.*:([0-9]+)/?$#\1#')"
+# The PATH to the token — never the token itself. Every argument on a command
+# line is readable by any local process via /proc/<pid>/cmdline; this file is
+# 0600 and HiveWeb.qml reads it directly.
+GATEWAY_TOKEN_FILE="${OPENCLAW_TOKEN_FILE:-$HOME/.openclaw/gateway-token}"
+
+# ════════════════════════════════════════
 # SECTION: Toggle Lock (SUPER+SPACE on/off)
 # PURPOSE: If popup is already open, close it. Otherwise start new.
 # ════════════════════════════════════════
@@ -105,32 +131,70 @@ trap "/usr/bin/rm -f $LOCKFILE; kill \$QML_PID 2>/dev/null; kill \$LLAMA_START_P
 # ════════════════════════════════════════
 
 LLAMA_START_PID=""
-if ! /usr/bin/pgrep -x "llama-server" > /dev/null 2>&1; then
-    echo "[LAUNCHER] llama-server not running, starting..."
-    bash /home/shawn/luminos-os/scripts/hive-start-model.sh nexus >> /tmp/hive-server.log 2>&1 &
-    LLAMA_START_PID=$!
-    echo "nexus" > /tmp/hive-active-model
-else
-    # Server is already running, try to detect which model is active
-    /usr/bin/pgrep -a "llama-server" | /usr/bin/grep -oP "(?<=--model-name\s)\w+" > /tmp/hive-active-model 2>/dev/null
-    if [ ! -s /tmp/hive-active-model ]; then
-        echo "nexus" > /tmp/hive-active-model
+
+if [ "$HIVE_UI" = "web" ]; then
+    # ── Web UI backend ─────────────────────────────────────────────────────
+    # [CHANGE: claude-code | 2026-08-14]
+    # The Control UI talks to the gateway on 18789; the gateway runs the agent,
+    # and the agent reaches the model through the tool-call proxy on 8082 and
+    # llama.cpp on 8081. Nothing in that chain is hive-daemon.py or
+    # hive-start-model.sh, so this path deliberately starts NEITHER — the
+    # latter has been exiting 1 since BUG-097 anyway, and starting a second
+    # llama-server would spend VRAM the agent's own model needs.
+
+    # The gateway is the only blocking dependency: without it the window has
+    # nothing to render. Wait for the port, not for `systemctl is-active` — the
+    # unit reports active well before the socket accepts.
+    if ! (exec 3<>/dev/tcp/127.0.0.1/"$GATEWAY_PORT") 2>/dev/null; then
+        echo "[LAUNCHER] OpenClaw gateway not listening on $GATEWAY_PORT, starting..."
+        systemctl --user start openclaw-gateway.service 2>/dev/null
+        for _ in $(/usr/bin/seq 1 40); do
+            (exec 3<>/dev/tcp/127.0.0.1/"$GATEWAY_PORT") 2>/dev/null && break
+            /usr/bin/sleep 0.25
+        done
     fi
-fi
 
-# Mark activity so idle-watchdog doesn't kill while popup is open
-/usr/bin/touch /tmp/hive-last-request
-
-# [CHANGE: claude-code | 2026-08-04] The daemon is a systemd user unit now.
-# Ask systemd for it rather than forking our own copy — two daemons would race
-# for 127.0.0.1:8078 and the loser dies with EADDRINUSE.
-if ! (exec 3<>/dev/tcp/127.0.0.1/8078) 2>/dev/null; then
-    echo "[LAUNCHER] HIVE daemon not listening, asking systemd to start it..."
-    systemctl --user start luminos-hive.service 2>/dev/null
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-        (exec 3<>/dev/tcp/127.0.0.1/8078) 2>/dev/null && break
-        /usr/bin/sleep 0.3
+    # The model services are NOT blocking. They take ~15 s to load and the user
+    # takes longer than that to read the window and type, so warming them in the
+    # background beats making them wait at a blank screen. They are stopped
+    # between uses on purpose, so the dGPU can runtime-suspend.
+    for port in 8081 8082; do
+        if ! (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+            echo "[LAUNCHER] warming OpenClaw model backend in the background..."
+            systemctl --user start jobhunt-llm.service jobhunt-toolproxy.service \
+                >/dev/null 2>&1 &
+            break
+        fi
     done
+else
+    # ── Legacy QML chat backend ────────────────────────────────────────────
+    if ! /usr/bin/pgrep -x "llama-server" > /dev/null 2>&1; then
+        echo "[LAUNCHER] llama-server not running, starting..."
+        bash /home/shawn/luminos-os/scripts/hive-start-model.sh nexus >> /tmp/hive-server.log 2>&1 &
+        LLAMA_START_PID=$!
+        echo "nexus" > /tmp/hive-active-model
+    else
+        # Server is already running, try to detect which model is active
+        /usr/bin/pgrep -a "llama-server" | /usr/bin/grep -oP "(?<=--model-name\s)\w+" > /tmp/hive-active-model 2>/dev/null
+        if [ ! -s /tmp/hive-active-model ]; then
+            echo "nexus" > /tmp/hive-active-model
+        fi
+    fi
+
+    # Mark activity so idle-watchdog doesn't kill while popup is open
+    /usr/bin/touch /tmp/hive-last-request
+
+    # [CHANGE: claude-code | 2026-08-04] The daemon is a systemd user unit now.
+    # Ask systemd for it rather than forking our own copy — two daemons would race
+    # for 127.0.0.1:8078 and the loser dies with EADDRINUSE.
+    if ! (exec 3<>/dev/tcp/127.0.0.1/8078) 2>/dev/null; then
+        echo "[LAUNCHER] HIVE daemon not listening, asking systemd to start it..."
+        systemctl --user start luminos-hive.service 2>/dev/null
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            (exec 3<>/dev/tcp/127.0.0.1/8078) 2>/dev/null && break
+            /usr/bin/sleep 0.3
+        done
+    fi
 fi
 # ════════════════════════════════════════
 # SECTION: Watchdog Keep-Alive Loop
@@ -163,7 +227,14 @@ KEEP_ALIVE_PID=$!
 #          alive so the keep-alive loop and cleanup below still run.
 # ════════════════════════════════════════
 
-/usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml &
+# [CHANGE: claude-code | 2026-08-14] Two faces, one launcher. Note the token
+# FILE is passed, not the token — see the "Which UI" section above.
+if [ "$HIVE_UI" = "web" ]; then
+    /usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveWeb.qml -- \
+        "$GATEWAY_BASE" "$GATEWAY_TOKEN_FILE" &
+else
+    /usr/bin/qml6 /home/shawn/luminos-os/src/hive/HiveChat.qml &
+fi
 QML_PID=$!
 echo "$QML_PID" > "$LOCKFILE"
 wait "$QML_PID"
