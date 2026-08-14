@@ -1,0 +1,58 @@
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+#
+# [CHANGE: claude-code | 2026-08-14] LUMINOS FORK — DECISION 72.
+# This is Arch's stock kirigami PKGBUILD plus one patch. Do not "clean up" the
+# pkgrel: 1.1 sorts ABOVE the repo's 1, which is what stops a routine
+# `pacman -Syu` from silently reverting the desktop's look. When upstream moves
+# to 6.28.1 or 6.29 the repo version wins again and this must be rebuilt.
+#
+#   Rebuild:  makepkg -si
+#   Revert:   sudo pacman -U /var/cache/pacman/pkg/kirigami-6.28.0-1-x86_64.pkg.tar.zst
+#
+# The patch does NOT change any default. It only lets three compiled-in
+# constants be overridden by environment variables, which is otherwise
+# impossible — Kirigami exposes them as read-only QML properties and reads no
+# config file. With the environment unset the package behaves exactly like
+# stock. Live values are set in /etc/environment.
+
+pkgname=kirigami
+pkgver=6.28.0
+pkgrel=1.1
+pkgdesc='A QtQuick based components set'
+arch=(x86_64)
+url='https://develop.kde.org/products/frameworks/'
+license=(LGPL-2.0-only
+         LGPL-3.0-only)
+depends=(glibc
+         libgomp
+         libstdc++
+         qt6-base
+         qt6-declarative
+         qt6-svg)
+makedepends=(doxygen
+             extra-cmake-modules
+             qt6-shadertools
+             qt6-tools)
+groups=(kf6)
+source=(https://download.kde.org/stable/frameworks/${pkgver%.*}/$pkgname-$pkgver.tar.xz{,.sig}
+        kirigami-luminos-units.patch)
+sha256sums=('30fc6bd928a7124ace334944c8b45748603d37e45464db874903d7eb91f41d36'
+            'SKIP'
+            'SKIP')
+validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB  # David Faure <faure@kde.org>
+              90A968ACA84537CC27B99EAF2C8DF587A6D4AAC1) # Nicolas Fella <nicolas.fella@kde.org>
+
+prepare() {
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/kirigami-luminos-units.patch
+}
+
+build() {
+  cmake -B build -S $pkgname-$pkgver \
+    -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}
+

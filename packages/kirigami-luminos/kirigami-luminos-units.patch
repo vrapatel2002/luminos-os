@@ -1,0 +1,63 @@
+--- a/src/platform/units.cpp
++++ b/src/platform/units.cpp
+@@ -25,6 +25,37 @@
+ namespace Platform
+ {
+ 
++// [CHANGE: claude-code | 2026-08-14] Luminos OS, DECISION 72.
++// Kirigami's design tokens are compiled-in constants with no config file and
++// read-only QML properties, so a desktop that wants a different visual scale
++// (here: Caelestia's Material 3 scale) has no lever at all. These helpers add
++// one. Every token below keeps its upstream default when the variable is unset
++// or unparseable, so an un-set environment is byte-for-byte stock behaviour.
++namespace
++{
++qreal luminosEnvReal(const char *name, qreal fallback)
++{
++    const QByteArray value = qgetenv(name);
++    if (value.isEmpty()) {
++        return fallback;
++    }
++    bool ok = false;
++    const qreal parsed = value.toDouble(&ok);
++    return (ok && parsed >= 0) ? parsed : fallback;
++}
++
++int luminosEnvInt(const char *name, int fallback)
++{
++    const QByteArray value = qgetenv(name);
++    if (value.isEmpty()) {
++        return fallback;
++    }
++    bool ok = false;
++    const int parsed = value.toInt(&ok);
++    return (ok && parsed > 0) ? parsed : fallback;
++}
++}
++
+ class UnitsPrivate
+ {
+     Q_DISABLE_COPY(UnitsPrivate)
+@@ -33,17 +64,17 @@
+     explicit UnitsPrivate(Units *units)
+         // Cache font so we don't have to go through QVariant and property every time
+         : fontMetrics(QFontMetricsF(QGuiApplication::font()))
+-        , gridUnit(18)
+-        , smallSpacing(4)
+-        , mediumSpacing(6)
+-        , largeSpacing(8)
++        , gridUnit(luminosEnvInt("KIRIGAMI_GRID_UNIT", 18))
++        , smallSpacing(luminosEnvInt("KIRIGAMI_SMALL_SPACING", 4))
++        , mediumSpacing(luminosEnvInt("KIRIGAMI_MEDIUM_SPACING", 6))
++        , largeSpacing(luminosEnvInt("KIRIGAMI_LARGE_SPACING", 8))
+         , veryLongDuration(400)
+         , longDuration(200)
+         , shortDuration(100)
+         , veryShortDuration(50)
+         , humanMoment(2000)
+         , toolTipDelay(700)
+-        , cornerRadius(5)
++        , cornerRadius(luminosEnvReal("KIRIGAMI_CORNER_RADIUS", 5))
+         , iconSizes(new IconSizes(units))
+     {
+     }

@@ -4329,3 +4329,113 @@ windows; install the real GoogleSansFlex; then decide on Kvantum. The biggest
 remaining mismatch found by actually comparing the two windows side by side is
 **not** the corner radius — it is that System Settings uses colourful Papirus
 icons where Nexus uses monochrome Material Symbols in circular tinted containers.
+
+---
+
+## DECISION 72
+
+**KDE's visual scale comes from a patched Kirigami, and DECISION 71 is reverted.**
+*[CHANGE: claude-code | 2026-08-14]*
+
+DECISION 71 rounded the **outside** of System Settings. Shawn looked at it beside
+Nexus and said it plainly: *"its no where near looking like it … what i mean by
+windows look alike was inside design not the out side keep it default try making
+sound and other sub section rectangle look like the ones from nexus."*
+
+He was right, and the mistake is worth naming: I optimised the thing that was
+easy to reach rather than the thing he was pointing at. The window frame was
+never what made Nexus look like Nexus.
+
+**DECISION 71 is undone.** The effect is disabled, `[Round-Corners]` is deleted
+from `kwinrc`, and `breezerc` is restored by hand to `RoundedCorners=true` /
+`OutlineEnabled=true` / `OutlineIntensity=OutlineMedium` — **the effect does not
+restore those when it unloads**, so skipping that step leaves every window
+permanently square, which looks like a new bug rather than a leftover.
+
+### What the rows are actually made of
+
+Measured, not guessed — a QML probe against the live library:
+
+| | Kirigami stock | Nexus |
+|---|---|---|
+| corner radius | **5** | ~16–20 |
+| row minimum height | **36** (`gridUnit * 2`) | ~64–72 |
+| padding inside a row | **6** (`mediumSpacing`) | ~12–16 |
+| gap between rows | **4** (`smallSpacing`) | ~8 |
+| selected-row colour | `tintWithAlpha(bg, highlight, 0.3)` | the same 30% accent tint |
+
+That last line is the happy accident: **the colour was already correct.** KDE and
+Caelestia use the same Material recipe for a selected row. The whole visible gap
+was size and shape — four numbers.
+
+### Why this needed a package rebuild, and why nothing smaller would do
+
+Three separate dead ends, each verified rather than assumed:
+
+1. **The properties are read-only.** Assigning `Kirigami.Units.cornerRadius`
+   throws `TypeError: Cannot assign to read-only property`. There is no setter
+   reachable from QML, no config file, and no environment variable — the values
+   are constructor constants in `src/platform/units.cpp`.
+2. **The delegate files on disk are decoys.** Both `org.kde.kirigami` and
+   `org.kde.kirigamiaddons.delegates` carry `prefer :/qt/qml/...` in their
+   `qmldir`, so the loaded copy lives inside the `.so`. Editing
+   `RoundedItemDelegate.qml` changes nothing and reports nothing.
+3. **System Settings ships no QML at all.** `pacman -Ql systemsettings` returns
+   zero `.qml` files; the entire interface is compiled into the binary. There is
+   nothing to patch even in principle.
+
+**Checked before building, because it would have wasted the whole effort:**
+Kirigami hands `Units` construction to a platform plugin when one is present, and
+three are installed (`org.kde.desktop`, `org.kde.breeze`, `KirigamiPlasmaStyle`).
+Probing under each one returned `cornerRadius = 5` every time, so no plugin
+overrides these and the base constructor really is the thing that runs.
+
+### The patch adds a lever, not an opinion
+
+`packages/kirigami-luminos/` holds Arch's stock PKGBUILD plus
+`kirigami-luminos-units.patch`, which replaces five constructor constants with
+`getenv`-with-fallback. **No default changes.** With the environment unset the
+package is byte-for-byte stock behaviour, which is the property that makes this
+safe: the panic button is deleting a line, not reinstalling anything.
+
+```
+KIRIGAMI_CORNER_RADIUS=16     # stock 5
+KIRIGAMI_MEDIUM_SPACING=12    # stock 6
+KIRIGAMI_SMALL_SPACING=6      # stock 4
+```
+
+Set in `/etc/environment` (the file this box already uses for `KWIN_DRM_DEVICES`
+and `QT_LOGGING_RULES`). `KIRIGAMI_GRID_UNIT` and `KIRIGAMI_LARGE_SPACING` also
+exist and are deliberately **left unset** — `gridUnit` is the base unit for every
+Kirigami layout and changing it scales the entire desktop like a zoom control.
+
+**Proven, three ways:** the knob moves the value (`5 → 16 → 20`); a garbage value
+(`banana`) falls back to 5, so a typo cannot brick the desktop; and the look
+reaches apps we never touched — `kinfocenter` was launched cold and showed the
+same pill-shaped selection and taller rows as System Settings.
+
+### What this costs
+
+**Every KDE app changes at once.** There is no per-app version of this and that
+is not a limitation to fix — it is the point, and Shawn asked for it in those
+words: *"it either every window changes (originally what i wanted) or every thing
+breaks."*
+
+**It is fragile against upgrades.** `pkgrel=1.1` sorts above the repo's `1`, so a
+routine `pacman -Syu` will not revert it. A **version** bump to 6.28.1 or 6.29
+will, silently, and the desktop will simply look stock again one morning. There
+is no pacman hook for this yet.
+
+**Haste decision.** The numbers 16/12/6 were chosen by eye against a screenshot,
+not derived from `caelestia-design-spec.json`, whose real scale is 4/8/12/16/28.
+What smart looks like: have `luminos-kde-caelestia-theme` read the spec and write
+`/etc/environment` so the tokens come from the one source of truth instead of my
+judgement. Not done, because the point of tonight was to find out whether the
+approach reads right at all.
+
+**Still broken, on purpose:** rows are still **single-line** — the grey subtitle
+under Nexus's titles needs System Settings itself rebuilt, since it never passes
+that text to the delegate. Icons are still full-colour Papirus rather than
+monochrome glyphs in tinted circles; the circle lives in kirigami-addons and the
+icons are an icon-theme decision that collides with the Yaru work in BUG-090.
+Both are separate jobs, and the icons are now the largest remaining difference.
