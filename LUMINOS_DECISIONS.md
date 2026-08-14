@@ -3957,9 +3957,10 @@ had, so this costs nothing new. **Two windows were deleted and none added.**
   a permanent 0 here, so it is left out rather than carried as dead code that looks like it works.
 
 **The power buttons are drawn but not wired, on Shawn's explicit instruction.** They run
-`Config.session.commands.{logout,shutdown,hibernate,reboot}`, whose defaults are Hyprland
-dispatches — under Plasma they will do nothing at all, silently, in the usual way. Replacing them
-with `loginctl` / `qdbus` calls is the follow-up.
+`Config.session.commands.{logout,shutdown,hibernate,reboot}`. ~~whose defaults are Hyprland
+dispatches — under Plasma they will do nothing at all, silently, in the usual way~~ — **that was
+wrong, and I never checked it before writing it down. See the third follow-up below for what the
+defaults actually are.** Replacing them is the follow-up.
 
 **Follow-up the same hour — the drawer got stuck open, and the reason is worth keeping.** I first
 left the sidebar out of the "pointer left, close it" handler, reasoning that Meta+N opens it with the
@@ -4042,6 +4043,72 @@ where we do four", and both times copying was less work than fixing our version.
 screen set on BlobGroup`. `BlobGroup` is a plain `QObject`, not an `Item`, so Caelestia's per-screen
 config cannot resolve which screen it belongs to and falls back to the global value. The same warning
 already appeared for our `mask` regions.
+
+#### Third follow-up, 2026-08-13 — the power buttons, and a correction I owe the record
+
+Shawn: *"now wire the power button and all. its simple right ?"* It was — three lines of JSON, no QML
+touched. But finding that out first **overturned something this document already asserted**, so the
+correction comes before the change.
+
+**What I wrote earlier was wrong.** Twice above, this file and `LUMINOS_STATUS.md` said the buttons
+run *"Hyprland dispatches that will silently do nothing under Plasma"*. I never checked. The actual
+defaults are in `plugin/src/Caelestia/Config/sessionconfig.hpp:29-32` and they are plain tokens —
+`logout`, `poweroff`, `hibernate`, `reboot`. `session/Content.qml` calls
+`SessionManager.exec(command)` **before** falling back to `Quickshell.execDetached`, and
+`SessionManager::exec` (`plugin/src/Caelestia/Services/sessionmanager.cpp:55-86`) matches those tokens
+by name and calls **logind over D-Bus** — `org.freedesktop.login1.Manager` `PowerOff` / `Reboot` /
+`Suspend` / `Hibernate`, and `org.freedesktop.login1.Session` `Terminate` for logout. None of that
+involves a compositor. **Three of the four buttons already worked.**
+
+*This is the null-is-false reflex firing on the wrong target.* Most breakage in this port really is a
+Hyprland call returning null, so I reached for that explanation without reading the code. It is
+exactly the habit `feedback: prove it works — run the tool, don't assert it` exists to stop, applied
+to a negative claim instead of a positive one. **An unverified "this is broken" costs as much as an
+unverified "this works" — it sends the next person to fix something that is fine.**
+
+**They were changed anyway, for a reason that survives the correction.** logind's `PowerOff` and
+session `Terminate` end the session *without ever asking applications to save*. Plasma's
+`org.kde.Shutdown` runs the logout protocol first — apps get their chance, session state is recorded —
+and only then powers off. That is DECISION 68's own migration rule: let Plasma do the job it already
+does well. So:
+
+```jsonc
+// ~/.config/caelestia/shell.json
+"session": {
+  "commands": {
+    "logout":    ["qdbus6", "org.kde.Shutdown", "/Shutdown", "logout"],
+    "shutdown":  ["qdbus6", "org.kde.Shutdown", "/Shutdown", "logoutAndShutdown"],
+    "reboot":    ["qdbus6", "org.kde.Shutdown", "/Shutdown", "logoutAndReboot"],
+    "hibernate": ["systemctl", "suspend"]
+  },
+  "icons": { "hibernate": "bedtime" }
+}
+```
+
+**No QML was patched.** These are config keys upstream already exposes, which is the cheapest possible
+form of this change and the one that survives a `caelestia-shell` upgrade untouched. Backup of the
+previous file: `~/.config/caelestia/shell.json.bak-prepower`.
+
+**The fourth button could never have worked, and that is physics, not configuration.** Swap on this
+machine is **zram only** (`/dev/zram0`, 8 GB) with `/sys/power/resume` reading `0:0` — there is no
+disk to write the image to, and you cannot hibernate into compressed RAM. logind agrees:
+`CanHibernate` returns `"na"`. Caelestia was not silent about it either — `SessionManager::hibernate`
+checks `CanHibernate` and raises a toast reading *"Hibernate failed / Enable hibernation to use this
+feature."* So the button is **repointed at suspend**, with its icon changed to `bedtime`, because a
+sleep button is what belongs in that slot on this hardware. (`["systemctl", "suspend"]` is not a
+subprocess: `exec` aliases a two-element `systemctl`/`loginctl` command to the raw D-Bus call.)
+
+**No confirmation dialog, deliberately.** `org.kde.Shutdown` acts immediately; `org.kde.LogoutPrompt`
+(`promptLogout` / `promptShutDown` / `promptReboot`) is on the bus if that is ever wanted. The
+argument against it: you have to drag this panel open and hit a specific icon, so the menu *is* the
+confirmation, and a second Plasma dialog on top of it defeats the point. One word per line to change
+if Shawn disagrees.
+
+**How far this was verified, honestly.** The icon changing to a crescent moon on screen proves the
+shell read the new `session` block — commands and icons come from the same block, so the commands
+loaded too. `qdbus6 org.kde.Shutdown /Shutdown saveSession` returned 0, proving the service, the
+binary and the argument form all work. **The shutdown, reboot and logout buttons themselves are
+untested and will stay that way** — the only way to test them is to end the session.
 
 ---
 

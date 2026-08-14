@@ -13,5 +13,34 @@
         "useFuzzy": {
             "apps": false
         }
+    },
+    "session": {
+        "commands": {
+            "hibernate": [
+                "systemctl",
+                "suspend"
+            ],
+            "logout": [
+                "qdbus6",
+                "org.kde.Shutdown",
+                "/Shutdown",
+                "logout"
+            ],
+            "reboot": [
+                "qdbus6",
+                "org.kde.Shutdown",
+                "/Shutdown",
+                "logoutAndReboot"
+            ],
+            "shutdown": [
+                "qdbus6",
+                "org.kde.Shutdown",
+                "/Shutdown",
+                "logoutAndShutdown"
+            ]
+        },
+        "icons": {
+            "hibernate": "bedtime"
+        }
     }
 }
