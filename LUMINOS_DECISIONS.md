@@ -4155,3 +4155,70 @@ the lightest thing that works and it was verified by re-grepping the tree to zer
 looks like: the name should never have been in a prompt string at all — the greeting prompt should
 take a caller-supplied identity, and `PROMPTS_DIR` should be config rather than an absolute path
 under one user's home.
+
+---
+
+## DECISION 70
+
+**The HIVE window keeps the face; OpenClaw becomes the brain.**
+*[CHANGE: claude-code | 2026-08-13]*
+
+Every HIVE chat now runs through `openclaw agent` by default. `HIVE_BACKEND=local`
+restores the old behaviour, and picking a chip still uses the legacy path.
+
+**Why now.** The legacy path has not worked since BUG-097 — `llama-server` is
+missing five shared libraries (`libllama.so.0`, `libggml.so.0`,
+`libggml-cpu.so.0`, `libllama-common.so.0`, `libmtmd.so.0`), so `SWAP FAILED:
+nexus (exit 1)` and the window renders an empty bubble. Verified again today by
+running `hive-start-model.sh nexus` directly. So this is not a preference over a
+working system; **OpenClaw is currently the only backend that answers.**
+
+**What it buys, measured today:**
+
+| | result |
+|---|---|
+| Plain answer, warm | **7.3 s** |
+| Cold — units stopped, model unloaded | **16 s** end to end |
+| Session memory across separate HTTP requests | works — the agent recalled a number from the previous turn with no history replayed |
+| Tools | works — `read` returned the contents of a file, and a directory listing came back with real mtimes |
+
+Session state is the real win. OpenClaw keeps conversation context server-side
+keyed on `session_key`, so the daemon stopped replaying history. `HiveChat.qml`
+now sends `session_id: currentConversationId`, which makes **New Chat** start a
+genuinely new agent session — without it the sidebar would show an empty
+conversation while the agent still remembered the previous one.
+
+**Services start on demand, deliberately.** `jobhunt-llm` and `jobhunt-toolproxy`
+stay stopped between uses so the discrete GPU can enter runtime suspend.
+`_ensure_openclaw_backend()` starts them on the first message and polls the
+**ports**, not `systemctl is-active` — a unit reports active while llama.cpp is
+still 15 s into loading and not yet accepting connections.
+
+**Three traps found by testing rather than by reading:**
+
+1. **`HiveChat.qml` reads `response.content`, not `response.response`.** The
+   first version returned `response` and looked perfect under `curl` while
+   rendering an **empty bubble** in the actual window. The daemon's contract is
+   `content` + `agent` + `thinking_time_ms`.
+2. **The QML shows `response.error` and returns without rendering the body**, so
+   an error payload must not carry both — the useful instructions get discarded.
+3. **`NO_REPLY` is an OpenClaw sentinel meaning "stay silent"**, intended to be
+   swallowed by a messaging channel. There is no channel here, so it arrived as
+   literal reply text. Now translated in `_clean_openclaw_reply()`.
+
+**Also completed the OpenClaw workspace bootstrap.** `BOOTSTRAP.md` made the
+agent open every fresh session with "Who am I? Who are you?" instead of
+answering. `IDENTITY.md` is now Nexus with the machine's constraints written in,
+`USER.md` carries working preferences and deliberately **no name**, and
+`BOOTSTRAP.md` is deleted as its own instructions direct.
+
+**Haste decision.** The turn shells out to the `openclaw` CLI once per message
+rather than holding a gateway WebSocket open. It costs a process spawn per turn
+and it cannot stream tokens, so the window waits ~7 s and then shows the whole
+reply at once. What smart looks like: speak the gateway protocol on 18789
+directly and stream deltas into the bubble. Not done, because the CLI path was
+already tested and the streaming rewrite touches the QML rendering loop.
+
+**Still broken, on purpose:** BUG-097 is not fixed. The chips are dead until
+`llama-server`'s libraries are rebuilt, and they will fail with an empty bubble
+rather than a message, because that failure lives in the legacy path.

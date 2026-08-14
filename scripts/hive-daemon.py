@@ -51,6 +51,31 @@ GREETING_CACHE_PATH = os.path.expanduser("~/.cache/luminos/hive-greeting.txt")
 # drops the name entirely rather than greeting an empty string.
 USER_NAME = os.environ.get("LUMINOS_USER_NAME", "").strip()
 
+# ── OpenClaw backend ──────────────────────────────────────────────────────────
+# [CHANGE: claude-code | 2026-08-13] DECISION 70. The HIVE window keeps the UI
+# and hands the actual turn to OpenClaw, which brings a real agent loop, tools
+# (read/edit/exec), skills and persistent sessions that this daemon does not have
+# and should not reimplement.
+#
+# HIVE_BACKEND=openclaw (default) → every chat goes through `openclaw agent`.
+# HIVE_BACKEND=local              → the original Nexus/Bolt/Nova path.
+# The legacy path is NOT deleted: it is the only thing that answers when the
+# gateway is down, and it is what the chips still select.
+OPENCLAW_BIN = os.path.expanduser("~/.npm-global/bin/openclaw")
+OPENCLAW_AGENT = os.environ.get("LUMINOS_OPENCLAW_AGENT", "main")
+HIVE_BACKEND = os.environ.get("HIVE_BACKEND", "openclaw").strip().lower()
+
+# OpenClaw's local model path is two services deep: the agent talks to the
+# tool-call proxy on 8082, which talks to llama.cpp on 8081. Pointing it at 8081
+# directly works for plain chat and then silently breaks every tool call.
+OPENCLAW_UNITS = ("jobhunt-llm.service", "jobhunt-toolproxy.service")
+OPENCLAW_PORTS = (8081, 8082)
+
+# Measured 2026-08-13: a real question answered in 9 s on the 4B local model,
+# including OpenClaw's ~20k-token system prompt. 180 s is deliberate headroom for
+# a cold model load (~15 s) plus a multi-step tool turn, not an expected latency.
+OPENCLAW_TIMEOUT = int(os.environ.get("LUMINOS_OPENCLAW_TIMEOUT", "180"))
+
 ALLOWED_MODELS = {"nexus", "bolt", "nova", "web"}
 
 # Chip name → model alias
@@ -547,6 +572,138 @@ def _strip_route_tags(text: str) -> str:
     return ROUTE_TAG_RE.sub("", text).strip()
 
 
+# ── OpenClaw backend ──────────────────────────────────────────────────────────
+# [CHANGE: claude-code | 2026-08-13] DECISION 70.
+
+def _port_open(port: int) -> bool:
+    """True if something is listening on 127.0.0.1:<port>.
+
+    Deliberately a real connect() and not a `pgrep` or a systemd `is-active`
+    check. A unit can be 'active' while llama.cpp is still 15 s into loading a
+    model and not yet accepting connections, and `pgrep -f` matches this
+    daemon's own command line when the pattern appears in it.
+    """
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.4)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _ensure_openclaw_backend(wait_s: int = 90) -> tuple[bool, str]:
+    """Bring up the model server and tool proxy OpenClaw's local model needs.
+
+    These units are stopped between jobhunt runs on purpose, so that the
+    discrete GPU can enter runtime suspend instead of being held awake by a
+    resident model. Starting them on demand keeps that property: the GPU only
+    wakes when someone actually types something.
+
+    Returns (ok, detail). Never raises — a failure here must produce a message
+    in the chat window, not a 500.
+    """
+    missing = [p for p in OPENCLAW_PORTS if not _port_open(p)]
+    if not missing:
+        return True, "already up"
+
+    logger.info("OpenClaw backend: ports %s down, starting %s", missing, OPENCLAW_UNITS)
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "start", *OPENCLAW_UNITS],
+            check=True, capture_output=True, timeout=30,
+        )
+    except subprocess.CalledProcessError as e:
+        return False, f"systemctl start failed: {e.stderr.decode('utf-8', 'replace').strip()}"
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return False, f"systemctl start failed: {e}"
+
+    # Poll the ports rather than sleeping a fixed amount. A warm model answers in
+    # about a second; a cold one takes ~15 s.
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        if all(_port_open(p) for p in OPENCLAW_PORTS):
+            return True, "started"
+        time.sleep(0.5)
+
+    still = [p for p in OPENCLAW_PORTS if not _port_open(p)]
+    return False, f"started the units but port(s) {still} never opened within {wait_s}s"
+
+
+def _clean_openclaw_reply(text: str) -> str:
+    """Turn OpenClaw's control sentinels into something a chat window can show.
+
+    `NO_REPLY` is OpenClaw's marker for "produce no message" — it exists so an
+    agent watching a group chat can stay silent. On a messaging channel it is
+    swallowed. Here there is no channel, so it arrives as the literal reply text
+    and would render as the word NO_REPLY in the chat bubble. Observed 2026-08-13
+    on the local 4B model.
+    """
+    stripped = text.strip()
+    if stripped.upper().replace("-", "_") == "NO_REPLY":
+        return "(no reply — the agent decided this needed no answer)"
+    return stripped
+
+
+def _call_openclaw(user_message: str, session_key: str) -> tuple[str | None, str | None]:
+    """Run one agent turn through OpenClaw. Returns (reply, error).
+
+    The message goes in on STDIN via --message-file /dev/stdin rather than as an
+    argv string, so a message containing quotes, newlines or a leading dash
+    cannot be reinterpreted as an option or mangled by the shell. No shell is
+    involved at all here — this is an argv list, not a command line.
+    """
+    if not os.path.exists(OPENCLAW_BIN):
+        return None, f"openclaw not found at {OPENCLAW_BIN}"
+
+    cmd = [
+        OPENCLAW_BIN, "agent",
+        "--agent", OPENCLAW_AGENT,
+        "--session-key", session_key,
+        "--message-file", "/dev/stdin",
+        "--json",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=user_message.encode("utf-8"),
+            capture_output=True,
+            timeout=OPENCLAW_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"OpenClaw did not answer within {OPENCLAW_TIMEOUT}s"
+    except OSError as e:
+        return None, f"could not run openclaw: {e}"
+
+    stdout = proc.stdout.decode("utf-8", "replace").strip()
+    stderr = proc.stderr.decode("utf-8", "replace").strip()
+
+    if not stdout:
+        # OpenClaw reports gateway and provider failures on stderr with a zero-ish
+        # exit, so an empty stdout is the real signal, not the return code.
+        return None, stderr.splitlines()[-1] if stderr else "OpenClaw returned nothing"
+
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None, f"OpenClaw returned non-JSON: {stdout[:200]}"
+
+    if payload.get("status") != "ok":
+        return None, f"OpenClaw status={payload.get('status')}: {payload.get('summary', '')}"
+
+    result = payload.get("result") or {}
+    payloads = result.get("payloads") or []
+    for entry in payloads:
+        text = (entry or {}).get("text")
+        if text and text.strip():
+            return _clean_openclaw_reply(text), None
+
+    # Backup path. payloads is the documented surface, but meta carries the same
+    # string and has been present on every run observed.
+    meta_text = ((result.get("meta") or {}).get("finalAssistantVisibleText") or "").strip()
+    if meta_text:
+        return _clean_openclaw_reply(meta_text), None
+
+    return None, "OpenClaw returned an empty reply"
+
+
 # ── Request Handler ───────────────────────────────────────────────────────────
 
 class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
@@ -778,6 +935,71 @@ class HiveDaemonHandler(http.server.BaseHTTPRequestHandler):
                     os.utime(LAST_REQUEST_FILE, None)
             except OSError:
                 pass
+
+            # ── OpenClaw intercept ─────────────────────────────────────────────
+            # [CHANGE: claude-code | 2026-08-13] DECISION 70. This runs BEFORE the
+            # web intercept and before any _swap_model call, because OpenClaw has
+            # its own web and tool access and swapping a HIVE model first would
+            # load a second model onto a 6 GB card for nothing.
+            #
+            # An explicit chip means the user deliberately picked Nexus/Bolt/Nova
+            # or Web, so it is honoured and the legacy path runs. OpenClaw is the
+            # default, not a hijack.
+            if HIVE_BACKEND == "openclaw" and not chip:
+                _state.set_stage("openclaw_starting")
+                ok, detail = _ensure_openclaw_backend()
+                if not ok:
+                    logger.error("OpenClaw backend unavailable: %s", detail)
+                    # NOTE: the key is "content", not "response". HiveChat.qml
+                    # reads response.content and silently renders an empty bubble
+                    # for anything else — it looks like the model said nothing.
+                    # Also: do NOT set "error" here. The QML shows the error and
+                    # returns without rendering the body, which would throw away
+                    # the instructions below.
+                    self._send_json(200, {
+                        "content": (
+                            "OpenClaw's backend is not answering.\n\n"
+                            f"    {detail}\n\n"
+                            "Check it with:\n\n"
+                            "    systemctl --user status jobhunt-llm jobhunt-toolproxy\n"
+                            "    journalctl --user -u jobhunt-llm -n 40\n\n"
+                            "Or pick a chip (Code, Learn, Write, System) to use the "
+                            "built-in models instead — those do not need OpenClaw."
+                        ),
+                        "agent": "OpenClaw",
+                        "thinking_time_ms": 0,
+                    })
+                    return
+
+                # One OpenClaw session per HIVE conversation, so the agent keeps
+                # its own context and this daemon does not have to replay history.
+                # That is the point of using it — history is the agent's job now.
+                session_id = str(data.get("session_id") or "main")
+                session_key = f"agent:{OPENCLAW_AGENT}:hive-{session_id}"
+
+                _state.set_stage("generating_openclaw")
+                reply, oc_err = _call_openclaw(user_message, session_key)
+                t_end = time.monotonic()
+
+                if oc_err:
+                    logger.error("OpenClaw turn failed: %s", oc_err)
+                    self._send_json(200, {
+                        "content": f"OpenClaw could not answer.\n\n    {oc_err}",
+                        "agent": "OpenClaw",
+                        "thinking_time_ms": int((t_end - t_start) * 1000),
+                    })
+                    return
+
+                logger.info("OpenClaw answered in %.1fs (session %s)",
+                            t_end - t_start, session_key)
+                _state.set_stage("idle")
+                self._send_json(200, {
+                    "content": reply,
+                    "agent": "OpenClaw",
+                    "routed": False,
+                    "thinking_time_ms": int((t_end - t_start) * 1000),
+                })
+                return
 
             # ── Early web intercept — no model needed ──────────────────────────
             # Check web intent BEFORE any _swap_model calls so web search works

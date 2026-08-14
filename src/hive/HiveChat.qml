@@ -1257,10 +1257,20 @@ Window {
             }
         }
 
+        // [CHANGE: claude-code | 2026-08-13] session_id added for the OpenClaw
+        // backend (DECISION 70). OpenClaw keeps its own conversation state
+        // server-side, keyed on this id, so "New Chat" has to start a new agent
+        // session too — otherwise the sidebar shows an empty conversation while
+        // the agent still remembers everything from the previous one.
+        //
+        // `history` is still sent because the legacy Nexus/Bolt/Nova path (used
+        // whenever a chip is active) is stateless and replays it. OpenClaw
+        // ignores it by design.
         var payload = {
             "message": userMsg,
             "chip": activeChip !== "" ? activeChip : null,
-            "history": history
+            "history": history,
+            "session_id": currentConversationId
         };
 
         xhr.send(JSON.stringify(payload));
