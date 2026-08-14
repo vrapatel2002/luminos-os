@@ -33,6 +33,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Caelestia.Blobs
 import Caelestia.Config
 import qs.components
 import qs.services
@@ -715,6 +716,132 @@ ShellRoot {
                     }
                 }
 
+                // ── the backdrop: ONE shape, not four ────────────────────────
+                // [CHANGE: claude-code | 2026-08-13] Was two separate
+                // `StyledRect`s (one behind the OSD, one behind the session
+                // panel) plus nothing at all behind the notifications and the
+                // sidebar, which is why the three layers came out as three
+                // floating pills with notches between them.
+                //
+                // Upstream never draws a rect per panel. Every background goes
+                // into one signed-distance field - a `BlobGroup` - and each
+                // panel contributes a `BlobRect` to it. The field is evaluated
+                // with a SMOOTH minimum instead of a hard one, so two shapes
+                // that touch grow a fillet between them and read as a single
+                // surface. That is the whole trick; there is no code that
+                // "joins" anything, the shapes just stop being separate.
+                //
+                // This is copied from drawers/ContentWindow.qml:149-249, minus
+                // two things that do not exist here:
+                //
+                //   - `BlobInvertedRect`, upstream's rounded screen border.
+                //     It is what swallows the outer corners so the panels look
+                //     welded to the frame. We have no screen border (DECISION
+                //     68 still lists it as not built), so the group ends in
+                //     rounded corners at the right edge instead - the same
+                //     shape the old rects had, so nothing gets worse.
+                //   - the `layer.enabled` + `MultiEffect` drop shadow. That is
+                //     a full-screen offscreen texture redrawn on every frame of
+                //     every panel animation, on a permanently-mapped overlay.
+                //     Not worth it for a shadow; the merge does not need it.
+                //
+                // The `+ bar.implicitWidth` / `+ borderThickness` offsets in
+                // upstream's version are both 0 for us: this window contains
+                // neither, and the panels are direct children, so their x/y are
+                // already in this window's coordinates.
+                //
+                // Upstream writes these four as an inline `component PanelBg`.
+                // Inline components have to be declared at the top of the
+                // document, where the ids inside this Variants delegate are not
+                // in scope, so they are written out longhand here.
+                BlobGroup {
+                    id: blobGroup
+
+                    color: Colours.tPalette.m3surface
+                    smoothing: Config.border.smoothing
+                }
+
+                // `deformScale` is the wobble: the blob overshoots when the
+                // panel moves and settles back, like jelly. The matching
+                // `transform: Matrix4x4 { matrix: <bg>.deformMatrix }` on each
+                // panel below squashes the CONTENT the same way - without it
+                // the backdrop would wobble and the text inside would sit dead
+                // still, which looks worse than no wobble at all. The per-panel
+                // amounts are upstream's.
+                // `visible` gate, NOT copied from upstream - upstream needs no
+                // such thing and this is why. A closed panel does not shrink to
+                // nothing: it keeps its width and slides off the right of the
+                // screen, so its blob leaves a 2px sliver hanging over the
+                // edge. Upstream's own comment on the border blob calls it
+                // "bulge from closed drawers" and thickens the border by 50px
+                // to swallow it. We have no border to swallow anything with, so
+                // a fully-closed panel drops out of the field instead.
+                //
+                // Measured before the gate: a 2px dark column at x=2878..2879
+                // running y=400..1380 - the session panel's exact band. The old
+                // StyledRects never showed it because they carried
+                // `opacity: session.opacity`, which is 0 when closed.
+                //
+                // `offsetScale` is 1 closed and 0 open, so this only bites at
+                // the very end of the animation - nothing pops.
+                BlobRect {
+                    id: osdBg
+
+                    visible: osd.offsetScale < 1
+                    group: blobGroup
+                    x: osdWrapper.x + osd.x
+                    y: osdWrapper.y
+                    implicitWidth: osd.width
+                    implicitHeight: osdWrapper.height
+                    radius: Tokens.rounding.extraLarge
+                    deformScale: (0.25 * Config.appearance.deformScale) / 10000
+                }
+
+                BlobRect {
+                    id: sessionBg
+
+                    visible: session.offsetScale < 1
+                    group: blobGroup
+                    x: sessionWrapper.x + session.x
+                    y: sessionWrapper.y
+                    implicitWidth: session.width
+                    implicitHeight: sessionWrapper.height
+                    radius: Tokens.rounding.extraLarge
+                    deformScale: (0.2 * Config.appearance.deformScale) / 10000
+                }
+
+                BlobRect {
+                    id: notifsBg
+
+                    visible: notifPanel.height > 0
+                    group: blobGroup
+                    x: notifPanel.x
+                    y: notifPanel.y
+                    implicitWidth: notifPanel.width
+                    implicitHeight: notifPanel.height
+                    radius: Tokens.rounding.extraLarge
+                    deformScale: (0.15 * Config.appearance.deformScale) / 10000
+                }
+
+                BlobRect {
+                    id: sidebarBg
+
+                    visible: sidebarDrawer.offsetScale < 1
+                    group: blobGroup
+                    x: sidebarDrawer.x
+                    y: sidebarDrawer.y
+                    implicitWidth: sidebarDrawer.width
+                    // Upstream's line. Undoing the vertical deform here keeps
+                    // the blob's BOTTOM where the panel's bottom is while the
+                    // middle still wobbles; the +2 covers the seam.
+                    implicitHeight: sidebarDrawer.height * (1 / sidebarBg.rawDeformMatrix.m22) + 2
+                    radius: Tokens.rounding.extraLarge
+                    // Barely any wobble on this one, upstream's value: it is
+                    // the tallest panel, and the same angular overshoot moves
+                    // its far end much further.
+                    deformScale: (0.03 * Config.appearance.deformScale) / 10000
+                }
+
                 // ── LAYER 1: volume / brightness ─────────────────────────────
                 // [CHANGE: claude-code | 2026-08-13] Moved in here from a
                 // window of its own. The wrapper Item and the margin chain are
@@ -750,23 +877,17 @@ ShellRoot {
                     implicitWidth: osd.implicitWidth * (1 - osd.offsetScale)
                     implicitHeight: osd.implicitHeight
 
-                    // Upstream paints this backdrop with the sheet's blob,
-                    // which we do not have; osd/Content.qml draws no background
-                    // of its own (checked - unlike sidebar/Content.qml, which
-                    // does, and therefore needs nothing here). A rounded rect is
-                    // the honest equivalent, exactly as for the launcher above.
-                    StyledRect {
-                        anchors.fill: osd
-                        radius: Tokens.rounding.extraLarge
-                        color: Colours.tPalette.m3surface
-                        opacity: osd.opacity
-                    }
+                    // The backdrop is `osdBg` above now, not a rect in here.
 
                     Osd.Wrapper {
                         id: osd
 
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
+
+                        transform: Matrix4x4 {
+                            matrix: osdBg.deformMatrix
+                        }
 
                         screen: scope.modelData
                         screenState: scope.screenState
@@ -813,19 +934,17 @@ ShellRoot {
                     implicitWidth: session.implicitWidth * (1 - session.offsetScale)
                     implicitHeight: session.implicitHeight
 
-                    // Same reason as the OSD's backdrop above.
-                    StyledRect {
-                        anchors.fill: session
-                        radius: Tokens.rounding.extraLarge
-                        color: Colours.tPalette.m3surface
-                        opacity: session.opacity
-                    }
+                    // The backdrop is `sessionBg` above now.
 
                     Session.Wrapper {
                         id: session
 
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
+
+                        transform: Matrix4x4 {
+                            matrix: sessionBg.deformMatrix
+                        }
 
                         screenState: scope.screenState
                         sidebarVisible: sidebarDrawer.visible
@@ -857,6 +976,10 @@ ShellRoot {
                     osdPanel: osdWrapper
                     sessionPanel: sessionWrapper
                     utilitiesPanel: utilitiesStandin
+
+                    transform: Matrix4x4 {
+                        matrix: notifsBg.deformMatrix
+                    }
                 }
 
                 // ── LAYER 3: the notification LIST, as a right-edge drawer ───
@@ -886,6 +1009,10 @@ ShellRoot {
                     anchors.bottom: parent.bottom
                     anchors.right: parent.right
                     anchors.topMargin: -notifPanel.anchors.topMargin
+
+                    transform: Matrix4x4 {
+                        matrix: sidebarBg.deformMatrix
+                    }
                 }
 
                 // ── the gesture: press at the edge and drag inward ───────────

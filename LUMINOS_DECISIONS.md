@@ -3800,7 +3800,9 @@ pointer was returned to within 3 px of where Shawn left it.
 Utilities, the rounded screen border, and bar popouts. The dashboard has no bar button
 (upstream does not give it one) — shortcut and hover only. *(The sidebar — the notification list
 drawer — was built on 2026-08-13; see the step-2 amendment below. The session menu was built the
-same day; see the three-layer amendment. **Its buttons are drawn but not wired.**)*
+same day; see the three-layer amendment. **Its buttons are drawn but not wired.** The blob
+backgrounds arrived the same day, so the rounded screen border is now the only missing piece of
+upstream's `ContentWindow` — and it is one `BlobInvertedRect` in a group that already exists.)*
 
 #### Amendment, 2026-08-13 — notifications move from Plasma to Caelestia (step 1 of 2)
 
@@ -3986,6 +3988,60 @@ neither is a signal about the edit. This is the `scripts lie about success` patt
 direction: a tool that fails silently is as useless as one that succeeds falsely. The only honest
 check here is restarting the shell and reading `~/.local/state/luminos/caelestia-plasma/shell.log`
 for `Configuration Loaded`, then taking a screenshot.
+
+#### Second follow-up, 2026-08-13 — the three layers are ONE surface now (blobs)
+
+With all three layers out, they came up as **three separate floating pills with notches between
+them**. Shawn: *"can you merge all of them how were they like in original caelestia ?"*
+
+**The cause was that we were drawing the backgrounds ourselves.** Each panel got its own
+`StyledRect` with `radius: Tokens.rounding.extraLarge`, so three rects meant three pills — and the
+notifications and the sidebar got no backdrop at all, because their `Content.qml` files draw inner
+cards and rely on something behind them.
+
+Upstream never draws a rect per panel. Every background goes into **one signed-distance field** — a
+`BlobGroup` from the `Caelestia.Blobs` QML module — and each panel contributes a `BlobRect` to it.
+The field is evaluated with a **smooth minimum** instead of a hard one, so two shapes that merely
+touch grow a fillet between them and read as a single surface. There is no code that joins anything;
+the shapes stop being separate. Copied from `drawers/ContentWindow.qml:149-249`, including the
+per-panel `deformScale` wobble and the matching `transform: Matrix4x4 { matrix: <bg>.deformMatrix }`
+on each panel's content — **that pairing is not optional**, because a backdrop that wobbles while the
+text inside it sits dead still looks worse than no wobble at all.
+
+**The decisive fact, checked before writing a line:** `Caelestia.Blobs` is *installed*
+(`/usr/lib/qt6/qml/Caelestia/Blobs/`), and `Config.border.smoothing` and
+`Config.appearance.deformScale` are real properties of the config plugin we already import. So this
+was copying, not inventing — which is the whole reason it was worth doing rather than approximating
+the joins by hand.
+
+**Two things from upstream deliberately left out:**
+
+- **`BlobInvertedRect`, the rounded screen border.** It is what swallows the outer corners so the
+  panels look welded to the frame. We have no screen border (still listed as not built below), so
+  our group ends in rounded corners at the right edge — the same shape the old rects had, so nothing
+  is worse than before.
+- **The `layer.enabled` + `MultiEffect` drop shadow.** That is a full-screen offscreen texture
+  redrawn on every frame of every panel animation, on a **permanently mapped** overlay. Not worth it
+  for a shadow; the merge does not need it.
+
+**One line we had to add that upstream does not need, and it is a direct consequence of skipping the
+border.** A closed panel does not shrink to nothing — it keeps its width and slides off the right of
+the screen, so its blob leaves a sliver hanging over the edge. Upstream's own comment on the border
+blob calls this *"bulge from closed drawers"* and thickens the border by 50 px to cover it. With no
+border, the bulge is visible: **measured as a 2 px dark column at x=2878–2879 running y=400–1380,
+which is the session panel's exact band.** The old `StyledRect`s never showed it because they carried
+`opacity: session.opacity`, which is 0 when closed. Fix: `visible: <panel>.offsetScale < 1` on each
+blob, so a fully-closed panel drops out of the field. `offsetScale` is 1 closed and 0 open, so this
+only bites at the very end of the animation and nothing pops.
+
+*The general lesson, which is the same one as the window merge: when a port looks wrong, check what
+upstream draws before deciding how to draw it. Both times the answer was "upstream does one thing
+where we do four", and both times copying was less work than fixing our version.*
+
+**One harmless new warning in the log**, so nobody chases it: `Config.border accessed without a
+screen set on BlobGroup`. `BlobGroup` is a plain `QObject`, not an `Item`, so Caelestia's per-screen
+config cannot resolve which screen it belongs to and falls back to the global value. The same warning
+already appeared for our `mask` regions.
 
 ---
 
