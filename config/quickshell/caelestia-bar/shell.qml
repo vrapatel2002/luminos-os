@@ -954,6 +954,34 @@ ShellRoot {
                         }
                     }
 
+                    // [CHANGE: claude-code | 2026-08-15] BUG-129: the power menu
+                    // opened from the BAR button and then stayed out forever.
+                    //
+                    // The rule above is "leaving closes it, if you have earned
+                    // the right by having been inside". Every way of opening it
+                    // that existed when that was written put the pointer inside:
+                    // the edge drag starts under your finger. The bar button
+                    // does not - it is a different window, so `containsMouse`
+                    // here never goes true, `ownedByPointer` never gets set, and
+                    // the leave that would close it never happens either,
+                    // because you never entered. Nothing was left to close it.
+                    //
+                    // A countdown covers exactly that gap, and nothing else:
+                    // `running` is a BINDING, so moving the pointer onto the
+                    // panel stops and resets it, and moving off starts it again
+                    // from zero. Hover reaches a parent, so this stays true
+                    // while you are on the buttons - which is what makes "keep
+                    // it open while I am looking at it" work for free.
+                    //
+                    // Only the session panel. The notification list next to it
+                    // is something you read, and yanking it away mid-sentence
+                    // would be a worse bug than the one being fixed.
+                    Timer {
+                        interval: 3000
+                        running: scope.screenState.session && !rightEdgeMouse.containsMouse
+                        onTriggered: scope.screenState.session = false
+                    }
+
                     onPositionChanged: event => {
                         const x = event.x;
                         const y = event.y;
@@ -1010,7 +1038,7 @@ ShellRoot {
                         }
                     }
 
-                    // [CHANGE: claude-code | 2026-08-15] BUG-125: the panels
+                    // [CHANGE: claude-code | 2026-08-15] BUG-128: the panels
                     // are CHILDREN of this MouseArea, not siblings after it.
                     // Siblings with equal z are painted and hit-tested in
                     // declaration order, so this area - declared last - sat on

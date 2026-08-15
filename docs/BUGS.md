@@ -204,6 +204,19 @@ Last Updated: 2026-08-08 (BUG-111 FIXED — **the plugin death BUG-100 predicted
 
 ## Fixed Bugs (new)
 
+### BUG-129 — The power menu opened from the bar button and then stayed out forever
+<!-- [CHANGE: claude-code | 2026-08-15] -->
+- Status: **FIXED (2026-08-15) — PROVEN ON SCREEN, both directions.**
+- Severity: Medium (a panel that will not go away is in the way of everything behind it)
+- Component: `config/quickshell/caelestia-bar/shell.qml`, `rightEdgeMouse`
+- Symptom: click the power button on the left bar, the four session options slide out — and nothing ever puts them back. Reported by Shawn immediately after BUG-128 made the panel usable.
+- **Root cause is a rule that was correct for every case that existed when it was written.** The close rule is `onContainsMouseChanged`: leaving closes the panel, *but only if `ownedByPointer`* — the pointer earns the right to close a panel by having been inside it. Every opening route that existed at the time put the pointer inside: the right-edge drag starts under your finger, and the drag handler sets the flag by hand. **The bar button is a different window.** `containsMouse` on this surface never goes true, so the flag is never set — and the leave that would close it never happens either, because there was never an enter. Nothing was left to close it.
+  Note this only became visible *because* BUG-128 was fixed. Before that the button's effect was invisible anyway.
+- Fix: a 3 s `Timer` whose `running` is a **binding** — `screenState.session && !rightEdgeMouse.containsMouse`. Moving onto the panel stops and resets the countdown; moving off starts it again from zero. No new state, no new handler, and the existing leave-closes rule is untouched.
+- **Deliberately session-only.** The notification list next to it is something you *read*; a 3 s timer would yank it away mid-sentence, which is a worse bug than the one being fixed.
+- The load-bearing assumption, verified rather than assumed: **hover reaches a parent**, so `rightEdgeMouse.containsMouse` stays true while the pointer is on the session panel's own buttons — which is what makes "keep it open while I am looking at it" fall out for free. Parked the pointer on the panel for 6 s and it stayed open; moved it away and it closed inside 4 s. Both checked by screenshot.
+- Date Found: 2026-08-15 (reported by Shawn) / Date Fixed: 2026-08-15
+
 ### BUG-128 — Notification toasts, the power menu and the notification list were all unclickable: one invisible mouse area sat on top of every panel
 <!-- [CHANGE: claude-code | 2026-08-15] -->
 - Status: **FIXED (2026-08-15) — PROVEN ON SCREEN with synthetic input, not asserted.**
