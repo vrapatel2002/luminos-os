@@ -30,15 +30,46 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from luminos_moe_offload import moe_cpu_offload, expert_pattern  # noqa: E402
 
 KEEP = int(os.environ.get("LLM_MOE_KEEP", "3"))
+# [CHANGE: claude-code | 2026-08-14] The second model gets its OWN keep count.
+# `keep` is a property of the model file, not of this process: a bigger quant has
+# bigger layers, so the same number buys more VRAM and less RAM. Serving two
+# quants of the same architecture under one number means one of them is wrong.
+# Defaults to KEEP, so single-model setups are unchanged.
+MODEL2 = os.environ.get("LLM_MODEL2", "")
+KEEP2 = int(os.environ.get("LLM_MOE_KEEP2", str(KEEP)))
+
+
+def _as_text(path_model):
+    """path_model arrives from llama-cpp-python as BYTES, not str."""
+    if isinstance(path_model, bytes):
+        return path_model.decode("utf-8", "replace")
+    return path_model
+
+
+def _keep_for(path_model):
+    """How many layers of experts to leave on the card, for THIS model."""
+    path_model = _as_text(path_model)
+    if MODEL2 and os.path.realpath(path_model) == os.path.realpath(MODEL2):
+        return KEEP2
+    return KEEP
+
+
+def _patterns_for(path_model):
+    keep = _keep_for(path_model)
+    pattern = expert_pattern(keep_on_gpu=keep)
+    print(f"[moe] {os.path.basename(_as_text(path_model))}: experts -> system RAM, "
+          f"keeping the first {keep} layers on the card", file=sys.stderr)
+    print(f"[moe] pattern: {pattern}", file=sys.stderr)
+    return (pattern,)
 
 
 def main():
-    pattern = expert_pattern(keep_on_gpu=KEEP)
-    print(f"[moe] experts -> system RAM, keeping the first {KEEP} layers on the card",
-          file=sys.stderr)
-    print(f"[moe] pattern: {pattern}", file=sys.stderr)
+    print(f"[moe] keep={KEEP}" + (f", keep2={KEEP2} for {os.path.basename(MODEL2)}"
+                                  if MODEL2 else ""), file=sys.stderr)
     from llama_cpp.server.__main__ import main as server_main
-    with moe_cpu_offload(patterns=(pattern,)):
+    # A CALLABLE, not a fixed tuple: the server may swap models at runtime and
+    # each one needs its own pattern. Evaluated per load.
+    with moe_cpu_offload(patterns=_patterns_for):
         server_main()
 
 

@@ -209,7 +209,19 @@ def moe_cpu_offload(patterns=(EXPERT_TENSORS,),
 
     from llama_cpp import _internals
 
-    arr, _keepalive = _build_override_array(list(patterns))
+    # [CHANGE: claude-code | 2026-08-14] `patterns` may be a CALLABLE taking the
+    # model path and returning the patterns for that model.
+    #
+    # WHY: llama-cpp-python's server can hold several models and swap between
+    # them, and the right `keep_on_gpu` is a property of the MODEL, not of the
+    # process — a 12.66 GiB quant and a 15.84 GiB quant of the same architecture
+    # want different numbers, because layer size differs by ~25%. With one fixed
+    # value the second model either wastes RAM or fails to allocate. Building the
+    # override array per load costs a few hundred bytes and one regex.
+    _per_model = callable(patterns)
+    if not _per_model:
+        arr, _keepalive = _build_override_array(list(patterns))
+
     orig_model = _internals.LlamaModel.__init__
     orig_ctx = _internals.LlamaContext.__init__
 
@@ -218,8 +230,14 @@ def moe_cpu_offload(patterns=(EXPERT_TENSORS,),
             _note(f"n_gpu_layers {params.n_gpu_layers} -> {n_gpu_layers} "
                   f"(expert override is subtractive; all layers must start on the GPU)")
             params.n_gpu_layers = n_gpu_layers
-        params.tensor_buft_overrides = ctypes.cast(arr, ctypes.c_void_p)
-        self._luminos_override_keepalive = (arr, _keepalive)
+        if _per_model:
+            this_arr, this_keep = _build_override_array(list(patterns(path_model)))
+        else:
+            this_arr, this_keep = arr, _keepalive
+        params.tensor_buft_overrides = ctypes.cast(this_arr, ctypes.c_void_p)
+        # Held on the model object, not in a local: llama.cpp keeps the bare
+        # pointer and walks it during load_tensors, so this must outlive __init__.
+        self._luminos_override_keepalive = (this_arr, this_keep)
         return orig_model(self, path_model=path_model, params=params, verbose=verbose)
 
     def patched_ctx(self, *, model, params, verbose=True):

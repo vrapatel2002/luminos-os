@@ -9,11 +9,58 @@
 #   systemctl --user start jobhunt-llm
 #   systemctl --user stop  jobhunt-llm      <- remember this half
 [Unit]
-Description=Jobhunt local LLM (Qwen3-4B, RTX 4050 via dgpu-exec-v2)
+Description=Jobhunt local LLM (gemma-4-26B-A4B MoE, RTX 4050 via dgpu-exec-v2)
 Documentation=file:///home/shawn/luminos-os/scripts/jobhunt/PLAN.md
 
 [Service]
 Type=simple
+
+# [CHANGE: claude-code | 2026-08-14] DECISION 74 — the MoE is the model now.
+#
+# THIS FILE HAD NO Environment= LINES AT ALL until today, which is why HIVE kept
+# answering as Qwen3-4B: llm-server.sh defaults LLM_MOE to 0. Everything below is
+# the MoE path being turned on, not new machinery.
+#
+# LLM_MOE=1        serve gemma-4-26B-A4B with its expert banks in system RAM
+#                  (DECISION 58). Default model becomes the IQ4_XS quant.
+# LLM_MODEL2       a SECOND model offered alongside the first. Only one is ever
+#                  resident; asking for the other swaps it in. Both show up in
+#                  OpenClaw's model picker via /v1/models.
+# LLM_CTX2         the full quant carries ~3 GB more resident weight, so it gets
+#                  a shorter window rather than failing to load.
+# LLM_MOE_KEEP     how many layers of experts stay on the card. MEASURED, and not
+#                  monotonic — see the table in llm-server.sh before changing it.
+Environment=LLM_MOE=1
+Environment=LLM_CTX=24576
+Environment=LLM_MODEL2=%h/.local/share/luminos/models/hive/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf
+Environment=LLM_ALIAS2=luminos-local-moe
+Environment=LLM_CTX2=4096
+
+# WHY THE MoE IS NOT THE DEFAULT, in llama.cpp's own numbers.
+# [CHANGE: claude-code | 2026-08-14] Measured today, IQ4_XS, mmap off, ctx 24576:
+#
+#   keep  CUDA0 weights   CPU weights   KV wanted        outcome
+#     3      3491 MiB      10208 MiB     2805 MiB        earlyoom SIGTERM
+#     6      4524 MiB       9176 MiB     2805 MiB        earlyoom SIGTERM @ 9507 RSS
+#     8      5212 MiB       8488 MiB     2805 MiB        cudaMalloc failed
+#
+# The two walls close from opposite sides. Every layer moved to the card frees
+# ~344 MiB of RAM and costs ~344 MiB of VRAM, and the card has 6141 MiB total
+# while earlyoom fires at 5% free RAM (~580 MiB). There is no value of keep that
+# satisfies both: at keep=6 RAM is ~600 MiB short, at keep=8 VRAM is ~2.5 GB short.
+#
+# The KV cache is what breaks it, and NOT the way I first assumed. 25 of gemma 4's
+# 30 layers are sliding-window and their KV is a flat 255 MiB. The other 5 are full
+# attention and asked for 2550 MiB at ctx 24576 -- ten times the rest of the model's
+# cache combined. Context is the expensive part here, not the experts.
+#
+# So the MoE is entry TWO, on a short context, and Qwen3-4B stays the default so
+# HIVE always answers. Picking 'luminos-local-moe' in the model picker loads it.
+# HASTE DECISION, LABELLED: the smart version is more RAM. 32 GiB makes keep=3 fit
+# with room to spare and the whole table above becomes irrelevant.
+Environment=LLM_MODEL=%h/.local/share/luminos/models/hive/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+Environment=LLM_MOE_KEEP2=5
+
 ExecStart=/home/shawn/luminos-os/scripts/jobhunt/llm-server.sh
 
 # Restart=no ON PURPOSE. If this dies it is almost always the OOM killer or a
@@ -22,7 +69,12 @@ ExecStart=/home/shawn/luminos-os/scripts/jobhunt/llm-server.sh
 # burning battery while looking healthy in `systemctl status`. Fail loudly.
 Restart=no
 
-# Loading a 4B onto the GPU takes 10-25s; nothing should give up before then.
+# [CHANGE: claude-code | 2026-08-14] The MoE is 12.66 GiB and is mmap'd off the
+# NVMe. COLD it takes MINUTES, not the 10-25 s the 4B took — the "15 s" in
+# llm-server.sh's comment was a warm page cache, and this box does not have the
+# RAM to keep 12.9 GiB cached across a reboot. Type=simple means systemd calls it
+# started the moment exec returns, so this timeout does not actually gate the
+# load; the thing that gates it is whatever polls port 8081.
 TimeoutStartSec=300
 # On stop, llama.cpp needs a moment to release VRAM cleanly. SIGKILL here can
 # leave the card in a state where the next start fails to allocate.

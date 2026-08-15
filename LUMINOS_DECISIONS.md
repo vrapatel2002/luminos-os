@@ -4535,3 +4535,108 @@ breadcrumb, model selector). **What was not done:** no message was typed into th
 window — driving the live session with synthetic input has interrupted the user
 mid-work before, so the round trip is inferred from DECISION 70's measured 7.3 s
 warm agent call, not re-measured here.
+
+---
+
+## DECISION 74
+# Two models on one port, and why the 26B MoE is the second one
+# [CHANGE: claude-code | 2026-08-14]
+
+**`jobhunt-llm.service` now serves TWO models on 8081 and both appear in
+OpenClaw's model picker:**
+
+| picker name | file | ctx | role |
+|---|---|---|---|
+| `luminos-local` | Qwen3-4B-Instruct-2507-Q4_K_M.gguf (2.33 GiB) | 24576 | default — always fits, HIVE always answers |
+| `luminos-local-moe` | gemma-4-26B-A4B-it-UD-IQ4_XS.gguf (12.66 GiB) | 4096 | on demand |
+
+Nothing was downloaded. Both files were already on disk.
+
+**How two models on one port works.** llama-cpp-python's server takes a
+`--config_file` with a `models:` list and swaps between them on request —
+`LlamaProxy.__call__` closes the resident model and loads the requested one. Only
+one is ever in VRAM, so the second costs no card memory, only the load time of a
+swap. The tool-call proxy on 8082 passes `/v1/models` straight through, so the
+picker populates itself.
+
+**`--config_file` REPLACES EVERY OTHER FLAG.** The server reads the models list
+and the host/port out of the file and never looks at argv again. Anything not
+written into the JSON is back at its library default — including `logits_all`,
+which defaults to TRUE and will get the process OOM-killed mid-prefill. Add a knob
+to one entry and you must add it to both.
+
+---
+
+### Why the MoE is not the default: the two walls close from opposite sides
+
+The ask was to make the gemma MoE the model, using the full 6 GB VRAM budget.
+Measured today, IQ4_XS, mmap off:
+
+| keep | CUDA0 weights | CPU weights | outcome |
+|---|---|---|---|
+| 3 | 3491 MiB | ~10208 MiB | earlyoom SIGTERM |
+| 6 | 4524 MiB | 9176 MiB | earlyoom SIGTERM at 9507 MiB RSS |
+| 8 | 5212 MiB | 8488 MiB | cudaMalloc failed |
+
+Every layer moved onto the card frees ~344 MiB of RAM and costs ~344 MiB of VRAM.
+The card has 6141 MiB; earlyoom fires at 5% free RAM (~580 MiB) and its config
+lists `python` in `--prefer`, so this server is a *chosen* victim, not a random
+one. **There is no value of `keep` that satisfies both walls at a useful context.**
+
+Where it landed: `keep=5, ctx=4096` — 4180 MiB weights + 467 MiB KV + 533 MiB
+compute = **5180 MiB VRAM**, 9520 MiB RAM. It loads, and it answers:
+
+```
+$ curl .../v1/chat/completions -d '{"model":"luminos-local-moe",...}'
+MODEL: luminos-local-moe
+REPLY: I am a large language model, trained by Google.
+```
+30.9 t/s prompt read, 20.1 t/s generation.
+
+---
+
+### Three things that will bite
+
+**1. mmap makes `keep` do nothing to RAM.** This cost two OOM kills to see:
+
+```
+keep=3  ->  CUDA0 3491 MiB   CPU_Mapped 12946 MiB
+keep=6  ->  CUDA0 4524 MiB   CPU_Mapped 12946 MiB   <- unchanged
+```
+
+With mmap on, llama.cpp maps the *entire* .gguf and reports the whole thing as the
+CPU buffer, even for tensors it then copies to VRAM. Raising `keep` bought VRAM and
+freed nothing. The kernel dump says it plainly — `anon-rss:4kB
+file-rss:12055088kB`, 11.8 GB of clean page cache that could not be reclaimed fast
+enough when chrome asked for a page. llama.cpp prints the hint itself: *"tensor
+overrides to CPU are used with mmap enabled — consider using --no-mmap"*. So MoE
+mode now defaults `use_mmap` to **false**, and the CPU buffer became honest
+(12946 → 8488 MiB at keep=8). The trade: that memory is anonymous now, swappable
+but not droppable, and every start re-reads from NVMe.
+
+**2. The KV cache is the expensive part, not the experts.** 25 of gemma 4's 30
+layers are sliding-window — their KV is a flat 255 MiB regardless of context. The
+other 5 are full attention and wanted **2550 MiB at ctx 24576**, ten times the rest
+of the cache combined. That single number is why the MoE runs at 4096 and the
+little Qwen runs at 24576.
+
+**3. `keep` is a property of the MODEL, not the process.** `moe-server.py` used one
+env var for the whole server, which breaks the moment two quants share a port —
+layer sizes differ ~25% between IQ4_XS and Q4_K_XL. `moe_cpu_offload(patterns=…)`
+now accepts a **callable** taking the model path, and `LLM_MOE_KEEP2` sets the
+second model's value independently.
+
+### What this leaves broken
+
+- **The MoE's context is 4096.** An agent harness spends most of that on its system
+  prompt and tool schemas, so `luminos-local-moe` is for chat, not for tool use.
+  Tool work should stay on `luminos-local`.
+- **Q4_K_XL (15.84 GiB) is not offered at all.** It needs ~12.4 GB resident; the
+  IQ4_XS already needs 9.5 GB of the ~10 GB free.
+- Selecting the MoE while RAM is tight will still get it killed. It is a swap, so
+  the failure is a 500 on one request, not a dead service.
+
+**HASTE DECISION, LABELLED.** The smart version of this is not a config value, it
+is **more RAM**. At 32 GiB (see the BIOS/SPD note — three 32 GiB profiles already
+ship unedited) `keep=3` fits with room to spare, the MoE takes ctx 24576, and this
+entire table stops mattering. Everything above is working around 15.3 GiB.

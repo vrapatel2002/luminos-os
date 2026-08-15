@@ -39,6 +39,21 @@ if [ "${LLM_MOE:-0}" = "1" ]; then
 else
   MODEL="${LLM_MODEL:-$MODELS/Qwen3-4B-Instruct-2507-Q4_K_M.gguf}"
 fi
+# [CHANGE: claude-code | 2026-08-14] The SECOND model, offered alongside the first.
+# Empty = single-model mode, exactly as before.
+#
+# WHY TWO AND NOT ONE: llama-cpp-python's server can hold a LIST of models and swap
+# between them on demand (LlamaProxy.__call__ closes the resident one and loads the
+# requested one). Only ONE is ever in VRAM, so this costs no extra card memory —
+# it costs the load time of a swap. Both appear in /v1/models, which the toolcall
+# proxy passes straight through, so both show up in OpenClaw's model picker.
+#
+# THE FIRST ENTRY IS THE DEFAULT and it must keep the alias `luminos-local`,
+# because that is the name every existing client config (OpenClaw, score.py) asks
+# for by. Rename it and they all silently fall back to... the default, which is
+# this same model, so the breakage would be invisible until you reorder the list.
+MODEL2="${LLM_MODEL2:-}"
+ALIAS2="${LLM_ALIAS2:-luminos-local-full}"
 HOST=127.0.0.1
 PORT="${LLM_PORT:-8081}"
 # 24576 is chosen against the VRAM ceiling, not picked round: it measures 4606 MiB
@@ -99,6 +114,29 @@ NGL="${LLM_NGL:--1}"
 # Note 4 is WORSE than 3 despite holding more on the card. Not monotonic — if you
 # swap models, re-measure rather than assuming the number carries over.
 MOE="${LLM_MOE:-0}"
+
+# [CHANGE: claude-code | 2026-08-14] mmap OFF by default in MoE mode. This is the
+# fix for the OOM kill, and it is not the obvious one.
+#
+# With mmap ON, llama.cpp maps the ENTIRE .gguf and reports the whole thing as the
+# CPU buffer, even for tensors it then copies to VRAM:
+#     keep=3  ->  CUDA0 3491 MiB   CPU_Mapped 12946 MiB
+#     keep=6  ->  CUDA0 4524 MiB   CPU_Mapped 12946 MiB   <- unchanged
+# So raising LLM_MOE_KEEP bought VRAM and freed NOTHING in RAM, and both configs
+# were OOM-killed at ~11.3 GB peak with `anon-rss:4kB file-rss:12055088kB` --
+# 11.8 GB of clean page cache that the kernel could not reclaim fast enough when
+# chrome asked for a page.
+#
+# With mmap OFF llama.cpp reads each tensor and allocates only the ones that stay
+# CPU-side, so the resident set becomes the offloaded experts alone. llama.cpp
+# prints the hint itself: "tensor overrides to CPU are used with mmap enabled --
+# consider using --no-mmap for better performance".
+#
+# THE TRADE: that memory is now ANONYMOUS, not file-backed. It can be swapped but
+# not simply dropped, and every start re-reads the file from NVMe with no page
+# cache to reuse. On this box the cache never survived anyway.
+USE_MMAP="${LLM_MMAP:-}"
+[ -z "$USE_MMAP" ] && { [ "$MOE" = "1" ] && USE_MMAP=false || USE_MMAP=true; }
 
 [ -x "$VENV/bin/python" ] || { echo "FAIL: $VENV missing — run build-cuda-venv.sh"; exit 1; }
 [ -f "$MODEL" ] || { echo "FAIL: model not found: $MODEL"; exit 1; }
@@ -171,6 +209,75 @@ if [ "$MOE" = "1" ]; then
     echo "  Close something, or raise LLM_MOE_KEEP to hold more experts on the card."
     exit 1
   fi
+
+  # The SECOND model is checked but NOT refused on. It does not load at startup —
+  # it only loads if someone picks it — so failing the whole server over it would
+  # take away the model that does fit. Say it out loud instead and let the swap
+  # fail if it fails.
+  if [ -n "${MODEL2:-}" ] && [ -f "$MODEL2" ]; then
+    need2_mb=$(( $(stat -c %s "$MODEL2") / 1048576 ))
+    if [ "$need2_mb" -gt "$have_mb" ]; then
+      echo "WARNING: '$ALIAS2' is ${need2_mb} MiB and only ${have_mb} MiB of RAM+swap"
+      echo "  is free right now. It is still offered; selecting it may thrash or fail."
+    fi
+  fi
+fi
+
+# ----------------------------------------------------------------------------
+# [CHANGE: claude-code | 2026-08-14] Two-model mode.
+#
+# --config_file REPLACES EVERY OTHER FLAG. llama_cpp.server's __main__ takes the
+# `models:` list and the server settings from the file and never looks at argv
+# again, so anything not written into the JSON below is silently back at its
+# library default — including logits_all, which defaults to TRUE and will get the
+# process OOM-killed mid-prefill (see the long note above). Add a knob here and
+# you must add it to BOTH entries.
+#
+# n_ctx is per entry on purpose: the full-quant model has ~3 GB less room to play
+# with once its experts are resident, so LLM_CTX2 lets it run a shorter window
+# instead of failing to load.
+# ----------------------------------------------------------------------------
+if [ -n "$MODEL2" ]; then
+  [ -f "$MODEL2" ] || { echo "FAIL: second model not found: $MODEL2"; exit 1; }
+  CTX2="${LLM_CTX2:-$CTX}"
+  CONFIG="${XDG_RUNTIME_DIR:-/tmp}/jobhunt-llm-models.json"
+  MODEL="$MODEL" ALIAS="$ALIAS" CTX="$CTX" MODEL2="$MODEL2" ALIAS2="$ALIAS2" \
+  CTX2="$CTX2" NGL="$NGL" KV_TYPE="$KV_TYPE" HOST="$HOST" PORT="$PORT" \
+  CHAT_FORMAT="$CHAT_FORMAT" USE_MMAP="$USE_MMAP" \
+  "$VENV/bin/python" - "$CONFIG" <<'PY'
+import json, os, sys
+def entry(model, alias, ctx):
+    e = {
+        "model": model,
+        "model_alias": alias,
+        "n_gpu_layers": int(os.environ["NGL"]),
+        "n_ctx": int(ctx),
+        "flash_attn": True,
+        "type_k": int(os.environ["KV_TYPE"]),
+        "type_v": int(os.environ["KV_TYPE"]),
+        "logits_all": False,
+        "use_mmap": os.environ["USE_MMAP"] == "true",
+    }
+    if os.environ.get("CHAT_FORMAT"):
+        e["chat_format"] = os.environ["CHAT_FORMAT"]
+    return e
+cfg = {
+    "host": os.environ["HOST"],
+    "port": int(os.environ["PORT"]),
+    "models": [
+        entry(os.environ["MODEL"],  os.environ["ALIAS"],  os.environ["CTX"]),
+        entry(os.environ["MODEL2"], os.environ["ALIAS2"], os.environ["CTX2"]),
+    ],
+}
+with open(sys.argv[1], "w") as f:
+    json.dump(cfg, f, indent=2)
+PY
+  echo "serving TWO models on http://$HOST:$PORT"
+  echo "  default: $(basename "$MODEL")  as '$ALIAS'   (ctx=$CTX)"
+  echo "  also:    $(basename "$MODEL2") as '$ALIAS2'  (ctx=$CTX2)"
+  echo "  only one is resident at a time; asking for the other swaps it in."
+  exec env "${MOE_ENV[@]}" dgpu-exec-v2 "$VENV/bin/python" "${ENTRY[@]}" \
+    --config_file "$CONFIG"
 fi
 
 echo "serving $(basename "$MODEL") as '$ALIAS' on http://$HOST:$PORT  (ctx=$CTX, all layers on GPU)"
@@ -180,6 +287,7 @@ exec env "${MOE_ENV[@]}" dgpu-exec-v2 "$VENV/bin/python" "${ENTRY[@]}" \
   --host "$HOST" --port "$PORT" \
   --n_gpu_layers "$NGL" \
   --n_ctx "$CTX" \
+  --use_mmap "$USE_MMAP" \
   --flash_attn true \
   --type_k "$KV_TYPE" --type_v "$KV_TYPE" \
   --logits_all false \
