@@ -204,6 +204,27 @@ Last Updated: 2026-08-08 (BUG-111 FIXED — **the plugin death BUG-100 predicted
 
 ## Fixed Bugs (new)
 
+### BUG-128 — Notification toasts, the power menu and the notification list were all unclickable: one invisible mouse area sat on top of every panel
+<!-- [CHANGE: claude-code | 2026-08-15] -->
+- Status: **FIXED (2026-08-15) — PROVEN ON SCREEN with synthetic input, not asserted.**
+- Severity: HIGH (a notification you cannot act on is a notification you cannot use — Shawn's example was an update notice he wanted to click through to)
+- Component: `config/quickshell/caelestia-bar/shell.qml` (the `rightEdge` PanelWindow), Caelestia-on-Plasma / DECISION 68
+- Symptom: toasts appear at the top right, render perfectly, show the expand chevron — and **nothing responds**. No hover highlight, no expand, no action buttons, no close. Same for the power menu and the notification-list drawer.
+- **What it was NOT, each ruled out by evidence rather than by reasoning:**
+  - Not the notification server. A live `notify-send` with two actions was delivered, tracked and drawn, and `services/Notifs.qml` already sets `actionsSupported: true`.
+  - Not the UI. `modules/notifications/Notification.qml` already has the whole thing — `expanded`, the drag-to-expand, the chevron at :351, the action `Repeater` at :451 calling `modelData.invoke()`, the close at :475. It was all there and all unreachable.
+  - Not the input mask. `mask: Region { ... }` already contained `Region { item: notifPanel }`, so the compositor was delivering the events. They were being eaten *inside* the window.
+- **Root cause — declaration order, one line of structure.** The four panels (`osdWrapper`, `sessionWrapper`, `notifPanel`, `sidebarDrawer`) were **siblings** of `MouseArea { id: rightEdgeMouse; anchors.fill: parent }`, and the MouseArea was declared **last**. Among Qt Quick siblings with equal `z`, the last-declared is on top for painting *and* for hit-testing. So a full-screen invisible mouse area covered every panel and swallowed every press. One mistake, three broken features.
+- Fix: make the panels **children** of the MouseArea. Children are always above their parent, so clicks land on the panels; hover still propagates *up* to a parent, so the edge gesture and the close-on-leave handler are untouched. This is the shape upstream already has — `drawers/ContentWindow.qml:251-262` nests `Panels` inside `Interactions`. **The fix deletes a difference from upstream rather than adding a mechanism.**
+- **The tempting one-liner `z: -1` on the MouseArea is WRONG and was rejected.** `components/StateLayer.qml`'s root is itself a `MouseArea`. Qt hover reaches parents but **not siblings below**, so `z: -1` would make panels clickable while killing (a) the OSD opening on edge-hover and (b) `onContainsMouseChanged` closing panels — drawers would open and never close.
+- How it was proven (ydotoold on a throwaway socket + `workspace.cursorPos` from a KWin script as the position oracle):
+  - chevron shows a hover ring → expand → app name, full body, and the `Open W…` / `Later` / close / copy row appear
+  - clicking `Open Window` made the waiting `notify-send` print **`open`** — the action really is invoked, not just drawn
+  - the `×` button dismissed the toast
+- **Regression check, A/B against the pre-change file:** the right-edge press-and-drag gesture does not respond to a synthetic drag — **and it behaved identically on the backup**, so the gesture is unchanged by this fix. It is not proven working by hand; a real pointer test is still owed.
+- Trap worth keeping: the first synthetic pointer move overshot to `1439,1` (pointer acceleration) before the verify-and-correct loop converged. Never trust one `ydotool mousemove`; read `workspace.cursorPos` back. Also `notify-send -A` **blocks** until the notification is answered — background it or it hangs the whole script.
+- Date Found: 2026-08-15 (reported by Shawn) / Date Fixed: 2026-08-15
+
 ### BUG-091 — Laptop never slept: lid close and idle were both disabled on purpose, and the fix went to a config file PowerDevil no longer reads
 <!-- [CHANGE: claude-code | 2026-08-02] -->
 - Status: **FIXED (2026-08-02) — VERIFIED END TO END (2026-08-03).** No longer pending. The journal caught a real, unprompted lid close by the user:

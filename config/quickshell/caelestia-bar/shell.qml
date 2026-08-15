@@ -842,178 +842,6 @@ ShellRoot {
                     deformScale: (0.03 * Config.appearance.deformScale) / 10000
                 }
 
-                // ── LAYER 1: volume / brightness ─────────────────────────────
-                // [CHANGE: claude-code | 2026-08-13] Moved in here from a
-                // window of its own. The wrapper Item and the margin chain are
-                // copied verbatim from upstream drawers/Panels.qml:41-58.
-                //
-                // The `rightMargin` binding is the push-left chain: the OSD
-                // sits to the left of the session panel, which sits to the left
-                // of the sidebar. Each panel reads the NEXT one's margin and
-                // adds however much of it is currently on screen
-                // (`width * (1 - offsetScale)`, which is 0 when closed and the
-                // full width when open), so the whole row slides as one.
-                //
-                // `clip` matters more than it looks: while a panel to the right
-                // is out, this one is squeezed and would otherwise draw over it.
-                //
-                // Nothing here DRIVES the OSD open on a volume key.
-                // Osd/Wrapper.qml:51-73 is a `Connections { target: Audio }`
-                // that calls show() whenever PipeWire's volume changes - no
-                // matter who changed it. KDE's kded `audioshortcutsservice`
-                // owns the volume keys and moves PipeWire; Quickshell sees the
-                // same node change and pops this out. So there is deliberately
-                // no shortcut wiring, and none is needed. Brightness is NOT
-                // symmetrical - it needed the poller further down.
-                Item {
-                    id: osdWrapper
-
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.right: parent.right
-                    anchors.rightMargin: sessionWrapper.anchors.rightMargin + session.width * (1 - session.offsetScale)
-
-                    clip: sidebarDrawer.visible || session.visible
-
-                    implicitWidth: osd.implicitWidth * (1 - osd.offsetScale)
-                    implicitHeight: osd.implicitHeight
-
-                    // The backdrop is `osdBg` above now, not a rect in here.
-
-                    Osd.Wrapper {
-                        id: osd
-
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-
-                        transform: Matrix4x4 {
-                            matrix: osdBg.deformMatrix
-                        }
-
-                        screen: scope.modelData
-                        screenState: scope.screenState
-                        // Wrapper.qml:20 uses this for a 12px nudge so the OSD
-                        // steps aside when something is out to its right. It
-                        // was hard-coded false while those panels did not
-                        // exist; they do now.
-                        sidebarOrSessionVisible: sidebarDrawer.visible || session.visible
-
-                        // Wrapper's own hide Timer (Wrapper.qml:84-92) only
-                        // hides when this is false, which is how "hover to keep
-                        // it open" works. Upstream sets it from
-                        // Interactions.qml; we set it from the mouse area at
-                        // the bottom of this window, which is the same thing.
-                        hovered: scope.osdHovered
-                    }
-                }
-
-                // ── LAYER 2: the power menu ──────────────────────────────────
-                // [CHANGE: claude-code | 2026-08-13] NEW - this is the layer
-                // that was missing. Structure copied verbatim from upstream
-                // drawers/Panels.qml:74-97.
-                //
-                // session/Wrapper.qml needs exactly two things - `screenState`
-                // and `sidebarVisible` - and session/Content.qml imports no
-                // Hyprland anything (checked), so unlike most of this port
-                // there is no stub to worry about.
-                //
-                // THE BUTTONS ARE NOT WIRED YET, on purpose: Shawn asked for
-                // the three-layer gesture first and said the buttons come
-                // later. They run `Config.session.commands.*`, whose defaults
-                // are Hyprland dispatches that will silently do nothing under
-                // Plasma - the usual null-is-false trap. Replacing them with
-                // loginctl/qdbus is the follow-up, not this change.
-                Item {
-                    id: sessionWrapper
-
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.right: parent.right
-                    anchors.rightMargin: sidebarDrawer.width * (1 - sidebarDrawer.offsetScale)
-
-                    clip: sidebarDrawer.visible
-
-                    implicitWidth: session.implicitWidth * (1 - session.offsetScale)
-                    implicitHeight: session.implicitHeight
-
-                    // The backdrop is `sessionBg` above now.
-
-                    Session.Wrapper {
-                        id: session
-
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-
-                        transform: Matrix4x4 {
-                            matrix: sessionBg.deformMatrix
-                        }
-
-                        screenState: scope.screenState
-                        sidebarVisible: sidebarDrawer.visible
-                    }
-                }
-
-                // Still no utilities panel (upstream's bottom-right dock).
-                // notifications/Content.qml only dereferences it inside
-                // `if (screenState.utilities)`, which nothing ever sets here,
-                // so an empty Item is safe rather than merely convenient.
-                Item {
-                    id: utilitiesStandin
-                }
-
-                Notifications.Wrapper {
-                    id: notifPanel
-
-                    anchors.top: parent.top
-                    anchors.right: parent.right
-
-                    screenState: scope.screenState
-                    sidebarPanel: sidebarDrawer
-                    // [CHANGE: claude-code | 2026-08-13] These two used to be
-                    // zero-size stand-ins, because the real panels lived in
-                    // other windows and Content.qml:38-42 clamps the toast list
-                    // by reading `osdPanel.y` - a coordinate that is meaningless
-                    // across windows. One window now, so they are the real
-                    // things, exactly as upstream passes them.
-                    osdPanel: osdWrapper
-                    sessionPanel: sessionWrapper
-                    utilitiesPanel: utilitiesStandin
-
-                    transform: Matrix4x4 {
-                        matrix: notifsBg.deformMatrix
-                    }
-                }
-
-                // ── LAYER 3: the notification LIST, as a right-edge drawer ───
-                // [CHANGE: claude-code | 2026-08-13] DECISION 68.
-                //
-                // Same window as the toasts on purpose, not convenience:
-                // upstream anchors this to the notification panel's bottom
-                // edge (drawers/Panels.qml:145-154) so the two stack down the
-                // right side, and anchoring across windows is not a thing.
-                //
-                // Safe to bind an anchor to, unlike the notification panel:
-                // sidebar/Wrapper.qml has a CONSTANT implicitWidth and slides
-                // by animating anchors.rightMargin through `offsetScale`. It
-                // never resizes, so BUG-123 (a wl_surface resized every frame)
-                // cannot happen here.
-                //
-                // Upstream anchors the bottom to the utilities panel; we have
-                // none, so it goes to the bottom of the screen. topMargin
-                // cancels the -5 that notifications/Wrapper.qml:14 applies to
-                // itself, exactly as upstream does.
-                Sidebar.Wrapper {
-                    id: sidebarDrawer
-
-                    screenState: scope.screenState
-
-                    anchors.top: notifPanel.bottom
-                    anchors.bottom: parent.bottom
-                    anchors.right: parent.right
-                    anchors.topMargin: -notifPanel.anchors.topMargin
-
-                    transform: Matrix4x4 {
-                        matrix: sidebarBg.deformMatrix
-                    }
-                }
 
                 // ── the gesture: press at the edge and drag inward ───────────
                 // [CHANGE: claude-code | 2026-08-13] The three-layer chain
@@ -1179,6 +1007,190 @@ ShellRoot {
                             // closes it. Upstream Interactions.qml:194-196.
                             if (inRightPanel(sidebarDrawer, dragStart.x, dragStart.y) && dragX > Config.sidebar.dragThreshold)
                                 scope.screenState.sidebar = false;
+                        }
+                    }
+
+                    // [CHANGE: claude-code | 2026-08-15] BUG-125: the panels
+                    // are CHILDREN of this MouseArea, not siblings after it.
+                    // Siblings with equal z are painted and hit-tested in
+                    // declaration order, so this area - declared last - sat on
+                    // top of every panel and swallowed every click: the
+                    // notification chevron, the action buttons, the power menu.
+                    // Children are always above their parent, and hover still
+                    // reaches a parent, so the edge gesture and the
+                    // close-on-leave handler keep working. This is the shape
+                    // upstream already has (drawers/ContentWindow.qml:251-262:
+                    // Panels nested inside Interactions).
+                    // ── LAYER 1: volume / brightness ─────────────────────────────
+                    // [CHANGE: claude-code | 2026-08-13] Moved in here from a
+                    // window of its own. The wrapper Item and the margin chain are
+                    // copied verbatim from upstream drawers/Panels.qml:41-58.
+                    //
+                    // The `rightMargin` binding is the push-left chain: the OSD
+                    // sits to the left of the session panel, which sits to the left
+                    // of the sidebar. Each panel reads the NEXT one's margin and
+                    // adds however much of it is currently on screen
+                    // (`width * (1 - offsetScale)`, which is 0 when closed and the
+                    // full width when open), so the whole row slides as one.
+                    //
+                    // `clip` matters more than it looks: while a panel to the right
+                    // is out, this one is squeezed and would otherwise draw over it.
+                    //
+                    // Nothing here DRIVES the OSD open on a volume key.
+                    // Osd/Wrapper.qml:51-73 is a `Connections { target: Audio }`
+                    // that calls show() whenever PipeWire's volume changes - no
+                    // matter who changed it. KDE's kded `audioshortcutsservice`
+                    // owns the volume keys and moves PipeWire; Quickshell sees the
+                    // same node change and pops this out. So there is deliberately
+                    // no shortcut wiring, and none is needed. Brightness is NOT
+                    // symmetrical - it needed the poller further down.
+                    Item {
+                        id: osdWrapper
+
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.right: parent.right
+                        anchors.rightMargin: sessionWrapper.anchors.rightMargin + session.width * (1 - session.offsetScale)
+
+                        clip: sidebarDrawer.visible || session.visible
+
+                        implicitWidth: osd.implicitWidth * (1 - osd.offsetScale)
+                        implicitHeight: osd.implicitHeight
+
+                        // The backdrop is `osdBg` above now, not a rect in here.
+
+                        Osd.Wrapper {
+                            id: osd
+
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            transform: Matrix4x4 {
+                                matrix: osdBg.deformMatrix
+                            }
+
+                            screen: scope.modelData
+                            screenState: scope.screenState
+                            // Wrapper.qml:20 uses this for a 12px nudge so the OSD
+                            // steps aside when something is out to its right. It
+                            // was hard-coded false while those panels did not
+                            // exist; they do now.
+                            sidebarOrSessionVisible: sidebarDrawer.visible || session.visible
+
+                            // Wrapper's own hide Timer (Wrapper.qml:84-92) only
+                            // hides when this is false, which is how "hover to keep
+                            // it open" works. Upstream sets it from
+                            // Interactions.qml; we set it from the mouse area at
+                            // the bottom of this window, which is the same thing.
+                            hovered: scope.osdHovered
+                        }
+                    }
+
+                    // ── LAYER 2: the power menu ──────────────────────────────────
+                    // [CHANGE: claude-code | 2026-08-13] NEW - this is the layer
+                    // that was missing. Structure copied verbatim from upstream
+                    // drawers/Panels.qml:74-97.
+                    //
+                    // session/Wrapper.qml needs exactly two things - `screenState`
+                    // and `sidebarVisible` - and session/Content.qml imports no
+                    // Hyprland anything (checked), so unlike most of this port
+                    // there is no stub to worry about.
+                    //
+                    // THE BUTTONS ARE NOT WIRED YET, on purpose: Shawn asked for
+                    // the three-layer gesture first and said the buttons come
+                    // later. They run `Config.session.commands.*`, whose defaults
+                    // are Hyprland dispatches that will silently do nothing under
+                    // Plasma - the usual null-is-false trap. Replacing them with
+                    // loginctl/qdbus is the follow-up, not this change.
+                    Item {
+                        id: sessionWrapper
+
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.right: parent.right
+                        anchors.rightMargin: sidebarDrawer.width * (1 - sidebarDrawer.offsetScale)
+
+                        clip: sidebarDrawer.visible
+
+                        implicitWidth: session.implicitWidth * (1 - session.offsetScale)
+                        implicitHeight: session.implicitHeight
+
+                        // The backdrop is `sessionBg` above now.
+
+                        Session.Wrapper {
+                            id: session
+
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            transform: Matrix4x4 {
+                                matrix: sessionBg.deformMatrix
+                            }
+
+                            screenState: scope.screenState
+                            sidebarVisible: sidebarDrawer.visible
+                        }
+                    }
+
+                    // Still no utilities panel (upstream's bottom-right dock).
+                    // notifications/Content.qml only dereferences it inside
+                    // `if (screenState.utilities)`, which nothing ever sets here,
+                    // so an empty Item is safe rather than merely convenient.
+                    Item {
+                        id: utilitiesStandin
+                    }
+
+                    Notifications.Wrapper {
+                        id: notifPanel
+
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+
+                        screenState: scope.screenState
+                        sidebarPanel: sidebarDrawer
+                        // [CHANGE: claude-code | 2026-08-13] These two used to be
+                        // zero-size stand-ins, because the real panels lived in
+                        // other windows and Content.qml:38-42 clamps the toast list
+                        // by reading `osdPanel.y` - a coordinate that is meaningless
+                        // across windows. One window now, so they are the real
+                        // things, exactly as upstream passes them.
+                        osdPanel: osdWrapper
+                        sessionPanel: sessionWrapper
+                        utilitiesPanel: utilitiesStandin
+
+                        transform: Matrix4x4 {
+                            matrix: notifsBg.deformMatrix
+                        }
+                    }
+
+                    // ── LAYER 3: the notification LIST, as a right-edge drawer ───
+                    // [CHANGE: claude-code | 2026-08-13] DECISION 68.
+                    //
+                    // Same window as the toasts on purpose, not convenience:
+                    // upstream anchors this to the notification panel's bottom
+                    // edge (drawers/Panels.qml:145-154) so the two stack down the
+                    // right side, and anchoring across windows is not a thing.
+                    //
+                    // Safe to bind an anchor to, unlike the notification panel:
+                    // sidebar/Wrapper.qml has a CONSTANT implicitWidth and slides
+                    // by animating anchors.rightMargin through `offsetScale`. It
+                    // never resizes, so BUG-123 (a wl_surface resized every frame)
+                    // cannot happen here.
+                    //
+                    // Upstream anchors the bottom to the utilities panel; we have
+                    // none, so it goes to the bottom of the screen. topMargin
+                    // cancels the -5 that notifications/Wrapper.qml:14 applies to
+                    // itself, exactly as upstream does.
+                    Sidebar.Wrapper {
+                        id: sidebarDrawer
+
+                        screenState: scope.screenState
+
+                        anchors.top: notifPanel.bottom
+                        anchors.bottom: parent.bottom
+                        anchors.right: parent.right
+                        anchors.topMargin: -notifPanel.anchors.topMargin
+
+                        transform: Matrix4x4 {
+                            matrix: sidebarBg.deformMatrix
                         }
                     }
                 }
