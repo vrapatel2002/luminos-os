@@ -4640,3 +4640,31 @@ second model's value independently.
 is **more RAM**. At 32 GiB (see the BIOS/SPD note — three 32 GiB profiles already
 ship unedited) `keep=3` fits with room to spare, the MoE takes ctx 24576, and this
 entire table stops mattering. Everything above is working around 15.3 GiB.
+
+### Addendum (2026-08-15): OpenClaw does NOT read /v1/models
+
+Serving two models is not enough to see two models. `~/.openclaw/openclaw.json`
+carries a **hardcoded** `models.providers.luminos.models` array, and the picker
+renders that array — it never calls `/v1/models` on 8082. A model that is missing
+there is invisible no matter what the server offers, with no error anywhere.
+
+Adding the entry is the whole fix:
+
+```json
+{ "id": "luminos-local-moe",
+  "name": "Gemma 4 26B A4B MoE (local, 4k ctx)",
+  "contextWindow": 4096,
+  "maxTokens": 1024 }
+```
+
+`contextWindow` MUST match the ctx the server was started with. Claim 24576 for a
+model served at 4096 and OpenClaw will happily build a prompt the server cannot hold.
+
+Two more things that make this look broken when it is not:
+
+- **The gateway hot-reloads this file** — the journal says
+  `[reload] config hot reload applied (models.providers.luminos.models)`. No restart
+  needed. Verify with `openclaw models list`, which is authoritative.
+- **An already-open HIVE window will not notice.** The Control UI fetches the model
+  list once when the page loads, so a window opened before the edit still shows the
+  old list. **Ctrl+R** in the window re-fetches it.
