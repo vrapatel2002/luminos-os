@@ -49,10 +49,19 @@ Environment=LLM_CTX2=4096
 # while earlyoom fires at 5% free RAM (~580 MiB). There is no value of keep that
 # satisfies both: at keep=6 RAM is ~600 MiB short, at keep=8 VRAM is ~2.5 GB short.
 #
-# The KV cache is what breaks it, and NOT the way I first assumed. 25 of gemma 4's
-# 30 layers are sliding-window and their KV is a flat 255 MiB. The other 5 are full
-# attention and asked for 2550 MiB at ctx 24576 -- ten times the rest of the model's
-# cache combined. Context is the expensive part here, not the experts.
+# The KV cache is what breaks it, not the experts. Measured at ctx 4096:
+#   25 sliding-window layers   425.00 MiB
+#    5 full-attention layers    42.50 MiB
+# Both scale STRAIGHT with context, so at 24576 they are 2550 and 255 MiB, and the
+# 2550 MiB is the allocation cudaMalloc refused.
+#
+# [CHANGE: claude-code | 2026-08-15] CORRECTION: an earlier version of this comment
+# named the wrong half and called the SWA number "flat". The sliding-window layers
+# should NOT scale with context -- they only ever look back 1024 tokens. They do
+# because this build has llama_context_default_params().swa_full == True (full-size
+# SWA cache). Llama() accepts a swa_full argument; the server's ModelSettings does
+# NOT expose it, so --config_file cannot reach it. Forcing it False is the untested
+# lead that could make ctx 24576 fit. Do not raise LLM_CTX2 until that is measured.
 #
 # So the MoE is entry TWO, on a short context, and Qwen3-4B stays the default so
 # HIVE always answers. Picking 'luminos-local-moe' in the model picker loads it.

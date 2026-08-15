@@ -4614,11 +4614,22 @@ mode now defaults `use_mmap` to **false**, and the CPU buffer became honest
 (12946 → 8488 MiB at keep=8). The trade: that memory is anonymous now, swappable
 but not droppable, and every start re-reads from NVMe.
 
-**2. The KV cache is the expensive part, not the experts.** 25 of gemma 4's 30
-layers are sliding-window — their KV is a flat 255 MiB regardless of context. The
-other 5 are full attention and wanted **2550 MiB at ctx 24576**, ten times the rest
-of the cache combined. That single number is why the MoE runs at 4096 and the
-little Qwen runs at 24576.
+**2. The KV cache is the expensive part, not the experts.** Measured at ctx 4096:
+the **25 sliding-window layers cost 425.00 MiB** and the **5 full-attention layers
+cost 42.50 MiB**. Both scale linearly with context, so at 24576 they are 2550 MiB
+and 255 MiB — and the 2550 MiB is the allocation `cudaMalloc` refused. That single
+number is why the MoE runs at 4096 and the little Qwen runs at 24576.
+
+[CHANGE: claude-code | 2026-08-15] **CORRECTION — this entry first named the wrong
+half.** It claimed the sliding-window group was a flat 255 MiB and the
+full-attention group was the 2550 MiB. It is the other way round, and "flat" was
+wrong too: **nothing here is capped by the window.** The reason is
+`llama_context_default_params().swa_full == True` in this build — full-size SWA
+cache, i.e. the sliding-window layers allocate the entire context even though they
+only ever attend to 1024 tokens of it. `Llama.__init__` accepts `swa_full`, but
+llama-cpp-python's server `ModelSettings` does **not** expose it, so `--config_file`
+cannot reach it; it would have to be forced the same way `tensor_buft_overrides` is.
+Untested — see the open item in LUMINOS_STATUS.md.
 
 **3. `keep` is a property of the MODEL, not the process.** `moe-server.py` used one
 env var for the whole server, which breaks the moment two quants share a port —
