@@ -77,11 +77,36 @@ Environment=LLM_CTX2=24576
 # at 9520 MiB, so the earlyoom wall below still stands -- ctx was never the RAM
 # problem, only the VRAM one.
 #
-# So the MoE is entry TWO, on a short context, and Qwen3-4B stays the default so
-# HIVE always answers. Picking 'luminos-local-moe' in the model picker loads it.
+# So the MoE is entry TWO, on a short context, and the small model stays the
+# default so HIVE always answers. Picking 'luminos-local-moe' loads the big one.
 # HASTE DECISION, LABELLED: the smart version is more RAM. 32 GiB makes keep=3 fit
 # with room to spare and the whole table above becomes irrelevant.
-Environment=LLM_MODEL=%h/.local/share/luminos/models/hive/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+#
+# THE SMALL MODEL IS GEMMA 4 E4B NOW, NOT QWEN3-4B.
+# [CHANGE: claude-code | 2026-08-16] Same family as the MoE, so one prompt style
+# across both entries instead of two. This is the google QAT q4_0 build
+# (quantisation-aware trained), chosen over the 4.28 GiB ggml-org q4_0 for
+# quality; the smaller file is still on disk as the fallback if this ever stops
+# fitting.
+#
+# MEASURED at ctx 24576, mmap off, flash attn, q8_0 KV, all 43 layers offloaded:
+#
+#   CUDA0 weights                            2696.06 MiB
+#   full-attention KV (7 layers, 24576)       204.00 MiB
+#   sliding-window KV (35 layers, n_swa=512)   21.25 MiB
+#   compute                                   569.30 MiB
+#   TOTAL VRAM                               3490.61 of 5681 MiB free
+#   CPU model buffer                         2730.00 MiB   <- stays in RAM
+#
+# 53.7 tok/s generation, 375 tok/s prompt. Proven by an actual reply, not by the
+# alias appearing in /v1/models.
+#
+# THE 2730 MiB CPU BUFFER IS NOT A MISCONFIGURATION. E4B is a per-layer-embedding
+# model: llama.cpp keeps that embedding table off the card by design, and it is
+# bigger than the 2190 MiB left over, so it could not go there anyway. It is the
+# reason "E4B" is ~8B of weights on disk but only ~4B active. Do not try to chase
+# it onto the GPU with n_gpu_layers.
+Environment=LLM_MODEL=%h/.local/share/luminos/models/hive/gemma-4-E4B-it-qat-q4_0.gguf
 Environment=LLM_MOE_KEEP2=5
 
 ExecStart=/home/shawn/luminos-os/scripts/jobhunt/llm-server.sh

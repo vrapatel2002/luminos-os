@@ -4547,10 +4547,16 @@ OpenClaw's model picker:**
 
 | picker name | file | ctx | role |
 |---|---|---|---|
-| `luminos-local` | Qwen3-4B-Instruct-2507-Q4_K_M.gguf (2.33 GiB) | 24576 | default — always fits, HIVE always answers |
-| `luminos-local-moe` | gemma-4-26B-A4B-it-UD-IQ4_XS.gguf (12.66 GiB) | 4096 | on demand |
+| `luminos-local` | gemma-4-E4B-it-qat-q4_0.gguf (4.80 GiB) | 24576 | default — always fits, HIVE always answers |
+| `luminos-local-moe` | gemma-4-26B-A4B-it-UD-IQ4_XS.gguf (12.66 GiB) | 24576 | on demand |
 
 Nothing was downloaded. Both files were already on disk.
+
+> **[CHANGE: claude-code | 2026-08-16] The small slot is Gemma 4 E4B now, and the
+> MoE runs at 24576 not 4096.** The context change is DECISION 74's own follow-up
+> (swa_full forced False). The model change is DECISION 75 below. Qwen3-4B has
+> been deleted from disk; the alias `luminos-local` is unchanged, which is why
+> nothing that consumes it — OpenClaw, `score.py:451` — needed editing.
 
 **How two models on one port works.** llama-cpp-python's server takes a
 `--config_file` with a `models:` list and swaps between them on request —
@@ -4713,3 +4719,81 @@ Two more things that make this look broken when it is not:
 - **An already-open HIVE window will not notice.** The Control UI fetches the model
   list once when the page loads, so a window opened before the edit still shows the
   old list. **Ctrl+R** in the window re-fetches it.
+
+---
+
+## DECISION 75
+# The small model is Gemma 4 E4B (google QAT), not Qwen3-4B
+# [CHANGE: claude-code | 2026-08-16]
+
+**What changed.** `luminos-local` — the always-resident default that HIVE, the
+jobhunt scorer and every other client asks for by name — now points at
+`gemma-4-E4B-it-qat-q4_0.gguf` instead of `Qwen3-4B-Instruct-2507-Q4_K_M.gguf`.
+The Qwen file has been deleted (2.33 GiB reclaimed).
+
+**Why.** Two reasons, in order of weight.
+
+1. **One family across both entries.** The other model on the port is
+   gemma-4-26B-A4B. Serving a Qwen and a Gemma meant two prompt formats, two
+   tool-call dialects and two sets of quirks behind one alias — and the alias is
+   the only thing the callers see. Now switching models changes size, not
+   behaviour.
+2. **It is a better model at a size that still fits.** E4B is Gemma 4's small
+   tier. There is **no dense Gemma 4 4B** — the tier is E2B/E4B, where the E is
+   *effective* parameters: the file carries ~7.5B of weights (`general.size_label`
+   says so) and activates about 4B of them per token.
+
+**Which build, and why that one.** Google's own **QAT q4_0** (4.80 GiB), not the
+ggml-org q4_0 (4.28 GiB). QAT means the model was fine-tuned *while quantised*, so
+the 4-bit weights are what it was trained to use rather than a lossy afterthought.
+Shawn chose it explicitly over the smaller file when the trade was put to him:
+*"quality so google E4B QAT q4_0."* The 4.28 GiB build is still on disk as the
+fallback and should stay there.
+
+**MEASURED, not assumed** — ctx 24576, mmap off, flash attention, q8_0 KV, all 43
+layers offloaded:
+
+| where | what | size |
+|---|---|---|
+| CUDA0 | weights | 2696.06 MiB |
+| CUDA0 | full-attention KV, 7 layers × 24576 | 204.00 MiB |
+| CUDA0 | sliding-window KV, 35 layers, `n_swa=512` | 21.25 MiB |
+| CUDA0 | compute | 569.30 MiB |
+| **CUDA0** | **total** | **3490.61 of 5681 MiB free** |
+| CPU | model buffer (per-layer embeddings) | 2730.00 MiB |
+
+**53.7 tok/s generation, 375 tok/s prompt.** Proven by an actual reply through the
+whole chain — gateway → proxy 8082 → server 8081 — not by the alias appearing in
+`/v1/models`.
+
+**THE 2730 MiB CPU BUFFER IS NOT A MISCONFIGURATION, and do not chase it onto the
+card.** E4B is a per-layer-embedding architecture: llama.cpp keeps that embedding
+table in system RAM by design. It is *bigger* than the 2190 MiB left over on the
+card, so it could not go there even if you wanted it to. This is the mechanism
+behind "7.5B on disk, 4B active" — and it is the one real cost of this swap, since
+Qwen3-4B put everything on the GPU and left RAM alone.
+
+**Why the file has a KV cache 100× smaller than the 26B's.** Same reason, same
+fix: `luminos_moe_offload.py` forces `swa_full` False, so the 35 sliding-window
+layers size their cache to the 512-token window instead of to `n_ctx`. Without
+that, those layers alone would want ~2.4 GiB at this context and it would not fit.
+
+**What was NOT touched, on purpose.** The alias. `score.py:451` still defaults to
+`"luminos-local"`, OpenClaw's provider block still names `luminos-local`, and
+neither needed an edit — the indirection is what made the swap free. Only the
+*display name* changed, in `~/.openclaw/openclaw.json` and
+`~/.openclaw/agents/main/agent/models.json`, because the picker shows that string
+to a human. Both backed up to `*.bak-20260816`.
+
+**Also unchanged: the reply is still signed "Nexus."** That is
+`agents.list[0].identity.name`, the persona, and it is independent of which model
+is loaded. Renaming it is a one-line config change and has not been made.
+
+**Verified end to end:** E4B answers on 8081 and through the 8082 tool-call proxy;
+the 26B still swaps in over the top of it (12 s warm) and answers; the HIVE model
+picker renders both entries with their proper names after a gateway restart.
+
+**Trap for next time.** `jobhunt-toolproxy.service` stops when `jobhunt-llm.service`
+stops and does **not** come back on its own when you start the LLM again. Chat
+through 8082 then fails with an empty response while 8081 is perfectly healthy —
+which reads exactly like a model problem and is not one. Start both.

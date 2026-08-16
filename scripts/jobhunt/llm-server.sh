@@ -37,7 +37,10 @@ MODELS="$HOME/.local/share/luminos/models/hive"
 if [ "${LLM_MOE:-0}" = "1" ]; then
   MODEL="${LLM_MODEL:-$MODELS/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf}"
 else
-  MODEL="${LLM_MODEL:-$MODELS/Qwen3-4B-Instruct-2507-Q4_K_M.gguf}"
+  # [CHANGE: claude-code | 2026-08-16] Was Qwen3-4B, which has been deleted. The
+  # small-model slot is gemma-4 E4B now — same family as the MoE above, so both
+  # entries speak one prompt format.
+  MODEL="${LLM_MODEL:-$MODELS/gemma-4-E4B-it-qat-q4_0.gguf}"
 fi
 # [CHANGE: claude-code | 2026-08-14] The SECOND model, offered alongside the first.
 # Empty = single-model mode, exactly as before.

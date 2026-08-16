@@ -38,7 +38,7 @@ design principle.
      |         regex + location rules           free, ~1 second
      |
   score.py     stage 2: the local model      ->  ranked 0-100
-     |         Qwen3-4B on the RTX 4050         free, ~7s per job
+     |        gemma-4-E4B on the RTX 4050       free, ~7s per job
      |
   status.py    you read the list             ->  you decide
                                                  free
@@ -59,7 +59,7 @@ US-only", "is it remote", or "does the title say Senior" needs a language
 model. Those are string comparisons. They are exact, they are instant, and they
 are free.
 
-What survives the filter goes to **Qwen3-4B running on your own RTX 4050**. No
+What survives the filter goes to **gemma-4-E4B running on your own RTX 4050**. No
 API key, no per-token bill, no data leaving the laptop. A cloud model gets
 involved only in Phase 3, when it writes a tailored resume for one specific job
 — a handful of calls where quality actually changes an outcome.

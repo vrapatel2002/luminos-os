@@ -25,7 +25,10 @@
 # they are free. So the rules pass runs first and kills ~97% of the pool with
 # regexes; the model only ever sees what survives.
 #
-# The model that does see them is Qwen3-4B on the RTX 4050 — local, so the
+# The model that does see them is gemma-4-E4B on the RTX 4050 — local, so the
+# [CHANGE: claude-code | 2026-08-16] Was Qwen3-4B, which is deleted. Nothing in
+# this file needed editing: the alias 'luminos-local' is what gets asked for and
+# it now points at the gemma. That indirection is the reason the swap was free.
 # marginal cost of a scoring run is electricity. No API key is involved and no
 # token is billed. Cloud models are reserved for Phase 3 (writing a tailored
 # resume for a specific posting), where there are a handful of calls and the

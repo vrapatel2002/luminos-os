@@ -213,7 +213,7 @@ Automated work-from-home job search. Manual: `scripts/jobhunt/README.md`. Design
 | 0b — OpenClaw + live web | ✅ DONE | agent → 8082 proxy → 8081 model; `web_fetch` proven on a real board |
 | 0c — Control UI + agent model | ✅ DONE | BUG-106; runs on the Claude Code subscription via `claude-cli` |
 | 1 — `profile.yaml` | 🔴 **BLOCKED ON SHAWN** | needs his resume. Gates Phases 3-5. |
-| 2 — filter + score | ✅ DONE | free rules 9,788 → 192 in 0.95 s, then Qwen3-4B on the RTX 4050 |
+| 2 — filter + score | ✅ DONE | free rules 9,788 → 192 in 0.95 s, then gemma-4-E4B on the RTX 4050 |
 | 3 — tailor | ⬜ not started | gated on Phase 1 |
 | 4 — apply (Playwright) | ⬜ not started | gated on Phase 1 |
 | 5 — agent loop | ⬜ not started | gated on Phase 1 + `claude` /login |
