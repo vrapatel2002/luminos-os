@@ -1088,6 +1088,46 @@ zero Plasma, zero KDE — so it reuses the Qt6 libraries Quickshell already keep
 ## BUG-097 — llama-server cannot start: its CUDA build was replaced by a CPU-only one
 **[CHANGE: claude-code | 2026-08-04] — OPEN, needs a decision**
 
+> ### RE-MEASURED 2026-08-16 — the diagnosis below is STALE. The blocker moved.
+> *[CHANGE: claude-code | 2026-08-16]*
+>
+> **`libllama-common.so.0` is no longer missing.** All seven libraries now exist,
+> installed by llama-cpp-python 0.3.34 on 2026-08-05 — but in **two** directories,
+> which is why a search for one of them can still come back empty:
+> ```
+> …/site-packages/llama_cpp/lib/   libllama, libggml{,-base,-cpu,-cuda}, libmtmd
+> …/site-packages/lib/             libllama-common     <- different directory
+> ```
+> With `LD_LIBRARY_PATH` set to both, `ldd` resolves everything and the binary
+> starts. **It then aborts before parsing a single argument:**
+> ```
+> common/arg.cpp:2493: GGML_ASSERT(params.n_gpu_layers < 0) failed
+> #6 common_params_parser_init(...)  from …/lib/libllama-common.so.0
+> ```
+> **The binary is 2026-04-24; the libraries are 2026-08-05.** llama.cpp changed the
+> default `n_gpu_layers` from `0` to `-1` ("all") in between, and the new library
+> asserts the new convention against a struct the old binary initialised the old
+> way. This is a version mismatch, not a missing file — **and no flag can work
+> around it, because it dies during parser setup, before any flag is read.**
+>
+> **`--version` and `--help` crash too**, so the binary cannot report anything
+> about itself. Read the *library's* flag table instead (`strings` on
+> `libllama-common.so.0`) — that is what will be in charge after a rebuild.
+>
+> **The prize is bigger than tool calling.** That August library advertises
+> **`--jinja`** (parses Gemma's tool calls natively → BUG-133's proxy gets deleted),
+> **`--override-tensor` and `--n-cpu-moe`** (MoE expert offload as a *first-class
+> flag* → `scripts/luminos_moe_offload.py` may get deleted too), **`--swa-full`**
+> (the DECISION 74 context fix, no ctypes needed) and `--flash-attn`. Every custom
+> mechanism in the serving stack exists because llama-cpp-python's server does not
+> expose these. **NONE of it is tested** — the binary will not run.
+>
+> **Fix is a rebuild**, not a file copy: build `llama-server` from the same
+> llama.cpp revision the libraries came from. Note CUDA fails in an ordinary shell
+> (`no CUDA-capable device is detected`) because of the DECISION 25 `dgpu` group
+> gate — that is the gate working, not a llama.cpp fault. Test through
+> `dgpu-exec-v2` or as the service user.
+
 **Symptom.** Opening the HIVE popup logs `[LAUNCHER] llama-server not running, starting...` and
 then nothing happens. `/tmp/hive-server.log` fills with:
 
