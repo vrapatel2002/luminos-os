@@ -34,7 +34,7 @@ Environment=LLM_MOE=1
 Environment=LLM_CTX=24576
 Environment=LLM_MODEL2=%h/.local/share/luminos/models/hive/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf
 Environment=LLM_ALIAS2=luminos-local-moe
-Environment=LLM_CTX2=4096
+Environment=LLM_CTX2=24576
 
 # WHY THE MoE IS NOT THE DEFAULT, in llama.cpp's own numbers.
 # [CHANGE: claude-code | 2026-08-14] Measured today, IQ4_XS, mmap off, ctx 24576:
@@ -55,13 +55,27 @@ Environment=LLM_CTX2=4096
 # Both scale STRAIGHT with context, so at 24576 they are 2550 and 255 MiB, and the
 # 2550 MiB is the allocation cudaMalloc refused.
 #
-# [CHANGE: claude-code | 2026-08-15] CORRECTION: an earlier version of this comment
-# named the wrong half and called the SWA number "flat". The sliding-window layers
-# should NOT scale with context -- they only ever look back 1024 tokens. They do
-# because this build has llama_context_default_params().swa_full == True (full-size
-# SWA cache). Llama() accepts a swa_full argument; the server's ModelSettings does
-# NOT expose it, so --config_file cannot reach it. Forcing it False is the untested
-# lead that could make ctx 24576 fit. Do not raise LLM_CTX2 until that is measured.
+# [CHANGE: claude-code | 2026-08-16] FIXED, and LLM_CTX2 is 24576 now.
+#
+# The sliding-window layers were never supposed to scale with context -- they only
+# look back n_swa=1024 tokens. They did because this build defaults swa_full to
+# True (full-size SWA cache). luminos_moe_offload.py now forces it False on the
+# context params, the same ctypes route the expert override already uses, because
+# llama-cpp-python's ModelSettings does not expose it and --config_file cannot
+# reach it.
+#
+# MEASURED at ctx 24576, IQ4_XS, keep2=5:
+#    5 full-attention layers  24576 cells    255.00 MiB
+#   25 sliding-window layers   1536 cells    159.38 MiB   <- was 2550.00
+#   weights                                 4179.75 MiB
+#   compute                                  532.88 MiB
+#   TOTAL VRAM                              5127.01 of 5681 MiB free
+#
+# That is LESS VRAM than the old 4096 config used (5180 MiB), at six times the
+# context. Proven by recall, not by the allocation: a 9051-token prompt with the
+# answer planted in the FIRST line came back correct in 9.0 s. RAM is unchanged
+# at 9520 MiB, so the earlyoom wall below still stands -- ctx was never the RAM
+# problem, only the VRAM one.
 #
 # So the MoE is entry TWO, on a short context, and Qwen3-4B stays the default so
 # HIVE always answers. Picking 'luminos-local-moe' in the model picker loads it.

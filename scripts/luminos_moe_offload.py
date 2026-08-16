@@ -184,6 +184,7 @@ def expert_pattern(keep_on_gpu=0):
 def moe_cpu_offload(patterns=(EXPERT_TENSORS,),
                     n_gpu_layers=ALL_LAYERS,
                     require_op_offload=True,
+                    swa_full=False,
                     enabled=True):
     """Within this block, any model loaded keeps `patterns` tensors in RAM.
 
@@ -257,6 +258,34 @@ def moe_cpu_offload(patterns=(EXPERT_TENSORS,),
             _note("op_offload was OFF - forcing it back ON. With experts in RAM "
                   "this is the difference between ~677 and ~7 tok/s prompt eval.")
             params.op_offload = True
+
+        # [CHANGE: claude-code | 2026-08-15] swa_full defaults to TRUE in this
+        # build, and that is what caps the context on Gemma 4.
+        #
+        # 25 of gemma 4 26B's 30 layers are sliding-window: they only ever attend
+        # to the last n_swa=1024 tokens. With swa_full=True llama.cpp still sizes
+        # their KV cache for the WHOLE context, so at ctx 24576 those 25 layers
+        # asked for 2550 MiB to hold 1024 tokens' worth of anything -- and that is
+        # the exact allocation cudaMalloc refused. The 5 full-attention layers,
+        # the ones that genuinely need the whole window, wanted only 255 MiB.
+        #
+        # Setting it False sizes the SWA cache to the window instead. There is no
+        # way to reach it from llama-cpp-python's SERVER: Llama.__init__ takes a
+        # swa_full argument but ModelSettings does not expose it, so --config_file
+        # cannot pass it. Hence here, next to the other params fix-up.
+        #
+        # THE TRADE, and it is real: swa_full=False means llama.cpp can no longer
+        # reuse a cached prefix that has slid out of the SWA window, so some
+        # prompt-reuse cases re-process instead of resuming. That costs time on a
+        # repeat prompt. It does NOT change the output.
+        #
+        # No effect on models without sliding-window layers -- Qwen3-4B reports
+        # is_swa_any = 0 and ignores this entirely. Safe to leave on for a server
+        # that swaps between both.
+        if swa_full is not None and params.swa_full != swa_full:
+            _note(f"swa_full {bool(params.swa_full)} -> {swa_full} "
+                  f"(size the sliding-window KV cache to the window, not to n_ctx)")
+            params.swa_full = swa_full
         return orig_ctx(self, model=model, params=params, verbose=verbose)
 
     _internals.LlamaModel.__init__ = patched_model

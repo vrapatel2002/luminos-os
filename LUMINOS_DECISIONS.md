@@ -4623,13 +4623,47 @@ number is why the MoE runs at 4096 and the little Qwen runs at 24576.
 [CHANGE: claude-code | 2026-08-15] **CORRECTION — this entry first named the wrong
 half.** It claimed the sliding-window group was a flat 255 MiB and the
 full-attention group was the 2550 MiB. It is the other way round, and "flat" was
-wrong too: **nothing here is capped by the window.** The reason is
+wrong too: **nothing here was capped by the window.** The reason is
 `llama_context_default_params().swa_full == True` in this build — full-size SWA
 cache, i.e. the sliding-window layers allocate the entire context even though they
-only ever attend to 1024 tokens of it. `Llama.__init__` accepts `swa_full`, but
-llama-cpp-python's server `ModelSettings` does **not** expose it, so `--config_file`
-cannot reach it; it would have to be forced the same way `tensor_buft_overrides` is.
-Untested — see the open item in LUMINOS_STATUS.md.
+only ever attend to 1024 tokens of it.
+
+### DECISION 75 — `swa_full=False`, and the MoE gets its 24k context back
+
+[CHANGE: claude-code | 2026-08-16] **The context wall was a default, not a hardware
+limit.** `luminos_moe_offload.py` now forces `swa_full = False` on the context
+params, via the same ctypes patch that already carries `tensor_buft_overrides` —
+necessary because `Llama.__init__` accepts the argument but llama-cpp-python's
+server `ModelSettings` does not expose it, so `--config_file` cannot pass it.
+
+Proven on the dense Gemma 4 12B first, CPU-only so a failure could not cost VRAM or
+anonymous RAM (n_ctx 8192): 40 SWA layers went **8192 cells / 1360.00 MiB → 1536
+cells / 255.00 MiB**, and the 8 full-attention layers did not move.
+
+Then on the 26B A4B at ctx 24576, keep2=5:
+
+| | cells | MiB |
+|---|---|---|
+| 5 full-attention layers | 24576 | 255.00 |
+| 25 sliding-window layers | 1536 | **159.38** (was 2550.00) |
+| weights (CUDA0) | | 4179.75 |
+| compute | | 532.88 |
+| **total VRAM** | | **5127.01** of 5681 free |
+
+**That is less VRAM than the old ctx-4096 config used (5180 MiB), at six times the
+context.** Verified by recall rather than by the allocation report: a 9051-token
+prompt with the answer planted in the *first* line returned it correctly in 9.0 s,
+so the 5 full-attention layers still carry long range. A short question answers in
+11.4 s cold. `LLM_CTX2` is 24576 and OpenClaw's hardcoded `contextWindow` for
+`luminos-local-moe` was raised to match (it does not read `/v1/models`).
+
+**What this does NOT fix:** RAM. The CPU side is still 9520.51 MiB and the earlyoom
+wall above is unchanged — context was only ever the VRAM problem. Free RAM sat at
+~285 MiB with the MoE resident. **The trade:** `swa_full=False` stops llama.cpp
+reusing a cached prefix that has slid out of the SWA window, so some repeat prompts
+re-process instead of resuming. Costs time, not correctness. No effect on models
+without sliding-window layers — Qwen3-4B reports `is_swa_any = 0` and its KV cache
+is byte-identical at 1836.00 MiB before and after.
 
 **3. `keep` is a property of the MODEL, not the process.** `moe-server.py` used one
 env var for the whole server, which breaks the moment two quants share a port —
