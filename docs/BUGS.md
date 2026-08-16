@@ -204,6 +204,21 @@ Last Updated: 2026-08-08 (BUG-111 FIXED — **the plugin death BUG-100 predicted
 
 ## Fixed Bugs (new)
 
+### BUG-131 — The bar popout opened a bar-width away from the bar, and you could not reach it
+<!-- [CHANGE: claude-code | 2026-08-16] -->
+- Status: **FIXED (2026-08-16) — measured, then re-proven by travelling into the panel and clicking a button in it.**
+- Severity: Medium (the panel BUG-130 had just made possible was unusable in practice)
+- Component: `config/quickshell/caelestia-bar/shell.qml`, `popoutWindow`
+- Symptom, in Shawn's words: *"its way to far keep it attached to the bar and also the pannel is un usable"*. Two complaints, **one cause**.
+- Root cause: a **double offset**. Upstream's `drawers/Panels.qml:39` sets `anchors.leftMargin: bar.implicitWidth`, and BUG-130 copied it. Upstream needs it because upstream paints its bar *inside* the same full-screen surface, so it has to step around its own bar by hand. Here the bar is a **separate window** that reserves its width with `exclusiveZone: bar.exclusiveZone`, and a layer-shell surface with `exclusiveZone: 0` means *"honour everyone else's reservations"* — the compositor had already moved the popout window past the bar. Applying the margin on top of that pushed it a second 60px.
+- **Why that also made it unusable, which is the non-obvious half.** The 60px gap is dead space belonging to neither surface. Reaching for the panel means the pointer is on neither the bar nor the popout, so `!barHover.hovered && !popoutHover.hovered` goes true, and the 250 ms close timer fires *while you are still on your way*. The panel deleted itself as you approached. With the gap at zero there is nothing to cross and the handoff is instant.
+- Fix: delete the `anchors.leftMargin` line. Nothing replaces it.
+- **Measured rather than reasoned about, and that mattered** — the two candidate explanations (window starts at the screen edge vs. window starts after the bar) predict the same screenshot but opposite fixes. Logging the window's own geometry settled it in one line: **`win=1380x900` on a `1440x900` screen**. 1440 would have meant the margin was right; 1380 means the compositor had already applied it.
+- Verified end to end afterwards: hovered the wifi icon, walked the pointer across into the panel (which stayed open), landed on "Rescan networks" and clicked — the button became a spinner and the scan ran. Repeated on a clean restart with bluetooth.
+- **Trap worth remembering, cost about ten minutes:** `pkill -x qs` is how you reload this shell, but `shell.sh` gives up after **3 non-zero exits inside 60 s** and opens a kitty window instead of the bar. Three quick debug restarts is exactly that budget. Either wait 60 s between restarts, or run `qs -p ~/.config/quickshell/caelestia-bar` yourself with `WAYLAND_DISPLAY` read from a live process.
+- Second trap: the probe must run **after layout**. `Component.onCompleted` reported `100x100` (Qt's default) and `barW=10`, which is the window before it has been configured — nearly a wrong conclusion. And a `PanelWindow` that is `visible: false` keeps that default size, so the window has to be forced visible to be measured at all.
+- Date Found: 2026-08-16 (reported by Shawn) / Date Fixed: 2026-08-16
+
 ### BUG-130 — The wifi, bluetooth and battery icons on the bar were pictures: hovering them did nothing
 <!-- [CHANGE: claude-code | 2026-08-16] -->
 - Status: **FIXED (2026-08-16) — all three popouts opened, read correct, and closed, checked by screenshot.**

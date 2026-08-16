@@ -315,11 +315,26 @@ ShellRoot {
                     item: popoutsWrapper
                 }
 
-                // Upstream's drawers/Panels.qml:37-39 - fill, then step right by
-                // the bar's width so the popout starts where the bar ends.
+                // [CHANGE: claude-code | 2026-08-16] BUG-131. There is NO left
+                // margin here, and that is the fix, not an omission.
+                //
+                // Upstream's drawers/Panels.qml:39 sets
+                // `anchors.leftMargin: bar.implicitWidth`, because upstream's bar
+                // is painted INSIDE the same full-screen surface - so it has to
+                // step around its own bar by hand. Here the bar is a separate
+                // window that reserves 60px with `exclusiveZone: bar.exclusiveZone`,
+                // and a layer-shell surface with `exclusiveZone: 0` means "honour
+                // everyone else's reservations". Measured: this window is
+                // 1380x900 on a 1440x900 screen. The compositor has already moved
+                // us past the bar.
+                //
+                // Copying upstream's margin applied that 60px a second time. The
+                // panel appeared one bar-width off the bar, and - worse - you
+                // could not use it, because reaching across that gap means the
+                // pointer is on neither surface and the close timer below fires
+                // before you arrive.
                 Item {
                     anchors.fill: parent
-                    anchors.leftMargin: barWindow.bar.implicitWidth
 
                     // Upstream paints this backdrop with the sheet's blob, which
                     // we do not have - so the first run of this came up as
