@@ -2925,3 +2925,63 @@ plugin and every Plasma applet after a system upgrade.
 `reference_linux_silent_failures` — this is the same shape as the rest of that
 list: a tool that reports success, or reports a plausible wrong reason, while
 doing nothing.
+
+## BUG-128 — the model picker only ever listed ONE model, because the HIVE window landed on the wrong URL
+*[CHANGE: claude-code | 2026-08-16]* — **FIXED 2026-08-16**
+
+**Symptom.** Two models were configured and only one appeared in HIVE's model
+picker. The one that showed was labelled with its raw id — `luminos-local ·
+luminos` — instead of the friendly name in the config. Pressing **Ctrl+R** made
+both appear, correctly named, every single time.
+
+**Everything on the config side checked out, four separate ways:**
+
+- `~/.openclaw/openclaw.json` — both models under `models.providers.luminos`.
+- `openclaw models list` — both listed, `luminos-local` tagged default.
+- `~/.openclaw/agents/main/agent/models.json` — both.
+- `curl 127.0.0.1:8082/v1/models` — `['luminos-local', 'luminos-local-moe']`.
+
+The gateway had hot-reloaded after the edit (`[reload] config hot reload applied
+(models.providers.luminos.models)` at 12:27:59) and, captured off the wire, was
+sending **both** models with `available: true`. So the data was right at every
+layer and the UI still drew one row. That is what made this look like a config
+problem for so long, and it never was one.
+
+**Cause.** `HiveWeb.qml` opened the gateway **root** (`/#token=…`) and let the
+React app route itself to `/chat`. The Control UI builds its picker from the
+catalog delivered on `chat.startup` / `chat.metadata`, and it only sends those
+two calls when the session is named in the query string at load time. Measured
+over the DevTools protocol, cold boot of the same window:
+
+| landing URL | RPCs the page sends |
+|---|---|
+| `/` | `connect` — and nothing else |
+| `/chat` | `connect` — and nothing else |
+| `/chat?session=agent%3Amain%3Amain` | `connect`, `chat.startup`, `chat.metadata` |
+
+With no catalog, the picker falls back to rendering the *current* model as its
+only entry, labelled `id · provider` because it has no name to use. Ctrl+R fixed
+it because by then the URL had been rewritten to `/chat?session=…`.
+
+**Nothing reported it.** The sidebar filled in (`sessions.list` is unrelated and
+works either way), the connection dot went green, the console logged no error,
+and the gateway logged a healthy client. Another entry for
+`reference_linux_silent_failures`.
+
+**Fix.** `src/hive/HiveWeb.qml` now lands on
+`/chat?session=agent%3Amain%3Amain` with the token fragment appended. Verified
+cold, with no reload: the picker lists **Qwen3 4B Instruct** and **Gemma 4 26B
+A4B MoE**.
+
+**Labelled haste.** `agent:main:main` is hardcoded. `openclaw.json` has exactly
+one agent, so it is right today and wrong the day a second is added. The smart
+version asks the gateway for its default session key first, which needs a
+WebSocket round trip from QML.
+
+**How this was found, worth keeping.** `QTWEBENGINE_REMOTE_DEBUGGING=9333` on
+the qml6 process exposes a normal Chrome DevTools endpoint for the embedded web
+view — the live DOM, the console, and every WebSocket frame. It is the only way
+to tell "the server sent the wrong thing" apart from "the client asked the wrong
+question", and here it was the second one.
+
+**Related.** DECISION 71 and 73 (why HIVE is a web view at all), BUG-102.

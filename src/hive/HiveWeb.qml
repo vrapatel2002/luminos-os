@@ -85,6 +85,43 @@ Window {
         }
     }
 
+    // ------------------------------------------------------------------
+    // THE LANDING URL MUST NAME THE SESSION. Do not shorten this back to "/".
+    // [CHANGE: claude-code | 2026-08-16]
+    //
+    // This window used to open the gateway ROOT and let the React app route
+    // itself to /chat. It looked identical, and it silently broke the model
+    // picker: the picker only ever listed ONE model, whichever one was
+    // selected, labelled with its raw id ("luminos-local · luminos") instead
+    // of its configured name.
+    //
+    // Measured over the DevTools protocol, cold boot vs. reload of the very
+    // same window:
+    //
+    //   landing at "/"                    -> sends `connect`, and that is ALL
+    //   landing at "/chat"                -> sends `connect`, and that is ALL
+    //   landing at "/chat?session=..."    -> sends chat.startup + chat.metadata
+    //
+    // The catalog rides on chat.startup/chat.metadata, so without the session
+    // in the query string the picker never receives one and falls back to
+    // rendering the current model as its only entry. The sidebar still filled
+    // in and the connection dot still went green, which is why this read as
+    // "the config is wrong" for so long. The config was never wrong: the
+    // gateway sends both models with available:true either way.
+    //
+    // Pressing Ctrl+R fixed it every time, because by then the URL had been
+    // rewritten to /chat?session=... — that is the tell, and it is the whole
+    // bug in one sentence.
+    //
+    // HASTE DECISION, LABELLED: agent:main:main is hardcoded. It is the only
+    // agent in openclaw.json (agents.list has one entry, id "main"), so this
+    // is correct today and will be wrong the day a second agent is added. The
+    // smart version asks the gateway for its default session key before
+    // loading — that needs a WebSocket round trip from QML, which is why it
+    // is not here.
+    // ------------------------------------------------------------------
+    readonly property string landingPath: "/chat?session=agent%3Amain%3Amain"
+
     Component.onCompleted: {
         parseArgs();
         var token = readTokenFile(root.tokenPath);
@@ -94,9 +131,9 @@ Window {
             // instead of showing a mystery login screen.
             console.log("HiveWeb: no token found at '" + root.tokenPath
                         + "' — loading the dashboard unauthenticated.");
-            view.url = root.gatewayBase + "/";
+            view.url = root.gatewayBase + root.landingPath;
         } else {
-            view.url = root.gatewayBase + "/#token=" + token;
+            view.url = root.gatewayBase + root.landingPath + "#token=" + token;
         }
     }
 
