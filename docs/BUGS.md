@@ -2926,8 +2926,16 @@ plugin and every Plasma applet after a system upgrade.
 list: a tool that reports success, or reports a plausible wrong reason, while
 doing nothing.
 
-## BUG-128 — the model picker only ever listed ONE model, because the HIVE window landed on the wrong URL
+## BUG-132 — the model picker only ever listed ONE model, because the HIVE window landed on the wrong URL
 *[CHANGE: claude-code | 2026-08-16]* — **FIXED 2026-08-16**
+
+> **Renumbered from BUG-128 on 2026-08-16.** This file runs two number sequences
+> at once — Caelestia work files into *Open Bugs* at the top, HIVE/LLM work
+> appends down here — and both reached 128 and 129 on the same two days. The
+> Caelestia entries were filed first (2026-08-15) so they keep the numbers.
+> Anything elsewhere that says "BUG-128" about the model picker means this entry.
+> **Before filing the next bug, run `grep -oP '^#{2,3} BUG-\K[0-9]+' docs/BUGS.md
+> | sort -n | tail -1` — reading only one section of this file will collide again.**
 
 **Symptom.** Two models were configured and only one appeared in HIVE's model
 picker. The one that showed was labelled with its raw id — `luminos-local ·
@@ -2985,3 +2993,89 @@ to tell "the server sent the wrong thing" apart from "the client asked the wrong
 question", and here it was the second one.
 
 **Related.** DECISION 71 and 73 (why HIVE is a web view at all), BUG-102.
+
+---
+
+## BUG-133 — tool calling was dead for both Gemma models, and reported success
+**Status:** FIXED — 2026-08-16
+**Component:** `scripts/jobhunt/toolcall-proxy.py` (port 8082)
+**Renumbered from BUG-129 on 2026-08-16** — see the note under BUG-132 above.
+
+**Symptom.** Ask the local model to use a tool and it answers like a normal chat
+turn. No error, HTTP 200, `finish_reason: "stop"` — and the tool call sitting in
+the message body as text the client has no reason to read:
+
+```
+content:    '<|tool_call>call:get_weather{city:<|"|>Toronto<|"|>}<tool_call|>'
+tool_calls: null
+```
+
+**How long, and what actually broke it.** Since **DECISION 74 (2026-08-14)**, when
+gemma-4-26B became a served model. Not caused by DECISION 75's swap of the small
+slot — the E4B and the 26B were measured failing *identically*, which is what
+proved the age of it. Before that the only served model was Qwen3-4B, whose
+dialect is the one the proxy was written for.
+
+**Cause.** `toolcall-proxy.py` existed because llama-cpp-python does not parse the
+model's tool syntax. It knew exactly one dialect — Qwen's `<tool_call>{json}
+</tool_call>`. Gemma emits `<|tool_call>call:NAME{key:VALUE}<tool_call|>`, where
+values are not JSON: strings are fenced with the literal token `<|"|>`, and
+`true`/`false`/`null`/numbers are bare. It matched no pattern and fell through as
+prose.
+
+**Why this hid.** Every layer reported success. The model did its job. The server
+did its job. The proxy did what it was told. Only the client, which never asked a
+question, could have noticed — and an agent that receives prose instead of a tool
+call simply answers from what it already knows, which reads like a slightly
+unhelpful model rather than a broken pipeline.
+
+**The round trip is the real difficulty, and the two layers contradict each other.**
+MEASURED against llama-cpp-python 0.3.34 with the Gemma 4 template:
+
+| what was sent back | result |
+|---|---|
+| `assistant.tool_calls`, `arguments` as a **dict** | **500** — request schema rejects it; `ChatCompletionMessageToolCall.function.arguments` must be a `str` |
+| `assistant.tool_calls`, `arguments` as a **string** | **500** — the GGUF template itself raises: *"arguments must be a JSON object (mapping), not a string"* |
+
+There is no value that satisfies both. Structured tool calls **cannot** be handed
+back to this server at all, so replaying history has to go back as text in the
+model's own dialect. That is what the proxy's `normalize_request` does, and it is
+not merely a workaround for `content: null` as the old comment claimed.
+
+**A second silent failure rides along.** A standalone `role: "tool"` message
+**validates fine and is then discarded by the template.** Gemma's message loop
+opens with `{% if message['role'] != 'tool' %}`, and tool results are rendered
+only by a forward-scan from an assistant turn that still carries `tool_calls` —
+which the paragraph above forces us to strip. Leave the tool message in place and
+the model answers as if the tool never ran. No error, anywhere. The fix folds the
+tool results into the same assistant text as the calls.
+
+**Fix.** Both dialects are parsed on the way out; the way back in emits Gemma's.
+
+- **A regex cannot parse the Gemma form.** `\{(.*?)\}` stops at the first `}`, so
+  any nested object silently truncates the arguments — and a call made with half
+  its arguments is worse than no call. Replaced with a small recursive-descent
+  reader that is strict on purpose: anything it cannot read is left as text rather
+  than guessed at.
+- Argument keys are emitted `sorted()` to match the template's `| dictsort`.
+- The Qwen parser is kept. It costs nothing and is already proven; nothing on this
+  box currently serves a Qwen.
+
+**Proven end to end, not asserted.** Turn 1 returns
+`finish_reason: "tool_calls"` with a real `tool_calls` array and `content: null`;
+turn 2 replays that history plus the tool result and the model answers *"The
+weather in Toronto right now is 18C and sunny, with a wind speed of 12 km/h."*
+Confirmed on **both** `luminos-local` and `luminos-local-moe`. Plain chat with no
+tools was re-tested for regression. Unit-tested besides: nested objects, arrays,
+booleans, numbers, nulls, two calls in one reply, Qwen's form, plain prose
+containing `{braces}`, and a deliberately malformed call — which correctly
+produces **no** tool call rather than an invented one.
+
+**How to spot the next one of these.** `finish_reason: "stop"` on a request that
+carried a `tools` array, with tool-ish punctuation in `content`, means the parser
+does not know the model's dialect. Print the raw `content` — the model is usually
+doing exactly the right thing in a format nothing downstream reads.
+
+**Related.** DECISION 74 and 75 (which models are served), BUG-097 (the real fix
+is llama.cpp's own `llama-server --jinja`, which parses this natively; this file
+should be deleted, not maintained, once that binary starts).

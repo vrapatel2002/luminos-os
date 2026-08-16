@@ -4785,9 +4785,13 @@ neither needed an edit — the indirection is what made the swap free. Only the
 `~/.openclaw/agents/main/agent/models.json`, because the picker shows that string
 to a human. Both backed up to `*.bak-20260816`.
 
-**Also unchanged: the reply is still signed "Nexus."** That is
+**~~Also unchanged: the reply is still signed "Nexus."~~ DONE 2026-08-16.** That is
 `agents.list[0].identity.name`, the persona, and it is independent of which model
-is loaded. Renaming it is a one-line config change and has not been made.
+is loaded. It now reads **"Gemma"**, verified on screen over CDP —
+`document.body.innerText` gives "OpenClaw › Gemma › Chat" and the reply signs
+itself Gemma. The emoji (`✳`) and the theme line were deliberately left alone.
+**Cheap undo:** one string in `~/.openclaw/openclaw.json`; the untouched
+`openclaw.json.pre-moe` and `.last-good` both still say `"name": "Nexus"`.
 
 **Verified end to end:** E4B answers on 8081 and through the 8082 tool-call proxy;
 the 26B still swaps in over the top of it (12 s warm) and answers; the HIVE model
@@ -4797,3 +4801,15 @@ picker renders both entries with their proper names after a gateway restart.
 stops and does **not** come back on its own when you start the LLM again. Chat
 through 8082 then fails with an empty response while 8081 is perfectly healthy —
 which reads exactly like a model problem and is not one. Start both.
+
+**Follow-ups closed 2026-08-16.** I ended the first pass with three loose ends and
+Shawn asked for all three. All are done:
+
+1. **Tool calling was not "probably fine" — it was completely dead, for both Gemma
+   models, since DECISION 74 landed on 2026-08-14.** I had assumed it still worked
+   because the MoE is also a Gemma; that assumption was wrong and the swap did not
+   cause it. See **BUG-133**. Fixed in `scripts/jobhunt/toolcall-proxy.py`; proven
+   over a real two-turn exchange on both models, with a no-tools regression check.
+2. **The persona is renamed to Gemma** (above).
+3. **The 4.28 GiB ggml-org E4B fallback is deleted.** The `google` QAT build is the
+   only E4B on disk. Disk now 442G used / 145G free of 619G.
