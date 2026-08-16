@@ -204,6 +204,31 @@ Last Updated: 2026-08-08 (BUG-111 FIXED — **the plugin death BUG-100 predicted
 
 ## Fixed Bugs (new)
 
+### BUG-134 — The app launcher vanished as soon as you typed in it
+<!-- [CHANGE: claude-code | 2026-08-16] -->
+- Status: **FIXED (2026-08-16) — reproduced on demand, fixed, then re-run against the exact failing case plus three hover regressions.**
+- Severity: High (the launcher was unusable for its one job)
+- Component: `config/quickshell/caelestia-bar/shell.qml`, `scope.onLauncherHoveredChanged` and `launcherSurfaceHover`
+- Symptom, in Shawn's words: *"the app launcher menu when i try to type something . it just crash"*.
+- **It was not a crash.** `qs` never died: same PID before and after, no coredump (`coredumpctl` had only llama-server), and `shell.sh` logged no restart. The *window* disappeared, which looks identical from the outside.
+- Root cause: the launcher window is sized to its content — `implicitHeight: launcher.implicitHeight` — and the content gets **shorter** as a query filters the result list. The window's top edge slides **down**, away from a pointer that never moved. The compositor sends a leave. `onLauncherHoveredChanged`'s `else` branch could not tell that from the user walking away, so it set `screenState.launcher = false` mid-word. This was written down as an "ACCEPTED COST" in the file when the `else` was added; the cost was much worse in practice than it read on paper.
+- **The A/B that proved it** (`ydotool` typing, KWin's `workspace.cursorPos` as the oracle, `ipc call drawers isOpen launcher` as the readout):
+
+  | pointer | query | result |
+  | --- | --- | --- |
+  | away (284,302) | `fir` (5 hits) | stays open |
+  | over it (747,540) | `fir` (5 hits) | stays open — the list barely shrinks, the pointer is still inside |
+  | over it (747,540) | `zzqqxw` (0 hits) | **closes** |
+  | away (284,302) | `zzqqxw` (0 hits) | stays open |
+
+  Identical keystrokes; only the pointer position differs. That isolates it to the one pointer-dependent close path in the file.
+- Fix (4 lines, no timers): record the launcher's height when the pointer lands on it, and on leave **only close if the launcher is at least as tall as it was then**. Shorter means the surface moved, not the pointer. Hover-ownership is still surrendered — the pointer genuinely is off the surface, so hover can no longer be trusted to close what it opened — but the launcher stays up. Walking back onto it re-arms hover-to-close, so it is self-healing.
+- The baseline has to be taken in **two** places. The usual way in is the bottom tripwire strip, which flips `launcherHovered` true while the launcher is still closed; the scope handler therefore records 0 and never fires again as the pointer walks up onto the now-open launcher. Hence the extra `onHoveredChanged` on `launcherSurfaceHover`. The scope handler reads `launcher.visible ? launcher.implicitHeight : 0` because a *closed* launcher keeps its last height (`launcher/Wrapper.qml:31` deliberately breaks the binding on the way out) and a stale tall value there would swallow a real leave.
+- Regressions re-run after the fix, all pass: hover the strip → opens; move away → closes; strip → up onto the body → away → closes; Escape → closes; hover-open → type a filtering query → **stays**; keep typing to zero results → **stays**.
+- Alternative considered and rejected: latch the window height to the tallest it reached while open, so the surface never shrinks under the pointer at all. It preserves dismiss-on-leave perfectly, but it adds mutable geometry state with a reset path, risks clipping the slide-up animation, and starts at 0 on first open (the same hazard `Wrapper.qml:37`'s hard-coded `|| 630` width fallback already works around). The height comparison is smaller and has no geometry risk.
+- Related, not fixed: `implicitWidth`/`implicitHeight` on `launcherWindow` are bound to a changing property, which is the shape BUG-123 warns about. It is not the same severity — these change once per keystroke, not 24–38 times per animation — so it is left alone.
+- Date Found: 2026-08-16 (reported by Shawn) / Date Fixed: 2026-08-16
+
 ### BUG-131 — The bar popout opened a bar-width away from the bar, and you could not reach it
 <!-- [CHANGE: claude-code | 2026-08-16] -->
 - Status: **FIXED (2026-08-16) — measured, then re-proven by travelling into the panel and clicking a button in it.**

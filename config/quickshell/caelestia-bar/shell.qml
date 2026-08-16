@@ -144,17 +144,42 @@ ShellRoot {
             // over some other window, is not closed instantly by the next
             // stray mouse move - only hover may close what hover opened.
             //
-            // ACCEPTED COST: hover-open it, then park the pointer off it while
-            // typing, and it closes under you. Keyboard-opened ones are safe.
+            // [CHANGE: claude-code | 2026-08-16] BUG-134. What used to sit here
+            // was "ACCEPTED COST: hover-open it, then park the pointer off it
+            // while typing, and it closes under you." That cost turned out to
+            // be far worse than it sounded, and it is now paid off.
+            //
+            // The launcher window is sized to its content (implicitHeight,
+            // below). Type a query that matches fewer apps and the result list
+            // gets shorter, so the WINDOW gets shorter - its top edge slides
+            // DOWN, away from a pointer that never moved. The compositor sends
+            // a leave, this handler could not tell that from the user walking
+            // away, and it shut the launcher mid-word. Measured: query "fir"
+            // (5 hits) shrinks a little and survives; a query with no hits at
+            // all collapses to just the search bar and always killed it.
+            //
+            // The tell is the launcher's own height. A leave that arrives while
+            // the launcher is SHORTER than it was when the pointer landed on it
+            // is the surface moving, not the pointer. Ownership is still given
+            // up - the pointer really is off the surface now, so hover can no
+            // longer be trusted to close what it opened - but the launcher
+            // stays up. Escape, Meta+P, the logo and launching an app all still
+            // close it, and walking back onto it re-arms hover-to-close.
             property bool launcherOwnedByHover
+            property real launcherHeightAtHover
 
             onLauncherHoveredChanged: {
                 if (launcherHovered) {
+                    // Read before opening: a closed launcher keeps its last
+                    // height (Wrapper.qml:31 breaks the binding on the way out),
+                    // and a stale tall value here would suppress a real leave.
+                    launcherHeightAtHover = launcher.visible ? launcher.implicitHeight : 0;
                     launcherOwnedByHover = true;
                     screenState.launcher = true;
                 } else if (launcherOwnedByHover) {
                     launcherOwnedByHover = false;
-                    screenState.launcher = false;
+                    if (launcher.implicitHeight >= launcherHeightAtHover)
+                        screenState.launcher = false;
                 }
             }
 
@@ -453,6 +478,19 @@ ShellRoot {
                 // a leave, and the launcher closes as you reach for it.
                 HoverHandler {
                     id: launcherSurfaceHover
+
+                    // [CHANGE: claude-code | 2026-08-16] BUG-134. Re-take the
+                    // height reading on arrival HERE as well as in
+                    // scope.onLauncherHoveredChanged, because the usual way in
+                    // is via the strip below: that sets launcherHovered true
+                    // while the launcher is still closed, so the scope handler
+                    // records 0 and never fires again as the pointer walks up
+                    // onto the open launcher. Without this line the baseline
+                    // stays 0, every height clears it, and nothing is guarded.
+                    onHoveredChanged: {
+                        if (hovered)
+                            scope.launcherHeightAtHover = launcher.implicitHeight;
+                    }
                 }
 
                 Launcher.Wrapper {
