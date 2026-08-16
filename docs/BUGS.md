@@ -204,6 +204,27 @@ Last Updated: 2026-08-08 (BUG-111 FIXED — **the plugin death BUG-100 predicted
 
 ## Fixed Bugs (new)
 
+### BUG-130 — The wifi, bluetooth and battery icons on the bar were pictures: hovering them did nothing
+<!-- [CHANGE: claude-code | 2026-08-16] -->
+- Status: **FIXED (2026-08-16) — all three popouts opened, read correct, and closed, checked by screenshot.**
+- Severity: Medium (the state was visible but not reachable — no way to see which network, no way to switch one)
+- Component: `config/quickshell/caelestia-bar/shell.qml` (new `popoutWindow`, `HoverHandler` on `BarWrapper`)
+- Symptom: the left bar shows a wifi glyph, a bluetooth glyph and a battery glyph. Hovering any of them does nothing at all.
+- **The icons were never wrong.** Early on I read a screenshot showing `wifi_off` while the machine was plainly connected and nearly went and "fixed" the state binding. The screenshot was taken 2 s after a shell restart, before `nmcli` had answered; a later one showed full bars. **A status icon read within a few seconds of start is reading a service that has not replied yet, not reading it wrong.**
+- Root cause, and it was already written down in this file's own header comment: the popouts Wrapper was instantiated as a **decoy** — `visible: false`, zero size, present only because `BarWrapper` requires one — and **`checkPopout()` was never called**. That call lives in upstream's `modules/drawers/Interactions.qml:240`, which belongs to the full-screen drawers sheet that DECISION 68's port deliberately does not have. So nothing ever told the popout which icon the pointer was on.
+- Fix, three small parts:
+  1. A `HoverHandler` on the `BarWrapper` calling `bar.checkPopout(point.position.y)` — the same one line Interactions.qml runs.
+  2. A new `popoutWindow` holding upstream's `BarPopouts.ClipWrapper` unmodified, offset by `anchors.leftMargin: bar.implicitWidth`.
+  3. A 250 ms `Timer` to close it.
+- **`HoverHandler`, not `MouseArea`, on purpose.** A handler is passive: it watches the pointer and never takes a press, so it cannot swallow the clicks underneath it. A `MouseArea` laid over the bar would have re-created BUG-128 one day after fixing it.
+- **The popout window covers the whole output and uses `mask: Region { item: popoutsWrapper }` — it is never resized.** The obvious design is to size the window to the popout, and that is precisely the mistake BUG-123 documents: binding a layer-shell window dimension to an animating property costs a compositor configure round trip *per frame* (24–38 resizes were measured for one dashboard tab switch). Checking BUG-123 before writing the code is what stopped it. Covering the output is safe because outside the mask there is no input region at all, so clicks fall through to the windows behind.
+- **The close needed a grace period because the bar and the popout are two separate surfaces.** "Left the bar" and "entered the popout" arrive as separate events in that order, so closing on the first leave would make the popout permanently unreachable — you could never travel to it. The 250 ms timer is bound to `hasCurrent && !barHover.hovered && !popoutHover.hovered`; entering the popout does not merely postpone the close, it unbinds `running` and cancels it outright.
+- Had to add a `StyledRect` backdrop. Upstream never paints one because the sheet's blob is behind the popout; without the sheet the first render was white text floating over whatever windows were behind it. Same pattern the launcher, OSD and dashboard already use here.
+- `keyboardFocus` deliberately left at its default `None`: `popouts/Wrapper.qml:98-104` already flips it to `OnDemand` by `Binding` when the wifi-password field needs it. Setting it would have fought that.
+- Verified: **WiFi** → "Wireless / Enabled / 21 networks available" with BELL851 marked connected; **Bluetooth** → "Enabled / Discovering / ULT WEAR"; **Battery** → "Remaining: 100% / Fully charged!". Handoff proven by hopping the pointer from icon into panel (stayed open); close proven by moving away (gone within 1.5 s).
+- **Known dead end inside the fix, not caused by it:** the battery popout's three power-profile buttons probably do nothing — `PowerProfiles` is masked on this machine (`Could not start PowerProfilesDaemon` in the shell log). Separate problem, not investigated.
+- Date Found: 2026-08-16 (reported by Shawn) / Date Fixed: 2026-08-16
+
 ### BUG-129 — The power menu opened from the bar button and then stayed out forever
 <!-- [CHANGE: claude-code | 2026-08-15] -->
 - Status: **FIXED (2026-08-15) — PROVEN ON SCREEN, both directions.**

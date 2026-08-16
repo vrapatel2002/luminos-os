@@ -19,11 +19,11 @@
 // bug.  Windows this size cannot do that: outside them there is no surface.
 //
 // Still NOT here (deliberately - one step at a time, per Shawn 2026-08-13):
-//   - sidebar (the notification LIST drawer) / session menu / utilities
+//   - the utilities panel (a standin is drawn in its place)
 //   - the rounded screen border and 10px gap (painted by the sheet's blob)
-//   - bar popouts.  A popouts Wrapper is instantiated because BarWrapper
-//     requires one, but it is never shown and `checkPopout()` is never called
-//     (that call lives in Interactions.qml, which belongs to the sheet).
+//
+// Added since: the sidebar and session menu (both live), and the bar popouts
+// (BUG-130 - `popoutWindow` below, driven by a HoverHandler on the bar).
 //
 // Run it by hand with:  qs -c caelestia-bar
 
@@ -189,7 +189,12 @@ ShellRoot {
                 id: barWindow
 
                 readonly property alias bar: bar
-                readonly property alias popouts: popouts
+                // [CHANGE: claude-code | 2026-08-16] BUG-130. The popouts used
+                // to be a zero-size decoy in here: instantiated only because
+                // BarWrapper requires one, `visible: false`, and never opened.
+                // They now live in a window of their own (below) for the same
+                // reason the dashboard does - see the comment down there.
+                readonly property var popouts: popoutsWrapper.content
 
                 screen: scope.modelData
                 color: "transparent"
@@ -213,14 +218,6 @@ ShellRoot {
                     color: Colours.tPalette.m3surface
                 }
 
-                BarPopouts.Wrapper {
-                    id: popouts
-
-                    screen: scope.modelData
-                    offsetScale: 0
-                    visible: false
-                }
-
                 BarWrapper {
                     id: bar
 
@@ -230,9 +227,151 @@ ShellRoot {
 
                     screen: scope.modelData
                     screenState: scope.screenState
-                    popouts: popouts
+                    popouts: popoutsWrapper.content
                     fullscreen: false
+
+                    // [CHANGE: claude-code | 2026-08-16] BUG-130: the one call
+                    // that was missing. Upstream drives popouts from
+                    // Interactions.qml:240-245 - a full-screen mouse area that
+                    // calls `bar.checkPopout(y)` whenever the pointer is left of
+                    // `bar.implicitWidth`. That file belongs to the sheet this
+                    // port does not have, so the call was never made and every
+                    // status icon was decoration.
+                    //
+                    // A HoverHandler, not a MouseArea, and that is the whole
+                    // point: BUG-128 was an invisible MouseArea sitting on top
+                    // of the panels and eating their clicks. A handler is
+                    // passive - it watches the pointer and never takes a press -
+                    // so the workspace buttons, the tray and the power button
+                    // underneath it keep working untouched.
+                    //
+                    // On the ITEM, not on the window, which is BUG-123's other
+                    // lesson: a HoverHandler on a window that covers more than
+                    // the thing you care about reports "hovered" everywhere.
+                    // The bar item is exactly the strip, so `hovered` here means
+                    // what it says.
+                    //
+                    // No x guard is needed for upstream's `x < bar.implicitWidth`
+                    // - this handler only exists inside the bar.
+                    HoverHandler {
+                        id: barHover
+
+                        onPointChanged: bar.checkPopout(barHover.point.position.y)
+                    }
                 }
+            }
+
+            // ── the bar popouts ──────────────────────────────────────────────
+            // [CHANGE: claude-code | 2026-08-16] BUG-130.
+            //
+            // Why a window at all: the bar window is exactly as wide as the bar
+            // (`implicitWidth: bar.implicitWidth`), so a popout drawn inside it
+            // would be clipped to about 60px and be unreadable.
+            //
+            // Why this window covers the whole output and never resizes: that
+            // is BUG-123, in full. The popout animates its own width and height
+            // when it opens and when you slide between network / bluetooth /
+            // battery, and binding a layer-shell surface to an animating value
+            // means a configure round trip with the compositor every frame - the
+            // animation stalls the animation. Upstream's ContentWindow.qml:73-79
+            // covers the output and masks instead, and so does the dashboard
+            // above, for the same reason and with the same result.
+            //
+            // The mask is what keeps this honest: outside the popout's own
+            // rectangle there is no input region, so clicks land on whatever is
+            // behind. When nothing is open the wrapper is 0 wide and the mask is
+            // empty, so this window is inert.
+            PanelWindow {
+                id: popoutWindow
+
+                screen: scope.modelData
+                color: "transparent"
+
+                // Same threaded-render-loop trap as the launcher, the OSD and
+                // the dashboard: ClipWrapper is `visible: width > 0 && height >
+                // 0` and that width is driven by a Behavior. A hidden window
+                // gets no frames to advance it with, so the popout would slide
+                // out once and never slide back. The plain bool flips instantly;
+                // OR-ing the animated one keeps the window alive for the return.
+                visible: barWindow.popouts.hasCurrent || popoutsWrapper.visible
+
+                WlrLayershell.namespace: "caelestia-bar-popouts"
+                WlrLayershell.layer: WlrLayer.Top
+
+                // Deliberately not setting keyboardFocus. The default is None,
+                // which is what a hover-opened panel should be, and popouts/
+                // Wrapper.qml:98-104 already flips it to OnDemand by Binding for
+                // the one popout that needs typing (the wifi password box) and
+                // puts it back afterwards. Setting it here would fight that.
+
+                exclusiveZone: 0
+
+                anchors.top: true
+                anchors.bottom: true
+                anchors.left: true
+                anchors.right: true
+
+                mask: Region {
+                    item: popoutsWrapper
+                }
+
+                // Upstream's drawers/Panels.qml:37-39 - fill, then step right by
+                // the bar's width so the popout starts where the bar ends.
+                Item {
+                    anchors.fill: parent
+                    anchors.leftMargin: barWindow.bar.implicitWidth
+
+                    // Upstream paints this backdrop with the sheet's blob, which
+                    // we do not have - so the first run of this came up as
+                    // floating white text over whatever window was behind it.
+                    // Same fix, and the same rounded rect, as the launcher, the
+                    // OSD and the dashboard. Declared BEFORE the wrapper so it
+                    // paints behind it.
+                    StyledRect {
+                        anchors.fill: popoutsWrapper
+                        radius: Tokens.rounding.extraLarge
+                        color: Colours.tPalette.m3surface
+                    }
+
+                    BarPopouts.ClipWrapper {
+                        id: popoutsWrapper
+
+                        screen: scope.modelData
+
+                        // Upstream subtracts the 10px frame it paints around the
+                        // whole screen before placing the popout against the
+                        // icon that opened it. We paint no such frame, so the
+                        // bar starts at y=0 and the offset is zero - the same
+                        // reason the launcher and the dashboard dropped their
+                        // top margins.
+                        borderThickness: 0
+
+                        HoverHandler {
+                            id: popoutHover
+                        }
+                    }
+                }
+            }
+
+            // [CHANGE: claude-code | 2026-08-16] BUG-130: what closes it.
+            //
+            // Upstream closes a popout in the same handler that opens it,
+            // because one full-screen mouse area sees the bar AND the popout.
+            // Here they are two surfaces, so "left the bar" and "left the
+            // popout" arrive separately, and closing on the first would make the
+            // popout impossible to reach - it would vanish the moment you moved
+            // towards it.
+            //
+            // So: close only when NEITHER is hovered, and give it a moment. The
+            // delay is not a guess about timing, it is cover for the handoff -
+            // crossing from one wl_surface to the next there is an instant where
+            // the pointer has left the first and not yet entered the second.
+            // `running` is a binding, so entering the popout cancels it outright
+            // rather than racing it.
+            Timer {
+                interval: 250
+                running: barWindow.popouts.hasCurrent && !barHover.hovered && !popoutHover.hovered
+                onTriggered: barWindow.popouts.hasCurrent = false
             }
 
             // ── the launcher ─────────────────────────────────────────────────
