@@ -4813,3 +4813,116 @@ Shawn asked for all three. All are done:
 2. **The persona is renamed to Gemma** (above).
 3. **The 4.28 GiB ggml-org E4B fallback is deleted.** The `google` QAT build is the
    only E4B on disk. Disk now 442G used / 145G free of 619G.
+
+---
+
+## DECISION 76
+# Dolphin's context is 16k, not 36k — and sliding window cannot buy it back
+# [CHANGE: claude-code | 2026-08-17]
+
+**What changed.** The third model on port 8081, `luminos-dolphin`
+(Dolphin3.0-Llama3.1-8B-Q4_K_M, the uncensored one OpenClaw talks to), went from
+**36864 context / 20 GPU layers / q8_0 KV** to **16384 context / all 33 layers /
+q4_0 KV**. Three files: `systemd/jobhunt-llm.service` (`LLM_CTX3`, `LLM_NGL3`, a
+new `LLM_KV_TYPE3`), `llm-server.sh` (KV type is now per-model, not one global),
+and `openclaw-provider.json5` + the live `~/.openclaw/openclaw.json`
+(`contextWindow`).
+
+**Why.** Shawn's complaint was *"it's just taking too long to load and is not
+replying."* Both halves were the same arithmetic:
+
+| | weights | KV cache | wanted | card has |
+|---|---|---|---|---|
+| 36864 ctx, q8_0 KV | 4685 MiB | **2448 MiB** | **7133 MiB** | 6141 MiB |
+| 16384 ctx, q4_0 KV | 4685 MiB | **544 MiB** | **5229 MiB** | 6141 MiB |
+
+The 36k configuration does not fit. The only way it loaded at all was
+`LLM_NGL3=20` — **13 of its 33 layers computing on the CPU, once per token.**
+That is the whole slowdown.
+
+**MEASURED, not assumed**, same model, same prompts, on the real card:
+
+| setting | VRAM used | free | short reply | 12k-token prompt |
+|---|---|---|---|---|
+| 36864 / ngl 20 / q8_0 | 5.9 GB-ish, spilled | — | **7.13 tok/s** | unusable |
+| 16384 / ngl -1 / q4_0 | **5348 MiB** | **793 MiB** | **36.7 tok/s** | 27.3 tok/s generate, ~1250 tok/s prompt read |
+
+**5.1×.** A 13,888-token prompt now answers correctly in 12.3 s end to end,
+through the 8082 proxy, which is the path OpenClaw actually uses.
+
+**What this costs.** Real context, honestly: 36864 → 16384 tokens. It is not the
+loss it looks like. At 7.13 tok/s a *filled* 36k window was hours of generation,
+so the capacity existed on paper only. 16k that answers beats 36k that does not.
+
+**Why q4_0 KV, and the global it broke.** q8_0 KV at 16384 is 1088 MiB, which puts
+the total at 5773 MiB against ~5772 MiB free — it would have failed by a rounding
+error. `KV_TYPE` in `llm-server.sh` was **one global for every model on the port**,
+the same trap as `CHAT_FORMAT` above it. It is per-model now (`entry(..., kv=)`),
+and **only** the third model overrides it, so Gemma's q8_0 is untouched. This was
+the smallest change that got Dolphin q4_0 without touching a working path.
+
+---
+
+**SLIDING WINDOW CANNOT RESCUE THE 36k.** Shawn asked directly, twice. The answer
+is no, and it is worth writing down because the reasoning is not obvious — SWA is
+exactly the right idea and it is simply not available on this architecture.
+
+Checked at three independent levels, each of which alone would settle it:
+
+1. **The file.** Reading the GGUF metadata directly: Dolphin has
+   `llama.block_count=32`, `head_count_kv=8`, `key_length=128`,
+   `context_length=131072`, and **no `llama.attention.sliding_window` key at all**.
+   For comparison, `gemma-4-26B` carries `sliding_window = 1024` and `gemma-4-E4B`
+   carries `512`. That is why DECISION 75's table shows E4B's 35 sliding layers
+   costing 21.25 MiB against 204 MiB for its 7 full-attention layers — SWA is doing
+   enormous work *there*, on a model that declares it.
+2. **The experiment.** `--override-kv llama.attention.sliding_window=int:4096` is
+   accepted without complaint and **silently does nothing**: the full 2448 MiB of
+   KV is still allocated and the server still OOMs. No warning, no error.
+3. **The source** (llama.cpp b10452, `~/.cache/luminos-build/llama.cpp-cuda/`).
+   This is the actual reason. `hparams.n_swa` and `hparams.swa_type` are set **only**
+   inside per-architecture `load_arch_hparams()` functions. **26 architecture files
+   read `LLM_KV_ATTENTION_SLIDING_WINDOW`** (gemma4, gemma3, gemma2, llama4, phi3,
+   cohere2, exaone4, olmo2, …). **`src/models/llama.cpp` — the loader for Dolphin's
+   `llama` architecture — reads it zero times.** The override does reach the loader
+   (`llama-model-loader.cpp:415-428` applies kv_overrides at every `get_key()`);
+   nothing on the `llama` path ever asks for the value. Downstream,
+   `llama-model.cpp` picks the cache type with
+   `if (hparams.swa_type != LLAMA_SWA_TYPE_NONE) → llama_kv_cache_iswa else →
+   llama_kv_cache`, so a `swa_type` left at NONE means one full-size cache, always.
+
+**Can it be forced?** Yes, and I do not recommend it. There is no runtime path —
+no flag, and spoofing `general.architecture` is not supported because the arch is
+locked in at init. The minimum change is a **3-line patch** to
+`llama_model_llama::load_arch_hparams()` in `src/models/llama.cpp`, setting
+`n_swa`, `swa_type = LLAMA_SWA_TYPE_STANDARD` and reading the key. It would build,
+and the cache would shrink.
+
+**It would also probably degrade the model, for a reason that is easy to miss.**
+SWA is not only an attention mask — it comes with **its own rotary base**.
+`llama-model.cpp:2065` reads
+`return hparams.is_swa(il) ? hparams.rope_freq_base_train_swa : cparams.rope_freq_base;`
+and `llama4.cpp:23-25` loads that value from `LLM_KV_ROPE_FREQ_BASE_SWA` in the
+file. **Dolphin's GGUF has no `*_swa` key of any kind**, so the patch would fall
+back to the 10000.0f default in `llama-hparams.h:132` while the model was trained
+with a different base. Every sliding layer would get positions encoded differently
+from how it learned them. Models that use SWA were *trained* that way; retrofitting
+it is not a configuration change, it is a different model.
+
+**Cost of the patch, for the record:** a local fork of an AUR package that would
+have to be re-applied on every llama.cpp upgrade, to run a model outside the shape
+it was trained in, to reclaim context that ran at 7 tok/s. 16k on the card wins.
+
+**What is available instead** — `--context-shift` (new binary, default off). That
+is a *conversation-level* window: when the context fills, the oldest tokens are
+dropped and generation continues instead of erroring. It works on any
+architecture, including this one. It does not reduce VRAM — the cache is still
+16384 tokens — it just means a long chat degrades gracefully. Worth turning on
+after the llama.cpp migration lands; it is not a substitute for SWA and does not
+change any number above.
+
+**Boundary behaviour, measured:** a prompt **over** `n_ctx` returns **HTTP 400**,
+not a truncated reply. A prompt under it with `max_tokens` that would overrun just
+clamps the generation (15,856-token prompt + `max_tokens: 2048` → fine). So
+`contextWindow` in the OpenClaw config must **equal** `LLM_CTX3`; setting it higher
+turns a trim into a visible error mid-conversation.

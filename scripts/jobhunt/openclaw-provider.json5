@@ -28,7 +28,7 @@
         models: [
           {
             id: "luminos-local",
-            name: "Luminos local (GPU, llama.cpp)",
+            name: "Gemma 4 E4B (local, fast, 24k ctx)",
             // MUST match llm-server.sh's CTX. OpenClaw assumes 200k for unknown
             // models and would build a prompt 8x larger than the server's window.
             //
@@ -37,6 +37,25 @@
             // preflight estimate says 9456, which is less than half the truth, so
             // trust the 400 from the server and not the estimate.
             contextWindow: 24576,
+            maxTokens: 2048,
+          },
+          {
+            id: "luminos-local-moe",
+            name: "Gemma 4 26B A4B MoE (local, 24k ctx)",
+            contextWindow: 24576,
+            maxTokens: 4096,
+          },
+          {
+            // [CHANGE: claude-code | 2026-08-17] 36864 -> 16384. Not a downgrade:
+            // 36k only loaded with 13 of 33 layers on the CPU and ran at 7.13
+            // tok/s, so a full context was hours of generation. 16k fits entirely
+            // on the card and runs at 36.7. This number must match LLM_CTX3 in
+            // jobhunt-llm.service — OpenClaw trims history to whatever is here,
+            // so setting it higher than the server just means the server truncates
+            // silently instead.
+            id: "luminos-dolphin",
+            name: "Dolphin 3.0 Llama 3.1 8B (local, uncensored, 16k ctx)",
+            contextWindow: 16384,
             maxTokens: 2048,
           },
         ],
@@ -48,18 +67,16 @@
       model: {
         primary: "luminos/luminos-local",
       },
-      // OpenClaw's defaults are tuned for 200k cloud models, where holding half
-      // the window back costs nothing. On a 16k local model those defaults make
-      // the agent unusable: measured promptBudget of 8000 against a fixed 9456
-      // token system prompt, so it overflowed before reading the user's message.
       compaction: {
-        // Let the prompt use most of the window instead of ~half.
-        maxHistoryShare: 0.9,
-        // Headroom for the reply. 2048 matches the model entry's maxTokens.
+        maxHistoryShare: 0.8,
         reserveTokens: 2048,
-        // The floor guard was silently raising the reserve to 8384 — over half
-        // the window — which is what actually caused the overflow. 0 disables it.
         reserveTokensFloor: 0,
+        keepRecentTokens: 4096,
+        recentTurnsPreserve: 4,
+        truncateAfterCompaction: true,
+        memoryFlush: {
+          enabled: false,
+        },
       },
     },
   },

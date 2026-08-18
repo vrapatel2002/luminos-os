@@ -55,8 +55,11 @@ fi
 # because that is the name every existing client config (OpenClaw, score.py) asks
 # for by. Rename it and they all silently fall back to... the default, which is
 # this same model, so the breakage would be invisible until you reorder the list.
+# [CHANGE: antigravity | 2026-08-16] Support MODEL2 and MODEL3 (Dolphin 3.0 etc.)
 MODEL2="${LLM_MODEL2:-}"
 ALIAS2="${LLM_ALIAS2:-luminos-local-full}"
+MODEL3="${LLM_MODEL3:-}"
+ALIAS3="${LLM_ALIAS3:-luminos-dolphin}"
 HOST=127.0.0.1
 PORT="${LLM_PORT:-8081}"
 # 24576 is chosen against the VRAM ceiling, not picked round: it measures 4606 MiB
@@ -69,6 +72,16 @@ CTX="${LLM_CTX:-24576}"
 # 8 = GGML_TYPE_Q8_0, 1 = GGML_TYPE_F16. A quantized V cache REQUIRES flash
 # attention; without it llama.cpp falls back and the saving silently disappears.
 KV_TYPE="${LLM_KV_TYPE:-8}"
+# [CHANGE: claude-code | 2026-08-17] KV_TYPE used to be ONE GLOBAL for every model
+# on this port, which is why the third model got q8_0 it could not afford. It is
+# per-model now, and only the third model has an override, because only the third
+# model is a DENSE 8B that has to hold its whole self AND its cache on the card.
+# 2 = GGML_TYPE_Q4_0. Measured 2026-08-17, Dolphin3.0-Llama3.1-8B at ctx 16384:
+#   q8_0 KV -> 1088 MiB cache + 4685 MiB weights = does not fit in 5772 MiB
+#   q4_0 KV ->  544 MiB cache + 4685 MiB weights = 5216 MiB used, 558 MiB free
+# The saving is what buys ngl=-1, and ngl=-1 is what buys 36.7 tok/s instead of
+# 7.13. Do not raise this back to 8 without dropping ctx to ~8192 first.
+KV_TYPE3="${LLM_KV_TYPE3:-$KV_TYPE}"
 # EMPTY BY DESIGN — do not "fix" this by naming a format. All three options were
 # measured against a real tools payload:
 #   chatml                  -> no tool support. The model narrates a tool call as
@@ -240,45 +253,63 @@ fi
 # with once its experts are resident, so LLM_CTX2 lets it run a shorter window
 # instead of failing to load.
 # ----------------------------------------------------------------------------
-if [ -n "$MODEL2" ]; then
-  [ -f "$MODEL2" ] || { echo "FAIL: second model not found: $MODEL2"; exit 1; }
+# [CHANGE: antigravity | 2026-08-16] Multi-model mode (MODEL2, MODEL3, etc.)
+if [ -n "$MODEL2" ] || [ -n "$MODEL3" ]; then
+  [ -z "$MODEL2" ] || [ -f "$MODEL2" ] || { echo "FAIL: second model not found: $MODEL2"; exit 1; }
+  [ -z "$MODEL3" ] || [ -f "$MODEL3" ] || { echo "FAIL: third model not found: $MODEL3"; exit 1; }
   CTX2="${LLM_CTX2:-$CTX}"
+  CTX3="${LLM_CTX3:-16384}"
+  NGL3="${LLM_NGL3:-29}"
   CONFIG="${XDG_RUNTIME_DIR:-/tmp}/jobhunt-llm-models.json"
   MODEL="$MODEL" ALIAS="$ALIAS" CTX="$CTX" MODEL2="$MODEL2" ALIAS2="$ALIAS2" \
-  CTX2="$CTX2" NGL="$NGL" KV_TYPE="$KV_TYPE" HOST="$HOST" PORT="$PORT" \
+  CTX2="$CTX2" MODEL3="$MODEL3" ALIAS3="$ALIAS3" CTX3="$CTX3" NGL="$NGL" NGL3="$NGL3" \
+  KV_TYPE="$KV_TYPE" KV_TYPE3="$KV_TYPE3" HOST="$HOST" PORT="$PORT" \
   CHAT_FORMAT="$CHAT_FORMAT" USE_MMAP="$USE_MMAP" \
   "$VENV/bin/python" - "$CONFIG" <<'PY'
 import json, os, sys
-def entry(model, alias, ctx):
+def entry(model, alias, ctx, ngl=None, kv=None):
+    if ngl is None:
+        ngl = int(os.environ["NGL"])
+    if kv is None:
+        kv = int(os.environ["KV_TYPE"])
     e = {
         "model": model,
         "model_alias": alias,
-        "n_gpu_layers": int(os.environ["NGL"]),
+        "n_gpu_layers": int(ngl),
         "n_ctx": int(ctx),
         "flash_attn": True,
-        "type_k": int(os.environ["KV_TYPE"]),
-        "type_v": int(os.environ["KV_TYPE"]),
+        "type_k": int(kv),
+        "type_v": int(kv),
         "logits_all": False,
         "use_mmap": os.environ["USE_MMAP"] == "true",
     }
     if os.environ.get("CHAT_FORMAT"):
         e["chat_format"] = os.environ["CHAT_FORMAT"]
     return e
+
+models = [
+    entry(os.environ["MODEL"], os.environ["ALIAS"], os.environ["CTX"]),
+]
+if os.environ.get("MODEL2"):
+    models.append(entry(os.environ["MODEL2"], os.environ["ALIAS2"], os.environ["CTX2"]))
+if os.environ.get("MODEL3"):
+    models.append(entry(os.environ["MODEL3"], os.environ["ALIAS3"], os.environ["CTX3"],
+                        ngl=int(os.environ.get("NGL3", "29")),
+                        kv=int(os.environ.get("KV_TYPE3", os.environ["KV_TYPE"]))))
+
 cfg = {
     "host": os.environ["HOST"],
     "port": int(os.environ["PORT"]),
-    "models": [
-        entry(os.environ["MODEL"],  os.environ["ALIAS"],  os.environ["CTX"]),
-        entry(os.environ["MODEL2"], os.environ["ALIAS2"], os.environ["CTX2"]),
-    ],
+    "models": models,
 }
 with open(sys.argv[1], "w") as f:
     json.dump(cfg, f, indent=2)
 PY
-  echo "serving TWO models on http://$HOST:$PORT"
+  echo "serving MULTIPLE models on http://$HOST:$PORT"
   echo "  default: $(basename "$MODEL")  as '$ALIAS'   (ctx=$CTX)"
-  echo "  also:    $(basename "$MODEL2") as '$ALIAS2'  (ctx=$CTX2)"
-  echo "  only one is resident at a time; asking for the other swaps it in."
+  [ -z "$MODEL2" ] || echo "  also:    $(basename "$MODEL2") as '$ALIAS2'  (ctx=$CTX2)"
+  [ -z "$MODEL3" ] || echo "  also:    $(basename "$MODEL3") as '$ALIAS3'  (ctx=$CTX3)"
+  echo "  only one is resident at a time; asking for another swaps it in."
   exec env "${MOE_ENV[@]}" dgpu-exec-v2 "$VENV/bin/python" "${ENTRY[@]}" \
     --config_file "$CONFIG"
 fi

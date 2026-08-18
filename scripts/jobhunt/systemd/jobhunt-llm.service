@@ -108,6 +108,31 @@ Environment=LLM_CTX2=24576
 # it onto the GPU with n_gpu_layers.
 Environment=LLM_MODEL=%h/.local/share/luminos/models/hive/gemma-4-E4B-it-qat-q4_0.gguf
 Environment=LLM_MOE_KEEP2=5
+# [CHANGE: antigravity | 2026-08-16] Model 3: Dolphin 3.0 Llama 3.1 8B for OpenClaw
+# [CHANGE: claude-code | 2026-08-17] Was 36864 ctx / ngl 20. That combination is
+# why Dolphin "took forever and never replied":
+#   36864 tokens of q8_0 KV = 2448 MiB, on top of 4685 MiB of weights = 7.1 GB
+#   wanted on a 6.1 GB card. The only way it loaded at all was ngl=20, i.e. 13 of
+#   its 33 layers computing on the CPU, once per token. Measured 7.13 tok/s.
+# Measured 2026-08-17 on the real card, same model, same prompts:
+#   ctx 16384 + ngl -1 (all 33 layers) + q4_0 KV -> 5216 MiB used, 558 MiB free
+#     short reply          36.7 tok/s
+#     12,020-token prompt  27.3 tok/s generate, 1379 tok/s prompt read
+# That is 5.1x. The context is the thing that was paid for the speed: 36k was
+# never usable at 7 tok/s anyway (a 12k prompt alone took ~28 min of generation).
+#
+# SLIDING WINDOW CANNOT RESCUE THE 36k. Checked at three levels: the GGUF has no
+# llama.attention.sliding_window key; --override-kv for it is silently ignored;
+# and in llama.cpp b10452 that key is only ever read inside per-architecture
+# loaders — 26 arch files read it, src/models/llama.cpp reads it zero times.
+# See LUMINOS_DECISIONS.md DECISION 76.
+Environment=LLM_MODEL3=%h/.local/share/luminos/models/hive/Dolphin3.0-Llama3.1-8B-Q4_K_M.gguf
+Environment=LLM_ALIAS3=luminos-dolphin
+Environment=LLM_CTX3=16384
+Environment=LLM_NGL3=-1
+# 2 = GGML_TYPE_Q4_0, overriding the port-wide q8_0. Only this model needs it;
+# llm-server.sh keeps KV type per-model so Gemma's q8_0 is untouched.
+Environment=LLM_KV_TYPE3=2
 
 ExecStart=/home/shawn/luminos-os/scripts/jobhunt/llm-server.sh
 

@@ -3144,3 +3144,60 @@ doing exactly the right thing in a format nothing downstream reads.
 **Related.** DECISION 74 and 75 (which models are served), BUG-097 (the real fix
 is llama.cpp's own `llama-server --jinja`, which parses this natively; this file
 should be deleted, not maintained, once that binary starts).
+
+---
+
+## BUG-134 — Dolphin "took forever and never replied" because its context did not fit on the card
+**Status:** FIXED — 2026-08-17
+**Component:** `scripts/jobhunt/systemd/jobhunt-llm.service`, `scripts/jobhunt/llm-server.sh`, `scripts/jobhunt/openclaw-provider.json5`
+
+**Symptom, in Shawn's words.** *"it's just taking too long to load and is not
+replying on openclaw nor the server thing."* Two symptoms, one cause.
+
+**Cause.** `luminos-dolphin` was added on 2026-08-16 at **36,864 context, 20 GPU
+layers, q8_0 KV**. That does not fit:
+
+```
+4685 MiB weights + 2448 MiB KV (36864 tok, q8_0) = 7133 MiB   card has 6141 MiB
+```
+
+`LLM_NGL3=20` is what made it load anyway — **13 of its 33 layers computing on
+the CPU, once per token**. Measured **7.13 tok/s** against Gemma's 51.37 on the
+same port. Nothing was broken; the numbers were simply impossible.
+
+**Why "not replying" looked separate.** Two things stacked on top of the slowness:
+a 7,816-token prompt came back with a **2-token** reply, because Dolphin's bare
+ChatML template never reads the `tools` variable, so tool schemas are rendered
+into nothing and the model has no idea it was asked to act (see BUG-133 — the
+proxy's `normalize_request` also rewrites history into Gemma's dialect
+unconditionally, which this model does not speak). And every switch between
+Dolphin and Gemma is a full unload + reload of 4.92 GB with mmap off.
+
+**Fix.** 16,384 context, **all 33 layers on the GPU**, q4_0 KV. Measured on the
+real card: **5348 MiB used / 793 MiB free, 36.7 tok/s** short, and a
+13,888-token prompt answered correctly in 12.3 s through the 8082 proxy. **5.1x.**
+`KV_TYPE` in `llm-server.sh` was one global for the whole port and is now
+per-model (`entry(..., kv=)`), so only Dolphin got q4_0 and Gemma's q8_0 is
+untouched. Full reasoning, and why sliding window cannot buy the 36k back, in
+**DECISION 76**.
+
+**Two traps found while fixing it.**
+
+1. **A leftover test server on another port is invisible until something else
+   needs VRAM.** `jobhunt-llm.service` failed to start with
+   `cudaMalloc failed: out of memory` **on the first model (Gemma)**, which reads
+   like a Gemma problem and is not one — a `llama-server` left on port 8083 from
+   an earlier measurement was holding 5.2 GB. Check `pgrep -x llama-server`
+   before believing an OOM.
+2. **A prompt longer than `n_ctx` returns HTTP 400, it does not truncate.**
+   (A prompt that fits with a `max_tokens` that would overrun just clamps the
+   generation — 15,856 tokens + `max_tokens: 2048` is fine.) So `contextWindow`
+   in `~/.openclaw/openclaw.json` must **equal** `LLM_CTX3`; setting it higher
+   turns a silent trim into a visible failure mid-conversation. Both were changed
+   together, and the live config was read back after patching.
+
+**How to spot the next one of these.** A positive `LLM_NGL*` is not a tuning
+knob, it is a confession that the model did not fit. Before accepting one, do the
+arithmetic: weights + (ctx x bytes-per-token of KV) against the card. If the
+answer is over, the context is the thing to cut — dropping layers to the CPU
+costs a factor of five, and it costs it on **every** token forever.
