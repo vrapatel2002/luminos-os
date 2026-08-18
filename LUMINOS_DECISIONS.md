@@ -4926,3 +4926,60 @@ not a truncated reply. A prompt under it with `max_tokens` that would overrun ju
 clamps the generation (15,856-token prompt + `max_tokens: 2048` → fine). So
 `contextWindow` in the OpenClaw config must **equal** `LLM_CTX3`; setting it higher
 turns a trim into a visible error mid-conversation.
+
+## DECISION 77 — The desktop wallpaper goes back to `org.luminos.livewallpaper`; Caelestia's bundled image is dropped
+# [CHANGE: claude-code | 2026-08-18]
+
+**What changed.** The Plasma desktop containment's `wallpaperplugin` went from
+`org.kde.image` (pointed at `/etc/xdg/quickshell/caelestia/assets/wallpaper.webp`) back to
+**`org.luminos.livewallpaper`** in video mode. Asked for by Shawn: *"remove the caelestia
+wallpaper and keep only the kde one"*, and when offered stock KDE wallpapers he chose
+*"our one that support the live wallpaper and more"* — i.e. our own plugin, not a static image.
+
+**This reverses a line in DECISION 43**, which retired `org.luminos.livewallpaper` on the
+grounds that it *"cannot be ported"* and replaced it with Caelestia's built-in wallpaper. That
+was true of the plan DECISION 43 was written for — a Hyprland-only session with no plasmashell,
+where a Plasma wallpaper plugin has nothing to load it. **DECISION 68 removed that premise**:
+Caelestia now rides on a full Plasma session, plasmashell is alive and draws the desktop, so
+the plugin loads exactly as it always did. Nothing was ported and nothing had to be.
+
+**Why it is safe to turn a video wallpaper back on.** DECISION 43's other worry —
+"no continuous GPU decode, which matters on a machine whose dGPU power gating is load-bearing"
+— was already answered by **DECISION 32 / BUG-083**, which replaced the old always-on decoder
+with a graded `ObscurePolicy`. The desktop group carries `ObscurePolicy=2` (freeze whenever the
+desktop is hidden) and `PauseOnBattery=true`. Measured immediately after the switch, with the
+desktop fully covered by a maximised window: **plasmashell burned 0 jiffies over 3 s**. The
+decoder is not running. Decode is also on the **iGPU**, not the dGPU, so the power-gating
+argument does not apply either way.
+
+**Lock screen.** Already on `org.luminos.livewallpaper` with the same video file, so "match the
+desktop" needed no change there — only the dormant `[Greeter][Wallpaper][org.kde.image]` group
+in `kscreenlockerrc`, which still named the Caelestia asset, was deleted. Note the two differ on
+purpose: the lock screen uses `ObscurePolicy=0` (never freeze), because when it is up it is the
+top surface by definition.
+
+**Files touched** (none in the repo — this is all user config):
+- `~/.config/plasma-org.kde.plasma.desktop-appletsrc` — `wallpaperplugin`, and the `org.kde.image` `Image` key emptied
+- `~/.config/kscreenlockerrc` — `[Greeter][Wallpaper][org.kde.image][General] Image` deleted
+
+**How to reverse**
+```bash
+cp ~/.config/plasma-org.kde.plasma.desktop-appletsrc.bak-caelwp-20260818-121853 \
+   ~/.config/plasma-org.kde.plasma.desktop-appletsrc
+cp ~/.config/kscreenlockerrc.bak-caelwp-20260818-121853 ~/.config/kscreenlockerrc
+systemctl --user restart plasma-plasmashell
+```
+
+**Left alone deliberately, and it is a live hazard.** Caelestia keeps its *own* record of "the
+wallpaper" at `~/.local/state/caelestia/wallpaper/path.txt` plus a `current` symlink, and the
+`caelestia` CLI **is** installed (`/usr/bin/caelestia`). Both still point at the bundled asset.
+They draw nothing — the Caelestia shell in this port has no background layer, so there is no
+second wallpaper on screen — but **picking a wallpaper from the Caelestia launcher would call
+`caelestia wallpaper` and overwrite the Plasma setting**, putting a static image back. Clearing
+that state was not done because it is what the launcher's wallpaper picker reads, and breaking
+the picker to tidy a path is a worse trade. If it ever fires, DECISION 77 is undone by one click
+and this is the first place to look.
+
+**Unrelated to colours.** `~/.local/state/caelestia/scheme.json` is `catppuccin/mocha`, not
+`dynamic`, so the bar and panel palette is **not** derived from the wallpaper. Changing the
+wallpaper cannot shift the shell's colours, and did not.
