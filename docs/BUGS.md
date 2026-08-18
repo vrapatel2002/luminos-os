@@ -3201,3 +3201,87 @@ knob, it is a confession that the model did not fit. Before accepting one, do th
 arithmetic: weights + (ctx x bytes-per-token of KV) against the card. If the
 answer is over, the context is the thing to cut — dropping layers to the CPU
 costs a factor of five, and it costs it on **every** token forever.
+
+---
+
+## BUG-135 — OpenClaw's compaction never runs, because the part it can shrink is the small part
+**Status:** FIXED — 2026-08-17
+**Component:** `~/.openclaw/openclaw.json` (`tools.deny`), `scripts/jobhunt/openclaw-provider.json5`
+
+**Symptom.** Shawn: *"the compact thing is not working."* Long chats either stop
+answering or die outright.
+
+**Evidence, read out of the trajectory logs.** Across **32 recorded sessions,
+`compactionCount` was greater than zero exactly ONCE** (2026-08-05). Two sessions
+ended with:
+
+```
+promptError = "Context overflow: prompt too large for the model (precheck)"
+```
+
+That is OpenClaw refusing to send **without compacting first**.
+
+**Cause.** OpenClaw re-sends a fixed block on **every** turn: its system prompt
+plus the full JSON schema of every tool. **Compaction can only shrink the
+conversation history — it cannot touch either of those.** Measured against the
+model's own tokenizer (never OpenClaw's estimate, which is less than half the
+truth — see the Phase 0b note, 9456 estimated vs 19929 actual):
+
+| | Gemma, 24576 window | Dolphin, 16384 window |
+|---|---|---|
+| system prompt alone | 8577 | 7776 |
+| **+ 28 tool schemas** | **15956** | 7776 |
+| OpenClaw budget (`0.8 x ctx - 2048`) | 17612 | 11059 |
+| **left for the actual chat** | **1656** | 3283 |
+
+On Gemma the fixed part was **91% of the budget**. Compaction was summarising the
+9% while the 91% stayed. There was nothing left to cut, so the precheck failed.
+
+**Fix.** `tools.deny` — 28 tools down to **11**. Measured after, same method:
+
+| | overhead | room for chat |
+|---|---|---|
+| Gemma before | 15956 | 1656 |
+| **Gemma after** | **9944** | **7668** — 4.6x |
+| Dolphin before | 7776 | 3283 |
+| **Dolphin after** | **6885** | **4174** — 1.3x |
+
+The saving beats the schema arithmetic (6012 vs a projected 5001) because the
+**system prompt lists the tools too**: 32224 -> 28330 chars.
+
+**Why Dolphin barely moves, and it is not good news.** Its overhead was *already*
+low because **its prompt template silently ignores the `tools` variable** — adding
+28 tool schemas changed its token count by **zero**. They cost nothing because
+they are thrown away. Dolphin cannot call tools at all. Same shape as BUG-133;
+the `--jinja` server in the BUG-097 migration is the real fix.
+
+**Why `deny` and not `allow`/`profile`.** Deny always wins and is unambiguous.
+`tools.profile` sets a base allowlist that `allow` then modifies, and the docs do
+not state whether `allow` widens or narrows it. Blunt on purpose.
+
+**What was removed and what it costs** — `cron` (5868 chars, 19% of the block;
+reminders and wake events — systemd timers already do this), `gateway` (the agent
+can no longer restart itself), `message` (no channel is connected), `nodes` +
+`node_inference` (no paired devices, and the latter runs Ollama, which AGENTS.md
+bans), the seven `sessions_*`/`subagents`/`agents_list` tools (a 6 GB card holds
+one model, so a sub-agent would fight its parent for the same VRAM),
+`skill_workshop`, the three goal tools, and `tts`. **Kept:** read, write, edit,
+apply_patch, exec, process, web_search, web_fetch, memory_search, memory_get,
+session_status.
+
+**Verified by running it, not by reading the config.** `openclaw agent --agent
+main -m "..."` drove a real turn; the new trajectory's `context.compiled` event
+lists **11 tools**, exactly the intended set. Config backed up first to
+`~/.openclaw/openclaw.json.pre-toolcut`.
+
+**How to spot the next one of these.** When an agent "runs out of context"
+immediately, measure the **fixed** overhead before touching history settings —
+send the system prompt and tool block to the server with `max_tokens: 1` and read
+`usage.prompt_tokens`. If the fixed part is most of the window, no history
+setting can save it. And never trust the harness's own token estimate.
+
+**Not done, deliberately.** `maxHistoryShare` is 0.8 and `reserveTokens` 2048;
+raising the share to ~0.95 would add roughly 3700 more tokens on Gemma. Left
+alone because 0.8 was set deliberately by another agent on 2026-08-16 and the
+reason is not recorded. One change at a time — the tool cut is measured and
+sufficient.

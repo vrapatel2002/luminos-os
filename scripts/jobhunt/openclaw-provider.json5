@@ -80,4 +80,60 @@
       },
     },
   },
+  // [CHANGE: claude-code | 2026-08-17] Cut the tool list from 28 to 11.
+  //
+  // WHY, measured with the model's OWN tokenizer (not OpenClaw's estimate, which
+  // is less than half the truth). OpenClaw re-sends its instructions plus every
+  // tool's JSON schema on EVERY turn. On Gemma, 24576 window, budget 17612:
+  //   28 tools -> 15956 tokens of fixed overhead ->  1656 left for the chat
+  //   11 tools ->  9944 tokens of fixed overhead ->  7668 left for the chat
+  // 4.6x more room. The saving is bigger than the schemas alone because the
+  // system prompt LISTS the tools too (32224 -> 28330 chars).
+  //
+  // THIS IS WHY COMPACTION LOOKED BROKEN. Compaction can only shrink the
+  // conversation history — it cannot touch the system prompt or the tool
+  // schemas, which were 91% of the budget. So OpenClaw hit
+  // "Context overflow: prompt too large for the model (precheck)" and errored
+  // instead of compacting. Across 32 recorded sessions, compaction had fired
+  // exactly ONCE. See BUG-135.
+  //
+  // WHY `deny` AND NOT `allow`/`profile`: deny always wins and is unambiguous.
+  // `tools.profile` sets a base allowlist that `allow` then modifies, and the
+  // docs do not say whether `allow` widens or narrows it. Blunt on purpose.
+  //
+  // KEPT (11): read, write, edit, apply_patch, exec, process, web_search,
+  //   web_fetch, memory_search, memory_get, session_status.
+  // Verified by driving a real turn and reading the trajectory back, not by
+  // trusting the config: `openclaw agent --agent main -m "..."` then reading
+  // `context.compiled` in ~/.openclaw/agents/main/sessions/*.trajectory.jsonl.
+  tools: {
+    deny: [
+      // 5868 chars — the single biggest tool, 19% of the whole block.
+      // Reminders and scheduled wake-ups. Luminos already has systemd timers.
+      "cron",
+      // Restart/reconfigure/update the OpenClaw process from inside a chat.
+      // Removing it means the agent cannot restart itself — do it from a shell.
+      "gateway",
+      // Send messages out over a chat channel. NO channel is connected (see
+      // LUMINOS_STATUS Phase 0b), so this was pure overhead.
+      "message",
+      // Control paired phones/desktops: camera, screen, location, notifications.
+      // No nodes are paired.
+      "nodes",
+      // Runs Ollama models on paired nodes. AGENTS.md bans Ollama outright.
+      "node_inference",
+      // Sub-agents and cross-session reads. A 6 GB card holds ONE model; a
+      // sub-agent would fight the parent for the same VRAM. Cost of removal:
+      // no delegation, no reading other chats. Both were unusable anyway.
+      "sessions_spawn", "sessions_list", "sessions_send", "sessions_history",
+      "sessions_yield", "subagents", "agents_list",
+      // Proposes reusable skills. Authoring feature, not a chat feature.
+      "skill_workshop",
+      // Long-horizon goal tracking. Useful for multi-hour autonomous runs,
+      // which is not what this box does.
+      "create_goal", "update_goal", "get_goal",
+      // Text to speech. No audio path configured.
+      "tts",
+    ],
+  },
 }
