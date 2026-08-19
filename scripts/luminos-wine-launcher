@@ -74,4 +74,14 @@ elif [ "$GPU_CHOICE" = "nvidia" ]; then
 fi
 
 # Launch the Wine app
+# [CHANGE: claude-code | 2026-08-18] BUG-136: the NVIDIA branch set every env var
+# correctly but then ran a bare `exec wine`, so the process never passed through the
+# DECISION 25 setgid gate. /dev/nvidia0 and /dev/nvidiactl are root:dgpu 0660 and the
+# dgpu group is deliberately empty, so the NVIDIA Vulkan ICD could not open them and
+# every Wine app silently fell back to the Radeon 780M. luminos-gpu-launch has always
+# done this; this launcher was the one that was missed.
+# v2, not v1: v1 raises only the effective gid and bash drops it at startup (BUG-102).
+if [ "$GPU_CHOICE" = "nvidia" ]; then
+  exec dgpu-exec-v2 wine "$EXE" $ARGS
+fi
 exec wine "$EXE" $ARGS

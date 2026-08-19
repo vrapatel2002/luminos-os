@@ -3285,3 +3285,133 @@ raising the share to ~0.95 would add roughly 3700 more tokens on Gemma. Left
 alone because 0.8 was set deliberately by another agent on 2026-08-16 and the
 reason is not recorded. One change at a time — the tool cut is measured and
 sufficient.
+
+---
+
+## BUG-136 — the NVIDIA card looked like a dead driver, twice, for two unrelated reasons
+<!-- [CHANGE: claude-code | 2026-08-18] -->
+**Status:** FIXED — 2026-08-18. Both halves proven on the card.
+**Component:** `/etc/environment` (`__EGL_VENDOR_LIBRARY_FILENAMES`), `scripts/luminos-wine-launcher`
+
+**Symptom.** Every Wine app silently ran on the Radeon 780M no matter what the GPU
+dialog was told. A direct check appeared to show the driver itself was broken:
+
+```
+Could not get 'vkCreateInstance' via 'vk_icdGetInstanceProcAddr' for ICD libGLX_nvidia.so.0
+```
+
+Three earlier sessions read that line and concluded the NVIDIA Vulkan driver was
+dead. **It was not.** There were two separate faults stacked on top of each other,
+and each one alone is enough to produce the same fallback.
+
+### Half one — `__EGL_VENDOR_LIBRARY_FILENAMES` is a *replace*, not an *add*
+
+Luminos pins it system-wide to `/usr/share/glvnd/egl_vendor.d/50_mesa.json`. That
+is the BUG-046c / BUG-050 fix and it is correct on its own terms: it stops NVIDIA
+becoming the default EGL vendor so the dGPU can actually sleep.
+
+But the variable does not *prefer* Mesa, it makes Mesa **the only vendor GLVND can
+see**. And **NVIDIA's Vulkan ICD initialises through EGL.** With NVIDIA's own EGL
+vendor removed from the list, the ICD fails its own init and then reports nothing:
+`vk_icdGetInstanceProcAddr(NULL, ...)` returns NULL for every global entry point,
+the loader concludes the library is not a Vulkan driver, and throws it away.
+
+Measured directly with a 40-line `dlopen` harness (`/tmp/icdtest2.c`), which skips
+the loader entirely and calls the ICD's own entry points:
+
+| `__EGL_VENDOR_LIBRARY_FILENAMES` | `vk_icdNegotiateLoaderICDInterfaceVersion` | `vkCreateInstance` | instance |
+|---|---|---|---|
+| `50_mesa.json` | **-3** (`VK_ERROR_INITIALIZATION_FAILED`), for **every** interface version 1–7 | **-3** | `(nil)` |
+| `60_nvidia.json` | **0** | **0** | `0x557e90579430` |
+| both, colon-joined | **0** | **0** | `0x564796076610` |
+
+Then `vulkaninfo` under `60_nvidia.json`:
+
+```
+deviceName = NVIDIA GeForce RTX 4050 Laptop GPU
+deviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+apiVersion = 1.4.329   driverInfo = 595.71.05
+```
+
+**What it is NOT, each ruled out by measurement, not by argument:**
+- **Not the DECISION 25 dgpu gate.** `dgpu-exec-v2 id` → `gid=948(dgpu)`;
+  opening `/dev/nvidiactl` and `/dev/nvidia0` through it both succeed;
+  `dgpu-exec-v2 nvidia-smi` lists the card. It fails **identically** with the gate
+  open and as **root**, so it was never a permissions problem.
+- **Not a missing symbol.** `nm -D --defined-only libGLX_nvidia.so.0` lists
+  `vkCreateInstance`, and `dlsym` hands back a live pointer (`0x7f9d4c573a10`).
+  The prior "the library doesn't export it" claim was simply wrong.
+- **Not the glibc `__malloc_hook` removal.** An `LD_PRELOAD` shim supplying
+  `__malloc_hook`/`__realloc_hook`/`__free_hook`/`__memalign_hook`/`ErrorF` changed
+  nothing — still `-3`. `LD_DEBUG` prints those as "(fatal)" and they are noise.
+- **Not a driver/userspace version skew.** Kernel module and userspace both 595.71.05.
+
+`strace` is what closed it: during the failing init the ICD loads
+`libEGL_mesa.so.0` and `libgallium-26.1.6-arch1.1.so`, reads `/proc/self/maps`,
+re-opens its own libraries — and **never opens `/dev/nvidiactl` at all.** It gives
+up long before it would ask the kernel for the card. (`strace` was not installed;
+`luminos-brain safe` said NO on the install, which is the known false positive that
+greps `hive-brain.md`'s own header banner — overridden with `--reason`.)
+
+**Fix.** Do not unpin the global default — the sleep behaviour it buys is worth
+keeping. Instead every launcher that selects NVIDIA must set
+`__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/60_nvidia.json`
+alongside `VK_ICD_FILENAMES`. `luminos-gpu-launch`, `chrome-luminos` and
+`luminos-wine-launcher` already do; `docs/LUMINOS_HANDBOOK.md:1141` already
+documented the pairing. **A bare `VK_ICD_FILENAMES=nvidia_icd.json` on its own is a
+broken test, not a broken driver** — that is what produced three sessions of wrong
+conclusions.
+
+### Half two — `luminos-wine-launcher` never entered the gate
+
+The NVIDIA branch set `DRI_PRIME=1`, the ICD, and the EGL vendor correctly, and
+then ended in a bare `exec wine`. `/dev/nvidia0` and `/dev/nvidiactl` are
+`root:dgpu 0660` and the `dgpu` group is deliberately **empty** (DECISION 25), so
+the process could not open the card and fell back to the 780M, while
+`notify-send` cheerfully announced "running on NVIDIA RTX 4050".
+
+This was **already written down** — the BUG-103 close-out noted "it never calls the
+dGPU gate at all" — and was never acted on. `luminos-gpu-launch` has always ended
+in `exec dgpu-exec-v2`; this launcher was the one that was missed.
+
+**Fix** (`scripts/luminos-wine-launcher`, installed to `/usr/local/bin/`):
+
+```bash
+if [ "$GPU_CHOICE" = "nvidia" ]; then
+  exec dgpu-exec-v2 wine "$EXE" $ARGS
+fi
+exec wine "$EXE" $ARGS
+```
+
+`dgpu-exec-v2`, not `dgpu-exec` — v1 raises only the *effective* gid and bash drops
+it at startup (BUG-102). Proven on a running Wine game: `/proc/82256/status` reads
+`Gid: 948 948 948 948`.
+
+**Verified end to end.** *007 First Light* now reaches a live swapchain on the card:
+`Found device: NVIDIA GeForce RTX 4050 Laptop GPU (NVIDIA 595.71.5)`,
+`Creating swapchain (1920 x 1080)`, `Got 3 swapchain images`.
+
+### Three traps found on the way, worth keeping
+
+- **Setgid processes are non-dumpable.** Anything launched through `dgpu-exec-v2`
+  gives `Permission denied` on `/proc/PID/maps` and `/proc/PID/environ` even as
+  yourself. Use `sudo`. `/proc/PID/status` still reads fine.
+- **DXVK reports an AMD GPU while running on NVIDIA, on purpose.**
+  `dxgi.nvapiHack` / `dxgi.hideNvidiaGpu` default true and spoof
+  `vendor 0x1002 device 0x73df`. Seeing that line is *evidence you are on NVIDIA*,
+  not evidence you are not. Set both `False` for Streamline/DLSS titles.
+- **On Optimus, DXGI divides by zero.** The NVIDIA adapter has no attached display,
+  so DXVK logs `Found monitors not associated with any adapter, using fallback`,
+  then `readMonitorEdidFromKey: Failed to get EDID reg key size`, then crashes
+  inside `dxgi.dll` computing a refresh rate from an empty mode. Running inside
+  `wine explorer /desktop=Name,1920x1080` supplies a synthetic monitor and it goes
+  away. Not a driver fault.
+
+**Not done, deliberately.** The launcher's NVIDIA branch still does not set
+`__NV_PRIME_RENDER_OFFLOAD=1` / `__GLX_VENDOR_LIBRARY_NAME=nvidia` the way
+`luminos-gpu-launch` does. Those two are the **GLX/OpenGL** offload path; Wine
+games go through Vulkan, which is already correct. Left out to keep the fix to one
+branch and one line. Add them if a GL-only Wine app turns up on the wrong card.
+
+**Undo.** Delete the three added lines from `/usr/local/bin/luminos-wine-launcher`.
+Nothing else on the system was changed for this bug.
