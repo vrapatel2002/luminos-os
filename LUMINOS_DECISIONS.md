@@ -4983,3 +4983,45 @@ and this is the first place to look.
 **Unrelated to colours.** `~/.local/state/caelestia/scheme.json` is `catppuccin/mocha`, not
 `dynamic`, so the bar and panel palette is **not** derived from the wallpaper. Changing the
 wallpaper cannot shift the shell's colours, and did not.
+
+## DECISION 78 — 007 First Light runs on the RTX 4050, via a GE-Proton clone with vkd3d-proton 3.0.1
+<!-- [CHANGE: claude-code | 2026-08-19] -->
+
+**The call.** `/usr/local/bin/007` now defaults to the **NVIDIA RTX 4050**, and it runs under
+`compatibilitytools.d/GE-Proton10-34-vkd3d301` — a clone of GE-Proton10-34 with vkd3d-proton
+**3.0.1** dropped in — using its own prefix at `~/re/007/pfx-GE-Proton10-34-vkd3d301`. The
+Radeon 780M is still one flag away: `007 --igpu`.
+
+**Why.** BUG-137 was never a Wine bug, a driver bug we could route around, a cache problem, or
+the DECISION 25 dGPU gate. It was the SPIR-V that GE-Proton10-34's bundled vkd3d-proton
+generates, which segfaults NVIDIA's shader compiler at `libnvidia-glvkspirv.so + 0x346fd8`.
+vkd3d-proton 3.0.1 generates something else and the card is fine. Measured, not argued:
+stock gives `assert=9 gpu=0%`, the clone gives `assert=0 gpu=100%` with 2064 MiB of VRAM held
+and the title screen on the panel at 2880x1800.
+
+**Why a clone and not an upgrade in place.** Three reasons, in order of how much they'd hurt:
+
+1. A Proton **prefix upgrade is one-way**. Letting a modified Proton touch
+   `~/re/007/protondata` risks the setup that already worked, with no way back.
+2. Stock `GE-Proton10-34` stays byte-identical and still launches. The undo for all of this
+   is two variable assignments in `007-run.sh`, not a reinstall.
+3. `cp -al` makes the clone cost ~25 MB instead of 1.4 GB, so keeping the fallback is nearly
+   free. That is only safe because `007-mkproton.sh` **replaces** the DLLs (`rm` then `cp`)
+   rather than writing into them — editing a hardlink in place would corrupt the original.
+
+**Why NVIDIA is now the default**, having been deliberately AMD before: the 4050 was always
+the intended GPU, and `007-run.sh`'s own header had pre-registered "flip the default back to
+nvidia once BUG-137 lands". The 780M has no dedicated VRAM — it borrows from system RAM — so
+it is both slower and in direct competition with everything else running.
+
+**What this leaves broken / what to watch.** On the 4050 the 6 GB is *dedicated*, so anything
+already resident is subtracted from the game. `jobhunt-llm` alone holds 3576 MiB, which drops
+the game to ~2.1 GB and makes its own overlay complain. The launcher now prints free VRAM and
+names the holders before starting, and deliberately **does not act on it** — stopping a service
+is the user's call, and `jobhunt-llm` backs a nightly pipeline. `007 --igpu` sidesteps the
+contention entirely.
+
+**Undo.** In `~/re/tools/007-run.sh`: set `GPU=igpu` for the old default, or point `GE` back at
+`.../GE-Proton10-34` and `COMPAT_DATA` back at `~/re/007/protondata` to undo the whole thing.
+Then `sudo install -m755 ~/re/tools/007-run.sh /usr/local/bin/007`. Delete
+`compatibilitytools.d/GE-Proton10-34-vkd3d301` and `~/re/007/pfx-*` to reclaim the space.
