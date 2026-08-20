@@ -1,352 +1,163 @@
-# HANDOFF — Caelestia desktop on KDE
-# [CHANGE: antigravity | 2026-08-16] — Response 17
-Last updated: 2026-08-16 — Response 17
+# HANDOFF — does the 007 method work on other games?
+# [CHANGE: claude-code | 2026-08-20] — Response 18
+Last updated: 2026-08-20 — Response 18
 
-**Read this whole file before touching anything. The direction changed on 2026-08-13 and most of
-the older reasoning in git history is now superseded.**
+**Read this whole file before touching anything.**
 
-- **AI Stack update (2026-08-16)**: 
-  - Added `luminos/luminos-dolphin` (Dolphin 3.0 Llama 3.1 8B Q4_K_M) with 36,864 (`36k`) context and 20 GPU offloaded layers (`LLM_NGL3=20`) to `jobhunt-llm.service` and OpenClaw (`openclaw.json`). Configured rolling sliding-window FIFO compaction policy.
-  - Built **Luminos Mobile Web Chat** (`scripts/luminos-mobile-chat.py`, service on port 8090) for phone access over Wi-Fi (`http://192.168.2.16:8090`). Zero Docker, zero OpenClaw, direct streaming dark-mode web chat. Verified live.
+The previous goal on this file was the Caelestia-on-KDE desktop. It is superseded, not
+abandoned — that handoff is intact at `git show b4a9e48c:HANDOFF.md` (352 lines, "i want the
+exact shell but not as shell", STEP A–D). Nothing here undoes any of it. Per AGENTS.md §0.2
+there is exactly **one** HANDOFF.md and it is overwritten in place, so the goal field moved.
 
 ---
 
-## The goal, in Shawn's words
+## Goal, in Shawn's words
 
-> "i want the exact shell but not as shell."
+> "WELL GREAT BUT ABOUT THE 007 CAN WE MAKE SURE IT DOES WORK FOR OTHER GAMES TOO ?"
 
-The Caelestia **look** — its bar, launcher, dashboard, volume and brightness bars, notifications,
-and eventually its window styling — on a desktop that otherwise behaves like normal KDE. Nothing
-covering the screen. Clicks land where you aim them.
+The 007 First Light project produced a 19-page IEEE paper describing a method: triage a repack
+for malware, prove whether it has DRM, fix the installer, reassemble the game by hand, and fix
+the graphics. **The method was demonstrated once, on one game.** The question is whether it is a
+method or an anecdote.
 
 ---
 
 ## Aim right now
 
-**Shawn is LIVE in "Luminos (Caelestia on Plasma)" as of 2026-08-13.** STEP A shipped, STEP B is
-done (he deleted the Plasma panel himself), and STEP C parts 1–3 are done: Caelestia's OSD shows
-**volume** and **brightness** from the right edge, and **Plasma's own OSD is silenced**.
-
-**STEP 4 — hover-to-peek — is also done**: the OSD noses out when the cursor reaches the right edge,
-proven in both directions on the live session.
-
-**STEP D part 1 — done 2026-08-13.** The **launcher now has all three ways in** Shawn asked for —
-shortcut (`Meta+P`), the bar's distro-logo button, and a new bottom-edge hover strip — and the
-**dashboard** (the panel that drops down from the top) is live via `Meta+K` and hover. Both use
-upstream's own modules unmodified. Every path was exercised on the live session, plus regression
-checks on the launcher and the OSD.
-
-Next on the list is the rest of **STEP D** — notifications, sidebar, session menu, utilities.
+**Documentation only.** Shawn's exact instruction this turn was *"read AGENTS.md / just update
+the docs."* The findings below were all measured in earlier turns of this session; this turn
+writes them down. **The test plan is NOT started** — he was offered it and chose docs instead.
 
 ---
 
-## THE PIVOT — 2026-08-13. Read this before proposing anything.
+## Why
 
-The previous plan was: **bare `kwin_wayland`, and rebuild every desktop feature by hand.**
-That plan is **retired.** It was my call, and it was the wrong one.
-
-**Why it was wrong.** I assumed the list of things we'd need to add back was short. It is not —
-it is most of Plasma. Two days of real use produced: Chrome hanging ~25 s on every launch
-(BUG-120), dead volume keys, dead brightness keys, no notifications, no idle screen-off, no
-password safe. Every one of those is a separate hand-built piece with its own bugs, and each one
-is something Plasma already does correctly for free.
-
-Shawn named the constraint plainly, and it governs from here:
-
-> "we have to as much less work as possible to avoid bugs and save time"
-
-**The new plan: run FULL Plasma, and take away its panel. Caelestia goes on top.**
-
-### The trap that made me reject this originally — and why it does not apply
-
-DECISION 63 rejected `startplasma-wayland` because suppressing plasmashell needs
-`systemctl --user set-environment LUMINOS_SHELL=caelestia` plus a `ConditionEnvironment=` drop-in,
-and **this user has `Linger=yes`** — the systemd user manager outlives logout, so the variable
-would still be set the next time Shawn picked plain Plasma at the greeter, handing him a session
-with no shell at all and no clue why.
-
-**That reasoning is still correct — but it only applies if you switch plasmashell OFF.**
-
-We are not doing that. **plasmashell keeps running.** We only remove the *panel it draws*. No env
-variable, no systemd drop-in, no `ConditionEnvironment=`, so the linger trap never exists.
+Because three of the paper's own claims are wrong, and they were only found to be wrong by
+running the method a second time against a control. A single case study cannot tell you which of
+its steps were load-bearing and which were coincidence. A second title can. A third would be
+better.
 
 ---
 
-## Shawn's answers — decided, do not re-litigate
+## Process
 
-| Question | His answer |
-|---|---|
-| Shortcut conflicts between Plasma and Caelestia | **"May be keep the plasma ones."** Plasma wins by default. Only take a key for Caelestia when its version is clearly better AND he has said so. |
-| plasmashell's RAM cost (~300–500 MB) | **"got it no problem."** Accepted. Do not re-raise it as a concern. |
-| Two wallpapers (Plasma's and Caelestia's) | **Decide later, after seeing both live.** Do not pick for him. |
-| Keep the current bare-KWin session? | **"for now its working good so do not delete it."** It stays as the fallback and as the only place to test Caelestia without Plasma helping. |
-| How much of Caelestia does he want? | **All of it.** Bar, launcher, dashboard, **volume bar, brightness bar, notifications, "and more"**, plus **Caelestia's window styling**. |
-| Caelestia's own settings panel | He pointed at it — bottom-right → popup → gear icon — as a **reference to lift from later**. Explicitly *"this but for later part."* Do not build it now. |
-| Two bars during STEP A — can't we just turn Plasma's off? | Asked 2026-08-13. Answer given: **yes, and he can do it himself from the GUI in ~10 s** (right-click panel → Enter Edit Mode → More Options → Auto Hide), which is also the safest version of STEP B. Deliberately left as his switch to flip rather than a config edit, so STEP A's login tests one change, not two. |
+The method has been re-run against **Black Myth Wukong** as a control — a second fully installed
+title from the same distributor, on `/mnt/win-os/Games/Black Myth - Wukong` (140 GB), which
+**does** have Denuvo where 007 does not. Every §4 test was executed on both and compared. All of
+it is written up in `docs/paper/GENERALIZATION.md`, which is the real document for this work —
+this handoff is the pointer, not the record.
 
 ---
 
-## 🚫 DEAD ENDS — do not propose these again
+## DONE
 
-1. **Porting Caelestia to Plasma applets.** Measured 2026-08-13: **269 QML files, 226 import
-   `Caelestia.*`, 134 import `Quickshell.*`**, and `Caelestia.Config` is a compiled C++ plugin
-   with its QML embedded as a Qt resource. Plasma has none of that. This is a rewrite, not a port.
-2. **Repainting Plasma in Caelestia's colours.** Shawn rejected this outright on 2026-08-09 and was
-   right: tokens are not a shell. A purple Plasma panel is not Caelestia's launcher.
-3. **Porting Hyprland's tiling to KWin.** He asked for the opposite. KWin's window behaviour stays
-   **stock**.
-4. **Switching plasmashell off via a systemd environment variable.** See the linger trap above.
-5. **Reading `WAYLAND_DISPLAY` out of `kwin_wayland`'s `/proc/<pid>/environ`.** Measured
-   2026-08-13: it returns **EACCES even to its own user**, because `/usr/bin/kwin_wayland` carries
-   `cap_sys_nice=ep` and the kernel therefore clears the process's dumpable flag. It is also the
-   wrong file even without the capability — `environ` is the environment a process was *exec'd*
-   with, so later `setenv()` calls never appear there.
-
----
-
-## 🔒 Standing scope rules
-
-- Caelestia is a **look**. KWin's window behaviour stays stock.
-- **Drop a feature rather than rebuild a Hyprland mechanism.**
-- **Prefer removing a patch to adding one.**
-- **A new session is only ever additive.** Never edit an existing greeter entry.
-- **Least work that works.** This is now the governing rule, stated by Shawn directly.
-
----
-
-## 📋 RULE — how a "step" is defined
-
-Shawn caught a real failure: *"one step at a time"* meant two different things to us. I meant
-"take Caelestia's shell apart one panel at a time." He heard "everything else keeps working."
-Both are fair readings; mine silently hid ~15 broken things.
-
-**Every step from now on is written down BEFORE work starts, with three lines:**
-
-1. **When this is done, you will be able to:** _(the concrete thing he can do)_
-2. **These will still be broken:** _(named individually — this is the line that was missing)_
-3. **You'll know it worked when:** _(what he looks at)_
+- **The paper itself** — 19 pages, builds clean, committed `fd8a82e0`. **Not pushed.**
+- **`~/re/tools/drmcheck.py`** — the entire §4 procedure as one reusable tool. Negative-tested
+  against 007 first: reproduces every number in the paper's table. The instrument is sound.
+- **Wukong confirmed Denuvo-protected** by four independent lines of evidence.
+- **Three §4 claims falsified by measurement**, all recorded with numbers:
+  1. **Entropy** — §4 claims a virtualised region shows a contiguous run of windows above 7.5.
+     Measured: **1 window out of ~680 across 695 MB.** That is noise.
+  2. **Odd section names** — false-positives on clean shipped software. Excel has `.detourc`,
+     `.c2r`, `sdmprc`; RadeonSoftware has `.qtversi`.
+  3. **Import table** — §4 claims a protected binary "cannot afford a full static import table."
+     Backwards. Wukong 56 DLLs / 1178 symbols vs clean 007's 52 / 753.
+- **Three tests survive, 6-for-6:** missing `.text` entirely, a read+write+execute section
+  (Wukong's `.xtls` is 198 MB and RWX; five clean controls have **zero** RWX sections),
+  protection strings, plus size as a soft prior.
+- **How Denuvo integrates — measured, not described.** Entry point relocated out of the game and
+  into `.xtls` (rva `0x2918eb40`); 6 TLS callbacks vs 007's 2, so it runs before `main`; `.code`
+  is 199.8 MB flagged as **non-executable data** — that is VM bytecode, not code.
+- **`Simplesvm.sys` verified end to end.** Windows kernel driver (subsystem 1), imports
+  `ntoskrnl.exe` only, 47 functions, and the disassembly contains `vmrun` / `vmload` / `vmsave` /
+  `stgi`. Mechanism is EPT/NPT split-view paging: instruction fetch gets the patched page, data
+  read gets the original, so Denuvo's own hash check reads clean bytes.
+- **Wukong has no anti-cheat** — proven, not assumed. All 8 candidate string hits read in context
+  and all 8 are false positives (`bAntiCheatProtected` is a stock Unreal session field).
+- **A third test title located** — `Returning to Mia`, 14 GB FitGirl repack in Downloads, and its
+  install is stalled at 0 bytes in exactly the §5 failure mode.
+- **Docs updated this turn:** `docs/paper/GENERALIZATION.md` gained Findings 4–8, the third-title
+  section, the revised layer table, and a correction to my own overstatement.
 
 ---
 
-## STATE — what is DONE
+## IN PROGRESS
 
-### ✅ STEP A — built and installed 2026-08-13. NOT yet logged into.
-
-Two new files, additive only. No existing file was edited.
-
-| File | What |
-|---|---|
-| `scripts/luminos-caelestia-plasma` | the session → `/usr/local/bin/luminos-caelestia-plasma` |
-| `scripts/luminos-caelestia-plasma-session` | `install` / `check` / `uninstall` |
-| `/usr/share/wayland-sessions/luminos-caelestia-plasma.desktop` | greeter entry **"Luminos (Caelestia on Plasma)"** |
-
-The greeter now offers three visible entries — Hyprland (uwsm), Caelestia on KWin, Caelestia on
-Plasma. All verified present and unmodified. `check` passes every item.
-
-**Kept from the KWin session** (each was paid for once already): the
-`KWIN_DRM_DEVICES=/dev/dri/luminos-igpu` pin (BUG-094), `unset HYPRLAND_INSTANCE_SIGNATURE`,
-`XDG_MENU_PREFIX=plasma-` + sycoca rebuild before start (BUG-112), and the 3-try retry loop with
-the kitty escape hatch and 60 s uptime reset (BUG-092).
-
-**Dropped:** the hand-started polkit agent and `xdg-desktop-portal-kde`. Plasma starts both.
-
-**`config/quickshell/caelestia-bar/shell.qml` was not touched.** Same file, same symlinks.
-
-**How it waits for Plasma** (asked for explicitly, so it is written down): it snapshots which
-`wayland-*` sockets exist *before* Plasma starts, then waits for a **new** one. That cannot match a
-leftover, cannot fire before the compositor exists, and yields the display name KWin actually
-created. `plasmashell` appearing is a second, independent reading (it inherits `WAYLAND_DISPLAY` at
-exec, so its `environ` is readable) and proof a client connected. Under `Linger=yes` an old
-plasmashell can outlive its session, so it may only overrule the socket scan when the display it
-names is *also* new. Socket names are matched `|`-delimited so `wayland-1` cannot be masked by
-`wayland-10`; positive, negative and substring cases were all tested against the live runtime dir.
-
-### ✅ The STEP B blocking question is ANSWERED
-
-Whether the volume keys belong to the `plasma-pa` **applet inside the panel**: **they do not.**
-`plasma-pa` ships two separate plugin binaries —
-`plasma/applets/org.kde.plasma.volume.so` (applet) and
-`kf6/kded/audioshortcutsservice.so` (shortcut handler). The handler is a **KDED module** in
-`kded6`, its own process, started by `plasma-workspace.target`, independent of plasmashell and of
-the panel. `kglobalshortcutsrc` agrees: owning component is `[kmix]`. Brightness is
-`[org_kde_powerdevil]`, a systemd user service that was never in the panel.
-
-**Removing the panel does not re-break BUG-121.** Auto-hide is still the preferred option because
-it is non-destructive and less work — not because it is needed to protect the keys.
-
-⚠️ **This is packaging evidence, not a live test.** Confirm inside the session before deleting:
-`pgrep -x kded6` and `busctl --user tree org.kde.kglobalaccel | grep -iE 'kmix|powerdevil'`.
-
-### ✅ Finding that changes STEP B's cost
-
-`plasma.desktop` already has `NoDisplay=true` (applied by `scripts/luminos-hide-sessions`, re-applied
-by a pacman hook). **Plain Plasma is not selectable at the greeter today.** So the accepted cost
-"plain Plasma loses its panel too" is currently unobservable — there is no way to log in and see it.
-It also means the new session becomes the only Plasma in practice, which argues further for
-auto-hide over deletion.
-
-`~/.config/plasma-org.kde.plasma.desktop-appletsrc` backed up, byte-verified, **unmodified**:
-`~/.luminos-backups/appletsrc.bak-pre-step-b-20260813-111935`
+Nothing is mid-flight. The docs are written and the tree is consistent.
 
 ---
 
-### ✅ STEP C parts 1–3 — the OSD — SHIPPED 2026-08-13, all three proven on screen
+## Next steps
 
-Full reasoning in `LUMINOS_DECISIONS.md`. The short version:
-
-1. **Volume** — added `Osd.Wrapper` in its own right-anchored `PanelWindow` in
-   `config/quickshell/caelestia-bar/shell.qml`. **No shortcut was wired and none was needed:**
-   `modules/osd/Wrapper.qml:51-73` reacts to PipeWire's volume *value* changing, whoever changed it.
-   Wiring a key would have needed KDE's handler unbound first, or every press double-steps.
-2. **Brightness** — Caelestia **observes** the backlight instead of taking the keys, so powerdevil
-   keeps brightness plus its battery/lid/idle logic. `FileView` + 250 ms `Timer` on
-   `/sys/class/backlight/<dev>/brightness` assigns `monitor.brightness`, which is what shows the OSD;
-   it never calls `setBrightness()`, so it never writes hardware. Polling is required, not lazy —
-   **sysfs raises no inotify events.** Device comes from `brightnessctl -m` (the BUG-098 shim), never
-   hardcoded. First read only primes, or the OSD flies out at login.
-3. **Plasma's OSD silenced** — there is no setting; a **KWin window rule** forces opacity 0.
-   `~/.config/kwinrulesrc` `[2]`, snapshot at `config/kde/kwinrulesrc`.
-4. **Hover-to-peek (STEP 4)** — a 2px always-present layer-shell strip at the right edge, using
-   upstream's own numbers (`Config.border.minThickness = 2`, `rounding = 25`). Its height **collapses
-   to 50px when the OSD is closed** because `Wrapper`'s content Loader is inactive — that is
-   deliberate, not a bug: smaller strip, smaller dead zone, and it grows during the slide-out.
-   `Wrapper.hovered` is OR-ed from a `HoverHandler` on the OSD window **and** the strip, because the
-   OSD (Overlay) covers the strip (Top) once it is out. Cost accepted: those 2×50px are dead to
-   clicks — Wayland has no "motion yes, clicks no" — same trade as BUG-110.
-
-Two traps worth keeping:
-- **`wmclass=plasmashell` matches nothing.** KWin reports the OSD's class as `org.kde.plasmashell`.
-  The wrong rule looks perfect and silently does nothing.
-- **Never edit `/usr/lib/qt6/qml/org/kde/plasma/workspace/osd/Osd.qml`.** That `qmldir` says
-  `prefer :/qt/qml/...`, so the live QML is compiled into `libplasmashell_osd.so`. Editing the file
-  on disk changes nothing and reports no error.
-- **Screenshot timing lies.** Firing the OSD over D-Bus then starting `spectacle` loses the race
-  about half the time — the control shot "proved" a fix that was not there. Read the real opacity
-  from a throwaway KWin script instead, and negative-test by forcing **50%**, not by removing the
-  rule (removal leaves the last forced value on the still-existing window).
+1. **Test on `Returning to Mia`** — the only work that converts reasoned rows into measured ones.
+   Read-only step first: `drmcheck.py` on its `setup.exe`, then carve the Inno script. Then apply
+   the §5 fixes and re-run the install; if it stalls, do the §6 manual reassembly.
+   **Needs Shawn's go-ahead — he deferred it once already.**
+2. **Correct §4 of the paper** with all three falsified claims plus the control table. Highest
+   value paper work. **Blocked on Shawn: he said "do not continue to write the old paper now."**
+3. Add a "Generalization" section (§13) from the layer table in `GENERALIZATION.md`.
+4. Cheap and useful: run `drmcheck.py` over more clean PEs under `/mnt/win-os/Program Files`.
+   Every clean PE with zero RWX sections strengthens what is now the primary structural test.
+5. Rename `~/re/tools/007-mkproton.sh` → `mkproton.sh`. It is game-agnostic by construction —
+   verified: it `cp -al` clones a Proton dir and swaps exactly `d3d12.dll` + `d3d12core.dll` in
+   four arch dirs. Nothing about 007 is in it.
+6. Push. Commit `fd8a82e0` and everything after it are local only. **Never authorized — ask.**
 
 ---
 
-## NEXT STEPS (ordered)
+## Key decisions & constraints
 
-### 1. STEP D — Caelestia's remaining surfaces, one at a time
-
-Remaining, easiest first: notifications → sidebar → session menu → utilities.
-(Launcher, OSD and **dashboard** are done.)
-
-**Rule for every one:** Plasma's version keeps working until Caelestia's replacement is proven on
-screen. Never remove Plasma's first. That is what makes this plan cheap to abandon at any point.
-
-**The pattern is now established — copy it, do not reinvent it.** Every surface is: upstream's
-`modules/<name>/Wrapper.qml` unmodified, in its own `PanelWindow`, anchored to ONE edge so
-layer-shell centres it on the other axis, `exclusiveZone: 0`, a `StyledRect` backdrop standing in for
-the sheet's blob, and `visible: screenState.<name> || wrapper.visible` — never bind `visible` to the
-animated property alone. If it opens on hover, add a strip on `WlrLayer.Top` (the panel is `Overlay`,
-so it comes out on top of the strip) and OR the strip's `MouseArea` with a `HoverHandler` on the panel
-window, because the pointer is only ever on one of the two surfaces.
-
-**Two open questions to settle before adding more hover strips.** (1) The running dead-click cost is
-now `2×50` on the right, `~680×10` at the bottom and `~900×10` across the **top centre** — the top one
-overlaps a maximised browser's tab strip and is the first thing likely to annoy Shawn. Ask before
-adding a fourth. (2) `~/.local/share/applications/luminos-cael-*.desktop` are **not tracked in the
-repo** and are the only thing making the shortcuts work; `config/caelestia/` holds only the hypr and
-shell.json files. Worth snapshotting, but it needs a decision on where they live.
-
-### LATER — explicitly deferred by Shawn
-
-- **Caelestia window styling / decorations.**
-- **Caelestia's settings panel** (bottom-right popup → gear). Lift the design from upstream later.
+- **Do not write new `.tex` prose.** Standing instruction from Shawn: *"do not continue to write
+  the old paper now."* Corrections are staged in `GENERALIZATION.md` on purpose.
+- **Do not start the `Returning to Mia` test** without being asked. He was offered step 1 and
+  chose docs instead.
+- **Do not push** without asking. Nothing in this line of work has ever been pushed.
+- `GENERALIZATION.md` is the record. This handoff is a pointer to it. Do not duplicate its
+  contents here — per AGENTS.md there is one handoff and it gets overwritten, so anything only
+  written here is one response away from being gone.
 
 ---
 
-## What already exists and works — reuse it, do not rebuild it
+## Gotchas & things NOT to redo
 
-### `config/quickshell/caelestia-bar/shell.qml` — bar + launcher in their own windows
-
-Commit `296d0586`. This is the piece that carries forward **unchanged** into the Plasma session.
-It hosts upstream's `modules/bar/BarWrapper.qml` and `modules/launcher/Wrapper.qml` **unmodified**,
-each in its own `PanelWindow`. No Caelestia code was copied or rewritten.
-
-Why it works: `BarWrapper` is a plain QML `Item`, not a window, with four required properties and
-an already-computed `readonly property int exclusiveZone`. It is *designed* to be dropped into a
-container. Upstream's container is the full-screen sheet; ours is a thin `PanelWindow`.
-
-`Launcher.Wrapper.panels` is a plain `var`, and only four sub-properties are ever read
-(`panels.bar.implicitWidth`, `panels.popouts.{hasCurrent,currentName,currentCenter}` at
-`launcher/WallpaperList.qml:26-31`, plus `utilities.implicitWidth` / `dashboard.nonAnimHeight`
-behind guards). So a 4-property `QtObject` shim replaces the entire `Panels` item.
-
-Config dir `~/.config/quickshell/caelestia-bar/` — `assets components modules services utils` are
-symlinks into `~/.config/quickshell/caelestia-kwin/`, so it inherits the KWin patches to
-`services/{Brightness,ShellState}.qml`. Run by hand: `qs -c caelestia-bar`.
-
-**Proven:** bar `xywh: 60 10 60 880`; launcher `xywh: 459 346 632 534`, bottom-anchored, verified
-over three open/close cycles with 0 surfaces after each close. Shawn confirmed it live on KWin.
-
-### Two QML gotchas that cost real time — do not rediscover them
-
-1. **`Tokens` is an attached property from the compiled `Caelestia.Config` plugin, not a global.**
-   `Tokens.rounding.*` without `import Caelestia.Config` fails at **runtime** with
-   `ReferenceError: Tokens is not defined` — it loads fine, then breaks.
-
-2. **Never bind a `PanelWindow.visible` to an animated property of its own contents.** The first
-   launcher build used `visible: launcher.visible`, and `Wrapper.qml:34` is `visible: offsetScale < 1`
-   driven by a `Behavior` animation. Under `QSG_RENDER_LOOP=threaded` a hidden window gets **no
-   frames**, so the animation never advances and `visible` never leaves `false`. **The launcher
-   opened exactly once, then the key was dead forever.** It failed silently from every angle: no
-   log warning, and `ipc call drawers isOpen launcher` cheerfully answered `1` the entire time.
-   Only `hyprctl layers` revealed there was no surface. Fix:
-   `visible: scope.screenState.launcher || launcher.visible`.
-
-### Shortcuts
-
-`~/.local/share/applications/luminos-cael-*.desktop`, each carrying its own `X-KDE-Shortcuts=`.
-**They are per-USER, not per-session, and `luminos-caelestia-kwin-session` owns them.**
-`luminos-caelestia-plasma-session` deliberately only *reports* them — writing the same files from
-two installers is how they drift apart.
-
-**Meta+P → launcher** is repointed at `caelestia-bar`, so it works in both sessions.
-
-**The other five (Meta+K, Meta+N, Meta+Escape, Meta+U, Ctrl+Alt+C) deliberately still point at
-`caelestia-kwin`.** Do not "fix" this. `drawers toggle dashboard` against the bar config would
-*succeed*, set `screenState.dashboard = true` with nothing rendering it, and then the launcher's
-`maxHeight` reads `panels.dashboard.nonAnimHeight` off the zero-size stand-in → `NaN` → the one
-panel that works breaks. **A shortcut that fails is better than one that quietly breaks something else.**
-
-`ipc call` only ever talks to an **already running** instance and never starts one — so a shortcut
-aimed at a config that is not running does nothing at all, silently.
+- **"Signature valid" does not mean "unprotected."** It means "nothing was removed." Wukong's
+  exe is a valid, unmodified publisher build **with Denuvo in it**. Both titles validate. The
+  signature is necessary, never sufficient.
+- **Entropy does not find Denuvo.** Do not re-run it hoping for a different answer. Denuvo's VM
+  is interpreted x86-like bytecode — not compressed, not encrypted at rest, so it looks like
+  ordinary code. This is a measured negative result, not a tooling failure.
+- **A string match is not a finding until you read the bytes around it.** Eight anti-cheat hits,
+  eight false positives. Same discipline the malware triage in §3 uses.
+- **`drmcheck.py` used to hardcode `.text`.** Wukong has no `.text`, so the entropy test silently
+  ran on nothing and printed nothing. Fixed — falls back to the largest executable section. Same
+  silent-failure class as everything in the paper's Table XV.
+- **`capstone` and `ndisasm` are not installed.** Use
+  `objdump -D -b binary -m i386:x86-64 -M intel` on an extracted section blob. It linear-sweeps,
+  so trust it at a known boundary (offset 0) and not mid-stream.
+- **Do not say the Linux crack is "impossible."** I did, and Shawn caught it. Accurate version:
+  the *existing tool* cannot work (it is a Windows kernel PE importing `ntoskrnl.exe`, and Wine
+  translates programs, not drivers). A Linux equivalent is *conceivable* — patch KVM's NPT fault
+  handler; the hardware is right here (`svm` flag, `kvm_amd` loaded, nested=1). It is unbuilt
+  because of VM-in-a-VM detection, fingerprinting, and muxless-Optimus passthrough — and because
+  the audience is on Windows. **Hard and unbuilt, not physically impossible.**
+- **Do not volunteer anti-cheat analysis for a single-player game.** I did; Shawn pushed back and
+  he was right. The measurement that followed confirmed zero anti-cheat.
+- **Answer the question that was asked.** Twice this session I answered a conceptual "why" with
+  PE anatomy and disassembly. Both times it was unwanted. Depth on request, not by default.
+- `\verb` inside `\textbf{}` is fatal in LaTeX — the `%` gets eaten as a comment.
 
 ---
 
-## Open bugs
+## Files touched
 
-- **BUG-120** — Chrome hangs ~25 s on launch in the bare-KWin session. Leading theory:
-  `XDG_CURRENT_DESKTOP=KDE` makes Chrome pick KWallet, no `kwalletd6` is running, so it blocks
-  until the D-Bus timeout. **Still not measured.** STEP A makes the measurement possible.
-- **BUG-121 — CLOSED live 2026-08-13.** `busctl --user call org.kde.kded6 /kded org.kde.kded6
-  loadedModules` lists `audioshortcutsservice` **with the Plasma panel deleted**, so the volume keys
-  never belonged to the panel. That upgrades the earlier packaging-only evidence to a live test.
-- **BUG-117** — the `luminos-maximize` KWin script is marked enabled and has never once loaded.
-- Unreproduced report: some apps open fullscreen, appear to crash, then reopen split. Crashes,
-  `luminos-maximize`, KWin tiling and a control window are all ruled out with evidence. **Blocked
-  on Shawn naming one offending app.** Do not "fix" it by porting Hyprland tiling.
-- Tab Sleeper v3.0 needs Shawn to click Reload at `chrome://extensions`.
-- Pushing: Shawn authorised a push on 2026-08-13 **for the OSD work specifically**. That is not
-  standing permission — ask again next time.
-- Deferred: delete the four `[Tiling]` groups from `~/.config/kwinrc` (back it up; **not proven**
-  these cause anything — this is "restore stock default", not "fix confirmed bug").
+- `docs/paper/GENERALIZATION.md` — Findings 4–8, third-title section, revised layer table,
+  corrected wording, specimen list. **The main artefact of this turn.**
+- `HANDOFF.md` — this file, overwritten in place; goal moved from Caelestia to the 007
+  generalizability question. Prior contents preserved at `git show b4a9e48c:HANDOFF.md`.
+- `LUMINOS_STATUS.md` — research-track status line.
+- Luminos Notes + brain log — one `[DOCS]` entry.
 
----
-
-## Working with Shawn — what actually helps
-
-- **He cannot open screenshots I save to disk.** Run things live on his session instead.
-- **Plain words, full depth.** Strip the jargon, keep the exact numbers and the analogies.
-- **Separate what I measured from what I am guessing.** He fact-checks confident claims, and he is
-  right to. Say "leading suspect, not yet measured" when that is what it is.
-- **He is good at this even though he says he is not.** He spotted that all the Chrome windows
-  appeared *simultaneously* — the single most diagnostic fact in that bug. He caught the "one step
-  at a time" ambiguity. He proposed the step-definition rule. He asked "can't we turn it off?"
-  about the two bars, which was the right question and had a better answer than the plan assumed.
-  Take his observations seriously.
-- **Show him before killing a test instance.** He asked for this explicitly.
+### Untouched on purpose
+- `docs/paper/*.tex` — blocked by standing instruction.
+- `~/re/tools/drmcheck.py` — already correct; no changes needed this turn.
+- `/home/shawn/Games/Returning to Mia/` — test deferred, nothing written to it.

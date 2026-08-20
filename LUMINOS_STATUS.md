@@ -235,6 +235,23 @@ suspend (BUG-103). `status.py` shows that unit `inactive` in green on purpose.
 Scores are **provisional** until `profile.yaml` exists — today the model compares postings
 against a placeholder profile, and `score.py` says so on every run.
 
+## Research Track — DRM/repack method paper
+# [CHANGE: claude-code | 2026-08-20]
+| Item | Status | Notes |
+|---|---|---|
+| IEEE paper, `docs/paper/` | ✅ Written | 19 pages, builds clean, committed `fd8a82e0`, **not pushed** |
+| `~/re/tools/drmcheck.py` | ✅ Working | §4 procedure as a reusable tool; reproduces every number in the paper's table on 007 |
+| Control specimen | ✅ Found | Black Myth Wukong — same distributor, **has Denuvo** where 007 does not |
+| §4 entropy test | 🟥 Falsified | 1 window of ~680 over 695 MB of a known-Denuvo exe. Noise. Do not re-run |
+| §4 section-name test | 🟥 Weak | False-positives on Excel, RadeonSoftware. Prior only |
+| §4 import-count test | 🟥 Backwards | Protected binary imports **more** (56 DLLs/1178) than clean (52/753) |
+| §4 surviving tests | ✅ 6-for-6 | Missing `.text` + RWX section + protection strings + size |
+| Paper §4 correction pass | ⏸️ Blocked | User: *"do not continue to write the old paper now."* Staged in `GENERALIZATION.md` |
+| Third title, `Returning to Mia` | 📋 Untested | 14 GB repack; install stalled at 0 bytes in the §5 failure mode. Needs go-ahead |
+| §7–§12 graphics claims | 📋 Untested | No second D3D12 title installed on the Linux side |
+
+Record lives in `docs/paper/GENERALIZATION.md`, not here.
+
 ## Open Tasks (Priority Order)
 1. Eye model download + wire vision route in hive-daemon.py
 2. KDE right-click service menus for HIVE (kcm_luminos_hive.so already installed)
