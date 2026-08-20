@@ -3532,16 +3532,61 @@ reported `assert=9`.
    `VKD3D_CONFIG=pipeline_library_ignore_spirv`.
 3. Capture the faulting address on the Unix side to confirm the fault is inside
    `libnvidia-gpucomp.so` rather than Wine's structure conversion.
-4. **Unpin and upgrade the NVIDIA driver — the strongest untried lead.** The
-   installed driver is `595.71.05`, frozen since 2026-05-10 by the DECISION 26
-   `IgnorePkg` line; the repo now carries `610.57.04`, a full branch jump. The
-   fault is a segfault *inside the driver*, which is exactly the class of thing
-   that changes between branches. This is NOT a casual `pacman -Syu`: DECISION 26
-   pinned it to protect the true-0W dGPU RTD3 gating, the DPM=0x02 power tuning
-   and the hand-built KCM `.so` plugins. Follow the DECISION 26 procedure —
-   unpin → upgrade → DKMS rebuild → verify 0W gating + KCMs → re-pin — and take a
-   Timeshift restore point first. Get the user's explicit go-ahead; it is a
-   hard-to-reverse system change, not a game fix.
+4. ~~Unpin and upgrade the NVIDIA driver.~~ **DONE 2026-08-19. Did not fix it.**
+   See "ROOT CAUSE FOUND" below.
+
+## ROOT CAUSE FOUND — [CHANGE: claude-code | 2026-08-19]
+
+**It is a segfault inside NVIDIA's SPIR-V compiler. Proven, not inferred.**
+
+`WINEDEBUG=+seh` finally prints what the MessageBox was hiding. Nine threads, one
+address, every time:
+
+```
+0148:warn:seh:handle_syscall_fault backtrace: --- Exception 0xc0000005 at
+0x7f04a4746fd8: /usr/lib/libnvidia-glvkspirv.so.610.57.04 + 0x346fd8.
+```
+
+`libnvidia-glvkspirv.so` is the NVIDIA driver's SPIR-V → machine-code compiler.
+vkd3d-proton hands it the compute shaders it translated from the game's DXIL, and
+the compiler dereferences a bad pointer. Wine's thunk is a bystander: it faithfully
+reports the Unix call died, `assert(!status)` fires, and nine `MessageBox`es open.
+
+That closes the question the AMD/NVIDIA split only pointed at. **This is an
+upstream NVIDIA driver bug.** Nothing in Wine, Proton, vkd3d or Luminos can fix it;
+they can only avoid feeding the compiler the shader it chokes on.
+
+### Eliminated on 2026-08-19, each by a measured run
+
+| Hypothesis | Test | Result |
+|---|---|---|
+| Stale driver branch | `595.71.05` → `610.57.04`, full DKMS rebuild | `assert=9`, identical |
+| Stale shader cache | moved `PipelineCache.bin` (259 MB) + `vkd3d-proton.cache` aside, cold run | `assert=9` |
+| A misbehaving Vulkan extension | disabled `shader_module_identifier`, `pipeline_creation_feedback`, `subgroup_size_control`, `descriptor_buffer`, `device_generated_commands`, `graphics_pipeline_library` together | `assert=9` |
+| The DECISION 25 dGPU gate | see below | never plausible |
+
+The driver upgrade is worth keeping regardless — it is now pinned at `610.57.04`
+instead of `595.71.05`, and the DECISION 26 protections were re-verified after it:
+RTD3 reaches `suspended` within 10 s of the last consumer exiting, `power/control`
+returns to `auto`, `d3cold_allowed=1`, and all three `kcm_luminos_*.so` plugins
+resolve with zero missing libraries.
+
+**Rollback, if the 610 branch ever causes trouble:** the three `595.71.05-2`
+packages are saved at `~/re/nvidia-rollback-595/` (308 MB, fetched from
+archive.archlinux.org because they were NOT in the pacman cache). Restore with
+`sudo pacman -U ~/re/nvidia-rollback-595/*.pkg.tar.zst`, then reload the modules.
+`/etc/pacman.conf.bak-20260819-nvidia610` holds the pre-change pin line.
+
+### What is actually left to try
+
+1. Make vkd3d emit different SPIR-V for the offending shader — lower
+   `VKD3D_FEATURE_LEVEL`, or bisect `VKD3D_CONFIG` codegen flags — so the compiler
+   never sees the construct that kills it. This is the only realistic local fix.
+2. Identify the specific shader. `VKD3D_SHADER_DUMP_PATH` writes every DXIL/SPIR-V
+   module; the last one written before the fault is the culprit, and it would make
+   a minimal reproducer.
+3. Report it upstream. A crash address inside `libnvidia-glvkspirv.so` plus a
+   dumped SPIR-V module is exactly what an NVIDIA bug report needs.
 
 ### Not the cause: the DECISION 25 dGPU gate
 
