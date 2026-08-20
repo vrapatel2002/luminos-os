@@ -3532,8 +3532,71 @@ reported `assert=9`.
    `VKD3D_CONFIG=pipeline_library_ignore_spirv`.
 3. Capture the faulting address on the Unix side to confirm the fault is inside
    `libnvidia-gpucomp.so` rather than Wine's structure conversion.
+4. **Unpin and upgrade the NVIDIA driver — the strongest untried lead.** The
+   installed driver is `595.71.05`, frozen since 2026-05-10 by the DECISION 26
+   `IgnorePkg` line; the repo now carries `610.57.04`, a full branch jump. The
+   fault is a segfault *inside the driver*, which is exactly the class of thing
+   that changes between branches. This is NOT a casual `pacman -Syu`: DECISION 26
+   pinned it to protect the true-0W dGPU RTD3 gating, the DPM=0x02 power tuning
+   and the hand-built KCM `.so` plugins. Follow the DECISION 26 procedure —
+   unpin → upgrade → DKMS rebuild → verify 0W gating + KCMs → re-pin — and take a
+   Timeshift restore point first. Get the user's explicit go-ahead; it is a
+   hard-to-reverse system change, not a game fix.
+
+### Not the cause: the DECISION 25 dGPU gate
+
+Worth writing down because it is the intuitive suspect and it is wrong. The gate
+is real — `/dev/nvidia0` and `/dev/nvidiactl` are `crw-rw---- root dgpu`, group
+`dgpu` (gid 948) is **empty**, and `shawn` is not a member — so an ordinary
+process cannot open the card and the NVIDIA Vulkan ICD silently falls back to the
+Radeon 780M. That is a real effect and it does explain "Wine seems pinned to the
+iGPU" for *other* apps.
+
+It is not what breaks 007, for three measured reasons:
+1. `007-run.sh` already goes through the gate: the NVIDIA branch is
+   `exec dgpu-exec-v2 env … nvidia_icd.json … 60_nvidia.json`, and
+   `dgpu-exec-v2` is `-rwxr-sr-x root dgpu`, i.e. setgid into the group.
+2. The gate passes right now: `dgpu-exec-v2 nvidia-smi …` returns
+   `NVIDIA GeForce RTX 4050 Laptop GPU, 595.71.05`, while the same command
+   without the wrapper returns `Failed to initialize NVML: Insufficient Permissions`.
+3. **The symptom is the wrong shape.** A gate failure means no NVIDIA device is
+   ever found — zero dialogs and a quiet fall back to AMD. What actually happens
+   is nine dialogs, which can only be reached *after* Vulkan has opened the
+   device, enumerated the GPU and created a logical device. Reaching
+   `vkCreateComputePipelines` is proof the gate was already passed.
+
+**One correction to a plausible-sounding next step:** capturing "the real
+`VkResult`" with `VK_LOADER_DEBUG=all` will not work, because there is no
+`VkResult`. The assert is on the **NTSTATUS of the Unix-side call** and the value
+is `0xc0000005` — an access violation. The driver did not *return* an error; it
+*crashed*. The useful capture is a faulting address, not a return code.
+
+### Fullscreen — [CHANGE: claude-code | 2026-08-19]
+
+The game first ran in a box in the middle of the screen. Not a game setting: the
+Wine virtual desktop was hardcoded to `1920x1080`, the panel is `2880x1800`
+physical, and XWayland is unscaled — so the window covered 67% x 60% of the panel.
+`007-run.sh` now defaults `RES` to the panel's native mode and writes it into
+`HKCU\Software\Wine\Explorer\Desktops`. Verified full-bleed at 2880x1800, 96% iGPU,
+zero `err:` lines, zero `#32770` windows.
+
+Read the mode from **sysfs**, not the compositor, so it works under KDE and
+Hyprland alike:
+
+```sh
+for _m in /sys/class/drm/card*-eDP-*/modes; do
+  _r=$(head -1 "$_m" 2>/dev/null)
+  case "$_r" in [0-9]*x[0-9]*) RES="$_r"; break ;; esac
+done
+```
+
+**Trap (cost me one wasted launch):** do NOT filter those files with `[ -s "$f" ]`.
+Every sysfs file reports 4096 bytes whether or not it has any content, so `-s`
+matches the *disconnected* `card1-eDP-1` connector first, yields an empty string,
+and falls silently back to the default. Test the **content**, not the size.
 
 **Undo.** `007` is a single file. Restore the previous NVIDIA-default behaviour by
 changing `GPU=igpu` back to `GPU=nvidia` in `~/re/tools/007-run.sh` and
-re-installing it. Nothing else on the system was changed for this bug; the
-`jobhunt-llm.service` stop was temporary and it was restarted.
+re-installing it; restore the old window size with `007 --res=1920x1080`. Nothing
+else on the system was changed for this bug; the `jobhunt-llm.service` stop was
+temporary and it was restarted.
