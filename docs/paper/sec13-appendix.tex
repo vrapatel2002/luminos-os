@@ -1,0 +1,161 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+Four questions were asked and four were answered.
+
+\textbf{Is it hostile?} No. Six independent lines of static evidence, all
+negative, including a byte-for-byte comparison against an independently verified
+package. The most alarming artefact in the distribution---a utility that rewrites
+the system \verb|hosts| file---turned out to be the strongest single piece of
+evidence \emph{for} the package's authenticity.
+
+\textbf{Is commercial anti-tamper present?} No, and it never was in this build.
+The executable's Authenticode digest validates over its current bytes, so the
+file is exactly what the publisher signed. Protection of that class lives inside
+the executable and cannot be removed without invalidating the signature.
+Three corroborating instruments agree, including a windowed entropy profile with
+zero windows anywhere near the threshold.
+
+\textbf{Can it be reconstructed without its installer?} Yes---in 37 minutes, to a
+working 54\,GB tree, with every one of ten stages verified in advance against a
+manifest the format publishes for free. The artefact that blocked the project for
+two working sessions was a three-line advertisement fetcher containing no build
+logic at all, and it was blocked not by a codec but by a missing configuration
+file at a hard-coded path.
+
+\textbf{Will it run on both GPUs?} Yes. The integrated GPU worked early. The
+discrete GPU produced a failure with no error message, no crash, and no log
+output, which turned out to be nine unpainted modal dialogs each reporting that
+the vendor's shader compiler had segmentation-faulted. The cause was neither the
+game, nor the driver, nor the hardware, nor the permissions gate that was
+suspected three separate times. It was the build of the Direct3D~12 translation
+layer---the one component chosen at the start of the project and never once
+treated as a variable. Replacing it took one attempt.
+
+The recurring lesson is not about graphics. It is that in a stack of a dozen
+substitutable layers, the expensive mistake is rarely a wrong hypothesis; it is a
+component that was never a hypothesis. Twice in this project---the installer
+helper that re-extracted itself, and the translation layer that was assumed
+fixed---the answer was in a place that had been silently excluded from the search
+space at the outset.
+
+Two smaller results are worth carrying away independently. A validated code
+signature is a stronger, cheaper, and more honest way to establish the absence of
+anti-tamper protection than any heuristic stack, and it should be the first test
+rather than the last. And a pipeline stage that publishes its own preconditions
+gives you a correctness check you neither had to design nor have to trust
+yourself to have designed correctly.
+
+\section*{Appendix: Reproduction}
+\label{sec:appendix}
+
+\subsection*{A. Establishing anti-tamper absence on an arbitrary binary}
+
+\begin{enumerate}
+\item Extract the certificate directory from the PE file, parse the PKCS\#7
+      structure, and read the embedded digest.
+\item Recompute the Authenticode hash over the file as it exists, excluding the
+      checksum field, the certificate table entry, and the certificate data.
+      Compare. If they match, stop---the question is answered.
+\item Otherwise, profile entropy in windows of 1\,MiB over the code section.
+      Report the window count above 7.5 and state the threshold used. Never
+      report a whole-file figure alone.
+\item Enumerate sections and the import table. A full, compiler-shaped import
+      table is difficult for a protection layer to preserve.
+\item Identify what protection \emph{is} present. ``No anti-tamper'' is not ``no
+      DRM.''
+\end{enumerate}
+
+\subsection*{B. Recovering a compiled Inno Setup script}
+
+Search for the 12-byte identifier \verb|rDlPtS|; read nine little-endian 32-bit
+words; seek to \textbf{offset0}; skip the 64-byte banner; read CRC, stored size,
+and compression flag; then read \verb|[crc32(4) + up to 4096 bytes]| chunks until
+the stored size is satisfied. The concatenated result is raw LZMA1 whose first
+five bytes are the properties block. Do \emph{not} follow the \verb|zlb\x1a|
+magic near the start of the overlay; that is the file data.
+
+\subsection*{C. Reassembling the distribution}
+
+\begin{enumerate}
+\item Copy the decompressor's configuration file to the root of the emulated
+      system drive.
+\item Patch the compression helpers to drop the \verb|Global\| namespace prefix,
+      using a live patcher that polls for newly extracted copies.
+\item Extract all six containers to their \emph{correct} destinations
+      (Table~\ref{tab:dest}); two of the six do not go where the others do.
+\item Read the worklists from the smallest container for the commands, and the
+      carved installer script for the ordering and working directories.
+\item Before each directory patch, read its manifest and record the expected
+      input count, input byte total, and output size. Verify after.
+\item Parallelise the per-file worklists; the cost is process startup, not
+      compression.
+\end{enumerate}
+
+\subsection*{D. Bisecting a translation-layer failure}
+
+\begin{enumerate}
+\item Enumerate windows inside the compatibility layer before assuming a hang.
+      A modal dialog that is never painted is indistinguishable from a deadlock
+      by every other means.
+\item Read assertion text precisely. An NTSTATUS is not an API return code, and
+      the difference decides whether you are debugging a rejection or a crash.
+\item Dump shaders on both vendors and compare hashes \emph{and} bytes. Identical
+      hashes with differing bytes means the layer is emitting vendor-specific
+      code and your cross-vendor control is not a control.
+\item Vary the translation-layer build before exhausting its configuration
+      surface, not after.
+\item Clone the distribution with hardlinks and replace libraries by
+      delete-then-copy. Never edit in place. Give each variant its own prefix,
+      and copy the prefix's sibling metadata, not just the prefix.
+\end{enumerate}
+
+\subsection*{E. Catalogue of silent failures encountered}
+
+Each of the following reported success, or reported nothing, while doing
+something other than what was intended.
+
+\begin{table}[htbp]
+\caption{Silent failures encountered in this project}
+\label{tab:silent}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{3.1cm}X@{}}
+\toprule
+\textbf{Construct} & \textbf{What it actually does} \\
+\midrule
+\verb|grep -c| with a fallback & prints \verb|0| \emph{and} exits non-zero, so
+  the fallback appends a second zero; all later comparisons error and read false \\
+Process match on full name & \verb|comm| truncates to 15 characters; the pattern
+  never matches and the process reads as dead \\
+Substring match on command line & matches the searching shell itself \\
+Static patch of installer helpers & bypassed; the installer re-extracts fresh
+  copies at runtime \\
+Prefix seeded from \verb|pfx/| only & missing sibling metadata aborts the
+  launcher before the game starts \\
+Library search under \verb|lib64| & the libraries are under \verb|lib|; the
+  search returns a confident false negative \\
+GUID searched in printed order & the first three fields byte-swap in memory \\
+Emptiness test on a \verb|/sys| file & always false; sysfs files report zero size
+  regardless of content \\
+Graphics layer's adapter report & deliberately reports AMD while on NVIDIA \\
+Launcher's own notification & claimed NVIDIA while running on the integrated GPU \\
+EGL vendor pin & replaces the vendor list rather than extending it, disabling an
+  unrelated API for an unrelated vendor \\
+Setgid helper raising only the effective GID & the shell drops it at startup \\
+Archive tool's size counter & 32-bit signed; goes negative past 2\,GB \\
+Debugger window text & truncated to 14 characters; labels look corrupted \\
+Compositor geometry versus screenshots & two different coordinate systems
+  differing by the scale factor \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection*{F. Artefacts}
+
+The harness scripts (launcher, single-configuration trial, distribution variant
+builder, three configuration sweeps, and a shader bisector), the archive
+extraction harness and its freestanding 32-bit build recipe, the installer-script
+carver, the helper patcher, and the reassembly drivers for both data chunks are
+retained alongside a running findings log. Defect and decision records are
+maintained in the project's own issue and decision registers.

@@ -1,0 +1,142 @@
+\section{Introduction}
+
+\subsection{The problem, stated plainly}
+
+A set of six binary containers totalling 37\,GB arrived on a workstation from a
+third party's machine. They were said to contain a 2025-era AAA video game. Three
+questions had to be answered, in order, before a single frame could be rendered:
+
+\begin{enumerate}
+\item \textbf{Is the payload hostile?} The provenance was a friend's Windows PC,
+      and the working hypothesis on arrival was that the files had come from an
+      impersonation site rather than the genuine distributor. If any component
+      were malicious, the correct action was deletion, not analysis.
+\item \textbf{Is the payload protected?} Modern commercial anti-tamper systems
+      insert a virtualising layer between the operating system and the program's
+      own control flow. Such a layer, or the countermeasures against it, can be
+      categorically incompatible with a compatibility layer such as
+      Wine~\cite{wine}, in which case no amount of engineering effort would ever
+      produce a running program.
+\item \textbf{Can it be made to run?} The containers refused to open under their
+      own installer, and the title targets Direct3D~12 with Shader Model 6.8,
+      ray tracing, and enhanced barriers---the upper bound of what a translation
+      layer can currently express.
+\end{enumerate}
+
+Each question turned out to have an answer that was cheaper and more decisive
+than expected, and each was initially attacked with an unnecessarily expensive
+method. That gap---between the method first reached for and the method that
+actually settled the question---is the recurring subject of this paper.
+
+\subsection{Why this is worth writing down}
+
+Case studies of this shape are usually either forensic (``here is the malware
+we found'') or compatibility-focused (``here is the Wine bug we fixed''). They
+are rarely both, and the interesting results here live precisely at the seams:
+
+\begin{itemize}
+\item The malware question and the anti-tamper question were \emph{settled by the
+      same single measurement}---an Authenticode signature validation---because a
+      valid retail signature simultaneously proves nobody added code and proves
+      nobody removed any (Section~\ref{sec:denuvo}).
+\item The extraction failure that consumed two working sessions was not a
+      compression, codec, or archive-integrity problem at all. It was a
+      configuration file that a library looked for at one hard-coded absolute
+      path, and the ``unsupported compression method'' error it produced was
+      technically accurate and completely misleading (Section~\ref{sec:extract}).
+\item The final graphics defect presented as neither a crash nor a hang.
+      Nine threads were blocked inside modal dialogs that the window system
+      created and never painted. The program was, in a strict sense, waiting for
+      the user to click a button that had never been drawn on any display
+      (Section~\ref{sec:deadlock}).
+\item The fix, once found, was to replace a single 5\,MB shared library. It was
+      found only after everything sophisticated had failed, because the component
+      in question had been an unexamined constant throughout
+      (Section~\ref{sec:fix}).
+\end{itemize}
+
+\subsection{Contributions}
+
+\begin{enumerate}
+\item \textbf{A signature-first argument for anti-tamper triage.} We show that
+      Authenticode validation over current bytes is a sufficient and inexpensive
+      proof of anti-tamper absence, and that entropy profiling, section-table
+      analysis, and import-table analysis serve as independent corroboration
+      rather than as the primary instrument (Section~\ref{sec:denuvo}).
+\item \textbf{A characterisation of vendor-divergent shader translation.} We
+      report, to our knowledge for the first time in the literature, a
+      quantitative diff of the SPIR-V emitted by a single D3D12-to-Vulkan
+      translator for the same title on two GPU vendors: 4047 of 4430 modules
+      share a content hash but differ in bytes, and one vendor-specific SPIR-V
+      extension appears in 4039 modules on one card and none on the other
+      (Section~\ref{sec:shaders}).
+\item \textbf{A diagnostic technique for invisible modal deadlock.} Counting
+      windows of Win32 class \verb|#32770| through the compatibility layer's own
+      debugger converts an unfalsifiable ``it hangs'' into a scalar that a
+      bisection harness can optimise (Sections~\ref{sec:deadlock},
+      \ref{sec:harness}).
+\item \textbf{A full negative-results table.} Twenty-three distinct hypotheses
+      were tested and eliminated by measurement. We publish all of them, because
+      the value of this work to a future reader is mostly in what they should
+      \emph{not} spend an evening on (Sections~\ref{sec:shaders},
+      \ref{sec:fix}).
+\item \textbf{A silent-failure taxonomy} drawn from the eleven distinct instances
+      encountered here in which a tool reported success, or reported an accurate
+      but misdirecting error, while doing nothing useful
+      (Section~\ref{sec:lessons}).
+\end{enumerate}
+
+\subsection{Scope, ethics, and what was not done}
+\label{sec:ethics}
+
+This work was performed on hardware owned by the author, on files already in the
+author's possession, for two purposes: determining whether those files were
+dangerous, and achieving interoperability with an operating system the vendor
+does not support.
+
+Three boundaries are worth stating explicitly, because a reader could otherwise
+infer more than was done.
+
+\textbf{No protection was circumvented by this work.} The game executable was
+never modified; the central forensic finding is precisely that it is
+\emph{byte-identical} to the signed retail build (Section~\ref{sec:denuvo}). The
+Steamworks emulation component present in the archive was pre-existing, was
+authored by a third party, and is \emph{characterised} here---its file sizes,
+its loader hook, its configuration---but was neither written, improved, nor
+analysed for the purpose of extending it. Nothing in this paper constitutes a
+method for defeating a protection system.
+
+\textbf{The contrasting title was abandoned, not attacked.} A second title on the
+same machine does carry a commercial anti-tamper system, and its accompanying
+countermeasure is a hypervisor that loads beneath the Windows kernel. We report
+this only to explain why that title is categorically out of scope for a
+compatibility layer: Wine implements no Windows kernel into which a driver can
+load, and on Linux the hardware virtualisation extensions are already owned by
+the host. That is an architectural impossibility argument, and it terminated the
+investigation rather than directing it.
+
+\textbf{The engineering contribution is entirely on the Linux side.} Every fix
+described in Sections~\ref{sec:extract} through \ref{sec:fix}---the namespace
+patch, the configuration path, the virtual desktop, the EGL vendor list, the
+translation-layer substitution---modifies open-source components or their
+configuration. None of them touches the game.
+
+\subsection{Roadmap}
+
+Section~\ref{sec:system} describes the hardware and software under test, which
+matters more than usual here because a hybrid-graphics laptop is the source of
+at least three of the defects. Sections~\ref{sec:malware} and \ref{sec:denuvo}
+answer the provenance and protection questions. Section~\ref{sec:extract} covers
+the two extraction failures and the standalone harness built to isolate them.
+Section~\ref{sec:reassembly} describes reconstructing a 54\,GB installation
+without its installer, and the a-priori verification technique that made every
+step checkable in advance. Sections~\ref{sec:graphics1} through \ref{sec:fix}
+are the graphics bring-up: reaching a swapchain, a three-session misdiagnosis of
+a ``dead'' Vulkan driver, the invisible modal deadlock, the vendor shader
+divergence, and the fix. Section~\ref{sec:lessons} generalises.
+Section~\ref{sec:appendix} is an artifact and reproduction index.
+
+Throughout, a claim is only stated as established if a specific measurement
+supports it, and retracted claims are marked as such rather than deleted---three
+of the working hypotheses in this investigation were confidently wrong, and the
+manner of their failure is part of the result.

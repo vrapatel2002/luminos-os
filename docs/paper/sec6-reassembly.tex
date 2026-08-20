@@ -1,0 +1,230 @@
+\section{Reassembly Without the Installer}
+\label{sec:reassembly}
+
+Extraction yields roughly 64.8\,GB of intermediate files across 10{,}950 objects.
+These are not the game. They are compressed, delta-encoded, and obfuscated
+fragments that the installer's own scripts would normally reconstitute. With the
+installer unusable for other reasons, the reconstruction had to be performed by
+hand.
+
+The result: a working 54\,GB installation, built in \textbf{37 minutes}, without
+ever running the installer.
+
+\subsection{The recipe is inside the archive, in plaintext}
+
+The planned approach was to reverse-engineer the reconstruction procedure out of
+the carved installer script (Section~\ref{sec:malware}). That was unnecessary.
+The 525\,KB container---the one that had blocked everything---contains the
+distributor's own worklists as plain text.
+
+\begin{table}[htbp]
+\caption{Contents of the smallest container}
+\label{tab:fg06}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{2.0cm}Xr@{}}
+\toprule
+\textbf{File} & \textbf{Function} & \textbf{Lines} \\
+\midrule
+\verb|fitgirl01.txt| & restore the audio assets, one command per file & 9{,}774 \\
+\verb|fitgirl02.txt| & rebuild the first data chunk & 98 \\
+\verb|fitgirl03.txt| & rebuild the second data chunk & 335 \\
+\verb|w01/w02.bat| & de-obfuscate halves; a wait-for-file handshake & 9 \\
+\verb|build01-03.bat| & \textbf{nothing of value} --- fetch an advert list from a
+                        URL shortener and delete themselves & 3 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Two observations follow, and the second is the more useful.
+
+First, \textbf{the file that stopped both the installer and the standalone
+harness for two sessions is a three-line advertisement fetcher.} It contains no
+build logic at all. The project was blocked on an artefact with no function.
+
+Second, \textbf{the carved installer script was still worth having}, but for a
+different reason than expected: the worklists give the commands, and the script
+gives the \emph{order} and the \emph{working directory} for each stage, which the
+worklists omit. Neither source is sufficient alone.
+
+\subsection{Every tool is a renamed public tool}
+
+The toolchain shipped in the archive consists of eleven executables with opaque
+names. None required reverse-engineering. \textbf{Running each with no arguments
+caused it to print its own banner.}
+
+\begin{table}[htbp]
+\caption{Toolchain identification, by running each binary with no arguments}
+\label{tab:tools}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{2.4cm}X@{}}
+\toprule
+\textbf{Ships as} & \textbf{Actually is} \\
+\midrule
+\verb|fgpack.exe| & OGGRE v0.1.1, an Ogg Vorbis recompressor~\cite{vorbis} \\
+\verb|fgpack2.exe|, \verb|fgpack3.exe|, \verb|lz4.exe| &
+  LZ4 at level 12~\cite{lz4}; two of the three are byte-identical \\
+\verb|x.exe| & xdelta3, VCDIFF delta decoder~\cite{rfc3284} \\
+\verb|xx.exe| & a public XOR utility \\
+\verb|x5.exe| & HDiffPatch \verb|hpatchz|, older build~\cite{hdiffpatch} \\
+\verb|x5n.exe| & HDiffPatch \verb|hpatchz| v4.8.0, with directory patching \\
+\verb|fart.exe| & find-and-replace; expands path placeholders \\
+\verb|run.exe|, \verb|countdown.exe| & URL fetcher; sleep \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The obfuscation here is nominal, not technical. This is worth stating because the
+instinct on encountering eleven unknown binaries inside a package one already
+suspects of hostility is to disassemble them. \textbf{The cheapest identification
+step---execute with no arguments and read the banner---identified all eleven in
+under two minutes}, and each identification was then confirmable against the
+public tool's documented command-line grammar.
+
+One tool in the set is worth a note for the forensic reader. The XOR utility
+exists because the distributor XOR-obfuscates selected payload files, here with a
+64-bit key, purely to evade antivirus heuristics on the compressed intermediates.
+XOR is symmetric, so those steps are trivially reversible and cost nothing.
+
+\subsection{A-priori verification: the most valuable technique in this project}
+
+Each directory-level patch is an HDiffPatch directory diff, and \verb|hpatchz|
+offers an information mode that prints the diff's manifest \emph{before} anything
+is applied: how many input files it expects, their exact total size in bytes, and
+the exact size of the output it will produce.
+
+This converts a long pipeline from hopeful to checkable. Every stage could be
+verified against a number known in advance, so an error would be caught at the
+stage that caused it rather than at the end.
+
+\begin{table*}[t]
+\caption{A-priori verification: every stage checked against a manifest read before the stage ran}
+\label{tab:verify}
+\centering
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}L{3.2cm}L{6.0cm}X c@{}}
+\toprule
+\textbf{Stage} & \textbf{Expected (from the manifest)} & \textbf{Measured} & \textbf{Match} \\
+\midrule
+Audio restore &
+  9{,}775 input files, 10{,}456{,}549{,}551\,B total &
+  9{,}774 restored files at 6{,}523{,}412{,}777\,B, plus one container at
+  3{,}933{,}136{,}774\,B & yes \\
+Directory patch output &
+  2 files, 12{,}091{,}379{,}792\,B &
+  6{,}613{,}152{,}048 + 5{,}478{,}227{,}744 & yes \\
+Chunk 0 inputs &
+  243 files, 19{,}387{,}609{,}117\,B &
+  243 files, 19{,}387{,}609{,}117\,B & yes \\
+Chunk 1 inputs &
+  411 files, 32{,}085{,}486{,}829\,B &
+  411 files, 32{,}085{,}486{,}829\,B & yes \\
+Final outputs & --- &
+  chunk~0 at 20{,}689{,}753{,}541\,B; chunk~1 at 35{,}798{,}270{,}141\,B & --- \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+All five checks landed exactly. The first row is the most informative: the
+manifest's expectation of 10{,}456{,}549{,}551 bytes across 9{,}775 files
+decomposes precisely into 9{,}774 restored audio files plus one separate
+container, to the byte. The 243 and 411 input counts likewise decompose exactly
+into their constituent file categories with nothing unaccounted for.
+
+\textbf{The general principle: prefer a pipeline whose stages publish their own
+preconditions.} Where such a manifest exists, use it as a checksum you already
+have rather than validating only the final artefact---which, at 54\,GB and 37
+minutes, is an expensive place to discover a mistake made in minute three.
+
+\subsection{The trap that would have silently broken everything}
+
+The extraction script sent all six containers to a single destination directory.
+\textbf{That is wrong for two of them.}
+
+\begin{table}[htbp]
+\caption{Per-container extraction destinations}
+\label{tab:dest}
+\centering
+\footnotesize
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Containers} & \textbf{Destination} \\
+\midrule
+\verb|fg-01|, \verb|fg-04|, \verb|fg-05| & the application root \\
+\verb|fg-02|, \verb|fg-03| & the application's runtime subdirectory \\
+\verb|fg-06| & the temporary directory (worklists only) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Had this gone unnoticed, the 9{,}774 audio files and their companion container
+would have landed one directory too high, and the directory patch in stage 3
+would have found no inputs. The failure would have appeared at a stage unrelated
+to its cause. The destinations are recorded in the carved installer script, which
+is the second reason that artefact remained worth having.
+
+\subsection{The procedure}
+
+Ten stages, in order. Every deletion instruction in the original must be honoured:
+the directory diffs consume their inputs, and \verb|hpatchz| deletes the old tree
+itself when it merges its temporary output back.
+
+\begin{enumerate}
+\item De-obfuscate both halves of the payload (XOR, symmetric).
+\item Restore 9{,}774 audio assets, one recompressor invocation each.
+\item Apply the top-level directory patch, producing two large intermediates.
+\item De-obfuscate both intermediates.
+\item Run the chunk-0 worklist.
+\item Apply a patch \emph{to the chunk-0 patch}---the directory diff is itself
+      shipped as a diff.
+\item Apply the chunk-0 directory patch, producing the first data archive.
+\item[8--10.] Repeat stages 5--7 for chunk 1.
+\end{enumerate}
+
+The per-file shape inside the chunk worklists is consistent: LZ4 to rebuild the
+compressed stream, xdelta3 to apply the residual, then XOR, then move into place.
+
+\subsection{Performance: process startup dominates, not compression}
+
+\begin{table}[htbp]
+\caption{Measured wall-clock time per stage}
+\label{tab:timing}
+\centering
+\footnotesize
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Stage} & \textbf{Time} \\
+\midrule
+De-obfuscate 10.5\,GB & 16\,s (675\,MB/s) \\
+9{,}774 recompressor invocations, 6-way parallel & 5\,min \\
+Top-level directory patch & 27\,s \\
+Chunk-0 worklist & 5\,min 35\,s \\
+Chunk-0 archive & 35\,s \\
+Chunk-1 worklist & 21\,min \\
+Chunk-1 archive & 1\,min 40\,s \\
+\midrule
+\textbf{Total} & \textbf{$\approx$37\,min} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The dominant cost in the two worklist stages is \textbf{Wine process startup, not
+compression}. Each individual recompressor invocation performs roughly 40\,ms of
+actual work; the remainder is the cost of creating a Windows process under a
+compatibility layer. Parallelism is therefore the only tuning knob that matters
+for those stages, and a six-way parallel invocation reduced 9{,}774 sequential
+launches to five minutes.
+
+One parameter was deliberately reduced from the distributor's own commands: a
+cache-size flag was lowered from 4\,GB to 1\,GB. On a 15.6\,GiB machine the
+larger value risks the userspace out-of-memory killer, and the change cost
+nothing measurable.
+
+\subsection{Result}
+
+A 54\,GB installation with the signature-verified original executable, both
+reconstructed data archives, the encrypted package definition the engine expects,
+and the Steamworks emulation component in place. The source containers were kept
+read-only throughout, so any stage remained redoable: recovery from a mistake is
+re-extracting the affected container, roughly 16 minutes for all six.

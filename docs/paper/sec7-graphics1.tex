@@ -1,0 +1,199 @@
+\section{First Graphics Bring-Up: A Null Pointer With a Documented Cause}
+\label{sec:graphics1}
+
+The installation is complete and the executable is the publisher's own. What
+follows is the second half of the project, which took considerably longer than
+the first, and which is entirely about the graphics stack.
+
+\subsection{Establishing that the reconstruction is actually the game}
+
+Before diagnosing rendering, it was worth confirming that the 54\,GB tree is a
+coherent game rather than a coherent-looking pile. Four observations settle it,
+and all four come from the game's own startup behaviour rather than from our
+inspection:
+
+\begin{itemize}
+\item The engine locates and reads its encrypted package definition,
+      \verb|packagedefinition.txt| at 35{,}284\,bytes, which is the file the
+      Glacier engine consults to find every other asset. A wrong or truncated
+      copy stops startup immediately.
+\item The crash-telemetry component initialises and writes
+      \verb|crash_metrics.dat|, 25{,}240\,bytes.
+\item NVIDIA's Streamline framework loads seven \verb|sl.*| libraries and
+      \emph{verifies its own digital signatures on each of them}, which is a
+      third-party integrity check passing on our reconstruction, performed by
+      code we did not write and cannot influence.
+\item Streamline then allocates its device-side and host-side pools,
+      \verb|sl.chi.heapGPU| and \verb|sl.chi.heapCPU|.
+\end{itemize}
+
+The game reaches its rendering path. Everything after this point is a graphics
+problem, not a packaging problem.
+
+\subsection{The bundled translation layer is too old}
+
+Direct3D~12 is translated to Vulkan by vkd3d-proton~\cite{vkd3d}. The
+system Wine ships a much older vkd3d, and its failure is immediate and legible:
+
+\begin{lstlisting}
+Enhanced barriers: 0
+\end{lstlisting}
+
+The game requires enhanced barriers, a Direct3D~12 feature for expressing
+resource state transitions, and refuses to proceed without them. This is a clean,
+early, well-signposted failure---the kind one wants.
+
+Replacing the translation layer with vkd3d-proton 2.14.1 and the Direct3D~11
+path with DXVK~\cite{dxvk} changes the log to:
+
+\begin{lstlisting}
+DX Ultimate supported!
+DXR 1.1 support enabled
+Enabling support for SM 6.8
+\end{lstlisting}
+
+Ray tracing, mesh shaders, and Shader Model 6.8 all negotiate successfully. The
+game then crashes.
+
+\subsection{The crash: a null vtable, disassembled}
+
+The fault is a read from address zero, and the three instructions around it say
+exactly what happened:
+
+\begin{lstlisting}
+140cb497c:  mov  0x8(%rax),%rcx   ; load an interface ptr
+140cb4997:  mov  (%rcx),%rax      ; load its vtable  <-- FAULT
+140cb49a8:  call *(%rax)          ; call through it
+\end{lstlisting}
+
+This is the canonical shape of an unchecked COM interface query. The game asked
+for an interface, did not check the return value, stored the null it received,
+and called a method on it one basic block later.
+
+\subsubsection{Which interface}
+
+The requested interface is \verb|ID3D12GraphicsCommandList10|, IID
+\verb|{7013c015-d161-4b63-a08c-238552dd8acc}|. It is a recent addition to the
+Direct3D~12 interface family. vkd3d-proton 2.14.1 does not implement it and
+correctly returns \verb|E_NOINTERFACE|; the game ignores that and dereferences
+the null.
+
+\subsubsection{Verifying support without running anything}
+
+A useful and very cheap technique: a COM interface's presence in a translation
+layer can be checked by searching the binary for the IID in its
+\emph{little-endian in-memory byte order}, which is not the order the GUID is
+printed in.
+
+\begin{lstlisting}
+grep -qaF $'\x15\xc0\x13\x70\x61\xd1\x63\x4b'\
+$'\xa0\x8c\x23\x85\x52\xdd\x8a\xcc' d3d12core.dll
+\end{lstlisting}
+
+The first three fields byte-swap; the last two do not. Getting this wrong
+produces a confident false negative.
+
+A second false-negative source cost real time and is worth stating plainly:
+inside a Proton distribution the Direct3D~12 libraries live under
+\verb|files/lib/wine/vkd3d-proton/x86_64-windows|. \textbf{That is
+\texttt{lib}, not \texttt{lib64}.} A \verb|lib64| path exists and contains other
+things, so a search there returns nothing and looks like an answer.
+
+A third: Wine ships its own \verb|d3d12.dll| of roughly 124\,KB, which is a thin
+forwarding stub and is \emph{not} vkd3d-proton. Confirming the size distinguishes
+them at a glance.
+
+\begin{table}[htbp]
+\caption{Installed translation-layer libraries, for size comparison}
+\label{tab:dlls}
+\centering
+\footnotesize
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Library} & \textbf{Bytes} \\
+\midrule
+\verb|d3d12.dll| & 159{,}758 \\
+\verb|d3d12core.dll| & 5{,}185{,}550 \\
+\verb|d3d11.dll| & 6{,}209{,}550 \\
+\verb|d3d10core.dll| & 290{,}830 \\
+\verb|dxgi.dll| & 4{,}435{,}982 \\
+\verb|nvapi64.dll| & 1{,}974{,}286 \\
+\verb|nvofapi64.dll| & 1{,}384{,}462 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{An unrelated fault in the same session: divide by zero in the display path}
+
+Independently of the interface problem, the game faulted while enumerating
+display modes. The log sequence is self-explanatory once the hardware topology
+from Section~\ref{sec:system} is in mind:
+
+\begin{lstlisting}
+Found monitors not associated with any adapter,
+  using fallback
+readMonitorEdidFromKey: Failed to get EDID
+  reg key size
+\end{lstlisting}
+
+The discrete GPU has no attached display. Enumerating modes for the rendering
+adapter therefore yields an empty set, and the engine divides by a refresh rate
+taken from that empty set.
+
+The fix is to give the application a display to find: a Wine virtual desktop, at
+which point mode enumeration returns a single well-formed entry and the division
+is well defined. This costs nothing and is required on any Optimus-class laptop.
+
+\subsection{The evidence that reversed an hour of reasoning}
+
+The log reported the graphics adapter as vendor \verb|0x1002|, device
+\verb|0x73df|---an AMD Radeon. On a machine with two GPUs, running a test
+intended to use the NVIDIA card, this reads unambiguously as ``the override did
+not take.''
+
+It is the opposite. \textbf{DXVK deliberately reports an AMD device while
+running on NVIDIA.} Two options, \verb|dxgi.nvapiHack| and
+\verb|dxgi.hideNvidiaGpu|, default to enabled and exist because a number of
+shipped games take a worse code path when they detect an NVIDIA adapter through
+DXGI. Seeing the AMD identifiers is therefore \emph{positive evidence that the
+NVIDIA card is in use}.
+
+This is worth generalising. \textbf{A compatibility layer's job is to lie
+convincingly, so its self-reports are the worst available evidence about what
+hardware is in use.} Ground truth must come from outside the layer---in this
+project, from \verb|nvidia-smi --query-compute-apps|, which reports the process
+list the kernel driver actually has.
+
+\subsection{Hypotheses eliminated at this stage}
+
+\begin{table}[htbp]
+\caption{Eliminated during first bring-up}
+\label{tab:elim-g1}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{2.9cm}X@{}}
+\toprule
+\textbf{Hypothesis} & \textbf{How it died} \\
+\midrule
+Vendor-gated crash & Spoofing the vendor as Intel (\verb|8086|) and as NVIDIA
+                     (\verb|10de|) both crash at the \emph{identical} address \\
+AMD helper library at fault & \verb|amd_ags_x64.dll| is a hard static import;
+                              removing it yields \verb|c0000135| before any
+                              rendering \\
+Never reached rendering & The log shows the swapchain created and presented \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The identical crash address under three different spoofed vendors is the
+strongest of these: a vendor-conditional code path would branch, and branching
+code does not fault at one address.
+
+\subsection{Where this leaves the investigation}
+
+Upgrading the translation layer resolves the missing interface, and the virtual
+desktop resolves the display-mode fault. The game then stops crashing---and
+starts doing something much harder to diagnose, which is the subject of
+Section~\ref{sec:deadlock}. Before that, Section~\ref{sec:egl} deals with a
+finding that had to be retracted, because for three sessions the discrete GPU was
+believed to be incapable of Vulkan at all.

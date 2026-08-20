@@ -1,0 +1,229 @@
+\section{Extraction: Two Failures With One Symptom}
+\label{sec:extract}
+
+\subsection{The containers}
+
+\begin{table}[htbp]
+\caption{Archive inventory, verified by the decompressor's own list command}
+\label{tab:inventory}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Box} & \textbf{Bytes} & \textbf{Files} & \textbf{Packed} & \textbf{Unpacked} \\
+\midrule
+\verb|fg-01| & 24{,}992{,}387{,}781 & 858   & 23{,}834\,MB & 51{,}419\,MB \\
+\verb|fg-02| &  6{,}037{,}379{,}414 & 9{,}774 &  5{,}757\,MB &  5{,}833\,MB \\
+\verb|fg-03| &  3{,}591{,}566{,}415 & 1     &  3{,}425\,MB &  3{,}750\,MB \\
+\verb|fg-04| &  3{,}280{,}408{,}667 & 218   &  3{,}128\,MB &  4{,}011\,MB \\
+\verb|fg-05| &    902{,}897{,}841 & 78    &    861\,MB &  1{,}393\,MB \\
+\verb|fg-06| &        525{,}112 & 21    &      0\,MB &      2\,MB \\
+\midrule
+\textbf{Total} & \textbf{$\approx$37\,GB} & \textbf{10{,}950} & & \textbf{$\approx$64.8\,GB} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Note the last row of Table~\ref{tab:inventory}. The smallest container, at
+525\,KB and roughly one part in seventy thousand of the total, blocked the entire
+project for two working sessions. It contains no game data whatsoever.
+
+A reading trap in the decompressor's own output is worth recording: the size
+fields reported by its list command are in \emph{megabytes} for the maximum, and
+the running counter is a 32-bit signed integer that goes negative past 2\,GB.
+Reading the counter rather than the maximum produces nonsense on any modern
+archive.
+
+\subsection{Failure 1: 0.0\% forever}
+
+The installer, run under Wine, stopped at 0.0\% and stayed there. No error, no
+timeout, no progress. The naive readings---``it is slow'', ``it deadlocked'',
+``the GUI is broken''---are all wrong.
+
+\subsubsection{Root cause}
+
+The repack's external-compressor plugins are split across architectures: a 64-bit
+helper process does the work, and a 32-bit plugin loaded inside the installer
+communicates with it through shared memory. Tracing the relevant calls with
+Wine's relay debugging revealed the mismatch:
+
+\begin{itemize}
+\item The 64-bit helper creates its mapping as
+      \verb|Global\Read_MapFile_CLS-srep00|.
+\item The 32-bit plugin opens \verb|Read_MapFile_CLS-srep00| --- \textbf{with no
+      prefix}.
+\end{itemize}
+
+On Windows this works, and it works for a reason specific to the NT object
+manager~\cite{ntobj}. A session's \verb|\Sessions\N\BaseNamedObjects| directory
+is a \emph{shadow} directory: a name that misses there falls through to the
+global \verb|\BaseNamedObjects|. \textbf{Wine implements no such fallback.} The
+unprefixed open therefore misses, and the plugin responds the way a 2000s-era
+Windows utility responds to an unexpected error---it raises a modal message box
+reading \verb|Can't open read file mapping!| and waits.
+
+That message box is never painted. The installer is not hung; it is waiting for a
+click on a button that exists only in the window manager's data structures. This
+is the first of two independent occurrences of this failure shape in this
+project; the second, in the graphics stack, is Section~\ref{sec:deadlock}.
+
+\subsubsection{Fix}
+
+One byte per helper. Zeroing the leading \verb|G| of the \verb|"Global\"| string
+literal truncates the prefix to the empty string, so both sides use the
+session-local name and the open succeeds. Backups of the originals were retained.
+
+\subsubsection{Why patching on disk is insufficient}
+
+This is the part that generalises. Patching the helpers where they live has no
+effect, because \textbf{the installer extracts its own fresh, unpatched copies of
+every helper into a newly created temporary directory on each run}. A
+hand-patched copy elsewhere is simply bypassed.
+
+The working approach is a live patcher: a process that polls at 0.2-second
+intervals and patches new copies as they appear. On launch it caught eight
+unpatched helpers across two separate temporary directories within seconds.
+
+The general lesson is that \emph{a self-extracting installer is a moving target,
+and static patching of its payload is only valid if the payload is not
+re-materialised at runtime}. The way to detect this class of problem is to notice
+that the patch verifiably applied and verifiably had no effect---otherwise an
+extremely confusing pair of facts.
+
+\subsection{Failure 2: ``unsupported compression method''}
+
+With the modal deadlock fixed, five of the six containers opened. The sixth---the
+525\,KB one---failed differently:
+
+\begin{lstlisting}
+[file] work\work\build01.bat
+ERROR: unsupported compression method
+ERROR: archive data corrupted (decompression fails)
+\end{lstlisting}
+
+\subsubsection{Differential diagnosis: distinguishing the two failures}
+
+The two failures present almost identically to a user: the process is alive and
+nothing happens. They are distinguished by a single cheap observation, and
+recording that observation is what prevented a second week on the first bug.
+
+\begin{table}[htbp]
+\caption{Telling the two extraction failures apart}
+\label{tab:diff}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{1.9cm}XX@{}}
+\toprule
+& \textbf{Failure 1 (modal)} & \textbf{Failure 2 (config)} \\
+\midrule
+CPU & 0\% & one core fully busy \\
+Child process & helper alive & \textbf{none} \\
+Bytes written & partial & \textbf{zero} \\
+Time to fail & never & $\approx$2\,s \\
+Root cause & namespace fallback & missing config file \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsubsection{The wrong hypothesis, and how long it survived}
+
+The error message is a direct statement that a compression method is not
+supported, so the hypothesis was that the container used a codec the shipped
+decompressor did not implement. Considerable effort went into it: an archive
+scanner was written, the tail directory block was located at two byte offsets,
+and a brute-force search over LZMA1 parameter space was implemented to recover
+the per-file method table out of the compressed directory block.
+
+None of it was the cause. The archive was correct the entire time.
+
+\subsubsection{Root cause}
+
+The decompression library reads its table of external compressors from a
+configuration file, and it looks for that file at \textbf{exactly one hard-coded
+absolute location}: the root of the system drive, \verb|c:\arc.ini|. Not its own
+directory. Not the current working directory. Not the output directory. Not the
+archive's directory.
+
+This was established, rather than guessed, by tracing file operations with
+\verb|WINEDEBUG=+file| from three different working directories. Every run
+produced exactly one probe, always \verb|CreateFileW L"c:\arc.ini"|, and always
+status \verb|c0000034| --- object name not found.
+
+The file exists, in the toolchain directory. With the table absent, every
+compression method that depends on an external tool resolves to ``unsupported,''
+and extraction dies on the first file that uses one.
+
+\subsubsection{Fix}
+
+One line: copy the configuration file to the root of the emulated system drive.
+The container that had blocked the project for two sessions opened on the first
+attempt afterwards, as did every other container.
+
+\subsection{Three signals that were available the whole time}
+
+Each of the following was observable before any of the wasted effort began, and
+each independently points away from the codec hypothesis.
+
+\begin{enumerate}
+\item \textbf{The list operation succeeded throughout.} The directory block
+      parsed correctly and reported all files. \emph{A working list beside a
+      failing extract points at the method table, not at the archive.} Were the
+      archive corrupt or the format misunderstood, listing would fail first.
+\item \textbf{Zero bytes written, failing in two seconds, is a parse-time
+      failure.} A genuine codec or data fault writes a partial output file
+      first, because it fails partway through a stream. Checking the destination
+      directory---not the log---separates these instantly.
+\item \textbf{``Unsupported compression method'' from this class of tool almost
+      always means missing configuration, not a missing codec.} The method table
+      is data, and data can simply be absent.
+\end{enumerate}
+
+\subsection{Dead ends, published so they are not repeated}
+
+\begin{table}[htbp]
+\caption{Failure 2: hypotheses tested and eliminated}
+\label{tab:deadends}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{2.7cm}X@{}}
+\toprule
+\textbf{Hypothesis} & \textbf{How it died} \\
+\midrule
+Corrupt configuration & Diffed against four copies; all identical \\
+Destination filesystem & NTFS versus ext4 made no difference \\
+Temporary path setting & Changing it made no difference \\
+Regression from the Failure 1 patch & Helpers verified still patched \\
+Unknown LZMA1 parameters & Brute-force search found nothing wrong, because
+                            nothing was wrong \\
+A Wine defect & Two different programs failed on the same file in the same way \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{The standalone harness}
+
+To separate ``the archive cannot be read'' from ``the installer cannot read the
+archive,'' a minimal harness was built that loads the decompression library
+directly and calls its extraction entry point, bypassing the installer framework
+entirely.
+
+The build is constrained in an instructive way. The library is 32-bit, and the
+system's Wine is a new-WoW64 build with no 32-bit Unix support, so a 32-bit
+\emph{Winelib} binary cannot be produced at all. What can be produced is a 32-bit
+\emph{PE}: a freestanding executable with no C runtime and no Windows headers,
+built with the LLVM toolchain already present.
+
+\begin{lstlisting}
+llvm-dlltool -m i386 -k -d kernel32.def -l kernel32.lib
+clang --target=i386-pc-windows-msvc -nostdlib \
+      -ffreestanding -O1 -c arcx32.c
+lld-link /subsystem:console /entry:start \
+      /nodefaultlib /machine:x86 arcx32.obj kernel32.lib
+\end{lstlisting}
+
+One implementation detail cost an afternoon and is a general hazard when calling
+into legacy Windows libraries: \textbf{the progress callback must be declared}
+\verb|__stdcall|. Declared \verb|cdecl|, the stack drifts by 16 bytes per
+invocation and the program page-faults after a few hundred callbacks---far enough
+into the run to look like a data-dependent fault rather than a calling-convention
+error.

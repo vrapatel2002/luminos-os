@@ -1,0 +1,122 @@
+\section{A Retracted Finding: The Discrete GPU Was Never Broken}
+\label{sec:egl}
+
+For three working sessions the recorded conclusion was that the discrete GPU
+could not do Vulkan on this system at all---that its driver was, in the words
+written down at the time, dead. That conclusion was wrong, it was wrong for a
+reason that generalises, and correcting it is what made everything in
+Sections~\ref{sec:deadlock} through~\ref{sec:fix} possible.
+
+\subsection{The symptom}
+
+Any attempt to create a Vulkan instance restricted to the NVIDIA driver failed
+at the earliest possible point:
+
+\begin{lstlisting}
+Could not get 'vkCreateInstance' via
+ 'vk_icdGetInstanceProcAddr' for ICD libGLX_nvidia.so.0
+\end{lstlisting}
+
+The loader could open the driver library but could not obtain a single entry
+point from it. Every global function resolved to null. This is not a subtle
+failure; it looks exactly like a broken or mismatched driver.
+
+\subsection{Isolating it below the compatibility layer}
+
+The first useful decision was to stop testing through Wine. A twenty-line C
+program was written that does nothing but \verb|dlopen| an ICD library, call its
+negotiation entry point across every interface version the loader supports, and
+attempt one instance creation.
+
+\begin{table}[htbp]
+\caption{Direct ICD probe, outside Wine and outside the Vulkan loader}
+\label{tab:icd}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{3.4cm}cc@{}}
+\toprule
+\textbf{Probe} & \textbf{Mesa pin} & \textbf{NVIDIA present} \\
+\midrule
+\verb|icdNegotiate| v1--7 & $-3$ & $0$ \\
+\verb|vkCreateInstance| & $-3$ & $0$ \\
+Resulting instance handle & \verb|(nil)| & \verb|0x557e90579430| \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The difference between the two columns is a single environment variable. That is
+the whole finding: the driver is fine, and something in the environment is
+disabling it.
+
+\subsection{Root cause: an environment variable that replaces rather than adds}
+
+The system pins its EGL vendor selection through
+\verb|__EGL_VENDOR_LIBRARY_FILENAMES|, set to Mesa's \verb|50_mesa.json| so that
+ordinary desktop applications do not incidentally wake the discrete GPU.
+
+\textbf{That variable is a replacement, not an addition.} It does not extend the
+vendor search path; it \emph{is} the vendor search path. With only Mesa's entry
+visible, libglvnd~\cite{glvnd} has no NVIDIA vendor at all.
+
+The non-obvious part is why this breaks \emph{Vulkan}, which is a separate API
+with its own loader and its own ICD list. NVIDIA's Vulkan implementation
+initialises through the same vendor-dispatch machinery as its EGL
+implementation. With the vendor absent, that initialisation fails silently and
+the ICD returns a table of null pointers rather than an error.
+
+The confirming observation is from \verb|strace|: in the failing configuration
+the driver library \textbf{never opens \texttt{/dev/nvidiactl}}. It is not being
+refused by the kernel; it never asks. This also independently eliminates the
+access gate of Section~\ref{sec:system}, which was again the first suspect.
+
+\subsection{Fix}
+
+Whenever the NVIDIA Vulkan driver is required, the EGL vendor list must name
+\emph{both} vendors---Mesa's entry and \verb|60_nvidia.json|. The rule to carry
+forward:
+
+\begin{quote}
+\textbf{A pin that names one vendor is a policy statement, and every consumer of
+that policy inherits it, including ones in a different API.} Any launcher that
+needs the pinned-out vendor must restore it explicitly rather than assume it can
+add to a list.
+\end{quote}
+
+After the correction, \verb|vulkaninfo| reports the discrete GPU exactly as it
+should: \textbf{NVIDIA GeForce RTX 4050 Laptop GPU}, device type
+\verb|DISCRETE_GPU|, Vulkan 1.4.329, driver 595.71.05.
+
+\subsection{A second, independent fault hiding behind the first}
+
+Correcting the vendor list revealed that a second defect had been masked by it.
+The project's Wine launcher, when asked for the discrete GPU, was performing a
+bare \verb|exec wine| with no ICD selection at all---so it silently used the
+integrated Radeon while the desktop notification it emitted said NVIDIA.
+
+Two independent faults, one of which lies to the user about which hardware is in
+use, are a good illustration of why the ground-truth rule from
+Section~\ref{sec:graphics1} matters. The failing configuration was
+indistinguishable from the working one by every self-report available, and
+distinguishable instantly by \verb|nvidia-smi --query-compute-apps|.
+
+\subsection{The methodological lesson}
+
+The recorded claim was ``NVIDIA Vulkan is dead on this machine.'' The evidence
+for it was a test that had been run under a system-wide policy the test did not
+know about.
+
+\begin{quote}
+\textbf{When an instrument reports that a major component is entirely
+non-functional, suspect the instrument first.} Total failure is rare; misconfigured
+measurement is common. The cheapest discriminator is to reproduce the failure at
+the lowest possible layer---here, forty lines of C with no loader, no
+compatibility layer, and no launcher script between the test and the driver.
+\end{quote}
+
+A corollary specific to this class of bug: a bare test of the form ``set the ICD
+list and see whether it works'' is \emph{not} a test of the driver, because the
+ICD list is not the only list involved. It is a test of one variable in an
+environment with at least two.
+
+With the discrete GPU restored to service, the game could finally be run on it.
+It then produced the failure that defines the rest of this paper.

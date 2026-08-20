@@ -1,0 +1,188 @@
+\section{The Central Defect: Nine Invisible Dialogs}
+\label{sec:deadlock}
+
+This is the failure that consumed most of the project. It is also the second
+independent occurrence of the failure shape first met in
+Section~\ref{sec:extract}: \emph{a program that is not hung, waiting on a window
+nobody can see}.
+
+\subsection{Symptom}
+
+On the discrete GPU, the game launches and appears to work. Specifically:
+
+\begin{itemize}
+\item A window opens, correctly sized, and stays open.
+\item Roughly 1{,}960\,MiB of video memory is allocated on the discrete GPU.
+\item The expected worker threads exist: \verb|vkd3d-swapchain|,
+      \verb|vkd3d_queue|, \verb|vkd3d_fence|.
+\item Then GPU utilisation falls to \textbf{0\%} and the shader clock drops to
+      its idle 210\,MHz.
+\item The window is black. It stays black indefinitely.
+\item \textbf{Nothing further is written to any log.}
+\end{itemize}
+
+The process is alive, holding memory, holding a device, and doing nothing. No
+error, no crash, no timeout.
+
+\subsection{Making the invisible visible}
+\label{sec:harness}
+
+The breakthrough was not a hypothesis. It was asking the window manager inside
+the compatibility layer to enumerate its own windows:
+
+\begin{lstlisting}
+winedbg --command "info wnd"
+\end{lstlisting}
+
+There were \textbf{nine} windows of class \verb|#32770|---the Win32 dialog box
+class---each containing three buttons reading \verb|&Abort|, \verb|&Retry|,
+\verb|&Ignore|. Nine assertion dialogs, stacked, none of them ever painted to the
+screen, each blocking a thread on a click that will never arrive.
+
+The assertion text is:
+
+\begin{lstlisting}
+../src-wine/dlls/winevulkan/loader_thunks.c:3151
+!status && "vkCreateComputePipelines"
+\end{lstlisting}
+
+\subsubsection{The detail that redirected the entire investigation}
+
+The natural reading is that a Vulkan call returned an error, and the natural next
+step is to capture the \verb|VkResult|. That is a category error, and recognising
+it saved an unknown amount of further wasted effort.
+
+\textbf{\texttt{status} here is an NTSTATUS describing whether the call into the
+Unix-side driver \emph{completed}, not a VkResult describing what it
+returned.} Its value is \verb|0xc0000005|: an access violation. The driver did
+not reject the pipeline. \textbf{The driver crashed while compiling it}, and the
+thunk layer is reporting the crash of the call itself.
+
+Turning on structured-exception tracing gives the address:
+
+\begin{lstlisting}
+Exception 0xc0000005 at 0x7f04a4746fd8:
+  libnvidia-glvkspirv.so.610.57.04 + 0x346fd8
+\end{lstlisting}
+
+Nine threads, nine faults, one address---inside NVIDIA's SPIR-V shader compiler.
+This is not a game bug and not a translation-layer bug in the ordinary sense. It
+is a driver segmentation fault, reached deterministically.
+
+\subsubsection{A cheaper proxy for the same signal}
+
+Attaching a debugger to every test run is slow. A far cheaper indicator turned
+out to be already present in the ordinary log:
+
+\begin{lstlisting}
+fixme:oleacc:find_class_data unhandled window
+  class: L"#32770"      (x29)
+fixme:oleacc:find_class_data unhandled window
+  class: L"Button"      (x9)
+\end{lstlisting}
+
+The accessibility layer announces every window class it does not recognise, so
+counting those lines counts the dialogs without a debugger. This became the
+project's primary metric.
+
+Two traps in reading the debugger output are worth recording. \verb|winedbg|
+truncates window text to fourteen characters, so button labels appear cut off and
+look corrupted. And the game window is reported with a geometry of
+\verb|960x568|---which reads as a scaling bug and is not one, for the reason
+given in Section~\ref{sec:system}. It was also simply sitting behind a browser
+window.
+
+\subsection{The differential that names the culprit}
+
+The same build, the same game, the same command line, on the integrated Radeon:
+it renders. On the discrete NVIDIA card: nine faults in the shader compiler.
+
+One variable differs, and it is the driver. Everything after this point is about
+\emph{why} the same program produces shader code that one vendor's compiler
+survives and the other's does not---which is answered, unexpectedly, in
+Section~\ref{sec:shaders}.
+
+\subsection{An automated harness, and why it had to be negative-tested}
+
+Manual testing of a failure that takes 40--90 seconds to manifest, has no error
+message, and must be counted rather than observed, is not viable. A harness was
+built:
+
+\begin{lstlisting}
+007-try.sh <label> [--igpu] [--proton=NAME] \
+           [--wait=N] [--kill] [VAR=VAL ...]
+\end{lstlisting}
+
+It launches one configuration, waits, samples, kills, and emits a single line:
+
+\begin{lstlisting}
+alive=Y assert=9 gpu=0 rss=2107448 secs=62
+\end{lstlisting}
+
+\textbf{The harness was then run against a configuration already known to fail,
+to confirm it reported failure.} This is not ceremony. An earlier version of the
+assertion counter used a construct of the form
+
+\begin{lstlisting}
+N=$(grep -c 'pattern' "$LOG" || echo 0)
+\end{lstlisting}
+
+which is wrong in a way that is invisible: \verb|grep -c| prints \verb|0| and
+\emph{also} exits non-zero when there are no matches, so the fallback appends a
+second zero and \verb|N| becomes the two-line string \verb|"0\n0"|. Every
+subsequent numeric comparison then errors and evaluates false, and the guard
+never fires. A health check that cannot report ill health is worse than no health
+check, because it is trusted.
+
+\subsection{Hypotheses eliminated before the shader work began}
+
+\begin{table}[htbp]
+\caption{Early eliminations, each with the measurement that killed it}
+\label{tab:eliminated-early}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{2.5cm}X@{}}
+\toprule
+\textbf{Hypothesis} & \textbf{Measurement} \\
+\midrule
+Still compiling shaders &
+  The 259\,MB pipeline cache's file descriptor position reaches the file size
+  exactly, then stops. A second run with the cache fully warm reaches the
+  identical stall in 46\,s \\
+Out of video memory &
+  Stopping the resident language-model service freed 3{,}576\,MiB of 6{,}141.
+  Identical stall \\
+Online check or licensing &
+  \textbf{Zero} TCP sockets open in the process at the time of the stall \\
+Missing virtual desktop &
+  Present and correct; the display-mode fault of
+  Section~\ref{sec:graphics1} does not recur \\
+Missing Vulkan extension &
+  All six extensions the translation layer requests are present and reported by
+  the driver \\
+Discrete-GPU access gate &
+  Reproduces identically as root with the gate open
+  (Section~\ref{sec:system}) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The first row deserves emphasis because it is the hypothesis that survives
+longest by default. ``It is still working'' is unfalsifiable without a
+measurement, and the measurement here is unusually direct: the operating system
+will report how far into a file a process has read. When that offset equals the
+file size and stops advancing, reading is finished, and ``still loading'' is
+dead.
+
+\subsection{A trap in process matching}
+
+The harness matches the game process by name. On Linux the kernel's \verb|comm|
+field is truncated to fifteen characters, so the process is
+\verb|007FirstLight.e| and never \verb|007FirstLight.exe|. A pattern containing
+the full name matches nothing, forever, silently---and the harness reports
+\verb|alive=N| for a process that is running perfectly well.
+
+The related hazard, which bit earlier in the project, is that a substring match
+against the full command line (\verb|pgrep -f|) matches the shell that is
+performing the search. The correct tool is an exact-name match against the
+truncated \verb|comm|.

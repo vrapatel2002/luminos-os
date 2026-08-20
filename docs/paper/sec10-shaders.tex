@@ -1,0 +1,156 @@
+\section{The Shaders: Same Game, Different Bytes Per Vendor}
+\label{sec:shaders}
+
+The driver crashes compiling a shader. The obvious next question is \emph{which}
+shader, and the obvious assumption is that both GPUs receive the same shaders and
+only one vendor's compiler mishandles them. The second half of that assumption is
+false, and correcting it reframes the problem.
+
+\subsection{Dump both, and compare}
+
+The translation layer can be told to write every shader it produces, in both its
+input and output forms, to a directory. Running the game once on each GPU and
+comparing the two directories gives the following.
+
+\begin{table}[htbp]
+\caption{Shader output compared across the two GPUs, same game, same build}
+\label{tab:shaders}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{4.4cm}X@{}}
+\toprule
+\textbf{Measurement} & \textbf{Value} \\
+\midrule
+Modules translated, Radeon & 6{,}657 \\
+Modules translated, NVIDIA & 4{,}430 \\
+Hashes present in both sets & 4{,}430 \\
+Same hash, \textbf{different bytes} & \textbf{4{,}047} \\
+Uses \verb|SPV_NV_raw_access_chains| & 4{,}039 NVIDIA / \textbf{0} Radeon \\
+\quad of which compute shaders & 561 of 886 \\
+Uses \verb|SPV_NV_shader_|\linebreak\verb|subgroup_partitioned| & exactly 1
+                                                                 compute shader \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The interpretation is unambiguous. \textbf{The translation layer emits
+vendor-specific code.} Given identical Direct3D shader bytecode as input, it
+produces different Vulkan output depending on which driver is present, because it
+uses vendor extensions where they are available.
+
+Of the shaders present on both sides, \textbf{91\% differ byte-for-byte}. The
+NVIDIA path uses a vendor extension in 4{,}039 modules that the Radeon path uses
+in none. So the premise ``the same shaders work on AMD'' was never true. AMD was
+never given these shaders.
+
+This matters for a reason beyond diagnosis: it means the AMD success provided
+much weaker evidence than it appeared to. It did not show that the game's shaders
+are sound; it showed that a \emph{different} set of shaders is sound.
+
+\subsection{Overriding the shaders, and a large partial result}
+
+The translation layer also supports substituting a shader by hash: place a
+replacement in a directory and the corresponding module is loaded from there
+instead of being generated. Feeding the Radeon's modules to the NVIDIA run is
+therefore mechanically possible.
+
+The result was the single largest improvement of the investigation:
+
+\begin{center}
+\texttt{9 dialogs, GPU 0\%} $\longrightarrow$
+\textbf{\texttt{4 dialogs, GPU 100\%}}
+\end{center}
+
+Five of the nine crashing pipelines stopped crashing, and the discrete GPU went
+from idle to fully loaded---it was doing real work for the first time. The result
+held across \textbf{fourteen consecutive invariant runs}, so it is not noise.
+
+It is also not a fix. Four dialogs remain, and the configuration is not one that
+could ship: it requires a shader dump from the other GPU, and it forces the
+translation layer to bypass its own pipeline cache.
+
+\subsection{Why this experiment is not clean, stated plainly}
+
+It is tempting to read the partial success as ``the vendor extension is the
+bug.'' The experiment does not support that, for two reasons that must be stated:
+
+\begin{enumerate}
+\item Substituting shaders \textbf{forces the layer to ignore its cached SPIR-V
+      entirely}, changing a second variable at the same time as the first.
+\item The Radeon modules were compiled for a different device's capability set.
+      Feeding them to a different vendor's compiler is not a controlled
+      substitution; it is a different program.
+\end{enumerate}
+
+\subsection{An unresolved contradiction, published rather than smoothed over}
+
+If the vendor extension were the cause, then disabling that extension outright
+should reproduce the improvement. It does not.
+
+\begin{quote}
+Disabling \verb|VK_NV_raw_access_chains| through the layer's own extension
+filter---so that the same 4{,}039 modules are generated without it---does
+\textbf{not} reduce the dialog count. The override, which changes both the
+extension usage and the cache path, does.
+\end{quote}
+
+We were unable to resolve this contradiction, and we report it unresolved. The
+most likely explanations are that the improvement came from the cache bypass
+rather than the extension, or that the extension filter does not affect
+already-cached modules. Neither was confirmed. It is recorded here because a
+reader reproducing this work will hit the same contradiction, and because the
+correct fix, found later, makes the question moot in a way that is itself
+informative: the layer that emitted the shaders was the wrong layer to be
+adjusting.
+
+\subsection{Everything tried at the shader level}
+
+\begin{table}[htbp]
+\caption{Shader- and translation-layer configuration attempts, all negative}
+\label{tab:shaderelim}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{4.2cm}X@{}}
+\toprule
+\textbf{Attempt} & \textbf{Result} \\
+\midrule
+Disable the vendor extension & no change \\
+Disable subgroup-partitioned ops & no change \\
+Force single-threaded pipeline compilation & no change \\
+Disable the pipeline library & no change \\
+Disable pipeline caching entirely & no change \\
+Force synchronous shader compilation & no change \\
+Disable descriptor-buffer usage & no change \\
+Disable ray tracing & no change \\
+Disable mesh shaders & no change \\
+Force a conservative memory model & no change \\
+Reduce shader-compiler thread count & no change \\
+Substitute the other vendor's modules & \textbf{9 $\to$ 4 dialogs, GPU to
+                                        100\%} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Eleven configuration changes with no effect and one with a large effect is itself
+a signal. When a component's entire exposed configuration surface fails to move
+the failure, the component is probably not the one to be configuring.
+
+\subsection{A verification script that was itself wrong}
+
+The override mechanism prints a line for each substituted module, so the harness
+checked for those lines to confirm the override had taken effect. It reported
+success on runs where nothing had been substituted, because of the \verb|grep -c|
+defect described in Section~\ref{sec:deadlock}. Two sweep results had to be
+discarded and re-run.
+
+\begin{quote}
+\textbf{Every instrument in this project that was not deliberately tested against
+a known-bad input was, at some point, wrong.} The harness, the override
+verifier, the shader-count comparison, and the process matcher each produced a
+confident false reading before being corrected.
+\end{quote}
+
+At this point the shader hypothesis was exhausted: a real and reproducible
+improvement, no clean explanation, and no path to a shippable configuration. The
+next section changes a variable that had been held constant since the beginning
+of the project, and the problem disappears entirely.

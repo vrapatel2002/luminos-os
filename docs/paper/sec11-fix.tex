@@ -1,0 +1,156 @@
+\section{The Fix: Changing the Variable Nobody Was Varying}
+\label{sec:fix}
+
+\subsection{The unexamined constant}
+
+Every experiment in Sections~\ref{sec:deadlock} and~\ref{sec:shaders} varied
+something inside the translation layer or the driver, and every one of them held
+the \emph{compatibility distribution} fixed. GE-Proton~10-34 had been chosen at
+the start because it worked, and it was never afterwards treated as a variable.
+
+A compatibility distribution bundles its own build of the Direct3D~12 translation
+layer. Changing the distribution changes that layer. The question ``does a
+different build of the translation layer produce shaders the driver survives?''
+had therefore never been asked, despite the entire investigation being about
+shaders the driver does not survive.
+
+\subsection{Building a variant cheaply}
+
+Replacing the bundled layer in place would destroy a working configuration. The
+approach taken instead was to clone the distribution and replace only the two
+libraries of interest.
+
+\begin{lstlisting}
+cp -al "$SRC" "$DST"                 # hardlink clone
+for d in <four library directories>; do
+  rm -f "$DST/$d/d3d12.dll" "$DST/$d/d3d12core.dll"
+  cp    "$NEW/d3d12.dll"    "$DST/$d/"
+  cp    "$NEW/d3d12core.dll" "$DST/$d/"
+done
+\end{lstlisting}
+
+A hardlink clone of a 1.4\,GB distribution costs about \textbf{25\,MB}, because
+only the replaced files are new data. This is safe \emph{only} because the
+replacement is \verb|rm| followed by \verb|cp|---creating a new inode---rather
+than an in-place edit, which would modify the original through the shared inode.
+That distinction is the entire safety argument and is easy to get wrong.
+
+Two further points, each of which cost a wasted result:
+
+\begin{itemize}
+\item \textbf{A prefix upgrade is one-way.} Once an emulated Windows filesystem
+      has been upgraded by a newer distribution it cannot be used by an older
+      one. Each variant needs its own prefix.
+\item \textbf{Seeding a prefix requires more than the prefix directory.} Copying
+      only \verb|pfx/| omits the sibling \verb|tracked_files| and \verb|version|
+      metadata, and the launcher aborts before the game starts---which reads
+      exactly like the variant being broken. This defect made the
+      \emph{winning} configuration look like a failure on its first run.
+\end{itemize}
+
+\subsection{Result}
+
+\begin{table}[htbp]
+\caption{Translation-layer builds, all other variables held fixed}
+\label{tab:proton}
+\centering
+\footnotesize
+\begin{tabular}{@{}llrr@{}}
+\toprule
+\textbf{Build} & \textbf{Layer} & \textbf{Dialogs} & \textbf{GPU} \\
+\midrule
+Stock (as used throughout) & 2.14.1 & 9 & 0\% \\
+Clone with newer layer & \textbf{3.0.1} & \textbf{0} & \textbf{100\%} \\
+Clone with same layer & 2.14.1 & --- & exits early \\
+Newer distribution & 3.x & 0 & 34\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Zero dialogs. The game runs.} The driver's shader compiler does not
+crash, because it is no longer being handed the code that crashed it.
+
+The third row is the control: the same clone procedure with the \emph{original}
+layer does not fix anything, which rules out the cloning itself as the cause of
+the improvement.
+
+\begin{table}[htbp]
+\caption{Before and after, discrete GPU}
+\label{tab:beforeafter}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{3.0cm}XX@{}}
+\toprule
+& \textbf{Before} & \textbf{After} \\
+\midrule
+Assertion dialogs & 9 & \textbf{0} \\
+GPU utilisation & 0\% & \textbf{100\%} \\
+Video memory & 1{,}960\,MiB, static & 2{,}064--2{,}070\,MiB, live \\
+Shader clock & 210\,MHz idle & boost \\
+Window & black, indefinitely & title screen at 2880$\times$1800 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Verified three independent ways}
+
+Following the project rule that a fix is not a fix until it has been exercised
+end to end, the result was confirmed by three methods that do not share a failure
+mode:
+
+\begin{enumerate}
+\item A \textbf{199-second continuous run} with the kernel driver's own compute
+      process list sampled throughout---ground truth from outside the
+      compatibility layer, per Section~\ref{sec:graphics1}.
+\item A \textbf{screenshot of the in-game graphics menu}, with DLSS listed among
+      the upscaling options. That option is only offered when an NVIDIA adapter
+      is present, so the game itself corroborates which GPU it is on.
+\item A \textbf{screenshot of the title screen} taken from the installed
+      launcher command as an ordinary user would invoke it---not from the test
+      harness.
+\end{enumerate}
+
+The third matters more than it looks. A fix that works only under the harness is
+a fix to the harness.
+
+\subsection{The integrated GPU was re-tested, not assumed}
+
+The Radeon path was re-run under the new configuration rather than presumed
+intact: \verb|assert=0|, 95\% utilisation. Both GPUs work. The launcher defaults
+to the discrete card and accepts a flag to select the integrated one.
+
+\subsection{Launcher design decisions}
+
+Three small decisions in the shipped launcher are worth recording because each
+encodes something learned above.
+
+\textbf{Restore the EGL vendor list explicitly.} Per Section~\ref{sec:egl}, the
+system-wide pin must be widened to include the NVIDIA vendor, not assumed to be
+additive.
+
+\textbf{Detect the panel's native mode from the kernel, not from a
+configuration file.} A subtlety: files under \verb|/sys| report a size of zero
+regardless of content, so the common shell idiom for ``file exists and is
+non-empty'' is always false there. The file must be read and its content checked.
+
+\textbf{Report memory pressure; do not act on it.} The discrete card's memory is
+a hard 6{,}141\,MiB budget, and a resident language-model service commonly holds
+3{,}576\,MiB of it. The launcher prints a notice when free memory is low. It does
+\textbf{not} stop the service, because that service may be doing work the user
+cares about more than the game. Tools that silently kill other work to make room
+for themselves are a category of behaviour to avoid.
+
+\subsection{Closing the remaining lead}
+
+One lead from the original three-way plan remained: try a newer graphics driver.
+It is closed negatively---all available prerelease driver packages resolve to the
+same version already installed, 610.57.04. There is no newer driver to try. The
+lead is exhausted rather than unexplored, which is a different and more useful
+state to record.
+
+\subsection{Undo}
+
+The original distribution is untouched; the variant is a separate directory with
+its own prefix. Reverting is deleting two directories and one line in the
+launcher. The fix is additive, and the cost of being wrong about it is a few
+seconds.

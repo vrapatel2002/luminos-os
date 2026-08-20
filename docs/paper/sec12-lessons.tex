@@ -1,0 +1,163 @@
+\section{Discussion: What Generalises}
+\label{sec:lessons}
+
+Nothing in this project required a novel technique. What it required, repeatedly,
+was noticing that a question had not been asked. This section extracts the parts
+that transfer.
+
+\subsection{Search order dominates search effort}
+
+The defect was in a component that was never varied, and it was found within one
+attempt of finally varying it. The preceding weeks were spent varying components
+that could not have been responsible.
+
+The failure of process is identifiable in advance. \textbf{A component chosen at
+the start of a project because it worked becomes invisible to the project.} It is
+not on the list of suspects because it is part of the definition of the setup.
+
+The practical rule follows from delta debugging~\cite{zeller2002}, applied one
+level up from where it is usually applied:
+
+\begin{quote}
+\textbf{Before bisecting within a component, enumerate the components you have
+never bisected across.} Any element of the stack that has held one value for the
+whole investigation belongs on the suspect list \emph{ahead of} the elements you
+have already varied without success, not behind them.
+\end{quote}
+
+A corroborating signal was available and misread: eleven configuration changes
+inside the translation layer produced no effect at all (Table~\ref{tab:shaderelim}).
+An exhausted configuration surface is evidence that the component is the wrong
+one to configure---not an invitation to configure it harder.
+
+\subsection{Differential diagnosis beats hypothesis generation}
+
+Twice in this project, two failures shared a symptom and were separated by one
+cheap observation:
+
+\begin{itemize}
+\item Extraction: process alive, nothing happening. \emph{Is a core busy, and did
+      it write any bytes?} Two seconds of observation, two entirely different
+      root causes (Table~\ref{tab:diff}).
+\item Rendering: window open, nothing happening. \emph{Ask the window manager
+      what windows exist.} One command, and an invisible modal dialog becomes a
+      driver crash address.
+\end{itemize}
+
+In both cases the correct move was to \emph{enumerate the state} rather than to
+generate hypotheses about it. Hypothesis generation is unbounded; state
+enumeration is finite and usually one command.
+
+\subsection{Prefer pipelines whose stages publish their preconditions}
+
+The reassembly (Section~\ref{sec:reassembly}) succeeded on the first attempt
+across ten stages and 54\,GB because every stage could be checked against a
+manifest read \emph{before} it ran. Five checks, five exact matches, and any
+error would have surfaced at its own stage.
+
+Where a format offers this, it is the cheapest correctness guarantee available:
+a checksum you did not have to compute and did not have to trust yourself to
+choose.
+
+\subsection{Instruments lie, and only negative testing catches it}
+
+Every measurement tool built in this project produced at least one confident
+false reading before being corrected:
+
+\begin{itemize}
+\item The assertion counter reported zero because \verb|grep -c| both prints zero
+      and fails.
+\item The override verifier reported success on runs that overrode nothing, for
+      the same reason.
+\item The process matcher reported the game dead because \verb|comm| truncates at
+      fifteen characters.
+\item The graphics layer reported an AMD adapter while running on NVIDIA, by
+      design.
+\item The launcher's own notification claimed NVIDIA while using the integrated
+      GPU.
+\item The recorded conclusion ``NVIDIA Vulkan is non-functional'' was an artefact
+      of a system-wide policy the test was unaware of.
+\end{itemize}
+
+\textbf{The discipline that catches all six is the same: run every instrument
+against an input whose answer you already know, and specifically against a
+\emph{failing} input.} A health check that has only ever been shown reporting
+health has not been tested.
+
+\subsection{``Impossible'' has exactly one legitimate use}
+
+This paper contains one genuine impossibility claim---the hypervisor-based
+countermeasure of Section~\ref{sec:contrast}, which fails for two independent
+structural reasons---and it is the only place the word is used.
+
+Elsewhere, several things that were recorded as impossible turned out to be
+merely unexamined: a compiled installer script that ``cannot be read'' was read
+by parsing the format; a driver that was ``dead'' was disabled by an environment
+variable; an archive that used ``an unsupported codec'' was missing a
+configuration file.
+
+\begin{quote}
+\textbf{Separate three claims that are easily conflated: this cannot exist; this
+would be difficult; I do not currently know how.} Only the first is a stopping
+condition, and it requires a structural argument, not a failed attempt.
+\end{quote}
+
+\subsection{The strong form of a negative result}
+
+Section~\ref{sec:denuvo} makes a claim of absence---that no commercial anti-tamper
+system was ever in this build---and supports it with a cryptographic identity
+rather than an accumulation of heuristics.
+
+This is worth generalising because negative results about binaries are usually
+argued the weak way: entropy, section names, string searches, absence of known
+signatures. Each of those is defeasible individually, and stacking defeasible
+arguments does not produce an indefeasible one. A validated signature over the
+current bytes does, because it converts ``we looked and found nothing'' into
+``the file is provably identical to the one the publisher signed, so there is
+nothing to find.''
+
+The corollary is a cost argument: \textbf{the strong test was also the cheapest
+one.} It was performed after the weak ones, which is the wrong order.
+
+\subsection{Threats to validity}
+
+\begin{itemize}
+\item \textbf{Single system.} Every result comes from one laptop with one hybrid
+      graphics configuration. The reassembly and forensic findings should
+      transfer directly; the graphics findings are specific to this driver
+      version, this translation layer, and this vendor pair.
+\item \textbf{The root cause is localised, not explained.} We show that one build
+      of the translation layer produces shader code that crashes a specific
+      driver's compiler and that another does not. We did not identify the
+      offending construct, and did not reduce it to a minimal reproducer. That
+      would be the natural next step and would produce a filable driver bug.
+\item \textbf{The unresolved contradiction of Section~\ref{sec:shaders}} is
+      genuinely unresolved. The partial improvement from shader substitution has
+      no confirmed mechanism.
+\item \textbf{Timing figures} are wall-clock on a loaded desktop system, not a
+      controlled benchmark.
+\end{itemize}
+
+\subsection{Related work}
+
+Entropy analysis for packing detection follows Lyda and
+Hamrock~\cite{lyda2007}; the windowing refinement and the known false-positive
+behaviour are discussed at length in the packer-detection
+literature~\cite{sokpacker}. Authenticode structure and validation semantics
+are specified by Microsoft~\cite{authenticode} over PKCS\#7/CMS~\cite{rfc5652}
+and the PE format~\cite{pecoff}. The bisection discipline in
+Section~\ref{sec:lessons} is delta debugging~\cite{zeller2002}, and the general
+approach to systematic debugging follows Zeller~\cite{zellerbook}. The
+compatibility stack under test is Wine~\cite{wine} with Proton~\cite{proton},
+vkd3d-proton~\cite{vkd3d}, and DXVK~\cite{dxvk}, targeting
+Vulkan~\cite{vulkan} and SPIR-V~\cite{spirv}. The reassembly toolchain uses
+LZ4~\cite{lz4}, VCDIFF~\cite{rfc3284}, HDiffPatch~\cite{hdiffpatch}, and Ogg
+Vorbis~\cite{vorbis}; the installer format is Inno Setup~\cite{innosetup} and
+the object-namespace behaviour is documented in Windows
+Internals~\cite{ntobj}. Vendor dispatch is handled by libglvnd~\cite{glvnd}.
+
+To our knowledge the specific combination reported here---a signature-based
+negative determination of anti-tamper presence, a manual reconstruction of a
+delta-compressed redistribution without its installer, and a cross-vendor shader
+divergence causing a driver-side compiler fault under translation---has not been
+described together in one place.

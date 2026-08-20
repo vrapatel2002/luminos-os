@@ -1,0 +1,248 @@
+\section{Protection Status: Establishing the Absence of Commercial Anti-Tamper}
+\label{sec:denuvo}
+
+This section answers the question the reader most likely arrived for: \emph{how
+do you determine, from a binary alone, that a commercial anti-tamper system is
+not present?} The answer has a strong form and a weak form, and most published
+methodology uses only the weak form.
+
+\subsection{Why the question had to be answered first}
+
+Commercial anti-tamper systems of the Denuvo class operate by taking selected
+regions of the program's control flow and replacing them with an interpreter for
+a private instruction set, generated per build. The practical consequences for
+this project were three:
+
+\begin{enumerate}
+\item \textbf{Compatibility.} Such a layer interacts closely with operating
+      system internals. A compatibility layer that reimplements those internals
+      may or may not satisfy it, and the failure mode is not usually a clean
+      error message.
+\item \textbf{Effort allocation.} If the protection were present, the ceiling on
+      this project might be architectural rather than engineering---in which case
+      the correct decision is to stop, as was in fact taken for the contrasting
+      title discussed in Section~\ref{sec:contrast}.
+\item \textbf{Threat model.} The outstanding malware theory from
+      Section~\ref{sec:malware} was that the protection had been
+      \emph{reimplemented} by a third party, and that this reimplementation was
+      the injection vector. Proving no such layer exists retires that theory
+      entirely.
+\end{enumerate}
+
+The subject of analysis is \verb|Retail\007FirstLight.exe|, 64{,}228{,}744 bytes,
+MD5 \verb|3e0c3e10a9fdb15397f5bc50aeb5e09b|, extracted from the fifth container.
+
+\subsection{The strong argument: signature validation}
+\label{sec:sig}
+
+Windows executables may carry an Authenticode signature~\cite{authenticode}: a
+PKCS\#7 / CMS structure~\cite{rfc5652} embedded in the certificate directory of
+the PE file~\cite{pecoff}, containing a cryptographic digest computed over the
+file's contents with three regions excluded (the checksum field, the certificate
+table entry, and the certificate data itself).
+
+Validation proceeds in two independent steps, and the distinction between them is
+the crux of this section:
+
+\begin{enumerate}
+\item \textbf{Chain validation} asks whether the signing certificate descends
+      from a trusted root. This says who signed it.
+\item \textbf{Digest validation} recomputes the Authenticode hash over the
+      \emph{file as it exists now} and compares it to the digest stored inside
+      the signature blob. This says whether the file has changed since it was
+      signed.
+\end{enumerate}
+
+For this executable, both hold. The recomputed SHA-256 equals the digest embedded
+in the PKCS\#7 structure. The signer is \textbf{IO~INTERACTIVE~A/S}, via
+GlobalSign GCC R45 CodeSigning CA 2020, with a signing time of
+2026-07-20 15:43:44 UTC.
+
+\subsubsection{Why this settles the question}
+
+The reasoning is short enough to state completely:
+
+\begin{quote}
+The signature validates over the current bytes. Therefore the current bytes are
+the bytes the publisher signed. Therefore \textbf{nobody has modified this
+executable}---not to add anything, and, crucially, \textbf{not to remove
+anything either}. Anti-tamper protection of the class in question is applied to
+the executable at build time by the publisher and lives inside the executable's
+own sections. If it had ever been present in this build, it would still be
+present now, and it would be visible. It is not visible. Therefore it was never
+applied to this build.
+\end{quote}
+
+This is a \emph{sufficient} argument, and it is the strong form. It requires no
+dynamic analysis, no debugger, no emulator, and no unpacking. It is also
+self-verifying in a way that heuristics are not: a forged conclusion would
+require a hash collision against SHA-256.
+
+It carries a second payload for free. The unresolved malware theory---that the
+protection was reimplemented and used as an injection vector---requires
+modification of the executable. The signature forecloses that. \textbf{One
+measurement answers both questions.}
+
+\subsubsection{The scope of the claim, stated honestly}
+
+The argument establishes that \emph{this executable} is unmodified and
+unprotected. It does not establish anything about the other 10{,}949 files in the
+package; those were covered separately, by the differential comparison in
+Section~\ref{sec:malware}. It also does not establish that no protection exists
+anywhere in the product---a separate protected loader could in principle exist as
+a distinct binary. Section~\ref{sec:corrob} addresses that by enumerating what
+the executable actually imports and what else ships beside it.
+
+\subsection{Corroboration: three independent weak arguments}
+\label{sec:corrob}
+
+The strong argument is sufficient, but a single-instrument conclusion is a fragile
+conclusion. Three further lines were run, each of which would independently have
+raised suspicion had the protection been present.
+
+\subsubsection{Entropy profiling}
+
+Compressed, encrypted, and virtualised code is high-entropy; ordinary compiled
+code is not. Entropy analysis is the standard first-pass instrument for detecting
+packing~\cite{lyda2007}, with the well-documented caveat that it produces both
+false positives and false negatives in the general case~\cite{sokpacker}.
+
+Rather than compute a single figure for the file, which averages away exactly the
+signal of interest, the \verb|.text| section was profiled in 43 windows of 1\,MiB
+each.
+
+\begin{table}[htbp]
+\caption{Shannon entropy profile of the game executable}
+\label{tab:entropy}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{3.3cm}X@{}}
+\toprule
+\textbf{Measurement} & \textbf{Value} \\
+\midrule
+Whole file & 6.354 \\
+\verb|.text|, 43 windows of 1\,MiB & range 5.906--6.700, mean 6.505 \\
+Windows at or above 7.5 & \textbf{0} \\
+Expected for a virtualised region & 7.9 and above \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The distribution is tight, unimodal, and entirely consistent with optimised
+native x86-64. There is no high-entropy island anywhere in the code section. Had
+a virtualising layer been present, it would appear as a contiguous run of windows
+well above 7.5, and windowing is precisely what makes it visible: a whole-file
+figure of 6.354 could in principle conceal a small high-entropy region, but 43
+individually reported windows cannot.
+
+\subsubsection{Section and import table analysis}
+
+\begin{table}[htbp]
+\caption{Structural indicators}
+\label{tab:pe}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{3.0cm}X@{}}
+\toprule
+\textbf{Indicator} & \textbf{Observation} \\
+\midrule
+Sections & \verb|.text|, \verb|.rdata|, \verb|.data|, \verb|.pdata|,
+            \verb|_RDATA|, \verb|.rsrc|, \verb|.reloc| --- stock MSVC layout \\
+Anomalous sections & none \\
+Imports & 52 DLLs, 753 symbols; a normal compiler-emitted table \\
+Runtime & ucrt and \verb|VCRUNTIME140| \\
+Protection strings & zero hits for the vendor name, VMProtect, or Themida \\
+Size profile & the several-hundred-megabyte bloat characteristic of a protected
+               build is absent \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Protected builds are structurally distinctive. They typically carry an extra
+section with a non-standard name, a truncated or stub import table with the real
+imports resolved at runtime, and a substantial size increase over the unprotected
+build. None of these is present. The import table in particular is decisive in
+its own small way: a protected binary usually cannot afford a full static import
+table, because the protection needs to mediate library resolution.
+
+\subsubsection{What the DRM actually is}
+
+Having established what is absent, the analysis identified what is present. The
+only protection mechanism in the package is Steamworks licensing, and the
+countermeasure is a third-party Steam API emulator.
+
+\begin{table}[htbp]
+\caption{The actual protection and countermeasure}
+\label{tab:rune}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}L{3.0cm}X@{}}
+\toprule
+\textbf{File} & \textbf{Identification} \\
+\midrule
+\verb|steam_api64.rne| & 319{,}584 B --- the genuine publisher-shipped Valve
+                         library, renamed \\
+\verb|steam_api64.dll| & 1{,}098{,}392 B --- the third-party replacement \\
+\verb|steam_emu.ini| & configuration; carries the author's banner, the
+                       application ID, and a configuration section \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The mechanism, characterised but not extended (Section~\ref{sec:ethics}), is a
+library-loading hook that looks for renamed twins of each library. The
+architecturally relevant point is that \textbf{it replaces only Valve's own API
+surface}---a documented interface between the game and a storefront---and does
+not touch the game's code. This is consistent with, and independently confirms,
+the signature finding.
+
+\subsection{The contrasting case, and why it terminated}
+\label{sec:contrast}
+
+A second title on the same machine provides the control that makes the above
+meaningful: it \emph{does} carry the commercial anti-tamper system, still present
+and active. Its accompanying countermeasure is not a library replacement but a
+\textbf{hypervisor}: a pair of kernel drivers implementing AMD-V and Intel VT-x
+support respectively, which load beneath the Windows kernel and answer the
+protection's queries from a layer below it. Source for the virtualisation
+component ships in the archive.
+
+This approach cannot work on Linux under a compatibility layer, for two
+independent reasons, either of which is sufficient:
+
+\begin{enumerate}
+\item \textbf{There is no kernel to load into.} Wine implements Windows APIs in
+      user space; it does not implement a Windows kernel, so there is no object
+      into which a \verb|.sys| driver can be loaded.
+\item \textbf{The hardware is already taken.} The CPU's virtualisation extensions
+      are owned by the Linux host. A second hypervisor cannot claim them.
+\end{enumerate}
+
+We note this explicitly as an \emph{architectural impossibility}, in the narrow
+sense argued in Section~\ref{sec:lessons}: not ``this would be difficult'' but
+``this specific mechanism has no counterpart on this platform.'' The
+investigation of that title stopped there, which is the correct outcome and the
+whole value of asking the protection question before the engineering question.
+
+\subsection{Summary of the method}
+
+For a reader wishing to reproduce this determination on another binary, the
+procedure in decreasing order of decisiveness:
+
+\begin{enumerate}
+\item \textbf{Validate the Authenticode digest over current bytes.} If it
+      validates, the file is the publisher's build and the question is answered.
+      Do not skip to entropy; this step is both cheaper and stronger.
+\item \textbf{Profile entropy in windows}, not whole-file. Report the window
+      count above threshold, and state the threshold.
+\item \textbf{Enumerate sections and imports.} A full, compiler-shaped import
+      table is difficult for a protection layer to preserve.
+\item \textbf{Identify what protection \emph{is} present.} ``No Denuvo'' is not
+      ``no DRM,'' and conflating them produces a wrong prediction about runtime
+      behaviour.
+\end{enumerate}
+
+For this title the answer is unambiguous: \textbf{there is no commercial
+anti-tamper system, and there never was one in this build.} Nothing was
+stripped, because there was nothing to strip. The engineering path was therefore
+open, and the remainder of this paper is about walking it.

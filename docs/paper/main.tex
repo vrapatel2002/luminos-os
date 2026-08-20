@@ -1,0 +1,197 @@
+%% [CHANGE: claude-code | 2026-08-20]
+%% 007 First Light -- end-to-end forensic and systems case study.
+%% Build: pdflatex main && pdflatex main   (twice, for cross-references)
+\documentclass[conference,10pt]{IEEEtran}
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{listings}
+\usepackage{url}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds}
+
+\usepackage[hidelinks]{hyperref}
+
+%% ---- listings style -------------------------------------------------------
+\lstdefinestyle{sh}{
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  frame=single,
+  framesep=3pt,
+  rulecolor=\color{black!35},
+  backgroundcolor=\color{black!3},
+  aboveskip=6pt,
+  belowskip=4pt,
+  literate={~}{{\textasciitilde}}1
+}
+\lstset{style=sh}
+
+%% ---- helpers --------------------------------------------------------------
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcommand{\bs}{\textbackslash}
+\newcommand{\tld}{\textasciitilde}
+\newcommand{\assertn}[1]{\texttt{assert=#1}}
+
+\begin{document}
+
+\title{Six Opaque Blobs to a Rendered Frame:\\
+An End-to-End Forensic and Systems Case Study in Executing an\\
+Unmodified Windows AAA Title on Linux Across Two GPU Vendors}
+
+\author{
+\IEEEauthorblockN{Shawn}
+\IEEEauthorblockA{Luminos OS Project\\
+Independent Systems Research\\
+Arch Linux / ASUS ROG Zephyrus G14 (GA403UU)}
+}
+
+\maketitle
+
+\begin{abstract}
+We present a complete, measurement-driven account of taking a 37\,GB set of six
+opaque binary containers of unknown provenance and ending with a modern
+Direct3D~12 title rendering at native resolution on Linux, on both an integrated
+AMD GPU and a discrete NVIDIA GPU. The work spans four normally disjoint
+disciplines: binary forensics (establishing that the payload was neither
+malicious nor protected by a commercial anti-tamper system), archive
+reverse-engineering (extracting and reassembling a container format whose own
+installer refused to run), Windows-on-Linux compatibility engineering (a
+namespace-fallback defect in Wine, a fixed-path configuration lookup, and a
+divide-by-zero in an Optimus display path), and graphics-driver fault isolation
+(a segmentation fault inside a proprietary SPIR-V compiler, reached through an
+assertion that surfaced as nine unpaintable modal dialogs).
+
+Four findings generalise beyond the specific title. First, code-signing
+verification is a \emph{sufficient} argument about anti-tamper presence: if a
+retail Authenticode signature still validates over the current bytes, no
+protection can have been removed, so the protection question is answered without
+any dynamic analysis. Second, a D3D12-to-Vulkan translation layer does not emit
+one program per shader; on this workload 4047 of 4430 modules had identical
+content hashes but different SPIR-V bytes across vendors, with an NVIDIA-only
+extension present in 4039 modules and in zero of the working card's modules.
+Third, an entire class of ``hang'' is neither a hang nor a crash but a modal
+dialog that no compositor ever paints, and it is diagnosable by counting Win32
+window classes rather than by reading logs. Fourth, and most costly: two days of
+sophisticated elimination---driver upgrades, cache purges, six Vulkan extensions
+disabled, a full shader dump-and-diff, eight code-generation flags---all returned
+the identical failure, while the actual fix was to notice that exactly one
+translation layer had ever been installed and to substitute a 5\,MB library.
+We report the resulting failure taxonomy, the negative results in full, and an
+argument for treating unexamined constants as the first bisection axis rather
+than the last.
+\end{abstract}
+
+\begin{IEEEkeywords}
+binary forensics, code signing, entropy analysis, Wine, Proton, Direct3D~12,
+Vulkan, SPIR-V, vkd3d, GPU drivers, hybrid graphics, differential diagnosis,
+software preservation, silent failure
+\end{IEEEkeywords}
+
+\input{sec1-intro}
+\input{sec2-system}
+\input{sec3-malware}
+\input{sec4-denuvo}
+\input{sec5-extraction}
+\input{sec6-reassembly}
+\input{sec7-graphics1}
+\input{sec8-egl}
+\input{sec9-deadlock}
+\input{sec10-shaders}
+\input{sec11-fix}
+\input{sec12-lessons}
+\input{sec13-appendix}
+
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{99}
+
+\bibitem{lyda2007}
+R.~Lyda and J.~Hamrock, ``Using entropy analysis to find encrypted and packed
+malware,'' \emph{IEEE Security \& Privacy}, vol.~5, no.~2, pp.~40--45, 2007.
+
+\bibitem{sokpacker}
+X.~Ugarte-Pedrero, D.~Balzarotti, I.~Santos, and P.~G. Bringas, ``SoK: Deep
+packer inspection: A longitudinal study of the complexity of run-time packers,''
+in \emph{Proc. IEEE Symp. Security and Privacy}, 2015, pp.~659--673.
+
+\bibitem{authenticode}
+Microsoft Corporation, ``Windows Authenticode portable executable signature
+format,'' Technical Specification, 2008.
+
+\bibitem{rfc5652}
+R.~Housley, ``Cryptographic Message Syntax (CMS),'' RFC 5652, IETF, 2009.
+
+\bibitem{pecoff}
+Microsoft Corporation, ``PE format specification,'' Microsoft Learn, 2024.
+
+\bibitem{zeller2002}
+A.~Zeller and R.~Hildebrandt, ``Simplifying and isolating failure-inducing
+input,'' \emph{IEEE Trans. Software Engineering}, vol.~28, no.~2, pp.~183--200,
+2002.
+
+\bibitem{zellerbook}
+A.~Zeller, \emph{Why Programs Fail: A Guide to Systematic Debugging}, 2nd ed.
+Morgan Kaufmann, 2009.
+
+\bibitem{wine}
+The Wine Project, ``Wine: a compatibility layer for running Windows applications
+on POSIX-compliant operating systems,'' \url{https://www.winehq.org}.
+
+\bibitem{proton}
+Valve Corporation, ``Proton: compatibility tool for Steam Play,''
+\url{https://github.com/ValveSoftware/Proton}.
+
+\bibitem{vkd3d}
+H.-K. Nienhuys \emph{et al.}, ``vkd3d-proton: Direct3D 12 to Vulkan translation
+layer,'' \url{https://github.com/HansKristian-Work/vkd3d-proton}.
+
+\bibitem{dxvk}
+P.~Möller, ``DXVK: Vulkan-based implementation of D3D9, D3D10 and D3D11,''
+\url{https://github.com/doitsujin/dxvk}.
+
+\bibitem{spirv}
+The Khronos Group, ``SPIR-V specification, version 1.6,'' 2023.
+
+\bibitem{vulkan}
+The Khronos Group, ``Vulkan 1.4 specification,'' 2024.
+
+\bibitem{lz4}
+Y.~Collet, ``LZ4: extremely fast compression algorithm,''
+\url{https://github.com/lz4/lz4}.
+
+\bibitem{rfc3284}
+D.~Korn, J.~MacDonald, J.~Mogul, and K.~Vo, ``The VCDIFF generic differencing
+and compression data format,'' RFC 3284, IETF, 2002.
+
+\bibitem{hdiffpatch}
+Housisong, ``HDiffPatch: a C\texttt{++} library and command-line tool for diff
+and patch of binary files and directories,''
+\url{https://github.com/sisong/HDiffPatch}.
+
+\bibitem{vorbis}
+Xiph.Org Foundation, ``Vorbis I specification,'' 2020.
+
+\bibitem{glvnd}
+NVIDIA Corporation and contributors, ``libglvnd: the GL vendor-neutral
+dispatch library,'' \url{https://gitlab.freedesktop.org/glvnd/libglvnd}.
+
+\bibitem{ntobj}
+M.~Russinovich, D.~Solomon, and A.~Ionescu, \emph{Windows Internals, Part 2},
+6th ed. Microsoft Press, 2012.
+
+\bibitem{innosetup}
+J.~Russell, ``Inno Setup,'' \url{https://jrsoftware.org/isinfo.php}.
+
+\end{thebibliography}
+
+\end{document}

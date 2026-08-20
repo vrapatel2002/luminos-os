@@ -1,0 +1,159 @@
+\section{System Under Test}
+\label{sec:system}
+
+The platform is load-bearing for this paper. A hybrid-graphics laptop with a
+high-DPI panel under a scaling Wayland compositor supplies, by itself, the root
+causes of a divide-by-zero in the display path (Section~\ref{sec:graphics1}), a
+three-session misdiagnosis of the discrete GPU (Section~\ref{sec:egl}), a
+window that appears absent from screenshots while existing (Section~\ref{sec:harness}),
+and a game that renders in a box covering 40\% of the panel
+(Section~\ref{sec:fix}). None of those would occur on a desktop with one GPU.
+
+\subsection{Hardware}
+
+\begin{table}[htbp]
+\caption{Hardware under test}
+\label{tab:hw}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}lX@{}}
+\toprule
+\textbf{Component} & \textbf{Detail} \\
+\midrule
+Chassis & ASUS ROG Zephyrus G14, model GA403UU \\
+Integrated GPU & AMD Radeon 780M (RDNA~3), no dedicated VRAM; borrows from
+                 system memory via the GTT \\
+Discrete GPU & NVIDIA GeForce RTX 4050 Laptop, 6141\,MiB dedicated VRAM,
+               PCIe-attached, \emph{no attached display} \\
+Graphics topology & NVIDIA Optimus (hybrid); the discrete GPU renders and
+                    copies, it never scans out \\
+System memory & 15.6\,GiB usable, shared bandwidth 102.4\,GB/s with the iGPU \\
+Panel & 2880$\times$1800 physical \\
+Storage & NVMe; game target on an NTFS volume with 699\,GB free \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Two hardware facts recur throughout and are worth isolating now.
+
+\textbf{The discrete GPU has no monitor attached.} On an Optimus system the panel
+is wired to the integrated GPU. The discrete GPU is a compute-and-render device
+whose output is blitted across PCIe. Any code path that enumerates display modes
+for the rendering adapter therefore encounters an empty set, and code that
+divides by a refresh rate obtained from that set faults
+(Section~\ref{sec:graphics1}).
+
+\textbf{The discrete GPU's memory is dedicated and non-elastic.} Unlike the
+Radeon 780M, which borrows from system RAM and can therefore be over-committed
+gracefully, the RTX 4050's 6141\,MiB is a hard budget. Anything already resident
+on the card is subtracted from what the game can have. During this work a local
+language-model service held 3576\,MiB of it, which is 58\% of the card. This did
+not cause the central defect---we tested that explicitly and report the negative
+result in Table~\ref{tab:eliminated-early}---but it shapes the final launcher
+design in Section~\ref{sec:fix}.
+
+\subsection{Software}
+
+\begin{table}[htbp]
+\caption{Software stack}
+\label{tab:sw}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}lX@{}}
+\toprule
+\textbf{Layer} & \textbf{Version / detail} \\
+\midrule
+OS & Arch Linux, rolling \\
+Display & KDE Plasma on Wayland, KWin; scale factor 2 \\
+X11 clients & XWayland, \emph{unscaled} \\
+NVIDIA driver & 595.71.05, upgraded to 610.57.04 during the work \\
+Mesa & 26.1.6 (RADV for the Radeon 780M) \\
+Compatibility layer & GE-Proton~10-34; system Wine 11.14 for contrast \\
+D3D12 translation & vkd3d-proton (bundled), 2.14.1, and 3.0.1 \\
+D3D11/10/9 translation & DXVK \\
+Vulkan loader & ICD selection via \verb|VK_ICD_FILENAMES| \\
+EGL dispatch & libglvnd, vendor list pinned system-wide \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{The scaling discontinuity}
+
+KDE runs at scale factor 2, so the 2880$\times$1800 panel presents as
+1440$\times$900 logical pixels to Wayland-native clients. \textbf{XWayland is
+unscaled}, so X11 clients---which includes everything under Wine---work in
+physical pixels and see a 2880$\times$1800 display.
+
+This produces two distinct and independently confusing artefacts:
+
+\begin{enumerate}
+\item \textbf{Screenshots and compositor coordinates are different number
+      systems.} A screenshot is 2880$\times$1800; the compositor's own cursor and
+      geometry queries answer in 1440$\times$900. Every pixel measured off a
+      screenshot must be halved before it can be used to aim anything. Nothing
+      warns about this; the symptom is aiming consistently twice as far right and
+      down as intended.
+\item \textbf{A correct window looks half-size in compositor reports.} During the
+      deadlock investigation, KWin described the game window as
+      \verb|960x568|, which reads as a scaling bug. It is correct: a
+      1920$\times$1080 physical window is 960$\times$540 logical, plus a 28-pixel
+      titlebar. The window was the right size the entire time.
+\end{enumerate}
+
+\subsection{The discrete-GPU access gate}
+
+The system enforces a default-deny policy on the discrete GPU. The device node
+\verb|/dev/nvidia0| is owned \verb|root:dgpu| with mode 0660, and the
+\verb|dgpu| group is deliberately empty. Access is granted only through a setgid
+helper, \verb|dgpu-exec-v2|, mode \verb|-rwxr-sr-x root dgpu|. The policy exists
+so that the discrete GPU can reach its runtime power-management sleep state
+instead of being woken by incidental enumeration.
+
+Two consequences matter for the investigation.
+
+First, \textbf{the gate is the intuitive suspect for every discrete-GPU failure
+and was never once the cause}. We record this because it was the first
+hypothesis on three separate occasions. It is falsifiable cheaply and in a way
+worth reusing: the failures reproduce identically \emph{as root} and with the
+gate open, which removes permissions from the space of explanations. In the
+central defect the symptom shape also rules it out on its own---a gate failure
+produces zero dialogs and a silent fallback to the integrated GPU, whereas
+reaching a Vulkan pipeline-creation call at all proves the device was already
+opened successfully.
+
+Second, \textbf{a setgid process is non-dumpable}. Anything launched through the
+helper has \verb|/proc/PID/mem|, \verb|/proc/PID/maps|, and
+\verb|/proc/PID/environ| readable only by root, even for the invoking user.
+\verb|/proc/PID/status| remains readable, which is what made the gate's operation
+verifiable at all: the game's status file reported
+\verb|Gid: 948 948 948 948|, confirming the setgid transition had taken effect.
+
+A related defect found during this work is worth one line, because it is a
+general hazard in privilege-raising wrappers: an earlier version of the helper
+raised only the \emph{effective} group ID, and \verb|bash| drops that on startup.
+Any wrapper invoked through a shell script therefore silently lost the privilege
+it had just acquired. The launcher must invoke the v2 helper, which raises the
+real GID as well, and it must exec the target binary rather than a shell.
+
+\subsection{Nomenclature used throughout}
+
+\begin{table}[htbp]
+\caption{Terms and abbreviations used in this paper}
+\label{tab:terms}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}lX@{}}
+\toprule
+\textbf{Term} & \textbf{Meaning here} \\
+\midrule
+\emph{box} & one of the six \verb|.bin| containers \\
+\emph{prefix} & a Wine or Proton emulated Windows filesystem and registry \\
+\emph{ICD} & Installable Client Driver; a vendor's Vulkan implementation \\
+DXIL & the shader bytecode format Direct3D~12 consumes \\
+SPIR-V & the shader bytecode format Vulkan consumes \\
+\assertn{n} & count of Win32 dialog windows found in the prefix; the
+              failure metric defined in Section~\ref{sec:harness} \\
+\verb|#32770| & the Win32 window class of a dialog box \\
+\bottomrule
+\end{tabularx}
+\end{table}
