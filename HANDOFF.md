@@ -1,8 +1,13 @@
 # HANDOFF — Caelestia desktop on KDE
-# [CHANGE: claude-code | 2026-08-13]
+# [CHANGE: antigravity | 2026-08-16] — Response 17
+Last updated: 2026-08-16 — Response 17
 
 **Read this whole file before touching anything. The direction changed on 2026-08-13 and most of
 the older reasoning in git history is now superseded.**
+
+- **AI Stack update (2026-08-16)**: 
+  - Added `luminos/luminos-dolphin` (Dolphin 3.0 Llama 3.1 8B Q4_K_M) with 36,864 (`36k`) context and 20 GPU offloaded layers (`LLM_NGL3=20`) to `jobhunt-llm.service` and OpenClaw (`openclaw.json`). Configured rolling sliding-window FIFO compaction policy.
+  - Built **Luminos Mobile Web Chat** (`scripts/luminos-mobile-chat.py`, service on port 8090) for phone access over Wi-Fi (`http://192.168.2.16:8090`). Zero Docker, zero OpenClaw, direct streaming dark-mode web chat. Verified live.
 
 ---
 
