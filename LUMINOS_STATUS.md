@@ -253,6 +253,9 @@ against a placeholder profile, and `score.py` says so on every run.
 | §6 direct-unarc path | ✅ 2-for-2 titles | 7/7 containers rc=0 on Mia. **This is the primary method, not the fallback** |
 | `~/re/tools/fginstall.sh` / `fgextract.sh` | ✅ New | Game-agnostic §5 and §6 drivers, generalized from the `*007*` originals |
 | §7–§12 graphics claims | 📋 Untested + often moot | No second D3D12 title on Linux. Mia ships a **native Linux build** (Ren'Py 8.3.3, ran clean on the 780M) — check for one before doing graphics work |
+| §8 EGL vendor pin | 🟥 Falsified as general | Selects the dGPU for 007; **breaks Mia outright** — gl2, gles2 *and software* all die `Invalid window` because the pin removes Mesa's EGL and SDL can make no window. Scoped to Wine/Proton titles only |
+| Returning to Mia launcher | ✅ Working | `/usr/local/bin/mia` — defaults to **AMD 780M** (2D VN, dGPU buys nothing); `mia --nvidia` = RTX 4050 via GLX offload on XWayland through `dgpu-exec-v2`. Both verified from the game's own `log.txt` |
+| Returning to Mia in Lutris | ✅ Added | `~/.config/lutris/games/returning-to-mia.yml` (flat shape) + `pga.db` id 3. It was absent only because nothing had ever added it |
 
 Record lives in `docs/paper/GENERALIZATION.md`, not here.
 

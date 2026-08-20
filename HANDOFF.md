@@ -67,6 +67,25 @@ actually available — and the normal path lost.
    `Ren'Py 8.3.3.24111502`, gl2, `AMD Radeon 780M (radeonsi, phoenix, ACO)`, Mesa 26.1.6, no
    traceback. Five seconds of `ls` deleted six sections of work.
 
+8. **§8's EGL vendor pin is falsified as a general technique** (Finding 15). It selects the dGPU
+   for 007 and **breaks Mia outright** — gl2, gles2 *and the software renderer* all die with
+   `Invalid window`. The software path failing is the tell: no window was ever created. Pinning
+   the vendor removes **Mesa's** EGL, and SDL's Wayland backend needs it to negotiate a surface
+   with a compositor running on the AMD card. Wine/Proton doesn't care because it makes its own
+   window first. Working route for native titles is the older GLX offload:
+   `SDL_VIDEODRIVER=x11 __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`.
+
+## DONE this turn — the game is now launchable
+
+- **`/usr/local/bin/mia`** — launcher in the shape of `/usr/local/bin/007`. Defaults to the
+  **AMD 780M** (deliberately unlike 007: this is a 2D visual novel, waking the 4050 buys nothing
+  and costs RTD3 residency). `mia --nvidia` uses the GLX offload route through `dgpu-exec-v2`,
+  which is mandatory under DECISION 25. Both paths verified by reading the renderer out of the
+  game's own `log.txt`.
+- **Lutris entry added** — `~/.config/lutris/games/returning-to-mia.yml` (**flat** `game:`/
+  `system:` shape, not the installer-script shape) + row id 3 in `pga.db`. It wasn't there for
+  the boring reason: nothing had ever added it. `lutris -l` confirms.
+
 ## DONE this turn — tooling
 
 - **`~/re/tools/fginstall.sh`** — game-agnostic §5 path. `-s setup.exe -t target`. Carves
@@ -121,6 +140,15 @@ Nothing is mid-flight. Tree is consistent.
 
 ## Gotchas & things NOT to redo
 
+- **Do NOT copy 007's `__EGL_VENDOR_LIBRARY_FILENAMES` pin to a native Linux game.** It removes
+  Mesa's EGL and SDL can then create no window at all — even the *software* renderer dies. Use
+  `SDL_VIDEODRIVER=x11 __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia` instead.
+- **`pkill -f "…/ReturningToMia"` kills your own shell** — the pattern is in the agent shell's own
+  command line. Use a bracket class (`py3-linux[-]x86_64/…`) or `pgrep | xargs kill`. Cost me a
+  truncated test run and a bogus exit 144.
+- **Lutris game configs are FLAT** (`game:`/`system:` at top level). The installer-script shape
+  gives "This game has no executable set." Same trap 007 hit. Lutris must not be running when
+  you write `pga.db`; back it up first.
 - **Try §6 first.** §5 is 25 minutes to a zero-byte failure; §6 is 5 minutes to a working game.
 - **Check for a shipped native Linux build before doing any graphics work.** `ls` the game dir
   for `lib/py3-linux-*` or similar. This is the cheapest step in the whole method.

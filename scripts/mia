@@ -1,0 +1,101 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-08-20] Launcher for the hand-rebuilt Returning to Mia.
+#
+#   mia            -> AMD Radeon 780M, native Wayland (default; correct choice)
+#   mia --nvidia   -> RTX 4050 via PRIME offload on XWayland. Works, but see below.
+#   mia --debug    -> keep the log and echo it on exit
+#
+# WHY THIS IS NOT A WINE GAME. The FitGirl repack is the Windows build, but the
+# payload inside it is the GOG release, and that ships a NATIVE LINUX BUILD at
+# lib/py3-linux-x86_64/. So there is no Proton, no prefix, no vkd3d, none of the
+# 007 machinery. ReturningToMia.sh picks the platform dir itself and exec's the
+# right binary. Ren'Py 8.3.3.24111502.
+#
+# WHY AMD IS THE DEFAULT, unlike /usr/local/bin/007 which defaults to NVIDIA:
+# this is a 2D visual novel. The 780M runs it at the panel's native mode without
+# effort, on the integrated GPU's shared memory, with the dGPU asleep. Waking the
+# 4050 for it costs battery and RTD3 residency and buys nothing measurable. 007
+# defaults to NVIDIA because 007 is a AAA D3D12 title; the reasoning does not
+# transfer.
+#
+# THE NVIDIA PATH IS NOT THE 007 NVIDIA PATH. This is the part worth reading.
+# 007 selects the dGPU by pinning the EGL vendor:
+#     __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/60_nvidia.json
+# Doing that HERE breaks the game outright. Measured 2026-08-20: gl2 failed,
+# gles2 failed, and the software renderer failed too, all with
+#     error: Invalid window
+# from pygame_sdl2's Window.__init__. Cause: pinning that variable to the nvidia
+# json removes Mesa's EGL from the process entirely, and SDL's Wayland backend
+# needs a Mesa EGL to negotiate a surface with a compositor that is itself
+# running on the AMD card. No EGL vendor it can use, no window, no renderer at
+# all -- which is why even the SOFTWARE path died, and that is the tell. A
+# software renderer cannot fail for GPU reasons.
+#
+# The route that works is the classic GLX render-offload on XWayland:
+#     SDL_VIDEODRIVER=x11 __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia
+# GLVND is left intact, Mesa still creates the window, NVIDIA only does the
+# drawing. Verified: Vendor NVIDIA Corporation / Renderer NVIDIA GeForce RTX 4050
+# Laptop GPU/PCIe/SSE2 / Version 4.6.0 NVIDIA 610.57.04, gl2, zero errors.
+#
+# dgpu-exec-v2, never v1 and never bare: DECISION 25 makes /dev/nvidia* root:dgpu
+# 0660 and shawn is deliberately not in the dgpu group, so the picker/helper is
+# the only door. v1 raises only the effective gid and bash drops it (BUG-102).
+#
+# One visible difference between the two paths, not a bug: native Wayland reports
+# the display as 1440x900 (KDE scale 2) while XWayland is unscaled and reports
+# 2880x1800. Ren'Py letterboxes its 1920x1080 virtual size into either.
+#
+# UNDO: nothing to undo. This script only sets environment variables and exec's
+# the game's own launcher.
+
+set -u
+
+GAME_DIR="/mnt/win-os/miaraw"
+LAUNCH="./ReturningToMia.sh"
+GPU=amd
+DEBUG=0
+
+for a in "$@"; do
+  case "$a" in
+    --nvidia|--dgpu) GPU=nvidia ;;
+    --igpu|--amd)    GPU=amd ;;
+    --debug)         DEBUG=1 ;;
+    -h|--help)       sed -n '2,50p' "$0"; exit 0 ;;
+  esac
+done
+
+die(){ echo "mia: $*" >&2; exit 1; }
+cd "$GAME_DIR" || die "game dir missing: $GAME_DIR"
+[ -x "$GAME_DIR/lib/py3-linux-x86_64/ReturningToMia" ] ||
+  die "native Linux binary missing -- was the repack extracted with fgextract.sh?"
+
+# Ren'Py writes log.txt into the game dir. /mnt/win-os is ntfs3 and writable, so
+# this works, but keep the previous run around because it is the only record of
+# which renderer was chosen.
+[ -f log.txt ] && cp -f log.txt log.prev.txt 2>/dev/null
+
+if [ "$GPU" = "nvidia" ]; then
+  command -v dgpu-exec-v2 >/dev/null || die "dgpu-exec-v2 missing - cannot reach the RTX 4050"
+  # XWayland only. Find the display rather than assuming :0.
+  if [ -z "${DISPLAY:-}" ]; then
+    for d in /tmp/.X11-unix/X*; do
+      n=${d##*/X}; [ "$n" = "99" ] && continue   # :99 is the headless Xvfb
+      export DISPLAY=":$n"; break
+    done
+  fi
+  [ -n "${DISPLAY:-}" ] || die "no X display -- the NVIDIA path needs XWayland"
+  [ -n "${XAUTHORITY:-}" ] || {
+    x=$(ls -t /run/user/1000/xauth_* 2>/dev/null | head -1); [ -n "$x" ] && export XAUTHORITY="$x"
+  }
+  echo "mia: RTX 4050 via GLX offload on XWayland ($DISPLAY)"
+  notify-send "Returning to Mia" "Starting on NVIDIA RTX 4050" --icon=dialog-information 2>/dev/null
+  exec dgpu-exec-v2 env \
+      SDL_VIDEODRIVER=x11 \
+      __NV_PRIME_RENDER_OFFLOAD=1 \
+      __GLX_VENDOR_LIBRARY_NAME=nvidia \
+      "$LAUNCH"
+else
+  echo "mia: AMD Radeon 780M, native Wayland"
+  notify-send "Returning to Mia" "Starting on AMD Radeon 780M" --icon=dialog-information 2>/dev/null
+  exec "$LAUNCH"
+fi

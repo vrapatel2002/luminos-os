@@ -465,6 +465,55 @@ engine-level:
 
 ---
 
+### Finding 15 — §8's EGL vendor pin does not generalize; it actively breaks a native title
+
+Measured 2026-08-20, while putting Mia on the dGPU. §8 selects the discrete GPU by
+pinning the EGL vendor library, and `/usr/local/bin/007` does exactly that:
+
+```
+__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/60_nvidia.json
+```
+
+That works for 007. Applied unchanged to Returning to Mia it **fails to start the
+game at all**:
+
+```
+Initializing gl2 renderer:   -> Could not get pygame screen: error('Invalid window')
+Initializing gles2 renderer: -> error: Invalid window
+software renderer:           -> error: Invalid window   <- the tell
+```
+
+**The software renderer failing is the diagnostic.** A software path cannot fail
+for GPU reasons. So this was never a rendering fault — no window was ever
+created. Pinning that variable to the nvidia json removes **Mesa's** EGL from the
+process, and SDL's Wayland backend needs a Mesa EGL to negotiate a surface with a
+compositor that is itself running on the AMD card. No usable EGL vendor, no
+window, and every renderer below it dies for the same reason.
+
+The route that does work is the older, coarser one — GLX render offload on
+XWayland, leaving GLVND intact so Mesa still owns the window and NVIDIA only
+draws:
+
+```
+SDL_VIDEODRIVER=x11 __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia
+```
+
+Verified: `NVIDIA GeForce RTX 4050 Laptop GPU/PCIe/SSE2`, `4.6.0 NVIDIA
+610.57.04`, gl2, zero errors.
+
+**Why this matters beyond one game.** The EGL pin and the GLX offload look like
+two spellings of "use the dGPU." They are not. The pin is a *substitution* — it
+replaces the process's GL stack — and it is only safe when the process does not
+also need Mesa for something else. Proton does not, because Wine creates its own
+window through the X/Wayland driver before any vendor library is consulted. A
+native SDL app does. So §8's technique is scoped to **translated Windows titles**,
+and the paper presents it as general.
+
+→ Row corrected in the table below. This is the fourth §4–§12 claim that a second
+title falsified, and the first one found outside the DRM sections.
+
+---
+
 ## Generalizability by layer — current assessment
 
 | Paper section | Generalizes to | Confidence | Evidence |
@@ -485,7 +534,8 @@ engine-level:
 | §6 vs §5 ordering | all FitGirl repacks | **§6 first** | it is the path that works; Finding 13 |
 | pre-§7 native-build check | any title | **High** | Mia shipped a Linux build; §7–§12 moot; Finding 14 |
 | §7 Optimus divide-by-zero | every D3D12 game on any Optimus laptop | **High** | hardware topology, nothing to do with 007 |
-| §8 EGL vendor pin | this machine's config | **Low** (specific); class is general | — |
+| §8 EGL vendor pin | **translated (Wine/Proton) titles only** | 🟥 **Falsified as general** | breaks native SDL titles outright — no window at all; Finding 15 |
+| §8 GPU selection, native titles | any native GL title | **High, measured** | GLX offload + `SDL_VIDEODRIVER=x11`; Mia runs on the 4050 |
 | §11 vkd3d-proton 3.0.1 | **every D3D12 game on NVIDIA under Proton** | **High by construction** | see below |
 | §9 dialog-enumeration diagnosis | any Wine hang | **High** | technique, not fix |
 
