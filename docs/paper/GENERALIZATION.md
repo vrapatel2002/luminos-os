@@ -313,21 +313,177 @@ everything in the paper's Table XV.
 
 ---
 
+# THIRD TITLE EXECUTED — *Returning to Mia* (2026-08-20)
+
+The test deferred in the previous session was run end to end. It is the first
+time the method has been executed against a title it was not derived from, and
+it changes four rows of the table below from *reasoned* to *measured*.
+
+Specimen: `Returning to Mia`, FitGirl repack, 14 GB, Ren'Py 8.3.3 visual novel
+(GOG build). Maximally unlike 007: no Unreal, no D3D12, no Denuvo.
+
+### Finding 9 — §3 triage generalizes at the TOOLCHAIN level, not the title level
+
+The repack payload is **not** title-specific. Comparing Mia's extracted
+installer payload against the known-clean 007 payload:
+
+| Result | Count | Files |
+|---|---|---|
+| byte-identical (md5) | **11 of 11** comparable | `ISDone.dll` `unarc.dll` `idp.dll` `hosts.exe` `CallbackCtrl.dll` `botva2.dll` `cls-lollypop.dll` `cls-srep_x64.exe` `cls-magic2_x64.exe` `facompress.dll` `razor.dll` |
+| new in Mia | 3 | `InnoCallback.dll`, `bass.dll`, `precomp.exe` |
+| `host.cmd` | identical | same FitGirl anti-impersonation host redirect, same IP `109.94.209.70` |
+| `arc.ini` | 2 lines differ | both cosmetic: a section alias, and `fgrplc` placeholder vs a resolved `15` |
+
+All three new files were attributed by reading context, not by string matching:
+`precomp.exe` carries an embedded text dictionary (source of ~40 junk
+`http://...` fragments) and a genuine credit line for packJPG's author;
+`hosts.exe` carries a .NET manifest. Zero real network indicators beyond the
+known FitGirl redirect.
+
+→ **This is the strongest generalization result in the whole exercise.** Triaging
+a FitGirl repack is a **delta problem**: hash the payload against a known-clean
+one and triage only what is new. §3's full procedure needs to be run once per
+*toolchain version*, not once per game.
+
+### Finding 10 — §4's strong test is simply unavailable on a repack's installer
+
+`setup.exe` has **no Authenticode signature at all** — not an invalid one, none.
+The decisive test in §4 therefore cannot run on the artefact a user actually
+executes first. Weak evidence only, all clean: entropy 6.482 flat (0 windows
+≥ 7.5), **0 RWX sections**, no protection strings, `.text` present.
+
+Also: `drmcheck.py` flagged `.itext` as a non-standard section name. It is
+ordinary Delphi/Inno Setup. **Another false positive for Finding 5's pile.**
+
+### Finding 11 — §5's preconditions are present, its fixes apply, and the installer still fails
+
+Everything §5 asks for was verified present and then applied:
+
+- **Precondition confirmed by measurement.** Creator `cls-srep_x64.exe` contains
+  `Global\`; opener `CLS-srep.dll` does not. Same for the lollypop pair.
+  `cls-magic2{,l}.dll` carry their own copy and so already agree — the exact
+  asymmetry §5 describes, in binaries that are byte-identical to 007's, at
+  **identical patch offsets** (`cls-magic2.dll` offset 1651, the number recorded
+  in `clspatch.py`'s 007-era comment).
+- **FIX 1 applied live.** `clspatch.py` caught **10 runtime-extracted helpers**
+  in a fresh temp dir seconds after launch — independently confirming §5's
+  "the payload is re-materialised at runtime, static patching is bypassed" claim
+  on a second title.
+- **FIX 2 applied.** `c:\arc.ini` staged at the system drive root.
+- **Payload proven intact first.** All 7 containers md5-match the shipped
+  `fitgirl-bins.md5` (14 GB verified), so the stall is not corrupt data.
+- **Config proven correct.** `{app}` substituted to the real target; the runtime
+  `CLS.ini` matches 007's working one (007's only edit redirected temp to a
+  separate dir — a disk-space convenience, not a fix).
+- **Prefix proven equivalent.** Fresh `win64` prefix; the only delta against the
+  007 sandbox is four NVIDIA DLLs, irrelevant to extraction.
+
+**Result: the installer still stalls.** 25 minutes, **zero bytes** into the
+`.rpa`, 3.0 MB of redist — reproducing the pre-existing failed install's exact
+signature in a clean prefix, so the failure is deterministic rather than
+environmental damage.
+
+### Finding 12 — the stall is a THIRD failure mode; §5's differential table is incomplete
+
+§5 offers two shapes and a table to tell them apart. This is neither:
+
+| | §5 Failure 1 (modal) | §5 Failure 2 (config) | **Mia (new)** |
+|---|---|---|---|
+| CPU | 0% | one core busy | **one core pinned 100%** |
+| Child process | helper alive | none | **none ever spawned** |
+| Bytes written | partial | zero | **zero** |
+| Time to fail | never | ~2 s | **never** |
+
+Measured directly rather than inferred:
+
+- read offset on `fg-01.bin` frozen at **byte 31** — the ArC header — for minutes
+  (`/proc/<pid>/fdinfo`, which is the real progress indicator, not output size)
+- RSS **perfectly flat** at 80,508 kB while burning a full core → not decompression
+- main thread blocked in `NtWaitForSingleObject`
+- worker thread: **every** stack sample lands in `NtFreeVirtualMemory` — a tight
+  alloc/free retry loop, `wchan=0`, no syscalls, pure userspace spin
+- **no `cls-*` helper process was ever spawned**
+
+→ §5 needs a **third row**: *spins at 100% forever, no helper, zero bytes*. Its
+current table would misdiagnose this as "one core busy" → Failure 2 → "missing
+config file", which is wrong; the config was present and correct.
+
+### Finding 13 — §6 is not a fallback, it is the primary method
+
+Driving `unarc.dll` directly via `arcx32.exe`, bypassing `setup.exe` entirely:
+
+| Container | Result | Note |
+|---|---|---|
+| fg-01 | **rc=0**, 17.2 GB `.rpa` in 5 m 20 s (~50 MB/s) | `CLS-srep_x64.exe` **did spawn** here |
+| fg-02…fg-07 | **rc=0** each | complete game tree, 18 GB total |
+
+Output validated structurally, not assumed: the archive opens with `RPA-3.0` and
+`Made with Ren'Py.`
+
+The single sharpest observation: **the srep helper spawns under the direct path
+and never spawns under the installer.** Same binaries, same patches, same
+`arc.ini`, same prefix — so the defect lives in the ISDone/Inno layer above
+`unarc`, not in the compressor stack §5 spends its time on.
+
+→ In the paper, §6 is framed as the emergency route taken because 007's
+`setup.exe` was missing. On Mia `setup.exe` is present, is used, and **fails** —
+while §6 succeeds. **That inverts the framing: skip the installer by default.**
+
+### Finding 14 — §7–§12 are unnecessary here, not merely untested
+
+The Windows repack ships a **native Linux build**: `ReturningToMia.sh` plus a
+full `lib/py3-linux-x86_64/` (`librenpython.so`, etc.). It was run:
+
+```
+Ren'Py 8.3.3.24111502 — "Returning to Mia"
+Loading script took 1.23s ... Index archives took 0.00s
+Initializing gl2 renderer:
+Renderer: AMD Radeon 780M Graphics (radeonsi, phoenix, ACO)
+Version: 4.6 (Compatibility Profile) Mesa 26.1.6-arch1.1
+```
+
+No `traceback.txt`, no `errors.txt`. No Wine, no Proton, no vkd3d-proton, no
+Optimus divide-by-zero, no dGPU at all. (Two benign non-fatal notes: the GOG
+build's `libsteam_api.so` is a stub, and PulseAudio was unavailable in the test
+environment.)
+
+→ **Generalization lesson the paper does not contain: look for a shipped native
+build before doing any graphics work.** 007 had none, so the case study never had
+occasion to check, and §7–§12 read as though the Wine graphics path is mandatory.
+For this title the entire second half of the paper is skippable.
+
+### What the third title cost, and what it bought
+
+Two new tools, both generalized from 007-specific scripts by removing hardcoded
+paths — nothing else had to change, which is itself evidence the method is
+engine-level:
+
+- `~/re/tools/fginstall.sh` — from `install007.sh`; applies both §5 fixes and
+  carves `arc.ini` out of any installer automatically
+- `~/re/tools/fgextract.sh` — from `extract007.sh`; the §6 direct-`unarc` path
+  against any repack
+
+---
+
 ## Generalizability by layer — current assessment
 
 | Paper section | Generalizes to | Confidence | Evidence |
 |---|---|---|---|
-| §3 malware triage | any Inno Setup installer | **High** | format-level, not title-level |
-| §3 script carving | any Inno Setup installer | **High** | same |
-| §4 signature test | any signed PE | **High** — but see Finding 2 | tested on 2 titles |
+| §3 malware triage | any Inno Setup installer | **High, measured on 2 repacks** | 11/11 payload files byte-identical 007↔Mia; Finding 9 |
+| §3 script carving | any Inno Setup installer | **High, measured on 2 repacks** | `innoextract` carved Mia's script first try |
+| §4 signature test | any **signed** PE | **High** — but see Findings 2 and 10 | tested on 2 titles; **unavailable** on Mia's unsigned `setup.exe` |
 | §4 entropy | — | **Rejected** | failed on the one control |
 | §4 import-table size | — | **Rejected** | backwards; Finding 4 |
 | §4 odd section *names* | any PE | **Low** — weak prior only | false-positives on Excel/Radeon; Finding 5 |
 | §4 missing `.text` + RWX | any PE | **High** | 5 clean controls have zero RWX |
 | §4 protection strings/size | any PE | **High** | clean on both titles |
-| §5 `Global\` namespace fix | all ISDone/unarc repacks | **High, untested** | engine-level, not title-level |
-| §5 `c:\arc.ini` fix | all ISDone/unarc repacks | **High, untested** | same |
-| §6 reassembly method | all FitGirl repacks | **Medium-High, untested** | Wukong is one; worklists differ per title |
+| §5 `Global\` namespace fix | all ISDone/unarc repacks | **Necessary, NOT sufficient** | applies cleanly to Mia (10 helpers, identical offsets) — installer still fails; Finding 11 |
+| §5 `c:\arc.ini` fix | all ISDone/unarc repacks | **Necessary, NOT sufficient** | same run; Finding 11 |
+| §5 failure taxonomy | — | **Incomplete** | Mia is a third failure mode neither entry describes; Finding 12 |
+| §5 installer path overall | — | **1 of 2 titles** | 007 n/a (no `setup.exe`), Mia **fails** |
+| §6 reassembly method | all FitGirl repacks | **High, measured on 2 titles** | Mia: 7/7 containers rc=0, 18 GB, validated; Finding 13 |
+| §6 vs §5 ordering | all FitGirl repacks | **§6 first** | it is the path that works; Finding 13 |
+| pre-§7 native-build check | any title | **High** | Mia shipped a Linux build; §7–§12 moot; Finding 14 |
 | §7 Optimus divide-by-zero | every D3D12 game on any Optimus laptop | **High** | hardware topology, nothing to do with 007 |
 | §8 EGL vendor pin | this machine's config | **Low** (specific); class is general | — |
 | §11 vkd3d-proton 3.0.1 | **every D3D12 game on NVIDIA under Proton** | **High by construction** | see below |
@@ -349,10 +505,17 @@ we have no second D3D12 game installed on the Linux side.
 
 ---
 
-## A third title is available — and it is the right kind of different
+## The third title — EXECUTED 2026-08-20
 
-The "only two games on this machine" limitation is **gone**. Found on disk
-2026-08-20, verified present the same day:
+**Status: done.** This section was written as a proposal; it is kept because the
+specimen description is still the record of what was tested, but the test itself
+is no longer pending. Results are Findings 9–14 above. One-line verdict:
+
+> §3 generalizes at the toolchain level; §4's strong test was unavailable; **§5
+> failed**; **§6 succeeded and produced a working 18 GB game**; §7–§12 turned out
+> to be unnecessary because the title ships a native Linux build.
+
+The specimen, as found on disk 2026-08-20 and verified the same day:
 
 ```
 /home/shawn/Downloads/New Folder/Returning_to_Mia_--_fitgirl-repacks.site_--_
@@ -365,16 +528,19 @@ The "only two games on this machine" limitation is **gone**. Found on disk
   fg-07.bin      25,807,318        (14 GB total)
 ```
 
-Why it is a good control:
+Why it was a good control — and it earned every one of these in the event:
 
 - **Same distributor, same repack engine** (FitGirl / ISDone / unarc), so §5 and
-  §6 apply directly.
+  §6 apply directly. Confirmed: 11/11 helper binaries byte-identical to 007's.
 - **`setup.exe` is present.** 007's was missing, which is why §6 had to
-  reassemble by hand. Here the normal path can be tried first — and the manual
-  path is still available as a fallback, which makes this a clean A/B of the two
-  methods.
+  reassemble by hand. Here the normal path could be tried first — and the manual
+  path was still available as a fallback, which made this a clean A/B of the two
+  methods. **The A/B is the single most valuable thing this title produced: the
+  supposedly-normal path lost.**
 - **Maximally unlike 007.** Ren'Py indie visual novel vs AAA Unreal. If the
-  installer fixes hold across that gap they are genuinely engine-level.
+  installer fixes held across that gap they would be genuinely engine-level.
+  They did not hold — but §6 did, across the same gap, which is the stronger
+  result because §6 is the harder claim.
 - **It already failed in the documented way.** A previous install attempt left:
 
 ```
@@ -389,46 +555,57 @@ Why it is a good control:
 ```
 
   Installer ran, wrote its redist payload, created the target file, then produced
-  nothing. That is precisely the ISDone/unarc stall §5 diagnoses — so it is a
-  live test of the `Global\` namespace fix and the `c:\arc.ini` fix rather than a
-  hypothetical one.
+  nothing. That looked like precisely the ISDone/unarc stall §5 diagnoses — so it
+  was a live test of the `Global\` namespace fix and the `c:\arc.ini` fix rather
+  than a hypothetical one. **It reproduced exactly in a clean prefix with both
+  fixes armed** (25 min, 0 bytes), which is what turned it from a re-run into
+  Finding 12.
 
-**Limits of this control:** `.rpa` means Ren'Py, which is Python + SDL. It
-exercises §3, §4, §5 and §6. It does **not** exercise §7–§12 — no D3D12, no
-Optimus divide-by-zero, no vkd3d-proton path. The graphics rows stay untested
-until a second D3D12 title is installed on the Linux side.
+**Limits of this control, as anticipated and as they played out:** `.rpa` means
+Ren'Py, which is Python + SDL. It exercised §3, §4, §5 and §6. It did **not**
+exercise §7–§12 — no D3D12, no Optimus divide-by-zero, no vkd3d-proton path. The
+graphics rows stay untested until a second D3D12 title is installed on the Linux
+side. What was *not* anticipated is that §7–§12 would be moot rather than merely
+skipped: the title ships a native Linux build (Finding 14).
 
 ---
 
 ## Resume point — what to do next
 
-0. **Test on `Returning to Mia`** — this is now step one, because it is the only
-   item that converts "reasoned" rows into "measured" rows. Four steps, in order:
-   1. **Read-only first:** `drmcheck.py` on `setup.exe`, then carve its Inno
-      script with the §3 recipe. No writes, no risk.
-   2. Apply the §5 fixes (`Global\` namespace patch to the `cls-*` helpers,
-      `c:\arc.ini`) and re-run the install under Wine. Either it completes —
-      which proves §5 is engine-level — or it stalls at 0 bytes again, which is
-      also a result.
-   3. If it stalls, do the §6 manual reassembly. Read the recipe out of
-      `fg-06.bin` and verify each step in advance with `hpatchz -info`.
-   4. Write up whichever path worked.
-1. **Correct §4 of the paper** with Findings 1, 2, **4 and 5**, and add the
-   two-title control table. Three claims in §4 are now falsified by measurement,
-   not one. This is still the highest-value paper work: it turns a single-case
-   study into a case study with a control.
-2. Add a short **"Generalization" section** (would become §13) covering the table
-   above, honestly marking which rows are tested and which are reasoned. Include
-   the corrected "hard and unbuilt, not impossible" wording — do not leave the
-   overstatement on the record.
-3. Rebuild: `cd docs/paper && pdflatex main && pdflatex main`
+0. ~~Test on `Returning to Mia`~~ — **DONE 2026-08-20.** Findings 9–14.
+1. **Correct §4 of the paper** with Findings 1, 2, **4, 5 and 10**, and add the
+   control table. Three claims in §4 are falsified by measurement, and Finding 10
+   adds a fourth limitation: the signature test is not merely weak, it is
+   *unavailable* on unsigned installers, which is the exact class of file §3 and
+   §4 are pointed at. This is still the highest-value paper work: it turns a
+   single-case study into a case study with two controls.
+2. **Correct §5 and §6 of the paper.** New, and arguably now more urgent than
+   step 1 because it changes what a reader is told to *do*, not just what to
+   believe:
+   - §5's failure table is incomplete — add Finding 12's third mode.
+   - §5 must stop being presented as the default path and §6 as the fallback.
+     Measured record across three titles: §5 usable **zero** times, §6 usable
+     **twice**. Recommend §6 first.
+   - Add the "check for a native Linux build before §7" step (Finding 14). It is
+     five seconds of `ls` and it deleted six sections of work.
+3. Add a short **"Generalization" section** (would become §13) covering the table
+   above, honestly marking which rows are measured and which are reasoned.
+   Include the corrected "hard and unbuilt, not impossible" wording — do not
+   leave the overstatement on the record.
+4. Rebuild: `cd docs/paper && pdflatex main && pdflatex main`
    (currently 19 pages, 0 undefined refs, 5 minor overfull boxes).
-4. Optional, cheap, high value: run `drmcheck.py` over more PEs to widen the
+5. Root-cause the Mia installer spin, if it is ever worth it. Characterised but
+   not fixed: main thread parked in `NtWaitForSingleObject`, a worker spinning in
+   `NtFreeVirtualMemory`, srep helper never spawned, read offset frozen at byte
+   31 of `fg-01.bin`. The defect is in the ISDone/Inno layer *above* unarc —
+   proven because the identical `unarc.dll` and the identical helpers work fine
+   when driven directly by `arcx32.exe`. Low priority: §6 already gets the game.
+6. Optional, cheap, high value: run `drmcheck.py` over more PEs to widen the
    control set — `HV-StartGame.exe` (the hypervisor loader), the Steam DLLs, and
    anything under `/mnt/win-os/Program Files`. Every clean PE added strengthens
    the "zero RWX sections in clean software" claim, which is now the primary
    structural test.
-5. Optional, expensive: install a second D3D12 title on the Linux side to test
+7. Optional, expensive: install a second D3D12 title on the Linux side to test
    whether the vkd3d-proton 3.0.1 result reproduces. This is the only way to
    move the §11 row from "high by construction" to "measured."
 
@@ -438,8 +615,25 @@ into the paper yet.
 
 ### Tools
 - `~/re/tools/drmcheck.py` — §4 procedure on any PE. `drmcheck.py <exe> [exe…]`
+- `~/re/tools/fginstall.sh` — **NEW.** Game-agnostic §5 installer path. Both
+  fixes applied automatically; `arc.ini` carved out of the installer itself.
+  `fginstall.sh -s <setup.exe> -t <target-dir>`. Generalized from `install007.sh`.
+  *Works as designed; the underlying method does not — see Finding 11.*
+- `~/re/tools/fgextract.sh` — **NEW.** Game-agnostic §6 direct-unarc path, which
+  is the one that works. `fgextract.sh -r <repack-dir> -o <out-dir> 01 02 …`
+  Stages the repack's **own** helpers so the test stays honest.
+- `~/re/tools/clspatch.py` — the live `Global\` patcher. Must run concurrently.
+- `~/re/tools/arcx32.exe` — 32-bit `LoadLibrary` harness for `unarc.dll`.
 - `~/re/tools/007-mkproton.sh` — Proton variant builder (game-agnostic)
 - `~/re/tools/pescan.py` — older sections/entropy/imports dump
+
+**Technique note — measuring progress.** Output file size is a *useless* signal
+for unarc: it creates the target at full or zero size and fills it out of order.
+The true signal is the read offset on the input container,
+`/proc/<pid>/fdinfo/<fd>` for the fd pointing at `fg-01.bin`. That is what
+exposed Mia's freeze at **byte 31**. Flat RSS plus `wchan` of `0` distinguishes a
+spin from slow work. `eu-stack -p <pid>` needs `sudo` on this machine —
+`/proc/sys/kernel/yama/ptrace_scope` is `1`.
 
 **Missing on this machine:** `capstone` (Python) and `ndisasm`. Disassembly was
 done with `objdump -D -b binary -m i386:x86-64 -M intel` over a raw extracted
@@ -452,7 +646,12 @@ trust it at a known-good boundary (offset 0 of `.text`) and not in the middle.
 - `/mnt/win-os/Games/Black Myth - Wukong/b1/Binaries/Win64/b1-Win64-Shipping.exe`
   — Denuvo control, 728,458,376 B, md5 `c7dae1acb6df82a1d591bd13ca1a9154`
 - `/home/shawn/Downloads/New Folder/Returning_to_Mia_--_fitgirl-repacks.site_--_`
-  — untested third title, 14 GB, `setup.exe` present
+  — third title, 14 GB, `setup.exe` present, **tested 2026-08-20**. All 7 bins
+  md5-verified intact before any conclusion was drawn about the installer.
+- `/mnt/win-os/miaraw` — the §6 output, 18 GB, the working game. Contains the
+  native Linux build under `lib/py3-linux-x86_64`.
+- `/mnt/win-os/Games/ReturningToMia` — the **failed** §5 output, 3.0 MB, with a
+  0-byte `.rpa`. Keep it: it is the evidence for Finding 11/12, not junk.
 
 ### Files
 - `docs/paper/main.tex` + `sec1..sec13` — the paper, builds clean

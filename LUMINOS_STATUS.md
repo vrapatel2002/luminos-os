@@ -247,8 +247,12 @@ against a placeholder profile, and `score.py` says so on every run.
 | §4 import-count test | 🟥 Backwards | Protected binary imports **more** (56 DLLs/1178) than clean (52/753) |
 | §4 surviving tests | ✅ 6-for-6 | Missing `.text` + RWX section + protection strings + size |
 | Paper §4 correction pass | ⏸️ Blocked | User: *"do not continue to write the old paper now."* Staged in `GENERALIZATION.md` |
-| Third title, `Returning to Mia` | 📋 Untested | 14 GB repack; install stalled at 0 bytes in the §5 failure mode. Needs go-ahead |
-| §7–§12 graphics claims | 📋 Untested | No second D3D12 title installed on the Linux side |
+| Third title, `Returning to Mia` | ✅ **Tested 2026-08-20** | 14 GB FitGirl repack. §3 passes, §4's strong test unavailable (unsigned), **§5 fails**, **§6 succeeds** → 18 GB working game at `/mnt/win-os/miaraw` |
+| §3 malware triage | ✅ Generalizes | 11/11 payload files **byte-identical** 007↔Mia. Triage is a delta problem: once per toolchain, not per game |
+| §5 installer path | 🟥 0-for-3 titles | Both fixes applied correctly and it still stalls — a **third** failure mode §5 does not describe. Read offset frozen at byte 31, srep helper never spawned |
+| §6 direct-unarc path | ✅ 2-for-2 titles | 7/7 containers rc=0 on Mia. **This is the primary method, not the fallback** |
+| `~/re/tools/fginstall.sh` / `fgextract.sh` | ✅ New | Game-agnostic §5 and §6 drivers, generalized from the `*007*` originals |
+| §7–§12 graphics claims | 📋 Untested + often moot | No second D3D12 title on Linux. Mia ships a **native Linux build** (Ren'Py 8.3.3, ran clean on the 780M) — check for one before doing graphics work |
 
 Record lives in `docs/paper/GENERALIZATION.md`, not here.
 
