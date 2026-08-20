@@ -3415,3 +3415,125 @@ branch and one line. Add them if a GL-only Wine app turns up on the wrong card.
 
 **Undo.** Delete the three added lines from `/usr/local/bin/luminos-wine-launcher`.
 Nothing else on the system was changed for this bug.
+
+---
+
+## BUG-137 — 007 First Light does not crash and does not hang; it waits on nine dialogs you cannot see
+<!-- [CHANGE: claude-code | 2026-08-19] -->
+
+**Status: OPEN on NVIDIA, WORKED AROUND on AMD.** The game is playable today via
+`007` (`/usr/local/bin/007` → `~/re/tools/007-run.sh`), which defaults to the
+Radeon 780M. Reached the title screen ("Press [F] to play") on 2026-08-19.
+
+**Symptom.** Under GE-Proton10-34 on the RTX 4050 the game starts normally, opens
+a real 1920x1080 window, holds ~1960 MiB of VRAM, spawns `vkd3d-swapchain`,
+`vkd3d_queue` and `vkd3d_fence` threads — and then stops. GPU utilisation falls to
+**0%**, SM clock to **210 MHz**, RSS freezes at a fixed value, and the window stays
+black forever. Nothing is logged. `rc` is never returned; the process lives.
+
+**Cause.** Nine of the game's threads are each blocked inside a `MessageBox` that
+Wine creates but never paints. All nine carry the same text:
+
+    Assertion failed!
+    Program: <program name unknown>
+    File:    ../src-wine/dlls/winevulkan/loader_thunks.c
+    Line:    3151
+    Expression: !status && "vkCreateComputePipelines"
+
+`status` there is the **NTSTATUS of the Unix-side call**, not a `VkResult`. Under
+system Wine 11.14 the identical fault prints
+`err:vulkan:vkCreateComputePipelines Exception 0xc0000005 in Unix call.` and kills
+the process instead of opening a dialog. **Proton and system Wine are hitting one
+bug, not two** — an earlier working theory that mixing GE-Proton's VKD3D-Proton
+with system Wine's winevulkan caused the segfault is hereby **retracted**.
+
+### How to see the dialogs
+
+They are invisible to screenshots, so ask the wineserver:
+
+```bash
+cd "/mnt/win-os/007 First Light/Retail"
+STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam" \
+STEAM_COMPAT_DATA_PATH="$HOME/re/007/protondata" \
+dgpu-exec-v2 env DISPLAY=:0 XAUTHORITY=/run/user/1000/xauth_* WINEDEBUG=-all \
+  "$GE/proton" runinprefix winedbg --command "info wnd"
+```
+
+Look for class **`#32770`** (the Win32 dialog class) with `&Abort` / `&Retry` /
+`&Ignore` buttons. **`winedbg` truncates window text to 14 characters**, so it will
+only ever show you `Assertion fail`. To read the whole message, grep the process's
+memory — and note the process is setgid via `dgpu-exec-v2` and therefore
+**non-dumpable**, so `/proc/PID/mem` and `/proc/PID/maps` need `sudo`.
+
+The `+err` log gives the same hint one step earlier and much more cheaply:
+`fixme:oleacc:find_class_data unhandled window class: L"#32770"` x29 alongside
+`L"Button"` x9. **A `#32770` in a Wine log means a message box exists.**
+
+### Ruled out by measurement — do not re-chase these
+
+| Theory | How it died |
+|---|---|
+| Shader compilation / still working | 4 threads did grind in `libnvidia-gpucomp.so` for ~10 min, but that was the game's own 259 MB `Retail/PipelineCache.bin`; its fd position reached the file size exactly. A second run with a warm `vkd3d-proton.cache.write` hit the *identical* stall in **46 s**. |
+| VRAM exhaustion | `jobhunt-llm.service` was holding 3576 MiB of the 6141 MiB card. Stopped it → 2 MiB used → stalled in the same place. |
+| Online / DRM check | Zero TCP sockets. The RUNE Steam emulator works fine; it writes `drive_c/users/Public/Documents/Steam/RUNE/3768760/stats.ini`. |
+| Missing virtual desktop | Adding the desktop *did* produce a window (keep it — see below), but the stall is unchanged. |
+| `VK_EXT_shader_module_identifier` | `VKD3D_DISABLE_EXTENSIONS=VK_EXT_shader_module_identifier` → still `assert=9`. |
+| `VK_EXT_device_generated_commands`, `VK_EXT_descriptor_buffer`, stale `vkd3d-proton.cache` | All tested under system Wine; all still crashed (7 s / 15 s / 19 s / 6 s). |
+| Wrong Wine version under VKD3D-Proton | Disproved by this bug's own evidence: real Proton hits the same assert. |
+
+**The decisive split:** the same build on the **AMD Radeon 780M** gives
+`assert=0` and 72% GPU busy. So the fault is on the NVIDIA side of
+`vkCreateComputePipelines`, not in Wine's thunk and not in the game.
+
+### What made it work (AMD path)
+
+1. **GE-Proton10-34 via `proton run`,** not system Wine. Needs *both*
+   `STEAM_COMPAT_CLIENT_INSTALL_PATH` and `STEAM_COMPAT_DATA_PATH` or it refuses.
+2. **A virtual desktop, set in the prefix registry.** `proton run` has no
+   `explorer /desktop=` equivalent, so:
+   ```
+   HKCU\Software\Wine\Explorer          Desktop = Default
+   HKCU\Software\Wine\Explorer\Desktops Default = 1920x1080
+   ```
+   `007-run.sh` now rewrites these whenever `--res=` disagrees with the prefix.
+3. `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/**radeon_icd.json**` — *not*
+   `radeon_icd.x86_64.json`, which does not exist on Arch and is still the stale
+   path in `luminos-gpu-launch:65`.
+4. `__EGL_VENDOR_LIBRARY_FILENAMES=…/50_mesa.json` (the system default; on the
+   NVIDIA branch this **must** become `60_nvidia.json` — BUG-136).
+
+First launch spends **~8 minutes** on a "PRE-LOADING SHADERS" screen (24% → 65% →
+done). It is cached after that: the next start reached the title screen in **72 s**.
+
+### The bisection harness
+
+`~/re/tools/007-try.sh <label> [--igpu] [VAR=VAL …]` runs one configuration and
+prints one line: `label alive=Y assert=9 gpu=0% rss=… secs=…`. `assert` counts
+`#32770` windows, so **`assert=0` with `gpu>0` is the shape of a run that works**.
+Negative-tested against the known-bad config before it was trusted; it correctly
+reported `assert=9`.
+
+### Two traps that cost time here
+
+- **`pgrep -x 007FirstLight.exe` matches nothing.** Linux truncates `comm` to 15
+  characters; the name to match is `007FirstLight.e`.
+- **"No window" in a screenshot is usually a stacking problem, not a missing
+  window.** KWin reported it the whole time as
+  `steam_proton | Wine Desktop | 960x568 @270,166` — and 960x568 is *correct*, not
+  half-scale: KDE runs at scale 2, so a 1920x1080 physical window is 960x540
+  logical plus a 28px titlebar. It simply sits behind Chrome. Raise it with a KWin
+  script (`workspace.windowList()` → set `workspace.activeWindow`) before capturing.
+
+### Next steps on the NVIDIA path, cheapest first
+
+1. Delete `Retail/PipelineCache.bin` (259 MB, the game's own D3D12 pipeline
+   library) and let it rebuild against this driver.
+2. Bisect `VKD3D_DISABLE_EXTENSIONS` more widely, and try
+   `VKD3D_CONFIG=pipeline_library_ignore_spirv`.
+3. Capture the faulting address on the Unix side to confirm the fault is inside
+   `libnvidia-gpucomp.so` rather than Wine's structure conversion.
+
+**Undo.** `007` is a single file. Restore the previous NVIDIA-default behaviour by
+changing `GPU=igpu` back to `GPU=nvidia` in `~/re/tools/007-run.sh` and
+re-installing it. Nothing else on the system was changed for this bug; the
+`jobhunt-llm.service` stop was temporary and it was restarted.
