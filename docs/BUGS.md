@@ -3859,10 +3859,52 @@ must match the X window **exactly**. RADV reports a real min/max range and clamp
 which is the entire reason `007 --igpu` never showed this and why it looked for a
 while like an NVIDIA driver fault.
 
-### The fix
+### The fix — it has TWO halves, and the first one alone is not enough
 
-`~/re/tools/007-run.sh` now sizes the virtual desktop from the **work area**, not
-the panel mode:
+**Correction, same day.** This was first fixed with work-area sizing alone, and
+Shawn came straight back with *"the game is still not fullscreen its windowed
+mode."* He was right. Sizing to the work area stops the black screen, but a Wine
+virtual desktop is an **ordinary window** — KWin gives it a titlebar and parks it
+beside the bar. Fixing the crash is not the same as fixing the game.
+
+**Half 2 is a KWin rule**, `~/.config/kwinrulesrc` `[3]`:
+
+```ini
+Description=Luminos: Wine virtual desktop is fullscreen (BUG-138)
+title=Wine Desktop
+titlematch=1
+fullscreen=true
+fullscreenrule=2      # 2 = Force
+noborder=true
+noborderrule=2
+```
+
+Matched on the window **title**, not `wmclass=steam_proton`, which would hit every
+Proton game whether or not it wants this. Reload with
+`qdbus org.kde.KWin /KWin reconfigure`. Previous config backed up as
+`~/.config/kwinrulesrc.bak-2026-08-20`.
+
+**The two halves must agree or the black screen comes straight back**, because the
+rule changes what size the window gets. So the launcher **detects** the rule
+rather than assuming it:
+
+```sh
+if pgrep -x kwin_wayland && grep -qF "$KWINRULE" ~/.config/kwinrulesrc; then
+  RES = _NET_DESKTOP_GEOMETRY   # 2880x1800 - the window will be forced fullscreen
+else
+  RES = _NET_WORKAREA           # 2760x1800 - the most an ordinary window can get
+fi
+```
+
+Delete the rule and the launcher quietly returns to the windowed-but-working size.
+That is the property worth keeping: **neither half can silently break the other.**
+Verified fullscreen by screenshot — title screen edge to edge, no titlebar, no
+bar, window `0,0 1440x900` logical = 2880x1800, swapchain 2880x1800, 0 failures.
+
+### Half 1 — the size
+
+`~/re/tools/007-run.sh` sizes the virtual desktop from the **work area** (or the
+full screen when the rule is in force), not the panel mode:
 
 ```sh
 _wa=$(xprop -root _NET_WORKAREA | tr -d ' ' | cut -d= -f2)
@@ -3913,20 +3955,44 @@ Also: this is exactly the failure mode where a *working* second GPU misleads you
 AMD rendering fine did not mean the request was reasonable, only that RADV is
 forgiving.
 
-### The alternative fix, deliberately not taken
+### The screenshot problem, and how to actually see the screen
 
-A KWin window rule forcing the Wine Desktop window fullscreen would give it the
-whole 2880x1800 and hide the bar behind the game. That is arguably nicer to look
-at — the current fix leaves a 60-logical-px strip of bar visible at the left — but
-it costs a desktop config that lives outside the launcher, applies to one window
-class by name, and silently stops working if the class ever changes. Work-area
-sizing is one file, self-describing, and correct on any bar width. If the visible
-strip becomes annoying, the rule is the upgrade path.
+Half of this bug was invisible for an hour because I could not look at the screen.
+For the record, on **KWin/Wayland with Caelestia**:
+
+- **`spectacle` DOES work headless** — `spectacle -b -n -f -o out.png`. It appears
+  to produce nothing when run from an agent shell because it needs the *live*
+  session's `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR` **and**
+  `DBUS_SESSION_BUS_ADDRESS`. Lift all three out of `/proc/$(pgrep -x plasmashell)/environ`.
+  This corrects the earlier "spectacle produces nothing" note.
+- **`grim` does not** — KWin has no wlr-screencopy.
+- **`ffmpeg -f x11grab` returns a BLACK frame.** KWin redirects XWayland windows,
+  so the X root is not composited. It looks exactly like the bug you are chasing,
+  which is a nasty way to be misled. Do not use it here.
+- **`xwininfo`/`xdotool`/`wmctrl` are still missing.** For geometry use
+  `/opt/claude-desktop-legacy/resources/locales/kwin-portal-bridge windows` (JSON,
+  **logical** px) and `xprop -root` for the root properties.
+
+### A second, unrelated thing that looks like this bug
+
+Shawn also read the game as *"not running on nvidia."* **It was** — `nvidia-smi`
+listed `./007FirstLight.exe` at 2074 MiB, 137 fds on `/dev/nvidia0`, `Gid: 948`
+(the DECISION 25 gate). What he saw was the game's own VRAM meter pegged **red at
+2,059 MB**, because `jobhunt-llm.service` holds **3576 of the card's 6141 MiB** and
+the 4050's VRAM is *dedicated* — it does not borrow from system RAM the way the
+780M does. A game reporting 2 GB of VRAM looks exactly like an integrated GPU.
+The launcher already prints the holders before starting and deliberately does not
+act on them; that stays the user's call.
 
 ### Undo
 
-`007` is a single file. `007 --res=2880x1800` restores the old (broken) request
-for one run; deleting the `_NET_WORKAREA` block in `~/re/tools/007-run.sh` and
-re-installing restores it permanently. Nothing else on the system was changed —
+Two things to undo, in this order. **Delete rule `[3]` from
+`~/.config/kwinrulesrc`** (or restore `kwinrulesrc.bak-2026-08-20`) and run
+`qdbus org.kde.KWin /KWin reconfigure` — the launcher detects its absence and
+drops back to work-area sizing by itself, so the game keeps working, just
+windowed. Then, if you want the launcher back too: `007` is a single file,
+`007 --res=2880x1800` restores the old (broken) request for one run, and deleting
+the `_NET_WORKAREA` block in `~/re/tools/007-run.sh` restores it permanently.
+Nothing else on the system was changed —
 the `jobhunt-llm.service` stop during the VRAM experiment was temporary and it was
 restarted and verified `active`.

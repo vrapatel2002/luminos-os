@@ -1,6 +1,6 @@
-# HANDOFF — 007 First Light: the black screen (BUG-138). FIXED.
-# [CHANGE: claude-code | 2026-08-20] — Response 20
-Last updated: 2026-08-20 — Response 20
+# HANDOFF — 007 First Light: the black screen (BUG-138). FIXED, both halves.
+# [CHANGE: claude-code | 2026-08-20] — Response 21
+Last updated: 2026-08-20 — Response 21
 
 **Read this whole file before touching anything.**
 
@@ -16,7 +16,15 @@ HANDOFF.md and it is overwritten in place.
 > "Bro can you check whats wrong with 007 is just black screen with audio running of game but
 > visual are just black? what is this and does this happen ?"
 
-Two questions: what is it, and is it a recurring thing. Both are answered, and it is fixed.
+then, after the first fix landed:
+
+> "hey but the game is still not fullscreen its windowed mode. and also its not running on nvidia
+> gpu look why ?"
+
+**He was right on the first count and the correction is the lesson of this turn: fixing the crash
+is not the same as fixing the game.** I stopped at "0 swapchain failures" and called it done. The
+game was still a window with a titlebar sitting next to the bar. Second count was a
+misreading, but a completely reasonable one — see below.
 
 ---
 
@@ -56,6 +64,26 @@ shader-compiler segfault; this is `assert=0 gpu=100%`).
    = physical 2760x1800, matching the swapchain exactly.
 5. **`docs/BUGS.md` — BUG-138 written up in full**, including the do-not-re-chase list.
 
+### Then the correction — the second half of the fix
+
+6. **KWin rule added**, `~/.config/kwinrulesrc` `[3]`: matched on the window **title**
+   `Wine Desktop` (exact), `fullscreen=true fullscreenrule=2`, `noborder=true noborderrule=2`.
+   Title, **not** `wmclass=steam_proton`, which would hit every Proton game. Old config saved as
+   `~/.config/kwinrulesrc.bak-2026-08-20`. Reload: `qdbus org.kde.KWin /KWin reconfigure`.
+7. **The launcher now DETECTS that rule** instead of assuming either size — `_NET_DESKTOP_GEOMETRY`
+   (2880x1800) when it is in force, `_NET_WORKAREA` (2760x1800) when it is not. The two halves must
+   agree or BUG-138 returns; this way **neither half can silently break the other**, and deleting
+   the rule leaves a working-but-windowed game rather than a black screen.
+8. **Verified by SCREENSHOT this time, not just by log counts** — full-bleed title screen, no
+   titlebar, no bar, window `0,0 1440x900` logical = 2880x1800, swapchain 2880x1800, 0 failures,
+   96% GPU.
+9. **"Not running on NVIDIA" — measured, and it IS.** `nvidia-smi` lists `./007FirstLight.exe` at
+   2074 MiB, 137 fds on `/dev/nvidia0`, `Gid: 948` (the DECISION 25 gate). What he actually saw was
+   the game's own VRAM meter pegged **red at 2,059 MB**, because `jobhunt-llm.service` holds
+   **3576 of the card's 6141 MiB** and the 4050's VRAM is *dedicated*. A game reporting 2 GB of
+   VRAM looks exactly like an iGPU. **Open question for Shawn: stop `jobhunt-llm` while playing?**
+   Not done — the launcher deliberately reports holders and does not act on them.
+
 ---
 
 ## IN PROGRESS
@@ -69,12 +97,14 @@ Nothing is mid-flight. Tree is consistent.
 
 ## Next steps
 
-1. **Ask Shawn whether the 60px strip of bar at the left edge bothers him.** The fix sizes the game
-   to the work area, so the bar stays visible beside it. The upgrade, if he wants it, is a KWin
-   window rule forcing the Wine Desktop window fullscreen — deliberately not done, see BUG-138's
-   "alternative fix" section for the trade-off.
-2. **Re-verify `007 --igpu` once.** It is expected to be unaffected (RADV clamps, and 2760x1800 is
-   if anything more correct), but it was not re-run after the change.
+1. **Ask Shawn whether to stop `jobhunt-llm.service` while playing.** It holds 3576 of 6141 MiB and
+   is why the game's VRAM meter is red. `sudo systemctl stop jobhunt-llm` frees it; it is a system
+   unit, not `--user`. **His call, not mine** — the jobhunt pipeline is his actual goal.
+2. **Re-verify `007 --igpu` once.** Not re-run since either change. It should now also come up
+   fullscreen (the KWin rule is GPU-agnostic) at 2880x1800.
+3. **Consider whether the KWin rule should be in the repo**, not just in `~/.config`. Right now it
+   is live-only config with a `.bak` beside it and nothing in `scripts/` puts it there, so a
+   fresh machine would get the windowed fallback silently.
 3. Paper work — **still blocked on Shawn: "do not continue to write the old paper now."**
    Corrections for §4, §5, §6 and a new §13 are staged in `docs/paper/GENERALIZATION.md`.
 4. Cheap: `drmcheck.py` over more clean PEs under `/mnt/win-os/Program Files`.
@@ -99,8 +129,23 @@ Nothing is mid-flight. Tree is consistent.
 
 ### From this turn (BUG-138)
 
+- **"The error stopped" is not "the feature works." LOOK AT IT.** I reported this fixed on a log
+  count of 0 without ever seeing the screen. The game was still windowed with a titlebar. One
+  screenshot would have caught it before Shawn had to.
+- **`spectacle` DOES work headless** — `spectacle -b -n -f -o out.png`. The earlier "spectacle
+  produces nothing" note was wrong: it needs the live session's `WAYLAND_DISPLAY`,
+  `XDG_RUNTIME_DIR` **and** `DBUS_SESSION_BUS_ADDRESS`, all three lifted out of
+  `/proc/$(pgrep -x plasmashell)/environ`. `grim` still does not work (no wlr-screencopy).
+- **`ffmpeg -f x11grab` gives a BLACK frame under KWin** — XWayland windows are redirected, so the
+  X root is not composited. It looks precisely like the black-screen bug you are chasing. Do not
+  use it to check for one.
 - **A swapchain error is a window-size question first and a driver question last.** Six experiments
   went hunting a broken NVIDIA stack. One `xprop` call settled it.
+- **A Wine virtual desktop is an ordinary window.** It gets a titlebar and honours the bar's
+  exclusive zone. Fullscreen takes a KWin rule; nothing about `explorer /desktop=` implies it.
+- **"It's not on the NVIDIA" was the VRAM meter, not the GPU.** The 4050's 6 GB is dedicated, so a
+  resident LLM leaves the game ~2 GB and every in-game readout then looks like an iGPU. Check
+  `nvidia-smi --query-compute-apps` and the fd count on `/dev/nvidia0` before believing the symptom.
 - **A working second GPU is misleading here.** AMD rendered fine, which felt like proof the request
   was reasonable. It only proved RADV clamps and NVIDIA does not.
 - **`007-try.sh` cannot test this fix.** The harness *reads* the prefix registry and never sets it;
@@ -142,10 +187,13 @@ Nothing is mid-flight. Tree is consistent.
 
 ## Files touched
 
-- `~/re/tools/007-run.sh` — work-area sizing; `RES` block moved below session resolution; header
-  comment and `--help` range updated. **The fix.**
+- `~/re/tools/007-run.sh` — work-area/full-screen sizing with KWin-rule detection; `RES` block moved
+  below session resolution; header comment and `--help` range updated. **Half 1 of the fix.**
+- `~/.config/kwinrulesrc` — new rule `[3]`, fullscreen + noborder for `Wine Desktop`.
+  **Half 2 of the fix.** Backup at `~/.config/kwinrulesrc.bak-2026-08-20`. **Not in the repo** —
+  see Next Steps 3.
 - `/usr/local/bin/007` — reinstalled from it, verified identical.
-- `docs/BUGS.md` — BUG-138, full write-up.
+- `docs/BUGS.md` — BUG-138, full write-up + the same-day correction + the screenshot-tooling note.
 - `HANDOFF.md` — this file, overwritten in place.
 - `LUMINOS_STATUS.md` — bug line.
 - Luminos Notes + brain log — one `[BUG]` entry.
