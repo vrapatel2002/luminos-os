@@ -3807,3 +3807,126 @@ changing `GPU=igpu` back to `GPU=nvidia` in `~/re/tools/007-run.sh` and
 re-installing it; restore the old window size with `007 --res=1920x1080`. Nothing
 else on the system was changed for this bug; the `jobhunt-llm.service` stop was
 temporary and it was restarted.
+
+---
+
+## BUG-138 — 007 First Light: black screen, audio playing, GPU at 100%. The window was 120 pixels too small.
+<!-- [CHANGE: claude-code | 2026-08-20] -->
+
+**Status: FIXED, 2026-08-20.** Type `007`.
+
+**This is NOT a relapse of BUG-137.** BUG-137 was `assert=9 gpu=0%` — nine invisible
+dialogs, nothing rendering because the shader compiler had segfaulted. This is
+`assert=0 gpu=100%` — the game is running perfectly, computing every frame, and
+throwing all of them away because it cannot get a surface to put them on.
+
+### The one-line cause
+
+The launcher asked for a **2880x1800** virtual desktop. KWin can only give it
+**2760x1800**, because Caelestia's left bar reserves an exclusive zone of 60
+logical (= 120 physical) pixels. **NVIDIA refuses a swapchain that is not exactly
+the window size.** AMD does not care. `2880 − 2760 = 120` = the bar.
+
+```
+xprop -root _NET_DESKTOP_GEOMETRY  ->  2880, 1800     what the panel is
+xprop -root _NET_WORKAREA          ->  120, 0, 2760, 1800   what you can actually have
+```
+
+### What it looked like
+
+One error, 894 times in 68 seconds, in a 42,599-line log — and **nothing else**:
+
+```
+info:vkd3d-proton:dxgi_vk_swap_chain_init: Creating swapchain (2880 x 1800), BufferCount = 2.
+err:vkd3d-proton:dxgi_vk_swap_chain_recreate_swapchain_in_present_task:
+    Failed to create swapchain, vr -13.
+```
+
+`vr -13` is **`VK_ERROR_UNKNOWN`**, which is the driver's way of saying "no".
+The *initial* create succeeds; every *recreate-in-present* fails, forever, so no
+frame is ever presented. Hence: audio fine, GPU pegged, screen black.
+
+### Why NVIDIA and not AMD
+
+`vulkaninfo` reports, for an NVIDIA surface:
+
+```
+minImageExtent = maxImageExtent = currentExtent
+```
+
+All three are the same number. There is no range to negotiate — the swapchain
+must match the X window **exactly**. RADV reports a real min/max range and clamps,
+which is the entire reason `007 --igpu` never showed this and why it looked for a
+while like an NVIDIA driver fault.
+
+### The fix
+
+`~/re/tools/007-run.sh` now sizes the virtual desktop from the **work area**, not
+the panel mode:
+
+```sh
+_wa=$(xprop -root _NET_WORKAREA | tr -d ' ' | cut -d= -f2)
+_w=$(echo "$_wa" | cut -d, -f3); _h=$(echo "$_wa" | cut -d, -f4)
+```
+
+with the old sysfs `drm/modes` read kept as the fallback for Hyprland, a bare TTY,
+or any session with no `xprop`. **This block had to move below the
+session-resolution code** — `xprop` needs `DISPLAY`, and the launcher may be
+started by an agent or a systemd unit with no session in its environment.
+
+| | before | after |
+|---|---|---|
+| requested desktop | 2880x1800 | **2760x1800** |
+| KWin window (logical) | 1380x900 | 1380x900 |
+| swapchain created | 2880x1800 | **2760x1800** |
+| `Failed to create swapchain` | **894** | **0** |
+| GPU | 100% (wasted) | 98% |
+| result | black screen | renders |
+
+Verified by running the installed `/usr/local/bin/007`, not the harness — the
+harness reads the prefix registry and does not set it, so it cannot test this fix.
+KWin then reported the window as `steam_proton 60,0 1380x900 'Wine Desktop'`,
+matching the swapchain exactly.
+
+### Measured and eliminated — do NOT re-chase any of these
+
+- **Driver mismatch.** `/proc/driver/nvidia/version` and the installed packages
+  are both 610.57.04. Consistent.
+- **Kernel GPU faults.** Zero NVRM/Xid lines in `dmesg` since boot.
+- **NVIDIA presentation in general.** `vkcube --wsi xcb` completes 120 frames on
+  both cards. (The flag is `--wsi xcb`; `--xcb` just prints usage.)
+- **VRAM pressure.** Stopping `jobhunt-llm` took free VRAM from 2214 MiB to
+  5799 MiB and the failure count went **up**, to 5362.
+- **NVIDIA Reflex / `VK_NV_low_latency2`.** 586 failures with it disabled.
+- **PRIME offload vars** (`__NV_PRIME_RENDER_OFFLOAD`, `__VK_LAYER_NV_optimus`,
+  `__GLX_VENDOR_LIBRARY_NAME`). 546 failures.
+- **Lutris.** Its entry uses the `linux` runner and execs `/usr/local/bin/007`;
+  it is not in the path.
+- **`kwinrc`.** Dated Aug 14; `[Xwayland] Scale=2` predates the working runs.
+
+### The generalisable lesson
+
+**A swapchain error is a window-size question first and a driver question last.**
+Six experiments went looking for a broken NVIDIA stack. The measurement that
+actually settled it was one `xprop` call, and the arithmetic was `2880 − 2760`.
+Also: this is exactly the failure mode where a *working* second GPU misleads you —
+AMD rendering fine did not mean the request was reasonable, only that RADV is
+forgiving.
+
+### The alternative fix, deliberately not taken
+
+A KWin window rule forcing the Wine Desktop window fullscreen would give it the
+whole 2880x1800 and hide the bar behind the game. That is arguably nicer to look
+at — the current fix leaves a 60-logical-px strip of bar visible at the left — but
+it costs a desktop config that lives outside the launcher, applies to one window
+class by name, and silently stops working if the class ever changes. Work-area
+sizing is one file, self-describing, and correct on any bar width. If the visible
+strip becomes annoying, the rule is the upgrade path.
+
+### Undo
+
+`007` is a single file. `007 --res=2880x1800` restores the old (broken) request
+for one run; deleting the `_NET_WORKAREA` block in `~/re/tools/007-run.sh` and
+re-installing restores it permanently. Nothing else on the system was changed —
+the `jobhunt-llm.service` stop during the VRAM experiment was temporary and it was
+restarted and verified `active`.
