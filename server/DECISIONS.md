@@ -1071,3 +1071,67 @@ into the episode, so those late intro timestamps are correct, not a misdetection
 **An API key was added** to the Jellyfin database as `luminos-admin` (row 3, alongside the
 existing `Sonarr` and `Seerr` keys) so the task can be driven over the API. It is stored at
 `/root/.jellyfin-token`, mode 600. Delete the row to revoke it.
+
+---
+
+## DECISION 79
+# [CHANGE: claude-code | 2026-08-20]
+### The wire is the default route now — a Cat 6 cable and one metric were both needed
+
+**Decision:** replace the router→server ethernet cable with Cat 6, and add a static default
+route via `enp2s0` at metric 100 so internet-bound traffic actually uses it.
+
+**The cable was the fault, and it was measurable.** Before the swap `ethtool enp2s0` reported
+**`Speed: 100Mb/s`** while the *link partner already advertised `1000baseT/Full`* — the router
+and the Realtek RTL8111 were both willing, so the only remaining variable was the cable
+(gigabit needs all four pairs; 100Mb/s needs two). After the swap: **`Speed: 1000Mb/s`,
+`Duplex: Full`, zero RX/TX errors.**
+
+**The second half of the problem: a gigabit cable that nothing was using.** systemd-networkd
+gives the wired DHCP route the default metric **1024**, while `25-wireless.network` pins
+wlan0 at **`RouteMetric=600`**. Lower wins, so `ip route get 8.8.8.8` still answered
+`dev wlan0`. Every Usenet download and every remote Tailscale stream was going over a 1x1
+2.4 GHz radio. **Re-cabling on its own changed nothing measurable** — that is the trap.
+
+**Fixed with a drop-in, `20-wired.network.d/10-prefer-cable.conf`, adding one route:**
+```
+[Route]
+Gateway=192.168.2.1
+Metric=100
+```
+**Deliberately NOT done by lowering `[DHCPv4] RouteMetric`** on the wired file. That would
+also outrank the on-link `192.168.2.0/24` route and move reply traffic for **192.168.2.61**
+— the address this headless box is administered over — onto the wire. Changing the admin path
+was an unnecessary risk for zero benefit. One default route was the whole fix.
+
+**Fallback is automatic.** The static route lives with the wired link; pull the cable, the
+carrier drops, networkd withdraws the route, and wlan0's metric-600 default takes over. This
+is by design and was *not* physically tested — nobody unplugged anything.
+
+**Measured, internet-facing, 4 parallel streams × 50 MB, two runs each:**
+
+| Path | Download | Upload |
+|---|---|---|
+| Cat 6 cable (`enp2s0`/.62) | **927 / 958 Mbps** | **754 / 657 Mbps** |
+| Wifi (`wlan0`/.61) | 95 / 107 Mbps | 59 / 66 Mbps |
+| Unbound, after the change | **974.6 Mbps** | **755.1 Mbps** |
+
+LAN throughput to the G14 went **10.7 MB/s → 41 MB/s**; that 41 is the *G14's* 2.4 GHz wifi,
+not the server. The server's own remaining ceiling is the HDD at **88.8 MB/s (~710 Mbps)**.
+
+**Applied behind a 5-minute auto-revert** (`systemd-run --on-active=300` removing the drop-in
+and reloading), disarmed only after DNS, an internet fetch, Tailscale, all six services,
+Prowlarr's indexers, and Jellyfin on **both** .61 and .62 were confirmed good. Do remote
+network changes this way.
+
+### Traps this turned up
+- **`systemd-run` does not inherit your `cd`.** `cd /tmp && sudo systemd-run ... python3 -m
+  http.server` serves from `/`. Three "45–90 KB/s" readings were 460-byte **404 pages** being
+  timed as if they were transfers. Always assert `%{http_code}` and `%{size_download}`, never
+  read `%{speed_download}` alone.
+- **Cloudflare's `/__down` returns 403 above ~75 MB.** A `bytes=100000000` request yields
+  `code=403 size=1`, which prints as a plausible-looking `0.0 Mbps` rather than an error.
+- **Single-stream `curl` understates a fast link.** 25 MB at ~500 Mbps completes in 0.38 s and
+  measures mostly ramp-up. Use 4 parallel streams and sum.
+- **`/tmp` on this box is tmpfs.** A "disk" benchmark against a file there read at 8.6 GB/s and
+  never touched `/dev/sda`. `df | grep -v tmpfs` hides exactly the fact you need.

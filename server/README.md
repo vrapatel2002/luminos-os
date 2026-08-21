@@ -181,6 +181,17 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 - **`ffmpeg` on `$PATH` is not the ffmpeg Jellyfin uses.** Jellyfin runs
   `/usr/lib/jellyfin-ffmpeg/ffmpeg`. The system build has no `chromaprint`; the Jellyfin one
   does. Check the right binary before concluding a codec or muxer is missing.
+- **A faster cable does not mean the box uses it.** [CHANGE: claude-code | 2026-08-20] After the
+  Cat 6 swap the wire ran at a full gigabit and the server still sent every byte over wifi —
+  `wlan0`'s DHCP route is metric **600**, the wired one gets systemd-networkd's default **1024**,
+  and lower wins. Finish a cabling change with `ip route get 8.8.8.8`, not `ethtool`. DECISION 79.
+- **Never read `%{speed_download}` without `%{http_code}`.** Three "45–90 KB/s" readings here were
+  460-byte **404 pages** timed as if they were transfers, and Cloudflare's `/__down` returns **403**
+  above ~75 MB while still printing as a plausible `0.0 Mbps`. A speed number cannot fail loudly.
+- **`systemd-run` does not inherit your working directory.** `cd /tmp && sudo systemd-run ...
+  python3 -m http.server` serves `/`. Use `--working-directory=`.
+- **`/tmp` is tmpfs on this box.** A benchmark against a file there measures RAM (8.6 GB/s observed)
+  and never touches `/dev/sda`. `df | grep -v tmpfs` hides precisely the line you need.
 - **Render node numbers are machine-specific.** `renderD128` is Intel here and NVIDIA on the G14.
   Resolve with `ls -l /sys/class/drm/renderD12*/device/driver`, never carry the number over.
 - **In `systemd-resolved`, DNS set on a *link* beats DNS set globally.** Configuring
