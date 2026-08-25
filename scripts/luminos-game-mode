@@ -1,0 +1,135 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-08-25] DECISION 82.
+# ============================================================================
+# luminos-game-mode — take the power limits off for a foreground game, then
+#                     put them back when it exits.
+#
+#   luminos-game-mode status
+#   luminos-game-mode on  [comm]     # comm = exact process name to watch
+#   luminos-game-mode off
+#
+# WHAT IT ACTUALLY CHANGES, AND WHY EACH ONE
+#   1. nvidia-powerd  — Dynamic Boost. This is the ONE that matters. The 4050's
+#      TGP is 55 W without it and up to ~88 W with it. Measured on 007 First
+#      Light: power pinned at 54.4/55.0 W with SM clocks sagging 2250-2490 MHz,
+#      then a flat 2640 MHz at 65 W once boost was on, with every throttle
+#      reason clear. `nvidia-smi -pl` does NOT work on this mobile GPU (BUG-069)
+#      — nvidia-powerd is the only mechanism that moves the TGP on a GA403UU.
+#   2. platform_profile=performance — the ASUS embedded controller's shared
+#      CPU+GPU power budget. `balanced` caps the package before either chip
+#      reaches its own limit, so this has to move or (1) cannot be spent.
+#   3. CPU governor + EPP = performance. amd-pstate-epp at
+#      powersave/balance_power held the cores at ~3.07 GHz of 5.14 GHz. Games
+#      are latency-bound on a couple of threads, and that is exactly the case
+#      the balanced EPP ramp handles worst.
+#   4. vm.swappiness 60 -> 10. With 14 GB total and a 6.5 GB game, the kernel
+#      will page game memory into zram mid-frame. That is a stutter, not a
+#      slowdown, and it is the kind users describe as "lag".
+#
+# THINGS THAT COST TIME, DO NOT REDO
+#  - FANS ARE USUALLY ALREADY AT 100% BEFORE YOU START. Curve v5 hits 100% at
+#    70c and a loaded GPU passes that in seconds, so "pin the fans" reads like
+#    a fix and changes nothing. Check `sensors` before believing it helped.
+#  - DO NOT WATCH THE GAME WITH `pgrep -f`. `luminos-train-mode on <pattern>`
+#    does, and its keep-alive loop carries that pattern in its OWN argv, so the
+#    watch matches itself, never fires, and leaves the fans pinned and
+#    nvidia-powerd unmasked forever. Verified 2026-08-25. Use `pgrep -x` on the
+#    exact comm.
+#  - comm IS TRUNCATED TO 15 CHARACTERS. `007FirstLight.exe` never matches;
+#    `007FirstLight.e` does.
+#  - nvidia-powerd IS MASKED ON PURPOSE (BUG-047 idle-drain policy). Leaving it
+#    running after the game is a real battery regression, which is why `off`
+#    re-masks it and why `on` always arms a watcher.
+# ============================================================================
+
+set -u
+
+STATE_DIR="$HOME/.local/state/luminos"
+STATE="$STATE_DIR/game-mode.state"
+UNIT="luminos-game-mode-watch"
+
+say()  { echo "game-mode: $*"; }
+note() { command -v notify-send >/dev/null 2>&1 && notify-send "Luminos Game Mode" "$1" --icon="${2:-dialog-information}" 2>/dev/null; }
+
+cpu_write() { # $1 = file basename, $2 = value
+  echo "$2" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/"$1" >/dev/null 2>&1
+}
+
+cmd_on() {
+  local watch="${1:-}"
+  mkdir -p "$STATE_DIR"
+
+  # Save what we are about to overwrite, so `off` restores THIS machine's
+  # settings rather than a guess at what the defaults were.
+  {
+    echo "profile=$(cat /sys/firmware/acpi/platform_profile 2>/dev/null)"
+    echo "governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)"
+    echo "epp=$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null)"
+    echo "swappiness=$(cat /proc/sys/vm/swappiness 2>/dev/null)"
+    echo "powerd=$(systemctl is-enabled nvidia-powerd 2>/dev/null)"
+    echo "watch=$watch"
+  } > "$STATE"
+
+  say "Dynamic Boost on (TGP 55W -> ~88W)"
+  sudo systemctl unmask nvidia-powerd >/dev/null 2>&1
+  sudo systemctl start nvidia-powerd
+  say "platform profile -> performance"
+  echo performance | sudo tee /sys/firmware/acpi/platform_profile >/dev/null 2>&1
+  say "CPU governor + EPP -> performance"
+  cpu_write scaling_governor performance
+  cpu_write energy_performance_preference performance
+  say "swappiness -> 10"
+  echo 10 | sudo tee /proc/sys/vm/swappiness >/dev/null 2>&1
+
+  if [ -n "$watch" ]; then
+    systemctl --user stop "$UNIT" 2>/dev/null
+    systemd-run --user --unit="$UNIT" --collect "$0" _watch "$watch" >/dev/null 2>&1 &&
+      say "armed: reverts when '$watch' exits" ||
+      say "WARNING: could not arm the watcher - run 'luminos-game-mode off' yourself"
+  else
+    say "no watch target given - remember to run 'luminos-game-mode off'"
+  fi
+  note "Max performance on — TGP unlocked, CPU unpinned"
+}
+
+cmd_off() {
+  local profile=balanced governor=powersave epp=balance_power swappiness=60
+  # shellcheck disable=SC1090
+  [ -f "$STATE" ] && . "$STATE" 2>/dev/null
+
+  systemctl --user stop "$UNIT" 2>/dev/null
+  say "restoring: profile=$profile governor=$governor epp=$epp swappiness=$swappiness"
+  echo "$profile"    | sudo tee /sys/firmware/acpi/platform_profile >/dev/null 2>&1
+  cpu_write scaling_governor "$governor"
+  cpu_write energy_performance_preference "$epp"
+  echo "$swappiness"  | sudo tee /proc/sys/vm/swappiness >/dev/null 2>&1
+  # Re-mask: nvidia-powerd running at idle is a battery regression (BUG-047).
+  sudo systemctl stop nvidia-powerd 2>/dev/null
+  sudo systemctl mask nvidia-powerd >/dev/null 2>&1
+  rm -f "$STATE"
+  say "back to normal power policy"
+  note "Max performance off — normal power policy restored"
+}
+
+cmd_status() {
+  echo "profile   : $(cat /sys/firmware/acpi/platform_profile 2>/dev/null)"
+  echo "governor  : $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)  EPP: $(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null)"
+  echo "powerd    : $(systemctl is-active nvidia-powerd 2>/dev/null)"
+  echo "swappiness: $(cat /proc/sys/vm/swappiness 2>/dev/null)"
+  echo "watcher   : $(systemctl --user is-active "$UNIT" 2>/dev/null)"
+  dgpu-exec-v2 nvidia-smi --query-gpu=power.draw,enforced.power.limit,clocks.sm,utilization.gpu,temperature.gpu,memory.free \
+    --format=csv 2>/dev/null
+}
+
+case "${1:-status}" in
+  on)     shift; cmd_on "${1:-}" ;;
+  off)    shift; cmd_off ;;
+  status) shift; cmd_status ;;
+  _watch)
+    # -x on the exact comm. NEVER -f: the pattern is in this loop's own argv.
+    while pgrep -x "${2:-}" >/dev/null 2>&1; do sleep 10; done
+    cmd_off
+    ;;
+  -h|--help) sed -n '4,8p' "$0" ;;
+  *) echo "usage: luminos-game-mode on [comm] | off | status" >&2; exit 2 ;;
+esac
