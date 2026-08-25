@@ -5149,3 +5149,54 @@ resident on the dGPU means no suspend and restricted airflow; this is the failur
 **Undo.** `kwriteconfig6 --file powerdevilrc --group AC --group SuspendAndShutdown --key LidAction 1`
 (repeat per profile, likewise `AutoSuspendAction 1`), set the logind drop-in back to `suspend`,
 then `sudo systemctl reload systemd-logind && systemctl --user restart plasma-powerdevil`.
+
+---
+
+## DECISION 81 — The GPU is arbitrated: a foreground game parks the resident model and gives it back
+<!-- [CHANGE: claude-code | 2026-08-25] -->
+
+**Context.** BUG-141. The RTX 4050's 6141 MiB is *dedicated* — unlike the 780M it does not borrow
+from system RAM — so a resident LLM is not sharing the card, it is holding it. Dolphin-8B at
+`--ctx-size 16384` sat on 5718 MiB and 007 First Light died during device setup with 61.75 MiB of
+Vulkan heap budget against the ~2100 MiB it needs. Two individually correct programs, and the loser
+was whoever launched second. Shawn's instruction was unambiguous: *"i want to use game free the vram
+for game. i am done with game give it back to dolphin"* — and *"it should be simple"*, meaning the
+plain `007` command, with no extra step to remember.
+
+**Decision.** Build the arbiter `MASTER_PLAN.md` Phase 6 had specified and never shipped, as
+`scripts/luminos-gpu-yield` → `/usr/local/bin/luminos-gpu-yield`. `007-run.sh`'s NVIDIA branch calls
+`yield` before Proton and `trap`s `restore` on `EXIT INT TERM HUP`. `007 --keep-model` opts out.
+
+**Why an arbiter rather than the two obvious alternatives.**
+- *Lower `--ctx-size`* — cannot work at any value. The 8B Q4_K_M weights alone are ~4.6 GB, so the
+  model and the game do not both fit in 6 GB however the KV cache is tuned. This is the fix that
+  looks obvious and costs a session to disprove; it is disproved here so nobody repeats it.
+- *Run the game on the 780M (`007 --igpu`)* — genuinely works and keeps both alive, since the iGPU
+  uses shared system RAM. Rejected because Shawn explicitly asked for the game on the dGPU, and
+  because it leaves the underlying contention unarbitrated for the next consumer.
+
+**The rule the design is built around: never fail to give the card back.** A model that never
+returns is a worse outcome than a game that never starts, because the first is silent and the second
+is not. Consequences, all deliberate:
+- Restore runs from a trap, so a crash, a `Ctrl-C` or a `kill` still returns the card.
+- The launcher **no longer `exec`s Proton** — it must outlive the game to fire that trap — and it
+  waits on `pgrep -x '007FirstLight.e'` afterwards, because `proton run` can return while the game
+  is still up.
+- **Restore replays the saved `/proc/<pid>/cmdline` verbatim; it does not call `hive-start-model.sh
+  <alias>`.** An alias restores whatever that script hardcodes *today*, at the context it hardcodes
+  *today*. A session running a different model, or the same model at a different `--ctx-size`, would
+  come back as something else with no indication that anything had been substituted. argv is the
+  only truthful record of what was running. The alias is kept for display only.
+- Restore is idempotent and never starts what was not there. Nothing parked, nothing started.
+
+**Verified end to end, both directions** (numbers in `docs/BUGS.md` BUG-141): 73 → 5799 MiB in ~1 s;
+game 3303 MiB at 99% GPU, 0 swapchain failures, title screen confirmed by screenshot rather than
+inferred; Dolphin back answering `/health` ~3 s after exit with byte-identical argv and a live chat
+round trip.
+
+**Consequence to accept.** While the game runs, the phone chat is down — that is the trade Shawn
+asked for, and both transitions now notify. Nothing else on the box competes for the card; if a
+second GPU consumer is ever added, it must go through this arbiter rather than around it.
+
+**Undo.** `007 --keep-model` for a single run; permanently, delete the `YIELD` block in
+`~/re/tools/007-run.sh` and reinstall to `/usr/local/bin/007`.

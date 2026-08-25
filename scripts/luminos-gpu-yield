@@ -1,0 +1,220 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-08-25] BUG-141.
+# ============================================================================
+# luminos-gpu-yield — hand the whole RTX 4050 to a foreground app, then give
+#                     it back to whatever HIVE model was using it.
+#
+#   luminos-gpu-yield status
+#   luminos-gpu-yield yield          # park the model, free the VRAM
+#   luminos-gpu-yield restore        # put the same model back, exactly as it was
+#   luminos-gpu-yield run -- CMD...  # yield, run CMD, restore no matter how it ends
+#
+# WHY THIS EXISTS
+# The 4050's 6141 MiB is DEDICATED - it is not borrowed from system RAM the way
+# the 780M's is - so a resident LLM is not "sharing", it is holding. Dolphin-8B
+# at ctx 16384 sits on 5718 MiB and leaves 73 MiB, and a game that needs ~2 GB
+# then dies during device setup with no useful error (BUG-141). Nothing on this
+# box arbitrated that; the two programs were each individually correct and the
+# loser was whoever launched second.
+#
+# THE ONE RULE: never fail to give it back.
+# Everything below is shaped by that. Hence:
+#
+#  - RESTORE REPLAYS THE SAVED ARGV VERBATIM, it does not call
+#    hive-start-model.sh with a model alias. An alias would restore the model
+#    that script hardcodes TODAY at the context IT hardcodes today, which is not
+#    necessarily what was actually running - a session that launched a different
+#    model, or the same model at a different --ctx-size, would silently come
+#    back as something else. /proc/<pid>/cmdline is the truth, so that is what
+#    is saved (NUL-separated, verbatim, so arguments containing spaces survive)
+#    and that is what is replayed. The alias is recorded for display only.
+#
+#  - `run` traps EXIT INT TERM HUP. A crash, a Ctrl-C or a kill must still give
+#    the card back; the failure mode where the model never returns is worse than
+#    the one where the game never started.
+#
+#  - RESTORE IS IDEMPOTENT AND NEVER STARTS SOMETHING THAT WASN'T THERE. If no
+#    model was resident at yield time, restore does nothing. Booting Dolphin at
+#    the end of a game you played on a quiet machine would be a surprise, and a
+#    surprise that eats 5.7 GB.
+#
+# THINGS THAT COST TIME, DO NOT REDO
+#  - nvidia-smi WILL NOT RUN BARE. DECISION 25 makes /dev/nvidia* root:dgpu 0660
+#    and shawn is deliberately not in `dgpu`, so bare nvidia-smi returns
+#    "Failed to initialize NVML: Insufficient Permissions". Go through
+#    dgpu-exec-v2 (v2, not v1: v1 raises only the EFFECTIVE gid and bash drops
+#    it - BUG-102).
+#  - A DEAD PROCESS IS NOT FREED VRAM. The pid leaving the process table and the
+#    driver reclaiming its allocations are two different events. Poll the card
+#    until the memory is actually back; do not sleep a magic number and hope.
+#  - `pkill -f llama-server` WOULD MATCH THIS SCRIPT (the string is in our own
+#    argv and in our state file path). Always -x on the exact comm.
+# ============================================================================
+
+set -u
+
+STATE_DIR="$HOME/.local/state/luminos"
+STATE="$STATE_DIR/gpu-yield.state"      # human-readable summary
+ARGV="$STATE_DIR/gpu-yield.argv"        # NUL-separated argv, replayed verbatim
+LOG="/tmp/hive-server.log"
+
+DGPU="dgpu-exec-v2"        # for nvidia-smi (reads only)
+DGPU_RUN="/usr/local/bin/dgpu-exec"   # for llama-server, same gate hive-start-model.sh uses
+
+say()  { echo "gpu-yield: $*"; }
+warn() { echo "gpu-yield: $*" >&2; }
+note() { command -v notify-send >/dev/null 2>&1 && notify-send "Luminos GPU" "$1" --icon="${2:-dialog-information}" 2>/dev/null; }
+
+# ---- reading the card -------------------------------------------------------
+vram_free() {
+  local v
+  v=$("$DGPU" nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | tr -d ' \r')
+  case "$v" in ''|*[!0-9]*) return 1 ;; *) echo "$v" ;; esac
+}
+
+server_pid() { pgrep -x llama-server 2>/dev/null | head -1; }
+
+# Model alias purely for what we print. The argv is what actually gets replayed.
+alias_of() {
+  case "$1" in
+    *Dolphin3.0-Llama3.1-8B*) echo nexus ;;
+    *Qwen2.5-Coder-7B*)       echo bolt ;;
+    *DeepSeek-R1-0528-Qwen3-8B*) echo nova ;;
+    *) basename "$1" .gguf ;;
+  esac
+}
+
+# ---- yield ------------------------------------------------------------------
+cmd_yield() {
+  mkdir -p "$STATE_DIR"
+  local pid; pid=$(server_pid)
+
+  if [ -z "$pid" ]; then
+    say "no model on the card - nothing to park"
+    printf 'none\n' > "$STATE"
+    rm -f "$ARGV"
+    return 0
+  fi
+
+  # Save argv VERBATIM before killing anything. If this fails we must not kill,
+  # because then we could not put it back.
+  if ! cat "/proc/$pid/cmdline" > "$ARGV" 2>/dev/null || [ ! -s "$ARGV" ]; then
+    warn "could not read /proc/$pid/cmdline - refusing to stop the model,"
+    warn "because a model I cannot describe is a model I cannot restore."
+    return 1
+  fi
+
+  local modelpath name
+  modelpath=$(tr '\0' '\n' < "$ARGV" | grep -A1 -x -- '-m' | tail -1)
+  name=$(alias_of "${modelpath:-unknown}")
+  printf '%s\n' "$name" > "$STATE"
+
+  say "parking $name (pid $pid) to free the card"
+  note "Freeing VRAM — parking $name"
+
+  kill "$pid" 2>/dev/null
+  local t=0
+  while [ $t -lt 15 ] && kill -0 "$pid" 2>/dev/null; do sleep 1; t=$((t+1)); done
+  if kill -0 "$pid" 2>/dev/null; then
+    warn "$name ignored SIGTERM after ${t}s - sending SIGKILL"
+    kill -9 "$pid" 2>/dev/null
+    sleep 2
+  fi
+
+  # A dead process is not freed VRAM. Watch the card, do not guess.
+  local free=0
+  t=0
+  while [ $t -lt 20 ]; do
+    free=$(vram_free) || free=0
+    [ "$free" -ge 4000 ] && break
+    sleep 1; t=$((t+1))
+  done
+  say "${free} MiB free"
+  [ "$free" -lt 4000 ] && warn "expected ~5700 MiB free - something else is holding the card:" &&
+    "$DGPU" nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null | sed 's/^/     /'
+  return 0
+}
+
+# ---- restore ----------------------------------------------------------------
+cmd_restore() {
+  local want; want=$(cat "$STATE" 2>/dev/null || echo none)
+
+  if [ "$want" = none ] || [ ! -s "$ARGV" ]; then
+    say "nothing was parked - leaving the card alone"
+    return 0
+  fi
+  if [ -n "$(server_pid)" ]; then
+    say "a model is already running - not starting a second one"
+    printf 'none\n' > "$STATE"
+    return 0
+  fi
+
+  local args=()
+  mapfile -t -d '' args < "$ARGV"
+  [ "${#args[@]}" -gt 0 ] || { warn "saved argv is empty - cannot restore"; return 1; }
+
+  # Port comes from the saved argv too; assuming 8080 would health-check the
+  # wrong thing if it was ever started on another port.
+  local port=8080 i
+  for ((i=0; i<${#args[@]}-1; i++)); do
+    [ "${args[$i]}" = "--port" ] && port="${args[$((i+1))]}"
+  done
+
+  say "putting $want back"
+  note "Restoring $want to the GPU"
+  touch /tmp/hive-last-request
+  nohup "$DGPU_RUN" "${args[@]}" >> "$LOG" 2>&1 &
+  disown $! 2>/dev/null || true
+
+  local t=0
+  while [ $t -lt 90 ]; do
+    if curl -s "http://127.0.0.1:$port/health" 2>/dev/null | grep -q ok; then
+      say "$want is back and answering on :$port"
+      note "$want is back — phone chat is live again"
+      printf 'none\n' > "$STATE"
+      return 0
+    fi
+    sleep 1; t=$((t+1))
+  done
+
+  warn "$want did not answer on :$port within 90s - check $LOG"
+  note "$want failed to come back — check $LOG" dialog-error
+  return 1
+}
+
+# ---- status -----------------------------------------------------------------
+cmd_status() {
+  local pid free want
+  pid=$(server_pid); free=$(vram_free) || free="?"
+  want=$(cat "$STATE" 2>/dev/null || echo none)
+  echo "VRAM free : ${free} MiB of 6141"
+  if [ -n "$pid" ]; then
+    local mp
+    mp=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -A1 -x -- '-m' | tail -1)
+    echo "On card   : $(alias_of "${mp:-unknown}") (pid $pid)"
+  else
+    echo "On card   : no model"
+  fi
+  echo "Parked    : $want"
+}
+
+# ---- run --------------------------------------------------------------------
+cmd_run() {
+  [ "$#" -gt 0 ] || { warn "run needs a command"; return 2; }
+  cmd_yield || return 1
+  trap 'cmd_restore' EXIT INT TERM HUP
+  "$@"
+  local rc=$?
+  trap - EXIT INT TERM HUP
+  cmd_restore
+  return $rc
+}
+
+case "${1:-status}" in
+  yield|free|stop) shift; cmd_yield "$@" ;;
+  restore|give-back|start) shift; cmd_restore "$@" ;;
+  status) shift; cmd_status "$@" ;;
+  run) shift; [ "${1:-}" = "--" ] && shift; cmd_run "$@" ;;
+  -h|--help) sed -n '4,9p' "$0" ;;
+  *) warn "unknown command: $1"; sed -n '4,9p' "$0"; exit 2 ;;
+esac

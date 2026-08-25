@@ -1,204 +1,165 @@
-# HANDOFF — 007 First Light: the black screen (BUG-138). FIXED, both halves.
-# [CHANGE: claude-code | 2026-08-20] — Response 21
-Last updated: 2026-08-20 — Response 21
+# HANDOFF — BUG-141 FIXED: the GPU is arbitrated, 007 takes the card and gives it back
+# [CHANGE: claude-code | 2026-08-25] — Response 3
+Last updated: 2026-08-25 — Response 3
 
 **Read this whole file before touching anything.**
 
-**The goal changed this turn.** Responses 18–19 were about whether the 007 method generalizes to
-other games; that work is complete and its record is `docs/paper/GENERALIZATION.md`, with the
-previous handoff at `git show 93a5c773:HANDOFF.md`. Per AGENTS.md §0.2 there is exactly **one**
-HANDOFF.md and it is overwritten in place.
+Per AGENTS.md §0.2 there is exactly **one** HANDOFF.md, overwritten in place. The previous version
+(Response 1, the BUG-141 *diagnosis*) is at `git show HEAD:HANDOFF.md` once this is committed;
+the BUG-138 handoff before it is at `git show 73395885:HANDOFF.md`.
 
 ---
 
 ## Goal, in Shawn's words
 
-> "Bro can you check whats wrong with 007 is just black screen with audio running of game but
-> visual are just black? what is this and does this happen ?"
+Turn 1:
 
-then, after the first fix landed:
+> "the game 007 is not launching right now dont know the problem i think it with vram things we have
+> done many things like server the dolphin in mobile phone things and lot more so can you find out
+> what the problme is and why is it not launching?"
 
-> "hey but the game is still not fullscreen its windowed mode. and also its not running on nvidia
-> gpu look why ?"
+Turn 2, after I made the mistake of handing him a menu of three options instead of a fix:
 
-**He was right on the first count and the correction is the lesson of this turn: fixing the crash
-is not the same as fixing the game.** I stopped at "0 swapchain failures" and called it done. The
-game was still a window with a titlebar sitting next to the bar. Second count was a
-misreading, but a completely reasonable one — see below.
+> "hey it should be simple i want to use game free the vram for game. i am done with game give it
+> back to dolphin. and also solve the 007 bug asap bro. and make it run on vram just as i said."
+
+That is a complete specification: **automatic both ways, on the dGPU, no extra command to remember.**
+It is now built and it works.
 
 ---
 
 ## The short version
 
-**The window was 120 pixels too small, and NVIDIA does not round.**
+`llama-server` — Dolphin-8B at `--ctx-size 16384`, the model that answers his phone — held **5718 of
+the RTX 4050's 6141 MiB**. The 4050's memory is *dedicated*; unlike the 780M it does not borrow from
+system RAM, so what the LLM takes is simply gone. Vulkan offered the game a device-local heap
+`budget` of **61.75 MiB** against the ~2100 MiB it needs, and it died during device setup.
 
-The launcher asked for a **2880x1800** virtual desktop — the panel's native mode. KWin can only
-ever hand out **2760x1800**, because Caelestia's left bar reserves an exclusive zone of 60 logical
-(= 120 physical) px. NVIDIA reports `minImageExtent == maxImageExtent == currentExtent` for a
-surface, so the swapchain must match the window **exactly**; it rejected the request with
-`VK_ERROR_UNKNOWN` and vkd3d-proton retried forever. Audio played, the GPU sat at 100%, and not a
-single frame was ever presented.
-
-`2880 − 2760 = 120`. That is the bar.
-
-**"Does this happen?"** — yes, to any NVIDIA D3D12 title that asks for a window size the
-compositor will not give it. It is **not** a relapse of BUG-137 (that was `assert=9 gpu=0%`, a
-shader-compiler segfault; this is `assert=0 gpu=100%`).
+**`scripts/luminos-gpu-yield` now arbitrates the card.** `007` parks the model before Proton and
+gives it back when the game exits. Nothing else to type.
 
 ---
 
 ## DONE this turn
 
-1. **Root-caused by measurement.** One distinct error in a 42,599-line log, 894 times in 68 s:
-   `dxgi_vk_swap_chain_recreate_swapchain_in_present_task: Failed to create swapchain, vr -13`.
-   `vulkaninfo` proved the NVIDIA min==max==current extent behaviour; `xprop -root _NET_WORKAREA`
-   returned `120, 0, 2760, 1800` against `_NET_DESKTOP_GEOMETRY` of `2880, 1800`.
-2. **Fixed `~/re/tools/007-run.sh`** — `RES` now comes from `_NET_WORKAREA`, with the old sysfs
-   `drm/modes` read kept as the fallback (Hyprland, bare TTY, no `xprop`). **The block had to move
-   below the session-resolution code**, because `xprop` needs `DISPLAY` and the launcher may be
-   started with no session in its environment.
-3. **Installed to `/usr/local/bin/007`** and verified byte-identical.
-4. **Verified end to end by running the real launcher**, not the harness: swapchain created at
-   `2760 x 1800`, **0** `Failed to create swapchain` in 892k log lines, 98% GPU, 5800 MiB VRAM,
-   and KWin reporting the window as `steam_proton 60,0 1380x900 'Wine Desktop'` — logical 1380x900
-   = physical 2760x1800, matching the swapchain exactly.
-5. **`docs/BUGS.md` — BUG-138 written up in full**, including the do-not-re-chase list.
+1. **`scripts/luminos-gpu-yield`** — new, installed to `/usr/local/bin/luminos-gpu-yield`.
+   `status` / `yield` / `restore` / `run -- CMD…`.
+2. **`~/re/tools/007-run.sh`** — NVIDIA branch yields + `trap`s restore; `--keep-model` opts out;
+   low-VRAM warning promoted from stdout to `notify-send`. Installed to `/usr/local/bin/007`.
+3. **Verified live, both directions.** Numbers in Next-steps-free detail below.
+4. **`docs/BUGS.md` BUG-141 → FIXED**, with the full design rationale and measurements.
+5. **`LUMINOS_DECISIONS.md` DECISION 81** — why an arbiter, and why the two obvious alternatives lose.
+6. **`AGENTS.md`** — §9 rows for both `/usr/local/bin` entries, §10 File Map row for the new script.
 
-### Then the correction — the second half of the fix
+### The measurements (do not re-run these to confirm; they are the record)
 
-6. **KWin rule added**, `~/.config/kwinrulesrc` `[3]`: matched on the window **title**
-   `Wine Desktop` (exact), `fullscreen=true fullscreenrule=2`, `noborder=true noborderrule=2`.
-   Title, **not** `wmclass=steam_proton`, which would hit every Proton game. Old config saved as
-   `~/.config/kwinrulesrc.bak-2026-08-20`. Reload: `qdbus org.kde.KWin /KWin reconfigure`.
-7. **The launcher now DETECTS that rule** instead of assuming either size — `_NET_DESKTOP_GEOMETRY`
-   (2880x1800) when it is in force, `_NET_WORKAREA` (2760x1800) when it is not. The two halves must
-   agree or BUG-138 returns; this way **neither half can silently break the other**, and deleting
-   the rule leaves a working-but-windowed game rather than a black screen.
-8. **Verified by SCREENSHOT this time, not just by log counts** — full-bleed title screen, no
-   titlebar, no bar, window `0,0 1440x900` logical = 2880x1800, swapchain 2880x1800, 0 failures,
-   96% GPU.
-9. **"Not running on NVIDIA" — measured, and it IS.** `nvidia-smi` lists `./007FirstLight.exe` at
-   2074 MiB, 137 fds on `/dev/nvidia0`, `Gid: 948` (the DECISION 25 gate). What he actually saw was
-   the game's own VRAM meter pegged **red at 2,059 MB**, because `jobhunt-llm.service` holds
-   **3576 of the card's 6141 MiB** and the 4050's VRAM is *dedicated*. A game reporting 2 GB of
-   VRAM looks exactly like an iGPU. **Open question for Shawn: stop `jobhunt-llm` while playing?**
-   Not done — the launcher deliberately reports holders and does not act on them.
+| | |
+|---|---|
+| yield | 73 MiB → **5799 MiB free in ~1 s** |
+| game on card | **3303 MiB**, **99% GPU**, **54.56 W**, **0 swapchain failures** |
+| looked at it | screenshot = full-bleed 007 title screen, no titlebar, no bar. BUG-138 intact |
+| restore | Dolphin answering `/health` **~3 s** after exit |
+| restore fidelity | argv **byte-identical** (`cmp` clean), same model, same `--ctx-size 16384` |
+| phone path | live `/v1/chat/completions` returned `back online` |
 
 ---
 
 ## IN PROGRESS
 
-Nothing is mid-flight. Tree is consistent.
-
-**Note:** a 007 process may still be running from the verification launch — `pkill -x
-007FirstLight.e` if so. (The `comm` name truncates to 15 chars; `007FirstLight.exe` never matches.)
+Nothing is mid-flight. The feature is complete and verified.
 
 ---
 
 ## Next steps
 
-1. **Ask Shawn whether to stop `jobhunt-llm.service` while playing.** It holds 3576 of 6141 MiB and
-   is why the game's VRAM meter is red. `sudo systemctl stop jobhunt-llm` frees it; it is a system
-   unit, not `--user`. **His call, not mine** — the jobhunt pipeline is his actual goal.
-2. **Re-verify `007 --igpu` once.** Not re-run since either change. It should now also come up
-   fullscreen (the KWin rule is GPU-agnostic) at 2880x1800.
-3. **Consider whether the KWin rule should be in the repo**, not just in `~/.config`. Right now it
-   is live-only config with a `.bak` beside it and nothing in `scripts/` puts it there, so a
-   fresh machine would get the windowed fallback silently.
-3. Paper work — **still blocked on Shawn: "do not continue to write the old paper now."**
-   Corrections for §4, §5, §6 and a new §13 are staged in `docs/paper/GENERALIZATION.md`.
-4. Cheap: `drmcheck.py` over more clean PEs under `/mnt/win-os/Program Files`.
-5. Rename `~/re/tools/007-mkproton.sh` → `mkproton.sh`. Verified game-agnostic.
-6. Root-cause the Mia installer spin. Characterised, not fixed. Low priority — §6 gets the game.
-7. Push. `fd8a82e0` and everything after is local only. **Never authorized — ask.**
+1. **Notes + brain entries** if they did not land this turn — check before re-adding, do not double-log.
+2. **Push. Nothing in this line of work has ever been pushed — never authorized, ask first.**
+3. `007 --igpu` is still **unverified since the BUG-138 fullscreen work**. Carried from two handoffs
+   ago. It is now the documented fallback in DECISION 81, so it should actually be tested once.
+4. Consider whether the BUG-138 KWin rule belongs in the repo rather than living only in
+   `~/.config/kwinrulesrc`, where a profile reset would silently delete it.
+5. Carried over, still true: paper work **blocked on Shawn** ("do not continue to write the old paper
+   now"); corrections staged in `docs/paper/GENERALIZATION.md`.
 
 ---
 
 ## Key decisions & constraints
 
 - **Do not write new `.tex` prose.** Standing instruction.
-- **Do not push** without asking. Nothing in this line of work has ever been pushed.
-- `docs/BUGS.md` BUG-138 is the record for this turn; this handoff is a pointer. Do not duplicate
-  it here — there is one handoff and it gets overwritten.
-- **Keep `/mnt/win-os/Games/ReturningToMia`** (3.0 MB, 0-byte `.rpa`). It is the evidence for the
-  §5 installer failure, not junk.
+- **Do not push** without asking.
+- **The arbiter's one rule: never fail to give the card back.** If you touch `luminos-gpu-yield` or
+  the launcher's yield block, that is the property to preserve. A model that never returns is a worse
+  failure than a game that never starts, because the first one is silent.
+- `docs/BUGS.md` BUG-141 and `LUMINOS_DECISIONS.md` DECISION 81 are the records for this turn; this
+  handoff is a pointer, not a copy.
 
 ---
 
 ## Gotchas & things NOT to redo
 
-### From this turn (BUG-138)
+### From this turn (BUG-141 / DECISION 81)
 
-- **"The error stopped" is not "the feature works." LOOK AT IT.** I reported this fixed on a log
-  count of 0 without ever seeing the screen. The game was still windowed with a titlebar. One
-  screenshot would have caught it before Shawn had to.
-- **`spectacle` DOES work headless** — `spectacle -b -n -f -o out.png`. The earlier "spectacle
-  produces nothing" note was wrong: it needs the live session's `WAYLAND_DISPLAY`,
-  `XDG_RUNTIME_DIR` **and** `DBUS_SESSION_BUS_ADDRESS`, all three lifted out of
-  `/proc/$(pgrep -x plasmashell)/environ`. `grim` still does not work (no wlr-screencopy).
-- **`ffmpeg -f x11grab` gives a BLACK frame under KWin** — XWayland windows are redirected, so the
-  X root is not composited. It looks precisely like the black-screen bug you are chasing. Do not
-  use it to check for one.
-- **A swapchain error is a window-size question first and a driver question last.** Six experiments
-  went hunting a broken NVIDIA stack. One `xprop` call settled it.
-- **A Wine virtual desktop is an ordinary window.** It gets a titlebar and honours the bar's
-  exclusive zone. Fullscreen takes a KWin rule; nothing about `explorer /desktop=` implies it.
-- **"It's not on the NVIDIA" was the VRAM meter, not the GPU.** The 4050's 6 GB is dedicated, so a
-  resident LLM leaves the game ~2 GB and every in-game readout then looks like an iGPU. Check
-  `nvidia-smi --query-compute-apps` and the fd count on `/dev/nvidia0` before believing the symptom.
-- **A working second GPU is misleading here.** AMD rendered fine, which felt like proof the request
-  was reasonable. It only proved RADV clamps and NVIDIA does not.
-- **`007-try.sh` cannot test this fix.** The harness *reads* the prefix registry and never sets it;
-  only the launcher writes `HKCU\Software\Wine\Explorer\Desktops`. Test with the installed `007`.
-- **`vkcube --xcb` just prints usage** — the flag is `--wsi xcb`.
-- Do NOT re-chase: driver mismatch (both 610.57.04), Xid/NVRM faults (none), VRAM pressure (freeing
-  3.5 GB made it *worse*, 5362 failures), NVIDIA Reflex (586), PRIME offload vars (546), Lutris (it
-  uses the `linux` runner and just execs `007`), `kwinrc` (dated Aug 14, predates the working runs).
+- **Restore must replay the saved argv, not a model alias.** Calling `hive-start-model.sh nexus`
+  would restore whatever that script hardcodes *today*, at the context it hardcodes *today* — a
+  session running a different model or a different `--ctx-size` would come back as something else
+  with nothing to indicate a substitution happened. `/proc/<pid>/cmdline` is the only honest record.
+  Save it NUL-separated, read it with `mapfile -t -d ''` so arguments with spaces survive.
+- **A dead process is not freed VRAM.** The pid leaving the process table and the driver reclaiming
+  its allocations are two separate events. Poll the card; do not sleep a magic number.
+- **`pkill -f llama-server` matches the arbiter itself** — the string is in its own argv and in its
+  state file path. Always `-x` on the exact comm.
+- **comm truncates at 15 characters**, so `pgrep -x 007FirstLight.exe` never matches and
+  `007FirstLight.e` does. This one costs an hour if you do not know it.
+- **`proton run` can return while the game is still running** — hence the `pgrep` wait loop. And the
+  launcher **must not `exec`**, or there is no process left alive to run the restore trap.
+- **`nvidia-smi` free memory and the Vulkan heap budget are different numbers, and only the second
+  one decides whether an app starts.** Read `budget` under `memoryHeaps[0]` in `vulkaninfo`.
+- **A 3-line `last-run.log` is a signal, not a missing log.** A working run is tens of thousands of
+  lines; stopping right after `wineserver: NTSync up and running!` locates the failure *before* the
+  renderer, which is what separates an allocation failure from BUG-137/138.
+- **Check the commit log of the last five days before theorising.** `38e9c794`'s message named this
+  outcome in advance — faster than any measurement, and it pointed straight at the cause.
+- **He said "I think it's the VRAM" and he was right.** Verify the user's own hypothesis first; it
+  costs one command and he knows his machine.
+- **`nvidia-smi` needs `dgpu-exec` / `dgpu-exec-v2`** or it returns `Failed to initialize NVML:
+  Insufficient Permissions` (DECISION 25 gate, gid 948). v2 for shell wrappers (BUG-102).
+- **Do not tune `--ctx-size` to fix VRAM contention with a game.** Dolphin-8B's weights alone are
+  ~4.6 GB — no context value leaves 2 GB. Disproved once, in BUG-141; do not spend a session on it.
+- **When he has already stated the outcome he wants, build it — do not present three options.**
+  Response 1 offered a menu and the reply was "hey it should be simple". The diagnosis was right and
+  the delivery was wrong.
 
 ### Carried forward, still true
 
-- **Do NOT copy 007's `__EGL_VENDOR_LIBRARY_FILENAMES` pin to a native Linux game.** It removes
-  Mesa's EGL and SDL can then create no window at all — even the *software* renderer dies. Use
-  `SDL_VIDEODRIVER=x11 __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia` instead.
-- **`pkill -f "…/ReturningToMia"` kills your own shell** — the pattern is in the agent shell's own
-  command line. Use a bracket class or `pgrep | xargs kill`.
-- **Lutris game configs are FLAT** (`game:`/`system:` at top level). The installer-script shape
-  gives "This game has no executable set." Lutris must not be running when you write `pga.db`.
-- **Try the paper's §6 before its §5.** §5 is 25 minutes to a zero-byte failure; §6 is 5 minutes to
-  a working game.
-- **Check for a shipped native Linux build before doing any graphics work.** Cheapest step in the
-  whole method.
-- **Output file size is a useless progress signal for unarc.** Use the read offset on the *input*:
-  `/proc/<pid>/fdinfo/<fd>`. Flat RSS + `wchan` of `0` distinguishes a spin from slow work.
+- **"The error stopped" is not "the feature works." LOOK AT IT.** Screenshot before claiming a fix.
+- **A swapchain error is a window-size question first and a driver question last** (BUG-138).
+- **Do NOT copy 007's `__EGL_VENDOR_LIBRARY_FILENAMES` pin to a native Linux game** — it removes
+  Mesa's EGL and SDL can then create no window at all. Use
+  `SDL_VIDEODRIVER=x11 __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`.
+- **`007-try.sh` cannot test launcher fixes** — the harness reads the prefix registry and never
+  writes it. Test with the installed `/usr/local/bin/007`.
+- **`spectacle` works headless** (`spectacle -b -n -f -o out.png`) only with `WAYLAND_DISPLAY`,
+  `XDG_RUNTIME_DIR` **and** `DBUS_SESSION_BUS_ADDRESS` lifted from `plasmashell`'s environ. `grim`
+  does not work (no wlr-screencopy). **`ffmpeg -f x11grab` returns a BLACK frame** under KWin — it
+  looks exactly like the black-screen bug you would be chasing.
+- **`xwininfo`, `xdotool`, `wmctrl` are NOT installed.** `xprop` is.
 - **`eu-stack`/`gdb` need `sudo` here** — `ptrace_scope` is `1`.
-- **`xwininfo`, `xdotool`, `wmctrl` are NOT installed.** `xprop` **is**, and it is how you read the
-  work area. `spectacle` produces nothing headless and `grim` needs wlr-screencopy, which KWin has
-  no — use `/opt/claude-desktop-legacy/resources/locales/kwin-portal-bridge windows` for geometry.
-- **`clspatch.py` must run concurrently**, never statically.
-- **SDL ignores `DISPLAY=:77`** and will use the Wayland session, so a test launch appears on
-  Shawn's real desktop. Warn him first.
-- **"Signature valid" does not mean "unprotected"**; **entropy does not find Denuvo**; **a string
-  match is not a finding until you read the bytes around it.**
-- **Do not say the Linux crack is "impossible."** Accurate: hard and unbuilt.
 - **Answer the question that was asked.** Depth on request, not by default.
-- `\verb` inside `\textbf{}` is fatal in LaTeX.
 
 ---
 
 ## Files touched
 
-- `~/re/tools/007-run.sh` — work-area/full-screen sizing with KWin-rule detection; `RES` block moved
-  below session resolution; header comment and `--help` range updated. **Half 1 of the fix.**
-- `~/.config/kwinrulesrc` — new rule `[3]`, fullscreen + noborder for `Wine Desktop`.
-  **Half 2 of the fix.** Backup at `~/.config/kwinrulesrc.bak-2026-08-20`. **Not in the repo** —
-  see Next Steps 3.
-- `/usr/local/bin/007` — reinstalled from it, verified identical.
-- `docs/BUGS.md` — BUG-138, full write-up + the same-day correction + the screenshot-tooling note.
+- `scripts/luminos-gpu-yield` — **new**, the arbiter. Installed to `/usr/local/bin/`.
+- `~/re/tools/007-run.sh` — yield/restore wiring, `--keep-model`, `notify-send` warning.
+  Installed to `/usr/local/bin/007`.
+- `docs/BUGS.md` — BUG-141 flipped to FIXED, full write-up + header summary.
+- `LUMINOS_DECISIONS.md` — DECISION 81.
+- `AGENTS.md` — §9 System Config (2 rows), §10 File Map (1 row).
 - `HANDOFF.md` — this file, overwritten in place.
-- `LUMINOS_STATUS.md` — bug line.
-- Luminos Notes + brain log — one `[BUG]` entry.
 
 ### Untouched on purpose
+- `scripts/hive-start-model.sh` — lowering `--ctx-size` does not fix this and the phone service works.
+  The arbiter deliberately does **not** go through it (see the argv gotcha above).
+- The `--igpu` branch of the launcher — the 780M uses shared system RAM and has never contended.
 - `docs/paper/*.tex` — blocked by standing instruction.
-- `~/re/tools/007-try.sh` — it is a bisection harness for BUG-137 and is still correct for that.
-- `~/.config/kwinrc`, Caelestia's bar config — the bar is not the bug, the assumption about it was.
