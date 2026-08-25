@@ -3,6 +3,18 @@ Last Updated: 2026-08-08 (BUG-111 FIXED — **the plugin death BUG-100 predicted
 
 ## Open Bugs
 
+### BUG-121 — every HIVE GPU model was dead, because `/usr/local/bin/llama-server` aborts on startup no matter what you pass it
+<!-- [CHANGE: claude-code | 2026-08-24] -->
+- Status: **FIXED and verified on the card**, 2026-08-24.
+- Severity: Critical (no GPU model could load at all — Nexus, Bolt and Nova were all unreachable)
+- Component: `scripts/hive-start-model.sh`
+- Symptom: `hive-start-model.sh nexus` exits non-zero, `luminos-hive.service` sits inactive, nothing listens on 8080.
+- **Root cause is the binary, not the flags.** `/usr/local/bin/llama-server` is a hand-built Apr-24 copy that dies in `common/arg.cpp` on `GGML_ASSERT(params.n_gpu_layers < 0)`. That assert runs during *option registration*, before a single argument is parsed, and it tests the **compiled-in default** — so it fires on every invocation, including `--version`. No flag combination could have avoided it, which is why this read as a hardware or CUDA fault.
+- **The tell was that `--version` also core-dumped.** A binary that cannot print its own version does not have a GPU problem.
+- Two things masked it: the crash handler prints `ptrace: Operation not permitted / No stack`, which reads like a permissions fault; and under **DECISION 25** a bare `llama-server` genuinely has no dGPU access, so the CUDA-init error seen alongside it was a real but *separate* second bug standing behind this one.
+- Fix: use the pacman binary `/usr/bin/llama-server` (`llama.cpp-cuda b10452-1`, Aug 16), invoked through the setgid `dgpu-exec` so it actually gets `egid=dgpu`. The stale `/usr/local/bin` copy shadows the good one on `PATH` and should be treated as radioactive — **check which `llama-server` you are running before debugging anything GPU-shaped.**
+- Side effect: `--flash-attn` had been BANNED since April as "core dump on this hardware". That core dump was *this binary*. On b10452 `-fa on` works, which unlocked q8_0 KV cache and 3x the context (DECISION 79).
+
 ### BUG-120 — Chrome takes ~25 s to open in the Caelestia-on-KWin session, then opens every window you asked for at once
 <!-- [CHANGE: claude-code | 2026-08-13] -->
 - Status: **OPEN — theory only, NOT measured.** Reported by Shawn from a real login, 2026-08-13.

@@ -1,0 +1,22 @@
+# [CHANGE: antigravity | 2026-08-16]
+# [CHANGE: claude-code | 2026-08-24] Was After/Wants=jobhunt-llm.service with
+# LLM_UPSTREAM=8081 — that is OpenClaw's own llama.cpp, so starting this unit
+# pulled up the OpenClaw stack and served a 4B model instead of Dolphin.
+# Dolphin sits on 8080 and is started by hive-start-model.sh, which is not a
+# unit, so there is nothing to order against; the proxy just fails until it's up.
+[Unit]
+Description=Luminos Mobile Web Chat Server (HTTPS, phone access on port 8090)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=LLM_UPSTREAM=http://127.0.0.1:8080
+Environment=MOBILE_CHAT_PORT=8090
+Environment=MOBILE_CHAT_HOST=0.0.0.0
+ExecStart=/opt/luminos/venv-jobhunt/bin/python /home/shawn/luminos-os/scripts/luminos-mobile-chat.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

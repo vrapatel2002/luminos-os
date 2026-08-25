@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# [CHANGE: antigravity | 2026-08-16]
+# Luminos Mobile Chat helper CLI
+set -euo pipefail
+
+# [CHANGE: claude-code | 2026-08-24] https + token now that the server enforces
+# both. The token is the whole credential, so the URL must carry it once; the
+# browser then keeps it in a cookie.
+LAN_IP=$(ip -br addr show | awk '$1 ~ /^wl|^en/ && $2 == "UP" {print $3}' | cut -d/ -f1 | head -n1 || echo "127.0.0.1")
+PORT="${MOBILE_CHAT_PORT:-8090}"
+TOKEN=$(cat "$HOME/.local/share/luminos/mobile-chat/token.txt" 2>/dev/null || echo "NO-TOKEN")
+URL="https://${LAN_IP}:${PORT}/?k=${TOKEN}"
+
+case "${1:-status}" in
+  start)
+    systemctl --user start luminos-mobile-chat.service
+    echo "Luminos Mobile Chat started!"
+    echo "Open on your phone: ${URL}"
+    ;;
+  stop)
+    systemctl --user stop luminos-mobile-chat.service
+    echo "Luminos Mobile Chat stopped."
+    ;;
+  restart)
+    systemctl --user restart luminos-mobile-chat.service
+    echo "Luminos Mobile Chat restarted!"
+    echo "Open on your phone: ${URL}"
+    ;;
+  status)
+    if systemctl --user is-active --quiet luminos-mobile-chat.service; then
+      echo "● Luminos Mobile Chat is ACTIVE"
+      echo "  URL (Wi-Fi): ${URL}"
+      echo "  Local:       https://localhost:${PORT}/?k=${TOKEN}"
+    else
+      echo "○ Luminos Mobile Chat is INACTIVE"
+      echo "  Run: luminos-mobile-chat start"
+    fi
+    ;;
+  url)
+    echo "${URL}"
+    ;;
+  qr)
+    echo "Scan this QR code with your phone camera:"
+    qrencode -t UTF8 "${URL}"
+    echo "URL: ${URL}"
+    ;;
+  *)
+    echo "Usage: luminos-mobile-chat {start|stop|restart|status|url|qr}"
+    exit 1
+    ;;
+esac

@@ -5,8 +5,26 @@
 # PURPOSE: Starts llama-server with strict GPU enforcement.
 #          Uses ABSOLUTE PATHS for every binary so this works
 #          from kglobalaccel's minimal env (SUPER+SPACE shortcut).
-# SAFE FLAGS ONLY: --n-gpu-layers 99 --ctx-size 4096 --port 8080 --host 127.0.0.1
-# BANNED: --cache-type-k turbo4, --flash-attn (core dump on this hardware)
+# SAFE FLAGS ONLY: --n-gpu-layers 99 --ctx-size 12288 --port 8080 --host 127.0.0.1
+# BANNED: --cache-type-k turbo4
+# ============================================
+# [CHANGE: claude-code | 2026-08-24] Three fixes, all verified on hardware:
+#
+# 1. BINARY: was /usr/local/bin/llama-server — a hand-built Apr-24 copy that
+#    aborts on EVERY invocation (even --version) via
+#    GGML_ASSERT(params.n_gpu_layers < 0) in common/arg.cpp. That assert tests
+#    the compiled-in DEFAULT, so no flag combination could avoid it. The entire
+#    HIVE GPU path was dead. Now uses the pacman binary /usr/bin/llama-server
+#    (llama.cpp-cuda b10452-1).
+#
+# 2. DGPU-EXEC: DECISION 25 made /dev/nvidia* root:dgpu 0660 and shawn is
+#    deliberately NOT in `dgpu`. Calling llama-server bare gets no GPU at all.
+#    Only the setgid `dgpu-exec` grants egid=dgpu.
+#
+# 3. FLASH-ATTN UNBANNED: the April core dump was this same broken binary, not
+#    the hardware. On b10452 `-fa on` works, which unlocks q8_0 KV cache and 3x
+#    the context. Measured: 16384 ctx = 5718/6141 MiB, leaving only 73 MiB —
+#    too tight for the forex bot's ~130 MiB. 12288 is the safe maximum.
 # ============================================
 
 # Hardened environment — same reason as luminos-hive-popup
@@ -50,10 +68,14 @@ fi
 
 echo "Starting llama-server with model $MODEL_PATH..."
 # SAFE FLAGS ONLY — --n-gpu-layers 99 is NON-NEGOTIABLE (full GPU)
-/usr/bin/nohup /usr/local/bin/llama-server \
+/usr/bin/nohup /usr/local/bin/dgpu-exec /usr/bin/llama-server \
     -m "$MODEL_PATH" \
     --n-gpu-layers 99 \
-    --ctx-size 4096 \
+    --ctx-size 12288 \
+    --flash-attn on \
+    --cache-type-k q8_0 \
+    --cache-type-v q8_0 \
+    --context-shift \
     --port 8080 \
     --host 127.0.0.1 >> /tmp/hive-server.log 2>&1 &
 

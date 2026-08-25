@@ -5025,3 +5025,53 @@ contention entirely.
 `.../GE-Proton10-34` and `COMPAT_DATA` back at `~/re/007/protondata` to undo the whole thing.
 Then `sudo install -m755 ~/re/tools/007-run.sh /usr/local/bin/007`. Delete
 `compatibilitytools.d/GE-Proton10-34-vkd3d301` and `~/re/007/pfx-*` to reclaim the space.
+
+---
+
+## DECISION 79 — Dolphin on the phone is one hop over TLS, 12288 context, and OpenClaw is not in the path
+<!-- [CHANGE: claude-code | 2026-08-24] -->
+
+**Context.** Shawn wanted to chat with Dolphin from his phone on the same Wi-Fi with maximum
+context and no tool layer eating that context. `scripts/luminos-mobile-chat.py` already existed
+(antigravity, 2026-08-16) and was already the right shape — a small FastAPI app that serves a
+phone UI and proxies to a local llama.cpp. Two things were wrong with it and one thing was
+wrong underneath it.
+
+**The path was pointed at OpenClaw.** `LLM_UPSTREAM` defaulted to `127.0.0.1:8081`, which is
+`jobhunt-llm.service` — OpenClaw's *own* llama.cpp serving a 4B model (see `hive-daemon.py`,
+DECISION 70). A file whose docstring says "Zero OpenClaw" was feeding straight back into the
+OpenClaw stack and had never once spoken to Dolphin. Now `127.0.0.1:8080`, which is Dolphin as
+launched by `hive-start-model.sh`. The full path is **phone → this proxy → Dolphin**, nothing else.
+
+**Nothing worked at all until BUG-121 was fixed.** `hive-start-model.sh` was calling a broken
+Apr-24 `llama-server` that aborts on startup, so port 8080 had never come up. See BUG-121.
+
+**Context is 12288, and the ceiling is VRAM, not the model.** With BUG-121 fixed, `-fa on`
+works, which allows `q8_0` K/V cache. Measured on the card:
+
+| ctx | VRAM used / 6141 MiB | free |
+|---|---|---|
+| 4096 (old, f16) | ~5.5 GiB | — |
+| 12288 + q8_0 KV | 5452 MiB | **349 MiB** |
+| 16384 + q8_0 KV | 5718 MiB | 73 MiB |
+
+16384 loads and answers, but 73 MiB of headroom does not fit the live forex bot's ~130 MiB, and
+that bot must never be killed. **12288 is the safe maximum** — still 3x the old window.
+`--context-shift` is enabled so a long conversation drops its oldest tokens instead of erroring.
+
+**Privacy: the ISP was never the threat, the room was.** LAN traffic never crosses the WAN, so
+the Wi-Fi provider genuinely cannot see any of this, and a raw-IP URL means there is no DNS
+lookup to leak either. The real exposure was that 8090 was **plain HTTP**: prompts and replies
+crossed the air in cleartext, readable by the router and by any device holding the WPA2 PSK.
+So: TLS (self-signed, `~/.local/share/luminos/mobile-chat/`, uvicorn's native `ssl_*` — no new
+packages, which keeps this clear of the venv rules) plus a 128-bit token checked with
+`compare_digest`, passed once as `?k=` and then held in a `Secure`/`HttpOnly` cookie.
+llama.cpp stays bound to `127.0.0.1`, so **8090 is the only LAN-facing surface**.
+
+**Honest limit:** TLS hides content, not metadata. The router still sees that the phone talked
+to the laptop on 8090, and how much and when. To remove even that, connect the *laptop to the
+phone's hotspot* — then there is no third party in the path at all.
+
+**Undo.** `systemctl --user stop luminos-mobile-chat.service`. To go back to the old model path,
+set `Environment=LLM_UPSTREAM=http://127.0.0.1:8081` in the unit. To drop TLS, remove the
+`ssl_certfile`/`ssl_keyfile` arguments in `main()` — but then do not expose the port.
