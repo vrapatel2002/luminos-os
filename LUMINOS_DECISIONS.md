@@ -5075,3 +5075,29 @@ phone's hotspot* — then there is no third party in the path at all.
 **Undo.** `systemctl --user stop luminos-mobile-chat.service`. To go back to the old model path,
 set `Environment=LLM_UPSTREAM=http://127.0.0.1:8081` in the unit. To drop TLS, remove the
 `ssl_certfile`/`ssl_keyfile` arguments in `main()` — but then do not expose the port.
+
+### DECISION 79 addendum — static IP, and the forex reservation is gone
+<!-- [CHANGE: claude-code | 2026-08-25] -->
+
+**ctx 12288 -> 16384.** 12288 existed *only* to leave ~130 MiB for the forex bot. Shawn dropped
+that bot on 2026-08-25 (verified: no process, nothing on the GPU but `llama-server`, and
+`xvfb.service` — the Wine/MT5 headless display — already inactive; nothing needed killing). The
+card is ours alone, so Dolphin now runs the full 16384: **5728 / 6141 MiB, ~73 MiB free.** That
+is a hard ceiling with room for nothing else — if any GPU workload ever returns, `--ctx-size` in
+`hive-start-model.sh` is the first knob to turn down. The phone client's history budget moved
+32000 -> 44000 chars to match.
+
+**The Wi-Fi address is now static, because the TLS cert is pinned to it.** The cert carries
+`subjectAltName=IP:192.168.2.16`; a DHCP move would break both the saved URL and certificate
+validation. NetworkManager connection "BELL851 2.4 GHz" is now `ipv4.method manual` on
+192.168.2.16/24, gw 192.168.2.1, DNS 192.168.2.1 + 207.164.234.129 — the same values DHCP was
+already handing out, so nothing else changes. Verified after reactivation: gateway pings, DNS
+resolves, external ping fine, and the full phone path still answers.
+
+**Residual risk, stated plainly:** .16 is almost certainly inside the Bell hub's DHCP pool, so
+the router could in principle lease it to another device while this laptop is off. Most routers
+ARP-probe first and will skip it, and the laptop reclaims it on connect. **The bulletproof fix
+is a DHCP reservation on the router**, which needs the hub's admin page — not done here.
+
+**Undo.** `sudo nmcli con mod "BELL851 2.4 GHz" ipv4.method auto && sudo nmcli con up "BELL851 2.4 GHz"`.
+If the address then changes, regenerate the cert with the new IP in `subjectAltName`.

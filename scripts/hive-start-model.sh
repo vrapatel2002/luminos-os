@@ -5,7 +5,7 @@
 # PURPOSE: Starts llama-server with strict GPU enforcement.
 #          Uses ABSOLUTE PATHS for every binary so this works
 #          from kglobalaccel's minimal env (SUPER+SPACE shortcut).
-# SAFE FLAGS ONLY: --n-gpu-layers 99 --ctx-size 12288 --port 8080 --host 127.0.0.1
+# SAFE FLAGS ONLY: --n-gpu-layers 99 --ctx-size 16384 --port 8080 --host 127.0.0.1
 # BANNED: --cache-type-k turbo4
 # ============================================
 # [CHANGE: claude-code | 2026-08-24] Three fixes, all verified on hardware:
@@ -22,9 +22,13 @@
 #    Only the setgid `dgpu-exec` grants egid=dgpu.
 #
 # 3. FLASH-ATTN UNBANNED: the April core dump was this same broken binary, not
-#    the hardware. On b10452 `-fa on` works, which unlocks q8_0 KV cache and 3x
-#    the context. Measured: 16384 ctx = 5718/6141 MiB, leaving only 73 MiB —
-#    too tight for the forex bot's ~130 MiB. 12288 is the safe maximum.
+#    the hardware. On b10452 `-fa on` works, which unlocks q8_0 KV cache and 4x
+#    the context. Measured: 16384 ctx = 5718/6141 MiB, leaving ~73 MiB free.
+#
+# 4. [CHANGE: claude-code | 2026-08-25] ctx 12288 -> 16384. 12288 existed only
+#    to leave room for the forex bot's ~130 MiB; Shawn has dropped that bot, so
+#    the GPU is ours alone. This is the ceiling — 73 MiB free fits nothing else,
+#    so if any other GPU workload returns, this is the first knob to turn down.
 # ============================================
 
 # Hardened environment — same reason as luminos-hive-popup
@@ -71,7 +75,7 @@ echo "Starting llama-server with model $MODEL_PATH..."
 /usr/bin/nohup /usr/local/bin/dgpu-exec /usr/bin/llama-server \
     -m "$MODEL_PATH" \
     --n-gpu-layers 99 \
-    --ctx-size 12288 \
+    --ctx-size 16384 \
     --flash-attn on \
     --cache-type-k q8_0 \
     --cache-type-v q8_0 \

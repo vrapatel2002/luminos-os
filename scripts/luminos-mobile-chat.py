@@ -383,10 +383,11 @@ HTML_PAGE = """<!DOCTYPE html>
       let fullAiText = "";
 
       // [CHANGE: claude-code | 2026-08-24] Was history.slice(-16). A fixed turn
-      // count either wasted the 12288-token window on short turns or overran it
-      // on long ones. Budget by characters instead (~4 chars/token), newest
-      // first, reserving room for the 2048-token reply.
-      const CHAR_BUDGET = 32000;
+      // count either wasted the context window on short turns or overran it on
+      // long ones. Budget by characters instead (~4 chars/token), newest first,
+      // reserving room for the 2048-token reply.
+      // [CHANGE: claude-code | 2026-08-25] 32000 -> 44000 to match ctx 16384.
+      const CHAR_BUDGET = 44000;
       const payloadMessages = [];
       let used = 0;
       for (let i = history.length - 1; i >= 0; i--) {
