@@ -5043,10 +5043,10 @@ DECISION 70). A file whose docstring says "Zero OpenClaw" was feeding straight b
 OpenClaw stack and had never once spoken to Dolphin. Now `127.0.0.1:8080`, which is Dolphin as
 launched by `hive-start-model.sh`. The full path is **phone → this proxy → Dolphin**, nothing else.
 
-**Nothing worked at all until BUG-121 was fixed.** `hive-start-model.sh` was calling a broken
-Apr-24 `llama-server` that aborts on startup, so port 8080 had never come up. See BUG-121.
+**Nothing worked at all until BUG-139 was fixed.** `hive-start-model.sh` was calling a broken
+Apr-24 `llama-server` that aborts on startup, so port 8080 had never come up. See BUG-139.
 
-**Context is 12288, and the ceiling is VRAM, not the model.** With BUG-121 fixed, `-fa on`
+**Context is 12288, and the ceiling is VRAM, not the model.** With BUG-139 fixed, `-fa on`
 works, which allows `q8_0` K/V cache. Measured on the card:
 
 | ctx | VRAM used / 6141 MiB | free |

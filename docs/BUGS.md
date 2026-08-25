@@ -3,9 +3,21 @@ Last Updated: 2026-08-08 (BUG-111 FIXED — **the plugin death BUG-100 predicted
 
 ## Open Bugs
 
-### BUG-121 — every HIVE GPU model was dead, because `/usr/local/bin/llama-server` aborts on startup no matter what you pass it
+### BUG-140 — the phone chat streamed a perfect reply and rendered a blank screen, because two backslashes were one too many
+<!-- [CHANGE: claude-code | 2026-08-25] -->
+- Status: **FIXED and verified**, 2026-08-25. **Note:** first filed as BUG-122 and renumbered the same day — 122 was already the hover-launcher bug.
+- Severity: High (the phone client was unusable — you could send, and nothing ever came back)
+- Component: `scripts/luminos-mobile-chat.py`, the `stream_generator` SSE proxy
+- Symptom as reported: *"I said HI from my phone cant see reply?"* Both services up, model healthy, request returning 200.
+- Root cause: the three yields ended in `\\n\\n`. In Python source that is an **escaped backslash** — it emits the two characters `\` and `n`, not a newline. Server-Sent Events delimit frames with a **blank line**, so the entire response arrived as one unbroken line and the browser's `buffer.split("\n")` never found a boundary. Every chunk stayed in the "partial line" buffer forever and nothing was ever rendered.
+- **Measured on the wire before the fix: 1 real newline, 24 literal `\n` strings.** After: 23 real newlines, 0 literal.
+- **The trap is that the same file needs both spellings.** Inside `HTML_PAGE` (a Python triple-quoted string holding JS), `\\n` is *correct* — Python unescapes it once so the browser sees `\n`. Only the yields in real Python code were wrong. A blind find-and-replace across this file breaks the JS.
+- **Why it survived the first round of testing — the lesson.** The upstream check used `curl ... | grep -o '"content":"[^"]*"'`, which finds the payload regardless of framing, so a structurally broken stream looked like a pass. **Grepping for content does not test a protocol.** The honest check is to count real newlines (`od -c`) and then re-implement the client's parser over the bytes; that now reconstructs `Hello! How can I assist you?` instead of an empty string.
+- Cookie auth re-verified alongside: `?k=` sets the cookie on page load, and a subsequent `POST /api/chat` carrying only the cookie returns 200.
+
+### BUG-139 — every HIVE GPU model was dead, because `/usr/local/bin/llama-server` aborts on startup no matter what you pass it
 <!-- [CHANGE: claude-code | 2026-08-24] -->
-- Status: **FIXED and verified on the card**, 2026-08-24.
+- Status: **FIXED and verified on the card**, 2026-08-24. **Note:** first filed as BUG-121 and renumbered on 2026-08-25 — 121 was already the dead-media-keys bug.
 - Severity: Critical (no GPU model could load at all — Nexus, Bolt and Nova were all unreachable)
 - Component: `scripts/hive-start-model.sh`
 - Symptom: `hive-start-model.sh nexus` exits non-zero, `luminos-hive.service` sits inactive, nothing listens on 8080.

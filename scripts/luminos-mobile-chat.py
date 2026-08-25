@@ -500,13 +500,22 @@ async def chat_proxy(request: Request):
             ) as upstream_response:
                 if upstream_response.status_code != 200:
                     err_body = await upstream_response.aread()
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': f'Model error ({upstream_response.status_code}): {err_body.decode()}'}}]})}\\n\\n"
-                    yield "data: [DONE]\\n\\n"
+                    yield f"data: {json.dumps({'choices': [{'delta': {'content': f'Model error ({upstream_response.status_code}): {err_body.decode()}'}}]})}\n\n"
+                    yield "data: [DONE]\n\n"
                     return
 
+                # [CHANGE: claude-code | 2026-08-25] These three yields used to
+                # end in \\n\\n, which is an ESCAPED backslash in Python source:
+                # it emitted the two characters \ and n, not a newline. SSE frames
+                # are delimited by a blank line, so the whole stream arrived as
+                # one unbroken line and the browser's split("\n") never found a
+                # boundary — the phone showed nothing at all. Measured on the
+                # wire before the fix: 1 real newline, 24 literal "\n" strings.
+                # Note the \\n on the JS side of HTML_PAGE ARE correct: that
+                # string is Python-escaped once so the browser sees \n.
                 async for line in upstream_response.aiter_lines():
                     if line:
-                        yield f"{line}\\n\\n"
+                        yield f"{line}\n\n"
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
