@@ -5101,3 +5101,51 @@ is a DHCP reservation on the router**, which needs the hub's admin page — not 
 
 **Undo.** `sudo nmcli con mod "BELL851 2.4 GHz" ipv4.method auto && sudo nmcli con up "BELL851 2.4 GHz"`.
 If the address then changes, regenerate the cert with the new IP in `subjectAltName`.
+
+---
+
+## DECISION 80 — The G14 never suspends: it is a LAN server for Dolphin now
+<!-- [CHANGE: claude-code | 2026-08-25] -->
+
+**Context.** With Dolphin reachable from Shawn's phone (DECISION 79), a suspend is not a power
+saving — it is an outage. Suspending evicts the model from VRAM and drops the 8090 endpoint, so
+the phone gets nothing until someone opens the laptop lid and re-runs `hive-start-model.sh`.
+Shawn asked for no sleep on lid close and no sleep after any idle period.
+
+**This deliberately reverses BUG-091**, which had *enabled* lid/idle suspend on 2026-08-02.
+BUG-091's entry now carries a banner pointing here, because otherwise the next reader sees
+"laptop won't sleep" and re-fixes a bug that no longer exists.
+
+**Both layers were set, because they fire in different contexts.** BUG-091 established that
+while a Plasma session is live, PowerDevil holds a *block* inhibitor on handle-lid-switch, so
+PowerDevil decides; logind only decides at SDDM, on a bare TTY, or after logout. Setting one
+without the other splits the behaviour by context, which is the confusing failure mode.
+
+1. `~/.config/powerdevilrc` — `LidAction=0` and `AutoSuspendAction=0` on **all three** profiles
+   (AC, Battery, LowBattery). Written with `kwriteconfig6 --group <profile> --group
+   SuspendAndShutdown`, i.e. the real subgroup. **This is the BUG-091 trap:** a bare `[AC]`
+   group parses fine, PowerDevil even opens the file, and the setting does nothing.
+2. `/etc/systemd/logind.conf.d/luminos-lidsleep.conf` — `HandleLidSwitch`,
+   `HandleLidSwitchExternalPower`, `HandleLidSwitchDocked` and `IdleAction` all `ignore`.
+
+Layer 3 from BUG-091 (`99-luminos-lid.rules` → `luminos-lid.service`) needed no action: the udev
+rule is gone and nothing triggers the unit, so it is orphaned dead code.
+
+**Verified live, with the checks BUG-091 specifies** — all four logind properties read `ignore`
+via `busctl`, and PowerDevil's `lidAction` reads `0` via `qdbus6`. Note BUG-091's warning: do
+**not** use `triggersLidAction()`, which returns `true` for every configuration including
+`LidAction=0`; it reports who owns the lid event, not what will happen.
+
+**What was left alone, on purpose.** Display dimming (1500 s) and display-off (1800 s) still
+work — the screen going dark is not a suspend, and on a machine that now runs lid-closed it
+saves power for free. The charge-based critical-battery action is also untouched: it is not
+time-based, so it does not conflict with "no sleep after any amount of time", and it is the only
+thing standing between a drained battery and an unclean power-off.
+
+**Two real risks, stated rather than hidden.** (1) **Heat** — lid closed with an 8B model
+resident on the dGPU means no suspend and restricted airflow; this is the failure mode to watch.
+(2) **Battery** — unplugged, the machine will now run flat instead of suspending.
+
+**Undo.** `kwriteconfig6 --file powerdevilrc --group AC --group SuspendAndShutdown --key LidAction 1`
+(repeat per profile, likewise `AutoSuspendAction 1`), set the logind drop-in back to `suspend`,
+then `sudo systemctl reload systemd-logind && systemctl --user restart plasma-powerdevil`.

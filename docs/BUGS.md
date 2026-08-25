@@ -313,7 +313,14 @@ Last Updated: 2026-08-08 (BUG-111 FIXED — **the plugin death BUG-100 predicted
 
 ### BUG-091 — Laptop never slept: lid close and idle were both disabled on purpose, and the fix went to a config file PowerDevil no longer reads
 <!-- [CHANGE: claude-code | 2026-08-02] -->
-- Status: **FIXED (2026-08-02) — VERIFIED END TO END (2026-08-03).** No longer pending. The journal caught a real, unprompted lid close by the user:
+> ⚠️ **DELIBERATELY REVERSED on 2026-08-25 — see DECISION 80. The machine is
+> supposed to never sleep again.** Shawn now serves Dolphin to his phone over the
+> LAN, and suspending drops the model out of VRAM and kills the endpoint. If you
+> are reading this entry because "the laptop won't sleep", that is the intended
+> behaviour, **not** a regression of BUG-091. The diagnostic content below is
+> still accurate and still worth reading — especially the subgroup trap — but the
+> *desired outcome* is now the opposite of what this entry describes.
+- Status: **FIXED (2026-08-02) — VERIFIED END TO END (2026-08-03), then intentionally reversed 2026-08-25 (DECISION 80).** The journal caught a real, unprompted lid close by the user:
   `00:50:11 systemd-logind: Lid closed.` → `suspend requested from client PID 27911 ('org_kde_powerde')` → `The system will suspend now!` → **40 h in s2idle** → `Aug 03 16:56:23 systemd-logind: Lid opened.` → `PM: suspend exit`, clean resume, session intact. `suspend_stats` success 2 / fail 1.
   The ~41 `Timekeeping suspended for ~3600 s` lines all share one wallclock stamp because the kernel ring buffer only drains at full resume — they are the hourly s2idle re-arm cycles (`PM: Triggering wakeup from IRQ 9` → `ACPI: PM: Rearming ACPI SCI for wakeup`), **not** 41 separate suspends. Bracket by `PM: suspend entry`/`exit`, which occur exactly once each.
 - **Residual (minor, self-recovering): the FIRST lid close aborted the suspend.**
