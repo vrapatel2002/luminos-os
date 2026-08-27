@@ -27,7 +27,14 @@ _CANADA = re.compile(
     r"|\bnewfoundland\b|british columbia|\bbc\b|\bon, ca\b"
     r"|\btoronto\b|\bottawa\b|\bmontreal\b|\bmontr[ée]al\b|\bvancouver\b"
     r"|\bcalgary\b|\bedmonton\b|\bwaterloo\b|\bkitchener\b|\bmississauga\b"
-    r"|\bhamilton\b|\bwinnipeg\b|\bhalifax\b|\bvictoria, bc\b|\bburnaby\b",
+    r"|\bhamilton\b|\bwinnipeg\b|\bhalifax\b|\bvictoria, bc\b|\bburnaby\b"
+    # [CHANGE: claude-code | 2026-08-26] His own city. Without it
+    # "Sault Ste Marie, ON" matched no country at all and fell through to
+    # ONSITE — the single place on earth where an on-site job costs him no
+    # move was the one the filter threw away. Bare "ON" is deliberately not a
+    # Canada token (too many false hits on the English word), so the city has
+    # to be named. Must stay in step with profile.yaml `identity.location`.
+    r"|sault\s+ste?\.?\s+marie|sault\s+sainte\s+marie",
     re.I,
 )
 
@@ -81,6 +88,41 @@ _OTHER = re.compile(
 
 _REMOTE_HINT = re.compile(r"\bremote\b|\banywhere\b|\bwork from home\b|\bwfh\b|\bdistributed\b", re.I)
 
+# [CHANGE: claude-code | 2026-08-26] BUG-139. HYBRID WAS NEVER FILTERED.
+#
+# `_CANADA` matched first and returned CANADA immediately, so "Hybrid - Toronto,
+# ON" came back `canada`, `is_open=True`, and went into the pool to be scored.
+# The profile says `remote_required: true`; the classifier did not implement it.
+# This is a rules bug, so it costs nothing to fix and nothing to re-crawl —
+# score.py recomputes the bucket every rules pass (the BUG-107 consequence).
+#
+# Found by TESTING THE CLAIM, not by a failing test: I had told Shawn that
+# locations.py "kills hybrid", then ran classify() on five hybrid strings and
+# all five came back open. The 17 built-in unit tests passed throughout, because
+# none of them contained the word "hybrid" — the same shape as BUG-107.
+# `in-person` is DELIBERATELY NOT HERE. It caught "Remote (Canada) - occasional
+# in-person offsites", which is a fully remote job with a team retreat. The
+# asymmetry decides it: a false accept wastes one 8-second scoring call, a false
+# reject silently deletes a job he could have had. When in doubt, keep it and
+# let the model read the requirements.
+_HYBRID = re.compile(
+    r"\bhybrid\b|\bon[\s-]?site\b|\bin[\s-]?office\b"
+    r"|\d\s*days?\s*(a|per)\s*week\s*in\b|\brelocation\s*(is\s*)?required\b"
+    r"|\bmust\s+relocate\b",
+    re.I,
+)
+
+# The ONE exception, confirmed by Shawn 2026-08-26: he will take a hybrid role
+# in his own city, because that involves no move. Anywhere else, hybrid means
+# relocating, which is the thing he is explicitly not doing.
+#
+# HARDCODED ON PURPOSE, and this is the haste decision: the honest version reads
+# `identity.location` out of profile.yaml, but classify() is called from both
+# ingest.py and score.py and neither carries the profile, so plumbing it through
+# is two signature changes to save one line. If Shawn moves, edit this regex —
+# it must stay in step with profile.yaml's `identity.location`.
+_LOCAL_CITY = re.compile(r"sault\s+ste?\.?\s+marie|sault\s+sainte\s+marie", re.I)
+
 
 def is_remote(location, title="", extra=""):
     """True if the posting looks like a work-from-home role."""
@@ -100,6 +142,20 @@ def classify(location, title="", extra=""):
     if not loc:
         # Some boards leave location blank on remote-native listings.
         return GLOBAL if _GLOBAL.search(title or "") or _BARE_REMOTE.search(title or "") else UNKNOWN
+
+    # [CHANGE: claude-code | 2026-08-26] BUG-139. This must run BEFORE the
+    # country checks, because _CANADA matches "Hybrid - Toronto" and returns
+    # CANADA on the spot. A desk requirement is a harder constraint than a
+    # country: being allowed to work in Ontario does not mean being able to
+    # drive to Toronto.
+    #
+    # Checked against loc AND title because boards split it both ways —
+    # Greenhouse puts "Hybrid" in the location, Lever often in the title.
+    if _HYBRID.search(loc) or _HYBRID.search(title or ""):
+        # His own city is the exception: hybrid here means no move at all.
+        if _LOCAL_CITY.search(loc):
+            return CANADA
+        return ONSITE
 
     if _CANADA.search(loc):
         return CANADA

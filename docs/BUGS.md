@@ -4119,3 +4119,42 @@ the `_NET_WORKAREA` block in `~/re/tools/007-run.sh` restores it permanently.
 Nothing else on the system was changed —
 the `jobhunt-llm.service` stop during the VRAM experiment was temporary and it was
 restarted and verified `active`.
+
+## BUG-139
+# [CHANGE: claude-code | 2026-08-26]
+**Hybrid roles were never filtered. "Hybrid - Toronto, ON" scored as an open Canadian job.**
+
+`profile.yaml` says `remote_required: true`. `locations.py` never implemented it. `classify()`
+checked `_CANADA` before anything else and returned `CANADA` the moment it saw "Toronto", so a
+posting that required three days a week at a desk 700 km away was indistinguishable from a
+fully remote one. `is_open()` returned `True` and it went into the pool to be scored.
+
+**How it was found, which is the part worth keeping.** Not by a failing test. I had told Shawn
+in plain prose that `locations.py` "kills hybrid" — an assertion, never checked. When he then
+confirmed he *would* take a hybrid role in his own city, I went to add the exception and ran
+`classify()` on five hybrid strings first. All five came back open. **The 26 built-in unit tests
+passed before and after, because not one of them contained the word "hybrid".** Identical shape
+to BUG-107: the tests encode the cases someone thought of, and the gap is invisible to them by
+construction.
+
+**Fix.** A `_HYBRID` check that runs BEFORE the country checks, against both the location and
+the title (Greenhouse puts "Hybrid" in one, Lever often in the other). A desk requirement is a
+harder constraint than a country — being allowed to work in Ontario is not being able to drive
+to Toronto.
+
+**The exception, confirmed by Shawn:** hybrid in Sault Ste. Marie is fine, because it involves
+no move. That exposed a second, quieter bug — `_CANADA` did not contain his own city, so
+`"Sault Ste Marie, ON"` matched no country at all and fell through to `ONSITE`. **The one place
+on earth where an on-site job costs him nothing was the one place the filter threw away.** Bare
+`ON` cannot be a Canada token (it collides with the English word), so the city had to be named.
+
+**What is deliberately NOT caught:** `in-person`. It matched `"Remote (Canada) - occasional
+in-person offsites"`, which is a remote job with a team retreat. The asymmetry decides it — a
+false accept wastes one 8-second scoring call, a false reject silently deletes a job he could
+have had.
+
+**Blast radius, measured rather than feared:** across all 15,658 rows, **10** sat in an open
+bucket and are really hybrid/on-site; **1** of those was in the current scoring pool. Small,
+because most hybrid postings name a city that was already rejected for other reasons. It was
+still worth fixing: the rule is free, it runs before the model, and `score.py` recomputes the
+bucket every rules pass, so no re-crawl was needed (the BUG-107 consequence paying off).
