@@ -416,3 +416,116 @@ JOBHUNT_DB=/tmp/t.db ./track.py --log <id> interview --at 2026-08-26T08:00:00
 
 `JOBHUNT_DB` exists so the stages that have not happened yet can be exercised
 without writing invented events into the real job history.
+
+---
+
+## Phase 5 — reading the replies
+
+`followup.py` reads the inbox, decides what each message means, records it as an
+event, and drafts a reply where a reply is safe. It is **built and tested but
+read-only**: it cannot reach Gmail yet, and `--send` refuses.
+
+```bash
+./followup.py --self-test          # 12 real archive cases through the classifier
+./followup.py --explain "we'd like to schedule a call"
+./followup.py --from-json mail.json        # dry run, prints what it WOULD do
+./followup.py --from-json mail.json --apply    # write the events
+./followup.py --scan --days 30 --apply         # needs OAuth (see below)
+```
+
+### Provenance before meaning
+
+Nothing is interpreted until it can be tied to an application we recorded
+sending. That order is not fussiness — it is what the real inbox does to a
+keyword search. A naive search over 400 days returned **2 hits, both false**:
+
+- **Temu**: "Congrats! Vratik Patel" and "Thank you for your purchase!"
+- **a car loan**: "(Next Steps) We've received your application"
+
+Both read exactly like a recruiter. Neither is one. So the sender's domain must
+match a company we applied to, or be a known ATS, or the thread must trace back
+to a `submitted` event — otherwise the message is dropped before a single word
+is classified.
+
+The domain match runs through `norm_company()`, the same function BUG-141 was
+about. "Canonical Ltd." flattens to `canonicalltd`, which is not in
+`canonical.com`, so without stripping the legal suffix the strongest provenance
+check would have quietly failed for every employer that writes one.
+
+Provenance is not enough on its own: **`sah.subscriptions@gmail.com` is a real
+employer on plain Gmail**, and Outlook out-of-office autoreplies
+(`Automatic reply: DATA SYSTEMS SPECIALIST`) come from the right domain and mean
+nothing. Both are handled explicitly.
+
+### Decisive vs weak evidence
+
+Each rule is marked decisive or not. `decided not to move forward` is decisive.
+`unfortunately` is not — it appears in acknowledgements, delays and rejections
+alike. A message that only trips weak rules becomes `needs_review` and lands on
+your list rather than being guessed at.
+
+If two **decisive** rules disagree in polarity — one says interview, one says
+rejected — it does not pick a winner by precedence. It escalates. A message that
+contradicts itself is exactly the message a human should read.
+
+### The conditional guard
+
+The single most important fix came from a real Sault Area Hospital
+acknowledgement:
+
+> your application has been received. You will be contacted by the Recruitment
+> Team **if you are selected for an interview**.
+
+That is not an interview invitation, and reading it as one would fire the one
+alert you actually care about, for nothing. Crying wolf there is worse than
+missing an acknowledgement, because it teaches you to ignore the notification
+that matters.
+
+So a decisive phrase inside a conditional is not decisive. Only the text
+**before** the match in the same sentence is checked, which keeps "we'd like to
+schedule a call **if you're available**" — a genuine invitation with a trailing
+conditional — working. That change took the self-test from 10/12 to **12/12**.
+
+### The asymmetry you should know about
+
+The archive holds roughly **ten real rejections** and **zero genuine interview
+invitations**. Every rejection rule is tested against real mail. The interview
+rules are tested against constructed examples and the one near-miss above.
+
+The branch that matters most is the branch with the least evidence behind it.
+That is why the default is *escalate when unsure*, and why `track.py` has the
+**CLOSED, BUT REACHED YOU FIRST** section — if this tool ever reads an interview
+as a rejection, the role stays visible instead of vanishing into the closed pile.
+
+### What it will and will not send
+
+Replies are **templates, not generated prose** — same rule as Phase 3, with less
+margin, because an email cannot be un-sent.
+
+There are exactly two templates: `recruiter_interest` and `assessment`. There is
+none for `interview` (you should write that yourself — it is the whole goal),
+none for `offer`, none for `rejected`, none for `acknowledged`. It also never
+replies to a no-reply sender, detected by address *and* by body text
+("this is an automated message", "unmonitored mailbox").
+
+An assessment gets both a reply **and** an escalation. The template commits you
+to completing the work before the deadline, and making a commitment on your
+behalf without telling you is precisely the over-eagerness this pipeline exists
+to avoid.
+
+### Gmail access — the second thing only you can do
+
+`--scan` and `--send` need OAuth credentials at
+`~/.config/luminos/jobhunt-gmail.json`. The MCP Gmail connector cannot be used:
+it is session-scoped, and the 03:30 timer has no session.
+
+Scopes: **`gmail.readonly` + `gmail.compose`**. Not `gmail.send` — compose can
+only write drafts, so the worst case of a bug is a draft you delete.
+
+In Google Cloud Console: new project → enable Gmail API → OAuth consent screen
+(External) → **add yourself as a Test user**, which is the step everyone misses
+and which makes login fail with a wall of text about unverified apps → Create
+credentials → OAuth client ID → Desktop app → download the JSON to that path.
+
+Until that file exists, `--scan` exits with an explanation and `--send` refuses.
+`--from-json` works today and is how the whole classifier was tested.

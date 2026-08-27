@@ -199,9 +199,27 @@ def stage_of(events):
     """
     if not events:
         return None
-    for e in events:
+
+    # [CHANGE: claude-code | 2026-08-27] A terminal event only closes the role if
+    # nothing needing a human happened AFTER it. This used to return terminal
+    # regardless of when it arrived, which is wrong in a case that really
+    # happens: rejected for the role on Monday, recruiter comes back Tuesday
+    # offering an interview. The truth on Wednesday is "interview". Reading it
+    # as "rejected" would park a live interview in the closed pile.
+    #
+    # `events` is ordered oldest-first by `load()`, so the last terminal index
+    # is simply the highest one.
+    last_terminal = None
+    for i, e in enumerate(events):
         if KINDS[e["kind"]][2]:
-            return e["kind"]
+            last_terminal = i
+    if last_terminal is not None:
+        after = [e for e in events[last_terminal + 1:]
+                 if e["kind"] in NEEDS_HUMAN]
+        if not after:
+            return events[last_terminal]["kind"]
+        return max(after, key=lambda e: KINDS[e["kind"]][0])["kind"]
+
     return max(events, key=lambda e: KINDS[e["kind"]][0])["kind"]
 
 

@@ -221,7 +221,7 @@ Automated work-from-home job search. Manual: `scripts/jobhunt/README.md`. Design
 | 3.5 — track | ✅ DONE | `track.py`, append-only event log keyed on `dedup_key`. The spine Phases 4/5 write into |
 | 4 — apply (Playwright) | ⬜ not started | Greenhouse 22 + Ashby 17 of 86 roles; **47 have no form found yet** |
 | 4b — resolve aggregators | ⬜ not started | turn those 47 jobicy/WWR/RemoteOK listings into real ATS forms |
-| 5 — follow-up on email | ⬜ not started | needs Google Cloud OAuth — the MCP connector is session-scoped and a 03:30 timer cannot use it |
+| 5 — follow-up on email | 🟡 built, read-only | `followup.py` classifies 12/12 real archive cases and drafts replies, but **cannot reach Gmail** — needs Google Cloud OAuth. `--from-json` works today, `--send` refuses |
 
 <!-- [CHANGE: claude-code | 2026-08-27] The old table said Phase 1 was blocked on
      Shawn's resume and Phase 5 on a `claude /login`. Both are stale: the profile
@@ -234,7 +234,23 @@ Automated work-from-home job search. Manual: `scripts/jobhunt/README.md`. Design
    it is the single most consequential screening answer and guessing it wrong is worse
    than not applying), `salary_expectation_cad`, `earliest_start_date`.
 2. **Google Cloud OAuth** → `~/.config/luminos/jobhunt-gmail.json`, scopes
-   `gmail.readonly` + `gmail.compose` (**not** `gmail.send`, on purpose).
+   `gmail.readonly` + `gmail.compose` (**not** `gmail.send`, on purpose). The easily-missed
+   step is adding yourself as a **Test user** on the consent screen.
+
+<!-- [CHANGE: claude-code | 2026-08-27] Phase 5 built. -->
+**Phase 5, stated honestly:** the classifier is gated on *provenance before meaning* — a
+message is dropped unless its sender ties back to an application we recorded sending,
+because a naive keyword search over 400 days of the real inbox returned **2 hits, both
+false** (a Temu "Congrats!" and a car loan's "We've received your application"). Evidence
+is marked decisive or weak, contradictions escalate rather than pick a winner, and a
+decisive phrase inside a conditional does not count — that last rule came from a real
+acknowledgement reading *"you will be contacted **if you are selected for an interview**"*
+and took the self-test from 10/12 to **12/12**. The archive holds ~10 real rejections and
+**zero** genuine interview invitations, so the branch that matters most has the least
+evidence behind it: the default is escalate-when-unsure, and `track.py`'s **CLOSED, BUT
+REACHED YOU FIRST** section exists so a misread interview stays visible. Replies are
+templates, never generated prose, and only for `recruiter_interest` and `assessment` —
+there is deliberately no template for an interview, an offer or a rejection.
 
 **The one command:** `cd ~/luminos-os/scripts/jobhunt && ./status.py`
 **The one file he edits:** `targets.yaml`, then `./score.py --rules-only` (~1 s, free).
