@@ -220,7 +220,7 @@ Automated work-from-home job search. Manual: `scripts/jobhunt/README.md`. Design
 | 2 — filter + score | ✅ DONE | free rules 9,788 → 192 in 0.95 s, then the LLM. **Backend is Antigravity** (DECISION 82), one-word switch |
 | 3 — tailor | ✅ DONE | `tailor.py`, DECISION 83 — the model picks `bullet_bank` ids and rephrases, it may not state a fact |
 | 3.5 — track | ✅ DONE | `track.py`, append-only event log keyed on `dedup_key`. The spine Phases 4/5 write into |
-| 4 — apply | 🟡 reads forms, does not submit | `apply.py` pulls the real form from the Greenhouse and Ashby APIs (no browser) and decides per field whether it can answer honestly. Submitting is not built |
+| 4 — apply | 🟡 reads forms, does not submit | `apply.py` pulls the real form from the Greenhouse and Ashby APIs (no browser) and decides per field whether it can answer honestly. Submitting is not built. **23 of 86 roles (all Canonical) forbid AI-written answers on the form itself and are excluded from automation permanently, not pending work** |
 | 4b — resolve aggregators | ⬜ not started | turn those 47 jobicy/WWR/RemoteOK listings into real ATS forms |
 | 5 — follow-up on email | 🟡 built, read-only | `followup.py` classifies 12/12 real archive cases and drafts replies, but **cannot reach Gmail** — needs Google Cloud OAuth. `--from-json` works today, `--send` refuses |
 
@@ -241,14 +241,43 @@ Automated work-from-home job search. Manual: `scripts/jobhunt/README.md`. Design
 <!-- [CHANGE: claude-code | 2026-08-27] Phase 4 measured. -->
 **Phase 4, and the finding that changes the plan.** Both ATSs hand over the whole
 application form as JSON over an unauthenticated read, so every shortlisted role can be
-checked without opening a browser. Measured across all 86: **0 ready now, 7 ready the
-moment `profile.yaml` is filled, 6 blocked on mappings still to write, 39 asking required
-open questions, 6 requiring a legal agreement, 6 withdrawn, 22 with no form found.**
-**"Auto-submit everything" is not reachable** — 45 roles ask something only Shawn can
-answer, and Canonical (about two dozen of them) asks his high-school mathematics
-performance, his degree result and his nationality. The tool never accepts an arbitration
-or background-check agreement and never infers nationality, both by rule rather than by
-omission. The anti-fabrication rule earned itself immediately: three of `apply.py`'s own
+checked without opening a browser.
+
+⚠️ **The finding that settles it: Canonical's form forbids being filled in by a tool.**
+A required checkbox reads *"During this application process I agree to use only my own
+words. I understand that plagiarism, the use of AI or other generated content will
+disqualify my application."* Ticking that and then generating the prose is a **false
+declaration** with disqualification as the stated penalty — and Canonical is **23 of the
+86 shortlisted roles**, the largest employer on the list. `form_forbids_ai()` now checks
+this at the form level before anything else, counts those roles apart, never submits them,
+and prints the clause as a banner above the field list. The regex is prohibition-specific
+on purpose: the first version matched a bare "use of AI" and flagged Tailscale, whose
+checkbox merely *acknowledges* an AI-guidelines policy — reporting that as a ban would
+have been a false statement in the tool's own summary.
+
+Measured across all 86 after the 2026-08-27 transcript/profile pass: **1 ready now
+(effectively 0 — see below), 7 ready the moment `profile.yaml` is filled, 6 blocked on
+mappings still to write, 16 asking required open questions, 5 requiring a legal agreement,
+23 forbidding AI-written answers, 6 withdrawn, 22 with no form found.** The single "ready"
+role is PostHog *Backend Engineer*, whose every answer is correct field by field — but the
+**live** title is `Backend Engineer - Ingestion (Europe/UK timezone)` while the DB stored
+only `Backend Engineer`, so the shortlist never saw the region requirement. It is the only
+role in the shortlist with that mismatch, and it is the one that came out ready.
+
+**"Auto-submit everything" is not reachable** — not for want of engineering, but because
+23 roles have the employer saying so in writing and 16 more ask open questions about his
+experience. Shawn's 2026-08-27 answers plus the official transcript cleared a lot of the
+rest: nationality (31 fields), willingness to travel (23), passport **country** (8, while a
+passport *number* stays refused permanently as a government identifier), street address
+(7), `over_18` (5), degree result (23) and sponsorship (15, now **false** — he holds an
+**open work permit**, with a separate `_us` field that is **true**). The transcript also
+**corrected a live error**: the profile claimed a *Bachelor of Computer Science*; the
+official record says *Bachelor of Science (Honours) Computer Science*. The wrong credential
+was going onto every tailored resume.
+
+The tool never accepts an arbitration or background-check agreement, never writes on a form
+that bans generated answers, and never stores a government identifier — all by rule rather
+than by omission. The anti-fabrication rule earned itself immediately: three of `apply.py`'s own
 rules silently filled wrong answers on the first real run — "Bachelor's Degree" typed into
 *"what was your degree **result**?"*, the same rule firing on *"how many companies have you
 worked for?"*, and the generic file rule uploading the resume into Greenhouse's separate

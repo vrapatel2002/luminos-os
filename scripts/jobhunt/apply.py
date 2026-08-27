@@ -401,13 +401,39 @@ def answer_for(f, p):
                  r"|i understand that", lab):
         return None, "a legal agreement — only Shawn can accept this"
 
-    # ---- protected attributes we cannot derive.
-    # Being authorised to work somewhere says nothing about nationality: a
-    # permanent resident is authorised and is not a citizen. There is no honest
-    # way to infer this, and it is not in profile.yaml on purpose.
-    if re.search(r"nationalit|citizenship|what is your citizen|passport", lab):
-        return None, ("nationality is not in profile.yaml and cannot be inferred "
-                      "from work authorisation")
+    # ---- nationality.
+    # Still never DERIVED — being authorised to work somewhere says nothing about
+    # citizenship, and a permanent resident is authorised and is not a citizen.
+    # [CHANGE: claude-code | 2026-08-27] But it is now STATED: Shawn gave it
+    # directly on 2026-08-27, so the 31 refusals across Canonical and Supabase
+    # have a real answer. A PASSPORT question stays refused — it asks for a
+    # document number, which is a different thing from a nationality and is not
+    # something this file should ever hold.
+    # [CHANGE: claude-code | 2026-08-27] "Passport" splits two ways and the first
+    # version of this rule refused both, costing 8 roles for nothing. Ashby asks
+    # "Passport Country", which is a nationality question wearing a different hat
+    # and is answerable. A passport NUMBER or expiry or a scan of the document is
+    # a government identifier, and that does not belong in this file at all —
+    # those stay refused permanently, not pending a CONFIRM.
+    if re.search(r"passport", lab):
+        if re.search(r"countr|nationalit|issu(ing|ed)|which country", lab):
+            v = ident.get("citizenship")
+            if not v:
+                return None, "identity.citizenship is empty in profile.yaml"
+            opt = pick_option(f.options, v) if f.options else v
+            return (opt, "identity.citizenship") if opt else (
+                None, f"no '{v}' option on this question")
+        return None, ("asks for passport document details — a government "
+                      "identifier, deliberately never stored here")
+    if re.search(r"nationalit|citizenship|what is your citizen"
+                 r"|country of citizen|citizen of which", lab):
+        v = ident.get("citizenship")
+        if not v:
+            return None, ("nationality is not in profile.yaml and cannot be "
+                          "inferred from work authorisation")
+        opt = pick_option(f.options, v) if f.options else v
+        return (opt, "identity.citizenship") if opt else (
+            None, f"no '{v}' option on this question")
 
     # ---- self-identification.
     # He set gender / race / veteran / disability to "Decline to self-identify".
@@ -425,8 +451,15 @@ def answer_for(f, p):
     if re.search(r"sponsor", lab):
         c = _country(f.label)
         if c == "us":
-            v = "Yes" if not ans.get("authorized_to_work_in_us") else "No"
-            why = "not authorised in the US, so sponsorship would be required"
+            # [CHANGE: claude-code | 2026-08-27] Explicit field first. The open
+            # permit is CANADIAN and buys nothing in the US, so this is Yes —
+            # but state it from a field rather than deriving it from a different
+            # question's answer.
+            need = ans.get("requires_sponsorship_us")
+            if need is None:
+                need = not ans.get("authorized_to_work_in_us")
+            v = "Yes" if need else "No"
+            why = "requires_sponsorship_us (the permit is Canadian)"
         elif c == "other":
             return None, "asks about a country the profile says nothing about"
         else:
@@ -435,7 +468,16 @@ def answer_for(f, p):
                 return None, ("requires_sponsorship_canada is unset — it has no "
                               "default on purpose; being work-authorised now "
                               "does not answer whether sponsorship is needed later")
-            v, why = ("Yes" if v else "No"), "requires_sponsorship_canada"
+            # [CHANGE: claude-code | 2026-08-27] Answered No, on Shawn's own
+            # words: an OPEN work permit means no employer sponsors anything to
+            # hire him. Flagged separately when the question says "now or in the
+            # FUTURE", because that wording is asking a different thing — the
+            # permit has an expiry — and if he ever wants those 15 roles
+            # answered the other way, this reason string is where to find them.
+            why = ("requires_sponsorship_canada (note: asks about the future too)"
+                   if re.search(r"future|continu|ongoing|any (time|point)", lab)
+                   else "requires_sponsorship_canada (open work permit)")
+            v = "Yes" if v else "No"
         opt = pick_option(f.options, v) if f.options else v
         return (opt, why) if opt else (None, f"no '{v}' option on this question")
 
@@ -523,14 +565,42 @@ def answer_for(f, p):
         return (opt, "no such employer anywhere in profile.yaml") if opt else (
             None, "no clear 'never worked here' option")
 
-    # ---- things only he knows, that profile.yaml could hold but does not
+    # [CHANGE: claude-code | 2026-08-27] Both of these were blocking real roles
+    # and both are now stated facts rather than inferences — see profile.yaml.
     if re.search(r"over the age of 18|at least 18|18 years", lab):
-        return None, "age is not in profile.yaml (add `over_18: true`)"
+        v = ans.get("over_18")
+        if v is None:
+            return None, "age is not in profile.yaml (add `over_18: true`)"
+        v = "Yes" if v else "No"
+        opt = pick_option(f.options, v) if f.options else v
+        return (opt, "application_answers.over_18") if opt else (
+            None, f"no '{v}' option on this question")
     if re.search(r"meet in person|travel .{0,20}(times?|days?) (a|per) year"
                  r"|willing to travel|in-person (event|meet)", lab):
-        return None, ("willingness to travel is not in profile.yaml "
-                      "(add `willing_to_travel_occasionally`)")
+        v = ans.get("willing_to_travel_occasionally")
+        if v is None:
+            return None, ("willingness to travel is not in profile.yaml "
+                          "(add `willing_to_travel_occasionally`)")
+        v = "Yes" if v else "No"
+        opt = pick_option(f.options, v) if f.options else v
+        return (opt, "willing_to_travel_occasionally") if opt else (
+            None, f"no '{v}' option on this question")
 
+    # [CHANGE: claude-code | 2026-08-27] Address, from the transcript. Matched
+    # part by part: Greenhouse asks for one blob, Ashby asks for four fields, and
+    # answering "395 Lake Street" into a box labelled "Postal code" would pass
+    # validation on some forms and be wrong on all of them.
+    addr = con.get("address") or {}
+    if addr:
+        if re.search(r"postal( |/)?code|zip ?code", lab):
+            return addr.get("postal_code"), "contact.address.postal_code"
+        if re.search(r"address line ?2|apt|suite|unit", lab):
+            return "", "no second address line"
+        if re.search(r"address line ?1|street address|^address$|mailing address",
+                     lab):
+            return addr.get("street"), "contact.address.street"
+        if re.fullmatch(r"city|town|city/town", lab):
+            return addr.get("city"), "contact.address.city"
     if re.search(r"address line|street address|postal( |/)?(code)?|zip ?code"
                  r"|^city$", lab):
         return None, "no street address in profile.yaml"
@@ -580,6 +650,45 @@ def answer_for(f, p):
         opt = pick_option(f.options, v, "Bachelor") if f.options else v
         return (opt, "highest_education") if opt else (
             None, "no matching education option")
+
+    # [CHANGE: claude-code | 2026-08-27] The RESULT question, which the rule above
+    # deliberately refuses. Answerable now that the transcript is in the file.
+    # Reported as a percentage plus the scale it came from, never converted into
+    # a British honours class — Canonical is a UK company and its wording invites
+    # "2:1"/"2:2", but a Canadian percentage does not map onto that cleanly, and
+    # this is the one field an employer can check against an official document.
+    if re.search(r"degree (result|classification|grade)"
+                 r"|(result|classification|grade).{0,20}(of|for) your .{0,20}degree"
+                 r"|what (was|is) your .{0,30}degree result"
+                 r"|\bgpa\b|grade point average", lab):
+        v = ans.get("degree_result")
+        if not v:
+            return None, "degree_result is empty in profile.yaml"
+        if f.options:
+            opt = pick_option(f.options, v)
+            return (opt, "degree_result") if opt else (
+                None, "degree result is a percentage; the options are a "
+                      "different grading system")
+        return v, "degree_result (from the transcript)"
+
+    # ---- school grades. Canonical asks about MATHS and NATIVE LANGUAGE at
+    # secondary school on 23 shortlisted roles. Nothing about school is in the
+    # university transcript, so these stay refused until he fills them in — but
+    # they are named separately from a generic "no rule" so the count is honest
+    # about what it is waiting for.
+    sch = p.get("secondary_school") or {}
+    if re.search(r"(high ?school|secondary school|at school).{0,40}"
+                 r"(math|maths|mathematics)"
+                 r"|(math|maths|mathematics).{0,30}(at|in) (high ?school|school)",
+                 lab):
+        v = sch.get("maths_result")
+        return (v, "secondary_school.maths_result") if v else (
+            None, "school maths result is not in profile.yaml (CONFIRM)")
+    if re.search(r"native language.{0,40}(high ?school|school)"
+                 r"|(high ?school|school).{0,40}native language", lab):
+        v = sch.get("native_language_result")
+        return (v, "secondary_school.native_language_result") if v else (
+            None, "school language result is not in profile.yaml (CONFIRM)")
     if re.search(r"how did you (first )?(hear|learn)|where did you (hear|find)"
                  r"|referral source|source", lab):
         src = ans.get("referral_source") or ""
@@ -618,6 +727,58 @@ def answer_for(f, p):
 GAP_MARKERS = ("empty in profile.yaml", "is unset", "no start date",
                "unset on purpose", "no street address", "not in profile.yaml (add")
 CONSENT_MARKERS = ("only Shawn can accept", "cannot be inferred")
+
+
+# ---------------------------------------------------------------------------
+# [CHANGE: claude-code | 2026-08-27] The rail that matters more than any other
+# in this file.
+#
+# Canonical puts this in the middle of its application form, as a REQUIRED
+# checkbox, on roughly a quarter of the shortlist:
+#
+#   "During this application process I agree to use only my own words. I
+#    understand that plagiarism, the use of AI or other generated content will
+#    disqualify my application."
+#
+# So on those forms, an automated answer is not merely a bad idea — ticking that
+# box and then letting a tool write the prose is a false declaration, and the
+# stated penalty is disqualification. Getting caught would not cost one
+# application, it would burn the employer.
+#
+# This is checked at the FORM level, not the field level, because the clause
+# poisons every other free-text box on the same page. A form that says this gets
+# no generated content at all: apply.py will still read it and still fill the
+# pure-fact fields (name, email, address — those are his own words in any
+# meaningful sense), but it must never write an essay answer here and must never
+# auto-submit. Shawn writes these himself or he does not apply.
+#
+# Broad on PROHIBITION wording, but it must actually be a prohibition. The first
+# version of this regex matched a bare "use of AI" and flagged Tailscale, whose
+# checkbox reads "I have read and understand Tailscale's Candidate Privacy Policy
+# and AI Guidelines regarding ... use of AI tools in the hiring process". That is
+# an acknowledgement pointing at a policy document, not a ban, and reporting it
+# as "forbids AI-written answers outright" would have been a false statement in
+# my own summary — the same category of error this file exists to avoid. It is
+# still blocked, correctly, as a [consent] legal agreement.
+#
+# So: the label has to carry a prohibition, not merely mention AI.
+AI_FORBIDDEN = re.compile(
+    r"use only my own words|in my own words only|\bplagiaris"
+    r"|(ai|artificial intelligence|chatgpt|llm|generated content|generative)"
+    r"[^.]{0,80}(disqualif|prohibit|not permitted|not allowed|forbidden"
+    r"|will not be considered|grounds for rejection|automatic rejection)"
+    r"|(do not|don't|must not|may not) use[^.]{0,40}"
+    r"(ai|chatgpt|llm|generative)", re.I)
+
+
+def form_forbids_ai(fields):
+    """Does this form declare that AI-generated answers are disqualifying?
+
+    Form-level, not field-level: the clause poisons every free-text box on the
+    same page, so one match condemns the whole application to being written by
+    hand.
+    """
+    return any(AI_FORBIDDEN.search(f.label or "") for f in fields)
 
 
 def blocker_kind(field, why):
@@ -687,6 +848,7 @@ def cmd_check(conn, args):
 
     reasons = {}
     gap_only, essay_roles, rule_roles, consent_roles = [], [], [], []
+    human_only = []
     for dk, jid, co, ti, sc, url, ats in todo:
         try:
             fields, _, _, _ = fetch_form(url, fresh=args.fresh)
@@ -694,6 +856,16 @@ def cmd_check(conn, args):
             errors.append((co, ti, f"{type(e).__name__}: {e}"))
             print(f"  {RED}err {RESET} {(co or '')[:20]:20} {(ti or '')[:32]:32}"
                   f" {DIM}{str(e)[:28]}{RESET}")
+            continue
+        # [CHANGE: claude-code | 2026-08-27] Checked FIRST and reported apart.
+        # This is not a blocker to be chipped away at like the others — it is
+        # the employer saying an automated application is disqualifying. No
+        # amount of profile.yaml or new rules moves a role out of this bucket.
+        if form_forbids_ai(fields):
+            human_only.append((co, ti))
+            print(f"  {RED}human{RESET}{(co or '')[:20]:20} "
+                  f"{(ti or '')[:32]:32} {DIM}form forbids AI-written answers"
+                  f"{RESET}")
             continue
         _, blocked = evaluate(fields, profile)
         if not blocked:
@@ -741,6 +913,8 @@ def cmd_check(conn, args):
           f"  {DIM}no honest automatic answer exists{RESET}")
     print(f"  {RED}{len(consent_roles):3} need a legal agreement accepted{RESET}"
           f"  {DIM}yours to read and tick, not mine{RESET}")
+    print(f"  {RED}{len(human_only):3} forbid AI-written answers outright{RESET}"
+          f"  {DIM}you write these or you skip them{RESET}")
     print(f"  {DIM}{len(errors):3} unreadable (posting withdrawn or renamed)"
           f"{RESET}")
     print(f"  {DIM}{len(noform):3} have no application form found yet"
@@ -767,6 +941,18 @@ def cmd_form(conn, args):
         return 1
     fields, title, company, ats = fetch_form(url, fresh=args.fresh)
     print(f"\n{BOLD}  {company} — {title}{RESET}\n  {DIM}{ats}  {url}{RESET}\n")
+    # [CHANGE: claude-code | 2026-08-27] Say it before the field list, not after.
+    # This is the one thing on the page that changes what you are allowed to do,
+    # and burying it under forty lines of answers is how it gets missed.
+    if form_forbids_ai(fields):
+        print(f"  {RED}{BOLD}This form forbids AI-written answers.{RESET}")
+        for f in fields:
+            if AI_FORBIDDEN.search(f.label or ""):
+                print(f"  {DIM}{f.label[:200]}{RESET}")
+                break
+        print(f"  {YELLOW}apply.py will never submit this one. The fact fields "
+              f"below are still\n  correct and safe to copy; the free-text "
+              f"answers have to be yours.{RESET}\n")
     rows, blocked = evaluate(fields, profile)
     for f, v, why, ok in rows:
         mark = f"{GREEN}+{RESET}" if ok else (

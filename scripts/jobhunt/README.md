@@ -595,37 +595,74 @@ A useful sign the guard works: Canonical's country list has 314 entries and
 splits Canada by province, so asking for "Canada" matched thirteen options.
 `pick_option()` refused rather than picking Alberta.
 
-### Blocked is four different things
+### The form that forbids being filled in by a tool
+
+The most important thing in this whole phase, found by reading Canonical's form
+on 2026-08-27. It is a **required checkbox**, sitting in the middle of the page:
+
+> During this application process I agree to use only my own words. I understand
+> that plagiarism, the use of AI or other generated content will disqualify my
+> application.
+
+So on those forms an automated answer is not merely a bad idea. Ticking that box
+and then letting a tool write the prose is a **false declaration**, and the stated
+penalty is disqualification. Getting caught would not cost one application, it
+would burn the employer — and Canonical is **23 of the 86 shortlisted roles**,
+the single largest employer on the list.
+
+`form_forbids_ai()` checks this at the **form** level, before anything else,
+because the clause poisons every free-text box on the same page. Those roles are
+counted separately, never auto-submitted, and `--form` prints the clause as a
+banner above the field list rather than below it.
+
+The regex is deliberately **prohibition-specific**, and the first version was not.
+It matched a bare `use of AI` and flagged Tailscale, whose checkbox reads *"I have
+read and understand Tailscale's Candidate Privacy Policy and AI Guidelines
+regarding ... use of AI tools in the hiring process"* — an acknowledgement
+pointing at a policy, not a ban. Reporting that as "forbids AI-written answers
+outright" would have been a false statement in the tool's own summary, which is
+the same category of error the rest of this file exists to prevent. Tailscale is
+still blocked, correctly, as a `consent` agreement.
+
+### Blocked is five different things
 
 `--check` counts them apart, because they need completely different responses.
 
 | | means |
 |---|---|
-| **gap** | the answer exists, it is just not written down — five lines of `profile.yaml` |
+| **gap** | the answer exists, it is just not written down — a line of `profile.yaml` |
 | **essay** | an open question about his experience. No honest automatic answer, ever |
 | **consent** | a legal agreement, or a protected attribute. His decision, nobody else's |
 | **rule** | a structured question with no mapping yet. Real work, and finishable |
+| **human-only** | the form bans AI-written answers. Not a blocker to chip away at — no profile line or new rule ever moves a role out of this bucket |
 
-Where the 86 shortlisted roles stand today:
+Where the 86 shortlisted roles stand after the 2026-08-27 profile pass:
 
 ```
-  0 ready to submit now
+  1 ready to submit now            (and see the caveat below)
   7 ready the moment profile.yaml is filled in
   6 blocked on questions this tool cannot map yet
- 39 ask required open questions
-  6 need a legal agreement accepted
+ 16 ask required open questions
+  5 need a legal agreement accepted
+ 23 forbid AI-written answers outright
   6 unreadable (posting withdrawn or renamed)
  22 have no application form found yet
 ```
 
-**Say the uncomfortable part plainly: "auto-submit everything" is not reachable.**
-Forty-five of these roles ask something only Shawn can answer. Canonical alone is
-about two dozen of them and asks how he did in high-school mathematics, what his
-degree result was, and his nationality. No amount of engineering makes those
-automatic, and a tool that answered them anyway would be filling applications
-with fiction under his name.
+**The caveat on that 1.** It is PostHog *Backend Engineer*, and every answer it
+would submit is correct — checked field by field. But the **live** title is
+`Backend Engineer - Ingestion (Europe/UK timezone)` while the database has only
+`Backend Engineer`, so the shortlist never saw the timezone requirement. He is in
+Ontario. It is the only role in the shortlist whose live title names a region
+that the stored title does not, so the leak is real but small — and it happens to
+be the one role that came out ready. Treat "1 ready" as **0 in practice**.
 
-### Two things it will never do
+**Say the uncomfortable part plainly: "auto-submit everything" is not reachable.**
+Not because of engineering effort. Twenty-three of these roles have an employer
+telling you in writing not to do it, and sixteen more ask open questions about his
+experience that no tool can answer honestly.
+
+### Three things it will never do
 
 **It never accepts a legal agreement.** Canonical, GitLab, 1Password and
 Tailscale all put one mid-form — arbitration agreements, background-check
@@ -633,9 +670,21 @@ consent, "I certify that the information in this application is true". Ticking
 one is agreeing to a contract on his behalf, and an arbitration clause signs away
 the right to sue. Those are blocked by rule, not by omission.
 
-**It never infers nationality or citizenship.** Being authorised to work
-somewhere says nothing about it — a permanent resident is authorised and is not a
-citizen. It is not in `profile.yaml` on purpose.
+**It never writes an answer on a form that bans generated answers.** See above.
+
+**It never stores or types a government identifier.** `Passport Country` is a
+nationality question wearing a different hat and is answered from
+`identity.citizenship`. A passport **number**, expiry or scan is refused
+permanently — not pending a CONFIRM, but because that does not belong in this
+file at all. The first version of the rule refused both and cost 8 roles for
+nothing.
+
+**Nationality is stated, never derived.** Being authorised to work somewhere says
+nothing about citizenship — a permanent resident is authorised and is not a
+citizen. It now sits in `identity.citizenship` because Shawn gave it directly on
+2026-08-27, which cleared 31 refusals across Canonical and Supabase. Canonical's
+list offers **demonyms**, not country names: 226 options, and `India` correctly
+resolves to `Indian` without colliding with `Burundian`.
 
 ### Country is not one question
 
@@ -646,15 +695,38 @@ US question from it would be a false statement on a legal screening question, so
 every authorisation rule works out which country is being asked about first and
 refuses when the country is one the profile says nothing about.
 
-`requires_sponsorship_canada` stays deliberately unset, and this is the reason it
-has no default: being work-authorised **now** does not answer whether sponsorship
-is needed **later**, which is exactly why Greenhouse asks the two separately.
+`requires_sponsorship_canada` is now **false**: Shawn holds an **open work
+permit**, so no employer sponsors anything to hire him in Canada. `_us` is a
+separate field and is **true**, because that permit is Canadian and buys nothing
+across the border.
+
+One nuance kept visible rather than buried. Sponsorship is asked two ways and
+they do not have the same answer:
+
+- *"Do you require sponsorship to work for us?"* → No. Plainly correct.
+- *"...now **or in the future** require sponsorship?"* → the permit has an expiry
+  date, so strictly this is Yes for anyone who is not a citizen or PR.
+
+apply.py answers **No** to both, on his explicit instruction, but tags the second
+with `(note: asks about the future too)` in `--why`. If he ever wants those
+answered the other way, that reason string is how to find them. Setting
+`work_permit_expiry` would let the question be answered precisely instead.
 
 ### What would unblock the most, in order
 
-1. `contact.phone` — 14 roles. Most ATSs mark it required, so an empty phone is
-   not a skipped field, it is a form that cannot be submitted
-2. `requires_sponsorship_canada` — 15 roles
-3. `contact.linkedin` — 15 roles
-4. `salary_expectation_cad` — 6 roles
-5. `over_18`, `willing_to_travel_occasionally` — new fields the forms ask for
+Recomputed 2026-08-27 after the transcript and the profile pass. Note how far
+down the list the school questions fell once Canonical was excluded — they were
+23 roles' worth of work that buys nothing automatable.
+
+1. `contact.phone` — **14 roles**. Most ATSs mark it required, so an empty phone
+   is not a skipped field, it is a form that cannot be submitted
+2. `contact.linkedin` — **15 roles**
+3. `salary_expectation_cad` — **6 roles**
+4. Phase 4b, resolving aggregator URLs — **22 roles**, the largest single bucket
+   left and the only one whose ceiling is unknown
+5. `secondary_school.*` — 23 roles on paper, **0 in practice**: all Canonical, all
+   human-only. Worth filling only as a copy-paste aid for applying by hand
+
+Already landed from the transcript and Shawn's 2026-08-27 answers: nationality
+(31), willingness to travel (23), passport country (8), street address (7),
+`over_18` (5), degree result (23), sponsorship (15).
