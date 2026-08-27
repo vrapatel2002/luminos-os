@@ -816,10 +816,16 @@ def pick_jobs(conn, args):
         if not rows:
             sys.exit(f"no job whose id starts with {args.job!r}")
         return rows
+    # [CHANGE: claude-code | 2026-08-27] BUG-141 — GROUP BY dedup_key.
+    # Every other tool here already counts ROLES; this one counted ROWS, and it
+    # is the one that generates applications. One job carried by two boards
+    # produced two packets, and Phase 4 would have sent both to the same
+    # recruiter. The `tailored_at` test has to move into HAVING for the same
+    # reason: "has anyone in this group been done", not "has this row".
     q = ("SELECT id,company,title,location,url,score,description,tailored_at "
-         "FROM jobs WHERE status='shortlist' ")
+         "FROM jobs WHERE status='shortlist' GROUP BY dedup_key ")
     if not args.force:
-        q += "AND (tailored_at IS NULL OR tailored_at='') "
+        q += "HAVING MAX(COALESCE(tailored_at,''))='' "
     q += "ORDER BY score DESC, company LIMIT ?"
     return conn.execute(q, (args.top,)).fetchall()
 
@@ -864,9 +870,11 @@ def main():
     ensure_columns(conn)
 
     if args.list:
+        # MAX() so the * marks the ROLE as done, whichever board's row carried it.
         rows = conn.execute(
-            "SELECT id,score,company,title,tailored_at FROM jobs "
-            "WHERE status='shortlist' ORDER BY score DESC LIMIT 40").fetchall()
+            "SELECT id,score,company,title,MAX(COALESCE(tailored_at,'')) FROM jobs "
+            "WHERE status='shortlist' GROUP BY dedup_key "
+            "ORDER BY score DESC LIMIT 40").fetchall()
         print(f"\n  {len(rows)} shortlisted, best first "
               f"(* = already tailored)\n")
         for r in rows:
@@ -950,8 +958,16 @@ def main():
                                    for b in packet["bullets"]}},
                       fh, indent=2)
         def mark():
-            conn.execute("UPDATE jobs SET tailored_at=?, packet_dir=? WHERE id=?",
-                         (t0.isoformat(timespec="seconds"), outdir, jid))
+            # [CHANGE: claude-code | 2026-08-27] BUG-141 — mark the whole dedup
+            # group, not one row, or the twin on another board still looks
+            # untailored and gets a second packet tomorrow night. Scoped to
+            # 'shortlist' for BUG-108's reason: never touch a row the rules
+            # deliberately filtered out.
+            conn.execute(
+                "UPDATE jobs SET tailored_at=?, packet_dir=?"
+                " WHERE dedup_key=(SELECT dedup_key FROM jobs WHERE id=?)"
+                "   AND status='shortlist'",
+                (t0.isoformat(timespec="seconds"), outdir, jid))
             conn.commit()
         db_retry(mark, "record the packet")
         ok += 1

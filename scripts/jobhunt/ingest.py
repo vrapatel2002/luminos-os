@@ -92,6 +92,34 @@ def job_id(source, company, title, url):
 
 _NOISE = re.compile(r"\(.*?\)|\[.*?\]|[^a-z0-9 ]", re.I)
 
+# [CHANGE: claude-code | 2026-08-27] BUG-141.
+# Legal suffixes, stripped from the END of a company name before it becomes part
+# of a role's identity. One employer writes itself differently on each board it
+# posts to — "Canonical" on its own ATS, "Canonical Ltd." on an aggregator — and
+# without this the same job counts twice, is scored twice, and would be APPLIED
+# TO twice, which is the exact thing dedup_key exists to prevent.
+_LEGAL_SUFFIX = {
+    "inc", "llc", "llp", "lp", "ltd", "limited", "corp", "corporation", "co",
+    "plc", "gmbh", "ag", "bv", "nv", "sa", "sarl", "srl", "spa", "ab", "oy",
+    "as", "pty", "pte", "kk",
+}
+
+
+def _norm(s):
+    return re.sub(r"\s+", " ", _NOISE.sub(" ", (s or "").lower())).strip()
+
+
+def norm_company(s):
+    """Company name reduced to the part that identifies the employer.
+
+    Strips trailing legal suffixes, but never the last word — a firm whose whole
+    name normalises to a suffix keeps it rather than becoming the empty string.
+    """
+    w = _norm(s).split()
+    while len(w) > 1 and w[-1] in _LEGAL_SUFFIX:
+        w.pop()
+    return " ".join(w)
+
 
 def dedup_key(company, title):
     """Identity of the underlying ROLE, independent of which board carried it.
@@ -100,9 +128,27 @@ def dedup_key(company, title):
     three aggregators. Applying three times looks like spam to the recruiter
     and burns the one impression you get.
     """
-    def norm(s):
-        return re.sub(r"\s+", " ", _NOISE.sub(" ", (s or "").lower())).strip()
-    return hashlib.sha1(f"{norm(company)}|{norm(title)}".encode()).hexdigest()[:16]
+    return hashlib.sha1(
+        f"{norm_company(company)}|{_norm(title)}".encode()).hexdigest()[:16]
+
+
+def redup(conn):
+    """Recompute every row's dedup_key from the CURRENT rule.
+
+    Same reasoning as score.py recomputing `bucket` on every rules pass
+    (BUG-107): a key baked in at crawl time freezes whatever bug existed that
+    night. Cheap — a few thousand sha1s — and it means a dedup fix lands on the
+    whole history without re-crawling 12,000 postings.
+    """
+    changed = 0
+    for jid, co, ti, old in conn.execute(
+            "SELECT id, company, title, dedup_key FROM jobs").fetchall():
+        new = dedup_key(co, ti)
+        if new != old:
+            conn.execute("UPDATE jobs SET dedup_key=? WHERE id=?", (new, jid))
+            changed += 1
+    conn.commit()
+    return changed
 
 
 def mk(source, company, title, url, location, posted_at=None, description=""):
@@ -430,14 +476,25 @@ def main():
     ap = argparse.ArgumentParser(description="Ingest worldwide remote job postings")
     ap.add_argument("--only", help="comma-separated sources to crawl")
     ap.add_argument("--stats", action="store_true", help="show db summary and exit")
+    ap.add_argument("--redup", action="store_true",
+                    help="recompute dedup keys on existing rows and exit")
     args = ap.parse_args()
 
     conn = connect()
     if args.stats:
         stats(conn)
         return
+    if args.redup:
+        print(f"  {redup(conn):,} rows re-keyed")
+        stats(conn)
+        return
 
     t0 = time.time()
+    # [CHANGE: claude-code | 2026-08-27] BUG-141 — before, not after: the crawl's
+    # own duplicate check reads these keys.
+    n = redup(conn)
+    if n:
+        print(f"  {n:,} rows re-keyed under the current dedup rule")
     crawl(conn, args.only.split(",") if args.only else None)
     print(f"\ndone in {time.time()-t0:.1f}s")
     stats(conn)

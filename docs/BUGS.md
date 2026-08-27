@@ -4219,3 +4219,88 @@ two that must be rejected) plus 3 live `agy` calls against real postings — 11.
 **The lesson, and it is not about JSON.** When a component is replaced, the question is not
 what the old one *did*. It is what the old one was *quietly compensating for*. A grammar looks
 like a validator; it was actually half the prompt.
+
+---
+
+## BUG-141 — one job, two applications: the dedup key ignored "Ltd."
+**Found** 2026-08-27 · **Fixed** 2026-08-27 · `scripts/jobhunt/ingest.py`, `scripts/jobhunt/tailor.py`
+
+**Symptom.** The first honest shortlist after the BUG-140 rescore had 106 roles on it, and
+44 of them were Canonical. Reading the list rather than the number:
+
+```
+distributed systems testing software engineer, python / go   3  canonical, Canonical Ltd., Canonical
+ubuntu security engineer                                     2  Canonical Ltd., Canonical
+python engineer                                              2  Canonical Ltd., Canonical
+... 18 more
+```
+
+The same job, twice, sometimes three times.
+
+**Cause.** `dedup_key()` normalises company and title by lowercasing and stripping
+punctuation, then hashes them. That turns `"Canonical Ltd."` into `canonical ltd` and
+`"Canonical"` into `canonical` — **two different roles.** One employer spells itself
+differently on its own ATS than it does on an aggregator, and nothing upstream normalises
+that.
+
+**Why it survived two months.** Everything that *counts* was already correct-looking.
+`browse.py`, `score.py` and `status.py` all `GROUP BY dedup_key`, so the funnel printed
+"distinct roles after cross-board dedup" over a key that was quietly wrong. **The
+aggregation was right and the thing being aggregated was wrong** — the same shape as
+BUG-108, where the visible number was right and the row underneath it was not.
+
+**Fix, part 1 — `norm_company()`.** Strip trailing legal suffixes (`inc llc ltd limited
+corp corporation co plc gmbh ag bv nv sa sarl srl spa ab oy as pty pte kk lp llp`), but
+never the last word, so a firm whose whole name normalises to a suffix does not become the
+empty string and swallow every other such firm.
+
+**Checked before applying, not after.** The suffix strip changes behaviour for exactly seven
+company groups in a 12,318-row database, and every one is plainly the same employer:
+
+```
+'canonical'       <- ['canonical', 'canonical ltd']
+'cloudflare'      <- ['cloudflare', 'cloudflare inc']
+'gusto'           <- ['gusto', 'gusto inc']
+'headway'         <- ['headway', 'headway co']
+'keeper security' <- ['keeper security', 'keeper security inc']
+'tiger analytics' <- ['tiger analytics', 'tiger analytics inc']
+'vestigas'        <- ['vestigas', 'vestigas gmbh']
+```
+
+Zero false merges. `Coca-Cola` does not lose its `co`, because the suffix must be a whole
+trailing word.
+
+**Fix, part 2 — `redup()`, and it runs on every ingest.** A key baked in at crawl time
+freezes whatever bug existed that night. Same reasoning as BUG-107, where `score.py` started
+recomputing `bucket` on every rules pass: a classifier fix has to land on the whole history
+without re-crawling 12,000 postings. `./ingest.py --redup` does it on demand.
+
+**Fix, part 3, and this is the one that mattered — `tailor.py` counted ROWS.** Every other
+tool in the directory groups by `dedup_key`. `tailor.py` did not, in three places, and it is
+the tool that *generates applications*:
+
+- `--list` printed the same role twice (two `tailscale Software Engineer, Strategic Projects`).
+- `pick_jobs()` would have produced **two packets for one job**, which Phase 4 would then
+  have sent to the same recruiter — precisely what `dedup_key` exists to prevent.
+- `UPDATE ... SET tailored_at WHERE id=?` marked one row, so the twin still looked untailored
+  and would be picked up again the next night. The mark now covers the dedup group, scoped
+  `AND status='shortlist'` for BUG-108's reason: never drag a deliberately filtered row along.
+
+The `tailored_at` test had to move from `WHERE` into `HAVING MAX(COALESCE(tailored_at,''))=''`
+— the question is "has anyone in this group been done", not "has this row".
+
+**Verified.**
+- 14 `norm_company()` cases, including two stacked suffixes (`Digital Treasury Pty Ltd`),
+  suffix-only names that must survive (`Ltd`, `Inc.`, `Co`), and `Coca-Cola`.
+- Predicted the collapse before touching the DB: 104 roles, 20 of them shortlisted.
+  After `--redup`, measured: crawled 12,318 → 12,214, **shortlist 106 → 86.** Exact match.
+- `SELECT title, COUNT(DISTINCT dedup_key) ... HAVING >1` over the Canonical shortlist:
+  empty.
+- `pick_jobs()` re-run: 85 rows / 85 distinct roles with `--force` off (86/86 on), and zero
+  already-tailored rows leaking through.
+- DB copied to `jobhunt.db.pre-bug141` first, so the undo is one `cp`.
+
+**The lesson.** *"Distinct roles after cross-board dedup"* was printed on every status page
+for two months. A label that asserts a property is not a test of that property — and the more
+confidently it is worded, the longer nobody checks. This was found by reading the shortlist
+out loud, not by reading the code.
