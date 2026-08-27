@@ -5351,3 +5351,45 @@ would be a second, differently-governed way in), `--accept-routes` (nothing adve
 and exit-node use. **Noted during the install:** several pacman mirrors returned 404 for the
 package before one succeeded — the mirror list is stale and a `-Syu` is overdue, untouched here
 because it was not asked for.
+
+---
+
+## DECISION 86
+<!-- [CHANGE: claude-code | 2026-08-27] -->
+### Taildrop replaces the phone-to-laptop file shuffle, and the CLI stops needing root to do it
+
+**Decision:** use Tailscale's built-in Taildrop for file transfer between `pixel-9` and
+`luminos-g14`, grant the `shawn` account operator rights over the Tailscale daemon, and run a
+persistent receiver so incoming files land on disk without a manual step.
+
+**Two things had to change.** First, `tailscale file cp` and `tailscale file get` are gated on
+the local API socket, which is root-owned — every invocation returned `Access denied: file
+access denied`. `sudo tailscale set --operator=shawn` grants that account access once and
+persists in the daemon's prefs, so no Tailscale command needs `sudo` from here on. This is a
+real privilege grant and worth stating plainly: it lets the account change tailnet state
+(`up`, `down`, `set`, exit nodes), not just move files. Accepted because the alternative was
+`sudo` on every transfer, which trains the habit of typing a root password for a routine task.
+
+**Second, Taildrop does not write to disk by itself.** Received files sit in a Tailscale-owned
+inbox until `tailscale file get <dir>` moves them out; if nobody runs it, transfers appear to
+succeed on the phone and then seem to vanish. `scripts/systemd/luminos-taildrop-receiver.service`
+runs `tailscale file get --loop` into `~/Downloads/taildrop`, `Restart=always`, enabled at
+`default.target`.
+
+**`--conflict=rename`, not the default.** The default is `skip`, which leaves a conflicting file
+in the inbox and errors — inside a `--loop` that error repeats forever and later files queue up
+behind the stuck one. `rename` writes a number-suffixed copy and keeps the queue draining.
+
+**Verified, not assumed:** the unit pulled a real file out of the inbox within the same second
+it started — `wrote Vratik Patel (1).pdf as /home/shawn/Downloads/taildrop/... (7080 bytes) /
+moved 1/1 files`. That file had been sent from the phone earlier and had been sitting invisible
+in the inbox, which is exactly the failure mode this unit exists to prevent.
+
+**Known rough edge:** `tailscale file cp <file> pixel-9:` can print `pixel-9 is not replying;
+trying anyway` even while `tailscale status` shows the phone `active` with a direct route.
+Android Doze parks the Tailscale process; the transfer still completes once the handset wakes.
+Not a fault — do not go debugging the tailnet over it.
+
+**Scope:** same-account tailnet only. Taildrop cannot send to another person's tailnet, and
+transfers are direct WireGuard between the two nodes, so no copy of the file transits a
+Tailscale server.

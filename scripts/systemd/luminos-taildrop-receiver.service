@@ -1,0 +1,25 @@
+# [CHANGE: claude-code | 2026-08-27]
+# Taildrop files sit in a Tailscale-internal inbox until `tailscale file get`
+# moves them out — nothing lands on disk on its own. This unit runs that get in
+# --loop mode so phone -> laptop transfers appear in ~/Downloads/taildrop with
+# no manual step.
+#
+# Requires `sudo tailscale set --operator=shawn` (done 2026-08-27), otherwise
+# the file API is root-only and every get returns "file access denied".
+#
+# --conflict=rename, not the default skip: a skipped file stays in the inbox and
+# the loop then re-errors on it forever, blocking later files behind it.
+[Unit]
+Description=Luminos Taildrop Receiver (auto-saves incoming Tailscale files)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/mkdir -p /home/shawn/Downloads/taildrop
+ExecStart=/usr/bin/tailscale file get --loop --verbose --conflict=rename /home/shawn/Downloads/taildrop
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
