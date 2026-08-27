@@ -5200,3 +5200,45 @@ second GPU consumer is ever added, it must go through this arbiter rather than a
 
 **Undo.** `007 --keep-model` for a single run; permanently, delete the `YIELD` block in
 `~/re/tools/007-run.sh` and reinstall to `/usr/local/bin/007`.
+
+## DECISION 82
+# [CHANGE: claude-code | 2026-08-26]
+**Jobhunt scoring runs on Google Antigravity, not the GPU. The local model becomes the fallback.**
+
+Shawn has two paid plans — Anthropic Max and Google AI Pro — and asked to stop using local models
+for the job pipeline. Both routes were tested on the same real posting (Instacart ML Engineer II,
+5,964 chars) rather than reasoned about, and they disagree by 5x on the thing that matters.
+
+| backend | per job | 192 jobs | GPU | quota spent |
+|---|---|---|---|---|
+| `local` (gemma-4-E4B) | ~7.1 s | 22.7 min | holds ~4.6 GB, card awake | none |
+| `agy` (gemini-3.5-flash) | ~8-19 s | ~26-61 min | **card stays suspended** | Google AI Pro |
+| `claude` (haiku) | ~39 s | ~125 min | none | **the same Max plan used for coding** |
+
+**Why `claude` lost despite being the better model.** The 39 s is not inference, it is startup:
+`claude -p` boots an entire agent per call — reads CLAUDE.md, starts three MCP servers, loads
+hooks — then answers. Paying that 192 times a night, out of the allowance Shawn also uses to write
+code, to do a task a 4B already does adequately, is the wrong trade. Haiku is kept for Phase 3,
+where it is a handful of calls and the writing is what a human sends.
+
+**Why Antigravity and not the Gemini CLI.** The `gemini` CLI is refused by Google regardless of
+plan — `IneligibleTierError` / `UNSUPPORTED_CLIENT`, re-measured today on a *paid* AI Pro account,
+so the 2026-08-06 finding was never about the free tier. Google's own error text says to migrate
+to Antigravity. `agy -p` is already installed (`antigravity-cli 1.0.1`) and needs no key.
+
+**What this costs, stated plainly.** Only the local backend can *guarantee* well-formed output:
+llama.cpp compiles `SCHEMA` into a GBNF grammar and constrains sampling, so broken JSON is
+impossible. Neither CLI accepts a grammar. `extract_json()` + `coerce_result()` replace that
+guarantee with parse-check-coerce-retry, and the types are pinned at the boundary
+(`"2+ years"` -> `2`, `"yes"` -> `True`, an over-long list truncated to its `maxItems`). Measured
+reliable — 5 of 5 jobs, 0 failures, both reply shapes handled — but reliable is not certain, and
+that is a real downgrade from the grammar.
+
+**The upside is bigger than the speed.** Verified during a live run: `runtime_status` stayed
+`suspended` and `jobhunt-llm.service` stayed `inactive` for the whole pass. The nightly job no
+longer wakes the dGPU at all, which removes the entire class of BUG-103 sleep-leak failures from
+the 03:30 timer.
+
+**Undo.** One word: `backend: local` in `targets.yaml`. `fallback_after: 5` also does it
+automatically mid-run — five consecutive cloud failures (quota gone, wifi down) and the run
+finishes on the GPU rather than producing a silently empty morning.

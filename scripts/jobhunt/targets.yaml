@@ -132,13 +132,41 @@ include_titles:
 # Everything below controls the paid/GPU half. The defaults are sized against
 # the 4.6 GB VRAM budget in CLAUDE.md — read the notes before raising them.
 scoring:
-  # Endpoint of the local model. score.py starts this service if it is down and
-  # STOPS IT AGAIN when finished, so the dGPU can go back to sleep. That is
-  # deliberate: an idle model server pins ~4.6 GB of VRAM and keeps the card
-  # awake, which is exactly the bug we fixed in BUG-103.
+  # ── WHICH BRAIN READS THE JOBS ────────────────────────────────────────────
+  # [CHANGE: claude-code | 2026-08-26] DECISION 77. Change this ONE WORD to
+  # switch, and change it back to undo. Nothing else in this file depends on it.
+  #
+  #   agy      Google Antigravity CLI, model gemini-3.5-flash. Runs on the
+  #            Google AI Pro subscription. No API key, no GPU, ~8 s/job.
+  #   claude   Claude Code CLI, model haiku, on the Anthropic Max plan. It
+  #            WORKS, but it boots a whole agent per call: ~39 s/job measured,
+  #            so a 192-job run is ~125 min against ~26. It also spends the
+  #            same allowance you use for actual coding. Keep it for Phase 3,
+  #            where it is a handful of calls and the writing quality matters.
+  #   local    the GPU. Slightly faster than agy (~7.1 s/job) and costs no
+  #            quota, but holds ~4.6 GB of VRAM and keeps the card awake for
+  #            the whole run.
+  #
+  # THE ONE REAL TRADE-OFF, SAID PLAINLY: only `local` can guarantee the reply
+  # is valid JSON, because only llama.cpp accepts the schema as a grammar. The
+  # cloud backends are asked nicely and then checked, retried and type-coerced
+  # in score.py. Measured over the pool this is reliable, not certain.
+  backend: agy
+
+  # Used only when backend is `local`. score.py starts this service if it is
+  # down and STOPS IT AGAIN when finished, so the dGPU can go back to sleep.
+  # That is deliberate: an idle model server pins ~4.6 GB of VRAM and keeps the
+  # card awake, which is exactly the bug we fixed in BUG-103. A cloud backend
+  # never touches either, so the card stays suspended through the whole run.
   endpoint: http://127.0.0.1:8081/v1
   model: luminos-local
   service: jobhunt-llm.service
+
+  # Cloud failures IN A ROW before the run gives up and finishes on the GPU.
+  # Consecutive, not cumulative: one bad reply in 200 is noise, five in a row
+  # means the quota is gone or the wifi is down. This is what stops a quota
+  # limit from turning into a silently empty morning.
+  fallback_after: 5
 
   # How much of the job description the model reads. 6000 characters is roughly
   # 1500 tokens — enough for the requirements section, which is where the

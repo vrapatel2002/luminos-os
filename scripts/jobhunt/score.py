@@ -438,6 +438,146 @@ def call_model(endpoint, model, prompt, timeout=180):
     return json.loads(data["choices"][0]["message"]["content"])
 
 
+# ── CLOUD BACKENDS ──────────────────────────────────────────────────────────
+# [CHANGE: claude-code | 2026-08-26] DECISION 77. A second way to reach a model.
+#
+# WHY SUBPROCESS AND NOT AN HTTP ENDPOINT. Both of these are SUBSCRIPTION CLIs,
+# not APIs. There is no URL to point `endpoint` at and no key to put in a
+# header — they authenticate from their own credential files (~/.gemini and
+# ~/.claude) and are billed against a plan Shawn already pays for. So a cloud
+# backend is a process, not a request, and `endpoint` is ignored when one is
+# selected.
+#
+# WHY agy AND NOT THE gemini CLI: the old client is refused by Google
+# (`IneligibleTierError` / `UNSUPPORTED_CLIENT`) regardless of plan, and its own
+# error message says to migrate to Antigravity. Re-measured 2026-08-26 on a paid
+# AI Pro plan and it still fails. Do not put `gemini` back in this table.
+CLI_BACKENDS = {
+    "agy": ["/usr/bin/agy", "-p"],
+    "claude": [os.path.expanduser("~/.npm-global/bin/claude"),
+               "-p", "--model", "haiku"],
+}
+
+# Variables that redirect or re-authenticate these CLIs. They MUST be stripped.
+#
+# This is not defensive noise. Claude Desktop and Cowork export
+# ANTHROPIC_BASE_URL and CLAUDE_CODE_OAUTH_TOKEN into every shell they spawn,
+# which points `claude` at a local gateway instead of the real API. Running
+# score.py by hand from inside one of those sessions would therefore behave
+# DIFFERENTLY from the 03:30 timer, which inherits none of them — the classic
+# "works when I run it, fails overnight" split. Stripping them means both paths
+# take the same route: read the credential file, talk to the vendor.
+ENV_STRIP_PREFIXES = ("ANTHROPIC_", "CLAUDE_", "GOOGLE_", "GEMINI_")
+
+
+def cli_env():
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(ENV_STRIP_PREFIXES)}
+    env.setdefault("HOME", os.path.expanduser("~"))
+    env.setdefault("PATH", "/usr/local/bin:/usr/bin")
+    return env
+
+
+def extract_json(text):
+    """Pull one JSON object out of a chat reply.
+
+    THIS FUNCTION IS THE PRICE OF LEAVING THE LOCAL MODEL. llama.cpp compiles
+    SCHEMA into a GBNF grammar and constrains sampling, so malformed JSON is
+    not unlikely, it is IMPOSSIBLE. Neither of these CLIs accepts a grammar, so
+    "reply with JSON only" goes back to being a request. Measured 2026-08-26 on
+    the same posting: agy returned bare JSON, claude wrapped it in a ```json
+    fence. Both shapes are handled here, and anything else raises so the caller
+    can retry rather than write a half-read row to the database."""
+    t = text.strip()
+    # Fenced block first — the fence may carry a language tag, and there may be
+    # prose before it. Take the FIRST fenced block, not a greedy span across
+    # several, which is why the inner pattern is non-greedy.
+    m = re.search(r"```(?:json)?\s*(.*?)```", t, re.S)
+    if m:
+        t = m.group(1).strip()
+    # Then the outermost braces. A model that adds "Here is the JSON:" in front
+    # or a friendly sentence behind is still perfectly usable.
+    start, end = t.find("{"), t.rfind("}")
+    if start == -1 or end <= start:
+        raise ValueError(f"no JSON object in reply: {text[:200]!r}")
+    return json.loads(t[start:end + 1])
+
+
+def coerce_result(d):
+    """Force a reply into SCHEMA's shape, or raise.
+
+    The grammar used to guarantee the TYPES too, not just the syntax. Without
+    it a model is free to answer "2+ years" where an integer is required, or
+    "yes" where a boolean is, and compute_score would then silently do the
+    wrong arithmetic on it. Every value is pinned here, at the boundary, so
+    nothing downstream has to wonder. maxItems is re-applied for the same
+    reason it was load-bearing in the grammar (BUG-109's unterminated strings):
+    an uncapped list is how a reply runs past its token budget."""
+    out = {}
+
+    yrs = d.get("years_required", 0)
+    if isinstance(yrs, str):
+        m = re.search(r"\d+", yrs)
+        yrs = int(m.group()) if m else 0
+    out["years_required"] = max(0, int(yrs or 0))
+
+    for k in ("degree_required", "hard_blocker"):
+        v = d.get(k, False)
+        if isinstance(v, str):
+            v = v.strip().lower() in ("true", "yes", "y", "1")
+        out[k] = bool(v)
+
+    fit = str(d.get("fit_signal", "")).strip().lower()
+    if fit not in FIT_BASE:
+        raise ValueError(f"fit_signal not in {sorted(FIT_BASE)}: {fit!r}")
+    out["fit_signal"] = fit
+
+    for k, cap in (("knockout_risks", 5), ("missing_skills", 8)):
+        v = d.get(k) or []
+        if isinstance(v, str):
+            v = [v]
+        out[k] = [str(x).strip() for x in v if str(x).strip()][:cap]
+
+    out["one_line_why"] = str(d.get("one_line_why", "")).strip()
+    return out
+
+
+def call_cli(cmd, prompt, timeout=300, attempts=2):
+    """Score one job through a subscription CLI.
+
+    Retries on a MALFORMED REPLY, not just on a crash — an unparseable answer
+    is the failure mode that actually happens here, and the second attempt gets
+    a blunter instruction appended. Two attempts, not more: if a model has
+    ignored the shape twice the problem is the prompt, and burning ten calls a
+    job on a 192-job run would empty the quota for nothing."""
+    last = None
+    for n in range(attempts):
+        p = prompt if n == 0 else (
+            prompt + "\n\nIMPORTANT: reply with the raw JSON object ONLY. "
+            "No markdown fence, no explanation, no text before or after it.")
+        try:
+            r = subprocess.run(cmd + [p], capture_output=True, text=True,
+                               timeout=timeout, env=cli_env(),
+                               # cwd matters: these are agent CLIs and will read
+                               # project files from wherever they start. /tmp
+                               # keeps a scoring run from dragging the whole
+                               # luminos-os tree into its context.
+                               cwd="/tmp")
+        except subprocess.TimeoutExpired:
+            last = TimeoutError(f"{cmd[0]} exceeded {timeout}s")
+            continue
+        if r.returncode != 0:
+            last = RuntimeError(
+                f"{cmd[0]} exit {r.returncode}: "
+                f"{(r.stderr or r.stdout or '').strip()[:300]}")
+            continue
+        try:
+            return coerce_result(extract_json(r.stdout))
+        except (ValueError, json.JSONDecodeError) as e:
+            last = e
+    raise last
+
+
 def load_candidate():
     """Use profile.yaml the moment it exists, otherwise say so out loud."""
     prof = os.path.join(HERE, "profile.yaml")
@@ -453,6 +593,16 @@ def run_model_pass(conn, cfg, limit=None, rescore=False, dry_run=False):
     endpoint = sc.get("endpoint", "http://127.0.0.1:8081/v1")
     model = sc.get("model", "luminos-local")
     unit = sc.get("service", "jobhunt-llm.service")
+    backend = str(sc.get("backend", "local")).strip().lower()
+    if backend not in ("local",) and backend not in CLI_BACKENDS:
+        sys.exit(f"  unknown backend {backend!r} in targets.yaml — "
+                 f"expected one of: local, {', '.join(sorted(CLI_BACKENDS))}")
+    cli_cmd = list(sc.get("cli_cmd") or CLI_BACKENDS.get(backend, []))
+    # After this many CLOUD failures IN A ROW, give up on the cloud and finish
+    # the run on the GPU. Consecutive, not cumulative: one malformed reply out
+    # of 200 is noise, but five in a row means the quota is gone or the network
+    # is down, and the difference matters at 03:30 with nobody watching.
+    fallback_after = int(sc.get("fallback_after", 5))
     maxchars = int(sc.get("description_chars", 6000))
     shortlist_min = int(sc.get("shortlist_min", 60))
     max_per_run = int(sc.get("max_per_run", 400))
@@ -490,17 +640,32 @@ def run_model_pass(conn, cfg, limit=None, rescore=False, dry_run=False):
         return 0
 
     started_by_us = False
-    if not wait_for_model(endpoint, timeout=3):
+
+    def start_local():
+        """Bring the GPU model up. Returns True if WE started it."""
+        if wait_for_model(endpoint, timeout=3):
+            return False
         print(f"  starting {unit} …")
         subprocess.run(["systemctl", "--user", "start", unit], check=True)
-        started_by_us = True
         if not wait_for_model(endpoint):
             subprocess.run(["systemctl", "--user", "stop", unit])
             sys.exit(f"  FAIL: {unit} started but never answered on {endpoint}\n"
                      f"  check: journalctl --user -u {unit} -n 40")
-    print(f"  model up — scoring {len(rows):,} jobs\n")
+        return True
+
+    # A cloud backend touches NEITHER the service NOR the card. That is the
+    # whole point of it: the dGPU stays suspended through the entire run, so
+    # BUG-103's "something is holding the GPU awake" cannot happen at all.
+    if backend == "local":
+        started_by_us = start_local()
+        print(f"  model up — scoring {len(rows):,} jobs\n")
+    else:
+        print(f"  backend {backend} ({' '.join(cli_cmd)}) — "
+              f"scoring {len(rows):,} jobs, GPU stays asleep\n")
 
     ok = fail = short = 0
+    misses = 0          # cloud failures in a row
+    active = backend
     t0 = time.time()
     try:
         for i, (jid, title, company, location, desc) in enumerate(rows, 1):
@@ -508,11 +673,23 @@ def run_model_pass(conn, cfg, limit=None, rescore=False, dry_run=False):
                 candidate=candidate, title=title or "?", company=company or "?",
                 location=location or "?", description=(desc or "")[:maxchars])
             try:
-                res = call_model(endpoint, model, prompt)
+                if active == "local":
+                    res = call_model(endpoint, model, prompt)
+                else:
+                    res = call_cli(cli_cmd, prompt)
+                misses = 0
             except Exception as e:
                 fail += 1
                 print(f"  [{i}/{len(rows)}] FAIL {(title or '?')[:44]}: "
                       f"{type(e).__name__}: {e}")
+                if active != "local":
+                    misses += 1
+                    if misses >= fallback_after:
+                        print(f"\n  {misses} cloud failures in a row — falling "
+                              f"back to the local model for the rest of this "
+                              f"run\n")
+                        started_by_us = start_local() or started_by_us
+                        active = "local"
                 continue
             fit = compute_score(res, max_years=max_years)
             # Keep the derived number next to the findings it came from. Six
