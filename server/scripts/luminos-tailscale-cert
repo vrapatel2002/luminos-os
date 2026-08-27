@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-08-27]
+# Fetch and renew the Let's Encrypt certificate for this machine's tailnet name and
+# hand it to Caddy as two plain files. See DECISION 80.
+#
+# Why a timer instead of letting Caddy do it: Caddy has a built-in Tailscale cert
+# manager, but tailscaled refuses cert requests from a non-root user unless that user
+# is made the tailnet OPERATOR -- and the operator can run `tailscale down`, change
+# exit nodes, and re-authenticate the machine. Handing that to an internet-facing web
+# server would make a Caddy compromise into a Tailscale compromise, on a box whose
+# entire security model is "Tailscale is the perimeter". So root fetches, Caddy reads.
+#
+# The cost of that choice, stated plainly: renewal is now this timer's job. If the
+# timer breaks, the certificate silently expires ~90 days later. The unit is allowed
+# to fail loudly so `systemctl list-units --failed` surfaces it, and the check below
+# warns while there is still a month of runway.
+set -euo pipefail
+
+NAME="$(tailscale status --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
+DIR=/var/lib/luminos/tls
+CERT="$DIR/cert.pem"
+KEY="$DIR/key.pem"
+
+install -d -o root -g caddy -m 750 "$DIR"
+
+before=""
+[ -f "$CERT" ] && before="$(openssl x509 -in "$CERT" -noout -fingerprint -sha256)"
+
+# The DNS-01 TXT record is published and then immediately queried, so the very first
+# request after enabling HTTPS Certificates on the tailnet loses that race and comes
+# back `order status: invalid`. It is not a real failure -- retry once.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+if ! tailscale cert --cert-file "$tmp/c" --key-file "$tmp/k" "$NAME" >/dev/null 2>&1; then
+    sleep 15
+    tailscale cert --cert-file "$tmp/c" --key-file "$tmp/k" "$NAME"
+fi
+
+install -o root -g caddy -m 644 "$tmp/c" "$CERT"
+install -o root -g caddy -m 640 "$tmp/k" "$KEY"
+
+after="$(openssl x509 -in "$CERT" -noout -fingerprint -sha256)"
+end="$(openssl x509 -in "$CERT" -noout -enddate | cut -d= -f2)"
+days=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))
+echo "$NAME  expires $end  ($days days)"
+
+if [ "$before" != "$after" ]; then
+    echo "certificate changed, reloading caddy"
+    systemctl reload caddy || systemctl restart caddy
+else
+    echo "certificate unchanged, caddy left alone"
+fi
+
+# Fail the unit while there is still a month of runway, rather than on the day it dies.
+if [ "$days" -lt 30 ]; then
+    echo "WARNING: renewal is not happening -- $days days left" >&2
+    exit 1
+fi

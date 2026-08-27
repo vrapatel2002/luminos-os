@@ -1,0 +1,16 @@
+# [CHANGE: claude-code | 2026-08-27]
+# Daily. Let's Encrypt certificates last 90 days and tailscaled only re-issues when the
+# current one is close to expiry, so a daily run is cheap and gives ~14 chances to
+# succeed before anything breaks.
+# Persistent=true because this box is switched on and off by hand -- without it, a
+# renewal window that passes while the machine is off is simply skipped.
+[Unit]
+Description=Daily renewal of the Tailscale TLS certificate
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

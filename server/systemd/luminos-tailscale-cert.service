@@ -1,0 +1,18 @@
+# [CHANGE: claude-code | 2026-08-27]
+# Renews the tailnet TLS certificate for Caddy. See DECISION 80.
+# Runs as root on purpose: `tailscale cert` refuses non-root callers unless they are
+# made the tailnet operator, and the operator can take the machine off the tailnet.
+[Unit]
+Description=Renew the Tailscale TLS certificate for Caddy
+Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-tailscale-cert
+# Deliberately NOT Restart=on-failure and deliberately not silenced: a failure here is
+# invisible for ~90 days, so it must show up in `systemctl list-units --failed`.
+
+[Install]
+WantedBy=multi-user.target

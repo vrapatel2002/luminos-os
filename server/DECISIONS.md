@@ -1195,11 +1195,35 @@ zero 32-hex-character strings. Unlike `luminos-space` it does **not** run as roo
 reads, so it gets its own account, group `media` for the three `config.xml` files, and a single
 ACL entry (`setfacl -m u:luminoshub:r`) on `nzbget.conf` rather than loosening its 0600 mode.
 
-**HTTPS is Caddy's local CA, not a real certificate — and that is a blocked item, not a
-choice.** `sudo tailscale cert` returns *"500: your Tailscale account does not support getting
-TLS certs"* because **HTTPS Certificates is switched off** at login.tailscale.com/admin/dns.
-That toggle is owner-only. Until it is on, the phone shows a certificate warning once. Traffic
-is not exposed by this: everything remote already rides inside WireGuard.
+**HTTPS was Caddy's local CA for about an hour, then became a real certificate — the owner
+turned on HTTPS Certificates at login.tailscale.com/admin/dns and the block cleared.**
+`luminos-server.tail1fd435.ts.net` now serves a genuine Let's Encrypt certificate on all eight
+ports: no browser warning, no `-k`, handshake 10–25 ms. The two bare IP addresses
+(`192.168.2.61`, `100.82.125.26`) stay on `tls internal`, because a public CA will not certify a
+private address — that is a permanent split, not a temporary one, and it is why the name and the
+IPs are separate site blocks.
+
+**Caddy is deliberately not allowed to fetch its own certificate.** Caddy's native
+`get_certificate tailscale` would work, but `tailscale cert` refuses a non-root caller unless
+that user is made the tailnet **operator** — and an operator can run `tailscale down`, change
+exit nodes, and re-authenticate the machine. Granting that to the one internet-facing process on
+the box would turn a Caddy compromise into a Tailscale compromise, on a machine whose entire
+security model is "Tailscale is the perimeter". So root fetches and Caddy only reads two files:
+`/var/lib/luminos/tls/cert.pem` (0644 root:caddy) and `key.pem` (0640 root:caddy).
+
+**The price of that choice, stated plainly: renewal is now our job, and its failure mode is
+silence.** `luminos-tailscale-cert` runs daily from a timer (`RandomizedDelaySec=1h`,
+`Persistent=true` because this box is switched on and off by hand). Certificates last 90 days
+and tailscaled only re-issues near expiry, so a daily run costs nothing and gives ~14 chances to
+succeed. The script compares the SHA-256 fingerprint before and after and reloads Caddy **only**
+when the file actually changed, and it **exits 1 while there are still 30 days of runway** so
+`systemctl list-units --failed` surfaces the problem a month early rather than on the day the
+site dies. The unit has no `Restart=` and is not silenced, on purpose.
+
+**The first `tailscale cert` call after flipping the toggle fails, and it is not a real
+failure.** It returns `acme: order ... status: invalid` — the DNS-01 TXT record on
+`_acme-challenge.<name>` is published and then queried immediately, and the first request loses
+that propagation race. A `sleep 15` and one retry are baked into the script.
 
 ### Traps this turned up
 - **Caddy hijacks `*.ts.net` names and it fails silently as a 20-second hang.** Caddy has
@@ -1209,8 +1233,11 @@ is not exposed by this: everything remote already rides inside WireGuard.
   failing NXDOMAIN, forever, against both prod and staging. The symptom is not an error
   message: the TLS handshake just hangs and the browser spins, on *every* port at once. The
   name was removed from the Caddyfile; `100.82.125.26` works identically over mobile data.
-  Handshake went from a 20 s timeout to **2.5 ms**. Do not re-add the name until
-  `tailscale cert` succeeds.
+  Handshake went from a 20 s timeout to **2.5 ms**. **Resolved the same day** — with the toggle
+  on and an explicit `tls /var/lib/luminos/tls/cert.pem /var/lib/luminos/tls/key.pem` in the site
+  block, the on-demand path is never entered and `journalctl -u caddy` shows **zero** ACME lines.
+  The rule to keep is narrower than "never use the name": a `.ts.net` name in a Caddyfile must
+  carry explicit certificate files, or Caddy will go and find its own.
 - **`local_certs` in the global block did not stop it.** The adapted JSON showed exactly one
   automation policy with `{"module":"internal"}` — and Caddy went to ACME anyway, because the
   on-demand path has its own policy. Reading the adapted config was not enough; only the
