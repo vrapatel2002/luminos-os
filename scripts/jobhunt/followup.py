@@ -86,6 +86,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -96,6 +97,7 @@ import ingest
 
 OAUTH_PATH = os.path.expanduser("~/.config/luminos/jobhunt-gmail.json")
 TOKEN_PATH = os.path.expanduser("~/.config/luminos/jobhunt-gmail-token.json")
+AUTH_URL_PATH = "/tmp/jobhunt-auth-url.txt"
 NOTIFY_PATH = os.path.expanduser("~/.local/share/luminos/jobhunt/needs-you.md")
 
 # [CHANGE: claude-code | 2026-08-27] readonly + compose, and deliberately NOT
@@ -517,8 +519,47 @@ def gmail_service():
                      "  an interactive shell. Run `./followup.py --scan` by hand\n"
                      "  once, then the timer works unattended.\n")
         flow = InstalledAppFlow.from_client_secrets_file(OAUTH_PATH, SCOPES)
-        creds = flow.run_local_server(port=0, open_browser=True,
-                                      prompt="consent")
+        # [CHANGE: claude-code | 2026-08-27] run_local_server picks the callback
+        # port itself, so the auth URL cannot be built before it runs — do that
+        # and you hand Google a stale redirect_uri and a state the flow will
+        # reject. Hook webbrowser.open instead, which is the exact function
+        # run_local_server calls with the correct URL.
+        #
+        # Why hook it at all: webbrowser.open reaches a BROKEN xdg-open here (it
+        # shells out to kfmclient, a KDE 4 binary that no longer exists), then
+        # falls back to PRINTING a 400-character URL that a terminal wraps over
+        # four lines. A human cannot copy that. A fallback producing something
+        # unusable is the same as no fallback.
+        import webbrowser
+        real_open = webbrowser.open
+
+        def open_and_save(url, *a, **kw):
+            try:
+                with open(AUTH_URL_PATH, "w") as f:
+                    f.write(url + "\n")
+                print(f"  if no browser opens, the URL is in {AUTH_URL_PATH}")
+            except OSError:
+                pass
+            for exe in ("google-chrome-stable", "chromium", "firefox",
+                        "google-chrome", "brave", "microsoft-edge-stable"):
+                path = shutil.which(exe)
+                if not path:
+                    continue
+                try:
+                    subprocess.Popen([path, url], start_new_session=True,
+                                     stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+                    return True
+                except OSError:
+                    continue
+            return real_open(url, *a, **kw)   # nothing found: let stdlib try
+
+        webbrowser.open = open_and_save
+        try:
+            creds = flow.run_local_server(port=0, open_browser=True,
+                                          prompt="consent")
+        finally:
+            webbrowser.open = real_open
         os.makedirs(os.path.dirname(TOKEN_PATH), exist_ok=True)
         # Write 0600 BEFORE the secret lands in it, not after: a token briefly
         # world-readable is a token that leaked.
