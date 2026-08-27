@@ -336,3 +336,83 @@ tries. Two things follow that are worth knowing:
 
 Everything on the resume comes from `profile.yaml`. **To change what it can
 say, change that file** — there is nowhere else for a claim to come from.
+
+---
+
+## Phase 3.5 — tracking what happened
+<!-- [CHANGE: claude-code | 2026-08-27] -->
+
+```bash
+./track.py                     # the board: funnel, rates, what needs you
+./track.py --show 4f5ce37d     # one application, in full
+./track.py --history 4f5ce37d  # the raw event rows
+./track.py --silent 21         # sent 21+ days ago, still nothing back
+./track.py --stage interview   # every role at one stage
+./track.py --kinds             # the event vocabulary
+```
+
+`apply.py` and `followup.py` both write into this. It is the shared spine, which
+is why it was built first.
+
+### It is an event log, not a status column
+
+Nothing is ever overwritten. Every state change appends a row to `events`, and
+the current stage is *derived* by reading the whole history back. A status column
+would have been less code, and it was rejected on purpose:
+
+- **This codebase has a documented habit of reporting success while doing
+  nothing** — BUG-088, BUG-089, BUG-104. A status column that says `submitted`
+  is a claim. An event row carrying a screenshot path is evidence.
+- **A rejection three days after an interview is information.** A status column
+  destroys the interview when it writes the rejection.
+
+Every event carries `evidence`: a packet directory, a screenshot, a Gmail message
+id. An event with no evidence is an assertion, and assertions are what went
+wrong last time.
+
+### Recording the same thing twice is a no-op
+
+`followup.py` re-reads the same inbox every night, so it will hand over the same
+rejection email twenty times. `UNIQUE(dedup_key, kind, evidence)` makes the
+nineteen repeats silently do nothing. **This is why evidence must be stable** —
+a Gmail message id is stable, a timestamp is not.
+
+### Keyed on `dedup_key`, never on `id`
+
+One role carried by three boards is three `jobs` rows. Tracking per row would
+re-import BUG-141 into the tracker. `--show 4f5ce37d` takes an id prefix and
+resolves it to the role.
+
+### A rejection is not allowed to hide an interview
+
+`rejected` is terminal and beats every other stage, so a role that reached
+`interview` and was then rejected shows as `rejected`. That is correct when the
+email was read correctly — and it is a disaster when it was not, because
+`followup.py` classifies mail without asking, and the whole point of the pipeline
+is to produce interviews.
+
+So the board has a **CLOSED, BUT REACHED YOU FIRST** section. It does not
+overrule the rejection. It just refuses to let a terminal event make an interview
+invisible, so a misread email is something you can see instead of something you
+cannot.
+
+### `apply at` is not always the URL that was crawled
+
+A role listed on both jobicy and Greenhouse has two URLs, and they are not
+interchangeable — one is an article about the job, the other is the form. `--show`
+picks the applyable one out of the whole dedup group and labels the other `also
+listed`. Where no form exists anywhere in the group it says so in yellow rather
+than pretending the aggregator link will work.
+
+Right now, of 86 shortlisted roles: **22 Greenhouse, 17 Ashby, 47 with no form
+found yet.** Those 47 are the Phase 4 problem.
+
+### Testing against a copy
+
+```bash
+cp ~/.local/share/luminos/jobhunt.db /tmp/t.db
+JOBHUNT_DB=/tmp/t.db ./track.py --log <id> interview --at 2026-08-26T08:00:00
+```
+
+`JOBHUNT_DB` exists so the stages that have not happened yet can be exercised
+without writing invented events into the real job history.

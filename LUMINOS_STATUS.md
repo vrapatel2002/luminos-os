@@ -215,14 +215,26 @@ Automated work-from-home job search. Manual: `scripts/jobhunt/README.md`. Design
 | 0 — local LLM on the GPU | ✅ DONE | `/opt/luminos/venv-jobhunt`, llama-cpp-python 0.3.34 + CUDA 13.3 |
 | 0b — OpenClaw + live web | ✅ DONE | agent → 8082 proxy → 8081 model; `web_fetch` proven on a real board |
 | 0c — Control UI + agent model | ✅ DONE | BUG-106; runs on the Claude Code subscription via `claude-cli` |
-| 1 — `profile.yaml` | 🔴 **BLOCKED ON SHAWN** | needs his resume. Gates Phases 3-5. |
-| 2 — filter + score | ✅ DONE | free rules 9,788 → 192 in 0.95 s, then gemma-4-E4B on the RTX 4050 |
-| 3 — tailor | ⬜ not started | gated on Phase 1 |
-| 4 — apply (Playwright) | ⬜ not started | gated on Phase 1 |
-| 5 — agent loop | ⬜ not started | gated on Phase 1 + `claude` /login |
+| 1 — `profile.yaml` | ✅ DONE | real resume + `bullet_bank` + 19 screening answers. Gitignored — the repo is public |
+| 2 — filter + score | ✅ DONE | free rules 9,788 → 192 in 0.95 s, then the LLM. **Backend is Antigravity** (DECISION 82), one-word switch |
+| 3 — tailor | ✅ DONE | `tailor.py`, DECISION 83 — the model picks `bullet_bank` ids and rephrases, it may not state a fact |
+| 3.5 — track | ✅ DONE | `track.py`, append-only event log keyed on `dedup_key`. The spine Phases 4/5 write into |
+| 4 — apply (Playwright) | ⬜ not started | Greenhouse 22 + Ashby 17 of 86 roles; **47 have no form found yet** |
+| 4b — resolve aggregators | ⬜ not started | turn those 47 jobicy/WWR/RemoteOK listings into real ATS forms |
+| 5 — follow-up on email | ⬜ not started | needs Google Cloud OAuth — the MCP connector is session-scoped and a 03:30 timer cannot use it |
 
-**Two blockers, both only Shawn can clear:** run `claude` then `/login`
-(`~/.claude/.credentials.json` expired 2026-05-27), and supply his resume.
+<!-- [CHANGE: claude-code | 2026-08-27] The old table said Phase 1 was blocked on
+     Shawn's resume and Phase 5 on a `claude /login`. Both are stale: the profile
+     exists, and scoring moved off `claude -p` onto Antigravity (DECISION 82). -->
+
+**What is actually blocked on Shawn**, and nothing else is:
+1. **5 lines in `profile.yaml`** — `contact.phone` (most ATS forms mark it REQUIRED, so a
+   null is not "field omitted", it is "cannot submit"), `contact.linkedin`,
+   `application_answers.requires_sponsorship_canada` (**deliberately has no default** —
+   it is the single most consequential screening answer and guessing it wrong is worse
+   than not applying), `salary_expectation_cad`, `earliest_start_date`.
+2. **Google Cloud OAuth** → `~/.config/luminos/jobhunt-gmail.json`, scopes
+   `gmail.readonly` + `gmail.compose` (**not** `gmail.send`, on purpose).
 
 **The one command:** `cd ~/luminos-os/scripts/jobhunt && ./status.py`
 **The one file he edits:** `targets.yaml`, then `./score.py --rules-only` (~1 s, free).
