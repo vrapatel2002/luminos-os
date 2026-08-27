@@ -1,0 +1,114 @@
+# [CHANGE: claude-code | 2026-08-27]
+# Single front door for the media server. See DECISION 80.
+#
+# Why a proxy at all: before this, every app was its own bare-HTTP port and you had
+# to remember seven of them. Now there is one address to remember, everything is
+# encrypted, and the landing page links to the rest.
+#
+# TWO addresses are served identically, so one bookmark works in both places:
+#   100.82.125.26   over Tailscale -- works on mobile data, anywhere
+#   192.168.2.61    at home, on the LAN
+#
+# WHY NOT THE NICE NAME luminos-server.tail1fd435.ts.net -- READ THIS BEFORE ADDING IT.
+# It was in this file and it had to come out. Caddy has built-in Tailscale support and
+# treats any *.ts.net name as ON-DEMAND TLS, which quietly overrides the `tls internal`
+# below. It then asks tailscaled for a certificate, gets back
+#   "500: your Tailscale account does not support getting TLS certs"
+# because HTTPS Certificates is switched off for this tailnet, and falls through to
+# Let's Encrypt -- for a name that has no public DNS record, so every attempt fails
+# with NXDOMAIN. The visible symptom is not an error: the TLS handshake just HANGS for
+# 20+ seconds and the browser spins forever, on every port at once.
+# To put the name back: turn on HTTPS Certificates at login.tailscale.com/admin/dns,
+# confirm `sudo tailscale cert luminos-server.tail1fd435.ts.net` succeeds, then add the
+# name to each site line and replace `tls internal` with `tls { get_certificate tailscale }`
+# in the site blocks. Do not add the name back before that check passes.
+#
+# WHAT THIS DOES NOT DO: it does not add authentication. Every app behind it was
+# tested first and each one demands a login even when the request arrives from
+# 127.0.0.1 -- which is what every request looks like once it comes through here.
+# That test is the whole point: Radarr/Sonarr/Prowlarr used to be set to
+# "DisabledForLocalAddresses", and putting a proxy in front of that setting would
+# have silently deleted the login prompt for everybody. They were switched to
+# "Enabled" first, on 2026-08-27, and re-tested through this proxy afterwards.
+# If you ever add an app here, hit it from 127.0.0.1 with no credentials FIRST.
+#
+# ONE PORT PER APP, not sub-paths. Sub-paths were tried and abandoned:
+# Radarr/Sonarr/Prowlarr have a urlBase setting, but it only rewrites the UI shell --
+# their login page stays at /login and their API stays at /api/ no matter what it is
+# set to, so three apps under one hostname all fight over /login. Jellyfin, Jellyseerr
+# and luminos-space have no base-path setting at all. Jellyfin was additionally left
+# untouched on purpose: giving it a base URL would break the Roku's saved server
+# address, and the TV working matters more than tidy URLs.
+
+{
+	# Nothing here is on the public internet, so there is no public certificate to be
+	# had and no ACME challenge that could ever pass. Caddy signs with its own local
+	# CA. The phone shows a certificate warning the first time; accept it once.
+	# The real fix is the Tailscale HTTPS Certificates toggle described above.
+	local_certs
+}
+
+(site) {
+	tls internal
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+}
+
+# --- the landing page ---------------------------------------------------------
+100.82.125.26, 192.168.2.61 {
+	import site
+	reverse_proxy 127.0.0.1:8100
+}
+
+# --- Jellyfin :8443 -----------------------------------------------------------
+100.82.125.26:8443, 192.168.2.61:8443 {
+	import site
+	reverse_proxy 127.0.0.1:8096
+}
+
+# --- Jellyseerr :8444 ---------------------------------------------------------
+100.82.125.26:8444, 192.168.2.61:8444 {
+	import site
+	reverse_proxy 127.0.0.1:5055
+}
+
+# --- NZBGet :8445 -------------------------------------------------------------
+100.82.125.26:8445, 192.168.2.61:8445 {
+	import site
+	reverse_proxy 127.0.0.1:6789
+}
+
+# --- luminos-space :8446 ------------------------------------------------------
+# Its page reads the token out of the query string in JavaScript, so the token has
+# to be in the URL. Putting it in here means the hub tile is a plain link and the
+# token never has to be typed or remembered.
+100.82.125.26:8446, 192.168.2.61:8446 {
+	import site
+	@needtoken {
+		path /
+		not query token=*
+	}
+	redir @needtoken /?token=__SPACETOKEN__
+	reverse_proxy 127.0.0.1:8099
+}
+
+# --- Radarr :8447 -------------------------------------------------------------
+100.82.125.26:8447, 192.168.2.61:8447 {
+	import site
+	reverse_proxy 127.0.0.1:7878
+}
+
+# --- Sonarr :8448 -------------------------------------------------------------
+100.82.125.26:8448, 192.168.2.61:8448 {
+	import site
+	reverse_proxy 127.0.0.1:8989
+}
+
+# --- Prowlarr :8449 -----------------------------------------------------------
+100.82.125.26:8449, 192.168.2.61:8449 {
+	import site
+	reverse_proxy 127.0.0.1:9696
+}

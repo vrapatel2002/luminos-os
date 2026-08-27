@@ -1,0 +1,52 @@
+# [CHANGE: claude-code | 2026-08-27]
+# One page that leads to everything else, built for a phone. See DECISION 80.
+#
+# Binds 127.0.0.1 ONLY. Caddy is the single front door and the only thing that
+# terminates TLS. The hub has no login of its own on purpose -- it serves nothing
+# but read-only summary numbers, and it holds the Sonarr/Radarr/NZBGet API keys
+# in-process precisely so the browser never receives them.
+#
+# Unlike luminos-space this does NOT run as root. It only reads, so an unprivileged
+# account plus group 'media' (for the arr config.xml files) and one ACL entry on
+# /var/lib/nzbget/nzbget.conf is enough.
+[Unit]
+Description=Luminos media hub (phone landing page)
+Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
+After=network-online.target sonarr.service radarr.service nzbget.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=luminoshub
+Group=luminoshub
+SupplementaryGroups=media
+ExecStart=/usr/local/bin/luminos-hub --port 8100 --bind 127.0.0.1
+Restart=on-failure
+RestartSec=5s
+Nice=10
+
+# Hardening. It reads four files and speaks to four loopback ports; nothing else.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+[Install]
+WantedBy=multi-user.target

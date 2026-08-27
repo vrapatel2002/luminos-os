@@ -1135,3 +1135,93 @@ network changes this way.
   measures mostly ramp-up. Use 4 parallel streams and sum.
 - **`/tmp` on this box is tmpfs.** A "disk" benchmark against a file there read at 8.6 GB/s and
   never touched `/dev/sda`. `df | grep -v tmpfs` hides exactly the fact you need.
+
+---
+
+## DECISION 80
+# [CHANGE: claude-code | 2026-08-27]
+### The phone gets one HTTPS front door — but the login prompt had to be built before the door was
+
+**Decision:** put Caddy in front of everything on ports 443 and 8443–8449, serve a small
+landing page (`luminos-hub`) at the root, and reach it from a phone over Tailscale. **But the
+first and most important part of this work was not the proxy — it was discovering that three
+apps had no password at all, and that adding the proxy would have hidden that fact instead of
+fixing it.**
+
+**The landmine.** Radarr, Sonarr and Prowlarr were all set to
+`AuthenticationRequired = DisabledForLocalAddresses`, with `Username` and `Password` **empty
+and unsalted** in `/var/lib/{app}/{app}.db`. "Local" to those apps means loopback *and* RFC1918
+— so every device on the house wifi was already a full administrator with delete rights over
+the whole library. Tailscale's 100.64.0.0/10 is CGNAT, not RFC1918, which is the only reason
+the tailnet still saw a login prompt. **A reverse proxy makes every request arrive from
+127.0.0.1.** Shipping the proxy first would have made even the tailnet look local and silently
+deleted the last remaining prompt. Passwords were set through each app's own API (so they are
+hashed and salted properly) and auth switched to `Enabled` **before** Caddy was installed.
+
+**The rule that falls out of this: before proxying any app, hit it from 127.0.0.1 with no
+credentials and confirm you are refused.** Done for all seven — arrs 302 to `/login`, NZBGet
+401, Jellyfin 401, Jellyseerr 307 to `/login`, luminos-space 403 without its token. NZBGet's
+`AuthorizedIP=` was checked and is empty; had it listed 127.0.0.1 it would have become an
+open-by-design bypass the moment the proxy went in.
+
+**One port per app, not sub-paths — sub-paths were tried and failed.** Radarr/Sonarr/Prowlarr
+do have a `urlBase` setting, and it was set to `/radarr`, `/sonarr`, `/prowlarr` and verified
+working. It then turned out `urlBase` **only rewrites the UI shell**: the login page stays at
+`/login` and the API stays at `/api/` regardless. Three apps under one hostname therefore all
+fight over the single path `/login`, with no clean tie-break. `urlBase` was reverted to empty.
+Jellyfin, Jellyseerr and luminos-space have no base-path setting at all.
+
+| Port | Behind it | Why not a sub-path |
+|---|---|---|
+| 443 | `luminos-hub` (the landing page) | — |
+| 8443 | Jellyfin 8096 | no base-path setting; also see below |
+| 8444 | Jellyseerr 5055 | upstream feature request, open since Overseerr |
+| 8445 | NZBGet 6789 | root-absolute URLs |
+| 8446 | luminos-space 8099 | root-absolute URLs; Caddy injects its token |
+| 8447 | Radarr 7878 | `/login` collision |
+| 8448 | Sonarr 8989 | `/login` collision |
+| 8449 | Prowlarr 9696 | `/login` collision |
+
+**Jellyfin was deliberately left unconfigured.** Setting a `BaseUrl` on it would break the
+Roku's saved server address. The TV working is worth more than tidy URLs, and 8096 stays open
+on the LAN for exactly that reason.
+
+**`luminos-hub` holds the API keys so the browser never does.** A static page of bookmarks
+could not show free space, the download queue or recent imports without shipping Radarr's and
+Sonarr's keys to every device that loads it. The hub queries them server-side and returns only
+answers. It binds **127.0.0.1 only** — verified by a refused connection to
+`192.168.2.61:8100` — so Caddy is the single front door. Confirmed the rendered page contains
+zero 32-hex-character strings. Unlike `luminos-space` it does **not** run as root: it only
+reads, so it gets its own account, group `media` for the three `config.xml` files, and a single
+ACL entry (`setfacl -m u:luminoshub:r`) on `nzbget.conf` rather than loosening its 0600 mode.
+
+**HTTPS is Caddy's local CA, not a real certificate — and that is a blocked item, not a
+choice.** `sudo tailscale cert` returns *"500: your Tailscale account does not support getting
+TLS certs"* because **HTTPS Certificates is switched off** at login.tailscale.com/admin/dns.
+That toggle is owner-only. Until it is on, the phone shows a certificate warning once. Traffic
+is not exposed by this: everything remote already rides inside WireGuard.
+
+### Traps this turned up
+- **Caddy hijacks `*.ts.net` names and it fails silently as a 20-second hang.** Caddy has
+  built-in Tailscale support and routes any `.ts.net` name through **on-demand TLS**, which
+  **overrides an explicit `tls internal` in the site block**. It asks tailscaled, gets the 500
+  above, and falls through to **public Let's Encrypt** for a name with no public DNS record —
+  failing NXDOMAIN, forever, against both prod and staging. The symptom is not an error
+  message: the TLS handshake just hangs and the browser spins, on *every* port at once. The
+  name was removed from the Caddyfile; `100.82.125.26` works identically over mobile data.
+  Handshake went from a 20 s timeout to **2.5 ms**. Do not re-add the name until
+  `tailscale cert` succeeds.
+- **`local_certs` in the global block did not stop it.** The adapted JSON showed exactly one
+  automation policy with `{"module":"internal"}` — and Caddy went to ACME anyway, because the
+  on-demand path has its own policy. Reading the adapted config was not enough; only the
+  runtime log told the truth.
+- **The `*arr` API ignores `urlBase`.** With `urlBase=/radarr`, `GET /radarr/api/v3/config/host`
+  returns **302 to a login page** and `GET /api/v3/config/host` returns **200**. A script that
+  assumed the prefix got a `JSONDecodeError` on HTML, which reads like an auth failure and is
+  not one.
+- **Prowlarr is API v1 while Radarr and Sonarr are v3.** Asking Prowlarr for v3 returns **404
+  with a perfectly valid key** — and 401 with an invalid one, so a 404 actually *proves* auth
+  passed.
+- **Right after a Caddy restart, requests to newly-added ports return `000`, not an error.**
+  Twenty-one certificate identifiers were being minted at once. Everything was fine; the tests
+  were early. Re-run before believing a failure.

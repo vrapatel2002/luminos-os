@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""[CHANGE: claude-code | 2026-08-27]
+One page that leads to everything else on the media server, built for a phone.
+
+Why this exists rather than a page of bookmarks: the interesting numbers -- free
+space, what is downloading, what arrived recently -- all live behind API keys.
+A static HTML page would have to carry those keys in JavaScript, which hands them
+to anything that can load the page. So this process holds the keys, talks to
+Sonarr/Radarr/NZBGet itself, and serves the browser nothing but the answers.
+
+It binds to 127.0.0.1 ONLY. It is reachable exclusively through Caddy, which
+terminates TLS and is the single front door. Do not bind it to 0.0.0.0 -- it has
+no authentication of its own, on purpose: everything it exposes is read-only
+summary data, and the front door is what does the gating.
+
+  luminos-hub                 # serve on 127.0.0.1:8100
+  luminos-hub --port 8100
+"""
+import argparse
+import base64
+import json
+import shutil
+import subprocess
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+MEDIA = "/srv/media"
+NZBGET_CONF = "/var/lib/nzbget/nzbget.conf"
+
+# Ports Caddy publishes each service on. The host is taken from the request, so
+# the same page works over the LAN address and the tailnet address without
+# knowing which one the phone used.
+#
+# Every app gets its own port rather than a sub-path of this one. Sub-paths were
+# tried and abandoned: Radarr/Sonarr/Prowlarr do have a urlBase setting, but it only
+# rewrites the UI shell -- their login page stays at /login and their API stays at
+# /api/ no matter what it is set to. Three apps all wanting /login on one hostname
+# is a collision with no clean fix. Jellyfin, Jellyseerr and luminos-space emit
+# root-absolute URLs and have no base-path setting at all. So: one port each.
+PUBLIC = {
+    "jellyfin": 8443,
+    "jellyseerr": 8444,
+    "nzbget": 8445,
+    "space": 8446,
+    "radarr": 8447,
+    "sonarr": 8448,
+    "prowlarr": 8449,
+}
+
+_cache = {"at": 0.0, "data": None}
+_lock = threading.Lock()
+
+
+def _cfg_value(path, pattern):
+    try:
+        out = subprocess.run(["grep", "-oP", pattern, path],
+                             capture_output=True, text=True, timeout=10)
+        return out.stdout.strip().splitlines()[0] if out.stdout.strip() else ""
+    except Exception:
+        return ""
+
+
+def api_key(app):
+    return _cfg_value(f"/var/lib/{app}/config.xml", "(?<=<ApiKey>)[^<]+")
+
+
+def arr(app, port, ver, path, timeout=8):
+    # The API lives at the root even if urlBase is set -- urlBase only rewrites the
+    # UI shell. Prowlarr is v1 while Radarr and Sonarr are v3; asking Prowlarr for v3
+    # returns 404 with a perfectly valid key, which reads like an auth failure and
+    # is not one.
+    key = api_key(app)
+    if not key:
+        return None
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/api/{ver}/{path}",
+                                 headers={"X-Api-Key": key})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read() or b"null")
+    except Exception:
+        return None
+
+
+def nzbget_status():
+    user = _cfg_value(NZBGET_CONF, r"^ControlUsername=\K.*")
+    pw = _cfg_value(NZBGET_CONF, r"^ControlPassword=\K.*")
+    if not user:
+        return None
+    auth = base64.b64encode(f"{user}:{pw}".encode()).decode()
+    req = urllib.request.Request(
+        "http://127.0.0.1:6789/jsonrpc",
+        data=json.dumps({"method": "status"}).encode(),
+        headers={"Authorization": f"Basic {auth}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            return (json.loads(r.read()) or {}).get("result")
+    except Exception:
+        return None
+
+
+def human(n):
+    n = float(n or 0)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(n) < 1024:
+            return f"{n:.0f} {unit}" if unit in ("B", "KB") else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} PB"
+
+
+def build_summary():
+    total, used, free = shutil.disk_usage(MEDIA)
+
+    queue = []
+    for app, port, ver in (("radarr", 7878, "v3"), ("sonarr", 8989, "v3")):
+        q = arr(app, port, ver, "queue?pageSize=50")
+        for rec in (q or {}).get("records", []) or []:
+            size = rec.get("size") or 0
+            left = rec.get("sizeleft") or 0
+            queue.append({
+                "title": rec.get("title", "?"),
+                "pct": round(100 * (size - left) / size, 1) if size else 0.0,
+                "size": human(size),
+                "eta": rec.get("timeleft") or "-",
+                "state": rec.get("status") or "",
+                "app": app,
+            })
+
+    recent = []
+    for m in (arr("radarr", 7878, "v3", "history?pageSize=8&sortKey=date&sortDirection=descending"
+                  "&eventType=3") or {}).get("records", []) or []:
+        recent.append({"title": m.get("sourceTitle", "?")[:70], "kind": "movie",
+                       "when": (m.get("date") or "")[:10]})
+    for s in (arr("sonarr", 8989, "v3", "history?pageSize=8&sortKey=date&sortDirection=descending"
+                  "&eventType=3") or {}).get("records", []) or []:
+        recent.append({"title": s.get("sourceTitle", "?")[:70], "kind": "tv",
+                       "when": (s.get("date") or "")[:10]})
+    recent.sort(key=lambda r: r["when"], reverse=True)
+
+    ng = nzbget_status() or {}
+    speed = ng.get("DownloadRate", 0) or 0
+
+    return {
+        "disk": {"total": human(total), "used": human(used), "free": human(free),
+                 "pct": round(100 * used / total, 1) if total else 0},
+        "queue": queue[:8],
+        "recent": recent[:8],
+        "speed": f"{speed / 1e6:.1f} MB/s" if speed else "idle",
+        "paused": bool(ng.get("DownloadPaused")),
+        "at": time.strftime("%H:%M"),
+    }
+
+
+def summary():
+    with _lock:
+        if _cache["data"] and time.time() - _cache["at"] < 10:
+            return _cache["data"]
+    data = build_summary()
+    with _lock:
+        _cache["at"], _cache["data"] = time.time(), data
+    return data
+
+
+PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>Luminos</title>
+<style>
+ *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+ body{margin:0;background:#0b0f14;color:#e6edf3;
+      font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+      padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+ .wrap{max-width:760px;margin:0 auto;padding:20px 16px 48px}
+ h1{font-size:22px;margin:4px 0 2px;letter-spacing:-.4px}
+ .sub{color:#7d8894;font-size:13px;margin-bottom:18px}
+ .bar{height:8px;border-radius:99px;background:#1b232d;overflow:hidden;margin:10px 0 6px}
+ .bar i{display:block;height:100%;background:linear-gradient(90deg,#3fb950,#d29922)}
+ .diskrow{display:flex;justify-content:space-between;font-size:13px;color:#9aa5b1}
+ .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:22px 0}
+ a.tile{display:block;padding:16px 14px;border-radius:14px;text-decoration:none;color:#e6edf3;
+        background:#131a22;border:1px solid #1f2833;min-height:92px}
+ a.tile:active{background:#1a2430}
+ a.tile .ic{font-size:22px;display:block;margin-bottom:8px}
+ a.tile .nm{font-weight:600;font-size:15px}
+ a.tile .ds{color:#7d8894;font-size:12px;margin-top:3px}
+ a.hero{grid-column:1/-1;background:linear-gradient(135deg,#1a2f4a,#132033);border-color:#24405f}
+ h2{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:#7d8894;
+    margin:26px 0 10px;font-weight:600}
+ .card{background:#131a22;border:1px solid #1f2833;border-radius:12px;padding:12px 14px;margin-bottom:8px}
+ .t{font-size:13px;word-break:break-word}
+ .meta{color:#7d8894;font-size:12px;margin-top:5px;display:flex;gap:10px;flex-wrap:wrap}
+ .qbar{height:5px;border-radius:99px;background:#1b232d;margin-top:8px;overflow:hidden}
+ .qbar i{display:block;height:100%;background:#388bfd}
+ .empty{color:#5c6672;font-size:13px;padding:6px 2px}
+ .foot{margin-top:26px;color:#5c6672;font-size:12px;text-align:center}
+</style></head><body><div class="wrap">
+ <h1>Luminos</h1>
+ <div class="sub" id="sub">loading…</div>
+
+ <div class="bar"><i id="diskbar" style="width:0%"></i></div>
+ <div class="diskrow"><span id="diskused"></span><span id="diskfree"></span></div>
+
+ <div class="grid">
+   <a class="tile hero" id="l-seerr" href="#">
+     <span class="ic">&#128269;</span><div class="nm">Find something to watch</div>
+     <div class="ds">Search a film or show &rarr; it downloads itself</div></a>
+   <a class="tile" id="l-jf" href="#"><span class="ic">&#127916;</span>
+     <div class="nm">Watch</div><div class="ds">Jellyfin</div></a>
+   <a class="tile" id="l-rad" href="#"><span class="ic">&#127909;</span>
+     <div class="nm">Movies</div><div class="ds">Radarr</div></a>
+   <a class="tile" id="l-son" href="#"><span class="ic">&#128250;</span>
+     <div class="nm">TV</div><div class="ds">Sonarr</div></a>
+   <a class="tile" id="l-nzb" href="#"><span class="ic">&#11015;</span>
+     <div class="nm">Downloads</div><div class="ds" id="nzbds">NZBGet</div></a>
+   <a class="tile" id="l-space" href="#"><span class="ic">&#128190;</span>
+     <div class="nm">Storage</div><div class="ds">See and delete what is big</div></a>
+   <a class="tile" id="l-prow" href="#"><span class="ic">&#128225;</span>
+     <div class="nm">Indexers</div><div class="ds">Prowlarr</div></a>
+ </div>
+
+ <h2>Downloading now</h2><div id="queue"><div class="empty">…</div></div>
+ <h2>Recently added</h2><div id="recent"><div class="empty">…</div></div>
+ <div class="foot">refreshed <span id="at">–</span> · tap to reload</div>
+</div>
+<script>
+// Built here rather than baked in, so the same page works whether the phone came
+// in on the LAN address or the tailnet one.
+const host = location.hostname;
+function link(id, port){ document.getElementById(id).href = 'https://' + host + ':' + port + '/'; }
+link('l-seerr','__SEERR__'); link('l-jf','__JF__');   link('l-nzb','__NZB__');
+link('l-space','__SPACE__'); link('l-rad','__RAD__'); link('l-son','__SON__');
+link('l-prow','__PROW__');
+
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+async function load(){
+  let d;
+  try { d = await (await fetch('/api/summary',{cache:'no-store'})).json(); }
+  catch(e){ document.getElementById('sub').textContent='server unreachable'; return; }
+
+  document.getElementById('sub').textContent =
+     d.paused ? 'downloads paused' : (d.speed==='idle' ? 'idle' : 'downloading ' + d.speed);
+  document.getElementById('diskbar').style.width = d.disk.pct + '%';
+  document.getElementById('diskused').textContent = d.disk.used + ' used';
+  document.getElementById('diskfree').textContent = d.disk.free + ' free';
+  document.getElementById('nzbds').textContent = d.paused ? 'paused' : d.speed;
+  document.getElementById('at').textContent = d.at;
+
+  const q = document.getElementById('queue');
+  q.innerHTML = d.queue.length ? d.queue.map(function(r){
+    return '<div class="card"><div class="t">'+esc(r.title)+'</div>'
+         + '<div class="qbar"><i style="width:'+r.pct+'%"></i></div>'
+         + '<div class="meta"><span>'+r.pct+'%</span><span>'+esc(r.size)+'</span>'
+         + '<span>'+esc(r.eta)+'</span><span>'+esc(r.app)+'</span></div></div>';
+  }).join('') : '<div class="empty">nothing downloading</div>';
+
+  const c = document.getElementById('recent');
+  c.innerHTML = d.recent.length ? d.recent.map(function(r){
+    return '<div class="card"><div class="t">'+esc(r.title)+'</div>'
+         + '<div class="meta"><span>'+esc(r.kind)+'</span><span>'+esc(r.when)+'</span></div></div>';
+  }).join('') : '<div class="empty">nothing recent</div>';
+}
+load(); setInterval(load, 15000);
+document.body.addEventListener('click', function(e){ if(e.target===document.body) load(); });
+</script></body></html>"""
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "luminos-hub"
+
+    def log_message(self, *a):
+        pass
+
+    def _send(self, code, body, ctype):
+        if isinstance(body, str):
+            body = body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        path = urllib.parse.urlsplit(self.path).path
+        if path in ("/", "/index.html"):
+            page = PAGE
+            for token, app in (("__SEERR__", "jellyseerr"), ("__JF__", "jellyfin"),
+                               ("__NZB__", "nzbget"), ("__SPACE__", "space"),
+                               ("__RAD__", "radarr"), ("__SON__", "sonarr"),
+                               ("__PROW__", "prowlarr")):
+                page = page.replace(token, str(PUBLIC[app]))
+            self._send(200, page, "text/html; charset=utf-8")
+        elif path == "/api/summary":
+            self._send(200, json.dumps(summary()), "application/json")
+        elif path == "/healthz":
+            self._send(200, "ok", "text/plain")
+        else:
+            self._send(404, "not found", "text/plain")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--port", type=int, default=8100)
+    ap.add_argument("--bind", default="127.0.0.1")
+    a = ap.parse_args()
+    srv = ThreadingHTTPServer((a.bind, a.port), Handler)
+    print(f"luminos-hub on http://{a.bind}:{a.port}", flush=True)
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
