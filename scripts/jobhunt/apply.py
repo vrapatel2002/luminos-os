@@ -326,7 +326,7 @@ def _country(label):
     return "ca"
 
 
-def answer_for(f, p):
+def answer_for(f, p, band=None):
     """(value, why) or (None, reason it cannot be answered)."""
     ident = p.get("identity", {})
     con = p.get("contact", {})
@@ -616,9 +616,29 @@ def answer_for(f, p):
     # ---- money and dates
     if re.search(r"salary|compensation expectation|expected (pay|rate)"
                  r"|desired (salary|compensation)", lab):
-        v = ans.get("salary_expectation_cad")
-        return (str(v), "salary_expectation_cad") if v else (
-            None, "salary_expectation_cad is empty in profile.yaml")
+        floor = ans.get("salary_expectation_cad")
+        if not floor:
+            return None, "salary_expectation_cad is empty in profile.yaml"
+        # [CHANGE: claude-code | 2026-08-27] Shawn is flexible and asked the
+        # tool to decide. Where the employer published a band, this READS it —
+        # a fact on the page, not a judgement — and answers inside it. Quoting
+        # the floor at an employer who already said 133k would cost him real
+        # money, so the floor only applies when nothing was published.
+        if band:
+            lo, hi = band
+            ask = max(int(floor), lo)
+            if f.kind in ("number",) or re.search(r"^\s*\d+\s*$", str(
+                    f.raw_type or "")):
+                return str(ask), f"inside the posted band {lo:,}-{hi:,}"
+            if f.kind == "select" and f.options:
+                return None, "salary asked as a picklist; bands do not map"
+            return (f"{ask:,} CAD, flexible" if ans.get("salary_is_flexible")
+                    else f"{ask:,} CAD"), f"posted band {lo:,}-{hi:,}"
+        if f.kind == "number":
+            return str(int(floor)), "salary_expectation_cad (nothing published)"
+        return ((f"{int(floor):,} CAD, flexible"
+                 if ans.get("salary_is_flexible") else f"{int(floor):,} CAD"),
+                "salary_expectation_cad (nothing published)")
     if re.search(r"start date|available to start|when can you start"
                  r"|notice period", lab):
         v = ans.get("earliest_start_date") or ans.get("notice_period")
@@ -799,13 +819,59 @@ def blocker_kind(field, why):
     return "rule"
 
 
-def evaluate(fields, profile):
-    """[(field, value, why, ok)], and whether the whole form can be completed."""
+# [CHANGE: claude-code | 2026-08-27] Deliberately a regex over the posting, not
+# a model call. "What number is written here" is the cheapest possible question
+# and an LLM adds only the risk of inventing one. Measured: 23 of 113
+# shortlisted postings publish a band, so this fires about 20% of the time and
+# the profile floor covers the rest.
+# \s* not \s? around the separator: stripping HTML turns "<b>$140,000</b> -
+# <b>$170,000</b>" into a run of several spaces, and a single optional space
+# silently matched nothing. Found by testing it, not by reading it.
+_BAND = re.compile(r"\$?\s*(\d{2,3}),?(\d{3})\s*(?:-|to|–|—)\s*"
+                   r"\$?\s*(\d{2,3}),?(\d{3})")
+
+
+# A number range is not a salary. "serving 50,000 - 90,000 requests per second"
+# matches the shape perfectly, and quoting 50,000 as his expectation would cost
+# him real money. So the range only counts as pay when pay is named right next
+# to it. Same lesson as every other rule in this file: a rule that can fire on
+# something it has not understood must be narrow.
+_MONEY_CTX = re.compile(
+    r"(salary|compensation|base pay|pay range|pay band|remuneration|\bCAD\b"
+    r"|\bUSD\b|per year|annually|annual|\$)", re.I)
+
+
+def posting_band(description):
+    """(low, high) the employer published, or None. Never a guess."""
+    if not description:
+        return None
+    text = re.sub(r"<[^>]+>", " ", description)
+    for m in _BAND.finditer(text):
+        lo = int(m.group(1) + m.group(2))
+        hi = int(m.group(3) + m.group(4))
+        # A plausible annual salary in CAD/USD. This window rejects the two
+        # things that otherwise match: phone numbers and "2020-2024" style
+        # date ranges, both of which appear in almost every posting.
+        if not (40_000 <= lo <= 400_000 and lo < hi <= 600_000):
+            continue
+        # ...and the words around it have to be about money.
+        near = text[max(0, m.start() - 90):m.end() + 40]
+        if _MONEY_CTX.search(near):
+            return lo, hi
+    return None
+
+
+def evaluate(fields, profile, band=None):
+    """[(field, value, why, ok)], and whether the whole form can be completed.
+
+    `band` is the (low, high) salary the POSTING published, or None. It is read
+    off the job description, never guessed — see answer_for's salary rule.
+    """
     out = []
     for f in fields:
         if f.kind == "hidden":
             continue
-        v, why = answer_for(f, profile)
+        v, why = answer_for(f, profile, band)
         if f.kind == "unknown" and f.required:
             v, why = None, f"unsupported field type '{f.raw_type}'"
         out.append((f, v, why, v is not None))
@@ -839,7 +905,15 @@ def cmd_check(conn, args):
         if not ats:
             noform.append((co, ti))
             continue
-        todo.append((dk, jid, co, ti, sc, url, ats))
+        # The posting's own text, so the salary rule can read a published band
+        # instead of quoting the profile floor at an employer who already said
+        # what the job pays.
+        row = conn.execute(
+            "SELECT description FROM jobs WHERE dedup_key=? "
+            "AND description IS NOT NULL AND description != '' LIMIT 1",
+            (dk,)).fetchone()
+        todo.append((dk, jid, co, ti, sc, url, ats,
+                     posting_band(row[0] if row else None)))
     if args.limit:
         todo = todo[:args.limit]
 
@@ -849,7 +923,7 @@ def cmd_check(conn, args):
     reasons = {}
     gap_only, essay_roles, rule_roles, consent_roles = [], [], [], []
     human_only = []
-    for dk, jid, co, ti, sc, url, ats in todo:
+    for dk, jid, co, ti, sc, url, ats, band in todo:
         try:
             fields, _, _, _ = fetch_form(url, fresh=args.fresh)
         except Exception as e:                       # noqa: BLE001
@@ -867,7 +941,7 @@ def cmd_check(conn, args):
                   f"{(ti or '')[:32]:32} {DIM}form forbids AI-written answers"
                   f"{RESET}")
             continue
-        _, blocked = evaluate(fields, profile)
+        _, blocked = evaluate(fields, profile, band)
         if not blocked:
             ready.append((jid, co, ti, sc, ats))
             print(f"  {GREEN}ok  {RESET} {(co or '')[:20]:20} "
