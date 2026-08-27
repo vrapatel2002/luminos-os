@@ -222,7 +222,7 @@ Automated work-from-home job search. Manual: `scripts/jobhunt/README.md`. Design
 | 3.5 — track | ✅ DONE | `track.py`, append-only event log keyed on `dedup_key`. The spine Phases 4/5 write into |
 | 4 — apply | 🟡 reads forms, does not submit | `apply.py` pulls the real form from the Greenhouse and Ashby APIs (no browser) and decides per field whether it can answer honestly. Submitting is not built. **23 of 86 roles (all Canonical) forbid AI-written answers on the form itself and are excluded from automation permanently, not pending work** |
 | 4b — resolve aggregators | ⬜ not started | turn those 47 jobicy/WWR/RemoteOK listings into real ATS forms |
-| 5 — follow-up on email | 🟡 built, read-only | `followup.py` classifies 12/12 real archive cases and drafts replies, but **cannot reach Gmail** — needs Google Cloud OAuth. `--from-json` works today, `--send` refuses |
+| 5 — follow-up on email | 🟡 wired to Gmail, one interactive consent left | `followup.py` classifies 12/12 real archive cases. OAuth client installed 2026-08-27; `--scan` reads real Gmail and `--draft` threads replies into Drafts. **`--send` is refused by design** — the token carries `gmail.compose`, never `gmail.send`, so a misread email costs a wrong draft, not a wrong sent message. The first `--scan` must be run by hand: a 03:30 timer cannot answer a browser consent screen, so `gmail_service()` checks `isatty()` and exits instead of hanging |
 
 <!-- [CHANGE: claude-code | 2026-08-27] The old table said Phase 1 was blocked on
      Shawn's resume and Phase 5 on a `claude /login`. Both are stale: the profile

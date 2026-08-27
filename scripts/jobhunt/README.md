@@ -422,16 +422,41 @@ without writing invented events into the real job history.
 ## Phase 5 — reading the replies
 
 `followup.py` reads the inbox, decides what each message means, records it as an
-event, and drafts a reply where a reply is safe. It is **built and tested but
-read-only**: it cannot reach Gmail yet, and `--send` refuses.
+event, and drafts a reply where a reply is safe.
 
 ```bash
 ./followup.py --self-test          # 12 real archive cases through the classifier
 ./followup.py --explain "we'd like to schedule a call"
 ./followup.py --from-json mail.json        # dry run, prints what it WOULD do
 ./followup.py --from-json mail.json --apply    # write the events
-./followup.py --scan --days 30 --apply         # needs OAuth (see below)
+./followup.py --scan --days 30                 # read real Gmail, dry run
+./followup.py --scan --days 30 --apply --draft # write events, draft the replies
 ```
+
+### It can read Gmail, and it can never send
+
+[CHANGE: claude-code | 2026-08-27] `--scan` is wired up: OAuth client at
+`~/.config/luminos/jobhunt-gmail.json`, refresh token cached at
+`~/.config/luminos/jobhunt-gmail-token.json` (0600, written with `os.open` so
+the file is never briefly world-readable).
+
+**`--send` is refused by design, and that is not a missing feature.** The token
+only ever carries `gmail.readonly` and `gmail.compose`. `compose` can put a
+draft in the mailbox; only `send` can put a message on the wire, and that scope
+is never requested from Google. So the worst outcome of a misclassified email is
+a wrong draft sitting in Drafts, not a wrong email sitting in an employer's
+inbox. `--draft` threads the reply onto the original conversation using both
+`threadId` and the real RFC822 `Message-Id` — the API message id is a different
+string, and using it alone makes some clients show a new thread.
+
+**The first run must be interactive.** `gmail_service()` checks
+`sys.stdin.isatty()` and exits rather than calling `run_local_server()`, because
+a 03:30 systemd timer cannot open a browser and would otherwise hang forever on
+a consent screen nobody is looking at. Run `--scan` by hand once; the cached
+refresh token makes every run after that unattended.
+
+Widening `SCOPES` later invalidates the cached token. The code says so and
+re-authorises instead of dying on a `ValueError`.
 
 ### Provenance before meaning
 

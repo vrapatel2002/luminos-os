@@ -95,7 +95,17 @@ import track
 import ingest
 
 OAUTH_PATH = os.path.expanduser("~/.config/luminos/jobhunt-gmail.json")
+TOKEN_PATH = os.path.expanduser("~/.config/luminos/jobhunt-gmail-token.json")
 NOTIFY_PATH = os.path.expanduser("~/.local/share/luminos/jobhunt/needs-you.md")
+
+# [CHANGE: claude-code | 2026-08-27] readonly + compose, and deliberately NOT
+# gmail.send. compose can create a draft in the mailbox; only send can put a
+# message on the wire. Shawn asked for automatic replies, but a wrong reply to
+# an employer is unrecallable, so the capability to send is simply not requested
+# from Google. Widening this list later invalidates the cached token and forces
+# a fresh consent screen — which is the intended friction, not a bug.
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly",
+          "https://www.googleapis.com/auth/gmail.compose"]
 
 # ---------------------------------------------------------------- provenance
 
@@ -457,11 +467,12 @@ def read_json(path):
     return out
 
 
-def read_gmail(days):
-    """Unattended read over Gmail OAuth.
+def gmail_service():
+    """Authorise once, then run unattended forever.
 
     Not the MCP connector: that is authorised inside a chat session and a 03:30
-    systemd timer has no session. This is the reason OAuth is on Shawn's list.
+    systemd timer has no session. The refresh token cached at TOKEN_PATH is what
+    lets the timer run while Shawn is asleep.
     """
     if not os.path.exists(OAUTH_PATH):
         sys.exit(
@@ -470,16 +481,166 @@ def read_gmail(days):
             "  and gmail.compose (NOT gmail.send). Until then:\n\n"
             "    ./followup.py --from-json <exported-messages.json>\n")
     try:
-        from google.oauth2.credentials import Credentials       # noqa: F401
-        from googleapiclient.discovery import build             # noqa: F401
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        from googleapiclient.discovery import build
     except ImportError:
         sys.exit("\n  google-api-python-client is not installed in this venv.\n"
                  "  /opt/luminos/venv-jobhunt/bin/pip install "
                  "google-api-python-client google-auth-oauthlib\n")
-    sys.exit("\n  --scan is not wired up yet: the credentials file has never\n"
-             "  existed, so this path has never been run against real Gmail and\n"
-             "  shipping it untested would be a claim, not a feature.\n"
-             "  Use --from-json today.\n")
+
+    creds = None
+    if os.path.exists(TOKEN_PATH):
+        try:
+            creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+        except ValueError:
+            # Scopes changed since the token was written. Deleting it is the
+            # documented recovery and costs one browser consent, so say so
+            # rather than dying on a stack trace.
+            print("  cached token does not cover the current scopes — "
+                  "re-authorising")
+            creds = None
+
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+        except Exception as e:
+            print(f"  token refresh failed ({e}) — re-authorising")
+            creds = None
+
+    if not creds or not creds.valid:
+        if not sys.stdin.isatty():
+            # A systemd timer cannot open a browser. Fail loudly here instead of
+            # hanging forever on a consent screen nobody will ever see.
+            sys.exit("\n  Gmail needs a one-time browser consent and this is not\n"
+                     "  an interactive shell. Run `./followup.py --scan` by hand\n"
+                     "  once, then the timer works unattended.\n")
+        flow = InstalledAppFlow.from_client_secrets_file(OAUTH_PATH, SCOPES)
+        creds = flow.run_local_server(port=0, open_browser=True,
+                                      prompt="consent")
+        os.makedirs(os.path.dirname(TOKEN_PATH), exist_ok=True)
+        # Write 0600 BEFORE the secret lands in it, not after: a token briefly
+        # world-readable is a token that leaked.
+        fd = os.open(TOKEN_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(creds.to_json())
+        print(f"  authorised — token cached at {TOKEN_PATH}")
+
+    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+
+def _decode(data):
+    import base64
+    return base64.urlsafe_b64decode(data.encode("ascii")).decode(
+        "utf-8", errors="replace")
+
+
+def _plaintext(payload):
+    """Pull text/plain out of a MIME tree, falling back to stripped HTML.
+
+    Gmail nests parts arbitrarily deep (multipart/mixed wrapping
+    multipart/alternative wrapping the actual text), so this recurses instead of
+    assuming a shape. text/plain always wins: employer mail is templated HTML and
+    the classifier reads far more reliably without the markup.
+    """
+    if not payload:
+        return ""
+    mime = payload.get("mimeType", "")
+    body = payload.get("body") or {}
+    if body.get("data"):
+        if mime == "text/plain":
+            return _decode(body["data"])
+        if mime == "text/html":
+            html = _decode(body["data"])
+            html = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
+            html = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</tr>", "\n", html)
+            html = re.sub(r"<[^>]+>", " ", html)
+            html = (html.replace("&nbsp;", " ").replace("&amp;", "&")
+                        .replace("&lt;", "<").replace("&gt;", ">")
+                        .replace("&#39;", "'").replace("&quot;", '"'))
+            return re.sub(r"[ \t]{2,}", " ", html)
+    plain, html = "", ""
+    for part in payload.get("parts") or []:
+        got = _plaintext(part)
+        if not got:
+            continue
+        if part.get("mimeType") == "text/plain" and not plain:
+            plain = got
+        elif not html:
+            html = got
+    return plain or html
+
+
+def save_draft(svc, msg, reply):
+    """Put the reply in Gmail Drafts, threaded onto the original.
+
+    A draft, never a send. threadId plus In-Reply-To is what makes Gmail file it
+    under the employer's own conversation instead of starting a new one that
+    looks like cold mail.
+    """
+    import base64
+    from email.message import EmailMessage
+    em = EmailMessage()
+    em["To"] = msg.get("sender", "")
+    subj = msg.get("subject", "") or ""
+    em["Subject"] = subj if subj.lower().startswith("re:") else f"Re: {subj}"
+    if msg.get("id"):
+        # Gmail's API message id is not the RFC822 Message-ID, so read the real
+        # one off the original; without it Gmail shows the draft as a new thread
+        # in some clients even when threadId is right.
+        full = svc.users().messages().get(
+            userId="me", id=msg["id"], format="metadata",
+            metadataHeaders=["Message-Id"]).execute()
+        rfc = {h["name"].lower(): h["value"]
+               for h in (full.get("payload") or {}).get("headers", [])
+               }.get("message-id")
+        if rfc:
+            em["In-Reply-To"] = rfc
+            em["References"] = rfc
+    em.set_content(reply)
+    body = {"message": {
+        "raw": base64.urlsafe_b64encode(em.as_bytes()).decode()}}
+    if msg.get("thread_id"):
+        body["message"]["threadId"] = msg["thread_id"]
+    return svc.users().drafts().create(userId="me", body=body).execute()
+
+
+def read_gmail(days, service=None):
+    """Every inbox message from the last `days` days, in read_json's shape."""
+    svc = service or gmail_service()
+    query = f"newer_than:{int(days)}d -in:chats"
+    ids, page = [], None
+    while True:
+        r = svc.users().messages().list(
+            userId="me", q=query, pageToken=page, maxResults=500).execute()
+        ids.extend(m["id"] for m in r.get("messages", []))
+        page = r.get("nextPageToken")
+        if not page:
+            break
+
+    out = []
+    for mid in ids:
+        m = svc.users().messages().get(
+            userId="me", id=mid, format="full").execute()
+        hdrs = {h["name"].lower(): h["value"]
+                for h in (m.get("payload") or {}).get("headers", [])}
+        raw_from = hdrs.get("from", "")
+        # "Jane Doe <jane@acme.com>" -> name and address separately, because
+        # is_noreply() matches on the address and draft_reply() greets the name.
+        mt = re.match(r'\s*"?([^"<]*?)"?\s*<([^>]+)>', raw_from)
+        name, addr = (mt.group(1).strip(), mt.group(2)) if mt else ("", raw_from)
+        body = _plaintext(m.get("payload")) or m.get("snippet", "")
+        out.append({
+            "id": mid,
+            "thread_id": m.get("threadId", ""),
+            "sender": addr,
+            "sender_name": name,
+            "subject": hdrs.get("subject", ""),
+            "body": body,
+            "date": hdrs.get("date", ""),
+        })
+    return out
 
 
 # --------------------------------------------------------------------- main
@@ -553,7 +714,10 @@ def main():
                     help="run the real archive examples through the classifier")
     ap.add_argument("--apply", action="store_true",
                     help="actually write events (default is a dry run)")
-    ap.add_argument("--send", action="store_true", help="send the drafted replies")
+    ap.add_argument("--send", action="store_true",
+                    help="refused by design — see --draft")
+    ap.add_argument("--draft", action="store_true",
+                    help="save replies into Gmail Drafts (needs --scan)")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="also show what was dropped, and why")
     args = ap.parse_args()
@@ -568,11 +732,20 @@ def main():
         return self_test()
 
     if args.send:
-        sys.exit("\n  --send needs Gmail OAuth (gmail.compose) and there are no\n"
-                 f"  credentials at {OAUTH_PATH}. Drafts print without it.\n")
+        # [CHANGE: claude-code | 2026-08-27] This is not "not built yet". The
+        # OAuth client only ever asks Google for gmail.compose, so sending is
+        # not a capability this program holds. --draft is the real answer.
+        sys.exit("\n  --send is refused by design: the token only carries\n"
+                 "  gmail.compose, never gmail.send. Use --draft to put the\n"
+                 "  reply in your Gmail Drafts and press send yourself.\n")
 
+    svc = None
     if args.scan:
-        msgs = read_gmail(args.days)
+        svc = gmail_service()
+        msgs = read_gmail(args.days, service=svc)
+    elif args.draft:
+        sys.exit("\n  --draft only makes sense with --scan (it replies in the\n"
+                 "  same Gmail thread the message came from).\n")
     elif args.from_json:
         msgs = read_json(args.from_json)
     else:
@@ -603,6 +776,14 @@ def main():
             print(f"                     {track.DIM}would reply:{track.RESET}")
             for line in reply.splitlines():
                 print(f"                     {track.DIM}| {line}{track.RESET}")
+            if args.draft and svc:
+                try:
+                    save_draft(svc, m, reply)
+                    print(f"                     {track.GREEN}saved to Gmail "
+                          f"Drafts{track.RESET}")
+                except Exception as e:
+                    print(f"                     {track.RED}draft failed: {e}"
+                          f"{track.RESET}")
 
     if escalate:
         print(f"\n{track.BOLD}{track.GREEN}  NEEDS YOU{track.RESET}")
