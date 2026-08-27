@@ -1,165 +1,178 @@
-# HANDOFF — BUG-141 FIXED: the GPU is arbitrated, 007 takes the card and gives it back
-# [CHANGE: claude-code | 2026-08-25] — Response 3
-Last updated: 2026-08-25 — Response 3
+# HANDOFF — BUG-142 FIXED: the 007 black screen was a leftover process, not a graphics bug
+# [CHANGE: claude-code | 2026-08-27] — Response 4
+Last updated: 2026-08-27 — Response 4
 
 **Read this whole file before touching anything.**
 
 Per AGENTS.md §0.2 there is exactly **one** HANDOFF.md, overwritten in place. The previous version
-(Response 1, the BUG-141 *diagnosis*) is at `git show HEAD:HANDOFF.md` once this is committed;
-the BUG-138 handoff before it is at `git show 73395885:HANDOFF.md`.
+(Response 3, BUG-141 / the GPU arbiter) is at `git show HEAD:HANDOFF.md` once this is committed.
 
 ---
 
 ## Goal, in Shawn's words
 
-Turn 1:
+> "bro fix this once in for all the game's video is visible its black evey time you fix it i can
+> play i restart and it stops working find a permemant cure."
 
-> "the game 007 is not launching right now dont know the problem i think it with vram things we have
-> done many things like server the dolphin in mobile phone things and lot more so can you find out
-> what the problme is and why is it not launching?"
-
-Turn 2, after I made the mistake of handing him a menu of three options instead of a fix:
-
-> "hey it should be simple i want to use game free the vram for game. i am done with game give it
-> back to dolphin. and also solve the 007 bug asap bro. and make it run on vram just as i said."
-
-That is a complete specification: **automatic both ways, on the dGPU, no extra command to remember.**
-It is now built and it works.
+The load-bearing word is **restart**. He had already told us where the bug was; it took two
+sessions to hear it.
 
 ---
 
-## The short version
+## What it actually was
 
-`llama-server` — Dolphin-8B at `--ctx-size 16384`, the model that answers his phone — held **5718 of
-the RTX 4050's 6141 MiB**. The 4050's memory is *dedicated*; unlike the 780M it does not borrow from
-system RAM, so what the LLM takes is simply gone. Vulkan offered the game a device-local heap
-`budget` of **61.75 MiB** against the ~2100 MiB it needs, and it died during device setup.
+**A leftover `explorer.exe /desktop` from the previous run.** Not vkd3d, not the swapchain, not the
+virtual desktop size, not the KWin rule, not VRAM, not DLSS.
 
-**`scripts/luminos-gpu-yield` now arbitrates the card.** `007` parks the model before Proton and
-gives it back when the game exits. Nothing else to type.
+Measured, 2026-08-27:
 
----
+- `explorer.exe /desktop` does **not** reliably exit when the game does. pid 127547 started 17:19,
+  its game was killed at ~17:20, and it was still alive at 17:36 owning a fullscreen X window
+  titled `Wine Desktop`, class `steam_proton`.
+- The next launch creates a **second** window with the same title and class.
+- KWin ends up holding `_NET_ACTIVE_WINDOW` on a window it keeps unmapped. From then on every
+  launch comes up with `_NET_WM_STATE_HIDDEN` — **including launches made after the stale process
+  has been killed**, because the wedged state lives in KWin, not in Wine.
+- The game was always fine. It renders, audio plays, the GPU sits at 99%. Its window is
+  `Unviewable` because its **parent is `Unmapped`**, so not one frame ever reaches the screen:
 
-## DONE this turn
+  ```
+  0x4600068  Unviewable  2880x1800                    <- the Vulkan surface
+  0x5200001  Unviewable  2880x1800  007 First Light
+  0x1e00007  Unmapped    2880x1800  Wine Desktop      <- the parent. nothing under it is visible
+  0x359      Viewable    2880x1800                    <- root
+  ```
 
-1. **`scripts/luminos-gpu-yield`** — new, installed to `/usr/local/bin/luminos-gpu-yield`.
-   `status` / `yield` / `restore` / `run -- CMD…`.
-2. **`~/re/tools/007-run.sh`** — NVIDIA branch yields + `trap`s restore; `--keep-model` opts out;
-   low-VRAM warning promoted from stdout to `notify-send`. Installed to `/usr/local/bin/007`.
-3. **Verified live, both directions.** Numbers in Next-steps-free detail below.
-4. **`docs/BUGS.md` BUG-141 → FIXED**, with the full design rationale and measurements.
-5. **`LUMINOS_DECISIONS.md` DECISION 81** — why an arbiter, and why the two obvious alternatives lose.
-6. **`AGENTS.md`** — §9 rows for both `/usr/local/bin` entries, §10 File Map row for the new script.
-
-### The measurements (do not re-run these to confirm; they are the record)
-
-| | |
-|---|---|
-| yield | 73 MiB → **5799 MiB free in ~1 s** |
-| game on card | **3303 MiB**, **99% GPU**, **54.56 W**, **0 swapchain failures** |
-| looked at it | screenshot = full-bleed 007 title screen, no titlebar, no bar. BUG-138 intact |
-| restore | Dolphin answering `/health` **~3 s** after exit |
-| restore fidelity | argv **byte-identical** (`cmp` clean), same model, same `--ctx-size 16384` |
-| phone path | live `/v1/chat/completions` returned `back online` |
+That is why it looked intermittent for two sessions: whether a run is black depends on what the
+**previous** run left behind, and nothing — not the log, not the run, not any tool — records that.
+It is also why every earlier "fix" appeared to work. Each one happened to involve a teardown or a
+long enough gap.
 
 ---
 
-## IN PROGRESS
+## The one command that tells the two apart
 
-Nothing is mid-flight. The feature is complete and verified.
+```bash
+xprop -id <win> _NET_WM_STATE
+```
 
----
+| outcome   | `_NET_WM_STATE` |
+|-----------|-----------------|
+| rendering | `MAXIMIZED_VERT, MAXIMIZED_HORZ, FULLSCREEN, FOCUSED` |
+| black     | **the same list plus `_NET_WM_STATE_HIDDEN`** |
 
-## Next steps
+**KWin's scripting API lies about this.** For a window the X server reports as `Unmapped`, KWin
+reports `minimized=false fullscreen=true active=true hidden=false`, and neither setting
+`w.minimized = false` nor sending a `_NET_ACTIVE_WINDOW` client message recovers it. Trust `xprop`
+and `XGetWindowAttributes`, not the KWin script view.
 
-1. **Notes + brain entries** if they did not land this turn — check before re-adding, do not double-log.
-2. **Push. Nothing in this line of work has ever been pushed — never authorized, ask first.**
-3. `007 --igpu` is still **unverified since the BUG-138 fullscreen work**. Carried from two handoffs
-   ago. It is now the documented fallback in DECISION 81, so it should actually be tested once.
-4. Consider whether the BUG-138 KWin rule belongs in the repo rather than living only in
-   `~/.config/kwinrulesrc`, where a profile reset would silently delete it.
-5. Carried over, still true: paper work **blocked on Shawn** ("do not continue to write the old paper
-   now"); corrections staged in `docs/paper/GENERALIZATION.md`.
-
----
-
-## Key decisions & constraints
-
-- **Do not write new `.tex` prose.** Standing instruction.
-- **Do not push** without asking.
-- **The arbiter's one rule: never fail to give the card back.** If you touch `luminos-gpu-yield` or
-  the launcher's yield block, that is the property to preserve. A model that never returns is a worse
-  failure than a game that never starts, because the first one is silent.
-- `docs/BUGS.md` BUG-141 and `LUMINOS_DECISIONS.md` DECISION 81 are the records for this turn; this
-  handoff is a pointer, not a copy.
+`xwininfo`, `xdotool` and `wmctrl` are **not installed** on this box. `xprop` is. Two throwaway
+ctypes/libX11 helpers were used for the parent-chain and map-state walks; they are in `/tmp` and
+are not worth keeping — `xprop` covers the check that matters.
 
 ---
 
-## Gotchas & things NOT to redo
+## The fix — `~/re/tools/007-run.sh`, installed to `/usr/local/bin/007`
 
-### From this turn (BUG-141 / DECISION 81)
+1. **`wine_teardown()` — `wineserver -k` on the prefix before AND after every attempt.** Never
+   start on top of an old session, never leave one behind. *This is the cure. The rest is safety
+   net.* It declines to act while a game is actually running, so it cannot shoot a live session.
+2. **`black_watchdog()`** polls `_NET_WM_STATE` during the run and ends the attempt in ~40 s if the
+   desktop is `HIDDEN`, instead of leaving a black window up forever. It waits 30 s before it
+   starts looking and needs three readings in a row, so a momentary hide is not fatal. Verified it
+   does **not** fire on a healthy 90 s run.
+3. **Attempt 2 is a clean restart.** Measured to work: a black run and the rendering run right
+   after it differed by nothing else.
+4. **Attempt 3 is the 780M.** RADV has never shown this. Slower, but it renders — which beats a
+   black screen. The BUG-141 model-restore runs *before* the fallback, via `give_back()`, so the
+   card goes back to Dolphin rather than sitting idle. The iGPU branch is no longer `exec`, or the
+   trap would not survive.
+5. **`VKD3D_DEBUG=err` is always on now.** Not a debug flag — vkd3d ships with its log off, which
+   is the only reason the second mechanism below stayed invisible for two sessions.
 
-- **Restore must replay the saved argv, not a model alias.** Calling `hive-start-model.sh nexus`
-  would restore whatever that script hardcodes *today*, at the context it hardcodes *today* — a
-  session running a different model or a different `--ctx-size` would come back as something else
-  with nothing to indicate a substitution happened. `/proc/<pid>/cmdline` is the only honest record.
-  Save it NUL-separated, read it with `mapfile -t -d ''` so arguments with spaces survive.
-- **A dead process is not freed VRAM.** The pid leaving the process table and the driver reclaiming
-  its allocations are two separate events. Poll the card; do not sleep a magic number.
-- **`pkill -f llama-server` matches the arbiter itself** — the string is in its own argv and in its
-  state file path. Always `-x` on the exact comm.
-- **comm truncates at 15 characters**, so `pgrep -x 007FirstLight.exe` never matches and
-  `007FirstLight.e` does. This one costs an hour if you do not know it.
-- **`proton run` can return while the game is still running** — hence the `pgrep` wait loop. And the
-  launcher **must not `exec`**, or there is no process left alive to run the restore trap.
-- **`nvidia-smi` free memory and the Vulkan heap budget are different numbers, and only the second
-  one decides whether an app starts.** Read `budget` under `memoryHeaps[0]` in `vulkaninfo`.
-- **A 3-line `last-run.log` is a signal, not a missing log.** A working run is tens of thousands of
-  lines; stopping right after `wineserver: NTSync up and running!` locates the failure *before* the
-  renderer, which is what separates an allocation failure from BUG-137/138.
-- **Check the commit log of the last five days before theorising.** `38e9c794`'s message named this
-  outcome in advance — faster than any measurement, and it pointed straight at the cause.
-- **He said "I think it's the VRAM" and he was right.** Verify the user's own hypothesis first; it
-  costs one command and he knows his machine.
-- **`nvidia-smi` needs `dgpu-exec` / `dgpu-exec-v2`** or it returns `Failed to initialize NVML:
-  Insufficient Permissions` (DECISION 25 gate, gid 948). v2 for shell wrappers (BUG-102).
-- **Do not tune `--ctx-size` to fix VRAM contention with a game.** Dolphin-8B's weights alone are
-  ~4.6 GB — no context value leaves 2 GB. Disproved once, in BUG-141; do not spend a session on it.
-- **When he has already stated the outcome he wants, build it — do not present three options.**
-  Response 1 offered a menu and the reply was "hey it should be simple". The diagnosis was right and
-  the delivery was wrong.
+### The second, rarer mechanism — also real, also proven today
 
-### Carried forward, still true
-
-- **"The error stopped" is not "the feature works." LOOK AT IT.** Screenshot before claiming a fix.
-- **A swapchain error is a window-size question first and a driver question last** (BUG-138).
-- **Do NOT copy 007's `__EGL_VENDOR_LIBRARY_FILENAMES` pin to a native Linux game** — it removes
-  Mesa's EGL and SDL can then create no window at all. Use
-  `SDL_VIDEODRIVER=x11 __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`.
-- **`007-try.sh` cannot test launcher fixes** — the harness reads the prefix registry and never
-  writes it. Test with the installed `/usr/local/bin/007`.
-- **`spectacle` works headless** (`spectacle -b -n -f -o out.png`) only with `WAYLAND_DISPLAY`,
-  `XDG_RUNTIME_DIR` **and** `DBUS_SESSION_BUS_ADDRESS` lifted from `plasmashell`'s environ. `grim`
-  does not work (no wlr-screencopy). **`ffmpeg -f x11grab` returns a BLACK frame** under KWin — it
-  looks exactly like the black-screen bug you would be chasing.
-- **`xwininfo`, `xdotool`, `wmctrl` are NOT installed.** `xprop` is.
-- **`eu-stack`/`gdb` need `sudo` here** — `ptrace_scope` is `1`.
-- **Answer the question that was asked.** Depth on request, not by default.
+`vkCreateSwapchainKHR` returns `VK_ERROR_UNKNOWN` (`vr -13`) inside
+`dxgi_vk_swap_chain_recreate_swapchain_in_present_task`, and vkd3d retries it ~100×/second for as
+long as the game runs. **There is no give-up path in vkd3d**, so the first failure is fatal and the
+run only *looks* alive. The watchdog greps for it as well as checking the window state.
 
 ---
 
-## Files touched
+## Verification (all screenshotted, pixel-checked, not inferred)
 
-- `scripts/luminos-gpu-yield` — **new**, the arbiter. Installed to `/usr/local/bin/`.
-- `~/re/tools/007-run.sh` — yield/restore wiring, `--keep-model`, `notify-send` warning.
-  Installed to `/usr/local/bin/007`.
-- `docs/BUGS.md` — BUG-141 flipped to FIXED, full write-up + header summary.
-- `LUMINOS_DECISIONS.md` — DECISION 81.
-- `AGENTS.md` — §9 System Config (2 rows), §10 File Map (1 row).
-- `HANDOFF.md` — this file, overwritten in place.
+| run | condition | result |
+|-----|-----------|--------|
+| 17:30 | stale `explorer.exe` present | **ALL BLACK** (5,184,000 pure-black pixels) |
+| 17:38 | stale process killed, KWin still wedged | **ALL BLACK** |
+| 17:41 | clean teardown, KWin rule **off** | renders — "PRE-LOADING SHADERS 96%" |
+| 17:44 | clean teardown, KWin rule **on** | renders |
+| ×3    | back-to-back quit → relaunch, no cleanup | renders, renders, renders |
+| final | **stale session deliberately planted first** | teardown killed it, **renders** |
 
-### Untouched on purpose
-- `scripts/hive-start-model.sh` — lowering `--ctx-size` does not fix this and the phone service works.
-  The arbiter deliberately does **not** go through it (see the argv gotcha above).
-- The `--igpu` branch of the launcher — the 780M uses shared system RAM and has never contended.
-- `docs/paper/*.tex` — blocked by standing instruction.
+Last frame captured: the title screen, "Press [F] to play".
+
+A pure-black 2880x1800 capture is ~20 KB; a rendering one is 130 KB–2.4 MB. Do not judge by file
+size alone — check the pixels:
+```bash
+python3 -c "from PIL import Image; im=Image.open('x.png').convert('RGB'); print(im.getcolors(20))"
+```
+
+Headless screenshot recipe (the session env has to be lifted from plasmashell):
+```bash
+P=$(pgrep -x plasmashell|head -1)
+eval "$(sudo tr '\0' '\n' < /proc/$P/environ | grep -E '^(WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=' | sed 's/^/export /;s/=/="/;s/$/"/')"
+spectacle -b -n -f -o /tmp/shot.png
+```
+
+---
+
+## Ruled out by direct experiment. Do not spend another session on these.
+
+NVIDIA Streamline/DLSS/NVAPI (`PROTON_DISABLE_NVAPI=1` moved VRAM 3304→2669 MiB, so it took
+effect; the screen stayed black) · the game's saved settings and profile (whole `remote/` removed →
+worked; restored → still worked) · the `vkd3d-proton.cache` · driver/kernel-module mismatch (they
+match; no package upgrades since Aug 24) · winewayland vs winex11 (`winex11.drv` confirmed loaded)
+· **the virtual desktop size** · **the BUG-138 KWin fullscreen rule** · suspend/resume ·
+NVIDIA's ability to present an xcb swapchain at 2880x1800 (`vkcube --wsi xcb` works; the flag is
+`--wsi xcb`, not `--xcb`).
+
+**This corrects BUG-138.** Its stated cause — "asking for a virtual desktop larger than KWin will
+give you" — did not survive testing: 2880x1800 renders with the fullscreen rule *disabled*, and
+2560x1440 has gone black with it *enabled*. The size is not the deciding variable.
+
+---
+
+## Still open / next agent picks this up
+
+- **`~/re/tools/007-run.sh` lives outside git.** It is the source of `/usr/local/bin/007` and the
+  cure is in it. A home-directory loss takes the cure with it. Ask Shawn before copying it into the
+  repo — two sources of truth for an installed binary is its own bug.
+- **`luminos-game-mode`'s revert is defective.** It restored `platform_profile=quiet` instead of the
+  recorded `balanced` and left `nvidia-powerd` active, and it leaves `game-mode.state` behind when
+  it half-finishes. Its watcher was found inactive with the machine still in performance mode; it
+  has been re-armed against the correct saved values, but the script itself is unfixed.
+- **`luminos-train-mode` still watches with `pgrep -f`**, whose pattern is in its own argv, so it
+  self-matches, never fires, and leaves the fans pinned and `nvidia-powerd` unmasked forever.
+- **`007 --igpu` has not been re-verified** since the BUG-138 work. It is now attempt 3 of the
+  fallback chain, so it matters more than it did.
+- **The BUG-138 KWin rule lives only in `~/.config/kwinrulesrc`**, which a Plasma profile reset
+  would silently delete. It is no longer load-bearing (see above) but it is still there.
+- **Two commits are unpushed.** `git push` has never been authorised in this repo — ask first.
+- `/tmp/007-remote.aside` and `/tmp/007-remote.fresh-working` are copies of his 007 save data,
+  kept deliberately. `/tmp` clears on reboot; the originals are in place and verified working.
+
+---
+
+## REPLY TO MANAGEMENT
+
+BUG-142 is fixed and verified on the screen, not inferred. The black screen was never a graphics
+fault — it was an `explorer.exe /desktop` surviving the previous run and wedging KWin, which is
+exactly why it came back "every time you fix it, I restart and it stops working". The launcher now
+tears the Wine session down on both sides of every run, notices within ~40 s if the window comes up
+hidden, restarts itself once, and falls back to the 780M rather than ever handing him a black
+screen again. Six consecutive launches render, including three back-to-back restarts and one with a
+stale session planted on purpose.
+
+Two corrections to the record: BUG-138's stated root cause (virtual desktop size) is wrong, and
+KWin's scripting API cannot be trusted to report whether a window is on screen.
