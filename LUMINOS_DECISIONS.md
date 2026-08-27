@@ -5242,3 +5242,65 @@ the 03:30 timer.
 **Undo.** One word: `backend: local` in `targets.yaml`. `fallback_after: 5` also does it
 automatically mid-run — five consecutive cloud failures (quota gone, wifi down) and the run
 finishes on the GPU rather than producing a silently empty morning.
+
+---
+
+## DECISION 83 — Phase 3 tailors resumes, and the model is never allowed to state a fact
+# [CHANGE: claude-code | 2026-08-26]
+
+`scripts/jobhunt/tailor.py`. Takes a shortlisted posting and produces an application
+packet: a one-page PDF resume, a cover letter, and a `packet.json` recording exactly which
+source bullet every line came from.
+
+**The decision is about what the model is permitted to do, and it is a narrow permission.**
+A model asked to "tailor a resume" will invent — not maliciously, but because that is what
+the words mean. Ask it to fit a posting wanting five years of Kubernetes and it produces
+five years of Kubernetes, in the candidate's voice, formatted beautifully. So the model
+here does exactly two things: **choose** which existing bullets are relevant, and
+**rephrase** them in the posting's vocabulary. It is never the source of a fact.
+
+**Every claim is mechanically traceable.** Each emitted bullet must carry a `bullet_bank`
+id that exists. Its rewritten text is then diffed against that one source entry: any number
+not in the source is a violation, and so is any name — anything containing a digit or one
+of `+ # . / _`, or capitalised in the MIDDLE of a sentence. On violation the packet is
+rejected and the model is told precisely what it got wrong, up to three attempts. In
+practice it takes two: the first draft usually over-reaches, the second is clean.
+
+**Deliberately asymmetric, and this is the crux.** What is CHECKED is narrow — numbers and
+names only, because that is where a lie can hide. What is PERMITTED is wide — every word
+he has truthfully written, stemmed. Rephrasing is the job; "hard problems" becoming
+"difficult problems" must not be an offence. Building the allowlist out of claim tokens
+instead of all words rejected every honest rewrite.
+
+**The subtle one worth writing down:** `skills.not_yet` is EXCLUDED from the allowlist. It
+lists Kubernetes, Docker and the cloud providers. Folding the skills dict in wholesale —
+the obvious implementation — would have made every one of them an approved word to write
+on a resume, silently defeating the entire file. They get a hard ban instead, checked in
+any case, anywhere in the text.
+
+**Known and accepted limitation:** the cover letter may name the company and the role
+title, and nothing else from the posting. So a Canonical letter cannot say "Ubuntu".
+Widening it to the whole description would let the POSTING supply technology names, and
+"I have deep Rust experience" would then validate cleanly because the posting said Rust.
+Losing a product name is cheap; a resume that passes validation while lying is not.
+
+**pdflatex, not Typst — a deviation from PLAN.md, on purpose.** Typst is not installed;
+pdflatex is, with texlive-latex{,extra,recommended}, and it was verified end to end before
+the file was written. Adding a package to get a second way to do a thing that already works
+is the wrong trade. `render()` and `TEMPLATE` are the only two places that know, so
+swapping is cheap. **xelatex is a trap** — the binary is present and its format file is
+not, so it fails at run time. Installed is not working.
+
+**Rendering is not proof; reading is.** Every PDF is re-read with `pdftotext` and checked
+for one page, the legal name, the email, the absence of "Shawn", and the presence of every
+bullet. This caught two real defects that a successful `pdflatex` exit code did not: a
+backtick rendering as an opening quote, and LaTeX's smart apostrophes breaking the text
+comparison.
+
+**Verified:** 12 validator cases (one honest packet that must pass, eleven attacks that
+must fail — invented id, inflated number, added technology, added employer, added date,
+professional-years claim, Kubernetes claim, informal name, duplicate id, empty, too few),
+plus live packets for two very different roles. For the Developer Advocate role it selected
+a different set of bullets than for the Linux Systems role — documentation, defect
+write-ups and tool-call testing rather than daemons and kernel panics. That is the feature
+working.

@@ -293,3 +293,46 @@ hold the dGPU awake permanently.
   separate decision.
 - **The scores are provisional until there is a `profile.yaml`.** Do not read
   the current ordering as gospel.
+
+---
+
+## Phase 3 — tailoring, and the one rule that makes it safe
+<!-- [CHANGE: claude-code | 2026-08-26] -->
+
+```bash
+./tailor.py --list             # what is shortlisted, best first (* = done)
+./tailor.py --top 3            # tailor the best 3 not yet done
+./tailor.py --job 4f5ce37d     # one job (an id prefix is enough)
+./tailor.py --top 3 --dry-run  # ask and check, write nothing
+./tailor.py --job 4f5ce37d --force   # redo one
+```
+
+Each finished job becomes a directory under
+`~/.local/share/luminos/jobhunt/applications/`:
+
+| file | what it is |
+|---|---|
+| `resume.pdf` | one page, ready to attach |
+| `resume.tex` | the source, if you want to hand-edit |
+| `resume.txt` | what a parser sees — read this, not the PDF |
+| `cover_letter.txt` | 120-200 words, no greeting or sign-off |
+| `packet.json` | the model's output AND the source bullet for every line |
+
+**`packet.json` is the receipt.** Its `sources` block maps every bullet on the
+resume back to the exact `bullet_bank` entry it came from. If a line ever looks
+too good, that file tells you in one look whether it was earned or invented.
+
+**The model cannot state a fact.** It picks bullets by id and rephrases them.
+Anything it adds that is not in the source bullet — any number, any tool, any
+employer, any date — is rejected automatically and it is told why, up to three
+tries. Two things follow that are worth knowing:
+
+- **A rejection is normal.** Most jobs take two attempts. The first draft
+  reaches, the second one behaves. Only a third failure is a real problem.
+- **The cover letter cannot name the company's products.** It can say
+  "Canonical" and it can say the job title, but not "Ubuntu". That is on
+  purpose — see DECISION 83. If it mattered, you would add the word to
+  `profile.yaml` yourself, which is the correct place for a true thing.
+
+Everything on the resume comes from `profile.yaml`. **To change what it can
+say, change that file** — there is nowhere else for a claim to come from.
