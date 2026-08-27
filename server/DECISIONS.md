@@ -1220,6 +1220,18 @@ when the file actually changed, and it **exits 1 while there are still 30 days o
 `systemctl list-units --failed` surfaces the problem a month early rather than on the day the
 site dies. The unit has no `Restart=` and is not silenced, on purpose.
 
+**The real cost of the toggle, and it is a privacy cost, not a security one: the machine name
+is now published in public Certificate Transparency logs, permanently.** Every certificate any
+public CA issues must be submitted to append-only public logs, and the certificate proves its
+own submission — `openssl x509 -text` on ours shows **two CT Precertificate SCTs** stamped
+`Aug 27 04:35:03 2026 GMT`. So `luminos-server.tail1fd435.ts.net` and the tailnet ID
+`tail1fd435` are searchable by anyone on crt.sh forever, and every future machine that gets a
+cert adds its name too. This is inherent to public TLS, not something Tailscale chose. **It
+does not open anything:** those names have no public DNS records, so knowing one gets you a
+NXDOMAIN — the door is still Tailscale's WireGuard tunnel and an unexpired machine key. What it
+does leak is that this tailnet exists and roughly what is on it. The alternative was the local
+CA and a warning on every device; that trade was made knowingly.
+
 **The first `tailscale cert` call after flipping the toggle fails, and it is not a real
 failure.** It returns `acme: order ... status: invalid` — the DNS-01 TXT record on
 `_acme-challenge.<name>` is published and then queried immediately, and the first request loses
