@@ -529,3 +529,132 @@ credentials → OAuth client ID → Desktop app → download the JSON to that pa
 
 Until that file exists, `--scan` exits with an explanation and `--send` refuses.
 `--from-json` works today and is how the whole classifier was tested.
+
+---
+
+## Phase 4 — filling the form
+
+`apply.py` reads the real application form, works out which questions it can
+answer honestly, and refuses the rest. The submitting half is **not built yet** —
+right now it reads and reports, and writes nothing anywhere.
+
+```bash
+./apply.py --check              # every shortlisted role: ready or blocked
+./apply.py --check --why        # ...and every question that blocks one
+./apply.py --form <id>          # one role, field by field, with the answers
+./apply.py --check --fresh      # ignore the cached copies
+```
+
+### It reads an API, not a screen
+
+Both reachable ATSs hand over the whole form as JSON, unauthenticated:
+
+| | |
+|---|---|
+| Greenhouse | `GET boards-api.greenhouse.io/v1/boards/<board>/jobs/<id>?questions=true` |
+| Ashby | `POST jobs.ashbyhq.com/api/non-user-graphql` (`ApiJobPosting`) |
+
+Both include the labels, the option lists and — the part that matters — which
+fields are **required**. So "can this application be completed truthfully" is
+answerable for every role in one pass, with no browser and nothing submitted.
+Checking first and submitting second is not fussiness: an application cannot be
+withdrawn and re-sent, so the only safe moment to find an unanswerable question
+is before the form is open.
+
+Ashby's GraphQL has introspection disabled, but its **validation errors name the
+types**, so the query was derived from the server one error at a time rather than
+guessed. Forms are cached for a day (`~/.cache/luminos/jobhunt-forms`) — with the
+cache a full `--check` takes 12 seconds instead of several minutes, and it does
+not re-ask two companies' APIs sixty times every time a regex changes.
+
+### The one rule
+
+**A field is answered from an explicit mapping or it is not answered.** No
+inference, no model, no "probably". Same rule as Phase 3, and harder here,
+because a resume bullet is a claim about the past while a screening answer is
+one the employer acts on immediately.
+
+That rule earned its keep on the first real run. Three of *this tool's own rules*
+filled in answers that were wrong:
+
+- a rule matching the word `degree` typed **"Bachelor's Degree"** into
+  *"What was your bachelor's university degree **result**?"* — a question asking
+  for a grade
+- the same rule fired on *"...since you graduated your first undergraduate
+  degree, **how many companies** have you worked for?"*, where the options were
+  0 to 10+
+- the generic file-upload rule swallowed Greenhouse's separate **cover letter**
+  upload, so the resume would have gone up twice, once labelled as a cover letter
+
+None of those was a missing mapping. Each was the tool inventing an answer
+because a keyword happened to appear, and each filled the field silently. The
+lesson was not "add three exceptions" — it is that a rule which can fire on a
+question it has not understood must be narrow.
+
+A useful sign the guard works: Canonical's country list has 314 entries and
+splits Canada by province, so asking for "Canada" matched thirteen options.
+`pick_option()` refused rather than picking Alberta.
+
+### Blocked is four different things
+
+`--check` counts them apart, because they need completely different responses.
+
+| | means |
+|---|---|
+| **gap** | the answer exists, it is just not written down — five lines of `profile.yaml` |
+| **essay** | an open question about his experience. No honest automatic answer, ever |
+| **consent** | a legal agreement, or a protected attribute. His decision, nobody else's |
+| **rule** | a structured question with no mapping yet. Real work, and finishable |
+
+Where the 86 shortlisted roles stand today:
+
+```
+  0 ready to submit now
+  7 ready the moment profile.yaml is filled in
+  6 blocked on questions this tool cannot map yet
+ 39 ask required open questions
+  6 need a legal agreement accepted
+  6 unreadable (posting withdrawn or renamed)
+ 22 have no application form found yet
+```
+
+**Say the uncomfortable part plainly: "auto-submit everything" is not reachable.**
+Forty-five of these roles ask something only Shawn can answer. Canonical alone is
+about two dozen of them and asks how he did in high-school mathematics, what his
+degree result was, and his nationality. No amount of engineering makes those
+automatic, and a tool that answered them anyway would be filling applications
+with fiction under his name.
+
+### Two things it will never do
+
+**It never accepts a legal agreement.** Canonical, GitLab, 1Password and
+Tailscale all put one mid-form — arbitration agreements, background-check
+consent, "I certify that the information in this application is true". Ticking
+one is agreeing to a contract on his behalf, and an arbitration clause signs away
+the right to sue. Those are blocked by rule, not by omission.
+
+**It never infers nationality or citizenship.** Being authorised to work
+somewhere says nothing about it — a permanent resident is authorised and is not a
+citizen. It is not in `profile.yaml` on purpose.
+
+### Country is not one question
+
+`Do you require immigration sponsorship to work for Affirm **in the United
+States**?` and `...**in Canada**?` are different questions, and Affirm asks both
+on the same form. The profile's sponsorship field is about Canada. Answering the
+US question from it would be a false statement on a legal screening question, so
+every authorisation rule works out which country is being asked about first and
+refuses when the country is one the profile says nothing about.
+
+`requires_sponsorship_canada` stays deliberately unset, and this is the reason it
+has no default: being work-authorised **now** does not answer whether sponsorship
+is needed **later**, which is exactly why Greenhouse asks the two separately.
+
+### What would unblock the most, in order
+
+1. `contact.phone` — 14 roles. Most ATSs mark it required, so an empty phone is
+   not a skipped field, it is a form that cannot be submitted
+2. `requires_sponsorship_canada` — 15 roles
+3. `contact.linkedin` — 15 roles
+4. `salary_expectation_cad` — 6 roles
+5. `over_18`, `willing_to_travel_occasionally` — new fields the forms ask for

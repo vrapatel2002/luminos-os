@@ -219,7 +219,7 @@ Automated work-from-home job search. Manual: `scripts/jobhunt/README.md`. Design
 | 2 — filter + score | ✅ DONE | free rules 9,788 → 192 in 0.95 s, then the LLM. **Backend is Antigravity** (DECISION 82), one-word switch |
 | 3 — tailor | ✅ DONE | `tailor.py`, DECISION 83 — the model picks `bullet_bank` ids and rephrases, it may not state a fact |
 | 3.5 — track | ✅ DONE | `track.py`, append-only event log keyed on `dedup_key`. The spine Phases 4/5 write into |
-| 4 — apply (Playwright) | ⬜ not started | Greenhouse 22 + Ashby 17 of 86 roles; **47 have no form found yet** |
+| 4 — apply | 🟡 reads forms, does not submit | `apply.py` pulls the real form from the Greenhouse and Ashby APIs (no browser) and decides per field whether it can answer honestly. Submitting is not built |
 | 4b — resolve aggregators | ⬜ not started | turn those 47 jobicy/WWR/RemoteOK listings into real ATS forms |
 | 5 — follow-up on email | 🟡 built, read-only | `followup.py` classifies 12/12 real archive cases and drafts replies, but **cannot reach Gmail** — needs Google Cloud OAuth. `--from-json` works today, `--send` refuses |
 
@@ -236,6 +236,24 @@ Automated work-from-home job search. Manual: `scripts/jobhunt/README.md`. Design
 2. **Google Cloud OAuth** → `~/.config/luminos/jobhunt-gmail.json`, scopes
    `gmail.readonly` + `gmail.compose` (**not** `gmail.send`, on purpose). The easily-missed
    step is adding yourself as a **Test user** on the consent screen.
+
+<!-- [CHANGE: claude-code | 2026-08-27] Phase 4 measured. -->
+**Phase 4, and the finding that changes the plan.** Both ATSs hand over the whole
+application form as JSON over an unauthenticated read, so every shortlisted role can be
+checked without opening a browser. Measured across all 86: **0 ready now, 7 ready the
+moment `profile.yaml` is filled, 6 blocked on mappings still to write, 39 asking required
+open questions, 6 requiring a legal agreement, 6 withdrawn, 22 with no form found.**
+**"Auto-submit everything" is not reachable** — 45 roles ask something only Shawn can
+answer, and Canonical (about two dozen of them) asks his high-school mathematics
+performance, his degree result and his nationality. The tool never accepts an arbitration
+or background-check agreement and never infers nationality, both by rule rather than by
+omission. The anti-fabrication rule earned itself immediately: three of `apply.py`'s own
+rules silently filled wrong answers on the first real run — "Bachelor's Degree" typed into
+*"what was your degree **result**?"*, the same rule firing on *"how many companies have you
+worked for?"*, and the generic file rule uploading the resume into Greenhouse's separate
+cover-letter slot. Country is never assumed: Affirm asks about US **and** Canadian
+sponsorship on one form, and answering the US one from the Canadian field would be a false
+statement on a legal screening question.
 
 <!-- [CHANGE: claude-code | 2026-08-27] Phase 5 built. -->
 **Phase 5, stated honestly:** the classifier is gated on *provenance before meaning* — a
