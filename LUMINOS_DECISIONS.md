@@ -5304,3 +5304,50 @@ plus live packets for two very different roles. For the Developer Advocate role 
 a different set of bullets than for the Linux Systems role — documentation, defect
 write-ups and tool-call testing rather than daemons and kernel panics. That is the feature
 working.
+
+## DECISION 85
+<!-- [CHANGE: claude-code | 2026-08-27] -->
+### The G14 joins the tailnet — and takes Tailscale's DNS, which is the opposite of what the server does
+
+**Decision:** install `extra/tailscale` on the G14 (native package, no `curl | sh`, no Docker),
+enable `tailscaled` at boot, and join the existing tailnet as **`luminos-g14`**
+(`100.121.55.85`). Third machine alongside `luminos-server` and `pixel-9`; all three now have
+**key expiry disabled**, so none of them can silently fall off the tailnet.
+
+**The name was set with `--hostname=luminos-g14`, not by renaming the machine.** The G14's
+system hostname is still the Arch default `archlinux`, which would have been a useless label
+on a tailnet that already has meaningful names. The flag gets the same result with a blast
+radius of zero — nothing else on the system reads a different hostname than it did before.
+
+**`--accept-dns=true` here, and that directly contradicts DECISION 51, on purpose.** The media
+server was brought up with `--accept-dns=false` because Tailscale hijacks DNS by default and
+would have silently undone the DNS-over-TLS to Quad9 from DECISION 48. **The G14 has no such
+thing to protect** — measured before touching anything: `-DNSOverTLS`, resolving against the
+router at `192.168.2.1`. So there was no cost, and there is a real benefit: MagicDNS makes
+`luminos-server.tail1fd435.ts.net` resolve, which is the *only* name the Let's Encrypt
+certificate from DECISION 84 is valid for. Without it the laptop would hit a bare IP and eat a
+certificate warning on every visit, forever.
+
+The rule worth carrying: **`--accept-dns` is not a house style, it is a per-machine question —
+"does this box already have a DNS setup worth more than MagicDNS?"** On the server, yes. On the
+laptop, no.
+
+**Verified rather than assumed.** Before-state recorded first (default route, DNS servers,
+`resolv.conf` symlink target, a working fetch to the server, and the tailnet name *failing* to
+resolve). After: `BackendState: Running`; `Verification: OK` from `openssl s_client
+-verify_return_error`, so the certificate genuinely validates rather than merely being present;
+all eight ports answered by name over `dev tailscale0` with **no `-k` and no `--resolve`**, 40–62
+ms; `ip route get 8.8.8.8` still goes out `wlp3s0` via the router, confirming Tailscale did
+**not** grab the default route and start tunnelling general internet traffic; and normal lookups
+(`archlinux.org`, `github.com`) still resolve through `100.100.100.100`. Rendered the hub in a
+headless browser with certificate checking **on** as the final proof.
+
+**Undo is one command:** `sudo tailscale set --accept-dns=false` restores the router's DNS and
+costs only the ability to use the name. `sudo tailscale down` leaves the tailnet entirely
+without uninstalling anything.
+
+**Not enabled, deliberately:** Tailscale SSH (the box already has key-only OpenSSH and this
+would be a second, differently-governed way in), `--accept-routes` (nothing advertises subnets),
+and exit-node use. **Noted during the install:** several pacman mirrors returned 404 for the
+package before one succeeded — the mirror list is stale and a `-Syu` is overdue, untouched here
+because it was not asked for.

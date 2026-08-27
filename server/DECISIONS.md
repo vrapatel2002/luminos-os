@@ -1138,9 +1138,17 @@ network changes this way.
 
 ---
 
-## DECISION 80
+## DECISION 84
 # [CHANGE: claude-code | 2026-08-27]
 ### The phone gets one HTTPS front door — but the login prompt had to be built before the door was
+
+> **Renumbered 80 → 84 on 2026-08-27, a few hours after it was written.** It was filed as 80
+> without checking `LUMINOS_DECISIONS.md`, which already had a DECISION 80 from 08-25. Per
+> CLAUDE.md the two files share **one** sequence, so 84 is the next genuinely free number.
+> Commit `e2fc90d7` and the Luminos Note from that day still say "DECISION 80" — they mean
+> this entry. **A pre-existing collision on 79 is still unresolved** and is not mine to fix
+> silently: server 79 (Cat 6 / default route, 08-20) and main 79 (Dolphin over TLS, 08-24)
+> are different decisions with the same number.
 
 **Decision:** put Caddy in front of everything on ports 443 and 8443–8449, serve a small
 landing page (`luminos-hub`) at the root, and reach it from a phone over Tailscale. **But the

@@ -1,5 +1,5 @@
 # [CHANGE: claude-code | 2026-08-27]
-# One page that leads to everything else, built for a phone. See DECISION 80.
+# One page that leads to everything else, built for a phone. See DECISION 84.
 #
 # Binds 127.0.0.1 ONLY. Caddy is the single front door and the only thing that
 # terminates TLS. The hub has no login of its own on purpose -- it serves nothing

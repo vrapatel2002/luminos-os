@@ -1,5 +1,5 @@
 # [CHANGE: claude-code | 2026-08-27]
-# Single front door for the media server. See DECISION 80.
+# Single front door for the media server. See DECISION 84.
 #
 # Why a proxy at all: before this, every app was its own bare-HTTP port and you had to
 # remember seven of them. Now there is one name to remember, everything is encrypted,

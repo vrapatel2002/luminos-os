@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # [CHANGE: claude-code | 2026-08-27]
 # Fetch and renew the Let's Encrypt certificate for this machine's tailnet name and
-# hand it to Caddy as two plain files. See DECISION 80.
+# hand it to Caddy as two plain files. See DECISION 84.
 #
 # Why a timer instead of letting Caddy do it: Caddy has a built-in Tailscale cert
 # manager, but tailscaled refuses cert requests from a non-root user unless that user
