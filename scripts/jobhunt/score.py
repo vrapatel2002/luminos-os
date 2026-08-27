@@ -478,6 +478,28 @@ def cli_env():
     return env
 
 
+# [CHANGE: claude-code | 2026-08-26] BUG-140. THE PROMPT NEVER ASKED FOR JSON.
+#
+# `"json" in PROMPT.lower()` is False, and always was. It never needed to be:
+# llama.cpp compiled SCHEMA into a grammar, so the reply was JSON whether the
+# prompt mentioned it or not. Take the grammar away and there is NO instruction
+# left — so Antigravity picked its own format and returned ```yaml, with
+# perfectly correct content, on most calls. It cost a 350-job run.
+#
+# This is appended for CLI backends ONLY. The local path keeps the grammar and
+# must not be given a redundant instruction that could fight it.
+CLI_FORMAT_SUFFIX = """
+
+OUTPUT FORMAT — this overrides any other formatting habit you have.
+Reply with ONE raw JSON object and nothing else. Not YAML. No markdown fence,
+no commentary, no text before or after it. Exactly these seven keys:
+
+{"years_required": 0, "degree_required": false, "hard_blocker": false,
+ "fit_signal": "strong|decent|weak|wrong_field", "knockout_risks": [],
+ "missing_skills": [], "one_line_why": ""}
+"""
+
+
 def extract_json(text):
     """Pull one JSON object out of a chat reply.
 
@@ -492,15 +514,34 @@ def extract_json(text):
     # Fenced block first — the fence may carry a language tag, and there may be
     # prose before it. Take the FIRST fenced block, not a greedy span across
     # several, which is why the inner pattern is non-greedy.
-    m = re.search(r"```(?:json)?\s*(.*?)```", t, re.S)
+    # The language tag is whatever the model felt like writing — `json`, `yaml`,
+    # or nothing. Match any word there rather than the one we hoped for, or a
+    # ```yaml fence survives into the YAML parser and the backticks fail it.
+    m = re.search(r"```[a-zA-Z0-9_+-]*\s*(.*?)```", t, re.S)
     if m:
         t = m.group(1).strip()
     # Then the outermost braces. A model that adds "Here is the JSON:" in front
     # or a friendly sentence behind is still perfectly usable.
     start, end = t.find("{"), t.rfind("}")
-    if start == -1 or end <= start:
-        raise ValueError(f"no JSON object in reply: {text[:200]!r}")
-    return json.loads(t[start:end + 1])
+    if start != -1 and end > start:
+        try:
+            return json.loads(t[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    # YAML FALLBACK, and it is not hypothetical — it is what BUG-140 actually
+    # was. The instruction above stops it at the source; this catches the tail
+    # of it for free, because yaml is already imported and JSON is a subset of
+    # YAML, so one parser handles both. The answer was never wrong, only
+    # dressed differently, and throwing away a correct answer over punctuation
+    # would be the expensive kind of strict.
+    try:
+        d = yaml.safe_load(t)
+        if isinstance(d, dict) and d:
+            return d
+    except yaml.YAMLError:
+        pass
+    raise ValueError(f"no JSON or YAML object in reply: {text[:200]!r}")
 
 
 def coerce_result(d):
@@ -552,9 +593,10 @@ def call_cli(cmd, prompt, timeout=300, attempts=2):
     job on a 192-job run would empty the quota for nothing."""
     last = None
     for n in range(attempts):
-        p = prompt if n == 0 else (
-            prompt + "\n\nIMPORTANT: reply with the raw JSON object ONLY. "
-            "No markdown fence, no explanation, no text before or after it.")
+        p = prompt + CLI_FORMAT_SUFFIX
+        if n:
+            p += ("\nYour previous reply could not be parsed. Return the raw "
+                  "JSON object only.\n")
         try:
             r = subprocess.run(cmd + [p], capture_output=True, text=True,
                                timeout=timeout, env=cli_env(),

@@ -4158,3 +4158,64 @@ bucket and are really hybrid/on-site; **1** of those was in the current scoring 
 because most hybrid postings name a city that was already rejected for other reasons. It was
 still worth fixing: the rule is free, it runs before the model, and `score.py` recomputes the
 bucket every rules pass, so no re-crawl was needed (the BUG-107 consequence paying off).
+
+---
+
+## BUG-140 — the prompt never asked for JSON; a grammar had been asking for two months
+# [CHANGE: claude-code | 2026-08-26]
+
+**Severity:** high — it stopped the pipeline dead.
+**Status:** FIXED.
+**Found:** 2026-08-26, on the first full run after the backend moved to Antigravity (DECISION 82).
+
+**Symptom.** `./score.py --rescore` over ~350 rows stalled at 50 and sat there for 14 minutes
+with an empty log. Not a crash, not an error — a hang.
+
+**Two layers of misdirection before the real cause.**
+1. The log was empty because Python buffers stdout when it is a pipe under `nohup`, so 50
+   scored rows existed in the DB and none of them had reached the file. **The run was not as
+   stuck as it looked; the reporting was.** Use `python3 -u`.
+2. Then it looked like `agy` hanging on stdin. Ruled out by experiment — `< /dev/null`,
+   `0<&-`, and three back-to-back calls all returned in 4-5 s.
+
+**Real cause.** `agy` was replying with a ```yaml fenced block. `extract_json()` raised, the
+retry produced YAML again, both attempts failed, and each failed job burned two multi-minute
+CLI calls. The one line that settles it:
+
+```python
+>>> 'json' in score.PROMPT.lower()
+False
+```
+
+**The prompt has never once contained the word JSON.** For two months it did not need to:
+llama.cpp compiles `response_format.schema` into a GBNF grammar and constrains sampling, so
+malformed JSON was not unlikely, it was *unreachable*. The grammar was silently doing the
+prompt's job. Move to a CLI backend, and the grammar goes away — but nothing in the code
+announces that, because the thing that was load-bearing was never written down.
+
+**This is the concrete cost of leaving `local`**, and DECISION 82 named it in the abstract
+before this bug arrived to make it real: only llama.cpp can make bad output impossible. Every
+cloud backend gets parse-check-coerce-retry instead. Reliable, not certain.
+
+**Fix, three parts:**
+- `CLI_FORMAT_SUFFIX` — appended to every CLI prompt. Names the seven keys, says raw JSON,
+  says explicitly *not YAML*, no fence. Stops it at the source.
+- YAML fallback in `extract_json()`. JSON is a subset of YAML, so one parser handles both.
+  The model's answer was never wrong, only dressed differently — throwing away a correct
+  answer over punctuation is the expensive kind of strict.
+- `coerce_result()` does by hand what the grammar's types used to guarantee: `"2+ years"` → 2,
+  `"yes"` → True, `"STRONG"` → `strong`, a bare string → a one-item list, lists capped.
+  An unknown `fit_signal` still raises — that one has to be right.
+
+**A regression inside the fix, caught only by testing the fix.** The fence-stripping regex was
+` ```(?:json)? ` — it matched the tag we hoped for. A ```yaml fence therefore survived into
+`yaml.safe_load`, which choked on the backticks. So the YAML fallback did not work on the exact
+input that motivated it. Now `[a-zA-Z0-9_+-]*` — match any tag, or none.
+
+**Verified:** 7 parser cases (bare JSON, fenced+prose, ```yaml, bare YAML, untagged fence, and
+two that must be rejected) plus 3 live `agy` calls against real postings — 11.1 s, 15.5 s,
+8.2 s, all parsed.
+
+**The lesson, and it is not about JSON.** When a component is replaced, the question is not
+what the old one *did*. It is what the old one was *quietly compensating for*. A grammar looks
+like a validator; it was actually half the prompt.
