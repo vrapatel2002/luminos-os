@@ -68,6 +68,39 @@ if /usr/bin/pgrep -x "llama-server" > /dev/null 2>&1; then
     /usr/bin/sleep 2
 fi
 
+# [CHANGE: claude-code | 2026-08-27] BUG-141 follow-up.
+# Do not climb onto a card somebody else is already using.
+#
+# luminos-gpu-yield parks the model when a game LAUNCHES, but nothing stopped a
+# model loading again while that game was still running - open the phone chat
+# mid-session and this script would try to put 5.7 GB into whatever was left.
+# The arbiter cannot help here: it hands the card over at launch and has no say
+# afterwards. So the check belongs at the one place every GPU model load goes
+# through, which is this line.
+#
+# Deliberately a free-VRAM test and not a list of game process names: it is the
+# actual constraint, and it protects against anything holding the card, not just
+# the one title we happened to think of. Dolphin-8B at ctx 16384 needs ~5718 MiB.
+#
+# Fails OPEN. If the card cannot be queried we start anyway - a HIVE that
+# refuses to answer because nvidia-smi hiccuped is a worse bug than the one
+# being prevented.
+NEED_MIB=5000
+FREE_MIB=$(dgpu-exec-v2 nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | tr -d ' \r')
+case "$FREE_MIB" in
+    ''|*[!0-9]*) ;;   # unreadable -> fail open, say nothing
+    *)
+        if [ "$FREE_MIB" -lt "$NEED_MIB" ]; then
+            echo "Refusing to load $MODEL_NAME: only ${FREE_MIB} MiB of 6141 free." >&2
+            echo "Something else is using the GPU right now:" >&2
+            dgpu-exec-v2 nvidia-smi --query-compute-apps=pid,process_name,used_memory \
+                --format=csv,noheader 2>/dev/null | sed 's/^/    /' >&2
+            echo "Close it, or run the model on CPU. The card is not being taken from it." >&2
+            exit 3
+        fi
+        ;;
+esac
+
 /usr/bin/touch /tmp/hive-last-request
 
 echo "Starting llama-server with model $MODEL_PATH..."

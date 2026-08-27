@@ -45,8 +45,22 @@ Last Updated: 2026-08-27 (BUG-142 FIXED — **the 007 black screen that came bac
   1. `wine_teardown()` — `wineserver -k` on the prefix **before and after** every attempt. Never
      start on top of an old session, never leave one behind. This is the cure; the rest is net.
   2. `black_watchdog()` — polls `_NET_WM_STATE` during the run and ends the attempt in ~40 s if the
-     desktop is `HIDDEN`, instead of leaving a black window up forever. Needs three readings in a
-     row so a momentary hide is not fatal; verified it does not fire on a healthy 90 s run.
+     desktop is wedged, instead of leaving a black window up forever. Needs three readings in a row
+     so a momentary state during map/unmap is not fatal.
+
+     **Read this before touching it — the first version of this watchdog was itself a bug.**
+     It tested for `_NET_WM_STATE_HIDDEN` alone and **killed a game that was rendering perfectly,
+     three attempts in a row**, walking all the way down to the iGPU fallback. `HIDDEN` is not a
+     failure signal on its own: KWin also sets it whenever another window is in front — so *the
+     screenshot tool being used to check on the game triggered it*. Shipped as written, it would
+     have killed the game every time the user alt-tabbed to Discord.
+
+     The real signature is the **contradiction: `FOCUSED` and `HIDDEN` at the same time.** A healthy
+     compositor cannot produce that — if you hold the input focus, nothing is on top of you. It is
+     precisely what a wedged KWin does, because it keeps `_NET_ACTIVE_WINDOW` on a window it is
+     refusing to map. Alt-tab gives `HIDDEN` *without* `FOCUSED`, and is correctly ignored.
+     Re-verified on a live healthy run: state held at `MAXIMIZED_VERT, MAXIMIZED_HORZ, FULLSCREEN,
+     FOCUSED` across six deliberate focus-steals over 13 minutes, with zero watchdog fires.
   3. Attempt 2 is a clean restart. Measured to work — a black run and the rendering run right after
      it differed by nothing else.
   4. Attempt 3 is the 780M, which has never shown this. Slower, but it renders.
@@ -71,6 +85,33 @@ Last Updated: 2026-08-27 (BUG-142 FIXED — **the 007 black screen that came bac
   disabled, and 2560x1440 goes black *with* it enabled. The size is not what decides it.
 - Note: `~/re/tools/007-run.sh` is the source of `/usr/local/bin/007` and lives **outside git**. A
   home-directory loss takes the cure with it.
+
+### BUG-143 — the GPU arbiter only worked at launch, so a model could climb back on mid-game
+<!-- [CHANGE: claude-code | 2026-08-27] -->
+- Status: **FIXED**, 2026-08-27. Verified live against a running game.
+- Severity: Medium — no crash was observed in the wild, but it is the same collision as BUG-141
+  arriving through a door nobody had shut.
+- Component: `scripts/hive-start-model.sh`.
+- Found while answering a question, not from a failure report: *"i think its with the dolphin
+  running on it but why is it not getting kicked off we tried coding that way."*
+- **`luminos-gpu-yield` parks the resident model when a game launches, and then has no further
+  say.** Nothing stopped a *new* model loading while that game was still running. Open the phone
+  chat mid-session and `hive-start-model.sh` would try to put Dolphin-8B's ~5718 MiB into whatever
+  the game had left — on the run measured here, 2708 MiB. The arbiter cannot cover this: it hands
+  the card over at launch and is not consulted again.
+- Fix: a free-VRAM precondition at the single point every GPU model load passes through. Below
+  5000 MiB free it refuses, names the process actually holding the card, and exits 3.
+- **Deliberately a VRAM test, not a list of game process names.** VRAM is the real constraint, and
+  it protects against anything on the card rather than only the titles we thought to enumerate.
+- **Fails open.** If `nvidia-smi` cannot be read it starts anyway — a HIVE that refuses to answer
+  because a query hiccuped is a worse bug than the one being prevented. All six branches were
+  exercised (idle / boundary 5000 / boundary 4999 / game running / empty output / non-numeric).
+- Live result with 007 on the card:
+  ```
+  Refusing to load nexus: only 2708 MiB of 6141 free.
+  Something else is using the GPU right now:
+      143541, ./007FirstLight.exe, 3020 MiB
+  ```
 
 ### BUG-141 — 007 First Light stopped launching because the phone chat took the whole graphics card
 <!-- [CHANGE: claude-code | 2026-08-25] -->

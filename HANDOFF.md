@@ -78,9 +78,20 @@ are not worth keeping — `xprop` covers the check that matters.
    start on top of an old session, never leave one behind. *This is the cure. The rest is safety
    net.* It declines to act while a game is actually running, so it cannot shoot a live session.
 2. **`black_watchdog()`** polls `_NET_WM_STATE` during the run and ends the attempt in ~40 s if the
-   desktop is `HIDDEN`, instead of leaving a black window up forever. It waits 30 s before it
-   starts looking and needs three readings in a row, so a momentary hide is not fatal. Verified it
-   does **not** fire on a healthy 90 s run.
+   desktop is wedged, instead of leaving a black window up forever. It waits 30 s before it starts
+   looking and needs three readings in a row, so a momentary state during map/unmap is not fatal.
+
+   **This watchdog was itself a bug on its first draft, and the trap is easy to fall back into.**
+   It tested `_NET_WM_STATE_HIDDEN` on its own and killed a game that was rendering perfectly,
+   three attempts running, all the way down to the iGPU fallback — because `HIDDEN` is *also* what
+   KWin sets when another window is in front, and the screenshot tool used to check on the game
+   took focus. As written it would have killed the game every time Shawn alt-tabbed.
+
+   The signature is the **contradiction — `FOCUSED` and `HIDDEN` together.** Nothing healthy
+   produces that: if you hold the focus, nothing is on top of you. A wedged KWin does exactly that,
+   holding `_NET_ACTIVE_WINDOW` on a window it will not map. Alt-tab gives `HIDDEN` without
+   `FOCUSED` and is ignored. Re-verified live: six deliberate focus-steals over 13 minutes, state
+   never left `MAXIMIZED_VERT, MAXIMIZED_HORZ, FULLSCREEN, FOCUSED`, zero fires.
 3. **Attempt 2 is a clean restart.** Measured to work: a black run and the rendering run right
    after it differed by nothing else.
 4. **Attempt 3 is the 780M.** RADV has never shown this. Slower, but it renders — which beats a
@@ -109,6 +120,7 @@ run only *looks* alive. The watchdog greps for it as well as checking the window
 | 17:44 | clean teardown, KWin rule **on** | renders |
 | ×3    | back-to-back quit → relaunch, no cleanup | renders, renders, renders |
 | final | **stale session deliberately planted first** | teardown killed it, **renders** |
+| 19:18–19:31 | corrected watchdog, 6 deliberate focus-steals | renders throughout, **0 watchdog fires**, 0 swapchain errors |
 
 Last frame captured: the title screen, "Press [F] to play".
 
