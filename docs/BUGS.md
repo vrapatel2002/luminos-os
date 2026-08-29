@@ -278,9 +278,22 @@ in the message, so the next person does not spend two days on vkd3d.
 
 - Reboot check: `ls -l /dev/nvidia-modeset` must show `crw-rw---- root dgpu`. If absent, the gate
   did not run or `nvidia-modprobe -m` failed — the journal will say which.
-- **Still to verify:** the delete-and-recreate test was deliberately NOT run on 2026-08-29 because
-  the game was live and pulling a device node out from under it was not worth the risk. Do it at
-  the next reboot instead, which tests the real path anyway.
+- **VERIFIED ACROSS A REBOOT, 2026-08-29 14:51.** Both creation paths are proven, by two different
+  kinds of evidence:
+  - **udev path (primary)** — proven by the boot itself. devtmpfs nodes do not survive a reboot, so
+    `/dev/nvidia-modeset` was created fresh at 14:51; the backstop service ran at 14:51:42 and
+    logged only `gated:` with **no** `modeset: created` line, i.e. the node already existed when it
+    got there. Nothing else on this machine creates it, so `71-luminos-uvm-gate.rules` did.
+  - **backstop path** — proven directly: node deleted, `systemctl restart luminos-uvm-gate`, which
+    logged `modeset: created /dev/nvidia-modeset root:dgpu 660` and restored it correctly owned.
+  All five nodes now come up `root:dgpu 660` at boot: `nvidia0`, `nvidiactl`, `nvidia-modeset`,
+  `nvidia-uvm`, `nvidia-uvm-tools`.
+- **Incidental finding, worth keeping:** the delete test was run with 007 live (by mistake — the
+  process check and the `rm` were in the same command and the output was not read first). The game
+  was **unaffected**: 92% GPU, 69 W, zero swapchain failures. Deleting a device node does not close
+  already-open file descriptors, so the risk that had this test deferred was smaller than assumed.
+  That is a reason to be less afraid of this specific test next time, **not** a general licence —
+  a process that reopens the node mid-session would have failed.
 - Date Found: 2026-08-29
 
 ### BUG-148 — every shutdown took ~2 minutes because the HIVE daemon deadlocked in its own SIGTERM handler
