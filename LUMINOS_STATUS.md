@@ -353,9 +353,19 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
     *late* — udev ran `nvidia-modprobe` at t=6.87 s and `luminos-uvm-gate.service` did not run
     until t=9.09 s, leaving `/dev/nvidia-uvm{,-tools}` world-open for 2.2 s at every boot.
     `config/udev/71-luminos-uvm-gate.rules` now rides the same PCI uevent; residual window
-    9-18 ms, measured. **Still unverified across a power cycle:** suspend/resume, the initramfs
-    module parameters, and behaviour after an `nvidia-utils` upgrade. Checklist in
+    9-18 ms, measured. A second reboot on 2026-08-29 verified **both** node-creation paths (the
+    udev rule at boot, and the backstop service by delete-and-restart).
+    <!-- [CHANGE: claude-code | 2026-08-29] -->
+    **Two things remain unverified — untested, not failing, and neither is urgent:**
+    (a) **suspend/resume** — close the lid, reopen, re-run `luminos-verify`; the claim under test is
+    `install-dgpu-gate.sh`'s comment that wake recreates the nodes at 0666, which has never been
+    re-tested since the UVM gate landed. (b) **`nvidia-utils` upgrade** — the pacman hook that
+    re-strips setuid has still never run during a real transaction, and the vendor JSON and
+    initramfs halves are undefended. Both are written up as runnable procedures at the end of
     `docs/BUGS.md` BUG-147.
+    **The daily check is one command: `luminos-verify`, section `[3b]`** — five node perms, the udev
+    rule, and the setuid bit, all as hard failures. It is also the first thing to run if 007 ever
+    goes black again (BUG-142/BUG-149).
 
 ## Input & Hardware
 | Component | Status | Notes |

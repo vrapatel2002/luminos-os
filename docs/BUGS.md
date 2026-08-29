@@ -170,6 +170,16 @@ The boot race — item 1 — is closed.
      it mid-session" — the log says so explicitly and tells the reader to check the timestamp.
 - **Also at risk and worth stating plainly:** `~/re/tools/007-run.sh` — the entire BUG-142 cure —
   **is not in git.** It survives a reboot fine. It does not survive a home-directory loss.
+- **The short version of everything below is now one command: `luminos-verify`.**
+  <!-- [CHANGE: claude-code | 2026-08-29] -->
+  Section **`[3b]` dGPU gate device nodes** stats all five `/dev/nvidia*` nodes, checks
+  `71-luminos-uvm-gate.rules` is installed, and checks the setuid bit on `/usr/bin/nvidia-modprobe`
+  is still off. It **fails**, not warns, on an absent node, and on `/dev/nvidia-modeset` it names
+  BUG-149 and the black-screen symptom in the failure text — so the next person to see a black 007
+  is told to look here *before* they start reading vkd3d source. It uses `stat` only and never opens
+  a node, so it stays inside section 3's contract of never waking the dGPU. Do not "improve" it by
+  calling `nvidia-smi`. The longhand checklist below is kept because it covers journal contents and
+  boot ordering, which `luminos-verify` deliberately does not read.
 - Proposed test, to be run when the user is present and can log back in (do NOT run unattended,
   a failed boot gate is recoverable but a failed *display-manager ordering* is not):
   ```
@@ -198,7 +208,38 @@ The boot race — item 1 — is closed.
     `nvidia-modprobe` and `/dev/nvidia0` is probably missing too — check it immediately.
   - `REFUSING to create ...` → `/dev/nvidia0` is absent; the guard stopped the script from killing
     the card. Run `nvidia-modprobe -c0`, then re-run the gate.
-- Repeat the same check after a suspend/resume cycle and after the next `nvidia` package upgrade.
+- **The two things still unverified, as procedures rather than adjectives.**
+  <!-- [CHANGE: claude-code | 2026-08-29] -->
+  Neither is *broken* — both are **untested**, which is a different and lesser claim, and neither
+  needs doing on any particular day. Written down here because "we should check that sometime" does
+  not survive a context window.
+  1. **Suspend/resume.** Costs about a minute.
+     ```
+     luminos-verify | sed -n '/\[3b\]/,/^$/p'    # baseline: 7 green lines
+     # close the lid, wait ~15 s, open it, log back in
+     luminos-verify | sed -n '/\[3b\]/,/^$/p'    # want the SAME 7 green lines
+     journalctl -b -u luminos-uvm-gate --since "5 min ago"
+     ```
+     The claim under test is the comment in `install-dgpu-gate.sh` saying *"nvidia-modprobe recreates
+     /dev/nvidia* at 0666 on every wake"*. If `[3b]` still passes, that comment is false and should
+     be corrected in place — **not deleted**, since it records what was once believed. If `[3b]`
+     fails, the gate needs a resume hook it does not currently have
+     (`/usr/lib/systemd/system-sleep/`), and this becomes a real bug worth filing.
+     Note the resume path has an extra hazard the boot path does not: the modules are already loaded,
+     so `60-nvidia.rules`' `TEST!="/dev/nvidia-uvm"` guard sees a node that already exists — meaning
+     on resume, unlike at boot, `nvidia-modprobe` may not run at all.
+  2. **`nvidia-utils` upgrade.** Costs nothing extra — just do it the next time one lands.
+     ```
+     # AFTER the upgrade transaction finishes, before rebooting:
+     ls -l /usr/bin/nvidia-modprobe   # want NO 's' — the pacman hook must have re-stripped it
+     luminos-verify | sed -n '/\[3b\]/,/^$/p'
+     ```
+     Three things ride on one unattended transaction and only the first is defended: pacman restores
+     the setuid bit (defended by `config/pacman-hooks/luminos-nvidia-modprobe-setuid.hook`, **which
+     has still never run during a real upgrade**); the vendor JSON `dgpu-exec-v2` points at can be
+     rewritten (**undefended**); and the initramfs is regenerated, which is where
+     `NVreg_DeviceFileGID` lives (**undefended**). If the setuid bit is back after an upgrade, the
+     hook did not fire and BUG-146 has reopened — `luminos-verify [3b]` fails loudly on exactly this.
 - Date Found: 2026-08-29 (filed as unverified, not as failing)
 
 ### BUG-149 — BUG-142 was never a vkd3d bug: our own security fix deleted `/dev/nvidia-modeset`
@@ -257,6 +298,19 @@ compositor while the dGPU renders.
 different entry points in the same presentation path. The evidence that they share this cause is
 empirical — the game works now — not a traced call chain. If swapchain failures ever return **with
 the node present**, this entry is not the whole story and BUG-142 must be reopened separately.
+
+**Triage order if the black screen ever comes back — check the device node FIRST.**
+<!-- [CHANGE: claude-code | 2026-08-29] -->
+This costs ten seconds and, on the evidence so far, is the answer:
+```
+luminos-verify | sed -n '/\[3b\]/,/^$/p'   # or: dgpu-exec-v2 --check
+```
+Both now say `ABSENT <- MISSING` and name BUG-149 rather than printing `absent` as a neutral line
+next to `gate: OK`, which is exactly how this hid for two days. **Only if all five nodes are
+present** does the swapchain storm become evidence of something new — at which point reopen BUG-142
+and note that the storm has been measured at two very different rates (13.1/s and ~93/s), so the
+detector in `007-run.sh` must keep counting failures-in-window rather than matching a rate. Do not
+delete that detector: it is the regression alarm for this bug.
 
 **The fix.** `luminos-uvm-gate.sh` now runs `/usr/bin/nvidia-modprobe -m` when the node is absent,
 then verifies the permissions rather than assuming the driver param handled it. It runs as root
@@ -571,6 +625,17 @@ in the message, so the next person does not spend two days on vkd3d.
   the 780M fallback. **Everything written below blaming vkd3d for this half is wrong** and is kept
   only because the storm *measurements* (13.1/s, then ~93/s) are real and are what the detector was
   sized against. Do not delete the storm detector — it is now a regression alarm for BUG-149.
+- <!-- [CHANGE: claude-code | 2026-08-29] --> **If the black screen returns, run this before reading
+  anything else in this entry:**
+  ```
+  luminos-verify | sed -n '/\[3b\]/,/^$/p'
+  ```
+  A missing `/dev/nvidia-modeset` is now the *first* suspect, not the last — it is the only cause of
+  the two that we introduced ourselves, and it is the one that produces no log line anywhere. The
+  original cause (a stale `explorer.exe /desktop`) has a one-command discriminator of its own,
+  `xprop -id <win> _NET_WM_STATE` showing `_NET_WM_STATE_HIDDEN`, described below. Two mechanisms,
+  two checks, both ten seconds. Note the BUG-149 fix is proven **empirically** — the game runs — and
+  not by a traced call chain; see the "Honest limit" paragraph in BUG-149.
 - Severity: High — the game was unplayable *and* the failure was invisible. Nothing logged it.
 - Component: `~/re/tools/007-run.sh` → `/usr/local/bin/007`. **Not tracked in this repo.**
 - Symptom as reported: *"the game's video is visible its black every time you fix it i can play i

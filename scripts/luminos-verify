@@ -89,6 +89,51 @@ if [ -r /proc/driver/nvidia/params ]; then
   [ -n "$dpm" ] && { [ "$dpm" = "2" ] && ok "NVreg_DynamicPowerManagement=0x02 (fine-grained)" || warn "DynamicPowerManagement=$dpm (expected 2/0x02)"; }
 fi
 
+# ---- 3b. DECISION 25 device nodes — all five, presence AND ownership ----
+# [CHANGE: claude-code | 2026-08-29] BUG-149.
+# This exists because a MISSING node was invisible for weeks. dgpu-exec-v2 --check listed
+# "/dev/nvidia-modeset absent" as a neutral line directly above "gate: OK", and nothing else
+# looked at these at all. Meanwhile every NVIDIA presentation call was failing with a bare
+# ERROR_UNKNOWN and 007 First Light was falling back to the 780M — blamed on vkd3d for two days.
+#
+# WHY MISSING IS A FAILURE, NOT A WARNING: absent is not "not applicable". Since BUG-146 stripped
+# setuid from nvidia-modprobe, and 60-nvidia.rules only ever passes -c0 -u, the ONLY thing that
+# creates these is luminos-uvm-gate. A node absent here means that did not run.
+#
+# `stat` does NOT open the node, so this stays inside the "never wakes the dGPU" contract of
+# section [3]. Do not "improve" this by opening a node or calling nvidia-smi.
+say "\n[3b] dGPU gate device nodes (DECISION 25 — stat only, does not wake the card)"
+for n in /dev/nvidia0 /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
+  if [ ! -e "$n" ]; then
+    if [ "$n" = "/dev/nvidia-modeset" ]; then
+      bad "$n ABSENT — NVIDIA Vulkan will fail every display call with ERROR_UNKNOWN and games
+        will fall back to the 780M. This is BUG-149, and it looks exactly like a vkd3d bug.
+        Fix: sudo systemctl restart luminos-uvm-gate"
+    else
+      bad "$n ABSENT — the dGPU gate did not run. Fix: sudo systemctl restart luminos-uvm-gate"
+    fi
+    continue
+  fi
+  perm=$(stat -c '%U:%G %a' "$n" 2>/dev/null)
+  if [ "$perm" = "root:dgpu 660" ]; then
+    ok "$n $perm"
+  else
+    bad "$n is [$perm], expected [root:dgpu 660] — reachable WITHOUT the gate (DECISION 25 breached)"
+  fi
+done
+# The primary mechanism. If this file is gone the nodes still get gated, but ~2.2 s late at every
+# boot (BUG-147) — a world-open window, not a broken card, so it is a warning not a failure.
+[ -e /etc/udev/rules.d/71-luminos-uvm-gate.rules ] \
+  && ok "71-luminos-uvm-gate.rules installed (closes the 2.2 s boot window, BUG-147)" \
+  || warn "71-luminos-uvm-gate.rules MISSING — nodes will be gated ~2.2 s late at every boot (BUG-147)"
+# The pacman hook that keeps setuid off nvidia-modprobe. If the bit comes back, BUG-146 reopens.
+if [ -u /usr/bin/nvidia-modprobe ]; then
+  bad "/usr/bin/nvidia-modprobe is SETUID again — BUG-146 has reopened. The pacman hook
+        (config/pacman-hooks/luminos-nvidia-modprobe-setuid.hook) did not run on the last upgrade."
+else
+  ok "nvidia-modprobe setuid bit is off (BUG-146 hook holding)"
+fi
+
 # ---- 4. Fan / thermal daemon ----
 say "\n[4] Fan & thermal (luminos-power owns the fan curve)"
 [ "$(systemctl is-active luminos-power 2>/dev/null)" = "active" ] \
