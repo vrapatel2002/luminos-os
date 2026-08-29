@@ -1340,12 +1340,37 @@ def main():
                 ", ".join(m for m, p in _system_prompts.items() if p))
     logger.info("═══════════════════════════════════════════════════════════")
 
+    # [CHANGE: claude-code | 2026-08-29] BUG-148 — this handler used to deadlock on every stop.
+    #
+    # `server.shutdown()` BLOCKS until the `serve_forever()` loop acknowledges the request.
+    # Python delivers signals on the MAIN thread — which is the very thread sitting inside
+    # `serve_forever()` — so calling it directly from here waited for a loop that could not
+    # run until this handler returned. Neither side could move. systemd then waited out the
+    # full 90 s TimeoutStopSec and SIGKILLed us, which is what put "A stop job is running"
+    # on the screen for a minute and a half at every shutdown.
+    #
+    # The stdlib says this outright: shutdown() "must be called while serve_forever() is
+    # running in a different thread otherwise it will deadlock."
+    #
+    # Measured in isolation 2026-08-29 with the identical server + a daemon background
+    # thread, SIGTERM to exit:
+    #     direct call (this file, before)   HUNG   >10 s, never exits
+    #     shutdown() from a thread          0.51 s
+    #     sys.exit(0), no shutdown()        0.11 s
+    #     os._exit(0)                       0.10 s
+    #
+    # The last two are faster because they skip the orderly shutdown rather than perform it:
+    # in-flight requests are not drained and the listening socket is not closed. Draining is
+    # the whole point of shutdown(), so the fix is to keep the call and put it on a thread
+    # that is not the blocked one. 0.51 s is one serve_forever poll interval, not a stall.
+    #
+    # Do NOT re-add `sys.exit(0)` below. Once shutdown() is dispatched, serve_forever()
+    # returns on its own and main() falls off the end normally.
     def _shutdown(signum, frame):
         signame = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
         logger.info("Received %s — shutting down", signame)
         _release_lock()
-        server.shutdown()
-        sys.exit(0)
+        threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)

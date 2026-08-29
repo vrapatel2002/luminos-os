@@ -1,0 +1,34 @@
+# luminos-hive.service — the HIVE daemon (routing, model swapping, inference) on port 8078.
+# [CHANGE: claude-code | 2026-08-29] BUG-148 — tracked in git for the first time, and given a
+# stop timeout.
+#
+# WHY TimeoutStopSec IS HERE
+# --------------------------
+# Until 2026-08-29 this daemon deadlocked in its own SIGTERM handler and never exited. systemd
+# waited out the full DefaultTimeoutStopSec (90 s) and SIGKILLed it at every single shutdown —
+# that is the "A stop job is running for Luminos HIVE Daemon (1min 30s / 1min 30s)" screen, and
+# it was the ENTIRE reason powering off this machine took ~2 minutes. Measured from the boot
+# journal: one 90.0 s gap in the whole shutdown sequence, and this unit was in it.
+#
+# The deadlock itself is fixed in scripts/hive-daemon.py (shutdown() must be called from a
+# thread other than the one in serve_forever(); the comment there has the measurements). This
+# line is INSURANCE, not the fix — it bounds the cost of the next hang, whatever causes it.
+#
+# 20 s and not 5: a stop can legitimately be slow if the daemon is mid-swap and has a
+# llama-server child to reap. 20 s is comfortably above anything observed (a clean stop is
+# ~0.5 s, one serve_forever poll interval) and still turns a 90 s shutdown stall into a blink.
+# If this ever actually fires, that is a bug to find, not a number to raise.
+
+[Unit]
+Description=Luminos HIVE Daemon (port 8078)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/shawn/luminos-os/scripts/hive-daemon.py
+WorkingDirectory=/home/shawn/luminos-os
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
