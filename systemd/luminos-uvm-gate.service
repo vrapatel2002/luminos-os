@@ -1,0 +1,37 @@
+[Unit]
+# [CHANGE: claude-code | 2026-08-29] BUG-146 — bring /dev/nvidia-uvm{,-tools} under DECISION 25.
+# nvidia-modprobe hardcodes 0666 root:root for these two nodes and the NVreg_DeviceFile*
+# params do not reach them, so they were the one hole left in the default-deny gate.
+Description=Luminos dGPU gate: nvidia_uvm device nodes (DECISION 25 / BUG-146)
+Documentation=file:///home/shawn/luminos-os/docs/BUGS.md
+
+# The module must be loaded for the device major to exist; modules-load.d/nvidia.conf does it.
+After=systemd-modules-load.service
+Wants=systemd-modules-load.service
+
+# Must win the race: pre-create the nodes correctly owned BEFORE anything triggers
+# nvidia-modprobe, because nvidia-modprobe skips nodes that already exist. supergfxd is the
+# actual boot-time trigger on this machine, so we order ahead of it and the display manager.
+Before=supergfxd.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+# RemainAfterExit is what makes `systemctl status` readable for a unit whose whole job is a
+# one-time boot fixup. The cost: to re-apply by hand you must use `systemctl RESTART`, because
+# `start` on an already-active unit is a silent no-op.
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/luminos-uvm-gate
+
+# NO PAIRED .path UNIT — this was tried on 2026-08-29 and removed. Two reasons, both measured:
+#   1. It spun. PathExists= stays satisfied for as long as the path is there, and this service
+#      CREATES the path rather than consuming it, so the unit retriggered itself ~4x/second
+#      until systemd tripped the start limit and left the service 'failed'. PathExists is for
+#      flag files that the triggered unit deletes; that is not this.
+#   2. It was not needed. Device nodes live in devtmpfs and are NOT removed when the module
+#      unloads — verified by `rmmod nvidia_uvm`, after which both nodes remained present with
+#      0660 root:dgpu intact. So once this service gets them right at boot they stay right for
+#      the whole session; nothing but root can delete them, and nothing does.
+
+[Install]
+WantedBy=multi-user.target

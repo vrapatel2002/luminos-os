@@ -105,7 +105,12 @@ esac
 
 echo "Starting llama-server with model $MODEL_PATH..."
 # SAFE FLAGS ONLY — --n-gpu-layers 99 is NON-NEGOTIABLE (full GPU)
-/usr/bin/nohup /usr/local/bin/dgpu-exec /usr/bin/llama-server \
+# [CHANGE: claude-code | 2026-08-29] was dgpu-exec (v1). Line 89 above already used v2 for the
+# nvidia-smi VRAM check, so this file was launching the model through one gate and measuring the
+# card through another. Both are v2 now. See BUG-145 for why v1 is retired: it only worked
+# because rgid!=egid raised AT_SECURE, which suppressed the Mesa EGL pin by accident.
+# Verified 2026-08-29: Dolphin-8B via v2, 4890 MiB on the RTX 4050, completion returned.
+/usr/bin/nohup /usr/local/bin/dgpu-exec-v2 /usr/bin/llama-server \
     -m "$MODEL_PATH" \
     --n-gpu-layers 99 \
     --ctx-size 16384 \

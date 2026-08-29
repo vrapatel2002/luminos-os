@@ -59,7 +59,14 @@ ARGV="$STATE_DIR/gpu-yield.argv"        # NUL-separated argv, replayed verbatim
 LOG="/tmp/hive-server.log"
 
 DGPU="dgpu-exec-v2"        # for nvidia-smi (reads only)
-DGPU_RUN="/usr/local/bin/dgpu-exec"   # for llama-server, same gate hive-start-model.sh uses
+# [CHANGE: claude-code | 2026-08-29] was /usr/local/bin/dgpu-exec (v1). Both of these are now
+# v2, so this file no longer straddles two gates. v1 only ever "worked" because its rgid!=egid
+# set AT_SECURE=1, which made libglvnd's secure_getenv() ignore the Mesa EGL pin — see BUG-145.
+# v2 does setresgid(g,g,g) and sets the NVIDIA vendor vars itself, which is the correct fix.
+# Verified 2026-08-29 with a real load: Dolphin-8B, --n-gpu-layers 99, 4890 MiB resident on the
+# RTX 4050 and a completion returned. CUDA does not use EGL, so the BUG-145 class of failure
+# does not apply here — but it was tested rather than assumed.
+DGPU_RUN="/usr/local/bin/dgpu-exec-v2"   # for llama-server, same gate hive-start-model.sh uses
 
 say()  { echo "gpu-yield: $*"; }
 warn() { echo "gpu-yield: $*" >&2; }

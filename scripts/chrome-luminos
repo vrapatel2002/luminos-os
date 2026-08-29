@@ -149,7 +149,7 @@ fi
 if [ "$GPU_CHOICE" = "nvidia" ]; then
   if ! dgpu-exec-v2 sh -p -c 'exec 3<>/dev/nvidiactl; exec 4<>/dev/nvidia0' 2>/dev/null; then
     kdialog --title "Luminos — Chrome" --sorry \
-      "The dGPU gate did not open — /dev/nvidiactl is still denied.\n\nFalling back to the AMD iGPU.\n\nDiagnose with:  dgpu-exec nvidia-smi" 2>/dev/null
+      "The dGPU gate did not open — /dev/nvidiactl is still denied.\n\nFalling back to the AMD iGPU.\n\nDiagnose with:  dgpu-exec-v2 --check" 2>/dev/null
     notify-send "Chrome" "dGPU gate denied — using AMD iGPU" --icon=dialog-warning 2>/dev/null
     GPU_CHOICE="igpu"
   fi

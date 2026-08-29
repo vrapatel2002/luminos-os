@@ -348,9 +348,22 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
    `0666 root:root` on every boot: `NVreg_DeviceFileGID` covers the `nvidia` module only, and the
    udev rule that was supposed to cover the rest has never fired (nvidia-modprobe uses `mknod(2)`,
    so no uevent is emitted). Not a bypass — `nvidiactl`/`nvidia0` stay tight, so `nvidia-smi`
-   outside the gate still fails — but it contradicts DECISION 25. **Blocked on:** confirming HIVE's
-   `llama-server` reaches CUDA *through* the gate; if it does not, gating UVM takes the models off
-   the card. Detect with `dgpu-exec-v2 --check` (reports `gate: LEAKING`).
+   outside the gate still fails — but it contradicts DECISION 25.
+   <!-- [CHANGE: claude-code | 2026-08-29] -->
+   **UNBLOCKED and half-fixed 2026-08-29.** The CUDA fear was wrong: `open(2)` checks the *effective*
+   gid and `llama-server` already goes through the gate, so a full Dolphin-8B load ran at
+   `--n-gpu-layers 99` (4890 MiB resident, prompt answered) with UVM at `0660 root:dgpu`.
+   `luminos-uvm-gate.service` now pre-creates both nodes correctly owned at boot, which beats
+   `nvidia-modprobe` because it only mknods a node that is *absent*.
+   **Still open — remaining work is in `cmd/luminos-power/`, not the gate.** An audit inode watch
+   (`auditctl -w /dev/nvidia-uvm -p a`) caught the resetter: `nvidia-smi` run as **root** by
+   `luminos-power.service` does `chmod 0666` + `chown root:root` on every power/temp poll, because any
+   euid-0 NVIDIA client re-applies the driver's hardcoded UVM defaults. Fix = drop privileges for the
+   read-only polls (`main.go:1513,1546,1607`). Deliberately not done unattended: that binary is the
+   fan/thermal manager. At idle the nodes hold (the poller skips a sleeping card), so the gap is open
+   only while the dGPU is awake. Re-assert any time with `sudo systemctl restart luminos-uvm-gate`
+   (**restart**, not `start` — the unit is `RemainAfterExit=yes`, so `start` is a silent no-op);
+   detect with `dgpu-exec-v2 --check` (reports `gate: LEAKING`).
 
 ## Input & Hardware
 | Component | Status | Notes |

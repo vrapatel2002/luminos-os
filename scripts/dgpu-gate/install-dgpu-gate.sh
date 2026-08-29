@@ -17,12 +17,12 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-echo "[1/7] Ensure 'dgpu' system group exists (shawn deliberately NOT a member)..."
+echo "[1/8] Ensure 'dgpu' system group exists (shawn deliberately NOT a member)..."
 getent group dgpu >/dev/null || groupadd --system dgpu
 DGPU_GID="$(getent group dgpu | cut -d: -f3)"
 echo "      dgpu gid=$DGPU_GID"
 
-echo "[2/7] Install NVIDIA driver param (authoritative gate — survives wake/reboot)..."
+echo "[2/8] Install NVIDIA driver param (authoritative gate — survives wake/reboot)..."
 # nvidia-modprobe recreates /dev/nvidia* at 0666 on every wake; only the driver params
 # below make the restricted perms stick. GID is written to match the real dgpu group.
 cat > /etc/modprobe.d/luminos-dgpu-gate.conf <<EOF
@@ -33,7 +33,7 @@ options nvidia NVreg_DeviceFileUID=0 NVreg_DeviceFileGID=$DGPU_GID NVreg_DeviceF
 EOF
 echo "      wrote /etc/modprobe.d/luminos-dgpu-gate.conf (GID=$DGPU_GID)"
 
-echo "[3/7] Compile + install setgid helpers /usr/local/bin/dgpu-exec{,-v2} ..."
+echo "[3/8] Compile + install setgid helpers /usr/local/bin/dgpu-exec{,-v2} ..."
 # [CHANGE: claude-code | 2026-08-28] v2 was built by hand on 2026-08-05 and never added
 # here, so a rebuilt machine got v1 only — and v1 is the one that drops the group at the
 # first shell wrapper (BUG-102). Build both; v2 is what everything should call.
@@ -47,7 +47,7 @@ for v in "dgpu-exec:dgpu-exec.c" "dgpu-exec-v2:dgpu-exec-v2.c"; do
   ls -l "$bin"
 done
 
-echo "[4/7] Install udev rule ..."
+echo "[4/8] Install udev rule ..."
 # HONESTY NOTE [claude-code | 2026-08-28]: this rule has never actually fired. The NVIDIA
 # nodes are created by nvidia-modprobe with mknod(2), not by the kernel device model, so
 # `udevadm info /dev/nvidia0` reports "Unknown device" and no rule ever matches them. The
@@ -57,16 +57,16 @@ echo "[4/7] Install udev rule ..."
 install -m 0644 "$UDEV_SRC" /etc/udev/rules.d/70-luminos-dgpu-access.rules
 udevadm control --reload
 
-echo "[5/7] Install the GPU launcher + styled picker (single launch path) ..."
+echo "[5/8] Install the GPU launcher + styled picker (single launch path) ..."
 install -m 0755 "$REPO_DIR/../luminos-gpu-launch" /usr/local/bin/luminos-gpu-launch
 install -d -m 0755 /usr/local/share/luminos
 install -m 0644 "$REPO_DIR/luminos-gpu-picker.qml" /usr/local/share/luminos/luminos-gpu-picker.qml
 
-echo "[6/7] Rebuild initramfs so the driver param loads at early boot ..."
+echo "[6/8] Rebuild initramfs so the driver param loads at early boot ..."
 # nvidia is in mkinitcpio MODULES=(...), so the module param must be baked into initramfs.
 mkinitcpio -P
 
-echo "[7/7] Apply LIVE to existing nodes (best-effort; a wake may reset until reboot) ..."
+echo "[7/8] Apply LIVE to existing nodes (best-effort; a wake may reset until reboot) ..."
 # BUG-146: the two UVM nodes below are gated HERE and then quietly un-gated on the next
 # reboot. NVreg_DeviceFileGID (step 2) governs the `nvidia` module's own nodes only;
 # nvidia_uvm has no equivalent parameter, so nvidia-modprobe recreates /dev/nvidia-uvm
@@ -75,11 +75,35 @@ echo "[7/7] Apply LIVE to existing nodes (best-effort; a wake may reset until re
 # correctly 0660 root:dgpu. Not a bypass — CUDA also needs nvidiactl and nvidia0, which
 # stay tight, so `nvidia-smi` outside the gate still fails with "Insufficient
 # Permissions" — but it does contradict the stated default-deny posture.
+#
+# [CHANGE: claude-code | 2026-08-29] The "and nothing puts them back" above is no longer true:
+# luminos-uvm-gate.service (installed below) puts them back at every boot. Read on for the part
+# that is STILL true — a root-privileged nvidia-smi re-opens them at runtime.
 shopt -s nullglob
 for n in /dev/nvidiactl /dev/nvidia[0-9]* /dev/nvidia-modeset /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
   chgrp dgpu "$n" && chmod 0660 "$n" && echo "      gated $n -> $(stat -c '%U:%G %a' "$n")"
 done
 echo "      (verify any time with: dgpu-exec-v2 --check)"
+
+echo "[8/8] Install the nvidia_uvm boot gate (BUG-146) ..."
+# The loop above is a LIVE fixup only. It cannot survive a reboot, because nvidia-modprobe
+# recreates the UVM nodes 0666 root:root and no driver parameter covers nvidia_uvm.
+# luminos-uvm-gate PRE-CREATES them correctly owned instead, which works because
+# nvidia-modprobe only mknods a node that is ABSENT and leaves an existing one alone.
+#
+# HONESTY NOTE — this does not fully close BUG-146. Any NVIDIA client running as root
+# (notably luminos-power.service polling nvidia-smi for power.draw/temperature.gpu) re-applies
+# the driver's hardcoded 0666 root:root to these two nodes. Caught 2026-08-29 with
+# `auditctl -w /dev/nvidia-uvm -p a`. At idle the nodes hold, because luminos-power skips dGPU
+# sensing while the card is asleep; the hole is open only while the dGPU is awake. The real fix
+# is to drop privileges for those read-only polls in cmd/luminos-power/. Re-assert any time with
+# `sudo systemctl restart luminos-uvm-gate` — RESTART, not start: the unit is RemainAfterExit=yes,
+# so `start` on an already-active oneshot silently does nothing and looks like it worked.
+install -o root -g root -m 0755 "$(dirname "$0")/luminos-uvm-gate.sh" /usr/local/bin/luminos-uvm-gate
+install -o root -g root -m 0644 "$(dirname "$0")/../../systemd/luminos-uvm-gate.service" \
+        /etc/systemd/system/luminos-uvm-gate.service
+systemctl daemon-reload
+systemctl enable --now luminos-uvm-gate.service
 
 echo
 echo "Done. The AUTHORITATIVE gate (driver param) takes full effect on next REBOOT."
