@@ -221,7 +221,21 @@ static int check_mode(void) {
     int opened_any = 0;
     for (int i = 0; nodes[i]; i++) {
         struct stat st;
-        if (stat(nodes[i], &st) != 0) { printf("  %-22s absent\n", nodes[i]); continue; }
+        /* [CHANGE: claude-code | 2026-08-29] BUG-149 — an absent node used to print "absent" and
+         * count as NOTHING, so --check reported "access: OK / gate: OK" for weeks while
+         * /dev/nvidia-modeset did not exist and every NVIDIA presentation call was failing with a
+         * bare ERROR_UNKNOWN. That is the whole reason BUG-142 was blamed on vkd3d for two days.
+         * A node that is not there is not "fine", it is a capability this gate cannot deliver. */
+        if (stat(nodes[i], &st) != 0) {
+            printf("  %-22s ABSENT   <- MISSING\n", nodes[i]);
+            if (strcmp(nodes[i], "/dev/nvidia-modeset") == 0)
+                printf("     !! nothing creates this since setuid was stripped from nvidia-modprobe\n"
+                       "        (60-nvidia.rules never passes -m). NVIDIA Vulkan will fail every\n"
+                       "        display/presentation call with ERROR_UNKNOWN. Fix: run\n"
+                       "        'sudo luminos-uvm-gate'. See BUG-149.\n");
+            problems++;
+            continue;
+        }
         struct group *ng = getgrgid(st.st_gid);
         int fd = open(nodes[i], O_RDONLY);
         if (fd >= 0) { opened_any = 1; close(fd); }

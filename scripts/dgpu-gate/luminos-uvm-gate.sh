@@ -181,12 +181,80 @@ fix_node() {
 fix_node /dev/nvidia-uvm       0
 fix_node /dev/nvidia-uvm-tools 1
 
+# [CHANGE: claude-code | 2026-08-29] BUG-149 — /dev/nvidia-modeset, and why it is in the "uvm" gate.
+#
+# THIS IS A REGRESSION WE CAUSED. BUG-146 stripped the setuid bit from nvidia-modprobe, and a
+# pacman hook keeps it stripped. That was correct and must stay. But the setuid helper was the
+# ONLY thing on this machine creating /dev/nvidia-modeset: 60-nvidia.rules runs `nvidia-modprobe`
+# and `nvidia-modprobe -c0 -u` and NEVER passes -m. Read it, it is four lines. So from BUG-146
+# onward the node simply stopped existing, and nothing anywhere said so.
+#
+# WHAT IT COST — this is the whole of BUG-142, which we spent two days blaming on vkd3d:
+#   node absent : vulkaninfo dies on vkGetPhysicalDeviceDisplayPropertiesKHR -> ERROR_UNKNOWN
+#   node present: vulkaninfo prints "NVIDIA GeForce RTX 4050 Laptop GPU", clean
+# Same binary, same boot, one node apart. Measured 2026-08-29. The AMD control does NOT produce
+# that error, so it is NVIDIA-specific and not a vulkaninfo quirk. With the node restored, 007
+# First Light ran on the 4050 for minutes at 98-100% GPU with ZERO swapchain failures, where the
+# same build had produced 278 failures in 3 s and fallen back to the 780M.
+#
+# It lives in this script, whose name says "uvm", because this script is already the thing that
+# runs as root on the nvidia PCI uevent with the driver's own helper suppressed. A second unit
+# would double the moving parts to fix one missing flag. The name is now narrower than the job;
+# that is a smaller problem than the node silently going missing again.
+#
+# Use `nvidia-modprobe -m`, NOT mknod: the minor is a driver convention (254 here), not something
+# /proc/devices reports, and the helper is the supported way to ask for this node. Absolute path
+# because udev's RUN= environment has no useful PATH. We run as root, so the stripped setuid bit
+# does not matter here — that is precisely why this works from the gate but not from a normal app.
+modeset_created=0
+modeset_failed=0
+MODESET_NODE=/dev/nvidia-modeset
+if [ ! -e "$MODESET_NODE" ]; then
+    /usr/bin/nvidia-modprobe -m || true
+    if [ -e "$MODESET_NODE" ]; then
+        modeset_created=1
+    else
+        modeset_failed=1
+    fi
+fi
+
+# Unlike the UVM nodes, this one IS covered by the driver's NVreg_DeviceFile* params — created by
+# hand on 2026-08-29 it came up root:dgpu 660 unaided. So verify rather than assume, and repair
+# only if the driver did not. Do NOT delete this check on the grounds that "the param handles it":
+# that is exactly what was believed about the UVM nodes before BUG-146, and it was false.
+if [ -e "$MODESET_NODE" ]; then
+    cur=$(stat -c '%U:%G %a' "$MODESET_NODE" 2>/dev/null || echo "?:? ?")
+    if [ "$cur" != "root:$GROUP ${MODE#0}" ]; then
+        log "$MODESET_NODE was [$cur], wanted [root:$GROUP ${MODE#0}] — repairing"
+        chown "root:$gid" "$MODESET_NODE"
+        chmod "$MODE" "$MODESET_NODE"
+    fi
+fi
+
 # In --udev mode this runs on every PCI add/bind for the card, so keep it to one line and
 # do not stat nodes that the guard above may have deliberately left absent.
 if [ -e /dev/nvidia-uvm ] && [ -e /dev/nvidia-uvm-tools ]; then
     log "gated: $(stat -c '%n %U:%G %a' /dev/nvidia-uvm /dev/nvidia-uvm-tools | tr '\n' ' ')"
 else
     log "gated: nothing to gate — UVM nodes absent (see REFUSING above)"
+fi
+
+# [CHANGE: claude-code | 2026-08-29] BUG-149 — reported on its own line, not folded into the one
+# above, because "created" is the INTERESTING outcome here and the opposite of what it means for
+# the UVM nodes. At boot, created is EXPECTED: nothing else makes this node any more. Silence
+# means it already existed, which mid-session is normal and at boot would mean something else
+# started creating it — worth noticing, not worth failing on.
+if [ "$modeset_created" -eq 1 ]; then
+    log "modeset: created $MODESET_NODE $(stat -c '%U:%G %a' "$MODESET_NODE") — BUG-149, 60-nvidia.rules never asks for it"
+fi
+
+if [ "$modeset_failed" -eq 1 ]; then
+    log "FAILED: $MODESET_NODE is ABSENT and 'nvidia-modprobe -m' did not create it. NVIDIA Vulkan"
+    log "        will fail every display/presentation call with a bare ERROR_UNKNOWN and 007 will"
+    log "        fall back to the 780M — that is BUG-142/BUG-149, and it will look like a vkd3d"
+    log "        bug rather than a missing device node. Check the nvidia_modeset module is loaded"
+    log "        ('lsmod | grep nvidia_modeset') and that /usr/bin/nvidia-modprobe exists."
+    exit 1
 fi
 
 if [ "$refused" -eq 1 ]; then

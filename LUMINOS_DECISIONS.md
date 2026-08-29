@@ -1133,6 +1133,22 @@ true of the privilege drop it was rejected in favour of. Now shipped together:
 modules or create the nodes on demand. That is only safe because Luminos does both up front —
 `/etc/modules-load.d/nvidia.conf` and `luminos-uvm-gate.service`. **If either is ever removed, the
 pacman hook must be removed with it**, or CUDA breaks for every non-root process on the machine.
+
+<!-- [CHANGE: claude-code | 2026-08-29] BUG-149 — the paragraph above was RIGHT and INCOMPLETE, and
+     the gap cost two days. It correctly says the helper can no longer create nodes on demand, and
+     correctly names the nodes we had covered. It never asked WHICH OTHER NODES that binary had
+     been creating. The answer was one, and it was load-bearing. -->
+**The node this missed: `/dev/nvidia-modeset`.** `60-nvidia.rules` runs `nvidia-modprobe` and
+`nvidia-modprobe -c0 -u` and **never passes `-m`**, so the setuid helper invoked on demand by
+applications was the only thing creating it. Strip setuid and it stops existing — silently, because
+`nvidia-smi`, CUDA, the permissions and the power state all stay correct. Only *presentation*
+breaks: NVIDIA Vulkan returns a bare `ERROR_UNKNOWN` from display/surface calls. **That was BUG-142**,
+which was blamed on vkd3d for two days. `luminos-uvm-gate.sh` now creates it; `dgpu-exec-v2 --check`
+now counts an absent node as a fault instead of printing it as a neutral line.
+
+**The generalisable rule: removing a privilege removes capabilities you did not enumerate.** Before
+de-privileging a helper, list everything it was doing for you — not everything you were *asking* it
+to do. The two differ, and the difference is where the outage lives.
 DECISION 25 still rests on one enforcement layer per node class; this closes the UVM hole, it does not
 add the second layer (that is v2, the BPF-LSM gate).
 
