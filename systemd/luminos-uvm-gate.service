@@ -5,13 +5,35 @@
 Description=Luminos dGPU gate: nvidia_uvm device nodes (DECISION 25 / BUG-146)
 Documentation=file:///home/shawn/luminos-os/docs/BUGS.md
 
+# [CHANGE: claude-code | 2026-08-29] BUG-147 — THIS UNIT IS NOW THE BACKSTOP, NOT THE FIX.
+# It used to be the only mechanism, and it lost the boot race at EVERY boot: nvidia-modprobe
+# is invoked from 60-nvidia.rules the moment the card binds (t=6.87 s, measured) and creates
+# both UVM nodes 0666 root:root, while this unit did not run until t=9.09 s. That is a 2.2
+# second world-open window on every boot, i.e. DECISION 25 was not actually in force then.
+#
+# 71-luminos-uvm-gate.rules now closes it: that rule rides the SAME PCI uevent and runs
+# `luminos-uvm-gate --udev` immediately after nvidia-modprobe. Measured residual window
+# 9-18 ms. This unit still runs, and still catches the case where the rule did not fire at
+# all (file removed, udev not reloaded, module loaded later by some other path).
+#
+# HOW TO READ `systemctl status` NOW: the healthy outcome is "active (exited)" with a single
+# `gated: ... root:dgpu 660` line and NO "created" line. A failure here means the udev rule
+# did not do its job — that is the signal. Do not silence it by relaxing the script.
+#
+# And do NOT restore the old "must win the race" goal below. Winning it BREAKS THE CARD:
+# 60-nvidia.rules guards both its RUN+= lines with TEST!="/dev/nvidia-uvm", so a pre-created
+# UVM node suppresses nvidia-modprobe entirely and /dev/nvidia0 is never made. Measured.
+
 # The module must be loaded for the device major to exist; modules-load.d/nvidia.conf does it.
 After=systemd-modules-load.service
 Wants=systemd-modules-load.service
 
-# Must win the race: pre-create the nodes correctly owned BEFORE anything triggers
-# nvidia-modprobe, because nvidia-modprobe skips nodes that already exist. supergfxd is the
-# actual boot-time trigger on this machine, so we order ahead of it and the display manager.
+# [CHANGE: claude-code | 2026-08-29] BUG-147 — this used to read "Must win the race:
+# pre-create the nodes correctly owned BEFORE anything triggers nvidia-modprobe". That goal
+# was both unreachable (udev beats us by 2.2 s) and, if reached, destructive (see above).
+# These two orderings are KEPT anyway, for a different and still-valid reason: they make this
+# backstop run before the two things that first OPEN the dGPU, so if the udev rule ever fails
+# the repair still lands before a real client can use an ungated node.
 Before=supergfxd.service
 Before=display-manager.service
 

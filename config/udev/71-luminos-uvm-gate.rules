@@ -1,0 +1,62 @@
+# 71-luminos-uvm-gate.rules
+# [CHANGE: claude-code | 2026-08-29] BUG-147 — close the boot-time world-open window on
+# /dev/nvidia-uvm{,-tools}.
+#
+# THE PROBLEM THIS SOLVES
+# -----------------------
+# nvidia-modprobe creates the two UVM nodes with a hardcoded 0666 root:root, and it is run
+# from /usr/lib/udev/rules.d/60-nvidia.rules the moment the card binds — measured at t=6.87 s
+# on this machine. luminos-uvm-gate.service did not run until t=9.09 s. That is a 2.2 second
+# window at every single boot in which both nodes were readable and writable by everyone,
+# i.e. DECISION 25 was not in force. Measured from the boot journal, 2026-08-29.
+#
+# WHY A UDEV RULE, WHEN THE GATE SCRIPT SAYS UDEV "CANNOT WORK HERE"
+# -----------------------------------------------------------------
+# That comment is correct but narrower than it reads, and it cost a real amount of time.
+# It is true of a KERNEL=="nvidia-uvm" match: nvidia-modprobe creates these nodes with
+# mknod(2), which emits NO uevent, so udev never learns the node appeared and a rule keyed on
+# the node itself can never fire. That is why 70-luminos-dgpu-access.rules has never once
+# fired for anything.
+#
+# This rule is keyed on something else entirely: the PCI DEVICE add/bind event, which is a
+# real uevent and is exactly what 60-nvidia.rules itself matches on. We are not waiting to be
+# told the node appeared — we are riding the same event that CAUSES it to appear.
+#
+# ORDERING, WHICH IS THE WHOLE FIX — MEASURED, NOT ASSUMED
+# --------------------------------------------------------
+# udev parses rule files in lexical filename order and accumulates RUN+= commands in the
+# order they were added, executing them after all rules for that event are parsed. 71 sorts
+# after 60, so nvidia-modprobe runs first and this runs second. Verified 2026-08-29 by
+# deleting both nodes and triggering an add: our RUN observed them as [root:root 666],
+# i.e. nvidia-modprobe had already created them by the time we ran. Had we run first we
+# would have seen them ABSENT — and that would have been a disaster, see below.
+#
+# RESIDUAL WINDOW, MEASURED OVER 3 RUNS
+# -------------------------------------
+#   /dev/nvidia-uvm         9-10 ms   (was 2.2 s)
+#   /dev/nvidia-uvm-tools     18 ms   (was 2.2 s)
+# Roughly a 120-240x reduction. It is NOT zero and this file must not claim that it is.
+#
+# WHY NOT CLOSE IT COMPLETELY BY PRE-CREATING THE NODES FIRST
+# -----------------------------------------------------------
+# Because that breaks the GPU outright. Look at 60-nvidia.rules: the guard TEST!="/dev/nvidia-uvm"
+# covers BOTH of its RUN+= lines, not just the UVM one. So if /dev/nvidia-uvm already exists
+# when that rule is evaluated, nvidia-modprobe is not run AT ALL — and /dev/nvidia0 and
+# /dev/nvidiactl, which it also creates, are never created either.
+# MEASURED 2026-08-29: with the UVM nodes present and the main nodes deleted, an add trigger
+# brought back NEITHER, and nvidia-smi failed with "couldn't communicate with the NVIDIA
+# driver". A rule numbered BELOW 60 that pre-creates these nodes would do exactly this at
+# every boot. Do not write one. See luminos-uvm-gate.sh for the matching guard.
+#
+# RELATIONSHIP TO luminos-uvm-gate.service
+# ----------------------------------------
+# The service is now a BACKSTOP, not the primary mechanism. This rule is the primary one.
+# The service still runs at boot and catches the case where this rule did not fire at all
+# (file removed, udev not reloaded, module loaded by some other path later).
+#
+# KILL SWITCH: sudo rm /etc/udev/rules.d/71-luminos-uvm-gate.rules && sudo udevadm control --reload
+# The service will then go back to repairing the nodes at ~9 s, with the old 2.2 s window.
+
+ACTION=="add|bind", ATTR{vendor}=="0x10de", ATTR{class}=="0x03[0-9]*", \
+    DRIVER=="nvidia", \
+    RUN+="/usr/local/bin/luminos-uvm-gate --udev"

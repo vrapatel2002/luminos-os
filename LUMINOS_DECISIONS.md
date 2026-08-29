@@ -1101,9 +1101,26 @@ Measured truth table (repair nodes → one `nvidia-smi --query-gpu=power.draw` �
 Two independent causes, so **neither half of the fix works alone** — which is exactly why dropping the
 setuid bit was tried on 2026-08-28 and reverted with "on its own it buys nothing". True, and equally
 true of the privilege drop it was rejected in favour of. Now shipped together:
-1. `systemd/luminos-uvm-gate.service` + `scripts/dgpu-gate/luminos-uvm-gate.sh` **pre-create** both
-   nodes correctly owned at boot — `nvidia-modprobe` only mknods a node that is *absent*, so winning
-   the race is enough. Major read from `/proc/devices` (kernel allocates it dynamically).
+1. `config/udev/71-luminos-uvm-gate.rules` runs `luminos-uvm-gate --udev` on the **same PCI
+   add|bind uevent** that `60-nvidia.rules` uses to invoke `nvidia-modprobe`, so the repair lands
+   milliseconds after the nodes are created rather than seconds. `systemd/luminos-uvm-gate.service`
+   + `scripts/dgpu-gate/luminos-uvm-gate.sh` remain as the **backstop** for the case where the rule
+   never fires. Major read from `/proc/devices` (kernel allocates it dynamically).
+
+   <!-- [CHANGE: claude-code | 2026-08-29] BUG-147 — this item used to read "**pre-create** both
+        nodes correctly owned at boot — nvidia-modprobe only mknods a node that is *absent*, so
+        winning the race is enough". Both halves of that were wrong and the second half was
+        DANGEROUS, so the original wording is kept here rather than quietly overwritten:
+          - Unreachable: udev ran nvidia-modprobe at t=6.87 s, the unit at t=9.09 s. The gate LOST
+            the race at every boot — a 2.2 s world-open window. Measured from the boot journal.
+          - Destructive if reached: the guard in 60-nvidia.rules is TEST!="/dev/nvidia-uvm" and it
+            covers BOTH of that rule's RUN+= lines. A pre-existing UVM node suppresses
+            nvidia-modprobe ENTIRELY, so /dev/nvidia0 and /dev/nvidiactl are never created either.
+            Measured: nvidia-smi failed with "couldn't communicate with the NVIDIA driver".
+        The gate has only ever worked BECAUSE IT LOST. The script's mknod path is now guarded on
+        /dev/nvidia0 already existing, which is the proof nvidia-modprobe has had its turn.
+        Residual world-open window after the udev rule: 9-18 ms, measured over 3 runs. NOT zero. -->
+
 2. `config/pacman-hooks/luminos-nvidia-modprobe-setuid.hook` keeps the setuid bit **off**
    `/usr/bin/nvidia-modprobe`. A one-time `chmod u-s` is not enough: the bit is part of
    `nvidia-utils`' recorded file mode, so pacman restores it on every upgrade and the gate reopens
@@ -1117,8 +1134,15 @@ modules or create the nodes on demand. That is only safe because Luminos does bo
 `/etc/modules-load.d/nvidia.conf` and `luminos-uvm-gate.service`. **If either is ever removed, the
 pacman hook must be removed with it**, or CUDA breaks for every non-root process on the machine.
 DECISION 25 still rests on one enforcement layer per node class; this closes the UVM hole, it does not
-add the second layer (that is v2, the BPF-LSM gate). And none of it has survived a reboot yet —
-see BUG-147.
+add the second layer (that is v2, the BPF-LSM gate).
+
+<!-- [CHANGE: claude-code | 2026-08-29] BUG-147 — this used to end "And none of it has survived a
+     reboot yet — see BUG-147." The reboot happened on 2026-08-29. -->
+**Reboot result, 2026-08-29:** the gate survived — all four nodes came up `root:dgpu 660` and
+`dgpu-exec-v2 nvidia-smi` returned the RTX 4050 — but it survived *late*, with a 2.2 s world-open
+window on `/dev/nvidia-uvm{,-tools}` first. That window is now 9-18 ms (item 1 above). The boot half
+of BUG-147 is **closed**; suspend/resume, the initramfs parameter path, and a driver upgrade are
+still unverified across a power cycle.
 
 **2. A setgid door changes more than permissions — it changes what the app is allowed to read.**
 `setresgid` (DECISION 52 / BUG-102) made real==effective, which cleared `AT_SECURE`. That was correct

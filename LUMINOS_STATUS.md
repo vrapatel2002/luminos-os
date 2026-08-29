@@ -347,11 +347,15 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
 8. SDDM custom Luminos theme
 9. ~~**BUG-146 — gate the `nvidia_uvm` device nodes.**~~ **DONE 2026-08-29** — see
    "dGPU gate (DECISION 25)" below. Superseded by task 10.
-10. **BUG-147 — reboot-verify the entire NVIDIA path.** Everything below works on the running
-    machine and **nothing below has been observed to survive a power cycle**. This is test debt,
-    not a known break, and it is now the highest-value open item because four separate fixes are
-    all resting on it. Run the checklist in `docs/BUGS.md` BUG-147 with the user present, at a
-    moment when a failed login is affordable.
+10. **BUG-147 — reboot-verify the entire NVIDIA path.** <!-- [CHANGE: claude-code | 2026-08-29]
+    this item used to say "nothing below has been observed to survive a power cycle". The reboot
+    was done. --> **Boot half DONE 2026-08-29.** The reboot happened: the gate held, but it held
+    *late* — udev ran `nvidia-modprobe` at t=6.87 s and `luminos-uvm-gate.service` did not run
+    until t=9.09 s, leaving `/dev/nvidia-uvm{,-tools}` world-open for 2.2 s at every boot.
+    `config/udev/71-luminos-uvm-gate.rules` now rides the same PCI uevent; residual window
+    9-18 ms, measured. **Still unverified across a power cycle:** suspend/resume, the initramfs
+    module parameters, and behaviour after an `nvidia-utils` upgrade. Checklist in
+    `docs/BUGS.md` BUG-147.
 
 ## Input & Hardware
 | Component | Status | Notes |
