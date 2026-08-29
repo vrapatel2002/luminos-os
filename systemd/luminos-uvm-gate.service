@@ -15,6 +15,17 @@ Wants=systemd-modules-load.service
 Before=supergfxd.service
 Before=display-manager.service
 
+# [CHANGE: claude-code | 2026-08-29] BUG-147 — DO NOT ADD `Before=nvidia-powerd.service`.
+# It was proposed as the fix for the boot race and then tested; it is REDUNDANT, twice over:
+#   1. nvidia-powerd itself declares `After=supergfxd.service`, and this unit is already
+#      `Before=supergfxd.service`, so the ordering gate -> supergfxd -> nvidia-powerd is
+#      already guaranteed transitively.
+#   2. nvidia-powerd is `disabled` with an EMPTY WantedBy — it cannot start itself at boot
+#      at all. supergfxd starts it explicitly, which is by definition after us. The boot
+#      journal shows `Did CommandArgs { inner: ["start", "nvidia-powerd.service"] }`.
+# Checked with `systemctl show -p After -p Before -p WantedBy`, not by reading documentation.
+# Adding the line would cost nothing but would imply a guarantee we did not actually need.
+
 [Service]
 Type=oneshot
 # RemainAfterExit is what makes `systemctl status` readable for a unit whose whole job is a

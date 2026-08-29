@@ -1,0 +1,50 @@
+# luminos-nvidia-modprobe-setuid — keep the setuid bit OFF /usr/bin/nvidia-modprobe.
+# [CHANGE: claude-code | 2026-08-29] BUG-146
+#
+# WHY
+# ---
+# DECISION 25 makes the dGPU default-deny. The nvidia module's NVreg_DeviceFile* parameters
+# enforce that for /dev/nvidia*, but they do not reach /dev/nvidia-uvm{,-tools}: those two
+# are created by the setuid-root helper /usr/bin/nvidia-modprobe with a HARDCODED
+# 0666 root:root, and it re-applies that every time any unprivileged process runs anything
+# that touches CUDA. That is BUG-146.
+#
+# Measured truth table, 2026-08-29 (`nvidia-smi --query-gpu=power.draw`, then stat the nodes):
+#
+#	caller     nvidia-modprobe setuid   gate holds?
+#	non-root   yes                      NO
+#	non-root   no                       YES
+#	root       yes                      NO
+#	root       no                       NO
+#
+# So dropping the setuid bit is one half of the fix and running the polls unprivileged is
+# the other; neither works alone. The unprivileged half lives in cmd/luminos-power/main.go
+# (nvidiaQuery); this hook maintains the half that a package upgrade would otherwise undo.
+#
+# WHY A HOOK AND NOT JUST `chmod u-s`
+# -----------------------------------
+# The bit is part of the nvidia-utils package's recorded file mode, so pacman restores it on
+# every upgrade of that package. A one-time chmod silently reverts and the gate silently
+# reopens, with nothing in any log to say so. This re-strips it after the upgrade lands.
+#
+# WHAT THIS COSTS
+# ---------------
+# nvidia-modprobe exists so that an unprivileged process can load the nvidia modules and
+# have the device nodes created on demand. Without setuid it can no longer do either. That
+# is fine ONLY because Luminos does both jobs up front:
+#   - modules:      /etc/modules-load.d/nvidia.conf loads nvidia, nvidia_uvm at boot
+#   - device nodes: the nvidia module creates /dev/nvidia* itself with the gate's
+#                   ownership, and luminos-uvm-gate.service pre-creates the two UVM nodes
+# If either of those is ever removed, this hook MUST be removed with it, or CUDA breaks for
+# every non-root process on the machine.
+
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = nvidia-utils
+
+[Action]
+Description = Luminos: re-stripping setuid from nvidia-modprobe (DECISION 25 / BUG-146)...
+When = PostTransaction
+Exec = /usr/bin/chmod u-s /usr/bin/nvidia-modprobe

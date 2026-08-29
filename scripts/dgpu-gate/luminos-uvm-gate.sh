@@ -50,13 +50,44 @@ if [ -z "${gid:-}" ]; then
     exit 1
 fi
 
-# The module must be loaded for the major to be allocated. modules-load.d/nvidia.conf loads
-# nvidia-uvm at boot; if it is somehow absent there is no major and nothing to pre-create.
+# The module must be loaded for the major to be allocated. Verified 2026-08-29:
+# nvidia-uvm.ko.zst IS inside /boot/initramfs-linux.img (mkinitcpio MODULES=) and
+# modules-load.d/nvidia.conf lists nvidia-uvm, so by the time this unit runs the major
+# exists. If it does not, something is badly wrong.
+#
+# [CHANGE: claude-code | 2026-08-29] BUG-147 — this used to `exit 0` here, and that was a
+# SILENT FAILURE. Measured in a sandbox: with the major absent the script logged "nothing
+# to gate yet" and returned SUCCESS, so `systemctl status` showed a green `active (exited)`
+# while the gate had done nothing at all and /dev/nvidia-uvm stayed world-open. A gate that
+# is not in place is a failure and must say so. Exiting non-zero is safe for boot: nothing
+# Requires= this unit, it is only ORDERED before supergfxd and display-manager, so a failure
+# is loud without being fatal.
 major=$(awk '$2 == "nvidia-uvm" { print $1 }' /proc/devices)
 if [ -z "${major:-}" ]; then
-    log "nvidia-uvm major not in /proc/devices (module not loaded) — nothing to gate yet"
-    exit 0
+    log "FAILED: nvidia-uvm major not in /proc/devices — the module is not loaded, so the"
+    log "        UVM nodes CANNOT be gated and are left ungated. DECISION 25 is NOT in"
+    log "        force. Check modules-load.d/nvidia.conf and the initramfs."
+    exit 1
 fi
+
+# [CHANGE: claude-code | 2026-08-29] BUG-147 — report whether we WON the boot race.
+#
+# This gate only works by pre-creating the nodes before anything calls nvidia-modprobe,
+# because nvidia-modprobe leaves an existing node alone and only mknods an absent one.
+# So "did we get there first?" is the single fact that decides whether the gate is sound,
+# and until now it was invisible: winning and losing produced byte-identical output and
+# exit 0 either way. Measured in a sandbox 2026-08-29 — the only difference was the
+# presence of a "created" line, which is an inference, not a report.
+#
+# Losing is not harmless just because we repair it afterwards. It means something raced us
+# and won, and the window where the node sat world-open was real. On a slower boot the
+# repair might come after a CUDA client has already opened it. That must be a FAILURE.
+#
+# Three outcomes, deliberately distinguished:
+#   created           -> we won. Correct.
+#   present + correct -> benign; almost certainly a re-run inside the same boot.
+#   present + WRONG   -> WE LOST THE RACE. Repair it, then fail loudly.
+raced=0
 
 fix_node() {
     node=$1
@@ -74,7 +105,21 @@ fix_node() {
 
     if [ ! -e "$node" ]; then
         mknod "$node" c "$major" "$minor"
-        log "created $node ($major:$minor)"
+        log "created $node ($major:$minor) — won the race"
+    else
+        # Already there. Was it already correct, or did somebody beat us to it?
+        # stat %a prints without a leading zero (660), MODE carries one (0660).
+        cur=$(stat -c '%U:%G %a' "$node" 2>/dev/null || echo "?:? ?")
+        if [ "$cur" != "root:$GROUP ${MODE#0}" ]; then
+            log "UNGATED NODE FOUND: $node was [$cur], wanted [root:$GROUP ${MODE#0}]. Repaired,"
+            log "                    but it was open until this moment."
+            log "                    At BOOT this means we lost the race and something created"
+            log "                    it before us — the ordering is wrong."
+            log "                    MID-SESSION it more likely means BUG-146: a setuid-root"
+            log "                    nvidia-modprobe re-applied the driver defaults after we ran."
+            log "                    This script cannot tell those two apart; check the timestamp."
+            raced=1
+        fi
     fi
 
     chown "root:$gid" "$node"
@@ -85,3 +130,11 @@ fix_node /dev/nvidia-uvm       0
 fix_node /dev/nvidia-uvm-tools 1
 
 log "gated: $(stat -c '%n %U:%G %a' /dev/nvidia-uvm /dev/nvidia-uvm-tools | tr '\n' ' ')"
+
+if [ "$raced" -eq 1 ]; then
+    log "FAILED: the nodes are correct NOW, but this unit did not create them — it found them"
+    log "        already open and repaired them. Do not trust the repair; find what opened"
+    log "        them. If this line appears in the FIRST seconds of a boot, the unit ordering"
+    log "        is wrong. If it appears later, it is BUG-146 re-opening them at runtime."
+    exit 1
+fi

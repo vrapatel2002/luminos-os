@@ -137,7 +137,7 @@ reading than the GPU and is not a viable path for agent work.
 | Daemon | Status | Notes |
 |---|---|---|
 | luminos-ai | ✅ Running | Unix socket IPC — central routing daemon. **+ aggregates `report_ram` + Conductor `intent` broadcasts in `status` (DECISION 24 Phase 4).** |
-| luminos-power | ✅ Running | v4.1 Adaptive Dual Governor + Thermal Burst Cooling + Resource Coordinator. Burst: 52°C→100% fans until 40°C. RAM pressure → effective load modifier. SPI log. **+ Conductor (DECISION 24, Phases 0-4) landed & wired — closed-loop PID fan + workload PCIe P0 pin + intent broadcast (`/run/luminos/intent.json` + socket push to ram/ai) + per-tick `conductor-telemetry.jsonl` corpus. Fan PID retuned 2026-07-04 (BUG-079: deadband + EMA + back-calc anti-windup killed the idle hunting) — idle-validated, no surging. GATED OFF by default (load test pending before default-on); enable with `LUMINOS_CONDUCTOR=1`.** |
+| luminos-power | ✅ Running | v4.1 Adaptive Dual Governor + Thermal Burst Cooling + Resource Coordinator. Burst: 52°C→100% fans until 40°C. RAM pressure → effective load modifier. SPI log. **+ Conductor (DECISION 24, Phases 0-4) landed & wired — closed-loop PID fan + workload PCIe P0 pin + intent broadcast (`/run/luminos/intent.json` + socket push to ram/ai) + per-tick `conductor-telemetry.jsonl` corpus. Fan PID retuned 2026-07-04 (BUG-079: deadband + EMA + back-calc anti-windup killed the idle hunting) — idle-validated, no surging. GATED OFF by default (load test pending before default-on); enable with `LUMINOS_CONDUCTOR=1`.** <!-- [CHANGE: claude-code \| 2026-08-29] --> **+ BUG-146: this daemon was silently re-opening the dGPU gate.** Every `nvidia-smi` it ran as root re-applied the driver's hardcoded `0666 root:root` to `/dev/nvidia-uvm{,-tools}`. Now: read-only polls go through `nvidiaQuery()`, which drops to `nobody:dgpu` via `SysProcAttr.Credential`; the four calls that change hardware state and therefore **cannot** drop root (`-pm`, `-pl`, `--lock-gpu-clocks`, `--reset-gpu-clocks`) go through `nvidiaCtl()`, which re-asserts `root:dgpu 0660` immediately after. Do not add a new bare `runCmd("nvidia-smi", …)` — use one of those two wrappers or the gate reopens with nothing in any log. Side finding: `--query-gpu=power.limit` returns `[N/A]` on this card even as root, so `initGPUTGP` has always fallen through to `setGPUTGP(55)`. |
 | luminos-sentinel | ✅ Running | Process monitor — CAP_SYS_PTRACE, /proc scan |
 | luminos-router | ✅ Running | .exe classifier — 80% rules + 20% ONNX AI fallback |
 | luminos-ram | ✅ Running v3.6 (rebuilt + reinstalled 2026-08-11 21:19, backup at `~/.luminos-backups/luminos-ram.bak-pre-tabs-20260811-211949`) | **[CHANGE: claude-code \| 2026-08-11] DECISION 66 — two additions, both for the tab sleeper and neither touching the memory algorithm.** (1) `/meminfo` now also publishes `model_running` / `model_name` / `model_rss_gb` from `detectModel()`, a cached `/proc/*/cmdline` scan with a 0.2 GB RSS floor. *Do not "simplify" this to `offload_reserved_gb`* — that field is always 0 because nothing in `hive-daemon.py` calls the reserve path, so the cap would be dead code that tests green. (2) New `/tabs` endpoint: a **mailbox only**, holding one report in memory, never consulted by the LIRS ranking or the `madvise` path. 8 unit tests in `cmd/luminos-ram/tabs_test.go`, 7 of them negative. Real process_madvise + caps CAP_KILL/CAP_SYS_NICE active (BUG-065/066 fixed 2026-06-12 restart). All /run/luminos sockets rebound (BUG-067). **+ reacts to Conductor `intent` broadcast — heavy workload lowers swappiness via single-writer `reconcileSwappinessLocked` (offload>intent precedence); pushes `report_ram` to ai (DECISION 24 Phase 4).** ⚠️ **[CHANGE: claude-code \| 2026-08-11] BUG-118 — the browser arm of this daemon is DEAD and always has been.** `checkCDPHealth()` has failed on port 9222 every 60 s since 2026-06-26 (339 errors in 24 h) because Chrome 136+ refuses `--remote-debugging-port` on the default profile, so `discardBrowserTabs()` is unreachable and **not one tab has ever been discarded** — the "Discard via CDP (freed 100%)" line in LUMINOS_RAM_ARCHITECTURE.md was false for six weeks. Superseded by the tab sleeper extension (DECISION 65), not repaired. Everything else in the daemon is fine. |
@@ -147,7 +147,8 @@ reading than the GPU and is not a viable path for agent work.
 ## Compatibility
 | Component | Status | Notes |
 |---|---|---|
-| Wine 11.8 | ✅ Working | .exe launches |
+| Wine 11.8 | ✅ Working | .exe launches. <!-- [CHANGE: claude-code \| 2026-08-29] --> **BUG-080 exonerated Wine entirely** — the MT5 "crash loop" blamed on the 11.8→11.13 upgrade was MT5's own LiveUpdate handing off to a staged binary identical to the installed one, forever. Do not roll Wine back. |
+| MT5 terminal (Wine) | 🟡 Loop fixed, login pending | [CHANGE: claude-code \| 2026-08-29] BUG-080. Stale `liveupdate\` staging cleared (**two** dirs, the second under the roaming profile); terminal now stays up 10m+ on a single start instead of restarting every few seconds. It stops on a modal **Authorization** dialog, so LiveUpdate/build 6140 is still unverified and port 18812 stays closed — needs one interactive login with "Save password" ticked. Trading units remain **masked** on purpose; no credentials were entered and nothing was traded. |
 | .exe file association | ✅ Working | Silent auto-routing |
 | Notepad++ tested | ✅ Working | Zone 2 Wine |
 | Windows apps in launcher | ✅ Working | Auto-created |
@@ -344,26 +345,13 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
 6. Go orchestrator (replace Python hive-daemon.py)
 7. Zone indicator Plasma widget
 8. SDDM custom Luminos theme
-9. **BUG-146 — gate the `nvidia_uvm` device nodes.** `/dev/nvidia-uvm{,-tools}` come up
-   `0666 root:root` on every boot: `NVreg_DeviceFileGID` covers the `nvidia` module only, and the
-   udev rule that was supposed to cover the rest has never fired (nvidia-modprobe uses `mknod(2)`,
-   so no uevent is emitted). Not a bypass — `nvidiactl`/`nvidia0` stay tight, so `nvidia-smi`
-   outside the gate still fails — but it contradicts DECISION 25.
-   <!-- [CHANGE: claude-code | 2026-08-29] -->
-   **UNBLOCKED and half-fixed 2026-08-29.** The CUDA fear was wrong: `open(2)` checks the *effective*
-   gid and `llama-server` already goes through the gate, so a full Dolphin-8B load ran at
-   `--n-gpu-layers 99` (4890 MiB resident, prompt answered) with UVM at `0660 root:dgpu`.
-   `luminos-uvm-gate.service` now pre-creates both nodes correctly owned at boot, which beats
-   `nvidia-modprobe` because it only mknods a node that is *absent*.
-   **Still open — remaining work is in `cmd/luminos-power/`, not the gate.** An audit inode watch
-   (`auditctl -w /dev/nvidia-uvm -p a`) caught the resetter: `nvidia-smi` run as **root** by
-   `luminos-power.service` does `chmod 0666` + `chown root:root` on every power/temp poll, because any
-   euid-0 NVIDIA client re-applies the driver's hardcoded UVM defaults. Fix = drop privileges for the
-   read-only polls (`main.go:1513,1546,1607`). Deliberately not done unattended: that binary is the
-   fan/thermal manager. At idle the nodes hold (the poller skips a sleeping card), so the gap is open
-   only while the dGPU is awake. Re-assert any time with `sudo systemctl restart luminos-uvm-gate`
-   (**restart**, not `start` — the unit is `RemainAfterExit=yes`, so `start` is a silent no-op);
-   detect with `dgpu-exec-v2 --check` (reports `gate: LEAKING`).
+9. ~~**BUG-146 — gate the `nvidia_uvm` device nodes.**~~ **DONE 2026-08-29** — see
+   "dGPU gate (DECISION 25)" below. Superseded by task 10.
+10. **BUG-147 — reboot-verify the entire NVIDIA path.** Everything below works on the running
+    machine and **nothing below has been observed to survive a power cycle**. This is test debt,
+    not a known break, and it is now the highest-value open item because four separate fixes are
+    all resting on it. Run the checklist in `docs/BUGS.md` BUG-147 with the user present, at a
+    moment when a failed login is affordable.
 
 ## Input & Hardware
 | Component | Status | Notes |

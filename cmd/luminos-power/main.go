@@ -46,6 +46,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -1489,9 +1490,142 @@ func readIGPULoad() float64 {
 	return val
 }
 
+// unprivUID is the uid that read-only nvidia-smi polls are dropped to. 65534 = nobody.
+// It only needs to be some uid that is not root; all of the access comes from the gid.
+const unprivUID = 65534
+
+var (
+	dgpuGIDOnce sync.Once
+	dgpuGIDVal  int
+)
+
+// dgpuGID resolves the numeric gid of the 'dgpu' group once, or -1 if it does not exist.
+// Looked up by name rather than hardcoded: the gid happens to be 948 on this machine but
+// nothing guarantees that on a rebuild.
+// [CHANGE: claude-code | 2026-08-29] BUG-146
+func dgpuGID() int {
+	dgpuGIDOnce.Do(func() {
+		dgpuGIDVal = -1
+		g, err := user.LookupGroup("dgpu")
+		if err != nil {
+			lg.Warn("dgpu group not found (%v) — nvidia-smi polls will run as root and "+
+				"will re-open the UVM nodes (BUG-146)", err)
+			return
+		}
+		n, err := strconv.Atoi(g.Gid)
+		if err != nil {
+			lg.Warn("dgpu group gid %q is not numeric: %v", g.Gid, err)
+			return
+		}
+		dgpuGIDVal = n
+	})
+	return dgpuGIDVal
+}
+
+// nvidiaQuery runs a READ-ONLY `nvidia-smi --query-gpu=` with root dropped: uid nobody,
+// gid dgpu. Use it for every poll; use plain runCmd for the control calls that genuinely
+// need root (-pl, -pm, --lock-gpu-clocks, --reset-gpu-clocks).
+//
+// WHY THIS EXISTS — BUG-146, and the reason is NOT the obvious one.
+// [CHANGE: claude-code | 2026-08-29]
+//
+// This daemon was re-opening /dev/nvidia-uvm{,-tools} to 0666 root:root every time it
+// polled the card, silently undoing DECISION 25 for as long as the dGPU was awake. The
+// recorded cause was "luminos-power runs as root". That was WRONG, and dropping privileges
+// alone does NOT fix it. Measured truth table, 2026-08-29:
+//
+//	caller     nvidia-modprobe setuid   gate holds?
+//	non-root   yes                      NO
+//	non-root   no                       YES
+//	root       yes                      NO
+//	root       no                       NO
+//
+// The agent re-applying the driver's hardcoded device-file defaults is the SETUID-ROOT
+// helper /usr/bin/nvidia-modprobe, which any nvidia-smi invocation may call — not the
+// privilege level of the caller. So the fix is a PAIR, and this function is only half of
+// it; the other half is stripping the setuid bit from nvidia-modprobe (see the pacman hook
+// at pacman-hooks/luminos-nvidia-modprobe-setuid.hook, which re-strips it after upgrades).
+// Neither half works alone. Verified with both applied: 10 polls over 30 s returned real
+// data while /dev/nvidia-uvm held 0660 root:dgpu throughout.
+//
+// The gid is what grants access — DECISION 25 makes the nodes root:dgpu 0660 — so this
+// drops to a NON-root uid while ADDING the dgpu group, exactly as dgpu-exec-v2 does.
+func nvidiaQuery(query string) ([]byte, error) {
+	cmd := exec.Command("nvidia-smi", "--query-gpu="+query, "--format=csv,noheader,nounits")
+	if gid := dgpuGID(); gid >= 0 && os.Geteuid() == 0 {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{
+				Uid:    unprivUID,
+				Gid:    uint32(gid),
+				Groups: []uint32{uint32(gid)},
+			},
+		}
+	}
+	return cmd.Output()
+}
+
+// uvmNodes are the two device nodes the nvidia module's NVreg_DeviceFile* parameters do
+// not cover, so they are the only part of the DECISION 25 gate that has to be maintained
+// from userspace. See scripts/dgpu-gate/luminos-uvm-gate.sh (BUG-146).
+var uvmNodes = []string{"/dev/nvidia-uvm", "/dev/nvidia-uvm-tools"}
+
+// regateUVM re-applies root:dgpu 0660 to the UVM nodes.
+// [CHANGE: claude-code | 2026-08-29] BUG-146
+//
+// WHY A POLL-SIDE FIX WAS NOT ENOUGH.
+// nvidiaQuery drops root, and with nvidia-modprobe's setuid bit stripped that keeps the
+// gate intact across the periodic polls — which is nearly every nvidia-smi call this daemon
+// makes. But four calls CANNOT drop root, because they change hardware state: -pm, -pl,
+// --lock-gpu-clocks, --reset-gpu-clocks. Measured 2026-08-29, with setuid already stripped:
+// a single root `nvidia-smi -pl 55` still reset both nodes to 0666 root:root. Root does not
+// need the setuid helper; it re-applies the driver defaults itself.
+//
+// So those four calls are an irreducible hole, and the honest fix is to close it
+// immediately after rather than pretend it is not there. The nodes are open for the
+// duration of one nvidia-smi invocation (~200 ms), a handful of times per session, instead
+// of continuously for as long as the card is awake.
+//
+// This does NOT shell out to luminos-uvm-gate: that script's job is boot-time creation and
+// it exits non-zero when it finds a node already open, which is the normal case here and
+// would log a false alarm every time. This only repairs ownership on nodes that exist.
+func regateUVM() {
+	gid := dgpuGID()
+	if gid < 0 || os.Geteuid() != 0 {
+		return
+	}
+	for _, n := range uvmNodes {
+		if _, err := os.Stat(n); err != nil {
+			continue // module not loaded yet; the boot unit owns creation, not us
+		}
+		if err := os.Chown(n, 0, gid); err != nil {
+			lg.Warn("BUG-146: chown %s root:dgpu failed: %v — node left world-open", n, err)
+			continue
+		}
+		if err := os.Chmod(n, 0o660); err != nil {
+			lg.Warn("BUG-146: chmod %s 0660 failed: %v — node left world-open", n, err)
+		}
+	}
+}
+
+// nvidiaCtl runs a root nvidia-smi CONTROL call and re-closes the UVM gate behind it.
+// Every root nvidia-smi invocation must go through here, not runCmd, or BUG-146 reopens.
+// [CHANGE: claude-code | 2026-08-29]
+func nvidiaCtl(args ...string) error {
+	err := runCmd("nvidia-smi", args...)
+	regateUVM()
+	return err
+}
+
 // readGPUStats returns NVIDIA dGPU power draw (W) and temperature (°C).
-// Reads from sysfs hwmon first (fast, no subprocess). Falls back to nvidia-smi if
-// sysfs files are absent or return zero — handles driver version differences.
+//
+// [CHANGE: claude-code | 2026-08-29] The comment that used to sit here claimed sysfs hwmon
+// was the fast path and nvidia-smi merely a fallback "for driver version differences". That
+// is false on this machine and always has been: the NVIDIA PROPRIETARY driver exposes no
+// hwmon at all — /sys/class/drm/card1/device/hwmon/ does not exist — so both globs return
+// empty on every single call and nvidia-smi is not a fallback, it is the only path. The
+// sysfs branch is KEPT, not deleted: it costs two glob calls, it is correct if a future
+// driver (or nouveau) does export hwmon, and it is the cheap path when it works. It is just
+// no longer described as something it isn't.
 // [CHANGE: claude-code | 2026-06-03] v4.2
 func readGPUStats() (powerW, tempC float64) {
 	powerPaths, _ := filepath.Glob("/sys/class/drm/card1/device/hwmon/hwmon*/power1_input")
@@ -1510,9 +1644,7 @@ func readGPUStats() (powerW, tempC float64) {
 		}
 	}
 	// Fallback: nvidia-smi (slower but always available)
-	out, err := exec.Command("nvidia-smi",
-		"--query-gpu=power.draw,temperature.gpu",
-		"--format=csv,noheader,nounits").Output()
+	out, err := nvidiaQuery("power.draw,temperature.gpu")
 	if err != nil {
 		return 0, 0
 	}
@@ -1543,9 +1675,7 @@ const offloadSignalFile = "/run/luminos/offload.active"
 // readGPUMaxGraphicsClock returns the dGPU's max graphics clock in MHz (0 if unknown).
 // [CHANGE: claude-code | 2026-06-28] v4.3
 func readGPUMaxGraphicsClock() int {
-	out, err := exec.Command("nvidia-smi",
-		"--query-gpu=clocks.max.graphics",
-		"--format=csv,noheader,nounits").Output()
+	out, err := nvidiaQuery("clocks.max.graphics")
 	if err != nil {
 		return 0
 	}
@@ -1573,11 +1703,11 @@ func readGPUMaxGraphicsClock() int {
 // [CHANGE: claude-code | 2026-06-28] v4.3
 func applyOffloadPin(on bool) {
 	if on {
-		if err := runCmd("nvidia-smi", "-pm", "1"); err != nil {
+		if err := nvidiaCtl("-pm", "1"); err != nil {
 			lg.Warn("offload: persistence mode on failed: %v", err)
 		}
 		if maxClk := readGPUMaxGraphicsClock(); maxClk > 0 {
-			if err := runCmd("nvidia-smi", fmt.Sprintf("--lock-gpu-clocks=%d", maxClk)); err != nil {
+			if err := nvidiaCtl(fmt.Sprintf("--lock-gpu-clocks=%d", maxClk)); err != nil {
 				lg.Warn("offload: lock GPU clocks to %d MHz failed: %v", maxClk, err)
 			} else {
 				lg.Info("offload: GPU graphics clock locked to %d MHz", maxClk)
@@ -1594,7 +1724,7 @@ func applyOffloadPin(on bool) {
 		return
 	}
 	offloadActive.Store(false)
-	if err := runCmd("nvidia-smi", "--reset-gpu-clocks"); err != nil {
+	if err := nvidiaCtl("--reset-gpu-clocks"); err != nil {
 		lg.Warn("offload: reset GPU clocks failed: %v", err)
 	}
 	if err := os.Remove(offloadSignalFile); err != nil && !os.IsNotExist(err) {
@@ -1604,9 +1734,7 @@ func applyOffloadPin(on bool) {
 }
 
 func initGPUTGP() {
-	out, err := exec.Command("nvidia-smi",
-		"--query-gpu=power.limit",
-		"--format=csv,noheader,nounits").Output()
+	out, err := nvidiaQuery("power.limit")
 	if err == nil {
 		if v, err2 := strconv.ParseFloat(strings.TrimSpace(string(out)), 64); err2 == nil && v > 0 {
 			currentGPUTGPW = v
@@ -1622,7 +1750,7 @@ func initGPUTGP() {
 // Requires the daemon to run as root (nvidia-smi -pl is root-only).
 // [CHANGE: claude-code | 2026-06-03] v4.2
 func setGPUTGP(watts float64) {
-	if err := runCmd("nvidia-smi", "-pl", fmt.Sprintf("%.0f", watts)); err != nil {
+	if err := nvidiaCtl("-pl", fmt.Sprintf("%.0f", watts)); err != nil {
 		lg.Warn("GPU TGP → %.0fW failed: %v", watts, err)
 		return
 	}

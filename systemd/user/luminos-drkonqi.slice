@@ -1,0 +1,66 @@
+# luminos-drkonqi.slice — a shared memory budget for ALL DrKonqi backtrace jobs.
+# [CHANGE: claude-code | 2026-08-29] BUG-084
+#
+# WHY A SLICE AND NOT `MemoryMax=` ON THE UNIT
+# --------------------------------------------
+# The obvious fix is a per-instance cap on drkonqi-coredump-launcher@.service. That does not
+# actually fix what was measured on 2026-07-24. The incident was not one greedy gdb, it was
+# FIVE launchers active at once (Filelight, plus repeated kscreen-doctor and qml crashes,
+# each of which arms another instance). A 2G per-instance cap would have permitted 10G on a
+# 14 GiB box — a stall, not a fix. drkonqi-coredump-launcher@ is a TEMPLATE, so the number of
+# instances is set by how many things crashed, which is exactly the quantity we cannot bound.
+#
+# A slice caps the SUM. Five concurrent backtraces now share 2G and OOM-kill each other
+# inside this cgroup instead of taking the desktop with them.
+#
+# WHY THESE NUMBERS — AND WHY THERE IS NO MemoryHigh=
+# ---------------------------------------------------
+# Measured peak on 2026-07-24: gdb at 7.4 GiB RSS / 16.3 GiB VSZ, still climbing after 12
+# minutes, with zram 100% full and /proc/pressure/memory full avg10 at 7.85%. So the cap has
+# to be far below 7.4G to do anything at all.
+#
+# The first version of this file paired MemoryMax=2G with MemoryHigh=1500M, on the usual
+# reasoning that a soft throttle is gentler than a kill. It was then tested against a process
+# that faults in 3 GiB of real anonymous pages, all four combinations, 2026-08-29:
+#
+#	MemoryHigh  MemorySwapMax  outcome
+#	1500M       (allowed)      BREACHED — allocated the full 3 GiB in 10 s
+#	off         (allowed)      BREACHED — allocated the full 3 GiB in 7 s
+#	1500M       0              LIVELOCK — throttled below 1.6 GiB, still running at 45 s,
+#	                                      never killed, never finished
+#	off         0              OOM-KILLED at 2 GiB in 2 s   <-- the only one that works
+#
+# So the shipped-first config was the WORST of the four: with swap available, MemoryHigh does
+# not stop a runaway, it just pushes the pages into zram — which is precisely the 2026-07-24
+# incident, reproduced. And with swap denied, MemoryHigh prevents the kill from ever
+# happening: anonymous pages cannot be reclaimed, so the cgroup spins in direct reclaim making
+# near-zero progress and the job neither dies nor completes. A backtrace hung forever is not
+# better than one that failed.
+#
+#   MemoryMax=2G     — hard kill, and the ONLY thing doing any work here. Above this the
+#                      backtrace is not going to finish usefully anyway.
+#   MemorySwapMax=0  — load-bearing, not a nicety. The specific harm on 2026-07-24 was 8 GiB
+#                      of zram filling and every other process stalling on swap-in. Without
+#                      this line MemoryMax is unenforceable in practice, because the cgroup
+#                      just swaps rather than hitting the limit.
+#   MemoryHigh       — deliberately ABSENT. See the table.
+#
+# WHAT THIS COSTS
+# ---------------
+# A crash report for a very large core may now be truncated or fail outright. That is the
+# intended trade: the core file itself is untouched in ~/.cache/drkonqi/cores/ and in
+# coredumpctl, so a backtrace can always be produced by hand afterwards with
+# `coredumpctl gdb <pid>`. Nothing is lost that was not already on disk.
+#
+# This is INSURANCE, not the root fix. The root fix is that kscreen-doctor reliably SIGABRTs
+# on this box and keeps arming new launchers; see BUG-084.
+
+[Unit]
+Description=Luminos: capped memory budget for DrKonqi backtrace jobs (BUG-084)
+Documentation=file:///home/shawn/luminos-os/docs/BUGS.md
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+MemoryMax=2G
+MemorySwapMax=0

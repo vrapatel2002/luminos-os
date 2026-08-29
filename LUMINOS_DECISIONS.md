@@ -1081,8 +1081,44 @@ than through the kernel device model, so no uevent is emitted and no rule can ma
 `NVreg_DeviceFile*` driver param — and that param covers the `nvidia` module's nodes only.
 `nvidia_uvm` has no equivalent, so `/dev/nvidia-uvm{,-tools}` come up `0666 root:root` on every boot.
 Measured as *not* a bypass (CUDA still needs `nvidiactl`+`nvidia0`, which stay tight), but it is not
-the posture this decision claims. Filed as **BUG-146**, deliberately left open: gating UVM could take
-HIVE's CUDA models off the card, so it needs verifying against a running HIVE first.
+the posture this decision claims. Filed as **BUG-146**.
+
+**BUG-146 CLOSED 2026-08-29 — and the fear that kept it open was wrong.** Gating UVM does *not* take
+HIVE off the card: `open(2)` checks the **effective** gid, and `llama-server` already goes through the
+gate, so a full Dolphin-8B load ran at `--n-gpu-layers 99` (4890 MiB resident, prompt answered) with
+UVM at `0660 root:dgpu`, while ungated CUDA stayed correctly blind.
+
+The fix needed **three** parts, and the first root cause written down covered only one of them.
+Measured truth table (repair nodes → one `nvidia-smi --query-gpu=power.draw` → stat):
+
+| caller | `nvidia-modprobe` setuid | gate holds? |
+|---|---|---|
+| non-root | yes | **NO** |
+| non-root | no | YES |
+| root | yes | **NO** |
+| root | no | **NO** |
+
+Two independent causes, so **neither half of the fix works alone** — which is exactly why dropping the
+setuid bit was tried on 2026-08-28 and reverted with "on its own it buys nothing". True, and equally
+true of the privilege drop it was rejected in favour of. Now shipped together:
+1. `systemd/luminos-uvm-gate.service` + `scripts/dgpu-gate/luminos-uvm-gate.sh` **pre-create** both
+   nodes correctly owned at boot — `nvidia-modprobe` only mknods a node that is *absent*, so winning
+   the race is enough. Major read from `/proc/devices` (kernel allocates it dynamically).
+2. `config/pacman-hooks/luminos-nvidia-modprobe-setuid.hook` keeps the setuid bit **off**
+   `/usr/bin/nvidia-modprobe`. A one-time `chmod u-s` is not enough: the bit is part of
+   `nvidia-utils`' recorded file mode, so pacman restores it on every upgrade and the gate reopens
+   with nothing in any log to say so.
+3. `cmd/luminos-power/main.go` routes read-only polls through `nvidiaQuery()` (drops to
+   `nobody:dgpu`) and the four irreducibly-root control calls — `-pm`, `-pl`, `--lock-gpu-clocks`,
+   `--reset-gpu-clocks` — through `nvidiaCtl()`, which re-asserts the gate immediately after.
+
+**Consequence that must not be forgotten:** without setuid, `nvidia-modprobe` can no longer load the
+modules or create the nodes on demand. That is only safe because Luminos does both up front —
+`/etc/modules-load.d/nvidia.conf` and `luminos-uvm-gate.service`. **If either is ever removed, the
+pacman hook must be removed with it**, or CUDA breaks for every non-root process on the machine.
+DECISION 25 still rests on one enforcement layer per node class; this closes the UVM hole, it does not
+add the second layer (that is v2, the BPF-LSM gate). And none of it has survived a reboot yet —
+see BUG-147.
 
 **2. A setgid door changes more than permissions — it changes what the app is allowed to read.**
 `setresgid` (DECISION 52 / BUG-102) made real==effective, which cleared `AT_SECURE`. That was correct

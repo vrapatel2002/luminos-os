@@ -29,6 +29,12 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 ### Go Daemons (cmd/)
 - `cmd/luminos-ai/` — Unix socket IPC server (central routing daemon)
 - `cmd/luminos-power/` — v3.6 EPP-based thermal control. AC: no cap ≤87°C (fans 100% at 70°C), 3.0GHz@87°C, 2.0GHz@92°C emergency. Fan curve v5: 35%@47°C, 62%@52°C. Beast mode: CPU>75%/GPU>80% — BUG-055.
+  <!-- [CHANGE: claude-code | 2026-08-29] BUG-146 -->
+  **Every `nvidia-smi` invocation must go through one of two wrappers — never a bare `runCmd("nvidia-smi", …)`.** A root NVIDIA client re-applies the driver's hardcoded `0666 root:root` to `/dev/nvidia-uvm{,-tools}`, silently reopening the DECISION 25 gate with nothing in any log.
+  - `nvidiaQuery(query)` — read-only `--query-gpu=` calls. Drops to `nobody:dgpu` via `SysProcAttr.Credential` when euid==0 and the `dgpu` group resolves. Used by `readGPUStats`, `readGPUMaxGraphicsClock`, `initGPUTGP`.
+  - `nvidiaCtl(args…)` — the four calls that change hardware state and therefore **cannot** drop root: `-pm`, `-pl`, `--lock-gpu-clocks`, `--reset-gpu-clocks`. Runs as root, then calls `regateUVM()` to re-assert `root:dgpu 0660`. Not belt-and-braces: a single root `nvidia-smi -pl 55` was measured to reset both nodes on its own, with setuid already stripped from `nvidia-modprobe`.
+  - `regateUVM()` — chown/chmod both UVM nodes. No-ops if the node is absent (the boot unit owns creation, not this daemon) and warns rather than failing if the chown/chmod is refused.
+  - Note: `--query-gpu=power.limit` returns `[N/A]` on this card even as root, so `initGPUTGP` has always fallen through to `setGPUTGP(55)`. Pre-existing, unrelated to the gate.
 - `cmd/luminos-sentinel/` — Process security monitoring (CAP_SYS_PTRACE, /proc scan)
 - `cmd/luminos-router/` — .exe compatibility classifier (80% rules + 20% ONNX AI)
 - `cmd/luminos-ram/` — v3.0 RAM management (LIRS ranking, HotSet N=8, OnScreen guard)
