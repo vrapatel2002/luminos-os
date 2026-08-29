@@ -1071,7 +1071,41 @@ Changing device perms does **not** revoke already-open FDs, so installing live d
 ### v2 (not built) — bypass-proof gate
 `CONFIG_BPF_LSM=y` and `bpf` is in the active LSM list, so a true **BPF-LSM** gate that allow-lists apps by binary at `open()` (defeats even a hostile process calling `dgpu-exec` itself) is possible. v1 covers the accidental-grab threat model; v2 covers the adversarial one.
 
-Files: `scripts/dgpu-gate/` (dgpu-exec.c, install-dgpu-gate.sh, luminos-gpu-picker.qml, README.md), `scripts/luminos-gpu-launch` (the single launcher), `config/modprobe.d/luminos-dgpu-gate.conf`, `config/udev/70-luminos-dgpu-access.rules`. KILL SWITCH: `sudo chmod 0666 /dev/nvidia*` (temp) or remove the modprobe+udev files and `mkinitcpio -P` (permanent).
+### Amendment (claude-code | 2026-08-28) — the gate must carry its own graphics environment
+**This corrects two claims above.** Both were found by measurement while chasing BUG-145.
+
+**1. "belt-and-suspenders udev rule" — there is no second layer.** `70-luminos-dgpu-access.rules`
+has never fired, for any node, ever. `nvidia-modprobe` creates `/dev/nvidia*` with `mknod(2)` rather
+than through the kernel device model, so no uevent is emitted and no rule can match:
+`udevadm info /dev/nvidia0` answers `Unknown device`. DECISION 25 rests on **one** layer — the
+`NVreg_DeviceFile*` driver param — and that param covers the `nvidia` module's nodes only.
+`nvidia_uvm` has no equivalent, so `/dev/nvidia-uvm{,-tools}` come up `0666 root:root` on every boot.
+Measured as *not* a bypass (CUDA still needs `nvidiactl`+`nvidia0`, which stay tight), but it is not
+the posture this decision claims. Filed as **BUG-146**, deliberately left open: gating UVM could take
+HIVE's CUDA models off the card, so it needs verifying against a running HIVE first.
+
+**2. A setgid door changes more than permissions — it changes what the app is allowed to read.**
+`setresgid` (DECISION 52 / BUG-102) made real==effective, which cleared `AT_SECURE`. That was correct
+and necessary — but `AT_SECURE` was *also*, silently, the only thing making the gate ignore
+`/etc/environment`'s Mesa EGL pin. libglvnd reads that variable with `secure_getenv(3)`. So the gate
+had been delivering NVIDIA **by accident**, and the moment it stopped being privileged it started
+obeying a system policy that pins every process to the iGPU vendor — killing NVIDIA Vulkan, because
+NVIDIA's Vulkan ICD lives inside `libGLX_nvidia.so.0`, a glvnd library.
+
+**The principle, generalised: a door that grants device access must also grant the *environment*
+that makes the device usable.** Permissions alone are not a capability. `dgpu-exec-v2` now sets the
+NVIDIA vendor variables itself, after the credential change — stating explicitly what it used to get
+as a side effect of being privileged. Values already naming `nvidia` are respected (idempotent,
+caller-overridable); a missing vendor JSON causes an **unset** rather than a dangling path, because
+unset means "scan the directory" and a dangling path means no EGL at all. `--keep-env` opts out.
+
+**Do not revert to v1 to "restore NVIDIA".** v1 works only by being privileged enough to escape the
+machine's own graphics policy, and it is the version that silently hands the iGPU to every
+shell-launched app. `dgpu-exec-v2 --check` now reports the whole chain — identity, predicted target
+`AT_SECURE`, node perms, EGL vendor, ICD, power state — and grades *access* and *gate integrity*
+separately, because a leak and an iGPU fallback are different faults with different fixes.
+
+Files: `scripts/dgpu-gate/` (dgpu-exec.c, dgpu-exec-v2.c, install-dgpu-gate.sh, luminos-gpu-picker.qml, README.md), `scripts/luminos-gpu-launch` (the single launcher), `config/modprobe.d/luminos-dgpu-gate.conf`, `config/udev/70-luminos-dgpu-access.rules`, `config/pacman-hooks/nvidia-egl-priority.hook`. KILL SWITCH: `sudo chmod 0666 /dev/nvidia*` (temp) or remove the modprobe+udev files and `mkinitcpio -P` (permanent). HEALTH CHECK: `dgpu-exec-v2 --check`.
 
 ---
 

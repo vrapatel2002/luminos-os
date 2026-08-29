@@ -33,13 +33,27 @@ options nvidia NVreg_DeviceFileUID=0 NVreg_DeviceFileGID=$DGPU_GID NVreg_DeviceF
 EOF
 echo "      wrote /etc/modprobe.d/luminos-dgpu-gate.conf (GID=$DGPU_GID)"
 
-echo "[3/7] Compile + install setgid helper /usr/local/bin/dgpu-exec ..."
-cc -O2 -Wall -Wextra -o /usr/local/bin/dgpu-exec "$REPO_DIR/dgpu-exec.c"
-chown root:dgpu /usr/local/bin/dgpu-exec
-chmod 2755 /usr/local/bin/dgpu-exec        # setgid dgpu
-ls -l /usr/local/bin/dgpu-exec
+echo "[3/7] Compile + install setgid helpers /usr/local/bin/dgpu-exec{,-v2} ..."
+# [CHANGE: claude-code | 2026-08-28] v2 was built by hand on 2026-08-05 and never added
+# here, so a rebuilt machine got v1 only — and v1 is the one that drops the group at the
+# first shell wrapper (BUG-102). Build both; v2 is what everything should call.
+# NOTE: do not build into /tmp — it is nosuid here, and the setgid bit is silently
+# ignored there, which makes a correct binary look broken.
+for v in "dgpu-exec:dgpu-exec.c" "dgpu-exec-v2:dgpu-exec-v2.c"; do
+  bin="/usr/local/bin/${v%%:*}"; src="$REPO_DIR/${v##*:}"
+  cc -O2 -Wall -Wextra -o "$bin" "$src"
+  chown root:dgpu "$bin"
+  chmod 2755 "$bin"                        # setgid dgpu
+  ls -l "$bin"
+done
 
-echo "[4/7] Install udev rule (belt-and-suspenders for node creation) ..."
+echo "[4/7] Install udev rule ..."
+# HONESTY NOTE [claude-code | 2026-08-28]: this rule has never actually fired. The NVIDIA
+# nodes are created by nvidia-modprobe with mknod(2), not by the kernel device model, so
+# `udevadm info /dev/nvidia0` reports "Unknown device" and no rule ever matches them. The
+# ONLY thing enforcing DECISION 25 is the NVreg_DeviceFile* driver param in step 2. The
+# rule is kept because it costs nothing and would apply if NVIDIA ever switches to proper
+# device registration — but do NOT count it as a second layer. It is not one. See BUG-146.
 install -m 0644 "$UDEV_SRC" /etc/udev/rules.d/70-luminos-dgpu-access.rules
 udevadm control --reload
 
@@ -53,10 +67,19 @@ echo "[6/7] Rebuild initramfs so the driver param loads at early boot ..."
 mkinitcpio -P
 
 echo "[7/7] Apply LIVE to existing nodes (best-effort; a wake may reset until reboot) ..."
+# BUG-146: the two UVM nodes below are gated HERE and then quietly un-gated on the next
+# reboot. NVreg_DeviceFileGID (step 2) governs the `nvidia` module's own nodes only;
+# nvidia_uvm has no equivalent parameter, so nvidia-modprobe recreates /dev/nvidia-uvm
+# and /dev/nvidia-uvm-tools as root:root 0666 every boot and nothing puts them back.
+# Verified 2026-08-28: post-boot they were 0666 root:root while nvidia0/nvidiactl were
+# correctly 0660 root:dgpu. Not a bypass — CUDA also needs nvidiactl and nvidia0, which
+# stay tight, so `nvidia-smi` outside the gate still fails with "Insufficient
+# Permissions" — but it does contradict the stated default-deny posture.
 shopt -s nullglob
 for n in /dev/nvidiactl /dev/nvidia[0-9]* /dev/nvidia-modeset /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
   chgrp dgpu "$n" && chmod 0660 "$n" && echo "      gated $n -> $(stat -c '%U:%G %a' "$n")"
 done
+echo "      (verify any time with: dgpu-exec-v2 --check)"
 
 echo
 echo "Done. The AUTHORITATIVE gate (driver param) takes full effect on next REBOOT."

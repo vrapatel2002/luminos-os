@@ -593,7 +593,25 @@ The EGL vendor override in `/etc/environment`:
 ```
 __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
 ```
-Forces all session processes to use AMD Mesa EGL by default. Without this, libEGL scans both `50_mesa.json` and `60_nvidia.json` and defaults to NVIDIA (higher priority number), keeping the dGPU in D0 constantly.
+Forces all session processes to use AMD Mesa EGL by default.
+
+<!-- [CHANGE: claude-code | 2026-08-28] This paragraph used to say libEGL "defaults to NVIDIA
+     (higher priority number)". That is backwards, and it contradicted docs/BUGS.md, which has
+     always had it right. Corrected below; see BUG-145. -->
+**How the priority actually works:** libglvnd loads `/usr/share/glvnd/egl_vendor.d/*.json` in
+**filename sort order**, and the *first* vendor to claim the display wins — so a **lower** number
+has higher priority, not a higher one. NVIDIA ships `10_nvidia.json`, which sorts *before* Mesa's
+`50_mesa.json` and therefore claims EGL for every GL client on the machine, keeping the dGPU in D0.
+That is why `/etc/pacman.d/hooks/nvidia-egl-priority.hook` renames it to `60_nvidia.json`: at 60 it
+sorts *after* Mesa and loses. The file you see here is already renamed, which is why this list reads
+`50_mesa.json` and `60_nvidia.json`.
+
+**Two caveats on the env var — it is not the whole defence** (BUG-145):
+- It is delivered by `pam_env`, so it reaches login sessions and `systemd --user`, but **not** the
+  systemd *system* manager. SDDM and other system services rely purely on the filename sort order.
+- Any process with `AT_SECURE` set — anything setuid/setgid, including the `dgpu-exec` gate —
+  **ignores it**, because libglvnd reads it with `secure_getenv(3)`. This is not a bug in libglvnd;
+  it is deliberate hardening. For a month it was also the only reason NVIDIA worked through the gate.
 
 Power states:
 - D0 (active) = ~8W idle draw — bad

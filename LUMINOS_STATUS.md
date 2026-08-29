@@ -344,6 +344,13 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
 6. Go orchestrator (replace Python hive-daemon.py)
 7. Zone indicator Plasma widget
 8. SDDM custom Luminos theme
+9. **BUG-146 — gate the `nvidia_uvm` device nodes.** `/dev/nvidia-uvm{,-tools}` come up
+   `0666 root:root` on every boot: `NVreg_DeviceFileGID` covers the `nvidia` module only, and the
+   udev rule that was supposed to cover the rest has never fired (nvidia-modprobe uses `mknod(2)`,
+   so no uevent is emitted). Not a bypass — `nvidiactl`/`nvidia0` stay tight, so `nvidia-smi`
+   outside the gate still fails — but it contradicts DECISION 25. **Blocked on:** confirming HIVE's
+   `llama-server` reaches CUDA *through* the gate; if it does not, gating UVM takes the models off
+   the card. Detect with `dgpu-exec-v2 --check` (reports `gate: LEAKING`).
 
 ## Input & Hardware
 | Component | Status | Notes |

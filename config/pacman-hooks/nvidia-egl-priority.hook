@@ -1,0 +1,36 @@
+# nvidia-egl-priority.hook — keep NVIDIA's EGL vendor below Mesa's after package updates.
+#
+# libglvnd loads /usr/share/glvnd/egl_vendor.d/*.json in filename sort order and the
+# FIRST vendor that claims the display wins. nvidia-utils ships 10_nvidia.json; Mesa
+# ships 50_mesa.json. 10 sorts before 50, so out of the box NVIDIA claims EGL for every
+# GL client on the machine — including KWin and every Plasma process. On this Optimus
+# laptop the panel is wired to the AMD 780M, so that means the RTX 4050 is held awake to
+# render a desktop it cannot even scan out. That is BUG-050: the dGPU never reaches
+# runtime-PM suspend and the battery drains for nothing.
+#
+# The fix is to rename it to 60_nvidia.json so Mesa sorts first. /etc/environment also
+# sets __EGL_VENDOR_LIBRARY_FILENAMES=.../50_mesa.json, but that is NOT a substitute:
+#   - /etc/environment is read by PAM, so it reaches login sessions and systemd --user,
+#     but NOT the systemd system manager. SDDM runs as a system service and never sees it.
+#   - Any process with AT_SECURE set (anything setuid/setgid — including our own
+#     dgpu-exec-v2 gate) has libglvnd deliberately IGNORE that variable. See BUG-145.
+# So for system services the filename sort order is the ONLY thing holding the line.
+# This hook is load-bearing. Do not delete it because "the env var already covers it".
+#
+# A nvidia-utils upgrade reinstalls 10_nvidia.json and silently undoes the rename, which
+# is exactly how BUG-050 came back the first time. Hence PostTransaction.
+#
+# Install to /etc/pacman.d/hooks/nvidia-egl-priority.hook
+# [CHANGE: claude-code | 2026-08-28] BUG-050 — hook existed on-disk since 2026-05-14 but
+#          was never tracked in git, so a rebuilt machine would have silently lost it.
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = nvidia-utils
+
+[Action]
+Description = Keeping NVIDIA EGL at lower priority than Mesa (AMD default)
+When = PostTransaction
+Exec = /bin/sh -c 'if [ -f /usr/share/glvnd/egl_vendor.d/10_nvidia.json ]; then mv /usr/share/glvnd/egl_vendor.d/10_nvidia.json /usr/share/glvnd/egl_vendor.d/60_nvidia.json; echo "luminos: NVIDIA EGL reprioritized to 60 (below Mesa 50)"; fi'

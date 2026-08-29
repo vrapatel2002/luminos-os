@@ -62,7 +62,13 @@ fi
 
 if [ "$GPU_CHOICE" = "igpu" ]; then
   export DRI_PRIME=0
-  export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
+  # [CHANGE: claude-code | 2026-08-28] BUG-144: this said radeon_icd.x86_64.json, which has
+  # never existed on this box — Mesa ships a single-arch /usr/share/vulkan/icd.d/radeon_icd.json.
+  # VK_ICD_FILENAMES is an override, not a hint: pointing it at a missing file does not fall back
+  # to the default search path, it yields "Found no drivers!" / ERROR_INCOMPATIBLE_DRIVER. So the
+  # *AMD* branch of the picker handed every Vulkan app zero drivers — the same failure we spent
+  # this whole investigation blaming on the dGPU gate. Verified fixed 2026-08-28.
+  export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json
   export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
   notify-send "GPU Launcher" "$APP → AMD Radeon 780M" --icon=dialog-information 2>/dev/null
   exec "$CMD" "${ARGS[@]}"
