@@ -1,0 +1,33 @@
+# [CHANGE: claude-code | 2026-08-31]
+# Standalone Usenet download client on the G14, for when the media server is not
+# reachable -- it lives on a thin cable and a nudge takes it offline.
+#
+# This is a --user unit on purpose. The packaged nzbget.service is a SYSTEM unit
+# running as the nzbget user, which would want root-owned directories and cannot
+# write to /home/shawn. Enable this one, never that one -- two nzbget instances
+# on port 6789 would fight.
+#
+#   systemctl --user enable --now luminos-nzbget.service
+#   http://127.0.0.1:6789/          (loopback only, by design)
+[Unit]
+Description=NZBGet (Luminos, standalone Usenet client on the G14)
+Documentation=https://nzbget.com/documentation/
+After=network-online.target
+
+[Service]
+Type=simple
+# -s = server mode in the foreground, so systemd tracks the real process rather
+# than nzbget's own daemon fork. -c points at the user config; without it nzbget
+# finds /usr/share/nzbget/nzbget.conf and silently runs with no provider.
+ExecStart=/usr/bin/nzbget -s -c %h/.config/nzbget/nzbget.conf
+ExecReload=/usr/bin/nzbget -c %h/.config/nzbget/nzbget.conf -O
+Restart=on-failure
+RestartSec=10
+# The provider password sits in the config, so keep the process boring.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+
+[Install]
+WantedBy=default.target

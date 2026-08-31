@@ -5503,3 +5503,90 @@ Not a fault — do not go debugging the tailnet over it.
 **Scope:** same-account tailnet only. Taildrop cannot send to another person's tailnet, and
 transfers are direct WireGuard between the two nodes, so no copy of the file transits a
 Tailscale server.
+
+---
+
+## DECISION 87 — A second Usenet client on the G14, because the server is one bumped cable away
+# [CHANGE: claude-code | 2026-08-31]
+
+**The problem is physical, not architectural.** The media server is an old Dell 3590 on a
+thin ethernet cable; nudging it drops the box. Every download path we have built runs
+*through* that machine — Jellyseerr asks Radarr/Sonarr, they ask Prowlarr, Prowlarr hands an
+`.nzb` to NZBGet. If the server is down, there is no way to get a file at all, and no way to
+practise the mechanics.
+
+So NZBGet is now installed on the G14 as a **standalone** client: same UsenetServer account,
+its own queue, downloads to `~/Downloads/usenet/completed/`. It is deliberately **not**
+wired to Sonarr, Radarr or Jellyfin. Nothing gets renamed or added to a library — it is a
+plain file you play in mpv. That isolation is the point: it must work with the server
+switched off, so it cannot depend on the server for anything.
+
+### The two-halves rule, written down because it is the thing that confuses people
+
+An `.nzb` is a **shopping list, not the shopping** — the same way a `.torrent` is not the
+movie. You always need two subscriptions from two different companies: an **indexer**
+(NZBGeek) that sells you the list, and a **provider** (UsenetServer) that actually holds the
+bytes. Paying one without the other gets you nothing. The client is the third piece and is
+not optional, because the file arrives as thousands of yEnc-encoded fragments inside a rar,
+with par2 repair blocks — decode, verify, repair, unpack is not a by-hand job.
+Full walkthrough: `docs/USENET_ON_THE_G14.md`.
+
+### Choices, and what each one is protecting
+
+**A `--user` unit, not the packaged system one.** `extra/nzbget` ships `nzbget.service`
+running as the `nzbget` user, which wants root-owned directories and cannot write to
+`/home/shawn`. `luminos-nzbget.service` runs as Shawn. The packaged unit is confirmed
+`disabled` — two instances would fight over port 6789.
+
+**`ControlIP=127.0.0.1`, not the server's `0.0.0.0`.** The server's NZBGet is exposed
+because Caddy proxies it on 8445 behind a real certificate. The laptop has no such front
+door and no reason to be reachable, so it binds loopback only. Negative-tested: `HTTP 000`
+from both `192.168.2.16` and `100.121.55.85`, `HTTP 401` from `127.0.0.1`.
+
+**`DiskSpace=20000` (20 GB floor).** `/home` was **90% full, 61 GB free** at install time
+and a single 4K remux can exceed that. NZBGet pauses instead of filling the disk. This guard
+exists because Timeshift once filled this root to zero bytes and truncated a file.
+
+**8 connections, against the server's 15.** The plan's total connection cap is unknown, and
+the account is shared. Lower is the safe side, and the laptop is a fallback that rarely runs
+at the same time as the server.
+
+**`OutputMode=loggable`.** Copied config defaulted to `curses`; under systemd there is no
+terminal and nzbget exits with `ncurses: cannot initialize terminal type ($TERM="unknown")`.
+This reads like a config error and is not one.
+
+**`NzbDir` watched at 5-second intervals.** Dropping a `.nzb` into
+`~/Downloads/usenet/nzb/` starts it — no command, no UI, nothing to remember. That is the
+whole interface for the common case.
+
+### The package pin, which is the one thing here that will rot
+
+`nzbget 26.2-3` in the repos links `libboost_json.so.1.92.0`; this machine has boost
+**1.91.0-2**, so the binary refuses to start with `error while loading shared libraries`.
+**pacman did not catch this** — `nzbget`'s dependency is an unversioned `boost-libs`, which
+was already satisfied. The soname mismatch only appears at run time.
+
+Upgrading boost alone is a partial upgrade that would break its other five dependants:
+`gdb`, `innoextract`, `xrt` (**the NPU runtime**), `libtorrent-rasterbar`, `source-highlight`.
+A full `pacman -Syu` is the correct Arch fix but pulls **212 packages**, including
+**kirigami 6.28.0-1.1 → 6.29.0-1** — the forked package from DECISION 72, whose version bump
+silently reverts the entire desktop look. **That is the user's decision, not a side effect of
+installing a download client.**
+
+So `nzbget-26.2-2` from `archive.archlinux.org` is installed instead: the **same upstream
+26.2**, one earlier package rebuild, linking boost 1.91. Zero feature difference. The pin
+dissolves by itself the next time a full upgrade runs.
+
+### Proof
+
+- `281 Welcome to UsenetServer (No Posting)` over **TLS 1.3**, certificate verified against
+  the system CA store, from the laptop.
+- **Negative test:** the same account with a deliberately wrong password returns
+  `502 Authentication Failed` — so the `281` is a real authentication, not the server being
+  permissive.
+- `systemctl --user is-active luminos-nzbget` → `active`; socket is `127.0.0.1:6789` only.
+- "No Posting" is expected, not a fault: the account is read-only and cannot upload
+  (DECISION 48).
+
+**Undo:** `systemctl --user disable --now luminos-nzbget && sudo pacman -Rns nzbget`, then
+delete `~/.config/nzbget` and `~/Downloads/usenet`.

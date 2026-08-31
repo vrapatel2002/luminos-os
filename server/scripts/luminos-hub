@@ -164,13 +164,7 @@ def summary():
     return data
 
 
-PAGE = """<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0b0f14">
-<title>Luminos</title>
-<style>
+STYLE = """
  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
  body{margin:0;background:#0b0f14;color:#e6edf3;
       font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
@@ -198,7 +192,28 @@ PAGE = """<!doctype html>
  .qbar i{display:block;height:100%;background:#388bfd}
  .empty{color:#5c6672;font-size:13px;padding:6px 2px}
  .foot{margin-top:26px;color:#5c6672;font-size:12px;text-align:center}
-</style></head><body><div class="wrap">
+ ol.steps{padding-left:0;list-style:none;margin:0}
+ ol.steps li{background:#131a22;border:1px solid #1f2833;border-radius:12px;
+             padding:14px 14px 14px 52px;margin-bottom:10px;position:relative;font-size:14px}
+ ol.steps li .h{display:block;font-weight:700;font-size:15px;margin-bottom:3px}
+ ol.steps li .n{position:absolute;left:14px;top:13px;width:26px;height:26px;border-radius:99px;
+                background:#1f6feb;color:#fff;font-size:13px;font-weight:700;
+                display:flex;align-items:center;justify-content:center}
+ .warn{background:#2a2113;border:1px solid #4a3a15;border-radius:12px;padding:12px 14px;
+       font-size:13px;color:#e3d5a8;margin:16px 0}
+ a.back{color:#7d8894;font-size:13px;text-decoration:none;display:inline-block;margin-bottom:14px}
+ a.go{display:block;text-align:center;padding:15px;border-radius:14px;text-decoration:none;
+      background:#1f6feb;color:#fff;font-weight:600;font-size:16px;margin:18px 0 6px}
+ a.go:active{background:#1a5fca}
+"""
+
+PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>Luminos</title>
+<style>__STYLE__</style></head><body><div class="wrap">
  <h1>Luminos</h1>
  <div class="sub" id="sub">loading…</div>
 
@@ -211,6 +226,9 @@ PAGE = """<!doctype html>
      <div class="ds">Search a film or show &rarr; it downloads itself</div></a>
    <a class="tile" id="l-jf" href="#"><span class="ic">&#127916;</span>
      <div class="nm">Watch</div><div class="ds">Jellyfin</div></a>
+   <a class="tile" href="/offline"><span class="ic">&#9992;</span>
+     <div class="nm">Take it with you</div>
+     <div class="ds">Save to this device for a flight or layover</div></a>
    <a class="tile" id="l-rad" href="#"><span class="ic">&#127909;</span>
      <div class="nm">Movies</div><div class="ds">Radarr</div></a>
    <a class="tile" id="l-son" href="#"><span class="ic">&#128250;</span>
@@ -270,6 +288,55 @@ document.body.addEventListener('click', function(e){ if(e.target===document.body
 </script></body></html>"""
 
 
+# The offline page deliberately carries NO Jellyfin API key. A key in a URL would
+# be a permanent, non-expiring credential sitting in browser history and in any
+# proxy log, and this process has no login of its own to hide it behind. Instead
+# it hands you off to Jellyfin, where your own session is what authorises the
+# download. That is also why there is no "download" button here: the hub cannot
+# read Jellyfin's key database (luminoshub is not in the jellyfin group, on
+# purpose), and giving it that access to save two taps is a bad trade.
+OFFLINE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>Take it with you</title>
+<style>__STYLE__</style></head><body><div class="wrap">
+ <a class="back" href="/">&larr; Luminos</a>
+ <h1>Take it with you</h1>
+ <div class="sub">Save a film or episode onto this phone or laptop, so it plays
+ with no signal at all &mdash; a flight, a layover, the subway.</div>
+
+ <ol class="steps">
+  <li><span class="n">1</span><span class="h">Open it in Jellyfin</span>
+      Tap the button below, then find the film or episode and open its page.</li>
+  <li><span class="n">2</span><span class="h">Press the download arrow</span>
+      On the item's page, next to Play, there is a &#11015; download button.
+      For a whole series, open a single <em>episode</em> &mdash; a season does not
+      download as one piece.</li>
+  <li><span class="n">3</span><span class="h">Watch it from Downloads</span>
+      In the Jellyfin phone app it lands under <b>Downloads</b> and plays with the
+      network off. In a browser it saves as a normal video file &mdash; play it in
+      VLC or mpv.</li>
+ </ol>
+
+ <a class="go" id="go" href="#">Open Jellyfin &rarr;</a>
+
+ <div class="warn"><b>Do this before you lose signal.</b> The file copies over the
+ network now; nothing downloads later on its own. A film is usually 2&ndash;30 GB,
+ so start it on wifi and give it time. Check the phone has the room.</div>
+
+ <div class="warn">Downloading is <b>on</b> for your account, and the server sends
+ files in resumable pieces &mdash; so if the connection drops part-way it picks up
+ where it stopped instead of starting over.</div>
+
+ <div class="foot">works over the tailnet too &mdash; you do not need to be home</div>
+</div>
+<script>
+document.getElementById('go').href = 'https://' + location.hostname + ':__JF__/';
+</script></body></html>"""
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "luminos-hub"
 
@@ -288,16 +355,21 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _render(self, template):
+        page = template.replace("__STYLE__", STYLE)
+        for token, app in (("__SEERR__", "jellyseerr"), ("__JF__", "jellyfin"),
+                           ("__NZB__", "nzbget"), ("__SPACE__", "space"),
+                           ("__RAD__", "radarr"), ("__SON__", "sonarr"),
+                           ("__PROW__", "prowlarr")):
+            page = page.replace(token, str(PUBLIC[app]))
+        return page
+
     def do_GET(self):
         path = urllib.parse.urlsplit(self.path).path
         if path in ("/", "/index.html"):
-            page = PAGE
-            for token, app in (("__SEERR__", "jellyseerr"), ("__JF__", "jellyfin"),
-                               ("__NZB__", "nzbget"), ("__SPACE__", "space"),
-                               ("__RAD__", "radarr"), ("__SON__", "sonarr"),
-                               ("__PROW__", "prowlarr")):
-                page = page.replace(token, str(PUBLIC[app]))
-            self._send(200, page, "text/html; charset=utf-8")
+            self._send(200, self._render(PAGE), "text/html; charset=utf-8")
+        elif path in ("/offline", "/offline/"):
+            self._send(200, self._render(OFFLINE), "text/html; charset=utf-8")
         elif path == "/api/summary":
             self._send(200, json.dumps(summary()), "application/json")
         elif path == "/healthz":
