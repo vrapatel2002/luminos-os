@@ -228,6 +228,282 @@ PATCHES = {
             "    }",
         ),
     ],
+    # The GPU card read "failed" forever.  [CHANGE: claude-code | 2026-08-31]
+    #
+    # Upstream's Gpu service asks nvidia-smi as the shell user.  That is denied
+    # here by design: the nvidia device nodes belong to group `dgpu` (gid 948),
+    # and that group is deliberately EMPTY - the only way in is the setgid
+    # wrapper /usr/local/bin/dgpu-exec.  So the card was not broken, it was the
+    # lock working, and it had no way to say so.
+    #
+    # Handing the shell the group would fix the message and break the point.
+    # Worse, asking at all is the wrong move: the 4050 sits in D3cold under RTD3
+    # (BUG-047, NVreg_DynamicPowerManagement=0x02) and ANY query wakes it.
+    # Measured 2026-08-31: awake and doing nothing draws 13.46 W.  A card that
+    # polled nvidia-smi would hold the dGPU awake for as long as the tab is open,
+    # which is a battery bug dressed up as a widget.
+    #
+    # So do not ask the GPU anything until it is already awake.  The kernel
+    # already knows, and telling us costs nothing and wakes nothing:
+    #
+    #     /sys/bus/pci/devices/0000:01:00.0/power/runtime_status
+    #         -> "suspended" (asleep, 0 W) or "active" (something is using it)
+    #
+    # Verified 2026-08-31 that reading it leaves the card in D3cold/suspended.
+    # Asleep  -> say so, report 0 W, spawn nothing.
+    # Awake   -> a game or a model already paid the wake cost, so nvidia-smi is
+    #            free at that point; show the live numbers for exactly that window.
+    #
+    # The PCI address is hard-coded because this is one fixed laptop.  If it ever
+    # moves, `lspci -D | grep -i nvidia` is where the new one comes from.
+    #
+    # The model name is the same trap in miniature.  `lspci -s 01:00.0` prints it,
+    # and measured 2026-08-31 it flipped the card D3cold -> D0 just by asking.
+    # The sysfs `modalias` attribute is already cached by the kernel, so reading
+    # it wakes nothing, and systemd-hwdb turns it into a name offline:
+    #
+    #     modalias -> pci:v000010DEd000028E1sv00001043sd00003398bc03sc00i00
+    #     systemd-hwdb query <that> -> ID_MODEL_FROM_DATABASE=AD107M [GeForce RTX 4050 ...]
+    #
+    # So the card knows what it is even while it is asleep, which is the point:
+    # the name lives on the subLabel line and the sleep/wake state moved down to
+    # the temperature row, where a number would otherwise just read 0.
+    "modules/dashboard/Performance.qml": [
+        (
+            "import Quickshell.Services.UPower",
+            "import Quickshell.Io\n"
+            "import Quickshell.Services.UPower",
+        ),
+        (
+            "    Loader {\n"
+            "        id: placeholder",
+            "    // [LUMINOS-KWIN] ---- dGPU state without waking the card ----------------\n"
+            "    // See scripts/luminos-caelestia-kwin-overlay for why this does not just\n"
+            "    // use upstream's Gpu service.\n"
+            "    QtObject {\n"
+            "        id: dgpu\n"
+            "\n"
+            "        readonly property string device: \"0000:01:00.0\"\n"
+            "        property bool awake: false\n"
+            "        property bool haveData: false\n"
+            "        property string name: qsTr(\"NVIDIA dGPU\")\n"
+            "        property real usage: 0\n"
+            "        property real temperature: 0\n"
+            "        property real power: 0\n"
+            "\n"
+            "        // Goes where the temperature normally goes. Asleep, a temperature\n"
+            "        // is just a 0 - the state is the thing worth the space.\n"
+            "        readonly property string status: {\n"
+            "            if (!awake)\n"
+            "                return qsTr(\"D3cold - 0 W\");\n"
+            "            if (!haveData)\n"
+            "                return qsTr(\"Waking...\");\n"
+            "            const f = GlobalConfig.services.useFahrenheitPerformance;\n"
+            "            const t = Math.ceil(f ? temperature * 1.8 + 32 : temperature);\n"
+            "            return `${t}\\u00b0${f ? \"F\" : \"C\"} - ${power.toFixed(0)} W`;\n"
+            "        }\n"
+            "\n"
+            "        readonly property string statusIcon: awake ? (haveData ? \"\" : \"hourglass\") : \"bedtime\"\n"
+            "    }\n"
+            "\n"
+            "    // Kernel state only. Reading this does NOT wake the card.\n"
+            "    FileView {\n"
+            "        id: dgpuState\n"
+            "\n"
+            "        path: `/sys/bus/pci/devices/${dgpu.device}/power/runtime_status`\n"
+            "        blockLoading: true\n"
+            "        printErrors: false\n"
+            "    }\n"
+            "\n"
+            "    // The kernel already cached this string, so reading it wakes nothing.\n"
+            "    FileView {\n"
+            "        id: dgpuModalias\n"
+            "\n"
+            "        path: `/sys/bus/pci/devices/${dgpu.device}/modalias`\n"
+            "        blockLoading: true\n"
+            "        printErrors: false\n"
+            "    }\n"
+            "\n"
+            "    // Name from the offline PCI id database - never asks the card.\n"
+            "    Process {\n"
+            "        running: true\n"
+            "        command: [\"systemd-hwdb\", \"query\", dgpuModalias.text().trim()]\n"
+            "\n"
+            "        stdout: StdioCollector {\n"
+            "            onStreamFinished: {\n"
+            "                const m = text.match(/^ID_MODEL_FROM_DATABASE=(.*)$/m);\n"
+            "                if (!m)\n"
+            "                    return;\n"
+            "                // \"AD107M [GeForce RTX 4050 Max-Q / Mobile]\" -> the bracket\n"
+            "                // half. The die codename means nothing on a dashboard.\n"
+            "                const b = m[1].match(/\\[(.*)\\]/);\n"
+            "                dgpu.name = b ? b[1] : m[1];\n"
+            "            }\n"
+            "        }\n"
+            "    }\n"
+            "\n"
+            "    // Only ever run while the card is ALREADY awake, so this never\n"
+            "    // causes a wake - it only reports one somebody else paid for.\n"
+            "    Process {\n"
+            "        id: dgpuQuery\n"
+            "\n"
+            "        command: [\"dgpu-exec\", \"nvidia-smi\", "
+            "\"--query-gpu=utilization.gpu,temperature.gpu,power.draw\", "
+            "\"--format=csv,noheader,nounits\"]\n"
+            "\n"
+            "        stdout: StdioCollector {\n"
+            "            onStreamFinished: {\n"
+            "                const f = text.trim().split(\",\").map(s => s.trim());\n"
+            "                if (f.length < 3 || !f[0])\n"
+            "                    return;\n"
+            "                dgpu.usage = (parseFloat(f[0]) || 0) / 100;\n"
+            "                dgpu.temperature = parseFloat(f[1]) || 0;\n"
+            "                dgpu.power = parseFloat(f[2]) || 0;\n"
+            "                dgpu.haveData = true;\n"
+            "            }\n"
+            "        }\n"
+            "    }\n"
+            "\n"
+            "    Timer {\n"
+            "        running: gpuCard.active\n"
+            "        interval: GlobalConfig.dashboard.resourceUpdateInterval\n"
+            "        repeat: true\n"
+            "        triggeredOnStart: true\n"
+            "\n"
+            "        onTriggered: {\n"
+            "            dgpuState.reload();\n"
+            "            dgpu.awake = dgpuState.text().trim() === \"active\";\n"
+            "            if (dgpu.awake) {\n"
+            "                if (!dgpuQuery.running)\n"
+            "                    dgpuQuery.running = true;\n"
+            "            } else {\n"
+            "                dgpu.haveData = false;\n"
+            "                dgpu.usage = 0;\n"
+            "                dgpu.temperature = 0;\n"
+            "                dgpu.power = 0;\n"
+            "            }\n"
+            "        }\n"
+            "    }\n"
+            "\n"
+            "    Loader {\n"
+            "        id: placeholder",
+        ),
+        (
+            "                    sourceComponent: HeroCard {\n"
+            "                        icon: \"desktop_windows\"\n"
+            "                        label: qsTr(\"GPU\")\n"
+            "                        subLabel: Gpu.name\n"
+            "                        usage: Gpu.percentage\n"
+            "                        temperature: Gpu.temperature\n"
+            "                        accent: Colours.palette.m3secondary\n"
+            "\n"
+            "                        ServiceRef {\n"
+            "                            service: Gpu\n"
+            "                        }\n"
+            "                    }",
+            "                    // [LUMINOS-KWIN] Fed from `dgpu` above, not from the Gpu\n"
+            "                    // service, and with NO ServiceRef - refing it is what made\n"
+            "                    // the card poll nvidia-smi and read 'failed'.\n"
+            "                    sourceComponent: HeroCard {\n"
+            "                        icon: \"desktop_windows\"\n"
+            "                        label: qsTr(\"GPU\")\n"
+            "                        subLabel: dgpu.name\n"
+            "                        usage: dgpu.usage\n"
+            "                        temperature: dgpu.temperature\n"
+            "                        statusText: dgpu.status\n"
+            "                        statusIcon: dgpu.statusIcon\n"
+            "                        accent: dgpu.awake ? Colours.palette.m3secondary "
+            ": Colours.palette.m3onSurfaceVariant\n"
+            "                    }",
+        ),
+    ],
+    # The GPU card needs to say "asleep" where the CPU card says "62 degrees".
+    # [CHANGE: claude-code | 2026-08-31]
+    #
+    # HeroCard is shared by CPU and GPU, so this adds two OPTIONAL properties that
+    # default to empty.  Empty means the upstream thermometer row renders exactly
+    # as before, so the CPU card is unchanged.
+    "modules/dashboard/performance/HeroCard.qml": [
+        (
+            "    required property real temperature",
+            "    required property real temperature\n"
+            "\n"
+            "    // [LUMINOS-KWIN] Optional override for the temperature row. The dGPU\n"
+            "    // spends most of its life in D3cold, where a temperature is a 0 and\n"
+            "    // the state is the useful number. Empty = upstream behaviour.\n"
+            "    property string statusText: \"\"\n"
+            "    property string statusIcon: \"\"",
+        ),
+        (
+            "                text: root.temperature > 90 ? \"thermometer_alert\" : \"thermometer\"\n"
+            "                color: root.temperature > 90 ? Colours.palette.m3error : root.accent",
+            "                text: root.statusIcon || "
+            "(root.temperature > 90 ? \"thermometer_alert\" : \"thermometer\")\n"
+            "                color: root.temperature > 90 && !root.statusIcon ? "
+            "Colours.palette.m3error : root.accent",
+        ),
+        (
+            "                text: `${Math.ceil(GlobalConfig.services.useFahrenheitPerformance "
+            "? root.temperature * 1.8 + 32 : root.temperature)}\u00b0"
+            "${GlobalConfig.services.useFahrenheitPerformance ? \"F\" : \"C\"}`",
+            "                Layout.fillWidth: true\n"
+            "                elide: Text.ElideRight\n"
+            "                text: root.statusText || "
+            "`${Math.ceil(GlobalConfig.services.useFahrenheitPerformance "
+            "? root.temperature * 1.8 + 32 : root.temperature)}\u00b0"
+            "${GlobalConfig.services.useFahrenheitPerformance ? \"F\" : \"C\"}`",
+        ),
+    ],
+    # BUG-123 part two: the dashboard stutters when you switch tabs.
+    # [CHANGE: claude-code | 2026-08-31]
+    #
+    # Every tab is a different size, so switching tabs animates the panel's
+    # implicitWidth AND implicitHeight for ~500 ms.  A panel that is a new size
+    # on every frame relayouts its whole content tree and re-uploads its
+    # layer-shell mask ~30 times per switch, and that work is on the GUI thread.
+    #
+    # Measured on the G14, 2026-08-31, with a 16 ms timer inside the shell (a
+    # timer runs late only when the thread is BUSY; idle does not delay it):
+    #
+    #     dashboard closed, 25 s ......................    0 ms blocked
+    #     dashboard open, sitting still ..............    0 ms blocked
+    #     switch Dashboard <-> Media .................  460-550 ms blocked,
+    #                                                    worst single freeze 91 ms
+    #     same switch with these two Behaviors gone ..    0-52 ms blocked,
+    #                                                    worst single freeze 29 ms
+    #
+    # At 60 Hz a frame is 16.7 ms, so a 91 ms freeze is five dropped frames, and
+    # ~500 ms of block across a ~500 ms animation means the animation was stalled
+    # essentially end to end.  That is the stutter, and it is why a high power
+    # profile hides it: more clock speed just shortens each stall.
+    #
+    # Two things were ruled OUT by measurement, so do not go back to them:
+    #   - Tab rebuild churn.  The Loaders do destroy the outgoing pane and
+    #     rebuild the incoming one, but making that sticky only bought 15%
+    #     (506 -> 411 ms).  The tell was that the SECOND visit to a tab cost the
+    #     same as the first.
+    #   - Anything outside the dashboard.  Closed and open-but-idle both measure
+    #     a clean zero.
+    #
+    # Cost: the panel now snaps to the new tab's size instead of growing into it.
+    # The horizontal slide (Behavior on contentX) is untouched, so the tabs still
+    # slide across.  A smooth animation nobody can watch without it hitching is
+    # not worth five dropped frames.
+    "modules/dashboard/Content.qml": [
+        (
+            "    Behavior on implicitWidth {\n"
+            "        Anim {}\n"
+            "    }\n"
+            "\n"
+            "    Behavior on implicitHeight {\n"
+            "        Anim {}\n"
+            "    }",
+            "    // [LUMINOS-KWIN] Deliberately NO Behavior on implicitWidth/implicitHeight.\n"
+            "    // Animating the panel's size relayouts the whole dashboard on every frame\n"
+            "    // and blocked the GUI thread for ~500 ms per tab switch.  See the note in\n"
+            "    // scripts/luminos-caelestia-kwin-overlay for the measurements.",
+        ),
+    ],
     # getMonitor("active") is how the brightness keys find a screen.  Without
     # Hyprland it returns undefined and increase/decreaseBrightness() return
     # early - the keys appear to work and change nothing.

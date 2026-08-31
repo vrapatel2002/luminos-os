@@ -3586,6 +3586,49 @@ The remaining ~90 ms hitch on every dashboard **open** is a different thing: `Wr
 `CoverVisualiser` rebuilds one `ShapePath` per bar per cava frame, which is what puts that tab at
 ~66% of a core. Neither is fixed here.
 
+### PART TWO — 2026-08-31: it was never fully fixed, and the user said so
+**Status:** FIXED · **Component:** `scripts/luminos-caelestia-kwin-overlay`
+(patches `modules/dashboard/Content.qml`)
+
+The user, plainly: *"the dashboard lags or stutter when switched from media to dashboard and more
+and this was discussed in some bug but we didnt solve it that time... only reason it is not
+[noticeable] is because the power profile is good enough to do it."* He was right on both counts.
+
+Part one stopped the **window** resizing. It left the `Behavior`s themselves in place, so the Item
+inside still animates its `implicitWidth`/`implicitHeight` for ~500 ms per switch, relayouting the
+whole dashboard content tree every frame — on the GUI thread. A faster CPU hid it. It did not fix it.
+
+#### The instrument came first, and the first one was wrong
+`FrameAnimation.frameTime > 20ms` reported ~100 ms hitches even on the static Weather tab, because
+`frameTime` measures time since the last **rendered** frame — an idle gap and a stall look identical.
+
+Replaced with a 16 ms repeating `Timer` measuring its own **lateness**. A timer is only late when
+the GUI thread is busy; idle never delays it. The probe lived in `shell.qml` (always alive, so it
+can measure the dashboard-*closed* baseline) driven by a temporary `measure` IPC, so each switch was
+one isolated event with 6 s of settling either side — not an auto-cycling loop that never rests.
+
+| moment | GUI thread blocked | worst single freeze |
+|---|---|---|
+| closed, 25 s | **0 ms** | — |
+| open, idle | **0 ms** | — |
+| opening the dashboard | 138–179 ms | 112–121 ms |
+| switch Dash ↔ Media, **before** | **461–552 ms** | 91 ms |
+| switch Dash ↔ Media, **after** | **0–52 ms** | 29 ms |
+
+#### A hypothesis the data killed
+The obvious suspect was the tab `Loader`s destroying and rebuilding their panes. Making them sticky
+bought 15% (506 → 411 ms) and was **reverted**. The tell was in the numbers all along: the *second*
+visit to a tab cost the same as the first. Nothing was being rebuilt.
+
+#### The fix
+Delete both `Behavior`s. The panel now snaps to its new size instead of growing into it; the
+horizontal slide (`Behavior on contentX`) is untouched, so the switch still reads as a movement.
+
+Not doable with `perf` (not installed) or `eu-stack`/gdb (`ptrace_scope=1`) — this was bisection.
+
+**The lesson.** A bug that is only invisible at high power is not fixed, it is outrun. And measure
+*lateness*, not frame time: one is a clock, the other is a mixture.
+
 ---
 
 ## BUG-124 — notifications arrive, are stored, and never draw (Caelestia on Plasma)
@@ -5061,3 +5104,138 @@ The `tailored_at` test had to move from `WHERE` into `HAVING MAX(COALESCE(tailor
 for two months. A label that asserts a property is not a test of that property — and the more
 confidently it is worded, the longer nobody checks. This was found by reading the shortlist
 out loud, not by reading the code.
+
+---
+
+### BUG-150 — the volume bar popped out over a fullscreen game, and only that one panel did
+**Status:** FIXED — 2026-08-31 · **Component:** `config/quickshell/caelestia-bar/shell.qml`
+
+#### The symptom, from the user
+Playing *007 First Light* fullscreen: *"any and all the hover were not working which is correct but
+the volume bar was getting poped out as mouse went to right side and it was annoying... others hover
+to pop out didn't have same problem."*
+
+That last clause is the entire diagnosis. Every other tripwire in this shell went correctly dead
+under the game. One did not.
+
+#### Root cause — a layer, not a logic error
+The right-edge catch strip was `WlrLayershell.layer: WlrLayer.Overlay`, permanently. Every other
+tripwire sits at `Top`. KWin stacks a fullscreen window **above `Top` but below `Overlay`**, so the
+game covered the others and swallowed their pointer events — while this one stayed above the game
+and kept arming. The hover logic was never wrong; this window was simply the only surface the game
+could not cover.
+
+`Overlay` was chosen for a real reason: a notification you cannot see over a fullscreen video is not
+a notification.
+
+#### The road that is closed here
+Upstream guards this with an explicit fullscreen check (`drawers/Interactions.qml:55`) off
+Hyprland's toplevel list. **That cannot work on KWin.** Checked with `wayland-info`, 2026-08-31:
+KWin exports neither `zwlr_foreign_toplevel_manager_v1` nor `ext_foreign_toplevel_list_v1`, so
+Quickshell's `ToplevelManager` is permanently empty and can never tell us a game is up.
+Re-check that list before anyone tries this again.
+
+#### The fix — let the compositor be the sensor
+Do not detect fullscreen at all. Sit at `Top` when idle, so a fullscreen window covers the strip on
+its own — the behaviour the bar already had and the user already called correct — and promote to
+`Overlay` only while a panel is genuinely out:
+
+```qml
+readonly property bool anythingShowing: scope.screenState.osd || scope.screenState.session
+    || scope.screenState.sidebar || osd.visible || session.visible
+    || sidebarDrawer.visible || notifPanel.visible
+
+WlrLayershell.layer: rightEdge.anythingShowing ? WlrLayer.Overlay : WlrLayer.Top
+```
+
+- **It cannot oscillate.** At `Top` under a fullscreen window no pointer events arrive, so hover
+  cannot set the flag that would promote it.
+- **Volume keys still show over a game.** `Osd/Wrapper.qml:51-73` opens on PipeWire's own volume
+  change — that path never needed the pointer.
+- **A live `set_layer`, not a window remap.** The property is writable with a notify
+  (`quickshell-wayland-layershell.qmltypes:102`), and `set_layer` has existed since
+  `zwlr_layer_shell_v1` version 2; KWin advertises version 5.
+- The `screenState` flags are tested *as well as* the four `visible`s so promotion lands on the
+  frame the panel is **asked** for, not one frame later once its slide animation has begun.
+
+**The lesson.** "Everything else behaves, one thing doesn't" is not a bug in the one thing's logic.
+It is a question about what makes that one thing different — and here the difference was a single
+enum value.
+
+---
+
+### BUG-151 — the GPU card read "failed" forever, and fixing it the obvious way would have cost 13 W
+**Status:** FIXED — 2026-08-31 · **Component:** `scripts/luminos-caelestia-kwin-overlay`
+(patches `modules/dashboard/Performance.qml`, `modules/dashboard/performance/HeroCard.qml`)
+
+#### The symptom
+Dashboard → Performance → the GPU hero card showed `failed` where the model name belongs, always.
+
+#### Root cause — the lock working, with no way to say so
+Upstream's `Gpu` service shells out to `nvidia-smi` as the shell user. That is **denied by design**
+on this box: the NVIDIA device nodes belong to group `dgpu` (gid 948), and that group is
+deliberately **empty** — the only way through is the setgid wrapper `/usr/local/bin/dgpu-exec`.
+The card was not broken. It had no vocabulary for "not allowed".
+
+#### Why the obvious fix was the wrong fix
+Adding the shell to `dgpu` would have fixed the string and dissolved the point of the group. Worse,
+**asking at all is wrong here.** The 4050 sits in D3cold under RTD3 (BUG-047,
+`NVreg_DynamicPowerManagement=0x02`) and any query wakes it. Measured 2026-08-31: **awake and doing
+nothing draws 13.46 W.** A card that polled `nvidia-smi` would have pinned the dGPU awake for as
+long as the tab was open — a battery bug wearing a widget's clothes.
+
+#### The fix — ask the kernel, never the card
+```
+/sys/bus/pci/devices/0000:01:00.0/power/runtime_status
+    "suspended" -> asleep, 0 W        "active" -> somebody is using it
+```
+Verified that reading it leaves the card in D3cold. Asleep → say so and **spawn nothing**. Awake →
+a game or a model already paid the wake cost, so `dgpu-exec nvidia-smi` is free for exactly that
+window, and the live numbers appear. No `ServiceRef` on `Gpu` anywhere — ref'ing it is what started
+the polling in the first place.
+
+#### The model name, without waking anything
+The user then asked to see *which* card it is even while it sleeps. Two dead ends and one answer:
+
+| source | result |
+|---|---|
+| `lspci -s 01:00.0` | correct name, but **flipped the card D3cold → D0 just by asking**. Rejected. |
+| `awk` over `/usr/share/hwdata/pci.ids` | returned `NV28 [GeForce4 Ti 4800]`. `awk` compared `"28e1"` **numerically** — `28e1` is valid scientific notation, `28×10¹ = 280` — and matched device `0280`. Force a string compare (`$1 "" == DEV ""`) and it is correct. |
+| `modalias` + `systemd-hwdb` | **used.** The kernel already cached the string, so reading it wakes nothing, and hwdb is an offline database. |
+
+```
+$ cat /sys/bus/pci/devices/0000:01:00.0/modalias
+pci:v000010DEd000028E1sv00001043sd00003398bc03sc00i00
+$ systemd-hwdb query pci:v000010DEd000028E1sv00001043sd00003398bc03sc00i00
+ID_MODEL_FROM_DATABASE=AD107M [GeForce RTX 4050 Max-Q / Mobile]
+```
+
+#### The layout
+The name lives on the subLabel line permanently. The sleep/wake state moved down into the
+**temperature** row, because asleep a temperature is only ever a `0`:
+
+```
+GPU                                  GPU
+GeForce RTX 4050 Max-Q / Mobile      GeForce RTX 4050 Max-Q / Mobile
+🌙  D3cold - 0 W                     🌡  45°C - 14 W
+```
+
+`HeroCard.qml` is shared with the CPU card, so this adds two **optional** properties,
+`statusText`/`statusIcon`, both defaulting to `""`. Empty means the upstream thermometer row renders
+exactly as before, and the CPU card is untouched.
+
+#### Verified
+Tab open 10 s with the GPU idle → stayed `suspended` (the card does not wake itself). A held load →
+live name / 45 °C / 14 W. 30 s after the load stopped → back to `suspended` on its own. Both states
+screenshotted. `qmllint` clean; overlay `--check` green at 7 patched files.
+
+#### A self-inflicted wound worth recording
+To screenshot the Performance tab there was no way to click it, so `showDashboard/showMedia/
+showWeather` were temporarily set `false` in `~/.config/caelestia/shell.json`. Restoring the backup
+**removed** those keys instead of setting them back to `true` — and Caelestia's config adapter only
+reacts to keys that *change*, so the stale in-memory values survived. The file diffed clean while the
+user's dashboard sat there with three tabs missing. **Deleting a key is not resetting it, and a
+config file is not a test fixture.**
+
+**The lesson.** `failed` was the true answer to a question that should never have been asked. The
+fix was not getting permission — it was asking something cheaper that already knew.
