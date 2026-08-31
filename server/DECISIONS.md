@@ -671,6 +671,38 @@ resolvectl query news.usenetserver.com -> "acquired via local or encrypted trans
 The cost is that the server cannot resolve other peers by their MagicDNS name. It does not
 need to — it is the thing being connected *to*.
 
+**Amended 2026-08-31 — the cost also applied to its *own* name, and that is now fixed with
+one `/etc/hosts` line.** Once DECISION 84 put a real Let's Encrypt certificate on
+`luminos-server.tail1fd435.ts.net`, the server was the only machine on the tailnet that
+could not reach its own front door by name. Nothing user-facing was broken — the phone and
+the G14 resolve it fine — but every test run *on* the box returned `000`, which reads like a
+service failure and is not one. **That false signal is the actual cost, and it burned an
+hour.** The fix does not touch systemd-resolved at all:
+
+```
+# /etc/hosts   (backup: /etc/hosts.bak-20260831)
+100.82.125.26  luminos-server.tail1fd435.ts.net
+```
+
+`nss-files` is consulted ahead of DNS, so that one name is answered locally and never becomes
+a query; **every other name still leaves over DNS-over-TLS to Quad9, unchanged.** Verified
+after the edit: `Current DNS Server: 9.9.9.9#dns.quad9.net`, `+DNSOverTLS`,
+`resolvectl query github.com` → "encrypted transport: yes", `Tailscale DNS: disabled`,
+`ip route get 8.8.8.8` still `dev enp2s0`. All 8 HTTPS ports answer by name from the box with
+no `-k` (11–48 ms), `openssl s_client -verify_return_error` → `Verification: OK`, and the
+download test that originally failed now returns **206** with `accept-ranges: bytes` —
+negative-tested at **401** with the key removed.
+
+**The split-DNS alternative was rejected on purpose.** Routing only `~tail1fd435.ts.net` to
+`100.100.100.100` is the more general answer and would scale to future peers, but it means
+claiming DNS on the `tailscale0` link — and on this box **link DNS beats global DNS**, which
+is the exact trap that forced the `UseDNS=false` drop-ins in DECISION 48. `tailscale0` is
+also the one link with `Default Route: yes`, so a link resolver there would be a candidate
+for *every* query, not just tailnet ones. One static line for one static address is the
+smaller blast radius. Revisit only if the server ever needs to resolve a *peer* by name.
+
+**Undo is one command:** `sudo cp /etc/hosts.bak-20260831 /etc/hosts`.
+
 ### Proof, and the limit of it
 
 `curl --interface 100.82.125.26 http://100.82.125.26:8096/System/Info/Public` → **200**.
