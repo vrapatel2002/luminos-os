@@ -5590,3 +5590,124 @@ dissolves by itself the next time a full upgrade runs.
 
 **Undo:** `systemctl --user disable --now luminos-nzbget && sudo pacman -Rns nzbget`, then
 delete `~/.config/nzbget` and `~/Downloads/usenet`.
+
+---
+
+## DECISION 88 — The G14 gets a firewall and encrypted DNS, tuned for a machine that moves
+# [CHANGE: claude-code | 2026-08-31]
+
+**The measurement that started this.** Audited side by side against the media server, the
+laptop was the *less* protected of the two machines, which is backwards — the laptop is the
+one that leaves the house. The server had a deliberate hardening pass (DECISION 48/51/84);
+the G14 never had one. It ran `policy accept` on every netfilter chain, i.e. no firewall at
+all, and `luminos-ram` was answering `/metrics` on `:9091` with **HTTP 200, 9805 bytes, no
+credentials**, to anything on the wifi. That was proven by curling it *from the server*, not
+assumed.
+
+The instruction was "whatever is the best — this laptop is used for a variety of purposes so
+there should be no problem using and accessing other things." So the shape of this decision
+is: **close the doors nobody uses, and do not touch anything a person would notice.**
+
+### The rule that makes this safe: outbound is untouched
+
+`config/nftables-g14.conf` sets `policy drop` on **input** and **forward**, and leaves
+**output on `policy accept`**. Browsing, gaming, downloading, HIVE, the forex bot, every
+update and every API call are outbound-initiated and are governed by the
+`ct state established,related accept` rule. Nothing about daily use changes. This file only
+governs connections coming *in*.
+
+### This is NOT a copy of the server's firewall, and must not become one
+
+The server sits on one network forever, so `ip saddr 192.168.2.0/24 accept` is a safe
+blanket rule there. A laptop joins airport, hotel and cafe wifi — **the same rule would hand
+every stranger on those networks the same trust as the home LAN.** So here the home subnet
+is named explicitly and used for as little as possible (`:22` and `:8090` only), and the
+**tailnet does the heavy lifting instead**: it is authenticated, it works from anywhere, and
+it does not care what wifi we are on.
+
+Things that are open, and why each one has to be:
+
+| Rule | Why removing it would be visible |
+|---|---|
+| `iifname "tailscale0" accept` | the phone reaching SSH and the mobile chat from anywhere |
+| `udp dport 41641` | without it every tailnet peer silently falls back to a relay — slower, and hard to diagnose because it still *works* |
+| ICMPv6 nd-* / mld | dropping neighbour discovery breaks IPv6 entirely, which presents as "wifi is broken" |
+| `udp sport 67 dport 68`, `udp dport 546` | DHCP replies; without them a new network may never hand out an address |
+| `5353` / `5355` | printers, casting, KDE Connect pairing |
+
+We define our **own table** and use `table X; delete table X; table X {…}` rather than
+`flush ruleset`. Tailscale keeps its rules in its own tables and flushing everything would
+tear them out from under a live tunnel. netfilter requires a packet to be accepted by
+**every** input hook, so our drop policy governs regardless of Tailscale's accept policy.
+
+**Applied behind a 10-minute `systemd-run` auto-rollback** with a snapshot at
+`/root/nft-before-20260831.rules`, and only cancelled after the verification below passed.
+
+### Encrypted DNS: opportunistic, not strict — and only on networks we control
+
+Two deliberate departures from the server's config, both for the same reason (it moves):
+
+1. **`DNSOverTLS=opportunistic`, not `yes`.** Strict DoT hard-fails behind a captive portal,
+   and the symptom at a hotel or an airport gate is "the internet is broken" with no way to
+   reach the login page. Opportunistic encrypts whenever the resolver supports it and
+   degrades to plain only when it cannot.
+2. **No global `ignore-auto-dns`.** A first attempt dropped
+   `/etc/NetworkManager/conf.d/90-luminos-dns.conf` to force this on *every* network. That
+   was **removed** — it is the same captive-portal footgun, and it buys close to nothing,
+   because opportunistic DoT against a hostile airport router is worth ~zero anyway. Instead
+   the four `BELL851*` profiles clear their DNS individually. Known networks get Quad9 over
+   TLS; unknown networks behave completely normally.
+
+**The trap that cost three failed attempts:** the active wifi profile is
+`ipv4.method=manual` with a hardcoded `dns=192.168.2.1;207.164.234.129;`. **`ignore-auto-dns`
+only suppresses DHCP-supplied DNS** — it does nothing about a static `dns=` line, so setting
+it (twice, plus a full `con down`/`con up`) changed nothing. And in systemd-resolved,
+**link DNS beats global DNS**, so the global Quad9 config sat there looking correct while
+every query went to the router in plaintext. The fix is clearing `ipv4.dns`/`ipv6.dns` on
+the profile itself. This is the third time link-beats-global has bitten this project; see
+DECISION 48.
+
+### How we know it works, rather than assuming
+
+Firewall, negative-tested **from the media server** — the earlier `:9091` leak is the control:
+
+- `:9091` metrics — was **HTTP 200 / 9805 bytes**, now **blocked**. `:6789` nzbget blocked.
+- `:22` and `:8090` still reachable from the home LAN, on purpose.
+- Everything still reachable over the tailnet. `tailscale status` reports
+  **`DIRECT via 192.168.2.61:41641`**, which is what proves the 41641 rule.
+- Drop counter observed climbing (86 → 1229 packets), so the policy is live, not cosmetic.
+- Internet 200, DNS resolving, server reachable by LAN IP, tailnet name and SSH.
+
+DNS:
+
+- `resolvectl query github.com` → **"Data was acquired via … encrypted transport: yes"**.
+- `ss` shows a live established socket **`192.168.2.16 → 9.9.9.9:853`** owned by
+  `systemd-resolve`, and **nothing at all** talking to `192.168.2.1:53`.
+- MagicDNS still resolves (1.3 ms) and the hub answers 200 by name.
+
+**A tooling note that nearly produced a false pass:** the packet capture intended as the
+on-the-wire proof printed `0` plaintext and `0` encrypted packets — because **`tcpdump` is
+not installed**, and the redirect hid the error. Identical shape to `checkupdates | wc -l`
+returning `0` on this box earlier the same day. A zero from a missing tool is not a result.
+`ss` was used instead because it is actually present.
+
+### Not fixed here, because they are not mine to decide
+
+- **SSH password authentication is still `yes`.** There is **no `~/.ssh/authorized_keys` on
+  this machine**, so turning it off would lock out remote SSH entirely. Needs a key
+  installed first, or `sshd` stopped outright.
+- **213 pending package upgrades.** Closing that gap means a full `pacman -Syu`, which bumps
+  **kirigami 6.28 → 6.29** and silently reverts the desktop look (DECISION 72). The security
+  argument and the desktop-look argument point in opposite directions.
+
+**Undo:**
+
+```bash
+# firewall
+sudo systemctl disable --now nftables && sudo nft delete table inet luminos
+# encrypted DNS
+sudo rm /etc/systemd/resolved.conf.d/luminos-dot.conf && sudo systemctl restart systemd-resolved
+# wifi DNS (restores the static router list)
+sudo cp -a /root/nm-profiles-backup-20260831/. /etc/NetworkManager/system-connections/ \
+  && sudo nmcli con reload && sudo nmcli con up "BELL851 2.4 GHz"
+```
