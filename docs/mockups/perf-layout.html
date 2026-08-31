@@ -33,6 +33,8 @@
     --tertiary:           #b9c8db;
     --cpu:                #bfb6f2;
     --track:              #46454f;
+    --batteryBg:          #c9c3e9;  /* m3primaryContainer - the tank is filled */
+    --batteryFg:          #45407a;
     --ok:                 #86d98a;
     --warn:               #f2c94c;
     --bad:                #ff8a80;
@@ -224,10 +226,11 @@
       <span>Line the rows up into a grid</span>
       <small>Every row the same height, every column the same width top to bottom.
              Cards stretch to their cell instead of hugging their text.</small></label>
-    <label class="opt"><input type="checkbox" id="uniform" checked>
+    <label class="opt"><input type="checkbox" id="uniform">
       <span>&hellip; and all columns the same width</span>
-      <small>Off: each column takes only the width it needs, but still lines up
-             with the column above it.</small></label>
+      <small>Forces every column to the widest one, which <b>overrides</b> the
+             per-card minimums below. Off: each column takes only what it needs
+             and still lines up with the column above it.</small></label>
   </fieldset>
 
   <fieldset>
@@ -251,6 +254,8 @@
     <legend>Everything else</legend>
     <label class="row">Gap between cards <span class="val" id="v-gap"></span>
       <input type="range" id="gap" min="4" max="24" step="4"></label>
+    <label class="row">Memory / VRAM &mdash; min width <span class="val" id="v-memw"></span>
+      <input type="range" id="memw" min="120" max="360" step="10"></label>
     <label class="row">Network card &mdash; min width <span class="val" id="v-netw"></span>
       <input type="range" id="netw" min="150" max="420" step="10"></label>
     <label class="row">Storage card &mdash; min width <span class="val" id="v-stow"></span>
@@ -302,14 +307,16 @@ const MEASURED = {
 const CHROME = { header: 29, gapTop: 20, gapBottom: 4, value: 26 };
 
 const els = {};
-["gauge","padh","padv","font","gap","netw","stow","drop","scale","herow","grid","uniform"]
+["gauge","padh","padv","font","gap","memw","netw","stow","drop","scale","herow","grid","uniform"]
   .forEach(id => els[id] = document.getElementById(id));
 
+// Shawn's settled numbers as of 2026-08-31: option C, wide cards, 85% zoom,
+// gauge 98 (83 after the zoom), grid on, columns sized per column.
 const DEFAULTS = {
   layout: "c", shape: "h",
-  gauge: 68, padh: 12, padv: 12, font: 90, gap: 12,
-  netw: 280, stow: 240, drop: true, scale: 85, herow: 340,
-  grid: true, uniform: true
+  gauge: 98, padh: 12, padv: 12, font: 90, gap: 12,
+  memw: 170, netw: 280, stow: 240, drop: true, scale: 85, herow: 340,
+  grid: true, uniform: false
 };
 
 function readState() {
@@ -329,6 +336,7 @@ function readState() {
     // Every width in the mockup passes through `scale`, so the master
     // slider cannot disagree with the individual ones.
     heroW: Math.round(+els.herow.value * scale),
+    memw:  Math.round(+els.memw.value  * scale),
     netw:  Math.round(+els.netw.value  * scale),
     stow:  Math.round(+els.stow.value  * scale),
     drop:  els.drop.checked,
@@ -348,7 +356,7 @@ function applyDefaults() {
   const shp = document.querySelector(`input[name=shape][value="${get("shape")}"]`);
   (shp || document.querySelector('input[name=shape][value="h"]')).checked = true;
 
-  ["gauge","padh","padv","font","gap","netw","stow","scale","herow"]
+  ["gauge","padh","padv","font","gap","memw","netw","stow","scale","herow"]
     .forEach(k => els[k].value = get(k));
   ["drop","grid","uniform"].forEach(k => els[k].checked = String(get(k)) !== "false");
 }
@@ -552,15 +560,31 @@ function trioCard(s) {
       ${dimTag(w, h)}</div>` };
 }
 
-function batteryCard(s) {
-  const w = Math.round(MEASURED.battery.w * s.scale), h = MEASURED.battery.h;
+// BatteryTank measures 150 x 160 on its own, but in the real dashboard it
+// Layout.fillHeights - it is one tall lozenge down the whole right edge, with
+// the charge state parked at the bottom. So its height is an OUTPUT here, not
+// an input: whatever the rows come to, the battery matches.
+function batteryCard(s, h) {
+  const w = Math.round(MEASURED.battery.w * s.scale);
+  const f = s.font;
   return { w, h, html: `
-    <div class="card" style="width:${w}px;height:${h}px">
-      <div style="padding:16px;text-align:center">
-        <div class="ct" style="font-size:15px;color:var(--ok)">Battery</div>
-        <div style="margin:14px auto 0;width:54px;height:78px;border-radius:14px;
-                    background:var(--track);position:relative;overflow:hidden">
-          <div style="position:absolute;bottom:0;left:0;right:0;height:72%;background:var(--ok)"></div>
+    <div class="card" style="width:${w}px;height:${h}px;
+                             background:var(--batteryBg);border-radius:${Math.round(28*s.scale)}px">
+      <div style="height:100%;display:flex;flex-direction:column;
+                  padding:${s.padv + 4}px ${s.padh + 2}px;color:var(--batteryFg)">
+        <svg width="${Math.round(18*s.scale)}" height="${Math.round(26*s.scale)}" viewBox="0 0 18 26">
+          <rect x="6" y="0" width="6" height="3" rx="1" fill="currentColor"/>
+          <rect x="1" y="3" width="16" height="23" rx="5" fill="currentColor"/>
+        </svg>
+        <div style="font-size:${Math.round(16*f)}px;margin-top:6px">Battery</div>
+        <div style="margin-top:auto;text-align:right">
+          <div style="font-size:${Math.round(12*f)}px;opacity:.8">Full</div>
+          <div style="font-size:${Math.round(30*s.scale)}px;line-height:1.1;
+                      white-space:nowrap;display:flex;align-items:center;
+                      justify-content:flex-end;gap:2px">
+            <svg width="${Math.round(20*s.scale)}" height="${Math.round(26*s.scale)}" viewBox="0 0 20 26">
+              <polygon points="12,1 3,15 9,15 8,25 17,10 11,10" fill="currentColor"/>
+            </svg>100%</div>
         </div>
       </div>${dimTag(w, h)}</div>` };
 }
@@ -577,6 +601,7 @@ function build() {
   document.getElementById("v-padv").textContent  = s.padv + " px";
   document.getElementById("v-font").textContent  = Math.round(s.font * 100) + "%";
   document.getElementById("v-gap").textContent   = s.gap + " px";
+  document.getElementById("v-memw").textContent  = s.memw + " px";
   document.getElementById("v-netw").textContent  = s.netw + " px";
   document.getElementById("v-stow").textContent  = s.stow + " px";
   document.getElementById("v-scale").textContent = Math.round(s.scale * 100) + "%";
@@ -589,10 +614,10 @@ function build() {
   const gpu = heroCard(s, { icon: "&#128421;", title: "GPU", sub: "GeForce RTX 4050 Max-Q / Mobile",
     pct: "0%", frac: .0, temp: 47, status: "47&deg;C &middot; 2 W", colour: "var(--secondary)" });
 
-  const memory = gaugeCard(s, { icon: "&#127974;", title: "Memory", pct: "51%",
-    value: "7.6 / 14.9 GiB", frac: .51, colour: "var(--primary)" });
-  const vram = gaugeCard(s, { icon: "&#128421;", title: "VRAM", pct: "0%",
-    value: "2 / 6141 MiB", frac: .0, colour: "var(--secondary)" });
+  const memory = widen(gaugeCard(s, { icon: "&#127974;", title: "Memory", pct: "51%",
+    value: "7.6 / 14.9 GiB", frac: .51, colour: "var(--primary)" }), s.memw);
+  const vram = widen(gaugeCard(s, { icon: "&#128421;", title: "VRAM", pct: "0%",
+    value: "2 / 6141 MiB", frac: .0, colour: "var(--secondary)" }), s.memw);
 
   // Storage carries a third line when the device dropdown stays.
   const storage = widen(gaugeCard(s, { icon: "&#128190;", title: "Storage", pct: "63%",
@@ -600,7 +625,6 @@ function build() {
     extra: s.drop ? "nvme0n1 &#9662;" : "" }), s.stow);
 
   const network = networkCard(s);
-  const battery = batteryCard(s);
 
   // rows of the left column. Option C is the only one where a hero card
   // does NOT sit in a row of its own kind - each chip sits beside the
@@ -630,8 +654,10 @@ function build() {
 
   const leftW = Math.max(...allRows.map(rowW));
   const leftH = allRows.reduce((a, r) => a + rowH(r), 0) + s.gap * (allRows.length - 1);
+
+  const battery = batteryCard(s, leftH);   // fills whatever the rows come to
   const panelW = leftW + s.gap + battery.w;
-  const panelH = Math.max(leftH, battery.h);
+  const panelH = leftH;
 
   document.getElementById("perf").innerHTML = `
     <div class="col" style="gap:${s.gap}px">
@@ -687,9 +713,11 @@ function report(s, w, h, leftW, rows, rowW) {
   text scale      ${Math.round(s.font*100)} %
   gap             ${s.gap} px      ->  ${tok(s.gap)}
   hero width      ${s.heroW} px      ->  Tokens.sizes.dashboard.perfHeroCardWidth (was 400)
+  mem/vram width  ${s.memw} px${s.uniform ? "      (ignored - uniform columns is on)" : ""}
   network width   ${s.netw} px
   storage width   ${s.stow} px
   storage dropdown ${s.drop ? "keep" : "drop"}
+  battery         full panel height, ${Math.round(MEASURED.battery.w * s.scale)} px wide
 
 RESULT
 
