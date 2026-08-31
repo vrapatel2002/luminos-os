@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<!-- [CHANGE: claude-code | 2026-08-31]
+     A 1:1 sandbox for the Caelestia dashboard Performance tab, so layout can be
+     argued with a slider instead of a shell restart.
+
+     Every default below is MEASURED off the live shell (Quickshell 0.3.0, screen
+     1440x900 logical @ dpr 2), not guessed:
+
+         HeroCard   400 x 154      MemoryCard  182 x 229
+         Storage    371 x 211      Network     390 x 220
+         Battery    150 x 160      Performance 974 x 627
+
+     Baseline to beat: BEFORE the VRAM card the panel was 967 x 386. Adding VRAM
+     as a third row took it to 974 x 627 - 62% taller. Everything here exists to
+     get that height back.
+
+     1 CSS px == 1 QML logical px. The number in the readout is the number the
+     shell would report. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Luminos - Performance tab layout sandbox</title>
+<style>
+  :root {
+    /* Caelestia dark palette, sampled from the live shell */
+    --surface:            #101014;
+    --surfaceContainer:   #1c1b20;
+    --surfaceContainerHi: #262530;
+    --onSurface:          #e6e0e9;
+    --onSurfaceVariant:   #cac4d0;
+    --primary:            #f2b8d4;  /* Memory  */
+    --secondary:          #c4c0dd;  /* GPU / VRAM */
+    --tertiary:           #b9c8db;
+    --cpu:                #bfb6f2;
+    --track:              #46454f;
+    --ok:                 #86d98a;
+    --warn:               #f2c94c;
+    --bad:                #ff8a80;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: #08080a;
+    color: var(--onSurface);
+    font: 14px/1.45 "Inter", "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ---------------- controls ---------------- */
+
+  #panel {
+    width: 330px;
+    flex: none;
+    padding: 20px;
+    background: #0d0d11;
+    border-right: 1px solid #232329;
+    overflow-y: auto;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+  }
+
+  #panel h1 { font-size: 15px; margin: 0 0 4px; letter-spacing: .3px; }
+  #panel .sub { font-size: 12px; color: #8b8794; margin-bottom: 18px; }
+
+  fieldset {
+    border: 1px solid #232329;
+    border-radius: 10px;
+    padding: 12px 14px 14px;
+    margin: 0 0 16px;
+  }
+  legend { font-size: 11px; letter-spacing: .8px; text-transform: uppercase; color: #8b8794; padding: 0 6px; }
+
+  label.row {
+    display: block;
+    font-size: 12px;
+    margin: 12px 0 0;
+    color: var(--onSurfaceVariant);
+  }
+  label.row:first-of-type { margin-top: 2px; }
+  label.row .val { float: right; color: var(--onSurface); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; margin: 5px 0 0; accent-color: var(--primary); }
+
+  .opt { display: block; font-size: 13px; margin: 7px 0; cursor: pointer; color: var(--onSurfaceVariant); }
+  .opt input { margin-right: 8px; accent-color: var(--primary); }
+  .opt.sel { color: var(--onSurface); }
+  .opt small { display: block; margin-left: 22px; color: #7d7986; font-size: 11px; line-height: 1.35; }
+
+  /* ---------------- readout ---------------- */
+
+  #readout {
+    font-size: 12px;
+    border: 1px solid #232329;
+    border-radius: 10px;
+    padding: 12px 14px;
+    background: #111116;
+  }
+  #readout table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  #readout td { padding: 3px 0; }
+  #readout td:last-child { text-align: right; }
+  #readout .big { font-size: 16px; }
+  #verdict { margin-top: 10px; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.4; }
+  #verdict.good { background: #143318; color: var(--ok); }
+  #verdict.meh  { background: #33290f; color: var(--warn); }
+  #verdict.bad  { background: #3a1614; color: var(--bad); }
+
+  button {
+    width: 100%;
+    margin-top: 12px;
+    padding: 9px;
+    border: 1px solid #34333d;
+    border-radius: 8px;
+    background: #1c1b20;
+    color: var(--onSurface);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  button:hover { background: #262530; }
+
+  /* ---------------- stage ---------------- */
+
+  #stage {
+    flex: 1;
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    align-items: flex-start;
+  }
+  .stagenote { font-size: 12px; color: #8b8794; }
+
+  #screen {
+    background: var(--surface);
+    border: 1px solid #232329;
+    border-radius: 14px;
+    padding: 16px;
+    position: relative;
+  }
+
+  #perf { display: flex; align-items: flex-start; }
+
+  .col   { display: flex; flex-direction: column; }
+  /* QML's RowLayout centres a short item in a tall row by default. */
+  .rowl  { display: flex; align-items: center; }
+
+  .card {
+    background: var(--surfaceContainer);
+    border-radius: 12px;
+    position: relative;
+    overflow: hidden;
+    flex: none;
+  }
+  .card.hero { border-radius: 28px; }
+
+  .ct { font-weight: 500; }
+  .cs { color: var(--onSurfaceVariant); }
+
+  .gauge { position: relative; flex: none; }
+  .gauge svg { display: block; transform: rotate(135deg); }
+  .gauge .mid {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    line-height: 1.05;
+  }
+
+  .dim {
+    position: absolute;
+    font-size: 10px;
+    color: #6f6b78;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+  .dim.w { bottom: 2px; right: 6px; }
+
+  #outbox {
+    width: 100%;
+    max-width: 900px;
+    font: 12px/1.5 ui-monospace, "JetBrains Mono", monospace;
+    white-space: pre;
+    background: #111116;
+    border: 1px solid #232329;
+    border-radius: 10px;
+    padding: 14px 16px;
+    color: #a9a4b4;
+    overflow-x: auto;
+  }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <h1>Performance tab layout</h1>
+  <div class="sub">1&nbsp;px here = 1 logical px in the shell.<br>Defaults are measured, not guessed.</div>
+
+  <fieldset>
+    <legend>Layout</legend>
+    <label class="opt"><input type="radio" name="layout" value="now"><span>Current (2&times;2)</span>
+      <small>What is live. Storage+Network, then Memory+VRAM.</small></label>
+    <label class="opt"><input type="radio" name="layout" value="a" checked><span>Option A &mdash; four across</span>
+      <small>Storage &middot; Memory &middot; Network &middot; VRAM in one row.</small></label>
+    <label class="opt"><input type="radio" name="layout" value="b"><span>Option B &mdash; trio + Network</span>
+      <small>One card holding Storage, Memory and VRAM, beside Network.</small></label>
+    <label class="opt"><input type="radio" name="layout" value="c"><span>Option C &mdash; hero per row</span>
+      <small>CPU with Memory and Storage; GPU with VRAM and Network. Each chip sits next to the thing it owns.</small></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Shrink everything</legend>
+    <label class="row">All card widths <span class="val" id="v-scale"></span>
+      <input type="range" id="scale" min="55" max="100" step="5"></label>
+    <div style="font-size:11px;color:#7d7986;margin-top:6px;line-height:1.4">
+      One multiplier over every card, hero cards included. Heights are driven by the
+      gauge and the padding, so shrink those separately below.
+    </div>
+    <label class="row">Hero card width <span class="val" id="v-herow"></span>
+      <input type="range" id="herow" min="240" max="400" step="10"></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Gauge cards (Memory / VRAM / Storage)</legend>
+    <label class="opt"><input type="radio" name="shape" value="v"><span>Tall &mdash; gauge above the label</span>
+      <small>Upstream MemoryCard. Narrow but 229 px tall.</small></label>
+    <label class="opt"><input type="radio" name="shape" value="h" checked><span>Wide &mdash; gauge beside the label</span>
+      <small>Upstream StorageCard's shape. Much shorter.</small></label>
+
+    <label class="row">Gauge diameter <span class="val" id="v-gauge"></span>
+      <input type="range" id="gauge" min="48" max="140" step="2"></label>
+    <label class="row">Card padding &mdash; sides <span class="val" id="v-padh"></span>
+      <input type="range" id="padh" min="8" max="40" step="4"></label>
+    <label class="row">Card padding &mdash; top/bottom <span class="val" id="v-padv"></span>
+      <input type="range" id="padv" min="8" max="32" step="4"></label>
+    <label class="row">Text scale <span class="val" id="v-font"></span>
+      <input type="range" id="font" min="70" max="115" step="5"></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Everything else</legend>
+    <label class="row">Gap between cards <span class="val" id="v-gap"></span>
+      <input type="range" id="gap" min="4" max="24" step="4"></label>
+    <label class="row">Network card &mdash; min width <span class="val" id="v-netw"></span>
+      <input type="range" id="netw" min="150" max="420" step="10"></label>
+    <label class="row">Storage card &mdash; min width <span class="val" id="v-stow"></span>
+      <input type="range" id="stow" min="150" max="400" step="10"></label>
+    <div style="font-size:11px;color:#7d7986;margin-top:6px;line-height:1.4">
+      Floors, not fixed sizes. Every card measures its own text, so these only
+      matter when a card would otherwise be narrower than the number.
+    </div>
+    <label class="opt"><input type="checkbox" id="drop" checked><span>Keep Storage's device dropdown</span>
+      <small>It is the tallest thing in that card.</small></label>
+  </fieldset>
+
+  <div id="readout">
+    <table>
+      <tr><td>Panel now</td><td class="big" id="r-size"></td></tr>
+      <tr><td>Was, before VRAM</td><td>967 &times; 386</td></tr>
+      <tr><td>Live today</td><td>974 &times; 627</td></tr>
+      <tr><td>Height change</td><td id="r-delta"></td></tr>
+      <tr><td>Wasted width</td><td id="r-waste"></td></tr>
+    </table>
+    <div id="verdict"></div>
+    <button id="copy">Copy these settings</button>
+  </div>
+</div>
+
+<div id="stage">
+  <div class="stagenote">Drawn at true size. Small grey numbers are each card's width &times; height.</div>
+  <div id="screen"><div id="perf"></div></div>
+  <div id="outbox"></div>
+</div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- constants
+// Measured off the live shell. Do not "tidy" these - they are evidence.
+const MEASURED = {
+  hero:    { w: 400, h: 154 },
+  memory:  { w: 182, h: 229 },
+  storage: { w: 371, h: 211 },
+  network: { w: 390, h: 220 },
+  battery: { w: 150, h: 160 },
+  panel:   { w: 974, h: 627 },
+  before:  { w: 967, h: 386 }
+};
+
+// Chrome inside a gauge card that is not the gauge itself, at font scale 100.
+// Calibrated so the tall shape at gauge=118 pad=32/16 reproduces 182 x 229.
+const CHROME = { header: 29, gapTop: 20, gapBottom: 4, value: 26 };
+
+const els = {};
+["gauge","padh","padv","font","gap","netw","stow","drop","scale","herow"]
+  .forEach(id => els[id] = document.getElementById(id));
+
+const DEFAULTS = {
+  layout: "c", shape: "h",
+  gauge: 68, padh: 12, padv: 12, font: 90, gap: 12,
+  netw: 280, stow: 240, drop: true, scale: 85, herow: 340
+};
+
+function readState() {
+  const scale = +els.scale.value / 100;
+  return {
+    layout: document.querySelector('input[name=layout]:checked').value,
+    shape:  document.querySelector('input[name=shape]:checked').value,
+    // The master slider is a uniform zoom: it shrinks the gauge and the type
+    // together, which is the only way a card that sizes itself to its own
+    // content gets narrower. Nothing is clipped.
+    gauge: Math.round(+els.gauge.value * scale),
+    padh:  +els.padh.value,
+    padv:  +els.padv.value,
+    font:  (+els.font.value / 100) * scale,
+    gap:   +els.gap.value,
+    scale,
+    // Every width in the mockup passes through `scale`, so the master
+    // slider cannot disagree with the individual ones.
+    heroW: Math.round(+els.herow.value * scale),
+    netw:  Math.round(+els.netw.value  * scale),
+    stow:  Math.round(+els.stow.value  * scale),
+    drop:  els.drop.checked
+  };
+}
+
+// Any default can be overridden from the query string, so a particular
+// arrangement can be linked to or reopened: ?layout=b&shape=v&gauge=64
+function applyDefaults() {
+  const q = new URLSearchParams(location.search);
+  const get = k => q.has(k) ? q.get(k) : DEFAULTS[k];
+
+  const lay = document.querySelector(`input[name=layout][value="${get("layout")}"]`);
+  (lay || document.querySelector('input[name=layout][value="a"]')).checked = true;
+  const shp = document.querySelector(`input[name=shape][value="${get("shape")}"]`);
+  (shp || document.querySelector('input[name=shape][value="h"]')).checked = true;
+
+  ["gauge","padh","padv","font","gap","netw","stow","scale","herow"]
+    .forEach(k => els[k].value = get(k));
+  els.drop.checked = String(get("drop")) !== "false";
+}
+
+// ---------------------------------------------------------------- geometry
+// One place decides how big a gauge card is, so the readout can never
+// disagree with what is drawn.
+// Real text metrics, not a guessed constant. A card that sizes itself to its
+// content is exactly what QML does, and guessing the label width is how a
+// mockup ends up promising a size the shell will not honour.
+const _ctx = document.createElement("canvas").getContext("2d");
+function textW(str, px, weight) {
+  _ctx.font = `${weight || 400} ${px}px Inter, "Segoe UI", system-ui, sans-serif`;
+  return _ctx.measureText(str).width;
+}
+
+function gaugeCardSize(s, o) {
+  const f = s.font;
+  const titleW = textW(o.title, 15 * f, 500) + 22;   // + icon and its gap
+  const valueW = textW(o.value, 13 * f);
+  const extraW = o.extra ? textW(o.extra.replace(/&#\d+;/g, "").trim(), 11 * f) : 0;
+  const label  = Math.max(titleW, valueW, extraW);
+
+  if (s.shape === "v") {
+    return {
+      w: Math.round(Math.max(s.gauge, label) + s.padh * 2),
+      h: Math.round(s.padv * 2 + CHROME.header * f + CHROME.gapTop + s.gauge
+                    + CHROME.gapBottom + CHROME.value * f
+                    + (o.extra ? 22 * f : 0))
+    };
+  }
+  // wide: gauge on the left, the label block on the right
+  const lines = o.extra ? 3 : 2;
+  return {
+    w: Math.round(s.padh * 2 + s.gauge + 12 + label),
+    h: Math.round(s.padv * 2 + Math.max(s.gauge, lines * 20 * f))
+  };
+}
+
+// ---------------------------------------------------------------- drawing
+function svgGauge(d, frac, colour, strokeScale) {
+  const sw = Math.max(4, Math.round(d * 0.085 * strokeScale));
+  const r  = (d - sw) / 2;
+  const c  = 2 * Math.PI * r;
+  const sweep = 0.75;                       // 270 degrees, like upstream
+  return `<svg width="${d}" height="${d}" viewBox="0 0 ${d} ${d}">
+    <circle cx="${d/2}" cy="${d/2}" r="${r}" fill="none" stroke="var(--track)"
+            stroke-width="${sw}" stroke-linecap="round"
+            stroke-dasharray="${c*sweep} ${c}"/>
+    <circle cx="${d/2}" cy="${d/2}" r="${r}" fill="none" stroke="${colour}"
+            stroke-width="${sw}" stroke-linecap="round"
+            stroke-dasharray="${c*sweep*frac} ${c}"/>
+  </svg>`;
+}
+
+function dimTag(w, h) {
+  return `<span class="dim w">${w}&times;${h}</span>`;
+}
+
+// Widen a finished card to a floor without letting the drawn box and the
+// reported number drift apart.
+function widen(card, minW) {
+  if (minW <= card.w)
+    return card;
+  return { w: minW, h: card.h,
+           html: card.html.replace(/width:\d+px;height:\d+px/, `width:${minW}px;height:${card.h}px`)
+                          .replace(/\d+&times;\d+<\/span>/, `${minW}&times;${card.h}</span>`) };
+}
+
+// A gauge card: Memory, VRAM or Storage.
+function gaugeCard(s, o) {
+  const size = gaugeCardSize(s, o);
+  const f = s.font;
+  const g = svgGauge(s.gauge, o.frac, o.colour, 1);
+  const pct = `<span style="font-size:${Math.round(s.gauge*0.24)}px;color:${o.colour}">${o.pct}</span>`;
+
+  let inner;
+  if (s.shape === "v") {
+    inner = `
+      <div style="display:flex;flex-direction:column;align-items:center;
+                  padding:${s.padv}px ${s.padh}px;height:100%;">
+        <div class="ct" style="font-size:${Math.round(16*f)}px;color:${o.colour};
+             display:flex;gap:6px;align-items:center;">${o.icon}<span>${o.title}</span></div>
+        <div class="gauge" style="width:${s.gauge}px;height:${s.gauge}px;margin-top:${CHROME.gapTop}px">
+          ${g}<div class="mid">${pct}
+            <span class="cs" style="font-size:${Math.round(11*f)}px">Used</span></div></div>
+        <div class="cs" style="font-size:${Math.round(13*f)}px;margin-top:${CHROME.gapBottom}px;
+             color:var(--onSurface)">${o.value}</div>
+      </div>`;
+  } else {
+    inner = `
+      <div style="display:flex;align-items:center;gap:12px;
+                  padding:${s.padv}px ${s.padh}px;height:100%;">
+        <div class="gauge" style="width:${s.gauge}px;height:${s.gauge}px">
+          ${g}<div class="mid">${pct}</div></div>
+        <div style="display:flex;flex-direction:column;justify-content:center;min-width:0;
+                    white-space:nowrap">
+          <div class="ct" style="font-size:${Math.round(15*f)}px;color:${o.colour};
+               display:flex;gap:6px;align-items:center">${o.icon}<span>${o.title}</span></div>
+          <div style="font-size:${Math.round(13*f)}px;color:var(--onSurface)">${o.value}</div>
+          ${o.extra ? `<div class="cs" style="font-size:${Math.round(11*f)}px">${o.extra}</div>` : ""}
+        </div>
+      </div>`;
+  }
+
+  return { w: size.w, h: size.h,
+           html: `<div class="card" style="width:${size.w}px;height:${size.h}px">
+                    ${inner}${dimTag(size.w, size.h)}</div>` };
+}
+
+function heroCard(s, o) {
+  const f = s.font;
+  const w = s.heroW;
+  // Upstream's height is driven by the two stacked blocks, not by a token,
+  // so it shrinks with the padding rather than with the width slider.
+  const h = Math.round(MEASURED.hero.h - (16 - s.padv) * 2);
+  const shape = Math.round(64 * s.scale);
+  const dial  = Math.round(52 * s.scale);
+  // The sublabel is the first thing a narrower card costs you - show that.
+  const subW  = Math.max(60, w - dial - shape - 60);
+  return { w, h, html: `
+    <div class="card hero" style="width:${w}px;height:${h}px">
+      <div style="display:flex;gap:14px;padding:${s.padv}px ${s.padh + 4}px;align-items:flex-start">
+        <div class="gauge" style="width:${dial}px;height:${dial}px">${svgGauge(dial, o.frac, o.colour, .8)}
+          <div class="mid"><span style="font-size:${Math.round(20*s.scale)}px;color:${o.colour}">${o.icon}</span></div></div>
+        <div style="min-width:0">
+          <div class="ct" style="font-size:${Math.round(17*f)}px;color:${o.colour}">${o.title}</div>
+          <div class="cs" style="font-size:${Math.round(12*f)}px;white-space:nowrap;
+               overflow:hidden;text-overflow:ellipsis;max-width:${subW}px">${o.sub}</div>
+        </div>
+        <div style="margin-left:auto;text-align:center">
+          <div class="cs" style="font-size:11px">Usage</div>
+          <div style="width:${shape}px;height:${shape}px;border-radius:${Math.round(shape*0.34)}px;
+                      background:var(--surfaceContainerHi);
+                      display:flex;align-items:center;justify-content:center;
+                      font-size:${Math.round(22*s.scale)}px;color:${o.colour}">${o.pct}</div>
+        </div>
+      </div>
+      <div style="position:absolute;left:${s.padh + 4}px;bottom:${s.padv - 2}px;
+                  width:${Math.max(120, w - shape - 40)}px">
+        <div style="font-size:${Math.round(14*f)}px">&#127777; ${o.status}</div>
+        <div style="height:5px;border-radius:3px;background:var(--track);margin-top:6px">
+          <div style="height:5px;border-radius:3px;width:${Math.round(o.temp)}%;background:${o.colour}"></div></div>
+      </div>
+      ${dimTag(w, h)}
+    </div>` };
+}
+
+function networkCard(s) {
+  const f = s.font;
+  const widest = Math.max(
+    textW("Network", 17 * f, 500) + 22,
+    textW("Download", 13 * f) + textW("6.4 MB/s", 13 * f) + 40,
+    textW("Total", 13 * f) + textW("\u219321.6MB \u2191145.1MB", 11 * f) + 40);
+  const w = Math.max(s.netw, Math.round(widest + s.padh * 2));
+  const h = Math.round(s.padv * 2 + 26 * f + 3 * 22 * f + 14);
+  return { w, h, html: `
+    <div class="card" style="width:${w}px;height:${h}px">
+      <div style="padding:${s.padv}px ${s.padh}px">
+        <div class="ct" style="font-size:${Math.round(17*f)}px;color:var(--tertiary)">&#8645; Network</div>
+        <div style="margin-top:8px;font-size:${Math.round(13*f)}px;line-height:1.7">
+          <div style="display:flex"><span class="cs">Download</span>
+            <span style="margin-left:auto;color:var(--tertiary)">6.4 MB/s</span></div>
+          <div style="display:flex"><span class="cs">Upload</span>
+            <span style="margin-left:auto">39.4 KB/s</span></div>
+          <div style="display:flex"><span class="cs">Total</span>
+            <span style="margin-left:auto;font-size:${Math.round(11*f)}px">&darr;21.6MB &uarr;145.1MB</span></div>
+        </div>
+      </div>${dimTag(w, h)}</div>` };
+}
+
+// Option B: Storage, Memory and VRAM sharing one card.
+function trioCard(s) {
+  const f = s.font;
+  const items = [
+    { icon: "&#128190;", title: "Storage", pct: "63%", value: "1.1 / 1.8 TiB", frac: .63, colour: "var(--onSurface)" },
+    { icon: "&#127974;", title: "Memory",  pct: "51%", value: "7.6 / 14.9 GiB", frac: .51, colour: "var(--primary)" },
+    { icon: "&#128421;", title: "VRAM",    pct: "0%",  value: "2 / 6141 MiB",  frac: .00, colour: "var(--secondary)" }
+  ];
+  const cellW = Math.round(s.gauge + 12 + 96 * f * s.scale);
+  const w = Math.round(s.padh * 2 + cellW * 3 + s.gap * 2);
+  const h = Math.round(s.padv * 2 + Math.max(s.gauge, 3 * 20 * f));
+  const cells = items.map(o => `
+    <div style="display:flex;align-items:center;gap:12px;width:${cellW}px">
+      <div class="gauge" style="width:${s.gauge}px;height:${s.gauge}px">
+        ${svgGauge(s.gauge, o.frac, o.colour, 1)}
+        <div class="mid"><span style="font-size:${Math.round(s.gauge*0.24)}px;color:${o.colour}">${o.pct}</span></div></div>
+      <div style="min-width:0">
+        <div class="ct" style="font-size:${Math.round(14*f)}px;color:${o.colour}">${o.title}</div>
+        <div style="font-size:${Math.round(12*f)}px;white-space:nowrap">${o.value}</div>
+      </div>
+    </div>`).join("");
+  return { w, h, html: `
+    <div class="card" style="width:${w}px;height:${h}px">
+      <div style="display:flex;gap:${s.gap}px;padding:${s.padv}px ${s.padh}px;height:100%">${cells}</div>
+      ${dimTag(w, h)}</div>` };
+}
+
+function batteryCard(s) {
+  const w = Math.round(MEASURED.battery.w * s.scale), h = MEASURED.battery.h;
+  return { w, h, html: `
+    <div class="card" style="width:${w}px;height:${h}px">
+      <div style="padding:16px;text-align:center">
+        <div class="ct" style="font-size:15px;color:var(--ok)">Battery</div>
+        <div style="margin:14px auto 0;width:54px;height:78px;border-radius:14px;
+                    background:var(--track);position:relative;overflow:hidden">
+          <div style="position:absolute;bottom:0;left:0;right:0;height:72%;background:var(--ok)"></div>
+        </div>
+      </div>${dimTag(w, h)}</div>` };
+}
+
+// ---------------------------------------------------------------- assembly
+function build() {
+  const s = readState();
+
+  // reflect slider values
+  // Show the EFFECTIVE value (after the master zoom), because that is the
+  // number that would go into the QML.
+  document.getElementById("v-gauge").textContent = s.gauge + " px";
+  document.getElementById("v-padh").textContent  = s.padh + " px";
+  document.getElementById("v-padv").textContent  = s.padv + " px";
+  document.getElementById("v-font").textContent  = Math.round(s.font * 100) + "%";
+  document.getElementById("v-gap").textContent   = s.gap + " px";
+  document.getElementById("v-netw").textContent  = s.netw + " px";
+  document.getElementById("v-stow").textContent  = s.stow + " px";
+  document.getElementById("v-scale").textContent = Math.round(s.scale * 100) + "%";
+  document.getElementById("v-herow").textContent = s.heroW + " px";
+  document.querySelectorAll(".opt").forEach(o =>
+    o.classList.toggle("sel", !!o.querySelector("input").checked));
+
+  const cpu = heroCard(s, { icon: "&#9881;", title: "CPU", sub: "AMD Ryzen 7 8845HS w/ Radeon 780M",
+    pct: "6%", frac: .06, temp: 48, status: "48&deg;C", colour: "var(--cpu)" });
+  const gpu = heroCard(s, { icon: "&#128421;", title: "GPU", sub: "GeForce RTX 4050 Max-Q / Mobile",
+    pct: "0%", frac: .0, temp: 47, status: "47&deg;C &middot; 2 W", colour: "var(--secondary)" });
+
+  const memory = gaugeCard(s, { icon: "&#127974;", title: "Memory", pct: "51%",
+    value: "7.6 / 14.9 GiB", frac: .51, colour: "var(--primary)" });
+  const vram = gaugeCard(s, { icon: "&#128421;", title: "VRAM", pct: "0%",
+    value: "2 / 6141 MiB", frac: .0, colour: "var(--secondary)" });
+
+  // Storage carries a third line when the device dropdown stays.
+  const storage = widen(gaugeCard(s, { icon: "&#128190;", title: "Storage", pct: "63%",
+    value: "1.1 / 1.8 TiB", frac: .63, colour: "var(--onSurface)",
+    extra: s.drop ? "nvme0n1 &#9662;" : "" }), s.stow);
+
+  const network = networkCard(s);
+  const battery = batteryCard(s);
+
+  // rows of the left column. Option C is the only one where a hero card
+  // does NOT sit in a row of its own kind - each chip sits beside the
+  // memory it owns, which is why it needs no separate hero row.
+  let allRows;
+  if (s.layout === "now")      allRows = [[cpu, gpu], [storage, network], [memory, vram]];
+  else if (s.layout === "a")   allRows = [[cpu, gpu], [storage, memory, network, vram]];
+  else if (s.layout === "b")   allRows = [[cpu, gpu], [trioCard(s), network]];
+  else                         allRows = [[cpu, memory, storage], [gpu, vram, network]];
+
+  const rowW = r => r.reduce((a, c) => a + c.w, 0) + s.gap * (r.length - 1);
+  const rowH = r => Math.max(...r.map(c => c.h));
+
+  const leftW = Math.max(...allRows.map(rowW));
+  const leftH = allRows.reduce((a, r) => a + rowH(r), 0) + s.gap * (allRows.length - 1);
+  const panelW = leftW + s.gap + battery.w;
+  const panelH = Math.max(leftH, battery.h);
+
+  document.getElementById("perf").innerHTML = `
+    <div class="col" style="gap:${s.gap}px">
+      ${allRows.map(r => `<div class="rowl" style="gap:${s.gap}px">
+          ${r.map(c => c.html).join("")}</div>`).join("")}
+    </div>
+    <div style="width:${s.gap}px"></div>
+    ${battery.html}`;
+
+  report(s, panelW, panelH, leftW, allRows, rowW);
+}
+
+function report(s, w, h, leftW, rows, rowW) {
+  document.getElementById("r-size").textContent = `${w} \u00d7 ${h}`;
+
+  const dH = h - MEASURED.before.h;
+  const dEl = document.getElementById("r-delta");
+  dEl.textContent = (dH >= 0 ? "+" : "") + dH + " px vs before";
+  dEl.style.color = dH <= 0 ? "var(--ok)" : dH <= 60 ? "var(--warn)" : "var(--bad)";
+
+  const waste = rows.reduce((a, r) => a + (leftW - rowW(r)), 0);
+  document.getElementById("r-waste").textContent = waste + " px";
+
+  const v = document.getElementById("verdict");
+  if (w > 1300 || h > 700) {
+    v.className = "bad";
+    v.textContent = "Bigger than what is live now. This is the direction you asked to move away from.";
+  } else if (dH <= 40 && w <= MEASURED.before.w + 40) {
+    v.className = "good";
+    v.textContent = "Fits in about the space the tab used before VRAM existed. This is the target.";
+  } else {
+    v.className = "meh";
+    v.textContent = "Smaller than today, still taller or wider than before VRAM. Keep shrinking, or drop a row.";
+  }
+
+  const names = { 4:"extraSmall", 8:"small", 12:"medium", 16:"large", 20:"largeIncreased",
+                  28:"extraLarge", 32:"extraLargeIncreased" };
+  const tok = n => names[n] ? `Tokens.padding.${names[n]}` : `${n}   // no token this size - literal`;
+
+  document.getElementById("outbox").textContent =
+`SETTINGS  (paste this back to Claude)
+
+  layout          ${ {now:"current 2x2", a:"A - four across",
+                      b:"B - trio + Network", c:"C - hero per row"}[s.layout] }
+  card shape      ${ s.shape === "v" ? "tall  (gauge above label)" : "wide  (gauge beside label)" }
+  shrink widths   ${Math.round(s.scale*100)} %
+  gauge diameter  ${s.gauge} px
+  padding sides   ${s.padh} px      ->  ${tok(s.padh)}
+  padding t/b     ${s.padv} px      ->  ${tok(s.padv)}
+  text scale      ${Math.round(s.font*100)} %
+  gap             ${s.gap} px      ->  ${tok(s.gap)}
+  hero width      ${s.heroW} px      ->  Tokens.sizes.dashboard.perfHeroCardWidth (was 400)
+  network width   ${s.netw} px
+  storage width   ${s.stow} px
+  storage dropdown ${s.drop ? "keep" : "drop"}
+
+RESULT
+
+  panel           ${w} x ${h}
+  before VRAM     ${MEASURED.before.w} x ${MEASURED.before.h}
+  live today      ${MEASURED.panel.w} x ${MEASURED.panel.h}
+  height change   ${(h - MEASURED.before.h >= 0 ? "+" : "")}${h - MEASURED.before.h} px vs before, ${(h - MEASURED.panel.h >= 0 ? "+" : "")}${h - MEASURED.panel.h} px vs today`;
+}
+
+document.querySelectorAll("input").forEach(i => i.addEventListener("input", build));
+document.getElementById("copy").addEventListener("click", () => {
+  navigator.clipboard.writeText(document.getElementById("outbox").textContent)
+    .then(() => { const b = document.getElementById("copy");
+                  b.textContent = "Copied"; setTimeout(() => b.textContent = "Copy these settings", 1200); })
+    .catch(() => alert("Clipboard blocked - just select the text below the preview."));
+});
+
+applyDefaults();
+build();
+</script>
+</body>
+</html>
