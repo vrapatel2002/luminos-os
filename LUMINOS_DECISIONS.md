@@ -5711,3 +5711,93 @@ sudo rm /etc/systemd/resolved.conf.d/luminos-dot.conf && sudo systemctl restart 
 sudo cp -a /root/nm-profiles-backup-20260831/. /etc/NetworkManager/system-connections/ \
   && sudo nmcli con reload && sudo nmcli con up "BELL851 2.4 GHz"
 ```
+
+---
+
+## DECISION 89 — The VRAM card is fed, never fetching; and the overlay learns to *add* files
+# [CHANGE: claude-code | 2026-08-31]
+
+The ask was small: "add a VRAM monitor under Performance, we can just copy the memory one."
+Copying MemoryCard is exactly right for the *look*. Copying how it **gets its numbers** would
+have been a 13 W battery bug.
+
+### The one rule this card lives by
+
+`MemoryCard.qml` owns its data — `ServiceRef { service: Memory }`, and the service polls. That
+works because reading `/proc/meminfo` is free. **VRAM has no free source.** There is no sysfs
+node for it; the only answer is `nvidia-smi`, and asking it flips the 4050 out of D3cold at a
+measured **13.46 W** (BUG-151). A VRAM card that polled on its own would pin the dGPU awake for
+as long as the tab is open, and the symptom would be "battery drains when the dashboard is
+open" — nobody traces that back to a widget.
+
+So `VramCard.qml` **owns no data source at all.** Three required properties come in from
+`Performance.qml`'s `dgpu`, which already knows the rule: read the kernel's `runtime_status`
+first, and only ever run `nvidia-smi` in a window somebody else already paid to open.
+
+```qml
+VramCard {
+    awake: dgpu.awake && dgpu.haveData
+    used:  dgpu.vramUsed
+    total: dgpu.vramTotal
+}
+```
+
+The `nvidia-smi` query grew from 3 fields to 5 — `memory.used,memory.total` on the *same* call
+that already fetched utilisation/temp/power. **Zero additional wakes.** That is the whole trick:
+the VRAM number is a free rider on a query that was happening anyway.
+
+### `total` is remembered on purpose
+
+Sleep clears `haveData`, `usage`, `temperature`, `power`, `vramUsed` — all of those are lies the
+moment the card is off. It does **not** clear `vramTotal`, because 6141 MiB is a property of the
+silicon, not of the session. That distinction is what lets the asleep card print an honest
+`0 / 6141 MiB` instead of a dash. Before the first wake there is no honest number, so it prints
+`Not read yet` rather than inventing a zero.
+
+| dGPU state | gauge | line beneath |
+|---|---|---|
+| never woken | `–` | `Not read yet` |
+| asleep, has woken before | `0%` | `0 / 6141 MiB` |
+| awake | live `%` | `2 / 6141 MiB` |
+
+### Why it has no config toggle
+
+Every other card on that tab is gated by `Config.dashboard.performance.showX`. There is no
+`showVram` and there **cannot be one**: `Caelestia.Config` is a *compiled QML plugin*, not a
+JSON schema the overlay can extend. Inventing the key would throw at load. So the card follows
+`gpuCard.active` — which is the honest coupling anyway, since without the GPU card's `dgpu`
+object there is nothing to display.
+
+### The layout: 2×2, not 1×3
+
+Adding a fourth card to the storage/network/memory row was the obvious move and the wrong one —
+the dashboard panel sizes itself to its content, so a fourth card pushes the panel past the
+screen edge. Memory dropped down to join VRAM instead. Storage, Network and the battery tank are
+untouched; the row is `visible:` only if at least one of its two cards is.
+
+### The second mechanism the overlay needed
+
+Until now `luminos-caelestia-kwin-overlay` could only **patch** upstream files: find an anchor,
+assert it appears exactly once, substitute. `VramCard.qml` has no upstream file to anchor into.
+Hence `NEW_FILES`, with its safety check **inverted**:
+
+```python
+if (SRC / rel).exists():
+    sys.exit(f"ERROR: upstream now ships {rel}, which this overlay also adds.")
+```
+
+A patch fails loudly when its anchor *disappears*. An added file must fail loudly when upstream
+*appears*, because from that moment on we would be silently shadowing a real Caelestia file and
+every future upgrade would be invisible. `--check` grew matching branches: a symlink where an
+added file belongs is DRIFT, wrong content is STALE, missing is MISSING.
+
+### Verified
+
+In a **throwaway `/tmp/perfprobe/` Quickshell config** that renders only the `Performance`
+component against the overlay — *not* by editing `~/.config/caelestia/shell.json`, which is the
+mistake recorded at the end of BUG-151. Asleep: `–` / `Not read yet`, greyed. Held awake:
+`0%` / `2 / 6141 MiB` alongside `GeForce RTX 4050 Max…` and `47°C - 2 W`. Load released →
+`suspended` on its own 8 s later. `qmllint` clean; overlay `--check` green at 7 patched + 1 added.
+
+**Undo:** delete the `NEW_FILES` entry and the VRAM `RowLayout` anchor from the overlay script,
+then `scripts/luminos-caelestia-kwin-overlay` to rebuild.

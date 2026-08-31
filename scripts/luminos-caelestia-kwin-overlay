@@ -29,7 +29,22 @@ from pathlib import Path
 
 SRC = Path("/etc/xdg/quickshell/caelestia")
 DST = Path.home() / ".config/quickshell/caelestia-kwin"
+REPO = Path(__file__).resolve().parent.parent
 MARKER = ".luminos-overlay"   # refuse to delete a directory that is not ours
+
+# ---------------------------------------------------------------------------
+# Files that do not exist upstream at all, copied in from the repo.
+# Keyed by path inside the overlay -> path inside this repo.
+#
+# These are REAL versioned QML files rather than strings in this script, because
+# a whole component embedded in Python is a component nobody will ever lint.
+# If upstream ever ships a file with the same name, the build fails loudly
+# rather than silently shadowing it.
+# ---------------------------------------------------------------------------
+NEW_FILES = {
+    "modules/dashboard/performance/VramCard.qml":
+        "config/quickshell/caelestia-kwin-extra/VramCard.qml",
+}
 
 # ---------------------------------------------------------------------------
 # The patches.  Each entry is (relative path, [(anchor, replacement), ...]).
@@ -290,6 +305,10 @@ PATCHES = {
             "        property real usage: 0\n"
             "        property real temperature: 0\n"
             "        property real power: 0\n"
+            "        property real vramUsed: 0\n"
+            "        // A hardware constant, so it is NOT cleared on sleep. Once the\n"
+            "        // card has been awake once, \"0 / 6141 MiB\" asleep is the truth.\n"
+            "        property real vramTotal: 0\n"
             "\n"
             "        // Goes where the temperature normally goes. Asleep, a temperature\n"
             "        // is just a 0 - the state is the thing worth the space.\n"
@@ -348,17 +367,19 @@ PATCHES = {
             "        id: dgpuQuery\n"
             "\n"
             "        command: [\"dgpu-exec\", \"nvidia-smi\", "
-            "\"--query-gpu=utilization.gpu,temperature.gpu,power.draw\", "
+            "\"--query-gpu=utilization.gpu,temperature.gpu,power.draw,memory.used,memory.total\", "
             "\"--format=csv,noheader,nounits\"]\n"
             "\n"
             "        stdout: StdioCollector {\n"
             "            onStreamFinished: {\n"
             "                const f = text.trim().split(\",\").map(s => s.trim());\n"
-            "                if (f.length < 3 || !f[0])\n"
+            "                if (f.length < 5 || !f[0])\n"
             "                    return;\n"
             "                dgpu.usage = (parseFloat(f[0]) || 0) / 100;\n"
             "                dgpu.temperature = parseFloat(f[1]) || 0;\n"
             "                dgpu.power = parseFloat(f[2]) || 0;\n"
+            "                dgpu.vramUsed = parseFloat(f[3]) || 0;\n"
+            "                dgpu.vramTotal = parseFloat(f[4]) || 0;\n"
             "                dgpu.haveData = true;\n"
             "            }\n"
             "        }\n"
@@ -381,6 +402,7 @@ PATCHES = {
             "                dgpu.usage = 0;\n"
             "                dgpu.temperature = 0;\n"
             "                dgpu.power = 0;\n"
+            "                dgpu.vramUsed = 0;\n"
             "            }\n"
             "        }\n"
             "    }\n"
@@ -415,6 +437,88 @@ PATCHES = {
             "                        accent: dgpu.awake ? Colours.palette.m3secondary "
             ": Colours.palette.m3onSurfaceVariant\n"
             "                    }",
+        ),
+        # Memory moves down into a new row so VRAM can sit beside it.
+        # Four cards in one row is not an option: the dashboard panel sizes
+        # itself to its content, so a fourth card widens the whole tab past
+        # the screen.  Two rows of two keeps the width and spends height,
+        # which the Performance tab has to spare.
+        #
+        # VRAM follows `gpuCard.active` rather than a config key of its own -
+        # Caelestia's config is a compiled QML plugin, so there is no
+        # `showVram` to add.  If the GPU card is on, the VRAM card is on.
+        (
+            "            RowLayout {\n"
+            "                spacing: Tokens.spacing.medium\n"
+            "                visible: storageCard.active || networkCard.active "
+            "|| memoryCard.active\n"
+            "\n"
+            "                WrappedLoader {\n"
+            "                    id: storageCard\n"
+            "\n"
+            "                    active: Config.dashboard.performance.showStorage\n"
+            "                    sourceComponent: StorageCard {}\n"
+            "                }\n"
+            "\n"
+            "                WrappedLoader {\n"
+            "                    id: networkCard\n"
+            "\n"
+            "                    active: Config.dashboard.performance.showNetwork\n"
+            "                    sourceComponent: NetworkCard {}\n"
+            "                }\n"
+            "\n"
+            "                WrappedLoader {\n"
+            "                    id: memoryCard\n"
+            "\n"
+            "                    active: Config.dashboard.performance.showMemory\n"
+            "                    sourceComponent: MemoryCard {}\n"
+            "                }\n"
+            "            }",
+            "            RowLayout {\n"
+            "                spacing: Tokens.spacing.medium\n"
+            "                visible: storageCard.active || networkCard.active\n"
+            "\n"
+            "                WrappedLoader {\n"
+            "                    id: storageCard\n"
+            "\n"
+            "                    active: Config.dashboard.performance.showStorage\n"
+            "                    sourceComponent: StorageCard {}\n"
+            "                }\n"
+            "\n"
+            "                WrappedLoader {\n"
+            "                    id: networkCard\n"
+            "\n"
+            "                    active: Config.dashboard.performance.showNetwork\n"
+            "                    sourceComponent: NetworkCard {}\n"
+            "                }\n"
+            "            }\n"
+            "\n"
+            "            // [LUMINOS-KWIN] Memory dropped down here to make room for\n"
+            "            // VRAM. See the note in scripts/luminos-caelestia-kwin-overlay.\n"
+            "            RowLayout {\n"
+            "                spacing: Tokens.spacing.medium\n"
+            "                visible: memoryCard.active || vramCard.active\n"
+            "\n"
+            "                WrappedLoader {\n"
+            "                    id: memoryCard\n"
+            "\n"
+            "                    active: Config.dashboard.performance.showMemory\n"
+            "                    sourceComponent: MemoryCard {}\n"
+            "                }\n"
+            "\n"
+            "                WrappedLoader {\n"
+            "                    id: vramCard\n"
+            "\n"
+            "                    active: gpuCard.active\n"
+            "\n"
+            "                    // Purely fed - VramCard asks the GPU nothing itself.\n"
+            "                    sourceComponent: VramCard {\n"
+            "                        awake: dgpu.awake && dgpu.haveData\n"
+            "                        used: dgpu.vramUsed\n"
+            "                        total: dgpu.vramTotal\n"
+            "                    }\n"
+            "                }\n"
+            "            }",
         ),
     ],
     # The GPU card needs to say "asleep" where the CPU card says "62 degrees".
@@ -539,6 +643,17 @@ def patched_text(rel: str) -> str:
     return text
 
 
+def new_file_text(rel: str, src: str) -> str:
+    if (SRC / rel).exists():
+        sys.exit(f"ERROR: upstream now ships {rel}, which this overlay also adds.\n"
+                 f"Silently shadowing it would be a trap. Compare {SRC / rel} with\n"
+                 f"{REPO / src} and either drop ours or move it to PATCHES.")
+    p = REPO / src
+    if not p.is_file():
+        sys.exit(f"ERROR: {p} is missing - the overlay cannot add {rel} without it.")
+    return p.read_text()
+
+
 def build() -> None:
     if DST.exists():
         if not (DST / MARKER).exists():
@@ -550,9 +665,12 @@ def build() -> None:
     DST.mkdir(parents=True)
     (DST / MARKER).write_text(
         "Generated by luminos-caelestia-kwin-overlay. Every file here is a symlink\n"
-        "into /etc/xdg/quickshell/caelestia except the patched ones listed below.\n"
+        "into /etc/xdg/quickshell/caelestia except the ones listed below.\n"
         "Do not edit in place - edit the script and rebuild.\n\n"
+        "patched:\n"
         + "".join(f"  {p}\n" for p in sorted(PATCHES))
+        + "added (no upstream equivalent):\n"
+        + "".join(f"  {p}\n" for p in sorted(NEW_FILES))
     )
 
     for root, _dirs, files in os.walk(SRC):
@@ -571,9 +689,13 @@ def build() -> None:
                      f"restructured; the overlay needs rewriting.")
         (DST / rel).write_text(patched_text(rel))
 
+    for rel, src in NEW_FILES.items():
+        (DST / rel).write_text(new_file_text(rel, src))
+
     print(f"built {DST}")
     print(f"  {links} symlinks to {SRC}")
     print(f"  {len(PATCHES)} patched files: {', '.join(sorted(PATCHES))}")
+    print(f"  {len(NEW_FILES)} added files: {', '.join(sorted(NEW_FILES))}")
 
 
 def check() -> int:
@@ -594,6 +716,13 @@ def check() -> int:
                 elif p.read_text() != patched_text(rel):
                     print(f"STALE: {rel} does not match the patch applied to current upstream")
                     bad += 1
+            elif rel in NEW_FILES:
+                if p.is_symlink():
+                    print(f"DRIFT: {rel} should be a real added file, found a symlink")
+                    bad += 1
+                elif p.read_text() != new_file_text(rel, NEW_FILES[rel]):
+                    print(f"STALE: {rel} does not match {NEW_FILES[rel]} in the repo")
+                    bad += 1
             elif not p.is_symlink():
                 print(f"DRIFT: {rel} should be a symlink, found a real file")
                 bad += 1
@@ -610,7 +739,15 @@ def check() -> int:
     if bad:
         print(f"\n{bad} problem(s). Run without --check to rebuild.")
         return 1
-    print(f"OK: {DST} is in sync with {SRC}, {len(PATCHES)} patched files apply cleanly")
+    for rel in NEW_FILES:
+        if not (DST / rel).exists():
+            print(f"MISSING: the overlay should add {rel}, it is not there")
+            bad += 1
+    if bad:
+        print(f"\n{bad} problem(s). Run without --check to rebuild.")
+        return 1
+    print(f"OK: {DST} is in sync with {SRC}, {len(PATCHES)} patched + "
+          f"{len(NEW_FILES)} added files apply cleanly")
     return 0
 
 
