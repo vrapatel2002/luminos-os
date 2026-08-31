@@ -219,6 +219,15 @@
     </div>
     <label class="row">Hero card width <span class="val" id="v-herow"></span>
       <input type="range" id="herow" min="240" max="400" step="10"></label>
+
+    <label class="opt" style="margin-top:14px"><input type="checkbox" id="grid" checked>
+      <span>Line the rows up into a grid</span>
+      <small>Every row the same height, every column the same width top to bottom.
+             Cards stretch to their cell instead of hugging their text.</small></label>
+    <label class="opt"><input type="checkbox" id="uniform" checked>
+      <span>&hellip; and all columns the same width</span>
+      <small>Off: each column takes only the width it needs, but still lines up
+             with the column above it.</small></label>
   </fieldset>
 
   <fieldset>
@@ -293,13 +302,14 @@ const MEASURED = {
 const CHROME = { header: 29, gapTop: 20, gapBottom: 4, value: 26 };
 
 const els = {};
-["gauge","padh","padv","font","gap","netw","stow","drop","scale","herow"]
+["gauge","padh","padv","font","gap","netw","stow","drop","scale","herow","grid","uniform"]
   .forEach(id => els[id] = document.getElementById(id));
 
 const DEFAULTS = {
   layout: "c", shape: "h",
   gauge: 68, padh: 12, padv: 12, font: 90, gap: 12,
-  netw: 280, stow: 240, drop: true, scale: 85, herow: 340
+  netw: 280, stow: 240, drop: true, scale: 85, herow: 340,
+  grid: true, uniform: true
 };
 
 function readState() {
@@ -321,7 +331,9 @@ function readState() {
     heroW: Math.round(+els.herow.value * scale),
     netw:  Math.round(+els.netw.value  * scale),
     stow:  Math.round(+els.stow.value  * scale),
-    drop:  els.drop.checked
+    drop:  els.drop.checked,
+    grid:  els.grid.checked,
+    uniform: els.uniform.checked
   };
 }
 
@@ -338,7 +350,7 @@ function applyDefaults() {
 
   ["gauge","padh","padv","font","gap","netw","stow","scale","herow"]
     .forEach(k => els[k].value = get(k));
-  els.drop.checked = String(get("drop")) !== "false";
+  ["drop","grid","uniform"].forEach(k => els[k].checked = String(get(k)) !== "false");
 }
 
 // ---------------------------------------------------------------- geometry
@@ -396,15 +408,19 @@ function dimTag(w, h) {
   return `<span class="dim w">${w}&times;${h}</span>`;
 }
 
-// Widen a finished card to a floor without letting the drawn box and the
-// reported number drift apart.
-function widen(card, minW) {
-  if (minW <= card.w)
+// Resize a finished card without letting the drawn box and the reported
+// number drift apart. The first width/height pair in the markup is always
+// the card's own; the gauge's comes later.
+function fit(card, w, h) {
+  if (w === card.w && h === card.h)
     return card;
-  return { w: minW, h: card.h,
-           html: card.html.replace(/width:\d+px;height:\d+px/, `width:${minW}px;height:${card.h}px`)
-                          .replace(/\d+&times;\d+<\/span>/, `${minW}&times;${card.h}</span>`) };
+  return { w, h,
+           html: card.html
+             .replace(/width:\d+px;height:\d+px/, `width:${w}px;height:${h}px`)
+             .replace(/<span class="dim w">[^<]*<\/span>/, `<span class="dim w">${w}&times;${h}</span>`) };
 }
+
+const widen = (card, minW) => fit(card, Math.max(card.w, minW), card.h);
 
 // A gauge card: Memory, VRAM or Storage.
 function gaugeCard(s, o) {
@@ -428,7 +444,7 @@ function gaugeCard(s, o) {
       </div>`;
   } else {
     inner = `
-      <div style="display:flex;align-items:center;gap:12px;
+      <div style="display:flex;align-items:center;justify-content:center;gap:12px;
                   padding:${s.padv}px ${s.padh}px;height:100%;">
         <div class="gauge" style="width:${s.gauge}px;height:${s.gauge}px">
           ${g}<div class="mid">${pct}</div></div>
@@ -495,7 +511,8 @@ function networkCard(s) {
   const h = Math.round(s.padv * 2 + 26 * f + 3 * 22 * f + 14);
   return { w, h, html: `
     <div class="card" style="width:${w}px;height:${h}px">
-      <div style="padding:${s.padv}px ${s.padh}px">
+      <div style="padding:${s.padv}px ${s.padh}px;height:100%;
+                  display:flex;flex-direction:column;justify-content:center">
         <div class="ct" style="font-size:${Math.round(17*f)}px;color:var(--tertiary)">&#8645; Network</div>
         <div style="margin-top:8px;font-size:${Math.round(13*f)}px;line-height:1.7">
           <div style="display:flex"><span class="cs">Download</span>
@@ -594,6 +611,20 @@ function build() {
   else if (s.layout === "b")   allRows = [[cpu, gpu], [trioCard(s), network]];
   else                         allRows = [[cpu, memory, storage], [gpu, vram, network]];
 
+  // Grid pass: a column is as wide as the widest card in that column across
+  // every row, and every row is as tall as the tallest card anywhere. Cards
+  // are then stretched to their cell, so nothing is ragged.
+  if (s.grid) {
+    const cols = Math.max(...allRows.map(r => r.length));
+    const colW = [];
+    for (let i = 0; i < cols; i++)
+      colW[i] = Math.max(...allRows.filter(r => r[i]).map(r => r[i].w));
+    if (s.uniform)
+      colW.fill(Math.max(...colW));
+    const cellH = Math.max(...allRows.flat().map(c => c.h));
+    allRows = allRows.map(r => r.map((c, i) => fit(c, colW[i], cellH)));
+  }
+
   const rowW = r => r.reduce((a, c) => a + c.w, 0) + s.gap * (r.length - 1);
   const rowH = r => Math.max(...r.map(c => c.h));
 
@@ -646,6 +677,9 @@ function report(s, w, h, leftW, rows, rowW) {
   layout          ${ {now:"current 2x2", a:"A - four across",
                       b:"B - trio + Network", c:"C - hero per row"}[s.layout] }
   card shape      ${ s.shape === "v" ? "tall  (gauge above label)" : "wide  (gauge beside label)" }
+  grid            ${ s.grid ? (s.uniform ? "yes - equal rows AND equal columns"
+                                         : "yes - equal rows, columns sized per column")
+                            : "no - every card hugs its own text" }
   shrink widths   ${Math.round(s.scale*100)} %
   gauge diameter  ${s.gauge} px
   padding sides   ${s.padh} px      ->  ${tok(s.padh)}
