@@ -832,10 +832,54 @@ ShellRoot {
                 visible: true
 
                 WlrLayershell.namespace: "caelestia-right-edge"
-                // Overlay: a notification you cannot see over a fullscreen
-                // video is not a notification, and an OSD behind a video is
-                // not doing its job either.
-                WlrLayershell.layer: WlrLayer.Overlay
+
+                // [CHANGE: claude-code | 2026-08-31] Overlay ONLY while
+                // something is actually out. It used to be Overlay always, and
+                // that is the whole of the 007 bug: brushing the right edge
+                // during a fullscreen game popped the volume OSD out over it,
+                // while every other hover in this shell correctly went dead.
+                //
+                // The other tripwires are all Top, and KWin stacks a fullscreen
+                // window ABOVE Top - so the game covered them and took the
+                // pointer. Overlay outranks fullscreen, so this one window
+                // stayed armed. Nothing was wrong with the hover logic; the
+                // window was simply the only one the game could not cover.
+                //
+                // Upstream guards this with `if (fullscreen) return`
+                // (drawers/Interactions.qml:55) off Hyprland's toplevel list.
+                // That road is CLOSED here: KWin exports no foreign-toplevel
+                // protocol at all - checked with wayland-info 2026-08-31,
+                // neither zwlr_foreign_toplevel_manager_v1 nor
+                // ext_foreign_toplevel_list_v1 - so Quickshell's
+                // ToplevelManager is permanently empty and cannot tell us a
+                // game is up. Do not try it again without re-checking that
+                // list first.
+                //
+                // So do not detect fullscreen. Let the COMPOSITOR be the
+                // sensor: sit at Top when idle and a fullscreen window covers
+                // the catch strip on its own, which is the behaviour the bar
+                // already had and Shawn already called correct. Promote to
+                // Overlay only when a panel is genuinely out, so a volume key,
+                // a toast and the drag chain still show over a game. The
+                // volume key never needed the pointer anyway - Osd/Wrapper
+                // .qml:51-73 opens on PipeWire's own volume change.
+                //
+                // This cannot oscillate: at Top under a fullscreen window no
+                // pointer events arrive, so hover cannot set the flag that
+                // would promote it.
+                //
+                // The screenState flags are here as well as the four
+                // `visible`s so promotion lands on the frame the panel is
+                // ASKED for, not one frame later once its slide animation has
+                // moved offsetScale off 1.
+                //
+                // Live `set_layer`, not a remap: the property is writable with
+                // a notify (quickshell-wayland-layershell.qmltypes:102) and
+                // set_layer has existed since zwlr_layer_shell_v1 version 2 -
+                // KWin advertises version 5.
+                readonly property bool anythingShowing: scope.screenState.osd || scope.screenState.session || scope.screenState.sidebar || osd.visible || session.visible || sidebarDrawer.visible || notifPanel.visible
+
+                WlrLayershell.layer: rightEdge.anythingShowing ? WlrLayer.Overlay : WlrLayer.Top
                 // Never take the keyboard. A toast that steals focus while you
                 // are typing is worse than no toast at all - and this surface
                 // is now permanently mapped, so taking focus would be a bug you
