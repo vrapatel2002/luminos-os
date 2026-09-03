@@ -1,0 +1,16 @@
+# [CHANGE: claude-code | 2026-09-03]
+# Points Jellyseerr at whichever library disk has the most free space. See DECISION 92.
+# Runs as root because it reads the API key out of /var/lib/jellyseerr/settings.json.
+[Unit]
+Description=Point Jellyseerr at the library disk with the most free space
+Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
+After=jellyseerr.service
+Wants=jellyseerr.service
+
+[Service]
+Type=oneshot
+# Exit 1 means a disk was unusable or a write did not stick. Letting systemd mark the
+# unit failed is the point: silently continuing to fill one disk is the failure mode
+# this exists to prevent.
+ExecStart=/usr/local/bin/luminos-root-balance
+Nice=10

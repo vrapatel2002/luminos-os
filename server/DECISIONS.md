@@ -1701,6 +1701,9 @@ needed, and if completed-download removal is ever turned off, this reasoning exp
 
 ### The lever, left deliberately unpulled
 
+> **Superseded the same day by DECISION 92** — the lever is now pulled automatically by
+> `luminos-root-balance.timer`. Kept because it states the constraint that decision solves.
+
 Jellyseerr's `activeDirectory` still points at `/srv/media/movies` and `/srv/media/tv`, so
 **every new request still lands on the internal disk** and the external one stays empty. That
 is the correct order — fill the faster internal spindle first, and keep new writes off the USB
@@ -1717,3 +1720,75 @@ It will fail without warning. Nothing irreplaceable should live only here, and `
 was deliberately **not** moved onto it — a backup you cannot health-check is a poor backup.
 The graceful-degradation property is what makes this acceptable: if the drive dies, Jellyfin
 shows fewer items and everything on the internal disk is untouched.
+
+
+## DECISION 92 — The root folder picks itself, because no app in the chain has a "most free space" policy
+
+<!-- [CHANGE: claude-code | 2026-09-03] -->
+
+DECISION 91 left one manual step: Jellyseerr pins `activeDirectory` to a single path, so every
+request landed on the internal disk until a human changed it. That is not automation, it is a
+reminder someone has to remember months from now. This removes it.
+
+### Why a timer and not a pooling filesystem
+
+The textbook answer is `mergerfs` with a most-free-space create policy — placement happens in
+the filesystem and no app knows there are two disks. It was rejected in DECISION 91 for being
+AUR-only, and wanting automation does not change that arithmetic: it still means a from-source
+FUSE layer in the media server's data path plus remounting `sda3` away from `/srv/media`, the
+path every service is configured against.
+
+The thing that actually needs deciding is not *where each file goes* but **which root folder a
+request is created with** — one choice per request, not per file. That is a scheduling problem, and
+`luminos-season-limit.timer` already establishes the pattern on this box: when an app is missing
+a setting, supply it from outside on a timer rather than replacing the app. Same shape here.
+
+`/usr/local/bin/luminos-root-balance`, hourly, stdlib-only Python (installing anything means
+pacman on a headless box). It reads free space on both library disks and moves Jellyseerr's
+`activeDirectory` to whichever has more. Hourly rather than the season-limiter's daily cadence:
+a request can arrive at any moment and the root folder has to be right *before* it does.
+
+### The guard that is the whole point
+
+**`/srv/external` is a mount point, so if the USB drive drops off, the directory still exists —
+empty, on the root filesystem — and `statvfs()` reports root's free space.** Measured with the
+drive unmounted: **19 GB**, presented exactly as if it were a healthy library disk. A naive
+most-free-space check would, once the internal disk filled below that, route a 100 GB remux at
+`/` and take the whole box down.
+
+So a candidate is only eligible if `os.path.ismount()` is true for its disk root, plus the
+directory exists and is writable. **Verified by actually unmounting the drive**, not by reading
+the code: the script correctly skipped `/srv/external/movies` and held its current choice.
+
+### Hysteresis, because two disks of similar size flap
+
+Pure most-free-space would rewrite the setting every hour while the disks sit 13 GB apart.
+A switch only happens on a **20 GB** lead, so the current choice wins ties. The disks are at
+478 G and 491 G today, so the live behaviour is "hold on the internal disk" — which is also
+the right answer on the merits, since the internal spindle is faster than the USB bus.
+`LOW_WATER_BYTES` warns at 120 G: quality definitions are all `maxSize: None` (DECISION 54)
+and a 103.5 GB grab has already happened, so headroom has to clear one worst-case release.
+
+### Two Jellyseerr traps found while building it
+
+- **Editing `/var/lib/jellyseerr/settings.json` under a running Jellyseerr does nothing.** It
+  keeps settings in memory and rewrites the file on its next save, silently discarding the
+  edit. The API is the only real way in.
+- **Jellyseerr rejects its own `GET` body on `PUT`.** Feeding an object straight back from
+  `GET /api/v1/settings/radarr` returns **HTTP 400 `request/body/id is read-only`**. `id` goes
+  in the URL and must be stripped from the body — but only `id`, since every other field
+  omitted is treated as a change. The first build of this script failed exactly here, which is
+  the argument for testing the write path rather than trusting a 204 on the read path.
+
+### Verified, not assumed
+
+The forced-switch test ran with `HYSTERESIS_BYTES = 0` to make it commit a real change, then
+confirmed the new value by reading it back through the API, then ran again to prove idempotency
+("already on … — no change"). Both services were restored to `/srv/media` afterwards and
+`settings.json` **diffed field-by-field against a pre-change backup: identical**, so the PUT
+round-trip dropped nothing — the real risk when sending a whole object back. The unit was then
+exercised through systemd, not just from a shell.
+
+Failure is loud on purpose: the script exits 1 if a disk is unusable or a write does not stick,
+and the unit is `Type=oneshot`, so systemd marks it failed. Continuing to quietly fill one disk
+is the failure mode this exists to prevent.

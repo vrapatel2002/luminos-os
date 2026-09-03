@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+# [CHANGE: claude-code | 2026-09-03] DECISION 92.
+"""Point Jellyseerr at whichever library disk has the most free space.
+
+Sonarr and Radarr have no "most free space" root folder policy -- a root folder is
+chosen per item, and Jellyseerr pins its own choice in `activeDirectory`. With two
+disks that means every request lands on the same disk forever until a human edits a
+setting. This supplies the missing policy, the same way luminos-season-limit supplies
+the maximum-seasons setting Sonarr does not have.
+
+Runs hourly, changes nothing when the current choice is already the best one.
+
+stdlib only, on purpose: installing anything here means pacman on a headless box.
+"""
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+SETTINGS = "/var/lib/jellyseerr/settings.json"
+API = "http://127.0.0.1:5055/api/v1"
+
+# service -> candidate root folders. Order is irrelevant; free space decides.
+CANDIDATES = {
+    "radarr": ["/srv/media/movies", "/srv/external/movies"],
+    "sonarr": ["/srv/media/tv", "/srv/external/tv"],
+}
+
+# The filesystem root of each library disk. A candidate is only eligible if its
+# disk is *actually mounted*, checked against this list -- see is_eligible().
+DISK_ROOTS = ["/srv/media", "/srv/external"]
+
+# Switch only if the alternative beats the current choice by this much. Without it
+# the two disks sitting at similar free space would flap the setting every hour.
+HYSTERESIS_BYTES = 20 * 1000**3
+
+# Below this, warn. Quality definitions are all maxSize:None (DECISION 54) and a
+# 103.5 GB remux has already been grabbed once, so headroom needs to be generous.
+LOW_WATER_BYTES = 120 * 1000**3
+
+
+def free_bytes(path):
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize
+
+
+def disk_root_for(path):
+    """Which entry in DISK_ROOTS this candidate belongs to."""
+    for root in DISK_ROOTS:
+        if path == root or path.startswith(root.rstrip("/") + "/"):
+            return root
+    return None
+
+
+def is_eligible(path, log):
+    """A candidate is only usable if its disk is genuinely mounted and writable.
+
+    This is the whole safety story. /srv/external is a mount point: if the USB drive
+    drops off, the directory still exists -- empty, on the 40 GB root filesystem --
+    and statvfs() would cheerfully report root's free space. Picking it would route a
+    100 GB remux onto /. So require the disk root to be a real mount point.
+    """
+    root = disk_root_for(path)
+    if root is None:
+        log(f"  {path}: not under a known disk root, skipping")
+        return False
+    if not os.path.ismount(root):
+        log(f"  {path}: {root} is NOT a mount point (disk missing?), skipping")
+        return False
+    if not os.path.isdir(path):
+        log(f"  {path}: does not exist, skipping")
+        return False
+    if not os.access(path, os.W_OK | os.X_OK):
+        log(f"  {path}: not writable, skipping")
+        return False
+    return True
+
+
+def api_key():
+    with open(SETTINGS) as fh:
+        return json.load(fh)["main"]["apiKey"]
+
+
+def api(method, path, key, payload=None):
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(API + path, data=data, method=method)
+    req.add_header("X-Api-Key", key)
+    if data:
+        req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        body = resp.read().decode()
+        return resp.status, (json.loads(body) if body.strip() else None)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true", help="report, change nothing")
+    args = ap.parse_args()
+
+    def log(msg):
+        print(msg, flush=True)
+
+    key = api_key()
+    changed = failed = 0
+
+    for service, paths in CANDIDATES.items():
+        log(f"{service}:")
+
+        usable = []
+        for p in paths:
+            if is_eligible(p, log):
+                f = free_bytes(p)
+                usable.append((f, p))
+                log(f"  {p}: {f / 1000**3:.0f} GB free")
+
+        if not usable:
+            log(f"  no usable root folder for {service} -- leaving settings alone")
+            failed += 1
+            continue
+
+        try:
+            status, servers = api("GET", f"/settings/{service}", key)
+        except urllib.error.URLError as exc:
+            log(f"  cannot reach Jellyseerr: {exc}")
+            failed += 1
+            continue
+        if status != 200 or not servers:
+            log(f"  unexpected GET /settings/{service} -> HTTP {status}")
+            failed += 1
+            continue
+
+        for server in servers:
+            current = server.get("activeDirectory")
+            best_free, best = max(usable)
+
+            if best_free < LOW_WATER_BYTES:
+                log(f"  WARNING: best option {best} has only "
+                    f"{best_free / 1000**3:.0f} GB free -- both disks are filling up")
+
+            # Only move off the current choice for a real improvement.
+            cur_free = next((f for f, p in usable if p == current), None)
+            if current == best:
+                log(f"  already on {current} -- no change")
+                continue
+            if cur_free is not None and best_free - cur_free < HYSTERESIS_BYTES:
+                log(f"  {best} leads {current} by less than "
+                    f"{HYSTERESIS_BYTES / 1000**3:.0f} GB -- holding to avoid flapping")
+                continue
+
+            if args.dry_run:
+                log(f"  DRY RUN: would switch {current} -> {best}")
+                continue
+
+            # `id` is read-only in the body and Jellyseerr rejects the whole request
+            # with HTTP 400 if it is present -- it belongs in the URL only. Every other
+            # field has to be sent back or it is treated as a change.
+            server_id = server["id"]
+            payload = {k: v for k, v in server.items() if k != "id"}
+            payload["activeDirectory"] = best
+            try:
+                status, _ = api("PUT", f"/settings/{service}/{server_id}", key, payload)
+            except urllib.error.URLError as exc:
+                log(f"  PUT failed: {exc}")
+                failed += 1
+                continue
+            if status not in (200, 201, 204):
+                log(f"  PUT returned HTTP {status} -- not applied")
+                failed += 1
+                continue
+
+            # Read back rather than trusting the write.
+            _, after = api("GET", f"/settings/{service}", key)
+            landed = next((s.get("activeDirectory") for s in after
+                           if s.get("id") == server_id), None)
+            if landed == best:
+                log(f"  switched {current} -> {best} (verified)")
+                changed += 1
+            else:
+                log(f"  WRITE DID NOT STICK: wanted {best}, reads back {landed}")
+                failed += 1
+
+    log(f"done: {changed} changed, {failed} problems")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

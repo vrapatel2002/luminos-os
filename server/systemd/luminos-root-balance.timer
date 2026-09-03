@@ -1,0 +1,15 @@
+# [CHANGE: claude-code | 2026-09-03]
+# Hourly, unlike the daily season-limit timer: a request can arrive at any moment and
+# the root folder has to already be correct when it does. A day's lag could send a
+# 100 GB remux at a disk that filled up this morning.
+[Unit]
+Description=Hourly rebalance of the Jellyseerr root folder
+
+[Timer]
+OnCalendar=hourly
+# The server is powered on and off by hand, so a missed run must still happen.
+Persistent=true
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

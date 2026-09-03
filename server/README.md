@@ -324,10 +324,19 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   → `L`) and there is no keyboard — a USB disk that does not enumerate would drop it to
   `emergency.target` at a prompt nobody can answer. And `nofail` is worth *verifying*, not
   assuming: check the generated unit has empty `RequiredBy=` and only `WantedBy=local-fs.target`.
-- **New downloads still land on the internal disk even though a second one is mounted.**
-  Nothing auto-balances. Jellyseerr's `activeDirectory` in `/var/lib/jellyseerr/settings.json`
-  pins the root folder, and it points at `/srv/media`. That is deliberate — fill the faster
-  spindle first — but it means the external drive stays empty until that setting is flipped.
+- **Root folder choice is automated by a timer, not by any app setting.** Neither Sonarr,
+  Radarr nor Jellyseerr has a "most free space" policy — `activeDirectory` pins one path
+  forever. `luminos-root-balance.timer` supplies the missing policy hourly, the same way
+  `luminos-season-limit.timer` supplies the maximum-seasons setting Sonarr lacks. **If you
+  hand-edit the root folder in the Jellyseerr UI, expect it back within the hour** unless the
+  disks are within 20 GB of each other. DECISION 92.
+- **Editing `/var/lib/jellyseerr/settings.json` while Jellyseerr runs achieves nothing.** It
+  holds settings in memory and rewrites the file on its next save, silently discarding the
+  edit. Go through the API (`PUT /api/v1/settings/{radarr,sonarr}/{id}`).
+- **Jellyseerr rejects its own GET body on PUT.** Round-tripping an object straight from
+  `GET /api/v1/settings/radarr` returns **HTTP 400 `request/body/id is read-only`** — `id`
+  belongs in the URL only and must be stripped. Every *other* field has to be sent back or it
+  counts as a change, so strip exactly that one.
 - **The hardlink objection to a second filesystem no longer applies, but only just.** 360 of
   414 GB of large files are hardlinked, which argues loudly against splitting the library. Those
   twins are torrent-era residue; nothing seeds since DECISION 84, and both apps have
