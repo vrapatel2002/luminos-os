@@ -233,6 +233,56 @@ fi
 export WAYLAND_DISPLAY="$WD"
 export QT_QPA_PLATFORM=wayland
 
+# ── X11 handoff ──────────────────────────────────────────────────────────────
+# [CHANGE: claude-code | 2026-09-03]
+# The bar launches other people's apps, and it hands them its own environment.
+# Wayland-native apps do not care what else is in there, which is why every app
+# anyone noticed working - Konsole, Dolphin, Chrome - kept working. X11-only apps
+# do care: with no DISPLAY they cannot open a screen at all. Ghidra spelled it
+# out ("Unable to launch Ghidra GUI application in headless environment"), exited
+# 1 after 1.6s, and did it with its stderr going nowhere, so from the bar it just
+# looked like the click did nothing.
+#
+# This script cannot simply inherit DISPLAY: it starts before Xwayland exists, so
+# at the top of this file there is nothing to inherit. The value shows up later,
+# and Plasma publishes it to the systemd user manager when it does. So poll for
+# it rather than reading it once.
+#
+# Not fatal. A session with no Xwayland is a working Wayland session, and a bar
+# that refuses to start would be a far worse bug than the one being fixed here.
+user_env_of() {
+    systemctl --user show-environment 2>/dev/null | sed -n "s/^$1=//p" | head -n1
+}
+
+DISP=
+XAUTH=
+deadline=$((SECONDS + 30))
+while [ "$SECONDS" -lt "$deadline" ]; do
+    DISP=$(user_env_of DISPLAY)
+    [ -n "$DISP" ] && break
+    sleep 0.25
+done
+
+if [ -n "$DISP" ]; then
+    export DISPLAY="$DISP"
+    log "X11 available: DISPLAY=$DISP (after ${SECONDS}s)"
+    # The cookie is optional and separately timed - Xwayland can be up a moment
+    # before the auth file is written. An unset XAUTHORITY still works when the
+    # server is not enforcing auth, so a miss here is worth a line, not a stall.
+    XAUTH=$(user_env_of XAUTHORITY)
+    if [ -n "$XAUTH" ] && [ -r "$XAUTH" ]; then
+        export XAUTHORITY="$XAUTH"
+        log "X11 cookie: XAUTHORITY=$XAUTH"
+    else
+        log "NOTE no readable XAUTHORITY (got '${XAUTH:-<unset>}') - X11 apps may"
+        log "     still work if the server is not enforcing auth"
+    fi
+else
+    log "WARNING no DISPLAY from the user manager in 30s - starting the bar anyway."
+    log "        Wayland apps are unaffected; X11-only apps launched from the bar"
+    log "        will fail with a headless-environment error."
+fi
+
 # ── the shell ────────────────────────────────────────────────────────────────
 # BUG-092's lesson: a black screen is not evidence of a crash, and three healthy
 # states also render black. If the bar dies there is nothing on screen to say so,

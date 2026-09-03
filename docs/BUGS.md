@@ -5360,3 +5360,85 @@ That is the test that matters, and it is still outstanding.
 looked like Meta+P being broken. It is not: **path-based instance lookup filters by
 `WAYLAND_DISPLAY`**, which an agent's non-graphical shell does not have. `WAYLAND_DISPLAY=wayland-0`
 in front of it, or `qs ipc --pid <pid>`, and it works. Do not "fix" the `.desktop`.
+
+---
+
+### BUG-153 — X11 apps launched from the bar died instantly, because the bar has no `DISPLAY` to give them
+<!-- [CHANGE: claude-code | 2026-09-03] -->
+**Status:** FIXED — 2026-09-03, **root cause reproduced and A/B proven with the bar's real
+environment.** Takes effect at next login. · **Component:** `scripts/luminos-caelestia-plasma`
+(generates `$STATE/shell.sh`)
+
+#### The symptom, as reported
+"Ghidra doesn't launch from the bar." Clicking it did nothing at all — no window, no error,
+no notification.
+
+#### It was never the launcher
+The launcher is innocent, and this was proven before anything was changed. An `execsnoop` trace
+of a real user click at 19:29:14 shows the full, correct exec chain:
+
+```
+env → /usr/bin/ghidra → bash → launch.sh → java
+```
+
+The spawn works. `launch()` is called, `entry.execute()` returns normally, the process starts —
+and then exits **1 after 1.6 s**, on its own. A diagnostic copy of `Apps.qml` was staged to log
+`launch()`, and it was never needed: it sat in `caelestia-kwin/` while the running shell is
+`qs -p ~/.config/quickshell/caelestia-bar`, so it never even loaded. It has been reverted to a symlink.
+
+#### Root cause — the bar's environment has no X11 in it
+The bar hands its own environment to every app it launches. Read straight off the live process:
+
+```
+$ tr '\0' '\n' < /proc/$(pgrep -x qs)/environ | grep -E '^(DISPLAY|XAUTHORITY)='
+   (nothing — 42 env vars total, and neither of these is among them)
+```
+
+Ghidra says so itself, given that exact environment:
+
+```
+ERROR: Unable to launch Ghidra GUI application in headless environment.
+```
+
+**Why the environment is short.** The bar is not started by systemd. The chain is
+`sddm-helper → inner.sh → shell.sh → qs`, and `shell.sh` exports `WAYLAND_DISPLAY` and
+`QT_QPA_PLATFORM` and nothing else. It also runs *early* — it is written to wait for the compositor
+socket, which means it starts before Xwayland exists, so at that moment there is no `DISPLAY` to
+inherit. The systemd user manager has it (`DISPLAY=:0`,
+`XAUTHORITY=/run/user/1000/xauth_FKaLMq`); the bar simply never looks.
+
+#### Why this looked intermittent, and why nobody caught it sooner
+Wayland-native apps do not read `DISPLAY`, so **every app anyone noticed working kept working** —
+Konsole, Dolphin, Chrome, which is precisely what fills the frequency table. Only X11-only
+toolkits (Java Swing, older GTK/Qt) fail, and they fail with their stderr going nowhere, so from
+the bar the click is silently inert. "Some apps work, some don't" was the real shape of it.
+
+#### The A/B, run with the bar's actual environment
+`env -i` reconstructed from `/proc/<qs pid>/environ`, so this is not an approximation of the bar's
+environment — it *is* it:
+
+| case | env | result |
+|---|---|---|
+| A | bar env as-is | **rc=1**, `Exited with error.` |
+| B | bar env + `DISPLAY` + `XAUTHORITY` | **rc=0**, launcher handed off; `java … ghidra.GhidraRun` alive with a window |
+
+B's parent exits 0 because Ghidra's launcher backgrounds the JVM — the surviving java PID is the
+proof, not the return code.
+
+#### The fix
+`shell.sh` now polls `systemctl --user show-environment` for `DISPLAY` (30 s budget, 0.25 s
+interval) after the compositor is up, and exports it alongside `WAYLAND_DISPLAY`. `XAUTHORITY` is
+picked up separately and only if the file is readable — Xwayland can be up a moment before the
+cookie is written, and an unset `XAUTHORITY` still works against a server not enforcing auth, so a
+miss there is worth a log line, not a stall.
+
+**Deliberately not fatal.** A session with no Xwayland is a perfectly good Wayland session; a bar
+that refused to start over a missing `DISPLAY` would be a far worse bug than this one. A timeout
+logs a warning naming the headless-environment error and starts the bar anyway.
+
+#### Verified so far
+`bash -n` clean on the generator and on the extracted `shell.sh` heredoc; the new block executed
+standalone resolves `DISPLAY=:0` and `XAUTHORITY=/run/user/1000/xauth_FKaLMq` in 0 s; the A/B above.
+**Not yet verified:** a real login. The fix regenerates `shell.sh` at session start, so the
+*currently running* bar still has no `DISPLAY` — restarting `qs` alone will not pick it up, because
+the supervisor's own environment lacks it too. This is confirmed at the next login, not before.
