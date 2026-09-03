@@ -1636,3 +1636,84 @@ sudo cp /root/luminos-space.bak-20260902 /usr/local/bin/luminos-space
 sudo systemctl daemon-reload && sudo systemctl restart byparr luminos-space
 sudo systemctl disable --now luminos-backup.timer
 ```
+
+
+## DECISION 91 — The library grows to 1.5 TB by adding a second root folder, not by pooling the two disks
+
+<!-- [CHANGE: claude-code | 2026-09-03] -->
+
+A 500 GB USB drive (`ST500LM030`, serial `ZDE7LHD0`) was plugged into the box and left
+unmounted. It came up as `sdb`, one ext4 partition labelled `MEDIA`, **empty** — formatted
+the same day, 36 K used, nothing but `lost+found`. Mounted at **`/srv/external`**, taking the
+library from 876 G to a **1.4 TiB pool with 903 G free**.
+
+### Why not one filesystem
+
+The obvious reading of "1 TB to 1.5 TB" is a single 1.5 TB volume — LVM spanning, or btrfs
+multi-device. Both are wrong here for the same reason: **they fuse the failure domains.** A
+spanned volume across an internal SATA disk and a bus-powered USB laptop drive loses
+*everything*, including the 386 G already on the internal disk, when the USB side hiccups —
+and USB drives drop off for reasons a SATA drive never would: a knocked cable, a spin-down,
+the brownouts this machine already gets (four unclean boots in four, DECISION 89). It also
+can't be done in place: `/srv/media` is a plain ext4 partition with 386 G on it and nowhere
+to stage a rebuild.
+
+`mergerfs` would pool them and degrade gracefully — losing a branch loses only that branch.
+It was rejected on cost, not correctness: **it is not in the Arch repos** (checked against
+`archlinux.org/packages`, 0 results — AUR only), so it means a from-source build plus a
+maintained out-of-tree FUSE layer sitting in the media server's data path, and a restructure
+that remounts `sda3` away from `/srv/media` — the path every service is configured against.
+
+### The hardlink argument, and why it expired
+
+The reflex objection to a second filesystem is hardlinks: Sonarr and Radarr import by
+hardlink, hardlinks cannot cross filesystems, so a second disk turns every import into a
+copy. Measured, that is **360.1 GB of 414.3 GB of large files currently hardlinked** — 87%,
+which looks decisive.
+
+It isn't, because those twins are **torrent-era residue**. Downloads were retained to seed;
+`qbittorrent-nox` was uninstalled in DECISION 84 and nothing seeds now. Both apps have
+`removeCompletedDownloads=True` on the NZBGet client, so a completed download is deleted
+after import. The copy penalty is therefore **transient** — one release, on the internal disk,
+during the import window — not permanent double storage. Internal has 446 G of headroom
+against a worst-case ~100 G remux (DECISION 54). That is the whole reason a FUSE layer is not
+needed, and if completed-download removal is ever turned off, this reasoning expires with it.
+
+### What was actually done
+
+- `nofail,x-systemd.device-timeout=10` in `/etc/fstab`, by UUID. **This is the load-bearing
+  option.** Root is locked (`passwd -S root` → `L`) and there is no keyboard on this box; a
+  USB disk that fails to enumerate must never reach `emergency.target`. Verified through the
+  generated unit, not assumed: `RequiredBy=` is empty and `WantedBy=local-fs.target`, so an
+  absent drive lets boot continue. `fstab` backed up to `/etc/fstab.bak-20260903` and checked
+  with `findmnt --verify` before `daemon-reload`.
+- Mounted outside `/srv/media` on purpose. A mountpoint *inside* it means that if the drive
+  ever fails to mount, writes land on the underlying directory on `sda3` and silently fill the
+  internal disk instead of failing.
+- `root:media 2775`, setgid, and the **whole traverse chain** checked with `namei -l` — the
+  `os.makedirs` umask trap that cost an afternoon on `/srv/media/usenet` produces a perfect
+  leaf under an untraversable parent. All four service accounts (`sonarr`, `radarr`,
+  `jellyfin`, `nzbget`) were proven to write there before anything was registered.
+- Second root folders added: `/srv/external/tv` (Sonarr), `/srv/external/movies` (Radarr),
+  both reporting `accessible: true`.
+- Added as **additional paths on the existing Jellyfin libraries**, not as new libraries, so
+  `Movies` and `Shows` each span both disks and the split is invisible to the Roku.
+
+### The lever, left deliberately unpulled
+
+Jellyseerr's `activeDirectory` still points at `/srv/media/movies` and `/srv/media/tv`, so
+**every new request still lands on the internal disk** and the external one stays empty. That
+is the correct order — fill the faster internal spindle first, and keep new writes off the USB
+bus while 446 G of better storage is free. When internal runs low, change `activeDirectory` in
+`/var/lib/jellyseerr/settings.json` (or the Jellyseerr UI) to the `/srv/external` paths. There
+is no auto-balancing; this is the one manual step, and it is a single setting.
+
+### Known and accepted
+
+**This drive's health is unreadable.** `smartctl` was tried through `auto`, `sat`, `sat,12`,
+`usbjmicron`, `usbsunplus`, `usbcypress` and `scsi` — the enclosure passes none of them. No
+power-on hours, no reallocated or pending sector counts, on a laptop drive of unknown age.
+It will fail without warning. Nothing irreplaceable should live only here, and `/srv/media/backup`
+was deliberately **not** moved onto it — a backup you cannot health-check is a poor backup.
+The graceful-degradation property is what makes this acceptable: if the drive dies, Jellyfin
+shows fewer items and everything on the internal disk is untouched.

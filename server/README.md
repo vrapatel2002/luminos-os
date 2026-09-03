@@ -26,6 +26,7 @@ server/
 |---|---|
 | Hardware | Dell Inspiron 3590 — i5-10210U (Comet Lake-U, 4c/8t), 16 GB RAM |
 | Storage | 1 TB 2.5" HDD (`WDC WD10SPZX`) at `/srv/media` — the only usable bay |
+| Storage (2) | 500 GB USB HDD (`ST500LM030`) at `/srv/external` — second root folder, **not** pooled, DECISION 91 |
 | Graphics | Intel UHD (`renderD128`, the transcoding GPU) + AMD Radeon 520 (`renderD129`, unused) |
 | Power | **battery removed — mains only.** A power cut is a hard stop |
 | OS | Arch, headless, on the HDD. Windows lives on an NVMe the installer never touches |
@@ -311,6 +312,28 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   ~35 Mbit/s against a 32.3 Mbit/s remux — about 5% headroom, which stutters. The idle wired
   `.62` measures 89.8 Mbit/s on the same file. YouTube working proves nothing here: it is
   ~5 Mbit/s over one hop.
+- **The 500 GB USB drive has no readable SMART.** [CHANGE: claude-code | 2026-09-03] The
+  enclosure passes none of `auto`, `sat`, `sat,12`, `usbjmicron`, `usbsunplus`, `usbcypress`
+  or `scsi` — no power-on hours, no reallocated or pending sectors, on a laptop drive of
+  unknown age. It will fail with no warning, so nothing irreplaceable lives only on it and
+  `/srv/media/backup` was deliberately left on the internal disk. DECISION 91.
+- **A second disk mounted *inside* `/srv/media` is a trap.** If it ever fails to mount, writes
+  land on the underlying directory on `sda3` and silently fill the internal disk instead of
+  failing loudly. That is why it is at `/srv/external`. Any future disk goes outside too.
+- **An fstab entry without `nofail` can strand this box.** Root is locked (`passwd -S root`
+  → `L`) and there is no keyboard — a USB disk that does not enumerate would drop it to
+  `emergency.target` at a prompt nobody can answer. And `nofail` is worth *verifying*, not
+  assuming: check the generated unit has empty `RequiredBy=` and only `WantedBy=local-fs.target`.
+- **New downloads still land on the internal disk even though a second one is mounted.**
+  Nothing auto-balances. Jellyseerr's `activeDirectory` in `/var/lib/jellyseerr/settings.json`
+  pins the root folder, and it points at `/srv/media`. That is deliberate — fill the faster
+  spindle first — but it means the external drive stays empty until that setting is flipped.
+- **The hardlink objection to a second filesystem no longer applies, but only just.** 360 of
+  414 GB of large files are hardlinked, which argues loudly against splitting the library. Those
+  twins are torrent-era residue; nothing seeds since DECISION 84, and both apps have
+  `removeCompletedDownloads=True`, so an import that copies costs one release transiently rather
+  than permanently. **If completed-download removal is ever switched off, that reasoning dies**
+  and a second filesystem starts costing real space. DECISION 91.
 - `bc` is not installed. Use python for arithmetic in scripts.
 
 ## Owner-only tasks
