@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-09-02] Config + database backups. DECISION 90.
+#
+# WHAT THIS DOES NOT DO: it does not back up the media. 386 GB of films that can
+# be downloaded again is not what you lose sleep over. What is genuinely
+# irreplaceable is the *state* -- what Sonarr is tracking, what has already been
+# grabbed, Jellyfin's watch history and users, the indexer settings. That is a
+# few hundred megabytes and it is what this saves.
+#
+# DATABASES ARE DUMPED, NOT COPIED. Sonarr/Radarr/Prowlarr/Jellyfin keep live
+# SQLite files in WAL mode. `cp` of a WAL database while the service is writing
+# gives you a file that may restore to a half-applied transaction. `sqlite3
+# .backup` takes a proper consistent snapshot of a live database, so the
+# services never have to stop.
+#
+# THE DISK CAVEAT: there is exactly ONE physical disk (sda). / is sda2 and
+# /srv/media is sda3. Writing backups to sda3 protects against a bad upgrade,
+# a corrupted config or a wrong click -- it does NOT protect against the disk
+# dying. The G14 pulls these with `luminos-pull-server-backup`, which is what
+# makes them real. That pull runs FROM the laptop on purpose: the server holds
+# no key to the laptop, so a compromised server cannot reach into it.
+#
+# DEST IS ON sda3 DELIBERATELY. The obvious-looking /srv/backup is on sda2,
+# which is root, which has 23 GB free against sda3's 446 GB. A backup job that
+# slowly fills the root filesystem is not a safety net, it is a scheduled
+# outage -- root filling up is precisely what strands a headless machine.
+
+set -uo pipefail
+
+DEST=/srv/media/backup/luminos
+KEEP=7
+STAMP=$(date +%Y%m%d-%H%M%S)
+OUT="$DEST/$STAMP"
+LOG=/var/log/luminos-backup.log
+
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S')  $*" | tee -a "$LOG"; }
+
+mkdir -p "$OUT" || { echo "cannot create $OUT"; exit 1; }
+log "=== backup $STAMP starting ==="
+
+fail=0
+
+# ---- SQLite databases, dumped live and consistently -------------------------
+for db in \
+  /var/lib/sonarr/sonarr.db \
+  /var/lib/radarr/radarr.db \
+  /var/lib/prowlarr/prowlarr.db \
+  /var/lib/jellyfin/data/jellyfin.db
+do
+  # NOTE: library.db and authentication.db exist in that directory but are both
+  # 0 bytes -- modern Jellyfin folded them into jellyfin.db and left the stubs
+  # behind. They are excluded on purpose: dumping an empty file succeeds and
+  # passes an integrity check, which would pad the log with two reassuring
+  # lines that mean nothing.
+  [ -f "$db" ] || continue
+  name=$(basename "$db" .db)
+  if sqlite3 "$db" ".backup '$OUT/$name.db'" 2>>"$LOG"; then
+    # A dump that cannot be read back is not a backup.
+    if [ "$(sqlite3 "$OUT/$name.db" 'PRAGMA integrity_check;' 2>/dev/null)" = "ok" ]; then
+      log "  db  $name  $(du -h "$OUT/$name.db" | cut -f1)  integrity ok"
+    else
+      log "  db  $name  *** INTEGRITY CHECK FAILED ***"; fail=1
+    fi
+  else
+    log "  db  $name  *** DUMP FAILED ***"; fail=1
+  fi
+done
+
+# ---- Config trees -----------------------------------------------------------
+# Jellyfin's metadata/ and cache/ are excluded: 2.3 GB of downloaded artwork
+# that regenerates itself, and it would dwarf everything worth keeping.
+tar_it() {
+  local label=$1 out=$2; shift 2
+  if tar czf "$OUT/$out" "$@" 2>>"$LOG"; then
+    log "  cfg $label  $(du -h "$OUT/$out" | cut -f1)"
+  else
+    log "  cfg $label  *** TAR FAILED ***"; fail=1
+  fi
+}
+
+tar_it "servarr configs" servarr-config.tar.gz \
+  --ignore-failed-read \
+  /var/lib/sonarr/config.xml /var/lib/radarr/config.xml \
+  /var/lib/prowlarr/config.xml /var/lib/jellyseerr/settings.json
+
+tar_it "jellyfin config" jellyfin-config.tar.gz \
+  --ignore-failed-read \
+  --exclude='*/metadata/*' --exclude='*/cache/*' --exclude='*/transcodes/*' \
+  --exclude='*/log/*' \
+  /var/lib/jellyfin/config /var/lib/jellyfin/plugins
+
+tar_it "system config" system-config.tar.gz \
+  --ignore-failed-read \
+  /etc/caddy /etc/nftables.conf /etc/systemd/network \
+  /etc/systemd/system/*.service /etc/systemd/resolved.conf.d \
+  /etc/ssh/sshd_config /etc/ssh/sshd_config.d \
+  /boot/loader/entries /etc/fstab
+
+# ---- A record of what was installed, so a rebuild is not guesswork ----------
+pacman -Qqe > "$OUT/pkglist-explicit.txt" 2>/dev/null
+pacman -Qq  > "$OUT/pkglist-all.txt" 2>/dev/null
+log "  pkg $(wc -l < "$OUT/pkglist-explicit.txt") explicit / $(wc -l < "$OUT/pkglist-all.txt") total"
+
+# Secrets live in these files. Nothing here should be world-readable.
+chmod -R go-rwx "$OUT"
+
+# ---- Prune -----------------------------------------------------------------
+# ls -1d sorts lexically, and the timestamp format makes that chronological.
+mapfile -t old < <(ls -1d "$DEST"/20* 2>/dev/null | head -n -"$KEEP")
+for d in "${old[@]:-}"; do
+  [ -n "$d" ] && rm -rf "$d" && log "  pruned $(basename "$d")"
+done
+
+log "=== backup $STAMP finished, $(du -sh "$OUT" | cut -f1), $( [ $fail -eq 0 ] && echo OK || echo 'WITH ERRORS' ) ==="
+exit $fail

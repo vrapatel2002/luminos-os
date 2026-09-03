@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-09-02] Pull the server's backups here. DECISION 90.
+#
+# WHY THIS RUNS FROM THE LAPTOP. The server backing itself up onto its own only
+# disk protects against a bad upgrade or a wrong click. It does not protect
+# against that disk dying, and there is exactly one disk in that machine. This
+# script is what turns those backups into a second copy on different hardware.
+#
+# The direction is a security decision, not a convenience one. If the server
+# pushed to the laptop it would need an SSH key to the laptop, and anything that
+# compromised the server would inherit a way in here. Pulling means the server
+# holds no credential to this machine and the trust only runs one way.
+#
+# WHY IT USES THE WIRE. 192.168.2.62 is the ethernet address. .61 is the wifi,
+# whose adapter firmware has crashed at least once, and which is a stale-lease
+# hazard when the radio roams bands. The wire holds the default route anyway
+# (DECISION 79).
+#
+# The backups are 0600 root on the server, so a plain rsync as `shawn` reads
+# nothing. --rsync-path="sudo rsync" runs the far end under the passwordless
+# sudo that already exists there. Locally they land under the invoking user and
+# are then locked to 0700, because these tarballs contain API keys.
+
+set -uo pipefail
+
+SERVER=192.168.2.62
+KEY="$HOME/.ssh/luminos-server"
+REMOTE=/srv/media/backup/luminos
+LOCAL="$HOME/Backups/luminos-server"
+
+mkdir -p "$LOCAL" || { echo "cannot create $LOCAL"; exit 1; }
+
+if ! ping -c1 -W2 "$SERVER" >/dev/null 2>&1; then
+  echo "server $SERVER is not answering -- is it powered on?"
+  echo "try: luminos-wake-server --wait"
+  exit 1
+fi
+
+echo "pulling $REMOTE from $SERVER ..."
+
+# --delete keeps this an exact mirror, so the server's 7-day prune propagates
+# here instead of growing forever. That does mean this copy is NOT an archive
+# of all time -- it is a mirror of the last week.
+rsync -az --delete --info=stats2 \
+  -e "ssh -i $KEY -o ConnectTimeout=10" \
+  --rsync-path="sudo rsync" \
+  "shawn@$SERVER:$REMOTE/" "$LOCAL/"
+rc=$?
+
+if [ $rc -ne 0 ]; then
+  echo "rsync failed with $rc -- the local copy may be incomplete" >&2
+  exit $rc
+fi
+
+chmod -R go-rwx "$LOCAL"
+
+echo
+echo "local copy: $LOCAL  ($(du -sh "$LOCAL" | cut -f1))"
+ls -1 "$LOCAL" | tail -7
+
+# A copy that cannot be read back is not a backup. Spot-check the newest dump
+# rather than trusting that rsync moved bytes correctly.
+newest=$(ls -1d "$LOCAL"/20* 2>/dev/null | tail -1)
+if [ -n "$newest" ] && [ -f "$newest/sonarr.db" ] && command -v sqlite3 >/dev/null; then
+  check=$(sqlite3 "$newest/sonarr.db" 'PRAGMA integrity_check;' 2>&1)
+  n=$(sqlite3 "$newest/sonarr.db" 'select count(*) from Series;' 2>&1)
+  echo "verify: $(basename "$newest")/sonarr.db -> $check, $n series"
+  [ "$check" = "ok" ] || exit 1
+fi

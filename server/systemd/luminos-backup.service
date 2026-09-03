@@ -1,0 +1,12 @@
+# [CHANGE: claude-code | 2026-09-02] DECISION 90.
+[Unit]
+Description=Luminos config + database backup
+# /srv/media is where the backups land. Without this the timer can fire during
+# early boot before sda3 is mounted and write into the empty mountpoint on root.
+RequiresMountsFor=/srv/media
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-backup
+Nice=10
+IOSchedulingClass=idle

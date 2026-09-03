@@ -1,0 +1,13 @@
+# [CHANGE: claude-code | 2026-09-02] DECISION 90.
+[Unit]
+Description=Daily Luminos backup
+
+[Timer]
+OnCalendar=daily
+# The box is off more than it is on. Without Persistent it would simply skip
+# every run it slept through; with it, a missed backup happens at next boot.
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

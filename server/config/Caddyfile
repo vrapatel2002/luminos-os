@@ -68,7 +68,7 @@ luminos-server.tail1fd435.ts.net {
 	import tsname
 	import proxy 8100
 }
-100.82.125.26, 192.168.2.61 {
+100.82.125.26, 192.168.2.61, 192.168.2.62 {
 	tls internal
 	import proxy 8100
 }
@@ -78,7 +78,7 @@ luminos-server.tail1fd435.ts.net:8443 {
 	import tsname
 	import proxy 8096
 }
-100.82.125.26:8443, 192.168.2.61:8443 {
+100.82.125.26:8443, 192.168.2.61:8443, 192.168.2.62:8443 {
 	tls internal
 	import proxy 8096
 }
@@ -88,7 +88,7 @@ luminos-server.tail1fd435.ts.net:8444 {
 	import tsname
 	import proxy 5055
 }
-100.82.125.26:8444, 192.168.2.61:8444 {
+100.82.125.26:8444, 192.168.2.61:8444, 192.168.2.62:8444 {
 	tls internal
 	import proxy 5055
 }
@@ -98,7 +98,7 @@ luminos-server.tail1fd435.ts.net:8445 {
 	import tsname
 	import proxy 6789
 }
-100.82.125.26:8445, 192.168.2.61:8445 {
+100.82.125.26:8445, 192.168.2.61:8445, 192.168.2.62:8445 {
 	tls internal
 	import proxy 6789
 }
@@ -119,7 +119,7 @@ luminos-server.tail1fd435.ts.net:8446 {
 	import spacetoken
 	import proxy 8099
 }
-100.82.125.26:8446, 192.168.2.61:8446 {
+100.82.125.26:8446, 192.168.2.61:8446, 192.168.2.62:8446 {
 	tls internal
 	import spacetoken
 	import proxy 8099
@@ -130,7 +130,7 @@ luminos-server.tail1fd435.ts.net:8447 {
 	import tsname
 	import proxy 7878
 }
-100.82.125.26:8447, 192.168.2.61:8447 {
+100.82.125.26:8447, 192.168.2.61:8447, 192.168.2.62:8447 {
 	tls internal
 	import proxy 7878
 }
@@ -140,7 +140,7 @@ luminos-server.tail1fd435.ts.net:8448 {
 	import tsname
 	import proxy 8989
 }
-100.82.125.26:8448, 192.168.2.61:8448 {
+100.82.125.26:8448, 192.168.2.61:8448, 192.168.2.62:8448 {
 	tls internal
 	import proxy 8989
 }
@@ -150,7 +150,7 @@ luminos-server.tail1fd435.ts.net:8449 {
 	import tsname
 	import proxy 9696
 }
-100.82.125.26:8449, 192.168.2.61:8449 {
+100.82.125.26:8449, 192.168.2.61:8449, 192.168.2.62:8449 {
 	tls internal
 	import proxy 9696
 }

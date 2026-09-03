@@ -1409,3 +1409,230 @@ echo -n Disabled | sudo tee $A/WakeOnAc/current_value
 echo -n Disabled | sudo tee $A/WakeOnLan/current_value
 sudo rm /etc/systemd/network/10-wired-wol.link && sudo udevadm control --reload
 ```
+
+---
+
+## DECISION 90 — The home network stops being a trust boundary, and three services stop relying on it
+# [CHANGE: claude-code | 2026-09-02]
+
+**Ask:** "what can we do to make server most secure — forget the G14."
+
+Six changes. Five are closures, one is the thing that was actually missing.
+
+### 0. The finding that set the priority
+
+A port sweep from the G14 against the server found **byparr on `:8191` answering
+HTTP 200 on `/docs` — FastAPI's interactive API console, no authentication of any
+kind — to every device on the wifi.** byparr holds no data worth stealing. That is
+not the risk. Its entire purpose is to fetch arbitrary URLs through a real headless
+browser, so an open one is a machine inside the house that makes requests on
+somebody else's behalf.
+
+The same sweep found **luminos-space running as root**, bound to `0.0.0.0:8099`,
+with a token in the URL as the only thing between the network and a button that
+deletes films.
+
+Both were reachable because of one firewall line: `ip saddr 192.168.2.0/24 accept`.
+Everything below follows from deciding that line was wrong.
+
+### 1. Backups — the gap, not a closure
+
+There were **none**. Four SQLite databases held every quality profile, indexer,
+naming rule and watch state, on a machine whose last four boots all ended
+uncleanly because the power cable gets bumped. WAL mode is why that has not
+corrupted anything yet, but "it has not happened yet" is not a backup.
+
+`server/scripts/luminos-backup` uses `sqlite3 .backup` (a consistent snapshot of a
+*live* database — copying the file while an app writes to it gives you a file that
+may not open), then `PRAGMA integrity_check`, then tars the configs.
+
+Two things it gets right that the obvious version does not:
+
+- **`DEST=/srv/media/backup/luminos`, not `/srv/backup`.** The obvious path lands on
+  sda2 — the 23 GB root partition. Backups grow. Filling root is precisely what
+  strands a headless box. sda3 has 446 GB.
+- **`integrity_check` returns `ok` on a zero-byte file.** So it is not proof of
+  content. Verification queries actual row counts: 4 series, 5 movies, 11 indexers,
+  1 user.
+
+Jellyfin's `library.db` and `authentication.db` are excluded with a comment saying
+why: they are 0-byte leftovers, and dumping them would "pad the log with two
+reassuring lines that mean nothing."
+
+**Direction is a security control.** `scripts/luminos-pull-server-backup` runs on the
+G14 and *pulls*. Push would require the server to hold a credential for the laptop,
+which means anything that compromises the server reaches the laptop. Pull means the
+server holds nothing. It uses `--rsync-path="sudo rsync"` to read root-owned 0600
+files as an unprivileged user, over the wire (`.62`) because that is the default
+route. Both ends run daily with `Persistent=true` — the box is off more than it is on,
+so a missed timer must fire late rather than never.
+
+### 2. The firewall — named ports, and the tailnet becomes the trusted path
+
+`server/config/nftables.conf`. The blanket subnet accept became five rules: `22`,
+`{80,443}`, `8443-8449`, `8096`, `udp 68`.
+
+**Narrowing this cost nothing**, and that is the whole reason it was possible.
+DECISION 80/84 already publishes every one of those apps over TLS on 8443-8449.
+Closing the bare ports did not remove access, it removed the *unencrypted duplicate*
+of access that already existed.
+
+Three details that are not decoration:
+
+- **`8096` stays open in the clear, deliberately.** The Roku app stores a bare server
+  address, does not follow redirects, and will not accept Caddy's local CA. The
+  Caddyfile already refuses Jellyfin a base URL for the same reason. The TV working
+  beats closing this, and Jellyfin demands a login regardless of where you came from.
+- **`udp 68` is load-bearing.** Both NICs get their address by DHCP, and a renewal
+  answered by *broadcast* is not matched by `ct state established,related`. Leave it
+  out and the lease can silently fail to renew, dropping the box off the network by
+  itself some hours later — the exact unattended failure DECISION 89 exists to fix.
+- **`iifname "tailscale0" accept` stays wide open, and that gap is now the design.**
+  The tailnet is the trusted path: every peer is authenticated and every machine on it
+  is ours. The home wifi holds a TV, phones and guests. Anything needing a port not
+  listed above should be reached over Tailscale, not by reopening it here.
+
+**`flush ruleset` was removed from the top of the file.** It had been there since
+2026-07-30. It deletes *every* table on the machine, not just this one — including the
+four `ip`/`ip6` `filter`/`nat`/`mangle` tables **tailscaled** owns and marks "do not
+touch". Every reload silently deleted Tailscale's rules, and the damage showed up
+later as the tunnel behaving strangely. Replaced with the standard idiom:
+`table inet filter` / `delete table inet filter` / `table inet filter { … }` — name it
+first so the delete cannot fail on a cold boot.
+
+Loaded behind a 5-minute `systemd-run --on-active=300` auto-rollback, cancelled only
+after a **new** SSH session proved access. This matters because
+`ct state established,related accept` comes first, so the session you are already
+sitting in survives any rule change — testing in it proves nothing.
+
+### 3. byparr — loopback, and a sandbox setting deliberately left out
+
+`server/systemd/byparr-override.conf`. The packaged unit ships `HOST=0.0.0.0`; now
+`127.0.0.1`. Prowlarr is the only consumer and already used `http://localhost:8191/`,
+so this cost nothing. Checked that no other config references 8191 — the hits in
+`sonarr.db`/`radarr.db` are digits inside UUIDs and timestamps, not settings.
+
+**`ProtectSystem` is absent on purpose, and that was measured.** With
+`ProtectSystem=strict` byparr starts cleanly and then fails every actual request:
+
+```
+OSError: [Errno 30] Read-only file system:
+'/usr/lib/python3.14/site-packages/playwright_captcha/utils/
+ camoufox_add_init_script/addon/scripts/script_*.js'
+```
+
+`playwright_captcha` deletes and rewrites files inside its own site-packages
+directory at solve time. All three levels (`yes`/`full`/`strict`) make `/usr`
+read-only, so all three break it.
+
+The obvious fix — a `ReadWritePaths` carve-out for that one directory — was
+**rejected**. The path contains `python3.14`. A Python minor bump moves it, systemd
+goes on starting the unit happily, and byparr fails only at request time, which reads
+as "the indexers are flaky" rather than as a config error. **A brittle carve-out that
+fails silently is worse than not having the setting at all.**
+
+`MemoryDenyWriteExecute` is also absent — it breaks the JavaScript JIT and the browser
+never starts. Everything else is on.
+
+I caught this because the Prowlarr proxy test returned 500 after my change and I read
+the journal instead of assuming it was pre-existing. Post-fix it returns `{}` `HTTP:200`.
+
+### 4. luminos-space — both reasons for root were false
+
+`server/systemd/luminos-space.service` + edits to `server/scripts/luminos-space`.
+Now runs as `luminosspace`, binds `127.0.0.1:8099`, sits behind Caddy's `:8446`.
+
+The old unit justified root with two reasons and **both measured wrong**:
+
+1. *"It needs root to read the Sonarr/Radarr API keys."* Those files are `0664`
+   `<app>:media`; group `media` reads them fine. The script was shelling out to
+   `sudo -n grep` — so it needed root only because it had chosen to use sudo.
+   Circular. It now opens the file and regexes `<ApiKey>` directly.
+2. *"It needs root to unlink hardlink twins under `/srv/media/downloads`."*
+   **Unlinking needs write on the directory, not the file.** Both directories are
+   `drwxrwsr-x` group `media`.
+
+`nzbget.conf` is the one genuine exception — `0640 nzbget:nzbget`, it holds the Usenet
+password. Granted with a single ACL entry rather than widening a group:
+`setfacl -m u:luminosspace:r /var/lib/nzbget/nzbget.conf`. Reading it is non-fatal, so
+the disk view still works if NZBGet is down.
+
+`luminos-hub` had been running this exact unprivileged pattern since 2026-08-27, and
+its own comment pointed at luminos-space as the one still unfixed.
+
+The unit gets `IPAddressAllow=localhost` / `IPAddressDeny=any` — every peer it talks
+to is on this machine, so a bug here cannot become a route to the internet. The URL
+token still exists; it is now a second lock rather than the only one.
+
+### 5. Caddy answers on the wire
+
+Every site block listed `100.82.125.26` and `192.168.2.61` but **not `192.168.2.62`**.
+The wire is the default route (DECISION 79), and the wifi is the interface whose
+ath10k firmware crashed earlier the same day — so the entire web front door depended
+on the less reliable of the two addresses. `.62` added to all eight blocks.
+
+A host absent from every block does not 404. It **fails the TLS handshake** (curl exit
+35), which reads as "the server is down".
+
+### 6. The update, and a false negative worth remembering
+
+`pacman -Qu` reported **1** package. The real number was **145**, including openssl,
+glibc, tailscale and a kernel jump 7.1.5 → 7.2.2. `-Qu` compares against the *sync
+database*, so a stale DB is a silent false negative — it tells you you are current when
+you are 145 behind. Also: `informant` hooks pacman and aborts the upgrade until Arch
+news is read.
+
+Rebooted, since after a kernel upgrade the running kernel's `/usr/lib/modules/<ver>` is
+deleted and the machine cannot load *any* module until it restarts. Back in **55
+seconds**: 0 failed units, fsck clean on its first `fsck.repair=yes` run (DECISION 89),
+all 11 services active, firewall loaded, `Wake-on: g` still armed, BIOS `WakeOnAc` and
+`WakeOnLan` persisted, and **zero ath10k firmware crashes** on the new kernel with
+`linux-firmware-atheros` installed.
+
+### Verified, not assumed
+
+- **Negative tests:** all seven bare ports (`8191, 8099, 8989, 7878, 9696, 6789, 5055`)
+  refuse from `192.168.2.16`. A change that only proves the good path is half a test.
+- **Positive:** Roku path `8096→302`; `443` and `8443`–`8449` answer on both `.61` and
+  `.62`; tailnet reaches `8989`/`9696`/`6789`; luminos-space `/api/data` and
+  `/api/downloads` return real data and a bad token returns 403.
+- **Cold table:** `nft delete table inet filter` then `systemctl start nftables`, to
+  prove the file loads when the table does not already exist.
+- One scare that was not: `systemctl status nftables` reads `inactive (dead)` after
+  `status=0/SUCCESS`. It is a `Type=oneshot` without `RemainAfterExit`. Normal.
+- One diagnosis that was not the firewall: `ssh 100.82.125.26` failed host-key
+  verification mid-sweep. Tailnet HTTP had already succeeded, so it was the G14's
+  `known_hosts`, not my rules. Confirmed with `-o StrictHostKeyChecking=accept-new`.
+
+### Deliberately declined
+
+- **Full-disk encryption with TPM auto-unlock.** The correct answer for a machine
+  someone could carry off, and genuinely the largest remaining gap. It needs the root
+  filesystem rebuilt, which on a headless box with no monitor and a locked root account
+  means one bad step ends in a drive to the machine with a USB stick. Not something to
+  do unattended.
+- **A BIOS admin password.** It is credential creation (which I do not do), it risks
+  locking the machine out of its own firmware, and it would block the `dell_wmi_sysman`
+  path DECISION 89 uses to set `WakeOnAc` from Linux.
+- **`fail2ban`.** SSH is key-only with `PasswordAuthentication no`. There is nothing to
+  brute-force, so it would add a service and log noise for no reduction in risk.
+- **Removing passwordless sudo.** It is what the backup pull and every automation here
+  runs on. Removing it breaks the things that make the box survivable.
+
+### What this leaves broken
+
+**nzb360 on the phone**, if pointed at bare `192.168.2.61:8989` / `:7878` / `:6789`,
+stops connecting. Use the Caddy ports (`8448`, `8447`, `8445`) or the tailnet address.
+Nothing else on the LAN used the bare ports.
+
+**Undo** — every replaced file was copied first:
+
+```bash
+sudo cp /root/nftables.conf.bak-20260902 /etc/nftables.conf && sudo nft -f /etc/nftables.conf
+sudo cp /root/Caddyfile.bak-20260902 /etc/caddy/Caddyfile && sudo systemctl reload caddy
+sudo cp /root/byparr-override.bak-20260902 /etc/systemd/system/byparr.service.d/override.conf
+sudo cp /root/luminos-space.service.bak-20260902 /etc/systemd/system/luminos-space.service
+sudo cp /root/luminos-space.bak-20260902 /usr/local/bin/luminos-space
+sudo systemctl daemon-reload && sudo systemctl restart byparr luminos-space
+sudo systemctl disable --now luminos-backup.timer
+```

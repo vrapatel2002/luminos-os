@@ -1,0 +1,9 @@
+# [CHANGE: claude-code | 2026-09-02] DECISION 90.
+[Unit]
+Description=Pull the media server's backups to this laptop
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-pull-server-backup
+Nice=10

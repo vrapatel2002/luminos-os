@@ -186,11 +186,26 @@ Fixes applied, in order:
 > (`/sys/class/net/<if>/statistics/rx_bytes`) and `tcpdump -i <if>` tell the truth.
 
 ### Why this shape and not per-port rules
+> **⚠️ REVERSED on 2026-09-02 by DECISION 90 — see §2c. The argument below is kept
+> because it was the reasoning at the time and it is worth knowing why it stopped
+> holding, not because it is still the design.**
+
 Per-port allow-lists rot. Every new service means remembering to add a rule, and
 forgetting means either a broken app or an open port. Trusting the subnet instead
 means new services on the box work automatically for the house and are invisible from
 outside, with no maintenance. The cost is that it gives you nothing against a device
 *already on your wifi* — which is the correct trade for a home LAN, but see §7.
+
+**What changed:** the sentence "the cost is that it gives you nothing against a device
+already on your wifi" was written as an acceptable cost. It stopped being acceptable
+once two things were true. First, DECISION 80/84 put **Caddy in front of every app over
+TLS**, so the bare ports became a *duplicate* of access that already existed — closing
+them removed nothing, it removed the unencrypted copy. Second, an audit found
+**byparr on `:8191` answering HTTP 200 with no authentication whatsoever**, which is
+precisely the "device already on your wifi" case turning into a real problem. The
+maintenance argument also weakened: adding an app now means editing the Caddyfile
+anyway, and the firewall rule is a **port range** (`8443-8449`) that new apps fall into
+without a firewall edit at all.
 
 ### Verified, not assumed
 - All five services still answer from the G14: `8096→302` (Jellyfin's normal
@@ -216,6 +231,127 @@ ruleset is a safe rollback, not a further lockout. Arm it **before** loading.
 > 2. `nftables.service` is a **oneshot**. After a *successful* load
 >    `systemctl is-active nftables` reads `inactive` and exits 3 (which will kill a
 >    `set -e` script). Use `is-enabled` plus a live `nft list ruleset` instead.
+
+> **A third trap, found 2026-09-02.** The rollback above says `nft flush ruleset`, and
+> that is still safe *for getting back in* — no table means no policy means accept.
+> But `flush ruleset` deletes **every** table on the machine, including the four
+> `ip`/`ip6` `filter`/`nat`/`mangle` tables that **tailscaled** owns. You get your SSH
+> back and quietly lose the tunnel's rules until tailscaled next rewrites them. If you
+> only want to undo *this* file, use `nft delete table inet filter` instead.
+
+---
+
+## 2c. DONE (2026-09-02) — the LAN gets named ports, not the whole machine
+# [CHANGE: claude-code | 2026-09-02]
+
+This is DECISION 90. It reverses the "trust the subnet" shape above, plus three other
+things that were only safe because the subnet rule was hiding them.
+
+### What was actually open
+
+A sweep from the G14 (`192.168.2.16`) against every service port found:
+
+| Port | Service | What answered |
+|---|---|---|
+| 8191 | **byparr** | **HTTP 200 on `/docs`, no authentication at all** — FastAPI's interactive API console, to anyone on the wifi |
+| 8099 | luminos-space | running **as root**, bound `0.0.0.0`, URL token the only lock, and its buttons delete films |
+| 8989 / 7878 / 9696 | Sonarr / Radarr / Prowlarr | plain HTTP, API keys in the clear on the wire |
+| 6789 | NZBGet | plain HTTP with the Usenet account behind it |
+| 5055 | Jellyseerr | plain HTTP |
+
+byparr is the one that mattered most, and not because of the data behind it — it has
+none. Its **job** is to fetch arbitrary URLs through a real headless browser. An open
+one is a machine on your home network that will make requests on someone else's behalf.
+
+### The four changes
+
+1. **Firewall narrowed** — `/etc/nftables.conf`, tracked at `server/config/nftables.conf`.
+   `ip saddr 192.168.2.0/24 accept` became five named rules: `22`, `{80,443}`,
+   `8443-8449`, `8096`, and `udp 68`. The `tailscale0` interface rule stays wide open,
+   and that gap is now the point: **the tailnet is the trusted path** (every peer is
+   authenticated and every machine on it is ours), the home wifi is not.
+   - `8096` stays open in the clear **on purpose**: the Roku app stores a bare server
+     address, does not follow redirects, and will not accept Caddy's local CA. The TV
+     working beats closing it, and Jellyfin demands a login regardless.
+   - `udp 68` is not optional. Both NICs get their address by DHCP, and a renewal
+     answered by *broadcast* is not matched by `ct state established`. Without that
+     rule the lease can fail to renew and the box drops off the network by itself some
+     hours later — the exact unattended failure this whole effort exists to prevent.
+   - `flush ruleset` at the top of the file was removed at the same time (see the trap
+     note above).
+
+2. **byparr moved to loopback** — `server/systemd/byparr-override.conf`.
+   The packaged unit ships `HOST=0.0.0.0`; it is now `127.0.0.1`. Prowlarr is the only
+   consumer and already addressed it as `http://localhost:8191/`, so this cost nothing.
+   Sandboxing added around it.
+   - `ProtectSystem` is **deliberately absent**, and that was measured, not assumed.
+     With `ProtectSystem=strict` byparr starts fine and then fails every real request
+     with `OSError: [Errno 30] Read-only file system` on a path inside
+     `/usr/lib/python3.14/site-packages/playwright_captcha/...` — the library rewrites
+     scripts inside its own install directory at solve time. All three levels
+     (`yes`/`full`/`strict`) make `/usr` read-only, so all three break it. A
+     `ReadWritePaths` carve-out was **rejected**: the path contains `python3.14`, so a
+     Python minor bump would move it, systemd would keep starting the unit happily, and
+     the failure would only appear at request time looking like "flaky indexers". A
+     brittle carve-out that fails silently is worse than not having the setting.
+   - `MemoryDenyWriteExecute` is also absent — it would break the JavaScript JIT and
+     the browser would never start.
+
+3. **luminos-space de-rooted and moved to loopback** — `server/systemd/luminos-space.service`.
+   Runs as `luminosspace`, binds `127.0.0.1:8099`, sits behind Caddy's `:8446`.
+   The old unit justified root with two reasons and **both measured false**:
+   - *"it needs root to read the Sonarr/Radarr API keys."* Those files are `0664`
+     `<app>:media`. Group `media` reads them fine. The script was shelling out to
+     `sudo -n grep`, so it needed root only because it had chosen to use sudo —
+     circular. It now opens the file directly.
+   - *"it needs root to unlink hardlink twins under `/srv/media/downloads`."*
+     Unlinking needs write on the **directory**, not the file, and both directories are
+     `drwxrwsr-x` group `media`.
+   - `nzbget.conf` is the one genuine exception (`0640 nzbget:nzbget`, it holds the
+     Usenet password). Granted with a single ACL entry, matching luminoshub's:
+     `setfacl -m u:luminosspace:r /var/lib/nzbget/nzbget.conf`.
+   - The URL token still exists and is still required. It is now a second lock rather
+     than the only one.
+
+4. **Caddy answers on the wire too** — `/etc/caddy/Caddyfile`.
+   Every site block listed `100.82.125.26` and `192.168.2.61` but **not**
+   `192.168.2.62`. Since the wire is the default route (DECISION 79) and the wifi is
+   the interface whose firmware crashed earlier the same day, the entire web front door
+   depended on the less reliable address. `.62` was added to all eight blocks. A host
+   missing from every block does not 404 — it fails the TLS handshake (curl exit 35),
+   which reads as "the server is down".
+
+### Verified, not assumed
+
+- **Positive:** Roku path `8096→302`; all of `443`, `8443`–`8449` answer over TLS on
+  both `.61` and `.62`; tailnet reaches `8989`/`9696`/`6789`; Prowlarr's byparr proxy
+  test returns `{}` `HTTP:200`; luminos-space `/api/data` and `/api/downloads` return
+  real data through Caddy and a bad token returns `403`.
+- **Negative:** the seven bare ports `8191, 8099, 8989, 7878, 9696, 6789, 5055` all
+  refuse from `192.168.2.16`. A change that only proves the good path is half a test.
+- **Cold table:** `nft delete table inet filter` then `systemctl start nftables`, to
+  prove the new file loads when the table does not already exist (the create/delete/
+  define idiom would otherwise fail on a cold boot).
+- The whole firewall load ran behind a 5-minute `systemd-run --on-active=300`
+  auto-rollback, cancelled only after a **new** SSH session proved access.
+
+### What this leaves broken
+
+**nzb360 on the phone**, if it was pointed at bare `192.168.2.61:8989` / `:7878` /
+`:6789`, will stop connecting. Point it at the Caddy ports (`8448`, `8447`, `8445`) or
+use the tailnet address instead. Nothing else on the LAN was using the bare ports.
+
+### Undo
+
+Every replaced file was copied to `/root/<name>.bak-20260902` first:
+```bash
+sudo cp /root/nftables.conf.bak-20260902 /etc/nftables.conf && sudo nft -f /etc/nftables.conf
+sudo cp /root/Caddyfile.bak-20260902 /etc/caddy/Caddyfile && sudo systemctl reload caddy
+sudo cp /root/byparr-override.bak-20260902 /etc/systemd/system/byparr.service.d/override.conf
+sudo cp /root/luminos-space.service.bak-20260902 /etc/systemd/system/luminos-space.service
+sudo cp /root/luminos-space.bak-20260902 /usr/local/bin/luminos-space
+sudo systemctl daemon-reload && sudo systemctl restart byparr luminos-space
+```
 
 ---
 
@@ -456,7 +592,15 @@ Usenet cannot supply. Which providers, and whether to pay for both, is Shawn's c
 
 ---
 
-## 7. TODO — the G14 itself has no firewall
+## 7. DONE — the G14 itself has no firewall
+# [CHANGE: claude-code | 2026-09-02]
+
+> **Resolved by DECISION 88.** The laptop now runs its own nftables ruleset plus
+> DNS-over-TLS. Its config deliberately **diverges** from the server's rather than
+> copying it, for the reason given at the bottom of this section: the G14 roams, so a
+> `192.168.2.0/24` trust rule is meaningless on a café network. The audit below is the
+> state as of 2026-07-30 and is kept for the port inventory. Note that qBittorrent is
+> long gone from both machines (DECISION 42, then 48).
 
 The laptop (`192.168.2.16`) was audited at the same time. **No firewall is
 configured.** Listening on non-loopback addresses:
@@ -497,13 +641,20 @@ does mean the rule must be written to fail closed, not opened up per-network.
 | 6 | Check router page for **manual** port forwards | **Shawn** | ⬜ |
 | 7 | Resolve the port-22 UPnP code 606 unknown | **Shawn** | ⬜ |
 | 8 | Decide the torrent-port trade-off (§6) | **Shawn** | ⬜ |
-| 9 | Firewall the G14, keeping 21861 open | either | ⬜ |
+| 9 | Firewall the G14, keeping 21861 open | done | ✅ DECISION 88 (21861 moot, qBittorrent removed) |
 | 10 | Bind `luminos-ram` to localhost, or justify `*:9091` | either | ⬜ |
-| 11 | HTTPS via domain + Let's Encrypt DNS-01 | later | ⬜ deferred, see §5 |
+| 11 | HTTPS via domain + Let's Encrypt DNS-01 | done | ✅ DECISION 80/84, local CA not Let's Encrypt |
 | 12 | Halt all torrent traffic until a VPN is in place (§6a) | done | ✅ 2026-08-04 |
-| 13 | **Choose the path: Usenet, seedbox or VPN** (§6b — Usenet recommended) | **Shawn** | ⬜ |
-| 14 | Install the VPN so the tunnel exits `enp2s0` (§6a, DECISION 36) | either | ⬜ blocked on 13 |
-| 15 | Test the kill-switch by downing the tunnel mid-transfer | either | ⬜ blocked on 14 |
+| 13 | **Choose the path: Usenet, seedbox or VPN** (§6b — Usenet recommended) | done | ✅ Usenet, DECISION 48 |
+| 14 | Install the VPN so the tunnel exits `enp2s0` (§6a, DECISION 36) | — | ➖ dropped — no torrents to protect |
+| 15 | Test the kill-switch by downing the tunnel mid-transfer | — | ➖ dropped with 14 |
+| 16 | Narrow the LAN rule to named ports (§2c) | done | ✅ 2026-09-02, DECISION 90 |
+| 17 | Close byparr — was HTTP 200 unauthenticated (§2c) | done | ✅ 2026-09-02, DECISION 90 |
+| 18 | De-root luminos-space, move it off the LAN (§2c) | done | ✅ 2026-09-02, DECISION 90 |
+| 19 | Off-box backups of the *arr databases | done | ✅ 2026-09-02, DECISION 90 |
+| 20 | Full-disk encryption with TPM auto-unlock | **Shawn** | ➖ declined — needs a root-fs rebuild on a headless box |
+| 21 | BIOS admin password | **Shawn** | ➖ declined — would block the remote firmware access WakeOnAc needs |
+| 22 | Physically test WakeOnAc: unplug at the wall, wait 10s, replug | **Shawn** | ⬜ |
 
 ---
 

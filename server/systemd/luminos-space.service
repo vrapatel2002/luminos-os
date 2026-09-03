@@ -1,22 +1,87 @@
 # [CHANGE: claude-code | 2026-08-08]
 # Web view of library space usage, with delete by movie and by season. See DECISION 62.
 #
-# Runs as root for two reasons, both needed: reading the Sonarr/Radarr API keys out of
-# /var/lib/*/config.xml, and unlinking hardlink twins under /srv/media/downloads, which
-# is owned by nzbget:media. Access is gated by a token in the URL, not by the network --
-# nftables already accepts the whole LAN and the tailnet on every port.
+# [CHANGE: claude-code | 2026-09-02] No longer runs as root, no longer on the LAN.
+# DECISION 90.
+#
+# WHAT THIS USED TO BE: root, on 0.0.0.0:8099, with a token in the URL as the only
+# thing between the network and a button that deletes films. The old unit justified
+# root with two reasons and BOTH were measured to be wrong:
+#
+#   1. "reading the Sonarr/Radarr API keys out of /var/lib/*/config.xml"
+#      Those files are 0664 <app>:media. Group 'media' reads them fine. The script
+#      was shelling out to `sudo -n grep`, which needed root only because the script
+#      had chosen to use sudo -- circular. It now opens the file directly.
+#   2. "unlinking hardlink twins under /srv/media/downloads, owned by nzbget:media"
+#      /srv/media and /srv/media/downloads are both drwxrwsr-x with group 'media',
+#      and unlinking needs write on the DIRECTORY, which group 'media' has.
+#
+# luminos-hub had already been running this exact pattern unprivileged since
+# 2026-08-27, and its own comment pointed at this service as the one that had not
+# been fixed yet.
+#
+# nzbget.conf is the one genuine exception: 0640 nzbget:nzbget, because it holds the
+# Usenet account password. Access is one POSIX ACL entry, matching luminoshub's:
+#   setfacl -m u:luminosspace:r /var/lib/nzbget/nzbget.conf
+#
+# BINDING: Caddy already fronted this on :8446 with TLS and injects the token via a
+# redirect, so nothing ever needed to reach :8099 from off-box. It now binds
+# 127.0.0.1. The token still exists and is still required -- it is now a second lock
+# rather than the only one.
 [Unit]
 Description=Luminos library space browser
 Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
 After=sonarr.service radarr.service
 Wants=sonarr.service radarr.service
+# It deletes files under /srv/media. If that is not mounted, the paths it walks are
+# an empty directory on the root filesystem and the free-space numbers are the root
+# partition's, which would be wrong rather than merely unavailable.
+RequiresMountsFor=/srv/media
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/luminos-space --port 8099
+User=luminosspace
+Group=luminosspace
+SupplementaryGroups=media
+ExecStart=/usr/local/bin/luminos-space --port 8099 --bind 127.0.0.1
 Restart=on-failure
 RestartSec=5s
 Nice=10
+
+# Hardening, copied from luminos-hub and then widened by exactly what this service
+# does that the hub does not: it deletes things.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+
+# ProtectSystem=strict makes the whole filesystem read-only, so the two things this
+# service legitimately writes have to be named. This is the entire write surface:
+#   /srv/media                     os.remove() of hardlink twins after a delete
+#   /var/lib/luminos/space-token   only if the token file does not already exist
+ReadWritePaths=/srv/media
+ReadWritePaths=/var/lib/luminos/space-token
+
+# Every peer it talks to is on this machine: Caddy inbound, and Sonarr :8989,
+# Radarr :7878, NZBGet :6789 outbound. Nothing off-box, so deny everything else --
+# this is what stops a bug here from becoming a way to reach the internet.
+IPAddressAllow=localhost
+IPAddressDeny=any
 
 [Install]
 WantedBy=multi-user.target

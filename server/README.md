@@ -50,20 +50,39 @@ Away from the house, it is also on a Tailscale tailnet as **100.82.125.26**
 
 ## Services
 
+<!-- [CHANGE: claude-code | 2026-09-02] Exposure column rewritten for DECISION 90. -->
+
 | service | port | exposure |
 |---|---|---|
-| Jellyfin | 8096 | LAN only |
-| qBittorrent WebUI | 8080 | **stopped** — see the halt below |
-| Sonarr | 8989 | LAN only |
-| Radarr | 7878 | LAN only |
-| Prowlarr | 9696 | LAN only |
-| Jellyseerr | 5055 | LAN + Tailscale — request films/shows, DECISION 54 |
+| Caddy landing page | 443 | LAN + Tailscale — TLS front door |
+| Jellyfin | 8096 | **LAN in the clear, deliberately** — the Roku can't do TLS here |
+| Jellyfin (via Caddy) | 8443 | LAN + Tailscale, TLS |
+| Jellyseerr | 8444 → 5055 | LAN + Tailscale, TLS — request films/shows, DECISION 54 |
+| NZBGet | 8445 → 6789 | LAN + Tailscale, TLS |
+| luminos-space | 8446 → 8099 | LAN + Tailscale, TLS — disk browser, DECISION 62 |
+| Radarr | 8447 → 7878 | LAN + Tailscale, TLS |
+| Sonarr | 8448 → 8989 | LAN + Tailscale, TLS |
+| Prowlarr | 8449 → 9696 | LAN + Tailscale, TLS |
+| byparr | 8191 | **loopback only** — no auth of any kind, DECISION 90 |
+| SSH | 22 | LAN + Tailscale, key-only |
 | Tailscale | — | outbound only — remote access to Jellyfin, opens nothing |
-| BitTorrent peer port | 25989 | **stopped** — rule still in nftables, nothing listening |
+| qBittorrent | — | **uninstalled**, DECISION 84 |
 
-## ⛔ Torrenting is halted until a VPN is installed
+**The bare app ports (`8989`, `7878`, `9696`, `6789`, `5055`, `8099`, `8191`) are no
+longer reachable from the LAN** — DECISION 90. They still listen on loopback, and Caddy
+is the way in. If a phone app stops connecting, that is why: point it at the `844x` port
+or at the tailnet address.
+
+## ⛔ Torrenting is over — Usenet replaced it
 
 <!-- [CHANGE: claude-code | 2026-08-04] -->
+<!-- [CHANGE: claude-code | 2026-09-02] -->
+
+> **Superseded.** The halt below was "until a VPN is installed". **DECISION 48 chose Usenet
+> instead, so the VPN is not coming and this is permanent.** `qbittorrent-nox` was
+> uninstalled in the DECISION 84 pass and the peer-port firewall rule removed. The section
+> is kept because it explains *why*, and because the four enforcement layers are still the
+> reason nothing restarts by accident.
 
 **Nothing downloads and nothing uploads right now, on purpose.** Halted 2026-08-04 —
 DECISION 42 has the full reasoning, the proof, and the restore commands.
@@ -101,10 +120,30 @@ sudo grep -oP '(?<=<ApiKey>)[^<]+' /etc/jellyfin/... 2>/dev/null  # or Jellyfin 
 
 These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 
-- **Any new service on this box is LAN- and tailnet-exposed the moment it listens.** The
-  nftables rules accept `ip saddr 192.168.2.0/24` and `iifname "tailscale0"` *wholesale*, not
-  per-port. Convenient — Jellyseerr on 5055 needed no firewall work at all — and a mistake
-  waiting to happen for anything unauthenticated. Nothing is open to the internet either way.
+- **Any new service on this box is tailnet-exposed the moment it listens, but no longer
+  LAN-exposed.** <!-- [CHANGE: claude-code | 2026-09-02] --> This used to be true of the LAN
+  too, and it bit: **byparr sat on `:8191` answering HTTP 200 with no authentication at all**
+  to every device on the wifi. DECISION 90 narrowed the LAN rule to named ports.
+  `iifname "tailscale0" accept` is still wholesale, and that is now deliberate — the tailnet
+  is the trusted path, the home wifi is not. Nothing is open to the internet either way.
+- **`flush ruleset` in `/etc/nftables.conf` deletes Tailscale's tables too.** It removes
+  *every* table, including the four `ip`/`ip6` `filter`/`nat`/`mangle` tables tailscaled owns
+  and marks "do not touch". Reloading the firewall silently broke the tunnel's rules, and it
+  only showed up later as odd behaviour. Use `table inet filter` / `delete table inet filter`
+  / `table inet filter { … }` instead — naming it first means the delete can't fail on a cold
+  boot. The same applies to the rollback recipe in the security brief.
+- **`ct state established,related accept` means your SSH session survives any firewall
+  change.** Testing in the session you're already in proves nothing. Open a new one — and arm
+  `systemd-run --on-active=300` first.
+- **`pacman -Qu` lies when the sync DB is stale.** It said **1** package; the real number was
+  **145**, including a kernel jump. It compares against the sync database, not the mirrors.
+  `pacman -Sy` first. `informant` will also abort the upgrade until Arch news is read.
+- **`PRAGMA integrity_check` returns `ok` on a zero-byte file.** It is not proof a backup has
+  content. Query a real row count.
+- **A host missing from every Caddy site block fails the TLS handshake, it doesn't 404.**
+  curl exits 35 and it reads as "the server is down". Every block listed `.61` but not `.62`,
+  so the whole web front door hung off the *wifi* address while the *wire* is the default
+  route.
 - **`engine-strict=true` in an `.npmrc` makes pnpm refuse, not warn.** A Node version mismatch
   stops the build dead. Hit building Jellyseerr 3.4.1 against the box's Node 26. DECISION 54.
 - **pnpm 11 no longer reads the `pnpm` field in `package.json`.** `onlyBuiltDependencies` and

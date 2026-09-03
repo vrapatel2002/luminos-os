@@ -1,0 +1,14 @@
+# [CHANGE: claude-code | 2026-09-02] DECISION 90.
+[Unit]
+Description=Daily pull of the media server's backups
+
+[Timer]
+OnCalendar=daily
+# The laptop is asleep or away from the house most of the time, and the pull
+# only works on the home LAN. Persistent means a missed day is caught up on the
+# next boot rather than silently skipped forever.
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

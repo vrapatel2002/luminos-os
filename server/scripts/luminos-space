@@ -22,23 +22,25 @@ databases stay consistent. Deleting a season also UNMONITORS it, and deleting a 
 episode unmonitors that episode -- otherwise Sonarr notices the gap within minutes and
 downloads it all over again.
 
-  luminos-space                  # serve on 0.0.0.0:8099, prints the URL with its token
+  luminos-space                  # serve on 127.0.0.1:8099, prints the URL with its token
   luminos-space --port 9000
+  luminos-space --bind 0.0.0.0   # only if you really mean it
   luminos-space --print-url      # show the URL of a server already configured
 
 The token is generated once into /var/lib/luminos/space-token and required on every
-request. This box accepts the whole LAN and the tailnet at the firewall, so an
-unauthenticated delete button would be reachable by anything on the network.
+request. It is a second lock, not the only one: as of DECISION 90 this binds to
+LOOPBACK by default and Caddy fronts it on :8446 with TLS, so the token is no longer
+all that stands between the LAN and a delete button.
 """
 import argparse
 import base64
 import http.server
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -59,12 +61,20 @@ _cache_lock = threading.Lock()
 # ---------------------------------------------------------------- plumbing
 
 def api_key(app):
-    out = subprocess.run(["sudo", "-n", "grep", "-oP", r"(?<=<ApiKey>)[^<]+",
-                          "/var/lib/%s/config.xml" % app],
-                         capture_output=True, text=True).stdout.strip()
-    if not out:
-        sys.exit("could not read the %s api key (needs passwordless sudo)" % app)
-    return out
+    # [CHANGE: claude-code | 2026-09-02] Read the file directly. DECISION 90.
+    # This used to shell out to `sudo -n grep`, which was the main reason the whole
+    # service ran as root. It never needed to: /var/lib/*/config.xml is mode 0664
+    # owned by <app>:media, so group 'media' -- which this service is in -- can just
+    # read it. luminos-hub has always done it this way.
+    path = "/var/lib/%s/config.xml" % app
+    try:
+        with open(path) as f:
+            m = re.search(r"<ApiKey>([^<]+)</ApiKey>", f.read())
+    except OSError as e:
+        sys.exit("could not read %s: %s" % (path, e))
+    if not m:
+        sys.exit("no <ApiKey> in %s" % path)
+    return m.group(1)
 
 
 def call(base, key, path, method="GET", body=None, timeout=180):
@@ -81,12 +91,26 @@ _NZB_CREDS = {}
 
 
 def nzb_conf(key):
-    # Cached: the download panel polls every few seconds, and re-shelling sudo three
-    # times per poll floods the auth log for credentials that never change.
+    # [CHANGE: claude-code | 2026-09-02] Read the file directly. DECISION 90.
+    # Was `sudo -n sed`. nzbget.conf is 0640 nzbget:nzbget and holds the Usenet
+    # password, so unlike config.xml it genuinely is not group-readable -- access
+    # comes from a POSIX ACL granting this service user read, the same one-line
+    # grant luminoshub already has. Still cached: the download panel polls every few
+    # seconds and this file never changes while the service is running.
     if key not in _NZB_CREDS:
-        out = subprocess.run(["sudo", "-n", "sed", "-n", "s/^%s[ ]*=[ ]*//p" % key,
-                              NZBGET_CONF], capture_output=True, text=True).stdout.strip()
-        _NZB_CREDS[key] = out.splitlines()[0].strip() if out else ""
+        val = ""
+        try:
+            with open(NZBGET_CONF) as f:
+                for line in f:
+                    m = re.match(r"^%s\s*=\s*(.*)$" % re.escape(key), line)
+                    if m:
+                        val = m.group(1).strip()
+                        break
+        except OSError:
+            # Deliberately not fatal: the disk-usage view is the main feature and
+            # works without NZBGet. Only the download panel degrades.
+            val = ""
+        _NZB_CREDS[key] = val
     return _NZB_CREDS[key]
 
 
@@ -717,6 +741,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8099)
+    # [CHANGE: claude-code | 2026-09-02] Loopback by default. DECISION 90.
+    # This used to be a hardcoded 0.0.0.0, which put a delete button for the whole
+    # library on every interface with only a URL token in front of it. Caddy already
+    # proxies it on :8446 with TLS and supplies that token itself, so nothing needs
+    # to reach port 8099 from off-box.
+    ap.add_argument("--bind", default="127.0.0.1")
     ap.add_argument("--print-url", action="store_true")
     a = ap.parse_args()
 
@@ -726,7 +756,7 @@ def main():
         print(url)
         return
 
-    srv = http.server.ThreadingHTTPServer(("0.0.0.0", a.port), Handler)
+    srv = http.server.ThreadingHTTPServer((a.bind, a.port), Handler)
     srv.token = t
     print("luminos-space on port %d\nopen this in Chrome:\n\n  %s\n" % (a.port, url))
     sys.stdout.flush()
