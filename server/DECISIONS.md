@@ -1304,3 +1304,83 @@ that propagation race. A `sleep 15` and one retry are baked into the script.
 - **Right after a Caddy restart, requests to newly-added ports return `000`, not an error.**
   Twenty-one certificate identifiers were being minted at once. Everything was fine; the tests
   were early. Re-run before believing a failure.
+
+---
+
+## DECISION 89 — The server powers itself on, because it has no battery to ride out anything
+# [CHANGE: claude-code | 2026-09-02]
+
+**The finding that reframes this whole machine.** `/sys/class/power_supply/` on the Dell
+3590 contains exactly one entry: `AC`. **There is no battery device at all.** So the thing
+we have been treating as "an old laptop that crashes if you nudge it" is really a desktop
+with no PSU hold-up: every power blip, every yanked cable, every outage is an *instant hard
+power-off*, and it then stays off until a human walks over and presses the button.
+
+That is why the box keeps "dying" and why it needed someone physically present to come back.
+A normal laptop would have ridden the outage out on its battery; this one cannot.
+
+### The fix is a BIOS setting, and it can be set from Linux
+
+`dell_wmi_sysman` is loaded and exposes 90 BIOS attributes under
+`/sys/class/firmware-attributes/dell-wmi-sysman/attributes/`. No BIOS admin password is set
+(`authentication/Admin/is_enabled` = `0`), so writes go straight through — **no reboot into
+the firmware menu, no screen, no keyboard.**
+
+| Attribute | Was | Now | Effect |
+|---|---|---|---|
+| `WakeOnAc` | `Disabled` | **`Enabled`** | power returns → it boots itself |
+| `WakeOnLan` | `Disabled` | **`LanOnly`** | can be woken on demand from the LAN |
+
+**Read the values with `sudo`.** The attribute files are mode `0600 root`, and a plain `cat`
+returns an *empty string* rather than a permission error — a first pass listing all the
+attributes showed every `current_value` as blank and looked like the driver was broken. Same
+silent-empty shape as `tcpdump`/`checkupdates` printing `0` when not installed. Always write
+then **read back**, because a `tee` into sysfs can return success and still be rejected by
+firmware.
+
+### Wake-on-LAN needs BOTH halves
+
+The BIOS setting alone does nothing: the NIC also has to be armed, and it was at
+`Wake-on: d` (disabled). `/etc/systemd/network/10-wired-wol.link` sets `WakeOnLan=magic`,
+matched on the wire's MAC (`c0:3e:ba:29:2d:c8`). Now `Wake-on: g`.
+
+**That .link file copies `NamePolicy`, `AlternativeNamesPolicy` and `MACAddressPolicy`
+verbatim from `/usr/lib/systemd/network/99-default.link`, and those lines are load-bearing.**
+A `.link` that matches a device but omits them does not inherit the stock policy — it falls
+back to different naming and can rename `enp2s0`. On a headless box reached only over that
+NIC, that means driving to it. Verified after `udevadm trigger` that the name survived, and
+that the DECISION 79 routing rules (`from 192.168.2.62 lookup 100`, wire winning the default
+route at metric 100) were still intact.
+
+`scripts/luminos-wake-server` sends the packet. It is **stdlib-only on purpose** — installing
+`wakeonlan` or `etherwake` on the G14 means touching pacman with 213 upgrades pending, one of
+which reverts the desktop look (DECISION 72), and a 102-byte packet does not justify that.
+It targets the **broadcast** address, not `192.168.2.62`: the machine is off, nothing answers
+ARP for it, and a unicast magic packet has nowhere to go. This is the usual reason WoL
+"doesn't work". It also means **WoL only works from inside the house** — broadcast does not
+cross the tailnet.
+
+### What is proven and what is not
+
+Proven: both BIOS values read back correctly; `ethtool` reports `Wake-on: g`; interface name
+and routing survived; all services active/enabled; hub answers 200 in 46 ms.
+
+**Not proven remotely: `WakeOnAc` itself.** The only real test is cutting mains power, which
+needs someone at the machine. The 20-second version: unplug it at the wall, wait ten seconds,
+plug it back in, do not touch the power button. It should boot on its own.
+
+### Deliberately not done
+
+`AutoOn` (`Disabled;Everyday;Weekdays;SelectDays` + `AutoOnHr`/`AutoOnMn`) would power the
+box on at a fixed time daily, which would recover even from *someone pressing the button*.
+Left off pending a decision — it is a behaviour change with a schedule attached, not a
+straight repair.
+
+**Undo:**
+
+```bash
+A=/sys/class/firmware-attributes/dell-wmi-sysman/attributes
+echo -n Disabled | sudo tee $A/WakeOnAc/current_value
+echo -n Disabled | sudo tee $A/WakeOnLan/current_value
+sudo rm /etc/systemd/network/10-wired-wol.link && sudo udevadm control --reload
+```
