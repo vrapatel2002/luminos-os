@@ -1369,6 +1369,31 @@ and routing survived; all services active/enabled; hub answers 200 in 46 ms.
 needs someone at the machine. The 20-second version: unplug it at the wall, wait ten seconds,
 plug it back in, do not touch the power button. It should boot on its own.
 
+
+### The thing that would have broken "comes back on its own" anyway
+
+`journalctl --list-boots` shows **4 of the last 4 previous boots ended uncleanly** — the
+power cable, exactly as described. Nothing is damaged yet: both ext4 filesystems report
+`Filesystem state: clean` with no error count, and all four SQLite databases (jellyfin,
+sonarr, radarr, prowlarr) are in **WAL** mode and return `integrity_check = ok`. WAL is doing
+real work here; it is the reason repeated hard cuts have not corrupted the library.
+
+But the kernel cmdline had **no `fsck.repair`**, so it defaulted to **`preen`** — which fixes
+only trivially-safe things and, on anything worse, **fails and drops to `emergency.target`**.
+And `passwd -S root` returns **`L`: the root account is locked**, so that emergency prompt
+cannot be logged into at all. The combination means one bad power cut would leave a headless
+box sitting at a prompt nobody can answer, needing a monitor, a keyboard and a USB stick.
+
+Added **`fsck.repair=yes`** to `/boot/loader/entries/luminos.conf`. Auto-repair without a
+human is the correct trade for a machine nobody can see; the alternative is not "a human
+decides", it is "the server is dead until someone drives to it".
+
+**That file is the single point of failure for booting** — there is exactly one boot entry
+and `editor no` is set. It was backed up to `luminos.conf.bak-20260902` (a `.bak` suffix, so
+systemd-boot will not parse it as a second entry), rewritten with deterministic content
+rather than a regex, and verified with `diff` plus `bootctl list` showing the entry still
+default and selected.
+
 ### Deliberately not done
 
 `AutoOn` (`Disabled;Everyday;Weekdays;SelectDays` + `AutoOnHr`/`AutoOnMn`) would power the
