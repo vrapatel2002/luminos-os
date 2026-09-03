@@ -1792,3 +1792,68 @@ exercised through systemd, not just from a shell.
 Failure is loud on purpose: the script exits 1 if a disk is unusable or a write does not stick,
 and the unit is `Type=oneshot`, so systemd marks it failed. Continuing to quietly fill one disk
 is the failure mode this exists to prevent.
+
+
+## DECISION 93 — luminos-space counts both disks, but only where counting both is the right answer
+
+<!-- [CHANGE: claude-code | 2026-09-03] -->
+
+After DECISION 91 the library spanned two disks and the web view still read **`0.94 TB total,
+478 GB free`**. It had `MEDIA = "/srv/media"` hardcoded and every space figure came from
+`shutil.disk_usage(MEDIA)`, so the second disk was invisible to it. Now `1.43 TB / 968.97 GB`.
+
+### Not every "free space" number wanted the pool
+
+The lazy fix is to swap the constant everywhere. That would have been wrong in one place.
+There were three distinct questions being answered by the same call:
+
+| site | question | answer |
+|---|---|---|
+| library view | "how big is the library, and what is left?" | **pool both disks** |
+| downloads view | "will this download fit?" | **`/srv/media` only** |
+| after a delete | "how much did that actually free?" | **the disk the file was on** |
+
+The downloads number must **not** be pooled. NZBGet's `DestDir`/`InterDir` are
+`/srv/media/usenet/{complete,incomplete}` — read out of `/var/lib/nzbget/nzbget.conf` and
+confirmed on `sda3` — and it unpacks there no matter which disk the import later targets.
+Pooling that figure would promise 969 GB of room for a download that in fact has 478 GB,
+which matters precisely because quality definitions are `maxSize: None` (DECISION 54).
+
+### The delete accounting was quietly broken by DECISION 91
+
+All three delete paths measured `disk_usage(MEDIA).free` before and after. For a file on
+`/srv/external` that measures **the wrong filesystem** — it would report `0.00 GB freed`
+while happily reporting whatever unrelated churn `sda3` saw in that 1.5 s window. And on
+this box "0.00 GB freed" is not obviously a bug: DECISION 62 exists *because* deleting a
+library file legitimately frees zero when a hardlinked twin survives. The false reading is
+indistinguishable from the real phenomenon the tool was built to explain, so it would have
+been believed. Each delete now resolves the disk from the file's path **before** the delete
+(the parent can vanish after) and measures only that filesystem.
+
+`weigh()` needed no change — it already keys twins on `(st_dev, st_ino)`, so it was
+cross-device correct before the second disk existed.
+
+### Same mount-point guard as DECISION 92
+
+`live_disks()` requires `os.path.ismount()` per disk and de-duplicates by `st_dev`. Without
+it, an unplugged drive leaves `/srv/external` as a directory on the root filesystem and the
+pool silently absorbs root's 19 GB. **Verified by unmounting the drive against the running
+service**: the pool fell to `0.94 TB / 478 GB` counting `/srv/media` alone, and came back to
+`1.43 TB` on remount.
+
+### Two display changes
+
+The pooled total is the headline, but a merged figure hides the case that matters — one disk
+full while the other is empty — so `/api/data` also returns a `disks` array and the UI appends
+the per-drive split. And `gb()` was hardcoded to GB, which is why the first corrected build
+rendered **"1431.12 GB"**: arithmetically right, and not what anyone wants to read. It scales
+to TB at 1e12, which nothing on this box had ever reached before the second disk.
+
+### Verified
+
+`node --check` on the extracted page script (the JS was edited blind, and a syntax error there
+takes out the whole library view), then the page loaded **in a real browser over the Caddy
+tailnet front door** — headline, downloads, TV and movie rows all rendered, no breakage. The
+final one-line `gb()` change was re-checked by running the deployed helper against the live
+`/api/data` payload rather than re-reading the DOM, because the extension had lost host
+permission by then. Previous binary kept at `/usr/local/bin/luminos-space.bak-20260903`.

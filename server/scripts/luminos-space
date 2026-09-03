@@ -54,6 +54,18 @@ DOWNLOADS = "/srv/media/downloads"
 MEDIA = "/srv/media"
 TOKEN_FILE = "/var/lib/luminos/space-token"
 
+# [CHANGE: claude-code | 2026-09-03] DECISION 93.
+# Every filesystem the library can live on. The library spans two disks since
+# DECISION 91 and luminos-root-balance decides which one new content lands on, so
+# anything reporting "space" has to add them up rather than measure MEDIA alone.
+LIBRARY_DISKS = [MEDIA, "/srv/external"]
+
+# NZBGet writes to /srv/media/usenet/{incomplete,complete} -- read out of its config,
+# both on sda3 -- regardless of which disk the import later lands on. So the DOWNLOADS
+# view must keep measuring this one disk: showing the pooled free space there would
+# promise room for a download that does not exist.
+DOWNLOAD_DISK = MEDIA
+
 _twin_cache = {"built": 0.0, "map": {}}
 _cache_lock = threading.Lock()
 
@@ -179,6 +191,52 @@ def twin_map(max_age=300):
         return m
 
 
+def live_disks():
+    """Library filesystems that are actually mounted, de-duplicated by device.
+
+    The ismount() check is not cosmetic. /srv/external is a mount point, so if the USB
+    drive drops off the directory still exists -- empty, on the root filesystem -- and
+    disk_usage() would report root's space as though it were a healthy library disk.
+    Counting it would inflate the pool by a filesystem the library cannot use.
+    """
+    seen, out = set(), []
+    for root in LIBRARY_DISKS:
+        try:
+            if not os.path.ismount(root):
+                continue
+            dev = os.stat(root).st_dev
+        except OSError:
+            continue
+        if dev not in seen:
+            seen.add(dev)
+            out.append(root)
+    return out
+
+
+def pool_usage():
+    """(total, used, free) summed across every mounted library disk."""
+    total = used = free = 0
+    for root in live_disks():
+        du = shutil.disk_usage(root)
+        total += du.total
+        used += du.used
+        free += du.free
+    return total, used, free
+
+
+def disk_root_of(path):
+    """Which library disk a path lives on. Resolved before deletion, not after."""
+    for root in LIBRARY_DISKS:
+        if path == root or path.startswith(root.rstrip("/") + "/"):
+            return root
+    return MEDIA
+
+
+def free_across(roots):
+    """Free bytes summed over the given disks, skipping any that are not mounted."""
+    return sum(shutil.disk_usage(r).free for r in roots if os.path.ismount(r))
+
+
 def weigh(paths):
     """Return (apparent_bytes, freed_bytes, twin_paths).
 
@@ -255,9 +313,16 @@ def gather():
 
     series_rows.sort(key=lambda r: -r["bytes"])
     movie_rows.sort(key=lambda r: -r["bytes"])
-    du = shutil.disk_usage(MEDIA)
+    total, used, free = pool_usage()
+    # `disk` stays the pooled headline. `disks` carries the per-drive split, because a
+    # merged 1.4 TB hides the case that matters: one disk full while the other is empty.
+    per_disk = [{"path": r,
+                 "total": shutil.disk_usage(r).total,
+                 "used": shutil.disk_usage(r).used,
+                 "free": shutil.disk_usage(r).free} for r in live_disks()]
     return {"series": series_rows, "movies": movie_rows,
-            "disk": {"total": du.total, "used": du.used, "free": du.free}}
+            "disk": {"total": total, "used": used, "free": free},
+            "disks": per_disk}
 
 
 def group_paused(g):
@@ -291,7 +356,10 @@ def downloads():
                       "status": status,
                       "paused": group_paused(g),
                       "health": g.get("Health", 0) / 10.0})
-    du = shutil.disk_usage(MEDIA)
+    # DOWNLOAD_DISK, not the pool: NZBGet unpacks to sda3 whatever disk the import
+    # targets, so this number answers "will this download fit", not "how big is the
+    # library". See DECISION 93.
+    du = shutil.disk_usage(DOWNLOAD_DISK)
     return {"globalPaused": bool(st.get("DownloadPaused")),
             "rate": st.get("DownloadRate", 0),
             "remaining": st.get("RemainingSizeMB", 0) * 1048576,
@@ -407,7 +475,8 @@ def delete_season(series_id, season):
     if not files:
         return {"ok": False, "message": "no files for that season"}
 
-    before = shutil.disk_usage(MEDIA).free
+    roots = {disk_root_of(f["path"]) for f in files}
+    before = free_across(roots)
     snap = snapshot([f["path"] for f in files])
     for f in files:
         call(SONARR, sk, "/episodefile/%d" % f["id"], "DELETE")
@@ -421,7 +490,7 @@ def delete_season(series_id, season):
 
     twins = drop_twins(snap)
     time.sleep(1.5)
-    freed = shutil.disk_usage(MEDIA).free - before
+    freed = free_across(roots) - before
     return {"ok": True, "message":
             "deleted %d episode(s), removed %d duplicate copy(ies), unmonitored S%02d "
             "- %.2f GB freed" % (len(files), twins, season, freed / 1e9)}
@@ -433,7 +502,8 @@ def delete_episode(file_id):
     if not f:
         return {"ok": False, "message": "no such file"}
 
-    before = shutil.disk_usage(MEDIA).free
+    roots = {disk_root_of(f["path"])}
+    before = free_across(roots)
     snap = snapshot([f["path"]])
     eps = [e["id"] for e in (call(SONARR, sk, "/episode?seriesId=%d" % f["seriesId"]) or [])
            if e.get("episodeFileId") == file_id]
@@ -442,7 +512,7 @@ def delete_episode(file_id):
 
     twins = drop_twins(snap)
     time.sleep(1.5)
-    freed = shutil.disk_usage(MEDIA).free - before
+    freed = free_across(roots) - before
     return {"ok": True, "message":
             "deleted the episode, removed %d duplicate copy(ies), unmonitored it "
             "- %.2f GB freed" % (twins, freed / 1e9)}
@@ -455,7 +525,8 @@ def delete_movie(movie_id):
     if not mf.get("path"):
         return {"ok": False, "message": "that movie has no file"}
 
-    before = shutil.disk_usage(MEDIA).free
+    roots = {disk_root_of(mf["path"])}
+    before = free_across(roots)
     snap = snapshot([mf["path"]])
     call(RADARR, rk, "/moviefile/%d" % mf["id"], "DELETE")
     m = call(RADARR, rk, "/movie/%d" % movie_id)
@@ -464,7 +535,7 @@ def delete_movie(movie_id):
 
     twins = drop_twins(snap)
     time.sleep(1.5)
-    freed = shutil.disk_usage(MEDIA).free - before
+    freed = free_across(roots) - before
     return {"ok": True, "message":
             "deleted the file, removed %d duplicate copy(ies), unmonitored - %.2f GB freed"
             % (twins, freed / 1e9)}
@@ -521,7 +592,10 @@ PAGE = r"""<!doctype html>
 
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
-const gb = b => (b/1e9).toFixed(2) + ' GB';
+// [CHANGE: claude-code | 2026-09-03] Scale to TB past a terabyte. The pool only crossed
+// 1 TB with the second disk (DECISION 91), and until then this always said GB -- so the
+// headline read "1431.12 GB", which is correct and still not what anyone wants to read.
+const gb = b => b >= 1e12 ? (b/1e12).toFixed(2) + ' TB' : (b/1e9).toFixed(2) + ' GB';
 const esc = s => String(s).replace(/[&<>"]/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const open = new Set();   // which rows are expanded, so a refresh does not collapse them
@@ -581,8 +655,15 @@ async function loadLib(){
   if(!r.ok){ document.getElementById('app').textContent='bad or missing token'; return; }
   const d = await r.json();
   const pct = (d.disk.used/d.disk.total*100).toFixed(0);
-  document.getElementById('disk').innerHTML =
-    '<b>'+gb(d.disk.free)+'</b> free of '+gb(d.disk.total)+' &middot; '+pct+'% used';
+  // Pooled headline, then the per-drive split. The pool alone would read as healthy
+  // with one disk completely full, which is exactly when you need to know. DECISION 93.
+  let dh = '<b>'+gb(d.disk.free)+'</b> free of '+gb(d.disk.total)+' &middot; '+pct+'% used';
+  if((d.disks||[]).length > 1){
+    dh += '<span class="note"> &middot; '
+       +  d.disks.map(x => x.path+': '+gb(x.free)+' free').join(' &middot; ')
+       +  '</span>';
+  }
+  document.getElementById('disk').innerHTML = dh;
 
   const max = Math.max(1, ...d.series.map(s=>s.bytes), ...d.movies.map(m=>m.bytes));
   const bar = b => '<span class="barwrap"><span class="bar" style="width:'
