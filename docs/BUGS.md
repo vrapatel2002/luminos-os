@@ -5239,3 +5239,124 @@ config file is not a test fixture.**
 
 **The lesson.** `failed` was the true answer to a question that should never have been asked. The
 fix was not getting permission — it was asking something cheaper that already knew.
+
+---
+
+### BUG-152 — the launcher SIGSEGVs mid-word, and the same keystroke that kills it also makes it stutter
+<!-- [CHANGE: claude-code | 2026-09-03] -->
+**Status:** FIXED — 2026-09-03, **reasoned from a symbolized backtrace, NOT reproduced synthetically.**
+Needs real-world soak. · **Component:** `scripts/luminos-caelestia-kwin-overlay`
+(patches `modules/launcher/AppList.qml`, `modules/launcher/ContentList.qml`)
+
+#### The symptom, as reported
+"Apps are not launching from the launcher", plus "the same stuttering problem with the launcher menu
+which we had with the top dashboard."
+
+#### The first symptom is not a launch bug
+Nothing is wrong with launching. Quickshell is built with crash handling and **self-restart**, so
+when the shell segfaults it silently comes back — and the launcher just *vanishes* mid-word. From
+the user's seat that is indistinguishable from "I clicked the app and nothing happened."
+
+Two plausible causes were checked and **disproved** before the real one:
+| suspect | verdict |
+|---|---|
+| corrupted `apps.sqlite` (frequency DB) throwing before `entry.execute()` | `PRAGMA integrity_check` = `ok`, `frequencies` populated. **Not it.** |
+| missing `app2unit` | installed, and this config does not use it. **Not it.** |
+
+#### Root cause — a reentrant write into a ListView mid-layout
+`~/.cache/quickshell/crashes/re127lskt/report.txt`, symbolized, read bottom-up, is **one keystroke**:
+
+```
+QQuickTextInputPrivate::processKeyEvent(QKeyEvent*)
+QQuickTextInputPrivate::finishChange(int, bool, bool)
+QV4::Runtime::StoreNameSloppy::call(...)      <- `displayText = search.text`, unqualified
+QQmlBoundSignalExpression::evaluate(void**)
+QQuickListView::qt_metacall(...)
+QQuickItemView::setCurrentIndex(int)          <- onValuesChanged: root.currentIndex = 0
+QQuickItemViewTransitionableItem::moveTo(QPointF const&, bool)
+QQuickItem::position() const                  <- freed item
+```
+
+The load-bearing fact is in **Quickshell's own source**, `src/core/scriptmodel.cpp`:
+
+```cpp
+void ScriptModel::setValues(const QList<QJSValue>& newValues) {
+    auto changed = this->updateValuesUnique(newValues);   // emits ALL begin/endInsert/Remove/MoveRows
+    if (changed) emit this->valuesChanged();              // fires the QML handler LAST
+}
+```
+
+So `onValuesChanged` runs while the ListView holds **recorded-but-unapplied** pending changes.
+Writing `currentIndex` there forces `applyPendingChanges()`/`layout()` **re-entrantly**, and
+`moveTo()` then dereferences an item the transition machinery has already freed.
+
+#### Why here and nowhere else — proof by elimination
+No synthetic reproducer ever crashed (four attempts, up to 800 churn cycles, escalating fidelity:
+rebound/fake-flick, parent-anchored delegates, animated height with `ApplyRange`, reordered results
+to fire `beginMoveRows`, and the full state machine with `delegate: null`). **The failure to
+reproduce is recorded here on purpose** — the diagnosis rests on the backtrace and elimination
+instead:
+- The backtrace frame is `QQuickListView::qt_metacall`, so the write targets a **ListView**.
+- Every `currentIndex` write in Caelestia was enumerated. `WallpaperList.qml:53` has the identical
+  anti-pattern but is a **`PathView`** — ruled out by the frame. `FolderContents`, `LyricList`,
+  `Tabs`, dashboard `Content`, `SpecialWorkspaces` are none of them reachable from a text-input
+  signal on a ListView.
+- That leaves exactly one: `AppList.qml:59` (a `StyledListView`, i.e. a `ListView`).
+
+**Why it is intermittent, and gets worse with use.** `add`/`remove` are declared
+`enabled: !root.state` — always false. But the state transition's final `PropertyAction` *clobbers
+that binding* to `true` permanently. Use an action prefix (`>calc `, `>scheme `) **once** and the
+add/remove transitions stay live for the rest of the session, widening the window every keystroke.
+
+#### The fix
+Take the write out of the model-mutation call stack:
+
+```qml
+function luminosResetIndex(): void { currentIndex = 0; }
+...
+onValuesChanged: Qt.callLater(root.luminosResetIndex)   // was: root.currentIndex = 0
+```
+
+A **named** function is required, not an inline arrow: `Qt.callLater` de-duplicates by function
+identity, so a named one also coalesces a fast typist's keystrokes into a single reset. An arrow
+would allocate a fresh closure per keystroke and never coalesce. `forceLayout()` was deliberately
+*not* added — the smallest change that breaks the reentrancy is the whole fix.
+
+**The regression that had to be ruled out.** Deferring the reset means `currentIndex` briefly keeps
+its old value, so "does Enter now launch the *wrong* app?" is a real question. `Content.qml:63`
+`onAccepted` reads `list.currentList?.currentItem`. Enter is a *separate* input event, posted to the
+queue **after** the `Qt.callLater` invocation and processed FIFO at the same priority — the reset
+always lands first. No wrong-app window exists for human or synthetic input.
+
+#### The second symptom — the dashboard stutter, verbatim
+`ContentList.qml` carried the same pair that was deleted from `modules/dashboard/Content.qml`
+(461–552 ms blocked → 0–52 ms; see the note in the overlay script):
+
+```qml
+Behavior on implicitWidth  { enabled: root.screenState.launcher; Anim {} }
+Behavior on implicitHeight { enabled: root.screenState.launcher; Anim {} }
+```
+
+Worse here than on the dashboard: `implicitHeight` chains to `AppList.implicitHeight`, which follows
+`count` — so this animated the panel on **every keystroke**, and `config/quickshell/caelestia-bar/
+shell.qml:458` binds the layer-shell surface size to it, making each frame a surface resize
+(the BUG-123 pattern). Both Behaviors deleted.
+
+**The two bugs feed each other**, which is why they were reported together: fewer relayouts while the
+model churns also narrows the window the crash lives in. Deleting the Behaviors removes the
+per-frame resize, so the second half of the dashboard fix (unbinding the window from the animated
+size) was left alone — with the animation gone the surface now resizes once per keystroke, which is
+the desired end state anyway. Measure before touching it.
+
+#### Verified so far
+`qmllint` clean on both patched files; overlay `--check` green at **11** patched + 1 added; shell
+restarted and reloaded them with no QML errors; launcher toggled open/closed over IPC with no new
+report under `~/.cache/quickshell/crashes/`. **Not yet verified:** sustained fast typing by a human.
+That is the test that matters, and it is still outstanding.
+
+#### A dead end worth recording
+`qs -p <dir> ipc call ...` — the exact command in `luminos-cael-launcher.desktop` — reported
+`No running instances` while `qs list --all` showed the instance alive on that exact path. This
+looked like Meta+P being broken. It is not: **path-based instance lookup filters by
+`WAYLAND_DISPLAY`**, which an agent's non-graphical shell does not have. `WAYLAND_DISPLAY=wayland-0`
+in front of it, or `qs ipc --pid <pid>`, and it works. Do not "fix" the `.desktop`.

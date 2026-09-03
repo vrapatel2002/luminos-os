@@ -33,6 +33,45 @@ REPO = Path(__file__).resolve().parent.parent
 MARKER = ".luminos-overlay"   # refuse to delete a directory that is not ours
 
 # ---------------------------------------------------------------------------
+# Performance tab geometry.  [CHANGE: claude-code | 2026-08-31]
+#
+# These are the ONLY numbers worth turning when the tab is the wrong size, so
+# they live together instead of being scattered through the patch strings
+# below.  They were arrived at in docs/mockups/perf-layout.html, which is a 1:1
+# sandbox for this tab - open it, drag the sliders, and paste the numbers here.
+#
+# Why they exist at all: the VRAM card made the tab a third row, and two tall
+# cards next to two wide ones left ~400 px of dead space.  The panel went from
+# 967x386 to 974x627.  The fix is a 3x2 grid of SHORT WIDE cards, which needs
+# the hero cards narrower and the Network card unpinned from its token size.
+# ---------------------------------------------------------------------------
+PERF = {
+    # HeroCard (CPU, GPU).  Upstream token is 400.  This is the one number with
+    # a visible cost, and it has a FLOOR that is easy to miss.
+    #
+    # The temperature bar at the bottom left is a fixed ~200 px and has no right
+    # anchor, while the "Usage" blob is pinned to the bottom RIGHT.  So the two
+    # do not push each other apart - narrow the card and the bar simply slides
+    # underneath the blob.  The bar's right edge lands at ~218 px and the blob's
+    # left edge at (width - 112), so anything under ~330 overlaps them.
+    #
+    # Everything else taken off the card comes off the subLabel.
+    #     289 -> 860 x 352 panel, bar under the blob, "GeForce..."
+    #     340 -> 911 x 352 panel, ~12 px clear,       "GeForce RTX 4..."
+    "hero_width": 340,
+    # Arc diameter shared by Memory, VRAM and Storage so the row reads as a set.
+    # Upstream sizes each one from its own text, which is why they differed.
+    "gauge_size": 83,
+    # NetworkCard is the only card pinned to a token in both axes, so both have
+    # to be overridden or it alone decides the grid's cell size.
+    "network_width": 238,
+    "network_height": 150,
+    # Floor for the title/value column beside a gauge.  Upstream's
+    # perfStorageTextWidth is generous enough to cost ~60 px of air.
+    "label_min_width": 120,
+}
+
+# ---------------------------------------------------------------------------
 # Files that do not exist upstream at all, copied in from the repo.
 # Keyed by path inside the overlay -> path inside this repo.
 #
@@ -42,8 +81,8 @@ MARKER = ".luminos-overlay"   # refuse to delete a directory that is not ours
 # rather than silently shadowing it.
 # ---------------------------------------------------------------------------
 NEW_FILES = {
-    "modules/dashboard/performance/VramCard.qml":
-        "config/quickshell/caelestia-kwin-extra/VramCard.qml",
+    "modules/dashboard/performance/GaugeCard.qml":
+        "config/quickshell/caelestia-kwin-extra/GaugeCard.qml",
 }
 
 # ---------------------------------------------------------------------------
@@ -410,7 +449,59 @@ PATCHES = {
             "    Loader {\n"
             "        id: placeholder",
         ),
+        # The whole card area becomes one 3x2 grid.  This replaces upstream's
+        # "row of two heroes, then a row of three" AND the extra VRAM row that
+        # an earlier version of this overlay added.
+        #
+        # Why: the VRAM card made the tab three rows deep, and two TALL cards
+        # (Memory, VRAM) sitting beside two WIDE ones (Storage, Network) left
+        # about 400 px of dead space in the middle.  The panel went from
+        # 967x386 to 974x627 - a 62% taller dashboard for one new number.
+        #
+        # A 3x2 grid with one hero per row fixes it, but only if every card is
+        # the SHORT WIDE shape, which is why Memory and VRAM both become
+        # GaugeCard and why HeroCard/NetworkCard/StorageCard are resized in
+        # their own patches below.  Sizes come from PERF at the top of this file.
+        #
+        # Layout.row/Layout.column are explicit on purpose: without them a card
+        # the user has switched off collapses its cell and the columns stop
+        # lining up with the row above.
         (
+            "        ColumnLayout {\n"
+            "            id: mainColumn\n"
+            "\n"
+            "            Layout.fillWidth: true\n"
+            "            spacing: Tokens.spacing.medium\n"
+            "\n"
+            "            RowLayout {\n"
+            "                spacing: Tokens.spacing.medium\n"
+            "                visible: cpuCard.active || gpuCard.active\n"
+            "\n"
+            "                WrappedLoader {\n"
+            "                    id: cpuCard\n"
+            "\n"
+            "                    active: Config.dashboard.performance.showCpu\n"
+            "\n"
+            "                    sourceComponent: HeroCard {\n"
+            "                        icon: \"memory\"\n"
+            "                        label: qsTr(\"CPU\")\n"
+            "                        subLabel: Cpu.name\n"
+            "                        usage: Cpu.percentage\n"
+            "                        temperature: Cpu.temperature\n"
+            "                        accent: Colours.palette.m3primary\n"
+            "\n"
+            "                        ServiceRef {\n"
+            "                            service: Cpu\n"
+            "                        }\n"
+            "                    }\n"
+            "                }\n"
+            "\n"
+            "                WrappedLoader {\n"
+            "                    id: gpuCard\n"
+            "\n"
+            "                    active: Config.dashboard.performance.showGpu "
+            "&& Gpu.type !== Gpu.None\n"
+            "\n"
             "                    sourceComponent: HeroCard {\n"
             "                        icon: \"desktop_windows\"\n"
             "                        label: qsTr(\"GPU\")\n"
@@ -422,32 +513,10 @@ PATCHES = {
             "                        ServiceRef {\n"
             "                            service: Gpu\n"
             "                        }\n"
-            "                    }",
-            "                    // [LUMINOS-KWIN] Fed from `dgpu` above, not from the Gpu\n"
-            "                    // service, and with NO ServiceRef - refing it is what made\n"
-            "                    // the card poll nvidia-smi and read 'failed'.\n"
-            "                    sourceComponent: HeroCard {\n"
-            "                        icon: \"desktop_windows\"\n"
-            "                        label: qsTr(\"GPU\")\n"
-            "                        subLabel: dgpu.name\n"
-            "                        usage: dgpu.usage\n"
-            "                        temperature: dgpu.temperature\n"
-            "                        statusText: dgpu.status\n"
-            "                        statusIcon: dgpu.statusIcon\n"
-            "                        accent: dgpu.awake ? Colours.palette.m3secondary "
-            ": Colours.palette.m3onSurfaceVariant\n"
-            "                    }",
-        ),
-        # Memory moves down into a new row so VRAM can sit beside it.
-        # Four cards in one row is not an option: the dashboard panel sizes
-        # itself to its content, so a fourth card widens the whole tab past
-        # the screen.  Two rows of two keeps the width and spends height,
-        # which the Performance tab has to spare.
-        #
-        # VRAM follows `gpuCard.active` rather than a config key of its own -
-        # Caelestia's config is a compiled QML plugin, so there is no
-        # `showVram` to add.  If the GPU card is on, the VRAM card is on.
-        (
+            "                    }\n"
+            "                }\n"
+            "            }\n"
+            "\n"
             "            RowLayout {\n"
             "                spacing: Tokens.spacing.medium\n"
             "                visible: storageCard.active || networkCard.active "
@@ -473,10 +542,69 @@ PATCHES = {
             "                    active: Config.dashboard.performance.showMemory\n"
             "                    sourceComponent: MemoryCard {}\n"
             "                }\n"
-            "            }",
+            "            }\n"
+            "        }",
+
+            "        // [LUMINOS-KWIN] Two packed rows, NOT a GridLayout. A grid gives\n"
+            "        // every column a single width, so the small gauge cards were\n"
+            "        // stretched out to match whichever hero card shared their column.\n"
+            "        // See scripts/luminos-caelestia-kwin-overlay.\n"
+            "        ColumnLayout {\n"
+            "            id: mainGrid\n"
+            "\n"
+            "            Layout.fillWidth: true\n"
+            "            spacing: Tokens.spacing.medium\n"
+            "\n"
             "            RowLayout {\n"
+            "                Layout.fillWidth: true\n"
             "                spacing: Tokens.spacing.medium\n"
-            "                visible: storageCard.active || networkCard.active\n"
+            "\n"
+            "                WrappedLoader {\n"
+            "                    id: cpuCard\n"
+            "\n"
+            "                    active: Config.dashboard.performance.showCpu\n"
+            "\n"
+            "                    sourceComponent: HeroCard {\n"
+            "                        icon: \"memory\"\n"
+            "                        label: qsTr(\"CPU\")\n"
+            "                        subLabel: Cpu.name\n"
+            "                        usage: Cpu.percentage\n"
+            "                        temperature: Cpu.temperature\n"
+            "                        accent: Colours.palette.m3primary\n"
+            "\n"
+            "                        ServiceRef {\n"
+            "                            service: Cpu\n"
+            "                        }\n"
+            "                    }\n"
+            "                }\n"
+            "\n"
+            "                // Upstream's MemoryCard is the tall shape, so it is swapped for\n"
+            "                // GaugeCard - same data, same memory_alt icon, laid on its side.\n"
+            "                // MemoryCard carried the ServiceRef, so it has to come along or\n"
+            "                // the Memory service is never started and the card reads 0%.\n"
+            "                WrappedLoader {\n"
+            "                    id: memoryCard\n"
+            "\n"
+            "                    Layout.fillWidth: false\n"
+            "                    active: Config.dashboard.performance.showMemory\n"
+            "\n"
+            "                    sourceComponent: GaugeCard {\n"
+            "                        icon: \"memory_alt\"\n"
+            "                        label: qsTr(\"Memory\")\n"
+            "                        accent: Colours.palette.m3tertiary\n"
+            "                        gaugeSize: " + str(PERF["gauge_size"]) + "\n"
+            "                        fraction: Memory.percentage\n"
+            "                        value: {\n"
+            "                            const fmt = UsageFmt.formatKib(Memory.used, Memory.total);\n"
+            "                            return `${+fmt.value.toFixed(1)} / "
+            "${+fmt.total.toFixed(1)} ${fmt.unit}`;\n"
+            "                        }\n"
+            "\n"
+            "                        ServiceRef {\n"
+            "                            service: Memory\n"
+            "                        }\n"
+            "                    }\n"
+            "                }\n"
             "\n"
             "                WrappedLoader {\n"
             "                    id: storageCard\n"
@@ -484,6 +612,11 @@ PATCHES = {
             "                    active: Config.dashboard.performance.showStorage\n"
             "                    sourceComponent: StorageCard {}\n"
             "                }\n"
+            "            }\n"
+            "\n"
+            "            RowLayout {\n"
+            "                Layout.fillWidth: true\n"
+            "                spacing: Tokens.spacing.medium\n"
             "\n"
             "                WrappedLoader {\n"
             "                    id: networkCard\n"
@@ -491,34 +624,62 @@ PATCHES = {
             "                    active: Config.dashboard.performance.showNetwork\n"
             "                    sourceComponent: NetworkCard {}\n"
             "                }\n"
-            "            }\n"
             "\n"
-            "            // [LUMINOS-KWIN] Memory dropped down here to make room for\n"
-            "            // VRAM. See the note in scripts/luminos-caelestia-kwin-overlay.\n"
-            "            RowLayout {\n"
-            "                spacing: Tokens.spacing.medium\n"
-            "                visible: memoryCard.active || vramCard.active\n"
-            "\n"
+            "                // Fed from `dgpu` above, not from the Gpu service, and with NO\n"
+            "                // ServiceRef - refing it is what made the card poll nvidia-smi\n"
+            "                // and read 'failed'.\n"
             "                WrappedLoader {\n"
-            "                    id: memoryCard\n"
+            "                    id: gpuCard\n"
             "\n"
-            "                    active: Config.dashboard.performance.showMemory\n"
-            "                    sourceComponent: MemoryCard {}\n"
+            "                    active: Config.dashboard.performance.showGpu "
+            "&& Gpu.type !== Gpu.None\n"
+            "\n"
+            "                    sourceComponent: HeroCard {\n"
+            "                        icon: \"desktop_windows\"\n"
+            "                        label: qsTr(\"GPU\")\n"
+            "                        subLabel: dgpu.name\n"
+            "                        usage: dgpu.usage\n"
+            "                        temperature: dgpu.temperature\n"
+            "                        statusText: dgpu.status\n"
+            "                        statusIcon: dgpu.statusIcon\n"
+            "                        accent: dgpu.awake ? Colours.palette.m3secondary "
+            ": Colours.palette.m3onSurfaceVariant\n"
+            "                    }\n"
             "                }\n"
             "\n"
+            "                // VRAM follows `gpuCard.active` rather than a config key of its\n"
+            "                // own - Caelestia's config is a compiled QML plugin, so there is\n"
+            "                // no `showVram` to add. Purely fed; it asks the GPU nothing.\n"
             "                WrappedLoader {\n"
             "                    id: vramCard\n"
             "\n"
+            "                    Layout.fillWidth: false\n"
             "                    active: gpuCard.active\n"
             "\n"
-            "                    // Purely fed - VramCard asks the GPU nothing itself.\n"
-            "                    sourceComponent: VramCard {\n"
-            "                        awake: dgpu.awake && dgpu.haveData\n"
-            "                        used: dgpu.vramUsed\n"
-            "                        total: dgpu.vramTotal\n"
+            "                    sourceComponent: GaugeCard {\n"
+            "                        readonly property bool awake: dgpu.awake && dgpu.haveData\n"
+            "\n"
+            "                        icon: \"developer_board\"\n"
+            "                        label: qsTr(\"VRAM\")\n"
+            "                        gaugeSize: " + str(PERF["gauge_size"]) + "\n"
+            "                        accent: awake ? Colours.palette.m3secondary "
+            ": Colours.palette.m3onSurfaceVariant\n"
+            "                        valueColour: awake ? Colours.palette.m3onSurface "
+            ": Colours.palette.m3onSurfaceVariant\n"
+            "                        fraction: dgpu.vramTotal > 0 "
+            "? dgpu.vramUsed / dgpu.vramTotal : 0\n"
+            "                        // `total` is a hardware constant, so it survives a\n"
+            "                        // sleep: once the card has been awake even once,\n"
+            "                        // \"0 / 6141 MiB\" while asleep is the truth, not a guess.\n"
+            "                        percentText: dgpu.vramTotal > 0 "
+            "? `${Math.round(fraction * 100)}%` : \"\\u2013\"\n"
+            "                        value: dgpu.vramTotal > 0 "
+            "? `${Math.round(dgpu.vramUsed)} / ${Math.round(dgpu.vramTotal)} MiB` "
+            ": qsTr(\"Not read yet\")\n"
             "                    }\n"
             "                }\n"
-            "            }",
+            "            }\n"
+            "        }",
         ),
     ],
     # The GPU card needs to say "asleep" where the CPU card says "62 degrees".
@@ -528,6 +689,14 @@ PATCHES = {
     # default to empty.  Empty means the upstream thermometer row renders exactly
     # as before, so the CPU card is unchanged.
     "modules/dashboard/performance/HeroCard.qml": [
+        # Narrower, because there are now three columns instead of two.  400 was
+        # sized for a two-across row; at 289 the subLabel ("GeForce RTX 4050
+        # Max-Q / Mobile") elides, which the elide added below handles.
+        (
+            "    implicitWidth: Tokens.sizes.dashboard.perfHeroCardWidth",
+            "    // [LUMINOS-KWIN] Was Tokens.sizes.dashboard.perfHeroCardWidth (400).\n"
+            "    implicitWidth: " + str(PERF["hero_width"]),
+        ),
         (
             "    required property real temperature",
             "    required property real temperature\n"
@@ -556,6 +725,99 @@ PATCHES = {
             "`${Math.ceil(GlobalConfig.services.useFahrenheitPerformance "
             "? root.temperature * 1.8 + 32 : root.temperature)}\u00b0"
             "${GlobalConfig.services.useFahrenheitPerformance ? \"F\" : \"C\"}`",
+        ),
+    ],
+    # StorageCard is already the wide shape, so it only has to get SMALLER.
+    # [CHANGE: claude-code | 2026-08-31]
+    #
+    # It measured 371x211, which made it the widest and tallest thing in the
+    # grid - and with uniformCellHeights every other cell would have been
+    # stretched to 211 to match it.  Three changes, in order of what they buy:
+    #
+    #   the icon leaves the gauge  ->  the gauge stops being sized by three
+    #                                  stacked lines, ~108 px down to 83
+    #   margins 28 -> 12           ->  32 px off both axes
+    #   text floor 180 -> 120      ->  the disk figure is ~120 px wide, so the
+    #                                  rest was air
+    #
+    # The icon is not deleted, it moves up beside the "Storage" title, which is
+    # where MemoryCard has always put its icon.  Same glyph, same colour.
+    "modules/dashboard/performance/StorageCard.qml": [
+        (
+            "        anchors.margins: Tokens.padding.extraLarge",
+            "        anchors.margins: Tokens.padding.medium  "
+            "// [LUMINOS-KWIN] was extraLarge",
+        ),
+        (
+            "                implicitSize: usageColumn.implicitHeight + thickness "
+            "+ Tokens.padding.large * 2",
+            "                // [LUMINOS-KWIN] Fixed, so Storage/Memory/VRAM all draw the\n"
+            "                // same size arc instead of each sizing to its own text.\n"
+            "                implicitSize: " + str(PERF["gauge_size"]),
+        ),
+        (
+            "                    MaterialIcon {\n"
+            "                        Layout.alignment: Qt.AlignHCenter\n"
+            "                        text: \"hard_drive\"\n"
+            "                        color: root.accent\n"
+            "                        fontStyle: Tokens.font.icon.medium\n"
+            "                    }\n"
+            "\n"
+            "                    StyledText {\n"
+            "                        Layout.alignment: Qt.AlignHCenter\n"
+            "                        text: Math.round(root.percentage * 100) + \"%\"",
+            "                    // [LUMINOS-KWIN] The icon moved out to the title row.\n"
+            "                    StyledText {\n"
+            "                        Layout.alignment: Qt.AlignHCenter\n"
+            "                        text: Math.round(root.percentage * 100) + \"%\"",
+        ),
+        (
+            "                StyledText {\n"
+            "                    text: qsTr(\"Storage\")\n"
+            "                    font: Tokens.font.title.medium\n"
+            "                }",
+            "                RowLayout {\n"
+            "                    spacing: Tokens.spacing.small\n"
+            "\n"
+            "                    MaterialIcon {\n"
+            "                        text: \"hard_drive\"\n"
+            "                        color: root.accent\n"
+            "                        fontStyle: Tokens.font.icon.medium\n"
+            "                    }\n"
+            "\n"
+            "                    StyledText {\n"
+            "                        text: qsTr(\"Storage\")\n"
+            "                        font: Tokens.font.title.medium\n"
+            "                    }\n"
+            "                }",
+        ),
+        (
+            "                Layout.minimumWidth: Tokens.sizes.dashboard.perfStorageTextWidth",
+            "                Layout.minimumWidth: " + str(PERF["label_min_width"]),
+        ),
+        # title.large was sized for the old ~108 px arc; at 83 px "63%" spills
+        # out over both sides of the ring. GaugeCard uses medium for the same
+        # reason, so this also makes the three gauges match.
+        (
+            "                        font: Tokens.font.title.builders.large.width(90).build()",
+            "                        font: Tokens.font.title.builders.medium.width(90).build()",
+        ),
+    ],
+    # NetworkCard is the only card pinned to a token in BOTH axes (390x220), so
+    # left alone it alone would decide every cell in the grid.
+    # [CHANGE: claude-code | 2026-08-31]
+    #
+    # Nothing inside it needs the space: the sparkline fills whatever it is
+    # given, and the three label rows are short.  The height here is a FLOOR,
+    # not a cap - uniformCellHeights stretches it up to whatever the hero cards
+    # come to, so the sparkline still gets the full cell.
+    "modules/dashboard/performance/NetworkCard.qml": [
+        (
+            "    implicitWidth: Tokens.sizes.dashboard.perfNetworkCardWidth\n"
+            "    implicitHeight: Tokens.sizes.dashboard.perfNetworkCardHeight",
+            "    // [LUMINOS-KWIN] Was perfNetworkCardWidth/Height (390x220).\n"
+            "    implicitWidth: " + str(PERF["network_width"]) + "\n"
+            "    implicitHeight: " + str(PERF["network_height"]),
         ),
     ],
     # BUG-123 part two: the dashboard stutters when you switch tabs.
@@ -606,6 +868,96 @@ PATCHES = {
             "    // Animating the panel's size relayouts the whole dashboard on every frame\n"
             "    // and blocked the GUI thread for ~500 ms per tab switch.  See the note in\n"
             "    // scripts/luminos-caelestia-kwin-overlay for the measurements.",
+        ),
+    ],
+    # [CHANGE: claude-code | 2026-09-03] The launcher SIGSEGVs mid-word.
+    #
+    # ~/.cache/quickshell/crashes/re127lskt/report.txt, symbolized:
+    #     QQuickItem::position() const
+    #     QQuickItemViewTransitionableItem::moveTo(QPointF const&, bool)
+    #     QQuickItemView::setCurrentIndex(int)
+    #     QQuickListView::qt_metacall(...)
+    #     QQmlBoundSignalExpression::evaluate(void**)
+    #     QV4::Runtime::StoreNameSloppy::call(...)
+    #     QQuickTextInputPrivate::finishChange(int, bool, bool)
+    #     QQuickTextInputPrivate::processKeyEvent(QKeyEvent*)
+    #
+    # Read it bottom-up and the whole thing happens inside ONE keystroke:
+    # the key event commits the search text, syncDisplayText() does the
+    # unqualified `displayText = search.text` (that is the StoreNameSloppy
+    # frame), which re-runs the ScriptModel `values` binding.
+    #
+    # Quickshell's ScriptModel::setValues (src/core/scriptmodel.cpp) emits
+    # every beginInsertRows/beginRemoveRows/beginMoveRows FIRST and
+    # valuesChanged() LAST.  So `onValuesChanged: currentIndex = 0` runs while
+    # the ListView still has recorded-but-unapplied pending changes.
+    # setCurrentIndex() then forces applyPendingChanges()/layout() re-entrantly
+    # and moveTo() dereferences an item the transition machinery already freed.
+    #
+    # Two things make it fire here and nowhere else:
+    #   - This is the only ListView in Caelestia whose currentIndex is written
+    #     from a text-input signal.  (WallpaperList writes one too, but it is a
+    #     PathView, and the backtrace says QQuickListView.)
+    #   - `add`/`remove` are declared `enabled: !root.state`, i.e. always false -
+    #     but the state transition's last PropertyAction clobbers that binding
+    #     to `true` for good.  Use an action prefix (">calc ", ">scheme ") once
+    #     and the add/remove transitions stay live for the rest of the session,
+    #     which is why the crash is intermittent and worsens with use.
+    #
+    # Fix: take the write out of the model-mutation call stack.  Qt.callLater
+    # defers it to the end of the event loop iteration, after the view has
+    # applied its own changes - and because Qt.callLater de-duplicates by
+    # function identity, a fast typist's keystrokes coalesce into one reset.
+    # A named function is required for that de-duplication; an inline arrow
+    # would allocate a fresh closure per keystroke and never coalesce.
+    "modules/launcher/AppList.qml": [
+        (
+            "    model: ScriptModel {\n"
+            "        values: root.resultsForText(root.displayText)\n"
+            "        onValuesChanged: root.currentIndex = 0\n"
+            "    }",
+            "    // [LUMINOS-KWIN] See the note in scripts/luminos-caelestia-kwin-overlay.\n"
+            "    function luminosResetIndex(): void {\n"
+            "        currentIndex = 0;\n"
+            "    }\n"
+            "\n"
+            "    model: ScriptModel {\n"
+            "        values: root.resultsForText(root.displayText)\n"
+            "        // [LUMINOS-KWIN] Was `root.currentIndex = 0`, which crashed the shell.\n"
+            "        // ScriptModel emits valuesChanged() AFTER its row signals, so writing\n"
+            "        // currentIndex here re-enters QQuickItemView::layout() while delegates\n"
+            "        // are mid-destruction -> use-after-free in moveTo().  Defer it.\n"
+            "        onValuesChanged: Qt.callLater(root.luminosResetIndex)\n"
+            "    }",
+        ),
+    ],
+    # [CHANGE: claude-code | 2026-09-03] Same stutter as the dashboard, same fix.
+    #
+    # ContentList's implicitHeight follows AppList's, which follows `count`, so
+    # these two Behaviors re-animate the launcher's size on EVERY keystroke -
+    # and the panel window binds its surface size to it, so each frame is also a
+    # layer-shell resize.  See the modules/dashboard/Content.qml note above for
+    # the measurements that justified deleting the identical pair there.
+    #
+    # Bonus: fewer relayouts while the model is churning also narrows the window
+    # the AppList crash above lives in.  They are separate bugs that feed each
+    # other.
+    "modules/launcher/ContentList.qml": [
+        (
+            "    Behavior on implicitWidth {\n"
+            "        enabled: root.screenState.launcher\n"
+            "\n"
+            "        Anim {}\n"
+            "    }\n"
+            "\n"
+            "    Behavior on implicitHeight {\n"
+            "        enabled: root.screenState.launcher\n"
+            "\n"
+            "        Anim {}\n"
+            "    }",
+            "    // [LUMINOS-KWIN] Deliberately NO Behavior on implicitWidth/implicitHeight.\n"
+            "    // implicitHeight tracks the result count, so these animated the launcher's\n"
+            "    // size - and the layer-shell surface bound to it - on every keystroke.",
         ),
     ],
     # getMonitor("active") is how the brightness keys find a screen.  Without
