@@ -5442,3 +5442,91 @@ standalone resolves `DISPLAY=:0` and `XAUTHORITY=/run/user/1000/xauth_FKaLMq` in
 **Not yet verified:** a real login. The fix regenerates `shell.sh` at session start, so the
 *currently running* bar still has no `DISPLAY` — restarting `qs` alone will not pick it up, because
 the supervisor's own environment lacks it too. This is confirmed at the next login, not before.
+
+#### Confirmed in production — 2026-09-03 19:56
+<!-- [CHANGE: claude-code | 2026-09-03] -->
+Shawn logged out and back in and clicked Ghidra himself. The bar's environment now carries
+`DISPLAY=:0` and `XAUTHORITY=/run/user/1000/xauth_DEyLrm`, and Ghidra's `application.log` records
+**"Ghidra startup complete"** at 19:56. The launch bug is closed.
+
+Fixing it immediately exposed a second, unrelated one: the window came up **blank**. See
+**BUG-154**. That is a rendering fault, not a launch fault, and it had been there all along —
+nothing could reach it while no X11 app could start at all.
+
+---
+
+### BUG-154 — Every Java Swing window painted as an empty white rectangle under XWayland
+<!-- [CHANGE: claude-code | 2026-09-03] -->
+**Status:** FIXED — 2026-09-03, one env var, A/B proven on an unmodified binary. ·
+**Component:** `~/.local/share/applications/ghidra.desktop` (Ghidra only, for now) ·
+**Scope:** the fault is system-wide; the fix applied is not
+
+#### The symptom, as reported
+"its launching but i can not see options like files view edit and more." Ghidra opened, KWin drew
+its titlebar and its border — and inside there was nothing. No menu bar, no toolbar, no project
+tree, no status bar. A blank white rectangle with a working close button.
+
+#### This is not a Ghidra bug
+That took some proving, because everything in Ghidra is a plausible suspect. Each was eliminated
+by test, not by argument:
+
+| Suspect | How it was ruled out |
+|---|---|
+| Global menu / appmenu / jayatana | No `JAVA_TOOL_OPTIONS`, no `APPMENU*`, no `GTK_MODULES`; jayatana not installed |
+| `sun.java2d.xrender=true` | Blank with `xrender=false` too |
+| `EX_STATE=6` (maximized) | Blank unmaximized at 800×600 too |
+| Modal Tip-of-the-Day stealing the paint | Blank with `SHOW_TIPS=false` too |
+| Ghidra's VM args generally | Blank with **no VM args at all** |
+| FlatLaf / Ghidra's docking framework | **A 40-line plain Swing app reproduces it exactly** |
+| A crash or exception | None. stderr empty, log clean, "Ghidra startup complete" |
+
+The reproducer is the load-bearing one. A `JFrame` with one `JMenu` and one `JLabel` reading
+"FRAME CONTENT PAINTING" comes up with the label absent and the menu bar absent. No Ghidra, no
+look-and-feel, no flags.
+
+#### The tell: Frames broke, Dialogs did not
+Within a single process, the `JDialog` painted its contents perfectly while its own parent `JFrame`
+stayed empty — which matches what Ghidra did, where the modal dialogs had always looked fine. A
+top-level `Frame` is mapped differently from a `Dialog`, and only the `Frame` path was stuck.
+
+#### Root cause
+Under XWayland with KWin, AWT does not get the reparenting/`ConfigureNotify` handshake it waits
+for before it will paint a top-level frame, so the frame is mapped, sized and decorated but its
+contents are never drawn. `_JAVA_AWT_WM_NONREPARENTING=1` tells AWT not to wait for it.
+
+#### The A/B
+Same class file, same JVM, same session, one variable:
+
+| case | env | result |
+|---|---|---|
+| A | `_JAVA_AWT_WM_NONREPARENTING` unset | blank frame, no menu, no label |
+| B | `_JAVA_AWT_WM_NONREPARENTING=1` | menu bar drawn, label drawn |
+
+Then on the real thing: Ghidra with the var set renders File / Edit / Project / Tools / Help, the
+toolbar, the Tool Chest, the project tree, the filter box, the Tree/Table tabs and the status bar.
+
+#### The fix
+Added to the existing user override at `~/.local/share/applications/ghidra.desktop`, alongside the
+HiDPI fix already there:
+
+```
+Exec=env _JAVA_AWT_WM_NONREPARENTING=1 GHIDRA_GUI_JAVA_OPTIONS=-Dsun.java2d.uiScale=2 ghidra %F
+```
+
+Verified end-to-end by launching that `.desktop` under an `env -i` rebuilt from
+`/proc/$(pgrep -x qs)/environ` — i.e. with the bar's real environment, through the real desktop
+entry. `desktop-file-validate` passes.
+
+#### Known limitation — the fix is narrower than the bug
+Because a plain Swing app reproduces this, **every Java GUI application on this machine is
+affected**, not just Ghidra. Only Ghidra is fixed. The system-wide version would be a line in
+`~/.config/environment.d/`, which is a bigger blast radius (it would reach the Java-based dev tools
+too) and was deliberately left for Shawn to call.
+
+#### Note for the next person
+The other untested suspect is Java 26. Ghidra 12.1.2 is compiled for 21
+(`application.java.compiler=21`) but `application.java.max=` is empty, so its launcher picks the
+newest JDK it can find. Java 21 could not be tested: `/usr/lib/jvm/java-21-openjdk` is
+`jre21-openjdk-headless` — it has `java` but no `javac` and no GUI. Testing it would mean
+installing `jdk21-openjdk`. Given that the env var fixes it outright, this is curiosity, not a
+blocker.
