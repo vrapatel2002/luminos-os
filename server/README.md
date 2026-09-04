@@ -127,6 +127,21 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   to every device on the wifi. DECISION 90 narrowed the LAN rule to named ports.
   `iifname "tailscale0" accept` is still wholesale, and that is now deliberate — the tailnet
   is the trusted path, the home wifi is not. Nothing is open to the internet either way.
+- **Jellyfin skips an *empty* library folder, and doesn't watch it either.**
+  <!-- [CHANGE: claude-code | 2026-09-04] --> The log says
+  `Library folder "…" is inaccessible or empty, skipping`. Harmless when it's true, except
+  that no inotify watcher gets attached — so the **first** import into a newly added folder
+  is invisible, long after the folder stopped being empty. Cost six episodes on
+  `/srv/external/tv`. **Sonarr's `MediaBrowser` connection does not save you here**: it fires,
+  reports success and tests green, but refreshing a path under a skipped folder is a no-op.
+  One full `POST /Library/Refresh` fixes it permanently for that path. `/srv/external/movies`
+  is still empty, so the first film there will do it again. DECISION 94.
+- **When something is on disk but not in the Jellyfin UI, open
+  `/var/log/jellyfin/jellyfin<YYYYMMDD>.log` before theorising.** <!-- [CHANGE: claude-code |
+  2026-09-04] --> The answer was one `[WRN]` line. A whole plausible wrong diagnosis
+  (`refreshLibrary=false`) got built instead, and two full scans had already disproven it.
+  Note the glob needs `sudo` on the *whole* command — `sudo grep /var/log/jellyfin/*.log`
+  expands the glob as your unprivileged shell and fails with "No such file".
 - **`flush ruleset` in `/etc/nftables.conf` deletes Tailscale's tables too.** It removes
   *every* table, including the four `ip`/`ip6` `filter`/`nat`/`mangle` tables tailscaled owns
   and marks "do not touch". Reloading the firewall silently broke the tunnel's rules, and it

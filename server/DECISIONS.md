@@ -1857,3 +1857,59 @@ tailnet front door** — headline, downloads, TV and movie rows all rendered, no
 final one-line `gb()` change was re-checked by running the deployed helper against the live
 `/api/data` payload rather than re-reading the DOM, because the extension had lost host
 permission by then. Previous binary kept at `/usr/local/bin/luminos-space.bak-20260903`.
+
+---
+
+## DECISION 94 — An empty library folder is not a library folder, so the first import into one is invisible
+<!-- [CHANGE: claude-code | 2026-09-04] -->
+
+**Context.** Six episodes of *A Knight of the Seven Kingdoms* were imported by Sonarr to
+`/srv/external/tv` between 17:05 and 17:55 on 2026-09-04. They did not appear in Jellyfin.
+Every obvious explanation was wrong: the files were on disk, correctly named, `0664
+sonarr:media` under `drwxrwsr-x` directories, `jellyfin` is in group `media`, and the path
+was already listed on the `Shows` library from DECISION 91.
+
+**What actually happened.** Jellyfin skips a library folder it finds empty — and it does not
+merely skip *scanning* it, it declines to attach an inotify watcher to it. The log says so
+twice, once per scan, from the moment the path was added:
+
+```
+2026-09-03 18:29:41 [WRN] Library folder "/srv/external/tv" is inaccessible or empty, skipping
+2026-09-04 06:30:44 [WRN] Library folder "/srv/external/tv" is inaccessible or empty, skipping
+```
+
+Both were correct at the time: the disk was formatted empty on 2026-09-03 and the first
+import did not land until 17:05 the next day. But the consequence outlives the condition.
+By 17:05 Jellyfin had no node in its library tree for that path and no watcher on it, so
+new files there produced no event.
+
+**Why the safety net did not catch it.** Sonarr has had a `MediaBrowser` connection all
+along — `updateLibrary=True`, `onDownload=True`, `onUpgrade=True`, `onRename=True` — and it
+fired on every one of those six imports. It was a **no-op**. That notification asks Jellyfin
+to refresh a *reported path*, and a path under a folder Jellyfin has skipped resolves to
+nothing to refresh. The connection tests green and looks healthy precisely because nothing
+is broken about it. This is the trap: the mechanism designed to make imports appear instantly
+fails silently and specifically in the one case where the folder is new.
+
+**Resolution.** A full `POST /Library/Refresh` at 18:13 ingested the folder, and the log flips
+to `[INF] Watching directory "/srv/external/tv"`. Series plus all six episodes indexed,
+confirmed by API (`SearchTerm` on episodes, single distinct `SeriesId`). **The condition is
+self-clearing** — once a folder is non-empty and one full scan has seen it, the watcher
+attaches and Sonarr's notification works normally from then on. `/srv/external/tv` will not
+do this again.
+
+**The same trap is still armed for movies.** `/srv/external/movies` is still empty, so it is
+still being skipped every scan, and the first film that lands there will be invisible by the
+identical mechanism. Worse: **Radarr had zero notifications configured** — no Jellyfin
+connection at all, so *every* movie, on either disk, waited for the daily 06:30 scan rather
+than appearing on import. Mirrored Sonarr's: `MediaBrowser`, `localhost:8096`,
+`updateLibrary=True`, on download/upgrade/rename/delete. `POST /notification/testall` returns
+`isValid: true`. That closes the ongoing lag; the one-time first-import case still needs the
+daily scan to fire once, which is automatic and needs nobody.
+
+**Worth knowing.** A prior read of this bug blamed the `refreshLibrary=false` query parameter
+used when the paths were added in DECISION 91. That was a plausible story and it was wrong —
+a scheduled full scan had already run twice since, at 18:29 and 06:30, and neither helped.
+The parameter was irrelevant; emptiness was the cause. The log line naming it was sitting in
+`/var/log/jellyfin/jellyfin20260904.log` the whole time, which is the file to open first next
+time something is on disk but not in the UI.
