@@ -1,0 +1,135 @@
+#!/bin/bash
+# luminos-dv-fix — convert Dolby Vision Profile 5 files to tagged HDR10, in place.
+# [CHANGE: claude-code | 2026-09-04] DECISION 95.
+#
+# Why this exists: a DV Profile 5 base layer is IPT-PQ-C2 and carries no colour tags at
+# all, so any player that can't decode P5 draws IPT values as RGB — the picture comes out
+# violet/magenta. Profile 8.1 files are fine (their base layer is ordinary HDR10), so this
+# only ever needs to touch P5. The recovery information lives in the RPU, which nothing in
+# ffmpeg reads except `libplacebo=apply_dolbyvision=true`. Plain zscale/tonemap cannot do
+# it — it fails with "no path between colorspaces", and forcing bt2020/PQ gives dark green.
+#
+# Usage:   luminos-dv-fix [--dry-run] FILE [FILE...]
+# Scan:    luminos-dv-fix --scan DIR        (report profiles, change nothing)
+#
+# Safety: encodes to a temp file, checks duration and audio-stream count against the
+# source, and only then moves the original into $BAK and puts the new file at the original
+# path. Filenames are preserved so Jellyfin and Sonarr paths stay valid. Nothing is ever
+# deleted; a failure removes the temp file and leaves the original alone.
+
+set -u
+
+FF=/usr/lib/jellyfin-ffmpeg/ffmpeg
+FP=/usr/lib/jellyfin-ffmpeg/ffprobe
+BAK=${LUMINOS_DV_BACKUP:-/srv/external/_dv_p5_originals}
+BITRATE=${LUMINOS_DV_BITRATE:-28M}
+MAXRATE=${LUMINOS_DV_MAXRATE:-38M}
+VAAPI=${LUMINOS_DV_VAAPI:-/dev/dri/renderD128}
+
+# ANV on the iGPU. Without this ffmpeg may pick lavapipe, which is correct but runs at
+# 0.027x realtime — about 28 hours for a 40-minute episode.
+export VK_DRIVER_FILES=${LUMINOS_DV_VK_ICD:-/usr/share/vulkan/icd.d/intel_icd.json}
+
+DRY=0
+SCAN=0
+case "${1:-}" in
+  --dry-run) DRY=1; shift ;;
+  --scan)    SCAN=1; shift ;;
+  -h|--help|"") sed -n '2,25p' "$0"; exit 0 ;;
+esac
+
+# The DOVI configuration record is stream-level side data, not per-frame. Reading frames
+# instead returns nothing and every file looks like plain HDR — which is a silent wrong
+# answer, so keep this on -show_streams.
+dv_sidedata() {
+  $FP -v error -select_streams v:0 -show_streams \
+      -show_entries stream=side_data_list -of json "$1" 2>/dev/null
+}
+
+dv_profile() {
+  echo "$1" | grep -o '"dv_profile": *[0-9]*' | head -1 | grep -o '[0-9]*$'
+}
+
+# Profile 8.1 sets this to 1, meaning the base layer is plain HDR10 and needs no help.
+dv_compatible() {
+  echo "$1" | grep -o '"dv_bl_signal_compatibility_id": *[0-9]*' | head -1 | grep -o '[0-9]*$'
+}
+
+needs_fix() {
+  local sd p c
+  sd=$(dv_sidedata "$1")
+  p=$(dv_profile "$sd"); c=$(dv_compatible "$sd")
+  [ "$p" = "5" ] && [ "${c:-0}" != "1" ]
+}
+
+if [ "$SCAN" -eq 1 ]; then
+  find "${1:-.}" -type f \( -name '*.mkv' -o -name '*.mp4' \) -print0 \
+  | while IFS= read -r -d '' f; do
+      sd=$(dv_sidedata "$f")
+      p=$(dv_profile "$sd"); c=$(dv_compatible "$sd")
+      if [ -z "$p" ]; then s="no DV"
+      elif [ "$p" = "5" ] && [ "${c:-0}" != "1" ]; then s="** PROFILE 5 - needs fixing"
+      else s="profile $p (compat=${c:-none}) - fine"; fi
+      printf '%-30s %s\n' "$s" "$(basename "$f")"
+    done
+  exit 0
+fi
+
+mkdir -p "$BAK" || exit 1
+
+for IN in "$@"; do
+  [ -f "$IN" ] || { echo "SKIP (not a file): $IN"; continue; }
+  BASE=$(basename "$IN")
+  DIR=$(dirname "$IN")
+
+  if ! needs_fix "$IN"; then
+    echo "SKIP (not Profile 5): $BASE"
+    continue
+  fi
+  if [ "$DRY" -eq 1 ]; then
+    echo "WOULD FIX: $BASE"
+    continue
+  fi
+
+  TMP="$DIR/.dvfix.$$.mkv"
+  echo "=== $(date +%T) START $BASE"
+
+  # Two processes on purpose. libplacebo's hwdownload drops chroma for nv12/yuv420p on this
+  # hardware (renders entirely green), so the filter emits p010; and p010 mis-strides through
+  # a nut rawvideo pipe (green/magenta noise), so it crosses the pipe as planar yuv420p10le
+  # and converts back on the encode side. Both conversions are cheap CPU work.
+  $FF -v error -nostdin -init_hw_device vulkan=vk:0 -filter_hw_device vk -i "$IN" -an -sn \
+    -vf "hwupload,libplacebo=apply_dolbyvision=true:colorspace=bt2020nc:color_primaries=bt2020:color_trc=smpte2084:range=tv:format=p010,hwdownload,format=p010,format=yuv420p10le" \
+    -f nut -c:v rawvideo - 2>/dev/null \
+  | $FF -v error -nostdin -stats -vaapi_device "$VAAPI" \
+      -f nut -i - -i "$IN" \
+      -map 0:v:0 -map 1:a -map "1:s?" -map "1:t?" -map_metadata 1 \
+      -vf "format=p010,hwupload" \
+      -c:v hevc_vaapi -profile:v main10 -rc_mode VBR -b:v "$BITRATE" -maxrate "$MAXRATE" \
+      -bsf:v hevc_metadata=colour_primaries=9:transfer_characteristics=16:matrix_coefficients=9 \
+      -c:a copy -c:s copy -max_muxing_queue_size 4096 \
+      -y "$TMP"
+  RC=$?
+
+  DIN=$($FP  -v error -show_entries format=duration -of csv=p=0 "$IN"  2>/dev/null | cut -d. -f1)
+  DOUT=$($FP -v error -show_entries format=duration -of csv=p=0 "$TMP" 2>/dev/null | cut -d. -f1)
+  AIN=$($FP  -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN"  2>/dev/null | wc -l)
+  AOUT=$($FP -v error -select_streams a -show_entries stream=index -of csv=p=0 "$TMP" 2>/dev/null | wc -l)
+  echo "rc=$RC  duration ${DIN}s -> ${DOUT:-none}s  audio ${AIN} -> ${AOUT}"
+
+  if [ "$RC" -eq 0 ] && [ -n "${DOUT:-}" ] \
+     && [ "$DOUT" -ge $((DIN - 3)) ] && [ "$AOUT" -eq "$AIN" ]; then
+    # mv -n so a name collision in the backup folder can never clobber an earlier original.
+    if mv -n "$IN" "$BAK/$BASE" && mv "$TMP" "$IN"; then
+      chown --reference="$BAK/$BASE" "$IN" 2>/dev/null
+      echo "=== $(date +%T) OK   $BASE  (original in $BAK)"
+    else
+      echo "=== $(date +%T) FAIL $BASE — could not swap; temp left at $TMP"
+    fi
+  else
+    echo "=== $(date +%T) FAIL $BASE — verification failed, original untouched"
+    rm -f "$TMP"
+  fi
+done
+
+echo "=== $(date +%T) ALL DONE"

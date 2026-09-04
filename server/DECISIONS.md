@@ -1913,3 +1913,104 @@ a scheduled full scan had already run twice since, at 18:29 and 06:30, and neith
 The parameter was irrelevant; emptiness was the cause. The log line naming it was sitting in
 `/var/log/jellyfin/jellyfin20260904.log` the whole time, which is the file to open first next
 time something is on disk but not in the UI.
+
+---
+
+## DECISION 95 — Dolby Vision Profile 5 is not a download problem, and the server can fix it
+# [CHANGE: claude-code | 2026-09-04]
+
+**Symptom.** *A Knight of the Seven Kingdoms* S01E01 and S01E04 played with every colour
+pushed to violet/magenta on the Roku TV. E02, E03, E06 looked correct. E05 was fine too.
+
+**Cause.** `ffprobe` side data: E01 and E04 were **Dolby Vision Profile 5**; E02/E03/E06 are
+**Profile 8.1** (`dv_bl_signal_compatibility_id=1`); E05 carries no DV at all. A Profile 8.1
+base layer is ordinary HDR10 — anything can play it and ignore the DV layer. A Profile 5 base
+layer is **IPT-PQ-C2**, a Dolby-internal colour space, carrying *no standard colour tags at
+all*. A player that cannot decode DV P5 renders those IPT values as if they were RGB. That is
+exactly the purple. The Roku direct-plays, so the server never touched it.
+
+**This is backwards from the intuition.** Profile 5 is not *newer* than 8.1 and the TV is not
+too old for it. 8.1 is the later format and exists specifically to stay watchable on non-DV
+gear. The TV handles the modern one and chokes on the legacy one. It is an encoding choice by
+the release group, nothing to do with hardware age.
+
+**Re-downloading fixed one of the two, and cannot fix the other.** This is worth being precise
+about, because the two episodes ended up needing opposite treatments:
+
+  - **E04 fixed itself by download.** A force-grabbed Profile 8.1 release landed at **19:12**
+    and replaced the file. It now probes `dv_profile=8, dv_bl_signal_compatibility_id=1` and
+    needs nothing further. ⚠️ **This was very nearly a self-inflicted wound**: the first
+    conversion script hardcoded `for PAT in E01 E04` from the original diagnosis, so it would
+    have re-encoded a perfectly good Profile 8.1 file and thrown away quality for no reason.
+    Caught only because `--scan` was tested on the season and reported E04 as "fine". **Re-probe
+    immediately before converting, never trust a diagnosis taken hours earlier** — Sonarr is
+    still actively grabbing while you work, so the files move under you.
+  - **E01 cannot be downloaded.** Every Profile 8 candidate aborts in NZBGet at ~79.7% health —
+    roughly a fifth of the articles are simply gone at the provider. That is provider
+    completeness, not release selection, so no amount of retrying or smarter filtering lands
+    it. This one has to be converted locally.
+
+**What does not work, and why it looked like nothing would.** The obvious fix — tonemap it on
+the box — fails immediately:
+
+    [Parsed_zscale_0] code 3074: no path between colorspaces
+
+The stream declares no colorimetry, so `zscale` has no origin to convert *from*. Forcing
+`setparams=color_primaries=bt2020:color_trc=smpte2084` makes the command run and produces a
+dark green picture, because the data is IPT and BT.2020 is a lie. **The recovery information
+lives in the RPU**, a metadata stream riding alongside the video, and `zscale`/`tonemap`/
+`tonemapx` have no concept of it. A first pass at this concluded "CPU cannot do it" from that
+failure. That conclusion was wrong — the test was wrong.
+
+**What works.** Exactly one filter in jellyfin-ffmpeg reads the RPU: `libplacebo` with
+`apply_dolbyvision=true`. It needs Vulkan, which this box had no driver for — `vulkan-icd-loader`
+was installed but `/usr/share/vulkan/icd.d/` did not exist. Two packages, both exact version
+matches to the installed `mesa 1:26.2.2-1`:
+
+  - `vulkan-swrast` — pure CPU rasterizer (lavapipe). Correct output, **0.027x realtime**
+    (~28 h per episode). Proves the approach without touching the GPU; useless in practice.
+  - `vulkan-intel` — ANV on the onboard CometLake-U UHD Graphics. **0.152x** with `libx264`,
+    and **0.463x** once the encode also moves onto the iGPU via `hevc_vaapi`. Filter-only
+    ceiling measured at 0.476x, so at that point the encoder is effectively free.
+
+Both installs required `luminos-brain safe --reason` overrides. The gate returned
+`NO: ML/AI always use pyenv 3.12.13` for both — a Python/pyenv rule firing on the word
+"install" against pacman graphics drivers. **The rule needs its scope narrowed**; the false
+positive is not a one-off and will hit any future non-Python package work on this box.
+
+**Two ffmpeg bugs on this hardware, both of which cost real time.**
+
+  1. `libplacebo` → `hwdownload` yields **entirely green frames** for `nv12` and `yuv420p`.
+     The luma is intact — the scene is faintly visible — but chroma is dropped. `rgba` and
+     `p010` are correct. This looks exactly like a broken DV decode and is not one.
+  2. `p010` piped through `-f nut -c:v rawvideo` arrives **mis-strided**, decoding to green
+     and magenta noise. Convert to planar `yuv420p10le` before the pipe and back to `p010`
+     after; both ends are cheap CPU conversions.
+
+Neither bug is in the Dolby Vision path. Both produce green, which is misleading, so when a
+frame comes out green **isolate the filter by writing a PNG straight from it** before blaming
+the decode.
+
+**Also worth knowing:** `hevc_vaapi` ignores `-qp` here — `-qp 20` produced 775 Mbps. Use
+`-rc_mode VBR -b:v`. And it silently drops the colour tags it was given, so HDR10 output
+must be tagged in the bitstream afterwards:
+`-bsf:v hevc_metadata=colour_primaries=9:transfer_characteristics=16:matrix_coefficients=9`.
+
+**One more trap, in the detection itself.** The DOVI configuration record is **stream-level**
+side data. A first version of the scanner read `-show_frames -read_intervals "%+#1"` and
+reported **"no DV" for every file in the season**, including the known-bad E01 — a silent
+wrong answer that would have concluded "nothing to fix" and closed the bug. Use
+`-show_streams -show_entries stream=side_data_list`. Always sanity-check a detector against a
+file you already know is bad.
+
+**Resolution.** `server/scripts/luminos-dv-fix` converts Profile 5 files in place to tagged
+HDR10 at 28 Mbps (originals are 20.6), keeping them HDR so they match the rest of the season.
+Audio, subtitles, attachments and metadata are stream-copied. The filename is preserved so
+Jellyfin and Sonarr paths stay valid. The original is moved to `/srv/external/_dv_p5_originals/`
+— outside both library roots so Jellyfin will not index it — and **only** after the output
+passes a duration and audio-stream-count check; any failure deletes the temp file and leaves
+the original alone. Nothing is deleted at any point.
+
+The script **re-probes every file and skips anything that is not Profile 5**, which is the
+lesson from the E04 near-miss above; `--scan DIR` reports profiles and changes nothing, and
+`--dry-run` lists what would be converted. Only E01 actually needed converting.

@@ -142,6 +142,35 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   (`refreshLibrary=false`) got built instead, and two full scans had already disproven it.
   Note the glob needs `sudo` on the *whole* command — `sudo grep /var/log/jellyfin/*.log`
   expands the glob as your unprivileged shell and fails with "No such file".
+- **A green picture out of ffmpeg is almost never a Dolby Vision problem.**
+  <!-- [CHANGE: claude-code | 2026-09-04] --> Two separate bugs on this hardware both render
+  green: `libplacebo` → `hwdownload` drops chroma for `nv12`/`yuv420p` (use `rgba` or `p010`),
+  and `p010` mis-strides through an `-f nut -c:v rawvideo` pipe (convert to planar
+  `yuv420p10le` across the pipe, back to `p010` after). Both look exactly like a broken DV
+  decode. **Isolate by writing a PNG straight out of the filter** before blaming the decode —
+  that one command separates the two in seconds. Also on `hevc_vaapi` here: `-qp` is **ignored**
+  (`-qp 20` gave 775 Mbps — use `-rc_mode VBR -b:v`), and it **silently drops colour tags**, so
+  HDR10 needs `-bsf:v hevc_metadata=colour_primaries=9:transfer_characteristics=16:matrix_coefficients=9`.
+  DECISION 95.
+- **Purple/violet video on the Roku means Dolby Vision Profile 5, and you cannot download
+  your way out of it.** <!-- [CHANGE: claude-code | 2026-09-04] --> `ffprobe` the side data:
+  `dv_profile=5` with no `dv_bl_signal_compatibility_id=1` is an IPT base layer carrying **no
+  colour tags**, and a non-DV-P5 player draws IPT as RGB. Profile 8.1 is the *newer*, compatible
+  one — the TV is not too old. Plain `zscale`/`tonemap` **cannot** fix it (`code 3074: no path
+  between colorspaces`; forcing bt2020/PQ gives dark green) because the fix lives in the RPU.
+  Only `libplacebo=apply_dolbyvision=true` reads it, which needs `vulkan-intel` on the iGPU —
+  `vulkan-swrast` also works but at 0.027x realtime, i.e. 28 h an episode. Use
+  `server/scripts/luminos-dv-fix` (`--scan` reports, `--dry-run` previews). **Re-probe right
+  before you convert** — Sonarr keeps grabbing while you work, and one of the two bad episodes
+  here silently fixed itself mid-investigation when a Profile 8.1 release landed; a script
+  built from the earlier diagnosis would have re-encoded a good file. Note the DOVI record is
+  **stream-level** side data — `ffprobe -show_frames` reports "no DV" for everything, including
+  files you know are bad. DECISION 95.
+- **`luminos-brain safe` returns a false `NO` on pacman packages.**
+  <!-- [CHANGE: claude-code | 2026-09-04] --> It answers `NO: ML/AI always use pyenv 3.12.13`
+  for things like `vulkan-intel` — a Python/pyenv rule matching on the word "install" against
+  a graphics driver. Legitimate to clear with `--reason` (it logs the override), but **the
+  rule's scope wants narrowing**; until then it will fire on any non-Python package work here.
 - **`flush ruleset` in `/etc/nftables.conf` deletes Tailscale's tables too.** It removes
   *every* table, including the four `ip`/`ip6` `filter`/`nat`/`mangle` tables tailscaled owns
   and marks "do not touch". Reloading the firewall silently broke the tunnel's rules, and it
