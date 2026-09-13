@@ -2132,3 +2132,74 @@ installed** on this server (`systemctl is-active bazarr` → inactive, not in pa
 Sonarr will not replace a Bluray-2160p with a 1080p dual-audio release because quality outranks
 format score. Replacing them requires deleting the episode files first, and that is a deliberate
 act, not an upgrade.
+
+---
+
+## DECISION 98 — Bazarr, and the correction that the anime library was never what I said it was
+# [CHANGE: claude-code | 2026-09-13]
+
+DECISION 97 fixed *which releases Sonarr is allowed to grab*. It did nothing about subtitles,
+because there was no subtitle automation on this box at all: `bazarr` was not installed, and
+`server/scripts/luminos-subtitle-warm` had been sitting in the repo **never installed** to
+`/usr/local/bin`. Bazarr 1.6.0-3 from the AUR now fills that hole.
+
+**Install and wiring.**
+
+| | |
+|---|---|
+| package | AUR `bazarr` 1.6.0-3, `/opt/bazarr`, config `/var/lib/bazarr` |
+| service | `bazarr.service`, enabled; override sets `Group=media` + `UMask=002` |
+| port | 6767 loopback/LAN-blocked, published by Caddy on **8450** |
+| connected | Sonarr 4.0.19 and Radarr 6.3.0, both over SignalR (live events, not polling) |
+| language profile | one profile, **English**, assigned to all 7 series and 1 movie |
+| providers | `embeddedsubtitles`, `animetosho`, `gestdown`, `tvsubtitles`, `subf2m`, `subsource`, `yifysubtitles` |
+
+**Only providers that need no account are enabled.** OpenSubtitles.com is the best source by a
+wide margin and is deliberately **off**, because enabling it without the owner's own login would
+just produce silent failures. `animetosho` is in the list specifically because it is the anime
+source and also needs no account. `auto_update` is **off** — pacman owns `/opt/bazarr` and
+Bazarr's self-updater would fight it. Analytics off.
+
+**`Group=media` + `UMask=002` is not cosmetic.** Bazarr writes `.srt` next to the video, into
+directories owned `sonarr:media` / `radarr:media`. The packaged unit runs `bazarr:bazarr`; without
+the override every subtitle lands `0644 bazarr:bazarr` and Jellyfin cannot read it. The packaged
+unit documents this layout in its own header comment — it is the supported path, not a hack.
+
+**Three traps worth keeping.**
+
+1. **A language profile item needs `audio_only_include` or every `POST /api/series` returns 500.**
+   `app/database.py` backfills the key when reading profiles, but `subtitles/indexer/series.py:261`
+   reads it raw. So the settings API cheerfully **accepts and stores** a profile without it, and
+   the failure surfaces later and somewhere else, as `KeyError: 'audio_only_include'` on a
+   completely different endpoint. Set `audio_exclude`, `audio_only_include`, `hi` and `forced`
+   explicitly on every item.
+2. **First start takes about four minutes to bind 6767 on this box**, and `systemctl is-active`
+   says `active` for all of it. The child process sits in `folio_wait_bit_common` doing disk I/O.
+   Do not conclude it is broken; the second start took ~65 s.
+3. **Bazarr 1.6 does not support Python 3.14** (`Python version greater than 3.13.x is
+   unsupported ... you're on your own`). It runs. If it breaks after a Python bump, that is why.
+
+**"0 episodes wanting subtitles" is a real answer here, not an indexing failure.**
+`use_embedded_subs` is on, so a subtitle track already inside the MKV satisfies the profile.
+Every Solo Leveling file carries English — Bazarr reports `missing_subtitles: []` for all seven.
+
+**Correction to DECISION 97: the library is not what that entry describes.** Sonarr's history
+shows the twelve Japanese Moozzi2 files were **deleted at 17:12 local** and twelve replacements
+grabbed at 17:21–17:22, *after* the profile-8 change and outside anything this session did. What
+is on disk now is seven ToonsHub `MULTi` WEB-DL files, and **six of the seven carry English audio
+and English subtitles**. The seventh (`S01E07`) is jpn/kor — it is the `E07.5` recap, mis-mapped
+onto episode 7 — and it still has English subs. So the new profile is demonstrably grabbing the
+right thing; the "twelve Japanese-only files with zero subtitles" framing in DECISION 97 describes
+a state that no longer exists. **Always re-read the library before writing about it.**
+
+**Two loose ends found while verifying and deliberately not touched.**
+`A Knight of the Seven Kingdoms`, `The Sopranos`, `True Detective` and `Better Call Saul` all
+report **0 files** in both Sonarr and Bazarr, and their season folders are empty on disk. And
+`/srv/external/_dv_p5_originals/` still holds the **6.46 GB** Profile 5 original of
+*A Knight of the Seven Kingdoms S01E01* whose converted counterpart is gone — so it is now
+backing up nothing. Both are the owner's call, not an agent's.
+
+**`luminos-brain safe` returned the same false NO a third time** — `NO: ML/AI always use pyenv
+3.12.13` for an AUR subtitle daemon on a different machine. Overridden with `--reason`. That rule
+has now blocked `vulkan-swrast`, `vulkan-intel` and `bazarr`; **it is matching the word "install"
+and needs its scope narrowed.**

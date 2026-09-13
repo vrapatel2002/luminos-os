@@ -113,6 +113,7 @@ PUBLIC = {
     "radarr": 8447,
     "sonarr": 8448,
     "prowlarr": 8449,
+    "bazarr": 8450,
 }
 
 # [CHANGE: claude-code | 2026-09-13] No inline script, no inline style, no third
@@ -437,6 +438,11 @@ PAGE = """<!doctype html>
    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="12" x2="12" y2="21"/>
     <path d="M8 12a5 5 0 0 1 8 0"/><path d="M5 9a9 9 0 0 1 14 0"/></svg>
    <span class="nm">Indexers</span><span class="ds">Prowlarr</span></a>
+
+  <a data-port="__BAZ__" href="#">
+   <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/>
+    <line x1="6" y1="15" x2="12" y2="15"/><line x1="15" y1="15" x2="18" y2="15"/></svg>
+   <span class="nm">Subtitles</span><span class="ds">Bazarr</span></a>
  </nav>
 
  <div class="foot"><span>read-only</span><span>refreshes every 15s</span></div>
@@ -548,7 +554,7 @@ class Handler(BaseHTTPRequestHandler):
         for token, app in (("__SEERR__", "jellyseerr"), ("__JF__", "jellyfin"),
                            ("__NZB__", "nzbget"), ("__SPACE__", "space"),
                            ("__RAD__", "radarr"), ("__SON__", "sonarr"),
-                           ("__PROW__", "prowlarr")):
+                           ("__PROW__", "prowlarr"), ("__BAZ__", "bazarr")):
             template = template.replace(token, str(PUBLIC[app]))
         return template
 

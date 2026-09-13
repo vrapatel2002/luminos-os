@@ -64,13 +64,14 @@ Away from the house, it is also on a Tailscale tailnet as **100.82.125.26**
 | Radarr | 8447 → 7878 | LAN + Tailscale, TLS |
 | Sonarr | 8448 → 8989 | LAN + Tailscale, TLS |
 | Prowlarr | 8449 → 9696 | LAN + Tailscale, TLS |
+| Bazarr | 8450 → 6767 | LAN + Tailscale, TLS — subtitles, DECISION 98 |
 | byparr | 8191 | **loopback only** — no auth of any kind, DECISION 90 |
 | SSH | 22 | LAN + Tailscale, key-only |
 | Tailscale | — | outbound only — remote access to Jellyfin, opens nothing |
 | qBittorrent | — | **uninstalled**, DECISION 84 |
 
-**The bare app ports (`8989`, `7878`, `9696`, `6789`, `5055`, `8099`, `8191`) are no
-longer reachable from the LAN** — DECISION 90. They still listen on loopback, and Caddy
+**The bare app ports (`8989`, `7878`, `9696`, `6789`, `5055`, `8099`, `8191`, `6767`) are
+no longer reachable from the LAN** — DECISION 90. They still listen on loopback, and Caddy
 is the way in. If a phone app stops connecting, that is why: point it at the `844x` port
 or at the tailnet address.
 
@@ -142,6 +143,23 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   (`refreshLibrary=false`) got built instead, and two full scans had already disproven it.
   Note the glob needs `sudo` on the *whole* command — `sudo grep /var/log/jellyfin/*.log`
   expands the glob as your unprivileged shell and fails with "No such file".
+- **`grep -o … | head -1 && echo BAD || echo ok` always prints BAD.** <!-- [CHANGE: claude-code |
+  2026-09-13] --> `head` exits 0 even with empty input, so the `&&` branch fires whether or not
+  grep matched. That pattern reported "API KEY LEAKED IN UNAUTH PAGE" for a Bazarr index page
+  that in fact contained no key (`grep -c` = 0). **Count with `grep -c` and compare the number**;
+  never let a pipeline's last command decide a security question.
+- **A language filter written for live action does the opposite on anime.** <!-- [CHANGE:
+  claude-code | 2026-09-13] --> `MULTI`, `DUAL AUDIO` and `DUBBED` mean "not English" on a film
+  and "**contains** the English dub" on anime. Sonarr's "Not English" custom format scores them
+  −10000, so it rejects exactly the right releases and lets an untagged raw Japanese rip win at
+  score 0. Anime needs its own profile with a **positive** requirement (`minFormatScore`), not a
+  weakened blocklist. DECISION 97.
+- **Bazarr accepts a broken language profile and fails somewhere else entirely.** <!-- [CHANGE:
+  claude-code | 2026-09-13] --> Omit `audio_only_include` from a profile item and
+  `POST /api/system/settings` returns 204, then every later `POST /api/series` returns 500 with
+  `KeyError` from `subtitles/indexer/series.py`. `database.py` backfills the key on read; the
+  indexer does not. Also: **first start took ~4 minutes to bind 6767 while systemd said
+  `active`** — do not conclude it crashed. DECISION 98.
 - **A green picture out of ffmpeg is almost never a Dolby Vision problem.**
   <!-- [CHANGE: claude-code | 2026-09-04] --> Two separate bugs on this hardware both render
   green: `libplacebo` → `hwdownload` drops chroma for `nv12`/`yuv420p` (use `rgba` or `p010`),
