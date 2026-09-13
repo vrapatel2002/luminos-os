@@ -1,18 +1,81 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
 Last updated: 2026-09-13
 
-> **The previous goal is not abandoned — it is parked.** This file was carrying an
-> in-progress note for the `org.luminos.style` QML work (shape done, size not started).
-> That note is preserved at **`git show 4273ed7e:HANDOFF.md`**. Read it before resuming
-> that task; do not try to reconstruct it from memory.
+> **Two previous goals are parked, not abandoned.** The `org.luminos.style` QML note is at
+> **`git show 4273ed7e:HANDOFF.md`**. The gaming/dGPU goal below is **complete** and kept
+> as reference. Read either before resuming; do not reconstruct from memory.
 
 ## Goal (the durable end objective)
-Gaming on Luminos actually uses the RTX 4050, and the system stays current without an
-upgrade quietly breaking something that only shows up at the next login.
+**Current:** the media server's own two web pages (`luminos-hub`, `luminos-space`) look
+deliberately designed rather than undesigned, without loosening a single one of the
+security properties DECISION 84/90/93 established.
+
+**Previous, now complete:** gaming on Luminos actually uses the RTX 4050, and the system
+stays current without an upgrade quietly breaking something at the next login.
 
 ## Aim right now
-**Done and verified.** Nothing is mid-flight. The one outstanding action is a **reboot**,
-which is Shawn's to take whenever convenient.
+The **brief is written, no code has been touched**: `server/docs/WEB_UI_PROMPT.md`.
+It is meant to be handed to the agent that does the redesign, whole, as its prompt.
+Nothing is mid-flight. A **reboot** is still outstanding from the gaming work — Shawn's
+to take whenever convenient.
+
+## The web-UI brief — what it decides, so it is not re-litigated
+- **Scope is two files only:** `server/scripts/luminos-hub` (`127.0.0.1:8100`, read-only
+  landing page) and `server/scripts/luminos-space` (`127.0.0.1:8099`, the delete tool).
+  Jellyfin / Jellyseerr / the *arrs are third-party UIs and are **out of scope**.
+- **Nine security invariants are frozen** and each has a verification command in §9 of the
+  brief: stay on loopback; zero third-party requests (so fonts are self-hosted, never a
+  CDN); no API key in the rendered HTML; the `luminos-space` token stays a Caddy-injected
+  query parameter (turning it into a cookie or a login form is explicitly out of scope);
+  the hub gains no mutating endpoint; escaping moves toward `textContent` over `innerHTML`;
+  delete gets *harder*, not easier; no new dependencies, no build step.
+- **One deliberate security improvement is in scope:** split the inline `<style>`/`<script>`
+  into `/app.css` + `/app.js` routes so a CSP with no `unsafe-inline` becomes possible.
+- **The information-design problem is the real work, not the styling.** `frees` ≠ `size`
+  because of hardlinks (DECISION 62, ~370 GB affected); the two disks must not be shown as
+  one pooled bar (DECISION 91/93); NZBGet's `Status` lags 16 s so the progress bar outranks
+  any status chip; every title is untrusted Usenet release text.
+- **Aesthetic committed:** "instrument panel" — near-black field, one warm accent that is
+  **not** blue and **not** purple, rationed green/amber/red for machine state only, tabular
+  numerals, two self-hosted faces (a variable grotesque + JetBrains Mono), dark-only.
+  Two alternates are in the brief's appendix as drop-in replacements for §5.
+- **Execution is six stops**, one screenshot each: brief → tokens+type → hub layout →
+  motion + CSP split → `luminos-space` → `/offline`.
+
+## Why / motivation (context a newcomer would be missing)
+Shawn's words: *"it's not very good looking … make it look real good … free hand … but make
+sure that it does not compromise security. it's just ui/ux thing."* He supplied
+`~/Downloads/website_prompt.md` — a research note on prompting models into good frontend
+work — and asked for a prompt built from it, not for the implementation.
+
+Two of his standing preferences shaped the brief's §11: he reviews **from screenshots, not
+descriptions**, and has rejected batched visual changes twice before (DECISION 71, 72); and
+he wants to be **informed, not consulted** — decisions made and stated in one line, with
+questions reserved for security tradeoffs, irreversible deletion, or spending money.
+
+## Process / approach being used
+Brief-first, then one visual step at a time. The brief is deliberately specific on all four
+axes the research note names (typography, colour, motion, backgrounds) and carries an
+explicit "do NOT" list, because the failure mode being designed against is the model
+converging on generic defaults — Inter, purple-on-white, centered hero plus three cards.
+
+## State — what is DONE
+`server/docs/WEB_UI_PROMPT.md` written. Indexed into Luminos Notes under `DOCS`.
+No script, no config, and nothing on the server was modified.
+
+## State — what is IN PROGRESS
+Nothing.
+
+## Next steps (ordered)
+1. Shawn reads the brief and either accepts "instrument panel" or picks an appendix
+   alternate. That choice gates everything else.
+2. Run the brief as the prompt. Stop at step 1 of its §11 (thesis + token table + fonts)
+   and put it in front of him before any code.
+3. Unrelated and still outstanding: **reboot** (glibc + systemd upgraded, running system is
+   on the old ones), then confirm a Lutris game actually renders on the dGPU with
+   `dgpu-exec-v2 -- nvidia-smi`.
+
+## Key decisions & constraints so far
 
 ## Why / motivation (context a newcomer would be missing)
 Shawn asked for "the latest version of everything" for gaming. Installing the runners
@@ -67,6 +130,15 @@ Nothing.
    → re-pin). Not urgent. Nothing is asking for it.
 
 ## Key decisions & constraints so far
+
+**Web UI (current goal):** see the bullet list above — the nine invariants in
+`server/docs/WEB_UI_PROMPT.md` §4 are the constraint set, and §9 is how each is proven.
+The one that is easiest to break by accident is **"zero third-party requests"**: the
+reflexive way to get a non-default font is a Google Fonts `<link>`, and that would make a
+private page on a LAN-only box depend on the internet and announce every page load to a
+third party. Fonts are vendored into `server/assets/fonts/` instead.
+
+**dGPU / gaming (previous goal, complete — kept because it is still live on the machine):**
 - **shawn stays out of the `dgpu` group.** Non-negotiable — it is the whole of DECISION 25.
 - **`dgpu-exec-v2` is the gate for nearly everything now**, and its own header comment plus
   AGENTS.md §9 both still claimed it was "wired into `chrome-luminos` only". Re-grepped and
