@@ -3899,3 +3899,125 @@ byte for byte.
 `15b7-ctxbytes.sh` is already running on the **base** binary and stays there deliberately, so its
 DRAM-bytes-per-token figure remains comparable with the rest of the log rather than measuring a
 tree nothing else in it used.
+
+### Which tree each number came from
+
+`~/llama.cpp` was carrying two uncommitted files while every number above was taken:
+`common/speculative.cpp` (the PR #26968 draft-load fix, iteration 34) and
+`tests/test-backend-ops.cpp` (instrumentation). Both are now committed on branch
+`cpu-igpu-tensor-parallel` as **8ba09e5**, with identical content to what ran, so the base arm's
+tree is named rather than described. Neither file can reach a timing path: `llama-bench` has no
+`-md` flag and never calls `common_speculative_init`, and `test-backend-ops` is its own binary.
+The worktree was branched from the same HEAD, so both arms carry both files and neither is a
+confound.
+
+---
+
+## Iteration 41 — the KV cache crosses the memory controller 12.79 times per token
+
+`15b7-ctxbytes.sh`, base tree `8ba09e5`, `llama-bench -p 0 -n {16,80} -d D -t 8 -fa 1 -r 1`
+wrapped in `~/llmperf/imc` (uncore_imc RAPL-adjacent counters, system-wide). Each depth is an
+n=16/n=80 **pair** and only the difference is reported, so model load, warm-up and the depth
+prefill cancel and what remains is 64 generated tokens. `uncore_imc` cannot be scoped to one
+process, so Jellyfin and the *arr stack are inside every window; background traffic was measured
+on an idle box at **0.154 GB/s** and subtracted as a per-second term, because it scales with
+elapsed time and therefore does *not* cancel in a subtraction between runs of different length.
+
+### Measured DRAM bytes per generated token
+
+| depth | GB/token | tg t/s | s/token | context term s | extra over weights | KV read once | **re-read factor** |
+|---|---|---|---|---|---|---|---|
+| 0 | 3.994 | 6.884 | 0.14526 | — | 0.000 | — | — |
+| 2048 | 4.371 | 4.889 | 0.20456 | 0.05930 | 0.377 GB | 0.1174 GB | **3.21** |
+| 4096 | 5.923 | 3.676 | 0.27204 | 0.12679 | 1.929 GB | 0.2349 GB | **8.21** |
+| 8192 | 10.002 | 2.350 | 0.42553 | 0.28027 | 6.008 GB | 0.4698 GB | **12.79** |
+
+Two things in that table had never been measured in this log, only computed.
+
+**The weight term is now confirmed at the memory controller.** 3.994 GB per token at depth 0
+against a 4.285 GB file — ratio 0.932. The weights are streamed almost exactly once per token,
+with ~7% staying resident. Every previous statement about the weight term in this log was
+inferred from the file size and the wall clock; this is the first direct reading, and it agrees.
+
+**The KV cache is not read once. It is read three to thirteen times.** The GQA ratio for this
+model is 28 attention heads / 4 KV heads = 7, and `ops.cpp:9284` calls
+`..._one_chunk(params, dst, q_head, q_head+1, ic_start, ic_end, ...)` inside
+`for (q_head = 0; q_head < neq2; q_head++)`, i.e. **one query head at a time**, so each KV head's
+slice is re-scanned 7 times per token by construction. 3.21 at depth 2048 is that loop mostly
+absorbed by cache. 8.21 at depth 4096 is it fully exposed. **12.79 at depth 8192 is more than the
+head loop can produce on its own**, so a second amplifier exists on top of it.
+
+### Correction 1: iteration 38's headline rate was wrong by a factor of eight
+
+Iteration 38 said the context term ran at **1.80 GB/s** against a demonstrated 30.40 GB/s and
+called that a **16.9x gap** — the number that motivated the whole "it is not bandwidth" argument.
+That figure divided the context-term *time* by the KV cache size **assuming the KV is read once**.
+It is not. Recomputing with measured bytes:
+
+| depth | context-term bytes | context-term time | **context-term rate** | vs the 27.50 GB/s that depth-0 generation demonstrates |
+|---|---|---|---|---|
+| 2048 | 0.377 GB | 0.05930 s | 6.36 GB/s | 23% |
+| 4096 | 1.929 GB | 0.12679 s | 15.21 GB/s | 55% |
+| 8192 | 6.008 GB | 0.28027 s | **21.44 GB/s** | **78%** |
+
+Whole-pass rate at depth 8192 is 23.50 GB/s against 27.50 GB/s at depth 0 — **85%**. The 16.9x
+gap does not exist. At working depth the memory controller is running near the rate this box
+demonstrably sustains, and iteration 38's central claim is withdrawn.
+
+That does **not** restore "it's bandwidth-bound" as an answer, because the decomposition is now
+sharper than the label: of the 6.008 GB of context traffic per token at depth 8192, **0.470 GB is
+the KV cache read once and 5.538 GB — 92.2% — is redundant re-reading.** The machine is moving
+bytes at close to peak. Almost all of them are bytes it has already read.
+
+### Correction 2: I retracted the L3 crossover, and the retraction was wrong
+
+Iteration 38 disfavoured the L3-crossover hypothesis before `15c1-ctxbytes` had run, on the
+grounds that the *time* per KV position moved only 29.50 -> 31.95 ns (+8.3%) across the boundary
+where the per-layer KV slice (2048 B/position) passes this CPU's 6 MB L3 at 3072 positions. That
+reasoning used the wrong observable. In **bytes**, the crossover is not subtle:
+
+| | slice per layer | vs 6 MB L3 | measured factor |
+|---|---|---|---|
+| depth 2048 | 4.19 MB | fits | 3.21 |
+| depth 4096 | 8.39 MB | 40% over | 8.21 |
+
+A 2.6x step in DRAM traffic, straddling exactly the predicted position, from a prediction
+registered with no free parameters. **The crossover is real and the retraction is withdrawn.**
+
+The reason it was invisible in time is the interesting part and it is the strongest single result
+here: **DRAM traffic per token rose 2.6x across that boundary and the per-position time rose 8%.**
+A term whose bytes can nearly triple while its time barely moves was not, at that depth, limited
+by its bytes. Both of iteration 38's readings were half right and each one was wrong about the
+other's half.
+
+### What this does to iteration 39
+
+PR #27478 cut the context term by a constant 28% at both 2048 and 8192 while changing no
+arithmetic and — on the face of the patch, which reorganises accumulation rather than access —
+no bytes. If bytes really are unchanged, that patch pushed the context-term rate from 21.44 GB/s
+to 29.8 GB/s at depth 8192, which is *above* the 27.50 GB/s depth-0 generation demonstrates. That
+is possible, because depth-0 generation is a quantised GEMM and its rate is not purely a DRAM
+ceiling — but it is close enough that assuming it would be exactly the mistake this iteration just
+caught iteration 38 making. **So it gets measured, not argued.**
+
+### Queued: `15b7b-kvreread.sh`, four arms, each killing or confirming a named candidate
+
+- `base8192` — the same configuration again, as a drift control against the 12.79 above.
+- `t4` — 4 threads. `chunk_size = (nek1 + nth - 1) / nth`, so at depth 8192 with 8 threads each
+  thread owns 1024 positions = 256 KB of K plus 256 KB of V for one KV head, against 256 KB of L2
+  per *physical* core shared by two SMT siblings. One query head's pass already does not fit, so
+  the next cannot reuse it. At `-t 4` the chunk doubles but SMT sharing disappears. If the factor
+  moves, chunk-vs-cache is the second amplifier. If it does not, that candidate is dead.
+- `fa0` — `-fa 0` does not use this loop nest at all; it builds KQ with a batched matmul that
+  reads each K row once for all heads. Its factor should be near 1. That is the control proving
+  the 12.79 belongs to the FA path and is not something the model does regardless.
+- `pr` — the same pair on the PR #27478 binary. Unchanged bytes means the 28% was pure
+  serialisation and the head-group fusion stacks on top at full value; reduced bytes means
+  PR #27478 is partly a locality fix and the fusion is worth less than 12.79 suggests. Those lead
+  to different next builds, which is the whole reason the arm exists.
+- `thp` — same pair with THP forced to `always` and restored to whatever it was afterwards,
+  because this is a 24/7 media server. Iteration 30 measured 142,287 minor faults at depth 8192
+  against a ~14k floor, so the KV cache is not hugepage-backed there and page-table walks are real
+  DRAM reads that the IMC counts. If the factor drops, part of the 12.79 was page walks.
+
+`15b7a-fae2e.sh` runs first and is unaffected — it is the end-to-end deliverable for iteration 39.
