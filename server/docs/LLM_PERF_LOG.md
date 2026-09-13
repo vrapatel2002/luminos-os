@@ -3779,3 +3779,123 @@ had isolated, running at 1.80 GB/s against a demonstrated 30.40 GB/s and ~900 cy
 position against an instruction mix worth ~100. That is not "running out of easy ideas". It is a
 new binding constraint, larger than everything speculation was ever fighting over, and there is an
 open upstream patch aimed precisely at it already building on the box.
+
+---
+
+## Iteration 39 — PR #27478: the first measured gain in five iterations, and it is 21.2%
+
+`15b6-faab.sh`, tree: `~/llama.cpp` at HEAD for the `base` arm, and the worktree
+`/srv/media/_llmtest/wt-pr27478` — that same commit plus `pr27478.diff` and nothing else — for
+the `pr` arm. Both arms link their own `libggml-cpu.so` from their own `build/bin`, so neither
+can pick up the other's library. The build gate passed first: `test-backend-ops test -o
+FLASH_ATTN_EXT -b CPU` returned **5181/5181, rc=0**.
+
+ABBA at the invocation level: base, pr, pr, base. `-p 512 -n 32 -d 0,2048,8192 -t 8 -fa 1 -r 2`.
+
+### The raw passes, all measured
+
+| pass | arm | d | pp512 t/s | tg t/s |
+|---|---|---|---|---|
+| p1 | base | 0 | 14.8051 | 6.0513 |
+| p2 | pr | 0 | 14.0690 | 6.0995 |
+| p3 | pr | 0 | 14.1630 | 6.1438 |
+| p4 | base | 0 | 14.1543 | 6.1360 |
+| p1 | base | 2048 | 12.5152 | 4.8900 |
+| p2 | pr | 2048 | 12.3501 | 5.1900 |
+| p3 | pr | 2048 | 12.4706 | 5.2319 |
+| p4 | base | 2048 | 12.4990 | 4.9120 |
+| p1 | base | 8192 | 9.3711 | 2.3182 |
+| p2 | pr | 8192 | 9.1611 | 2.8098 |
+| p3 | pr | 8192 | 9.4484 | 2.8406 |
+| p4 | base | 8192 | 9.5785 | 2.3437 |
+
+### Paired means
+
+| d | phase | base | pr | change |
+|---|---|---|---|---|
+| 0 | tg | 6.0937 | 6.1217 | **+0.46%** |
+| 2048 | tg | 4.9010 | 5.2110 | **+6.32%** |
+| 8192 | tg | 2.3310 | 2.8252 | **+21.20%** |
+| 0 | pp512 | 14.4797 | 14.1160 | −2.51% |
+| 2048 | pp512 | 12.5071 | 12.4104 | −0.77% |
+| 8192 | pp512 | 9.4748 | 9.3048 | −1.80% |
+
+The within-arm spread on the headline cell is 1.1% on both arms (base 2.3182/2.3437, pr
+2.8098/2.8406). The gap between arms is **19x that spread**. The base arm also ran *faster* in
+p4 than in p1 at every depth on tg, so drift over the run favoured the second base pass and the
+result survives it anyway.
+
+The pp512 control moves −0.8% to −2.5%. The largest piece of that is p1's 14.8051 at d=0, which
+is the very first llama-bench invocation of the run; base p4 measures 14.1543, which sits inside
+the pr arm's own spread. So the control is flat to within a warm-up transient, which is what it
+should be: **prefill uses the tiled path and this patch does not touch it.** Recorded as a
+caution about ABBA rather than waved away — ABBA cancels *linear* drift, and a first-invocation
+warm-up is not linear.
+
+### The mechanism, isolated: it is a constant 28% off the context term
+
+Iteration 38 defined the context term as T(D) − T(0), the part of a forward pass that scales with
+KV depth. Converting the means above to seconds per token and subtracting:
+
+| | T(0) | T(2048) | T(8192) |
+|---|---|---|---|
+| base, s | 0.164105 | 0.204040 | 0.429009 |
+| pr, s | 0.163355 | 0.191903 | 0.353958 |
+| base context term | — | 0.039935 | 0.264904 |
+| pr context term | — | 0.028548 | 0.190603 |
+| **context term cut by** | — | **28.51%** | **28.05%** |
+
+That is the whole result in one line. **The patch removes a fixed ~28% of the context term and
+nothing else.** Two things follow, and both are answers to questions `15b6`'s own header asked
+before the run:
+
+1. **T(0) moved −0.46%, i.e. not at all.** The weight-streaming term is untouched, which is the
+   control for "this is an attention change, not a general one". Confirmed rather than assumed.
+2. **The header predicted that `gain(8192) − gain(2048)` would isolate the `ggml.c` allocation
+   half's contribution**, because 8192 is the only depth where the KV cache was measured *not* to
+   be hugepage-backed (142,287 minor faults against a ~14k floor). Measured, that difference is
+   **28.51% vs 28.05% — zero to within a spread of 1.1%.** So the allocation half contributes
+   nothing here and the entire gain is the `ops.cpp` serialisation fix. The reason the whole-pass
+   number is +21.20% at 8192 and only +6.32% at 2048 is simply that the context term is 61.7% of
+   the pass at 8192 and 19.6% at 2048. Same fix, same fraction, different share.
+
+### What the patch does not fix, also measured
+
+Per-KV-position cost, the quantity iteration 38 put at ~900 cycles:
+
+| | d=2048 | d=8192 | ratio |
+|---|---|---|---|
+| base | 19.50 ns | 32.34 ns | 1.658 |
+| pr | 13.94 ns | 23.27 ns | 1.669 |
+
+The per-position cost still grows with depth, and **it grows by the same factor on both arms**
+(1.658 vs 1.669). PR #27478 scales the whole curve down by 0.72 and changes its shape not at all.
+So the superlinearity — the thing that makes a position at depth 8192 cost 1.66x what a position
+at depth 2048 costs, when both are the same 128-wide dot and the same 128-wide mad — is a
+*separate* mechanism, untouched, and it is now the largest unexplained term left. Iteration 38's
+~848–978 cycles per (layer, query head, KV position) becomes ~610–704 after this patch, against
+an instruction mix that justifies ~100. **There is still roughly 6x sitting in that term.**
+
+### Correcting the record
+
+The mission brief carried forward "speculative decoding at +21%" from the original record as a
+live result. Iterations 35, 36 and 37 killed it: every speculation variant on this build is a
+loss, and iteration 7's original +21% was measured at short context on a configuration that, as
+iteration 34 established by reading `common/arg.cpp` and `common/speculative.cpp`, never
+constructed a speculator at all. The +21% in *this* iteration is a different number attached to a
+different mechanism and the two should never be conflated. The old one is withdrawn.
+
+### The new baseline, and what runs next
+
+`base` was the tree every number in this log came from. It no longer is, for generation at depth.
+`15b7a-fae2e.sh` is queued: it builds `llama-server` in the worktree — only `llama-bench` and
+`test-backend-ops` existed there — and runs the mission's actual deliverable, one real coding
+question against `testfile.py` (4,858 tokens), ABBA over four server lifetimes, TTFT and total.
+It also does the correctness check that matters: PR #27478 reorders floating-point accumulation,
+so bit-identical output is not guaranteed by construction and `test-backend-ops` passing under its
+own tolerance does not settle it. At temperature 0 the two arms' 200-token answers are compared
+byte for byte.
+
+`15b7-ctxbytes.sh` is already running on the **base** binary and stays there deliberately, so its
+DRAM-bytes-per-token figure remains comparable with the rest of the log rather than measuring a
+tree nothing else in it used.
