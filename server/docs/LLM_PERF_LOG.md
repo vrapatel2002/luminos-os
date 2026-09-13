@@ -4021,3 +4021,90 @@ caught iteration 38 making. **So it gets measured, not argued.**
   DRAM reads that the IMC counts. If the factor drops, part of the 12.79 was page walks.
 
 `15b7a-fae2e.sh` runs first and is unaffected — it is the end-to-end deliverable for iteration 39.
+
+---
+
+## Iteration 40 — end to end: 18.5% faster, and it does not give the same answer
+
+`15b7a-fae2e.sh`. Four whole `llama-server` lifetimes, ABBA: base, pr, pr, base. `-c 8192
+-fa on -t 8 -tb 4 -np 1`. One real question — *"Add a retry-with-backoff wrapper around the
+network calls in this file. Show the code."* — against `testfile.py`, 4,866 prompt tokens,
+`n_predict 200`, `temperature 0`, `cache_prompt true`. Each lifetime pays one cold prefill as a
+`gen=1` warm-up **off the clock**, and the two timed asks then run against the warm prefix cache.
+`llama-server` had never been built from the worktree; this script built it first and would not
+have timed anything if it had failed.
+
+### The deliverable
+
+| | base | pr | change |
+|---|---|---|---|
+| cold TTFT, s | 382.31 | 385.29 | +0.78% |
+| **warm TTFT, s** | **0.30** | **0.27** | −11% |
+| **tg, tok/s** | **3.180** | **3.770** | **+18.55%** |
+| **wall for a 200-token answer, s** | **62.92** | **53.07** | **−15.66%** |
+
+Both timed asks in every lifetime reported `cached_n = 4865` of 4,866 — the prefix cache is
+working, so the 382 s prefill is paid once per server lifetime and never again, and **0.27 s is
+the TTFT a user actually sees.** The two base lifetimes measured 3.195/3.165 and the two pr
+lifetimes 3.785/3.755, so the within-arm spread is under 1% on both and the 18.55% gap is more
+than 18x it. Cold TTFT moved +0.78%, which is the prefill control behaving exactly as
+iteration 39 said it would: prefill uses the tiled path and this patch does not touch it.
+
+This is the first end-to-end improvement in the log that survives a paired comparison.
+
+### The losslessness check failed, and that is the more important result
+
+`15b7a`'s header said the byte-for-byte comparison of the 200-token answers was the check that
+mattered, because PR #27478 reorders floating-point accumulation and bit-identical output is not
+guaranteed by construction. It failed:
+
+```
+p4base IDENTICAL to p1base
+p2pr   DIFFERS from p1base
+p3pr   DIFFERS from p1base
+```
+
+`p2pr` and `p3pr` are identical **to each other**. So neither arm is flaky — each is perfectly
+deterministic and reproducible — and the two arms simply produce different text. They agree for
+six lines and diverge at the seventh. That is the signature of reassociation flipping a near-tied
+argmax under greedy sampling: the patch hoists the running-max rescale out of the per-position
+dependency chain and batches the `exp`, which changes the order of the additions building each
+attention output, and a difference of a few ULP in a logit is enough to swap two close
+candidates.
+
+**`test-backend-ops test -o FLASH_ATTN_EXT -b CPU` passed 5181/5181 on this patch.** It compares
+against a reference within a tolerance, and that tolerance hid a difference large enough to
+change what the model writes. The unit-test gate in iteration 31 was necessary and it was not
+sufficient, and this is the measured proof of that rather than a caution about it.
+
+I am recording one further observation and explicitly *not* treating it as a result: in this
+single sample the base arm degenerated into a repeating loop ("Notify the team… / Monitor the
+system… / If any issues arise…" twice over) while the pr arm stayed on topic about the retry
+wrapper. **One prompt is an anecdote.** It is written down because it would be dishonest to
+report the divergence and quietly omit which side looked worse, not because it measures anything.
+
+### The bar, fixed before the next run
+
+"Same answer, 18.5% faster" is now a false claim and must not be made. The question becomes
+whether the patch is as *good*, which perplexity answers and which is this log's existing quality
+gate — iteration 6 used it to clear the pure-Q4_K conversion. Perplexity is fully deterministic:
+fixed corpus, fixed chunking, no sampling. So it needs no ABBA and no repetition, and one run per
+arm is the entire measurement.
+
+`15b7aa-faquality.sh` is queued ahead of everything else, with the bar written into the script
+before it runs:
+
+| |dppl| / ppl | verdict |
+|---|---|
+| < 0.1% | numerical noise. Adopt PR #27478 as the new baseline and merge it into the main tree. |
+| 0.1% – 1% | real but small. The number gets quoted next to the 18.55% everywhere it appears. |
+| > 1%, **either direction** | do not adopt. PR #27478 scoring *better* is also a fail: the reference implementation is the definition of correct, so beating it means the numerics moved rather than improved. |
+
+The corpus is built on the box rather than downloaded — there is no `wiki.test.raw` here and the
+absolute perplexity value is irrelevant, only the difference over byte-identical input. It is
+400,000 bytes of Python stdlib source taken from a sorted file list, with its sha256 recorded, so
+a later run can prove it used the same text. Python source because the model under test is a
+coding model and the divergence appeared while it was writing code.
+
+**Until that gate passes, PR #27478 stays in the worktree and `~/llama.cpp` remains the
+baseline.**
