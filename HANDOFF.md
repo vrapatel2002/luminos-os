@@ -1,130 +1,121 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-03 — Response 2
+Last updated: 2026-09-13
+
+> **The previous goal is not abandoned — it is parked.** This file was carrying an
+> in-progress note for the `org.luminos.style` QML work (shape done, size not started).
+> That note is preserved at **`git show 4273ed7e:HANDOFF.md`**. Read it before resuming
+> that task; do not try to reconstruct it from memory.
 
 ## Goal (the durable end objective)
-Make native KDE/Qt windows on Luminos look like Caelestia's **Nexus** settings window —
-the **inside** of the window (rows, cards, sub-sections), not the window frame.
+Gaming on Luminos actually uses the RTX 4050, and the system stays current without an
+upgrade quietly breaking something that only shows up at the next login.
 
-## Aim right now (this can differ from the first prompt — keep it current)
-Working in order: **shape → size → the rest.** Shape is done and proven live.
-Size (row height, padding, the 2px gap that makes a group read as one card) is next
-and has NOT been started.
+## Aim right now
+**Done and verified.** Nothing is mid-flight. The one outstanding action is a **reboot**,
+which is Shawn's to take whenever convenient.
 
 ## Why / motivation (context a newcomer would be missing)
-Third attempt. DECISION 71 rounded the window **frame** and was rejected —
-*"what i mean by windows look alike was inside design not the out side keep it default
-try making sound and other sub section rectangle look like the ones from nexus."*
-DECISION 72 went after the inside via a patched Kirigami and is still live, but it set
-a **uniform 16** on all four corners of every row, which is a different shape from
-Nexus's asymmetric connected group, not a smaller version of it.
+Shawn asked for "the latest version of everything" for gaming. Installing the runners
+surfaced a much bigger finding: **no Lutris game had ever been reaching the dGPU.** Not a
+regression — it had never worked, and it was invisible because the AMD 780M is fast enough
+that the symptom reads as "a bit slow" rather than "no picture".
 
 ## Process / approach being used
-A **QtQuick Controls style module**, `org.luminos.style`. It is plain QML on disk,
-selected by one environment variable, and changes every Qt Quick app at once with
-**zero package rebuilds**. Opposite of DECISION 72's approach (fork + rebuild Kirigami),
-and it can be tested on a single app launch without touching the live desktop.
+Fix it **without weakening the gate**. The one-command answer (`usermod -aG dgpu shawn`)
+was rejected on purpose — it would delete DECISION 25 and re-open the 8 W idle regression
+(BUG-047) and the VRAM contention DECISION 81 exists to arbitrate.
 
 ## State — what is DONE
-- **Nexus opened as the live reference** (no new process, no config edits):
-  `WAYLAND_DISPLAY=wayland-0 qs -p ~/.config/quickshell/caelestia-bar ipc call nexus open`
-- **DECISION 72 confirmed still live:** `kirigami 6.28.0-1.1` + `/etc/environment` lines
-  52–54 (`KIRIGAMI_CORNER_RADIUS=16`, `MEDIUM_SPACING=12`, `SMALL_SPACING=6`).
-- **`org.luminos.style` built and proven working** on System Settings. Sidebar rows now
-  draw as filled slabs with Nexus's per-corner radii, and every other control still
-  renders as stock Breeze.
-- **Nothing persisted.** `/etc/environment` has no style variable, there is no
-  `~/.config/qtquickcontrols2.conf`. The style only applies to a launch that sets the
-  env vars by hand. Reverting is "do nothing".
 
-## State — what is IN PROGRESS (and where exactly it was left off)
-Shape landed but the group does **not** visually connect yet. Every sidebar row currently
-draws with the **inner** radius (4) on all four corners because with KDE's stock row
-spacing each row is separated by padding, so a run of rows reads as separate slabs rather
-than one sliced card. Closing that gap is a **size** change (step 2), not a shape one, and
-was deliberately not started.
+**1. Lutris routed through the dGPU gate (DECISION 90).**
+`~/.config/lutris/system.yml` → `prefix_command: dgpu-exec-v2 --` + `mangohud: true`.
+Repo copy: `config/lutris-system.yml`.
 
-### Nexus row anatomy — measured from source, not guessed
-Files: `reference_code/caelestia-shell-2.2.0/modules/nexus/common/`
+**2. Gaming stack brought current.**
+GE-Proton11-6 into Lutris runners **and** Flatpak Steam's `compatibilitytools.d`;
+mangohud 0.8.4 + lib32-mangohud + nvidia-prime; Flatpak MangoHud Vulkan layer 25.08.
 
-| Part | Source | Value |
-|---|---|---|
-| Row background | `ConnectedRect.qml` | `m3surfaceContainer` |
-| Corner, group **outer** edge | `ConnectedRect.qml:11-14` | `rounding.extraLarge` = **28** |
-| Corner, group **inner** edge | same | `rounding.extraSmall` = **4** |
-| Gap between rows in a group | `pages/AudioPage.qml:20` | `spacing.extraSmall / 2` = **2** |
-| Row vertical padding | `NavRow.qml:30` | `padding.medium` = **12** |
-| Row left/right padding | `NavRow.qml:31-32` | `padding.largeIncreased` = **20** |
-| Icon | `NavRow.qml:39` | `font.icon.medium` = 18px Material Symbols Rounded |
-| Title | `NavRow.qml:50` | `body.small` = 12px / 400 |
-| Subtitle | `NavRow.qml:60-61` | `label.small` = 11px / 400, colour `m3outline` |
-| Gap between sections | `PageBase.qml:23` | `spacing.extraLargeIncreased` = **32** |
-| Page title | `PageBase.qml:55` | `title.large` = 22px / 500 |
-| Button radius | `components/controls/ButtonBase.qml` | 16 default · 8 pressed · 12 checked · h/2 round |
+**3. Full `pacman -Syu` — 522 packages, five weeks stale — completed with pins intact.**
+`nvidia-utils` held at 610.57.04 (615.71.09 ignored), `linux` held at 7.0.5 (7.2.4
+ignored). glibc 2.44+r24, systemd 261.3, mesa 26.2.2, plasma-workspace 6.7.5,
+qt6-base 6.11.2-3. Three hand-built KCMs survived — 0 missing libs, checked.
+
+**4. BUG-155 caught and fixed before Shawn could hit it.**
+The Qt6 bump made `quickshell-git` unloadable (`Qt_6_PRIVATE_API`), which would have
+killed **both** Caelestia greeter sessions at the next login. Rebuilt to
+`0.3.1.r11.ge3d52a7-1`.
+
+**5. 53 GB reclaimed** — three abandoned 007 First Light directories under `/mnt/win-os`.
+
+**6. Docs updated** (this was the explicit ask): DECISION 90, DECISION 26 amendment,
+BUG-155, AGENTS.md §1/§9/§14, LUMINOS_STATUS.md, docs/CODE_REFERENCE.md,
+docs/LUMINOS_HANDBOOK.md Part 5.7, and the stale scope comment in `dgpu-exec-v2.c`.
+
+## State — what is IN PROGRESS
+Nothing.
 
 ## Next steps (ordered)
-1. **Step 2 — size.** Give the rows Nexus's geometry so the group actually connects:
-   vertical padding 12, horizontal 20, and a 2px gap between rows instead of KDE's
-   inset-based spacing. This is where `isFirst`/`isLast` start to be visible.
-2. Decide whether DECISION 72's `/etc/environment` Kirigami knobs should be reduced or
-   removed once the style module carries the same information — right now two mechanisms
-   are shaping the same rows and they disagree (uniform 16 vs 28/4).
-3. Only after both look right: pick how the style gets turned on permanently
-   (a `~/.config/plasma-workspace/env/` script is the reversible option) and write the
-   DECISION + AGENTS.md §9 row. **Not before Shawn has looked at it.**
+1. **Reboot.** glibc and systemd were both upgraded; the running system is on the old ones.
+   Nothing is known to be broken — this is hygiene, not a fix.
+2. **Confirm a game actually renders on the card.** Launch anything in Lutris, then
+   `dgpu-exec-v2 -- nvidia-smi`. If the game is not in the process list it is on the 780M,
+   regardless of what MangoHud claims.
+3. **Build DECISION 26 rung L3** (AGENTS.md §14 item 0f) — auto-rebuild the custom AUR
+   builds after an upgrade, and *read the result back*. BUG-155 is the case for it.
+4. Optional, deliberate: the NVIDIA 610.57.04 → 615.71.09 unpin window, following the
+   DECISION 26 procedure (unpin → upgrade → DKMS rebuild → verify true-0W gating + KCMs
+   → re-pin). Not urgent. Nothing is asking for it.
 
 ## Key decisions & constraints so far
-- Order is **shape → size → more**, one change at a time, looked at before the next.
-- The **inside** of the window is the target; the frame stays default (DECISION 72).
-- Desktop-wide by design — *"it either every window changes (originally what i wanted)
-  or every thing breaks."*
-- Colour is deliberately untouched: DECISION 72 measured that KDE and Caelestia already
-  use the same selected-row recipe (30% accent tint).
+- **shawn stays out of the `dgpu` group.** Non-negotiable — it is the whole of DECISION 25.
+- **`dgpu-exec-v2` is the gate for nearly everything now**, and its own header comment plus
+  AGENTS.md §9 both still claimed it was "wired into `chrome-luminos` only". Re-grepped and
+  corrected. v1 `dgpu-exec` is down to **one** caller — the Caelestia VRAM card's
+  `nvidia-smi` query. Repoint that and v1 can be deleted. A change to v2 now changes how
+  games launch, not just Chrome.
+- Kernel + NVIDIA stay pinned (DECISION 26). Moving them is a deliberate window, never a
+  side effect of `-Syu`.
 
 ## Gotchas / dead-ends / things NOT to redo
-- **A partial QQC2 style is not viable.** `QT_QUICK_CONTROLS_FALLBACK_STYLE=org.kde.desktop`
-  is **silently ignored** — Qt only accepts built-in styles there — so every control the
-  style does not define falls back to **Basic**. Symptom: the app turns light grey with
-  generic spinbox arrows and round slider handles, and reports no error. Fix already in
-  place: `scripts/luminos-qml-style-build` symlinks all 51 upstream controls into the
-  module so only real overrides differ.
-- **QML errors on this box go to the JOURNAL, not stderr.** `qml6` prints only
-  `Did not load any objects, exiting.` — even for a deliberately broken file. Use
-  `journalctl --user --since "1 min ago" | grep -i qml`. This cost a `systemsettings`
-  core dump before it was noticed.
-- **Inside a style module, unqualified type names resolve against that module's own
-  qmldir first.** Copying upstream's `Label { }` into a partial style gives
-  `Label is not a type`. Qualify it (`QQC2.Label`) or declare the type.
-- **Do not re-round the window frame** — tried and rejected (DECISION 71).
-- **Do not edit Kirigami / kirigami-addons / org.kde.desktop `.qml` files on disk** —
-  their `qmldir` carries `prefer :/qt/qml/...`, so the loaded copy is inside the `.so`.
-  Editing changes nothing and reports nothing. Our module has no `prefer`, on purpose.
-- **The Sound page is QML but compiled into `kcm_pulseaudio.so`** (Kirigami + QQC2, no
-  `formcard`). Its layout has **no cards at all** — only section headings and rule lines.
-  A style can restyle its *controls*, but nothing short of rebuilding `plasma-pa` can add
-  grouped cards to that page. Same for `systemsettings`, which ships zero `.qml`.
-- **`qs ipc` needs `WAYLAND_DISPLAY` exported** or it silently finds no instance.
-- **A full `pacman -Syu` pulls `kirigami 6.28.0-1.1 → 6.29.0-1`** and silently reverts
-  DECISION 72. Still no pacman hook guarding it.
-- Re-run `luminos-qml-style-build` after any `qqc2-desktop-style` upgrade — a control
-  added upstream will be missing from our module and silently fall back to Basic.
+- **`prime-run` does nothing on this machine.** It sets environment variables; the obstacle
+  is file permissions on `/dev/nvidia*`. Its `Found no drivers!` /
+  `ERROR_INCOMPATIBLE_DRIVER` output looks like a broken driver and is not one. Do not
+  spend time on it again.
+- **v1 `dgpu-exec` is not a substitute here.** Lutris launches through shell/python
+  wrappers which reset the effective gid (BUG-102), and v1 does not re-assert the NVIDIA
+  vendor env past the `/etc/environment` Mesa pin (BUG-145).
+- **Do not put `mangohud` into `prefix_command`.** Lutris prepends it *before* the prefix,
+  so `mangohud: true` already yields the correct `dgpu-exec-v2 -- mangohud <game>`. Doing
+  it by hand inverts the order and the overlay loses GPU access.
+- **Flatpak Steam does not read `~/.local/share/Steam/compatibilitytools.d/`** — the path
+  every guide names. It reads `~/.var/app/com.valvesoftware.Steam/data/Steam/...`.
+- **`lib32-libpcap` is gone from the Arch repos.** If something reinstalls
+  `wine-ge-custom-bin-opt` (discontinued — GE-Proton8-26 was its last release), every
+  future `-Syu` blocks again. `checkupdates` and `pacman -Qu` will not warn you; it only
+  appears at dependency resolution.
+- **`luminos-brain safe` misfires on pacman actions** — it returns the pyenv/ML rule
+  ("NO: ML/AI always use pyenv 3.12.13") for system package work. Re-run with an explicit
+  `--reason` naming pacman/no-Python to get the override. This is AGENTS.md §14 item 0b,
+  still open.
+- **A `-Syu` post-transaction wall is 35 hooks long and a fatal finding is one line in it.**
+  BUG-155 was hook 32/35 and the transaction still reported success. Read it, or build L3.
 
 ## Files touched / relevant files
-**New this session (repo only — nothing installed, nothing in `/etc`):**
-- `config/qml/org/luminos/style/ItemDelegate.qml` — the shape override (step 1)
-- `config/qml/org/luminos/style/qmldir` — generated
-- `config/qml/org/luminos/style/*.qml` — 50 symlinks to `/usr/lib/qt6/qml/org/kde/desktop/`
-- `scripts/luminos-qml-style-build` — regenerates the module
+**Live system (not in the repo):**
+- `~/.config/lutris/system.yml` — new; the whole of DECISION 90
 
-**Reference / prior work:**
-- `LUMINOS_DECISIONS.md` — DECISION 71 (reverted) line 4338, DECISION 72 line 4445
-- `config/kde/caelestia-design-spec.json` — token source of truth
-- `reference_code/caelestia-shell-2.2.0/modules/nexus/` — Nexus source
-- `packages/kirigami-luminos/` + `/etc/environment` lines 52–54 — DECISION 72, still live
-- Screenshots: `/tmp/nexus-open.png` (target), `/tmp/syssettings-audio.png` (before),
-  `/tmp/ss-luminos2.png` (after step 1)
+**Repo:**
+- `config/lutris-system.yml` — repo copy of the above
+- `scripts/dgpu-gate/dgpu-exec-v2.c` — SCOPE comment corrected (comment only, no code)
+- `LUMINOS_DECISIONS.md` — DECISION 90; DECISION 26 amendment
+- `docs/BUGS.md` — BUG-155
+- `AGENTS.md` — §1 Plasma version, §9 two rows corrected + one added, §14 item 0f
+- `LUMINOS_STATUS.md` — new top entry + 3 System rows
+- `docs/CODE_REFERENCE.md` — `config/lutris-system.yml`
+- `docs/LUMINOS_HANDBOOK.md` — new Part 5.7 (gaming / why prime-run does nothing)
 
-**Try it (one app, nothing persisted):**
-```bash
-QML_IMPORT_PATH=$HOME/luminos-os/config/qml \
-QT_QUICK_CONTROLS_STYLE=org.luminos.style systemsettings
-```
+**Untouched on purpose:** the `org.luminos.style` work in `config/qml/` and
+`scripts/luminos-qml-style-build`, and the initramfs-looking untracked tree at the repo
+root (`init`, `kernel/`, `usr/`, `etc/`, `lib`, `sbin`, `hooks/`). Neither was part of this
+task and neither was staged. **Find out what that tree is before anyone commits or deletes
+it** — it may be someone's in-progress work.

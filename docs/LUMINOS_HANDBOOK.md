@@ -681,6 +681,44 @@ Two KDE service menus in `~/.local/share/kio/servicemenus/`:
 `luminos-app-gpu.desktop` — right-click on `.desktop` files:
 - Extracts the `Exec=` line from the .desktop file and passes it to `luminos-gpu-launch`
 
+### 5.7 Gaming — Lutris, Proton, and why `prime-run` does nothing here
+<!-- [CHANGE: claude-code | 2026-09-13] DECISION 90 -->
+
+**The one thing to know:** on this machine you do **not** get the RTX 4050 by setting environment
+variables. `prime-run`, `DRI_PRIME=1`, `__NV_PRIME_RENDER_OFFLOAD=1` — all of them set env and
+none of them touch permissions, and permissions are the gate. `/dev/nvidia*` are `root:dgpu 0660`
+and your user is deliberately not in `dgpu` (DECISION 25), so the NVIDIA Vulkan ICD cannot
+initialise and Vulkan quietly falls through to the AMD 780M. `prime-run vulkaninfo` printing
+`Found no drivers!` / `ERROR_INCOMPATIBLE_DRIVER` is this, not a broken driver.
+
+**What actually routes a game to the dGPU:** `dgpu-exec-v2`. Lutris is wired to it globally in
+`~/.config/lutris/system.yml`, so every Lutris game already goes through it. Nothing to do
+per-game.
+
+| Want | Do |
+|---|---|
+| A Lutris game on the dGPU | nothing — it is the default since 2026-09-13 |
+| One Lutris game on the iGPU (battery) | Lutris → that game → **System options → Command prefix** → clear it |
+| A non-Lutris binary on the dGPU | `dgpu-exec-v2 -- <command>`, or right-click → "Run on GPU…" |
+| Check the gate is healthy | `dgpu-exec-v2 --check` — wants `access: OK` **and** `gate: OK` |
+
+**MangoHud** is on globally for Lutris (`mangohud: true`). Lutris prepends it *before* the command
+prefix, so the real argv is `dgpu-exec-v2 -- mangohud <game>` and the overlay runs inside the gate.
+Do not put `mangohud` into the prefix by hand — that inverts the order and the overlay loses GPU
+access. Toggle the overlay at runtime with **Right Shift + F12**.
+
+**Proton:** GE-Proton11-6 is installed (2026-09-13). Two separate locations, and they are not
+interchangeable:
+- Lutris: `~/.local/share/lutris/runners/proton/`
+- Steam (Flatpak): `~/.var/app/com.valvesoftware.Steam/data/Steam/compatibilitytools.d/`
+
+Steam here is the **Flatpak**, so the usual advice of `~/.local/share/Steam/compatibilitytools.d/`
+is wrong — Flatpak Steam never reads that path. In Steam the runner appears under
+Properties → Compatibility after a restart of Steam.
+
+**Sanity check that costs nothing:** launch the game, then `dgpu-exec-v2 -- nvidia-smi`. If the
+game is not in the process list it is running on the 780M regardless of what the overlay claims.
+
 ---
 
 ## PART 6 — KEYBOARD BACKLIGHT (DEEP DIVE)

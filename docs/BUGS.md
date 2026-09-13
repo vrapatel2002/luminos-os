@@ -5530,3 +5530,65 @@ newest JDK it can find. Java 21 could not be tested: `/usr/lib/jvm/java-21-openj
 `jre21-openjdk-headless` — it has `java` but no `javac` and no GUI. Testing it would mean
 installing `jdk21-openjdk`. Given that the env var fixes it outright, this is curiosity, not a
 blocker.
+
+---
+
+### BUG-155 — a routine `-Syu` unloaded both Caelestia sessions, and the only warning scrolled past inside 35 pacman hooks
+<!-- [CHANGE: claude-code | 2026-09-13] -->
+
+- Date: 2026-09-13
+- Severity: **High, and silent.** Nothing was visibly broken on the running desktop. It would
+  have presented as "I picked my session at the login screen and got a black screen", after a
+  reboot, with no obvious connection to an upgrade done hours earlier.
+- Status: **FIXED** same day.
+
+#### Symptom
+At the tail of a 522-package upgrade, post-transaction hook **32/35** printed one line:
+
+```
+/usr/bin/quickshell: symbol lookup error: /usr/bin/quickshell: undefined symbol:
+_ZN23QUntypedPropertyBindingC1EP23QPropertyBindingPrivate, version Qt_6_PRIVATE_API
+```
+
+and the transaction reported success. `quickshell --version` exited non-zero.
+
+#### Cause
+`quickshell-git` links against **`Qt_6_PRIVATE_API`**, not the stable Qt ABI. Qt only promises
+that versioned symbol within a single patch series; `qt6-base` moved to **6.11.2-3** and the
+constructor's mangled name changed. The installed `quickshell` binary had been built against the
+previous Qt and was now unloadable. This is not a quickshell defect — it is the documented cost
+of consuming private API, and it will happen again on **every** Qt6 bump.
+
+#### Why it mattered more than it looked
+`quickshell-git` is `Required By: caelestia-shell`, and **both**
+`/usr/share/wayland-sessions/luminos-caelestia-kwin.desktop` (DECISION 63) and
+`luminos-caelestia-plasma.desktop` (DECISION 68) launch `qs`. Two of the four greeter sessions
+were dead. The retry-then-kitty escape hatch in those session scripts (BUG-092) would have caught
+it and handed over a terminal instead of a bar — working as designed, but only after three failed
+starts at the login screen.
+
+#### Fix
+```bash
+yay -S --noconfirm quickshell-git     # rebuild against the Qt now on disk
+quickshell --version                  # exit 0
+```
+Rebuilt `0.3.0.r20.g28771c7-1` → **`0.3.1.r11.ge3d52a7-1`**; 0 missing symbols afterwards.
+
+#### The real lesson — this is DECISION 26's L3 rung, and it is still not built
+The safe-update ladder anticipated exactly this ("L3 auto-rebuild customs as a post-upgrade
+hook") and it was never implemented, so the defence is a human noticing one line in a wall of
+hook output. Everything on this box built against a moving ABI has the same exposure:
+
+| Custom build | Breaks on | Currently detected by |
+|---|---|---|
+| `quickshell-git` (→ `caelestia-shell`, 2 greeter sessions) | any `qt6-base` bump (private API) | nothing — a hook line you must read |
+| `kcm_luminos_{hive,keyboard,lid_light}.so` | KF6 soname bump | `luminos-verify` section [2] |
+| `nvidia-open-dkms` | kernel bump | pinned by DECISION 26 |
+
+The three KCMs survived this upgrade (KF6 6.28 → 6.30 kept soname `.6`) — checked, 0 missing
+libs. That was luck, not protection.
+
+#### Related, same class, already known and still unguarded
+`kirigami 6.28.0-1.1 → 6.29.0-1` silently reverts **DECISION 72** on any full `-Syu`. Recorded in
+`HANDOFF.md` as a known gotcha; still no pacman hook holding it. Same failure shape: an upgrade
+quietly undoing a customisation, with nothing that fails loudly.

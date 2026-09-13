@@ -1232,6 +1232,38 @@ them at 595.71.05 to match the installed 64-bit driver.)
 Files: `/etc/pacman.conf` (+ .bak-20260721). Cross-ref AGENTS.md §9. Next rungs (L1–L4)
 not yet built — tracked as an open initiative.
 
+<!-- [CHANGE: claude-code | 2026-09-13] -->
+### Amendment, 2026-09-13 — first full `-Syu` since the pins; two things the ladder should have caught
+
+522 packages, five weeks stale. The pins held exactly as designed: `nvidia-utils` stayed at
+**610.57.04** with 615.71.09 sitting in the repo ignored, and `linux` stayed at **7.0.5** with
+7.2.4 ignored. Everything else moved (glibc 2.44+r24, systemd 261.3, mesa 26.2.2,
+plasma-workspace 6.7.5, qt6-base 6.11.2-3). **Correction to the Context section above:** the
+installed driver is no longer 595.71.05 — that number is from July 2026, and deliberate unpin
+windows have happened since.
+
+Findings worth recording, because each is a ladder rung that does not exist yet:
+
+1. **L1 partly exists after all.** This section says restore points are "not yet built", but
+   timeshift already holds 2 snapshots. Verified before the transaction, along with 828 cached
+   packages in `/var/cache/pacman/pkg` and the Arch news feed (no applicable manual
+   interventions). The rollback story is better than the doc claimed.
+
+2. **A pinned AUR package that depends on a dropped repo library blocks every future upgrade,
+   silently, until you run the transaction.** `pacman -Suw` aborted with
+   `installing libpcap (1.10.7-1) breaks dependency 'libpcap=1.10.6' required by lib32-libpcap`.
+   `lib32-libpcap` has been **dropped from the Arch repos** (`pacman -Si` says not found), and
+   the only thing requiring it was **`wine-ge-custom-bin-opt`** (`1:GE_Proton8_26-1`,
+   `Required By: None`) — a runner that is itself **discontinued**: GE-Proton8-26 was its final
+   release, and the lineage now ships as GE-Proton11-x. Removed both after confirming nothing
+   referenced `/opt/wine-ge-custom-opt`; the upgrade then proceeded. **This class of blocker is
+   invisible to `checkupdates` and to `pacman -Qu`** — it surfaces only at dependency-resolution
+   time. An L2 pre-flight doing a `--print` dry run would have named it days earlier.
+
+3. **L3 (auto-rebuild customs) now has a concrete casualty: see BUG-155.** The Qt6 bump broke
+   `quickshell-git`, which is what both Caelestia greeter sessions run, and the only warning was
+   one line inside a 35-hook post-transaction wall. L3 is no longer a nice-to-have.
+
 ---
 
 ## DECISION 27 — Local caching DNS resolver (systemd-resolved) for Chrome new-page-load speed
@@ -5801,3 +5833,96 @@ mistake recorded at the end of BUG-151. Asleep: `–` / `Not read yet`, greyed. 
 
 **Undo:** delete the `NEW_FILES` entry and the VRAM `RowLayout` anchor from the overlay script,
 then `scripts/luminos-caelestia-kwin-overlay` to rebuild.
+
+---
+
+## DECISION 90 — Lutris launches every game through the dGPU gate, not through `prime-run`
+Date: September 13, 2026
+Made by: claude-code
+**Status: APPLIED (live in `~/.config/lutris/system.yml`)**
+
+### Context
+Shawn asked for "the latest version of everything" for gaming. While installing GE-Proton11-6
+it turned out that **no Lutris game had ever been reaching the RTX 4050**. Every one of them was
+rendering on the AMD 780M and nobody noticed, because the iGPU is fast enough that the symptom
+is "a bit slow", not "no picture".
+
+The cause is our own security posture, working exactly as designed. DECISION 25 has
+`70-luminos-dgpu-access.rules` set every `/dev/nvidia*` node to `root:dgpu 0660`, and **shawn is
+deliberately not a member of `dgpu`**. So an ordinary process cannot open the card at all: the
+NVIDIA Vulkan ICD fails to initialise and Vulkan silently falls through to the AMD ICD. The
+usual Arch answer — `prime-run`, or exporting `__NV_PRIME_RENDER_OFFLOAD=1` — **cannot work
+here**. Those only set environment variables; they do nothing about file permissions. Running
+`prime-run vulkaninfo` on this box gives `Found no drivers!` / `ERROR_INCOMPATIBLE_DRIVER`,
+which reads like a broken driver and is not one.
+
+### What we decided
+`~/.config/lutris/system.yml` — Lutris's global (lowest-precedence) system options:
+
+```yaml
+system:
+  prefix_command: dgpu-exec-v2 --
+  mangohud: true
+```
+
+Every game Lutris launches is now wrapped by the gate binary. Per-game override stays available
+in the Lutris UI (**System options → Command prefix**) for any title that should stay on the
+iGPU for battery.
+
+### Why `dgpu-exec-v2` and not v1 `dgpu-exec`
+Two properties of v2 that v1 does not have, both of which this path needs:
+
+1. **`setresgid(948,948,948)`, not just setgid.** Lutris does not exec the game directly — it
+   goes through shell and Python wrappers. A merely *effective* gid is reset to the real gid by
+   bash, so v1's grant evaporates before the game starts (this is BUG-102, discovered on Chrome).
+2. **It re-asserts the NVIDIA vendor env after the credential change.** `/etc/environment` pins
+   `__EGL_VENDOR_LIBRARY_FILENAMES=…/50_mesa.json` for true-0W RTD3 (BUG-046c / BUG-050), and
+   libglvnd reads that through `secure_getenv(3)`, which returns NULL under `AT_SECURE=1`. Fixing
+   AT_SECURE is what made the Mesa pin start applying and killed NVIDIA Vulkan — BUG-145. v2
+   already carries the fix; v1 does not.
+
+### Consequence — v2's blast radius grew, and the old scope note was stale
+`dgpu-exec-v2` was installed in August "alongside v1, wired into `chrome-luminos` only"
+(DECISION 52). Both the header comment in `scripts/dgpu-gate/dgpu-exec-v2.c` and the AGENTS.md §9
+row still said that, and **both had been wrong for weeks**. Re-grepped on this date across the
+repo and `/usr/local/bin`: v2 is the gate for `chrome-luminos`, `luminos-gpu-launch`,
+`luminos-gpu-yield`, `luminos-wine-launcher`, `luminos-game-mode`, `hive-start-model.sh`,
+`007-run.sh`, `mia` and the jobhunt LLM server — and now every Lutris game. Both texts corrected.
+
+**v1 `dgpu-exec` is down to a single caller**: the `dgpuQuery` Process in the Caelestia VRAM card
+(BUG-151), emitted by `luminos-caelestia-kwin-overlay` as `["dgpu-exec","nvidia-smi",…]`. It is
+correct there — nvidia-smi is a direct ELF exec with no interposed shell, which is the one case
+v1 handles. Repointing that one line is all that stands between here and deleting v1 and dropping
+the `-v2` suffix, which DECISION 52 said was the eventual goal.
+
+Lutris is nonetheless the first consumer that is **not a single named program**: anyone changing
+v2 from now on is changing how an open-ended set of games launch.
+
+### Ordering note that is easy to get wrong
+Lutris prepends `mangohud` **before** it applies `prefix_command`
+(`lutris/runner_interpreter.py`), so the final argv is `dgpu-exec-v2 -- mangohud <game>` — the
+overlay runs *inside* the gate and inherits the dgpu gid. Putting mangohud in `prefix_command`
+by hand would produce the opposite order and an overlay with no GPU access.
+
+### The conflict (both sides, per Rule 11)
+- **Gate every game (chosen):** the security posture of DECISION 25 is untouched — shawn still
+  is not in `dgpu`, and the card is still reachable only through a setgid binary we own. Cost:
+  one more thing between Lutris and the game, and every game now inherits v2's forced NVIDIA env
+  whether it wanted the dGPU or not (opt out per-game).
+- **Add shawn to the `dgpu` group (rejected):** one command, fixes Lutris, Steam, and everything
+  else at once. Rejected because it deletes DECISION 25 entirely — every process on the desktop
+  could then wake and hold the dGPU, which is the exact 8 W idle regression BUG-047 fixed and
+  the exact VRAM contention DECISION 81 arbitrates.
+
+### Also installed in the same pass (gaming stack currency, no decision content)
+GE-Proton11-6 into **both** `~/.local/share/lutris/runners/proton/` and
+`~/.var/app/com.valvesoftware.Steam/data/Steam/compatibilitytools.d/` — Flatpak Steam does **not**
+read `~/.local/share/Steam/compatibilitytools.d/`, which is where every guide tells you to put it.
+Plus `mangohud` 0.8.4 + `lib32-mangohud` + `nvidia-prime` natively, and the Flatpak
+`org.freedesktop.Platform.VulkanLayer.MangoHud//25.08` extension (the 32-bit `.Compat.i386`
+variant does not exist on Flathub — the main extension already ships `MangoHud.x86.json`).
+
+**Files:** `~/.config/lutris/system.yml` (repo copy: `config/lutris-system.yml`).
+**Revert:** delete that file, or clear **System options → Command prefix** in Lutris.
+Games then run on the 780M again — which is the pre-existing behaviour, not a failure.
+Cross-ref: AGENTS.md §9, DECISION 25, DECISION 52, BUG-102, BUG-145.

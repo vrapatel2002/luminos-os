@@ -1,0 +1,17 @@
+# [CHANGE: claude-code | 2026-09-13]
+# Global Lutris system options.
+#
+# prefix_command: every game is launched through the dGPU gate. Without this,
+#   /dev/nvidia* are root:dgpu 0660 (70-luminos-dgpu-access.rules) and shawn is
+#   deliberately not in `dgpu`, so the NVIDIA Vulkan ICD fails to initialise and
+#   Lutris silently renders on the AMD 780M instead. dgpu-exec-v2 does
+#   setresgid(948,948,948) so the grant survives Lutris's shell/python wrappers,
+#   and sets the NVIDIA vendor env (BUG-145).
+#   Override per-game in Lutris (System options -> Command prefix) to run a
+#   specific title on the iGPU for power saving.
+#
+# mangohud: Lutris prepends `mangohud` BEFORE prefix_command is applied, giving
+#   `dgpu-exec-v2 -- mangohud <game>`, so the overlay inherits the dgpu gid.
+system:
+  prefix_command: dgpu-exec-v2 --
+  mangohud: true

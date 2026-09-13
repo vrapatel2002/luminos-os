@@ -89,10 +89,22 @@
  * chain instead of evaporating at the first shell. If anything the posture improves,
  * because v1's failure mode was SILENT: it announced NVIDIA and delivered the iGPU.
  *
- * SCOPE — installed alongside v1 as `dgpu-exec-v2`, wired into `chrome-luminos` only.
- * `dgpu-exec` (v1) is still what `luminos-gpu-launch` and everything else calls. Once
- * the other gated apps have been re-verified against v2, this should replace v1
- * outright and the -v2 name should go away.
+ * SCOPE — this text used to say "wired into `chrome-luminos` only", and that has been
+ * wrong for a while. [CHANGE: claude-code | 2026-09-13] Re-checked by grepping every
+ * script in the repo and every installed script in /usr/local/bin: **v2 is now the gate
+ * for effectively everything** — chrome-luminos, luminos-gpu-launch, luminos-gpu-yield,
+ * luminos-wine-launcher, luminos-game-mode, hive-start-model.sh, 007-run.sh, mia, the
+ * jobhunt LLM server, and as of DECISION 90 **every Lutris game**, via `prefix_command`
+ * in ~/.config/lutris/system.yml.
+ *
+ * That last one is not a single named program, so a change in this file changes how
+ * games launch as well as how Chrome launches. Test both.
+ *
+ * v1 `dgpu-exec` is down to ONE caller: the `dgpuQuery` Process in the Caelestia VRAM
+ * card, emitted by `scripts/luminos-caelestia-kwin-overlay` as
+ * `["dgpu-exec", "nvidia-smi", …]`. It works there because nvidia-smi is a direct ELF
+ * exec with no shell in between — exactly the one case v1 handles correctly. Repoint
+ * that and v1 can be deleted and the `-v2` suffix can finally go away.
  *
  * Build/install (also done by install-dgpu-gate.sh):
  *     cc -O2 -Wall -o dgpu-exec-v2 dgpu-exec-v2.c
