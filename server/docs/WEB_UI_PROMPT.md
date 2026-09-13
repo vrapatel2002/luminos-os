@@ -1,5 +1,10 @@
 # WEB_UI_PROMPT.md — total redesign of the Luminos media server web surface
-# [CHANGE: claude-code | 2026-09-13] v2 — supersedes the v1 brief at `git show 304e28a7`
+# [CHANGE: claude-code | 2026-09-13] v3 — supersedes v2 (`git show a03fda8a`) and v1 (`304e28a7`)
+#
+# v3 changed one substantive thing: v2 claimed Radarr/Sonarr/Prowlarr/NZBGet could not be
+# reskinned. They can, on disk, without touching Caddy. That is now §4 tier 3, Jellyseerr got
+# its own tier 4, build step 16, security item 13, checks 10–13, and the research lesson in
+# Phase 0 step 5. Nothing about tier 1, the token, or the frozen §6.1–12 changed.
 
 Paste this entire file as your prompt. It is self-contained. Everything else you need is in
 `~/luminos-os/` and on the server itself — go and get it.
@@ -57,6 +62,19 @@ You are redesigning something you have not seen. Go look at it.
    empty state. **Design against these, never against invented placeholder data.**
 5. **Enumerate what is themeable per app** and write down the verdict with evidence. §4 has
    the answers I already verified — confirm them, extend them, correct me if I am wrong.
+
+   > **Take this one seriously; it has already gone wrong once.** v2 of this brief claimed the
+   > tier-3 apps could not be reskinned at all. What had actually been tested was a single
+   > thing — that stock Caddy has no body-rewriting module — and that one negative result was
+   > generalised into a blanket "impossible". The on-disk route was never checked. It was
+   > checked afterwards and it works fine.
+   >
+   > The lesson to carry into your own research: **"I tested route A and it failed" is not
+   > "the thing is impossible".** For every app, enumerate *all* the routes — proxy injection,
+   > an in-app setting, a documented theme API, static files on disk — and record the verdict
+   > per route with the command that produced it. A "no" with one command behind it is worth
+   > nothing. And when you find something that disagrees with §4, **say so loudly**; that is
+   > the outcome this step is for.
 6. **Write the findings to `server/docs/WEB_UI_FINDINGS.md`** before continuing. Include the
    screenshots. This is the deliverable of Phase 0.
 
@@ -82,17 +100,25 @@ You are redesigning something you have not seen. Go look at it.
 11. **The landing page** (`luminos-hub` `/`) — the surface that matters most.
 12. **The library and downloads tool** (`luminos-space`), reusing the identical tokens.
 13. **`/offline`**, which is mostly typography.
-14. **The Jellyfin theme** (§4 tier 2), so the place people spend the most time stops looking
+14. **The absorbed pages** — the one or two things per app that people actually go there to do,
+    rebuilt as first-party pages on the same token set (see "stop linking out" below). Behind
+    the `luminos-space` token if they mutate anything (§6.5). Jellyseerr's "request a title" is
+    the highest-value one, because §4 tier 4 says Jellyseerr itself cannot be skinned.
+15. **The Jellyfin theme** (§4 tier 2), so the place people spend the most time stops looking
     like a different product.
-15. **The tier 3 skins** — Radarr, Sonarr, Prowlarr and NZBGet restyled on disk (§4 tier 3),
+16. **The tier 3 skins** — Radarr, Sonarr, Prowlarr and NZBGet restyled on disk (§4 tier 3),
     installed by an idempotent script with a pacman hook so an upgrade cannot silently undo it.
+    **Last, deliberately:** these are the rarest-visited surfaces, they are the only step that
+    writes outside the repo and outside `/usr/local/`, and they are worthless until the token
+    set they are echoing has been settled by steps 10–15.
 
 ---
 
-## LAYER 2b — WHAT YOU ARE REDESIGNING
+## LAYER 2b (§4) — WHAT YOU ARE REDESIGNING
 
-Three tiers, by how much control you actually have. **I verified these on the box on
-2026-09-13. Confirm, do not assume.**
+**Four tiers**, by how much control you actually have. Every claim below was verified on the
+box on 2026-09-13 with the command shown. **Confirm, do not assume** — see Phase 0 step 5 for
+why that sentence is not boilerplate.
 
 ### Tier 1 — ours. Total freedom, rebuild from nothing.
 | page | process | reached at |
@@ -134,8 +160,19 @@ new module, and no service reconfiguration. Verified on the box 2026-09-13:
 `curl http://127.0.0.1:7878/Content/styles.css` returns `200 text/css` — the `Content/`
 directory is served raw, so a `luminos.css` dropped there is reachable at
 `/Content/luminos.css` and one extra `<link>` in `index.html` loads it. NZBGet is the
-*easiest* of the five: it already ships `dark-theme.css` and `light-theme.css` as separate
-plain files with an in-app theme switcher.
+**easiest of the four**: it already ships `dark-theme.css` and `light-theme.css` as separate
+plain files with an in-app theme switcher, so it wants a third theme file rather than an
+override layer.
+
+Two things I did **not** determine, so determine them before you build:
+- **Whether the app re-reads `index.html` per request or caches it at start.** Servarr
+  templates `__URL_BASE__` into that file at serve time, which suggests per-request, but test
+  it: edit, `curl`, and only then decide whether `luminos-skin-apply` must restart the unit.
+  If it must, that is a `systemctl restart`, not a reconfiguration — still inside the line.
+- **Whether an override stylesheet or a replacement is the right shape.** These are
+  Tailwind-ish compiled bundles; overriding by re-declaring CSS custom properties on `:root`
+  is far more upgrade-durable than fighting compiled selectors with `!important`. Look at what
+  `Content/styles.css` actually exposes as variables before choosing.
 
 **Before you write a line of CSS, spend the free win:** Radarr/Sonarr/Prowlarr expose a
 `theme` field on `/api/v3/config/ui` (`/api/v1/` for Prowlarr), currently `"auto"`. Set it
@@ -412,6 +449,24 @@ shape rather than a list. Propose at least two ideas nobody asked for.
 12. **Leave the API-facing Python alone.** The functions that talk to Sonarr/Radarr/NZBGet
     encode facts learned from specific failures. Read them, reuse them, do not "tidy" them.
     Your work lives in the templates, the new routes, the assets, and the handler.
+13. **Editing third-party apps on disk (§4 tier 3) is permitted and narrowly bounded.** It is
+    allowed because a stylesheet cannot change who reaches an app or what they may do once
+    there — it is presentation, downstream of every authentication decision. The bound:
+    - **`.css` files, plus one `<link>` line in `index.html`. Nothing else.**
+    - **Never `.js`** — not editing it, not adding it, not "just a small shim". A skin that
+      needs JavaScript is the wrong skin. This is the line between restyling an app and
+      modifying it, and it is also what keeps the apps' own CSP assumptions intact.
+    - **Never anything under `/var/lib/<app>/`** — that is `config.xml`, the API keys, and the
+      databases. Configuration is reached through the app's own API (the `theme` field), never
+      by editing state on disk under a running service.
+    - **Never `systemctl edit`, never a unit file, never a `User=`.** A restart to pick up a
+      changed file is fine; a reconfiguration is not.
+    - **Every edit must be reproducible from the repo and re-appliable by one idempotent
+      script.** A hand-edit that exists only on the box is undocumented drift, and these paths
+      are package-owned, so the next `pacman -Syu` deletes it silently and nobody finds out
+      until they open the page.
+    - Verify with `pacman -Qkk <pkg>` (§8 check 10): it must report **exactly** the files you
+      intended to alter, and no others.
 
 ## 7. PERFORMANCE BUDGET
 
@@ -421,6 +476,10 @@ transcoding at the same time.
 - **Zero third-party requests.** Every byte comes from this box.
 - First-party CSS ≤ 24 KB, first-party JS ≤ 20 KB, hand-written, uncompressed.
 - Fonts ≤ 80 KB total, Latin subset, `woff2` only.
+- **Each tier-3 skin ≤ 8 KB**, and it may not pull in the fonts. Those apps already load their
+  own faces; adding a second family to a page you are only repainting buys a FOUT and a
+  download on a screen nobody lingers on. Skins inherit the *palette*, not the whole system —
+  that is enough for the seam to read as continuous.
 - Any vendored 3D library is **lazy-loaded, on capable devices only**, and never blocks first
   paint. Budget it honestly in the findings doc and justify the number.
 - Artwork: serve the pre-scaled variants, `loading="lazy"` below the fold, explicit
@@ -466,16 +525,23 @@ curl -s http://127.0.0.1:8100/app.js > /tmp/a.js && node --check /tmp/a.js
 # 9. every remaining innerHTML must be static markup with no interpolation
 grep -n 'innerHTML' server/scripts/luminos-hub server/scripts/luminos-space
 
-# 10. tier 3 skins added CSS only — this must return nothing
-find /usr/lib/{radarr,sonarr,prowlarr}/bin/UI /usr/share/nzbget/webui \
-     -newer /usr/lib/radarr/bin/UI/Content/styles.css.map -name '*.js' 2>/dev/null
+# 10. tier 3 — exactly which packaged files were altered, and nothing else.
+# Baseline today is "0 altered files" for all four. Afterwards the ONLY acceptable
+# result is index.html per app. A .js or a config.xml in this output is a failure.
+for p in radarr-bin sonarr-bin prowlarr-bin nzbget; do pacman -Qkk $p; done
 
 # 11. the re-apply script is idempotent — running it twice must not double the <link>
 sudo luminos-skin-apply && sudo luminos-skin-apply
-grep -c 'luminos.css' /usr/lib/radarr/bin/UI/index.html   # must print 1
+grep -c 'luminos.css' /usr/lib/radarr/bin/UI/index.html   # must print exactly 1
 
-# 12. Caddy was not touched by any of it
-cd ~/luminos-os && git diff --stat -- server/config/Caddyfile   # must be empty
+# 12. the skin survives what will actually kill it — simulate the upgrade
+sudo cp /usr/lib/radarr/bin/UI/index.html /tmp/skinned.html
+sudo pacman -S --noconfirm radarr-bin          # reinstall == what an upgrade does to the file
+grep -c 'luminos.css' /usr/lib/radarr/bin/UI/index.html   # hook fired? must be 1, not 0
+
+# 13. nothing outside presentation was touched
+sudo find /var/lib/radarr /var/lib/sonarr /var/lib/prowlarr -newer /tmp/skinned.html
+cd ~/luminos-os && git diff --stat -- server/config/Caddyfile   # both must be empty
 ```
 
 Then load every page in a real browser **through the Caddy front door** — not against
@@ -519,8 +585,12 @@ DECISION 93 did.
 - Put a season that frees 0 bytes beside one that frees 40 GB. **Can you tell them apart from
   arm's length, before tapping?** This is the most important check in the document.
 - Turn WebGL off. Is the page still good — not "still functional", *still good*?
-- Go from the landing page into Jellyfin. Does it feel like the same product, or like clicking
-  a bookmark?
+- Go from the landing page into Jellyfin, then into Radarr, then into NZBGet. Does each feel
+  like going a room deeper into one building, or like clicking three unrelated bookmarks? The
+  deep panels are allowed to feel more technical — they are not allowed to feel foreign.
+- Go into Jellyseerr, the one surface you could not skin. Is the discontinuity acceptable
+  because the thing people actually came to do was absorbed into a first-party page — or did
+  you leave the everyday path running through the one app that still looks like someone else's?
 - Could you name the job of each section in three words?
 - Does anything move that does not carry information?
 - Screen-read a download row. Does the accessible name include the title, or just "delete"?
@@ -529,9 +599,21 @@ DECISION 93 did.
 ## 11. DONE MEANS
 
 `server/docs/WEB_UI_FINDINGS.md` exists with the research, the three directions and the
-reasoning for the one chosen. Every tier-1 page is rebuilt on one shared token set. Jellyfin
-carries a matching theme. Every command in §8 has been run with its output pasted. Phone-width
-screenshots of every page exist, including WebGL-off and reduced-motion variants. Changed files
-carry `[CHANGE: claude-code | <date>]` tags, `server/STATUS.md` and `server/DECISIONS.md` are
-updated, and the work is committed with **named files** — never `git add -A`, because there is
-an untracked initramfs tree at the repo root that must not be committed.
+reasoning for the one chosen — including a per-app, per-route themeability table with the
+command behind each verdict (Phase 0 step 5).
+
+Every tier-1 page is rebuilt on one shared token set. Jellyfin carries a matching theme. The
+tier-3 apps carry skins that came out of `server/assets/skins/<app>/` via
+`server/scripts/luminos-skin-apply`, with a pacman hook in `server/config/` that survives
+check 12. Jellyseerr is either skinned — if you found a route I missed — or deliberately left
+stock with its useful function absorbed, and the findings doc says which and why.
+
+Every command in §8 has been run with its output pasted. Phone-width screenshots of every page
+exist, including the skinned third-party apps, WebGL-off and reduced-motion variants.
+
+Changed files carry `[CHANGE: claude-code | <date>]` tags. `server/STATUS.md` and
+`server/DECISIONS.md` are updated — the latter with a decision recording that package-owned
+presentation files are edited on purpose, that they are expected to be clobbered by upgrades,
+and that the hook is the mitigation. The work is committed with **named files** — never
+`git add -A`, because there is an untracked initramfs tree at the repo root that must not be
+committed.

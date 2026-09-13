@@ -241,3 +241,38 @@ no hand-edit without the hook).
 
 **Steps 1–2 already shipped are unaffected** — none of this touches `luminos-hub`. Tier 3
 skinning is new work that slots in after step 6.
+
+### v3 — the correction is now integrated throughout, not bolted on
+
+The first pass only rewrote §4 and left the rest of the brief contradicting it. Fixed:
+
+- Header says v3 and lists exactly what changed from v2.
+- §4 heading now says **four** tiers, not three, and carries the `(§4)` anchor the rest of the
+  document was already referencing.
+- **Phase 0 step 5** now carries the research lesson: *"I tested route A and it failed" is not
+  "the thing is impossible."* Enumerate every route per app — proxy, in-app setting, theme API,
+  files on disk — and record the command behind each verdict. This is the most portable part
+  of the correction and it is why the step exists.
+- **Build order gained steps 14–16**: absorbed first-party pages, then Jellyfin, then the
+  tier-3 skins *last* — they are the rarest surfaces, the only step writing outside the repo
+  and `/usr/local/`, and worthless before the token set is settled.
+- **§6 gained item 13**, bounding third-party edits: `.css` plus one `<link>` line, never
+  `.js`, never `/var/lib/<app>/`, never a unit file, everything reproducible from the repo.
+  §6.1–12 are untouched.
+- **§8 checks 10–13 rewritten.** `pacman -Qkk <pkg>` replaces the `find -newer` hack — it
+  names exactly which packaged files were altered. Baseline today is `radarr-bin: 583 total
+  files, 0 altered files`; afterwards the only acceptable result is `index.html` per app.
+  Check 12 now *simulates the upgrade* (`pacman -S --noconfirm radarr-bin`) to prove the hook
+  actually fires, rather than trusting that it would.
+- **§7** caps each skin at 8 KB and forbids it pulling the fonts in — skins inherit the
+  palette, not the whole system.
+- **§10** litmus extended: hub → Jellyfin → Radarr → NZBGet must read as one building; and a
+  separate check asks whether the everyday path still runs through unskinnable Jellyseerr.
+- **§11** now requires the skins, the apply script, the hook, and a DECISIONS entry recording
+  that package-owned files are edited on purpose.
+
+**Two things deliberately left open for the implementing agent**, because I did not measure
+them: whether the Servarr apps re-read `index.html` per request or cache it at start (decides
+whether the apply script needs a `systemctl restart`), and whether an override stylesheet or a
+custom-property redeclaration is the upgrade-durable shape. Both are written into §4 tier 3 as
+questions, not guesses.
