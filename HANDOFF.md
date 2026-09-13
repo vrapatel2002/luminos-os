@@ -1,193 +1,208 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-13
+Last updated: 2026-09-13 — Response 5
 
-> **Two previous goals are parked, not abandoned.** The `org.luminos.style` QML note is at
-> **`git show 4273ed7e:HANDOFF.md`**. The gaming/dGPU goal below is **complete** and kept
-> as reference. Read either before resuming; do not reconstruct from memory.
+> The gaming/dGPU goal is **complete**; its detail is at `git show b08c3904:HANDOFF.md`.
+> The `org.luminos.style` QML note is at `git show 4273ed7e:HANDOFF.md`.
+> Read either before resuming those; do not reconstruct from memory.
 
 ## Goal (the durable end objective)
-**Current:** the media server's own two web pages (`luminos-hub`, `luminos-space`) look
-deliberately designed rather than undesigned, without loosening a single one of the
-security properties DECISION 84/90/93 established.
+**Widened 2026-09-13 on Shawn's instruction.** Previously: make the two own pages look
+designed. **Now: every page of the media server's web surface, rebuilt from zero**, so the
+whole journey feels like one product — with full creative freedom on colour, type, motion and
+3D — without loosening a single security property from DECISION 62 / 84 / 90 / 91 / 93.
 
-**Previous, now complete:** gaming on Luminos actually uses the RTX 4050, and the system
-stays current without an upgrade quietly breaking something at the next login.
+His words: *"redesign every page from zero … give it every freedom … go out of the box …
+using 3d object and more"*, and on process, *"let it research and think"* but *"do not ask
+for my suggestion — point it to the luminos folder"*.
+
+## ⚠️ THE SPEC MOVED TO v2 WHILE A v1 BUILD WAS AT STEP 2 OF 6. Read this before continuing.
+
+`server/docs/WEB_UI_PROMPT.md` was rewritten to **v2** on 2026-09-13. **v1 is at
+`git show 304e28a7:server/docs/WEB_UI_PROMPT.md`.** Do not merge them; v2 supersedes v1
+completely and has absorbed everything from the v1 build that was worth keeping.
+
+**Nothing already deployed was reverted, and nothing needs to be.** Steps 1–2 of the v1 build
+are live and approved, and v2 §2b-bis carries them forward explicitly as work not to redo.
+
+**The one thing v2 genuinely reopens** is the aesthetic. Shawn approved "instrument panel"
+with a frozen token table and said "YES GO"; v2 asks the implementing agent for three fresh
+directions. The conflict is resolved in v2 by making the approved direction **the incumbent** —
+a new direction only wins if the agent can argue in writing that it is clearly better, and if
+it cannot, the incumbent stands. The deployed fonts survive either way unless a winning
+direction genuinely needs different faces.
 
 ## Aim right now
-The **brief is written, no code has been touched**: `server/docs/WEB_UI_PROMPT.md`.
-It is meant to be handed to the agent that does the redesign, whole, as its prompt.
-Nothing is mid-flight. A **reboot** is still outstanding from the gaming work — Shawn's
-to take whenever convenient.
-
-## The web-UI brief — what it decides, so it is not re-litigated
-- **Scope is two files only:** `server/scripts/luminos-hub` (`127.0.0.1:8100`, read-only
-  landing page) and `server/scripts/luminos-space` (`127.0.0.1:8099`, the delete tool).
-  Jellyfin / Jellyseerr / the *arrs are third-party UIs and are **out of scope**.
-- **Nine security invariants are frozen** and each has a verification command in §9 of the
-  brief: stay on loopback; zero third-party requests (so fonts are self-hosted, never a
-  CDN); no API key in the rendered HTML; the `luminos-space` token stays a Caddy-injected
-  query parameter (turning it into a cookie or a login form is explicitly out of scope);
-  the hub gains no mutating endpoint; escaping moves toward `textContent` over `innerHTML`;
-  delete gets *harder*, not easier; no new dependencies, no build step.
-- **One deliberate security improvement is in scope:** split the inline `<style>`/`<script>`
-  into `/app.css` + `/app.js` routes so a CSP with no `unsafe-inline` becomes possible.
-- **The information-design problem is the real work, not the styling.** `frees` ≠ `size`
-  because of hardlinks (DECISION 62, ~370 GB affected); the two disks must not be shown as
-  one pooled bar (DECISION 91/93); NZBGet's `Status` lags 16 s so the progress bar outranks
-  any status chip; every title is untrusted Usenet release text.
-- **Aesthetic committed:** "instrument panel" — near-black field, one warm accent that is
-  **not** blue and **not** purple, rationed green/amber/red for machine state only, tabular
-  numerals, two self-hosted faces (a variable grotesque + JetBrains Mono), dark-only.
-  Two alternates are in the brief's appendix as drop-in replacements for §5.
-- **Execution is six stops**, one screenshot each: brief → tokens+type → hub layout →
-  motion + CSP split → `luminos-space` → `/offline`.
-
-## Why / motivation (context a newcomer would be missing)
-Shawn's words: *"it's not very good looking … make it look real good … free hand … but make
-sure that it does not compromise security. it's just ui/ux thing."* He supplied
-`~/Downloads/website_prompt.md` — a research note on prompting models into good frontend
-work — and asked for a prompt built from it, not for the implementation.
-
-Two of his standing preferences shaped the brief's §11: he reviews **from screenshots, not
-descriptions**, and has rejected batched visual changes twice before (DECISION 71, 72); and
-he wants to be **informed, not consulted** — decisions made and stated in one line, with
-questions reserved for security tradeoffs, irreversible deletion, or spending money.
+Hand **v2** to the implementing agent as its entire prompt. Its first deliverable is
+`server/docs/WEB_UI_FINDINGS.md` — research, screenshots of every page, three art directions
+scored against the incumbent, and the reasoning for the pick. **Nothing gets built before
+that file exists.**
 
 ## Process / approach being used
-Brief-first, then one visual step at a time. The brief is deliberately specific on all four
-axes the research note names (typography, colour, motion, backgrounds) and carries an
-explicit "do NOT" list, because the failure mode being designed against is the model
-converging on generic defaults — Inter, purple-on-white, centered hero plus three cards.
+v2 imposes its own order: **Phase 0 research** (read the repo and the live box; design
+questions to Shawn are forbidden) → **Phase 1 concept** (three directions vs the incumbent,
+self-chosen, justified in writing) → **Phase 2 build** (design system → landing → space →
+offline → Jellyfin theme).
+
+Shawn reviews from pictures, not descriptions, and has rejected batched visual changes twice
+(DECISION 71, 72). He wants to be informed, not consulted — decisions stated in one line,
+questions reserved for security tradeoffs, irreversible deletion, or money.
+
+**This file doubles as the build log.** AGENTS.md §0.2 forbids a second handoff file, so no
+separate `BUILD_LOG.md` was created.
+
+## What v2 changes, beyond scope
+- **Three tiers by how much control actually exists.** Tier 1 ours, total freedom. Tier 2
+  **Jellyfin** — 10.11.11 has a real server-side Custom CSS branding field, and it is where
+  Shawn actually spends time. Tier 3 Jellyseerr / *arrs / NZBGet.
+- **Tier 3 cannot be reskinned, verified not assumed.** `caddy list-modules` on the box has
+  **no `replace` / `sub_filter` handler**; theme.park-style injection would need Caddy rebuilt
+  via `xcaddy` — swapping the binary that terminates TLS for all eight site blocks, to change
+  a colour scheme. **Rejected in the brief.** The answer given instead is architectural:
+  **stop linking out, start absorbing** — first-party pages for the one or two things each app
+  is actually opened for, admin panels demoted to rare link-outs.
+- **Artwork exists and nobody uses it** — the largest free visual win available.
+  `/var/lib/{radarr,sonarr}/MediaCover/<id>/` holds posters, fanart, banners and clearlogos at
+  three sizes each, `0664 <app>:media`, and **`luminoshub` is in group `media`** — readable
+  with no privilege change, 28.5 MB over ~16 titles. ⚠️ The obvious route fails:
+  `GET /MediaCover/…` with a valid `X-Api-Key` **302s to `/login`** (session-cookie route, not
+  an API route), so an agent testing via the API concludes there is no artwork. **Read from
+  disk**, through an allowlisted route (§6.9) modelled on the existing `/fonts/` whitelist.
+- **3D is permitted.** v1 banned it on faulty reasoning — "the server is a weak i5" — but
+  **3D renders on the client**; the server only ships bytes. Real constraints are payload over
+  Tailscale, phone battery, and the no-CDN rule meaning the library is vendored. Required:
+  progressive enhancement, static fallback, and a hard "must still be good with WebGL off".
+- **Security went from nine invariants to twelve**, each with a verification command in §8 —
+  adding: do not rebuild Caddy, do not touch nftables or unit `User=`, leave the API-facing
+  Python alone, and path-traversal tests on the new artwork route.
 
 ## State — what is DONE
-`server/docs/WEB_UI_PROMPT.md` written. Indexed into Luminos Notes under `DOCS`.
-No script, no config, and nothing on the server was modified.
+
+**Step 1 — brief written back and accepted.** Aesthetic is "instrument panel". Tokens,
+type scale and both typefaces are frozen (table below). Shawn said "YES GO".
+
+**Step 2 — tokens + type on the hub, deployed and verified.** The DOM was not touched;
+only the `STYLE` constant, plus the new font route.
+
+- `server/assets/fonts/` created: four subset `.woff2` files, **37,968 bytes total**
+  against a 60 KB budget. Sources and SHA-256 of each are in that folder's `README.md`.
+- `luminos-hub` gained `FONT_DIR` / `FONTS`, a `_send_font()`, a `/fonts/<name>.woff2`
+  route, and a `cache` parameter on `_send()`.
+- Live on the box. Rollback copy at `/usr/local/bin/luminos-hub.bak-2026-09-13`.
+- Fonts installed to `/usr/local/share/luminos/fonts/` (0644, root).
+
+Verified on the box after deploy:
+
+| check | result |
+|---|---|
+| API keys (32-hex) in rendered HTML | **0** |
+| Off-box hosts referenced in HTML | **none** |
+| `http://192.168.2.61:8100/` | **connection refused** (loopback only holds) |
+| `/fonts/archivo-800.woff2` | 200, `font/woff2`, `max-age=31536000, immutable` |
+| `/fonts/../../../etc/passwd` | **404** |
+| `/fonts/nope.woff2` | **404** |
+| hub page weight | 9,300 bytes |
 
 ## State — what is IN PROGRESS
-Nothing.
+Nothing mid-flight. Awaiting Shawn's look at the step-2 screenshot before starting step 3.
 
 ## Next steps (ordered)
-1. Shawn reads the brief and either accepts "instrument panel" or picks an appendix
-   alternate. That choice gates everything else.
-2. Run the brief as the prompt. Stop at step 1 of its §11 (thesis + token table + fonts)
-   and put it in front of him before any code.
-3. Unrelated and still outstanding: **reboot** (glibc + systemd upgraded, running system is
-   on the old ones), then confirm a Lutris game actually renders on the dGPU with
+1. **Phase 0 + 1 of v2** — the implementing agent researches the repo and the live box,
+   screenshots every page, and produces `server/docs/WEB_UI_FINDINGS.md` with three art
+   directions scored against the incumbent. Nothing is built before that file exists.
+2. **Phase 2 build**, in v2's order: shared design system (`/app.css`) → landing page →
+   `luminos-space` → `/offline` → Jellyfin Custom CSS theme → whatever absorbing tier 3
+   turns out to justify. Run §8 verification in full and paste the output.
+3. The three unfixed findings below are **build work, not research** — fold them in, do not
+   defer them. The free-space bug in particular is a wrong number on the live page today.
+4. Unrelated and still outstanding: **reboot** (glibc + systemd upgraded, running system is
+   on the old ones), then confirm a Lutris game renders on the dGPU with
    `dgpu-exec-v2 -- nvidia-smi`.
 
 ## Key decisions & constraints so far
 
-## Why / motivation (context a newcomer would be missing)
-Shawn asked for "the latest version of everything" for gaming. Installing the runners
-surfaced a much bigger finding: **no Lutris game had ever been reaching the dGPU.** Not a
-regression — it had never worked, and it was invisible because the AMD 780M is fast enough
-that the symptom reads as "a bit slow" rather than "no picture".
+**Frozen token set** — every colour and size in the finished CSS resolves to one of these:
 
-## Process / approach being used
-Fix it **without weakening the gate**. The one-command answer (`usermod -aG dgpu shawn`)
-was rejected on purpose — it would delete DECISION 25 and re-open the 8 W idle regression
-(BUG-047) and the VRAM contention DECISION 81 exists to arbitrate.
+| token | value | token | value |
+|---|---|---|---|
+| `--bg` | `#0F0D0B` | `--accent` | `#FF7A18` |
+| `--surface` | `#17140F` | `--ok` | `#3FBF6A` |
+| `--line` | `#2A2520` | `--warn` | `#E8C547` |
+| `--text` | `#F2EDE4` | `--danger` | `#FF4D3D` |
+| `--muted` | `#8C8279` | `--r` | `4px` |
 
-## State — what is DONE
+Type: `--t-display clamp(52px,15vw,76px)` / `--t-head 15px` / `--t-body 15px` /
+`--t-mono 14px` / `--t-caption 12px`. Spacing `--s1..--s6` = 4/8/12/16/24/40 px.
+Faces: **Archivo** 500+800 (display/UI), **JetBrains Mono** 400+800 (all numbers, all
+release names). Accent is deliberately a hue-step away from `--warn` so the two never read
+as the same signal.
 
-**1. Lutris routed through the dGPU gate (DECISION 90).**
-`~/.config/lutris/system.yml` → `prefix_command: dgpu-exec-v2 --` + `mangohud: true`.
-Repo copy: `config/lutris-system.yml`.
+**`/app.css` and `/app.js` on port 8099 will NOT require the token.** Decided 2026-09-13,
+Shawn deferred the call. They are static constants with no library data and no secrets,
+byte-identical to what the hub already serves unauthenticated. Putting the token in a
+`<link href>` would spread it into a second URL and into browser error reports for no gain.
+Every route returning library data or performing a delete keeps `compare_digest` unchanged.
 
-**2. Gaming stack brought current.**
-GE-Proton11-6 into Lutris runners **and** Flatpak Steam's `compatibilitytools.d`;
-mangohud 0.8.4 + lib32-mangohud + nvidia-prime; Flatpak MangoHud Vulkan layer 25.08.
+**Fonts are a whitelist, not a path join.** `FONTS` is a fixed tuple and the route tests
+membership, so directory traversal is impossible by construction rather than by correct
+escaping. Verified with `/fonts/../../../etc/passwd` → 404.
 
-**3. Full `pacman -Syu` — 522 packages, five weeks stale — completed with pins intact.**
-`nvidia-utils` held at 610.57.04 (615.71.09 ignored), `linux` held at 7.0.5 (7.2.4
-ignored). glibc 2.44+r24, systemd 261.3, mesa 26.2.2, plasma-workspace 6.7.5,
-qt6-base 6.11.2-3. Three hand-built KCMs survived — 0 missing libs, checked.
+## Three findings from reading the code — all still to be acted on in step 3
 
-**4. BUG-155 caught and fixed before Shawn could hit it.**
-The Qt6 bump made `quickshell-git` unloadable (`Qt_6_PRIVATE_API`), which would have
-killed **both** Caelestia greeter sessions at the next login. Rebuilt to
-`0.3.1.r11.ge3d52a7-1`.
-
-**5. 53 GB reclaimed** — three abandoned 007 First Light directories under `/mnt/win-os`.
-
-**6. Docs updated** (this was the explicit ask): DECISION 90, DECISION 26 amendment,
-BUG-155, AGENTS.md §1/§9/§14, LUMINOS_STATUS.md, docs/CODE_REFERENCE.md,
-docs/LUMINOS_HANDBOOK.md Part 5.7, and the stale scope comment in `dgpu-exec-v2.c`.
-
-## State — what is IN PROGRESS
-Nothing.
-
-## Next steps (ordered)
-1. **Reboot.** glibc and systemd were both upgraded; the running system is on the old ones.
-   Nothing is known to be broken — this is hygiene, not a fix.
-2. **Confirm a game actually renders on the card.** Launch anything in Lutris, then
-   `dgpu-exec-v2 -- nvidia-smi`. If the game is not in the process list it is on the 780M,
-   regardless of what MangoHud claims.
-3. **Build DECISION 26 rung L3** (AGENTS.md §14 item 0f) — auto-rebuild the custom AUR
-   builds after an upgrade, and *read the result back*. BUG-155 is the case for it.
-4. Optional, deliberate: the NVIDIA 610.57.04 → 615.71.09 unpin window, following the
-   DECISION 26 procedure (unpin → upgrade → DKMS rebuild → verify true-0W gating + KCMs
-   → re-pin). Not urgent. Nothing is asking for it.
-
-## Key decisions & constraints so far
-
-**Web UI (current goal):** see the bullet list above — the nine invariants in
-`server/docs/WEB_UI_PROMPT.md` §4 are the constraint set, and §9 is how each is proven.
-The one that is easiest to break by accident is **"zero third-party requests"**: the
-reflexive way to get a non-default font is a Google Fonts `<link>`, and that would make a
-private page on a LAN-only box depend on the internet and announce every page load to a
-third party. Fonts are vendored into `server/assets/fonts/` instead.
-
-**dGPU / gaming (previous goal, complete — kept because it is still live on the machine):**
-- **shawn stays out of the `dgpu` group.** Non-negotiable — it is the whole of DECISION 25.
-- **`dgpu-exec-v2` is the gate for nearly everything now**, and its own header comment plus
-  AGENTS.md §9 both still claimed it was "wired into `chrome-luminos` only". Re-grepped and
-  corrected. v1 `dgpu-exec` is down to **one** caller — the Caelestia VRAM card's
-  `nvidia-smi` query. Repoint that and v1 can be deleted. A change to v2 now changes how
-  games launch, not just Chrome.
-- Kernel + NVIDIA stay pinned (DECISION 26). Moving them is a deliberate window, never a
-  side effect of `-Syu`.
+1. **The hub is reporting the wrong free space, and has been.** `build_summary()` calls
+   `shutil.disk_usage("/srv/media")` and nothing else, so `/srv/external` is invisible.
+   Live: sda3 876G (283G free) + sdb1 458G (398G free). The page says ~268 GB free when
+   the true figure is ~681 GB, and shows 62.6% used when the pool is ~46%. **Only
+   `luminos-space` has a `disks` array — the hub does not.** WEB_UI_PROMPT §3(b) assumes it
+   does. Fix: mirror `live_disks()` from `luminos-space` into the hub, `ismount()` check
+   included (without it an unplugged USB reports root's space as library space).
+2. **`luminos-space` sends no security headers of its own** — no CSP, no `nosniff`, no
+   `Referrer-Policy`, no `Cache-Control`; `_send()` sets none. The token is protected from
+   referrer leakage *only* by Caddy's `(proxy)` snippet today, so one Caddyfile edit
+   silently un-protects a delete-everything URL. Set them at the app level too in step 5.
+3. **The hub serves pre-formatted strings** (`"282.7 GB"`), not numbers, so values cannot
+   be animated between polls (§7). Add raw byte fields alongside `human()`; do not change
+   `human()` itself.
 
 ## Gotchas / dead-ends / things NOT to redo
-- **`prime-run` does nothing on this machine.** It sets environment variables; the obstacle
-  is file permissions on `/dev/nvidia*`. Its `Found no drivers!` /
-  `ERROR_INCOMPATIBLE_DRIVER` output looks like a broken driver and is not one. Do not
-  spend time on it again.
-- **v1 `dgpu-exec` is not a substitute here.** Lutris launches through shell/python
-  wrappers which reset the effective gid (BUG-102), and v1 does not re-assert the NVIDIA
-  vendor env past the `/etc/environment` Mesa pin (BUG-145).
-- **Do not put `mangohud` into `prefix_command`.** Lutris prepends it *before* the prefix,
-  so `mangohud: true` already yields the correct `dgpu-exec-v2 -- mangohud <game>`. Doing
-  it by hand inverts the order and the overlay loses GPU access.
-- **Flatpak Steam does not read `~/.local/share/Steam/compatibilitytools.d/`** — the path
-  every guide names. It reads `~/.var/app/com.valvesoftware.Steam/data/Steam/...`.
-- **`lib32-libpcap` is gone from the Arch repos.** If something reinstalls
-  `wine-ge-custom-bin-opt` (discontinued — GE-Proton8-26 was its last release), every
-  future `-Syu` blocks again. `checkupdates` and `pacman -Qu` will not warn you; it only
-  appears at dependency resolution.
-- **`luminos-brain safe` misfires on pacman actions** — it returns the pyenv/ML rule
-  ("NO: ML/AI always use pyenv 3.12.13") for system package work. Re-run with an explicit
-  `--reason` naming pacman/no-Python to get the override. This is AGENTS.md §14 item 0b,
-  still open.
-- **A `-Syu` post-transaction wall is 35 hooks long and a fatal finding is one line in it.**
-  BUG-155 was hook 32/35 and the transaction still reported success. Read it, or build L3.
+- **Font weight lives in the hinting and ligature tables, not the glyphs.** A naive
+  Latin-1 subset of JetBrains Mono Regular is 29,348 bytes; `--no-hinting` plus dropping
+  `liga`/`calt` gives the same coverage in 7,884. Do not re-derive this.
+- **Keep `tnum`.** Tabular figures are the entire reason JetBrains Mono carries the numbers.
+- **Subset range is Latin-1 + Latin Extended-A, not ASCII.** ASCII is ~3 KB smaller per
+  file and wrong — the library holds titles like `Amélie`, and a missing glyph falls back
+  to a system font mid-word.
+- **Screenshot through Caddy, never `127.0.0.1`.** Hitting the loopback port skips the
+  proxy, the TLS and the token injection. Working command:
+  `chromium --headless --disable-gpu --no-sandbox --ignore-certificate-errors
+  --window-size=412,1400 --force-device-scale-factor=2 --virtual-time-budget=9000
+  --hide-scrollbars --screenshot=/tmp/x.png "https://192.168.2.61/"`
+  (412 px is the Pixel 9 CSS width; `--ignore-certificate-errors` is required because the
+  IP addresses can only ever use Caddy's local CA.)
+- **Emoji tile glyphs look actively broken against this palette** — confirmed in the step-2
+  screenshot, not predicted. They are already scheduled for replacement by inline SVG in
+  step 3.
+- **`server/SPEC.md` is a different project** (the LLM prefill work). It is not this build's
+  spec. The spec for this build is `server/docs/WEB_UI_PROMPT.md`.
+- **MCP `mempalace` and `code-review-graph` are not connected in this Cowork session.**
+  AGENTS.md §6 requires noting that rather than skipping silently.
+- Repo and installed copies of both scripts were **md5-identical** before this work, so
+  there is no pre-existing drift to untangle (contrast the usual `/usr/local/bin` divergence).
 
 ## Files touched / relevant files
-**Live system (not in the repo):**
-- `~/.config/lutris/system.yml` — new; the whole of DECISION 90
-
 **Repo:**
-- `config/lutris-system.yml` — repo copy of the above
-- `scripts/dgpu-gate/dgpu-exec-v2.c` — SCOPE comment corrected (comment only, no code)
-- `LUMINOS_DECISIONS.md` — DECISION 90; DECISION 26 amendment
-- `docs/BUGS.md` — BUG-155
-- `AGENTS.md` — §1 Plasma version, §9 two rows corrected + one added, §14 item 0f
-- `LUMINOS_STATUS.md` — new top entry + 3 System rows
-- `docs/CODE_REFERENCE.md` — `config/lutris-system.yml`
-- `docs/LUMINOS_HANDBOOK.md` — new Part 5.7 (gaming / why prime-run does nothing)
+- `server/scripts/luminos-hub` — `STYLE` replaced; `FONT_DIR`/`FONTS`, `_send_font()`,
+  `/fonts/` route, `cache` param on `_send()`
+- `server/assets/fonts/` — **new**: 4 × `.woff2` + `README.md` (sources, SHA-256, method)
+- `HANDOFF.md` — this file
 
-**Untouched on purpose:** the `org.luminos.style` work in `config/qml/` and
-`scripts/luminos-qml-style-build`, and the initramfs-looking untracked tree at the repo
-root (`init`, `kernel/`, `usr/`, `etc/`, `lib`, `sbin`, `hooks/`). Neither was part of this
-task and neither was staged. **Find out what that tree is before anyone commits or deletes
-it** — it may be someone's in-progress work.
+**Live system (not in the repo):**
+- `/usr/local/bin/luminos-hub` — updated
+- `/usr/local/bin/luminos-hub.bak-2026-09-13` — rollback copy
+- `/usr/local/share/luminos/fonts/` — **new**, 4 files, 0644 root
+
+**Untouched on purpose:** `luminos-space` (step 5), the `/offline` page body (step 6), and
+all Python that talks to the Sonarr/Radarr/NZBGet APIs — that code encodes about a dozen
+hard-won facts about how those services lie, and WEB_UI_PROMPT §10 forbids tidying it.
+Also still unexplained: the initramfs-looking untracked tree at the repo root (`init`,
+`kernel/`, `usr/`, `etc/`, `lib`, `sbin`, `hooks/`). **Find out what it is before anyone
+commits or deletes it.**
