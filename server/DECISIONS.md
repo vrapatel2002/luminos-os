@@ -2079,3 +2079,56 @@ passed **5181/5181** on this patch. Its tolerance hid a difference large enough 
 model writes. Compare the actual generated text, byte for byte, or you have not checked.
 
 **Nothing was purchased and nothing is proposed.** The hardware is the hardware.
+
+---
+
+## DECISION 97 — The anime came in Japanese because the English filter was written for live action
+# [CHANGE: claude-code | 2026-09-13]
+
+Solo Leveling S01 imported on 2026-09-13 as twelve Japanese-only 4K files with **zero subtitle
+tracks**. Nothing was broken; Sonarr did exactly what it was told.
+
+**The cause is one regex.** Custom format **"Not English"** (id 2) scores **−10000** in quality
+profile 7, and its release-title regex includes `MULTI`, `DUAL[. -]?AUDIO` and `DUBBED`. On live
+action those tokens do mean "not English". **On anime they mean the opposite** — `MULTi` and
+`DUAL-AUDIO` are precisely the releases that carry the English dub. So the filter rejected every
+English-bearing release at −10000, and the raw Japanese BD rip
+`[Moozzi2] Ore dake Level Up na Ken-01 [BD 3840x2160 x265-10Bit Flac]` — which carries **no
+language token at all** — scored 0 and won. The best release lost for having advertised itself.
+
+**Profile 7 could not be edited in place.** It is shared by six English `standard` series
+(House of Cards (US), True Detective, The Sopranos, Better Call Saul, A Knight of the Seven
+Kingdoms, Ozark) where the filter is doing real work. Weakening it there to fix one anime would
+have let French and Hindi rips back into six other shows.
+
+**Resolution — a separate anime profile with a positive requirement, not a negative filter.**
+Two new custom formats and one new profile:
+
+| | id | regex / value |
+|---|---|---|
+| CF **English or Dual Audio** | 4 | `\b(DUAL[. _-]?AUDIO\|DUAL\|MULTi\|MULTI[. _-]?AUDIO\|ENG(LISH)?[. _-]?DUB(BED)?\|ENG[. _-]?AUDIO)\b` |
+| CF **English Subs** | 5 | `\b(MSUBS?\|MULTI[. _-]?SUBS?\|ENG(LISH)?[. _-]?SUBS?\|SOFTSUBS?\|SUBBED)\b` |
+| Profile **Anime - English or Dual Audio** | 8 | clone of 7; Not English **0**, English or Dual Audio **+1000**, English Subs **+200**, AV1 and Audio Description unchanged at −10000 |
+
+The guarantee comes from **`minFormatScore = 1000`**, not from a blocklist. A release must
+*prove* it has English audio to be eligible at all; anything that says nothing scores 0 and is
+refused. `cutoffFormatScore = 1200` so a subbed release still counts as an upgrade over a
+bare dual-audio one. Solo Leveling (series 8) moved to profile 8.
+
+**Verified by interactive search, not by reading the config.** 422 releases for S01E01:
+the Moozzi2 Japanese rip is now rejected with *"Custom Formats have score 0 below Series profile
+minimum 1000"*, while 18 English/dual releases score 1000–1200. Every remaining rejection on
+those 18 is the unrelated *"Existing file on disk is of equal or higher preference:
+Bluray-2160p"* — i.e. the rule works and only the already-imported files stand in the way.
+
+**Subtitles are a preference here, deliberately not a requirement.** Raising the minimum to 1200
+would reject `Solo.Leveling.S01.1080p.BluRay.DDP2.0.x265.DUAL-Anitsu`, which certainly has subs
+but does not say so in its filename. Release names are not an inventory. **Bazarr is not
+installed** on this server (`systemctl is-active bazarr` → inactive, not in pacman), and
+`server/scripts/luminos-subtitle-warm` exists in the repo but was **never installed** to
+`/usr/local/bin` — so there is no subtitle automation at all today. That is the open half.
+
+**The twelve existing files are not fixed by this.** The new rule only governs future grabs;
+Sonarr will not replace a Bluray-2160p with a 1080p dual-audio release because quality outranks
+format score. Replacing them requires deleting the episode files first, and that is a deliberate
+act, not an upgrade.
