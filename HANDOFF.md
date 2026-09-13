@@ -206,3 +206,38 @@ hard-won facts about how those services lie, and WEB_UI_PROMPT §10 forbids tidy
 Also still unexplained: the initramfs-looking untracked tree at the repo root (`init`,
 `kernel/`, `usr/`, `etc/`, `lib`, `sbin`, `hooks/`). **Find out what it is before anyone
 commits or deletes it.**
+
+---
+
+## CORRECTION 2026-09-13 — tier 3 apps CAN be reskinned. The brief said they could not.
+
+`server/docs/WEB_UI_PROMPT.md` §4 previously claimed Radarr/Sonarr/Prowlarr/NZBGet could not
+be reskinned. **That was wrong.** The owner challenged it; he was right. What had actually
+been proved was only that *proxy-level body rewriting* is unavailable in stock Caddy — that
+much still holds — and it was then over-generalised to "cannot be reskinned at all". The
+on-disk route was never checked. It was checked today and it works.
+
+Verified on the box:
+- `/usr/lib/{radarr,sonarr,prowlarr}/bin/UI/index.html` — plain static file, `root:root 0644`.
+- `curl http://127.0.0.1:7878/Content/styles.css` → `200 text/css`. `Content/` is served raw,
+  so `Content/luminos.css` + one `<link>` in `index.html` is a complete reskin. This is
+  theme.park's documented *native* install method. **Caddy is not involved.**
+- **NZBGet is the easiest of the five, not the hardest** — `/usr/share/nzbget/webui/` with
+  plain `index.html`, `style.css`, `dark-theme.css`, `light-theme.css`.
+- **Jellyseerr is the only genuinely hard one** — Next.js SSR, no `.html` anywhere under
+  `.next/server`, CSS in content-hashed chunks whose names change on every upgrade. It got
+  its own tier 4 in the brief: leave stock, absorb the request flow instead.
+- Free win nobody spent: Radarr/Sonarr/Prowlarr have a `theme` field on `/api/v3/config/ui`
+  (`/api/v1/` on Prowlarr), currently `"auto"`.
+- **The real cost:** `pacman -Qii radarr-bin` → `Backup Files : None`. Every upgrade silently
+  overwrites these files. Mitigation specified in the brief: repo-owned skins under
+  `server/assets/skins/`, an idempotent `server/scripts/luminos-skin-apply`, and a
+  PostTransaction pacman hook in `server/config/`.
+
+Brief sections changed: §4 tier 3 (rewritten), new §4 tier 4 for Jellyseerr, deliverable 15,
+the "stop linking out" block (skinning and absorbing are now stated as both-not-either),
+§8 checks 10–12, and three new §9 DO NOTs (no `.js` edits, nothing under `/var/lib/<app>/`,
+no hand-edit without the hook).
+
+**Steps 1–2 already shipped are unaffected** — none of this touches `luminos-hub`. Tier 3
+skinning is new work that slots in after step 6.

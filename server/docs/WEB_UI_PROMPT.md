@@ -84,7 +84,8 @@ You are redesigning something you have not seen. Go look at it.
 13. **`/offline`**, which is mostly typography.
 14. **The Jellyfin theme** (§4 tier 2), so the place people spend the most time stops looking
     like a different product.
-15. **The seam** — whatever §4 tier 3 turns out to allow, applied consistently.
+15. **The tier 3 skins** — Radarr, Sonarr, Prowlarr and NZBGet restyled on disk (§4 tier 3),
+    installed by an idempotent script with a pacman hook so an upgrade cannot silently undo it.
 
 ---
 
@@ -111,14 +112,64 @@ Branding) plus a login disclaimer and splashscreen. That is a supported feature,
 Jellyfin is where the owner actually spends time. A redesign that makes the hub beautiful and
 leaves Jellyfin stock has redesigned the lobby and not the building.
 
-### Tier 3 — Jellyseerr, Radarr, Sonarr, Prowlarr, NZBGet. **Verified constraint, read carefully.**
-Reskinning these from a proxy needs response-body rewriting. **Stock Caddy cannot do it.**
-`caddy list-modules` on the box returns `http.handlers.templates` and the encoders — there is
-**no `replace` / `sub_filter` handler**. Getting one means rebuilding Caddy with `xcaddy` and
-swapping the binary that terminates TLS for all eight site blocks. That is a change to the
-security front door to alter a colour scheme. **Do not do it.**
+### Tier 3 — Radarr, Sonarr, Prowlarr, NZBGet. **Reskinnable on disk. Verified.**
 
-So solve it the other way, and this is the central architectural idea of the redesign:
+Do **not** try to reskin these at the proxy. Stock Caddy has no `replace` / `sub_filter`
+handler (`caddy list-modules` returns `http.handlers.templates` and the encoders, nothing
+else), and getting one means rebuilding with `xcaddy` and swapping the binary that terminates
+TLS for all eight site blocks — a change to the security front door to alter a colour scheme.
+**Caddy is not touched by anything in this section.**
+
+Reskin them **at the source instead**. Every one of these four ships a plain static frontend
+on disk. This is theme.park's documented *native* install method and it needs no proxy, no
+new module, and no service reconfiguration. Verified on the box 2026-09-13:
+
+| app | HTML to edit | CSS drops into | perms |
+|---|---|---|---|
+| Radarr | `/usr/lib/radarr/bin/UI/index.html` | `/usr/lib/radarr/bin/UI/Content/` | `root:root 0644` |
+| Sonarr | `/usr/lib/sonarr/bin/UI/index.html` | `/usr/lib/sonarr/bin/UI/Content/` | same |
+| Prowlarr | `/usr/lib/prowlarr/bin/UI/index.html` | `/usr/lib/prowlarr/bin/UI/Content/` | same |
+| NZBGet | `/usr/share/nzbget/webui/index.html` | `/usr/share/nzbget/webui/` | `root:root 0644` |
+
+`curl http://127.0.0.1:7878/Content/styles.css` returns `200 text/css` — the `Content/`
+directory is served raw, so a `luminos.css` dropped there is reachable at
+`/Content/luminos.css` and one extra `<link>` in `index.html` loads it. NZBGet is the
+*easiest* of the five: it already ships `dark-theme.css` and `light-theme.css` as separate
+plain files with an in-app theme switcher.
+
+**Before you write a line of CSS, spend the free win:** Radarr/Sonarr/Prowlarr expose a
+`theme` field on `/api/v3/config/ui` (`/api/v1/` for Prowlarr), currently `"auto"`. Set it
+deliberately and you have consistent light/dark across all three with zero file edits.
+
+**The real cost, and it is the one thing you must handle.** `pacman -Qii radarr-bin` reports
+**`Backup Files : None`** — these are not pacman `backup` entries, so **every upgrade silently
+overwrites `index.html` and any CSS you put beside it**. That is a maintenance problem, not a
+blocker. Solve it properly:
+- Keep the real source of truth in `server/assets/skins/<app>/` in the repo.
+- Install with a small idempotent script (`server/scripts/luminos-skin-apply`) that copies the
+  CSS in and inserts the `<link>` **only if absent**, so re-running is harmless.
+- Wire it to a pacman hook in `server/config/` (`Type = Package`, `Target = radarr-bin` etc.,
+  `When = PostTransaction`) so an upgrade re-applies it automatically.
+- Record in `server/DECISIONS.md` that these files are owned by a package and are expected to
+  be clobbered; the hook is the mitigation.
+
+**The security line, stated exactly.** This touches *presentation files of third-party apps*.
+It does **not** touch Caddy, the firewall, the API keys, the systemd units, the service users,
+or any authentication path. Adding a stylesheet does not change who can reach the app or what
+they can do once there. Two hard limits: **CSS only — never edit or add `.js`**, and **never
+touch `config.xml` or anything under `/var/lib/<app>/`**. If a skin needs JavaScript to work,
+you have chosen the wrong skin.
+
+### Tier 4 — Jellyseerr. **The genuinely hard one.**
+Jellyseerr is a Next.js app running SSR: `find /usr/lib/jellyseerr/.next/server -name '*.html'`
+returns **nothing**. There is no HTML file on disk to add a `<link>` to. Its CSS lives in
+content-hashed Tailwind chunks (`/usr/lib/jellyseerr/.next/static/chunks/0hg5~53-g9q9d.css`,
+199 KB, `jellyseerr:media 0644`) whose **filenames change on every upgrade**, so appending
+overrides to a chunk is a hack that silently dies. Investigate whether current Jellyseerr has
+a custom-CSS setting; if it does not, **leave it stock and absorb its one useful function
+instead** — see below. Do not chase it further than that.
+
+### And regardless of tiers — the central architectural idea of the redesign:
 
 > **Stop linking out. Start absorbing.**
 >
@@ -126,12 +177,18 @@ So solve it the other way, and this is the central architectural idea of the red
 > "search a title, press request". NZBGet is "what is downloading, pause it". Sonarr is
 > "is this show monitored". Each of those is a first-party page you can build properly
 > in tier 1, talking to the same local APIs the hub already talks to. The full admin
-> panels stay as link-outs — clearly marked as the deep, rare, unstyled machine room —
-> and stop being the front door for everyday tasks.
+> panels stay as link-outs — now *skinned* link-outs, per tier 3, so the seam is a step
+> deeper rather than a step out of the design — and stop being the front door for everyday
+> tasks.
 >
 > Decide how far to take this. Absorbing the whole of Sonarr is wrong. Absorbing "request
 > a film" and "what is downloading" is almost certainly right. Justify where you drew the
 > line in your findings doc.
+>
+> **Absorbing and skinning are not alternatives — do both.** Skinning tier 3 makes the rare
+> deep visit feel like the same product. Absorbing makes the common shallow visit unnecessary.
+> Jellyseerr is the case where absorbing is doing real work, because tier 4 says it cannot be
+> skinned: a first-party "request a title" page is the only way that flow stops looking foreign.
 
 **The constraint on absorbing:** a first-party page that *performs an action* must sit behind
 the `luminos-space` token, never on the unauthenticated hub. See §6.5 — that is not
@@ -408,6 +465,17 @@ curl -s http://127.0.0.1:8100/app.js > /tmp/a.js && node --check /tmp/a.js
 
 # 9. every remaining innerHTML must be static markup with no interpolation
 grep -n 'innerHTML' server/scripts/luminos-hub server/scripts/luminos-space
+
+# 10. tier 3 skins added CSS only — this must return nothing
+find /usr/lib/{radarr,sonarr,prowlarr}/bin/UI /usr/share/nzbget/webui \
+     -newer /usr/lib/radarr/bin/UI/Content/styles.css.map -name '*.js' 2>/dev/null
+
+# 11. the re-apply script is idempotent — running it twice must not double the <link>
+sudo luminos-skin-apply && sudo luminos-skin-apply
+grep -c 'luminos.css' /usr/lib/radarr/bin/UI/index.html   # must print 1
+
+# 12. Caddy was not touched by any of it
+cd ~/luminos-os && git diff --stat -- server/config/Caddyfile   # must be empty
 ```
 
 Then load every page in a real browser **through the Caddy front door** — not against
@@ -430,7 +498,12 @@ DECISION 93 did.
 - A framework, bundler, `package.json`, CSS preprocessor, or utility-class library.
 - A login form, session cookie, or any change to how auth works.
 - A mutating endpoint on the unauthenticated hub.
-- Rebuilding Caddy with plugins to inject CSS into third-party apps.
+- Rebuilding Caddy with plugins to inject CSS into third-party apps. Skin them on disk (§4
+  tier 3) — the front door is never touched to change a colour.
+- Editing or adding `.js` inside a third-party app's frontend, or touching anything under
+  `/var/lib/<app>/`. Tier 3 is stylesheets and one `<link>` tag, nothing more.
+- Hand-editing a packaged file without an idempotent re-apply script and a pacman hook behind
+  it. None of these paths are pacman `backup` entries; an upgrade wipes them silently.
 - Skeleton loaders that shift layout when real content lands.
 - A stack of corner toasts. There is one `say()` message bar and it is the right pattern for
   one-action-at-a-time.
