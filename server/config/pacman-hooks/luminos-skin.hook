@@ -1,0 +1,29 @@
+# Luminos — put the tier-3 skins back after an upgrade. [CHANGE: claude-code | 2026-09-13]
+# Installed at /etc/pacman.d/hooks/luminos-skin.hook.
+#
+# Radarr, Sonarr, Prowlarr, NZBGet and Bazarr ship their web frontends as package-owned files,
+# so `pacman -Syu` overwrites index.html and deletes Content/luminos.css without a word.
+# This hook is the only thing that makes those edits survive; without it the skins last
+# until the next upgrade and then silently vanish.
+#
+# Triggered on paths, not package names, so it keeps working if a package is renamed
+# (radarr-bin -> radarr, say) and does nothing at all on an unrelated transaction.
+#
+# Jellyfin is deliberately absent. Its theme lives in the server's own configuration,
+# not in a packaged file, so an upgrade cannot clear it -- and the API call that would
+# set it needs Jellyfin running, which mid-transaction it may not be.
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/lib/radarr/bin/UI/*
+Target = usr/lib/sonarr/bin/UI/*
+Target = usr/lib/prowlarr/bin/UI/*
+Target = usr/share/nzbget/webui/*
+Target = opt/bazarr/frontend/build/*
+
+[Action]
+Description = Reapplying the Luminos skins to the web frontends...
+When = PostTransaction
+Exec = /usr/local/bin/luminos-skin-apply --radarr --sonarr --prowlarr --nzbget --bazarr

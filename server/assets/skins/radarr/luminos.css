@@ -1,0 +1,9 @@
+/* Luminos — Radarr delta. [CHANGE: claude-code | 2026-09-13]
+   Appended to skins/servarr/luminos.css by `luminos-skin-apply`. Everything shared lives
+   there; this file is only what Radarr names differently from Sonarr and Prowlarr. */
+:root{
+  --radarrYellow:var(--lx-accent)!important;
+  --themeAlternateYellow:var(--lx-accent-hi)!important;
+  --movieBackgroundColor:var(--lx-surface)!important;
+  --addMovieBackgroundColor:var(--lx-surface)!important;
+}

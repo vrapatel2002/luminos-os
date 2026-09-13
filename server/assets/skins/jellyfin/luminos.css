@@ -1,0 +1,155 @@
+/* Luminos — Jellyfin theme. [CHANGE: claude-code | 2026-09-13]
+   Installed into Jellyfin's server-wide Custom CSS field (Dashboard → General →
+   Branding), which is a supported feature, by `luminos-skin-apply --jellyfin`.
+   Replaces ElegantFin, backed up at /etc/jellyfin/branding.xml.bak-elegantfin-2026-09-13.
+   Revert = restore that file, or empty the Custom CSS box in the dashboard.
+
+   Two things this theme deliberately does NOT do:
+
+   - It does not change the typeface. Our faces are served from luminos-hub on a
+     different origin, and a cross-origin font needs a CORS header from Caddy, which
+     §6.11 puts out of bounds. Inlining them as base64 would add ~40 KB to a
+     stylesheet fetched on every page load, for the same reason §7 forbids it on the
+     tier-3 skins. So Jellyfin keeps its own type and is unified by colour, weight,
+     density and shape instead. That is most of the distance.
+   - It does not touch layout. Jellyfin is the one app here that already works on a
+     phone. Repainting it is the whole job; moving things is how a theme breaks on
+     the next release.
+
+   Jellyfin's own themes declare no custom properties at all -- they are flat
+   declarations over a fixed selector vocabulary (see themes/dark/theme.css). So this
+   file defines the tokens itself and every rule below resolves to one. The numbers
+   are identical to app.css; when that palette moves, this moves with it. */
+
+:root{
+  --lx-bg:#0F0D0B; --lx-surface:#17140F; --lx-sunk:#0B0908;
+  --lx-line:#2A2520; --lx-line-hi:#3D362E;
+  --lx-text:#F2EDE4; --lx-muted:#8C8279; --lx-faint:#5A534B;
+  --lx-accent:#FF7A18; --lx-accent-sunk:#2E1A0B; --lx-danger:#FF4D3D;
+  --lx-r:4px;
+}
+
+/* ---------------------------------------------------------------- field */
+html,.backgroundContainer,.dialog,.mainDrawer,.drawer-open,
+.nowPlayingContextMenu,.nowPlayingPlaylist,
+#bookPlayer,#comicsPlayer,#pdfPlayer,#dialogToc,
+.noBackdropTransparency .detailPagePrimaryContainer,
+.noBackdropTransparency .detailPageSecondaryContainer{
+  background-color:var(--lx-bg)}
+html,.skinHeader{color:var(--lx-text)}
+/* Artwork is the point of this app, so a backdrop is dimmed rather than tinted. */
+.backgroundContainer.withBackdrop{background-color:rgba(15,13,11,.88)}
+
+.skinHeader-withBackground,.appfooter,.playlistSectionButton,
+.collapseContent,.paperList,.visualCardBox,
+.formDialogFooter:not(.formDialogFooter-clear),
+.formDialogHeader:not(.formDialogHeader-clear),
+.ui-corner-all,.ui-shadow,.wizardStartForm{
+  background-color:var(--lx-surface)}
+.skinHeader.semiTransparent{background-color:rgba(11,9,8,.72)}
+.detailRibbon{background:rgba(23,20,15,.84)}
+.detailTableBodyRow-shaded:nth-child(2n){background:rgba(23,20,15,.9)}
+
+/* ---------------------------------------------------------------- text */
+.cardText-secondary,.fieldDescription,.guide-programNameCaret,
+.listItem .secondary,.nowPlayingBarSecondaryText,.programSecondaryTitle,
+.secondaryText,.emby-tab-button,.alphaPickerButton{
+  color:var(--lx-muted)}
+.checkboxListLabel,.inputLabel,.inputLabelUnfocused,.paperListLabel,
+.textareaLabelUnfocused{color:var(--lx-muted)}
+.emby-tab-button-active,.alphaPickerButton-selected{color:var(--lx-text)}
+.guide-date-tab-button{color:var(--lx-faint)}
+
+/* ---------------------------------------------------------------- lines */
+.emby-collapsible-button,.channelPrograms,.guide-channelHeaderCell,
+.programCell{border-color:var(--lx-line)}
+.listItem-border{border-color:var(--lx-line) !important}
+.actionsheetDivider{background:var(--lx-line)}
+.listItem:hover{background:var(--lx-surface)}
+.listItem:focus,.navMenuOption:hover{background:var(--lx-line)}
+
+/* ---------------------------------------------------------------- signal
+   One accent, used only where something is live or actionable. Jellyfin ships
+   #00a4dc in roughly forty places; every one of them is here. */
+.button-submit,.selectionCommandsPanel,.emby-button.detailFloatingButton,
+.emby-button.show-focus:focus,.navMenuOption-selected,
+.guide-date-tab-button.show-focus:focus{
+  background:var(--lx-accent) !important;color:var(--lx-bg) !important}
+.button-submit:focus{background:#FF8C35 !important;color:var(--lx-bg) !important}
+.emby-checkbox:checked+span+.checkboxOutline,.itemProgressBarForeground,
+.countIndicator,.fullSyncIndicator,.mediaSourceIndicator,.playedIndicator{
+  background-color:var(--lx-accent)}
+.fullSyncIndicator,.countIndicator,.playedIndicator{color:var(--lx-bg)}
+.inputLabelFocused,.selectLabelFocused,.textareaLabelFocused,
+.upNextDialog-countdownText,.button-link,.button-flat:hover,
+.buttonActive,.metadataSidebarIcon,.guide-date-tab-button.emby-tab-button-active,
+.guide-date-tab-button:focus,.emby-tab-button:hover,
+.emby-tab-button.show-focus:focus,.paper-icon-button-light.show-focus:focus,
+#dialogToc .bookplayerButtonIcon:hover,#dialogToc .toc li a:hover,
+#dialogToc .toc li a:active{color:var(--lx-accent)}
+.progressring-spiner,.itemSelectionPanel{border-color:var(--lx-accent)}
+.card:focus .cardBox.visualCardBox,
+.card:focus .cardBox:not(.visualCardBox) .cardScalable{
+  border-color:var(--lx-accent) !important}
+.emby-checkbox:checked+span+.checkboxOutline,
+.emby-checkbox:focus:not(:checked)+span+.checkboxOutline{
+  border-color:var(--lx-accent)}
+.paper-icon-button-light:active:not(:disabled){
+  background-color:var(--lx-accent-sunk);color:var(--lx-accent)}
+@media (hover:hover) and (pointer:fine){
+  .paper-icon-button-light:hover:not(:disabled){
+    background-color:var(--lx-accent-sunk);color:var(--lx-accent)}
+}
+.guide-channelHeaderCell:focus,.programCell:focus,
+.alphaPickerButton-tv:focus,.emby-select-tv-withcolor:focus{
+  background-color:var(--lx-accent) !important;color:var(--lx-bg) !important}
+
+/* Destructive keeps its own colour. It is the one thing that must not read as
+   "the accent, slightly different". */
+.button-delete{background:var(--lx-danger);color:var(--lx-bg)}
+.itemProgressBarForeground-recording,.ratingbutton-icon-withrating,
+.playstatebutton-icon-played{background-color:initial;color:var(--lx-danger)}
+.itemProgressBarForeground-recording{background-color:var(--lx-danger)}
+
+/* ---------------------------------------------------------------- controls */
+.fab,.raised{background:var(--lx-surface);color:var(--lx-text);
+             border:1px solid var(--lx-line-hi)}
+.fab:focus,.raised:focus{background:var(--lx-line);border-color:var(--lx-line-hi)}
+.emby-input,.emby-textarea,.emby-select-withcolor{
+  background:var(--lx-sunk);border:1px solid var(--lx-line-hi);
+  border-radius:var(--lx-r);color:var(--lx-text)}
+.emby-input:focus,.emby-textarea:focus,.emby-select-withcolor:focus{
+  border-color:var(--lx-accent) !important}
+.emby-select-withcolor>option{background:var(--lx-surface);color:var(--lx-text)}
+.checkboxOutline{border-color:currentColor}
+.toast,.infoBanner{background:var(--lx-surface);color:var(--lx-text);
+                   border:1px solid var(--lx-line-hi);border-radius:var(--lx-r)}
+.mediaInfoText{background:var(--lx-line);color:var(--lx-text)}
+.downloadbutton-icon-complete,.downloadbutton-icon-on{color:var(--lx-accent)}
+
+/* Radius is the one shape decision. Jellyfin's stock is close already; this just
+   makes every corner the same 4 px the rest of the product uses. */
+.card .cardBox,.visualCardBox,.raised,.fab,.button-submit,.button-delete,
+.dialog,.paperList,.collapseContent,.emby-button{border-radius:var(--lx-r)}
+
+/* ---------------------------------------------------------------- placeholders
+   The five card backgrounds shown before artwork loads. Jellyfin ships five blues;
+   these are five steps of the same warm dark so a loading grid does not flash a
+   different product. */
+.defaultCardBackground1{background-color:#1C1712}
+.defaultCardBackground2{background-color:#241D16}
+.defaultCardBackground3{background-color:var(--lx-accent-sunk)}
+.defaultCardBackground4{background-color:#191410}
+.defaultCardBackground5{background-color:#2B2119}
+.guide-programTextIcon{background:var(--lx-line-hi);color:var(--lx-bg)}
+.programCell-active{background:var(--lx-surface) !important}
+.programCell-sports{background:#2B3A2B !important}
+.programCell-movie{background:var(--lx-accent-sunk) !important}
+.programCell-kids{background:#1F2A33 !important}
+.programCell-news{background:#2B2A1C !important}
+
+/* ---------------------------------------------------------------- scrollbars */
+*{scrollbar-color:var(--lx-line-hi) var(--lx-bg);scrollbar-width:thin}
+::-webkit-scrollbar-track-piece{background-color:var(--lx-bg)}
+::-webkit-scrollbar-thumb:horizontal,
+::-webkit-scrollbar-thumb:vertical{background:var(--lx-line-hi);border-radius:2px}

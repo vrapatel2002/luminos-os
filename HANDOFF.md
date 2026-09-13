@@ -1,122 +1,85 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-13 — Response 5
+Last updated: 2026-09-13 — Response 6
 
 > The gaming/dGPU goal is **complete**; its detail is at `git show b08c3904:HANDOFF.md`.
 > The `org.luminos.style` QML note is at `git show 4273ed7e:HANDOFF.md`.
 > Read either before resuming those; do not reconstruct from memory.
 
-## Goal (the durable end objective)
-**Widened 2026-09-13 on Shawn's instruction.** Previously: make the two own pages look
-designed. **Now: every page of the media server's web surface, rebuilt from zero**, so the
-whole journey feels like one product — with full creative freedom on colour, type, motion and
-3D — without loosening a single security property from DECISION 62 / 84 / 90 / 91 / 93.
+## ✅ THE WEB-SURFACE REDESIGN IS BUILT. Steps 1–16 are done and live.
 
-His words: *"redesign every page from zero … give it every freedom … go out of the box …
-using 3d object and more"*, and on process, *"let it research and think"* but *"do not ask
-for my suggestion — point it to the luminos folder"*.
+`server/docs/WEB_UI_PROMPT.md` v3 is the brief; v2 is `git show a03fda8a:…`, v1 is
+`304e28a7:…`. **Do not merge them — v3 supersedes both.** The full research trail, all three
+art directions, the per-route themeability verdicts and every screenshot are in
+`server/docs/WEB_UI_FINDINGS.md`. The architectural record is **DECISION 99**.
 
-## ⚠️ THE SPEC MOVED TO v2 WHILE A v1 BUILD WAS AT STEP 2 OF 6. Read this before continuing.
+All eight surfaces now share one token set:
 
-`server/docs/WEB_UI_PROMPT.md` was rewritten to **v2** on 2026-09-13. **v1 is at
-`git show 304e28a7:server/docs/WEB_UI_PROMPT.md`.** Do not merge them; v2 supersedes v1
-completely and has absorbed everything from the v1 build that was worth keeping.
+| tier | what | how |
+|---|---|---|
+| 1 | `luminos-hub` `/` + `/offline`, `luminos-space` | ours, rebuilt from zero on `/app.css` |
+| 2 | Jellyfin | Custom CSS via its own API — **ElegantFin removed** |
+| 3 | Radarr, Sonarr, Prowlarr, NZBGet, **Bazarr** | skinned on disk + pacman hook |
+| 4 | Jellyseerr | cannot be skinned — request flow **absorbed** as a first-party page |
 
-**Nothing already deployed was reverted, and nothing needs to be.** Steps 1–2 of the v1 build
-are live and approved, and v2 §2b-bis carries them forward explicitly as work not to redo.
+Budgets all held: `app.css` 20,055 / 24,576 B · `app.js` 12,333 / 20,480 B · skins
+7907 / 8067 / 7748 / 7912 / 2322 B against 8192 each · **0 `@font-face` in any skin** ·
+**0 third-party network calls anywhere**.
 
-**The one thing v2 genuinely reopens** is the aesthetic. Shawn approved "instrument panel"
-with a frozen token table and said "YES GO"; v2 asks the implementing agent for three fresh
-directions. The conflict is resolved in v2 by making the approved direction **the incumbent** —
-a new direction only wins if the agent can argue in writing that it is clearly better, and if
-it cannot, the incumbent stands. The deployed fonts survive either way unless a winning
-direction genuinely needs different faces.
+## ⚠️ Read these four before touching any of it
+
+1. **There are FIVE tier-3 apps, not the four the brief lists.** Bazarr arrived the same day
+   the brief was written (DECISION 98). It is in `TIER3`, in the hook, and skinned.
+2. **`login.html` is skinned too**, so `pacman -Qkk` reports **2** altered files for each
+   Servarr app, not the 1 that §8 check 10 calls "the ONLY acceptable result". Deliberate:
+   all three run `AuthenticationMethod=Forms`, so it is the only page a logged-out browser
+   ever sees. Reasoning in DECISION 99; do not "fix" it back.
+3. **The hook is proven live on NZBGet only.** The other four are not in
+   `/var/cache/pacman/pkg/`, so the version-identical reinstall could not be run for them.
+   If you want that proof, it needs a re-download — ask first.
+4. **`<Theme>dark</Theme>` is a write under `/var/lib/<app>/`**, which §6.13 otherwise
+   forbids. It is the "free win" §4 explicitly instructs; Servarr persists that API field to
+   `config.xml` rather than its database. Flagged, not hidden.
 
 ## Aim right now
-Hand **v2** to the implementing agent as its entire prompt. Its first deliverable is
-`server/docs/WEB_UI_FINDINGS.md` — research, screenshots of every page, three art directions
-scored against the incumbent, and the reasoning for the pick. **Nothing gets built before
-that file exists.**
+Nothing mid-flight on the web surface. Remaining work is unrelated: see "Still outstanding".
 
-## Process / approach being used
-v2 imposes its own order: **Phase 0 research** (read the repo and the live box; design
-questions to Shawn are forbidden) → **Phase 1 concept** (three directions vs the incumbent,
-self-chosen, justified in writing) → **Phase 2 build** (design system → landing → space →
-offline → Jellyfin theme).
+## Still outstanding (unrelated to the redesign)
+1. **Reboot** — glibc + systemd were upgraded and the running system is still on the old
+   ones. Then confirm a Lutris game renders on the dGPU with `dgpu-exec-v2 -- nvidia-smi`.
+2. Bazarr has **pre-existing** errors from its fresh install, unrelated to the skin:
+   `KeyError: 'audio_only_include'`, a `FOREIGN KEY constraint failed` on a Solo Leveling
+   episode, and Sonarr sync timeouts. All timestamped before this work. See
+   `WEB_UI_FINDINGS.md` §10.2 so they are not misread as fallout.
+3. `luminos-brain safe` has now returned a false `NO` three times by matching the word
+   "install". **Its rule scope needs narrowing.**
+4. ⚠️ **`server/config/Caddyfile` in the repo is STALE — it is missing the Bazarr `:8450`
+   block that is live on the box.** DECISION 98 added it to `/etc/caddy/Caddyfile` on
+   2026-09-13 at 17:51 and never mirrored it back. Restoring the repo copy onto the box
+   today would silently drop Bazarr's front door. **Deliberately not fixed in the redesign
+   commit**, because §8 check 13 requires `git diff --stat -- server/config/Caddyfile` to be
+   empty and mixing the two would make it impossible to tell a config drift from a redesign
+   touching the front door. Mirror it back as its own change. (The one *other* difference is
+   intentional and must stay: the repo redacts the `luminos-space` token, the live file has
+   the real one.)
+5. `/etc/nftables.conf` was also rewritten at 17:51 the same day, with a
+   `.bak-20260913` alongside it. **Checked, not assumed:** `policy drop` still holds and
+   every `accept` is restricted by source address or interface — the only unrestricted ones
+   are ICMP. Nothing is open to the internet.
 
-Shawn reviews from pictures, not descriptions, and has rejected batched visual changes twice
-(DECISION 71, 72). He wants to be informed, not consulted — decisions stated in one line,
-questions reserved for security tradeoffs, irreversible deletion, or money.
+## How to change a skin
+Edit `server/assets/skins/<app>/luminos.css`, then:
 
-**This file doubles as the build log.** AGENTS.md §0.2 forbids a second handoff file, so no
-separate `BUILD_LOG.md` was created.
+```
+rsync -a server/assets/skins/ <box>:/tmp/skins/
+sudo rsync -a /tmp/skins/ /usr/local/share/luminos/skins/
+sudo luminos-skin-apply --check     # dry run, exits 1 if anything would change
+sudo luminos-skin-apply             # apply
+```
 
-## What v2 changes, beyond scope
-- **Three tiers by how much control actually exists.** Tier 1 ours, total freedom. Tier 2
-  **Jellyfin** — 10.11.11 has a real server-side Custom CSS branding field, and it is where
-  Shawn actually spends time. Tier 3 Jellyseerr / *arrs / NZBGet.
-- **Tier 3 cannot be reskinned, verified not assumed.** `caddy list-modules` on the box has
-  **no `replace` / `sub_filter` handler**; theme.park-style injection would need Caddy rebuilt
-  via `xcaddy` — swapping the binary that terminates TLS for all eight site blocks, to change
-  a colour scheme. **Rejected in the brief.** The answer given instead is architectural:
-  **stop linking out, start absorbing** — first-party pages for the one or two things each app
-  is actually opened for, admin panels demoted to rare link-outs.
-- **Artwork exists and nobody uses it** — the largest free visual win available.
-  `/var/lib/{radarr,sonarr}/MediaCover/<id>/` holds posters, fanart, banners and clearlogos at
-  three sizes each, `0664 <app>:media`, and **`luminoshub` is in group `media`** — readable
-  with no privilege change, 28.5 MB over ~16 titles. ⚠️ The obvious route fails:
-  `GET /MediaCover/…` with a valid `X-Api-Key` **302s to `/login`** (session-cookie route, not
-  an API route), so an agent testing via the API concludes there is no artwork. **Read from
-  disk**, through an allowlisted route (§6.9) modelled on the existing `/fonts/` whitelist.
-- **3D is permitted.** v1 banned it on faulty reasoning — "the server is a weak i5" — but
-  **3D renders on the client**; the server only ships bytes. Real constraints are payload over
-  Tailscale, phone battery, and the no-CDN rule meaning the library is vendored. Required:
-  progressive enhancement, static fallback, and a hard "must still be good with WebGL off".
-- **Security went from nine invariants to twelve**, each with a verification command in §8 —
-  adding: do not rebuild Caddy, do not touch nftables or unit `User=`, leave the API-facing
-  Python alone, and path-traversal tests on the new artwork route.
-
-## State — what is DONE
-
-**Step 1 — brief written back and accepted.** Aesthetic is "instrument panel". Tokens,
-type scale and both typefaces are frozen (table below). Shawn said "YES GO".
-
-**Step 2 — tokens + type on the hub, deployed and verified.** The DOM was not touched;
-only the `STYLE` constant, plus the new font route.
-
-- `server/assets/fonts/` created: four subset `.woff2` files, **37,968 bytes total**
-  against a 60 KB budget. Sources and SHA-256 of each are in that folder's `README.md`.
-- `luminos-hub` gained `FONT_DIR` / `FONTS`, a `_send_font()`, a `/fonts/<name>.woff2`
-  route, and a `cache` parameter on `_send()`.
-- Live on the box. Rollback copy at `/usr/local/bin/luminos-hub.bak-2026-09-13`.
-- Fonts installed to `/usr/local/share/luminos/fonts/` (0644, root).
-
-Verified on the box after deploy:
-
-| check | result |
-|---|---|
-| API keys (32-hex) in rendered HTML | **0** |
-| Off-box hosts referenced in HTML | **none** |
-| `http://192.168.2.61:8100/` | **connection refused** (loopback only holds) |
-| `/fonts/archivo-800.woff2` | 200, `font/woff2`, `max-age=31536000, immutable` |
-| `/fonts/../../../etc/passwd` | **404** |
-| `/fonts/nope.woff2` | **404** |
-| hub page weight | 9,300 bytes |
-
-## State — what is IN PROGRESS
-Nothing mid-flight. Awaiting Shawn's look at the step-2 screenshot before starting step 3.
-
-## Next steps (ordered)
-1. **Phase 0 + 1 of v2** — the implementing agent researches the repo and the live box,
-   screenshots every page, and produces `server/docs/WEB_UI_FINDINGS.md` with three art
-   directions scored against the incumbent. Nothing is built before that file exists.
-2. **Phase 2 build**, in v2's order: shared design system (`/app.css`) → landing page →
-   `luminos-space` → `/offline` → Jellyfin Custom CSS theme → whatever absorbing tier 3
-   turns out to justify. Run §8 verification in full and paste the output.
-3. The three unfixed findings below are **build work, not research** — fold them in, do not
-   defer them. The free-space bug in particular is a wrong number on the live page today.
-4. Unrelated and still outstanding: **reboot** (glibc + systemd upgraded, running system is
-   on the old ones), then confirm a Lutris game renders on the dGPU with
-   `dgpu-exec-v2 -- nvidia-smi`.
+Comments and indentation are stripped at install time (that is how the 8 KB budget is met),
+so the repo copy stays readable and `diff`ing installed-vs-git still works line by line. A
+colour-only change never restarts a service; only inserting the `<link>` does, because
+`index.html` is cached at process start while the stylesheet is re-read per request.
 
 ## Key decisions & constraints so far
 
@@ -146,7 +109,29 @@ Every route returning library data or performing a delete keeps `compare_digest`
 membership, so directory traversal is impossible by construction rather than by correct
 escaping. Verified with `/fonts/../../../etc/passwd` → 404.
 
-## Three findings from reading the code — all still to be acted on in step 3
+## Three findings from reading the code — ✅ all three fixed in the build, verified live
+
+Verified 2026-09-13 against the running services, not assumed:
+
+```
+$ curl -s http://127.0.0.1:8100/api/summary        # hub now has BOTH disks, and raw bytes
+"disks":[{"name":"internal","total":940017598464,…,"freeh":"271.2 GB"},
+         {"name":"external","total":491106508800,…,"freeh":"397.8 GB"}]
+
+$ curl -s -D- -o /dev/null http://127.0.0.1:8099/  # space sets its own headers now
+Content-Security-Policy: default-src 'none'; style-src 'self'; script-src 'self'; …
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+Cache-Control: no-store
+```
+
+Finding 1 fixed (the hub gained the `disks` array with the `ismount()` guard), finding 2 fixed
+(headers set at the app level, so the token no longer depends on Caddy's snippet alone), and
+finding 3 fixed in the same change — raw `total`/`used`/`free` sit **alongside** `totalh`/
+`usedh`/`freeh`, so values can animate between polls and `human()` was left untouched.
+
+The original text is kept below because it is the only record of what the numbers were wrong
+*by*:
 
 1. **The hub is reporting the wrong free space, and has been.** `build_summary()` calls
    `shutil.disk_usage("/srv/media")` and nothing else, so `/srv/external` is invisible.
@@ -222,8 +207,13 @@ Verified on the box:
 - `curl http://127.0.0.1:7878/Content/styles.css` → `200 text/css`. `Content/` is served raw,
   so `Content/luminos.css` + one `<link>` in `index.html` is a complete reskin. This is
   theme.park's documented *native* install method. **Caddy is not involved.**
-- **NZBGet is the easiest of the five, not the hardest** — `/usr/share/nzbget/webui/` with
-  plain `index.html`, `style.css`, `dark-theme.css`, `light-theme.css`.
+- ~~**NZBGet is the easiest of the five, not the hardest**~~ — **this turned out to be wrong
+  too, and is corrected in `WEB_UI_FINDINGS.md` §9.3.** Its files are indeed plain, but it is
+  Bootstrap 2 with **no custom properties anywhere**, so there is no token layer to redeclare
+  and the skin has to name ~120 selectors by hand. Its packaged `dark-theme.css` is also
+  incomplete — 45 light surfaces it never covers. It is the **hardest** of the five. Bazarr,
+  which did not exist when this was written, is the easiest: Mantine 7, a real token layer,
+  2322 B of skin.
 - **Jellyseerr is the only genuinely hard one** — Next.js SSR, no `.html` anywhere under
   `.next/server`, CSS in content-hashed chunks whose names change on every upgrade. It got
   its own tier 4 in the brief: leave stock, absorb the request flow instead.

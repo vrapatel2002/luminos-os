@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""Install the Luminos skins. [CHANGE: claude-code | 2026-09-13]
+
+    luminos-skin-apply              # everything
+    luminos-skin-apply --jellyfin   # just Jellyfin
+    luminos-skin-apply --check      # report, change nothing
+
+Idempotent by design: it compares what is installed against what is in the repo and
+writes only on a difference, so a pacman hook can call it after every upgrade without
+churning files or bouncing services.
+
+Two different mechanisms, because the apps are different:
+
+  Jellyfin (tier 2) has a supported server-wide Custom CSS field. It is set through
+  Jellyfin's own API, not by editing /etc/jellyfin/branding.xml underneath a running
+  service -- a service that rewrites that file from memory on shutdown and would
+  silently undo a disk edit.
+
+  Radarr / Sonarr / Prowlarr / NZBGet (tier 3) ship a plain static frontend. A
+  stylesheet is dropped beside the app's own, and one <link> is added to index.html.
+  Nothing else is touched: no .js, nothing under /var/lib/<app>/, no unit files. Those
+  paths are package-owned, so `pacman -Syu` deletes this work without warning -- which
+  is the entire reason this script and the pacman hook exist.
+
+Stdlib only. Run as root.
+"""
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+ASSETS = os.environ.get("LUMINOS_SKIN_ASSETS", "/usr/local/share/luminos/skins")
+JELLYFIN_DB = "/var/lib/jellyfin/data/jellyfin.db"
+JELLYFIN_URL = "http://127.0.0.1:8096"
+# Marks our <link> so a re-run can find and replace it instead of stacking a second one.
+# It must be an HTML comment: a CSS comment here is just a text node, and the browser
+# hoists stray text out of <head> and paints it at the top of the page.
+MARK = "<!--luminos-skin-->"
+HEADER = "/* luminos-skin | source: luminos-os/server/assets/skins/ */\n"
+
+# app -> (pages to add the <link> to, directory the app serves stylesheets from,
+#         href those pages use)
+#
+# login.html is in the list for the Servarr three because it is a separate static file
+# with its own <style> block, and it is the only one of their pages a logged-out browser
+# ever sees. It reads the same custom properties, so one extra <link> themes it too.
+TIER3 = {
+    "radarr":   (("/usr/lib/radarr/bin/UI/index.html",
+                  "/usr/lib/radarr/bin/UI/login.html"),
+                 "/usr/lib/radarr/bin/UI/Content", "/Content/luminos.css"),
+    "sonarr":   (("/usr/lib/sonarr/bin/UI/index.html",
+                  "/usr/lib/sonarr/bin/UI/login.html"),
+                 "/usr/lib/sonarr/bin/UI/Content", "/Content/luminos.css"),
+    "prowlarr": (("/usr/lib/prowlarr/bin/UI/index.html",
+                  "/usr/lib/prowlarr/bin/UI/login.html"),
+                 "/usr/lib/prowlarr/bin/UI/Content", "/Content/luminos.css"),
+    "nzbget":   (("/usr/share/nzbget/webui/index.html",),
+                 "/usr/share/nzbget/webui", "luminos.css"),
+    # Bazarr is not in the brief -- DECISION 98 installed it the same day the brief was
+    # written, so §4 lists four tier-3 apps and there are five. Same class of target:
+    # package-owned static frontend, `/assets/` served raw, empty base_url.
+    "bazarr":   (("/opt/bazarr/frontend/build/index.html",),
+                 "/opt/bazarr/frontend/build/assets", "/assets/luminos.css"),
+}
+
+# Radarr, Sonarr and Prowlarr are one frontend wearing three brand colours, so they
+# share a stylesheet and add a few lines each rather than carrying three copies of it.
+SHARED = {"radarr": "servarr", "sonarr": "servarr", "prowlarr": "servarr"}
+
+changed = []
+checked = []
+
+
+def note(what, did):
+    (changed if did else checked).append(what)
+    print(("changed  " if did else "already  ") + what)
+
+
+def read(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def skin(app):
+    """The stylesheet as installed: the shared base, if the app has one, then its own,
+    with the prose stripped.
+
+    The sources carry long comments explaining why each rule exists -- that is the part
+    worth keeping in the repo, and the part a phone should never download. §7 caps a
+    tier-3 skin at 8 KB, which is a budget on bytes over the wire, so the comments come
+    out here and one attribution line goes back in.
+
+    Indentation goes too -- with the comments gone it is only aligning a flat list, and
+    the four files land within a few hundred bytes of the cap without it. Nothing else
+    is rewritten: still one declaration per line, no selector merging, so `diff`ing what
+    is installed against what is in git stays a readable operation."""
+    names = [SHARED[app]] if app in SHARED else []
+    names.append(app)
+    parts = [read(os.path.join(ASSETS, n, "luminos.css")) for n in names]
+    if None in parts:
+        return None
+    css = re.sub(r"/\*.*?\*/", "", "".join(parts), flags=re.S)
+    lines = [ln.strip() for ln in css.splitlines()]
+    return HEADER + "\n".join(ln for ln in lines if ln) + "\n"
+
+
+# ---------------------------------------------------------------- jellyfin
+
+def jellyfin_token():
+    """Jellyfin's admin key, from its own database. Read-only: this script never
+    writes there, it only needs a credential to talk to the API."""
+    con = sqlite3.connect("file:%s?mode=ro" % JELLYFIN_DB, uri=True)
+    try:
+        row = con.execute("select AccessToken from ApiKeys "
+                          "where Name = ? limit 1", ("luminos-admin",)).fetchone()
+    finally:
+        con.close()
+    if not row:
+        sys.exit("no 'luminos-admin' API key in Jellyfin -- create one in "
+                 "Dashboard > API Keys and re-run")
+    return row[0]
+
+
+def jellyfin_call(token, path, body=None):
+    req = urllib.request.Request(
+        JELLYFIN_URL + path,
+        data=json.dumps(body).encode() if body is not None else None,
+        method="POST" if body is not None else "GET",
+        headers={"Authorization": 'MediaBrowser Token="%s"' % token,
+                 "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as f:
+        raw = f.read()
+    return json.loads(raw) if raw else None
+
+
+def do_jellyfin(check):
+    want = read(os.path.join(ASSETS, "jellyfin", "luminos.css"))
+    if want is None:
+        sys.exit("missing %s/jellyfin/luminos.css" % ASSETS)
+    token = jellyfin_token()
+    cfg = jellyfin_call(token, "/System/Configuration/branding") or {}
+    if (cfg.get("CustomCss") or "") == want:
+        return note("jellyfin custom css", False)
+    if check:
+        return note("jellyfin custom css", True)
+    cfg["CustomCss"] = want
+    jellyfin_call(token, "/System/Configuration/branding", cfg)
+    note("jellyfin custom css", True)
+
+
+# ---------------------------------------------------------------- tier 3
+
+def do_tier3(app, check):
+    pages, content_dir, href = TIER3[app]
+    want = skin(app)
+    if want is None:
+        return note("%s (no skin in assets)" % app, False)
+    if not os.path.exists(pages[0]):
+        return note("%s (not installed)" % app, False)
+
+    css_path = os.path.join(content_dir, "luminos.css")
+    if read(css_path) != want:
+        if not check:
+            os.makedirs(content_dir, exist_ok=True)
+            with open(css_path, "w", encoding="utf-8") as f:
+                f.write(want)
+            os.chmod(css_path, 0o644)
+        note("%s stylesheet" % app, True)
+    else:
+        note("%s stylesheet" % app, False)
+
+    link = '<link rel="stylesheet" href="%s">%s' % (href, MARK)
+    wrote = False
+    for page in pages:
+        name = "%s %s" % (app, os.path.basename(page))
+        html = read(page)
+        if html is None:
+            note("%s (unreadable)" % name, False)
+            continue
+        if link in html:
+            note(name, False)
+            continue
+        if check:
+            note(name, True)
+            continue
+        # Drop any previous marked line first, so re-running after an upgrade that
+        # restored the packaged file cannot stack two <link>s.
+        html = re.sub(r'<link[^>]*>' + re.escape(MARK), "", html)
+        if "</head>" not in html:
+            note("%s (no </head>)" % name, False)
+            continue
+        # Last stylesheet wins in a tie, so ours goes immediately before </head>.
+        html = html.replace("</head>", link + "</head>", 1)
+        if not os.path.exists(page + ".luminos-orig"):
+            shutil.copy2(page, page + ".luminos-orig")
+        with open(page, "w", encoding="utf-8") as f:
+            f.write(html)
+        os.chmod(page, 0o644)
+        note(name, True)
+        wrote = True
+
+    # All four read their HTML once at start and serve it from memory -- verified by
+    # editing the file and curl'ing, which kept returning the packaged markup. So a
+    # <link> only takes effect after a bounce. Nothing is reconfigured: the unit is
+    # restarted exactly as it is on disk. The stylesheet itself is re-read per request,
+    # so a colour change on its own never reaches this line.
+    if wrote:
+        subprocess.run(["systemctl", "restart", app + ".service"], check=False)
+        note("%s restarted" % app, True)
+
+
+def main():
+    args = set(sys.argv[1:])
+    check = "--check" in args
+    args.discard("--check")
+    if args - {"--jellyfin"} - set("--" + a for a in TIER3):
+        sys.exit(__doc__)
+    only = set(a.lstrip("-") for a in args)
+
+    if not only or "jellyfin" in only:
+        do_jellyfin(check)
+    for app in TIER3:
+        if not only or app in only:
+            do_tier3(app, check)
+
+    if check and changed:
+        print("\n%d item(s) would change" % len(changed))
+        sys.exit(1)
+    print("\n%d changed, %d already correct" % (len(changed), len(checked)))
+
+
+if __name__ == "__main__":
+    main()

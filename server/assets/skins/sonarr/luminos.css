@@ -1,0 +1,14 @@
+/* Luminos — Sonarr delta. [CHANGE: claude-code | 2026-09-13]
+   Appended to skins/servarr/luminos.css by `luminos-skin-apply`. Everything shared lives
+   there; this file is only what Sonarr names differently from Radarr and Prowlarr.
+   Season and episode rows get the step above surface so a expanded series reads as
+   nested rather than as one flat slab. */
+:root{
+  --sonarrBlue:var(--lx-accent)!important;
+  --themeAlternateBlue:var(--lx-accent-hi)!important;
+  --seriesBackgroundColor:var(--lx-surface)!important;
+  --addSeriesBackgroundColor:var(--lx-surface)!important;
+  --seasonBackgroundColor:var(--lx-raise)!important;
+  --episodesBackgroundColor:var(--lx-raise)!important;
+  --collapseButtonBackgroundColor:var(--lx-line)!important;
+}

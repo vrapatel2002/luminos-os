@@ -1,0 +1,183 @@
+/* Luminos — NZBGet skin. [CHANGE: claude-code | 2026-09-13]
+   Dropped into /usr/share/nzbget/webui/ and loaded by one extra <link> before </head>,
+   by `luminos-skin-apply`.
+
+   Why this one is written by hand while the Servarr three are a variable list.
+
+   NZBGet's frontend is Bootstrap 2 vintage: no custom properties anywhere, colours
+   hard-coded per selector across style.css (56 KB) plus a light-theme.css and a
+   dark-theme.css that the in-app switcher swaps by rewriting one <link>'s href. So
+   there is no token layer to redeclare -- this has to name the selectors.
+
+   That is why it is an *override layer* rather than the third theme file the app's
+   switcher implies. Adding "luminos" to the switcher means editing index.js to add the
+   button, and §6.13 draws the line at .css files plus one <link>. As a layer it also
+   lands on top of whichever theme is active, so the page is right whether the switcher
+   says light or dark and the user can still flip it without losing this.
+
+   The selector list below is exactly dark-theme.css's own list, remapped. Where it
+   loses to a more specific rule in style.css, `!important` appears -- only there.
+
+   Bootstrap 2 paints buttons and bars with -webkit-gradient stacks, so a flat colour
+   only shows once the gradient is gone. Every rule below uses the `background:`
+   shorthand rather than `background-color:` for exactly that reason -- the shorthand
+   resets background-image to none on its own, so no separate `background-image:none`
+   is needed and none appears here. Flat is the look.
+
+   No @font-face, deliberately: §7. */
+
+:root{
+  --lx-bg:#0F0D0B; --lx-surface:#17140F; --lx-raise:#211C16; --lx-sunk:#0B0908;
+  --lx-line:#2A2520; --lx-line-hi:#3D362E;
+  --lx-text:#F2EDE4; --lx-muted:#8C8279; --lx-faint:#5A534B;
+  --lx-accent:#FF7A18; --lx-accent-hi:#FF8C35; --lx-accent-sunk:#2E1A0B;
+  --lx-ok:#3FBF6A; --lx-warn:#E8C547; --lx-danger:#FF4D3D;
+  --lx-r:4px;
+}
+
+/* ---------------------------------------------------------------- field */
+html{scrollbar-color:var(--lx-line-hi) var(--lx-bg);scrollbar-width:thin}
+body{background-color:var(--lx-bg);color:var(--lx-text)}
+hr,.nav-list .divider{border-color:var(--lx-line);background:none}
+.navbar-fixed-top .navbar-inner{background:var(--lx-surface);
+  border-color:var(--lx-line);box-shadow:none}
+.modal,.modal-header,.modal-footer,.accordion-heading,.progress-block,
+#TableDragBox,.dropdown-menu{background:var(--lx-surface);
+  border-color:var(--lx-line);color:var(--lx-text)}
+.modal-footer{box-shadow:none}
+#ConfigNav,#ConfigContent .config-header,.config-settitle,.menu-header{
+  background:var(--lx-surface);color:var(--lx-muted);border-color:var(--lx-line)}
+
+/* ---------------------------------------------------------------- text */
+a,.table a,.back{color:var(--lx-accent)}
+a:hover,.table a:hover,.pagination a:hover,#AddDialog_Files a:hover,
+.nav > li > a:hover,.navbar .nav .active > a:hover,
+#ConfigNav.nav-list > .active > a:hover{color:var(--lx-accent-hi)}
+#ConfigNav.nav-list a{color:var(--lx-muted)}
+.help-block,.config-multicaption,.confirm-help-block,#UpdateDialog_Hint p,
+span.help-option-title,.help-block pre.help-desc{color:var(--lx-muted)}
+.txt-info{color:var(--lx-accent)}
+.txt-success{color:var(--lx-ok)}
+.txt-warning{color:var(--lx-warn)}
+.txt-important{color:var(--lx-danger)}
+
+/* ---------------------------------------------------------------- tables
+   The download queue is a table, and it is what this app is for. Zebra striping is
+   one step of warmth rather than a grey, and hover is the only thing that brightens. */
+.table,.table-bordered{background:transparent;border-color:var(--lx-line)}
+.table th,.table td,.table-bordered th,.table-bordered td,
+.table-bordered:not(.table-fixed) td{border-color:var(--lx-line);color:var(--lx-text)}
+.table > thead > tr > th,table > thead > tr > th.table-selector{
+  background:var(--lx-surface);color:var(--lx-muted);border-color:var(--lx-line)}
+.table-striped tbody tr:nth-child(odd) td,
+.table-striped tbody tr:nth-child(odd) th{background:var(--lx-surface)}
+.table tbody tr:hover,.table tbody tr:hover td,.table-hover tbody tr:hover th,
+.table td:hover{background:var(--lx-raise)}
+tr.checked:nth-child(odd),.table tbody tr.checked:hover td,
+.table.check-simple tbody tr.checked:hover td{background:var(--lx-accent-sunk)}
+tr.drag-source > td,.dragover,
+.dragover .table-striped tbody tr:nth-child(odd) td{background:var(--lx-accent-sunk)}
+.table-striped tbody tr.drag-finish td a{color:var(--lx-accent)}
+td:hover span.none-category{color:var(--lx-faint)}
+td.dropdown-cell > div:not(.dropdown-disabled):hover::after{color:var(--lx-accent)}
+div.check,table.table-cancheck tr.checked div.img-check,
+table.table-cancheck tr.checkremove div.img-check{border-color:var(--lx-line-hi)}
+div.check:hover{border-color:var(--lx-accent)}
+
+/* ---------------------------------------------------------------- controls */
+.btn-default,.btn-info,.config-header .btn{
+  background:var(--lx-surface)!important;
+  border-color:var(--lx-line-hi)!important;color:var(--lx-text)!important;
+  box-shadow:none!important;text-shadow:none!important;border-radius:var(--lx-r)}
+.btn-default:hover:not(.btn-active),.btn-info:hover{
+  background:var(--lx-line)!important;
+  border-color:var(--lx-line-hi)!important;color:var(--lx-text)!important}
+.btn-primary,.btn-active,.badge-active{
+  background:var(--lx-accent)!important;
+  border-color:var(--lx-accent)!important;color:var(--lx-bg)!important;
+  box-shadow:none!important;text-shadow:none!important}
+.btn-primary:hover{background:var(--lx-accent-hi)!important;color:var(--lx-bg)!important}
+.btn-danger{background:var(--lx-danger)!important;
+  border-color:var(--lx-danger)!important;color:var(--lx-bg)!important;
+  box-shadow:none!important;text-shadow:none!important}
+.btn-danger:hover{background:#FF6255!important;
+  color:var(--lx-bg)!important}
+.table .btn-success:hover{background:var(--lx-ok)!important;color:var(--lx-bg)!important}
+.btn-active .caret,.search-caret-button .caret,.focused .search-caret-button .caret,
+.dropup .caret,.navbar-fixed-bottom .dropdown .caret,#PlayCaret{
+  border-top-color:var(--lx-accent);border-bottom-color:var(--lx-accent)}
+input,select,.add-on,.modal .input-xlarge,.uneditable-mulitline-input,
+#FeedFilterDialog_FilterLines,#FeedFilterDialog_FilterBlock,
+#FeedFilterDialog_FilterClient,#FeedFilterDialog_FilterHeader,
+#ConfigContent.search div.control-group.multiset{
+  background:var(--lx-sunk);color:var(--lx-text);
+  border-color:var(--lx-line-hi);border-radius:var(--lx-r);box-shadow:none}
+input:focus,select:focus,.btn-switch input:focus{
+  border-color:var(--lx-accent);box-shadow:none;outline:none}
+#FeedFilterDialog_FilterNumbers .lineno{color:var(--lx-faint)}
+.search .option-name:hover{color:var(--lx-accent)}
+.dropdown-menu li:not(:hover) .empty-item{color:var(--lx-faint)}
+.dropdown-warning,.alert-inverse{background:var(--lx-accent-sunk);border-color:var(--lx-accent);color:var(--lx-text)}
+.log-dialog .modal-body pre,.table .update-release-notes{
+  background:var(--lx-sunk);border-color:var(--lx-line);color:var(--lx-text)}
+
+/* ---------------------------------------------------------------- progress
+   A bar that is running is the accent; a bar that is merely allocated is a line.
+   Paused keeps its own amber so "not moving" cannot be mistaken for "slow". */
+.progress,.progress-none.progress-striped .bar{background:var(--lx-line);box-shadow:none;border-radius:var(--lx-r)}
+.progress .bar{background:var(--lx-accent);box-shadow:none}
+.progress-warning .bar,.progress .bar-warning{background:var(--lx-warn)}
+.progress-danger .bar,.progress .bar-danger{background:var(--lx-danger)}
+.checked .progress{background:var(--lx-accent-sunk)}
+.badge,#TableDragBox .badge{background:var(--lx-line-hi);
+  color:var(--lx-text);text-shadow:none}
+
+/* ---------------------------------------------------------------- the leftovers
+   dark-theme.css is incomplete: it never touches Bootstrap 2's own light surfaces, so
+   on the packaged dark theme an alert box, a <pre>, a disabled input and a popover all
+   stay cream. Found by diffing every `background:#xxx` in style.css and bootstrap.css
+   that is lighter than #ccc against the selectors dark-theme.css actually overrides --
+   45 of them, all below. The first one visible in practice is "Communication error",
+   which is the box NZBGet shows when it loses the backend. */
+.alert{background:var(--lx-accent-sunk);
+  border-color:var(--lx-line-hi);color:var(--lx-text);text-shadow:none;
+  border-radius:var(--lx-r)}
+.alert-danger,.alert-error,
+.control-group.error .input-append .add-on,
+.control-group.error .input-prepend .add-on{
+  background:rgba(255,77,61,.12);border-color:var(--lx-danger);color:var(--lx-text)}
+.alert-success,.control-group.success .input-append .add-on,
+.control-group.success .input-prepend .add-on{
+  background:rgba(63,191,106,.12);border-color:var(--lx-ok);color:var(--lx-text)}
+.alert-info{background:rgba(255,122,24,.12);border-color:var(--lx-accent);
+  color:var(--lx-text)}
+.control-group.warning .input-append .add-on,
+.control-group.warning .input-prepend .add-on{
+  background:rgba(232,197,71,.12);border-color:var(--lx-warn);color:var(--lx-text)}
+.btn{background:var(--lx-surface);border-color:var(--lx-line-hi);
+  color:var(--lx-text);text-shadow:none;box-shadow:none;border-radius:var(--lx-r)}
+.btn:hover,.btn:active,.btn.active,.btn.disabled,.btn[disabled],
+.btn-group.open .btn.dropdown-toggle{background:var(--lx-line);
+  color:var(--lx-text)}
+.well,.form-actions,.hero-unit,.breadcrumb,.popover-title,.pagination .active a{
+  background:var(--lx-surface);border-color:var(--lx-line);
+  color:var(--lx-text);text-shadow:none}
+.popover-content,.pager a,.pager .disabled a,.pager .disabled a:hover,
+.nav-tabs > .active > a,.nav-tabs > .active > a:hover{
+  background:var(--lx-surface);border-color:var(--lx-line);color:var(--lx-text)}
+.pager a:hover{background:var(--lx-line)}
+code,pre{background:var(--lx-sunk);border-color:var(--lx-line);color:var(--lx-text)}
+.uneditable-input,input[type="file"],.navbar-search .search-query:focus,
+.navbar-search .search-query.focused{background:var(--lx-sunk);color:var(--lx-text);
+  border-color:var(--lx-line-hi)}
+input[disabled],input[readonly],select[disabled],select[readonly],
+textarea[disabled],textarea[readonly]{background:var(--lx-bg);color:var(--lx-faint)}
+.dropdown-menu .divider{background:var(--lx-line);border-color:var(--lx-line)}
+.navbar .btn-navbar .icon-bar{background:var(--lx-muted);box-shadow:none}
+input[type=checkbox],input[type=radio]{accent-color:var(--lx-accent)}
+
+/* ---------------------------------------------------------------- scrollbars */
+::-webkit-scrollbar-track-piece{background-color:var(--lx-bg)}
+::-webkit-scrollbar-thumb:horizontal,
+::-webkit-scrollbar-thumb:vertical{background:var(--lx-line-hi);border-radius:2px}
+::-webkit-calendar-picker-indicator{filter:invert(1)}

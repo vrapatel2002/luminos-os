@@ -1,0 +1,11 @@
+/* Luminos — Prowlarr delta. [CHANGE: claude-code | 2026-09-13]
+   Appended to skins/servarr/luminos.css by `luminos-skin-apply`. Everything shared lives
+   there; this file is only what Prowlarr names differently from Radarr and Sonarr.
+
+   `--chartColors` and `--chartColorsDiversified` are left alone on purpose. They are
+   comma-separated *lists* consumed by the stats charts, and a chart that plots twelve
+   indexers needs twelve distinguishable hues -- collapsing them onto one accent would
+   make the page prettier and useless. */
+:root{
+  --prowlarrOrange:var(--lx-accent)!important;
+}

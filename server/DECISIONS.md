@@ -2203,3 +2203,88 @@ backing up nothing. Both are the owner's call, not an agent's.
 3.12.13` for an AUR subtitle daemon on a different machine. Overridden with `--reason`. That rule
 has now blocked `vulkan-swrast`, `vulkan-intel` and `bazarr`; **it is matching the word "install"
 and needs its scope narrowed.**
+
+---
+
+## DECISION 99 — The media server's web surface is one product now, including the apps we don't own
+# [CHANGE: claude-code | 2026-09-13]
+
+Seven admin panels behind a link list, each shipped by a different project with a different
+idea of what a button looks like. DECISION 84 put them all behind one front door; this puts
+them all behind one *appearance*. Brief and full research trail: `server/docs/WEB_UI_PROMPT.md`
+and `server/docs/WEB_UI_FINDINGS.md`.
+
+**Four tiers, by how much control we actually have.**
+
+| tier | what | mechanism |
+|---|---|---|
+| 1 | `luminos-hub` `/` and `/offline`, `luminos-space` | ours — rebuilt from zero on one token set, `/app.css` |
+| 2 | Jellyfin | supported server-wide Custom CSS, set through its own API |
+| 3 | Radarr, Sonarr, Prowlarr, NZBGet, **Bazarr** | package-owned static frontend, skinned on disk |
+| 4 | Jellyseerr | cannot be skinned — its request flow was absorbed instead |
+
+**The tier-3 decision is the one with a cost, so it is the one worth recording.**
+
+These five ship their frontends as **package-owned files**. `pacman -Syu` overwrites
+`index.html` and deletes any stylesheet we add, silently. That is not a reason to avoid the
+route — it is a reason to make the route repeatable:
+
+- Sources live in the repo at `server/assets/skins/<app>/luminos.css`.
+- `server/scripts/luminos-skin-apply` installs them, comparing before writing, so it is safe to
+  run on every upgrade. `--check` reports without changing anything.
+- `server/config/pacman-hooks/luminos-skin.hook` → `/etc/pacman.d/hooks/` re-applies after any
+  transaction that touches those paths. It triggers on **paths, not package names**, so a
+  rename (`radarr-bin` → `radarr`) does not silently disarm it.
+
+**Proven by doing it, not by reading about it.** A version-identical `pacman -U` of
+`nzbget-26.2-3` restored the packaged `index.html`; the hook fired as post-transaction step 4/4,
+re-added the `<link>` and restarted the unit. ⚠️ **Only NZBGet was proven this way** — the
+other four are not in `/var/cache/pacman/pkg/`, so the same test would need a re-download. The
+argument for them is by construction: identical hook, identical mechanism, against paths
+`pacman -Qlq` confirms are package-owned.
+
+**Caddy was deliberately not used**, and this is the interesting rejection. A `handle` +
+`file_server` block per app would intercept the stylesheet with **zero packaged files touched
+and no upgrade exposure at all** — engineering-wise the better answer. Refused because it means
+editing the config of the process that terminates TLS for all eight site blocks in order to
+change a colour. The on-disk route plus a hook keeps the blast radius on presentation files.
+Recorded in full at `WEB_UI_FINDINGS.md` §4.1 in case that trade is ever worth revisiting.
+
+**What the skins are made of.** Not `!important` wars against compiled class names — those are
+content-hashed (`.Button-danger-vthZW`) and rot on upgrade. Variable names are a stable API, so
+four of the five are lists of custom-property declarations that **never select an element** and
+therefore cannot break a layout:
+
+- **Servarr** sets ~136 theme variables as *inline styles* on `<html>` via
+  `documentElement.style.setProperty()`. An author `!important` declaration outranks a
+  non-important style attribute, which is the entire reason this works. One shared sheet plus a
+  ~20-line delta each, because the three are one frontend in three brand colours.
+- **Bazarr** is Mantine 7 — a real token layer, 2322 B of skin. Its primary is a custom `brand`
+  ramp generated at runtime, *not* the `blue` ramp its stylesheet declares and binds; see
+  `WEB_UI_FINDINGS.md` §10.1.
+- **NZBGet** is the exception and the hard one: Bootstrap 2, no custom properties anywhere, so
+  it has to name selectors. Its own `dark-theme.css` turns out to be **incomplete** — 45
+  Bootstrap light surfaces it never covers, including the "Communication error" box, i.e. the
+  thing shown exactly when something is already wrong. All 45 closed.
+
+**Two writes that go beyond what §6.13 anticipated, both deliberate, both flagged:**
+
+1. **`login.html` is skinned as well as `index.html`** for the Servarr three, so `pacman -Qkk`
+   reports 2 altered files each rather than 1. All three run `AuthenticationMethod=Forms`, so
+   the login page is the only surface a logged-out browser ever sees — and a themed app behind
+   a stock-blue login screen fails the goal at the first frame. Same class of edit: an HTML
+   file, one `<link>`, no `.js`.
+2. **`<Theme>dark</Theme>` in `/var/lib/<app>/config.xml`** for the Servarr three, and the
+   equivalent in Bazarr's `config.yaml`. §4 instructs "spend the free win" and set `theme` via
+   the API; Servarr persists that field to `config.xml`, not its database. One documented
+   setting through the app's own supported API — the same act as clicking it in the UI — and it
+   is what makes the ~100 variables the skins do *not* override fall back to dark.
+
+**Everything else held.** No `.js` altered, nothing else under `/var/lib/<app>/`, no
+`systemctl edit`, no unit `User=` changed, `nftables.conf` untouched, and
+`git diff --stat -- server/config/Caddyfile` is empty. `index.html` is cached at start rather
+than re-read per request — verified, contradicting the brief's guess — so the script restarts a
+unit **only when it actually rewrote a page**; the stylesheet itself is re-read per request, so
+iterating on colour never bounces a service.
+
+Reverting is `rm` the skin, restore `<page>.luminos-orig`, delete the hook.

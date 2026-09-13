@@ -1,0 +1,126 @@
+/* Luminos — Bazarr skin. [CHANGE: claude-code | 2026-09-13]
+   Dropped into /opt/bazarr/frontend/build/assets/ and loaded by one extra <link> before
+   </head>, by `luminos-skin-apply`.
+
+   Bazarr is not in the brief. It did not exist on this box when WEB_UI_PROMPT.md v3 was
+   written -- DECISION 98 installed it the same day -- so §4 enumerates four tier-3 apps and
+   there are five. It is skinned here because leaving it stock would leave exactly the seam
+   the whole exercise exists to close: a foreign panel on :8450, one tap from the rest.
+
+   Same class of target as the other four, verified the same way:
+     $ pacman -Qo /opt/bazarr/frontend/build/index.html
+       ... is owned by bazarr 1.6.0-3
+   package-owned static frontend, so an upgrade clobbers it and the pacman hook covers it.
+
+   The stack is Mantine 7, which declares 965 custom properties -- a real token layer, and
+   declared in CSS rather than set inline like Servarr. Almost everything derives from a few
+   ramps and a dozen semantic names, so this file is ~40 declarations, not NZBGet's ~120.
+
+   Three things had to be found by looking rather than assuming, and the first two were
+   caught by screenshotting a page I had already convinced myself was finished.
+
+   1. THE PRIMARY IS NOT `blue`. The static CSS declares a full `--mantine-color-blue-0..9`
+      ramp and binds `--mantine-primary-color-*` to it, which reads exactly like the answer.
+      It is not. The JS theme sets `primaryColor:"brand"` with a custom ten-step ramp
+      (`colorBrand0..9` = #ae3ec9, #9c36b5, #862e9c ... i.e. Mantine's `grape`), and Mantine
+      generates `--mantine-color-brand-*` at runtime as an INLINE style on <html>. That is
+      why `grep mantine-color-brand *.css` finds one incidental hit and no definitions. A
+      whole blue ramp remapped to orange changed nothing visible; the Login button stayed
+      purple. The brand ramp below is what actually repaints it.
+
+   2. THE LIGHT SCHEME HAD TO BE HANDLED, NOT IGNORED. First pass put the overrides on
+      `:root,[data-mantine-color-scheme=dark]`. `:root` applies in *either* scheme, so
+      `--mantine-color-body` went dark everywhere while every light-scheme surface stayed
+      light -- a white login card floating on a black page. The semantic block below is
+      scheme-independent on purpose, so the page lands dark whichever scheme is active. That
+      also matches §2d ("no light theme") and the NZBGet skin's shape: a layer that is right
+      either way beats a layer that assumes.
+
+   3. `blue` IS LEFT ALONE, deliberately. It is not the primary, so remapping it bought
+      nothing, and it is what Mantine draws "info" with. Same rule as the red and green
+      below: status colour is information, and collapsing it onto the accent would make the
+      page tidier and less useful.
+
+   `!important` throughout, for the Servarr reason: the brand ramp and the resolved scheme
+   are written inline on <html>, and an author !important declaration outranks a
+   non-important style attribute. It also settles the tie against
+   `[data-mantine-color-scheme=...]`, which has the same specificity as `:root`.
+
+   Free win taken first, exactly as §4 prescribes for the Servarr three: Bazarr's own
+   `theme` was `auto`, now `dark`, via its own API (`POST /api/system/settings` -> 204).
+
+   Bazarr's theme also sets `fontFamily` to a Helvetica/Arial stack, which §2d bans. Left
+   alone: §7 forbids a tier-3 skin pulling in the fonts, and renaming the family without
+   shipping it only picks a different fallback. This is a repaint, not a re-typesetting. */
+
+:root{
+  --lx-bg:#0F0D0B; --lx-surface:#17140F; --lx-raise:#211C16;
+  --lx-line:#2A2520; --lx-line-hi:#3D362E;
+  --lx-text:#F2EDE4; --lx-muted:#8C8279; --lx-faint:#5A534B;
+  --lx-accent:#FF7A18; --lx-accent-hi:#FF8C35; --lx-accent-sunk:#2E1A0B;
+  --lx-danger:#FF4D3D;
+
+  /* ---------------------------------------------------------------- the primary
+     The ten steps Mantine generates from the JS `brand` array, overridden in place. Step 6
+     is the default filled colour and therefore the accent proper; the rest ramp either side
+     so tints and hovers stay in family. */
+  --mantine-color-brand-0:#FFF1E4!important;
+  --mantine-color-brand-1:#FFE0C6!important;
+  --mantine-color-brand-2:#FFC894!important;
+  --mantine-color-brand-3:#FFAD5E!important;
+  --mantine-color-brand-4:#FF9636!important;
+  --mantine-color-brand-5:#FF861F!important;
+  --mantine-color-brand-6:var(--lx-accent)!important;
+  --mantine-color-brand-7:#E56A10!important;
+  --mantine-color-brand-8:#CC5D0C!important;
+  --mantine-color-brand-9:#B35008!important;
+
+  /* Mantine picks brand-8 for a filled button in dark and brand-6 in light. Both are pinned
+     so the primary action is the same brightest thing on the page in either scheme -- it is
+     the one job that control has. */
+  --mantine-color-brand-filled:var(--lx-accent)!important;
+  --mantine-color-brand-filled-hover:var(--lx-accent-hi)!important;
+  --mantine-color-brand-light:var(--lx-accent-sunk)!important;
+  --mantine-color-brand-light-hover:#3D2310!important;
+  --mantine-color-brand-light-color:var(--lx-accent-hi)!important;
+  --mantine-color-brand-outline:var(--lx-accent)!important;
+  --mantine-color-brand-outline-hover:rgba(255,122,24,.06)!important;
+  --mantine-primary-color-contrast:var(--lx-bg)!important;
+  --mantine-color-anchor:var(--lx-accent)!important;
+
+  /* ---------------------------------------------------------------- the surfaces
+     Semantic names, not a ramp, because these are the ones whose *value* differs per scheme
+     while the name does not. Pinning them here is what makes the light scheme land dark
+     instead of leaving a white card on a black page. */
+  --mantine-color-body:var(--lx-bg)!important;
+  --mantine-color-white:var(--lx-surface)!important;
+  --mantine-color-text:var(--lx-text)!important;
+  --mantine-color-default:var(--lx-line)!important;
+  --mantine-color-default-hover:#332D26!important;
+  --mantine-color-default-border:var(--lx-line-hi)!important;
+  --mantine-color-default-color:var(--lx-text)!important;
+  --mantine-color-dimmed:var(--lx-muted)!important;
+  --mantine-color-placeholder:var(--lx-faint)!important;
+  --mantine-color-error:var(--lx-danger)!important;
+
+  /* ---------------------------------------------------------------- the greyscale
+     Mantine's dark ramp is a neutral grey (#c9c9c9 -> #141414); this is the same ten steps
+     walked through the warm palette, so anything still deriving from it lands in family. */
+  --mantine-color-dark-0:#F2EDE4!important;
+  --mantine-color-dark-1:#D9D2C7!important;
+  --mantine-color-dark-2:#8C8279!important;
+  --mantine-color-dark-3:#5A534B!important;
+  --mantine-color-dark-4:#3D362E!important;
+  --mantine-color-dark-5:#332D26!important;
+  --mantine-color-dark-6:#2A2520!important;
+  --mantine-color-dark-7:var(--lx-raise)!important;
+  --mantine-color-dark-8:var(--lx-surface)!important;
+  --mantine-color-dark-9:var(--lx-bg)!important;
+}
+
+/* red and green are left alone on purpose, here and in the Servarr sheet. Bazarr's entire
+   readout is "does this episode have a subtitle or not", and that is carried by colour. */
+
+/* Same closing rule as the other four: checkboxes and radios are painted by the browser,
+   not by the token layer, so without this the one foreign colour left is a tick box. */
+input[type=checkbox],input[type=radio]{accent-color:var(--lx-accent)}

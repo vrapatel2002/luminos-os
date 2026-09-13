@@ -1,0 +1,219 @@
+/* Luminos — shared Radarr / Sonarr / Prowlarr skin. [CHANGE: claude-code | 2026-09-13]
+   Installed by `luminos-skin-apply` into each app's own Content/ directory, then loaded
+   by one extra <link> before </head>. Concatenated with the app's own luminos.css, which
+   carries only that app's brand variable.
+
+   Why this file is nothing but variables.
+
+   The Servarr frontend is already fully tokenised: its ~250 KB compiled stylesheet
+   contains no colour literals at all, only `var(--pageBackground)`, `var(--linkColor)`
+   and so on. The values are not in any stylesheet either -- the bundle does
+
+       Object.entries(themes[theme]).forEach(([k, v]) =>
+         document.documentElement.style.setProperty(`--${k}`, v))
+
+   so all ~136 land as *inline styles on <html>*. That is the whole reason every line
+   below ends in `!important`: an author `!important` declaration outranks a non-important
+   inline style, and the app never marks its own. Without it nothing here would apply.
+
+   It also means this skin cannot break a layout, because it never selects an element.
+   The compiled class names are content-hashed (`.Button-danger-vthZW`) and change on
+   every upgrade; a skin written against them would rot silently. A skin written against
+   the variable names survives, because those names are the app's own API to its themes.
+
+   No @font-face here, deliberately: §7. This page is only being repainted, and adding a
+   second family to it buys a FOUT and a download for no gain.
+
+   Set each app's `theme` to "dark" (not "auto") before relying on this -- anything below
+   that is left unset then falls back to a dark value rather than a light one. */
+
+:root{
+  --lx-bg:#0F0D0B; --lx-surface:#17140F; --lx-raise:#211C16; --lx-sunk:#0B0908;
+  --lx-line:#2A2520; --lx-line-hi:#3D362E;
+  --lx-text:#F2EDE4; --lx-muted:#8C8279; --lx-faint:#5A534B;
+  --lx-accent:#FF7A18; --lx-accent-hi:#FF8C35; --lx-accent-sunk:#2E1A0B;
+  --lx-ok:#3FBF6A; --lx-warn:#E8C547; --lx-danger:#FF4D3D;
+
+  /* ------------------------------------------------------------------ field */
+  --pageBackground:var(--lx-bg)!important;
+  --pageFooterBackgroud:var(--lx-sunk)!important;   /* app's spelling, not ours */
+  --pageFooterBackground:var(--lx-sunk)!important;
+  --pageHeaderBackgroundColor:var(--lx-surface)!important;
+  --sidebarBackgroundColor:var(--lx-surface)!important;
+  --sidebarActiveBackgroundColor:var(--lx-accent-sunk)!important;
+  --sidebarColor:var(--lx-muted)!important;
+  --toolbarBackgroundColor:var(--lx-surface)!important;
+  --toolbarColor:var(--lx-muted)!important;
+  --toolbarLabelColor:var(--lx-muted)!important;
+  --toolbarMenuItemBackgroundColor:var(--lx-raise)!important;
+  --toolbarMenuItemHoverBackgroundColor:var(--lx-line)!important;
+  --modalBackdropBackgroundColor:rgba(11,9,8,.72)!important;
+  --modalBackgroundColor:var(--lx-surface)!important;
+  --modalCloseButtonHoverColor:var(--lx-accent)!important;
+  --cardBackgroundColor:var(--lx-surface)!important;
+  --cardAlternateBackgroundColor:var(--lx-raise)!important;
+  --cardCenterBackgroundColor:var(--lx-surface)!important;
+  --cardShadowColor:var(--lx-sunk)!important;
+  --logEventsBackgroundColor:var(--lx-surface)!important;
+  --searchIconContainerBackgroundColor:var(--lx-raise)!important;
+  --chartBackgroundColor:var(--lx-surface)!important;
+
+  /* ------------------------------------------------------------------ text */
+  --textColor:var(--lx-text)!important;
+  --defaultColor:var(--lx-text)!important;
+  --white:var(--lx-text)!important;
+  --offWhite:var(--lx-text)!important;
+  --black:var(--lx-bg)!important;
+  --helpTextColor:var(--lx-muted)!important;
+  --dimColor:var(--lx-muted)!important;
+  --disabledColor:var(--lx-faint)!important;
+  --disabledLabelColor:var(--lx-faint)!important;
+  --disabledInputColor:var(--lx-faint)!important;
+  --disabledCheckInputColor:var(--lx-faint)!important;
+  --gray:var(--lx-muted)!important;
+  --darkGray:var(--lx-faint)!important;
+  --mediumGray:var(--lx-muted)!important;
+  --lightGray:var(--lx-text)!important;
+  --menuItemColor:var(--lx-text)!important;
+  --menuItemHoverColor:var(--lx-text)!important;
+  --menuItemHoverBackgroundColor:var(--lx-line)!important;
+  --inverseLabelColor:var(--lx-line-hi)!important;
+  --inverseLabelTextColor:var(--lx-text)!important;
+  --infoTextColor:var(--lx-text)!important;
+  --progressBarFrontTextColor:var(--lx-bg)!important;
+  --progressBarBackTextColor:var(--lx-text)!important;
+  --progressBarBackgroundColor:var(--lx-line)!important;
+
+  /* ------------------------------------------------------------------ lines */
+  --borderColor:var(--lx-line)!important;
+  --defaultBorderColor:var(--lx-line-hi)!important;
+  --tableRowHoverBackgroundColor:rgba(242,237,228,.05)!important;
+
+  /* ------------------------------------------------------------------ signal
+     One accent. Servarr ships #5d9cec for primary and #ffc230/#f9be03 for "selected";
+     both collapse onto ours so there is exactly one colour that means "this one". */
+  --primaryColor:var(--lx-accent)!important;
+  --primaryBackgroundColor:var(--lx-accent)!important;
+  --primaryBorderColor:var(--lx-accent)!important;
+  --primaryHoverBackgroundColor:var(--lx-accent-hi)!important;
+  --primaryHoverBorderColor:var(--lx-accent-hi)!important;
+  --selectedColor:var(--lx-accent)!important;
+  --infoColor:var(--lx-accent)!important;
+  --linkColor:var(--lx-accent)!important;
+  --linkHoverColor:var(--lx-accent-hi)!important;
+  --defaultLinkHoverColor:var(--lx-accent-hi)!important;
+  --iconButtonHoverColor:var(--lx-accent)!important;
+  --iconButtonHoverLightColor:var(--lx-accent)!important;
+  --iconButtonDisabledColor:var(--lx-faint)!important;
+  --toobarButtonHoverColor:var(--lx-accent)!important;     /* app's typo, not ours */
+  --toobarButtonSelectedColor:var(--lx-accent)!important;
+  --sliderAccentColor:var(--lx-accent)!important;
+  --themeBlue:var(--lx-accent)!important;
+  --themeRed:var(--lx-danger)!important;
+  --themeDarkColor:var(--lx-surface)!important;
+  --themeLightColor:var(--lx-line)!important;
+  --purple:var(--lx-accent)!important;
+  --pink:var(--lx-accent)!important;
+  --queueColor:var(--lx-accent)!important;
+  --torrentColor:var(--lx-ok)!important;
+  --usenetColor:var(--lx-accent)!important;
+
+  /* Status keeps three distinct colours. Green/amber/red is the one place a second
+     hue earns its keep -- "grabbed", "missing" and "failed" must not read alike. */
+  --successColor:var(--lx-ok)!important;
+  --successBackgroundColor:var(--lx-ok)!important;
+  --successBorderColor:var(--lx-ok)!important;
+  --successHoverBackgroundColor:#4FD07A!important;
+  --successHoverBorderColor:#4FD07A!important;
+  --warningColor:var(--lx-warn)!important;
+  --warningBackgroundColor:var(--lx-warn)!important;
+  --warningBorderColor:var(--lx-warn)!important;
+  --warningHoverBackgroundColor:#F2D45F!important;
+  --warningHoverBorderColor:#F2D45F!important;
+  --advancedFormLabelColor:var(--lx-warn)!important;
+  --dangerColor:var(--lx-danger)!important;
+  --dangerBackgroundColor:var(--lx-danger)!important;
+  --dangerBorderColor:var(--lx-danger)!important;
+  --dangerHoverBackgroundColor:#FF6255!important;
+  --dangerHoverBorderColor:#FF6255!important;
+
+  /* ------------------------------------------------------------------ controls */
+  --defaultBackgroundColor:var(--lx-surface)!important;
+  --defaultButtonBackgroundColor:var(--lx-surface)!important;
+  --defaultButtonTextColor:var(--lx-text)!important;
+  --defaultHoverBackgroundColor:var(--lx-line)!important;
+  --defaultHoverBorderColor:var(--lx-line-hi)!important;
+  --inputBackgroundColor:var(--lx-sunk)!important;
+  --inputReadOnlyBackgroundColor:var(--lx-bg)!important;
+  --inputBorderColor:var(--lx-line-hi)!important;
+  --inputHoverBackgroundColor:rgba(242,237,228,.08)!important;
+  --inputSelectedBackgroundColor:var(--lx-accent-sunk)!important;
+  --inputBoxShadowColor:rgba(0,0,0,.35)!important;
+  --inputFocusBorderColor:var(--lx-accent)!important;
+  --inputFocusBoxShadowColor:rgba(255,122,24,.35)!important;
+  --inputErrorBorderColor:var(--lx-danger)!important;
+  --inputErrorBoxShadowColor:rgba(255,77,61,.35)!important;
+  --inputWarningBorderColor:var(--lx-warn)!important;
+  --inputWarningBoxShadowColor:rgba(232,197,71,.35)!important;
+  --scrollbarBackgroundColor:var(--lx-line-hi)!important;
+  --scrollbarHoverBackgroundColor:var(--lx-muted)!important;
+
+  /* ------------------------------------------------------------------ popovers */
+  --popoverBodyBackgroundColor:var(--lx-surface)!important;
+  --popoverTitleBackgroundColor:var(--lx-raise)!important;
+  --popoverTitleBorderColor:var(--lx-line)!important;
+  --popoverArrowBorderColor:var(--lx-surface)!important;
+  --popoverShadowColor:rgba(0,0,0,.5)!important;
+  --popoverTitleBackgroundInverseColor:var(--lx-raise)!important;
+  --popoverTitleBorderInverseColor:var(--lx-line)!important;
+  --popoverArrowBorderInverseColor:var(--lx-surface)!important;
+  --popoverShadowInverseColor:rgba(0,0,0,.5)!important;
+
+  /* ------------------------------------------------------------------ alerts
+     Servarr tints these with rgba(255,0,0,.1) etc. over a light page. On a warm dark
+     field those read as mud, so each becomes its own colour at low opacity. */
+  --alertDangerBackgroundColor:rgba(255,77,61,.12)!important;
+  --alertDangerBorderColor:var(--lx-danger)!important;
+  --alertDangerColor:var(--lx-text)!important;
+  --alertInfoBackgroundColor:rgba(255,122,24,.12)!important;
+  --alertInfoBorderColor:var(--lx-accent)!important;
+  --alertInfoColor:var(--lx-text)!important;
+  --alertSuccessBackgroundColor:rgba(63,191,106,.12)!important;
+  --alertSuccessBorderColor:var(--lx-ok)!important;
+  --alertSuccessColor:var(--lx-text)!important;
+  --alertWarningBackgroundColor:rgba(232,197,71,.12)!important;
+  --alertWarningBorderColor:var(--lx-warn)!important;
+  --alertWarningColor:var(--lx-text)!important;
+
+  /* ------------------------------------------------------------------ calendar */
+  --calendarBackgroundColor:var(--lx-surface)!important;
+  --calendarBorderColor:var(--lx-line)!important;
+  --calendarTodayBackgroundColor:var(--lx-accent-sunk)!important;
+  --calendarTextDim:var(--lx-muted)!important;
+  --calendarTextDimAlternate:var(--lx-text)!important;
+
+  /* ------------------------------------------------------------------ accessibility
+     Colour-impaired mode replaces fills with hatched gradients. Those gradient stops
+     are tokens too, so they need warm values or the mode flips half the page grey. */
+  --colorImpairedGradient:var(--lx-line-hi)!important;
+  --colorImpairedGradientDark:var(--lx-line)!important;
+  --colorImpairedDangerGradient:#B83A2E!important;
+  --colorImpairedWarningGradient:#A88C2E!important;
+  --colorImpairedPrimaryGradient:#B85610!important;
+  --colorImpairedGrayGradient:var(--lx-muted)!important;
+
+  /* ------------------------------------------------------------------ login page
+     login.html is a separate static file from index.html, with its own <style> block,
+     but it reads the same variables -- plus these four, which appear nowhere else. */
+  --panelBackground:var(--lx-surface)!important;
+  --forgotPasswordColor:var(--lx-muted)!important;
+  --forgotPasswordAltColor:var(--lx-accent)!important;
+  --failedColor:var(--lx-danger)!important;
+}
+
+/* The one rule in this file that is not a variable. Checkboxes and radios are painted
+   by the browser, not by the app, so no token reaches them and "Remember Me" stays
+   Chrome blue -- the only foreign colour left on the page. `accent-color` is a plain
+   element selector, so unlike the app's content-hashed class names it survives an
+   upgrade. */
+input[type=checkbox],input[type=radio]{accent-color:var(--lx-accent)}

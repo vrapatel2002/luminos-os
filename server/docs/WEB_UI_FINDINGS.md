@@ -474,3 +474,264 @@ what to avoid — the centred hero over three cards that §9 bans is the modal r
 
 The test used: **absorb a flow if it is one action against an API the hub already holds a key
 for; skin it if it needs the app's own state model.**
+
+---
+
+## 9. Step 16 — what building the tier-3 skins taught, including where §4 was wrong
+
+Phase 0 step 5 asks for a verdict **per route with the command that produced it**, and to say
+so **loudly** where reality disagrees with §4. Five things disagree. Two of them are §4 leaving
+a question open and the answer turning out to be the inconvenient one; three are mine.
+
+### 9.1 ⚠️ `index.html` is cached at start. §4 guessed per-request, and guessed wrong.
+
+§4 said: *"Servarr templates `__URL_BASE__` into that file at serve time, which suggests
+per-request, but test it."* Tested. It does not.
+
+```
+$ sudo sed -i 's#</head>#<link rel="stylesheet" href="/Content/luminos.css"></head>#' \
+      /usr/lib/radarr/bin/UI/index.html
+$ grep -c luminos.css /usr/lib/radarr/bin/UI/index.html      # on disk
+1
+$ curl -sk https://192.168.2.61:8447/login | grep -c luminos.css   # as served
+0
+```
+
+Same result for all four apps. The templating happens **once**, into a cached string
+(`if (IsProduction && _generatedContent != null) return _generatedContent;`). So a `<link>`
+only takes effect after a bounce, and `luminos-skin-apply` runs `systemctl restart <app>` —
+but **only when it actually rewrote a page**. The stylesheet itself *is* re-read per request:
+
+```
+$ sudo touch /usr/lib/radarr/bin/UI/Content/luminos.css && \
+  curl -skI https://192.168.2.61:8447/Content/luminos.css | head -1
+HTTP/2 200
+```
+
+So iterating on colours never restarts anything; only the one-time `<link>` insertion does.
+That is a restart of the unit exactly as it sits on disk — no `systemctl edit`, no unit file
+touched, inside the §6.13 line.
+
+### 9.2 The Servarr theme is inline styles, so the skin is variables + `!important`
+
+§4 left the override-vs-replacement question open. The answer is forced by the cascade, not
+by preference: the 248 KB compiled sheet contains **zero colour literals**, and all ~136 theme
+variables are set by JS as inline styles on `<html>`. A normal rule loses to an inline style;
+an author `!important` declaration beats one. So the skin is a list of variable declarations,
+each ending `!important`, and it **never selects an element** — which is why a Radarr upgrade
+that reshuffles its content-hashed class names cannot break it.
+
+This is also why Radarr/Sonarr/Prowlarr share one file: they are one frontend in three brand
+colours. `skins/servarr/luminos.css` plus a ~20-line delta each, rather than three copies.
+
+### 9.3 ⚠️ NZBGet wanted an override layer, not the third theme file §4 predicted
+
+§4 called NZBGet *"the easiest of the four… it wants a third theme file rather than an override
+layer."* Wrong, and for a reason that only shows up on reading `index.js`: the switcher's theme
+list is **hardcoded in JavaScript**. Adding "Luminos" to it means editing `.js`, and §6.13 draws
+the line at `.css` files plus one `<link>`.
+
+An override layer is also strictly better here, because it lands on top of whichever theme is
+active — the page is right whether the switcher says light or dark, and the user keeps the
+switcher. It is the **hardest** of the four, not the easiest: Bootstrap 2 vintage, no custom
+properties anywhere, colours hard-coded per selector across a 56 KB `style.css`. There is no
+token layer to redeclare, so it has to name selectors.
+
+### 9.4 ⚠️ NZBGet's own `dark-theme.css` is incomplete — 45 light surfaces uncovered
+
+My first pass copied `dark-theme.css`'s selector list, assuming the packaged dark theme was
+complete. It is not. It never touches Bootstrap 2's own light surfaces, so on stock dark an
+alert box, a `<pre>`, a disabled input and a popover all stay cream. Found by diffing every
+`background:#xxx` lighter than `#ccc` in `style.css` + `lib/bootstrap.css` against the
+selectors `dark-theme.css` actually overrides — **45 of them**. All closed in the "leftovers"
+section. The first one visible in practice is the "Communication error" box, i.e. the thing
+NZBGet shows exactly when something is already wrong.
+
+Caught by screenshotting, not by reading code. So was a worse one: the first `MARK` was a CSS
+comment, and a CSS comment sitting in HTML is a text node — the browser hoists stray text out
+of `<head>` and paints `/* luminos-skin */` across the top of every page. `MARK` is now an
+HTML comment.
+
+### 9.5 ⚠️ Two deliberate deviations from §8's stated acceptable results
+
+**`login.html` is skinned too.** Check 10 says *"the ONLY acceptable result is index.html per
+app"*, and `pacman -Qkk` now reports **two** altered files for each Servarr app:
+
+```
+radarr-bin    583 total files, 2 altered files    (index.html, login.html)
+sonarr-bin    546 total files, 2 altered files    (index.html, login.html)
+prowlarr-bin  571 total files, 2 altered files    (index.html, login.html)
+nzbget        110 total files, 1 altered file     (index.html)
+```
+
+Taken anyway: it is the same *class* of edit (an HTML file, one `<link>`, no `.js`), it reads
+the same custom properties so it needs no extra CSS, and — decisively — all three apps run
+`AuthenticationMethod=Forms`, so **the login page is the only Servarr surface a logged-out
+browser ever sees**, and the only one I can verify without handling the owner's password. A
+themed app behind a stock-blue login screen fails the brief's actual goal at the first frame.
+
+**`<Theme>dark</Theme>` is a write under `/var/lib/<app>/`.** §4 instructs *"spend the free
+win"* and set the `theme` field via the API; §6.13 says never write under `/var/lib/<app>/`.
+Those collide, because Servarr persists that field to `config.xml`, not to its database:
+
+```
+$ sudo stat -c '%y' /var/lib/radarr/config.xml ; systemctl show radarr -p ActiveEnterTimestamp --value
+2026-09-13 17:46:16   <- the API call
+Sun 2026-09-13 17:44:05 EDT   <- service start
+```
+
+Written two minutes *after* start, so this is the `PUT`, not a startup rewrite. It is one
+documented setting changed through the app's own supported API — the same act as clicking it
+in the UI — and it is what makes the ~100 variables the skin does *not* override fall back to
+dark rather than light. Recording it because check 13 is designed to catch exactly this, and
+it did.
+
+### 9.6 The 8 KB budget was the binding constraint, and shaped the script
+
+§7 caps each tier-3 skin at 8 KB and forbids pulling in the fonts (a second family on a page
+you are only repainting buys a FOUT and a download; no `@font-face` appears in any of the
+four). The sources are heavily commented — that is the part worth keeping in git and the part
+a phone should never download — so `luminos-skin-apply` strips comments and indentation at
+install time and puts one attribution line back. Nothing else is rewritten: still one
+declaration per line, no selector merging, so `diff`ing installed-vs-git stays readable.
+
+Three separate budget failures got it there — 11294/11584/11431/8438 B raw → comment-strip →
+indent-strip → dropping `background-image:none` everywhere (the `background:` shorthand already
+resets it). Final, against the 8192 cap:
+
+```
+radarr 7907   sonarr 8067   prowlarr 7748   nzbget 7912      @font-face: 0
+```
+
+### 9.7 The pacman hook, and the honest limits of its proof
+
+The hook triggers on **paths, not package names**, so it keeps working if `radarr-bin` is
+renamed to `radarr`, and does nothing on an unrelated transaction. Those paths are
+package-owned, which is the whole exposure:
+
+```
+$ pacman -Qlq radarr-bin | grep -cE 'usr/lib/radarr/bin/UI/'
+59        # sonarr 54, prowlarr 58, nzbget 91 — incl. index.html and login.html
+```
+
+**Proven live, once, with NZBGet** — a version-identical reinstall from cache, which restored
+the packaged `index.html` and let the hook put it back:
+
+```
+$ sudo pacman -U --noconfirm /var/cache/pacman/pkg/nzbget-26.2-3-x86_64.pkg.tar.zst
+(4/4) Reapplying the Luminos skins to the web frontends...
+changed  nzbget index.html
+changed  nzbget restarted
+```
+
+**Not proven live for the Servarr three, and I am not claiming it was.** Check 12 names
+`radarr-bin`, but it is not in `/var/cache/pacman/pkg/` (only `nzbget-26.2-2` and `-3` are), so
+the reinstall errored with `could not find or read package` and **the file was never restored**.
+The `grep -c luminos.css` that follows it in check 12 printed `1`, and that `1` means nothing —
+it is the link that was already there. The argument for the other three is by construction: same
+hook, same `Type = Path` mechanism that just fired for real, against paths shown above to be
+package-owned. Re-running it properly needs a re-download, which is the one thing here I would
+rather the owner green-light than do silently.
+
+### 9.8 Jellyfin is deliberately absent from the hook
+
+Its theme lives in the server's own configuration, not in a packaged file, so an upgrade cannot
+clear it — and the API call that would set it needs Jellyfin running, which mid-transaction it
+may not be.
+
+---
+
+## 10. ⚠️ There is a fifth tier-3 app. The brief does not know about it.
+
+§4 enumerates four tier-3 apps. There are five. **Bazarr** was installed by DECISION 98 on
+**the same day** this brief was written, so the brief is not wrong so much as overtaken — but
+left alone it would have been a foreign panel on `:8450`, one tap from everything else, which
+is precisely the seam the exercise exists to close.
+
+It qualifies on exactly the same test as the other four:
+
+```
+$ pacman -Qo /opt/bazarr/frontend/build/index.html
+/opt/bazarr/frontend/build/index.html is owned by bazarr 1.6.0-3
+$ curl -so /dev/null -w '%{http_code} %{content_type}\n' \
+      http://127.0.0.1:6767/assets/index-P9MgGVtN.css
+200 text/css; charset=utf-8
+$ sudo grep -i base_url /var/lib/bazarr/config/config.yaml
+  base_url: ''
+```
+
+Package-owned static frontend, `/assets/` served raw, no URL base, `root:root 0644`. Added to
+`TIER3`, to the pacman hook (`Target = opt/bazarr/frontend/build/*`) and to the `--check` run.
+The free win was taken first, same as the Servarr three: `theme` was `auto`, now `dark`, via
+`POST /api/system/settings` → `204`.
+
+**It is the cheapest of the five and the most instructive.** Mantine 7 is a genuine token
+layer — 965 custom properties, declared in CSS rather than set inline — so the skin is 2322 B
+against the 8 KB cap, roughly a quarter of what NZBGet's hand-written selector list needed.
+
+### 10.1 Two bugs the screenshot caught that reading the CSS could not
+
+Worth recording because both looked finished on paper.
+
+**The primary is not `blue`.** The static stylesheet declares a complete
+`--mantine-color-blue-0..9` ramp *and* binds `--mantine-primary-color-*` to it. That reads like
+the answer, and it is not. The JS theme sets `primaryColor:"brand"` with its own ramp, and
+Mantine generates `--mantine-color-brand-*` **at runtime as an inline style on `<html>`** —
+which is why grepping the CSS for it finds one incidental hit and no definitions:
+
+```
+$ sudo grep -ohE 'primaryColor:"[a-z]+"' /opt/bazarr/frontend/build/assets/*.js | sort -u
+primaryColor:"blue"
+primaryColor:"brand"
+$ sudo grep -ohE '.{0,40}colorBrand0.{0,60}' …/assets/*.js
+="#ae3ec9",r6="#9c36b5",o6="#862e9c", … wa={colorBrand0:Wx,colorBrand1:e6, …
+```
+
+`#ae3ec9` is Mantine's `grape`. I remapped the entire blue ramp to orange, changed nothing
+visible, and the Login button stayed purple. **Generalising from the stylesheet was the same
+mistake in miniature that Phase 0 step 5 was written to warn about** — one plausible route
+checked, and a conclusion drawn wider than the evidence.
+
+**Forcing dark on `:root` produced a white card on a black page.** The first pass scoped the
+overrides to `:root,[data-mantine-color-scheme=dark]`. `:root` matches in *either* scheme, so
+`--mantine-color-body` went dark unconditionally while every light-scheme surface stayed
+light. The login card is a Mantine `Paper`, which draws from `--mantine-color-white` in light
+mode, so it stayed white while the page behind it went black.
+
+Fixed by making the semantic block scheme-independent — `body`, `white`, `text`, `default`,
+`default-hover`, `default-border`, `default-color`, `dimmed`, `placeholder`, `error` pinned
+outright — so the page lands dark whichever scheme is active. Same shape as the NZBGet layer,
+and for the same reason: **a layer that is correct either way beats a layer that assumes.**
+
+### 10.2 What was deliberately left alone
+
+- **`blue`.** Not the primary, so remapping it bought nothing visible, and it is what Mantine
+  draws "info" with. Same rule as red and green across all five skins: status colour is
+  information.
+- **`fontFamily`.** Bazarr's theme sets a Helvetica/Arial stack, which §2d bans. §7 forbids a
+  tier-3 skin pulling in the fonts, and renaming the family without shipping it only selects a
+  different fallback. This is a repaint, not a re-typesetting.
+- **Its pre-existing errors.** The log shows `KeyError: 'audio_only_include'`, a
+  `FOREIGN KEY constraint failed` on a Solo Leveling episode, and Sonarr sync timeouts — all
+  timestamped *before* this work and belonging to DECISION 98's fresh install still settling.
+  Noting them so they are not read later as fallout from the skin.
+
+### 10.3 Final state, all five
+
+```
+$ sudo luminos-skin-apply --check
+0 changed, 14 already correct
+
+installed size (cap 8192)   radarr 7907   sonarr 8067   prowlarr 7748
+                            nzbget 7912   bazarr 2322        @font-face: 0
+
+$ for p in radarr-bin sonarr-bin prowlarr-bin nzbget bazarr; do pacman -Qkk $p | tail -1; done
+radarr-bin:    583 total files,   2 altered files   (index.html, login.html)
+sonarr-bin:    546 total files,   2 altered files   (index.html, login.html)
+prowlarr-bin:  571 total files,   2 altered files   (index.html, login.html)
+nzbget:        110 total files,   1 altered file    (index.html)
+bazarr:      11493 total files,   1 altered file    (index.html)
+```
+
+No `.js` altered, no `config.xml`, nothing under `/var/lib/<app>/` except the one documented
+`<Theme>dark</Theme>` write in §9.5.
