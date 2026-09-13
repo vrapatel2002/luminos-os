@@ -3,6 +3,108 @@ Last Updated: 2026-08-29 (BUG-149 **BUG-142 WAS NEVER A vkd3d BUG — WE DELETED
 
 ## Open Bugs
 
+### BUG-157 — our own power daemon flips the dGPU between 90 W and 55 W ten times in twelve minutes, mid-game
+<!-- [CHANGE: claude-code | 2026-09-13] -->
+- Status: **DIAGNOSED, NOT FIXED.** Reported as *"the game was using way more gpu and still gave way
+  less fps and graphics."* All three symptoms are one cause and the cause is `luminos-power`, not
+  Lutris, not the NVIDIA driver, and not BUG-156's `steam-devices` install.
+
+#### What the journal shows (Black Myth Wukong, 19:30–19:44)
+
+```
+19:30:51 GPU TGP uplift: 49.5W draw ≥ 47W threshold, temp=56.0°C  → 90W
+19:31:51 GPU TGP revert: idle 60s (8.4W, 0% util)                 → 55W   ← game is running
+19:33:10 GPU TGP uplift: 70.6W draw ≥ 47W threshold, temp=71.0°C  → 90W
+19:34:38 GPU TGP thermal override: 84.0°C ≥ 83°C                  → 55W
+19:35:39 uplift 69.5W, temp=81.0°C                                → 90W
+19:36:42 thermal override 83.0°C                                  → 55W
+19:37:44 uplift 69.2W, temp=81.0°C                                → 90W
+19:39:01 thermal override 83.0°C                                  → 55W
+19:40:43 uplift 58.8W, temp=82.0°C                                → 90W
+19:42:13 thermal override 83.0°C                                  → 55W
+19:43:16 uplift 69.6W, temp=82.0°C                                → 90W
+```
+
+Ten power-limit changes in 12.5 minutes, a 39% swing each time. Every drop collapses the clocks
+mid-frame; UE5's dynamic resolution answers a missed frame target by dropping internal render
+resolution, which is the *"less graphics"*; utilisation pins at 100% because the card is
+power-starved rather than fast, which is the *"more GPU"*; and the frame rate is the average of a
+sawtooth. One mechanism, three symptoms.
+
+**This is new to today.** Same binary, same boot. `GPU TGP thermal override` count per boot:
+boot -1 → 0, boot -2 → 0, boot -6 → 0, boot -5 (2026-09-08) → 1, **this boot's 19:00 hour → 27**.
+
+#### Three defects in `cmd/luminos-power/main.go`, all real, all independent
+
+1. **`readDGPULoad()` reads an amdgpu-only file and therefore always returns 0.**
+   ```go
+   os.ReadFile("/sys/class/drm/card1/device/gpu_busy_percent")
+   ```
+   `card1` *is* the RTX 4050 (`DRIVER=nvidia`, `10DE:28E1`) — the card number is right and that is
+   what makes this hard to see. `gpu_busy_percent` is an **amdgpu** attribute; it exists on `card2`
+   (`DRIVER=amdgpu`, reads `2`) and has never existed on the NVIDIA node. `os.ReadFile` returns an
+   error that is discarded into `_`, `ParseFloat("")` returns 0, so `dgpuLoad` is **hard-wired to
+   0%** for the life of the daemon. Every `SPI=` line through a 14-minute game says `dgpu=0%`.
+   Knock-on effects beyond TGP: `applyGamingDetection(dgpuLoad, …)` can never fire, so beast mode
+   is only ever reachable from CPU load; and the `quietIdleDGPUPct` branch believes the dGPU is
+   idle, so the box can drop to **Quiet** while a game is running.
+
+2. **The 19:31:51 revert is a false idle, and defect 1 is half of why.** The revert guard is
+   `gpuPowerW < 15 && gpuLoad < 20`; the `gpuLoad` half is always true, so the *only* thing standing
+   between a live game and a power cut is one instantaneous wattage sample.
+
+3. **The thermal loop has no deadband.** `gpuTGPThermalCeilC = 83.0` is simultaneously the
+   drop threshold *and* the re-uplift gate:
+   ```
+   uplift : gpuPowerW >= 47 && gpuTempC <  83 && hysteresisOK
+   drop   : gpuTempC  >= 83                   && hysteresisOK
+   ```
+   Under sustained load the card parks itself exactly on 83 °C, so it satisfies one condition and
+   then the other, forever. `gpuTGPHysteresis = 60s` does **not** damp this — it only sets the
+   oscillation's period, which is why every cycle in the log above is 60–90 s. 83 °C is also well
+   under what the hardware wants: the 4050's own HW thermal slowdown had not fired once
+   (`HW Thermal Slowdown: Not Active`, counter `0 us`).
+
+#### Two more things found on the way, neither of them the cause
+
+- **`readGPUStats()`'s fast path is dead code.** It globs
+  `/sys/class/drm/card1/device/hwmon/hwmon*/power1_input` — that directory **does not exist**; the
+  NVIDIA open module exports no hwmon there. So every 2 s poll falls through to the `nvidia-smi`
+  fork, which by main.go:416's own comment *wakes a sleeping dGPU*.
+- **The Dynamic Boost handshake failed on this boot only.** `dmesg` at 09:45:53:
+  `PlatformRequestHandler failed to get target temp from SBIOS` and `…failed to get platform power
+  mode from SBIOS`. **Absent from boots -1, -2, -3 and -5 with the identical driver 610.57.04.**
+  `asusd` agrees from userspace — `nv_dynamic_boost`, `nv_tgp`, `nv_temp_target`, `ppt_pl1_spl`,
+  `ppt_pl2_sppt`, `ppt_pl3_fppt` all `Could not read current value`, and reading
+  `/sys/class/firmware-attributes/asus-armoury/attributes/*/current_value` by hand returns
+  **ENODEV** for every one. Consistent with `nvidia-smi -q -d POWER` reporting
+  `Current Power Limit: 65.00 W` when the daemon last asked for **90 W** — the request is being
+  clamped, so the "90 W" in the log is a claim, not a measurement. Reboot is the first thing to try;
+  do not chase this before ruling that out.
+
+#### Ruled out, with evidence
+- **BUG-156 / `steam-devices` is innocent.** `dgpu-exec-v2 --check` reports `access: OK / gate: OK`
+  with all four nodes `0660 dgpu`; every `/dev/nvidia*` is dated **Sep 12 09:45** (boot), ~10 h
+  before the 19:20 install; the pacman transaction fired only the two udev-reload hooks.
+- **No driver/kernel mismatch.** Running kernel `7.0.5-arch1-1` == installed; NVRM `610.57.04` ==
+  `nvidia-utils 610.57.04`. No Xid, no GPU reset, no HW slowdown.
+- **Not battery.** `ACAD/online` = 1, fully charged, `platform_profile` = `performance`,
+  `throttle_thermal_policy` = 1 throughout.
+
+#### Also true, and separately worth fixing — the un-rebooted stack
+553 packages upgraded 11:27 today; last boot **2026-09-12 09:45**. `kwin_wayland` (pid 1564) is
+compositing with **198 deleted mappings** including `libEGL_mesa.so`, `libgbm.so`, `gbm/dri_gbm.so`,
+`libvulkan_radeon.so` and `libwayland-server.so.0.25.0` while the disk holds mesa 26.2.2 and
+`libwayland-server.so.0.26.0`; `Xwayland` (pid 1663) and `plasmashell` (pid 1751, 1329 deleted maps)
+are in the same state. On a PRIME-offload box the game's frames cross that boundary every frame.
+This is HANDOFF outstanding item 1 and it is not hypothetical any more — but it is **not** what the
+journal indicts, and the TGP sawtooth would still be there after a reboot.
+
+#### Not done on purpose
+No code changed. The user asked what was wrong and why, and a thermal governor is the wrong thing to
+edit and ship in the same breath as its diagnosis — the fix needs a measured before/after across one
+real play session, not a plausible-looking constant. The three defects above are the work list.
+
 ### BUG-147 — the whole NVIDIA path works today, and NOT ONE PART OF IT HAS SURVIVED A REAL REBOOT
 <!-- [CHANGE: claude-code | 2026-08-29] -->
 - Status: **REBOOT TESTED 2026-08-29 — the gate LOST the boot race, exactly as feared. Now FIXED**

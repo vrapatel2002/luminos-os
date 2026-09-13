@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-13 — Response 1 (new chat; the previous chat ended at Response 6)
+Last updated: 2026-09-13 — Response 2
 
 > Previous goals, complete, do not reconstruct from memory:
 > gaming/dGPU → `git show b08c3904:HANDOFF.md` · `org.luminos.style` QML → `git show 4273ed7e:HANDOFF.md`
@@ -10,8 +10,27 @@ Keep Luminos OS working as a daily-driver Windows replacement — the G14 deskto
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-**Nothing is mid-flight.** The PS5-controller task below is finished and verified. Pick up from
-"Still outstanding".
+**BUG-157 is diagnosed and NOT fixed — that is the next piece of work.** Shawn reported the game
+"using way more gpu and still gave way less fps and graphics". It is `luminos-power` sawtoothing the
+dGPU power limit 90 W ↔ 55 W ten times in twelve minutes. Full evidence in `docs/BUGS.md`; the
+three-defect work list is below. **Do not re-derive the diagnosis — go and fix the three defects.**
+
+### ⚠️ BUG-157 work list (`cmd/luminos-power/main.go`)
+1. `readDGPULoad()` reads `/sys/class/drm/card1/device/gpu_busy_percent`. `card1` really is the
+   RTX 4050, but `gpu_busy_percent` is an **amdgpu-only** attribute — it exists on `card2` and has
+   never existed on the NVIDIA node. The error is discarded into `_`, so **`dgpuLoad` is hard-wired
+   to 0%**. Also breaks `applyGamingDetection` (beast mode unreachable from GPU load) and lets the
+   `quietIdleDGPUPct` branch drop the box to Quiet mid-game. NVIDIA has no sysfs equivalent —
+   `utilization.gpu` via the existing `nvidiaQuery()` is the honest source.
+2. The idle revert `gpuPowerW < 15 && gpuLoad < 20` has its util half permanently true because of
+   defect 1, so one low wattage sample can cut power mid-game. It did, at 19:31:51.
+3. `gpuTGPThermalCeilC = 83.0` is both the drop threshold and the re-uplift gate — **no deadband**.
+   `gpuTGPHysteresis = 60s` does not damp the oscillation, it only sets its period. Needs separate
+   up/down temperatures, and 83 °C is too low anyway: the card's own HW thermal slowdown never fired.
+
+**Measure before/after across one real play session.** A plausible constant is not a fix. And do
+**not** bundle this with the reboot — reboot first (item 1 below), because the SBIOS handshake also
+failed this boot and the "90 W" the daemon logs is a request that the driver is clamping to 65 W.
 
 ## State — what is DONE
 
@@ -62,8 +81,14 @@ superseded — **do not merge them**); full research trail, art directions and s
    database. Flagged, not hidden.
 
 ## Still outstanding (ordered)
-1. **Reboot** — glibc + systemd were upgraded and the running system is still on the old ones.
-   Then confirm a Lutris game renders on the dGPU with `dgpu-exec-v2 -- nvidia-smi`.
+1. **Reboot — now urgent, and no longer hypothetical.** 553 packages were upgraded at 11:27 on
+   2026-09-13 and the box has not booted since **2026-09-12 09:45**. Measured, not assumed:
+   `kwin_wayland` (pid 1564) is compositing with **198 deleted mappings** including
+   `libEGL_mesa.so`, `libgbm.so`, `gbm/dri_gbm.so`, `libvulkan_radeon.so` and
+   `libwayland-server.so.0.25.0`, while disk holds mesa 26.2.2 and `libwayland-server.so.0.26.0`.
+   `Xwayland` (1663) and `plasmashell` (1751, 1329 deleted maps) likewise. Plus glibc + systemd.
+   A reboot is also the first thing to try for the SBIOS/Dynamic-Boost failure in BUG-157.
+   Afterwards confirm a Lutris game renders on the dGPU with `dgpu-exec-v2 -- nvidia-smi`.
    *(The controller fix needs no reboot — udev rules in `/usr/lib` apply at boot and the running
    node was already re-triggered.)*
 2. ⚠️ **`server/config/Caddyfile` in the repo is STALE — missing the Bazarr `:8450` block that is
@@ -145,6 +170,20 @@ so traversal is impossible by construction rather than by correct escaping. Veri
   `lib32-sdl2-compat`; system `wine`'s `winebus.so` links `libudev` and not SDL, and Proton /
   GE-Proton ship their own. Installing one fixes nothing.
 
+**GPU / power**
+- **"The GPU is slow" starts at `journalctl -b 0 -g 'GPU TGP'`, not at nvidia-smi.** A one-shot
+  nvidia-smi at idle tells you nothing about a governor that is oscillating under load. The per-boot
+  count of `GPU TGP thermal override` is the fastest regression signal there is.
+- **`gpu_busy_percent` is amdgpu-only.** It does not exist on an NVIDIA DRM node, and neither does
+  `device/hwmon/`. Any Go/Python that reads them for the 4050 silently gets 0 — check the error.
+- **`card1` is the RTX 4050 and `card2` is the 780M on this box** — the numbering is *not* the trap
+  people assume; the trap is assuming the attributes are the same on both.
+- **`nvidia-smi -q -d POWER` "Current Power Limit" is what was granted, not what was asked for.**
+  It read 65 W while the daemon's last request was 90 W. Compare it against the log before believing
+  either. (`--query-gpu=power.limit` still reads `[N/A]` — BUG-069.)
+- **`SW Thermal Slowdown: Active` at idle is a sampling artefact**, not a fault — the query itself
+  wakes the card. Sample it five times; the counters stop growing.
+
 **Web surface**
 - **Font weight lives in the hinting and ligature tables, not the glyphs.** A naive Latin-1 subset
   of JetBrains Mono Regular is 29,348 bytes; `--no-hinting` plus dropping `liga`/`calt` gives the
@@ -176,7 +215,7 @@ so traversal is impossible by construction rather than by correct escaping. Veri
   `luminos-notes.sh search` + `luminos-brain query`.
 
 ## Files touched this session
-- `docs/BUGS.md` — BUG-156 added
+- `docs/BUGS.md` — BUG-156 added, then **BUG-157 added (open, diagnosed only)**
 - `LUMINOS_DECISIONS.md` — DECISION 101 added
 - `AGENTS.md` §9 — `steam-devices` row added
 - `HANDOFF.md` — this file
