@@ -1077,6 +1077,31 @@ in the message, so the next person does not spend two days on vkd3d.
 
 ## Fixed Bugs (new)
 
+### BUG-156 — the PS5 controller was "not supported" in Lutris, because `/dev/hidraw` was root-only
+<!-- [CHANGE: claude-code | 2026-09-13] -->
+- Status: **FIXED (2026-09-13) — proven by an A/B against root before the fix, then re-proven as the normal user after it, then confirmed physically with rumble and the light bar.**
+- Severity: Medium (the pad enumerated, so nothing looked broken; it just lost every feature that makes it a DualSense)
+- Component: `/dev/hidraw*` permissions (package `steam-devices` was not installed) + `~/.config/lutris/games/black-myth-wukong-1788815087.yml`
+- Symptom, in Shawn's words: *"the thing in lutris the ps5 controller is not supported"*.
+- **The kernel was never the problem, and that is what makes this easy to misdiagnose.** `hid-playstation` had already claimed the pad and built out the full device set — `event18` gamepad, `event19` motion sensors, `event20` touchpad, `event21` headset jack, plus `js0`. `event18` and `js0` both carried a `user:shawn:rw-` ACL from `uaccess`. Every obvious check passes. The pad *works*; it just works as a generic joystick.
+- Root cause: **`/dev/hidraw3` was `root:root 0600` with no ACL.** Arch's `steam-devices` package — the udev rules that `TAG+="uaccess"` game-controller hidraw nodes — was not installed, and nothing else on the box grants hidraw. SDL therefore could not open the HID node, so it silently fell back from its **HIDAPI PS5 driver** to the plain **Linux evdev/joydev driver**. That fallback is the whole bug: buttons and sticks still work, so it never errors, but rumble, the light bar, gyro/accel, the touchpad button and the correct button map are all on the HIDAPI path only.
+- **The A/B that proved it** — same binary, same pad, same moment, only the uid differs:
+
+  | run as | SDL reports | mapping |
+  | --- | --- | --- |
+  | `shawn` | `Sony Interactive Entertainment DualSense Wireless Controller` | `0300fd57…`, no `touchpad`, no `misc1` — the **evdev** name and map |
+  | `root`  | `DualSense Wireless Controller` | `030057564c050000e60c000000016800`, `touchpad:b11`, `misc1:b12`, `crc:5657` — the **HIDAPI** map |
+
+  The name itself is the tell: the long "Sony Interactive Entertainment…" string is the evdev device name, the short one is what the HIDAPI driver reports. Two different SDL drivers, decided purely by whether `open("/dev/hidraw3")` succeeds.
+- **It is not Lutris-specific, which is why fixing it here fixes everything.** System `wine`'s `winebus.so` links `libudev` and **not SDL** (checked with `ldd`) — its only controller backend is udev, which prefers hidraw. GE-Proton and Proton bundle their own SDL, which uses HIDAPI. Native SDL games use HIDAPI. All four paths were blocked by the same 0600.
+- Fix 1: `pacman -S steam-devices`. Two files in `/usr/lib/udev/rules.d/`, no dependencies, **no `/etc/` change**. Lines 41 and 44 of `60-steam-input.rules` match `054c:0ce6` over USB *and* Bluetooth and set `MODE="0660", TAG+="uaccess"`. Verified the rules actually cover this product ID by extracting the package and grepping it **before** installing, rather than assuming the list was complete. Lines 47/50 cover the DualSense Edge (`054c:0df2`) for free.
+- **Second, independent defect found in the same pass**, and it would have outlived fix 1: `black-myth-wukong-1788815087.yml` carried a hand-written `sdl_gamecontrollerconfig` override that **could never match and was wrong anyway**. Its GUID was `030000004c050000e60e000011810000` — product field `e60e` = `0x0EE6`, which is not a Sony product. The DualSense is `0x0CE6`, i.e. `e60c`. One transposed character, so SDL never applied it and the override sat there looking like a fix. Had anyone "corrected" just the GUID it would have been worse than useless: the body is a DualShock-3-shaped map — `lefttrigger:b6,righttrigger:b7` (the DualSense's triggers are **analog axes**, not buttons), `rightx:a2,righty:a3` (should be `a3`/`a4` on evdev), face buttons rotated to `a:b1,b:b2,x:b0,y:b3`, and `guide`/`back`/`start` all on the wrong indices. Removed outright; SDL's built-in mapping is correct on both paths, as the table above shows. Backup: `…yml.bak-ps5-20260913`.
+- Verified after the fix, as `shawn`, no sudo: SDL picks the HIDAPI driver (identical GUID and map to the root run above), `SDL_GameControllerRumble` → **OK** (felt), `SDL_GameControllerSetLED` → **OK** (light bar went orange), gyro **1**, accel **1**, touchpads **1**.
+- `SDL_GameControllerRumbleTriggers` returns "not supported" and that is **correct, not a leftover** — that call is the Xbox trigger-rumble API. DualSense adaptive triggers go through `SDL_SendGamepadEffect` with a DualSense-specific report. Do not chase it.
+- Checked and deliberately **not** changed: there is no 32-bit SDL on the box (`sdl2-compat` is 64-bit only, and Arch has no `lib32-sdl2-compat`). It does not matter here — system `wine`'s bus has no SDL backend at all so it never wanted one, and Proton/GE-Proton ship their own 32-bit SDL inside the runtime. Installing a 32-bit SDL would have been a change that fixed nothing.
+- Left alone: `wine.overrides` in that game's YAML is an empty-key/empty-value pair (`? '' : ''`) that Lutris wrote itself. It is junk but it is not this bug, and §5 Rule 1 says leave it.
+- Date Found: 2026-09-13 (reported by Shawn) / Date Fixed: 2026-09-13
+
 ### BUG-134 — The app launcher vanished as soon as you typed in it
 <!-- [CHANGE: claude-code | 2026-08-16] -->
 - Status: **FIXED (2026-08-16) — reproduced on demand, fixed, then re-run against the exact failing case plus three hover regressions.**

@@ -5926,3 +5926,74 @@ variant does not exist on Flathub — the main extension already ships `MangoHud
 **Revert:** delete that file, or clear **System options → Command prefix** in Lutris.
 Games then run on the 780M again — which is the pre-existing behaviour, not a failure.
 Cross-ref: AGENTS.md §9, DECISION 25, DECISION 52, BUG-102, BUG-145.
+
+---
+
+## DECISION 101 — game-controller hidraw access comes from `steam-devices`, not a Luminos udev rule
+Date: September 13, 2026
+Made by: claude-code
+**Status: APPLIED (package installed; `/dev/hidraw3` now carries a `uaccess` ACL)**
+
+### Context
+Shawn reported the PS5 controller as "not supported" in Lutris (BUG-156). The kernel side was
+already perfect — `hid-playstation` had claimed the DualSense and built out gamepad, motion,
+touchpad and headset nodes, all with `uaccess` ACLs. The one node with **no** ACL was
+`/dev/hidraw3`, at `root:root 0600`.
+
+That single permission decides which SDL driver you get. With hidraw open, SDL uses its
+**HIDAPI PS5** driver: rumble, light bar, gyro, accelerometer, touchpad button, correct map.
+Without it, SDL falls back to the generic **evdev/joydev** driver, which enumerates fine and
+throws no error — so the pad appears to work while quietly being a no-name joystick. The same
+node also gates system `wine`, whose `winebus.so` links `libudev` and **not** SDL, so udev/hidraw
+is its only controller backend.
+
+Nothing on this box grants hidraw. Arch splits those rules into `steam-devices`, which was
+not installed.
+
+### What we decided
+Install the **package** (`steam-devices`, multilib, 0.02 MiB, no dependencies) rather than
+hand-write a Luminos rule for `054c:0ce6`.
+
+### Why the package and not our own rule
+The instinct here is a three-line `/etc/udev/rules.d/71-luminos-dualsense.rules`, matching the
+house style of `70-luminos-dgpu-access.rules`. It was rejected:
+
+- **It would be an `/etc/` change, and the package is not.** `steam-devices` ships only
+  `/usr/lib/udev/rules.d/{60-steam-input,60-steam-vr}.rules`. Rule 10 exists because every
+  `/etc/` file is a future incident; this way there is no Luminos-owned file to drift, and no
+  §9 row that can silently disagree with the disk.
+- **The upstream list is maintained and ours would not be.** The package already covers the
+  DualSense Edge (`054c:0df2`), DualShock 3/4, and ~240 other lines. A bespoke rule fixes
+  exactly the one pad in hand and is a fresh bug the day a second controller arrives.
+- **Revert is `pacman -R steam-devices`** — one command, nothing left behind.
+
+The cost is that it grants `uaccess` on a long list of devices we do not own. That is not a
+privilege escalation: `uaccess` grants only to the user physically logged in at the seat, and
+only for devices actually present. The rules are inert for hardware that is not plugged in.
+
+### Verified before installing, not after
+The package was downloaded with `pacman -Sw` and extracted to `/tmp` so
+`60-steam-input.rules` could be grepped for the DualSense product ID **before** committing to
+it. Lines 41 and 44 match `054c:0ce6` over USB and Bluetooth respectively and set
+`MODE="0660", TAG+="uaccess"`. Installing first and hoping the list was complete would have
+been the same class of mistake as assuming `prime-run` fixes permissions (DECISION 90).
+
+### The brain gate said NO, and it was the known false NO
+`luminos-brain safe "install steam-devices…"` returned
+`NO: ML/AI always use pyenv 3.12.13` — the fourth recorded instance of it matching on the bare
+word "install" (HANDOFF item 3). Overridden with the documented `--reason` form, following the
+2026-08-04 precedent for `hyprpicker`/`ydotool`/`app2unit`:
+udev rules only, zero Python, no venv, no pyenv, no ML stack, no dependencies.
+**This is now the fourth false NO and the rule scope genuinely needs narrowing** — the override
+path is only safe while a human still reads the reason.
+
+### What this does NOT do
+It does not install a 32-bit SDL, and does not need to. `sdl2-compat` is 64-bit only and Arch
+has no `lib32-sdl2-compat`; system `wine`'s bus has no SDL backend to feed, and Proton and
+GE-Proton carry their own 32-bit SDL inside their runtimes. Adding one would have been motion
+without effect.
+
+**Files:** none in the repo — the change is a package plus its own udev rules.
+**Revert:** `sudo pacman -R steam-devices && sudo udevadm control --reload-rules`. The pad goes
+back to enumerating as a generic joystick, which is the pre-existing behaviour, not a failure.
+Cross-ref: AGENTS.md §9, BUG-156, DECISION 25, DECISION 90.
