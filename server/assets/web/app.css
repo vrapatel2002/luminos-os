@@ -1,0 +1,355 @@
+/* app.css — the Luminos design system. One stylesheet, one vocabulary.
+   [CHANGE: claude-code | 2026-09-13]
+
+   Served byte-identical by luminos-hub (/) and luminos-space (:8446) from
+   /usr/local/share/luminos/web/app.css. They are separate origins, so each
+   process serves its own copy of this file rather than linking across -- a
+   cross-origin <link> would be blocked by `style-src 'self'`.
+
+   Direction: "instrument panel" (WEB_UI_FINDINGS.md §6). The incumbent survived
+   three challengers. Every value below resolves to a token; a raw hex in a rule
+   means the token set is short and should be extended instead.
+
+   Two rules that carry the whole thing:
+     - Hierarchy comes from the type scale, never from decoration. Strip every
+       shadow, radius and rule and the page still reads.
+     - Colour is rationed. Idle is monochrome. Accent means live or actionable;
+       warn/danger mean machine state and never appear as decoration. */
+
+/* ---------------------------------------------------------------- faces */
+@font-face{font-family:Archivo;src:url(/fonts/archivo-500.woff2) format('woff2');
+           font-weight:500;font-style:normal;font-display:swap}
+@font-face{font-family:Archivo;src:url(/fonts/archivo-800.woff2) format('woff2');
+           font-weight:800;font-style:normal;font-display:swap}
+@font-face{font-family:JBMono;src:url(/fonts/jetbrainsmono-400.woff2) format('woff2');
+           font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:JBMono;src:url(/fonts/jetbrainsmono-800.woff2) format('woff2');
+           font-weight:800;font-style:normal;font-display:swap}
+
+/* ---------------------------------------------------------------- tokens */
+:root{
+  /* field */
+  --bg:#0F0D0B; --surface:#17140F; --sunk:#0B0908;
+  --line:#2A2520; --line-hi:#3D362E;
+  --text:#F2EDE4; --muted:#8C8279; --faint:#5A534B;
+
+  /* signal -- accent is live/actionable, the rest are machine state only */
+  --accent:#FF7A18; --ok:#3FBF6A; --warn:#E8C547; --danger:#FF4D3D;
+  --accent-sunk:#2E1A0B;
+
+  /* material -- the three faces of an isometric solid, lit from top-left */
+  --face-top:#6E655B; --face-r:#4A443C; --face-l:#332E29;
+
+  --f-ui:Archivo,sans-serif; --f-mono:JBMono,ui-monospace,monospace;
+
+  --t-display:clamp(52px,15vw,76px); --t-big:28px; --t-sub:18px;
+  --t-head:15px; --t-body:15px; --t-mono:14px;
+  --t-caption:12px; --t-micro:11px;
+
+  --s0:2px; --s1:4px; --s2:8px; --s3:12px; --s4:16px;
+  --s5:24px; --s6:40px; --s7:64px;
+
+  --r:4px; --r-lg:8px;
+  --sh-1:0 1px 0 rgba(0,0,0,.4);
+  --sh-2:0 8px 24px rgba(0,0,0,.55);
+
+  --dur-1:120ms; --dur-2:240ms; --dur-3:480ms; --dur-4:900ms;
+  --ease:cubic-bezier(.2,.7,.2,1);
+}
+
+/* ---------------------------------------------------------------- base */
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--text);
+     font:500 var(--t-body)/1.5 var(--f-ui);
+     -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+     padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.wrap{max-width:760px;margin:0 auto;padding:var(--s5) var(--s4) var(--s7)}
+
+/* Numbers are machine identifiers. Tabular figures everywhere, always. */
+.mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+/* A class, not a style attribute. Every visibility change in the product goes
+   through this, so the pages carry no inline styles and can run under a CSP with
+   no 'unsafe-inline'. */
+.off{display:none !important}
+
+/* The server stopped answering. Nothing is wrong with the page -- the numbers on
+   it are simply no longer current, and must stop looking current. */
+.fig .free,.vol{transition:opacity var(--dur-2) var(--ease)}
+body.stale .readout,body.stale .fig .free,body.stale .vol{opacity:.45}
+
+/* ---------------------------------------------------------------- masthead */
+.top{display:flex;align-items:baseline;justify-content:space-between;
+     gap:var(--s3);margin-bottom:var(--s6)}
+.mark{font-family:var(--f-ui);font-weight:800;font-size:var(--t-caption);
+      letter-spacing:.28em;text-transform:uppercase;color:var(--muted)}
+.clock{font-family:var(--f-mono);font-size:var(--t-micro);color:var(--faint);
+       font-variant-numeric:tabular-nums;letter-spacing:.06em}
+
+/* ---------------------------------------------------------------- section label
+   A hairline and a tiny caps label. No boxes, no cards, no chrome. This is the
+   only section separator in the product. */
+.lbl{font-family:var(--f-ui);font-weight:800;font-size:var(--t-micro);
+     letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
+     margin:0 0 var(--s3);padding-bottom:var(--s2);
+     border-bottom:1px solid var(--line);display:flex;
+     align-items:center;justify-content:space-between;gap:var(--s3)}
+.lbl .aux{font-family:var(--f-mono);font-weight:400;letter-spacing:.04em;
+          text-transform:none;color:var(--faint);font-variant-numeric:tabular-nums}
+section,nav.go{margin-bottom:var(--s6)}
+
+/* ---------------------------------------------------------------- the readout
+   The answer to "is it doing anything". Biggest thing on the page by 4x. */
+.readout{font-family:var(--f-mono);font-weight:800;font-size:var(--t-display);
+         line-height:.95;letter-spacing:-.045em;color:var(--text);
+         font-variant-numeric:tabular-nums;margin:0;
+         word-break:break-word;
+         transition:color var(--dur-2) var(--ease),opacity var(--dur-2) var(--ease)}
+.readout.live{color:var(--accent)}
+.readout.held{color:var(--warn)}
+.readout-sub{font-family:var(--f-ui);font-weight:500;font-size:var(--t-body);
+             color:var(--muted);margin:var(--s3) 0 0;min-height:1.5em}
+.readout-sub b{color:var(--text);font-weight:800}
+
+/* ---------------------------------------------------------------- room / volume
+   Two isometric solids. Height is capacity, fill is usage. Volume is the right
+   encoding for physical storage across two unequal drives -- see FINDINGS §6.
+   Hand-drawn SVG, no WebGL: ~1 KB against Three.js's ~150 KB, and identical
+   with WebGL disabled because there is no canvas to fail. */
+.room{display:grid;grid-template-columns:auto 1fr;gap:var(--s5);align-items:end}
+.vol{display:block;flex:none;overflow:visible}
+.vol .out{fill:none;stroke:var(--line-hi);stroke-width:1}
+.vol .out.risky{stroke-dasharray:3 3}
+.vol .ft{fill:var(--face-top)} .vol .fr{fill:var(--face-r)} .vol .fl{fill:var(--face-l)}
+.vol .warnfill .ft{fill:var(--warn)} .vol .warnfill .fr{fill:#A88C2F}
+.vol .warnfill .fl{fill:#6E5A1E}
+.vol .dangerfill .ft{fill:var(--danger)} .vol .dangerfill .fr{fill:#B3352A}
+.vol .dangerfill .fl{fill:#73211A}
+.vol .cap{font-family:var(--f-mono);font-size:9px;fill:var(--faint);
+          letter-spacing:.08em}
+.vol g{transition:opacity var(--dur-3) var(--ease)}
+
+.figs{display:flex;flex-direction:column;gap:var(--s4);min-width:0}
+.fig{min-width:0}
+.fig .who{font-family:var(--f-mono);font-size:var(--t-micro);color:var(--faint);
+          letter-spacing:.06em;display:flex;gap:var(--s2);align-items:center}
+.fig .free{font-family:var(--f-mono);font-weight:800;font-size:var(--t-big);
+           line-height:1.1;color:var(--text);font-variant-numeric:tabular-nums;
+           letter-spacing:-.03em}
+.fig .of{font-family:var(--f-mono);font-size:var(--t-caption);color:var(--muted);
+         font-variant-numeric:tabular-nums}
+.fig.tight .free{color:var(--warn)}
+.fig.full .free{color:var(--danger)}
+/* The USB drive has no readable SMART and is expected to fail without warning
+   (DECISION 91). It reads as the less trustworthy thing it is. */
+.tag{font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;
+     text-transform:uppercase;color:var(--faint);border:1px solid var(--line);
+     border-radius:2px;padding:1px var(--s1)}
+
+/* ---------------------------------------------------------------- rows
+   A queue item or an arrival is a discrete object, so it gets a surface. A
+   navigation entry is not, so it does not. */
+.item{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+      padding:var(--s3) var(--s4);margin-bottom:var(--s2);position:relative}
+.item .t{font-family:var(--f-mono);font-size:var(--t-mono);line-height:1.45;
+         color:var(--text);overflow-wrap:anywhere;word-break:break-word}
+.item .meta{display:flex;flex-wrap:wrap;gap:var(--s3);margin-top:var(--s2);
+            font-family:var(--f-mono);font-size:var(--t-caption);
+            color:var(--muted);font-variant-numeric:tabular-nums}
+.item .meta .on{color:var(--accent)}
+.item .meta .bad{color:var(--danger)}
+
+/* Progress. The byte-delta is more truthful than NZBGet's Status string, which
+   lags up to 16s -- so the bar leads and the chip is never allowed to contradict
+   it (FINDINGS §5). */
+.track{height:2px;background:var(--line);margin-top:var(--s3);overflow:hidden}
+.track i{display:block;height:100%;background:var(--accent);
+         transform-origin:left center;transition:transform var(--dur-3) var(--ease)}
+.track.held i{background:var(--warn)}
+
+/* arrivals carry artwork -- explicit width/height, so nothing shifts on load */
+.arr{display:flex;gap:var(--s3);align-items:flex-start}
+.arr img{flex:none;width:46px;height:68px;object-fit:cover;border-radius:2px;
+         background:var(--sunk);border:1px solid var(--line)}
+.arr .body{min-width:0;flex:1}
+/* An arrival is identified by its real title, not its release name. The release
+   name is still here -- it is the only thing that says 2160p or which group --
+   but it sits underneath, at caption weight, because it is not what you scan. */
+.arr .nm{font-family:var(--f-ui);font-weight:800;font-size:var(--t-body);
+         line-height:1.25;letter-spacing:-.01em;overflow-wrap:anywhere}
+.arr .t{color:var(--faint);font-size:var(--t-caption);margin-top:var(--s2)}
+
+.empty{font-family:var(--f-mono);font-size:var(--t-mono);color:var(--faint);
+       padding:var(--s2) 0}
+
+/* ---------------------------------------------------------------- the library tree
+   Every row here is a block, not a flex row with fixed columns. The old layout
+   demanded 441 px of fixed width inside 368 px of phone, so `.name{flex:1;min-width:0}`
+   collapsed to nothing -- while the delete button, having a fixed width, stayed.
+   You could tap delete on a row you could not read. A title now gets the full
+   width and wraps; the size sits beside it; everything else goes underneath. */
+.ent{border-bottom:1px solid var(--line);padding:var(--s3) 0}
+.ent:last-child{border-bottom:0}
+.hdr{display:flex;align-items:flex-start;gap:var(--s2);width:100%;min-height:34px;
+     background:none;border:0;padding:0;margin:0;text-align:left;color:inherit;
+     font:inherit;cursor:pointer}
+.hdr .caret{flex:none;width:10px;height:10px;margin:5px 0 0;fill:var(--faint);
+            transition:transform var(--dur-1) var(--ease)}
+.ent.open>.hdr .caret{transform:rotate(90deg)}
+.hdr .pad{flex:none;width:10px}
+.hdr .nm{flex:1;min-width:0;font-family:var(--f-ui);font-weight:800;
+         font-size:var(--t-body);line-height:1.3;overflow-wrap:anywhere}
+.hdr .amt{flex:none;margin-top:1px;font-family:var(--f-mono);font-size:var(--t-mono);
+          color:var(--muted);font-variant-numeric:tabular-nums}
+.kids .hdr .nm{font-weight:500}
+
+/* Size, drawn relative to the largest thing in the library. This is the only
+   ranking that matters on a page about what to delete. */
+.meas{height:2px;background:var(--line);margin-top:var(--s2);overflow:hidden}
+.meas i{display:block;height:100%;background:var(--line-hi);transform-origin:left center;
+        transition:transform var(--dur-3) var(--ease)}
+/* NOT `.ent.top` -- `.top` is the masthead, and it is `display:flex`. Naming a
+   library row `top` turned every large entry into a flex container and laid its
+   title, its size and its facts out side by side. */
+.ent.big>.meas i{background:var(--muted)}
+
+.sub{display:flex;flex-wrap:wrap;gap:var(--s3);margin-top:var(--s2);
+     font-family:var(--f-mono);font-size:var(--t-caption);color:var(--faint);
+     font-variant-numeric:tabular-nums}
+/* Two facts this tool exists to tell you, and nothing else is allowed this colour.
+   `.twin`: the file has a second name under the downloads tree, so deleting it
+   here removes both -- Sonarr's own delete would free nothing.
+   `.stuck`: something outside our view still holds the inode, so this row frees
+   less than it says. Rare, and the one case where a size is a lie. */
+.sub .twin{color:var(--accent)}
+.sub .stuck{color:var(--warn)}
+
+.kids{margin:var(--s3) 0 0 var(--s1);padding-left:var(--s4);
+      border-left:1px solid var(--line)}
+.kids .ent{padding:var(--s2) 0}
+
+/* Destructive controls are reachable only once a row is open, and never sit in a
+   collapsed header. Harder, not easier (§6.6). 36 px is the smallest a thumb
+   should have to hit. */
+.acts{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s3)}
+.btn{font-family:var(--f-ui);font-weight:800;font-size:var(--t-caption);
+     letter-spacing:.04em;color:var(--text);background:var(--surface);
+     border:1px solid var(--line-hi);border-radius:var(--r);
+     padding:0 var(--s3);min-height:36px;cursor:pointer}
+.btn:active{border-color:var(--accent)}
+.btn.danger{color:var(--danger);border-color:var(--danger)}
+.btn.on{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.btn[disabled]{opacity:.45;cursor:default}
+
+/* One line of feedback, over the content, out of the way of the thumb. */
+#msg{position:fixed;left:var(--s4);right:var(--s4);bottom:var(--s4);z-index:10;
+     max-width:728px;margin:0 auto;background:var(--surface);
+     border:1px solid var(--line-hi);border-left:2px solid var(--accent);
+     border-radius:var(--r);padding:var(--s3) var(--s4);box-shadow:var(--sh-2);
+     font-family:var(--f-mono);font-size:var(--t-caption);color:var(--text);
+     line-height:1.4}
+
+/* ---------------------------------------------------------------- navigation
+   Deliberately NOT eight equal tiles -- that is the shape the brief bans and the
+   shape this page used to be. One primary action carries weight; the rest is an
+   index that stays out of the way. */
+nav.go a{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 0;
+         border-bottom:1px solid var(--line);text-decoration:none;color:var(--text)}
+nav.go a:last-of-type{border-bottom:0}
+nav.go a .nm{font-family:var(--f-ui);font-weight:800;font-size:var(--t-body);
+             letter-spacing:-.01em;flex:1;min-width:0}
+nav.go a .ds{font-family:var(--f-mono);font-size:var(--t-micro);color:var(--faint);
+             letter-spacing:.04em}
+nav.go a:active .nm{color:var(--accent)}
+.ico{flex:none;width:20px;height:20px;stroke:var(--muted);stroke-width:1.5;
+     fill:none;stroke-linecap:round;stroke-linejoin:round;
+     transition:stroke var(--dur-1) var(--ease)}
+nav.go a:active .ico{stroke:var(--accent)}
+
+.primary{display:flex;align-items:center;gap:var(--s3);text-decoration:none;
+         background:var(--accent-sunk);border:1px solid var(--accent);
+         border-radius:var(--r);padding:var(--s4);margin-bottom:var(--s4)}
+.primary .nm{font-family:var(--f-ui);font-weight:800;font-size:var(--t-sub);
+             color:var(--accent);flex:1;letter-spacing:-.01em}
+.primary .ds{display:block;font-family:var(--f-mono);font-size:var(--t-micro);
+             color:var(--muted);letter-spacing:.02em;margin-top:2px;font-weight:400}
+.primary .ico{stroke:var(--accent)}
+.primary:active{opacity:.82}
+
+/* ---------------------------------------------------------------- asking for a title
+   A search field, and results that are words rather than posters. Jellyseerr's
+   artwork lives on image.tmdb.org and §6.2 rules out a third-party asset fetch, so
+   this page is typographic on purpose rather than by omission. */
+.readout.small{font-size:var(--t-big);letter-spacing:-.03em;margin-bottom:var(--s4)}
+.ask{display:flex;gap:var(--s2);margin-bottom:var(--s3)}
+.field{flex:1;min-width:0;font-family:var(--f-ui);font-weight:500;
+       font-size:var(--t-body);color:var(--text);background:var(--sunk);
+       border:1px solid var(--line-hi);border-radius:var(--r);
+       padding:0 var(--s3);min-height:44px;-webkit-appearance:none;appearance:none}
+.field::placeholder{color:var(--faint)}
+.field:focus{outline:none;border-color:var(--accent)}
+.blurb{font-family:var(--f-ui);font-weight:500;font-size:var(--t-caption);
+       line-height:1.5;color:var(--muted);margin:var(--s2) 0 0;max-width:62ch}
+/* `.back` is the offline page's standalone link; inside a masthead it must not
+   carry that page's trailing margin. */
+.top .back{margin-bottom:0;cursor:pointer}
+
+/* ---------------------------------------------------------------- offline page */
+.back{display:inline-block;margin-bottom:var(--s5);color:var(--muted);
+      font-family:var(--f-mono);font-size:var(--t-caption);text-decoration:none;
+      letter-spacing:.04em}
+.back:active{color:var(--accent)}
+.lede{font-family:var(--f-ui);font-weight:500;font-size:var(--t-sub);
+      line-height:1.45;color:var(--muted);margin:var(--s3) 0 var(--s6);max-width:46ch}
+.lede b{color:var(--text);font-weight:800}
+ol.steps{list-style:none;padding:0;margin:0;counter-reset:step}
+ol.steps li{position:relative;padding:0 0 var(--s5) var(--s6);color:var(--muted);
+            border-left:1px solid var(--line);margin-left:var(--s3)}
+ol.steps li:last-child{border-left-color:transparent;padding-bottom:0}
+ol.steps li::before{counter-increment:step;content:counter(step);
+                    position:absolute;left:calc(var(--s4) * -1 + 4px);top:-2px;
+                    width:24px;height:24px;border-radius:50%;
+                    background:var(--bg);border:1px solid var(--line-hi);
+                    color:var(--accent);font-family:var(--f-mono);font-weight:800;
+                    font-size:var(--t-caption);display:flex;
+                    align-items:center;justify-content:center}
+ol.steps li .h{display:block;font-family:var(--f-ui);font-weight:800;
+               font-size:var(--t-body);color:var(--text);margin-bottom:var(--s1)}
+.note{border-left:2px solid var(--warn);padding:var(--s1) 0 var(--s1) var(--s3);
+      margin:var(--s5) 0;color:var(--muted);font-size:var(--t-body)}
+.note b{color:var(--text);font-weight:800}
+.cta{display:block;text-align:center;padding:var(--s4);border-radius:var(--r);
+     text-decoration:none;background:var(--accent);color:var(--bg);
+     font-family:var(--f-ui);font-weight:800;font-size:var(--t-body);
+     letter-spacing:.03em;margin:var(--s6) 0 var(--s4)}
+.cta:active{opacity:.82}
+
+.foot{margin-top:var(--s7);padding-top:var(--s3);border-top:1px solid var(--line);
+      color:var(--faint);font-family:var(--f-mono);font-size:var(--t-micro);
+      letter-spacing:.06em;display:flex;justify-content:space-between;gap:var(--s3)}
+
+/* ---------------------------------------------------------------- motion
+   One orchestrated page-load. Compositor-only properties. Live values transition
+   between polls rather than snapping -- the poll rate never increases. */
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.stagger>*{animation:rise var(--dur-3) var(--ease) both}
+.stagger>*:nth-child(1){animation-delay:0ms}
+.stagger>*:nth-child(2){animation-delay:60ms}
+.stagger>*:nth-child(3){animation-delay:120ms}
+.stagger>*:nth-child(4){animation-delay:180ms}
+.stagger>*:nth-child(5){animation-delay:240ms}
+.stagger>*:nth-child(6){animation-delay:300ms}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:1ms !important;animation-delay:0ms !important;
+                       transition-duration:1ms !important}
+  .stagger>*{opacity:1;transform:none}
+}
+
+/* ---------------------------------------------------------------- focus
+   Keyboard and screen-reader users get a real focus ring, not a removed one. */
+a:focus-visible,button:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
+    clip-path:inset(50%);white-space:nowrap}
