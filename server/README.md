@@ -160,6 +160,20 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   `KeyError` from `subtitles/indexer/series.py`. `database.py` backfills the key on read; the
   indexer does not. Also: **first start took ~4 minutes to bind 6767 while systemd said
   `active`** — do not conclude it crashed. DECISION 98.
+- **"The server is slow" on this box means the disk, not the network.** <!-- [CHANGE:
+  claude-code | 2026-09-13] --> Both drives are 5400 rpm platters. `iostat -dx 3 2` (ignore the
+  first block, it is an average since boot) told the whole story in one line: `sda` at **99.85%
+  util, 239 ms await, queue depth 12.4** doing ~28 MB/s read *and* ~28 MB/s write at once, while
+  `sdb` sat at **0.23%**. `vmstat`'s `wa` column and a low top-CPU process point the same way.
+  Keep NZBGet's `InterDir` on the *other* spindle from the library. ⚠️ But `DestDir` must stay on
+  the **same filesystem as the library root**, or Sonarr's `copyUsingHardlinks` silently becomes
+  a full copy — check `/api/v3/config/mediamanagement` before moving either. DECISION 100.
+- **Read the vendor's shipped config docs before asserting what a flag does.** <!-- [CHANGE:
+  claude-code | 2026-09-13] --> `/usr/share/nzbget/nzbget.conf` is the fully commented reference
+  and it was on the box all along. I claimed `DirectWrite=yes` defeats `ArticleCache`; the docs
+  say the cache *"works best with option `<DirectWrite>`"*. The evidence I used was
+  `ArticleCacheMB 0` from `/jsonrpc/status` — that is a **live gauge**, zero when idle, 36 MB
+  mid-download. A counter reading zero means "nothing happening now", not "feature disabled".
 - **A green picture out of ffmpeg is almost never a Dolby Vision problem.**
   <!-- [CHANGE: claude-code | 2026-09-04] --> Two separate bugs on this hardware both render
   green: `libplacebo` → `hwdownload` drops chroma for `nv12`/`yuv420p` (use `rgba` or `p010`),
@@ -411,9 +425,11 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 
 Things that need physical access or the router admin page:
 
-- Two Cat 6 cables: router→server (the current one downshifts to 100 Mb/s) and router→TV.
-  **Now measured, not theoretical:** Usenet does 11.45 MB/s and is sitting exactly on the
-  wifi ceiling, while the router reports a ~1 Gbps line. The cable is worth about 10x.
+- ~~Two Cat 6 cables: router→server (the current one downshifts to 100 Mb/s) and router→TV.~~
+  **Done — the server side at least.** [CHANGE: claude-code | 2026-09-13] DECISION 100.
+  `enp2s0` now negotiates **1000 Mbps full duplex** and owns the winning default route, and
+  Usenet measures **17.59 MB/s** against the 11.45 MB/s that was the wifi-era ceiling. The
+  bottleneck moved to the disk. Router→TV is unverified from here.
 - A DHCP reservation for 192.168.2.62.
 - The BIOS boot order must keep the HDD first, or a power blip boots Windows and SSH is gone.
 - **Disable Tailscale key expiry for `luminos-server`** in the admin console. The machine key

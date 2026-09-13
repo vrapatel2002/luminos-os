@@ -2288,3 +2288,83 @@ unit **only when it actually rewrote a page**; the stylesheet itself is re-read 
 iterating on colour never bounces a service.
 
 Reverting is `rm` the skin, restore `<page>.luminos-orig`, delete the hook.
+
+## DECISION 100 — "Slow" was one disk head doing two jobs, not the network and not the RAM
+
+[CHANGE: claude-code | 2026-09-13]
+
+The ask was *"why not download it on RAM and then RAM to hard drive, and also we had more
+speed before."* Both halves turned out to be measurement questions, and the measurements
+disagreed with the premise in interesting ways.
+
+**The network was never the problem.** `enp2s0` negotiates **1000 Mbps full duplex** and owns
+the winning default route (`metric 100`, ahead of `wlan0` at 600). The Cat 6 cable listed as an
+owner-only task in `README.md` has clearly been fitted at some point — that line was stale and
+is now corrected.
+
+**"More speed before" is not what the record says.** NZBGet's own history holds exactly **one**
+real download over 200 MB: the 8.1 GB *Solo Leveling* season pack at **15.59 MB/s**. During this
+investigation the live rate hit **17.59 MB/s** with a 14.7 MB/s running average. DECISION 54
+recorded **11.45 MB/s** as the measured ceiling back when the link was downshifted to 100 Mb/s.
+So today is the **fastest throughput on record**, by a wide margin. What degraded is not
+bytes-per-second, it is *responsiveness* — Jellyfin and the web UIs crawl, which reads as "the
+server is slow" even while the download is fine.
+
+**I had to correct myself on the RAM claim.** I said earlier that `DirectWrite=yes` *defeats*
+the article cache, because `/jsonrpc/status` reported `ArticleCacheMB 0`. Both halves were
+wrong. NZBGet's own shipped documentation says the opposite — *"The article cache works best
+with option `<DirectWrite>` which can effectively use even small cache (like 50 MB)"* — and
+`ArticleCacheMB` is a **live gauge, not a reservation**: it read 0 because nothing was
+downloading at that instant, and read 36 MB a few minutes later mid-transfer. **Read the
+vendor's config documentation before asserting what a flag does.** It was on the box the
+whole time at `/usr/share/nzbget/nzbget.conf`.
+
+**A RAM disk is the wrong shape for this workload.** The box has 15.7 GB total, **11.8 GB
+available**. A tmpfs `InterDir` has to hold an entire download: the season pack alone was
+8.1 GB and the Dolby Vision remux of DECISION 54 was **103.5 GB**. It would not have degraded,
+it would have OOMed — and Jellyfin and the *arr stack share that RAM.
+
+**The actual bottleneck, from `iostat -dx`:**
+
+| | before | after |
+|---|---|---|
+| `sda` utilisation | **99.85%** | 96% |
+| `sda` write await | **239 ms** | — |
+| `sda` read await | **207 ms** | **57 ms** |
+| `sda` queue depth | **12.40** | **3.95** |
+| `sdb` utilisation | **0.23%** | idle → now carries the scratch |
+
+`sda` was doing ~28 MB/s read **and** ~28 MB/s write simultaneously: the next article stream
+writing while par2 verify and unpack read the previous download back off **the same 5400 rpm
+platter**. Meanwhile `sdb` — a whole second spindle — sat at 0.23%. The fix is not more RAM,
+it is *stop making one head seek between two jobs*.
+
+**What changed** in `/var/lib/nzbget/nzbget.conf` (backup `nzbget.conf.bak-20260913`, each
+line tagged in place with its previous value, all four confirmed loaded via `/jsonrpc/config`
+after restart):
+
+| option | was | now | why |
+|---|---|---|---|
+| `InterDir` | `/srv/media/usenet/incomplete` (sda) | `/srv/external/usenet/incomplete` (**sdb**) | download + par2 + unpack all move to the idle disk |
+| `ArticleCache` | 500 | **1024** MB | the RAM buffer the question was really asking for |
+| `ParBuffer` | 16 | **512** MB | par2 verifies in RAM; the docs say *"if you have a lot of RAM set to few hundreds (MB)"* |
+| `ParScan` | `extended` | `limited` | `extended` scans files **beyond** the par-set — pure extra seeking on a platter |
+
+Peak extra RAM is ~1.5 GB against 11.8 GB available.
+
+⚠️ **`DestDir` deliberately stays on `sda`.** Sonarr runs `copyUsingHardlinks: true` and the TV
+library is `/srv/media/tv` on `sda3`. Moving `DestDir` to `sdb` would break every hardlink into
+a full cross-device copy. As configured there is exactly **one** cross-device transfer — NZBGet
+moving the finished file sdb → sda — and Sonarr's import stays free. The naive "put it all on
+the empty disk" version is slower.
+
+⚠️ **`luminos-brain safe` returned the same false NO for the fourth time** — `ML/AI always use
+pyenv 3.12.13`, for a plain text edit to a **C++** daemon's config file. It has now blocked two
+graphics drivers, a subtitle daemon and a config edit. Overridden with `--reason`. This rule
+matches on the word "install" near anything and **its scope needs narrowing** — four false
+positives is no longer a curiosity, it is a gate nobody will read.
+
+⚠️ **Unrelated find, not fixed:** the 8.1 GB `[Anime Time] Solo Leveling [Season 02]` batch
+downloaded and unpacked cleanly but sits in Sonarr's queue as **`importBlocked`** — *"Found
+matching series via grab history, but release was matched to series by ID. Automatic import is
+not possible."* Season batch packs need a manual import; the file is on disk and safe.
