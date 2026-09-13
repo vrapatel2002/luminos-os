@@ -2014,3 +2014,68 @@ the original alone. Nothing is deleted at any point.
 The script **re-probes every file and skips anything that is not Profile 5**, which is the
 lesson from the E04 near-miss above; `--scan DIR` reports profiles and changes nothing, and
 `--dry-run` lists what would be converted. Only E01 actually needed converting.
+
+---
+
+## DECISION 96 — The coding LLM is interactive already; the wall was the cold prefill, not the tokens
+# [CHANGE: claude-code | 2026-09-13]
+
+Full measurement record: [`docs/LLM_PERF_LOG.md`](docs/LLM_PERF_LOG.md), iterations 39–41.
+Everything below is measured on the server against
+`/srv/media/_llmtest/qwen7b-pureQ4K.gguf` (Qwen2.5-Coder-7B, pure Q4_K, 4.28 GB).
+
+**The number that changes the design.** Asking a real coding question about a real 4,858-token
+file, through `llama-server` with its prefix cache on:
+
+| | measured |
+|---|---|
+| cold TTFT, first ask of a server lifetime | **382.31 s** |
+| warm TTFT, every ask after that | **0.30 s** |
+| generation | 3.18 tok/s |
+| wall clock, 200-token answer | 62.92 s |
+
+`cached_n` came back 4865 of 4866 on every timed ask, so the prefix cache is doing exactly what
+it claims. **The 382 s is paid once per server lifetime, not once per question.** That is a
+1,270× difference between the two TTFTs and it is the whole usability story: the server is not
+slow to answer, it is slow to *start*. The design consequence is that `llama-server` must be a
+long-lived resident process with the working file already in its context — not something spawned
+per request. Spawning per request would pay 382 s every single time.
+
+**Generation speed is a separate, smaller problem, and it degrades with depth**, because the KV
+cache is re-read once per query head. Measured at the memory controller (`uncore_imc`), bytes
+crossing DRAM per generated token:
+
+| depth | GB/token | KV re-reads per token |
+|---|---|---|
+| 0 | 3.994 | — |
+| 2048 | 4.371 | 3.21 |
+| 4096 | 5.923 | 8.21 |
+| 8192 | 10.002 | 12.79 |
+
+At depth 8192, **92.2% of the context traffic is redundant re-reading** of KV the machine already
+read. The model's GQA ratio is 28/4 = 7, so 7× is structural — the CPU flash-attention path loops
+one query head at a time — and the excess above 7 is still being isolated by experiment.
+
+**Two earlier claims in this record were wrong and are withdrawn.** (1) A "16.9× gap" between the
+KV traversal rate and the memory ceiling: measuring the bytes instead of inferring them puts the
+context term at 21.44 GB/s against the 27.50 GB/s that depth-0 generation demonstrates — 78%, not
+a 16.9× shortfall. (2) "Speculative decoding is worth +21%": the original measurement was timing a
+speculator that never actually constructed. Every speculation variant re-measured after that bug
+was fixed is a **loss** on this box, for a named reason — verify-batch amplification A(8) tops out
+at 1.351, so there is no headroom for any drafting scheme to work in.
+
+**Upstream PR #27478 is NOT adopted, despite being the only real win found.** It reorganises CPU
+flash-attention accumulation and measures **+18.55% generation, −15.66% wall clock** end to end,
+with the prefill control moving −1.80% (i.e. it costs nothing). It is held out of the baseline
+anyway, because it is **not lossless**: at temperature 0 the base tree and the patched tree
+produce byte-identical output within themselves and *different* output from each other, diverging
+at line 7 of a 200-token answer. Floating-point reassociation flips a near-tied argmax. It lives
+in a worktree at `/srv/media/_llmtest/wt-pr27478` and `~/llama.cpp` stays the baseline until a
+perplexity gate — bar fixed before the run at |Δppl|/ppl < 0.1% adopt, 0.1–1% adopt but quote the
+cost, >1% in *either* direction reject — says the numerics did not move.
+
+**A unit test passing is not a correctness gate.** `test-backend-ops test -o FLASH_ATTN_EXT -b CPU`
+passed **5181/5181** on this patch. Its tolerance hid a difference large enough to change what the
+model writes. Compare the actual generated text, byte for byte, or you have not checked.
+
+**Nothing was purchased and nothing is proposed.** The hardware is the hardware.
