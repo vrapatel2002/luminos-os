@@ -117,7 +117,12 @@ section,nav.go{margin-bottom:var(--s6)}
    encoding for physical storage across two unequal drives -- see FINDINGS §6.
    Hand-drawn SVG, no WebGL: ~1 KB against Three.js's ~150 KB, and identical
    with WebGL disabled because there is no canvas to fail. */
-.room{display:grid;grid-template-columns:auto 1fr;gap:var(--s5);align-items:end}
+/* Flex, not a two-column grid: the solids are drawn at a fixed 174px and the
+   figures beside them need about 150px before "268.5 GB" starts wrapping mid
+   number. A grid column would have squeezed them to whatever was left; this lets
+   the figures drop underneath the solids instead, on any layout that gets tight.
+   [CHANGE: claude-code | 2026-09-14] */
+.room{display:flex;flex-wrap:wrap;gap:var(--s4) var(--s5);align-items:flex-end}
 .vol{display:block;flex:none;overflow:visible}
 .vol .out{fill:none;stroke:var(--line-hi);stroke-width:1}
 .vol .out.risky{stroke-dasharray:3 3}
@@ -130,7 +135,7 @@ section,nav.go{margin-bottom:var(--s6)}
           letter-spacing:.08em}
 .vol g{transition:opacity var(--dur-3) var(--ease)}
 
-.figs{display:flex;flex-direction:column;gap:var(--s4);min-width:0}
+.figs{display:flex;flex-direction:column;gap:var(--s4);min-width:0;flex:1 1 10rem}
 .fig{min-width:0}
 .fig .who{font-family:var(--f-mono);font-size:var(--t-micro);color:var(--faint);
           letter-spacing:.06em;display:flex;gap:var(--s2);align-items:center}
@@ -328,6 +333,46 @@ ol.steps li .h{display:block;font-family:var(--f-ui);font-weight:800;
 .foot{margin-top:var(--s7);padding-top:var(--s3);border-top:1px solid var(--line);
       color:var(--faint);font-family:var(--f-mono);font-size:var(--t-micro);
       letter-spacing:.06em;display:flex;justify-content:space-between;gap:var(--s3)}
+
+/* ---------------------------------------------------------------- the board
+   [CHANGE: claude-code | 2026-09-14]
+   The hub was one column at every width, because `.wrap` is 760px and nothing
+   under it ever reflowed. That is right on a phone and wrong on a desktop, where
+   it reads as a ribbon down the middle of a black field with the bottom half of
+   the product below the fold.
+
+   There are no breakpoints here and no device sizes. Each panel states the
+   narrowest width at which it is still readable (`--col`, in rem so it follows
+   the reader's own text size), flex-wrap counts how many of those fit, and the
+   ones that do share the row out between them. The layout therefore re-forms at
+   every width continuously -- including widths nobody tested, split windows, and
+   a phone turned sideways -- rather than snapping at three chosen numbers.
+
+   96rem is a reading cap, not a breakpoint: past it the columns would grow wider
+   than a line of text should be, so the board centres instead. */
+.board{max-width:96rem;display:flex;flex-wrap:wrap;align-items:flex-start;
+       gap:var(--s6) clamp(var(--s5),3vw,var(--s7));
+       padding-inline:clamp(var(--s4),3vw,var(--s6))}
+/* One shrinkable, growable column. `--col` is the hint, not a width. */
+.board>*{flex:1 1 var(--col,24rem);min-width:0;margin-bottom:0}
+/* Masthead and footer are rules across the whole board, so they take the line. */
+.board>.top,.board>.foot{flex-basis:100%}
+.board>.foot{margin-top:var(--s2)}
+/* The readout is the one thing worth reading from across the room: widest hint,
+   and it takes the larger share of whatever row it lands on. */
+.board>.hero{--col:30rem;flex-grow:1.5}
+/* The solids are drawn at a fixed 174px; the figures beside them need about as
+   much again. Below that the pair stops being a comparison. */
+.board>.store{--col:19rem}
+.board>.go{--col:22rem}
+
+/* An index of nine links is a tall thing to put in a column. Same trick one level
+   down: as the nav's own column widens, the links pair up and then triple up. The
+   primary action never does -- it is the only thing here with weight. */
+.board>.go{display:grid;align-content:start;
+           grid-template-columns:repeat(auto-fit,minmax(min(100%,17rem),1fr));
+           column-gap:clamp(var(--s4),2vw,var(--s5))}
+.board>.go .primary{grid-column:1/-1}
 
 /* ---------------------------------------------------------------- motion
    One orchestrated page-load. Compositor-only properties. Live values transition

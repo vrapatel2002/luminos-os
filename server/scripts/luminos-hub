@@ -338,21 +338,21 @@ PAGE = """<!doctype html>
 <link rel="preload" href="/fonts/jetbrainsmono-800.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/app.css">
 </head><body>
-<div class="wrap stagger">
+<div class="wrap board stagger">
 
  <div class="top">
   <span class="mark">Luminos</span>
   <span class="clock" id="clock">--:--</span>
  </div>
 
- <section>
+ <section class="hero">
   <p class="readout" id="state">&hellip;</p>
   <p class="readout-sub" id="state-sub">Asking the server.</p>
   <noscript><p class="readout-sub">This page reads live numbers off the server,
    which needs JavaScript. The links below still work.</p></noscript>
  </section>
 
- <section>
+ <section class="store">
   <div class="lbl">Room <span class="aux" id="room-aux"></span></div>
   <div class="room">
    <svg class="vol" width="174" height="152" viewBox="0 0 174 152" aria-hidden="true">
