@@ -88,6 +88,59 @@ Last Updated: 2026-08-29 (BUG-149 **BUG-142 WAS NEVER A vkd3d BUG — WE DELETED
   `working-backup/` (each a copy of `database` / `-shm` / `-wal`) were created **Sep 14 18:23**.
   KDE does not name directories like that.
 
+### BUG-160 — the dGPU never sleeps again, because the daemon watching it is what keeps it awake
+<!-- [CHANGE: claude-code | 2026-09-14] -->
+- Status: **FIXED 2026-09-14 19:26. Measured: 300 s asleep out of 300 s, against 0 s before.**
+  Reported the morning after BUG-157 shipped — *"now the dgpu is on for ever"*. A regression I
+  introduced, not a pre-existing fault.
+
+**The cause.** BUG-157's fix folded `utilization.gpu` into the nvidia-smi call that already read
+power and temperature. Power and temperature come off **board-level sensors**, which answer while
+the GPU core is gated down. Utilisation is read from **performance counters inside the core**, so
+asking for it forces the core to D0 and resets the driver's `pm_runtime` autosuspend timer. The
+monitor loop polls every 0.5–2 s. The timer needs ~50 s of silence. It never got it.
+
+**Why the existing BUG-078 guard could not save us.** The guard is
+
+```go
+if offloadActive.Load() || !dgpuRuntimeSuspended() { ... }
+```
+
+which is *one-way*: it keeps the daemon off a card that has **already** reached `suspended`. It has
+nothing to say about letting a card **get** there. Once the poll made `suspended` unreachable, the
+guard was permanently false and the loop sustained itself. This is the trap to remember — a guard
+phrased as "don't poke it while it's asleep" is not the same guard as "let it fall asleep".
+
+**The fix, in two parts.**
+1. `readGPUStats` asks for `power.draw,temperature.gpu` first, and only issues a **second** call for
+   `utilization.gpu` when power says the card is already working (`>= dgpuActiveW`, 10 W; measured
+   idle-in-D0 on this card is **2.5 W**, so 10 W is ~4× headroom and no idle state can cross it).
+2. New `dgpuHasClients()` — a `/proc/*/fd` walk for any open `/dev/nvidia*` node. It is the honest
+   "is the dGPU in use" signal precisely because it **never contacts the card**. nvidia-smi can
+   never answer that question, because asking is what breaks it. The guard became
+   `offloadActive.Load() || (!dgpuRuntimeSuspended() && dgpuHasClients())`.
+
+**Rejected on measurement — a timed "stop polling for N seconds" sleep window.** Implemented first,
+and it did let the card suspend. But it is blind by construction: a 90 s window swallowed an entire
+80 s llama-bench run, during which the daemon saw `dgpu=0%` and managed nothing. Guessing at when
+the GPU is idle is strictly worse than asking the kernel who has it open.
+
+**Not the cause, though it looked like it.** `nvidia-powerd` holds `/dev/nvidia0` open and logs
+`ERROR! Client (presumably SBIOS) has requested to disable Dynamic Boost DC controller`. It is a
+red herring: `systemctl disable` is a **no-op** on it — it is already `disabled` with an empty
+`WantedBy`, and **asusd starts it explicitly** (see the comment block in
+`/etc/systemd/system/luminos-uvm-gate.service`). The final 300/300 s measurement was taken with
+nvidia-powerd running, so it does not need to be touched.
+
+**Verification that BUG-157 did not regress.** Under `llama-bench` on the dGPU the daemon logs
+`dgpu=100%` and `beast mode → Performance (trigger: gpu, cpu=10%, dgpu=100%)`. Load detection and
+sleep now both work.
+
+**Adjacent, NOT fixed, deliberately out of scope:** during that verification run CPU package temp
+reached **94.9 °C** under beast mode while the workload was GPU-bound, and the documented 92 °C
+emergency throttle did not log. Shared heatpipe, CPU held wide open for a load that was not using
+it. Worth its own look.
+
 ### BUG-157 — our own power daemon flips the dGPU between 90 W and 55 W ten times in twelve minutes, mid-game
 <!-- [CHANGE: claude-code | 2026-09-13] -->
 - Status: **FIXED 2026-09-13 20:39, measured before/after on a live Black Myth Wukong session.**

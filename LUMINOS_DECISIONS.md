@@ -6154,3 +6154,37 @@ Re-assert with `SetBrightness` on the value it already claims.
 `AGENTS.md` §11.
 **Revert:** `cp ~/.luminos-backups/powerdevilrc.bak-bug159-20260914 ~/.config/powerdevilrc`.
 Cross-ref: BUG-159, BUG-158, BUG-098, DECISION 38.
+
+## DECISION 105 — "is the dGPU in use" is answered by /proc, never by nvidia-smi
+<!-- [CHANGE: claude-code | 2026-09-14] -->
+
+**Decision:** `luminos-power` decides whether to monitor the discrete GPU by walking `/proc/*/fd`
+for an open `/dev/nvidia*` node (`dgpuHasClients()`), not by querying the card. `utilization.gpu`
+is additionally split into its own second nvidia-smi call, issued only once `power.draw` shows the
+card is already working (≥10 W).
+
+**Why:** asking the GPU how busy it is *is itself GPU activity*. `utilization.gpu` comes from
+performance counters inside the core, so the query forces D0 and resets the RTD3 autosuspend timer.
+On a 0.5–2 s monitor loop against a ~50 s timer, the card can never sleep — the observer was the
+load. Power and temperature are safe to poll because they come from board-level sensors outside the
+core. The `/proc` walk is the only signal that is both honest and free: a game, a CUDA job or a
+PRIME-offload client all hold a device node open, and reading the link target never touches
+hardware.
+
+**What we rejected and why:** a timed "pause polling for N seconds" window. It was built and it did
+let the card suspend, but it is blind by construction — a 90 s window swallowed an entire 80 s
+llama-bench, during which the daemon read `dgpu=0%` and managed nothing. Inferring idleness from a
+clock is strictly worse than asking the kernel who holds the device. Also rejected: disabling
+`nvidia-powerd`. It looked like the culprit, but `systemctl disable` is a no-op on it (already
+disabled, empty `WantedBy`, started explicitly by asusd) and the final measurement was clean with
+it running.
+
+**Measured result:** dGPU suspended **300 s out of 300 s** at idle, against **0 s** before, with
+nvidia-powerd and luminos-power both running. Idle draw 2.5 W. BUG-157 not regressed: under load
+the daemon logs `dgpu=100%` and `beast mode → Performance (trigger: gpu)`.
+
+**Files:** `cmd/luminos-power/main.go` (`dgpuHasClients`, `readGPUStats`, `nvidiaFloats`,
+`dgpuActiveW`, the SENSE guard), `docs/BUGS.md` BUG-160.
+**Revert:** `git revert` this commit, then
+`go build -o /tmp/luminos-power ./cmd/luminos-power && sudo install -m755 /tmp/luminos-power /usr/local/bin/luminos-power && sudo systemctl restart luminos-power`.
+Cross-ref: BUG-160, BUG-157, BUG-078, DECISION 102, DECISION 25.

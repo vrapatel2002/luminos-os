@@ -111,6 +111,12 @@ const (
 	gpuTGPThermalDownC = 87.0 // at/above this, drop 90W → 55W
 	gpuTGPThermalUpC   = 82.0 // only return to 90W below this (5°C deadband)
 
+	// [CHANGE: claude-code | 2026-09-14] BUG-160. Above this draw the dGPU core is
+	// demonstrably awake and doing work, so querying utilization.gpu costs nothing extra.
+	// Measured idle-in-D0 on this RTX 4050 is 2.5W, so 10W is ~4x headroom: no idle state
+	// can cross it, and any real 3D load clears it immediately. See readGPUStats.
+	dgpuActiveW = 10.0
+
 	// CPU beast-mode thresholds — catches CPU-heavy work (ML training, compilation)
 	cpuHighThreshPct   = 75.0
 	cpuHighThreshTicks = 10 // 20s at 2s poll
@@ -435,8 +441,16 @@ func monitorLoop(ctx context.Context) {
 		// pinned the card at D0 and blocked true 0W idle. A suspended card is idle by definition,
 		// so report 0 load/power/temp and skip all dGPU access. During an offload session the card
 		// is actively in use, so always sense/manage it (offloadActive short-circuits the guard).
+		// [CHANGE: claude-code | 2026-09-14] BUG-160: that guard alone is one-way. It keeps us
+		// off a card that is ALREADY suspended, but every nvidia-smi read resets the driver's
+		// autosuspend timer, and this loop polls up to twice a second — far shorter than the
+		// ~50s the card needs untouched before it drops to D3cold. So the card could never
+		// REACH suspended and the guard could never engage: the daemon's own monitoring was
+		// what pinned the dGPU at D0 forever. dgpuHasClients is the missing half — it answers
+		// "is the dGPU actually in use" without touching the card, so when nothing is using it
+		// we go quiet and let RTD3 do its job.
 		var dgpuLoad, gpuPowerW, gpuTempC float64
-		if offloadActive.Load() || !dgpuRuntimeSuspended() {
+		if offloadActive.Load() || (!dgpuRuntimeSuspended() && dgpuHasClients()) {
 			// [CHANGE: claude-code | 2026-09-13] BUG-157: one nvidia-smi call now yields
 			// util + power + temp. `dgpuLoad` used to come from a sysfs attribute that does
 			// not exist on an NVIDIA node, so it was always 0 — which made beast mode
@@ -1501,6 +1515,35 @@ func dgpuRuntimeSuspended() bool {
 	return strings.TrimSpace(string(d)) == "suspended"
 }
 
+// dgpuHasClients reports whether any process holds an NVIDIA device node open — a game
+// under PRIME offload, a CUDA job, anything. It is a /proc walk: it never contacts the
+// card, which is the whole point. nvidia-smi cannot answer this question because asking
+// it wakes the GPU, and a 2s poll then keeps the autosuspend timer from ever expiring.
+// Called only while the card is already awake, so the walk stops early in the case that
+// matters (something IS using the GPU) and the exhaustive case costs a few ms on an
+// otherwise idle machine.
+// [CHANGE: claude-code | 2026-09-14] BUG-160
+func dgpuHasClients() bool {
+	procs, err := os.ReadDir("/proc")
+	if err != nil {
+		return true // can't tell — assume in use rather than stop managing a live GPU
+	}
+	for _, p := range procs {
+		fdDir := "/proc/" + p.Name() + "/fd"
+		fds, err := os.ReadDir(fdDir)
+		if err != nil {
+			continue // not a pid, or exited mid-walk
+		}
+		for _, fd := range fds {
+			if target, err := os.Readlink(fdDir + "/" + fd.Name()); err == nil &&
+				strings.HasPrefix(target, "/dev/nvidia") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // readIGPULoad returns AMD iGPU (card2) busy percent. 0 if unavailable.
 func readIGPULoad() float64 {
 	d, _ := os.ReadFile("/sys/class/drm/card2/device/gpu_busy_percent")
@@ -1646,11 +1689,19 @@ func nvidiaCtl(args ...string) error {
 
 // readGPUStats returns NVIDIA dGPU utilisation (%), power draw (W) and temperature (°C).
 //
-// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 1. Utilisation is now returned from
-// HERE, in the SAME nvidia-smi invocation that already fetched power and temp, rather than
-// from the deleted sysfs readDGPULoad. One call, not two: each nvidia-smi exec costs ~200ms
-// and touches the card, and this runs on a 2s poll, so a second invocation per tick would
-// be a real cost for data the first call can carry for free.
+// [CHANGE: claude-code | 2026-09-14] BUG-160. Utilisation is read in a SECOND call, and only
+// when power says the card is already working. power.draw and temperature.gpu come from
+// board-level sensors that answer while the GPU core is gated down; utilization.gpu is read
+// from performance counters INSIDE the core, so asking for it forces the core to D0 and
+// resets the pm_runtime autosuspend timer. On a 2s poll that timer never expires and the
+// card can never runtime-suspend. Bundling all three into one query (the 2026-09-13 shape)
+// is what pinned the dGPU awake forever. The extra exec only happens while the card is
+// already awake and drawing >dgpuActiveW, so it costs nothing at idle — which is the only
+// time the cost would have mattered.
+//
+// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 1. Utilisation comes from nvidia-smi,
+// not from the deleted sysfs readDGPULoad, which read an amdgpu-only attribute off the
+// NVIDIA node and therefore returned 0 forever.
 //
 // The sysfs hwmon branch that used to sit here is GONE. The 2026-08-29 comment correctly
 // established that it can never fire on this machine — the NVIDIA proprietary driver
@@ -1661,26 +1712,43 @@ func nvidiaCtl(args ...string) error {
 // silently returning 0 is the exact shape of the bug being fixed here.
 // [CHANGE: claude-code | 2026-06-03] v4.2
 func readGPUStats() (loadPct, powerW, tempC float64) {
-	out, err := nvidiaQuery("utilization.gpu,power.draw,temperature.gpu")
-	if err != nil {
-		lg.Warn("GPU stats read failed: %v — treating dGPU as idle this tick", err)
+	v, ok := nvidiaFloats("power.draw,temperature.gpu", 2)
+	if !ok {
 		return 0, 0, 0
 	}
-	parts := strings.Split(strings.TrimSpace(string(out)), ",")
-	if len(parts) != 3 {
-		lg.Warn("GPU stats: unexpected nvidia-smi output %q", strings.TrimSpace(string(out)))
-		return 0, 0, 0
-	}
-	loadPct, _ = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-	powerW, _ = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-	tempC, _ = strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
+	powerW, tempC = v[0], v[1]
 	// Sanity cap: RTX 4050 max TGP is 90W — anything higher is a bad read (driver quirk).
 	// [CHANGE: claude-code | 2026-06-08] Observed 590W spurious read causing false TGP uplift.
 	if powerW > 110.0 {
 		lg.Warn("GPU power read %.1fW exceeds hardware max — discarding (driver quirk)", powerW)
 		powerW = 0
 	}
+	if powerW >= dgpuActiveW {
+		if u, ok := nvidiaFloats("utilization.gpu", 1); ok {
+			loadPct = u[0]
+		}
+	}
 	return
+}
+
+// nvidiaFloats runs one --query-gpu read and parses exactly n comma-separated numbers.
+// [CHANGE: claude-code | 2026-09-14]
+func nvidiaFloats(query string, n int) ([]float64, bool) {
+	out, err := nvidiaQuery(query)
+	if err != nil {
+		lg.Warn("nvidia-smi %s failed: %v — treating dGPU as idle this tick", query, err)
+		return nil, false
+	}
+	parts := strings.Split(strings.TrimSpace(string(out)), ",")
+	if len(parts) != n {
+		lg.Warn("nvidia-smi %s: unexpected output %q", query, strings.TrimSpace(string(out)))
+		return nil, false
+	}
+	vals := make([]float64, n)
+	for i, p := range parts {
+		vals[i], _ = strconv.ParseFloat(strings.TrimSpace(p), 64)
+	}
+	return vals, true
 }
 
 // initGPUTGP reads the current GPU power limit at startup and seeds currentGPUTGPW.
