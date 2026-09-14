@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-13 — Response 3
+Last updated: 2026-09-14 — Response 4
 
 > Previous goals, complete, do not reconstruct from memory:
 > gaming/dGPU → `git show b08c3904:HANDOFF.md` · `org.luminos.style` QML → `git show 4273ed7e:HANDOFF.md`
@@ -10,10 +10,94 @@ Keep Luminos OS working as a daily-driver Windows replacement — the G14 deskto
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-**BUG-157 is FIXED and verified live — nothing is pending on it.** The next piece of work is the
-**reboot** (outstanding item 1), which is now the only thing left from the gaming session.
+Two faults reported 2026-09-14, both **diagnosed, deliberately NOT fixed yet** — Shawn said
+*"first find it than tell me and than we will work to solve this."* Root causes below (BUG-158,
+BUG-159). Do not apply a fix without his go-ahead. After that, resume the bar plan at step 2
+(dGPU indicator).
 
 ## State — what is DONE
+
+### ✅ 2026-09-14 — BUG-158 FIXED / DECISION 103: live wallpaper gone — desktop containment orphaned
+
+**Fix, verified live:** `SetCurrentActivity` → containment 30 went `screen=-1` → `screen=0`, and
+plasmashell now holds the mp4 open (`/proc/<pid>/fd` → the video, with libavcodec/libavformat/
+libQt6Multimedia mapped). Made permanent by `scripts/luminos-desktop-guard` +
+`config/luminos-desktop-guard.service` (installed to `/usr/local/bin/` and
+`~/.config/systemd/user/`, enabled on `plasma-workspace.target`). The guard reads the wanted
+activity **off the containment** rather than hardcoding the uuid, re-asserts it at login, and
+**always** writes `[main] currentActivity=` into `kactivitymanagerdrc` — kactivitymanagerd keeps
+that value in memory and only flushes on a clean exit, so a crash or hard reboot would otherwise
+resurrect the bug. Known-good desktop config snapshotted to
+`config/kde/plasma-appletsrc-known-good-20260914`.
+
+Note: the broken state **cannot** be reproduced through the API — `SetCurrentActivity s ""`
+returns `false`. It only arises when kactivitymanagerd starts with no stored currentActivity,
+which is exactly what the guard now prevents.
+
+**Diagnosis that led there:**
+Nothing is missing or broken. Verified present and intact: the plugin
+`~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` (metadata.json + contents/ui/main.qml
++ config), the 14 MB video, and every Qt dep it imports (qt6-multimedia 6.11.2-1,
+qt6-multimedia-ffmpeg, qt6-webengine). The Caelestia bar rework is **innocent** — proven with
+`git log -S "modules/background"`: our `config/quickshell/caelestia-bar/shell.qml` has never
+contained a `Background {}` element, so it never drew the desktop at all.
+
+The failure is in Plasma's containment→screen placement:
+
+```
+busctl --user call org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell evaluateScript ...
+  → idx=0 id=30 screen=-1 wp=org.luminos.livewallpaper
+```
+`screen=-1` means containment 30 is assigned to **no screen**, so it is never rendered and you see
+kwin's flat clear-colour instead. Plasma places a containment on a screen only when its `activityId`
+matches the current activity. Containment 30 carries
+`activityId=d1c73956-6304-4b5a-b773-295615a0378b` (the only activity that exists), but
+`org.kde.ActivityManager` **CurrentActivity is empty** — so it matches nothing. A second containment
+31 exists with `activityId=` (empty), `wallpaperplugin=org.kde.image`, `Image=` empty — the blank
+fallback. `[ScreenMapping] itemsOnDisabledScreens=1,,1,desktop:/worldline.desktop` shows Plasma
+recorded the desktop item as living on a *disabled* screen.
+
+**When:** `~/.config/plasma-org.kde.plasma.desktop-appletsrc` was rewritten **2026-09-13 20:48:05**
+and truncated to **1184 bytes**. `~/.config/plasma-welcomerc` was written **20:48:04** — one second
+earlier. Welcome Center only runs on a first-run profile, so Plasma treated the profile as new at
+that moment and reset the desktop config. That is "after yesterday".
+
+**Unexplained, flag before touching:** `~/.local/share/kactivitymanagerd/resources/test-backup/` and
+`working-backup/` (each a copy of `database` / `-shm` / `-wal`) were created **Sep 14 18:23**. Those
+are not KDE-generated names.
+
+**Backups that exist** (do not overwrite without reading them):
+`config/kde/plasma-org.kde.plasma.desktop-appletsrc`, `config/kde/plasma-appletsrc-tahoe-backup`,
+and `~/.config/plasma-org.kde.plasma.desktop-appletsrc.{tahoe.bak,bak,bak-caelwp-20260818-121853,bak-wallpaper-20260724}`.
+
+### 🔎 2026-09-14 — BUG-159 (DIAGNOSED, NOT FIXED): brightness dips on its own — PowerDevil DimDisplay with a 0-second timeout
+**Root cause:** `~/.config/powerdevilrc` has `DimDisplayIdleTimeoutSec=0` in all three profiles
+(`[AC][Display]`, `[Battery][Display]`, `[LowBattery][Display]`). In PowerDevil, **`-1` means never;
+`0` is a real zero-second timeout**, so the dim action fires the instant input pauses and restores
+the instant anything registers activity — a self-retriggering loop. File mtime **2026-09-13 00:11** —
+also yesterday.
+
+**Proof, measured live** (`/tmp/blwatch.sh`, 0.2 s poll on `/sys/class/backlight/amdgpu_bl2`):
+KDE's user-facing brightness never moves while the hardware value does.
+
+```
+18:43:59.205  sysfs=278137  kde_dbus=7000  ratio=0.9958
+18:43:59.442  sysfs=246715  kde_dbus=7000  ratio=0.8833
+18:43:59.673  sysfs=214130  kde_dbus=7000  ratio=0.7667
+18:43:59.908  sysfs=279300  kde_dbus=7000  ratio=1.0
+```
+`kde_dbus` = `org.kde.ScreenBrightness/display0 Brightness`, pinned at 7000/10000 = 70% = 279300/399000.
+A user/app brightness change would move that property. Only a **dimming ratio** leaves it pinned while
+the hardware moves — and `powerdevil_dimdisplayaction.so` exports exactly
+`ScreenBrightnessController::setDimmingRatio(QString, double)`. One full fade reached **83791**, and
+0.30 × 279300 = **83790** — PowerDevil's dim target to the unit.
+
+**Ruled out by measurement, do not re-investigate:** AMD ABM (no `panel_power_savings` file exists
+anywhere under `/sys/class/drm`, and ABM cannot move the *requested* value, only `actual_brightness`);
+ambient light sensor (none present); `luminos-power` and `asusd` (neither binary contains any backlight
+string); two-backlight-device conflict (the BUG-098 shim at `scripts/brightnessctl` routes everything
+to `amdgpu_bl2` by DRM topology); Caelestia `Brightness.qml` round-tripping (it writes whole percents;
+the observed values are 1/240 steps of the current value).
 
 ### ✅ 2026-09-13 — BUG-157 / DECISION 102: luminos-power was blind to the dGPU and throttled the laptop mid-game
 Reported first as *"way more gpu and still way less fps and graphics"*, then sharpened to

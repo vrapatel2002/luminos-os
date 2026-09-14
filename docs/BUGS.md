@@ -3,6 +3,63 @@ Last Updated: 2026-08-29 (BUG-149 **BUG-142 WAS NEVER A vkd3d BUG — WE DELETED
 
 ## Open Bugs
 
+### BUG-159 — the screen dims itself every few seconds, with nothing touching the brightness keys
+<!-- [CHANGE: claude-code | 2026-09-14] -->
+- Status: **DIAGNOSED 2026-09-14, NOT FIXED** — Shawn asked for cause only, no fix yet.
+- Cause: `~/.config/powerdevilrc` carries `DimDisplayIdleTimeoutSec=0` in all three profiles
+  (`[AC][Display]`, `[Battery][Display]`, `[LowBattery][Display]`). In PowerDevil **`-1` means
+  never; `0` is a literal zero-second idle timeout**, so the dim action fires the instant input
+  pauses and restores the instant anything registers activity — it self-retriggers forever. File
+  mtime **2026-09-13 00:11**, the same day as BUG-158.
+- The measurement that settles it (0.2 s poll on `/sys/class/backlight/amdgpu_bl2`):
+  ```
+  18:43:59.205  sysfs=278137  kde_dbus=7000  ratio=0.9958
+  18:43:59.442  sysfs=246715  kde_dbus=7000  ratio=0.8833
+  18:43:59.673  sysfs=214130  kde_dbus=7000  ratio=0.7667
+  18:43:59.908  sysfs=279300  kde_dbus=7000  ratio=1.0
+  ```
+  `kde_dbus` is `org.kde.ScreenBrightness/display0 Brightness`, **pinned** at 7000/10000 = 70% =
+  279300/399000 while the hardware moves underneath it. A user or app brightness change moves that
+  property; only a *dimming ratio* leaves it pinned. `powerdevil_dimdisplayaction.so` exports
+  exactly `ScreenBrightnessController::setDimmingRatio(QString, double)`. One fade that ran to
+  completion reached **83791**, and 0.30 × 279300 = **83790** — PowerDevil's dim target to the unit.
+- **Ruled out by measurement — do not re-investigate:** AMD ABM (no `panel_power_savings` file
+  exists anywhere under `/sys/class/drm`, and ABM cannot move the *requested* value, only
+  `actual_brightness`); ambient light sensor (none present); `luminos-power` and `asusd` (neither
+  binary contains any backlight string); the two-backlight-device conflict from BUG-098 (the
+  `scripts/brightnessctl` shim routes everything to `amdgpu_bl2` by DRM topology); Caelestia's
+  `Brightness.qml` (it writes whole percents; the observed values are 1/240 steps of the current
+  value).
+- Fix when asked for: set the three keys to `-1`, or untick "Dim screen" in the Energy Saving KCM.
+
+### BUG-158 — the live wallpaper disappeared and the desktop went flat grey
+<!-- [CHANGE: claude-code | 2026-09-14] -->
+- Status: **FIXED 2026-09-14, verified live.**
+- Nothing was missing. The plugin `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/`,
+  the 14 MB video and every Qt dependency were all present and intact, and the Caelestia bar rework
+  is **innocent** — `git log -S "modules/background"` proves
+  `config/quickshell/caelestia-bar/shell.qml` has never contained a `Background {}` element, so it
+  never drew the desktop at all.
+- Cause: Plasma places a desktop containment on a screen **only** when the containment's
+  `activityId` matches the *current* activity. Containment 30 is tagged
+  `d1c73956-6304-4b5a-b773-295615a0378b` — the only activity that exists — but
+  `org.kde.ActivityManager CurrentActivity` was the **empty string**, so it matched nothing and sat
+  at `screen=-1`, never rendering. What you saw was kwin's clear colour.
+- When: `~/.config/plasma-org.kde.plasma.desktop-appletsrc` was rewritten **2026-09-13 20:48:05**
+  and truncated to **1184 bytes**; `~/.config/plasma-welcomerc` was written **20:48:04**, one second
+  earlier. Welcome Center only runs on a first-run profile, so Plasma treated this profile as new
+  and reset the desktop at that moment.
+- Fix: `SetCurrentActivity` → containment went `screen=-1` → `screen=0`, and plasmashell now holds
+  the mp4 open (`/proc/<pid>/fd` → the video, with `libavcodec`/`libavformat`/`libQt6Multimedia`
+  mapped). Made permanent by `scripts/luminos-desktop-guard` +
+  `config/luminos-desktop-guard.service` on `plasma-workspace.target` — see DECISION 103.
+- **The broken state cannot be reproduced through the API**: `SetCurrentActivity s ""` returns
+  `false`. It only arises when kactivitymanagerd starts with no stored currentActivity, which is
+  precisely what the guard now prevents.
+- Unexplained, flag before touching: `~/.local/share/kactivitymanagerd/resources/test-backup/` and
+  `working-backup/` (each a copy of `database` / `-shm` / `-wal`) were created **Sep 14 18:23**.
+  KDE does not name directories like that.
+
 ### BUG-157 — our own power daemon flips the dGPU between 90 W and 55 W ten times in twelve minutes, mid-game
 <!-- [CHANGE: claude-code | 2026-09-13] -->
 - Status: **FIXED 2026-09-13 20:39, measured before/after on a live Black Myth Wukong session.**

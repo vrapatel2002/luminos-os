@@ -6075,3 +6075,36 @@ longer the constraint.
 **Files:** `cmd/luminos-power/main.go`.
 **Revert:** `sudo install -m 755 ~/.luminos-backups/luminos-power.bak-bug157-20260913 /usr/local/bin/luminos-power && sudo systemctl restart luminos-power`.
 Cross-ref: BUG-157, BUG-146, BUG-069, DECISION 25, DECISION 90, AGENTS.md §9.
+
+## DECISION 103 — the current KDE activity is asserted at login, because nothing else persists it
+<!-- [CHANGE: claude-code | 2026-09-14] -->
+**Context:** BUG-158. Plasma places a desktop containment on a screen only when the containment's
+`activityId` matches the current activity. On 2026-09-13 20:48 Plasma treated this profile as
+first-run (it wrote `plasma-welcomerc` one second before rewriting the desktop config down to 1184
+bytes) and came back with `CurrentActivity` as the empty string. Containment 30 is tagged
+`d1c73956-…`, matched nothing, sat at `screen=-1`, and the `org.luminos.livewallpaper` video stopped
+rendering. Nothing was missing — the desktop simply was not on a screen.
+
+**Decision:** a small oneshot, `luminos-desktop-guard`, runs on `plasma-workspace.target` after
+plasmashell. It re-asserts the activity and, crucially, **always** writes
+`[main] currentActivity=` into `kactivitymanagerdrc`.
+
+**Why the write is not redundant:** kactivitymanagerd keeps `currentActivity` in memory and was
+measured **not** to flush it — 45 s after a successful `SetCurrentActivity`, the rc file's mtime was
+still 2026-04-19. It appears to sync only on a clean exit, so any crash or hard reboot would
+resurrect the bug. Asserting over DBus without also writing it down would have fixed this session
+only.
+
+**Why it reads the uuid from the containment instead of hardcoding it:**
+`awk '/^activityId=/ && length($2)>0'` over the appletsrc. If the activity is ever recreated the
+uuid changes, and a hardcoded one would re-break the thing this guard exists to protect.
+
+**Negative result worth keeping:** the failure **cannot** be reproduced through the API —
+`SetCurrentActivity s ""` returns `false`. The empty state is only reachable by starting
+kactivitymanagerd with nothing stored, which is exactly the hole the guard plugs. Do not waste time
+trying to script a repro.
+
+**Files:** `scripts/luminos-desktop-guard`, `config/luminos-desktop-guard.service`,
+`config/kde/plasma-appletsrc-known-good-20260914` (snapshot of the repaired desktop config).
+**Revert:** `systemctl --user disable --now luminos-desktop-guard && sudo rm /usr/local/bin/luminos-desktop-guard`.
+Cross-ref: BUG-158, BUG-159.

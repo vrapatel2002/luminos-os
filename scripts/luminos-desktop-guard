@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# luminos-desktop-guard — keep the desktop containment on a screen
+# [CHANGE: claude-code | 2026-09-14] BUG-158
+#
+# Plasma only places a desktop containment on a screen when the containment's
+# activityId matches the *current* activity. On 2026-09-13 20:48 Plasma treated
+# this profile as first-run, rewrote plasma-org.kde.plasma.desktop-appletsrc
+# (1184 bytes) and left the current activity as an empty string. Containment 30
+# is tagged d1c73956-… so it matched nothing, sat at screen=-1, and never
+# rendered — which is why the org.luminos.livewallpaper video vanished and the
+# desktop went flat grey. Nothing was missing; it just was not on a screen.
+#
+# kactivitymanagerd does not flush currentActivity to its rc while running, so a
+# crash or hard reboot loses it again. This re-asserts it at login and writes it
+# down, so the live wallpaper comes back every boot until Shawn changes it.
+
+set -uo pipefail
+
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+ACT_SVC=org.kde.ActivityManager
+ACT_PATH=/ActivityManager/Activities
+ACT_IFACE=org.kde.ActivityManager.Activities
+APPLETSRC="$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
+
+log() { printf '%s  %s\n' "$(date '+%F %T')" "$*"; }
+
+current_activity() {
+    busctl --user call "$ACT_SVC" "$ACT_PATH" "$ACT_IFACE" CurrentActivity 2>/dev/null |
+        sed -n 's/^s "\(.*\)"$/\1/p'
+}
+
+# Read the activity off the containment itself rather than hardcoding the uuid,
+# so this keeps working if the activity is ever recreated.
+wanted_activity() {
+    awk -F= '/^activityId=/ && length($2) > 0 { print $2; exit }' "$APPLETSRC" 2>/dev/null
+}
+
+placement() {
+    busctl --user call org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell evaluateScript s \
+        'var o=""; for (var i=0;i<desktops().length;i++) { var d=desktops()[i]; o+=d.id+":screen="+d.screen+" "; } print(o);' 2>/dev/null
+}
+
+# Login race: the guard can start before the activity manager owns its bus name.
+for _ in $(seq 1 60); do
+    busctl --user status "$ACT_SVC" >/dev/null 2>&1 && break
+    sleep 2
+done
+
+want=$(wanted_activity)
+if [[ -z $want ]]; then
+    log "no containment carries an activityId — nothing to assert"
+    exit 0
+fi
+
+cur=$(current_activity)
+if [[ $cur == "$want" ]]; then
+    log "current activity already $want"
+else
+    log "current activity is '${cur:-<empty>}' — asserting $want"
+    busctl --user call "$ACT_SVC" "$ACT_PATH" "$ACT_IFACE" SetCurrentActivity s "$want" >/dev/null
+    sleep 2
+fi
+
+# Always write it down, even when no repair was needed. kactivitymanagerd keeps
+# currentActivity in memory and only flushes on a clean exit, so a crash or a
+# hard reboot would otherwise bring the session back up with it empty again.
+stored=$(kreadconfig6 --file kactivitymanagerdrc --group main --key currentActivity 2>/dev/null)
+if [[ $stored != "$want" ]]; then
+    log "persisting currentActivity to kactivitymanagerdrc (was '${stored:-<unset>}')"
+    kwriteconfig6 --file kactivitymanagerdrc --group main --key currentActivity "$want"
+fi
+
+log "desktop placement: $(placement)"
