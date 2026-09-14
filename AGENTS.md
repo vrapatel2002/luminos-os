@@ -436,6 +436,7 @@ luminos-brain safe "<action>"
 | `hive-swap-server.py` (port 8079) | RETIRED — do not reference |
 | `orchestrator.py` | RETIRED — do not reference |
 | Tahoe macOS theme | White panel bugs — archived, do not restore |
+| `0` in any `*IdleTimeoutSec` key of `~/.config/powerdevilrc` | **It does not mean "never", it means "after zero seconds".** "Never" is `-1`. Writing `0` to `DimDisplayIdleTimeoutSec` cost BUG-159: the dim action self-retriggered every few seconds and the screen pulsed for a day. `config/powerdevilrc` in git is the canonical copy — restore from it with `install -m644 config/powerdevilrc ~/.config/powerdevilrc && systemctl --user restart plasma-powerdevil.service`, and re-assert brightness afterwards (see BUG-159). [CHANGE: claude-code \| 2026-09-14] |
 
 ---
 

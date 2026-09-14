@@ -6108,3 +6108,49 @@ trying to script a repro.
 `config/kde/plasma-appletsrc-known-good-20260914` (snapshot of the repaired desktop config).
 **Revert:** `systemctl --user disable --now luminos-desktop-guard && sudo rm /usr/local/bin/luminos-desktop-guard`.
 Cross-ref: BUG-158, BUG-159.
+
+---
+
+## DECISION 104 — `config/powerdevilrc` in git is the canonical copy, and `0` is never a timeout
+<!-- [CHANGE: claude-code | 2026-09-14] -->
+**Context:** BUG-159. The screen pulsed dimmer/brighter every few seconds for a day. The cause was
+`DimDisplayIdleTimeoutSec=0` in `~/.config/powerdevilrc` — a literal zero-second idle timeout, so
+PowerDevil's dim action fired the moment input paused and restored the moment anything moved, in a
+loop. It was **not** a mystery value: a sibling file `~/.config/powerdevilrc.bak-awake`, written 8
+seconds before the change, is byte-identical to `config/powerdevilrc` in git. Whoever made the edit
+was trying to stop the display sleeping and wrote `0` meaning "no timeout". In PowerDevil, "never"
+is `-1`.
+
+**Decision — three parts:**
+1. **`config/powerdevilrc` is the canonical copy.** Repair is a restore, not a re-derivation:
+   `install -m644 config/powerdevilrc ~/.config/powerdevilrc && systemctl --user restart plasma-powerdevil.service`.
+   The live file had drifted from git with nothing to notice it, which is the same class of problem
+   as the installed-vs-repo script drift already documented in §9.
+2. **The `[Battery][Display]` and `[LowBattery][Display]` groups are deleted, not set to `-1`.**
+   The committed file never had them. Deleting them lets PowerDevil apply its own shipped defaults
+   on battery, which is correct for a laptop; pinning `-1` there would mean a panel that never dims
+   on battery, which is a drain we did not ask for. **Absent is a stronger statement than a value:**
+   a value we invent has to be maintained forever, a default tracks upstream.
+3. **`0` is added to §11 Absolute Do-Nots** for every `*IdleTimeoutSec` key, because the mistake
+   reads as correct and the failure is a slow visual flicker nobody attributes to a config file.
+
+**Why not just untick "Dim screen" in the KCM:** it works, but it writes `DimDisplayWhenIdle=false`
+and leaves the poisoned `0` in place, so the next agent reading the file still sees a zero-second
+timeout and still has to decide whether it matters. Restoring git removes the landmine instead of
+disarming it.
+
+**Verification standard used, and worth reusing:** 189 samples at 0.2 s on
+`/sys/class/backlight/amdgpu_bl2` with no input, asserting **exactly one distinct value** — not "it
+looks fine now". The same watcher caught the fault before the fix (`0.5775 → 0.5046 → 0.4317` of
+max in 0.4 s), so the instrument was proven able to see the bug before it was trusted to declare it
+gone.
+
+**Side effect found while verifying, now documented:** restarting PowerDevil mid-fade strands the
+panel at the interrupted ratio — hardware at 49 % while `org.kde.ScreenBrightness` still reports
+70 %. The dimming ratio lives in the process, not the panel, so the restore is simply never issued.
+Re-assert with `SetBrightness` on the value it already claims.
+
+**Files:** `config/powerdevilrc` (unchanged — it was already right), `docs/BUGS.md` BUG-159,
+`AGENTS.md` §11.
+**Revert:** `cp ~/.luminos-backups/powerdevilrc.bak-bug159-20260914 ~/.config/powerdevilrc`.
+Cross-ref: BUG-159, BUG-158, BUG-098, DECISION 38.

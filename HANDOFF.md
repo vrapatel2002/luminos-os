@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-14 — Response 4
+Last updated: 2026-09-14 — Response 5
 
 > Previous goals, complete, do not reconstruct from memory:
 > gaming/dGPU → `git show b08c3904:HANDOFF.md` · `org.luminos.style` QML → `git show 4273ed7e:HANDOFF.md`
@@ -10,10 +10,9 @@ Keep Luminos OS working as a daily-driver Windows replacement — the G14 deskto
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-Two faults reported 2026-09-14, both **diagnosed, deliberately NOT fixed yet** — Shawn said
-*"first find it than tell me and than we will work to solve this."* Root causes below (BUG-158,
-BUG-159). Do not apply a fix without his go-ahead. After that, resume the bar plan at step 2
-(dGPU indicator).
+Both faults reported 2026-09-14 are now **FIXED and verified live** — BUG-158 (live wallpaper) and
+BUG-159 (self-dimming screen). Resume the bar plan at step 2 (dGPU indicator). The reboot in
+"Still outstanding" item 1 is the oldest thing on the list and is still not done.
 
 ## State — what is DONE
 
@@ -70,8 +69,42 @@ are not KDE-generated names.
 `config/kde/plasma-org.kde.plasma.desktop-appletsrc`, `config/kde/plasma-appletsrc-tahoe-backup`,
 and `~/.config/plasma-org.kde.plasma.desktop-appletsrc.{tahoe.bak,bak,bak-caelwp-20260818-121853,bak-wallpaper-20260724}`.
 
-### 🔎 2026-09-14 — BUG-159 (DIAGNOSED, NOT FIXED): brightness dips on its own — PowerDevil DimDisplay with a 0-second timeout
-**Root cause:** `~/.config/powerdevilrc` has `DimDisplayIdleTimeoutSec=0` in all three profiles
+### ✅ 2026-09-14 — BUG-159 FIXED / DECISION 104: brightness dips on its own — PowerDevil DimDisplay with a 0-second timeout
+
+**Fix, verified live:** this turned out to be a **regression against our own committed file**, not a
+config to re-derive. `~/.config/powerdevilrc.bak-awake` — written 8 seconds before the bad change at
+00:11:23 — is **byte-identical to `config/powerdevilrc` in git** (both 356 B, last touched by
+`244f5eaf`, 2026-08-25). The `-awake` suffix names the intent: someone wanted the screen to stop
+sleeping and wrote `0` meaning "no timeout". So the repair was a restore:
+
+```
+install -m644 config/powerdevilrc ~/.config/powerdevilrc
+systemctl --user restart plasma-powerdevil.service
+```
+
+**The battery groups are deleted, not set to `-1`** — the committed file never had
+`[Battery][Display]`/`[LowBattery][Display]`, so PowerDevil's shipped defaults now apply on battery.
+Pinning `-1` there would mean a panel that never dims on battery, which nobody asked for.
+
+**Verified:** 189 samples at 0.2 s on `/sys/class/backlight/amdgpu_bl2` with no input →
+**exactly one distinct value.** The same watcher caught the fault *before* the fix
+(`0.5775 → 0.5046 → 0.4317` of max in 0.4 s), so the instrument was proven able to see the bug
+before it was trusted to declare it gone. Backup of the broken state:
+`~/.luminos-backups/powerdevilrc.bak-bug159-20260914`.
+
+⚠️ **Restarting PowerDevil mid-fade strands the panel at the interrupted ratio.** The dimming ratio
+lives in the process, not the panel, so the restore it owed you is simply never issued. Measured
+straight after the restart: hardware `195510` (49 %) while `org.kde.ScreenBrightness` still reported
+7000/10000 (70 %) — flat, but wrong, and easy to misread as "still broken". Cure is to re-assert the
+value it already claims:
+```
+busctl --user call org.kde.ScreenBrightness /org/kde/ScreenBrightness/display0 \
+  org.kde.ScreenBrightness.Display SetBrightness iu 7000 0
+```
+→ `279300`, exact. Final check after that: **139 samples, one value, correct 70 %.**
+
+**Original root cause (unchanged, kept for the reasoning trail):** `~/.config/powerdevilrc` had
+`DimDisplayIdleTimeoutSec=0` in all three profiles
 (`[AC][Display]`, `[Battery][Display]`, `[LowBattery][Display]`). In PowerDevil, **`-1` means never;
 `0` is a real zero-second timeout**, so the dim action fires the instant input pauses and restores
 the instant anything registers activity — a self-retriggering loop. File mtime **2026-09-13 00:11** —
@@ -219,7 +252,14 @@ superseded — **do not merge them**); research trail and screenshots in `server
    `usr/`, `etc/`, `lib`, `sbin`, `hooks/`, `early_cpio`, `buildconfig`, `keymap.bin`,
    `consolefont.psfu`). Plus an untracked `_to_delete/`. **Find out what these are before anyone
    commits or deletes them.**
-8. **Known, not fixed, flagged deliberately:** the RAM-pressure branch in `monitorLoop` logs
+8. ⚠️ **`AGENTS.md` §9's `powerdevilrc` row is STALE** — found while fixing BUG-159, not fixed
+   because it is a separate change. It documents DECISION 38's `AutoSuspendAction=1`, `LidAction=1`,
+   `AutoSuspendIdleTimeoutSec=900/600/300`. The committed file has said `AutoSuspendAction=0`,
+   `LidAction=0`, `3600/600/300` since `244f5eaf` (2026-08-25, *"stop the G14 suspending — it serves
+   Dolphin to the phone now"*), which reversed DECISION 38. **An agent trusting that row would
+   "restore" suspend-on-lid-close onto a machine that is deliberately a server.** Fix the row, keep
+   the DECISION 38 history as history.
+9. **Known, not fixed, flagged deliberately:** the RAM-pressure branch in `monitorLoop` logs
    `resource coord: RAM 9% avail → +22% effective load (cap nudged down)`, but adding to
    `effectiveLoad` *raises* the cap in `computeAdaptiveCap` (`base + load/100 × (max-base)`). The
    log text and the arithmetic disagree about the sign. Left alone — out of scope for BUG-157, and
@@ -320,13 +360,37 @@ so traversal is impossible by construction. Verified with `/fonts/../../../etc/p
 - **NZBGet is the HARDEST of the five, not the easiest** — Bootstrap 2, no custom properties, ~120
   selectors by hand. Bazarr is the easiest (Mantine 7, real token layer, 2322 B).
 
+**KDE config files**
+- **Look for a `.bak*` sibling BEFORE theorising about a wrong config value.** BUG-159 was solved by
+  `ls ~/.config/powerdevilrc*` — the backup was byte-identical to git, so the entire bug collapsed
+  into a two-line diff, and the backup's *name* (`.bak-awake`) revealed the author's intent. This has
+  now paid off twice in two days; do it first, not last.
+- **`0` is not "never" in `powerdevilrc`. `-1` is.** Any `*IdleTimeoutSec=0` is a zero-second
+  timeout. Now in AGENTS.md §11.
+- **Restarting `plasma-powerdevil.service` mid-dim leaves the panel dark.** The dimming ratio is
+  process state. Re-assert via `org.kde.ScreenBrightness … SetBrightness` — details in the BUG-159
+  block above. Do not mistake the stranded-but-flat panel for an unfixed bug.
+- **Live KDE configs drift from `config/` in git with nothing to notice it** — the same class as the
+  installed-vs-repo script drift in AGENTS.md §9. `diff` the pair before assuming the live one is
+  authoritative.
+
 **Process**
 - **MCP `mempalace` and `code-review-graph` are NOT connected in Cowork sessions.** AGENTS.md §6
   requires saying so rather than skipping silently. Confirmed again this session — fell back to
   `luminos-notes.sh search` + `luminos-brain query`, both of which returned nothing for this topic.
 - **`asusctl profile -p` / `-P` do not exist.** The subcommand is `asusctl profile get`.
 
-## Files touched this session
+## Files touched this session (Response 5 — BUG-159)
+- `docs/BUGS.md` — BUG-159 → **FIXED**, incl. the `.bak-awake` finding and the mid-fade side effect
+- `LUMINOS_DECISIONS.md` — **DECISION 104** added
+- `AGENTS.md` §11 — `0` in `*IdleTimeoutSec` added to Absolute Do-Nots
+- `HANDOFF.md` — this file
+- **Live system, not in the repo:** `~/.config/powerdevilrc` restored from `config/powerdevilrc`,
+  `plasma-powerdevil.service` restarted, brightness re-asserted to 70%; backup
+  `~/.luminos-backups/powerdevilrc.bak-bug159-20260914`
+- **No repo file needed changing to fix the bug** — `config/powerdevilrc` was already correct
+
+## Files touched earlier this session
 - `cmd/luminos-power/main.go` — BUG-157, four fixes (see above)
 - `docs/BUGS.md` — BUG-157 → **FIXED**, incl. the correction that the 60 W clamp was the platform
   profile and not the SBIOS handshake

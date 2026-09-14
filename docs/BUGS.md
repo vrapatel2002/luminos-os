@@ -5,12 +5,39 @@ Last Updated: 2026-08-29 (BUG-149 **BUG-142 WAS NEVER A vkd3d BUG — WE DELETED
 
 ### BUG-159 — the screen dims itself every few seconds, with nothing touching the brightness keys
 <!-- [CHANGE: claude-code | 2026-09-14] -->
-- Status: **DIAGNOSED 2026-09-14, NOT FIXED** — Shawn asked for cause only, no fix yet.
-- Cause: `~/.config/powerdevilrc` carries `DimDisplayIdleTimeoutSec=0` in all three profiles
+- Status: **FIXED 2026-09-14, verified live.**
+- Cause: `~/.config/powerdevilrc` carried `DimDisplayIdleTimeoutSec=0` in all three profiles
   (`[AC][Display]`, `[Battery][Display]`, `[LowBattery][Display]`). In PowerDevil **`-1` means
   never; `0` is a literal zero-second idle timeout**, so the dim action fires the instant input
   pauses and restores the instant anything registers activity — it self-retriggers forever. File
   mtime **2026-09-13 00:11**, the same day as BUG-158.
+- **This was a regression against our own committed file, not a mystery config.** The proof is a
+  sibling left behind by whatever made the change: `~/.config/powerdevilrc.bak-awake`, written
+  **8 seconds earlier** at 00:11:23, is **byte-identical to `config/powerdevilrc` in git**
+  (`diff` clean, both 356 B, last touched by `244f5eaf`). The diff against it is the whole bug:
+  ```
+  -DimDisplayIdleTimeoutSec=1500      +DimDisplayIdleTimeoutSec=0
+  -TurnOffDisplayIdleTimeoutSec=1800  +TurnOffDisplayIdleTimeoutSec=0
+  +[Battery][Display]    (new)        +[LowBattery][Display]  (new)
+  ```
+  The `-awake` suffix names the intent: someone was trying to stop the screen going to sleep and
+  wrote `0` meaning "no timeout". `0` means the opposite of what it reads like. **Always look for a
+  `.bak*` sibling before theorising about a config — it turns "why is this value wrong" into a
+  two-line diff and it names the author's intent.**
+- Fix applied: restored `config/powerdevilrc` over `~/.config/powerdevilrc`
+  (`install -m644`), then `systemctl --user restart plasma-powerdevil.service`. The battery
+  sections are **deliberately deleted, not set to `-1`** — the committed file never had them, so
+  PowerDevil's own shipped defaults apply on battery, which is what we want on a laptop.
+- Verified: **189 samples at 0.2 s with no input → exactly one distinct `sysfs` value.** Before the
+  fix the same watcher caught a live fade in 0.4 s (`0.5775 → 0.5046 → 0.4317` of max).
+- **Restart-mid-fade side effect, worth knowing:** killing PowerDevil while a dim is in progress
+  strands the panel at the interrupted ratio — the process that owed you the restore is gone, and
+  the new one starts with ratio 1.0 but never re-pushes brightness. Measured: hardware sat at
+  `195510` (49 %) while `org.kde.ScreenBrightness` still reported 7000/10000 (70 %), i.e. flat but
+  wrong. Cured by re-asserting the value it already claimed:
+  `busctl --user call org.kde.ScreenBrightness /org/kde/ScreenBrightness/display0 org.kde.ScreenBrightness.Display SetBrightness iu 7000 0`
+  → `279300`, exact. Final check: **139 samples, one value, at the correct 70 %.**
+- Backup of the broken state: `~/.luminos-backups/powerdevilrc.bak-bug159-20260914`.
 - The measurement that settles it (0.2 s poll on `/sys/class/backlight/amdgpu_bl2`):
   ```
   18:43:59.205  sysfs=278137  kde_dbus=7000  ratio=0.9958
@@ -30,7 +57,8 @@ Last Updated: 2026-08-29 (BUG-149 **BUG-142 WAS NEVER A vkd3d BUG — WE DELETED
   `scripts/brightnessctl` shim routes everything to `amdgpu_bl2` by DRM topology); Caelestia's
   `Brightness.qml` (it writes whole percents; the observed values are 1/240 steps of the current
   value).
-- Fix when asked for: set the three keys to `-1`, or untick "Dim screen" in the Energy Saving KCM.
+- If Shawn ever does want the panel to **never** dim, the correct edit is `-1` (or untick "Dim
+  screen" in the Energy Saving KCM and let it write the file). Not `0`. Never `0`.
 
 ### BUG-158 — the live wallpaper disappeared and the desktop went flat grey
 <!-- [CHANGE: claude-code | 2026-09-14] -->
