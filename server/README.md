@@ -174,6 +174,26 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
   say the cache *"works best with option `<DirectWrite>`"*. The evidence I used was
   `ArticleCacheMB 0` from `/jsonrpc/status` — that is a **live gauge**, zero when idle, 36 MB
   mid-download. A counter reading zero means "nothing happening now", not "feature disabled".
+- **A release name is not an audio inventory — and neither is Sonarr's `languages` field.** <!--
+  [CHANGE: claude-code | 2026-09-14] --> `DUAL-Anitsu` is jpn+**por** (Brazilian group),
+  `Dual-Audio…-Arg0` is jpn+**kor**. Both satisfy DECISION 97's English requirement and neither
+  has English. ⚠️ Sonarr's own detected language is *worse*: it calls `[DKB]`/`[Anime Time]`
+  Japanese-only when ffprobe shows English as track 1, so a `LanguageSpecification` rejects the
+  **good** releases. The only thing that knows what is in a file is the file — gate imports on
+  `ffprobe -select_streams a -show_entries stream_tags=language`. DECISION 101.
+- **Clear Sonarr's queue before you manually import, not after.** <!-- [CHANGE: claude-code |
+  2026-09-14] --> A queue item parked as `importPending` is blocked only by *"Not an upgrade"*.
+  Importing a good file **lowers the existing quality**, which unblocks the bad one, which
+  overwrites it — measured at **4 seconds** after the manual import. Also: `ManualImport` exists
+  to override `permanent` rejections, so filtering candidates on `rejections` finds nothing; and
+  force-grab bypasses the parser, so check the release's own `SxxEyy` token — absolute numbering
+  makes the indexer offer `S01E01` as a candidate for an S02E03 episode id. DECISION 101.
+- **NZBGet's duplicate check reads *hidden* history, which the API hides from you.** <!--
+  [CHANGE: claude-code | 2026-09-14] --> A re-grab dies instantly with `Skipping duplicate …
+  found in history with exactly same content`, and Sonarr reports it as `PAR Status: NONE -
+  Unpack Status: NONE`, which reads like a dead article set. `rpc("history", [])` returned an
+  **empty list** while 210 rows existed — pass the hidden flag, `rpc("history", [True])`, then
+  clear the `DUP … SUCCESS/HIDDEN` row with `editqueue → HistoryFinalDelete`. DECISION 101.
 - **A green picture out of ffmpeg is almost never a Dolby Vision problem.**
   <!-- [CHANGE: claude-code | 2026-09-04] --> Two separate bugs on this hardware both render
   green: `libplacebo` → `hwdownload` drops chroma for `nv12`/`yuv420p` (use `rgba` or `p010`),

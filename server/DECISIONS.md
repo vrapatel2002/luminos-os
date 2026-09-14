@@ -2368,3 +2368,107 @@ positives is no longer a curiosity, it is a gate nobody will read.
 downloaded and unpacked cleanly but sits in Sonarr's queue as **`importBlocked`** — *"Found
 matching series via grab history, but release was matched to series by ID. Automatic import is
 not possible."* Season batch packs need a manual import; the file is on disk and safe.
+
+---
+
+## DECISION 101 — A release name is not an audio inventory, and Sonarr's own language field is not one either
+# [CHANGE: claude-code | 2026-09-14]
+
+**Reported as:** *"look whats wrong with the download its stucked at one point how to solve it ?"*
+
+The download was not stuck. Three separate mechanisms were each silently reverting the fix,
+and the visible symptom — a download that finished and then nothing changed — was the same
+for all three.
+
+### The real defect underneath
+
+DECISION 97 made Sonarr *require* an English-audio marker in the release name. That was the
+right fix for the problem it addressed and it is still correct. But the marker is a **claim**,
+not an inventory. Every one of these passed the +1000 gate and **none** of them has an English
+audio track, verified with `ffprobe`:
+
+| release | `stream_tags=language` | what the name promised |
+|---|---|---|
+| `…BluRay…DUAL-Anitsu` | `jpn, por` | "DUAL" — it is a **Brazilian** group, so dual means **Portuguese** |
+| `…CR.WEB-DL.Dual-Audio…-Arg0` | `jpn, jpn, kor` | "Dual-Audio" — the second language is **Korean** |
+| `…CR.WEB-DL.Multi-Audio…` | `jpn, jpn, eng, kor` ✅ | "Multi-Audio" — this one is honest |
+| `[Yameii]…[English.Dub]` | `eng` ✅ | honest |
+
+⚠️ **And Sonarr's own detected `languages` field does not rescue this.** It reports `[DKB]` and
+`[Anime Time]` releases as **Japanese only** when `ffprobe` shows English as track 1. So a
+`LanguageSpecification` requiring English would have **rejected the good releases** while still
+admitting Anitsu. The only thing that actually knows what is in the file is the file.
+
+**Fix, in two halves.** A `ReleaseGroupSpecification` custom format (id 6,
+**"No English audio (verified groups)"**, **−10000** in profile 8) naming groups *proven by
+ffprobe* to ship no English: `Anitsu|AnimesTC|AnimesVision|AnimesGratis|OtakuSpirit|Darkside|LacksHD|Arg0`.
+And every import now goes through an `ffprobe` gate that refuses any file without an `eng`
+audio stream, regardless of what Sonarr or the release name says. Verified: Anitsu fell to
+−9000, the good releases held at 1200, **105 candidates still pass the 1000 minimum and zero
+of them are Anitsu**.
+
+### Three mechanisms that each reverted a completed fix
+
+⚠️ **1. Sonarr's auto-import raced the manual import and won, 4 seconds later.**
+History, in order: `23:13:59 downloadFolderImported [Yameii]…[English.Dub]` then
+`23:14:02 episodeFileDeleted` then `23:14:03 downloadFolderImported …Dual-Audio…-Arg0`.
+The Arg0 download was parked in the queue as `importPending`, blocked only by *"Not an upgrade.
+Existing quality: Bluray-1080p"*. Importing the good WEBDL file **lowered the existing quality to
+WEBDL**, which **unblocked the bad one**, which then overwrote it. The good file had already been
+moved out of the completed dir, so it was gone. **A pending queue item is a loaded gun: clear the
+queue before manually importing, not after.**
+
+⚠️ **2. NZBGet refused the re-grab as a duplicate, and Sonarr reported it as a download failure.**
+`[WARNING] Skipping duplicate …, found in history with exactly same content` — 5 seconds after
+the grab, surfacing in Sonarr as `downloadFailed | PAR Status: NONE - Unpack Status: NONE -
+Move Status: NONE`, which reads like a dead article set. It is not. **The dupe check reads
+*hidden* history rows**, and `history` over JSON-RPC returns **only the visible ones** — it
+returned an empty list while 210 rows existed. `history` **must** be called with the hidden flag
+(`rpc("history", [True])`); the blocking row was `320 | DUP | SUCCESS/HIDDEN`. Clear with
+`editqueue → HistoryFinalDelete`.
+
+⚠️ **3. Sonarr's failure handling auto-grabbed a replacement that raced the next import.**
+The `downloadFailed` from (2) triggered an automatic search that grabbed a different release
+within a minute. Removed from the queue before it could finish.
+
+### Two more traps
+
+⚠️ **Absolute numbering makes the indexer map the wrong episode onto the right ID.** Asking for
+S02E03 returned `[Yameii].Solo.Leveling-S01E01` as a candidate **for episode id 609**, and a
+naive "grab the first Yameii hit" force-grabbed it. Force-grab bypasses the parser, so it would
+have imported an S01E01 file as S02E03. **A force-grab must verify the release's own `SxxEyy`
+token matches what was asked for** — the candidate list is not filtered for you.
+
+⚠️ **`ManualImport` exists to override `permanent` rejections — do not filter on `rejections`.**
+The first import script found "nothing to import" because it skipped every candidate carrying a
+rejection. The rejection was *"Not an upgrade for existing episode file(s)"*, type `permanent` —
+exactly the thing a manual import is for.
+
+### S02E03 was corrupt, and a remux could not save it
+
+`ffprobe` showed **58 streams: two complete identical track sets** (0–23 and 24–47) plus
+`Element … exceeds containing master element` / `Duplicate element` — an unpack artifact from
+the disk-saturation era of DECISION 100. Per standing guidance the repair was attempted first:
+`ffmpeg -map 0:0..23 -map 0:48..57 -c copy` produced a **structurally clean** 24-stream file with
+the correct 1422.64 s duration. It was still discarded — a full decode of the remux emitted
+`Could not find ref with POC …` / `Error constructing the frame RPS` throughout, because the
+source has an invalid EBML byte at offset 59,501,562 and the **video bitstream itself is missing
+reference frames**. A container rebuild cannot restore data that is not there. Re-downloaded.
+**The repair attempt was still worth it — it is what proved the damage was below the container.**
+
+### Result
+
+All **25 episodes** now carry an English audio track, and a separate container-integrity sweep
+(parse + duration + video-stream count on every file) reports **25/25 clean, one video stream
+each**. S01E07 was also replaced — it had been the `E07.5` recap mis-mapped onto episode 7
+(DECISION 98), `jpn, kor`, and is now the real episode with an English dub.
+
+⚠️ **Left in place, needs the owner's call:** `/srv/media/usenet/complete/tv/` still holds
+`Solo.Leveling.2024.S01E01…-DUSKLiGHT` (1.6 GB, orphaned when its queue item was cancelled).
+Deleting downloaded media is not something to do unasked.
+
+**Reusable scripts on the server** (`/tmp`, stdlib-only, same shape as the rest):
+`mi6.py` — ffprobe-gated manual import straight from a completed folder, which works after the
+queue has drained (`mi5.py` walks `/queue` and finds nothing once post-processing ends);
+`grab.py <season> <episode>` — force-grab with the `SxxEyy` token check;
+`nzhist.py` — hidden-history lister and dupe-row purge.
