@@ -5997,3 +5997,81 @@ without effect.
 **Revert:** `sudo pacman -R steam-devices && sudo udevadm control --reload-rules`. The pad goes
 back to enumerating as a generic joystick, which is the pre-existing behaviour, not a failure.
 Cross-ref: AGENTS.md §9, BUG-156, DECISION 25, DECISION 90.
+
+---
+
+## DECISION 102 — dGPU utilisation comes from nvidia-smi, and thermal ceilings come from the card
+Date: September 13, 2026
+Made by: claude-code
+**Status: APPLIED LIVE — rebuilt, installed, restarted and measured on a running game.**
+
+### The Decision
+1. **`luminos-power` reads dGPU utilisation from `nvidia-smi --query-gpu=utilization.gpu`, never
+   from sysfs.** `readDGPULoad()` and `readGPULoad()` are deleted, and the value is returned by
+   `readGPUStats()` from the single nvidia-smi call it already made for power and temperature.
+2. **The GPU TGP thermal threshold is split into a deadband** — `gpuTGPThermalDownC = 87.0` and
+   `gpuTGPThermalUpC = 82.0` — replacing the single `gpuTGPThermalCeilC = 83.0`.
+3. **`initGPUTGP()` adopts the current power limit instead of blind-writing 55 W**, reading it from
+   `nvidia-smi -q -d POWER` via a new privilege-dropping `nvidiaRead()`.
+
+### Why
+`gpu_busy_percent` is an **amdgpu-only** sysfs attribute. It exists on `card2` (Radeon 780M) and has
+never existed on `card1` (RTX 4050). The read error was discarded into `_`, so `dgpuLoad` was
+hard-wired to **0.0% for the life of the daemon** — and the daemon's own logs prove it: every
+beast-mode line ever logged on this machine says `dgpu=0%`, while nvidia-smi reported 99% at the same
+instant.
+
+The consequence was not subtle. With dGPU load pinned at 0, `applyGamingDetection()` could never
+return Performance, so **beast mode was unreachable from GPU load** — and worse, it *exited*
+mid-game (`20:14:21 beast mode exit → Balanced (cpu=15%, dgpu=0%)`). The quiet-idle branch then saw
+`cpu 15<25 && igpu 3<15 && dgpu 0<5` and dropped the machine to **Quiet while a game was rendering**:
+CPU capped to 3.68 GHz of 5.14, EPP `power`, and — because the ASUS firmware scales the dGPU ceiling
+with the platform profile — only **60 W** of the 90 W the daemon was asking for. The user's report
+was *"when I am using GPU and playing games it should have been fully unlocked, whole laptop,
+everything, but it's not."* It was exactly right, and it was one missing sysfs file.
+
+For the deadband: one constant used as both the drop threshold and the re-uplift gate is a latch, not
+a limit. `gpuTGPHysteresis = 60s` never damped that oscillation — it only set its period, which is
+why the observed sawtooth had a ~63 s cycle. And 83 °C was simply the wrong number: the card's own
+`GPU Target Temperature Specification` is **87 °C**, Max Operating ≈ 89 °C, HW Slowdown ≈ 91 °C. The
+daemon was amputating 35 W of TGP 4 °C below the temperature the firmware itself considers normal,
+and HW thermal slowdown had never once fired.
+
+### What we rejected, and why
+- **Adding a second nvidia-smi call for utilisation.** Each invocation costs ~200 ms, forks, and
+  touches the card, on a 2 s poll. The existing power/temp call can carry utilisation for free.
+- **Keeping the sysfs hwmon "fast path" in `readGPUStats()`.** It has never executed on this driver —
+  `/sys/class/drm/card1/device/hwmon/` does not exist — and utilisation must come from nvidia-smi
+  regardless. Keeping it would split one reading across two sources and preserve a branch whose
+  failure mode (missing sysfs silently yielding 0) is the exact bug being fixed.
+- **Keeping `readGPULoad()` as harmless dead code.** It globs `card*` and returns the **max across
+  both GPUs**, while its comment advertised it for "beast-mode dGPU detection". Anything that adopted
+  it would silently have been reading the AMD iGPU. A landmine, not dead weight.
+- **A bare `exec.Command("nvidia-smi", "-q", …)` for the power-limit read.** Per the BUG-146 truth
+  table a **root** nvidia-smi re-applies the driver's 0666 root:root device-file defaults on its own,
+  with no setuid helper involved — so even a read-only query run as root tears open the DECISION 25
+  gate. Hence `nvidiaRead()`, which drops to uid nobody / gid dgpu exactly as `nvidiaQuery` does.
+  Verified: the UVM nodes held `root:dgpu 0660` across the restart.
+- **Rebooting first.** The prior diagnosis blamed the 60 W ceiling on this boot's failed SBIOS
+  Dynamic Boost handshake and made a reboot the prerequisite. Measured on the same un-rebooted boot,
+  the enforced limit tracked the platform profile — `quiet` 60 W, `balanced` 75 W, `performance`
+  90 W — so the clamp was downstream of this same defect. The handshake failure is real and still
+  unexplained, but it is not what capped the card.
+- **Raising `gpuHighThreshPct` or shortening the 30 s beast-mode latch.** Not needed: a GPU-bound
+  game sits at 99%, which clears the existing 80% threshold immediately. Flap resistance is worth
+  keeping.
+
+### Measured result
+`beast mode → Performance (trigger: gpu, cpu=17%, dgpu=99%)` — the first GPU-triggered beast mode
+this machine has ever logged. Profile Quiet→**Performance**, EPP→**performance**, CPU cap
+3.68→**5.14 GHz**, dGPU enforced limit 60→**89.8 W**, temp 73-75→**68 °C**, and **zero** TGP switches
+across 90 s of sustained play against a cycle every ~63 s before. Every reason in
+`nvidia-smi -q -d PERFORMANCE` now reads `Not Active`, including `SW Power Cap`.
+
+Remaining honest limit: the card draws ~57 W of 90 W and holds 2655 MHz of a 3105 MHz max with no
+throttle reason active — its own V/f curve, not a cap. **VRAM is 5781 MiB of 6141 MiB.** Power is no
+longer the constraint.
+
+**Files:** `cmd/luminos-power/main.go`.
+**Revert:** `sudo install -m 755 ~/.luminos-backups/luminos-power.bak-bug157-20260913 /usr/local/bin/luminos-power && sudo systemctl restart luminos-power`.
+Cross-ref: BUG-157, BUG-146, BUG-069, DECISION 25, DECISION 90, AGENTS.md §9.

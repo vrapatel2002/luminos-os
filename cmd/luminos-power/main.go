@@ -85,14 +85,31 @@ const (
 	// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU TGP dynamic switching
 	// When GPU power draw nears the 55W cap, uplift to 90W so the GPU isn't
 	// artificially constrained. Revert when idle, or temperature-override when too hot.
-	gpuTGPLowW         = 55.0             // default TGP (W)
-	gpuTGPHighW        = 90.0             // boosted TGP (W)
-	gpuTGPUpThreshW    = 47.0             // 85% of 55W → trigger uplift
-	gpuTGPDownPowerW   = 15.0             // revert when power draw < 15W …
-	gpuTGPDownUtilPct  = 20.0             // … AND GPU util < 20%
-	gpuTGPDownTicks    = 30               // 60s sustained idle at 2s poll before revert
-	gpuTGPThermalCeilC = 83.0             // do not run at 90W if GPU temp ≥ 83°C
-	gpuTGPHysteresis   = 60 * time.Second // minimum time between any TGP switch
+	gpuTGPLowW        = 55.0             // default TGP (W)
+	gpuTGPHighW       = 90.0             // boosted TGP (W)
+	gpuTGPUpThreshW   = 47.0             // 85% of 55W → trigger uplift
+	gpuTGPDownPowerW  = 15.0             // revert when power draw < 15W …
+	gpuTGPDownUtilPct = 20.0             // … AND GPU util < 20%
+	gpuTGPDownTicks   = 30               // 60s sustained idle at 2s poll before revert
+	gpuTGPHysteresis  = 60 * time.Second // minimum time between any TGP switch
+
+	// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 3 — THERMAL DEADBAND.
+	// These replace the single gpuTGPThermalCeilC = 83.0, which was both the drop
+	// threshold AND the re-uplift gate. With one number there is no deadband, so at
+	// steady-state load the pair (drop at ≥83, re-uplift at <83) is a latch that cannot
+	// settle: gpuTGPHysteresis did not damp that oscillation, it only set its PERIOD.
+	// Measured 2026-09-13 19:34→19:43: five full 90W↔55W cycles, one every ~63s.
+	//
+	// 83°C was also simply too low. The card's OWN limits, read from the hardware this
+	// session (nvidia-smi -q -d TEMPERATURE, T.Limit values are offsets from current):
+	//   GPU Target Temperature Specification : 87°C   ← firmware's own management target
+	//   Max Operating  ≈ 89°C   Slowdown ≈ 91°C   Shutdown ≈ 101°C
+	// So the daemon was cutting power 4°C BELOW the point the firmware itself considers
+	// normal, and 8°C below hardware slowdown — which never fired even at 84°C. We now
+	// hand the 87→89°C band back to the firmware, which manages it per-clock instead of
+	// by amputating 35W of TGP.
+	gpuTGPThermalDownC = 87.0 // at/above this, drop 90W → 55W
+	gpuTGPThermalUpC   = 82.0 // only return to 90W below this (5°C deadband)
 
 	// CPU beast-mode thresholds — catches CPU-heavy work (ML training, compilation)
 	cpuHighThreshPct   = 75.0
@@ -420,21 +437,29 @@ func monitorLoop(ctx context.Context) {
 		// is actively in use, so always sense/manage it (offloadActive short-circuits the guard).
 		var dgpuLoad, gpuPowerW, gpuTempC float64
 		if offloadActive.Load() || !dgpuRuntimeSuspended() {
-			dgpuLoad = readDGPULoad() // NVIDIA dGPU
+			// [CHANGE: claude-code | 2026-09-13] BUG-157: one nvidia-smi call now yields
+			// util + power + temp. `dgpuLoad` used to come from a sysfs attribute that does
+			// not exist on an NVIDIA node, so it was always 0 — which made beast mode
+			// unreachable from GPU load and let the Quiet-idle branch throttle the box
+			// mid-game. See readGPUStats.
 			// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU power draw and temp for TGP management
-			gpuPowerW, gpuTempC = readGPUStats()
+			dgpuLoad, gpuPowerW, gpuTempC = readGPUStats()
 			// [CHANGE: claude-code | 2026-06-28] v4.3 — during an offload session, pin TGP to the
 			// 90W ceiling instead of letting it idle-revert in the micro-gaps between streamed
 			// layers. Thermal safety still wins: drop to 55W if the GPU reaches the thermal ceiling.
 			// (Clock lock + persistence are applied immediately in applyOffloadPin; this only owns
 			// the TGP write so currentGPUTGPW stays single-writer — no data race.)
+			// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 3: deadband here too. This
+			// branch previously dropped at ≥83°C and re-raised the instant temp fell below
+			// 83°C, i.e. the same no-deadband latch as manageGPUTGP — and being an
+			// unconditional per-tick reassertion it could flip every 2s, not every 60s.
 			if offloadActive.Load() {
-				if gpuTempC >= gpuTGPThermalCeilC {
+				if gpuTempC >= gpuTGPThermalDownC {
 					if currentGPUTGPW != gpuTGPLowW {
-						lg.Warn("offload: GPU %.1f°C ≥ %.0f°C thermal ceiling → %.0fW", gpuTempC, gpuTGPThermalCeilC, gpuTGPLowW)
+						lg.Warn("offload: GPU %.1f°C ≥ %.0f°C thermal ceiling → %.0fW", gpuTempC, gpuTGPThermalDownC, gpuTGPLowW)
 						setGPUTGP(gpuTGPLowW)
 					}
-				} else if currentGPUTGPW != gpuTGPHighW {
+				} else if currentGPUTGPW != gpuTGPHighW && gpuTempC < gpuTGPThermalUpC {
 					setGPUTGP(gpuTGPHighW)
 				}
 			} else {
@@ -1450,26 +1475,19 @@ func readCPUTemp() float64 {
 	return max
 }
 
-func readGPULoad() float64 {
-	// Returns max GPU load across all cards (used for beast-mode dGPU detection).
-	matches, _ := filepath.Glob("/sys/class/drm/card*/device/gpu_busy_percent")
-	var max float64
-	for _, m := range matches {
-		d, _ := os.ReadFile(m)
-		val, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
-		if val > max {
-			max = val
-		}
-	}
-	return max
-}
-
-// readDGPULoad returns NVIDIA dGPU (card1) busy percent. 0 if unavailable/powered down.
-func readDGPULoad() float64 {
-	d, _ := os.ReadFile("/sys/class/drm/card1/device/gpu_busy_percent")
-	val, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
-	return val
-}
+// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 1 — readGPULoad and readDGPULoad
+// DELETED, not fixed. Both read `gpu_busy_percent`, which is an **amdgpu-only** sysfs
+// attribute. It exists on card2 (the 780M) and has NEVER existed on card1 (the RTX 4050):
+// verified this session, `/sys/class/drm/card1/device/gpu_busy_percent` → ENOENT while
+// card1/device/vendor reads 0x10de. Both discarded the error into `_`, so dGPU load was
+// hard-wired to 0.0% forever, and the daemon's own logs prove it — every beast-mode line
+// this boot reads `dgpu=0%` while nvidia-smi reported 99% util at the same moment.
+//
+// readDGPULoad's caller now takes utilisation from readGPUStats (nvidia-smi
+// utilization.gpu), which is the only honest source on this driver. readGPULoad had ZERO
+// callers and is gone rather than left in place: it globs `card*` and returns the MAX
+// across both GPUs, so anything that adopted it for "dGPU detection" — which is what its
+// comment invited — would silently have been reading the AMD iGPU.
 
 // dgpuRuntimeSuspended reports whether the NVIDIA dGPU is runtime-suspended (D3cold, ~0W).
 // [CHANGE: claude-code | 2026-07-03] BUG-078: reading runtime_status does NOT wake the card
@@ -1551,7 +1569,17 @@ func dgpuGID() int {
 // The gid is what grants access — DECISION 25 makes the nodes root:dgpu 0660 — so this
 // drops to a NON-root uid while ADDING the dgpu group, exactly as dgpu-exec-v2 does.
 func nvidiaQuery(query string) ([]byte, error) {
-	cmd := exec.Command("nvidia-smi", "--query-gpu="+query, "--format=csv,noheader,nounits")
+	return nvidiaRead("--query-gpu="+query, "--format=csv,noheader,nounits")
+}
+
+// nvidiaRead runs an arbitrary READ-ONLY nvidia-smi with the same privilege drop as
+// nvidiaQuery. Every read that is not a --query-gpu must come through here rather than a
+// bare exec.Command: per the BUG-146 truth table above, a ROOT nvidia-smi re-applies the
+// driver's 0666 root:root device-file defaults by itself, with no setuid helper involved,
+// so a "harmless read-only query" run as root still tears open the DECISION 25 gate.
+// [CHANGE: claude-code | 2026-09-13]
+func nvidiaRead(args ...string) ([]byte, error) {
+	cmd := exec.Command("nvidia-smi", args...)
 	if gid := dgpuGID(); gid >= 0 && os.Geteuid() == 0 {
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			Credential: &syscall.Credential{
@@ -1616,43 +1644,36 @@ func nvidiaCtl(args ...string) error {
 	return err
 }
 
-// readGPUStats returns NVIDIA dGPU power draw (W) and temperature (°C).
+// readGPUStats returns NVIDIA dGPU utilisation (%), power draw (W) and temperature (°C).
 //
-// [CHANGE: claude-code | 2026-08-29] The comment that used to sit here claimed sysfs hwmon
-// was the fast path and nvidia-smi merely a fallback "for driver version differences". That
-// is false on this machine and always has been: the NVIDIA PROPRIETARY driver exposes no
-// hwmon at all — /sys/class/drm/card1/device/hwmon/ does not exist — so both globs return
-// empty on every single call and nvidia-smi is not a fallback, it is the only path. The
-// sysfs branch is KEPT, not deleted: it costs two glob calls, it is correct if a future
-// driver (or nouveau) does export hwmon, and it is the cheap path when it works. It is just
-// no longer described as something it isn't.
+// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 1. Utilisation is now returned from
+// HERE, in the SAME nvidia-smi invocation that already fetched power and temp, rather than
+// from the deleted sysfs readDGPULoad. One call, not two: each nvidia-smi exec costs ~200ms
+// and touches the card, and this runs on a 2s poll, so a second invocation per tick would
+// be a real cost for data the first call can carry for free.
+//
+// The sysfs hwmon branch that used to sit here is GONE. The 2026-08-29 comment correctly
+// established that it can never fire on this machine — the NVIDIA proprietary driver
+// exposes no hwmon, `/sys/class/drm/card1/device/hwmon/` does not exist — but kept it "in
+// case a future driver exports it". That is no longer worth it: utilisation has to come
+// from nvidia-smi regardless, so keeping the branch would split one reading across two
+// sources and leave power/temp on a path that has never once executed. Missing-sysfs
+// silently returning 0 is the exact shape of the bug being fixed here.
 // [CHANGE: claude-code | 2026-06-03] v4.2
-func readGPUStats() (powerW, tempC float64) {
-	powerPaths, _ := filepath.Glob("/sys/class/drm/card1/device/hwmon/hwmon*/power1_input")
-	tempPaths, _ := filepath.Glob("/sys/class/drm/card1/device/hwmon/hwmon*/temp1_input")
-	if len(powerPaths) > 0 && len(tempPaths) > 0 {
-		if d, err := os.ReadFile(powerPaths[0]); err == nil {
-			v, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
-			powerW = v / 1e6 // microwatts → watts
-		}
-		if d, err := os.ReadFile(tempPaths[0]); err == nil {
-			v, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
-			tempC = v / 1000.0 // millidegrees → degrees
-		}
-		if powerW > 0 || tempC > 0 {
-			return
-		}
-	}
-	// Fallback: nvidia-smi (slower but always available)
-	out, err := nvidiaQuery("power.draw,temperature.gpu")
+func readGPUStats() (loadPct, powerW, tempC float64) {
+	out, err := nvidiaQuery("utilization.gpu,power.draw,temperature.gpu")
 	if err != nil {
-		return 0, 0
+		lg.Warn("GPU stats read failed: %v — treating dGPU as idle this tick", err)
+		return 0, 0, 0
 	}
-	parts := strings.SplitN(strings.TrimSpace(string(out)), ",", 2)
-	if len(parts) == 2 {
-		powerW, _ = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-		tempC, _ = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	parts := strings.Split(strings.TrimSpace(string(out)), ",")
+	if len(parts) != 3 {
+		lg.Warn("GPU stats: unexpected nvidia-smi output %q", strings.TrimSpace(string(out)))
+		return 0, 0, 0
 	}
+	loadPct, _ = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	powerW, _ = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	tempC, _ = strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
 	// Sanity cap: RTX 4050 max TGP is 90W — anything higher is a bad read (driver quirk).
 	// [CHANGE: claude-code | 2026-06-08] Observed 590W spurious read causing false TGP uplift.
 	if powerW > 110.0 {
@@ -1733,16 +1754,50 @@ func applyOffloadPin(on bool) {
 	lg.Info("offload session STOP — GPU clocks reset, TGP returned to dynamic manager")
 }
 
-func initGPUTGP() {
-	out, err := nvidiaQuery("power.limit")
-	if err == nil {
-		if v, err2 := strconv.ParseFloat(strings.TrimSpace(string(out)), 64); err2 == nil && v > 0 {
-			currentGPUTGPW = v
-			lg.Info("GPU TGP init: current limit %.0fW", v)
-			return
+// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 4 / BUG-069.
+// `--query-gpu=power.limit` returns the literal string `[N/A]` on this driver, so the
+// ParseFloat below ALWAYS failed and initGPUTGP always fell through to the "can't read"
+// branch — meaning every daemon restart blind-wrote 55W to the card. Harmless at idle,
+// not harmless mid-game: it yanks 35W off a rendering GPU, and if the card happens to be
+// at/above gpuTGPThermalUpC at that moment the uplift gate refuses to give it back for up
+// to gpuTGPHysteresis. Observed live this session at 20:35:10 — `GPU TGP → 55W` one second
+// before `uplift … → 90W`, a pointless round trip through 55W under load.
+//
+// The value IS readable, just not from --query-gpu: `nvidia-smi -q -d POWER` prints a real
+// "Current Power Limit : 90.00 W". That is the same field, via the verbose query, and it is
+// what this now parses. Confirmed against the live card, which read 90.00 W while
+// --query-gpu=power.limit read [N/A].
+func readGPUPowerLimit() (float64, bool) {
+	out, err := nvidiaRead("-q", "-d", "POWER")
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		// Match the ceiling field only. "Default Power Limit" and "Max Power Limit" also
+		// contain "Power Limit", so anchor on the exact label.
+		if !strings.Contains(line, "Current Power Limit") {
+			continue
+		}
+		f := strings.SplitN(line, ":", 2)
+		if len(f) != 2 {
+			continue
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(f[1]), "W")), 64)
+		if err == nil && v > 0 {
+			return v, true
 		}
 	}
-	// Can't read — force a known baseline
+	return 0, false
+}
+
+func initGPUTGP() {
+	if v, ok := readGPUPowerLimit(); ok {
+		currentGPUTGPW = v
+		lg.Info("GPU TGP init: current limit %.0fW (adopted, no write)", v)
+		return
+	}
+	// Genuinely unreadable — force a known baseline.
+	lg.Warn("GPU TGP init: could not read current limit — forcing %.0fW baseline", gpuTGPLowW)
 	setGPUTGP(gpuTGPLowW)
 }
 
@@ -1787,7 +1842,7 @@ func manageGPUTGP(gpuPowerW, gpuLoad, gpuTempC float64, onAC bool) {
 
 	if currentGPUTGPW < gpuTGPHighW {
 		// Currently at 55W: uplift if power draw is near the cap and temp is safe
-		if gpuPowerW >= gpuTGPUpThreshW && gpuTempC < gpuTGPThermalCeilC && hysteresisOK {
+		if gpuPowerW >= gpuTGPUpThreshW && gpuTempC < gpuTGPThermalUpC && hysteresisOK {
 			gpuTGPLastSwitch = now
 			gpuTGPDownTick = 0
 			lg.Info("GPU TGP uplift: %.1fW draw ≥ %.0fW threshold, temp=%.1f°C", gpuPowerW, gpuTGPUpThreshW, gpuTempC)
@@ -1797,8 +1852,8 @@ func manageGPUTGP(gpuPowerW, gpuLoad, gpuTempC float64, onAC bool) {
 	}
 
 	// Currently at 90W: check thermal override first, then idle revert
-	if gpuTempC >= gpuTGPThermalCeilC && hysteresisOK {
-		lg.Warn("GPU TGP thermal override: %.1f°C ≥ %.0f°C → %.0fW", gpuTempC, gpuTGPThermalCeilC, gpuTGPLowW)
+	if gpuTempC >= gpuTGPThermalDownC && hysteresisOK {
+		lg.Warn("GPU TGP thermal override: %.1f°C ≥ %.0f°C → %.0fW", gpuTempC, gpuTGPThermalDownC, gpuTGPLowW)
 		gpuTGPLastSwitch = now
 		gpuTGPDownTick = 0
 		setGPUTGP(gpuTGPLowW)

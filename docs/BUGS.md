@@ -5,9 +5,12 @@ Last Updated: 2026-08-29 (BUG-149 **BUG-142 WAS NEVER A vkd3d BUG — WE DELETED
 
 ### BUG-157 — our own power daemon flips the dGPU between 90 W and 55 W ten times in twelve minutes, mid-game
 <!-- [CHANGE: claude-code | 2026-09-13] -->
-- Status: **DIAGNOSED, NOT FIXED.** Reported as *"the game was using way more gpu and still gave way
-  less fps and graphics."* All three symptoms are one cause and the cause is `luminos-power`, not
-  Lutris, not the NVIDIA driver, and not BUG-156's `steam-devices` install.
+- Status: **FIXED 2026-09-13 20:39, measured before/after on a live Black Myth Wukong session.**
+  Reported as *"the game was using way more gpu and still gave way less fps and graphics."* All three
+  symptoms are one cause and the cause is `luminos-power`, not Lutris, not the NVIDIA driver, and not
+  BUG-156's `steam-devices` install. Follow-up report — *"when I am using GPU and playing games it
+  should have been fully unlocked, whole laptop, everything, but it's not"* — turned out to be the
+  **same defect 1**, and is the more serious half of it. See "What was actually fixed" below.
 
 #### What the journal shows (Black Myth Wukong, 19:30–19:44)
 
@@ -100,10 +103,99 @@ are in the same state. On a PRIME-offload box the game's frames cross that bound
 This is HANDOFF outstanding item 1 and it is not hypothetical any more — but it is **not** what the
 journal indicts, and the TGP sawtooth would still be there after a reboot.
 
-#### Not done on purpose
-No code changed. The user asked what was wrong and why, and a thermal governor is the wrong thing to
-edit and ship in the same breath as its diagnosis — the fix needs a measured before/after across one
-real play session, not a plausible-looking constant. The three defects above are the work list.
+#### What was actually fixed, 2026-09-13 20:39
+
+Four changes in `cmd/luminos-power/main.go`. Defects 1–3 as written above, plus a fourth found while
+verifying. Installed binary rebuilt; backup `~/.luminos-backups/luminos-power.bak-bug157-20260913`.
+
+1. **`readDGPULoad()` and `readGPULoad()` deleted.** dGPU utilisation now comes from
+   `readGPUStats()`, which asks nvidia-smi for `utilization.gpu,power.draw,temperature.gpu` in the
+   **one** invocation it was already making for power and temp — no second fork per 2 s tick.
+   `readGPULoad()` had zero callers and was removed rather than left: it globs `card*` and returns
+   the max across **both** GPUs, so anything adopting it for "dGPU detection" would have been
+   reading the AMD iGPU. The dead sysfs hwmon branch in `readGPUStats` went with it — utilisation
+   has to come from nvidia-smi regardless, and a missing-sysfs read silently yielding 0 is the exact
+   shape of the bug being fixed.
+2. **Defect 2 closes as a consequence.** The idle-revert guard `power < 15 && util < 20` now has a
+   real `util` term, so a single low wattage sample can no longer cut power mid-game.
+3. **Thermal deadband.** `gpuTGPThermalCeilC = 83.0` is replaced by
+   `gpuTGPThermalDownC = 87.0` / `gpuTGPThermalUpC = 82.0`. 87 °C is not a guess — it is the card's
+   own `GPU Target Temperature Specification`, read from the hardware this session. The same file
+   gives Max Operating ≈ 89 °C, HW Slowdown ≈ 91 °C, Shutdown ≈ 101 °C (the `T.Limit` fields are
+   offsets from current temp, not absolutes — 73 °C current with `Current T.Limit 16` ⇒ 89 °C).
+   So the old ceiling was cutting 35 W of TGP **4 °C below the point the firmware itself considers
+   normal**. The offload-pin branch in `monitorLoop` had the same missing deadband and was worse —
+   being an unconditional per-tick reassertion it could flip every 2 s, not every 60 s. Both fixed.
+4. **NEW — `initGPUTGP()` blind-wrote 55 W on every daemon start.** `--query-gpu=power.limit` returns
+   the literal `[N/A]` on this driver (BUG-069), so the `ParseFloat` **always** failed and the
+   "can't read" fallback **always** ran. Observed live at 20:35:10: `GPU TGP → 55W` one second before
+   `uplift … → 90W`, a pointless round trip through 55 W on a rendering card. The value is readable,
+   just not from `--query-gpu`: `nvidia-smi -q -d POWER` prints a real `Current Power Limit`. Now
+   parsed from there, and the daemon **adopts** it instead of writing (`init: current limit 88W
+   (adopted, no write)`). New `readGPUPowerLimit()` + `nvidiaRead()`.
+   ⚠️ `nvidiaRead()` exists specifically so this does **not** regress BUG-146: per that bug's own
+   truth table a **root** nvidia-smi re-applies the driver's 0666 root:root device-file defaults by
+   itself, with no setuid helper involved, so even a read-only `-q -d POWER` run as root tears open
+   the DECISION 25 gate. `nvidiaRead()` applies the same uid-nobody/gid-dgpu drop as `nvidiaQuery`.
+   Verified: `/dev/nvidia-uvm` and `-tools` held `root:dgpu 0660` across the restart.
+
+#### The part the diagnosis got WRONG — the 60 W clamp was NOT the SBIOS handshake
+
+The section above blames `Current Power Limit: 65.00 W` on the failed Dynamic Boost handshake and
+says "reboot is the first thing to try". **That was wrong, and no reboot was needed.** The enforced
+ceiling tracks the **asusctl platform profile**, measured on one un-rebooted boot with the game
+running throughout:
+
+| platform profile | enforced `Current Power Limit` |
+|---|---|
+| `quiet` | **60 W** |
+| `balanced` | **75 W** |
+| `performance` | **90 W** |
+
+So the clamp was a *downstream consequence of defect 1*, not an independent firmware fault: because
+`dgpuLoad` was hard-wired to 0, beast mode could never latch, the box sat in Quiet/Balanced, and the
+ASUS firmware therefore granted only 60–75 W of the 90 W the daemon kept requesting. The SBIOS
+handshake failure and the `asus-armoury` ENODEV reads are **real and still unexplained** — but they
+are not what capped the card, and they must not be used to explain a low power limit again.
+
+#### "Fully unlocked while gaming" — the measured before/after
+
+Same game (Black Myth Wukong, `dgpu-exec-v2` → RTX 4050), same boot, no reboot, ~4 minutes apart:
+
+| | before (20:34) | after (20:40) |
+|---|---|---|
+| `asusctl profile` | **Quiet**, then Balanced | **Performance** |
+| `platform_profile` | `quiet` / `balanced` | `performance` |
+| EPP | `power` / `balance_power` | `performance` |
+| `scaling_max_freq` | **3.68 GHz** of 5.14 | **5.14 GHz** of 5.14 (uncapped) |
+| dGPU enforced power limit | **60 W** → 75 W | **89.8 W** |
+| dGPU util / clock | 99 % @ 2655 MHz | 99 % @ 2655 MHz |
+| dGPU temp | 73–75 °C | **68 °C** (Performance fan curve) |
+| beast-mode trigger in log | `trigger: cpu, dgpu=0%` | `trigger: gpu, dgpu=99%` |
+| TGP switches in 90 s | oscillating ~every 63 s | **0** |
+
+`beast mode → Performance (trigger: gpu, cpu=17%, dgpu=99%)` is the **first GPU-triggered beast mode
+this machine has ever logged** — every prior instance says `trigger: cpu … dgpu=0%`.
+
+The decisive check is `nvidia-smi -q -d PERFORMANCE`: **every** clocks-event reason now reads
+`Not Active`, including `SW Power Cap`, whose lifetime counter had accumulated 190,832,450 µs
+(≈191 s) of capping. The card is no longer throttled by anything we impose.
+
+**What is still limited, honestly:** the GPU draws ~57 W of the 90 W now available and holds
+2655 MHz against a `clocks.max.graphics` of 3105 MHz, with no throttle reason active — that is the
+card's own V/f curve at this temperature, not a cap. VRAM is **5781 MiB of 6141 MiB used**. Power is
+no longer the constraint; VRAM is. Do not expect more FPS from power tuning.
+
+#### Why the box sat in Quiet mid-game — the causal chain, for the record
+```
+readDGPULoad() → ENOENT → discarded into _ → dgpuLoad = 0.0 always
+  ├─ applyGamingDetection(0, …)  → never returns Performance  → beast mode unreachable from GPU
+  ├─ beast-mode EXIT fires        → 20:14:21 "exit → Balanced (cpu=15%, dgpu=0%)" mid-game
+  ├─ quiet-idle: cpu 15<25 && igpu 3<15 && dgpu 0<5 → 60 s → asusctl profile set Quiet
+  │    ├─ platform_profile=quiet → firmware grants dGPU only 60 W of the 90 W requested
+  │    └─ adaptive governor active (not suspended) → CPU capped 3.68 GHz, EPP=power
+  └─ TGP idle-revert `power<15 && util<20` → util half permanently true → false idle cut
+```
 
 ### BUG-147 — the whole NVIDIA path works today, and NOT ONE PART OF IT HAS SURVIVED A REAL REBOOT
 <!-- [CHANGE: claude-code | 2026-08-29] -->
