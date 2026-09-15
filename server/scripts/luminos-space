@@ -74,7 +74,12 @@ DOWNLOAD_DISK = MEDIA
 # bytes the hub serves at :443 -- :8446 is a different origin and cannot share a
 # <link> with it, so each process serves its own copy.
 WEB_DIR = "/usr/local/share/luminos/web"
+#
+# [CHANGE: claude-code | 2026-09-15] lum.js is the shared half of the client --
+# DOM helpers, keyed list rendering, number formatting -- and is another copy
+# for the same origin reason as app.css. No gl.js here: this page draws no solids.
 STATIC = {"/app.css": ("app.css", "text/css; charset=utf-8"),
+          "/lum.js": ("lum.js", "application/javascript; charset=utf-8"),
           "/app.js": ("space.js", "application/javascript; charset=utf-8"),
           "/ask.js": ("ask.js", "application/javascript; charset=utf-8")}
 FONT_DIR = "/usr/local/share/luminos/fonts"
@@ -668,22 +673,27 @@ PAGE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0F0D0B">
+<meta name="theme-color" content="#080706">
 <meta name="color-scheme" content="dark">
 <title>Space</title>
 <link rel="stylesheet" href="/app.css">
 </head><body>
+<div class="air"></div>
 <div class="wrap stagger">
 
  <div class="top">
-  <span class="mark">Space</span>
+  <span class="mark">Luminos <em>/ Space</em></span>
   <a class="clock back" id="ask">ask for a title &rarr;</a>
  </div>
 
- <section>
-  <p class="readout" id="free">&hellip;</p>
-  <p class="readout-sub" id="free-sub">Measuring.</p>
-  <noscript><p class="readout-sub">This page needs JavaScript.</p></noscript>
+ <!-- Same hero, same two registers as the hub: the machine state small and
+      always present, the number large. Here the number is the pool, which is the
+      question this page exists to answer. -->
+ <section class="hero">
+  <p class="sig" id="sig">measuring</p>
+  <p class="figure" id="free">&hellip;</p>
+  <p class="sub" id="free-sub">Reading the disks.</p>
+  <noscript><p class="sub">This page needs JavaScript.</p></noscript>
  </section>
 
  <section>
@@ -693,16 +703,22 @@ PAGE = """<!doctype html>
        data-kind="dl"></button></div>
  </section>
 
+ <!-- The hunt. Every node carries a byte size and every node is rankable against
+      the largest thing in the library, because that is the only ranking that
+      matters on a page about what to delete. -->
  <section>
   <div class="lbl">Library <span class="aux" id="lib-aux"></span></div>
   <div id="lib"></div>
  </section>
 
- <div class="foot"><span>deletes go through Sonarr and Radarr</span></div>
+ <div class="foot"><span>deletes go through Sonarr and Radarr</span>
+  <span>refreshes every 5s</span></div>
 </div>
 <div id="msg" class="off"></div>
+<script src="/lum.js"></script>
 <script src="/app.js"></script>
-</body></html>"""
+</body></html>
+"""
 
 
 # [CHANGE: claude-code | 2026-09-13] Asking for a title, absorbed.
@@ -718,28 +734,33 @@ REQUEST = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0F0D0B">
+<meta name="theme-color" content="#080706">
 <meta name="color-scheme" content="dark">
 <title>Ask for a title</title>
 <link rel="stylesheet" href="/app.css">
 </head><body>
+<div class="air"></div>
 <div class="wrap stagger">
 
  <div class="top">
-  <a class="mark back" id="home">Space</a>
-  <span class="clock">ask for a title</span>
+  <a class="mark back" id="home">&larr; Luminos <em>/ Space</em></a>
+  <span class="clock">jellyseerr</span>
  </div>
 
+ <!-- No poster artwork anywhere on this page: the images live on image.tmdb.org
+      and the policy forbids a third-party fetch. So the page is typographic on
+      purpose, and the plates beside each result are invented rather than fetched
+      -- a rule and a figure, set in the two faces this product already has. -->
  <section>
-  <h1 class="readout small">What do you want?</h1>
-  <form class="ask" id="form">
+  <h1 class="title q">WHAT DO<br>YOU <em>WANT?</em></h1>
+  <form class="searchbar" id="form">
    <input class="field" id="q" name="q" type="search" autocomplete="off"
           placeholder="a film or a series" aria-label="title to search for">
    <button class="btn" id="go" type="submit">search</button>
   </form>
-  <p class="readout-sub" id="note">Names only. It gets added to the queue, not to this
-   disk &mdash; it shows up in the library once it has actually landed.</p>
-  <noscript><p class="readout-sub">This page needs JavaScript.</p></noscript>
+  <p class="blurb" id="note">Names only. It goes into the queue, not onto this disk
+   &mdash; it shows up in the library once it has actually landed.</p>
+  <noscript><p class="blurb">This page needs JavaScript.</p></noscript>
  </section>
 
  <section>
@@ -747,11 +768,14 @@ REQUEST = """<!doctype html>
   <div id="res"></div>
  </section>
 
- <div class="foot"><span>requests go through Jellyseerr</span></div>
+ <div class="foot"><span>requests go through Jellyseerr</span>
+  <span>nothing here is on the disk yet</span></div>
 </div>
 <div id="msg" class="off"></div>
+<script src="/lum.js"></script>
 <script src="/ask.js"></script>
-</body></html>"""
+</body></html>
+"""
 
 
 class Handler(http.server.BaseHTTPRequestHandler):

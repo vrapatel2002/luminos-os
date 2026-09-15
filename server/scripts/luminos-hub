@@ -55,8 +55,16 @@ FONTS = ("archivo-500.woff2", "archivo-800.woff2",
 # undo the point of having the policy. Both processes therefore serve the same
 # bytes from the same file. Same whitelist shape as FONTS.
 WEB_DIR = "/usr/local/share/luminos/web"
+#
+# [CHANGE: claude-code | 2026-09-15] Three scripts now, not one. lum.js is the
+# shared half -- DOM helpers, keyed list rendering, number formatting -- and is
+# byte-identical on both ports for the same reason app.css is. gl.js is the
+# WebGL1 renderer for the two drives and is hub-only; it is hand-written rather
+# than a vendored three.js, so `script-src 'self'` is untouched.
 STATIC = {
     "/app.css": ("app.css", "text/css; charset=utf-8"),
+    "/lum.js": ("lum.js", "application/javascript; charset=utf-8"),
+    "/gl.js": ("gl.js", "application/javascript; charset=utf-8"),
     "/app.js": ("hub.js", "application/javascript; charset=utf-8"),
 }
 
@@ -332,37 +340,64 @@ PAGE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0F0D0B">
+<meta name="theme-color" content="#080706">
 <meta name="color-scheme" content="dark">
 <title>Luminos</title>
 <link rel="preload" href="/fonts/jetbrainsmono-800.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/archivo-800.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/app.css">
 </head><body>
+<div class="air"></div>
 <div class="wrap board stagger">
 
  <div class="top">
   <span class="mark">Luminos</span>
-  <span class="clock" id="clock">--:--</span>
+  <span class="clock"><i class="pip" id="pip"></i><span id="clock">--:--</span></span>
  </div>
 
- <section class="hero">
-  <p class="readout" id="state">&hellip;</p>
-  <p class="readout-sub" id="state-sub">Asking the server.</p>
-  <noscript><p class="readout-sub">This page reads live numbers off the server,
-   which needs JavaScript. The links below still work.</p></noscript>
+ <!-- The hero. Two registers: the machine state, always present and always small,
+      and the weather -- the rate when something moves, the room when nothing does.
+      Idle is the normal state on this box and is not a null result. -->
+ <section class="hero" id="hero">
+  <p class="sig" id="sig">reading</p>
+  <p class="figure" id="figure">&hellip;</p>
+  <p class="sub" id="sub">Asking the server.</p>
+  <svg class="trace off" id="trace" viewBox="0 0 240 40" preserveAspectRatio="none"
+       aria-hidden="true">
+   <polygon class="tf" id="trace-f"></polygon>
+   <polyline class="tl" id="trace-l"></polyline>
+   <line class="base" x1="0" y1="39.5" x2="240" y2="39.5"></line>
+  </svg>
+  <noscript><p class="sub">This page reads live numbers off the server, which needs
+   JavaScript. Every link below still works.</p></noscript>
  </section>
 
+ <!-- Two drives, two objects, never one pooled bar. The canvas is the object; the
+      SVG below it is the same object with the light switched off, and is what you
+      get with no WebGL, on a lost context, or with ?flat=1. -->
  <section class="store">
+  <!-- [CHANGE: claude-code | 2026-09-15] The room IS the door to Space. "What is
+       taking up room" is no longer a link in the rank below: the two drives are the
+       thing you go there to manage, so the objects are the handle. The canvas stays
+       draggable -- hub.js measures the pointer and swallows the click if it was a
+       turn rather than a tap. The SVG fallback is inside this anchor too, so a
+       WebGL failure cannot make the Space page unreachable. -->
+  <a class="roomdoor" id="roomdoor" data-port="__SPACE__" href="#">
   <div class="lbl">Room <span class="aux" id="room-aux"></span></div>
   <div class="room">
-   <svg class="vol" width="174" height="152" viewBox="0 0 174 152" aria-hidden="true">
-    <g id="v0" transform="translate(44,124)">
+   <div class="stage" id="stage">
+    <canvas class="drives" id="drives" aria-label="Two drives drawn as solids: height is capacity, filled volume is usage."></canvas>
+    <span class="hint" id="hint">drag to turn</span>
+   </div>
+   <svg class="flat off" id="flat" width="196" height="172" viewBox="0 0 196 172"
+        aria-hidden="true">
+    <g id="v0" transform="translate(56,140)">
      <g id="f0"><polygon class="fl" id="fl0"/><polygon class="fr" id="fr0"/>
       <polygon class="ft" id="ft0"/></g>
      <polygon class="out" id="o0"/><polygon class="out" id="r0"/>
      <text class="cap" id="c0" x="0" y="31" text-anchor="middle"></text>
     </g>
-    <g id="v1" transform="translate(130,124)">
+    <g id="v1" transform="translate(142,140)">
      <g id="f1"><polygon class="fl" id="fl1"/><polygon class="fr" id="fr1"/>
       <polygon class="ft" id="ft1"/></g>
      <polygon class="out" id="o1"/><polygon class="out" id="r1"/>
@@ -372,83 +407,75 @@ PAGE = """<!doctype html>
    <div class="figs">
     <div class="fig" id="fig0">
      <div class="who"><span id="w0">&mdash;</span>
-      <span class="tag off" id="g0">usb &middot; no smart</span></div>
+      <span class="tag" id="p0"></span>
+      <span class="tag risk off" id="g0">usb &middot; no smart</span></div>
      <div class="free" id="e0">&mdash;</div>
      <div class="of" id="u0"></div>
     </div>
     <div class="fig" id="fig1">
      <div class="who"><span id="w1">&mdash;</span>
-      <span class="tag off" id="g1">usb &middot; no smart</span></div>
+      <span class="tag" id="p1"></span>
+      <span class="tag risk off" id="g1">usb &middot; no smart</span></div>
      <div class="free" id="e1">&mdash;</div>
      <div class="of" id="u1"></div>
     </div>
    </div>
   </div>
+  <span class="enter">what is taking up room &mdash; and delete it &rarr;</span>
+  </a>
  </section>
 
  <section>
   <div class="lbl">Downloading <span class="aux" id="q-aux"></span></div>
-  <div id="queue" data-empty="nothing downloading"></div>
+  <div id="queue"></div>
  </section>
 
- <section>
-  <div class="lbl">Arrived</div>
-  <div id="recent" data-empty="nothing yet"></div>
+ <!-- The one place in the product with real visual material in it. -->
+ <section class="wide">
+  <div class="lbl">Arrived <span class="aux" id="r-aux"></span></div>
+  <div class="shelf" id="recent"></div>
  </section>
 
+ <!-- Nine links in three ranks, stated in the type scale. Watch is 90% of the
+      taps; the last four are admin panels opened twice a year. -->
  <nav class="go">
   <a class="primary" data-port="__JF__" href="#">
-   <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polygon points="7 4 20 12 7 20"/></svg>
    <span class="nm">Watch
     <span class="ds">Jellyfin &mdash; everything that finished</span></span>
+   <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polygon points="6 3 21 12 6 21"/></svg>
   </a>
 
-  <a data-port="__SEERR__" href="#">
+  <a class="row" data-port="__SEERR__" href="#">
    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/>
     <line x1="16" y1="16" x2="21" y2="21"/></svg>
    <span class="nm">Ask for something</span><span class="ds">Jellyseerr</span></a>
 
-  <a data-port="__SPACE__" href="#">
-   <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
-    <polygon points="12 3 21 8 12 13 3 8"/><polyline points="3 12 12 17 21 12"/>
-    <polyline points="3 16 12 21 21 16"/></svg>
-   <span class="nm">What is taking up room</span><span class="ds">and delete it</span></a>
-
-  <a href="/offline">
+  <a class="row" href="/offline">
    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="3" x2="12" y2="15"/>
     <polyline points="7 11 12 16 17 11"/><polyline points="4 18 4 21 20 21 20 18"/></svg>
    <span class="nm">Take it with you</span><span class="ds">offline, on a plane</span></a>
 
-  <a data-port="__NZB__" href="#">
+  <a class="row" data-port="__NZB__" href="#">
    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="6"/>
     <rect x="3" y="14" width="18" height="5"/><line x1="7" y1="8" x2="7.01" y2="8"/></svg>
    <span class="nm">Downloads</span><span class="ds">NZBGet</span></a>
 
-  <a data-port="__RAD__" href="#">
-   <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16"/>
-    <line x1="7" y1="4" x2="7" y2="20"/><line x1="17" y1="4" x2="17" y2="20"/></svg>
-   <span class="nm">Films</span><span class="ds">Radarr</span></a>
-
-  <a data-port="__SON__" href="#">
-   <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="8" width="20" height="13"/>
-    <polyline points="8 3 12 8 16 3"/></svg>
-   <span class="nm">Shows</span><span class="ds">Sonarr</span></a>
-
-  <a data-port="__PROW__" href="#">
-   <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="12" x2="12" y2="21"/>
-    <path d="M8 12a5 5 0 0 1 8 0"/><path d="M5 9a9 9 0 0 1 14 0"/></svg>
-   <span class="nm">Indexers</span><span class="ds">Prowlarr</span></a>
-
-  <a data-port="__BAZ__" href="#">
-   <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/>
-    <line x1="6" y1="15" x2="12" y2="15"/><line x1="15" y1="15" x2="18" y2="15"/></svg>
-   <span class="nm">Subtitles</span><span class="ds">Bazarr</span></a>
+  <div class="admin">
+   <span class="lg">Panels</span>
+   <a data-port="__RAD__" href="#">films <span>&middot; radarr</span></a>
+   <a data-port="__SON__" href="#">shows <span>&middot; sonarr</span></a>
+   <a data-port="__PROW__" href="#">indexers <span>&middot; prowlarr</span></a>
+   <a data-port="__BAZ__" href="#">subtitles <span>&middot; bazarr</span></a>
+  </div>
  </nav>
 
- <div class="foot"><span>read-only</span><span>refreshes every 15s</span></div>
+ <div class="foot"><span>read-only</span><span id="foot-poll">refreshes every 15s</span></div>
 </div>
+<script src="/lum.js"></script>
+<script src="/gl.js"></script>
 <script src="/app.js"></script>
-</body></html>"""
+</body></html>
+"""
 
 
 # The offline page deliberately carries NO Jellyfin API key. A key in a URL would
@@ -466,15 +493,24 @@ OFFLINE = """<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0F0D0B">
+<meta name="theme-color" content="#080706">
 <meta name="color-scheme" content="dark">
 <title>Take it with you</title>
 <link rel="stylesheet" href="/app.css">
-</head><body><div class="wrap">
+<!-- ROUTES: served at /offline on :443. It shares hub.js only to have the Jellyfin
+     port filled in; there is nothing here to poll. -->
+</head><body>
+<div class="air"></div>
+<div class="wrap">
  <a class="back" href="/">&larr; Luminos</a>
 
- <div class="top"><span class="mark">Offline</span></div>
- <h1 class="readout">TAKE IT<br>WITH YOU</h1>
+ <div class="top"><span class="mark">Luminos <em>/ Offline</em></span>
+  <span class="clock">no live data on this page</span></div>
+
+ <!-- No live data at all, so the type scale carries the whole screen alone. The
+      display size here is the same one the hub uses for its rate, deliberately:
+      one product, one voice, whether or not there is a number to print. -->
+ <h1 class="title">TAKE IT<br><em>WITH YOU</em></h1>
  <p class="lede">Copy a film or an episode onto this phone <b>now</b>, so it plays
   later with no signal at all &mdash; a flight, a tunnel, a hotel with bad wifi.</p>
 
@@ -490,7 +526,9 @@ OFFLINE = """<!doctype html>
    in VLC or mpv.</li>
  </ol>
 
- <a class="cta" data-port="__JF__" href="#">Open Jellyfin &rarr;</a>
+ <a class="cta" data-port="__JF__" href="#">Open Jellyfin
+  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="12" x2="19" y2="12"/>
+   <polyline points="13 6 19 12 13 18"/></svg></a>
 
  <p class="note"><b>Do it before you lose signal.</b> The file copies across the
   network while you wait; nothing downloads later on its own. A film is usually
@@ -501,8 +539,10 @@ OFFLINE = """<!doctype html>
 
  <div class="foot"><span>works over the tailnet</span><span>you need not be home</span></div>
 </div>
+<script src="/lum.js"></script>
 <script src="/app.js"></script>
-</body></html>"""
+</body></html>
+"""
 
 
 class Handler(BaseHTTPRequestHandler):

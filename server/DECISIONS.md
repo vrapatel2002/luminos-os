@@ -2472,3 +2472,69 @@ Deleting downloaded media is not something to do unasked.
 queue has drained (`mi5.py` walks `/queue` and finds nothing once post-processing ends);
 `grab.py <season> <episode>` — force-grab with the `SxxEyy` token check;
 `nzhist.py` — hidden-history lister and dupe-row purge.
+
+---
+
+## DECISION 102 — The drives became the door, and the mockup's safety net had to be cut before it shipped
+# [CHANGE: claude-code | 2026-09-15]
+
+DECISION 99 put all eight surfaces on one token set. The result was correct and dull — Shawn
+called the flat instrument panel underwhelming, and he was right: a page you look at twice a
+day should be worth looking at. This round sent the four first-party pages through Claude
+Design with a brief that asked for depth, motion and material, and brought the result back
+here to be made live.
+
+**What shipped.** The two drives on the hub are now solids, drawn in WebGL and draggable. The
+important part is what they are *not*: `gl.js` is ~16 KB of hand-written WebGL1, not a vendored
+three.js. A `<script src="https://cdn…/three.min.js">` would have forced `script-src` open, and
+the whole point of this page's policy is that nothing third-party executes on it. The old
+isometric SVG is still in the markup and still exact — it is what renders with no WebGL, on a
+lost context, or with `?flat=1`.
+
+**The room is the door.** "What is taking up room — and delete it" used to be one of five
+links in a rank. It is gone from that rank. The block that draws the drives is now the anchor
+to the Space page, because the drives *are* what you are going there to manage, so the objects
+are the handle. Hovering pulls the whole block back a little — nothing else on the page moves
+that way, so the gesture reads as a surface you can go through rather than decoration.
+
+Two things that had to be got right or the idea fails:
+
+- **A turn must not navigate.** The canvas inside the anchor is draggable. `hub.js` measures
+  the pointer instead of asking the renderer: under 6 px of travel and under 600 ms is a tap,
+  anything longer or further is a turn and the click is swallowed. `e.detail === 0` means the
+  click came from the keyboard and carries no coordinates, so those always pass — otherwise
+  tab + Enter would stop reaching the page.
+- **The fallback carries the link too.** Once the drives are the only route to Space, a WebGL
+  failure would make a whole screen unreachable. The SVG is inside the same anchor. Verified
+  with `?flat=1`: the canvas goes `off`, the SVG comes up, the href is still there.
+
+**The thing that nearly shipped a lie.** The design build's `lum.js` carried a demo shim so the
+pages would run on an artboard with no Python behind them. `LUM.get(url, sample)` tried the
+real endpoint first and fell back to a `sample-*.json` file sitting beside the page on 404, on
+403, or on any transport error. On this box **a missing token is a 403** — so the shim's
+failure mode was to answer a credential failure by painting last week's fixture, on a page that
+would look perfectly healthy while every number on it was false. `LUM.post` was worse: it
+returned a fabricated `{ok: true, message: "would free 264.8 GB"}` when the POST failed, on the
+button that deletes films. Both were cut before deploy; rejections now pass through to the
+catch handlers, which already said "no reply" and "no token" out loud. The free-space figure
+also only flashes its credit animation when `r.ok`, so nothing celebrates a delete that did not
+happen.
+
+**Budgets are blown on purpose.** `app.css` went 20,055 → 35,656 B and the hub's client JS
+12,333 → 42,356 B across three files. DECISION 99 set those ceilings to stop decoration
+creeping in a byte at a time; this is not creep, it is a deliberate spend on the one screen
+this product is looked at through, over a LAN, with `no-store` and a 15 s poll. If a future
+round wants them back, `gl.js` is the 16 KB to argue about first.
+
+**Serving shape.** Client JS is three files now: `lum.js` shared, `gl.js` hub-only, and
+`app.js` which is `hub.js` on :443 and `space.js` on :8446. Both processes serve their own copy
+of `lum.js` and `app.css` for the same origin reason as before — `style-src 'self'` will not
+reach across ports. The port placeholders (`__JF__` and friends) were put back into the
+templates the design build had hard-coded, so `PUBLIC` stays the one place ports are written
+down.
+
+**Verified through Caddy, never 127.0.0.1.** All four pages 200 with real data; `app.css`
+35,656 B identical on both ports; the CSP header byte-identical to before on both; `/lum.js`,
+`/gl.js`, `/app.js`, `/ask.js` all 200 with the right content type; the token redirect on :8446
+intact; `?flat=1` fallback keeps the link. Rollback is `/root/luminos-web-backup-20260915/` on
+the box — the six previous assets plus both previous scripts.

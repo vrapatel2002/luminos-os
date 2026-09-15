@@ -1,85 +1,66 @@
 /* space.js -- the library and downloads tool.
-   [CHANGE: claude-code | 2026-09-13]
+   [REDESIGN: 2026-09-14]
 
-   Served by luminos-space at /app.js from /usr/local/share/luminos/web/space.js,
-   beside the identical app.css the landing page uses. Real routes rather than an
-   inline <script>, so the page runs under `script-src 'self'`.
+   Served by luminos-space at /app.js, beside the identical app.css the hub uses.
 
    This page can delete things, so two rules are absolute:
 
-     - Nothing is ever built as an HTML string. The old page concatenated release
-       names into innerHTML behind an esc() helper; every name here was chosen by
-       a stranger, and one missed call is an injection. Nodes are constructed and
-       text goes in through .textContent, which makes the bug impossible rather
-       than merely absent.
+     - Nothing is ever built as an HTML string. Every name here was chosen by a
+       stranger on the internet, and one missed escape is an injection. Nodes are
+       constructed and text goes in through .textContent, which makes the bug
+       impossible rather than merely absent.
      - A delete button is never reachable without opening the row it belongs to,
        and the confirmation names the title and the bytes that actually come back
-       -- which is frequently not the same as the size on the row. */
+       -- frequently not the same as the size printed on the row. */
 (function () {
   "use strict";
 
   var $ = function (id) { return document.getElementById(id); };
+  var size = LUM.size, el = LUM.el, txt = LUM.txt;
 
   /* The token stays a query-string parameter, read from the URL and put straight
-     back on each request. Never a cookie, never localStorage: a cookie would be
-     sent by the browser on requests this page did not make, and localStorage would
-     outlive the tab that was handed the link. */
+     back on every request and every internal link. Never a cookie -- the browser
+     would attach it to requests this page did not make -- and never localStorage,
+     which would outlive the tab that was handed the link. */
   var TOKEN = new URLSearchParams(location.search).get("token") || "";
   function q(path) { return path + "?token=" + encodeURIComponent(TOKEN); }
 
-  /* The way through to /request. Built here rather than server-rendered so the token
-     is never written into a page constant, and it stays on this origin -- the hub has
-     no token and must not be handed one. */
+  /* ROUTES: "/request" on the server. */
   $("ask").href = q("/request");
 
-  var UNITS = ["B", "KB", "MB", "GB", "TB", "PB"];
-  function size(n) {
-    n = Number(n) || 0;
-    var i = 0;
-    while (Math.abs(n) >= 1024 && i < UNITS.length - 1) { n /= 1024; i++; }
-    return (i < 2 ? n.toFixed(0) : n.toFixed(1)) + " " + UNITS[i];
+  LUM.parallax();
+
+  /* ---- the pool ------------------------------------------------------------- */
+  var freeFig = null;
+  function pool(d) {
+    if (!freeFig) { $("free").textContent = ""; freeFig = LUM.figure($("free")); }
+    freeFig.to(d.disk.free);
+    $("sig").textContent = "free";
+    var sub = $("free-sub");
+    sub.replaceChildren();
+    sub.appendChild(document.createTextNode("of " + size(d.disk.total) + " across "
+      + d.disks.length + (d.disks.length === 1 ? " drive. " : " drives. ")));
+    var twinned = d.series.reduce(function (a, s) { return a + (s.twins || 0); }, 0)
+                + d.movies.reduce(function (a, m) { return a + (m.twins || 0); }, 0);
+    if (twinned) {
+      txt("b", null, sub, twinned + " file" + (twinned === 1 ? "" : "s"));
+      sub.appendChild(document.createTextNode(
+        " here also exist under downloads; deleting from this page removes both copies."));
+    }
+  }
+  /* Deleting 150 GB should feel like 150 GB. The freed bytes land in the figure,
+     which counts up from where it was and takes the light for a second. */
+  function credit() {
+    $("free").classList.remove("credited");
+    void $("free").offsetWidth;
+    if (!LUM.reduced) { $("free").classList.add("credited"); }
   }
 
-  function el(tag, cls, parent) {
-    var n = document.createElement(tag);
-    if (cls) { n.className = cls; }
-    if (parent) { parent.appendChild(n); }
-    return n;
-  }
-  function txt(tag, cls, parent, s) {
-    var n = el(tag, cls, parent);
-    n.textContent = s;
-    return n;
-  }
-
-  var CARET = "M2 0 L8 5 L2 10 Z";
-  function caret(parent) {
-    var s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    s.setAttribute("class", "caret");
-    s.setAttribute("viewBox", "0 0 10 10");
-    var p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    p.setAttribute("d", CARET);
-    s.appendChild(p);
-    parent.appendChild(s);
-    return s;
-  }
-
-  var msgTimer = null;
-  function say(t) {
-    var m = $("msg");
-    m.textContent = t;
-    m.classList.remove("off");
-    clearTimeout(msgTimer);
-    msgTimer = setTimeout(function () { m.classList.add("off"); }, 9000);
-  }
-
-  /* Which rows are expanded. A refresh must not collapse the tree under someone
-     mid-scroll, and a delete refreshes the tree. */
+  /* ---- one entry in the tree ------------------------------------------------
+     `o` needs: key, title, bytes, frees, twins, and optional facts[] / acts(). */
   var open = new Set();
   var biggest = 1;
 
-  /* ---- one entry in the tree ------------------------------------------------
-     `o` needs: key, title, bytes, frees, twins, and optional facts[] / acts[]. */
   function entry(o, parent) {
     var ent = el("div", "ent", parent);
     if (o.key && open.has(o.key)) { ent.classList.add("open"); }
@@ -88,7 +69,7 @@
     var hdr = el("button", "hdr", ent);
     hdr.type = "button";
     if (o.key) {
-      caret(hdr);
+      LUM.caret(hdr);
       hdr.setAttribute("aria-expanded", open.has(o.key) ? "true" : "false");
       hdr.dataset.tog = o.key;
     } else {
@@ -98,22 +79,23 @@
     txt("span", "nm", hdr, o.title);
     txt("span", "amt", hdr, size(o.bytes));
 
+    /* Size as volume, one slab per row, ranked against the largest thing in the
+       library. A custom property rather than a width, so the transition runs on
+       the compositor and the page carries no inline style attribute in markup. */
     var meas = el("div", "meas", ent);
-    el("i", null, meas).style.transform =
-      "scaleX(" + Math.max(0.004, o.bytes / biggest).toFixed(4) + ")";
+    el("i", null, meas).style.setProperty(
+      "--w", Math.max(0.004, o.bytes / biggest).toFixed(4));
 
-    var sub = el("div", "sub", ent);
+    var sub = el("div", "sub-facts", ent);
     (o.facts || []).forEach(function (f) { txt("span", null, sub, f); });
-    /* The whole reason this tool exists. 45 % of this library is one series
-       stored under two names for one inode; Sonarr's own delete would free
-       nothing, and this one frees everything. Say so on the row. */
+    /* The whole reason this tool exists: 45% of this library is one series stored
+       under two names for one inode. Sonarr's own delete would free nothing here
+       and this one frees everything, so the row says so. */
     if (o.twins > 0) {
       txt("span", "twin", sub, o.twins + (o.twins === 1 ? " twinned copy" : " twinned copies"));
     }
-    /* frees < bytes means something outside the downloads tree still holds the
-       inode. It does not happen on demand -- NZBGet's completed directory is not
-       walked, deliberately, because walking it would put its files on the delete
-       path -- but when it does happen the size on the row is a lie and must say so. */
+    /* frees < bytes means something outside our view still holds the inode, so the
+       size on this row is a lie. Rare, and the only case of it in the product. */
     if (o.frees < o.bytes) {
       txt("span", "stuck", sub, "frees only " + size(o.frees));
     }
@@ -130,8 +112,7 @@
 
   /* `face` is what the button says, and it is never just "delete". A season's
      button is the first thing inside the season's open body, directly above
-     episode one, so an unlabelled one reads as episode one's. Naming what each
-     button destroys is the cheapest part of §6.6. */
+     episode one, so an unlabelled one would read as episode one's. */
   function deleteBtn(parent, face, label, kind, id, season, frees) {
     var acts = el("div", "acts", parent);
     var b = txt("button", "btn danger", acts, face);
@@ -210,25 +191,14 @@
     var held = d.series.reduce(function (a, s) { return a + s.bytes; }, 0)
              + d.movies.reduce(function (a, m) { return a + m.bytes; }, 0);
     $("lib-aux").textContent = titles + (titles === 1 ? " title" : " titles")
-      + " \u00b7 " + size(held);
+      + " \u00b7 " + size(held) + " \u00b7 largest " + size(biggest);
 
-    $("free").textContent = size(d.disk.free);
-    $("free-sub").replaceChildren();
-    $("free-sub").appendChild(document.createTextNode("free of " + size(d.disk.total)
-      + " across " + d.disks.length + (d.disks.length === 1 ? " drive. " : " drives. ")));
-    var twinned = d.series.reduce(function (a, s) { return a + (s.twins || 0); }, 0)
-                + d.movies.reduce(function (a, m) { return a + (m.twins || 0); }, 0);
-    if (twinned) {
-      var b = el("b", null, $("free-sub"));
-      b.textContent = twinned + " file" + (twinned === 1 ? "" : "s");
-      $("free-sub").appendChild(document.createTextNode(
-        " here also exist under downloads; deleting from this page removes both."));
-    }
+    pool(d);
   }
 
   /* ---- downloads -------------------------------------------------------------
-     Polled every 5 s, so nodes are reused rather than rebuilt -- a rebuild would
-     destroy the button under a thumb that is already on its way down. */
+     Polled every 5s, so nodes are reused rather than rebuilt: a rebuild would
+     destroy the button under a thumb already on its way down. */
   function makeDl() {
     var n = el("div", "item");
     n._t = el("div", "t", n);
@@ -255,14 +225,14 @@
     var pct = it.bytes ? (it.done / it.bytes * 100) : 0;
     n._t.textContent = it.name;
     n._bar.style.transform = "scaleX(" + (pct / 100).toFixed(4) + ")";
+    n.classList.toggle("moving", !it.paused);
     n._track.classList.toggle("held", it.paused);
     n._pct.classList.toggle("on", !it.paused);
     n._pct.textContent = pct.toFixed(0) + "%";
     n._size.textContent = size(it.done) + " of " + size(it.bytes);
-    /* `paused` is not NZBGet's Status string: that reads DOWNLOADING for 3-6 s
+    /* `paused` is not NZBGet's Status string: that reads DOWNLOADING for 3-6s
        after a pause while connections drain, and PausedSizeMB alone is the par2
-       set every healthy group holds back. The server settles both before it
-       answers -- see group_paused(). */
+       set every healthy group holds back. The server settles both before answering. */
     n._state.textContent = it.paused ? "held" : (it.status || "").toLowerCase();
     n._health.textContent = it.health < 100 ? "health " + it.health.toFixed(0) + "%" : "";
     n._pause.textContent = it.paused ? "resume" : "pause";
@@ -305,7 +275,10 @@
       kids.push(node);
     });
     dlBy = now;
-    if (!kids.length) { kids.push(txt("div", "empty", null, "nothing downloading")); }
+    if (!kids.length) {
+      kids.push(txt("div", "empty", null,
+        "Nothing downloading. The queue is empty most of the time on this box."));
+    }
     root.replaceChildren.apply(root, kids);
   }
 
@@ -314,30 +287,23 @@
     /* A delete reloads this whole tree. Hold the scroll position, or the row you
        were looking at jumps away the moment you act on it. */
     var y = window.scrollY;
-    return fetch(q("/api/data"), { cache: "no-store" })
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    return LUM.get(q("/api/data"))
       .then(function (d) { library(d); window.scrollTo(0, y); })
       .catch(function (e) {
+        $("sig").textContent = e === 403 ? "no token" : "no reply";
+        $("sig").classList.add("gone");
         $("free").textContent = e === 403 ? "NO TOKEN" : "NO REPLY";
         $("free-sub").textContent = e === 403
           ? "This page is reached through the front door, which adds the token for you."
           : "The server did not answer.";
+        document.body.classList.add("stale");
       });
   }
 
   function loadDl() {
-    return fetch(q("/api/downloads"), { cache: "no-store" })
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    return LUM.get(q("/api/downloads"))
       .then(downloads)
       .catch(function () { downloads({ error: "no reply", items: [] }); });
-  }
-
-  function post(path, body) {
-    return fetch(q(path), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    }).then(function (r) { return r.json(); });
   }
 
   /* ---- one listener, so no handler is ever written into markup ---------------- */
@@ -358,9 +324,9 @@
     if (d.kind === "dl") {
       if (d.act === "delete" && !confirm("Cancel this download?\n\n" + d.label)) { return; }
       t.disabled = true;
-      post("/api/download-action", { action: d.act, id: d.id ? Number(d.id) : null })
-        .then(function (r) { say(r.message); })
-        .catch(function () { say("that did not reach the server"); })
+      LUM.post(q("/api/download-action"),
+               { action: d.act, id: d.id ? Number(d.id) : null })
+        .then(function (r) { LUM.say(r.message); })
         .then(loadDl);
       return;
     }
@@ -371,11 +337,11 @@
       if (!confirm("Delete " + d.label + "?\n\nThis frees "
                    + size(Number(d.frees)) + " and cannot be undone.")) { return; }
       t.disabled = true;
-      say("deleting " + d.label + "\u2026");
-      post("/api/delete", {
-        kind: d.kind, id: Number(d.id), season: d.season ? Number(d.season) : 0
-      }).then(function (r) { say(r.message); })
-        .catch(function () { say("that did not reach the server"); })
+      LUM.say("deleting " + d.label + "\u2026");
+      LUM.post(q("/api/delete"),
+               { kind: d.kind, id: Number(d.id), season: d.season ? Number(d.season) : 0 })
+        /* The free figure only flashes when something was actually freed. */
+        .then(function (r) { LUM.say(r.message); if (r.ok) { credit(); } })
         .then(function () { loadLib(); loadDl(); });
     }
   });
@@ -383,4 +349,7 @@
   loadLib();
   loadDl();
   setInterval(loadDl, 5000);
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) { loadDl(); }
+  });
 }());

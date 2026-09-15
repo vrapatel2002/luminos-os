@@ -1,22 +1,30 @@
-/* app.css — the Luminos design system. One stylesheet, one vocabulary.
-   [CHANGE: claude-code | 2026-09-13]
+/* app.css -- the Luminos design system, one stylesheet, one vocabulary.
+   [REDESIGN: 2026-09-14]
 
-   Served byte-identical by luminos-hub (/) and luminos-space (:8446) from
-   /usr/local/share/luminos/web/app.css. They are separate origins, so each
-   process serves its own copy of this file rather than linking across -- a
-   cross-origin <link> would be blocked by `style-src 'self'`.
+   Served byte-identical by luminos-hub (/) and luminos-space (:8446).
 
-   Direction: "instrument panel" (WEB_UI_FINDINGS.md §6). The incumbent survived
-   three challengers. Every value below resolves to a token; a raw hex in a rule
-   means the token set is short and should be extended instead.
+   Direction: "the room". The page is a dark room with two objects sitting in it
+   that catch light. Everything else is type. Three rules carry the whole thing:
 
-   Two rules that carry the whole thing:
-     - Hierarchy comes from the type scale, never from decoration. Strip every
-       shadow, radius and rule and the page still reads.
-     - Colour is rationed. Idle is monochrome. Accent means live or actionable;
-       warn/danger mean machine state and never appear as decoration. */
+     1. Hierarchy comes from the type scale, never from decoration. Strip every
+        shadow, gradient and rule below and the page still reads -- the fallback
+        path proves it, because it IS the page with the light switched off.
+     2. Colour is rationed like a second press plate. Idle is monochrome. Accent
+        means live or actionable. warn/danger mean machine state, never decoration.
+     3. Light is not colour. The two glows and the highlight hairlines are made of
+        --lit, which is accent at 4-10% alpha and never carries a value. No number,
+        no word and no state is ever encoded in light.
 
-/* ---------------------------------------------------------------- faces */
+   PALETTE: unchanged from the incumbent, plus two tokens.
+     --void  the field BEHIND the surfaces. The old --bg was both the page and the
+             lowest surface, which left nothing for a surface to sit against, which
+             is why the old page had no depth to give. Now: void < bg < surface
+             < raise, four steps instead of two.
+     --lit   the light itself. One token so it can never drift into being an ink. */
+
+/* ---------------------------------------------------------------- faces
+   Locked: Archivo 500/800, JetBrains Mono 400/800, subset, same-origin, behind
+   the server-side whitelist. The local() fallbacks matter only off-server. */
 @font-face{font-family:Archivo;src:url(/fonts/archivo-500.woff2) format('woff2');
            font-weight:500;font-style:normal;font-display:swap}
 @font-face{font-family:Archivo;src:url(/fonts/archivo-800.woff2) format('woff2');
@@ -28,68 +36,101 @@
 
 /* ---------------------------------------------------------------- tokens */
 :root{
-  /* field */
-  --bg:#0F0D0B; --surface:#17140F; --sunk:#0B0908;
+  --void:#080706; --bg:#0F0D0B; --surface:#17140F; --raise:#1E1A15; --sunk:#0B0908;
   --line:#2A2520; --line-hi:#3D362E;
   --text:#F2EDE4; --muted:#8C8279; --faint:#5A534B;
 
-  /* signal -- accent is live/actionable, the rest are machine state only */
   --accent:#FF7A18; --ok:#3FBF6A; --warn:#E8C547; --danger:#FF4D3D;
   --accent-sunk:#2E1A0B;
+  --lit:255,122,24;                 /* light, never ink. rgb triple for alpha use */
 
-  /* material -- the three faces of an isometric solid, lit from top-left */
+  /* material -- the three faces of a solid, lit from top-left. The GL renderer
+     reads these same three values, so canvas and fallback are the same object. */
   --face-top:#6E655B; --face-r:#4A443C; --face-l:#332E29;
+  /* the material the fill solids are made of. One token, so the shader and the
+     stylesheet can never disagree about what a disk is made of. */
+  --fill:#8A7F72;
 
-  --f-ui:Archivo,sans-serif; --f-mono:JBMono,ui-monospace,monospace;
+  --f-ui:Archivo,'Helvetica Neue',Helvetica,Arial,sans-serif;
+  --f-mono:JBMono,ui-monospace,'SF Mono',Menlo,Consolas,monospace;
 
-  --t-display:clamp(52px,15vw,76px); --t-big:28px; --t-sub:18px;
-  --t-head:15px; --t-body:15px; --t-mono:14px;
-  --t-caption:12px; --t-micro:11px;
+  --t-hero:clamp(56px,17vw,116px);
+  --t-display:clamp(40px,11vw,60px);
+  --t-big:28px; --t-sub:18px; --t-head:15px; --t-body:15px; --t-mono:14px;
+  --t-caption:12px; --t-micro:11px; --t-nano:9px;
 
   --s0:2px; --s1:4px; --s2:8px; --s3:12px; --s4:16px;
-  --s5:24px; --s6:40px; --s7:64px;
+  --s5:24px; --s6:40px; --s7:64px; --s8:96px;
 
   --r:4px; --r-lg:8px;
   --sh-1:0 1px 0 rgba(0,0,0,.4);
-  --sh-2:0 8px 24px rgba(0,0,0,.55);
+  --sh-2:0 14px 40px -12px rgba(0,0,0,.8);
 
   --dur-1:120ms; --dur-2:240ms; --dur-3:480ms; --dur-4:900ms;
   --ease:cubic-bezier(.2,.7,.2,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+
+  --py:0px;                          /* parallax offset, written by lum.js */
 }
 
 /* ---------------------------------------------------------------- base */
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html{background:var(--bg)}
-body{margin:0;background:var(--bg);color:var(--text);
+html{background:var(--void)}
+body{margin:0;background:var(--void);color:var(--text);
      font:500 var(--t-body)/1.5 var(--f-ui);
      -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+     overflow-x:hidden;
      padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
-.wrap{max-width:760px;margin:0 auto;padding:var(--s5) var(--s4) var(--s7)}
+a{color:var(--accent);text-decoration:none}
+a:hover{color:var(--text)}
+
+/* The air. Two slow warm glows and a vignette, behind everything, drawn once.
+   position:fixed so scrolling it costs nothing; it only ever moves by transform.
+   This is the "sense of space behind the glass" and it is made of --lit alone. */
+.air{position:fixed;inset:-10% -10% -10% -10%;z-index:-1;pointer-events:none;
+       background:
+         radial-gradient(52vw 40vw at 18% 6%,rgba(var(--lit),.055),transparent 70%),
+         radial-gradient(44vw 44vw at 92% 34%,rgba(var(--lit),.035),transparent 70%),
+         radial-gradient(90vw 70vw at 50% 120%,rgba(255,255,255,.02),transparent 70%),
+         var(--void);
+       transform:translate3d(0,var(--py),0);
+       will-change:transform}
+
+.wrap{max-width:760px;margin:0 auto;padding:var(--s5) var(--s4) var(--s8)}
 
 /* Numbers are machine identifiers. Tabular figures everywhere, always. */
 .mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 
-/* A class, not a style attribute. Every visibility change in the product goes
-   through this, so the pages carry no inline styles and can run under a CSP with
-   no 'unsafe-inline'. */
+/* A class, not a style attribute: no inline styles anywhere in the product. */
 .off{display:none !important}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
+    clip-path:inset(50%);white-space:nowrap}
 
 /* The server stopped answering. Nothing is wrong with the page -- the numbers on
-   it are simply no longer current, and must stop looking current. */
-.fig .free,.vol{transition:opacity var(--dur-2) var(--ease)}
-body.stale .readout,body.stale .fig .free,body.stale .vol{opacity:.45}
+   it are simply no longer current and must stop looking current. Everything that
+   is a live value desaturates and lifts off the accent; structure stays put. */
+body.stale .figure,body.stale .sig,body.stale .free,body.stale .drives,
+body.stale .item,body.stale .track i{opacity:.4;filter:saturate(.25)}
+body.stale .hero .sub b{color:var(--muted)}
+.figure,.sig,.free,.drives,.item{transition:opacity var(--dur-3) var(--ease),
+                                            filter var(--dur-3) var(--ease)}
 
 /* ---------------------------------------------------------------- masthead */
 .top{display:flex;align-items:baseline;justify-content:space-between;
      gap:var(--s3);margin-bottom:var(--s6)}
 .mark{font-family:var(--f-ui);font-weight:800;font-size:var(--t-caption);
       letter-spacing:.28em;text-transform:uppercase;color:var(--muted)}
+.mark em{font-style:normal;color:var(--faint)}
 .clock{font-family:var(--f-mono);font-size:var(--t-micro);color:var(--faint);
        font-variant-numeric:tabular-nums;letter-spacing:.06em}
+/* One dot that says the page is talking to the server. It is the only thing in
+   the product allowed to pulse, it carries no value, and it stops when idle. */
+.pip{display:inline-block;width:5px;height:5px;border-radius:50%;
+     background:var(--faint);margin-right:var(--s2);vertical-align:.1em}
+.pip.beat{background:var(--accent);animation:beat 2.4s var(--ease) infinite}
+@keyframes beat{0%,100%{opacity:.25;transform:scale(.8)}12%{opacity:1;transform:scale(1)}}
 
-/* ---------------------------------------------------------------- section label
-   A hairline and a tiny caps label. No boxes, no cards, no chrome. This is the
-   only section separator in the product. */
+/* ---------------------------------------------------------------- section label */
 .lbl{font-family:var(--f-ui);font-weight:800;font-size:var(--t-micro);
      letter-spacing:.22em;text-transform:uppercase;color:var(--faint);
      margin:0 0 var(--s3);padding-bottom:var(--s2);
@@ -99,46 +140,85 @@ body.stale .readout,body.stale .fig .free,body.stale .vol{opacity:.45}
           text-transform:none;color:var(--faint);font-variant-numeric:tabular-nums}
 section,nav.go{margin-bottom:var(--s6)}
 
-/* ---------------------------------------------------------------- the readout
-   The answer to "is it doing anything". Biggest thing on the page by 4x. */
-.readout{font-family:var(--f-mono);font-weight:800;font-size:var(--t-display);
-         line-height:.95;letter-spacing:-.045em;color:var(--text);
-         font-variant-numeric:tabular-nums;margin:0;
-         word-break:break-word;
-         transition:color var(--dur-2) var(--ease),opacity var(--dur-2) var(--ease)}
-.readout.live{color:var(--accent)}
-.readout.held{color:var(--warn)}
-.readout-sub{font-family:var(--f-ui);font-weight:500;font-size:var(--t-body);
-             color:var(--muted);margin:var(--s3) 0 0;min-height:1.5em}
-.readout-sub b{color:var(--text);font-weight:800}
+/* ---------------------------------------------------------------- the hero
+   The answer to "is it doing anything". The incumbent put the word IDLE here at
+   76px, which was honest and read as a null result the overwhelming majority of
+   the time. Now the slot has two registers:
 
-/* ---------------------------------------------------------------- room / volume
-   Two isometric solids. Height is capacity, fill is usage. Volume is the right
-   encoding for physical storage across two unequal drives -- see FINDINGS §6.
-   Hand-drawn SVG, no WebGL: ~1 KB against Three.js's ~150 KB, and identical
-   with WebGL disabled because there is no canvas to fail. */
-/* Flex, not a two-column grid: the solids are drawn at a fixed 174px and the
-   figures beside them need about 150px before "268.5 GB" starts wrapping mid
-   number. A grid column would have squeezed them to whatever was left; this lets
-   the figures drop underneath the solids instead, on any layout that gets tight.
-   [CHANGE: claude-code | 2026-09-14] */
+     .sig     the machine state, always present, always small, always one of the
+              five words. Nothing is hidden -- it is simply no longer the biggest
+              type on a page about a server at rest.
+     .figure  the weather. When something is moving this is the rate, in accent.
+              When nothing is, it is the room: how much space there is. A true
+              number about the house instead of a null about the wire. */
+.sig{display:flex;align-items:center;gap:var(--s2);
+     font-family:var(--f-mono);font-weight:800;font-size:var(--t-micro);
+     letter-spacing:.22em;text-transform:uppercase;color:var(--muted);
+     margin:0 0 var(--s3)}
+.sig::before{content:"";width:var(--s5);height:1px;background:var(--line-hi);flex:none}
+.sig.live{color:var(--accent)}
+.sig.live::before{background:var(--accent)}
+.sig.held{color:var(--warn)}
+.sig.held::before{background:var(--warn)}
+.sig.gone{color:var(--danger)}
+.sig.gone::before{background:var(--danger)}
+
+.figure{font-family:var(--f-mono);font-weight:800;font-size:var(--t-hero);
+        line-height:.88;letter-spacing:-.05em;color:var(--text);
+        font-variant-numeric:tabular-nums;margin:0;word-break:break-word;
+        transition:color var(--dur-3) var(--ease)}
+.figure .u{font-size:.36em;letter-spacing:.02em;color:var(--muted);
+           font-weight:400;margin-left:.16em;vertical-align:.16em}
+.hero.running .figure{color:var(--accent)}
+.hero.held .figure{color:var(--warn)}
+.hero.gone .figure{color:var(--danger)}
+.sub{font-family:var(--f-ui);font-weight:500;font-size:var(--t-body);
+     line-height:1.5;color:var(--muted);margin:var(--s4) 0 0;min-height:3em;
+     max-width:44ch}
+.sub b{color:var(--text);font-weight:800}
+.sub .acc{color:var(--accent);font-weight:800}
+
+/* Throughput that feels like throughput: a 40px trace under the rate, one pixel
+   per sample, scrolled by transform. Only ever visible while something moves. */
+.trace{display:block;width:100%;height:40px;margin-top:var(--s4);overflow:visible}
+.trace .tl{fill:none;stroke:var(--accent);stroke-width:1.5;
+           stroke-linejoin:round;stroke-linecap:round}
+.trace .tf{fill:rgba(var(--lit),.10);stroke:none}
+.trace .base{stroke:var(--line);stroke-width:1}
+
+/* ---------------------------------------------------------------- the room
+   Two drives, two objects, never one pooled bar (the internal is 875 GB of SATA;
+   the external is a 457 GB USB disk with no readable SMART that is expected to
+   fail unannounced). Height is capacity, filled volume is usage.
+
+   .drives is the WebGL canvas. .flat is the same two solids in ~1 KB of SVG and
+   is what you get with hardware acceleration off, on a context loss, or with
+   ?flat=1 in the URL. Exactly one of the two is ever in the layout. */
 .room{display:flex;flex-wrap:wrap;gap:var(--s4) var(--s5);align-items:flex-end}
-.vol{display:block;flex:none;overflow:visible}
-.vol .out{fill:none;stroke:var(--line-hi);stroke-width:1}
-.vol .out.risky{stroke-dasharray:3 3}
-.vol .ft{fill:var(--face-top)} .vol .fr{fill:var(--face-r)} .vol .fl{fill:var(--face-l)}
-.vol .warnfill .ft{fill:var(--warn)} .vol .warnfill .fr{fill:#A88C2F}
-.vol .warnfill .fl{fill:#6E5A1E}
-.vol .dangerfill .ft{fill:var(--danger)} .vol .dangerfill .fr{fill:#B3352A}
-.vol .dangerfill .fl{fill:#73211A}
-.vol .cap{font-family:var(--f-mono);font-size:9px;fill:var(--faint);
-          letter-spacing:.08em}
-.vol g{transition:opacity var(--dur-3) var(--ease)}
+.stage{flex:none;position:relative;width:208px;height:188px;touch-action:none}
+.drives{display:block;width:100%;height:100%;cursor:grab}
+.drives:active{cursor:grabbing}
+.stage.turning .hint{opacity:0}
+.hint{position:absolute;left:0;right:0;bottom:-2px;text-align:center;
+      font-family:var(--f-mono);font-size:var(--t-nano);letter-spacing:.14em;
+      text-transform:uppercase;color:var(--faint);pointer-events:none;
+      transition:opacity var(--dur-2) var(--ease)}
+
+.flat{display:block;overflow:visible}
+.flat .out{fill:none;stroke:var(--line-hi);stroke-width:1}
+.flat .out.risky{stroke-dasharray:3 3}
+.flat .ft{fill:var(--face-top)} .flat .fr{fill:var(--face-r)} .flat .fl{fill:var(--face-l)}
+.flat .warnfill .ft{fill:var(--warn)} .flat .warnfill .fr{fill:#A88C2F}
+.flat .warnfill .fl{fill:#6E5A1E}
+.flat .dangerfill .ft{fill:var(--danger)} .flat .dangerfill .fr{fill:#B3352A}
+.flat .dangerfill .fl{fill:#73211A}
+.flat .cap{font-family:var(--f-mono);font-size:9px;fill:var(--faint);letter-spacing:.08em}
 
 .figs{display:flex;flex-direction:column;gap:var(--s4);min-width:0;flex:1 1 10rem}
 .fig{min-width:0}
 .fig .who{font-family:var(--f-mono);font-size:var(--t-micro);color:var(--faint);
-          letter-spacing:.06em;display:flex;gap:var(--s2);align-items:center}
+          letter-spacing:.06em;display:flex;gap:var(--s2);align-items:center;
+          flex-wrap:wrap}
 .fig .free{font-family:var(--f-mono);font-weight:800;font-size:var(--t-big);
            line-height:1.1;color:var(--text);font-variant-numeric:tabular-nums;
            letter-spacing:-.03em}
@@ -146,17 +226,19 @@ section,nav.go{margin-bottom:var(--s6)}
          font-variant-numeric:tabular-nums}
 .fig.tight .free{color:var(--warn)}
 .fig.full .free{color:var(--danger)}
-/* The USB drive has no readable SMART and is expected to fail without warning
-   (DECISION 91). It reads as the less trustworthy thing it is. */
-.tag{font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;
+.tag{font-family:var(--f-mono);font-size:var(--t-nano);letter-spacing:.1em;
      text-transform:uppercase;color:var(--faint);border:1px solid var(--line);
      border-radius:2px;padding:1px var(--s1)}
+.tag.risk{color:var(--warn);border-color:rgba(232,197,71,.35)}
 
-/* ---------------------------------------------------------------- rows
-   A queue item or an arrival is a discrete object, so it gets a surface. A
-   navigation entry is not, so it does not. */
-.item{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
-      padding:var(--s3) var(--s4);margin-bottom:var(--s2);position:relative}
+/* ---------------------------------------------------------------- surfaces
+   A queue item or an arrival is a discrete object, so it gets a surface -- and a
+   surface in a lit room catches light on its top edge. That inset hairline is the
+   entire decoration budget of this design system. */
+.item{position:relative;background:linear-gradient(var(--raise),var(--surface));
+      border:1px solid var(--line);border-radius:var(--r);
+      padding:var(--s3) var(--s4);margin-bottom:var(--s2);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.035),var(--sh-1)}
 .item .t{font-family:var(--f-mono);font-size:var(--t-mono);line-height:1.45;
          color:var(--text);overflow-wrap:anywhere;word-break:break-word}
 .item .meta{display:flex;flex-wrap:wrap;gap:var(--s3);margin-top:var(--s2);
@@ -164,237 +246,366 @@ section,nav.go{margin-bottom:var(--s6)}
             color:var(--muted);font-variant-numeric:tabular-nums}
 .item .meta .on{color:var(--accent)}
 .item .meta .bad{color:var(--danger)}
+/* A live item is lit from its left edge. Held loses the light, does not gain a
+   colour it has not earned. */
+.item.moving{border-left-color:rgba(var(--lit),.55)}
+.empty{font-family:var(--f-mono);font-size:var(--t-mono);color:var(--faint);
+       padding:var(--s3) 0;line-height:1.5}
+.empty b{color:var(--muted);font-weight:400}
 
-/* Progress. The byte-delta is more truthful than NZBGet's Status string, which
-   lags up to 16s -- so the bar leads and the chip is never allowed to contradict
-   it (FINDINGS §5). */
 .track{height:2px;background:var(--line);margin-top:var(--s3);overflow:hidden}
 .track i{display:block;height:100%;background:var(--accent);
-         transform-origin:left center;transition:transform var(--dur-3) var(--ease)}
+         transform-origin:left center;transform:scaleX(0);
+         transition:transform var(--dur-4) var(--ease)}
 .track.held i{background:var(--warn)}
 
-/* arrivals carry artwork -- explicit width/height, so nothing shifts on load */
-.arr{display:flex;gap:var(--s3);align-items:flex-start}
-.arr img{flex:none;width:46px;height:68px;object-fit:cover;border-radius:2px;
-         background:var(--sunk);border:1px solid var(--line)}
-.arr .body{min-width:0;flex:1}
-/* An arrival is identified by its real title, not its release name. The release
-   name is still here -- it is the only thing that says 2160p or which group --
-   but it sits underneath, at caption weight, because it is not what you scan. */
-.arr .nm{font-family:var(--f-ui);font-weight:800;font-size:var(--t-body);
-         line-height:1.25;letter-spacing:-.01em;overflow-wrap:anywhere}
-.arr .t{color:var(--faint);font-size:var(--t-caption);margin-top:var(--s2)}
+/* ---------------------------------------------------------------- arrivals
+   The one place in the product with real visual material in it: actual posters,
+   read off the arrs' MediaCover directory by the server, same origin. So they get
+   a shelf with perspective rather than a list with thumbnails -- newest nearest,
+   turned very slightly away. Scroll-snap, one thumb, no JS to drive it.
 
-.empty{font-family:var(--f-mono);font-size:var(--t-mono);color:var(--faint);
-       padding:var(--s2) 0}
+   Every poster sits on a typographic plate that is drawn first and stays if the
+   art 404s, so a missing image degrades to a designed object, not a grey box. */
+.shelf{display:flex;gap:var(--s3);overflow-x:auto;overflow-y:hidden;
+       scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;
+       padding:var(--s2) var(--s4) var(--s4);margin:0 calc(var(--s4) * -1);
+       perspective:900px;scrollbar-width:none}
+.shelf::-webkit-scrollbar{display:none}
+.card{flex:none;width:118px;scroll-snap-align:start;
+      transform-style:preserve-3d;
+      transition:transform var(--dur-3) var(--ease-out)}
+.card .plate{position:relative;width:118px;height:174px;border-radius:var(--r);
+             overflow:hidden;background:linear-gradient(160deg,var(--raise),var(--sunk));
+             border:1px solid var(--line);
+             box-shadow:inset 0 1px 0 rgba(255,255,255,.05),var(--sh-2);
+             transform:rotateY(-13deg);transform-origin:left center;
+             transition:transform var(--dur-3) var(--ease-out)}
+.card:first-child .plate{transform:rotateY(-5deg)}
+.card:focus-within .plate,.card:hover .plate{transform:rotateY(0deg) translateZ(18px)}
+.card .plate img{position:absolute;inset:0;width:100%;height:100%;
+                 object-fit:cover;opacity:0;
+                 transition:opacity var(--dur-3) var(--ease)}
+.card .plate img.in{opacity:1}
+/* The plate itself: initials in the display weight, cropped by the frame. This is
+   invented imagery and is meant to look invented rather than broken. */
+.card .plate .ini{position:absolute;left:-2px;bottom:-14px;
+                  font-family:var(--f-ui);font-weight:800;font-size:76px;
+                  line-height:1;letter-spacing:-.06em;color:rgba(242,237,228,.07)}
+.card .plate .rule{position:absolute;left:var(--s2);right:var(--s2);top:var(--s3);
+                   height:1px;background:var(--line-hi)}
+.card .nm{font-family:var(--f-ui);font-weight:800;font-size:var(--t-caption);
+          line-height:1.3;margin-top:var(--s2);overflow-wrap:anywhere}
+.card .mt{font-family:var(--f-mono);font-size:var(--t-nano);color:var(--faint);
+          letter-spacing:.06em;margin-top:3px;font-variant-numeric:tabular-nums}
+.card .mt .k{color:var(--muted);text-transform:uppercase}
 
-/* ---------------------------------------------------------------- the library tree
-   Every row here is a block, not a flex row with fixed columns. The old layout
-   demanded 441 px of fixed width inside 368 px of phone, so `.name{flex:1;min-width:0}`
-   collapsed to nothing -- while the delete button, having a fixed width, stayed.
-   You could tap delete on a row you could not read. A title now gets the full
-   width and wraps; the size sits beside it; everything else goes underneath. */
+/* ---------------------------------------------------------------- the library
+   Every row is a block, never a flex row of fixed columns -- a title takes the
+   full width and wraps, the size sits beside it, everything else goes underneath.
+   That is what keeps a delete button off a row you cannot read on a phone. */
 .ent{border-bottom:1px solid var(--line);padding:var(--s3) 0}
 .ent:last-child{border-bottom:0}
-.hdr{display:flex;align-items:flex-start;gap:var(--s2);width:100%;min-height:34px;
+.hdr{display:flex;align-items:flex-start;gap:var(--s2);width:100%;min-height:36px;
      background:none;border:0;padding:0;margin:0;text-align:left;color:inherit;
      font:inherit;cursor:pointer}
-.hdr .caret{flex:none;width:10px;height:10px;margin:5px 0 0;fill:var(--faint);
-            transition:transform var(--dur-1) var(--ease)}
-.ent.open>.hdr .caret{transform:rotate(90deg)}
+.hdr .caret{flex:none;width:10px;height:10px;margin:6px 0 0;fill:var(--faint);
+            transition:transform var(--dur-2) var(--ease),fill var(--dur-1) var(--ease)}
+.ent.open>.hdr .caret{transform:rotate(90deg);fill:var(--accent)}
 .hdr .pad{flex:none;width:10px}
 .hdr .nm{flex:1;min-width:0;font-family:var(--f-ui);font-weight:800;
          font-size:var(--t-body);line-height:1.3;overflow-wrap:anywhere}
 .hdr .amt{flex:none;margin-top:1px;font-family:var(--f-mono);font-size:var(--t-mono);
           color:var(--muted);font-variant-numeric:tabular-nums}
 .kids .hdr .nm{font-weight:500}
+.hdr:active .nm{color:var(--accent)}
 
-/* Size, drawn relative to the largest thing in the library. This is the only
-   ranking that matters on a page about what to delete. */
-.meas{height:2px;background:var(--line);margin-top:var(--s2);overflow:hidden}
-.meas i{display:block;height:100%;background:var(--line-hi);transform-origin:left center;
-        transition:transform var(--dur-3) var(--ease)}
-/* NOT `.ent.top` -- `.top` is the masthead, and it is `display:flex`. Naming a
-   library row `top` turned every large entry into a flex container and laid its
-   title, its size and its facts out side by side. */
-.ent.big>.meas i{background:var(--muted)}
+/* Size as volume, not length. Each row's bar is a slab seen slightly from above:
+   the same solid as the drives, one row high. Width is bytes against the largest
+   thing in the library -- the only ranking that matters on a page about deleting.
+   The slab lifts as its row opens: that is what expanding a season feels like. */
+.meas{position:relative;height:8px;margin-top:var(--s2);perspective:220px}
+.meas i{display:block;height:6px;width:100%;transform-origin:left center;
+        background:linear-gradient(var(--face-top),var(--face-r));
+        transform:scaleX(var(--w,0)) rotateX(38deg);
+        transition:transform var(--dur-4) var(--ease-out),
+                   background var(--dur-3) var(--ease)}
+.ent.big>.meas i{background:linear-gradient(#8A8074,var(--face-r))}
+.ent.open>.meas i{background:linear-gradient(#C89050,#7A4E1E);
+                  transform:scaleX(var(--w,0)) rotateX(22deg) translateY(-2px)}
 
-.sub{display:flex;flex-wrap:wrap;gap:var(--s3);margin-top:var(--s2);
-     font-family:var(--f-mono);font-size:var(--t-caption);color:var(--faint);
-     font-variant-numeric:tabular-nums}
-/* Two facts this tool exists to tell you, and nothing else is allowed this colour.
-   `.twin`: the file has a second name under the downloads tree, so deleting it
-   here removes both -- Sonarr's own delete would free nothing.
-   `.stuck`: something outside our view still holds the inode, so this row frees
-   less than it says. Rare, and the one case where a size is a lie. */
-.sub .twin{color:var(--accent)}
-.sub .stuck{color:var(--warn)}
-
+.sub-facts{display:flex;flex-wrap:wrap;gap:var(--s3);margin-top:var(--s2);
+           font-family:var(--f-mono);font-size:var(--t-caption);color:var(--faint);
+           font-variant-numeric:tabular-nums}
+/* The two facts this tool exists to tell you. Nothing else gets these colours.
+   .twin  -- a second hardlink under downloads: deleting here frees both copies,
+             deleting in Sonarr's own UI would free nothing.
+   .stuck -- something outside our view still holds the inode, so this row frees
+             less than it says. The one case where a size on screen is a lie. */
+.sub-facts .twin{color:var(--accent)}
+.sub-facts .stuck{color:var(--warn);font-weight:800}
 .kids{margin:var(--s3) 0 0 var(--s1);padding-left:var(--s4);
-      border-left:1px solid var(--line)}
+      border-left:1px solid var(--line);overflow:hidden}
 .kids .ent{padding:var(--s2) 0}
+.ent.open>.kids{animation:unfold var(--dur-3) var(--ease-out) both}
+@keyframes unfold{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 
-/* Destructive controls are reachable only once a row is open, and never sit in a
-   collapsed header. Harder, not easier (§6.6). 36 px is the smallest a thumb
-   should have to hit. */
+/* ---------------------------------------------------------------- controls
+   Destructive controls are reachable only once a row is open and never sit in a
+   collapsed header. 36px is the smallest a thumb should have to hit. */
 .acts{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s3)}
 .btn{font-family:var(--f-ui);font-weight:800;font-size:var(--t-caption);
-     letter-spacing:.04em;color:var(--text);background:var(--surface);
+     letter-spacing:.04em;color:var(--text);
+     background:linear-gradient(var(--raise),var(--surface));
      border:1px solid var(--line-hi);border-radius:var(--r);
-     padding:0 var(--s3);min-height:36px;cursor:pointer}
-.btn:active{border-color:var(--accent)}
-.btn.danger{color:var(--danger);border-color:var(--danger)}
+     padding:0 var(--s3);min-height:36px;cursor:pointer;
+     box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+     transition:transform var(--dur-1) var(--ease),border-color var(--dur-1) var(--ease),
+                color var(--dur-1) var(--ease)}
+.btn:hover{border-color:var(--muted)}
+.btn:active{transform:translateY(1px) scale(.985);border-color:var(--accent)}
+.btn.danger{color:var(--danger);border-color:rgba(255,77,61,.45)}
+.btn.danger:hover{border-color:var(--danger);background:linear-gradient(#251512,#1B0F0D)}
 .btn.on{background:var(--accent);border-color:var(--accent);color:var(--bg)}
-.btn[disabled]{opacity:.45;cursor:default}
+.btn[disabled]{opacity:.45;cursor:default;transform:none}
 
-/* One line of feedback, over the content, out of the way of the thumb. */
 #msg{position:fixed;left:var(--s4);right:var(--s4);bottom:var(--s4);z-index:10;
-     max-width:728px;margin:0 auto;background:var(--surface);
+     max-width:728px;margin:0 auto;
+     background:linear-gradient(var(--raise),var(--surface));
      border:1px solid var(--line-hi);border-left:2px solid var(--accent);
      border-radius:var(--r);padding:var(--s3) var(--s4);box-shadow:var(--sh-2);
      font-family:var(--f-mono);font-size:var(--t-caption);color:var(--text);
-     line-height:1.4}
+     line-height:1.4;
+     transform:translateY(0);opacity:1;
+     transition:transform var(--dur-3) var(--ease-out),opacity var(--dur-2) var(--ease)}
+#msg.off{display:block !important;transform:translateY(140%);opacity:0;
+         pointer-events:none}
 
 /* ---------------------------------------------------------------- navigation
-   Deliberately NOT eight equal tiles -- that is the shape the brief bans and the
-   shape this page used to be. One primary action carries weight; the rest is an
-   index that stays out of the way. */
-nav.go a{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 0;
-         border-bottom:1px solid var(--line);text-decoration:none;color:var(--text)}
-nav.go a:last-of-type{border-bottom:0}
-nav.go a .nm{font-family:var(--f-ui);font-weight:800;font-size:var(--t-body);
-             letter-spacing:-.01em;flex:1;min-width:0}
-nav.go a .ds{font-family:var(--f-mono);font-size:var(--t-micro);color:var(--faint);
-             letter-spacing:.04em}
-nav.go a:active .nm{color:var(--accent)}
+   Nine links, one of which is 90% of the taps. So: one object with weight, four
+   rows of ordinary size, and four admin panels as a monospace footnote. Three
+   ranks, stated in the type scale. Never nine equal tiles. */
+.primary{display:flex;align-items:center;gap:var(--s4);text-decoration:none;
+         position:relative;overflow:hidden;
+         background:linear-gradient(140deg,#2E1A0B,#1A120C 60%);
+         border:1px solid var(--accent);border-radius:var(--r-lg);
+         padding:var(--s5) var(--s4);margin-bottom:var(--s5);
+         box-shadow:inset 0 1px 0 rgba(var(--lit),.25),var(--sh-2);
+         transition:transform var(--dur-2) var(--ease-out),
+                    box-shadow var(--dur-2) var(--ease)}
+.primary::after{content:"";position:absolute;inset:-40% -10% auto;height:180%;
+                background:radial-gradient(40% 60% at 22% 0%,rgba(var(--lit),.20),transparent 70%);
+                pointer-events:none}
+.primary:hover{transform:translateY(-2px);
+               box-shadow:inset 0 1px 0 rgba(var(--lit),.35),0 20px 46px -14px rgba(0,0,0,.9)}
+.primary:active{transform:translateY(1px) scale(.995)}
+.primary .nm{font-family:var(--f-ui);font-weight:800;font-size:var(--t-display);
+             line-height:.95;letter-spacing:-.035em;color:var(--accent);flex:1;
+             min-width:0}
+.primary .ds{display:block;font-family:var(--f-mono);font-size:var(--t-micro);
+             color:var(--muted);letter-spacing:.06em;margin-top:var(--s2);
+             font-weight:400;text-transform:uppercase}
+.primary .ico{flex:none;width:34px;height:34px;stroke:none;fill:var(--accent)}
+
+nav.go a.row{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 0;
+             border-bottom:1px solid var(--line);text-decoration:none;color:var(--text)}
+nav.go a.row:last-of-type{border-bottom:0}
+nav.go a.row .nm{font-family:var(--f-ui);font-weight:800;font-size:var(--t-body);
+                 letter-spacing:-.01em;flex:1;min-width:0}
+nav.go a.row .ds{font-family:var(--f-mono);font-size:var(--t-micro);color:var(--faint);
+                 letter-spacing:.04em}
+nav.go a.row:hover .nm,nav.go a.row:active .nm{color:var(--accent)}
 .ico{flex:none;width:20px;height:20px;stroke:var(--muted);stroke-width:1.5;
      fill:none;stroke-linecap:round;stroke-linejoin:round;
      transition:stroke var(--dur-1) var(--ease)}
-nav.go a:active .ico{stroke:var(--accent)}
+nav.go a.row:hover .ico,nav.go a.row:active .ico{stroke:var(--accent)}
 
-.primary{display:flex;align-items:center;gap:var(--s3);text-decoration:none;
-         background:var(--accent-sunk);border:1px solid var(--accent);
-         border-radius:var(--r);padding:var(--s4);margin-bottom:var(--s4)}
-.primary .nm{font-family:var(--f-ui);font-weight:800;font-size:var(--t-sub);
-             color:var(--accent);flex:1;letter-spacing:-.01em}
-.primary .ds{display:block;font-family:var(--f-mono);font-size:var(--t-micro);
-             color:var(--muted);letter-spacing:.02em;margin-top:2px;font-weight:400}
-.primary .ico{stroke:var(--accent)}
-.primary:active{opacity:.82}
+/* The twice-a-year panels. A footnote, in mono, at caption size. Reachable, not
+   competing. */
+.admin{margin-top:var(--s5);padding-top:var(--s3);border-top:1px solid var(--line);
+       display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4)}
+.admin .lg{flex-basis:100%;font-family:var(--f-mono);font-size:var(--t-nano);
+           letter-spacing:.18em;text-transform:uppercase;color:var(--faint);
+           margin-bottom:var(--s1)}
+.admin a{font-family:var(--f-mono);font-size:var(--t-caption);color:var(--muted);
+         text-decoration:none;letter-spacing:.02em;padding:var(--s1) 0}
+.admin a span{color:var(--faint)}
+.admin a:hover,.admin a:active{color:var(--accent)}
 
-/* ---------------------------------------------------------------- asking for a title
-   A search field, and results that are words rather than posters. Jellyseerr's
-   artwork lives on image.tmdb.org and §6.2 rules out a third-party asset fetch, so
-   this page is typographic on purpose rather than by omission. */
-.readout.small{font-size:var(--t-big);letter-spacing:-.03em;margin-bottom:var(--s4)}
-.ask{display:flex;gap:var(--s2);margin-bottom:var(--s3)}
+/* ---------------------------------------------------------------- asking
+   No poster artwork: the images live on image.tmdb.org and the policy forbids a
+   third-party fetch. So this page is typographic on purpose. Each result carries
+   an invented plate -- a number and a rule, set in the two locked faces -- so the
+   page has visual material without a single byte fetched off-origin. */
+.searchbar{display:flex;gap:var(--s2);margin:var(--s5) 0 var(--s3)}
 .field{flex:1;min-width:0;font-family:var(--f-ui);font-weight:500;
-       font-size:var(--t-body);color:var(--text);background:var(--sunk);
+       font-size:var(--t-sub);color:var(--text);background:var(--sunk);
        border:1px solid var(--line-hi);border-radius:var(--r);
-       padding:0 var(--s3);min-height:44px;-webkit-appearance:none;appearance:none}
+       padding:0 var(--s4);min-height:52px;-webkit-appearance:none;appearance:none;
+       transition:border-color var(--dur-1) var(--ease),box-shadow var(--dur-2) var(--ease)}
 .field::placeholder{color:var(--faint)}
-.field:focus{outline:none;border-color:var(--accent)}
+.field:focus{outline:none;border-color:var(--accent);
+             box-shadow:0 0 0 1px var(--accent),0 0 32px -8px rgba(var(--lit),.5)}
 .blurb{font-family:var(--f-ui);font-weight:500;font-size:var(--t-caption);
-       line-height:1.5;color:var(--muted);margin:var(--s2) 0 0;max-width:62ch}
-/* `.back` is the offline page's standalone link; inside a masthead it must not
-   carry that page's trailing margin. */
-.top .back{margin-bottom:0;cursor:pointer}
+       line-height:1.55;color:var(--muted);margin:var(--s2) 0 0;max-width:62ch}
 
-/* ---------------------------------------------------------------- offline page */
+.hit{display:flex;gap:var(--s4);align-items:flex-start;
+     border-bottom:1px solid var(--line);padding:var(--s4) 0}
+.hit:last-child{border-bottom:0}
+.hit .idx{flex:none;width:52px;height:74px;border-radius:2px;position:relative;
+          background:linear-gradient(160deg,var(--raise),var(--sunk));
+          border:1px solid var(--line);overflow:hidden}
+.hit .idx b{position:absolute;left:5px;bottom:-6px;font-family:var(--f-mono);
+            font-weight:800;font-size:30px;color:rgba(242,237,228,.10);
+            letter-spacing:-.04em}
+.hit .idx s{position:absolute;left:5px;right:5px;top:8px;height:1px;
+            background:var(--line-hi);text-decoration:none}
+.hit .body{flex:1;min-width:0}
+.hit .ttl{font-family:var(--f-ui);font-weight:800;font-size:var(--t-sub);
+          line-height:1.25;letter-spacing:-.015em;overflow-wrap:anywhere}
+.hit .yr{font-family:var(--f-mono);font-weight:400;font-size:var(--t-caption);
+         color:var(--faint);margin-left:var(--s2);letter-spacing:.04em}
+.have{display:inline-flex;align-items:center;gap:var(--s2);margin-top:var(--s2);
+      font-family:var(--f-mono);font-size:var(--t-caption);letter-spacing:.06em;
+      text-transform:uppercase;font-weight:800;color:var(--accent)}
+.have::before{content:"";width:var(--s3);height:1px;background:currentColor}
+
+/* ---------------------------------------------------------------- offline
+   No live data at all. The type scale carries the whole screen alone, which is
+   why the display size here is the same one the hub uses for its rate. */
 .back{display:inline-block;margin-bottom:var(--s5);color:var(--muted);
       font-family:var(--f-mono);font-size:var(--t-caption);text-decoration:none;
       letter-spacing:.04em}
-.back:active{color:var(--accent)}
+.back:hover,.back:active{color:var(--accent)}
+.top .back{margin-bottom:0;cursor:pointer}
+/* The ask page asks its question one step down the scale: it shares the screen
+   with a field you are about to type in, and the offline page does not. */
+.title.q{font-size:var(--t-display);line-height:.95}
+.title{font-family:var(--f-ui);font-weight:800;font-size:var(--t-hero);
+       line-height:.86;letter-spacing:-.05em;margin:0;text-wrap:balance}
+.title em{font-style:normal;color:var(--faint)}
 .lede{font-family:var(--f-ui);font-weight:500;font-size:var(--t-sub);
-      line-height:1.45;color:var(--muted);margin:var(--s3) 0 var(--s6);max-width:46ch}
+      line-height:1.45;color:var(--muted);margin:var(--s5) 0 var(--s7);max-width:46ch}
 .lede b{color:var(--text);font-weight:800}
+
 ol.steps{list-style:none;padding:0;margin:0;counter-reset:step}
-ol.steps li{position:relative;padding:0 0 var(--s5) var(--s6);color:var(--muted);
+ol.steps li{position:relative;padding:0 0 var(--s6) var(--s6);color:var(--muted);
             border-left:1px solid var(--line);margin-left:var(--s3)}
 ol.steps li:last-child{border-left-color:transparent;padding-bottom:0}
 ol.steps li::before{counter-increment:step;content:counter(step);
-                    position:absolute;left:calc(var(--s4) * -1 + 4px);top:-2px;
-                    width:24px;height:24px;border-radius:50%;
-                    background:var(--bg);border:1px solid var(--line-hi);
+                    position:absolute;left:calc(var(--s4) * -1 + 4px);top:-4px;
+                    width:28px;height:28px;border-radius:50%;
+                    background:linear-gradient(var(--raise),var(--bg));
+                    border:1px solid var(--line-hi);
+                    box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
                     color:var(--accent);font-family:var(--f-mono);font-weight:800;
                     font-size:var(--t-caption);display:flex;
                     align-items:center;justify-content:center}
 ol.steps li .h{display:block;font-family:var(--f-ui);font-weight:800;
-               font-size:var(--t-body);color:var(--text);margin-bottom:var(--s1)}
-.note{border-left:2px solid var(--warn);padding:var(--s1) 0 var(--s1) var(--s3);
-      margin:var(--s5) 0;color:var(--muted);font-size:var(--t-body)}
+               font-size:var(--t-sub);color:var(--text);margin-bottom:var(--s2);
+               letter-spacing:-.015em}
+.note{border-left:2px solid var(--warn);padding:var(--s1) 0 var(--s1) var(--s4);
+      margin:var(--s5) 0;color:var(--muted);font-size:var(--t-body);max-width:52ch}
 .note b{color:var(--text);font-weight:800}
-.cta{display:block;text-align:center;padding:var(--s4);border-radius:var(--r);
-     text-decoration:none;background:var(--accent);color:var(--bg);
-     font-family:var(--f-ui);font-weight:800;font-size:var(--t-body);
-     letter-spacing:.03em;margin:var(--s6) 0 var(--s4)}
-.cta:active{opacity:.82}
+.cta{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);
+     padding:var(--s5) var(--s4);border-radius:var(--r-lg);text-decoration:none;
+     background:linear-gradient(140deg,#FF8F35,var(--accent));color:#140D06;
+     font-family:var(--f-ui);font-weight:800;font-size:var(--t-sub);
+     letter-spacing:-.01em;margin:var(--s7) 0 var(--s4);
+     box-shadow:0 18px 44px -18px rgba(var(--lit),.7);
+     transition:transform var(--dur-2) var(--ease-out),box-shadow var(--dur-2) var(--ease)}
+.cta:hover{transform:translateY(-2px);color:#140D06;
+           box-shadow:0 24px 52px -18px rgba(var(--lit),.85)}
+.cta:active{transform:translateY(1px) scale(.995)}
+.cta .ico{stroke:#140D06;width:22px;height:22px}
 
 .foot{margin-top:var(--s7);padding-top:var(--s3);border-top:1px solid var(--line);
       color:var(--faint);font-family:var(--f-mono);font-size:var(--t-micro);
-      letter-spacing:.06em;display:flex;justify-content:space-between;gap:var(--s3)}
+      letter-spacing:.06em;display:flex;flex-wrap:wrap;justify-content:space-between;
+      gap:var(--s3)}
 
 /* ---------------------------------------------------------------- the board
-   [CHANGE: claude-code | 2026-09-14]
-   The hub was one column at every width, because `.wrap` is 760px and nothing
-   under it ever reflowed. That is right on a phone and wrong on a desktop, where
-   it reads as a ribbon down the middle of a black field with the bottom half of
-   the product below the fold.
-
-   There are no breakpoints here and no device sizes. Each panel states the
-   narrowest width at which it is still readable (`--col`, in rem so it follows
-   the reader's own text size), flex-wrap counts how many of those fit, and the
-   ones that do share the row out between them. The layout therefore re-forms at
-   every width continuously -- including widths nobody tested, split windows, and
-   a phone turned sideways -- rather than snapping at three chosen numbers.
-
-   96rem is a reading cap, not a breakpoint: past it the columns would grow wider
-   than a line of text should be, so the board centres instead. */
+   No breakpoints and no device sizes. Each panel states the narrowest width at
+   which it is still readable (--col, in rem so it follows the reader's own text
+   size), flex-wrap counts how many fit, and the ones that do share the row. The
+   layout re-forms continuously at every width, including ones nobody tested.
+   96rem is a reading cap, not a breakpoint. */
 .board{max-width:96rem;display:flex;flex-wrap:wrap;align-items:flex-start;
        gap:var(--s6) clamp(var(--s5),3vw,var(--s7));
        padding-inline:clamp(var(--s4),3vw,var(--s6))}
-/* One shrinkable, growable column. `--col` is the hint, not a width. */
 .board>*{flex:1 1 var(--col,24rem);min-width:0;margin-bottom:0}
-/* Masthead and footer are rules across the whole board, so they take the line. */
-.board>.top,.board>.foot{flex-basis:100%}
+.board>.top,.board>.foot,.board>.wide{flex-basis:100%}
 .board>.foot{margin-top:var(--s2)}
-/* The readout is the one thing worth reading from across the room: widest hint,
-   and it takes the larger share of whatever row it lands on. */
-.board>.hero{--col:30rem;flex-grow:1.5}
-/* The solids are drawn at a fixed 174px; the figures beside them need about as
-   much again. Below that the pair stops being a comparison. */
-.board>.store{--col:19rem}
+.board>.hero{--col:30rem;flex-grow:1.4}
+.board>.store{--col:21rem}
 .board>.go{--col:22rem}
-
-/* An index of nine links is a tall thing to put in a column. Same trick one level
-   down: as the nav's own column widens, the links pair up and then triple up. The
-   primary action never does -- it is the only thing here with weight. */
 .board>.go{display:grid;align-content:start;
            grid-template-columns:repeat(auto-fit,minmax(min(100%,17rem),1fr));
            column-gap:clamp(var(--s4),2vw,var(--s5))}
-.board>.go .primary{grid-column:1/-1}
+.board>.go .primary,.board>.go .admin{grid-column:1/-1}
 
 /* ---------------------------------------------------------------- motion
-   One orchestrated page-load. Compositor-only properties. Live values transition
-   between polls rather than snapping -- the poll rate never increases. */
-@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.stagger>*{animation:rise var(--dur-3) var(--ease) both}
+   One orchestrated page load on compositor-only properties. Live values are
+   interpolated in JS between polls; the poll rate never increases. */
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.stagger>*{animation:rise var(--dur-4) var(--ease-out) both}
 .stagger>*:nth-child(1){animation-delay:0ms}
-.stagger>*:nth-child(2){animation-delay:60ms}
-.stagger>*:nth-child(3){animation-delay:120ms}
-.stagger>*:nth-child(4){animation-delay:180ms}
-.stagger>*:nth-child(5){animation-delay:240ms}
-.stagger>*:nth-child(6){animation-delay:300ms}
+.stagger>*:nth-child(2){animation-delay:70ms}
+.stagger>*:nth-child(3){animation-delay:140ms}
+.stagger>*:nth-child(4){animation-delay:210ms}
+.stagger>*:nth-child(5){animation-delay:280ms}
+.stagger>*:nth-child(6){animation-delay:350ms}
+.stagger>*:nth-child(7){animation-delay:420ms}
 
+/* Deleting 150 GB: the freed bytes land in the free-space figure, which counts up
+   and takes the light for one second. The only celebration in the product. */
+@keyframes credited{0%{color:var(--text)}18%{color:var(--accent);
+   text-shadow:0 0 40px rgba(var(--lit),.55)}100%{color:var(--text);text-shadow:none}}
+.figure.credited{animation:credited 1.4s var(--ease) both}
+
+/* Reduced motion truly disables motion rather than shortening it: no keyframes,
+   no transitions, no parallax, and lum.js stops the ambient loop and jumps every
+   interpolated value straight to its target. */
 @media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation-duration:1ms !important;animation-delay:0ms !important;
-                       transition-duration:1ms !important}
+  *,*::before,*::after{animation:none !important;transition:none !important}
   .stagger>*{opacity:1;transform:none}
+  .air{transform:none}
+  .pip.beat{animation:none;background:var(--accent)}
+  #msg.off{display:none !important}
 }
 
-/* ---------------------------------------------------------------- focus
-   Keyboard and screen-reader users get a real focus ring, not a removed one. */
-a:focus-visible,button:focus-visible,[tabindex]:focus-visible{
-  outline:2px solid var(--accent);outline-offset:2px}
-.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
-    clip-path:inset(50%);white-space:nowrap}
+/* ---------------------------------------------------------------- focus */
+a:focus-visible,button:focus-visible,input:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+
+/* ---------------------------------------------------------------- the door
+   [CHANGE: claude-code | 2026-09-15]
+   "What is taking up room" has left the link rank. The block that draws the two
+   drives IS the way in -- you are going there to manage those objects, so the
+   objects are the handle. Hovering pulls the whole block back a little, as if
+   the camera steps away from it: nothing else on this page moves that way, so
+   the gesture reads as "this is a surface you can go through" rather than as
+   decoration. */
+.roomdoor{display:block;text-decoration:none;color:inherit;
+          border-radius:var(--r);outline-offset:6px;
+          transition:transform var(--dur-2) var(--ease-out)}
+.roomdoor:hover,.roomdoor:focus-visible{transform:scale(.965)}
+
+/* The invitation. Hidden until wanted on a pointer device; always visible on
+   touch, where there is no hover and the phone is the primary device. */
+.roomdoor .enter{display:block;margin-top:var(--s3);
+                 font-family:var(--f-mono);font-size:var(--t-micro);
+                 letter-spacing:.06em;color:var(--faint);opacity:0;
+                 transition:opacity var(--dur-2) var(--ease),
+                            color var(--dur-2) var(--ease)}
+.roomdoor:hover .enter,.roomdoor:focus-visible .enter{opacity:1;color:var(--accent)}
+@media (hover:none){.roomdoor .enter{opacity:1}}
+
+/* The canvas keeps `cursor:grab` -- it is still draggable. Everything else in
+   the block is a door and says so. */
+.roomdoor .lbl,.roomdoor .figs,.roomdoor .flat,.roomdoor .enter{cursor:pointer}
+
+@media (prefers-reduced-motion:reduce){
+  .roomdoor:hover,.roomdoor:focus-visible{transform:none}
+  .roomdoor .enter{opacity:1}
+}

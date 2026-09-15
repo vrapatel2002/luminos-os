@@ -1,8 +1,9 @@
 /* ask.js -- asking for a title, absorbed from Jellyseerr.
-   [CHANGE: claude-code | 2026-09-13]
+   [REDESIGN: 2026-09-14]
 
    Served by luminos-space at /ask.js. Same token, same rules as space.js: no HTML
-   strings anywhere, and the one button that mutates something confirms first.
+   strings anywhere, and the one button that spends disk and bandwidth on someone
+   else's schedule confirms first.
 
    Every title on this page was written by a stranger on the internet, which is the
    whole reason nodes are constructed rather than concatenated. */
@@ -10,34 +11,17 @@
   "use strict";
 
   var $ = function (id) { return document.getElementById(id); };
+  var el = LUM.el, txt = LUM.txt;
 
   var TOKEN = new URLSearchParams(location.search).get("token") || "";
   function q(path) { return path + "?token=" + encodeURIComponent(TOKEN); }
 
-  function el(tag, cls, parent) {
-    var n = document.createElement(tag);
-    if (cls) { n.className = cls; }
-    if (parent) { parent.appendChild(n); }
-    return n;
-  }
-  function txt(tag, cls, parent, s) {
-    var n = el(tag, cls, parent);
-    n.textContent = s;
-    return n;
-  }
-
-  var msgTimer = null;
-  function say(t) {
-    var m = $("msg");
-    m.textContent = t;
-    m.classList.remove("off");
-    clearTimeout(msgTimer);
-    msgTimer = setTimeout(function () { m.classList.add("off"); }, 9000);
-  }
-
-  /* The way back carries the token, because every route on this origin needs it and
-     the hub -- which has no token -- must never be given one to hold (§6.4). */
+  /* The way back carries the token, because every route on this origin needs it
+     and the hub -- which has no token -- must never be handed one to hold.
+     ROUTES: "/" on the server. */
   $("home").href = q("/");
+
+  LUM.parallax();
 
   function render(d) {
     var root = $("res");
@@ -54,23 +38,33 @@
       return;
     }
     var frag = document.createDocumentFragment();
-    rows.forEach(function (r) {
-      var ent = el("div", "ent", frag);
-      var hdr = el("div", "hdr", ent);
-      el("span", "pad", hdr);
-      txt("span", "nm", hdr, r.title);
-      txt("span", "amt", hdr, r.year || "");
+    rows.forEach(function (r, i) {
+      var hit = el("div", "hit", frag);
 
-      var sub = el("div", "sub", ent);
+      /* The invented plate: a rule and the result's index, cropped by the frame.
+         It gives the page visual rhythm without a single byte fetched off-origin,
+         and it is meant to look invented rather than look like a missing poster. */
+      var idx = el("div", "idx", hit);
+      el("s", null, idx);
+      txt("b", null, idx, String(i + 1).padStart(2, "0"));
+
+      var body = el("div", "body", hit);
+      var ttl = el("div", "ttl", body);
+      ttl.appendChild(document.createTextNode(r.title));
+      if (r.year) { txt("span", "yr", ttl, String(r.year)); }
+
+      var sub = el("div", "sub-facts", body);
       txt("span", null, sub, r.kind === "tv" ? "series" : "film");
-      /* The one fact that stops a pointless request, so it gets the loud colour. */
-      if (r.have) { txt("span", "twin", sub, r.have); }
 
-      if (r.blurb) { txt("p", "blurb", ent, r.blurb); }
+      /* The one fact that stops a pointless request, so it gets the loud colour
+         and a line of its own rather than sitting in the row of grey facts. */
+      if (r.have) { txt("div", "have", body, r.have); }
+      if (r.blurb) { txt("p", "blurb", body, r.blurb); }
 
-      /* Already here, or already asked for -- there is nothing useful to press. */
+      /* Already here, on the way, partly here, asked for -- there is nothing
+         useful to press, so there is no button. */
       if (r.have) { return; }
-      var acts = el("div", "acts", ent);
+      var acts = el("div", "acts", body);
       var b = txt("button", "btn", acts, "ask for this");
       b.type = "button";
       b.dataset.id = String(r.id);
@@ -84,12 +78,12 @@
   function search(term) {
     var mine = ++seq;
     $("res-aux").textContent = "looking\u2026";
-    fetch(q("/api/search") + "&q=" + encodeURIComponent(term))
-      .then(function (r) { return r.json(); })
-      .then(function (d) { if (mine === seq) { render(d); } })
-      .catch(function () {
-        if (mine === seq) { render({ error: "no reply" }); }
-      });
+    LUM.get(q("/api/search") + "&q=" + encodeURIComponent(term))
+      .then(function (d) {
+        if (mine !== seq) { return; }
+        render(d);
+      })
+      .catch(function () { if (mine === seq) { render({ error: "no reply" }); } });
   }
 
   $("form").addEventListener("submit", function (e) {
@@ -101,21 +95,23 @@
   $("res").addEventListener("click", function (e) {
     var b = e.target.closest("button.btn");
     if (!b) { return; }
-    /* Asking is not destructive, but it does spend disk and bandwidth on someone
-       else's schedule, so it still names what it is about to fetch. */
     if (!confirm("Ask for " + b.dataset.label + "?")) { return; }
     b.disabled = true;
-    fetch(q("/api/request"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: b.dataset.kind, id: Number(b.dataset.id) })
-    }).then(function (r) { return r.json(); })
+    LUM.post(q("/api/request"), { kind: b.dataset.kind, id: Number(b.dataset.id) })
       .then(function (d) {
-        say(d.message || (d.ok ? "asked" : "failed"));
+        LUM.say(d.message || (d.ok ? "asked" : "failed"));
         if (d.ok) { b.textContent = "asked for"; } else { b.disabled = false; }
-      })
-      .catch(function () { say("no reply"); b.disabled = false; });
+      });
   });
+
+  /* Nothing has been asked yet. The results slot says so rather than sitting as
+     an empty rule under a label. */
+  txt("div", "empty", $("res"), "Type a name. Nothing is requested until you press a button.");
+
+  /* DEMO SHIM: ?q=dune prefills the field and runs the search, so the results
+     state is reachable without a Jellyseerr behind the page. */
+  var pre = new URLSearchParams(location.search).get("q");
+  if (pre) { $("q").value = pre; search(pre); }
 
   $("q").focus();
 }());
