@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-15 — Response 8
+Last updated: 2026-09-15 — Response 9
 
 > Previous goals, complete, do not reconstruct from memory:
 > gaming/dGPU → `git show b08c3904:HANDOFF.md` · `org.luminos.style` QML → `git show 4273ed7e:HANDOFF.md`
@@ -42,6 +42,64 @@ Resume the bar plan at step 2 (dGPU indicator).
 **The box rebooted 2026-09-14 13:43.** Outstanding item 1 is DONE; item 2 was retested on the new
 boot and is NOT fixed. Both corrected below — do not re-read the old text and re-plan a reboot.
 
+### ✅ 2026-09-15 — BUG-161 + DECISION 109: the dGPU was 17% awake, and no program was waking it
+Reported from the dashboard card reading `54°C — 2 W` on an idle desktop. The widget prints
+`D3cold — 0 W` when the card is genuinely asleep, so the reading was **correct** and the card really
+was up. **No process was responsible.** Four suspects were cleared by measurement, not by reasoning:
+zero fd holders on `/dev/nvidia*` during a 75 s wake; the dashboard gates on `runtime_status` before
+polling; `luminos-power`'s BUG-160 nvidia-smi guard was working; and `nvidia-powerd` was **stopped
+for 10 minutes as an A/B** while the wakes continued at the same rate.
+
+`ftrace` on `rpm_resume`, filtered to `0000:01:00.0`, named it — the resume arrives on a **kworker**:
+```
+=> rm_acpi_nvpcf_notify    => acpi_ev_notify_dispatch
+=> os_ref_dynamic_power    => nv_indicate_not_idle
+```
+The **laptop firmware** woke it, over ACPI NVPCF (Dynamic Boost). The *trigger* was ours:
+`luminos-power` flapping Quiet↔Balanced → `asusctl` → `asusd` writes the platform profile → firmware
+fires NVPCF → driver resumes the card. Entry and exit shared thresholds — **no deadband**, the same
+latch shape as BUG-157. An idle 780M oscillates 4%↔17% just compositing, so the box earned its 60 s
+of calm, dropped to Quiet, and bounced straight back. Four round trips in 20 min; the iGPU was the
+only signal that crossed in all four.
+
+**Why now, when the code is from 2026-05-24 (`27477ef6`):** until BUG-160 was fixed on 2026-09-14 the
+dGPU slept **0 s out of 300 s**. A wake notify to an already-awake card does nothing and leaves no
+trace, so this fired into the void for 3½ months. **Fixing BUG-160 did not regress anything — it
+uncovered a dormant bug by making its symptom expressible.** Expect that shape again.
+
+**Fixed in two parts:** separate exit thresholds (`quietExitCPUPct=40` / `quietExitIGPUPct=30` /
+`quietExitDGPUPct=10`), and all seven `asusctl profile set` call sites routed through one
+`setProfile()` that compares against `/sys/firmware/acpi/platform_profile` and no-ops on a match.
+That second half caught a **live second instance**: emergency-thermal re-sent `"Quiet"` every 2 s for
+the whole duration of an overheat. Deliberately **not** a rate limiter — callers `continue`
+immediately, so a refused change is never retried and could strand the laptop in the wrong profile
+while hot. `noteProfileChange()` now warns above 4 changes / 10 min.
+
+⚠️ **Not fully closed.** After the choke point: 0 profile switches in 4 min, but the card was
+**13 s awake out of 180 s**, not 0. No profile switch happened in that window, so it is a *different*
+path. Down from 17%, worth a longer `rpm_resume` trace before anyone declares the dGPU question done.
+
+### ⚠️ 2026-09-15 — DECISION 108: the metrics port was on the whole LAN (item 5 of D107, now closed)
+`luminos-ram` served **three** endpoints on `0.0.0.0:9091` — `/metrics`, `/meminfo` and `/tabs`, the
+last accepting **POST** — from a root process holding CAP_SYS_PTRACE and CAP_KILL, unauthenticated.
+The D107 audit had undercounted it as one read-only endpoint. **Relief found by reading the code:**
+`tabReport` is written and read only; it never reaches `evictLast()` or `isSafeToKill()`, so it was
+**not** a remote kill switch.
+
+Bound to `127.0.0.1:9091` — free, because every consumer already asked for loopback (RAM widget,
+`chrome-tab-sleeper`, `hive_context.py`). **And `Access-Control-Allow-Origin: *` was removed from
+`/tabs`, which is not garnish:** loopback does not hide an endpoint from the web — any site can make
+*your own browser* fetch `127.0.0.1:9091`, and that header was the one thing letting it read the
+reply. The extension is unaffected; `host_permissions` bypasses CORS entirely. Verified live:
+loopback 200, `192.168.2.16:9091` refused at connect, zero `Access-Control-*` headers, extension
+re-reported within one 30 s sweep.
+
+⚠️ **Correction worth carrying: nftables had ALREADY closed the LAN path** (DECISION 88, 2026-08-31,
+negative-tested from the media server). So the bind change is defence in depth, not a rescue — and
+**the CORS header was the genuinely live hole**, because no firewall rule can touch a request that
+originates on this box from your own browser at a remote page's instruction. *"The port is
+firewalled" answers one threat model and can hide another.*
+
 ### ⚠️ 2026-09-15 — DECISION 107: D106 shipped a security regression. Read this first.
 Making the lid always suspend exposed a **dormant** hole: `~/.config/kscreenlockerrc` had
 `Autolock=false` AND `LockOnResume=false` from the never-sleep era, so every resume landed on an
@@ -61,8 +119,9 @@ from bare full-root to `systemd-analyze security` **2.8**.
 
 **Open items Shawn was told about but which are HIS call — do not action unilaterally:** no FDE,
 `NOPASSWD: ALL`, sshd `PasswordAuthentication yes` on `0.0.0.0:22`, both SSH keys passphrase-less,
-`luminos-ram` serving unauthenticated `/metrics` on `0.0.0.0:9091` as root with CAP_SYS_PTRACE/CAP_KILL,
 and `Autolock=false` (nothing ever locks an idle open-lid machine).
+~~`luminos-ram` on `0.0.0.0:9091`~~ — **item 5 is FIXED, see DECISION 108 below.** The
+CAP_SYS_PTRACE/CAP_KILL half of that item stands and is still his call.
 
 **Verified clean, do not re-investigate:** lock screen cannot fail open (4× retry → password-gated
 `EmergencyWindow`); only sleep hook is nvidia's, unmodified per `pacman -Qkk`; zram-only swap so
@@ -311,6 +370,12 @@ superseded — **do not merge them**); research trail and screenshots in `server
    the "free win" §4 instructs; Servarr persists that API field to `config.xml`. Flagged, not hidden.
 
 ## Still outstanding (ordered)
+0. ⚠️ **The dGPU still wakes for ~13 s per 180 s, and BUG-161 does not explain it.** After the
+   DECISION 109 choke point there were **0 profile switches in that window**, so this is a different
+   path from the NVPCF one. Down from 17% awake but not zero. Next step is a longer
+   `rpm_resume` trace — arm it with `filter` = `name == "0000:01:00.0"` and
+   `trigger` = `stacktrace if name == "0000:01:00.0"`, leave it an hour, read the **tail**. Do not
+   re-scan `/proc/*/fd`; that was already proven blind to this class of wake.
 1. ✅ **DONE — the reboot happened. `system boot 2026-09-14 13:43`** (boot id
    `fc5df078…`). Confirmed on 2026-09-14: running kernel `7.0.5-arch1-1` == installed `linux`
    package, loaded NVRM `610.57.04` == installed `nvidia-utils`/`nvidia-open-dkms 610.57.04-1`. The
@@ -431,7 +496,35 @@ so traversal is impossible by construction. Verified with `/fonts/../../../etc/p
   slowdown 91 °C, shutdown 101 °C). The old 83 °C constant was 4 °C below the firmware's own target.
 - **One constant used as both a drop threshold and a re-raise gate is a latch, not a limit.** A
   hysteresis *timer* does not damp that oscillation — it only sets its period. Always split into
-  separate up/down values.
+  separate up/down values. **This has now cost two separate bugs** — BUG-157 (GPU TGP) and BUG-161
+  (Quiet↔Balanced). If you add a threshold to `luminos-power`, add its pair at the same time.
+- **Changing the asusctl profile WAKES THE dGPU.** `asusd` writes the ASUS platform profile, the
+  firmware answers with an **ACPI NVPCF** notify, and the nvidia driver resumes the card out of
+  D3cold to handle it (`rm_acpi_nvpcf_notify → os_ref_dynamic_power → nv_indicate_not_idle`). Costs
+  ~60 s at ~2 W per switch. **Never call `asusctl profile set` directly in `luminos-power` — use
+  `setProfile()`**, which no-ops when `/sys/firmware/acpi/platform_profile` already matches.
+- **"Nothing is holding the GPU" is NOT "nothing is waking it."** An fd scan of `/dev/nvidia*` can
+  only ever find a *userspace* holder. BUG-161's wake came from firmware over ACPI and was invisible
+  to every tool already in the repo — including `luminos-dgpu-watch`. If the card is awake and the
+  holder list is empty, stop scanning fds and go straight to the tracepoint.
+- **`/sys/kernel/tracing/events/rpm/rpm_resume` is the tool that answers "who resumed this device."**
+  Notes that cost time: tracefs is at **`/sys/kernel/tracing`**, not `/sys/kernel/debug/tracing`, on
+  this kernel. **Set `filter` to `name == "0000:01:00.0"`** or the amdgpu iGPU floods the ring buffer
+  and the one line that matters scrolls away. The `trigger` is **separate** from the filter — write
+  `stacktrace if name == "0000:01:00.0"` or you get stacks from the wrong device. And **read the
+  buffer's tail, not `head`** unless you cleared it first; stale lines above will frame an innocent
+  process. That mistake nearly convicted `nvidia-powerd` here.
+- **`nvidia-powerd` holds `/dev/nvidia0` + `/dev/nvidiactl` for all of uptime by design.** It is
+  started by supergfxd on resume and reads `disabled; preset: disabled` while active. It is a
+  permanent fixture in every holder list — `luminos-dgpu-watch`'s `holders()` deliberately skips it.
+  **Do not convict it without an A/B**: stop it for 10 minutes and see if the behaviour changes.
+- **A masking bug can hold a second bug's symptom at exactly zero.** BUG-161 lived in the tree from
+  2026-05-24 and was unobservable until BUG-160 let the card sleep on 2026-09-14. When a fix is
+  immediately followed by a new report in the same subsystem, check whether it is a regression or an
+  *uncovering* before rolling anything back — `git log -S` on the suspect constant dates it.
+- **Instrument the rate, not just the event.** BUG-161 hid for four months because every profile
+  switch looked reasonable on its own log line and only the *frequency* was wrong. Nothing counted
+  them. `noteProfileChange()` now does.
 - **"The GPU is slow" starts at `journalctl -b 0 -u luminos-power -g 'GPU TGP'`, then
   `asusctl profile get`, then `nvidia-smi -q -d PERFORMANCE`** (every clocks-event reason, not just
   temperature). A one-shot nvidia-smi at idle tells you nothing about a governor oscillating under
@@ -490,7 +583,23 @@ so traversal is impossible by construction. Verified with `/fonts/../../../etc/p
   `luminos-notes.sh search` + `luminos-brain query`, both of which returned nothing for this topic.
 - **`asusctl profile -p` / `-P` do not exist.** The subcommand is `asusctl profile get`.
 
-## Files touched this session (Response 8 — DECISION 107, lock + security sweep)
+## Files touched this session (Response 9 — DECISION 108 + 109, BUG-161)
+- `cmd/luminos-ram/main.go` — bind `":9091"` → **`"127.0.0.1:9091"`**; the three
+  `Access-Control-Allow-*` headers and the `MethodOptions` preflight branch **deleted** from `/tabs`
+- `cmd/luminos-power/main.go` — `quietExit{CPU,IGPU,DGPU}Pct` added (deadband); new `setProfile()`
+  choke point + `noteProfileChange()` flap counter; all **seven** `runCmd("asusctl","profile","set")`
+  call sites rerouted through it
+- `docs/BUGS.md` — **BUG-161** added (symptom, four cleared suspects, ftrace stack, the "why now"
+  timeline, both fixes, measured before/after)
+- `LUMINOS_DECISIONS.md` — **DECISION 108** and **DECISION 109**
+- `AGENTS.md` — §11 Do-Not row for bare `asusctl profile set`; §12 NVPCF/deadband paragraph
+- `HANDOFF.md` — this file; D107's open-item list corrected (item 5 closed)
+- **Live system:** `/usr/local/bin/luminos-power` rebuilt + reinstalled ×2, `luminos-power` and
+  `luminos-ram` restarted, `nvidia-powerd` restarted after the A/B, tracing disabled, watcher
+  processes killed
+- Commits: `02cd399b` (security), `0b02247d` (deadband), `9c2fef57` (choke point) — all pushed
+
+## Files touched earlier this session (Response 8 — DECISION 107, lock + security sweep)
 - `~/.config/kscreenlockerrc` — `LockOnResume` false → **true** (live only, not tracked in repo)
 - `scripts/luminos-lid` — locks via `loginctl lock-sessions` before suspending; absolute binary
   paths; 10 s debounce against a resume-time suspend loop

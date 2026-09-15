@@ -6425,4 +6425,64 @@ in the response; and the Chrome extension re-reported within one 30-second sweep
 `CAP_KILL` — it needs them to do its job — and the endpoints remain unauthenticated to anything
 already running as him on this box. Loopback is the boundary now; it was previously the whole LAN.
 
-**Files:** `cmd/luminos-ram/main.go`. Cross-ref: DECISION 107 (item 5), DECISION 66 (tab mailbox).
+**Correction found afterwards, recorded rather than buried: nftables had already closed the LAN
+path.** DECISION 88 (2026-08-31) added a rule for exactly this endpoint and negative-tested it *from
+the media server*. So the `0.0.0.0` bind was less exposed than the D107 audit implied, and the
+loopback change is **defence in depth** — a second lock on a door that already had one, worth having
+because a firewall is one `systemctl` away from not being loaded and lives in a file far from the code.
+**The CORS hole was the part that was genuinely live.** No firewall rule could have touched it: the
+request originates on this machine, from your own browser, at the instruction of a remote page.
+`Allow-Origin: *` was the whole vulnerability, and the nftables rule had never covered it.
+Lesson: *"the port is firewalled" answers one threat model and can hide another.*
+
+**Files:** `cmd/luminos-ram/main.go`. Cross-ref: DECISION 107 (item 5), DECISION 66 (tab mailbox),
+DECISION 88 (the nftables rule that already covered the LAN path).
+
+---
+
+## DECISION 109 — one choke point for the platform profile, and deliberately no rate limiter
+<!-- [CHANGE: claude-code | 2026-09-15] -->
+**Context: BUG-161.** Writing the ASUS platform profile is not a local act. `asusctl` → `asusd`
+writes the profile → the laptop firmware answers with an **ACPI NVPCF notify** (Dynamic Boost
+renegotiating the CPU/GPU power split) → the NVIDIA driver handles it in
+`rm_acpi_nvpcf_notify → os_ref_dynamic_power → nv_indicate_not_idle`, which **resumes the dGPU out
+of D3cold**. Every profile change costs a GPU wake and roughly 60 s at ~2 W. Confirmed by ftrace on
+the `rpm_resume` tracepoint; the resume arrives on a kworker with no userspace process in the stack.
+
+**Why this became visible only on 2026-09-15.** The flapping logic has been in the tree since
+`27477ef6` (2026-05-24). It did nothing observable for three and a half months because the dGPU
+**slept 0 s out of 300 s** until BUG-160 was fixed on 2026-09-14 — a wake notify delivered to an
+already-awake card changes nothing and leaves no trace. Fixing BUG-160 did not cause this; it
+*uncovered* it. Expect more of this shape: a masking bug can hold a second bug's symptom at zero.
+
+**Chosen: every profile write goes through `setProfile()` in `cmd/luminos-power/main.go`.** It
+compares the requested value against `/sys/firmware/acpi/platform_profile` and returns without doing
+anything if they already match. Seven call sites previously ran `runCmd("asusctl", "profile", "set",
+…)` independently, none aware of what the others had just done.
+
+**This caught a second, live instance of the same bug.** The emergency-thermal branch re-sent
+`"Quiet"` on **every 2 s tick** for the entire duration of an overheat, with no guard at all. That
+would have pinned the dGPU awake precisely when the machine could least afford the extra heat. It
+had never been observed for the same reason as above — the card never slept.
+
+**Compare against sysfs, not `prevState`.** `prevState` is restored from a file across daemon
+restarts and can disagree with the hardware. The firmware's own view is the only value worth testing.
+
+**Rejected: a rate limiter.** It was the obvious second half and it is the wrong tool. Every caller
+`continue`s immediately after `setProfile()`, so a refused change is never retried — a limiter could
+strand the laptop in the wrong profile while it is cooking. **Hysteresis is the cure for
+oscillation** (`quietExitCPUPct=40` / `quietExitIGPUPct=30` / `quietExitDGPUPct=10`, the BUG-161 fix
+proper); **idempotence is the cure for repeats.** A rate limiter is neither, and it is unsafe here.
+
+**Added instead: `noteProfileChange()`**, which warns above 4 real changes per 10 minutes. The reason
+BUG-161 hid for four months is that **nothing counted** — each switch looked reasonable on its own
+log line and only the *rate* was wrong. An invisible bug is a bug with no instrument pointed at it.
+
+**Measured:** before, 4 profile switches and 4 dGPU wakes in ~20 min, card 17% awake at ~2 W. After
+the deadband, 0 switches and 0 wakes in 9 min, then 0 s awake out of 180 s. After the choke point,
+0 switches in 4 min with the card at **13 s awake out of 180 s** — not zero, and honestly not yet
+explained, but no profile switch occurred in that window so it was not this path. Worth a longer
+trace before anyone calls the dGPU question closed.
+
+**Files:** `cmd/luminos-power/main.go`, `docs/BUGS.md` (BUG-161). Cross-ref: DECISION 102 (BUG-157,
+the same no-deadband latch shape), BUG-160 (the fix that made this observable).

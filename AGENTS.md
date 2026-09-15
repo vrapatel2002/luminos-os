@@ -436,6 +436,7 @@ luminos-brain safe "<action>"
 | `hive-swap-server.py` (port 8079) | RETIRED — do not reference |
 | `orchestrator.py` | RETIRED — do not reference |
 | Tahoe macOS theme | White panel bugs — archived, do not restore |
+| A bare `runCmd("asusctl", "profile", "set", …)` in `cmd/luminos-power/main.go` | **Use `setProfile()`.** Writing the platform profile makes the firmware fire an **ACPI NVPCF** notify, which the NVIDIA driver answers by **resuming the dGPU out of D3cold** — so a profile write you think is free costs a GPU wake and ~60 s at ~2 W. `setProfile()` reads `/sys/firmware/acpi/platform_profile` first and does nothing if it already matches. This cost BUG-161 twice: a Quiet↔Balanced flap with no deadband, and an emergency-thermal branch re-sending `"Quiet"` every 2 s while the laptop was hot. [CHANGE: claude-code \| 2026-09-15] |
 | `0` in any `*IdleTimeoutSec` key of `~/.config/powerdevilrc` | **It does not mean "never", it means "after zero seconds".** "Never" is `-1`. Writing `0` to `DimDisplayIdleTimeoutSec` cost BUG-159: the dim action self-retriggered every few seconds and the screen pulsed for a day. `config/powerdevilrc` in git is the canonical copy — restore from it with `install -m644 config/powerdevilrc ~/.config/powerdevilrc && systemctl --user restart plasma-powerdevil.service`, and re-assert brightness afterwards (see BUG-159). [CHANGE: claude-code \| 2026-09-14] |
 
 ---
@@ -456,6 +457,16 @@ Mid fan:  `30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%`
 **Battery:** ZoneWarm=62°C→3.5GHz | ZoneHot=72°C→2.5GHz.
 
 **EPP:** `power` always except beast mode (`performance`). Always call `setEPPAfterAsusctl()` with 350ms sleep — never write EPP immediately after asusctl.
+
+**A profile change wakes the dGPU (DECISION 109, BUG-161).** `asusctl` → `asusd` writes the ASUS
+platform profile → firmware fires an **ACPI NVPCF** notify → `rm_acpi_nvpcf_notify` →
+`nv_indicate_not_idle` pulls the RTX 4050 out of **D3cold**. So profile switching is never free, and
+**any new threshold pair needs a deadband** — entry and exit must not share a number, or an idle
+desktop oscillates and the card never sleeps (`quietIdle*` for entry, `quietExit*` for exit). Route
+every write through `setProfile()`, which no-ops when the profile already matches. `noteProfileChange()`
+warns above 4 changes / 10 min. **The `dgpu-exec` setgid gate cannot help here** — it guards the
+`/dev/nvidia*` device nodes, and an ACPI wake never opens one, so no fd scan will ever find a culprit.
+`/sys/kernel/tracing/events/rpm/rpm_resume` is the tool that answers "who resumed this device".
 
 ---
 
