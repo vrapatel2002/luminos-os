@@ -6385,3 +6385,44 @@ a `Type=oneshot` without `RemainAfterExit`. Mobile chat on `:8090` is properly t
 **Files:** `~/.config/kscreenlockerrc` (live, untracked), `scripts/luminos-lid`,
 `systemd/luminos-lid.service`, `systemd/99-luminos-sdreader-nowake.rules` (new).
 Cross-ref: DECISION 106, DECISION 105, BUG-158 (live wallpaper).
+
+## DECISION 108 — The metrics port binds loopback, and the tab mailbox stops trusting every website you visit
+<!-- [CHANGE: claude-code | 2026-09-15] -->
+
+Shawn asked how item #5 of the DECISION 107 security list could be fixed — `luminos-ram` serving
+unauthenticated HTTP on `0.0.0.0:9091` from a root process holding `CAP_SYS_PTRACE` and `CAP_KILL`.
+
+**First correction to the audit that produced that list: it undercounted the endpoint.** There are
+**three**, not one — `/metrics`, `/meminfo` and `/tabs` — and `/tabs` accepts **POST**. Mitigating
+fact, read out of the source rather than assumed: `tabReport` is only stored and echoed back. It
+never reaches `evictLast()` or `isSafeToKill()`, so it is **not** a remote kill switch.
+
+**What decided the fix: every existing consumer already asks for loopback.** Checked all four —
+`src/widgets/org.luminos.ramwidget` (`http://localhost:9091/…`), `scripts/chrome-tab-sleeper`'s
+`background.js` and `options.js` (`http://127.0.0.1:9091/…`, and `manifest.json` declares exactly
+`http://127.0.0.1:9091/*` in `host_permissions`), and `scripts/hive_context.py`. Nothing on this
+machine has ever needed the wider bind, so the narrow fix costs nothing.
+
+**Chosen: bind `127.0.0.1:9091` in the code.** The alternatives were considered and rejected as
+worse, not as unnecessary — an nftables rule and systemd `IPAddressDeny=any`/`IPAddressAllow=localhost`
+both leave the socket open and add a second place to look when it breaks; a Unix socket would have
+meant rewriting all four clients; token auth is real work for an endpoint that has no remote user.
+A one-word change in the listener is the smallest thing that actually closes it.
+
+**Second change, and it is not optional garnish: `Access-Control-Allow-Origin: *` is gone from
+`/tabs`.** Binding to loopback does **not** hide this endpoint from the web. Any site you visit can
+have *your own browser* fetch `http://127.0.0.1:9091/tabs`, and that header was the single thing
+telling the browser to hand the site the response. Without it the read is blocked and the POST never
+survives preflight. The extension is unaffected because `host_permissions` bypasses CORS entirely,
+and its `<all_urls>` content script never touches this port — verified before removing the header.
+
+**Verified live, not assumed:** `127.0.0.1:9091` answers 200 on `/meminfo` and `/tabs`; the same
+request to `192.168.2.16:9091` is refused at connect (curl exit 7); zero `Access-Control-*` headers
+in the response; and the Chrome extension re-reported within one 30-second sweep
+(`{"reported":true,…"asleep":6,"awake":2}`), which is the check that proves the tab sleeper still works.
+
+**Still deliberately not done, and still Shawn's call:** the process keeps `CAP_SYS_PTRACE` and
+`CAP_KILL` — it needs them to do its job — and the endpoints remain unauthenticated to anything
+already running as him on this box. Loopback is the boundary now; it was previously the whole LAN.
+
+**Files:** `cmd/luminos-ram/main.go`. Cross-ref: DECISION 107 (item 5), DECISION 66 (tab mailbox).

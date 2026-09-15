@@ -268,8 +268,14 @@ func main() {
 		http.HandleFunc("/meminfo", handleMemInfo)
 		// [CHANGE: claude-code | 2026-08-11] DECISION 66 — tab sleeper mailbox.
 		http.HandleFunc("/tabs", handleTabs)
-		lg.Info("metrics server on :9091")
-		if err := http.ListenAndServe(":9091", nil); err != nil {
+		// [CHANGE: claude-code | 2026-09-15] Was ":9091" — every interface, including
+		// the LAN. This process runs as root with CAP_SYS_PTRACE and CAP_KILL and the
+		// server has no authentication, so anyone on the same wifi could read a live
+		// map of the machine's memory and browsing. Every real consumer already asks
+		// for loopback (the RAM widget, chrome-tab-sleeper's manifest host_permissions,
+		// hive_context.py), so nothing needs the wider bind.
+		lg.Info("metrics server on 127.0.0.1:9091")
+		if err := http.ListenAndServe("127.0.0.1:9091", nil); err != nil {
 			lg.Error("metrics server: %v", err)
 		}
 	}()
@@ -1569,15 +1575,15 @@ var (
 	tabReport   *TabReport
 )
 
+// [CHANGE: claude-code | 2026-09-15] The three Access-Control-Allow-* headers are gone.
+// Binding to loopback does not hide this endpoint from a web page: any site you visit can
+// have your browser fetch http://127.0.0.1:9091/tabs, and `Allow-Origin: *` was the one
+// thing telling the browser to hand that site the response. Without it the read is blocked
+// and the POST never gets past preflight. The extension is unaffected — it declares
+// http://127.0.0.1:9091/* in host_permissions, which bypasses CORS entirely, and its only
+// <all_urls> content script never touches this port.
 func handleTabs(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-
 	switch r.Method {
-	case http.MethodOptions:
-		w.WriteHeader(http.StatusNoContent)
-
 	case http.MethodPost:
 		var rep TabReport
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&rep); err != nil {
