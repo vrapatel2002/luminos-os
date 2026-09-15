@@ -129,6 +129,24 @@ const (
 	quietIdleIGPUPct = 15.0 // iGPU% threshold for idle (card2=AMD 780M)
 	quietIdleDGPUPct = 5.0  // dGPU% threshold for idle (card1=NVIDIA)
 	quietIdleTicks   = 30   // 60s sustained idle (30 × 2s) → drop to Quiet
+	// [CHANGE: claude-code | 2026-09-15] BUG-161: leaving Quiet needs its own, higher
+	// thresholds. Entry and exit used to share the numbers above, with no deadband — the
+	// same no-hysteresis latch BUG-157 fixed for GPU TGP. On an idle desktop the AMD 780M
+	// oscillates 4%↔17% just compositing, so the box fell into Quiet after its 60s of calm
+	// and bounced straight back out on the next tick. Measured over 20 minutes: four
+	// round trips, dwelling in Quiet 5s, 10s, 16s and 36s, and in all four the iGPU was the
+	// only signal that crossed — CPU never exceeded 19%.
+	//
+	// The cost is not the profile change. Each one calls asusctl, so asusd writes the ASUS
+	// platform profile, and the firmware answers by firing an ACPI NVPCF notify (Dynamic
+	// Boost renegotiating the CPU/GPU power split). The nvidia driver handles that in
+	// rm_acpi_nvpcf_notify → os_ref_dynamic_power → nv_indicate_not_idle, which RESUMES the
+	// discrete GPU out of D3cold. Confirmed by ftrace: every dGPU wake landed 1-3s after one
+	// of these switches, and the card then idled at ~2W for ~60s until RTD3 dropped it again.
+	// That is what kept an RTX 4050 "17% awake" on a machine doing nothing.
+	quietExitCPUPct  = 40.0
+	quietExitIGPUPct = 30.0
+	quietExitDGPUPct = 10.0
 	// Emergency thermal threshold
 	// [CHANGE: claude-code | 2026-05-24] BUG-055: raised from 85°C→92°C (ZoneHot entry raised to 87°C)
 	thermalEmergencyC = 92.0
@@ -610,7 +628,7 @@ func monitorLoop(ctx context.Context) {
 				quietTicks = 0
 			}
 		} else if onAC && prevState.Profile == "Quiet" {
-			if cpuLoad >= quietIdleCPUPct || igpuLoad >= quietIdleIGPUPct || dgpuLoad >= quietIdleDGPUPct {
+			if cpuLoad >= quietExitCPUPct || igpuLoad >= quietExitIGPUPct || dgpuLoad >= quietExitDGPUPct {
 				quietTicks = 0
 				lg.Info("load → Balanced (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
 				runCmd("asusctl", "profile", "set", "Balanced")

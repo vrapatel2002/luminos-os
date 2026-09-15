@@ -3,6 +3,51 @@ Last Updated: 2026-08-29 (BUG-149 **BUG-142 WAS NEVER A vkd3d BUG — WE DELETED
 
 ## Open Bugs
 
+### BUG-161 — the RTX 4050 woke itself every couple of minutes on an idle machine, and no process was holding it
+<!-- [CHANGE: claude-code | 2026-09-15] -->
+- Status: **FIXED 2026-09-15, measured before and after.**
+- Symptom: the dashboard GPU card read `Usage 0% · 54°C · 2 W`. That reading was correct, and it
+  is the tell — the widget prints `D3cold - 0 W` when the card is asleep, so 2 W means the card
+  was genuinely powered up and idling. `runtime_active_time` said **17% awake** across uptime
+  with no GPU work ever launched.
+- **Every obvious suspect was innocent, and proving that is what cracked it.** `luminos-dgpu-watch`
+  walked `/proc/*/fd` at 0.2 s for the whole of a 75-second wake and found **zero** holders of
+  `/dev/nvidia*` or `renderD128`. `luminos-power`'s nvidia-smi guard (BUG-160) was working
+  correctly. The Quickshell dashboard gates on `runtime_status` before it polls, so it cannot
+  cause a wake. `nvidia-powerd` holds the nodes for all of uptime by design — it was **stopped
+  for 10 minutes as an A/B and the wakes continued at the same rate**, which ruled it out.
+- Cause, from `ftrace` on the `rpm_resume` tracepoint filtered to `0000:01:00.0`. The resume
+  arrives on a **kworker**, with no userspace process anywhere in the stack:
+  ```
+  => rm_acpi_nvpcf_notify        <- NVIDIA driver handling an ACPI NVPCF event
+  => acpi_ev_notify_dispatch     <- ...dispatched by the laptop firmware
+  => os_ref_dynamic_power
+  => nv_indicate_not_idle        <- ...which pulls the GPU out of D3cold
+  ```
+  NVPCF is the ASUS firmware's Dynamic Boost channel, and **writing the ASUS platform profile
+  makes the firmware fire it**. So the chain is: `luminos-power` switches profile → `asusctl` →
+  `asusd` writes the platform profile → firmware fires ACPI NVPCF → nvidia driver resumes the
+  dGPU. Confirmed on timestamps — every wake landed **1–3 s after** a profile switch
+  (19:00:49→19:00:51, 19:04:39→19:04:36, 19:06:25→19:06:27, 19:07:01→19:07:03).
+- The real defect is one layer up: **the Quiet↔Balanced profile was flapping.** Entry and exit
+  shared the same thresholds — no deadband, the identical latch shape BUG-157 fixed for GPU TGP.
+  An idle AMD 780M oscillates 4%↔17% just compositing the desktop, so the box earned its 60 s of
+  calm, dropped to Quiet, then bounced straight back out on the next tick. Measured over 20 min:
+  **four round trips, dwelling in Quiet 5 s, 10 s, 16 s and 36 s** — and in all four the iGPU was
+  the only signal that crossed. CPU never exceeded 19% against its 25% threshold.
+- Fix: separate exit thresholds in `cmd/luminos-power/main.go` — `quietExitCPUPct=40`,
+  `quietExitIGPUPct=30`, `quietExitDGPUPct=10`. Entry thresholds untouched; one comparison changed.
+- Verified: before, 4 profile switches and 4 dGPU wakes in ~20 min. After, **0 profile switches
+  and 0 dGPU wakes in 9 minutes**, then a clean **0 s awake out of 180 s**. The card now holds
+  true D3cold at 0 W instead of sitting 17% awake at ~2 W.
+- Lesson worth keeping: *"nothing is holding the GPU"* was true, and it is **not** the same
+  statement as *"nothing is waking it"*. An fd scan can only ever find a userspace holder; this
+  wake came from firmware and was invisible to every tool already in the repo. `rpm_resume` is the
+  tracepoint that answers "who resumed this device", and it needs `filter` set to the PCI address
+  — unfiltered, the amdgpu iGPU floods the ring buffer and the one line that matters scrolls away.
+  Also note the trigger and the event filter are separate: `stacktrace` must be written as
+  `stacktrace if name == "0000:01:00.0"` or the stacks come from the wrong device.
+
 ### BUG-159 — the screen dims itself every few seconds, with nothing touching the brightness keys
 <!-- [CHANGE: claude-code | 2026-09-14] -->
 - Status: **FIXED 2026-09-14, verified live.**
