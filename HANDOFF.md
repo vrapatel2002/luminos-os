@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-14 — Response 5
+Last updated: 2026-09-14 — Response 7
 
 > Previous goals, complete, do not reconstruct from memory:
 > gaming/dGPU → `git show b08c3904:HANDOFF.md` · `org.luminos.style` QML → `git show 4273ed7e:HANDOFF.md`
@@ -12,12 +12,30 @@ separate media server — fixing what Shawn reports, and never leaving a change 
 ## Aim right now
 Both faults reported 2026-09-14 are **FIXED and verified live** — BUG-158 (live wallpaper) and
 BUG-159 (self-dimming screen) — and the sleep policy was reversed to **lid-close-only** on request
-(DECISION 105). Resume the bar plan at step 2 (dGPU indicator).
+(DECISION 105), then **amended the same day to be unconditional** (DECISION 106) — Shawn said
+*"sleep mean sleep"*, so a closed lid now suspends even if an app is holding an inhibition.
+Resume the bar plan at step 2 (dGPU indicator).
 
 **The box rebooted 2026-09-14 13:43.** Outstanding item 1 is DONE; item 2 was retested on the new
 boot and is NOT fixed. Both corrected below — do not re-read the old text and re-plan a reboot.
 
-### ✅ 2026-09-14 — DECISION 105: lid close sleeps again, idle still never does
+### ✅ 2026-09-14 — DECISION 106: a closed lid sleeps, and nothing may veto it
+**This supersedes the block below.** DECISION 105 shipped a *conditional* lid action and Shawn
+rejected the conditions. Three vetoes were closed: the docked/external-monitor exemption (both
+layers), and — the one that mattered — **app inhibitions**. PowerDevil aborts its lid action on any
+KDE PolicyAgent inhibition (Chrome held `"Playing audio"` + `"Video Wake Lock"`, mode `block`), and
+**`systemd-inhibit --list` cannot see those**; read them from the PolicyAgent's `ActiveInhibitions`
+property instead. logind can't cover for it either, because PowerDevil holds a `block` inhibitor on
+`handle-lid-switch` while Plasma runs.
+
+So the guarantee moved off PowerDevil: `scripts/luminos-lid` is now a small root watcher on the
+`Lid Switch` evdev node that runs `systemctl suspend -i`. **If the box ever suspends "for no
+reason", suspect `luminos-lid.service` first** — it is deliberately not answerable to any KDE or
+systemd setting. `99-luminos-lid.rules` was deleted for good; it matched `KERNEL=="LID0",
+SUBSYSTEM=="button"`, which does not exist on this kernel, so it had never once fired.
+Full detail: DECISION 106.
+
+### ✅ 2026-09-14 — DECISION 105 (superseded by 106): lid close sleeps again, idle still never does
 Shawn asked for the never-sleep policy (DECISION 80 / `244f5eaf`) to be reversed and chose the
 **halfway** option when the cost was put in front of him: `luminos-hive.service` was active and
 **:8090 was listening at that moment** (pid 1057), so a suspend is an outage, not a saving.
@@ -286,7 +304,13 @@ superseded — **do not merge them**); research trail and screenshots in `server
    `backups/power-2026-08-02/` holds only `powermanagementprofilesrc` — **the file PowerDevil 6.7
    does not read** — so it is not a usable restore source despite the row previously saying
    "Revert: restore the backup dir."
-9. **`systemd/luminos-lidsleep.conf` is an orphaned duplicate of `config/luminos-lidsleep.conf`
+9. ⚠️ **DECISION 106's lid watcher has NOT been tested against a real lid close.** Every piece was
+   verified short of the physical act: the service is running on `/dev/input/event2`, `EVIOCGSW`
+   confirms the node carries `SW_LID` and decodes correctly, and suspend/resume is proven on this
+   kernel. But no one has actually shut the lid and watched it sleep. First chance, do it, and check
+   `journalctl -u luminos-lid` for the `lid closed — suspending` line to confirm which layer won.
+
+10. **`systemd/luminos-lidsleep.conf` is an orphaned duplicate of `config/luminos-lidsleep.conf`
    and should be DELETED, not maintained.** Nothing in the repo references it. On 2026-09-14 the two
    **disagreed** — `config/` said `ignore` (live policy), `systemd/` still said `suspend` (the
    2026-08-02 policy it was never updated from). Reconciled for now rather than deleted, because
@@ -412,7 +436,21 @@ so traversal is impossible by construction. Verified with `/fonts/../../../etc/p
   `luminos-notes.sh search` + `luminos-brain query`, both of which returned nothing for this topic.
 - **`asusctl profile -p` / `-P` do not exist.** The subcommand is `asusctl profile get`.
 
-## Files touched this session (Response 6 — DECISION 105, sleep policy)
+## Files touched this session (Response 7 — DECISION 106, unconditional sleep)
+- `scripts/luminos-lid` — bash screen-blanker → python3 evdev watcher that suspends with `-i`
+- `systemd/luminos-lid.service` — udev-triggered oneshot → long-running, `Restart=always`, **enabled**
+- `systemd/99-luminos-lid.rules` — **deleted** (could never match on this kernel)
+- `config/luminos-lidsleep.conf` + `systemd/luminos-lidsleep.conf` — `HandleLidSwitchDocked` → `suspend`
+- `config/powerdevilrc` — `InhibitLidActionWhenExternalMonitorPresent=false` ×3
+- `LUMINOS_DECISIONS.md` — **DECISION 106**
+- `LUMINOS_STATUS.md` — "Suspend / lid close" row rewritten again
+- `AGENTS.md` §9 — lid row updated; revert recipe now names the watcher first
+- `HANDOFF.md` — this file
+- **Live system:** `/usr/local/bin/luminos-lid`, `/etc/systemd/system/luminos-lid.service`,
+  `/etc/systemd/logind.conf.d/luminos-lidsleep.conf`, `~/.config/powerdevilrc` all reinstalled;
+  `/etc/udev/rules.d/99-luminos-lid.rules` removed; logind reloaded, powerdevil restarted
+
+## Files touched earlier this session (Response 6 — DECISION 105, sleep policy)
 - `config/powerdevilrc` — `LidAction=0` → `1` ×3; `AutoSuspendAction=0` ×3 left alone on purpose
 - `config/luminos-lidsleep.conf` — logind layer → `suspend`/`suspend`/`ignore`/`ignore`
 - `systemd/luminos-lidsleep.conf` — orphaned duplicate reconciled (was stating the opposite policy)

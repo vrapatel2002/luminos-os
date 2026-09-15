@@ -6,13 +6,16 @@ TurnOffDisplayIdleTimeoutSec=1800
 AutoSuspendAction=0
 AutoSuspendIdleTimeoutSec=3600
 LidAction=1
+InhibitLidActionWhenExternalMonitorPresent=false
 
 [Battery][SuspendAndShutdown]
 AutoSuspendAction=0
 AutoSuspendIdleTimeoutSec=600
 LidAction=1
+InhibitLidActionWhenExternalMonitorPresent=false
 
 [LowBattery][SuspendAndShutdown]
 AutoSuspendAction=0
 AutoSuspendIdleTimeoutSec=300
 LidAction=1
+InhibitLidActionWhenExternalMonitorPresent=false

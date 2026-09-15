@@ -6252,3 +6252,70 @@ maintained** — logged in HANDOFF.
 **Revert to never-sleep:** set `LidAction=0` ×3 in `config/powerdevilrc` and all four logind keys to
 `ignore`, reinstall both, restart `plasma-powerdevil` and reload `systemd-logind`.
 Cross-ref: DECISION 80 (`244f5eaf`), DECISION 38, BUG-091, BUG-159.
+
+---
+
+## DECISION 106 — A closed lid sleeps. No exceptions, no vetoes.
+**Date:** 2026-09-14 · **Agent:** claude-code · **Amends:** DECISION 105 (same day)
+
+Shawn, a few hours after choosing lid-close-only: *"bro i want sleep mean sleep i dont want any
+program app or code running got it if lid close every thing goes to sleep."* DECISION 105 delivered
+a lid action that was **conditional**, and he did not want conditions. Three things could veto it.
+All three are now closed.
+
+**1. The external-monitor exemption — removed at both layers.**
+`HandleLidSwitchDocked` went `ignore` → `suspend`, and `InhibitLidActionWhenExternalMonitorPresent=false`
+was added to all three `[<profile>][SuspendAndShutdown]` groups. DECISION 105 argued a docked lid
+close means "use the other screen"; that argument is overruled.
+
+**2. App inhibitions — the one that actually mattered.**
+PowerDevil's lid action is *vetoable*. `libpowerdevilcore.so` aborts with
+`"Unsatisfied policies, the action has been aborted"` when any KDE PolicyAgent inhibition is held.
+At the moment of investigation Chrome held two, both mode `block`:
+
+```
+a(ssssu) 2 "idle"  "/opt/google/chrome/google-chrome" "Video Wake Lock" "block" 3
+         3 "sleep" "/opt/google/chrome/google-chrome" "Playing audio"   "block" 3
+```
+
+**These are invisible to `systemd-inhibit --list`** — that command showed only `delay` inhibitors
+and would have said everything was fine. Read them with
+`busctl --user get-property org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement/PolicyAgent
+org.kde.Solid.PowerManagement.PolicyAgent ActiveInhibitions`.
+`ListInhibitions()` is deprecated and `qdbus6` cannot even print its `aas` return.
+
+logind cannot rescue this: while Plasma runs PowerDevil holds a **block** inhibitor on
+`handle-lid-switch`, so `HandleLidSwitch=suspend` never fires. The vetoable layer is also the only
+layer that gets to act.
+
+**3. So the guarantee was moved off PowerDevil entirely.**
+`scripts/luminos-lid` — the 2026-06-03 script that used to *blank the panel to keep the box awake* —
+was rewritten into a small root watcher on the `Lid Switch` evdev node. On `EV_SW`/`SW_LID`=1 it runs
+`systemctl suspend -i`. `-i` ignores every inhibitor there is, and reading the physical switch means
+nothing in userspace can intercept the trigger. PowerDevil keeps `LidAction=1` and still handles the
+ordinary case gracefully; this is the backstop for when it is overruled.
+
+**`99-luminos-lid.rules` is deleted, and would never have worked.** It matched
+`KERNEL=="LID0", SUBSYSTEM=="button"`. On this kernel the lid is `PNP0C0D:00` on subsystem
+`platform`, its input device is `input2`/`event2` on subsystem `input`, and ACPI lid transitions are
+emitted over **netlink, not udev**. `udevadm trigger --subsystem-match=button` matches nothing at
+all. Any future "fire a script on lid change" idea should go straight to evdev.
+
+**Idle-suspend is untouched** — `AutoSuspendAction=0` ×3 stays. He asked about the lid and only the
+lid; idle-never is what keeps HIVE on :8090 answering his phone.
+
+**Verified, and the instrument was checked before it was trusted:** rather than assume the watcher
+can see the switch, `EVIOCGSW` was read off `/dev/input/event2` — bitmask `0x0`, SW_LID bit 0,
+matching `/proc/acpi/button/lid/LID0/state` = open. That proves the node, the `EV_SW` type and the
+`SW_LID` code are all correct without needing the lid physically closed. Device advertises
+`B: EV=21` (EV_SYN|EV_SW) and `B: SW=1` (SW_LID). Service active on `/dev/input/event2`;
+logind → `suspend suspend suspend ignore`; `lidAction` → 1.
+
+**Files:** `scripts/luminos-lid` (bash → python3, rewritten), `systemd/luminos-lid.service`
+(oneshot → long-running, enabled), `systemd/99-luminos-lid.rules` (**deleted**),
+`config/luminos-lidsleep.conf`, `systemd/luminos-lidsleep.conf`, `config/powerdevilrc`,
+`AGENTS.md` §9, `LUMINOS_STATUS.md`.
+**Revert to never-sleep:** `systemctl disable --now luminos-lid.service` **first** — it suspends on
+its own and will keep doing so no matter what the KDE settings say — then `LidAction=0` ×3 and all
+four logind keys to `ignore`.
+Cross-ref: DECISION 105, DECISION 80 (`244f5eaf`), DECISION 38, BUG-091, BUG-159.

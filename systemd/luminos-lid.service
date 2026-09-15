@@ -1,8 +1,17 @@
 # [CHANGE: claude-code | 2026-06-03]
-# Triggered by the 99-luminos-lid.rules udev rule on lid open/close.
+# [CHANGE: claude-code | 2026-09-14] Was a udev-triggered oneshot that blanked the
+# screen and kept the box awake. It is now a long-running watcher that suspends.
+# The udev rule it used to depend on (99-luminos-lid.rules) is gone: it matched
+# KERNEL=="LID0", SUBSYSTEM=="button", which does not exist on this kernel.
 [Unit]
-Description=Luminos lid handler — toggle screen, keep system awake
+Description=Luminos lid handler — a closed lid suspends, ignoring all inhibitors
+After=multi-user.target
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart=/usr/local/bin/luminos-lid
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

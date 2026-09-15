@@ -1,27 +1,55 @@
-#!/bin/bash
-# luminos-lid — lid close/open handler
-# System stays fully awake; only the built-in eDP panel is toggled.
-# Triggered by udev on every lid state change.
-# [CHANGE: claude-code | 2026-06-03]
+#!/usr/bin/env python3
+"""luminos-lid — a closed lid sleeps. No app, service or code can veto it.
 
-USER_ID=1000
-XDG_RT="/run/user/${USER_ID}"
-WAYLAND_DISP="wayland-0"
-DBUS_ADDR="unix:path=${XDG_RT}/bus"
+[CHANGE: claude-code | 2026-06-03] original: udev-triggered, blanked the eDP panel
+    and deliberately kept the system awake.
+[CHANGE: claude-code | 2026-09-14] rewritten: it suspends, and it watches the lid
+    switch directly instead of via udev.
 
-lid_state=$(cat /proc/acpi/button/lid/LID0/state 2>/dev/null \
-         || cat /proc/acpi/button/lid/LID/state 2>/dev/null)
+Why not just let PowerDevil or logind do it:
 
-if [[ "$lid_state" == *"closed"* ]]; then
-    runuser -u shawn -- env \
-        XDG_RUNTIME_DIR="$XDG_RT" \
-        WAYLAND_DISPLAY="$WAYLAND_DISP" \
-        DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
-        kscreen-doctor output.1.disable
-else
-    runuser -u shawn -- env \
-        XDG_RUNTIME_DIR="$XDG_RT" \
-        WAYLAND_DISPLAY="$WAYLAND_DISP" \
-        DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
-        kscreen-doctor output.1.enable
-fi
+  * PowerDevil's lid action is vetoable. Any app holding a PolicyAgent inhibition
+    — Chrome's "Playing audio", a page's Video Wake Lock — makes it abort with
+    "Unsatisfied policies, the action has been aborted". Those inhibitions are
+    invisible to `systemd-inhibit --list`, so the machine just silently stays up.
+  * logind can't rescue it: while Plasma runs, PowerDevil holds a *block*
+    inhibitor on handle-lid-switch, so logind's HandleLidSwitch never fires.
+  * The old udev rule could never have worked. On this kernel the lid is
+    PNP0C0D:00 on subsystem 'platform', not LID0 on 'button', and ACPI lid
+    transitions go out over netlink, not as udev uevents.
+
+So this reads the physical switch off its evdev node, which nothing can intercept,
+and suspends with -i, which ignores every inhibitor there is. PowerDevil still
+handles the ordinary case gracefully; this is the backstop for when it is overruled.
+"""
+
+import re
+import struct
+import subprocess
+import sys
+from pathlib import Path
+
+EV_SW, SW_LID = 0x05, 0x00
+FMT = "llHHi"  # struct input_event, 24 bytes on 64-bit
+SIZE = struct.calcsize(FMT)
+
+
+def lid_event_node():
+    """Resolve 'Lid Switch' to /dev/input/eventN by name — the number can move."""
+    devices = Path("/proc/bus/input/devices").read_text()
+    match = re.search(r'N: Name="Lid Switch".*?H: Handlers=(.*)', devices, re.S)
+    if not match:
+        sys.exit("luminos-lid: no input device named 'Lid Switch'")
+    handler = next(h for h in match.group(1).split() if h.startswith("event"))
+    return Path("/dev/input") / handler
+
+
+node = lid_event_node()
+print(f"luminos-lid: watching {node}", flush=True)
+
+with node.open("rb") as dev:
+    while chunk := dev.read(SIZE):
+        _, _, etype, code, value = struct.unpack(FMT, chunk)
+        if etype == EV_SW and code == SW_LID and value == 1:
+            print("luminos-lid: lid closed — suspending, ignoring inhibitors", flush=True)
+            subprocess.run(["systemctl", "suspend", "-i", "--no-block"])
