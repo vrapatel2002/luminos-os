@@ -6188,3 +6188,67 @@ the daemon logs `dgpu=100%` and `beast mode → Performance (trigger: gpu)`.
 **Revert:** `git revert` this commit, then
 `go build -o /tmp/luminos-power ./cmd/luminos-power && sudo install -m755 /tmp/luminos-power /usr/local/bin/luminos-power && sudo systemctl restart luminos-power`.
 Cross-ref: BUG-160, BUG-157, BUG-078, DECISION 102, DECISION 25.
+
+---
+
+## DECISION 105 — the G14 sleeps on lid close again, but never on idle
+<!-- [CHANGE: claude-code | 2026-09-14] -->
+**Context:** Shawn asked for the never-sleep policy (DECISION 80 / `244f5eaf`, 2026-08-25) to be
+reversed. That policy existed for a real and *still-live* reason: `luminos-hive.service` is active
+and **port 8090 was listening at the moment of the request** (pid 1057), so a suspend is not a power
+saving, it is an outage — it evicts the model from VRAM and drops the phone's chat endpoint until
+someone opens the lid and reruns `hive-start-model.sh`.
+
+**Decision:** reverse it **halfway** — the split is the point, not a compromise.
+
+| trigger | before | now |
+|---|---|---|
+| lid close | nothing | **suspend** |
+| idle, lid open | nothing | **nothing** (unchanged) |
+| lid close, external monitor | nothing | nothing (unchanged) |
+
+**Why this split and not a full reversal:** closing the lid is an *explicit act* that means "I am
+done with this machine". Idling is the *absence* of an act, and on this box the absence of an act is
+exactly when the phone is most likely to be using it. Full idle-suspend would have made the endpoint
+die precisely when Shawn walked away with the phone in his pocket. So the machine serves for as long
+as the lid is open, and stops when he says so.
+
+**Settings, both layers (they must agree or behaviour splits by context — BUG-091):**
+- `~/.config/powerdevilrc` ← `config/powerdevilrc`: `LidAction=1` in all three profiles.
+  `AutoSuspendAction=0` **deliberately unchanged** in all three.
+- `/etc/systemd/logind.conf.d/luminos-lidsleep.conf` ← `config/luminos-lidsleep.conf`:
+  `HandleLidSwitch=suspend`, `HandleLidSwitchExternalPower=suspend`,
+  `HandleLidSwitchDocked=ignore`, `IdleAction=ignore`.
+
+PowerDevil holds a **block** inhibitor on `handle-lid-switch` while Plasma runs, so `powerdevilrc` is
+what actually fires; logind is only the SDDM/TTY/logged-out fallback. Both are set anyway.
+
+**Verified live, both layers, not assumed:**
+```
+qdbus6 … HandleButtonEvents.lidAction                 → 1        (was 0)
+busctl … HandleLidSwitch HandleLidSwitchExternalPower → suspend suspend
+busctl … HandleLidSwitchDocked IdleAction             → ignore ignore
+powerdevilrc AutoSuspendAction ×3                     → 0        (still never)
+```
+Use `lidAction`, **never** `triggersLidAction` — the latter reads true for every configuration
+including `LidAction=0`, and has misled this project before.
+
+**Risk checked before committing to it, rather than after:** suspend/resume is proven working on
+*this* kernel and driver. The journal shows `PM: suspend entry (s2idle)` at 2026-09-14 20:26:15 and
+`PM: suspend exit` 17 s later on the current boot, with `nvidia-powerd` stopping and restarting
+cleanly around it. Loaded NVRM `610.57.04` matches installed `nvidia-utils`/`nvidia-open-dkms`
+`610.57.04-1`, and the running kernel `7.0.5-arch1-1` matches the `linux` package —
+`PreserveVideoMemoryAllocations` is `1`. So enabling a lid suspend was not a leap of faith.
+
+**Repo drift found and fixed in passing:** `systemd/luminos-lidsleep.conf` was an **orphaned
+duplicate** of `config/luminos-lidsleep.conf` that nothing references, and the two **disagreed** —
+`config/` said `ignore` (the live 2026-08-25 policy) while `systemd/` still said `suspend` (the
+2026-08-02 policy it was never updated from). Reconciled. Two tracked copies of one config with no
+installer naming a winner is how that happens; **the duplicate should eventually be deleted, not
+maintained** — logged in HANDOFF.
+
+**Files:** `config/powerdevilrc`, `config/luminos-lidsleep.conf`, `systemd/luminos-lidsleep.conf`,
+`AGENTS.md` §9, `LUMINOS_STATUS.md`.
+**Revert to never-sleep:** set `LidAction=0` ×3 in `config/powerdevilrc` and all four logind keys to
+`ignore`, reinstall both, restart `plasma-powerdevil` and reload `systemd-logind`.
+Cross-ref: DECISION 80 (`244f5eaf`), DECISION 38, BUG-091, BUG-159.

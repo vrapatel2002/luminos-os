@@ -5,14 +5,14 @@ TurnOffDisplayIdleTimeoutSec=1800
 [AC][SuspendAndShutdown]
 AutoSuspendAction=0
 AutoSuspendIdleTimeoutSec=3600
-LidAction=0
+LidAction=1
 
 [Battery][SuspendAndShutdown]
 AutoSuspendAction=0
 AutoSuspendIdleTimeoutSec=600
-LidAction=0
+LidAction=1
 
 [LowBattery][SuspendAndShutdown]
 AutoSuspendAction=0
 AutoSuspendIdleTimeoutSec=300
-LidAction=0
+LidAction=1

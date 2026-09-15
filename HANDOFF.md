@@ -10,9 +10,35 @@ Keep Luminos OS working as a daily-driver Windows replacement — the G14 deskto
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-Both faults reported 2026-09-14 are now **FIXED and verified live** — BUG-158 (live wallpaper) and
-BUG-159 (self-dimming screen). Resume the bar plan at step 2 (dGPU indicator). The reboot in
-"Still outstanding" item 1 is the oldest thing on the list and is still not done.
+Both faults reported 2026-09-14 are **FIXED and verified live** — BUG-158 (live wallpaper) and
+BUG-159 (self-dimming screen) — and the sleep policy was reversed to **lid-close-only** on request
+(DECISION 105). Resume the bar plan at step 2 (dGPU indicator).
+
+**The box rebooted 2026-09-14 13:43.** Outstanding item 1 is DONE; item 2 was retested on the new
+boot and is NOT fixed. Both corrected below — do not re-read the old text and re-plan a reboot.
+
+### ✅ 2026-09-14 — DECISION 105: lid close sleeps again, idle still never does
+Shawn asked for the never-sleep policy (DECISION 80 / `244f5eaf`) to be reversed and chose the
+**halfway** option when the cost was put in front of him: `luminos-hive.service` was active and
+**:8090 was listening at that moment** (pid 1057), so a suspend is an outage, not a saving.
+
+| trigger | before | now |
+|---|---|---|
+| lid close | nothing | **suspend** |
+| idle, lid open | nothing | nothing (unchanged) |
+| lid close + external monitor | nothing | nothing (unchanged) |
+
+Closing the lid is an *explicit act*; idling is the *absence* of one, and the absence is exactly when
+the phone is most likely to be using the box. Set on both layers because they fire in different
+contexts (BUG-091): `config/powerdevilrc` `LidAction=1` ×3 with `AutoSuspendAction=0` ×3 untouched,
+and `config/luminos-lidsleep.conf` → `suspend`/`suspend`/`ignore`/`ignore`. Verified live:
+`qdbus6 … lidAction` → **1**, logind → `suspend suspend ignore ignore`. Use `lidAction`, **never**
+`triggersLidAction` — it reads true for every config including `LidAction=0`.
+
+**Checked the risk before making the change, not after:** suspend/resume is proven on *this* kernel
+and driver — `PM: suspend entry (s2idle)` 2026-09-14 20:26:15 → `PM: suspend exit` 17 s later on the
+current boot, `nvidia-powerd` down and back cleanly, NVRM `610.57.04` loaded == installed,
+`PreserveVideoMemoryAllocations=1`.
 
 ## State — what is DONE
 
@@ -217,22 +243,24 @@ superseded — **do not merge them**); research trail and screenshots in `server
    the "free win" §4 instructs; Servarr persists that API field to `config.xml`. Flagged, not hidden.
 
 ## Still outstanding (ordered)
-1. **Reboot — still urgent, and now the ONLY thing left from the gaming work.** 553 packages were
-   upgraded at 11:27 on 2026-09-13 and the box has not booted since **2026-09-12 09:45**. Measured:
-   `kwin_wayland` (pid 1564) is compositing with **198 deleted mappings** including `libEGL_mesa.so`,
-   `libgbm.so`, `gbm/dri_gbm.so`, `libvulkan_radeon.so` and `libwayland-server.so.0.25.0`, while disk
-   holds mesa 26.2.2 and `libwayland-server.so.0.26.0`. `Xwayland` (1663) and `plasmashell` (1751,
-   1329 deleted maps) likewise. Plus glibc + systemd. On a PRIME box the game's frames cross that
-   boundary every frame. Afterwards confirm `dgpu-exec-v2 -- nvidia-smi` and that beast mode still
-   latches from GPU load. **No longer a prerequisite for BUG-157 — that is fixed without it.**
-2. **The SBIOS / Dynamic-Boost handshake failure is real but is NOT a power cap.** `dmesg` 09:45:53:
-   `PlatformRequestHandler failed to get target temp from SBIOS`. `asusd` can't read `nv_tgp` /
-   `nv_dynamic_boost` / `ppt_pl*` (ENODEV on
-   `/sys/class/firmware-attributes/asus-armoury/attributes/*/current_value`). Absent from boots
-   -1/-2/-3/-5 on the identical driver. **BUG-157's write-up originally blamed the 60 W ceiling on
-   this and it was wrong** — the enforced limit tracks the platform profile (quiet 60 / balanced 75 /
-   performance 90 W), measured on this same un-rebooted boot. Do not explain a low power limit with
-   this again. Reboot (item 1) is still the first thing to try for the handshake itself.
+1. ✅ **DONE — the reboot happened. `system boot 2026-09-14 13:43`** (boot id
+   `fc5df078…`). Confirmed on 2026-09-14: running kernel `7.0.5-arch1-1` == installed `linux`
+   package, loaded NVRM `610.57.04` == installed `nvidia-utils`/`nvidia-open-dkms 610.57.04-1`. The
+   198-deleted-mapping situation in `kwin_wayland`/`Xwayland`/`plasmashell` is therefore resolved.
+   Still not re-run after the reboot: `dgpu-exec-v2 -- nvidia-smi` and the check that beast mode
+   still latches from GPU load — **do those**, they are the only leftovers from the gaming work.
+2. **The SBIOS / Dynamic-Boost handshake failure SURVIVED the reboot — the fix everyone was waiting
+   on did not work.** Retested on boot 0 (2026-09-14): all four attributes still read **ENODEV**
+   (`nv_tgp`, `nv_dynamic_boost`, `ppt_pl1_spl`, `ppt_pl2_sppt` under
+   `/sys/class/firmware-attributes/asus-armoury/attributes/*/current_value`). "Reboot first" was the
+   standing advice in this slot; it has now been **tried and has failed**, so the next person needs a
+   different theory — firmware/BIOS version or the `asus-armoury` module itself, not a stale boot.
+   Note the log line `PlatformRequestHandler failed to get target temp from SBIOS` greps **zero**
+   times on both boot 0 and boot -1, so **do not use that message as the test** — it is absent even
+   while the fault is present. Test the attributes directly.
+   **Still true and still important:** this is **NOT a power cap**. BUG-157's write-up originally
+   blamed the 60 W ceiling on this and was wrong — the enforced limit tracks the platform profile
+   (quiet 60 / balanced 75 / performance 90 W). Do not explain a low power limit with this again.
 3. ⚠️ **`server/config/Caddyfile` in the repo is STALE — missing the Bazarr `:8450` block that is
    live on the box.** DECISION 98 added it to `/etc/caddy/Caddyfile` on 2026-09-13 17:51 and never
    mirrored it back. Restoring the repo copy onto the box today would silently drop Bazarr's front
@@ -252,14 +280,18 @@ superseded — **do not merge them**); research trail and screenshots in `server
    `usr/`, `etc/`, `lib`, `sbin`, `hooks/`, `early_cpio`, `buildconfig`, `keymap.bin`,
    `consolefont.psfu`). Plus an untracked `_to_delete/`. **Find out what these are before anyone
    commits or deletes them.**
-8. ⚠️ **`AGENTS.md` §9's `powerdevilrc` row is STALE** — found while fixing BUG-159, not fixed
-   because it is a separate change. It documents DECISION 38's `AutoSuspendAction=1`, `LidAction=1`,
-   `AutoSuspendIdleTimeoutSec=900/600/300`. The committed file has said `AutoSuspendAction=0`,
-   `LidAction=0`, `3600/600/300` since `244f5eaf` (2026-08-25, *"stop the G14 suspending — it serves
-   Dolphin to the phone now"*), which reversed DECISION 38. **An agent trusting that row would
-   "restore" suspend-on-lid-close onto a machine that is deliberately a server.** Fix the row, keep
-   the DECISION 38 history as history.
-9. **Known, not fixed, flagged deliberately:** the RAM-pressure branch in `monitorLoop` logs
+8. ✅ **DONE — `AGENTS.md` §9's `powerdevilrc` row was stale and is now rewritten** (it had claimed
+   `AutoSuspendAction=1` / `900/600/300` for the 20 days after `244f5eaf` turned every suspend off).
+   It now states DECISION 105, carries its own staleness warning, and flags that
+   `backups/power-2026-08-02/` holds only `powermanagementprofilesrc` — **the file PowerDevil 6.7
+   does not read** — so it is not a usable restore source despite the row previously saying
+   "Revert: restore the backup dir."
+9. **`systemd/luminos-lidsleep.conf` is an orphaned duplicate of `config/luminos-lidsleep.conf`
+   and should be DELETED, not maintained.** Nothing in the repo references it. On 2026-09-14 the two
+   **disagreed** — `config/` said `ignore` (live policy), `systemd/` still said `suspend` (the
+   2026-08-02 policy it was never updated from). Reconciled for now rather than deleted, because
+   other sessions are active in this tree. `config/` is canonical.
+10. **Known, not fixed, flagged deliberately:** the RAM-pressure branch in `monitorLoop` logs
    `resource coord: RAM 9% avail → +22% effective load (cap nudged down)`, but adding to
    `effectiveLoad` *raises* the cap in `computeAdaptiveCap` (`base + load/100 × (max-base)`). The
    log text and the arithmetic disagree about the sign. Left alone — out of scope for BUG-157, and
@@ -379,6 +411,17 @@ so traversal is impossible by construction. Verified with `/fonts/../../../etc/p
   requires saying so rather than skipping silently. Confirmed again this session — fell back to
   `luminos-notes.sh search` + `luminos-brain query`, both of which returned nothing for this topic.
 - **`asusctl profile -p` / `-P` do not exist.** The subcommand is `asusctl profile get`.
+
+## Files touched this session (Response 6 — DECISION 105, sleep policy)
+- `config/powerdevilrc` — `LidAction=0` → `1` ×3; `AutoSuspendAction=0` ×3 left alone on purpose
+- `config/luminos-lidsleep.conf` — logind layer → `suspend`/`suspend`/`ignore`/`ignore`
+- `systemd/luminos-lidsleep.conf` — orphaned duplicate reconciled (was stating the opposite policy)
+- `LUMINOS_DECISIONS.md` — **DECISION 105**
+- `LUMINOS_STATUS.md` — "Suspend / lid close" row rewritten
+- `AGENTS.md` §9 — the stale `powerdevilrc` row rewritten (outstanding item 8, now closed)
+- `HANDOFF.md` — this file; outstanding items 1 and 2 corrected against the new boot
+- **Live system:** `~/.config/powerdevilrc` + `/etc/systemd/logind.conf.d/luminos-lidsleep.conf`
+  reinstalled, `plasma-powerdevil` restarted, `systemd-logind` reloaded
 
 ## Files touched this session (Response 5 — BUG-159)
 - `docs/BUGS.md` — BUG-159 → **FIXED**, incl. the `.bak-awake` finding and the mid-fade side effect
