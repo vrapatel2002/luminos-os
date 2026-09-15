@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-14 — Response 7
+Last updated: 2026-09-15 — Response 8
 
 > Previous goals, complete, do not reconstruct from memory:
 > gaming/dGPU → `git show b08c3904:HANDOFF.md` · `org.luminos.style` QML → `git show 4273ed7e:HANDOFF.md`
@@ -10,6 +10,29 @@ Keep Luminos OS working as a daily-driver Windows replacement — the G14 deskto
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
+**BUG-160 open, options listed, nothing applied (2026-09-14).** Desktop icons sit *under* the bar.
+KWin honours the bar's 52 px exclusive zone for real windows — measured, maximized Chrome starts at
+exactly device x=104 / logical x=52 — but plasmashell computes `availableScreenRect` from **its own
+Plasma panels only**, and there are none (both containments are `formfactor=0`). So the desktop
+thinks all 1440 px are free and auto-places icon #1 at 0,0. The containment QML already honours it
+(`main.qml:184  leftMargin: root.availableScreenRect.x`) — it is being handed the wrong rect.
+Why it surfaced now: `ItemGeometries-1440x900=` is **empty**, wiped in the same 2026-09-13 20:48
+profile reset as BUG-158, so saved icon positions are gone and layout falls back to top-left.
+Folder-view `alignment` key is `0=Left / 1=Right` (verified in
+`/usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/config/main.xml`).
+
+**The bar did NOT reset — measured 2026-09-14.** Reported as "thick again"; it is **52 logical px**,
+the accepted value. Three independent confirmations: `~/.config/caelestia/shell-tokens.json` still
+holds `sizes.bar.innerWidth: 32` (upstream default is 40); exactly one `qs` process is running
+(`qs -p ~/.config/quickshell/caelestia-bar`, pid 1946); and a fresh screenshot changes colour at
+device x=104 = logical x=52 on all four sampled rows. Do not "re-apply" the slimming — it is applied.
+Where the width actually goes: `BarWrapper.qml:22  contentWidth = Tokens.sizes.bar.innerWidth +
+padding * 2`, with `padding = max(Tokens.padding.small=8, Config.border.thickness=10)` = **10**. So
+32 px of icons + **20 px of border padding** — 38% of the bar is padding, and `border.thickness` is
+still at its upstream default because `shell.json` has no `border` key at all. That is the untouched
+lever if it needs to go thinner.
+
+
 Both faults reported 2026-09-14 are **FIXED and verified live** — BUG-158 (live wallpaper) and
 BUG-159 (self-dimming screen) — and the sleep policy was reversed to **lid-close-only** on request
 (DECISION 105), then **amended the same day to be unconditional** (DECISION 106) — Shawn said
@@ -18,6 +41,33 @@ Resume the bar plan at step 2 (dGPU indicator).
 
 **The box rebooted 2026-09-14 13:43.** Outstanding item 1 is DONE; item 2 was retested on the new
 boot and is NOT fixed. Both corrected below — do not re-read the old text and re-plan a reboot.
+
+### ⚠️ 2026-09-15 — DECISION 107: D106 shipped a security regression. Read this first.
+Making the lid always suspend exposed a **dormant** hole: `~/.config/kscreenlockerrc` had
+`Autolock=false` AND `LockOnResume=false` from the never-sleep era, so every resume landed on an
+**unlocked desktop** — on a box with `NOPASSWD: ALL` sudo and **no disk encryption**. Fixed twice
+over: `LockOnResume=true` (verify it worked by checking `kwin_wayland` holds a `sleep` **delay**
+inhibitor reading *"Ensuring that the screen gets locked before going to sleep"* — its absence is the
+tell), and `luminos-lid` now runs `loginctl lock-sessions` before suspending. `-i` does not defeat
+this: it is `--check-inhibitors=no`, client-side, and delay inhibitors are still honoured.
+
+**Lesson worth keeping: changing *when* a machine sleeps changes *what a resume exposes*. The two
+settings were harmless for months only because the box never resumed.**
+
+Also fixed here: the "spontaneous 6-second wake" was **never a wake** — the empty SD reader (`mmc0`,
+33 × `error -110` per boot) held a wakeup source and *aborted* the suspend; wakeup disabled on bridge
+`0000:00:02.1` via `systemd/99-luminos-sdreader-nowake.rules`. And `luminos-lid.service` was hardened
+from bare full-root to `systemd-analyze security` **2.8**.
+
+**Open items Shawn was told about but which are HIS call — do not action unilaterally:** no FDE,
+`NOPASSWD: ALL`, sshd `PasswordAuthentication yes` on `0.0.0.0:22`, both SSH keys passphrase-less,
+`luminos-ram` serving unauthenticated `/metrics` on `0.0.0.0:9091` as root with CAP_SYS_PTRACE/CAP_KILL,
+and `Autolock=false` (nothing ever locks an idle open-lid machine).
+
+**Verified clean, do not re-investigate:** lock screen cannot fail open (4× retry → password-gated
+`EmergencyWindow`); only sleep hook is nvidia's, unmodified per `pacman -Qkk`; zram-only swap so
+memory never hits disk; hibernate impossible; nftables IS loaded (`is-active inactive` is a oneshot
+artefact); `:8090` is token-gated; `:8078` is localhost-only.
 
 ### ✅ 2026-09-14 — DECISION 106: a closed lid sleeps, and nothing may veto it
 **This supersedes the block below.** DECISION 105 shipped a *conditional* lid action and Shawn
@@ -304,7 +354,11 @@ superseded — **do not merge them**); research trail and screenshots in `server
    `backups/power-2026-08-02/` holds only `powermanagementprofilesrc` — **the file PowerDevil 6.7
    does not read** — so it is not a usable restore source despite the row previously saying
    "Revert: restore the backup dir."
-9. ⚠️ **DECISION 106's lid watcher has NOT been tested against a real lid close.** Every piece was
+9. ⚠️ **The lid watcher HAS now fired for real** (journal, 2026-09-15 17:39:43, lid closed →
+   suspend) — but that was BEFORE the lock fix. The lock-then-suspend path is **still untested
+   against a physical lid close.** Close the lid, reopen, and confirm it demands a password. Old note
+   follows for the verification method used:
+   **DECISION 106's lid watcher had not been tested against a real lid close.** Every piece was
    verified short of the physical act: the service is running on `/dev/input/event2`, `EVIOCGSW`
    confirms the node carries `SW_LID` and decodes correctly, and suspend/resume is proven on this
    kernel. But no one has actually shut the lid and watched it sleep. First chance, do it, and check
@@ -436,7 +490,18 @@ so traversal is impossible by construction. Verified with `/fonts/../../../etc/p
   `luminos-notes.sh search` + `luminos-brain query`, both of which returned nothing for this topic.
 - **`asusctl profile -p` / `-P` do not exist.** The subcommand is `asusctl profile get`.
 
-## Files touched this session (Response 7 — DECISION 106, unconditional sleep)
+## Files touched this session (Response 8 — DECISION 107, lock + security sweep)
+- `~/.config/kscreenlockerrc` — `LockOnResume` false → **true** (live only, not tracked in repo)
+- `scripts/luminos-lid` — locks via `loginctl lock-sessions` before suspending; absolute binary
+  paths; 10 s debounce against a resume-time suspend loop
+- `systemd/luminos-lid.service` — full hardening block; `StartLimit*` moved into `[Unit]`
+- `systemd/99-luminos-sdreader-nowake.rules` — **new**, stops the empty SD reader aborting suspend
+- `LUMINOS_DECISIONS.md` — **DECISION 107**
+- `HANDOFF.md` — this file
+- **Live system:** rule installed + `udevadm control --reload-rules`, wakeup disabled on
+  `0000:00:02.1`, `luminos-lid` reinstalled and restarted
+
+## Files touched earlier this session (Response 7 — DECISION 106, unconditional sleep)
 - `scripts/luminos-lid` — bash screen-blanker → python3 evdev watcher that suspends with `-i`
 - `systemd/luminos-lid.service` — udev-triggered oneshot → long-running, `Restart=always`, **enabled**
 - `systemd/99-luminos-lid.rules` — **deleted** (could never match on this kernel)

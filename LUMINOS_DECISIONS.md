@@ -6319,3 +6319,69 @@ logind → `suspend suspend suspend ignore`; `lidAction` → 1.
 its own and will keep doing so no matter what the KDE settings say — then `LidAction=0` ×3 and all
 four logind keys to `ignore`.
 Cross-ref: DECISION 105, DECISION 80 (`244f5eaf`), DECISION 38, BUG-091, BUG-159.
+
+---
+
+## DECISION 107 — A sleep that leaves the machine unlocked is not a finished sleep
+**Date:** 2026-09-15 · **Agent:** claude-code · **Amends:** DECISION 106 (regression it caused)
+
+Shawn: *"why is the laptop not locking when its put to sleep what have you done?"* Fair. DECISION 106
+made the lid always suspend without checking what a resume exposed.
+
+**Root cause was pre-existing, the regression was mine.** `~/.config/kscreenlockerrc` held
+`Autolock=false` **and** `LockOnResume=false` — set during the never-sleep era, when they were
+harmless because the box physically never resumed. DECISION 106 turned a dormant setting into a live
+hole: lid close → suspend → lid open → **unlocked desktop**. On a machine with
+`shawn ALL=(ALL) NOPASSWD: ALL` in `/etc/sudoers.d/` and no disk encryption, that is walk-up root.
+
+**Fixed two ways, deliberately redundant:**
+1. `LockOnResume=true`. Confirmed live and load-bearing: the moment it was set, `kwin_wayland` took a
+   **`sleep` delay inhibitor** reading *"Ensuring that the screen gets locked before going to sleep"*
+   — it had been absent before, which is exactly why nothing locked.
+2. `luminos-lid` now calls `loginctl lock-sessions` **before** it suspends. The lock guarantee lives
+   next to the sleep guarantee rather than depending on a KDE checkbox that was already found
+   switched off once.
+
+**`-i` does not defeat this, and that was checked rather than assumed.** `systemctl -i` is
+`--check-inhibitors=no`, a **client-side** check that only suppresses systemctl's own refusal on
+*block* inhibitors. logind's handling of **delay** inhibitors is untouched, so kwin still gets its
+window to lock before the machine goes down.
+
+**Two real bugs found in the same sweep and fixed:**
+
+**The 6-second "spontaneous wake" was not a wake — the suspend was aborted.**
+`PM: Some devices failed to suspend, or early wake event detected` appears exactly twice this boot,
+matching exactly the two 6-second suspend cycles. Cause: the **empty** Realtek SD reader (`mmc0`)
+wedges — 33 × `mmc0: error -110 whilst initialising SD card` in one boot — and holds a kernel wakeup
+source for ~5.4 s, which kicks s2idle back out. Its parent bridge `0000:00:02.1` was wake-enabled.
+Fixed with `systemd/99-luminos-sdreader-nowake.rules`. The reader still works; it just can no longer
+wake the machine. **Do not re-enable it** without re-testing suspend.
+
+**`luminos-lid.service` shipped as unhardened full root.** Empty `CapabilityBoundingSet`,
+`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `SystemCallFilter=@system-service` and the
+rest added; `systemd-analyze security` now rates it **2.8 OK** where it had the entire capability set
+before. The sibling `luminos-ram.service` had always done this correctly, so the omission was haste,
+not design. Also: absolute `/usr/bin/systemctl` and `/usr/bin/loginctl` instead of `$PATH` lookup,
+`StartLimitIntervalSec=120`/`StartLimitBurst=5` in `[Unit]` so a missing lid device fails loudly
+instead of respawning silently every 5 s forever, and a 10 s **debounce** so a switch state re-synced
+on resume cannot suspend-loop the machine.
+
+**Deliberately NOT changed — reported to Shawn instead, because these are his calls, not mine:**
+`Autolock=false` (nothing ever locks an idle machine with the lid open — separate from what he
+reported), no full-disk encryption, `NOPASSWD: ALL` sudo, `PasswordAuthentication yes` on sshd
+listening on `0.0.0.0:22`, both SSH private keys stored without passphrases, and `luminos-ram`
+serving unauthenticated `/metrics` on `0.0.0.0:9091` from a root process holding `CAP_SYS_PTRACE`
+and `CAP_KILL`. Each is a security tradeoff with a real cost to his workflow.
+
+**Verified clean, so nobody re-investigates:** the lock screen **cannot fail open** — a crashing
+greeter or wallpaper retries 4× with software rendering and then shows the password-gated
+`EmergencyWindow`; `kscreenlocker_greet` even guards against `Qt.quit()`
+(*"Greeter tried to quit without being unlocked"*). Only sleep hook is `/usr/lib/systemd/system-sleep/nvidia`,
+unmodified per `pacman -Qkk`. zram-only swap, so no memory ever reaches disk. Hibernate impossible
+(no `resume=`, no disk swap). nftables **is** loaded despite `is-active` reporting `inactive` — it is
+a `Type=oneshot` without `RemainAfterExit`. Mobile chat on `:8090` is properly token-gated
+(`secrets.compare_digest`, `0600` token). HIVE on `:8078` binds `127.0.0.1`, not the LAN.
+
+**Files:** `~/.config/kscreenlockerrc` (live, untracked), `scripts/luminos-lid`,
+`systemd/luminos-lid.service`, `systemd/99-luminos-sdreader-nowake.rules` (new).
+Cross-ref: DECISION 106, DECISION 105, BUG-158 (live wallpaper).

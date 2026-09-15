@@ -21,17 +21,36 @@ Why not just let PowerDevil or logind do it:
 So this reads the physical switch off its evdev node, which nothing can intercept,
 and suspends with -i, which ignores every inhibitor there is. PowerDevil still
 handles the ordinary case gracefully; this is the backstop for when it is overruled.
+
+[CHANGE: claude-code | 2026-09-15] It now LOCKS before it suspends.
+    The first version did not, and the machine woke straight onto a live desktop.
+    Root cause was `LockOnResume=false` in kscreenlockerrc (set long ago, harmless
+    only because the box never used to sleep) — that is fixed separately. But the
+    lock is not left depending on a KDE checkbox that was already found switched
+    off once: `loginctl lock-sessions` is called here first, so the guarantee lives
+    in the same place as the sleep guarantee.
+    Ordering is safe even with -i: `-i` is `--check-inhibitors=no`, a *client-side*
+    check, so logind still honours kwin's "Ensuring that the screen gets locked
+    before going to sleep" delay inhibitor.
 """
 
 import re
 import struct
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 EV_SW, SW_LID = 0x05, 0x00
 FMT = "llHHi"  # struct input_event, 24 bytes on 64-bit
 SIZE = struct.calcsize(FMT)
+
+# Absolute paths: this runs as root, PATH is not its to trust.
+LOGINCTL, SYSTEMCTL = "/usr/bin/loginctl", "/usr/bin/systemctl"
+
+# The kernel can re-sync switch state on resume. Without this, a lid that is still
+# closed when the machine wakes would re-fire and could suspend-loop the machine.
+DEBOUNCE_SEC = 10
 
 
 def lid_event_node():
@@ -47,9 +66,16 @@ def lid_event_node():
 node = lid_event_node()
 print(f"luminos-lid: watching {node}", flush=True)
 
+last_fired = 0.0
 with node.open("rb") as dev:
     while chunk := dev.read(SIZE):
         _, _, etype, code, value = struct.unpack(FMT, chunk)
-        if etype == EV_SW and code == SW_LID and value == 1:
-            print("luminos-lid: lid closed — suspending, ignoring inhibitors", flush=True)
-            subprocess.run(["systemctl", "suspend", "-i", "--no-block"])
+        if etype != EV_SW or code != SW_LID or value != 1:
+            continue
+        if time.monotonic() - last_fired < DEBOUNCE_SEC:
+            print("luminos-lid: ignoring repeat close event (debounce)", flush=True)
+            continue
+        last_fired = time.monotonic()
+        print("luminos-lid: lid closed — locking, then suspending", flush=True)
+        subprocess.run([LOGINCTL, "lock-sessions"])
+        subprocess.run([SYSTEMCTL, "suspend", "-i", "--no-block"])

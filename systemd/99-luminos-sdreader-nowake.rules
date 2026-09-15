@@ -1,0 +1,17 @@
+# [CHANGE: claude-code | 2026-09-15]
+# Stop the empty SD card reader from aborting suspend.
+#
+# The Realtek reader (rtsx_pci, mmc0) wedges on an empty slot — 33 × "mmc0: error
+# -110 whilst initialising SD card" in a single boot — and while it retries it
+# holds a kernel wakeup source for ~5.4 s. Its parent PCI bridge 0000:00:02.1 is
+# wake-enabled, so that wakeup source kicks the s2idle attempt back out:
+#
+#   PM: suspend entry (s2idle)
+#   PM: Some devices failed to suspend, or early wake event detected
+#   PM: suspend exit                         <- ~6 s later, lid still shut
+#
+# Seen twice in one boot, both times matching a 6-second suspend. It self-corrects
+# (the next attempt sticks) but it leaves a closed laptop awake and — until today's
+# lock fix — awake and unlocked. Disabling wakeup on the bridge does not disable
+# the reader; a card still works, it just can no longer wake the machine.
+ACTION=="add", SUBSYSTEM=="pci", KERNEL=="0000:00:02.1", ATTR{power/wakeup}="disabled"

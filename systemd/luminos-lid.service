@@ -6,12 +6,35 @@
 [Unit]
 Description=Luminos lid handler — a closed lid suspends, ignoring all inhibitors
 After=multi-user.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/luminos-lid
 Restart=always
 RestartSec=5
-
+# [CHANGE: claude-code | 2026-09-15] Without these it ran as full root with the
+# entire capability set — sibling luminos-ram.service already did this properly,
+# so the omission was just haste. It needs exactly three things: read
+# /proc/bus/input/devices, read the lid evdev node, and talk to logind over the
+# system bus. Nothing here takes any of those away.
+# StartLimit: if the Lid Switch device is ever missing, the script exits non-zero.
+# At RestartSec=5 against the default 10s/5-burst window the rate limiter never
+# trips, so it would respawn forever in silence. This makes it fail loudly instead.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 [Install]
 WantedBy=multi-user.target
