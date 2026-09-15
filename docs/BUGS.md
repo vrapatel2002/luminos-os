@@ -40,6 +40,21 @@ Last Updated: 2026-08-29 (BUG-149 **BUG-142 WAS NEVER A vkd3d BUG — WE DELETED
 - Verified: before, 4 profile switches and 4 dGPU wakes in ~20 min. After, **0 profile switches
   and 0 dGPU wakes in 9 minutes**, then a clean **0 s awake out of 180 s**. The card now holds
   true D3cold at 0 W instead of sitting 17% awake at ~2 W.
+- **Why it surfaced only now, after living in the tree since 2026-05-24** (`27477ef6`, the commit
+  that introduced `quietIdleTicks`): until BUG-160 was fixed on 2026-09-14 the dGPU **slept 0 s out
+  of 300 s** — it was awake permanently. A wake notify delivered to an already-awake card does
+  nothing and leaves no trace, so the flapping fired NVPCF into the void for three and a half
+  months. Fixing BUG-160 made the card sleep, which made the pre-existing bug observable for the
+  first time. Nothing regressed; a dormant defect was uncovered by the fix beneath it.
+- Follow-up hardening, same day: all seven scattered `runCmd("asusctl", "profile", "set", …)` call
+  sites now go through one `setProfile()`, which compares against `/sys/firmware/acpi/platform_profile`
+  (hardware truth, not our restorable-from-disk `prevState`) and returns without doing anything if
+  the profile already matches. This closes a second latent instance of the same bug: the
+  **emergency-thermal branch re-sent "Quiet" on every 2 s tick** for the entire duration of an
+  overheat, which would have pinned the dGPU awake exactly when the machine could least afford it.
+  A `noteProfileChange()` counter now logs a warning above 4 changes per 10 minutes. Deliberately
+  **not** a rate limiter — refusing a change the thermal code asked for could strand the laptop in
+  the wrong profile with no retry, since every caller `continue`s immediately after.
 - Lesson worth keeping: *"nothing is holding the GPU"* was true, and it is **not** the same
   statement as *"nothing is waking it"*. An fd scan can only ever find a userspace holder; this
   wake came from firmware and was invisible to every tool already in the repo. `rpm_resume` is the

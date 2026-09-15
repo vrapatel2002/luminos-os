@@ -582,7 +582,7 @@ func monitorLoop(ctx context.Context) {
 					src = "cpu"
 				}
 				lg.Info("beast mode → Performance (trigger: %s, cpu=%.0f%%, dgpu=%.0f%%)", src, cpuLoad, dgpuLoad)
-				runCmd("asusctl", "profile", "set", "Performance")
+				setProfile("Performance")
 				setEPPAfterAsusctl("performance")
 				setAllMaxFreq(0) // full boost — adaptive governor suspended
 				prevAppliedCapKHz = cpuHardwareMaxFreq
@@ -598,7 +598,7 @@ func monitorLoop(ctx context.Context) {
 			cpuProfile := applyCPUBeastDetection(cpuLoad, "Performance")
 			if gpuProfile == "Balanced" && cpuProfile == "Balanced" {
 				lg.Info("beast mode exit → Balanced (cpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, dgpuLoad)
-				runCmd("asusctl", "profile", "set", "Balanced")
+				setProfile("Balanced")
 				applyAggressiveFanCurve("balanced") // re-apply: asusctl loses custom curve on profile switch
 				currentThermalZone = ZoneCool
 				thermalDownholdTick = 0
@@ -618,7 +618,7 @@ func monitorLoop(ctx context.Context) {
 				if quietTicks >= quietIdleTicks {
 					quietTicks = 0
 					lg.Info("idle → Quiet (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
-					runCmd("asusctl", "profile", "set", "Quiet")
+					setProfile("Quiet")
 					applyAggressiveFanCurve("quiet") // re-apply: asusctl loses custom curve on profile switch
 					updateState(onAC, temp, dgpuLoad, prevState.EPP, "Quiet")
 					sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
@@ -631,7 +631,7 @@ func monitorLoop(ctx context.Context) {
 			if cpuLoad >= quietExitCPUPct || igpuLoad >= quietExitIGPUPct || dgpuLoad >= quietExitDGPUPct {
 				quietTicks = 0
 				lg.Info("load → Balanced (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
-				runCmd("asusctl", "profile", "set", "Balanced")
+				setProfile("Balanced")
 				applyAggressiveFanCurve("balanced") // re-apply: asusctl loses custom curve on profile switch
 				updateState(onAC, temp, dgpuLoad, prevState.EPP, "Balanced")
 				sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
@@ -711,7 +711,7 @@ func monitorLoop(ctx context.Context) {
 				prevAppliedCapKHz = 3500000
 			} else {
 				lg.Warn("%.1f°C > %.0f°C — Emergency: Quiet + 2GHz cap", temp, thermalEmergencyC)
-				runCmd("asusctl", "profile", "set", "Quiet")
+				setProfile("Quiet")
 				setAllEPP("power")
 				setAllMaxFreq(2000000)
 				prevAppliedCapKHz = 2000000
@@ -833,7 +833,7 @@ func applyACTransition(onAC bool) {
 		setWiFiPowerSave(false)
 		setKSM(true)
 		setDisplayHz(120)
-		runCmd("asusctl", "profile", "set", "Balanced")
+		setProfile("Balanced")
 		// asusd applies EPP asynchronously via D-Bus — wait for it to finish
 		// before overwriting. EPP=power targets 45°C idle on AC and battery alike.
 		setEPPAfterAsusctl("power")
@@ -845,7 +845,7 @@ func applyACTransition(onAC bool) {
 		setWiFiPowerSave(true)
 		setKSM(false)
 		setDisplayHz(60)
-		runCmd("asusctl", "profile", "set", "Quiet")
+		setProfile("Quiet")
 		setEPPAfterAsusctl("power")
 		prevState.EPP = "power"
 		prevState.Profile = "Quiet"
@@ -1317,6 +1317,56 @@ func abs(x int) int {
 	}
 	return x
 }
+
+// [CHANGE: claude-code | 2026-09-15] BUG-161 follow-up: every profile write goes
+// through here now, instead of seven scattered runCmd("asusctl", "profile", "set", …)
+// calls that each decided on their own.
+//
+// Two reasons. First, a write that changes nothing is not free: asusd still writes the
+// ASUS platform profile, the firmware still answers with an ACPI NVPCF notify, and the
+// nvidia driver still resumes the dGPU out of D3cold to hear it. The emergency-thermal
+// branch re-sent "Quiet" on every 2s tick for as long as the machine was hot, which
+// would have pinned the card awake for the whole overheat. Nobody noticed because until
+// 2026-09-14 the dGPU never slept at all, so there was never anything to wake.
+//
+// Second, the truth lives in sysfs, not in our own prevState — that struct is restored
+// from a file across restarts and can disagree with the hardware. We compare against
+// /sys/firmware/acpi/platform_profile, which is what the firmware actually thinks.
+//
+// Deliberately NOT a rate limiter. Skipping a profile change the thermal code asked for
+// could leave the laptop cooking in the wrong profile with no retry, since every caller
+// `continue`s straight after. Hysteresis is what stops oscillation (see quietExit*);
+// this only stops pointless repeats.
+func setProfile(name string) {
+	if cur, err := os.ReadFile("/sys/firmware/acpi/platform_profile"); err == nil {
+		if strings.EqualFold(strings.TrimSpace(string(cur)), name) {
+			return
+		}
+	}
+	runCmd("asusctl", "profile", "set", name)
+	noteProfileChange()
+}
+
+// noteProfileChange makes a flap visible in the log while it is happening. BUG-161 sat
+// here for almost four months precisely because nothing counted: each switch looked
+// reasonable on its own line, and only the *rate* was wrong. Four changes in ten minutes
+// on an idle desktop is not tuning, it is oscillation, and each one wakes the dGPU.
+func noteProfileChange() {
+	now := time.Now()
+	kept := recentProfileChanges[:0]
+	for _, t := range recentProfileChanges {
+		if now.Sub(t) < 10*time.Minute {
+			kept = append(kept, t)
+		}
+	}
+	recentProfileChanges = append(kept, now)
+	if len(recentProfileChanges) > 4 {
+		lg.Warn("profile flapping: %d changes in 10min — each one wakes the dGPU via ACPI NVPCF (BUG-161)",
+			len(recentProfileChanges))
+	}
+}
+
+var recentProfileChanges []time.Time
 
 // setEPPAfterAsusctl waits for asusd's async D-Bus write to complete before
 // overwriting EPP. asusctl returns immediately but asusd applies the profile
