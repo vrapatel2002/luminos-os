@@ -154,3 +154,21 @@ luminos-server.tail1fd435.ts.net:8449 {
 	tls internal
 	import proxy 9696
 }
+
+# --- Bazarr :8450 -------------------------------------------------------------
+# [CHANGE: claude-code | 2026-09-16] DECISION 98 added this block to the LIVE
+# /etc/caddy/Caddyfile on 2026-09-13 17:51 and never wrote it back here, so this file was
+# one `sudo cp` away from silently deleting Bazarr's front door.
+# ⚠️ HONEST PROVENANCE: this block was RECONSTRUCTED from the nine blocks above plus the
+# port recorded in DECISION 98 (6767 → 8450). It was NOT copied off the server — the
+# session that wrote it had no route to the box. `diff` it against /etc/caddy/Caddyfile
+# before this file is ever installed.
+# Bazarr listens on 6767, loopback-only and LAN-blocked; 8450 is its only way in.
+luminos-server.tail1fd435.ts.net:8450 {
+	import tsname
+	import proxy 6767
+}
+100.82.125.26:8450, 192.168.2.61:8450, 192.168.2.62:8450 {
+	tls internal
+	import proxy 6767
+}

@@ -1,0 +1,15 @@
+# [CHANGE: claude-code | 2026-09-16] BUG-164 / DECISION 112.
+# Weekly, and deliberately NOT on import: this ffprobes the whole library off a 5400 rpm
+# spindle, and DECISION 100 is the standing lesson about what a second job on that head
+# does to playback. Idle IO + jitter keeps it out of the way.
+[Unit]
+Description=Weekly Roku Direct Play audit of the media library
+
+[Timer]
+OnCalendar=weekly
+# The server is powered on and off by hand, so a missed run must still happen.
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

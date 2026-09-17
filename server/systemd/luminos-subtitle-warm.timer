@@ -1,0 +1,17 @@
+# [CHANGE: claude-code | 2026-09-16] DECISION 113.
+# Daily, not weekly: the whole point is that newly imported episodes are already warm
+# before anyone sits down. It is cheap to repeat -- an already-cached track answers in
+# ~6 ms, so only genuinely new files cost anything.
+# 04:00 is after Intro Skipper's 00:00 media-segment scan, so the two do not fight over
+# the same disk head.
+[Unit]
+Description=Daily subtitle pre-extraction sweep
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+# The server is powered on and off by hand, so a missed run must still happen.
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

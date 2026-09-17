@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[CHANGE: claude-code | 2026-08-05]
+"""[CHANGE: claude-code | 2026-08-05] [CHANGE: claude-code | 2026-09-16] DECISION 113
 Pre-extract every embedded text subtitle track so the first play never waits.
 
 Jellyfin demuxes an embedded subtitle out of the MKV on demand, on first request.
@@ -14,8 +14,34 @@ nothing to the media files.
 import json, os, sys, time, urllib.request, urllib.error
 
 BASE = 'http://127.0.0.1:8096'
-TOKEN = open('/tmp/jftoken').read().strip()
-USER = open('/tmp/jfuid').read().strip()
+
+# [CHANGE: claude-code | 2026-09-16] Credentials no longer come from /tmp.
+# The original read /tmp/jftoken and /tmp/jfuid, which do not survive a reboot -- recorded
+# as a known weakness in DECISION 60 and the reason this never became a timer: a scheduled
+# run would have died on a missing file at the first boot after it was set up, and said so
+# only in a log. The durable key is the `luminos-admin` row DECISION 64 added, at
+# /root/.jellyfin-token mode 600.
+TOKEN_PATHS = ['/root/.jellyfin-token', '/tmp/jftoken']
+
+
+def _token():
+    tok = os.environ.get('JELLYFIN_TOKEN')
+    if tok:
+        return tok.strip()
+    for path in TOKEN_PATHS:
+        try:
+            with open(path) as fh:
+                tok = fh.read().strip()
+            if tok:
+                return tok
+        except OSError:
+            continue
+    sys.exit('no Jellyfin token: tried $JELLYFIN_TOKEN and %s. DECISION 64 put the '
+             '`luminos-admin` key in /root/.jellyfin-token -- run this as root.'
+             % ', '.join(TOKEN_PATHS))
+
+
+TOKEN = _token()
 HDRS = {'Authorization': 'MediaBrowser Token="%s"' % TOKEN}
 TEXT_CODECS = {'subrip', 'srt', 'ass', 'ssa', 'mov_text', 'subviewer', 'webvtt'}
 
@@ -35,7 +61,34 @@ def warm(item_id, index, timeout=900):
     return n, time.time() - t0
 
 
+def _user():
+    """Resolve the user id from the server instead of from /tmp/jfuid.
+
+    An admin token can list users, so there is nothing to cache and nothing to go stale.
+    Deliberately refuses on more than one candidate rather than guessing: the watch state
+    this warms is per-user, and warming the wrong one would look like it worked.
+    """
+    uid = os.environ.get('JELLYFIN_UID')
+    if uid:
+        return uid.strip()
+    try:
+        with open('/tmp/jfuid') as fh:
+            uid = fh.read().strip()
+            if uid:
+                return uid
+    except OSError:
+        pass
+    users = get('/Users')
+    admins = [u for u in users if (u.get('Policy') or {}).get('IsAdministrator')]
+    pick = admins or users
+    if len(pick) != 1:
+        sys.exit('cannot choose a user: %d candidates (%s). Set $JELLYFIN_UID.'
+                 % (len(pick), ', '.join(u.get('Name', '?') for u in pick)))
+    return pick[0]['Id']
+
+
 def main():
+    USER = _user()
     items = get('/Items?userId=%s&recursive=true&includeItemTypes=Episode,Movie'
                 '&fields=MediaSources&limit=5000' % USER, timeout=300)['Items']
     todo = []
@@ -64,6 +117,12 @@ def main():
 
     cached = sum(len(f) for _, _, f in os.walk('/var/lib/jellyfin/data/subtitles'))
     print('done: %d ok, %d failed, %d files now in the subtitle cache' % (ok, fail, cached))
+    # Non-zero on any failure so a scheduled run surfaces in `systemctl list-units
+    # --failed` instead of scrolling past in a journal. Re-running is cheap and safe:
+    # an already-cached track answers in ~6 ms, so the sweep is idempotent by nature and
+    # only ever pays the real cost on files imported since the last run.
+    return 1 if fail else 0
 
 
-main()
+if __name__ == '__main__':
+    sys.exit(main())

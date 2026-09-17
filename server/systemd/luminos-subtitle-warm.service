@@ -1,0 +1,22 @@
+# [CHANGE: claude-code | 2026-09-16] DECISION 113 (finishes DECISION 60).
+# Pre-extracts embedded text subtitle tracks so the first play never waits.
+# Root, because the API key lives in /root/.jellyfin-token (DECISION 64). Reads only.
+[Unit]
+Description=Pre-extract embedded subtitles into Jellyfin's cache
+Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
+After=jellyfin.service
+Wants=jellyfin.service
+
+[Service]
+Type=oneshot
+# Exit 1 means at least one track failed to extract. Allowed to fail on purpose so it
+# shows up in `systemctl list-units --failed` rather than only in the journal.
+ExecStart=/usr/local/bin/luminos-subtitle-warm
+# The sweep reads whole files off the 5400 rpm spindle. DECISION 100 is the standing
+# lesson about a second job on that head, so it yields to anything that is streaming.
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=4h
+
+[Install]
+WantedBy=multi-user.target

@@ -27,7 +27,12 @@ import os
 import subprocess
 import sys
 
-ROOTS = ["/srv/media/tv", "/srv/media/movies"]
+# [CHANGE: claude-code | 2026-09-16] Second disk added. DECISION 91 gave the library a
+# second root on 2026-09-03 and this list was never extended, so every weekly run since
+# then has ffprobed half the library and reported a clean bill for the other half. A
+# missing path here fails SILENTLY -- os.walk on a non-existent dir yields nothing.
+ROOTS = ["/srv/media/tv", "/srv/media/movies",
+         "/srv/external/tv", "/srv/external/movies"]
 EXTS = (".mkv", ".mp4", ".m4v", ".avi")
 # Matched against the track title. Kept narrow on purpose: "AD" alone is far too
 # common in real titles to be safe here.

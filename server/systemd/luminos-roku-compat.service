@@ -1,0 +1,21 @@
+# [CHANGE: claude-code | 2026-09-16] BUG-164 / DECISION 112.
+# Flags library files that would force Jellyfin into a live transcode for the Roku,
+# because a live transcode is what breaks seeking there (jellyfin-roku#582).
+# Runs as root purely to read every file under both library roots; it writes nothing.
+[Unit]
+Description=Audit the library for files that will not Direct Play on the Roku
+Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
+After=jellyfin.service
+Wants=jellyfin.service
+
+[Service]
+Type=oneshot
+# Exit 1 means "at least one file will transcode, and seeking will break on it".
+# The unit is ALLOWED to fail, same as luminos-audio-audit: `systemctl list-units
+# --failed` is then the place the finding shows up, instead of a log nobody reads.
+ExecStart=/usr/local/bin/luminos-roku-compat
+Nice=15
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

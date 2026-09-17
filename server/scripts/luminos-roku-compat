@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""[CHANGE: claude-code | 2026-09-16] BUG-164 / DECISION 112.
+
+Find -- and optionally repair -- library files that will force Jellyfin into a LIVE
+TRANSCODE for the Roku, because a live transcode is what breaks seeking on that client.
+
+WHY THIS EXISTS, in one paragraph. Direct Play means the Roku pulls the file itself with
+byte-range requests and does its own seeking; it works. A transcode replaces that with HLS
+off a live jellyfin-ffmpeg, where a seek tears the encoder down and restarts it at an
+offset -- and the restarted stream arrives labelled as starting at zero. The Roku believes
+it, shows 00:00, and plays from there. That is jellyfin/jellyfin-roku#582, still open
+against client 3.2.3 (the newest, 2026-08-03) and servers 10.10-10.11.x. We cannot patch a
+Roku channel. So the fix is not to make transcoded seeking work; it is to make sure
+nothing has to transcode. This script is the standing check for that.
+
+  luminos-roku-compat                   # audit both disks, exit 1 if anything would transcode
+  luminos-roku-compat --json            # machine-readable, for the timer
+  luminos-roku-compat --observed        # ground truth: what Jellyfin ACTUALLY transcoded today
+  luminos-roku-compat --fix-audio       # DRY RUN: what an added AC3 track would touch
+  luminos-roku-compat --fix-audio --apply
+
+SAFETY, same shape as luminos-dv-fix (DECISION 95): --fix-audio is a dry run unless
+--apply is given; it writes to a temp file, checks duration and stream count against the
+source, preserves the filename so Jellyfin and Sonarr paths stay valid, moves the original
+into BACKUP outside both library roots, and NEVER deletes anything. It never re-encodes
+video -- -c:v copy -- so there is no quality loss and no hour-long job.
+
+READ THIS BEFORE TRUSTING THE VERDICTS. The capability table below is the one guessed part
+of this script. It was written without access to the Roku, from what the server docs record
+(DECISION 37: "the TV takes H264"; AllowHevcEncoding=false; no AV1 anywhere in the chain).
+Roku models differ -- a 4K stick direct-plays HEVC Main10 that an older HD model will not.
+So: run --observed first. It reads what Jellyfin really did, with the Roku's real device
+profile, and disagreements between that and the table below are the table being wrong, not
+Jellyfin. Fix the table, do not fix the evidence.
+"""
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+# Both disks. luminos-audio-audit still lists only /srv/media and has therefore been blind
+# to everything on the second disk since DECISION 91 added it on 2026-09-03.
+ROOTS = ["/srv/media/tv", "/srv/media/movies",
+         "/srv/external/tv", "/srv/external/movies"]
+EXTS = (".mkv", ".mp4", ".m4v", ".avi", ".ts")
+BACKUP = os.environ.get("LUMINOS_ROKU_BACKUP", "/srv/external/_roku_pre_ac3_originals")
+
+# Jellyfin does not run the ffmpeg on $PATH (README: "Two ffmpegs are not the same").
+# Use its own build so a codec name here means what it means to Jellyfin.
+FF = "/usr/lib/jellyfin-ffmpeg/ffmpeg"
+FP = "/usr/lib/jellyfin-ffmpeg/ffprobe"
+if not os.path.exists(FP):
+    FF, FP = "ffmpeg", "ffprobe"
+
+# [CHANGE: claude-code | 2026-09-16] Was "/var/lib/jellyfin/log", which does not exist on
+# this server -- the real path is /var/log/jellyfin. So --observed, the ONE function in here
+# written to be ground truth and to overrule the guessed table below, could never run at all.
+# Same class of fault as the luminos-audio-audit ROOTS bug. Probe, do not hardcode.
+JF_LOG_DIR = next((d for d in ("/var/log/jellyfin", "/var/lib/jellyfin/log")
+                   if os.path.isdir(d)), "/var/log/jellyfin")
+
+# ---------------------------------------------------------------- capability table
+# See the warning in the docstring. Everything outside these sets forces a transcode.
+DIRECT_VIDEO = {"h264", "hevc", "mpeg4", "vp8", "vp9"}
+# Roku takes AAC/MP3 natively and passes AC3/EAC3 through to the receiver. DTS, DTS-HD MA,
+# TrueHD, FLAC and PCM are the ones that show up on remuxes and force an audio transcode --
+# which on its own is enough to break seeking (jellyfin-roku#582 reports exactly that).
+DIRECT_AUDIO = {"aac", "ac3", "eac3", "mp3"}
+# Image subtitles have to be painted onto the picture, which is a full video re-encode.
+# Only matters while Jellyfin is set to show subtitles by default -- it is (DECISION 60,
+# SubtitleMode: Always) -- and only when there is no text track it could have picked first.
+IMAGE_SUBS = {"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"}
+# [CHANGE: claude-code | 2026-09-16] ASS/SSA moved OUT of TEXT_SUBS -- this was the bug that
+# made this script certify a library as clean while Jellyfin was transcoding it live.
+# ASS is a text format, but it is not one the Roku can render. Jellyfin only converts
+# subrip-class tracks to WebVTT for client-side display; ASS carries styling, positioning
+# and embedded fonts that have nowhere to go on that client, so Jellyfin BURNS IT IN --
+# which is a full video re-encode, i.e. exactly the live transcode this script exists to
+# prevent. Measured on the box 2026-09-16: every Solo Leveling episode carrying ASS
+# transcoded with `subtitles=...:alpha=1:sub2video=1` + `overlay_vaapi`, including S01E02,
+# which is 1080p, was NOT resized, and had its audio stream-COPIED -- burn-in was the only
+# cause present. The three episodes with no subtitle track at all (E01/E03/E07) never
+# transcoded once in four days of logs.
+BURN_SUBS = IMAGE_SUBS | {"ass", "ssa"}
+TEXT_SUBS = {"subrip", "mov_text", "webvtt", "text"}
+
+
+def probe(path):
+    out = subprocess.run(
+        [FP, "-v", "error", "-show_entries",
+         "stream=index,codec_type,codec_name,channels:stream_tags=language,title:"
+         "stream_disposition=default,forced",
+         "-show_entries", "format=duration",
+         "-of", "json", path],
+        capture_output=True, text=True)
+    if out.returncode != 0:
+        return None
+    try:
+        return json.loads(out.stdout)
+    except ValueError:
+        return None
+
+
+def verdict(info):
+    """Return (list_of_reasons, best_source_audio_index_or_None)."""
+    streams = info.get("streams", [])
+    vids = [s for s in streams if s.get("codec_type") == "video"
+            and s.get("codec_name") not in ("mjpeg", "png")]   # cover art is not video
+    auds = [s for s in streams if s.get("codec_type") == "audio"]
+    subs = [s for s in streams if s.get("codec_type") == "subtitle"]
+
+    reasons = []
+    for v in vids[:1]:
+        if v.get("codec_name") not in DIRECT_VIDEO:
+            reasons.append("video:%s" % v.get("codec_name"))
+
+    ok_audio = [s for s in auds if s.get("codec_name") in DIRECT_AUDIO]
+    if auds and not ok_audio:
+        reasons.append("audio:%s" % ",".join(
+            sorted({s.get("codec_name") or "?" for s in auds})))
+    if not auds:
+        reasons.append("audio:none")
+
+    # Burn-in only bites when there is no sub Jellyfin could deliver as text instead.
+    # A subrip/WebVTT track anywhere means it has something cheaper to pick, so a file
+    # carrying both (S01E02 does) is a Jellyfin track-selection problem, not a file problem.
+    burn = {s.get("codec_name") for s in subs} & BURN_SUBS
+    if burn and not any(s.get("codec_name") in TEXT_SUBS for s in subs):
+        reasons.append("subs:%s(burn-in)" % ",".join(sorted(burn)))
+
+    # For --fix-audio: the widest non-compatible track is the one worth converting.
+    src = None
+    if auds and not ok_audio:
+        src = max(range(len(auds)),
+                  key=lambda i: int(auds[i].get("channels") or 0))
+    return reasons, src
+
+
+def check_roots():
+    """Refuse rather than report a clean library that was never opened.
+
+    This is the exact failure this script was written after finding in
+    luminos-audio-audit: os.walk on a path that does not exist yields nothing and raises
+    nothing, so a stale ROOTS list prints a clean bill for files nobody read. An absent
+    root is an error here, not a skip.
+    """
+    missing = [r for r in ROOTS if not os.path.isdir(r)]
+    if len(missing) == len(ROOTS):
+        sys.exit("refusing to report: none of %s exist. Run this on the server."
+                 % ", ".join(ROOTS))
+    for r in missing:
+        print("WARNING: %s does not exist -- NOT audited. If the drive is unmounted this "
+              "run is incomplete; if the path is stale, fix ROOTS." % r, file=sys.stderr)
+
+
+def walk(paths=None):
+    # [CHANGE: claude-code | 2026-09-17] Explicit file/dir args override the ROOTS scan,
+    # so a single episode can be targeted: `luminos-roku-compat --fix-audio --apply FILE`.
+    # This is the safe way to do one file first before trusting the tool on the library.
+    if paths:
+        for p in paths:
+            if os.path.isdir(p):
+                for dirpath, _dirs, files in os.walk(p):
+                    for name in sorted(files):
+                        if name.lower().endswith(EXTS) and not name.startswith("."):
+                            yield os.path.join(dirpath, name)
+            elif os.path.isfile(p):
+                yield p
+            else:
+                print("not found: %s" % p, file=sys.stderr)
+        return
+    for root in ROOTS:
+        if not os.path.isdir(root):
+            continue
+        for dirpath, _dirs, files in os.walk(root):
+            for name in sorted(files):
+                if name.lower().endswith(EXTS) and not name.startswith("."):
+                    yield os.path.join(dirpath, name)
+
+
+def audit(as_json, paths=None):
+    if not paths:
+        check_roots()
+    bad = []
+    for path in walk(paths):
+        info = probe(path)
+        if info is None:
+            bad.append({"file": path, "reasons": ["unreadable"]})
+            continue
+        reasons, _src = verdict(info)
+        if reasons:
+            bad.append({"file": path, "reasons": reasons})
+
+    if as_json:
+        print(json.dumps(bad, indent=2))
+    elif not bad:
+        print("OK - every file in %d root(s) should Direct Play on the Roku." % len(ROOTS))
+    else:
+        print("%d file(s) will force a live transcode, and seeking will break on each:\n"
+              % len(bad))
+        for b in bad:
+            print("  %-28s %s" % (",".join(b["reasons"]), b["file"]))
+        print("\naudio:* alone is repairable in place -- luminos-roku-compat --fix-audio")
+        print("video:* means the file itself has to be replaced.")
+    return 1 if bad else 0
+
+
+def observed():
+    """Ground truth. What did Jellyfin actually transcode, with the Roku's real profile?
+
+    This beats the table above every time: it is Jellyfin's own decision, made against the
+    device profile the Roku sent. If this and the audit disagree, the TABLE is wrong.
+    """
+    if not os.path.isdir(JF_LOG_DIR):
+        print("no %s -- run this on the server, as root." % JF_LOG_DIR, file=sys.stderr)
+        return 2
+    logs = sorted(n for n in os.listdir(JF_LOG_DIR)
+                  if n.startswith("jellyfin"))[-3:]
+    hits = 0
+    for name in logs:
+        try:
+            with open(os.path.join(JF_LOG_DIR, name), errors="replace") as fh:
+                for line in fh:
+                    if "jellyfin-ffmpeg" not in line and "TranscodeReasons" not in line:
+                        continue
+                    hits += 1
+                    print("%s: %s" % (name, line.strip()[:400]))
+        except OSError as exc:
+            print("  (cannot read %s: %s)" % (name, exc), file=sys.stderr)
+    if not hits:
+        print("Nothing transcoded in the last %d log file(s) -- everything Direct Played."
+              % len(logs))
+    return 0
+
+
+def fix_audio(apply_it, paths=None):
+    """Add an AC3 track to files whose ONLY fault is audio. Video is stream-copied."""
+    if not paths:
+        check_roots()
+    os.makedirs(BACKUP, exist_ok=True) if apply_it else None
+    todo = []
+    for path in walk(paths):
+        info = probe(path)
+        if info is None:
+            continue
+        reasons, src = verdict(info)
+        if reasons and src is not None and all(r.startswith("audio:") for r in reasons):
+            todo.append((path, info, src))
+
+    if not todo:
+        print("Nothing to do -- no file fails on audio alone.")
+        return 0
+    if not apply_it:
+        print("DRY RUN - %d file(s) would get an added AC3 track "
+              "(video stream-copied, nothing deleted):\n" % len(todo))
+        for path, _i, src in todo:
+            print("  a:%d -> +ac3   %s" % (src, path))
+        print("\nRe-run with --apply to do it.")
+        return 0
+
+    rc_all = 0
+    for path, info, src in todo:
+        dur_in = float(info.get("format", {}).get("duration") or 0)
+        n_in = len(info.get("streams", []))
+        tmp = os.path.join(os.path.dirname(path), ".rokufix.%d.mkv" % os.getpid())
+        print("=== %s" % os.path.basename(path))
+        # -map 0 keeps every original stream untouched; the AC3 is appended as an extra.
+        # Not marked default -- Jellyfin chooses by codec support, and overriding the
+        # file's own default flag is how DECISION 61's descriptive-audio bug happened.
+        cmd = [FF, "-v", "error", "-nostdin", "-y", "-i", path,
+               "-map", "0", "-c", "copy",
+               "-map", "0:a:%d" % src, "-c:a:%d" % len([
+                   s for s in info["streams"] if s.get("codec_type") == "audio"]),
+               "ac3", "-b:a", "640k", "-ac", "6",
+               "-max_muxing_queue_size", "4096", tmp]
+        rc = subprocess.run(cmd).returncode
+        out = probe(tmp) if os.path.exists(tmp) else None
+        dur_out = float(out.get("format", {}).get("duration") or 0) if out else 0
+        n_out = len(out.get("streams", [])) if out else 0
+        ok = (rc == 0 and out is not None
+              and abs(dur_out - dur_in) < 2.0 and n_out == n_in + 1)
+        print("  rc=%s  duration %.0fs -> %.0fs  streams %d -> %d  %s"
+              % (rc, dur_in, dur_out, n_in, n_out, "OK" if ok else "REFUSED"))
+        if not ok:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            rc_all = 1
+            continue
+        shutil.move(path, os.path.join(BACKUP, os.path.basename(path)))
+        shutil.move(tmp, path)
+    return rc_all
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--observed", action="store_true",
+                    help="what Jellyfin really transcoded (beats the table; needs root)")
+    ap.add_argument("--fix-audio", action="store_true",
+                    help="add an AC3 track where audio is the only fault (dry run)")
+    ap.add_argument("--apply", action="store_true", help="with --fix-audio, actually do it")
+    ap.add_argument("files", nargs="*",
+                    help="specific file(s) or dir(s) to act on; default is both library roots")
+    args = ap.parse_args()
+
+    if args.observed:
+        return observed()
+    if args.fix_audio:
+        return fix_audio(args.apply, args.files or None)
+    return audit(args.json, args.files or None)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,23 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-09-17] BUG-164 one-shot: fix the E7 seek/skip break.
+# Run ON THE SERVER (shawn@192.168.2.61), with sudo. Touches ONE file, keeps the original.
+#   sudo luminos-fix-e7 [SEARCH]     SEARCH defaults to S01E07
+set -u
+PAT="${1:-S01E07}"
+TOOL=/usr/local/bin/luminos-roku-compat
+SRC=~shawn/luminos-os/server/scripts/luminos-roku-compat
+[ -x "$TOOL" ] || sudo install -m755 "$SRC" "$TOOL" 2>/dev/null || TOOL="$SRC"
+
+F=$(find /srv/media/tv /srv/media/movies /srv/external/tv /srv/external/movies \
+      -iname "*${PAT}*" 2>/dev/null | head -1)
+if [ -z "$F" ]; then echo "No file matching *$PAT* under the library roots."; exit 1; fi
+echo "Target: $F"
+echo "--- what is wrong with it ------------------------------------------"
+python3 "$TOOL" "$F"
+echo "--- dry run --------------------------------------------------------"
+python3 "$TOOL" --fix-audio "$F"
+echo "--- applying (original goes to /srv/external/_roku_pre_ac3_originals) ---"
+python3 "$TOOL" --fix-audio --apply "$F"
+echo "--- done. Rescan Jellyfin, then play $PAT and try to skip. ----------"
+echo "If it said 'video:...' instead of 'audio:...', this file needs REPLACING,"
+echo "not repairing -- the audio fix cannot help a video-codec problem."

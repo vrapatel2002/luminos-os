@@ -2538,3 +2538,217 @@ down.
 `/gl.js`, `/app.js`, `/ask.js` all 200 with the right content type; the token redirect on :8446
 intact; `?flat=1` fallback keeps the link. Rollback is `/root/luminos-web-backup-20260915/` on
 the box — the six previous assets plus both previous scripts.
+
+---
+
+## DECISION 112 — The fix for broken seeking is that nothing transcodes, not that transcoded seeking works
+# [CHANGE: claude-code | 2026-09-16]
+
+**Symptom (BUG-164).** On the Jellyfin **Roku** app, pressing *Skip Intro* or scrubbing the
+progress bar restarts the episode at **00:00**. Reported on one episode; a later episode in the
+same session skipped correctly with **no change made on the server** — which is the finding, not a
+coincidence. It is **per-file**.
+
+**The two symptoms are one bug.** *Skip Intro* is nothing but a seek: since 10.10 Intro Skipper
+only writes `MediaSegments` timestamps and the button is drawn by the client (DECISION 64). The
+button appearing at all proves the plugin, the segments and the daily 00:00 scan are healthy.
+**DECISION 64 is not the place to look, and this must not re-open it.**
+
+**Mechanism.** Direct Play means the Roku pulls the file itself with byte-range requests and does
+its own seeking — it works. A transcode replaces that with HLS off a live `jellyfin-ffmpeg`, where
+a seek tears the encoder down and restarts it at an offset; the restarted stream arrives labelled
+as starting at zero, the Roku believes it, and plays from there. The picture is right and the clock
+is lost. That is `jellyfin/jellyfin-roku#582` — still **open**, reported against servers
+10.10–10.11.x, and reported as **file-specific**, which is exactly the shape of this report.
+
+**We cannot fix the client, and that was checked rather than assumed.** The installed Roku app is
+**3.2.3, released 2026-08-03 — the newest there is**. No fix exists upstream to update to, and a
+Roku channel cannot be patched from here. So the decision is: **stop trying to make transcoded
+seeking work; make sure nothing has to transcode.** That is a better end state anyway — it also
+spares the i5-10210U the encode, which DECISION 37 measured at 1.22x realtime on CPU.
+
+**Ruled out first, because it was the obvious suspect.** DECISION 99 replaced the Jellyfin web
+theme on 2026-09-13, three days before the report. It is colour-only — 155 lines, no rule touching
+`.osd*`, sliders, `transform`, `position` or `pointer-events` — and **the Roku does not load
+`CustomCss` at all.** It cannot cause this. Also ruled out: subtitle burn-in, the standing
+`SubtitleMode: Always` risk from DECISION 60 — the reporter states there are no subtitles on
+screen at all, and burned-in subtitles are by definition visible.
+
+### What was built
+
+`server/scripts/luminos-roku-compat` + `luminos-roku-compat.{service,timer}`, weekly, allowed to
+fail so a finding surfaces in `systemctl list-units --failed` rather than in a log nobody reads —
+the same shape as `luminos-audio-audit` (DECISION 61).
+
+| mode | does |
+|---|---|
+| (default) | ffprobes both library roots, prints every file that will transcode **and why** |
+| `--observed` | reads Jellyfin's own log for what it **actually** transcoded — ground truth |
+| `--fix-audio` | dry run: which files would get an added AC3 track |
+| `--fix-audio --apply` | does it — `-c:v copy`, so no video re-encode and no quality loss |
+
+**`--observed` exists because the capability table is the one guessed part.** It was written
+without access to the Roku, from what these docs record (DECISION 37 "the TV takes H264",
+`AllowHevcEncoding=false`, no AV1 anywhere in the chain). Roku models differ — a 4K stick direct
+plays HEVC Main10 that an older HD model refuses. `--observed` reads Jellyfin's real decision, made
+against the **real device profile the Roku sent**. **Where the two disagree, the table is wrong.**
+Run `--observed` before believing a verdict.
+
+**`--fix-audio` adds a track, it does not replace one.** `-map 0 -c copy` keeps every original
+stream byte-for-byte and appends AC3 640k alongside; the lossless TrueHD/DTS-HD track stays in the
+file for anything that can play it. It is **not** marked default — overriding a file's own
+disposition flags is precisely how the descriptive-audio bug of DECISION 61 happened. Safety is
+`luminos-dv-fix`'s (DECISION 95): dry run unless `--apply`, temp file, duration **and** stream-count
+verification (`n_out == n_in + 1`) before anything moves, filename preserved so Jellyfin and Sonarr
+paths stay valid, original moved to `/srv/external/_roku_pre_ac3_originals/` — outside both library
+roots so Jellyfin will not index it — and **nothing is ever deleted**.
+
+**Verified how it could be verified from where it was written.** The session had **no route to the
+server**, so nothing was run against the real library. What *was* done: the decision function was
+exercised against **8 synthetic stream sets** covering h264+ac3+srt (clean), DTS-only (audio fault),
+TrueHD **with** an AC3 sibling (clean — the case a naive check would wrongly flag), AV1 (video
+fault), PGS-only (burn-in), PGS **plus** SRT (clean), an mjpeg cover-art stream that must not read
+as the video stream, and widest-track selection for the AC3 source. **8/8.** That proves the logic,
+**not** the capability table and **not** the ffmpeg invocation. Both still need a real run.
+
+### The blind spot this turned up, which is worse than the bug
+
+**`luminos-audio-audit` has been auditing half the library since 2026-09-03.** Its `ROOTS` list was
+written 2026-08-07 as `/srv/media/{tv,movies}`; DECISION 91 added `/srv/external` as a second root
+on 2026-09-03 and nobody extended it. `os.walk` on a path that does not exist yields nothing and
+raises nothing, so **every weekly run since has reported a clean bill for files it never opened.**
+Fixed here. **The general rule: a hardcoded root list is a silent-failure machine, and adding
+storage is exactly when it breaks.** Anything else in `server/scripts/` carrying a path list needs
+the same audit — this was found by accident while writing an unrelated script.
+
+### Not done, deliberately
+
+**The acquisition-side half is left alone.** The complete fix also stops such files arriving:
+custom formats in Sonarr/Radarr preferring AC3/EAC3 over DTS-HD/TrueHD-only releases. It is **not**
+done here because a hard reject fails closed and silently — that is the True Detective
+profile-5 trap (STATUS row 24: 733 releases rejected, no 4K existed, Sonarr sat there saying
+nothing) and it would need scoring, not rejection, plus a negative test against the real library.
+Run `luminos-roku-compat` first: if the audit comes back nearly clean, the acquisition change is
+not worth its risk.
+
+---
+
+## DECISION 113 — The subtitle warm sweep becomes a timer, because "done once" expires the moment something is imported
+# [CHANGE: claude-code | 2026-09-16]
+
+**Symptom.** "When I try to load the subtitles the stream just crashes." On the Roku, selecting a
+subtitle track drops playback.
+
+**It is not crashing. It is waiting, and the client gives up first.** This is DECISION 60's fault
+again, reported from a client that exits instead of one that merely shows nothing. Jellyfin demuxes
+an embedded subtitle out of the MKV **on demand, on first request**, caching to
+`/var/lib/jellyfin/data/subtitles/`. The extraction reads the **whole file**, which on a 2160p remux
+on a 5400 rpm spindle takes minutes — measured in DECISION 60 at **144 s**, against a viewer who
+abandoned at 69 s. Nothing arrives, the Roku has no stream, and it drops out. The picture the user
+gets is a crash; the thing that happened is a timeout.
+
+**Why it came back.** STATUS row 43 said it plainly: *"Done once, not automated."* The sweep ran
+**2026-08-07** and covered 78 tracks. Everything imported since is cold — the seven ToonsHub
+Solo Leveling files (2026-09-13/14, DECISION 98/101), *Evil Dead Burn*, *28 Days Later*
+(2026-08-27), and the `luminos-dv-fix` output of DECISION 95, whose re-encode produced a **new file**
+and therefore a new cache miss. **A one-off sweep over a library that keeps growing has a shelf
+life measured in days, and nothing was watching the expiry.**
+
+**Second path to the same symptom, and it is not fixed by any of this.** If the only subtitle is
+**PGS or VOBSUB**, there is nothing to extract — image subtitles have to be **burned in**, which is
+a full video re-encode (DECISION 60's own note; STATUS row 27 benchmarked it at 5.8× realtime on
+*28 Days Later*). That path also ends in "nothing arrives", and `luminos-roku-compat` flags it as
+`subs:image-only(burn-in)`. **Tell the two apart before acting:** the warm sweep fixes text tracks
+and can do nothing whatsoever for image ones.
+
+### What changed
+
+`luminos-subtitle-warm` is now a daily timer (`04:00`, `Persistent=true`, after Intro Skipper's
+00:00 scan so the two do not fight the same disk head; `Nice=15` + `IOSchedulingClass=idle`).
+
+**Daily, and repeating it is nearly free — that is what makes a timer the right shape here.** An
+already-cached track answers in ~6 ms, so the sweep is idempotent by nature and only ever pays the
+real cost on files imported since the last run. It exits **1** on any failure so a bad run surfaces
+in `systemctl list-units --failed` rather than scrolling past in a journal.
+
+**The credential weakness had to be fixed first, and it is the reason this was never a timer.**
+The script read `/tmp/jftoken` and `/tmp/jfuid` — recorded as a known weakness in DECISION 60 —
+and **`/tmp` does not survive a reboot**. A timer built on that would have run once, then died at
+the first boot afterwards on a missing file, and reported it only in a log. It now takes the token
+from `/root/.jellyfin-token` (the durable `luminos-admin` key DECISION 64 created, mode 600) with
+`$JELLYFIN_TOKEN` and the old `/tmp` path as fallbacks, and **resolves the user id from
+`GET /Users`** instead of caching it — an admin token can list users, so there is nothing to go
+stale. It **refuses rather than guesses** when more than one candidate user exists: the cache this
+warms is per-user, and warming the wrong one would look exactly like success.
+
+**Not automated, deliberately:** nothing hooks this to Sonarr/Radarr import. An import-time hook
+would be faster to warm but would put a whole-file read on the same head that is already doing the
+import — DECISION 100 is the standing lesson on what a second job on that spindle costs. Daily at
+04:00 is late enough and cheap enough.
+
+
+---
+
+## DECISION 114 — The audit certified a library it could not see, and E07 was the one episode that worked
+# [CHANGE: claude-code | 2026-09-16]
+
+**What this corrects.** DECISION 112 built `luminos-roku-compat` with no route to the server and
+said so honestly: the capability table was guessed and `--observed` existed to overrule it. The
+tool was then run on the box for the first time on 2026-09-16. **Both halves of the standing
+hypothesis were wrong, and the tool itself was wrong in two ways that hid it.**
+
+**The premise was inverted.** The standing note said Solo Leveling **S01E07** was the failing
+episode, and that the jpn/kor E07.5 recap mis-map (DECISION 98/101) made its audio the transcode
+trigger. Measured: `S01E07` is `h264` + **one** AAC stereo English track and **no subtitle track at
+all**. It has no fault the tool can name — not `audio:*`, not `video:*` — and it does **not appear
+once** in four days of Jellyfin transcode logs. **E07 is one of only three episodes in the season
+that Direct Plays** (E01, E03, E07 — the three with no subtitle track). `--fix-audio --apply` was
+run against it and correctly did nothing. No media file was modified.
+
+**The real trigger is ASS subtitle burn-in, and the tool was built to ignore it.** `ass` sat in the
+tool's `TEXT_SUBS` set, on the reasoning that a text track is something Jellyfin can hand to the
+client cheaply. That is true of `subrip` and false of `ass`. Jellyfin only converts subrip-class
+tracks to WebVTT for client-side rendering; ASS carries styling, positioning and embedded fonts
+that have nowhere to go on a Roku, so Jellyfin **burns it into the picture** — a full video
+re-encode, which is the live transcode this tool exists to prevent. Because `ass` read as safe, the
+tool printed *"OK — every file in 4 root(s) should Direct Play"* **for a season Jellyfin was
+transcoding at that moment.**
+
+**The proof is S01E02, and it is airtight.** That session's ffmpeg line is 1080p source, `-codec:a:0
+copy` (audio stream-copied), no resize, and yet `-codec:v:0 h264_vaapi` — with
+`subtitles=f='…/8.ass':alpha=1:sub2video=1` composited by `overlay_vaapi`. Codec, resolution,
+bitrate and audio were all fine. **Burn-in was the only cause present.**
+
+**`--observed` — the one function written to be ground truth — could never run.** `JF_LOG_DIR` was
+`/var/lib/jellyfin/log`; the real path on this server is `/var/log/jellyfin`. It exited with "run
+this on the server, as root" *while running on the server as root*, which reads as a usage error
+rather than a wrong constant. **This is the third hardcoded-path fault in `server/scripts/` after
+the `luminos-audio-audit` ROOTS bug** — a guessed path fails silently and looks like a clean
+result. Both are now probed, not assumed.
+
+**jellyfin-roku#582's mechanism was observed live, not inferred.** Three encoder restarts on S01E09
+inside 90 seconds on 2026-09-16 — `start_number 0` → `-ss 00:03:12.192 start_number 32` → `-ss
+00:06:54.414 start_number 69`. Each seek tears ffmpeg down and starts a new one at an offset. That
+is the bug, on this box, on video.
+
+**A second, independent trigger exists and is client-side.** Today's S01E08/E09 sessions ran with
+subtitles **off** (`-map -0:s`) and still transcoded: 3840x2160 `h264 High@L5.1` sources, output
+pinned to `-level 42` and, on E09, `scale_vaapi=w=1920:h=1080` with a round `-b:v 10000000`. The
+server imposes no such limit — `RemoteClientBitrateLimit` is `0` and the user policy is empty — so
+that ceiling arrives in the Roku's own PlaybackInfo request. **An earlier session (E06, 00:21) did
+emit 4K at L5.1**, so this is the app's quality setting varying between sessions, not a fixed Roku
+H.264 ceiling. Unsettled, and recorded as unsettled.
+
+**⚠️ This changes the Bazarr advice, which DECISION 98 got right for the wrong library.** `use_embedded_subs`
+is ON, so an embedded **ASS** track satisfies the profile and Bazarr reports `missing_subtitles: []`
+— correctly by its own rules, and exactly wrong here, because that ASS track is the thing forcing
+the transcode. For these 20 files Bazarr must be made to fetch a real SRT anyway. **Do not read
+"Bazarr reports nothing missing" as "these files are fine."**
+
+**Library-wide, first honest numbers:** 46 files will force a transcode — **26 `audio:dts`**
+(repairable in place by `--fix-audio`, which is what that path was built for and is still unproven
+on real media) and **20 `subs:ass(burn-in)`** (not repairable by an added audio track; they need a
+text sidecar or subtitles off). **Zero `video:*`** — no file in the library needs replacing.
+
+**Still not done, deliberately:** `--fix-audio --apply` has not been run on the library. The gate
+from DECISION 112 stands — one file done by hand and **watched** before the other 25.
