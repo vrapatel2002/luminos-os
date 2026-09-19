@@ -268,7 +268,14 @@ Shawn "far lighter than Chromium" without naming the scene.
   scene declares no settings" is a sentence a user believes.
 
 **Repo hygiene**
-- **Never `git add -A` in this repo.** An unpacked initramfs (`init`, `lib`, `sbin`, `usr/`, `var/`,
+- **Never `git add -A` in this repo — and I did it anyway on 2026-09-19.** `git add -A scripts`
+  in commit `022faa74` swept ~20 unrelated files into a wallpaper commit: `chrome-luminos`, the
+  tab sleeper, `jobhunt/`, the caelestia overlay, and a dozen previously-UNTRACKED scripts
+  (`luminos-pagefile`, `luminos-verify`, `luminos-dgpu-watch`, `luminos-kde-desktop-overlay`…).
+  Nothing was lost and no credentials went in (checked), and several of those files are named in
+  AGENTS.md §9 as canonical repo copies so tracking them is arguably overdue — but the commit
+  message describes none of it. Not rewritten, because it is pushed. **The rule is `git add`
+  with named paths, and a directory path is not a named path.** An unpacked initramfs (`init`, `lib`, `sbin`, `usr/`, `var/`,
   `kernel/`, `keymap.bin`, `consolefont.psfu`) and `_to_delete/` sit untracked at the root. Stage
   named files only. The §13 git snippet says `-A`; it is wrong here.
 - **Git from the bridge VM (`device_bash`) can CREATE lock files but not DELETE them** — that is the
