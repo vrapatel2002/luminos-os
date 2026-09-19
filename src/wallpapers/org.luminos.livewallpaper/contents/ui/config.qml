@@ -9,6 +9,9 @@ import QtQuick.Layouts
 import QtQuick.Dialogs as Dialogs
 import org.kde.kquickcontrols as KQuickControls
 import org.kde.kirigami as Kirigami
+// [CHANGE: claude-code | 2026-09-19] DECISION 118 — SPEC §3.2
+import "props"
+import "scene.js" as Scene
 
 ColumnLayout {
     id: root
@@ -45,6 +48,8 @@ ColumnLayout {
     // [CHANGE: claude-code | 2026-09-19] DECISION 117
     property bool cfg_AudioReactive
     property bool cfg_AudioReactiveDefault: false
+    property string cfg_SceneProperties
+    property string cfg_ScenePropertiesDefault: "{}"
 
     // Where the bundled sample web wallpapers live once installed.
     readonly property string samplesDir:
@@ -299,6 +304,43 @@ ColumnLayout {
             text: i18n("Mute video audio")
             checked: root.cfg_MuteAudio
             onToggled: root.cfg_MuteAudio = checked
+        }
+    }
+
+    // ---- THE SCENE'S OWN SETTINGS  (SPEC §3.2, CONTRACTS §4) -------------
+    // [CHANGE: claude-code | 2026-09-19] DECISION 118
+    // Nothing here knows what any scene's settings are. The scene ships a
+    // properties.json, this reads it, and the panel appears. Resolving the scene
+    // through scene.js is what guarantees the panel edits the properties of the
+    // scene the wallpaper will actually load.
+    PropertyStore {
+        id: sceneProps
+        sceneId: root.cfg_QmlScene
+        savedJson: root.cfg_SceneProperties
+        sceneUrl: {
+            var path = Scene.pathFor(root.cfg_QmlScene);
+            return Scene.isAbsolute(path) ? path : Qt.resolvedUrl(path);
+        }
+    }
+
+    Kirigami.Separator {
+        Layout.fillWidth: true
+        visible: root.cfg_WallpaperMode === "qml" && sceneProps.loaded
+    }
+    QQC2.Label {
+        visible: root.cfg_WallpaperMode === "qml" && sceneProps.loaded
+        Layout.fillWidth: true
+        font: Kirigami.Theme.defaultFont
+        text: i18n("Scene settings")
+    }
+    PropertyEditor {
+        Layout.fillWidth: true
+        visible: root.cfg_WallpaperMode === "qml" && sceneProps.loaded
+        schema: sceneProps.schema
+        values: sceneProps.props
+        // The panel owns the config key; the wallpaper only ever reads it.
+        onChanged: function (key, value) {
+            root.cfg_SceneProperties = sceneProps.withValue(root.cfg_QmlScene, key, value);
         }
     }
 

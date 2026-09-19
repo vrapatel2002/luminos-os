@@ -234,3 +234,84 @@ was malformed. Read what the run printed, not just what it returned.
    `then.service` and `Spectrum.service`, and git tried to push refs named `remote` and `SSH`.
    Nothing was harmed, but **neither command actually ran**, and the output looked like failure of the
    real thing rather than of the comment. Hand over one command per line, no trailing comments.
+
+## 2026-09-19 — session 3: SPEC §3.2, a scene that carries its own settings
+
+### What landed
+```
+ui/props/PropertyStore.qml     new  schema load + merge; used by the wallpaper AND the panel
+ui/props/PropertyEditor.qml    new  one row per schema key, changed(key,value) out
+ui/props/PropertyControls.qml  new  the eight Lively control types, one Component each
+ui/scene.js                    new  the built-in scene map, shared by host and config
+ui/QmlMode.qml                 mod  owns the store, binds `props`, uses scene.js
+ui/scenes/Spectrum.qml         mod  bars/sensitivity/colours/beat-flash from props
+ui/scenes/Shader.qml           mod  uSpeed/uAudioGain/uTint bound by name
+ui/scenes/{Shader,Spectrum}.properties.json   new
+shaders/luminos-shader.frag    mod  3 uniforms appended at std140 104/108/112
+ui/main.qml, ui/config.qml, config/main.xml   mod  the SceneProperties key and the panel
+tests/wallpaper/props_contract.qml    new  21 checks, qml6 on the box
+tests/wallpaper/test_shipped_props.py new  7 tests, the shipped schemas
+```
+Repo and the installed copy are `diff -rq` clean; every transfer md5-matched both ends.
+
+### The decision worth writing down: the merge exists twice
+`scripts/luminos-wallpaper-pkg` owns `validate_properties()` / `merge_props()` and has the property
+tests. But **QML cannot call that Python**, and the merge has to happen inside plasmashell. So
+`PropertyStore.qml` is a second copy of the same rules.
+
+That is a real risk, not a shrug: two copies of a merge is how a slider ends up showing one number
+while the wallpaper renders another, and nothing crashes. The mitigation is not "be careful" — it is
+that `props_contract.qml` runs **the same cases** against the QML copy that the Python suite runs
+against the Python one, including the garbage-input ones. Change one, change both, run the pair.
+
+### Two things that are one bug waiting to happen, closed early
+1. **The scene map lived in QmlMode.qml only.** `config.qml` needs to resolve the same scene to find
+   its `properties.json`. A second copy of that table is how the panel ends up editing the properties
+   of a scene the wallpaper is not showing — and that presents as "my settings don't do anything",
+   which is about the worst symptom to debug. Moved to `ui/scene.js`, imported by both.
+2. **Delegate keys are handed over in `Loader.onLoaded`, not through the Loader's context.** Whether a
+   `Component` declared outside a `Loader` can resolve that Loader's own properties is a QML scoping
+   rule, and I cannot run a QML engine here to settle it. Two lines of explicit assignment have no
+   rule to be wrong about. The same instinct as BUG-168: do not let a near-miss question pass.
+
+### The half of §3.2 that is NOT here, said out loud
+SPEC §3.2 also promises property keys mapping onto **any** shader's uniforms automatically. A QML
+object cannot gain a property at runtime, so that means building the `ShaderEffect` from generated
+source with `Qt.createQmlObject` — which is exactly what **§3.4** (drop in any Shadertoy `.frag`)
+needs. Doing it here, against one shader whose uniforms are already known, would be inventing the
+hard part in the easy case and then rewriting it. It lands with §3.4. The built-in shader's three
+uniforms are bound by name today, so the mechanism is demonstrated, just not generalised.
+
+### Budget check (SPEC §9)
+`PropertyEditor` came out at 213 lines against a 200-line host budget. Rather than shaving comments
+until the number passed, the eight control Components moved into `PropertyControls.qml` — 106 + 118,
+and it reads better: one file is "what a row looks like", the other is "what a control is". A budget
+that forces a real seam is doing its job; a budget met by deleting explanations is not.
+
+| file | lines | budget |
+|---|---|---|
+| PropertyEditor.qml | 106 | 200 host |
+| PropertyControls.qml | 118 | 200 host |
+| PropertyStore.qml | 171 | 200 host |
+| QmlMode.qml | 119 | 200 host |
+| AudioBridge.qml | 156 | 200 host |
+| Shader.qml | 136 | 150 scene |
+| Spectrum.qml | 144 | 150 scene |
+
+### Verified
+| | |
+|---|---|
+| QML syntax, all new/changed files | `qmlformat` parse, clean |
+| shader compiles; uniforms at 104/108/112 | `qsb` exit 0; offsets **read from `qsb --dump`** |
+| `uTint` default reproduces the old constant | `#d959a6` vs `vec3(0.85,0.35,0.65)`, equal to 8-bit rounding |
+| KConfig schema still valid, `SceneProperties` present | parsed with `xml.dom.minidom` |
+| package + schema suite | **27 passed** in the build container (20 + 7 new) |
+| transfer integrity | md5 identical cloud → device → installed, 12 files |
+| **the QML merge rules** | `props_contract.qml`, 21 checks — **needs a QML engine, so it runs on the box** |
+| **the panel on screen** | ❌ **not verified — plasmashell has not been restarted since §3.1** |
+
+### Next
+**§3.4, not §3.3.** It is the cheaper item, it carries §3.2's deferred half, and `iAudio` already
+exists so Shadertoy audio shaders arrive with it. §3.3's Python half (`parse_manifest`,
+`lively_to_manifest`, `_path_safe`) is already written and tested; what it still needs is the gallery
+UI and the install path, which is a bigger surface than the shader loader.

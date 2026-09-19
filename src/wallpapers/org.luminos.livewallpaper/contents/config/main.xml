@@ -88,5 +88,15 @@
       <label>Feed live audio into the QML scene</label>
       <default>false</default>
     </entry>
+
+    <!-- Per-scene property values, as JSON: {"<sceneId>": {"speed": 1.0, ...}}.
+         ONE key on purpose (CONTRACTS §4): a wallpaper's KConfig schema is fixed
+         at build time and cannot grow at runtime, so a scene that invents its own
+         settings has nowhere else to put them.
+         [CHANGE: claude-code | 2026-09-19] DECISION 118 -->
+    <entry name="SceneProperties" type="String">
+      <label>Per-scene property values (JSON)</label>
+      <default>{}</default>
+    </entry>
   </group>
 </kcfg>

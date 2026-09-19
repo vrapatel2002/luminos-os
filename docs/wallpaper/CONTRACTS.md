@@ -48,6 +48,10 @@ Missing key → `undefined`; scenes must tolerate it.
 
 File `properties.json` beside the scene. Control types match Lively's one-for-one:
 
+> **Clarification, 2026-09-19 (DECISION 118) — behaviour for packages is unchanged.** "Beside the
+> scene" is unambiguous for a package, which is one scene per folder. The built-in scenes share
+> `ui/scenes/`, so the loader tries `<Scene>.properties.json` first and `properties.json` second.
+
 ```json
 { "speed": { "type":"slider",   "label":"Speed", "value":1.0, "min":0.1, "max":5.0, "step":0.1 },
   "tint":  { "type":"color",    "label":"Tint",  "value":"#7c3aed" },

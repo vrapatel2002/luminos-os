@@ -5,7 +5,8 @@
     stats via window.luminos.
     [CHANGE: claude-code | 2026-07-22, occlusion policy 2026-07-24,
      web renderer split out 2026-09-16 — see WebMode.qml and DECISION 112,
-     audio 2026-09-19 — see ui/audio/AudioBridge.qml and DECISION 117]
+     audio 2026-09-19 — see ui/audio/AudioBridge.qml and DECISION 117,
+     per-scene properties 2026-09-19 — see ui/props/ and DECISION 118]
     SPDX-License-Identifier: GPL-3.0-or-later
 */
 import QtQuick
@@ -367,6 +368,7 @@ WallpaperItem {
                 qmlHost.item.shouldPlay = Qt.binding(() => root.shouldPlay);
                 qmlHost.item.stats = Qt.binding(() => root.statsObj);
                 qmlHost.item.audioEnabled = Qt.binding(() => root.wantAudio);
+                qmlHost.item.sceneProperties = Qt.binding(() => root.configuration.SceneProperties);
             }
         }
     }

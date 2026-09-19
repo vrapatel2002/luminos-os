@@ -3,6 +3,7 @@
     SPDX-License-Identifier: GPL-3.0-or-later
     [CHANGE: claude-code | 2026-09-16] DECISION 113.
     [CHANGE: claude-code | 2026-09-19] DECISION 117 — audio (SPEC §3.1).
+    [CHANGE: claude-code | 2026-09-19] DECISION 118 — per-scene props (SPEC §3.2).
 
     Web mode still exists and is still the right tool for arbitrary HTML from
     the internet. This mode is for the wallpapers we write ourselves, where
@@ -20,6 +21,8 @@ import QtQuick
 // AudioBridge's own URL Loader, which is where DECISION 112's rule actually
 // bites. Deferring a QtQuick-only file would buy nothing and hide the wiring.
 import "audio"
+import "props"
+import "scene.js" as Scene
 
 Item {
     id: qmlRoot
@@ -30,29 +33,19 @@ Item {
     property bool shouldPlay: true
     property var stats: ({})
     property bool audioEnabled: false
+    // The raw SceneProperties config string, passed through untouched.
+    property string sceneProperties: "{}"
 
     property real cursorX: 0
     property real cursorY: 0
 
-    readonly property var builtins: ({
-        "shader":    "scenes/Shader.qml",
-        "aurora":    "scenes/Aurora.qml",
-        "particles": "scenes/Particles.qml",
-        "sysmon":    "scenes/SysMon.qml",
-        "spectrum":  "scenes/Spectrum.qml"
-    })
-
+    // The built-in map moved to scene.js so config.qml resolves scenes the SAME
+    // way — it has to find this scene's properties.json to build its panel, and
+    // a second copy of the map is how a settings panel ends up editing the
+    // properties of a scene the wallpaper is not showing.
     readonly property url sceneUrl: {
-        var s = ("" + qmlRoot.scene).trim();
-        if (s.length === 0)
-            return Qt.resolvedUrl(qmlRoot.builtins["shader"]);
-        if (qmlRoot.builtins[s] !== undefined)
-            return Qt.resolvedUrl(qmlRoot.builtins[s]);
-        if (s.indexOf("://") !== -1)
-            return s;
-        if (s.charAt(0) === "/")
-            return "file://" + s;
-        return Qt.resolvedUrl(s);
+        var path = Scene.pathFor(qmlRoot.scene);
+        return Scene.isAbsolute(path) ? path : Qt.resolvedUrl(path);
     }
 
     // CONTRACTS §2. Always instantiated, never conditional: it costs one Item and
@@ -63,6 +56,16 @@ Item {
         id: audioBridge
         audioEnabled: qmlRoot.audioEnabled
         running: qmlRoot.shouldPlay
+    }
+
+    // CONTRACTS §4. Defaults from the scene's properties.json, saved values on
+    // top, delivered as `props`. The store is also what config.qml instantiates,
+    // so the panel and the wallpaper cannot disagree about the merge.
+    PropertyStore {
+        id: propStore
+        sceneUrl: qmlRoot.sceneUrl
+        sceneId: qmlRoot.scene
+        savedJson: qmlRoot.sceneProperties
     }
 
     // Anything the desktop draws must never take the whole shell down, so the
@@ -96,6 +99,8 @@ Item {
                 item.stats = Qt.binding(() => qmlRoot.stats);
             if (qmlRoot.sceneHas(item, "audio"))
                 item.audio = Qt.binding(() => audioBridge.audio);
+            if (qmlRoot.sceneHas(item, "props"))
+                item.props = Qt.binding(() => propStore.props);
             if (qmlRoot.sceneHas(item, "cursorX"))
                 item.cursorX = Qt.binding(() => qmlRoot.cursorX);
             if (qmlRoot.sceneHas(item, "cursorY"))

@@ -3,6 +3,7 @@
     shader, as a Qt ShaderEffect. Same maths, no browser.
     [CHANGE: claude-code | 2026-09-16] DECISION 113
     [CHANGE: claude-code | 2026-09-19] DECISION 117 — audio uniforms + iAudio texture
+    [CHANGE: claude-code | 2026-09-19] DECISION 118 — speed/tint/audioGain from props
     SPDX-License-Identifier: GPL-3.0-or-later
 
     The GLSL lives in contents/shaders/luminos-shader.frag and is committed
@@ -23,6 +24,15 @@ Item {
     // CONTRACTS §1 — bound by the host only if declared, so it starts as a real
     // value rather than undefined.
     property var audio: null
+    // CONTRACTS §1/§4 — the merged values from Shader.properties.json.
+    property var props: ({})
+
+    // Defaults live in properties.json, but a scene must still render if that
+    // file is missing or a key was hand-deleted from the config.
+    function p(key, fallback) {
+        var v = scene.props ? scene.props[key] : undefined;
+        return (v === undefined || v === null) ? fallback : v;
+    }
 
     readonly property var bands: (scene.audio && scene.audio.bands) ? scene.audio.bands : null
     onBandsChanged: audioTex.requestPaint()
@@ -90,6 +100,13 @@ Item {
         // pre-audio version. Adding a feature must not change the default picture.
         property real iAudioActive: (scene.audio && scene.audio.active) ? 1 : 0
         property variant iAudio: audioSrc
+
+        // Bound BY NAME to uniforms in the .frag — offsets 104/108/112, read from
+        // `qsb --dump`. Declaring a key in properties.json is what produces the
+        // slider; this is the whole of the glue between the two.
+        property real uSpeed: scene.p("speed", 1)
+        property real uAudioGain: scene.p("audioGain", 1)
+        property color uTint: scene.p("tint", "#d959a6")
 
         fragmentShader: Qt.resolvedUrl("../../shaders/luminos-shader.frag.qsb")
         visible: fx.status === ShaderEffect.Compiled

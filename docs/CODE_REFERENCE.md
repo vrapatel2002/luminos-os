@@ -632,6 +632,21 @@ END OF CODE_REFERENCE.md
   parity), property schema, package manifest + Lively field map, JS shim surface, producer IPC
   (**normalised 0–1 coordinates**, never pixels — the wallpaper and the producer differ in resolution).
 - `docs/wallpaper/BUILD_LOG.md` — decisions and why, appended per session.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/props/PropertyStore.qml` — **[EXISTS]** loads
+  a scene's `properties.json`, validates it, merges saved values over defaults, exposes `schema`
+  and `props`. `withValue()`/`clear()` return the new `SceneProperties` string. Used by the
+  wallpaper AND by config.qml — one merge, so the panel and the wallpaper cannot disagree.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/props/PropertyEditor.qml` — **[EXISTS]** the
+  generated settings panel: one row per schema key, `changed(key, value)` back to the caller.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/props/PropertyControls.qml` — **[EXISTS]**
+  the eight control types as Components (slider/color/dropdown/textbox/checkbox/file/button/label).
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/scene.js` — **[EXISTS]** the built-in scene
+  map + `pathFor()`/`isAbsolute()`. Shared by QmlMode.qml and config.qml on purpose. DECISION 118.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/scenes/{Shader,Spectrum}.properties.json` —
+  **[EXISTS]** the shipped property schemas; `tests/wallpaper/test_shipped_props.py` guards them.
+- `tests/wallpaper/props_contract.qml` — **[EXISTS]** CONTRACTS §4 conformance, 21 checks, `qml6`.
+- `tests/wallpaper/test_shipped_props.py` — **[EXISTS]** 7 tests: every shipped schema validates
+  with nothing skipped, defaults inside range, dropdown defaults index a real item.
 - `src/wallpapers/org.luminos.livewallpaper/contents/ui/audio/AudioBridge.qml` — **[EXISTS]** the
   `audio` contract (CONTRACTS §2): 128 bands 0–1, bass/mid/treble, beat, bpm, active. Imports
   QtQuick and nothing else; publishes silence and logs when there is no provider.

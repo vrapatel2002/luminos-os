@@ -1,0 +1,8 @@
+{
+  "sensitivity": { "type": "slider",   "label": "Sensitivity",  "value": 1.0, "min": 0.2, "max": 3.0, "step": 0.1 },
+  "bars":        { "type": "dropdown", "label": "Bars",         "value": 1, "items": ["32", "64", "128"] },
+  "lowColor":    { "type": "color",    "label": "Bar bottom",   "value": "#38bdf8" },
+  "highColor":   { "type": "color",    "label": "Bar top",      "value": "#a78bfa" },
+  "beatFlash":   { "type": "checkbox", "label": "Flash on beat","value": true },
+  "note":        { "type": "label",    "value": "Bars sit flat when nothing is playing. That is deliberate — a fake idle animation would hide a broken audio path." }
+}

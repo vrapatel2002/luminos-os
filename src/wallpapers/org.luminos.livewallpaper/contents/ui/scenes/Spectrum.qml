@@ -1,16 +1,15 @@
 /*
     Luminos Live Wallpaper — audio spectrum scene.  SPEC §3.1.
-    [CHANGE: claude-code | 2026-09-19]  DECISION 117.
+    [CHANGE: claude-code | 2026-09-19]  DECISION 117, props 118.
     SPDX-License-Identifier: GPL-3.0-or-later
 
     Bars, not a Canvas. A Canvas repaint is a CPU raster of the whole surface —
     at 2880×1800 that is the wrong trade sixty times a second. Rectangles are
     composited on the GPU and only their heights change.
 
-    64 bars drawn from 128 contract bands, pairwise max. The contract stays 128
-    because that is Lively's number and ports depend on it; the DRAWING is a
-    presentation choice, and 64 halves the item count without looking different
-    at this width.
+    N bars drawn from the 128 contract bands, max within each group. The contract
+    stays 128 because that is Lively's number and ports depend on it; how many are
+    DRAWN is a setting (Spectrum.properties.json), defaulting to 64.
 */
 import QtQuick
 
@@ -21,19 +20,33 @@ Item {
     // ---- scene interface, CONTRACTS §1 ---------------------------------
     property bool running: true
     property var audio: null
+    property var props: ({})
     property real cursorX: -1
     property real cursorY: -1
 
-    readonly property int visualBars: 64
+    function p(key, fallback) {
+        var v = scene.props ? scene.props[key] : undefined;
+        return (v === undefined || v === null) ? fallback : v;
+    }
+
+    readonly property var barChoices: [32, 64, 128]
+    readonly property int visualBars: scene.barChoices[scene.p("bars", 1)] || 64
+    readonly property real sensitivity: scene.p("sensitivity", 1)
     readonly property var bands: (scene.audio && scene.audio.bands) ? scene.audio.bands : null
     readonly property bool live: !!(scene.audio && scene.audio.active)
 
+    // Max within the group, not mean: a mean smears a single loud band into
+    // nothing, and the peaks are the part an eye reads as "the music".
     function level(i) {
         var b = scene.bands;
         if (!b || b.length < 128)
             return 0;
-        var a = b[i * 2], c = b[i * 2 + 1];
-        return a > c ? a : c;
+        var g = 128 / scene.visualBars, start = i * g, m = 0;
+        for (var k = 0; k < g; k++)
+            if (b[start + k] > m)
+                m = b[start + k];
+        m *= scene.sensitivity;
+        return m > 1 ? 1 : m;
     }
 
     // Deliberately NOT faked. When there is no provider the bars sit flat and the
@@ -86,8 +99,8 @@ Item {
                 radius: Math.min(width, height) / 2
 
                 gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#a78bfa" }
-                    GradientStop { position: 1.0; color: "#38bdf8" }
+                    GradientStop { position: 0.0; color: scene.p("highColor", "#a78bfa") }
+                    GradientStop { position: 1.0; color: scene.p("lowColor", "#38bdf8") }
                 }
                 opacity: 0.55 + bar.value * 0.45
 
@@ -114,7 +127,7 @@ Item {
             target: scene.audio
             ignoreUnknownSignals: true
             function onBeatChanged() {
-                if (scene.running && scene.audio && scene.audio.beat)
+                if (scene.running && scene.p("beatFlash", true) && scene.audio && scene.audio.beat)
                     flashAnim.restart();
             }
         }

@@ -108,10 +108,22 @@ Deliver a `audio` object to every scene (shape in CONTRACTS §2). Lively parity 
 `iBass`/`iMid`/`iTreble`/`iAudioActive`). Config key `AudioReactive`, off by default, forced on for
 the spectrum scene. Verified by `tests/wallpaper/audio_contract.qml` (22 checks, `qml6`, exit code).
 
-### 3.2 Per-scene properties — the `LivelyProperties.json` equivalent
+### 3.2 Per-scene properties — ✅ **DONE 2026-09-19, DECISION 118** (one half deferred to §3.4)
 Declarative control schema → generated settings UI → values delivered to the scene, and mapped onto
 shader uniforms **by name** so a shader author gets a slider with zero glue.
 Lively's control types, matched: slider, textbox, dropdown, folderDropdown, button, color, checkbox, label.
+
+**Shipped:** `ui/props/PropertyStore.qml` (schema load + merge, used by the wallpaper AND the
+settings panel), `ui/props/PropertyEditor.qml` + `PropertyControls.qml` (the generated panel, all
+eight types), `ui/scene.js` (one scene map, so the panel cannot edit a different scene's values),
+config key `SceneProperties`, and `Spectrum.properties.json` + `Shader.properties.json` to prove it
+end to end. Verified by `tests/wallpaper/props_contract.qml` (21 checks) and
+`test_shipped_props.py` (7 tests; suite is 27 passed).
+
+**Deferred to §3.4 on purpose:** binding property keys to the uniforms of an *arbitrary* shader. A
+QML object cannot gain a property at runtime, so that needs a `ShaderEffect` built from generated
+source — which is §3.4's machinery anyway. The built-in shader's `uSpeed`/`uAudioGain`/`uTint` are
+bound by name today.
 
 ### 3.3 Package format + gallery + **Lively import**
 A wallpaper becomes a folder with a manifest and a preview, not a path typed into a textbox.

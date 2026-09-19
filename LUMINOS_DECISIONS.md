@@ -7315,3 +7315,83 @@ that could not be tested in the build container, so it is the part that ships as
 ### Cross-references
 SPEC §3.1 · CONTRACTS §1, §2 · DECISION 112 (import placement) · DECISION 113 (native QML mode) ·
 BUG-168 (the binding test this change had to fix first) · `scripts/luminos-wallpaper-capabilities`
+
+## DECISION 118 — a scene declares its own settings, and the panel that shows them knows nothing about scenes
+<!-- [CHANGE: claude-code | 2026-09-19] SPEC §3.2, CONTRACTS §4 -->
+
+### What Lively does, and what we had to match
+A Lively wallpaper ships `LivelyProperties.json` and gets a settings panel for free: slider, textbox,
+dropdown, folderDropdown, button, color, checkbox, label. Ours is `properties.json` with the same
+eight controls (their `folderDropdown` is our `file`), so their file maps onto ours with no type left
+over. Nothing in `PropertyEditor.qml` knows what any scene's settings are — ship a `properties.json`,
+get a panel.
+
+### The decisions, and why
+
+**1. ONE config key, `SceneProperties`, holding JSON.** A Plasma wallpaper's KConfig schema is fixed
+at build time; it cannot grow a key because a scene invented a setting. So every scene's values live
+in one String key as `{"<sceneId>": {...}}`. This was already frozen in CONTRACTS §4 — recorded here
+because it looks like laziness until you know KConfig cannot do the obvious thing.
+
+**2. `sceneId` is the scene string the user picked** — `"spectrum"` for a built-in, the path for a
+file. Not a hash of the file, not its title: the id then survives exactly as long as the setting that
+selected it, and a scene renamed on disk loses its saved values at the same moment it stops being
+selected. Any other id drifts out of sync with the thing it names.
+
+**3. The merge logic exists twice, deliberately, and is pinned by the same test cases.**
+`scripts/luminos-wallpaper-pkg` has `validate_properties()` / `merge_props()` — tested, 20 property
+tests. `ui/props/PropertyStore.qml` has the same rules in QML, because that is what actually runs
+inside plasmashell; QML cannot call the Python. Two copies of a merge is how a slider ends up showing
+one number while the wallpaper renders another, so: same known-type set, same "unknown type is
+skipped not fatal", same "saved wins, else default, else null", and
+`tests/wallpaper/props_contract.qml` runs **the same cases** against the QML copy that the Python
+suite runs against the Python one. Change one, change both.
+
+**4. The settings panel and the wallpaper share one store and one scene map.** `PropertyStore.qml` is
+instantiated by `config.qml` too, and the built-in scene table moved to `ui/scene.js` so both resolve
+a scene the same way. A second copy of that map is precisely how a panel ends up editing the
+properties of a scene the wallpaper is not showing — and that bug looks like "my settings don't do
+anything", which is the hardest kind to trace.
+
+**5. CONTRACTS §4 says `properties.json` lives "beside the scene". Clarified, not changed:** a package
+is one scene per folder, so `properties.json` is unambiguous there. The built-ins share `scenes/`, so
+the store tries `<Scene>.properties.json` first and `properties.json` second. Packages behave exactly
+as frozen; built-ins stop colliding.
+
+**6. Delegate keys are handed over in `Loader.onLoaded`, not through the Loader's context.** Whether a
+`Component` declared outside a `Loader` resolves that Loader's own properties is a QML scoping rule I
+could not test from the build container, and the failure mode — a settings panel that silently edits
+the wrong key — is not one anybody notices quickly. Explicit assignment costs two lines and has no
+rule to be wrong about.
+
+**7. A `button` carries an action token, not a value.** `props[key]` becomes `{action, at}`. Without
+the timestamp a second press is indistinguishable from the first, so a "Reset" button would work once
+per session and then look broken.
+
+**8. Shader uniforms are bound by name — for the built-in shader.** `uSpeed`, `uAudioGain` and `uTint`
+sit at std140 offsets 104 / 108 / 112, **read from `qsb --dump` reflection, not counted by hand**, and
+`Shader.qml` binds them straight from `props`. `uTint`'s default `#d959a6` is the constant
+`vec3(0.85, 0.35, 0.65)` it replaced, to within 8-bit rounding, so an untouched wallpaper looks like
+it always did.
+
+### Not done here, and why — the honest half of §3.2
+SPEC §3.2 also says property keys map onto **any** shader's uniforms automatically. That is not in
+this change. A QML object cannot gain a property at runtime, so a generic binding means building the
+`ShaderEffect` from generated source with `Qt.createQmlObject` — which is exactly the machinery
+**SPEC §3.4** (drop in any Shadertoy `.frag`) needs anyway. Building it twice, or building it here
+against one shader whose uniforms we already know, would be inventing the hard part in the easy case.
+It lands with §3.4. Everything else in §3.2 — schema, storage, delivery, generated panel, all eight
+control types — is done.
+
+### Verification
+- `tests/wallpaper/props_contract.qml` — 21 checks on the QML store (validate, merge, saved-wins,
+  garbage input, the config string, a hand-mangled config). Runs on the box with `qml6`, exit 0/1.
+- `tests/wallpaper/test_shipped_props.py` — every `properties.json` we ship must validate with
+  **nothing skipped**, every control must carry what its type needs, slider defaults must lie inside
+  their own min/max and dropdown defaults must index a real item. A misspelled control type does not
+  crash anything; it silently drops a control, which is why the shipped schemas need a test.
+- Suite is **27 passed** (20 package + 7 schema) in the build container.
+
+### Cross-references
+SPEC §3.2, §3.4 · CONTRACTS §4 · DECISION 117 (audio, same delivery path) · DECISION 113 (native QML
+mode) · `scripts/luminos-wallpaper-pkg`
