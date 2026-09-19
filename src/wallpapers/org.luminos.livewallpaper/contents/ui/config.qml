@@ -182,8 +182,15 @@ ColumnLayout {
             QQC2.TextField {
                 Layout.fillWidth: true
                 placeholderText: i18n("/path/to/scene.qml  or  /path/to/shader.frag")
-                text: root.cfg_QmlScene
-                onEditingFinished: root.cfg_QmlScene = text
+                // A built-in is already named in the combo above; echoing its key
+                // here read as "this scene is a file called spectrum", which invited
+                // typing a media path into a box that takes scenes and shaders.
+                // [CHANGE: claude-code | 2026-09-19]
+                text: Scene.BUILTINS[root.cfg_QmlScene] !== undefined ? "" : root.cfg_QmlScene
+                onEditingFinished: {
+                    if (text.length > 0)
+                        root.cfg_QmlScene = text;
+                }
             }
             // [CHANGE: claude-code | 2026-09-19] DECISION 119 — one box, both kinds.
             QQC2.Button {
@@ -215,7 +222,7 @@ ColumnLayout {
             Layout.maximumWidth: Kirigami.Units.gridUnit * 22
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
-            text: i18n("128 frequency bands from the current output, the same shape Lively uses, so a Lively audio wallpaper works here unchanged. Costs a PipeWire capture stream and an FFT thread while it runs, and stops with the wallpaper when the desktop is hidden. The Spectrum scene switches it on for itself.")
+            text: i18n("This does not play anything — it listens to your speakers. Play a file in any player (VLC, mpv, Elisa) or a video in your browser and the wallpaper follows it. 128 frequency bands from the current output, the same shape Lively uses, so a Lively audio wallpaper works here unchanged. Costs a PipeWire capture stream and an FFT thread while it runs, and stops with the wallpaper when the desktop is hidden. The Spectrum scene switches it on for itself.")
         }
 
         // ---- WEB: bundled samples ----------------------------------
