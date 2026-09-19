@@ -1,6 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 2 (new Cowork chat, counter restarted deliberately)
-<!-- Response 2 restated the VERIFY.md checklist for Shawn; no code, config or system change. -->
+Last updated: 2026-09-19 — Response 3 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -19,7 +18,7 @@ Plan and gap analysis: `docs/wallpaper/SPEC.md`. Frozen interfaces: `docs/wallpa
 Reasoning per session: `docs/wallpaper/BUILD_LOG.md`. Eyes-on brief: `docs/wallpaper/VERIFY.md`.
 
 **Three of six SPEC §3 items are done** (§3.1 audio, §3.2 per-scene settings, §3.4 runtime shaders)
-and the box now reports **30/30 on `luminos-wallpaper-selftest`**.
+and the box now reports **31/31 on `luminos-wallpaper-selftest`**.
 **§3.5 (`.js` canvas wallpapers) or §3.3 (packages + gallery + Lively import) is next**; §3.6 (games
 through a nested compositor) is the big one and the only thing that lets web mode finally be deleted.
 
@@ -57,7 +56,7 @@ and JS, and playable games.
   superstition.
 
 ## State — what is DONE
-### Wallpaper — verified on the box 2026-09-19 16:04, **30 passed / 0 failed**
+### Wallpaper — verified on the box 2026-09-19 16:21, **31 passed / 0 failed**
 Live config: `WallpaperMode=qml QmlScene=spectrum AudioReactive=true ObscurePolicy=2`.
 Chromium **not** mapped into plasmashell; `libcava.so.1.0.0` **and**
 `libcaelestia-services.so` are — which is positive proof the audio provider loaded.
@@ -81,8 +80,10 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (a KPackage must be self-contained; the lock screen loads the same package). Cached by content
   hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is built with `Qt.createQmlObject`, which is
   what makes §3.2 real for an arbitrary shader — a QML object cannot gain a property at runtime.
-- **BUG-168 / BUG-169 / BUG-170 / BUG-171 / BUG-172 all fixed.** The last two are this turn's and
-  are the reason the earlier eyes-on session looked like a failure — read them before re-testing.
+- **BUG-168 / BUG-169 / BUG-170 / BUG-171 / BUG-172 / BUG-173 all fixed.** BUG-171 (a deploy is
+  not a load) and BUG-173 (every settings row drew a label and no control) are why the eyes-on
+  session kept failing — read both before re-testing. BUG-173 is now covered without a person by
+  `tests/wallpaper/editor_contract.qml`.
 - **`scripts/luminos-wallpaper-cost`** — is `libQt6WebEngineCore` mapped into plasmashell at all,
   PSS from `smaps_rollup`, CPU as a percentage of one core, with BUG-083's Chromium-era numbers
   alongside. Package/manifest layer (`luminos-wallpaper-pkg`) and the capability gate
@@ -104,9 +105,10 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
 ## State — what is IN PROGRESS (and exactly where it was left off)
 Nothing is half-written. Everything is deployed and `diff -rq` clean.
 
-**The three eyes-only checks in `docs/wallpaper/VERIFY.md` are still unconfirmed** — Shawn's last
-attempt was invalidated by BUG-171 (he was clicking on QML compiled before the fixes landed).
-plasmashell was restarted at **16:04:08** with every fix in place, so they are ready to try again:
+**The three eyes-only checks in `docs/wallpaper/VERIFY.md` are still unconfirmed.** Two separate
+faults have invalidated every attempt so far: BUG-171 (clicking on QML compiled before the fixes
+landed) and BUG-173 (the panel really did render labels with no controls). Both are fixed and
+plasmashell was restarted at **16:21:56** with everything in place, so they are ready to try again:
 
 1. **Native QML → Spectrum**, desktop visible, music playing → 64 bars moving, purple wash on bass,
    faint flash on the beat.
@@ -169,6 +171,17 @@ maximized window, and a frozen audio scene shows flat bars by design (BUG-172).
   The tell: a `[LUMINOS-WP]` journal line whose wording differs from the source on disk.
 - **BUG-172 — a warning that cannot tell "off on purpose" from "broken" is noise.** The spectrum
   scene accused the audio stack every time a window was maximized.
+- **BUG-173 — in a Repeater delegate, the delegate's OWN properties resolve before the enclosing
+  component's ids.** A `property string ctl` on the delegate shadowed `id: ctl` outside it, so
+  `sourceComponent` was `undefined` and every row loaded nothing — and a Loader that loads nothing
+  is not an error. Never give a delegate property the same name as an id in the same file.
+- **The contract tests were MUTE.** Qt hands `console.log` to the journal when stderr is not a tty,
+  so `qml6 … 2>&1` captured nothing and the self test's exit code was all it ever had.
+  `QT_FORCE_STDERR_LOGGING=1`.
+- **Six instrument failures in five days, all the same shape: the test exercised the logic while
+  the product was broken.** BUG-168 bound no properties, BUG-170 read no files, BUG-173 rendered no
+  controls — suite green through all three. A check that never touches what the user looks at is
+  not a check.
 - **Exit code 0 is not the whole result.** The audio test passed 22/22 while the engine printed
   `Member enabled … overrides a member of the base object`. Read what a run prints.
 - **The near-miss question passes for the wrong reason.** `item.x !== undefined` instead of
@@ -236,8 +249,10 @@ maximized window, and a frozen audio scene shows flat bars by design (BUG-172).
   `samples/luminos-shadertoy.frag{,.properties.json}`, `config/main.xml`.
 - **Installed copy:** `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` — keep it
   `diff -rq` clean against the repo, and restart plasmashell after touching it.
-- **This turn:** `ui/scenes/Spectrum.qml` (BUG-172), `docs/BUGS.md` (BUG-171, BUG-172),
-  `docs/wallpaper/VERIFY.md` (the restart rule + the freeze trap), `HANDOFF.md`.
+- **This turn:** `ui/scenes/Spectrum.qml` (BUG-172), `ui/props/PropertyEditor.qml` (BUG-173),
+  new `tests/wallpaper/editor_contract.qml`, `scripts/luminos-wallpaper-selftest` (adds it, and
+  `QT_FORCE_STDERR_LOGGING=1` so a failing contract test can actually say why),
+  `docs/BUGS.md` (BUG-171/172/173), `docs/wallpaper/VERIFY.md`, `LUMINOS_STATUS.md`, `HANDOFF.md`.
 - **Docs:** `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG,VERIFY,SELFTEST.log}.md`,
   `LUMINOS_DECISIONS.md` (117–120), `docs/BUGS.md`, `LUMINOS_STATUS.md`, `docs/CODE_REFERENCE.md`.
 - **Verification:** `scripts/luminos-wallpaper-selftest` (30 checks) and `docs/wallpaper/VERIFY.md`.

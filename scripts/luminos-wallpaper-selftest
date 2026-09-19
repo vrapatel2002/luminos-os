@@ -84,8 +84,13 @@ say ""
 # The exit code IS the result: each harness exits with its failure count.
 say "[4] QML contract tests"
 if command -v qml6 >/dev/null 2>&1; then
-    for t in audio_contract props_contract; do
-        out="$(QT_QPA_PLATFORM=offscreen timeout 30 qml6 "$REPO/tests/wallpaper/$t.qml" 2>&1)"
+    # QT_FORCE_STDERR_LOGGING: Qt hands console.log to the JOURNAL when stderr is
+    # not a tty, so `2>&1` captured NOTHING here and a failing check printed its
+    # reason into a void. The exit code was all this ever had. BUG-173.
+    # [CHANGE: claude-code | 2026-09-19]
+    for t in audio_contract props_contract editor_contract; do
+        out="$(QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
+               timeout 30 qml6 "$REPO/tests/wallpaper/$t.qml" 2>&1)"
         rc=$?
         case "$rc" in
             0)   ok "$t — exit 0, every check passed" ;;

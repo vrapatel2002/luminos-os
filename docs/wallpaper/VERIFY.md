@@ -23,7 +23,7 @@ pasting.
 | 1 | the package | every file installed, and the installed copy `diff -rq` clean against the repo |
 | 2 | scene settings (SPEC §3.2) | `Spectrum.qml` and the sample shader both return `OK {…}`. **`NONE` for Spectrum is a failure** — it ships six controls |
 | 3 | runtime shaders (SPEC §3.4) | `qsb` present, the sample shader compiles, the `.qsb` really lands in `~/.cache/luminos/wallpaper-shaders/` |
-| 4 | QML contracts | `audio_contract` 22 checks, `props_contract` 21 checks, both exit 0. Needs a graphical session |
+| 4 | QML contracts | `audio_contract` 22 checks, `props_contract` 21 checks, `editor_contract` 6 checks (does a settings row actually RENDER a control — BUG-173), all exit 0 |
 | 5 | the running wallpaper | Chromium **not** mapped into plasmashell. `libcava` mapped only when an audio scene is selected |
 | 6 | the journal | no `[LUMINOS-WP]` lines. Any that appear name the real fault — they are worth reading, not filtering |
 
@@ -55,7 +55,9 @@ The self test cannot see the screen. These three need a person, once:
    *Never — keep rendering even when hidden*, before deciding the audio path is broken.
 1. **Native QML → Spectrum**, with music playing in any player — the bars should move, the
    backdrop should swell on bass, and there should be a faint flash on the beat.
-2. **Scene settings** at the bottom of the wallpaper settings dialog — Sensitivity, Bars,
+2. **Scene settings** at the bottom of the wallpaper settings dialog. **Labels with no
+   controls beside them is BUG-173** — `editor_contract.qml` now catches that without a
+   person, so check the self test first. Sensitivity, Bars,
    Bar bottom, Bar top, Flash on beat. Changing Bars to 128 should visibly change the
    wallpaper, and the value should survive closing and reopening the dialog.
 3. **Shadertoy sample (audio-reactive)** from the Scene list — rings pulsing from the

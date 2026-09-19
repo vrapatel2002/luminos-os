@@ -1,5 +1,5 @@
 Luminos live wallpaper — self test
-  2026-09-19T16:04:31-04:00   7.0.5-arch1-1   plugin: /home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents
+  2026-09-19T16:22:16-04:00   7.0.5-arch1-1   plugin: /home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents
 
 [1] the package
   PASS  installed ui/QmlMode.qml
@@ -35,9 +35,10 @@ Luminos live wallpaper — self test
 [4] QML contract tests
   PASS  audio_contract — exit 0, every check passed
   PASS  props_contract — exit 0, every check passed
+  PASS  editor_contract — exit 0, every check passed
 
 [5] the running wallpaper
-  PASS  plasmashell pid 43607
+  PASS  plasmashell pid 52534
   PASS  Chromium not mapped
   PASS  libcava mapped — the audio path is live
         AudioReactive=true
@@ -45,10 +46,10 @@ Luminos live wallpaper — self test
         WallpaperMode=qml
 
 [6] what the wallpaper said
-  ..    installed files last written 2026-09-19 16:04:08 — older warnings are previous versions
+  ..    installed files last written 2026-09-19 16:21:57 — older warnings are previous versions
   PASS  no [LUMINOS-WP] warnings since this build was installed
   ..    5 older line(s) in this boot, from previous versions
 
 -----------------------------------------------------------
-  30 passed, 0 failed
+  31 passed, 0 failed
   report written to /home/shawn/luminos-os/docs/wallpaper/SELFTEST.log

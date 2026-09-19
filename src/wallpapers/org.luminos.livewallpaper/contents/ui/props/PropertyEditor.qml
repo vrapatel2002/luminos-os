@@ -60,7 +60,14 @@ ColumnLayout {
             required property string modelData
 
             readonly property var def: editor.schema[row.modelData] || ({})
-            readonly property string ctl: "" + (row.def.type || "")
+            // Named `kind`, and it matters. It used to be named the same as the
+            // id of the PropertyControls object at the bottom of this file, and
+            // a delegate's own properties are searched BEFORE the enclosing
+            // component's ids — so the lookup in the Loader below resolved
+            // against this string instead of that object, every row loaded
+            // nothing, and the panel showed five labels and no controls with no
+            // error anywhere. BUG-173. [CHANGE: claude-code | 2026-09-19]
+            readonly property string kind: "" + (row.def.type || "")
 
             Layout.fillWidth: true
             spacing: Kirigami.Units.largeSpacing
@@ -70,7 +77,7 @@ ColumnLayout {
                 Layout.alignment: Qt.AlignVCenter
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
-                visible: row.ctl !== "label"
+                visible: row.kind !== "label"
                 text: ("" + (row.def.label || row.modelData)) + ":"
             }
 
@@ -81,7 +88,8 @@ ColumnLayout {
                 // rather than vanishing — CONTRACTS §4: "unknown control type ->
                 // skipped, rest still rendered". PropertyStore has already dropped
                 // types it does not know, so this is belt and braces.
-                sourceComponent: ctl[row.ctl] !== undefined ? ctl[row.ctl] : ctl.label
+                sourceComponent: controlSet[row.kind] !== undefined ? controlSet[row.kind]
+                                                                       : controlSet.label
                 // Handed over EXPLICITLY, not through the Loader's context: whether
                 // a Component declared outside the Loader resolves the Loader's own
                 // properties is a scoping rule I cannot test from here, and a panel
@@ -107,7 +115,7 @@ ColumnLayout {
             : i18n("This scene declares no settings. A scene gets a panel here by shipping a properties.json beside it.")
     }
     PropertyControls {
-        id: ctl
+        id: controlSet
         editor: editor
     }
 }

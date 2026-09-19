@@ -6648,3 +6648,68 @@ which is the case the warning was written for.
 Same shape as BUG-163 and BUG-170 one more time, from the other side: **a warning that cannot
 tell "off on purpose" from "broken" is noise, and noise in a checker is worse than no checker** —
 it trains you to scroll past the one line that matters.
+
+---
+
+## BUG-173 — every settings row rendered its label and no control, because a delegate property shadowed an id
+<!-- [CHANGE: claude-code | 2026-09-19] found by Shawn, with a screenshot -->
+
+**Status:** FIXED · **Severity:** SPEC §3.2 produced a panel of labels and nothing else ·
+**Files:** `contents/ui/props/PropertyEditor.qml`, new `tests/wallpaper/editor_contract.qml`,
+`scripts/luminos-wallpaper-selftest`
+
+Shawn's screenshot: **Scene settings**, the subtitle, then `Sensitivity:` `Bars:` `Bar bottom:`
+`Bar top:` `Flash on beat:` — five labels, right-aligned, correct, and empty space where every
+control should be. Nothing in the journal. `luminos-wallpaper-props` returned all six keys. The
+self test was 30/30.
+
+`PropertyEditor.qml` built each row like this:
+
+```qml
+RowLayout {
+    id: row
+    readonly property string ctl: "" + (row.def.type || "")   // "slider", "color", …
+    Loader {
+        sourceComponent: ctl[row.ctl] !== undefined ? ctl[row.ctl] : ctl.label
+    }
+}
+…
+PropertyControls { id: ctl }        // the object holding the eight Components
+```
+
+Two different things called `ctl`, one line apart in intent and eighty apart in the file.
+
+**A delegate's own properties are resolved before the enclosing component's ids.** So inside the
+Loader, `ctl` is the RowLayout's *string*, not the PropertyControls *object*:
+`"slider"["slider"]` → `undefined`, then the fallback `"slider".label` → `undefined`, then
+`sourceComponent: undefined` → **the Loader loads nothing, and that is not an error.** Eight rows,
+eight silent empties. Every control type, including the plain `label`, which is why the note at the
+bottom of the Spectrum panel was missing too.
+
+The comment sitting directly beneath the broken line was worrying about QML scoping — about
+whether a Component declared outside a Loader can see the Loader's properties — and was right to.
+It just guarded the other direction.
+
+#### Fix
+The delegate property is now `kind`, the instance id is now `controlSet`, and the two can no longer
+collide. A comment says why the name matters, so it does not get "tidied" back.
+
+#### The real fix: `tests/wallpaper/editor_contract.qml`
+`props_contract.qml` has 21 checks and every one passed while the panel was empty, because it tests
+`PropertyStore` — the merge, the validation, the error states. Nothing tested that a **row renders a
+control**. The new harness builds a `PropertyEditor` over all eight Lively types and asserts, per
+row: the Loader produced an item, the item has a width, and it was handed its own key. Against the
+broken code it says `8 of 8 rows are empty (indices 0,1,2,3,4,5,6,7)`; against the fix, six ok.
+Wired into the self test, now **31 checks**.
+
+#### Second bug found while writing it: the contract tests were mute
+`QT_QPA_PLATFORM=offscreen qml6 … 2>&1` captured **nothing**. Qt hands `console.log` to the
+**journal** when stderr is not a tty, so the self test's `$out` was always empty and its
+"print the first six FAIL lines" branch printed a blank block. The exit code was all it ever had.
+Fixed with `QT_FORCE_STDERR_LOGGING=1`.
+
+#### Lesson
+Sixth instrument failure in five days. The pattern is now unmistakable and worth stating as a rule:
+**every one of these was a test that exercised the logic while the product was broken.** BUG-168
+bound no properties, BUG-170 read no files, BUG-173 rendered no controls — and the suite was green
+through all three. A check that never touches the thing the user looks at is not a check.
