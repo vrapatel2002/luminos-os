@@ -37,7 +37,7 @@ Item {
 
     AudioBridge {
         id: bridge
-        enabled: false      // never loads a provider — see header
+        audioEnabled: false // never loads a provider — see header
         running: true
     }
 
@@ -91,12 +91,12 @@ Item {
         // SPEC §5.3 / CONTRACTS §2: the provider stops when running is false.
         // `wanted` is what the provider Loader is keyed on, so this is the
         // property that actually enforces it.
-        bridge.enabled = true;
+        bridge.audioEnabled = true;
         bridge.running = false;
         harness.check("running=false => not wanted", bridge.wanted === false, bridge.wanted);
         bridge.running = true;
         harness.check("enabled+running => wanted", bridge.wanted === true, bridge.wanted);
-        bridge.enabled = false;
+        bridge.audioEnabled = false;
         harness.check("disabled => not wanted", bridge.wanted === false, bridge.wanted);
 
         console.log(harness.failures === 0

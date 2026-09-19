@@ -26,14 +26,18 @@ Item {
     height: 0
 
     // ---- inputs ---------------------------------------------------------
-    property bool enabled: false
+    // NOT `enabled`: Item already has an `enabled` property, and shadowing it made
+    // Qt log `Member enabled of AudioBridge overrides a member of the base object`
+    // on every load. A shadowed base property is a bug waiting for the day something
+    // reads Item.enabled and gets ours. [CHANGE: claude-code | 2026-09-19]
+    property bool audioEnabled: false
     // CONTRACTS §2: "The provider stops when running is false." Non-negotiable —
     // an audio wallpaper that keeps an FFT thread and a PipeWire stream alive
     // behind a fullscreen window is exactly the cost the freeze policy exists
     // to avoid. The Loader below is keyed on this, so the refcount drops and
     // Caelestia's service stops itself.
     property bool running: true
-    readonly property bool wanted: bridge.enabled && bridge.running
+    readonly property bool wanted: bridge.audioEnabled && bridge.running
 
     readonly property int bandCount: 128
 

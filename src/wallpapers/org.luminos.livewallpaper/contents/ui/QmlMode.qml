@@ -58,10 +58,10 @@ Item {
     // CONTRACTS §2. Always instantiated, never conditional: it costs one Item and
     // one QtObject, and in exchange `audio` is a stable object from the first
     // frame, with active:false, instead of flipping between null and an object
-    // under every scene's bindings. `enabled` is what actually starts PipeWire.
+    // under every scene's bindings. `audioEnabled` is what actually starts PipeWire.
     AudioBridge {
         id: audioBridge
-        enabled: qmlRoot.audioEnabled
+        audioEnabled: qmlRoot.audioEnabled
         running: qmlRoot.shouldPlay
     }
 
