@@ -79,15 +79,22 @@ esac
 say ""
 
 # ----------------------------------------------------------- 4. the QML tests
-say "[4] QML contract tests (need a graphical session)"
+# QT_QPA_PLATFORM=offscreen because this may be run from a shell with no display
+# — without it Qt aborts on a bare Item and the failure reads as a broken test.
+# The exit code IS the result: each harness exits with its failure count.
+say "[4] QML contract tests"
 if command -v qml6 >/dev/null 2>&1; then
     for t in audio_contract props_contract; do
-        if out="$(timeout 60 qml6 "$REPO/tests/wallpaper/$t.qml" 2>&1)"; then
-            ok "$t — $(printf '%s' "$out" | grep -c '  ok ') checks"
-        else
-            bad "$t FAILED"
-            printf '%s\n' "$out" | grep -E 'FAIL|Error|error' | head -5 | sed 's/^/        /' | tee -a "$LOG"
-        fi
+        out="$(QT_QPA_PLATFORM=offscreen timeout 30 qml6 "$REPO/tests/wallpaper/$t.qml" 2>&1)"
+        rc=$?
+        case "$rc" in
+            0)   ok "$t — exit 0, every check passed" ;;
+            124) bad "$t TIMED OUT — a throw before Qt.exit() will do this" ;;
+            134) bad "$t ABORTED — usually no display; is QT_QPA_PLATFORM honoured?" ;;
+            *)   bad "$t failed, exit $rc, $rc check(s) broken" ;;
+        esac
+        [ "$rc" -eq 0 ] || printf '%s\n' "$out" | grep -E 'FAIL|Error|error|\.qml:' \
+            | head -6 | sed 's/^/        /' | tee -a "$LOG"
     done
 else
     bad "qml6 not found — cannot run the contract tests"
@@ -118,13 +125,23 @@ awk '/^\[/{g=$0} /^(WallpaperMode|QmlScene|AudioReactive|SceneProperties)=/{ if 
 say ""
 
 # ------------------------------------------------------------- 6. the journal
-say "[6] what the wallpaper said this boot"
-lines="$(journalctl --user -b -t plasmashell --no-pager 2>/dev/null | grep -c 'LUMINOS-WP')"
-if [ "${lines:-0}" -eq 0 ]; then
-    ok "no [LUMINOS-WP] warnings"
+# Warnings from BEFORE the currently installed files were written are history —
+# they are what the last version said, and flagging them as current faults makes
+# the report cry wolf for the rest of the boot. Only lines newer than the newest
+# installed file are this build's problem. [CHANGE: claude-code | 2026-09-19]
+say "[6] what the wallpaper said"
+deployed="$(find "$PLUGIN" -type f -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1)"
+since="$(date -d "@${deployed:-0}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
+info "installed files last written $since — older warnings are previous versions"
+recent="$(journalctl --user -t plasmashell --no-pager --since "$since" 2>/dev/null | grep -c 'LUMINOS-WP')"
+older="$(journalctl --user -b -t plasmashell --no-pager 2>/dev/null | grep -c 'LUMINOS-WP')"
+older=$(( older - recent ))
+if [ "${recent:-0}" -eq 0 ]; then
+    ok "no [LUMINOS-WP] warnings since this build was installed"
+    [ "${older:-0}" -gt 0 ] && info "$older older line(s) in this boot, from previous versions"
 else
-    bad "$lines [LUMINOS-WP] warning(s):"
-    journalctl --user -b -t plasmashell --no-pager 2>/dev/null \
+    bad "$recent [LUMINOS-WP] warning(s) from THIS build:"
+    journalctl --user -t plasmashell --no-pager --since "$since" 2>/dev/null \
         | grep 'LUMINOS-WP' | tail -20 | sed 's/^/        /' | tee -a "$LOG"
 fi
 say ""

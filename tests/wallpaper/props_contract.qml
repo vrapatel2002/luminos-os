@@ -38,6 +38,8 @@ Item {
         console.log("CONTRACTS §4 — per-scene properties");
 
         // ---- 1. validate: unknown control types are SKIPPED, not fatal -----
+        // validate() returns the schema directly since BUG-170 — the reader now
+        // reports what it skipped, so the store no longer carries a second value.
         var v = store.validate({
             speed: { type: "slider", value: 1 },
             tint:  { type: "color",  value: "#fff" },
@@ -45,13 +47,14 @@ Item {
             junk:  "not an object",
             empty: null
         });
-        harness.check("known types kept", v.schema.speed !== undefined && v.schema.tint !== undefined,
-                      Object.keys(v.schema));
-        harness.check("unknown type dropped", v.schema.weird === undefined, v.schema.weird);
-        harness.check("non-object dropped", v.schema.junk === undefined, v.schema.junk);
-        harness.check("null entry dropped", v.schema.empty === undefined, v.schema.empty);
-        harness.check("skipped names reported", v.skipped.length === 3, v.skipped);
+        harness.check("known types kept", v.speed !== undefined && v.tint !== undefined, Object.keys(v));
+        harness.check("unknown type dropped", v.weird === undefined, v.weird);
+        harness.check("non-object dropped", v.junk === undefined, v.junk);
+        harness.check("null entry dropped", v.empty === undefined, v.empty);
+        harness.check("only the known keys survive", Object.keys(v).length === 2, Object.keys(v));
         harness.check("all eight Lively types known", store.knownTypes.length === 8, store.knownTypes);
+        harness.check("validate never throws on garbage",
+                      Object.keys(store.validate(null)).length === 0, "threw");
 
         // ---- 2. merge: saved wins, else default, else null ----------------
         var schema = {
@@ -96,6 +99,21 @@ Item {
         store.savedJson = '"a bare string"';
         harness.check("non-object JSON degrades to defaults",
                       Object.keys(store.savedFor("spectrum")).length === 0, "threw");
+
+        // ---- 6. BUG-170: unreadable must never look like "no settings" -----
+        store.accept("");
+        harness.check("empty payload = no settings, and NO problem reported",
+                      Object.keys(store.schema).length === 0 && store.problem.length === 0, store.problem);
+        store.accept('{"a":{"type":"slider","value":1}}');
+        harness.check("a payload is parsed into the schema", store.schema.a !== undefined, store.schema);
+        harness.check("a good payload clears any previous problem", store.problem.length === 0, store.problem);
+        store.reject("the reader fell over");
+        harness.check("a rejected read REPORTS a problem", store.problem === "the reader fell over", store.problem);
+        harness.check("a rejected read leaves an empty schema",
+                      Object.keys(store.schema).length === 0, store.schema);
+        store.accept("not json at all");
+        harness.check("an unparseable payload is a problem, not silence",
+                      store.problem.length > 0, store.problem);
 
         console.log(harness.failures === 0
                     ? "PASS — property contract holds"

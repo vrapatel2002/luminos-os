@@ -1,0 +1,54 @@
+Luminos live wallpaper — self test
+  2026-09-19T15:51:29-04:00   7.0.5-arch1-1   plugin: /home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents
+
+[1] the package
+  PASS  installed ui/QmlMode.qml
+  PASS  installed ui/scene.js
+  PASS  installed ui/audio/AudioBridge.qml
+  PASS  installed ui/audio/CaelestiaAudio.qml
+  PASS  installed ui/audio/AudioTexture.qml
+  PASS  installed ui/props/PropertyStore.qml
+  PASS  installed ui/props/PropsReader.qml
+  PASS  installed ui/props/PropertyEditor.qml
+  PASS  installed ui/props/PropertyControls.qml
+  PASS  installed ui/props/ShaderBaker.qml
+  PASS  installed ui/scenes/Spectrum.qml
+  PASS  installed ui/scenes/ShaderToy.qml
+  PASS  installed ui/scenes/Spectrum.properties.json
+  PASS  installed tools/luminos-shader-bake
+  PASS  installed tools/luminos-wallpaper-props
+  PASS  installed tools/shader-wrapper.glsl
+  PASS  installed samples/luminos-shadertoy.frag
+  PASS  installed copy matches the repo
+
+[2] scene settings (SPEC §3.2, BUG-170)
+  PASS  Spectrum.qml -> OK {"sensitivity":{"type":"slider","label":"Sensitivity","va…
+  PASS  Shader.qml -> OK {"speed":{"type":"slider","label":"Speed","value":1.0,"mi…
+  PASS  luminos-shadertoy.frag -> OK {"uSpeed":{"type":"slider","label":"Speed","value":1.0,"m…
+
+[3] runtime shaders (SPEC §3.4)
+  PASS  qsb present
+  PASS  sample shader compiles
+        UNIFORMS uTint:vec4 uSpeed:float
+  PASS  cached at /home/shawn/.cache/luminos/wallpaper-shaders/4dd3b0bb1ea9be3aa252f68051dca437.qsb
+
+[4] QML contract tests
+  PASS  audio_contract — exit 0, every check passed
+  PASS  props_contract — exit 0, every check passed
+
+[5] the running wallpaper
+  PASS  plasmashell pid 1765
+  PASS  Chromium not mapped
+  PASS  libcava mapped — the audio path is live
+        AudioReactive=true
+        QmlScene=spectrum
+        WallpaperMode=qml
+
+[6] what the wallpaper said
+  ..    installed files last written 2026-09-19 15:50:38 — older warnings are previous versions
+  PASS  no [LUMINOS-WP] warnings since this build was installed
+  ..    4 older line(s) in this boot, from previous versions
+
+-----------------------------------------------------------
+  30 passed, 0 failed
+  report written to /home/shawn/luminos-os/docs/wallpaper/SELFTEST.log

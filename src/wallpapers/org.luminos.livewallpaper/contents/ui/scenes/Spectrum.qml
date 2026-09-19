@@ -3,13 +3,12 @@
     [CHANGE: claude-code | 2026-09-19]  DECISION 117, props 118.
     SPDX-License-Identifier: GPL-3.0-or-later
 
-    Bars, not a Canvas. A Canvas repaint is a CPU raster of the whole surface —
-    at 2880×1800 that is the wrong trade sixty times a second. Rectangles are
-    composited on the GPU and only their heights change.
+    Bars, not a Canvas: a Canvas repaint is a CPU raster of the whole surface, and
+    at 2880×1800 that is the wrong trade sixty times a second.
 
-    N bars drawn from the 128 contract bands, max within each group. The contract
-    stays 128 because that is Lively's number and ports depend on it; how many are
-    DRAWN is a setting (Spectrum.properties.json), defaulting to 64.
+    N bars from the 128 contract bands, max within each group. The contract stays
+    128 because that is Lively's number and ports depend on it; how many are DRAWN
+    is a setting (Spectrum.properties.json), default 64.
 */
 import QtQuick
 
@@ -49,13 +48,23 @@ Item {
         return m > 1 ? 1 : m;
     }
 
-    // Deliberately NOT faked. When there is no provider the bars sit flat and the
-    // log says why. An idle shimmer here would look better and would mean a
-    // broken audio path is indistinguishable from a quiet room — the same
-    // mistake BUG-163 taught: a green light nobody can trust.
+    // Not faked when there is no provider: flat bars, and the log says why. An
+    // idle shimmer would make a broken audio path look like a quiet room —
+    // BUG-163's lesson. Delayed 3s because the provider loads asynchronously, and
+    // a warning that fires on every start is one people scroll past.
     onLiveChanged: {
-        if (!scene.live)
-            console.warn("[LUMINOS-WP] spectrum: no audio provider — bars will stay flat");
+        if (scene.live)
+            settleWarn.stop();
+        else
+            settleWarn.restart();
+    }
+    Timer {
+        id: settleWarn
+        interval: 3000
+        onTriggered: {
+            if (!scene.live)
+                console.warn("[LUMINOS-WP] spectrum: no audio provider after 3s — bars will stay flat");
+        }
     }
 
     Rectangle {

@@ -205,6 +205,21 @@ The bridge VM cannot read the device's package DB, so these get measured on the 
 
 **Nothing in §3 gets built against an unverified answer.**
 
+## 7a. VERIFIED ON THE BOX — 2026-09-19
+
+`scripts/luminos-wallpaper-selftest` → **30 passed, 0 failed**, run on the G14 itself.
+
+| | |
+|---|---|
+| §3.1 audio | `libcava` mapped into plasmashell; `AudioReactive=true`; contract exit 0 |
+| §3.2 settings | reader returns `OK` for Spectrum, Shader and the sample shader; contract exit 0 |
+| §3.4 shaders | sample compiles, `.qsb` lands in `~/.cache/luminos/wallpaper-shaders/` |
+| no Chromium | `libQt6WebEngineCore` **not mapped** — DECISION 112 still holding |
+
+Still needs a pair of eyes (a self test cannot see the screen): bars moving to music, a
+settings change visibly altering the wallpaper, and the shader sample showing its own
+different controls. `docs/wallpaper/VERIFY.md` has the three.
+
 ## 8. DONE MEANS
 
 - A wallpaper is a folder you install, with a picture of itself in a gallery.

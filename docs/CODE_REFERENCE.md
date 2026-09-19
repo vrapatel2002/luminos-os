@@ -644,6 +644,20 @@ END OF CODE_REFERENCE.md
   ShaderEffect with `Qt.createQmlObject` so property keys become uniforms by name on any shader.
 - `src/wallpapers/org.luminos.livewallpaper/contents/ui/audio/AudioTexture.qml` — **[EXISTS]** the
   128×1 spectrum texture (CONTRACTS §2), shared by `Shader.qml` and `ShaderToy.qml`.
+- `scripts/luminos-wallpaper-selftest` — **[EXISTS]** every wallpaper check in one run: installed files,
+  the settings reader, the shader baker and its cache, both QML contracts (with `QT_QPA_PLATFORM=offscreen`,
+  because `qml6` aborts with no display), whether Chromium and libcava are mapped, and this build's
+  `[LUMINOS-WP]` journal lines. Writes `docs/wallpaper/SELFTEST.log`; exit code is the failure count.
+- `docs/wallpaper/VERIFY.md` — **[EXISTS]** the brief for a session running ON the box: what passing looks
+  like per section, the three things that still need eyes, the traps not to re-diagnose.
+- `src/wallpapers/org.luminos.livewallpaper/contents/tools/luminos-wallpaper-props` — **[EXISTS]** reads a
+  scene's `properties.json` and prints `OK {json}` / `NONE` / `ERR <line>`. Exists because Qt 6.11 blocks
+  local file reads from QML (BUG-170). 19 tests.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/props/PropsReader.qml` — **[EXISTS]** runs that
+  tool through the executable DataSource and parses one line. Loaded BY URL, so a missing import is a
+  named warning rather than a broken settings dialog.
+- `tests/wallpaper/props_read_probe.qml` — **[EXISTS]** the probe that settled BUG-170: tries an
+  `XMLHttpRequest` on a file that is definitely there and prints status and byte count.
 - `scripts/luminos-wallpaper-cost` — **[EXISTS]** measures what the wallpaper costs: is
   `libQt6WebEngineCore` mapped into plasmashell, PSS from `smaps_rollup`, CPU jiffies over a window.
   Turns "lighter than Chromium" into a number anyone can re-run.

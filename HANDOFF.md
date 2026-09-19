@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 5 (Cowork chat; see the counter note)
+Last updated: 2026-09-19 — Response 21 (Cowork chat; see the counter note)
 
 > ⚠️ **Counter note, recorded deliberately per §0.1 — do not silently "fix" it.** This is a **Cowork**
 > chat (cloud container + device bridge), not Claude Code on the box. It ran a long way **without
@@ -34,6 +34,21 @@ The wallpaper already did image / GIF / video / YouTube / web, but the web path 
 a file; DECISION 113 replaced the four bundled effects with native QML. What is left is the part that
 makes it *Lively*: audio, per-wallpaper settings, installable packages, drop-in shaders and JS, and
 playable games.
+
+## ⚡ READ THIS FIRST — a Cowork session CAN run things on the G14 now
+As of 2026-09-19 a **host shell** exists: `mcp__remote-devices__host-shell__run_command`
+runs a command on the G14 itself, as Shawn, outside the Cowork VM. That changes the working
+model completely — `qml6`, `journalctl`, `luminos-notes.sh`, `luminos-brain`, `pactl`,
+`systemctl --user` and **`git push`** are all reachable. Do not hand the user a list of
+commands to paste; run them.
+
+Two things learned immediately:
+- **Each call must finish in well under 60s** or the device stops responding to it.
+  Backgrounding does not survive the call. Split long work into short commands.
+- **That shell has no `DISPLAY`/`WAYLAND_DISPLAY`.** `qml6` calls `abort()` on a bare `Item`
+  without one, which reads as "the test crashed". Always `QT_QPA_PLATFORM=offscreen`.
+- `device_bash` is still a **different machine** (the Cowork VM, uid 1004). Both see the same
+  connected folders; only the host shell sees the real desktop session.
 
 ## Process / approach
 - **Build in the cloud container, deploy by checksum.** The container has Qt 6.4 tooling
@@ -95,18 +110,22 @@ playable games.
 Nothing is half-written. Every file named below is deployed to
 `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` and `diff -rq` clean against the repo.
 
-**Two things are waiting on Shawn, not on code:**
-1. **plasmashell has not been restarted since §3.1/§3.2 landed**, so the running wallpaper is still
-   the pre-audio build. Nothing is proven on screen yet.
-2. **Three commits are unpushed** (`ef200445`, `2c62f8fb`, `9fa3d26b`, plus this session's §3.2
-   commit). The remote is SSH and the bridge VM has no SSH.
+**Verified on the box 2026-09-19** — `scripts/luminos-wallpaper-selftest` → **30 passed, 0
+failed**. Live config is `WallpaperMode=qml QmlScene=spectrum AudioReactive=true`; **chromium is
+not mapped** into plasmashell and **libcava is**; the settings reader answers `OK` for all three
+scenes; the sample shader compiles and caches; both QML contracts exit 0.
+
+**What is still unproven is only what a self test cannot see:** bars actually moving to music, a
+settings change visibly altering the wallpaper, and the shader sample showing its own different
+controls. `docs/wallpaper/VERIFY.md` lists those three.
 
 ## Next steps (ordered)
 Wallpaper first; the server items below are unchanged and still Shawn's call.
 
-1. **Shawn, on the box — one command per line, no trailing comments** (a pasted `# comment` becomes
-   an argument; it already made systemd try to restart `then.service`). Add the shader test and the
-   cost baseline to the run:
+1. **Run the self test, do not hand out command lists** — the host shell exists now:
+   `bash ~/luminos-os/scripts/luminos-wallpaper-selftest` (writes `docs/wallpaper/SELFTEST.log`,
+   exit code = failure count). The old per-command list is kept below only because the three
+   eyes-only checks still need a person:
    ```
    qml6 ~/luminos-os/tests/wallpaper/audio_contract.qml ; echo $?
    ```
@@ -185,6 +204,16 @@ Wallpaper first; the server items below are unchanged and still Shawn's call.
   Do not investigate it a third time. Killing it kills the Cowork session.
 
 **Wallpaper**
+- **Qt 6.11 disables `XMLHttpRequest` on local files** (BUG-170) — `QML_XHR_ALLOW_FILE_READ` is
+  the documented opt-in and we deliberately do **not** set it: it is per-process and would give
+  every QML object in plasmashell arbitrary local file reads. The reader is
+  `contents/tools/luminos-wallpaper-props`, run as a subprocess.
+- **A `fillWidth` + wrapping label inside a `Kirigami.FormLayout` drags the whole form off-screen**
+  (BUG-169). Cap every long help label with `Layout.maximumWidth`.
+- **Never gate a whole UI section on an async flag.** The Scene settings block was invisible
+  whenever its file read had not completed, with nothing said.
+- **`qml6` aborts without a display** — `QT_QPA_PLATFORM=offscreen`. Exit 134 means that; exit 124
+  means something threw before `Qt.exit()` and the test hung.
 - **A template's own documentation is inside the template.** `shader-wrapper.glsl` mentioned its
   `%(props)s` placeholder in its header comment; the whole file goes through one percent-format, so
   the generated uniform declarations were spliced into the comment and broke the next line. The error
@@ -227,6 +256,9 @@ Wallpaper first; the server items below are unchanged and still Shawn's call.
   `diff -rq` clean against the repo.
 - **Docs:** `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG}.md`, `LUMINOS_DECISIONS.md` (117, 118),
   `docs/BUGS.md` (BUG-168), `LUMINOS_STATUS.md`, `docs/CODE_REFERENCE.md`.
+- **Verification:** `scripts/luminos-wallpaper-selftest` (30 checks, writes
+  `docs/wallpaper/SELFTEST.log`) and `docs/wallpaper/VERIFY.md` (the brief, incl. the three
+  eyes-only checks).
 - **Scripts/tests:** `scripts/luminos-wallpaper-{pkg,capabilities,probe,cost}`,
   `tests/wallpaper/{test_pkg,test_shipped_props,test_shader_bake,budget_check}.py`,
   `tests/wallpaper/{audio_contract,props_contract}.qml`. Suite: **58 pytest + 43 QML checks**.

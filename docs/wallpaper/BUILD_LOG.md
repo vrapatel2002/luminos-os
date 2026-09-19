@@ -467,3 +467,55 @@ measures; only the CPU numbers are comparable.
 `device_commit_files` answered `written`; the device still had the previous 160-line copy, and only
 the **md5 comparison** showed it. Re-sending fixed it. Second occurrence — this is a reliable hazard,
 not a one-off, and "always md5 the device copy against the container copy" earns its place.
+
+## 2026-09-19 — session 5: it runs, and three of the four failures were the instruments
+
+A host shell reached the G14 for the first time this session, so the checks that had been
+handed to Shawn as command lists could finally be run here. `luminos-wallpaper-selftest`:
+**30 passed, 0 failed.**
+
+```
+WallpaperMode=qml   QmlScene=spectrum   AudioReactive=true
+chromium       not mapped          <- DECISION 112, still holding
+libcava        MAPPED              <- the audio path is live
+settings       OK for Spectrum, Shader and the sample shader
+shader         compiles, cached in ~/.cache/luminos/wallpaper-shaders/
+contracts      audio 0, props 0
+```
+
+### The first run said 27/3. Every one of the three was the test, not the product.
+
+**1. `qml6` SIGABRTs without a display.** Both contract tests "FAILED". A bare
+`Item { }` also aborts, so it was never about the tests: this shell has no
+`DISPLAY`/`WAYLAND_DISPLAY`, Qt cannot pick a platform plugin and calls `abort()`. Fixed
+with `QT_QPA_PLATFORM=offscreen`, and the runner now reports the exit code's meaning —
+**124 is a throw before `Qt.exit()`**, **134 is no display** — instead of one word.
+
+**2. `props_contract.qml` was testing an API I had changed.** The BUG-170 rewrite made
+`validate()` return the schema directly instead of `{schema, skipped}`. The test still read
+`v.schema.speed`, threw a TypeError inside `Component.onCompleted`, and therefore never
+reached `Qt.exit` — so it hung until the timeout and reported as a failure with no message.
+A test that is stale in exactly the way the code changed is worse than no test, because its
+failure looks like the product's. Updated, and grown from 21 to **28 checks** — the new ones
+pin BUG-170's actual lesson: `NONE`, `OK` and `ERR` must stay three distinguishable outcomes.
+
+**3. Section 6 flagged the past as the present.** It counted every `[LUMINOS-WP]` line in the
+boot, including four from *before* any of today's fixes were installed — among them a
+delightful one where a `grep` command had been pasted into the scene box and faithfully
+reported as a scene that would not load. Now it takes the newest installed file's mtime and
+only counts warnings **after** it, mentioning the older ones as history.
+
+### One real bug in the product, from the same evidence
+`Spectrum.qml` logged *"no audio provider — bars will stay flat"* the instant the scene
+appeared, because the provider loads asynchronously and arrives a moment later. Three of the
+four journal lines were that. A warning that fires on every single start is one people learn
+to scroll past, which is the whole value of the warning gone. It now waits three seconds and
+only complains if audio really has not arrived.
+
+### The thing worth carrying forward
+Four failures, three of them in the measuring equipment. That is now the fourth session in a
+row where the instrument was wrong — and the pattern is consistent enough to state plainly:
+**when a check fails, suspect the check first when it has never passed, and suspect the code
+first when it used to pass.** The audio contract had passed before, so its new failure was
+environmental. `props_contract` had passed before too — but the code under it had changed
+shape, which is the case that looks like the product failing and is not.
