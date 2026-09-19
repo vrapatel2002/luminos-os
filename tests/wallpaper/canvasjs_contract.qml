@@ -27,6 +27,7 @@ Item {
     property int failures: 0
     property int stage: 0
     property bool done: false
+    property int frozeAt: 0
 
     function check(name, cond, got) {
         if (cond)
@@ -98,19 +99,51 @@ Item {
                               s !== null && ("" + s.source).indexOf("bounded.js") > 0,
                               s === null ? "no scene" : s.source);
                 harness.stage = 2;
-                mode.scene = harness.fixture("needs-fetch.js");
+                mode.scene = harness.fixture("looping.js");
                 settle.restart();
                 return;
             }
 
             if (harness.stage === 2) {
+                // BUG-180: it must ANIMATE, and it must come BACK.
+                harness.check("the fixture is still the one loaded",
+                              ("" + s.source).indexOf("looping.js") > 0, s === null ? "-" : s.source);
+                harness.check("it is animating, not one frame and a still picture",
+                              s !== null && s.frames > 2, s === null ? "-" : s.frames);
+                harness.frozeAt = s.frames;
+                mode.shouldPlay = false;
+                harness.stage = 25;
+                settle.restart();
+                return;
+            }
+
+            if (harness.stage === 25) {
+                harness.check("freezing really stops it",
+                              s.frames - harness.frozeAt <= 1, s.frames - harness.frozeAt);
+                harness.frozeAt = s.frames;
+                mode.shouldPlay = true;      // the exact thing Shawn does: show the desktop
+                harness.stage = 26;
+                settle.restart();
+                return;
+            }
+
+            if (harness.stage === 26) {
+                harness.check("unfreezing RESUMES it — close your windows, it plays again",
+                              s.frames - harness.frozeAt > 2, s.frames - harness.frozeAt);
+                harness.stage = 3;
+                mode.scene = harness.fixture("needs-fetch.js");
+                settle.restart();
+                return;
+            }
+
+            if (harness.stage === 3) {
                 // CONTRACTS §6: "fails at load with a NAMED error — never a blank wallpaper".
                 var why = (s === null) ? "" : ("" + s.failure);
                 harness.check("an unsupported script fails rather than running",
                               why.length > 0, "no failure reported");
                 harness.check("and the failure NAMES what was missing",
                               why.toLowerCase().indexOf("fetch") >= 0, why);
-                harness.stage = 3;
+                harness.stage = 4;
                 mode.scene = harness.fixture("missing-nothing-here.js");
                 settle.restart();
                 return;

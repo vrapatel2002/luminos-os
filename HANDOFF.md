@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 13 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 14 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -80,7 +80,7 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (a KPackage must be self-contained; the lock screen loads the same package). Cached by content
   hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is built with `Qt.createQmlObject`, which is
   what makes §3.2 real for an arbitrary shader — a QML object cannot gain a property at runtime.
-- **BUG-168 through BUG-179 all fixed**, BUG-176 included: `org.kde.kwindowsystem` exports
+- **BUG-168 through BUG-180 all fixed**, BUG-176 included: `org.kde.kwindowsystem` exports
   `KWindowSystem.showingDesktop` as a notifiable QML singleton property, so Show Desktop now
   unfreezes the wallpaper for one binding rather than a `qdbus6` poll. BUG-171 (a deploy is
   not a load) and BUG-173 (every settings row drew a label and no control) are why the eyes-on
@@ -240,8 +240,16 @@ Shawn "far lighter than Chromium" without naming the scene.
 - **DECISION 121 — do NOT cap the audio publish rate.** Tried, measured 57.2 Hz from 84 Hz as
   intended, and cost MORE: 23.7 % mean against 20.9 % uncapped, three samples each. Reverted whole.
 - **BUG-178 — a rAF loop with nothing pacing it queued 2.5 GB of paint commands in 30 s.** The
-  wallpaper frame loop MUST be driven by `Canvas.onPainted`, never by `Canvas.requestAnimationFrame`
+  wallpaper frame loop must be paced by real paints, never by `Canvas.requestAnimationFrame`
   directly: the renderer has to set the pace or the producer outruns it without bound.
+- **BUG-180 — but NEVER run the frame synchronously inside `onPainted`.** A `requestPaint()`
+  issued from inside that handler is SWALLOWED (Qt marks the canvas clean when it returns), so the
+  loop dies after exactly one frame. Schedule the timer instead. And **`resume()` must kick the
+  timer, not the canvas** — waiting for `onPainted` makes recovery depend on the thing that
+  stopped, which is why a frozen wallpaper never came back.
+- **A wallpaper screenshot proves the first frame rendered and NOTHING else.** §3.5 shipped as a
+  still picture with every check green. When the feature is motion, count frames: `CanvasJs.frames`
+  exists for exactly that.
 - **A `.js` canvas wallpaper is EXPENSIVE here and a shader is cheap** — 41.1 % of a core against
   6.6 %, and worse than the Chromium it replaces (~24 %). Qt rasterises canvas on the CPU. Four
   experiments: capping surface resolution did NOTHING, the render target did NOTHING, content
@@ -333,7 +341,10 @@ Shawn "far lighter than Chromium" without naming the scene.
   `samples/luminos-shadertoy.frag{,.properties.json}`, `config/main.xml`.
 - **Installed copy:** `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` — keep it
   `diff -rq` clean against the repo, and restart plasmashell after touching it.
-- **SPEC §3.3 COMPLETE (DECISION 123 + 123a), this turn:** new `ui/WallpaperGallery.qml`,
+- **BUG-180 (the canvas freeze), this turn:** `ui/js/JsShim.qml`, `ui/scenes/CanvasJs.qml`
+  (new `frames` property), `tests/wallpaper/canvasjs_contract.qml` (17 checks now) +
+  `fixtures/looping.js`.
+- **SPEC §3.3 COMPLETE (DECISION 123 + 123a), earlier:** new `ui/WallpaperGallery.qml`,
   `tests/wallpaper/gallery_contract.qml`; `luminos-wallpaper-{install,gallery}` moved into
   `contents/tools/` with `scripts/` symlinks; `ui/scene.js` gained `modeForType()`; `ui/config.qml`
   gained the wiring only.

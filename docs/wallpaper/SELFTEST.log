@@ -1,5 +1,5 @@
 Luminos live wallpaper — self test
-  2026-09-19T18:27:03-04:00   7.0.5-arch1-1   plugin: /home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents
+  2026-09-19T18:59:39-04:00   7.0.5-arch1-1   plugin: /home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents
 
 [1] the package
   PASS  installed ui/QmlMode.qml
@@ -45,16 +45,16 @@ Luminos live wallpaper — self test
   PASS  gallery_contract — exit 0, every check passed
 
 [5] the running wallpaper
-  PASS  plasmashell pid 101188
+  PASS  plasmashell pid 141641
   PASS  Chromium not mapped
   PASS  libcava mapped — the audio path is live
         AudioReactive=true
-        QmlScene=/home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents/samples/luminos-shadertoy.frag
+        QmlScene=/home/shawn/.local/share/luminos/wallpapers/starfield/wallpaper.js
         SceneProperties={"spectrum":{"lowColor":"#38bdf8","highColor":"#fa8b8b","bars":2,"sensitivity":3}}
         WallpaperMode=qml
 
 [6] what the wallpaper said
-  ..    installed files last written 2026-09-19 18:27:03 — older warnings are previous versions
+  ..    installed files last written 2026-09-19 18:59:25 — older warnings are previous versions
   PASS  no [LUMINOS-WP] warnings since this build was installed
   ..    6 older line(s) in this boot, from previous versions
 

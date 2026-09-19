@@ -27,6 +27,8 @@ Item {
 
     readonly property var canvasItem: cv
     readonly property real dpr: Screen.devicePixelRatio
+    // Frames delivered to the script, for tests and for the journal. BUG-180.
+    readonly property int frames: shim.frames
     property string failure: ""
 
     function fail(why) {

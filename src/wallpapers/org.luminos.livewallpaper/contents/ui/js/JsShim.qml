@@ -74,14 +74,11 @@ QtObject {
         }
     }
 
-    // Frames per second, capped. Measured on the G14: the cost of a canvas
-    // wallpaper is dominated by the PER-FRAME cycle, not by what is drawn in it
-    // — dropping the shipped sample from 160 dots to 30 and removing every line
-    // saved only 76% -> 56.6% of a core, and capping the surface resolution from
-    // 2880 to 1920 px saved nothing at all. So the lever is how OFTEN, not how
-    // much. 30 fps is more than a wallpaper needs; `fps` in a properties.json
-    // raises it for a wallpaper that earns it.
-    // [CHANGE: claude-code | 2026-09-19] BUG-178
+    // Frames per second, capped. The cost of a canvas wallpaper is dominated by
+    // the PER-FRAME cycle, not by what is drawn: 160 dots -> 30 and no lines saved
+    // only 76% -> 56.6% of a core, and capping the surface 2880 -> 1920 px saved
+    // nothing. The lever is how OFTEN. `fps` in a properties.json raises it.
+    // BUG-178.
     readonly property int minFrameMs: {
         var v = Number(shim.scene.props ? shim.scene.props.fps : undefined);
         if (isNaN(v) || v <= 0)
@@ -89,22 +86,28 @@ QtObject {
         return Math.round(1000 / Math.max(1, Math.min(120, v)));
     }
     property double lastTick: 0
+    // Frames delivered to the script: how a test asks "is it animating?" without
+    // eyes. BUG-180 shipped as one frame and a still picture.
+    property int frames: 0
 
-    // Called from Canvas.onPainted.
+    // Called from Canvas.onPainted, and it NEVER runs a frame synchronously.
+    // It used to, and that killed the loop after exactly ONE frame (BUG-180): a
+    // `requestPaint()` issued from inside onPainted is swallowed — Qt marks the
+    // canvas clean when the handler returns — so no second paint ever arrived and
+    // onPainted, the only driver, never fired again. Going through the timer puts
+    // the script's requestPaint outside the paint handler, where it lands.
+    // BUG-178's back-pressure is unchanged: a frame still waits for a real paint.
+    // [CHANGE: claude-code | 2026-09-19]
     function tick() {
         if (!shim.scene.running || shim.queue.length === 0)
             return;
-        var wait = shim.minFrameMs - (Date.now() - shim.lastTick);
-        if (wait > 1) {
-            pace.interval = wait;
-            pace.restart();
-            return;
-        }
-        shim.runDue();
+        pace.interval = Math.max(1, shim.minFrameMs - (Date.now() - shim.lastTick));
+        pace.restart();
     }
 
     function runDue() {
         shim.lastTick = Date.now();
+        shim.frames++;
         var due = shim.queue;
         shim.queue = [];
         for (var i = 0; i < due.length; i++) {
@@ -124,9 +127,14 @@ QtObject {
         }
     }
 
+    // Unfreezing kicks the TIMER, not the canvas: waiting for onPainted made
+    // recovery depend on the mechanism that had just stopped, so closing every
+    // window left the wallpaper a still image for good. BUG-180.
     function resume() {
-        if (shim.queue.length > 0)
-            shim.scene.canvasItem.requestPaint();
+        if (shim.queue.length === 0)
+            return;
+        pace.interval = 1;
+        pace.restart();
     }
 
     // ---- dispatch -------------------------------------------------------
@@ -137,9 +145,8 @@ QtObject {
             shim.mouseListeners.push(fn);
         else if (type === "resize")
             shim.resizeListeners.push(fn);
-        // Any other event type is accepted and never fires: a wallpaper cannot
-        // be clicked or typed into, and throwing here would kill scripts that
-        // merely register a keydown handler they never need.
+        // Any other type is accepted and never fires: a wallpaper cannot be
+        // clicked, and throwing would kill scripts registering an unused handler.
     }
 
     function fire(list, arg) {

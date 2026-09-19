@@ -7038,3 +7038,54 @@ Fifth instrument failure, and the second that **flattered** us (BUG-177 was the 
 whose default invocation is a no-op will pass forever, and "BUDGETS PASS" scrolling by is exactly
 as reassuring as a real one. **If a checker can be run wrong, wire the right invocation into the
 suite — do not rely on remembering the arguments.**
+
+---
+
+## BUG-180 — the canvas wallpaper ran one frame and stopped, and never came back
+<!-- [CHANGE: claude-code | 2026-09-19] reported by Shawn: "when I close all the windows and the desktop is visible it should resume playing" -->
+
+**Status:** FIXED · **Severity:** SPEC §3.5 shipped as a still picture; a frozen wallpaper never
+resumed · **Files:** `contents/ui/js/JsShim.qml`, `contents/ui/scenes/CanvasJs.qml`,
+`tests/wallpaper/canvasjs_contract.qml`
+
+Two faults, both introduced by BUG-178's fix, and both invisible to a screenshot.
+
+#### Fault 1: one frame, then dead
+BUG-178 made the frame loop paint-driven — `Canvas.onPainted` → `tick()` → run the script's
+callback. The script's callback ends, as every canvas wallpaper's does, with
+`canvas.requestPaint()`.
+
+**A `requestPaint()` issued from inside `onPainted` is swallowed.** Qt marks the canvas clean when
+the handler returns, so the request made *during* it is discarded. No second paint arrived,
+`onPainted` never fired again, and `onPainted` was the only driver. Measured with a fixture that
+logs every frame: `SCRIPT LOADED`, `F1`, and then silence — for the rest of the run.
+
+**Fix:** `tick()` never runs a frame synchronously any more. It always schedules the pacing timer,
+so the script's `requestPaint()` happens *outside* the paint handler, where it lands. BUG-178's
+back-pressure is unchanged — a frame still waits for a real paint to have completed, so the
+producer still cannot outrun the rasteriser. Frames went from **1** to **75** in the same test.
+
+#### Fault 2: it did not come back — which is what Shawn actually saw
+`resume()` called `requestPaint()` and waited for `onPainted` to restart the loop. That makes
+recovery depend on the very mechanism that had just stopped. Close every window, look at the
+desktop, and the wallpaper stayed a still image **for good**. Measured: 75 frames running → 0
+frozen → **0 after unfreezing**.
+
+**Fix:** unfreezing kicks the timer directly. Nothing has to arrive first. Measured after:
+75 → 0 → **74**.
+
+#### Why neither was caught
+`canvasjs_contract.qml` asserted the script *loads* and *reports no failure*. It never asked
+whether a frame had happened, because nothing could answer that — the count lived in a closure
+inside the script. So `CanvasJs` now exposes `frames`, and the contract has three new checks that
+say it in words: **it is animating, not one frame and a still picture** · **freezing really stops
+it** · **unfreezing RESUMES it — close your windows, it plays again**. 17 checks now.
+
+Verified on the real desktop too, the way Shawn described it: two captures of the visible desktop
+three seconds apart, previously byte-identical, now differing (YAVG 1.02).
+
+#### Lesson
+Same shape as BUG-175 one turn later, and I walked into it anyway. **A wallpaper screenshot proves
+the first frame rendered and nothing else.** Every check that existed for §3.5 was satisfied by a
+still picture, and the single question that mattered — *is it still going?* — was the one nothing
+asked. When the feature is motion, the test has to count frames.
