@@ -62,6 +62,10 @@ ColumnLayout {
 
     Kirigami.FormLayout {
         Layout.fillWidth: true
+        // Without a cap the form grows to its widest child, which on a maximised
+        // dialog drags every row to the right and leaves a gap on the left.
+        // [CHANGE: claude-code | 2026-09-19] BUG-169
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
 
         // ---- Type selector ------------------------------------------
         QQC2.ComboBox {
@@ -132,6 +136,7 @@ ColumnLayout {
         QQC2.Label {
             visible: root.cfg_WallpaperMode === "web"
             Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
             text: i18n("Any HTML/CSS/JS or WebGL page. Local files and Shadertoy-style shaders work. YouTube links are auto-resolved for video mode. This mode loads a full browser engine — for the bundled effects, Native QML does the same thing far more cheaply.")
@@ -202,6 +207,7 @@ ColumnLayout {
         QQC2.Label {
             visible: root.cfg_WallpaperMode === "qml"
             Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
             text: i18n("The same effects as the web samples, drawn by Qt directly. No browser engine is loaded, so this costs far less than Web mode. A scene may declare running, stats, audio, props, cursorX and cursorY and they will be bound for it. A .frag is compiled on the spot and run as a Shadertoy shader — iTime, iResolution, iMouse and iChannel0 (the audio spectrum) are all provided.")
@@ -256,6 +262,7 @@ ColumnLayout {
         QQC2.Label {
             visible: root.cfg_WallpaperMode === "web"
             Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
             text: i18n("Off: cursor movement still reaches the page, but clicks go to the desktop icons. On: the page gets full mouse and clicks (desktop clicks are captured while it is on).")
@@ -290,6 +297,7 @@ ColumnLayout {
         QQC2.Label {
             visible: root.cfg_WallpaperMode !== "web"
             Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
             text: root.cfg_WallpaperMode === "video"
@@ -359,17 +367,30 @@ ColumnLayout {
 
     Kirigami.Separator {
         Layout.fillWidth: true
-        visible: root.cfg_WallpaperMode === "qml" && sceneProps.loaded
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+        Layout.topMargin: Kirigami.Units.largeSpacing
+        visible: root.cfg_WallpaperMode === "qml"
+    }
+    Kirigami.Heading {
+        visible: root.cfg_WallpaperMode === "qml"
+        Layout.fillWidth: true
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+        Layout.topMargin: Kirigami.Units.largeSpacing
+        level: 3
+        text: i18n("Scene settings")
     }
     QQC2.Label {
-        visible: root.cfg_WallpaperMode === "qml" && sceneProps.loaded
+        visible: root.cfg_WallpaperMode === "qml"
         Layout.fillWidth: true
-        font: Kirigami.Theme.defaultFont
-        text: i18n("Scene settings")
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+        wrapMode: Text.WordWrap
+        font: Kirigami.Theme.smallFont
+        text: i18n("Declared by the scene itself, in a properties.json beside it.")
     }
     PropertyEditor {
         Layout.fillWidth: true
-        visible: root.cfg_WallpaperMode === "qml" && sceneProps.loaded
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+        visible: root.cfg_WallpaperMode === "qml"
         schema: sceneProps.schema
         values: sceneProps.props
         // The panel owns the config key; the wallpaper only ever reads it.

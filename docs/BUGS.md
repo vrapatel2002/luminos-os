@@ -6477,3 +6477,36 @@ function sceneHas(item, name) {
 question passes for the wrong reason, and stays green until someone outside the original assumptions
 turns up. BUG-163 was a checker pointed at the wrong path; the `cava` WARN in the capability probe was
 a check on `PATH` instead of on `ldd`; this is a check on a value instead of on a declaration.
+
+---
+
+## BUG-169 — the wallpaper settings panel overflowed sideways, and its newest section could hide itself
+<!-- [CHANGE: claude-code | 2026-09-19] found by Shawn, both faults mine -->
+
+**Status:** FIXED · **Severity:** the feature was unreachable ·
+**File:** `src/wallpapers/org.luminos.livewallpaper/contents/ui/config.qml`
+
+Two separate faults, reported together as "it's just cutting, and when I full screen it keeps going
+to the right and leaves space on the left".
+
+**1. The overflow.** A `QQC2.Label` with `Layout.fillWidth: true` and `wrapMode: Text.WordWrap`
+inside a `Kirigami.FormLayout` reports a very large implicit width. The form sizes its column to its
+widest child, so one long help paragraph drags the entire form past the dialog: horizontal
+scrollbar, clipped text, and on a maximised window every row marches right with a gap on the left.
+
+Two labels in this file already did it correctly — `Layout.maximumWidth: Kirigami.Units.gridUnit * 22`
+— and four did not. Adding SPEC §3.2/§3.4 made two of the uncapped ones considerably longer, which
+is when it became visible. Every wrapping label now carries a cap, and the form itself is capped at
+40 grid units so no future child can do this again.
+
+**2. The section that could hide itself.** The whole *Scene settings* block was gated on
+`sceneProps.loaded`, which is set inside an `XMLHttpRequest` callback. If that request never
+completed, the feature was simply absent with nothing said — and `PropertyEditor` already renders
+"This scene declares no settings" for an empty schema, which is a far better failure. The gate is
+gone; the section shows whenever the mode is Native QML.
+
+#### Lesson
+An unreachable feature and a missing feature look identical from the chair. Both of these shipped
+green: every test passed, because every test ran against the *logic* and nothing looked at the
+*panel*. Layout has no unit test here, so it needs eyes — which is exactly why "test-verified, not
+eye-verified" was worth saying out loud rather than calling §3.2 done.
