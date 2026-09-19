@@ -202,3 +202,35 @@ panel, and CONTRACTS §4 already froze the schema and the storage (one `ScenePro
 a wallpaper's KConfig schema is fixed at build time and cannot grow at runtime). After that §3.4
 shader loader — now cheaper than it was this morning, because `iAudio` already exists and Shadertoy's
 audio convention is the one we implemented.
+
+## 2026-09-19 — session 2b: the test ran on the box, and its WARNINGS were the useful part
+
+`qml6 tests/wallpaper/audio_contract.qml` → **22/22, exit 0.** The contract holds on the real engine,
+not just on a parser in a container.
+
+But the line above the results said:
+
+```
+qt.qml.propertyCache.append: Member enabled of the object AudioBridge_QMLTYPE_0
+overrides a member of the base object.
+```
+
+`Item` already has `enabled`. Mine was shadowing it. It *worked* — every check passed — and that is
+exactly the problem: it would have kept working until something read `Item.enabled` on the bridge and
+silently got the audio switch instead. Renamed to `audioEnabled` throughout (bridge, caller, test).
+
+**Exit code 0 is not the whole result.** The test was green while the engine was telling us the type
+was malformed. Read what the run printed, not just what it returned.
+
+### Two bridge traps found the hard way
+1. **`device_commit_files` can answer `written` before the bytes are visible to `device_bash`.** The
+   first rename commit reported success; a `grep` in the very next call still saw the old file, and a
+   `git commit` after it staged nothing and looked like the edit had failed. Re-sending it worked.
+   **Always md5 the device copy against the container copy before acting on a commit**, the same way
+   we already do for binaries — this time the risk was not corruption but *staleness*.
+2. **Multi-line shell pastes with trailing `# comments` are dangerous.** A paste of three commented
+   commands turned into `systemctl --user restart '#' then pick Spectrum '+' play music` and
+   `git push origin main '#' remote is SSH the bridge has none` — systemd dutifully tried to restart
+   `then.service` and `Spectrum.service`, and git tried to push refs named `remote` and `SSH`.
+   Nothing was harmed, but **neither command actually ran**, and the output looked like failure of the
+   real thing rather than of the comment. Hand over one command per line, no trailing comments.
