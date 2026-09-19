@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 9 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 11 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -18,7 +18,7 @@ Plan and gap analysis: `docs/wallpaper/SPEC.md`. Frozen interfaces: `docs/wallpa
 Reasoning per session: `docs/wallpaper/BUILD_LOG.md`. Eyes-on brief: `docs/wallpaper/VERIFY.md`.
 
 **Four of six SPEC §3 items are done** (§3.1 audio, §3.2 per-scene settings, §3.4 runtime shaders, §3.5 .js canvas)
-and the box now reports **32/32 on `luminos-wallpaper-selftest`**.
+and the box now reports **34/34 on `luminos-wallpaper-selftest`**.
 **§3.3 (packages + gallery + Lively import) is next**; §3.6 (games
 through a nested compositor) is the big one and the only thing that lets web mode finally be deleted.
 
@@ -80,7 +80,7 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (a KPackage must be self-contained; the lock screen loads the same package). Cached by content
   hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is built with `Qt.createQmlObject`, which is
   what makes §3.2 real for an arbitrary shader — a QML object cannot gain a property at runtime.
-- **BUG-168 through BUG-178 all fixed**, BUG-176 included: `org.kde.kwindowsystem` exports
+- **BUG-168 through BUG-179 all fixed**, BUG-176 included: `org.kde.kwindowsystem` exports
   `KWindowSystem.showingDesktop` as a notifiable QML singleton property, so Show Desktop now
   unfreezes the wallpaper for one binding rather than a `qdbus6` poll. BUG-171 (a deploy is
   not a load) and BUG-173 (every settings row drew a label and no control) are why the eyes-on
@@ -141,6 +141,13 @@ not.** The shader is a quarter of Chromium; Spectrum at 20.3 % is within noise o
 Shawn "far lighter than Chromium" without naming the scene.
 
 ## Next steps (ordered)
+0. **FLAGGED, NOT NOW — the GPU optimisation pass.** Shawn 2026-09-19: *"flag all the things
+   for now and when everything is made than we will go again over all the features to optimize
+   it."* So build §3.3 and §3.6 FIRST, then revisit every cost number in one pass. Details in
+   AGENTS.md §14 item 0g. The constraint is **AMD 780M iGPU only, never the RTX 4050**, and it is
+   already satisfied: plasmashell holds `renderD129` and nothing else. See also DECISION 121 for
+   the one optimisation already tried and rejected.
+
 1. **Spectrum on the GPU — the one number that does not beat Chromium.** 128 bars + live audio is
    **20.3 %** of a core against web mode's ~24 %. Measured breakdown: cava alone 4.6 %, the bars
    drawn once 2.0 %, so ~14 % is redrawing 128 gradient `Rectangle`s at 2880×1800 per audio tick.
@@ -148,10 +155,17 @@ Shawn "far lighter than Chromium" without naming the scene.
    The candidate is one `ShaderEffect` sampling the 128×1 `AudioTexture` we already build, with
    colours / bar count / beat flash as uniforms — machinery §3.4 already has. The shader scene
    costs 6.6 %. This is a redesign of `Spectrum.qml`, so it gets its own pass.
-2. **SPEC §3.3 — packages + gallery + Lively import.** The Python half is written and tested
-   (`scripts/luminos-wallpaper-pkg`: `parse_manifest`, `lively_to_manifest`, `_path_safe`). Missing:
-   the gallery UI and the install path (`~/.local/share/luminos/wallpapers/<id>/`). With §3.5 done,
-   an imported Lively `.js` will actually run.
+2. **SPEC §3.3 — the GALLERY UI is all that is left.** The install and read halves are DONE
+   (DECISION 123): `scripts/luminos-wallpaper-install` (folder or .zip →
+   `~/.local/share/luminos/wallpapers/<id>/`, zip-slip refused whole, Lively's `LivelyInfo.json`
+   read unmodified) and `scripts/luminos-wallpaper-gallery` (one JSON line, absolute paths, an
+   honest `playable` + reason). Both verified end to end, including a real Lively manifest and an
+   archive containing `../../../../.bashrc`.
+   **To build:** a grid of previews in `config.qml` reading `luminos-wallpaper-gallery` through the
+   same executable `DataSource` the props reader uses, unplayable ones greyed with their reason,
+   and a Browse button that calls `luminos-wallpaper-install`. ⚠️ `config.qml` is already 449 lines
+   and exempt from SPEC §9 by name (BUG-179) — the gallery should be its OWN file under `ui/`, not
+   more of config.qml.
 3. **Nothing else new here** — item 4 below is the big one.
 4. **SPEC §3.6 — external producer (games).** A nested compositor (`cage`) → PipeWire →
    `PipeWireSourceItem` (kpipewire), with input back through `zwlr_virtual_pointer_v1`. Prerequisite
@@ -236,6 +250,10 @@ Shawn "far lighter than Chromium" without naming the scene.
   helped a little, **frame rate is the only real lever**. Do not re-run those experiments.
 - **Offscreen there is no vsync**, so a rAF wallpaper runs flat out and starves the event loop —
   a 3.5 s Timer in a test fired at t+20.4 s. Test fixtures must stop themselves after a few frames.
+- **BUG-179 — `budget_check.py` takes its files as ARGUMENTS and prints `BUDGETS PASS` about
+  nothing when run bare**, and was never wired into the self test. Every "BUDGETS PASS" reported
+  before 2026-09-19 was vacuous. Now self-test section [3b]. `main.qml` and `config.qml` are over
+  budget and exempt BY NAME, printed on every run.
 - **The contract tests were MUTE.** Qt hands `console.log` to the journal when stderr is not a tty,
   so `qml6 … 2>&1` captured nothing and the self test's exit code was all it ever had.
   `QT_FORCE_STDERR_LOGGING=1`.
@@ -310,7 +328,10 @@ Shawn "far lighter than Chromium" without naming the scene.
   `samples/luminos-shadertoy.frag{,.properties.json}`, `config/main.xml`.
 - **Installed copy:** `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` — keep it
   `diff -rq` clean against the repo, and restart plasmashell after touching it.
-- **SPEC §3.5 (DECISION 122), this turn:** `ui/js/{JsSource,JsShim}.qml`, `ui/scenes/CanvasJs.qml`,
+- **SPEC §3.3 install half (DECISION 123), this turn:** `scripts/luminos-wallpaper-install`,
+  `scripts/luminos-wallpaper-gallery`, `scripts/luminos-wallpaper-selftest` (section [3b]),
+  `ui/scenes/Spectrum.qml` (154 → 150 lines, BUG-179).
+- **SPEC §3.5 (DECISION 122), last turn:** `ui/js/{JsSource,JsShim}.qml`, `ui/scenes/CanvasJs.qml`,
   `tools/luminos-wallpaper-js`, `samples/luminos-canvas.js{,.properties.json}`, `ui/scene.js`,
   `ui/QmlMode.qml`, `ui/config.qml`, `tests/wallpaper/canvasjs_contract.qml` (13 checks) +
   `tests/wallpaper/fixtures/`.

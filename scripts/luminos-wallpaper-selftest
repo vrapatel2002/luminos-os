@@ -82,6 +82,43 @@ say ""
 # QT_QPA_PLATFORM=offscreen because this may be run from a shell with no display
 # — without it Qt aborts on a bare Item and the failure reads as a broken test.
 # The exit code IS the result: each harness exits with its failure count.
+# ---------------------------------------------------------------------------
+# [CHANGE: claude-code | 2026-09-19] BUG-179. budget_check.py takes its files as
+# ARGUMENTS and checks nothing without them — run bare it prints "BUDGETS PASS"
+# and exits 0 about zero files. It had never been wired in here at all, so SPEC
+# §9's "over budget is a red build" was not a build rule, it was a sentence.
+say "[3b] budgets (SPEC §9)"
+PYFILES="$REPO/scripts/luminos-wallpaper-pkg $REPO/scripts/luminos-wallpaper-install
+         $REPO/scripts/luminos-wallpaper-gallery
+         $REPO/src/wallpapers/org.luminos.livewallpaper/contents/tools/luminos-wallpaper-props
+         $REPO/src/wallpapers/org.luminos.livewallpaper/contents/tools/luminos-wallpaper-js"
+if out="$(python3 "$REPO/tests/wallpaper/budget_check.py" $PYFILES 2>&1)"; then
+    ok "python budgets — $(printf '%s' "$PYFILES" | wc -w) files within 150/40/3"
+else
+    bad "python budgets over"
+    printf '%s\n' "$out" | grep FAIL | head -5 | sed 's/^/        /' | tee -a "$LOG"
+fi
+# QML has no AST checker here, so lines only. main.qml and config.qml predate
+# SPEC §9 and are exempt BY NAME and by date, not by silence — see BUG-179.
+QML_EXEMPT="main.qml config.qml"
+over=""
+for f in "$REPO"/src/wallpapers/org.luminos.livewallpaper/contents/ui/*.qml \
+         "$REPO"/src/wallpapers/org.luminos.livewallpaper/contents/ui/*/*.qml; do
+    [ -f "$f" ] || continue
+    base="$(basename "$f")"
+    case " $QML_EXEMPT " in *" $base "*) continue ;; esac
+    n=$(wc -l < "$f")
+    case "$f" in */scenes/*) limit=150 ;; *) limit=200 ;; esac
+    [ "$n" -gt "$limit" ] && over="$over $base:$n>$limit"
+done
+if [ -z "$over" ]; then
+    ok "qml budgets — every file within 150 (scene) / 200 (host)"
+else
+    bad "qml over budget:$over"
+fi
+info "exempt by name, pre-SPEC §9: $QML_EXEMPT ($(wc -l < "$REPO/src/wallpapers/org.luminos.livewallpaper/contents/ui/main.qml") and $(wc -l < "$REPO/src/wallpapers/org.luminos.livewallpaper/contents/ui/config.qml") lines)"
+say ""
+
 say "[4] QML contract tests"
 if command -v qml6 >/dev/null 2>&1; then
     # QT_FORCE_STDERR_LOGGING: Qt hands console.log to the JOURNAL when stderr is

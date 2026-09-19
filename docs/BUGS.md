@@ -7001,3 +7001,40 @@ This is the first feature this week that was measured **before** being called do
 after, and it is the only reason a 2.5 GB leak did not land on Shawn's machine as "§3.5 complete".
 The four cost experiments also each killed a plausible theory — the resolution cap in particular
 was obviously right and did nothing.
+
+---
+
+## BUG-179 — the budget gate had never been wired in, and prints PASS about nothing
+<!-- [CHANGE: claude-code | 2026-09-19] found while adding SPEC §3.3 -->
+
+**Status:** FIXED · **Severity:** SPEC §9's "over budget is a red build" was a sentence, not a
+build rule · **Files:** `scripts/luminos-wallpaper-selftest`, `contents/ui/scenes/Spectrum.qml`
+
+`tests/wallpaper/budget_check.py` takes the files to check as **command-line arguments**:
+
+```python
+for path in sys.argv[1:]:
+```
+
+Run bare it iterates an empty list, prints **`BUDGETS PASS`**, and exits 0 — about zero files.
+Every "BUDGETS PASS" reported during this session was that. And `luminos-wallpaper-selftest` never
+called it at all, so nothing anywhere enforced SPEC §9.
+
+#### What it caught the moment it was wired up
+`ui/scenes/Spectrum.qml` at **154 lines against a 150-line scene budget** — over since the BUG-172
+edit, and arguably over before that at 153. Trimmed to 150 without dropping a single fact, only
+prose.
+
+#### Fix
+A new self-test section **[3b]**, naming its Python files explicitly and checking QML line counts
+against 150 (scene) / 200 (host). The self test is 34 checks now.
+
+`ui/main.qml` (416) and `ui/config.qml` (449) predate SPEC §9 and are **exempt by name and by
+date**, printed on every run as an `info` line with their current sizes. An exemption that is
+listed out loud every time is a decision; an exemption by silence is the bug above.
+
+#### Lesson
+Fifth instrument failure, and the second that **flattered** us (BUG-177 was the other). A checker
+whose default invocation is a no-op will pass forever, and "BUDGETS PASS" scrolling by is exactly
+as reassuring as a real one. **If a checker can be run wrong, wire the right invocation into the
+suite — do not rely on remembering the arguments.**

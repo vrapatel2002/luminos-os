@@ -4,7 +4,8 @@
     SPDX-License-Identifier: GPL-3.0-or-later
 
     Bars, not a Canvas: a Canvas repaint is a CPU raster of the whole surface, and
-    at 2880×1800 that is the wrong trade sixty times a second.
+    at 2880×1800 that is the wrong trade sixty times a second (BUG-178: the .js
+    canvas scene costs 41% of a core, these bars 2%).
 
     N bars from the 128 contract bands, max within each group. The contract stays
     128 because that is Lively's number and ports depend on it; how many are DRAWN
@@ -35,7 +36,7 @@ Item {
     readonly property bool live: !!(scene.audio && scene.audio.active)
 
     // Max within the group, not mean: a mean smears a single loud band into
-    // nothing, and the peaks are the part an eye reads as "the music".
+    // nothing, and the peaks are what an eye reads as "the music".
     function level(i) {
         var b = scene.bands;
         if (!b || b.length < 128)
@@ -48,21 +49,17 @@ Item {
         return m > 1 ? 1 : m;
     }
 
-    // Not faked when there is no provider: flat bars, and the log says why. An
-    // idle shimmer would make a broken audio path look like a quiet room —
-    // BUG-163's lesson. Delayed 3s because the provider loads asynchronously, and
-    // a warning that fires on every start is one people scroll past.
+    // Flat bars when there is no provider, and the log says why: an idle shimmer
+    // would make a broken audio path look like a quiet room (BUG-163).
     onLiveChanged: settleWarn.restart()
     onRunningChanged: settleWarn.restart()
     Timer {
         id: settleWarn
         interval: 3000
         onTriggered: {
-            // Only an accusation when the scene is MEANT to be running. A wallpaper
-            // frozen by ObscurePolicy — any maximized window covering the desktop —
-            // has no provider by design, and warning there made a healthy box report
-            // a broken audio path and burned a selftest FAIL on nothing.
-            // [CHANGE: claude-code | 2026-09-19]
+            // Only when the scene is MEANT to be running: a wallpaper frozen by
+            // ObscurePolicy has no provider by design, and warning there made a
+            // healthy box report a broken audio path. BUG-172.
             if (!scene.live && scene.running)
                 console.warn("[LUMINOS-WP] spectrum: audio is on but no provider arrived in 3s — bars will stay flat");
         }
@@ -76,8 +73,7 @@ Item {
         }
     }
 
-    // Bass lifts the whole backdrop. Zero audio → zero opacity → exactly the
-    // gradient above, so the scene degrades to something still worth looking at.
+    // Bass lifts the backdrop; zero audio → zero opacity → just the gradient.
     Rectangle {
         anchors.fill: parent
         color: "#7c3aed"

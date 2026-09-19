@@ -7598,3 +7598,46 @@ BUG-178 · CONTRACTS §6 · SPEC §3.5 · DECISION 117 (the audio the shim forwa
 DECISION 118 (the properties the shim exposes as `window.luminos.props`) ·
 DECISION 120 (same read-in-a-process pattern, same BUG-170 reason) ·
 `tests/wallpaper/canvasjs_contract.qml` (13 checks)
+
+---
+
+## DECISION 123 — a wallpaper is a folder with a manifest, and Lively's own file is read as-is
+<!-- [CHANGE: claude-code | 2026-09-19] SPEC §3.3, CONTRACTS §5 — install half -->
+
+**Shipped: the install and read halves. The gallery UI is still to come.**
+
+`scripts/luminos-wallpaper-install` takes a folder or a `.zip` and installs it to
+`~/.local/share/luminos/wallpapers/<id>/` with a normalised `luminos-wallpaper.json`.
+`scripts/luminos-wallpaper-gallery` prints what is installed, as one JSON line.
+
+**Why two scripts.** Installing is the write side; listing is the read side, and **only the read
+side is ever called from QML** — on every open of the settings dialog, from a Plasma config page
+that has no business being able to modify anything. The split also keeps both inside SPEC §9's
+150-line budget, which is how it was noticed that the budget gate had never been running at all
+(BUG-179).
+
+**Lively's file is read, never written.** `LivelyInfo.json` maps straight through
+`lively_to_manifest` — the function that already had 20 property-based tests — so a community
+wallpaper installs unmodified. Verified end to end with a real Lively manifest: `Title` → title,
+`Type: 0` → video, `FileName` → entry, `Thumbnail` → preview.
+
+**Zip slip is refused whole, before anything is written.** Every member name goes through the
+package layer's own `_path_safe` first, so an archive containing `../../../../.bashrc` is rejected
+by name and nothing lands. Tested with exactly that archive; `~/.bashrc` untouched.
+
+**`playable` is honest.** Lively's web and app types map to `producer`, which is SPEC §3.6 and not
+built. Such a package still installs, still lists, and carries
+`playable: false` with *"producer wallpapers need the external producer, which is not built yet"*.
+It is not hidden and not faked — CONTRACTS §5: "unmapped → import, mark unsupported, do not
+pretend." A wallpaper that vanishes after importing reads as a failed import; one that says why
+reads as a roadmap.
+
+### Still to build for §3.3
+The gallery UI in `config.qml`: a grid of previews reading `luminos-wallpaper-gallery`, with the
+unplayable ones shown greyed and carrying their reason, and a Browse button that calls
+`luminos-wallpaper-install`.
+
+### Cross-references
+BUG-179 (the budget gate this work exposed) · CONTRACTS §5 · SPEC §3.3 ·
+DECISION 122 (§3.5, which is what makes an imported Lively `.js` actually run) ·
+`scripts/luminos-wallpaper-pkg` + `tests/wallpaper/test_pkg.py` (the 20 tests underneath)

@@ -2,7 +2,7 @@
 Before concluding ANY task, you MUST update `luminos-notes.sh` to reflect all file changes, deleted directories, and architectural shifts. You must also verify that `LUMINOS_STATUS.md` matches the current reality. Do not output a final report until these state files are synchronized.
 
 # AGENTS.md — Luminos OS Agent Constitution
-# Last Updated: 2026-08-11
+# Last Updated: 2026-09-18
 
 You are a **senior systems software engineer** and sole maintainer of Luminos OS — a custom Arch Linux distribution on the ASUS ROG G14. You own every layer: kernel driver config, Go daemons, KDE/Qt UI, AI inference, hardware quirks. Work like a production engineer: verify current state before acting, document every decision, treat every `/etc/` change as a future incident risk. This file is your operating brief — read it before every task.
 
@@ -84,6 +84,16 @@ the rules in this file. Two lightweight, always-on habits make that forgetting
   an archive: history already lives in git, `luminos-notes.sh`, `LUMINOS_DECISIONS.md` and
   `docs/BUGS.md`. Carry forward only what a newcomer must not re-learn or re-break, and
   say in the file that it was reset and where the old one is (`git show <sha>:HANDOFF.md`).
+
+- **"Do not change anything" scopes to CODE ONLY — reporting is NEVER optional.**
+  [CHANGE: claude-code | 2026-09-18] When Shawn says *no changes / don't fix / just
+  investigate*, that covers **code, configs and system state** — it does **not** cover the
+  state files. `HANDOFF.md` is still overwritten in place at the end of that response, and
+  the §13 doc-trigger table still applies (`LUMINOS_STATUS.md`, `LUMINOS_DECISIONS.md`,
+  `docs/BUGS.md`, `luminos-notes.sh`). A read-only turn produces findings, and findings that
+  live only in a chat window are lost the moment the chat ends — which is the exact failure
+  `HANDOFF.md` exists to prevent. Do not ask permission to write the handoff on a no-change
+  turn: write it, and say in the reply that it was written.
 
 **Where the rest of this file hooks in:** read `HANDOFF.md` as step 0 of the Session
 Start Checklist (§8); overwrite `HANDOFF.md` + confirm the `Response N` line as part of
@@ -183,6 +193,7 @@ Custom Arch Linux on ASUS ROG G14 GA403UU. Privacy-first, AI-native Windows repl
 9. **No Docker / No Ollama** — Inference is bare-metal llama.cpp. Never suggest either.
 10. **System Config Ownership** — Any `/etc/` change (modprobe, udev, environment, sysctl, X11 conf) must appear in §9 System Config table (with WHY) AND LUMINOS_DECISIONS.md same day. The DPM=0x02 / Chrome NVIDIA P-state conflict was undocumented for 18 days because this rule didn't exist.
 11. **Document Conflicts** — When two settings fight each other, document both sides + the tradeoff in LUMINOS_DECISIONS.md immediately. Cross-reference both original bugs.
+12. **"No changes" = code only** — a stop on changes never stops the reporting. `HANDOFF.md` + the §13 doc triggers get written on EVERY turn, investigation turns included. See §0.2. [CHANGE: claude-code | 2026-09-18]
 
 ---
 
@@ -339,6 +350,8 @@ luminos-brain safe "<action>"
 
 | Path | What it does | Why / Bug ref |
 |------|-------------|---------------|
+| `/etc/pacman.d/hooks/luminos-desktop-indent.hook` + `/usr/local/bin/luminos-kde-desktop-overlay` + `/usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/main.qml` + `/usr/local/share/luminos/desktopcontainment/{main.qml.orig,reserve}` | **Conditional — only installed if the user-path overlay turns out inert.** Floors the desktop containment's screen rect at the Caelestia bar's width so icons are not placed under the bar; the hook re-applies it after every `plasma-desktop` upgrade, re-snapshotting the restored file as the new pristine copy first. `reserve` records the indent so the hook does not have to read a config it cannot reach as root. Makes `pacman -Qkk plasma-desktop` report `main.qml` altered — expected. Undo: `sudo luminos-kde-desktop-overlay --system-remove`. | BUG-163 / DECISION 111 |
+| `/etc/systemd/system/luminos-pagefile.service` | Brings up `/swapfile.luminos` (32 G, priority 10) at boot via `/usr/local/bin/luminos-pagefile on`. **Size lives in the unit's `Environment=`.** A unit rather than an `/etc/fstab` entry on purpose: a swapfile that is missing, being resized or deliberately deleted fails `swap.target` and takes the boot with it, while a `oneshot` that refuses cannot. `ExecStop` is `off --keep-file` — `systemctl stop` means stop using it, not throw it away. | DECISION 115 / BUG-166 — the box had zram-only swap, so the only way to reclaim a cold browser tab was to delete it. [CHANGE: claude-code \| 2026-09-18] |
 | `/etc/environment` | `KWIN_DRM_DEVICES=/dev/dri/card2` (KWin AMD-only). `__EGL_VENDOR_LIBRARY_FILENAMES=50_mesa.json` (force Mesa EGL globally — prevents NVIDIA EGL waking dGPU). `QT_LOGGING_RULES=kwin_libinput.warning=false` (suppress touchpad spam). | BUG-050, BUG-046c |
 | `/etc/modprobe.d/nvidia.conf` | `NVreg_DynamicPowerManagement=0x02` (fine-grained DPM — GPU sleeps aggressively). `nvidia-drm modeset=1 fbdev=1` (KMS). | BUG-047: NVIDIA wasted 8W idle. ⚠️ **KNOWN CONFLICT:** DPM=0x02 keeps NVIDIA at P8/210MHz during light workloads (e.g. Chrome). See LUMINOS_DECISIONS.md. |
 | `/etc/udev/rules.d/` | NVIDIA PCI auto power-off when idle. | BUG-047 |
@@ -412,6 +425,7 @@ luminos-brain safe "<action>"
 | `scripts/luminos-wine-uninstall` | Wine uninstaller — **hybrid: run the app's own uninstaller, then sweep by location.** Scans a prefix's Program Files for real apps; on pick it (1) finds & runs the app's own `uninstall*.exe`/`unins0*.exe` if present (the proper Windows path — `wine uninstaller` dialog was unreliable because the .exe is often a ghost, e.g. WinRAR's is gone), then (2) sweeps leftovers: Program Files[/(x86)], AppData Roaming+Local, Start Menu .lnk (user + ProgramData), the Wine-generated `~/.local/share/applications/wine/Programs/*` launcher [the icon the app's own uninstaller never cleans], and the registry Uninstall key. Shows the exact path list + confirm before sweeping. MetaTrader 5 hard-excluded (filtered from menu AND guarded at selection). `--list [prefix]` = headless candidate dump. App-menu entry: `luminos-wine-uninstall.desktop`. [CHANGE: claude-code | 2026-07-05] |
 | `scripts/luminos-verify` | Post-upgrade health check (DECISION 26 L2). 5 sections: Go daemons · KCM plugins · dGPU gating (sysfs only, never wakes it) · fan/thermal · **[5] MCP tooling**. `--mcp` runs section 5 alone (wired to the SessionStart hook); `--quiet` prints only the PASS/FAIL line. Section [5] does a real MCP `initialize` handshake and hard-fails on duplicate registration, Arch rolling python, non-pyenv interpreter, editable install, missing binary, or no valid result. [CHANGE: claude-code \| 2026-07-25] |
 | `scripts/luminos-notepad` | Plain-text editor. Wrapper around `qml6 src/notepad/Notepad.qml` — resolves the Wayland/DBus session (so a keybind or .desktop launch works from a stripped env), exports `QML_XHR_ALLOW_FILE_{READ,WRITE}=1` (the only way pure QML touches disk), and rejects directories / unreadable / binary targets before handing the path over, because the QML side literally cannot tell "missing file" from "empty file" (XHR reports both as status 0, empty body). **Saves are verified by read-back** — a failed PUT and a successful PUT both report status 0. [CHANGE: claude-code \| 2026-08-05] |
+| `scripts/luminos-pagefile` | **Permanent** SSD pagefile for the desktop: `/swapfile.luminos`, 32 G default, priority 10 — zram (100) fills first, this second, `/swapfile.train` (5) last. `on`/`off [--keep-file]`/`status`/`resize <GB>`. Free-space floor **refuses** rather than filling the disk; `status` prints the RAM+zram+pagefile total from the live kernel. **Sister to, and deliberately separate from, `luminos-train-ram` — different file, different priority, they coexist. Do not merge them.** Partly reverses DECISION 20; see DECISION 115. [CHANGE: claude-code \| 2026-09-18] |
 | `scripts/luminos-train-ram` | ML training RAM-headroom toggle (CPU-side companion to train-mode): runtime swapfile `/swapfile.train` at low prio (NOT in fstab) + `vm.swappiness` 60→10 + optional memory-cgroup via `run`; `on`/`off`/`status`/`run -- <cmd>`. **Fully reverts on `off` — nothing permanent (no /etc, no fstab, no sysctl.d).** Fixes zram-only OOM during training (BUG-070). |
 | `scripts/luminos-hyprpm-sync` | Self-heals the Hyprland plugins after a compositor upgrade; run from `hyprland.start` in `hypr-user.lua`, referenced by repo path (not deployed to /usr/local/bin). Compares hyprpm's build hash in `/var/cache/hyprpm/$USER/state.toml` to the running commit, rebuilds via `hyprpm update` only on mismatch, then **reads `hyprctl plugin list` back** because `hyprpm update` reports `✔ Loaded` even when nothing loads. Exits 1 + notifies if loaded < enabled. **Do not "improve" this into a pacman hook** — hyprpm builds against the *running* compositor (mid-transaction that is the version being replaced) and hooks run as root (wrong hyprpm state dir). Symptom it prevents: a login popup reading `hypr-user.lua:NNN: unknown config key 'plugin.hyprexpo...'`, which blames the Lua config for an unloaded plugin. BUG-100/BUG-111, DECISION 49. [CHANGE: claude-code \| 2026-08-08] |
 | `scripts/luminos-caelestia-kwin-session` | Installs/checks/uninstalls the **third greeter session**, "Luminos (Caelestia on KWin)" (DECISION 63). Writes `/usr/local/bin/luminos-caelestia-kwin`, `/usr/share/wayland-sessions/luminos-caelestia-kwin.desktop`, and one `.desktop` per global shortcut in `~/.local/share/applications/luminos-cael-*.desktop`. **`X-KDE-Shortcuts=` in the .desktop IS the registration** — the `[services]` group in `kglobalshortcutsrc` is only a user *override* and beats it, so the installer deletes any stale `_launch` key. Runs `kbuildsycoca6 --noincremental` after, because kglobalaccel finds shortcuts through `KApplicationTrader`/sycoca. `check` verifies 14 things incl. live `busctl --user tree` registration and that the Hyprland fallback is still present. `uninstall` reverts everything. BUG-112. [CHANGE: claude-code \| 2026-08-09] |
@@ -569,6 +583,23 @@ Task: [what was asked]" && git push origin main
     Related gap found the same day: an AUR package depending on a **dropped** repo library
     (`wine-ge-custom-bin-opt` → `lib32-libpcap`) blocks every future `-Syu` and is invisible to
     `checkupdates`/`pacman -Qu`. An L2 pre-flight `--print` dry run would surface it.
+0g. **FLAGGED FOR THE OPTIMISATION PASS — wallpaper rendering on the GPU. Shawn's call
+    2026-09-19: "flag all the things for now and when everything is made then we will go
+    again over all the features to optimize it."** [CHANGE: claude-code | 2026-09-19]
+    The canvas path (SPEC §3.5) costs **41.1 % of a core** because Qt 6 rasterises Canvas 2D
+    on the CPU, while Chrome's canvas2d is GPU-accelerated (BUG-178, DECISION 122).
+    **Constraint, and the good news:** it must use the **AMD 780M iGPU, never the RTX 4050** —
+    waking the dGPU for a wallpaper would undo BUG-047's true-0W gating and cost ~8 W all day.
+    **Verified 2026-09-19: plasmashell already satisfies this by itself** — it holds
+    `renderD129` (AMD) and nothing else, with `KWIN_DRM_DEVICES=/dev/dri/luminos-igpu` and
+    `__EGL_VENDOR_LIBRARY_FILENAMES=…50_mesa.json` from §9. So anything the wallpaper draws
+    through the scene graph is ALREADY on the iGPU, and a GPU canvas path needs no new GPU
+    selection — only that those two settings are never undone.
+    Candidates to measure when the pass comes: QtQuick `Shape`/`Path` items (GPU vector) in
+    place of Canvas 2D ops; a `ShaderEffect` spectrum fed by the existing 128×1 `AudioTexture`
+    (DECISION 121 — the rate cap was already tried and measured WORSE, do not redo that one);
+    `QSGRenderNode`. **Nothing here is to be optimised before §3.3 and §3.6 are built.**
+
 1. Eye model download + wire vision route in hive-daemon.py
 2. KDE right-click service menus for HIVE (kcm_luminos_hive.so already installed)
 3. ydotool type-into-apps integration
@@ -614,3 +645,7 @@ REPLY TO MANAGEMENT:
 **Also required on EVERY response (see §0):** this reply started with its `Response N`
 counter line, and `HANDOFF.md` was overwritten in place with the current goal/aim/state
 (one file only — never a second handoff).
+
+**Including read-only turns.** "Do not change anything" is scoped to code/config/system state
+(§0.2, Rule 12) — it never suspends the counter, the handoff, or the §13 doc triggers. On such
+a turn `What changed:` reads `nothing (read-only)` and the handoff line still reads `yes`.
