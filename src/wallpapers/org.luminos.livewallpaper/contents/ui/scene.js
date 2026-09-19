@@ -79,3 +79,20 @@ function rawPath(scene) {
         return "file://" + s;
     return s;
 }
+
+// A package's manifest `type` (CONTRACTS §5) -> the wallpaper mode that shows it,
+// and the config key that holds its path. Pure, and here rather than inside
+// config.qml, so the gallery's promise can actually be tested.
+// Returns null for a type we cannot show — the gallery never offers those, and a
+// caller that ignores that should do nothing rather than guess.
+// [CHANGE: claude-code | 2026-09-19] SPEC §3.3, DECISION 123
+function modeForType(type) {
+    var t = ("" + type).toLowerCase();
+    if (t === "scene" || t === "shader" || t === "js")
+        return { mode: "qml", key: "QmlScene" };
+    if (t === "video")
+        return { mode: "video", key: "Video" };
+    if (t === "image" || t === "gif")
+        return { mode: "image", key: "Image" };
+    return null;
+}

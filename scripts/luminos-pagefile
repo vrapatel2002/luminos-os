@@ -1,0 +1,177 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-09-18] luminos-pagefile — a permanent SSD pagefile for the
+# desktop, sitting BELOW zram. DECISION 115 / BUG-166.
+#
+# WHY THIS EXISTS
+#   This box had zram swap only: 15.3 GB of RAM plus 8 GB of compressed RAM, and no real
+#   spill valve anywhere. With nowhere to put a cold page, the only way to reclaim a
+#   background browser tab was to DELETE it (chrome.tabs.discard), which throws the page
+#   away and re-downloads it on click. Shawn's ask, verbatim: "rather than deleting it
+#   move it to ssd so in case of internet outage i can still visit that site", and "keep a
+#   separate space just like the windows have a separate RAM on ssd making its total
+#   memory way more than 16GB".
+#
+#   That is a pagefile. With this on, a cold tab's memory is compressed into zram first and
+#   spills to the SSD second; the tab is never destroyed, and clicking it faults the pages
+#   back with NO network. It applies to every process and every window, not just Chrome.
+#
+# RELATIONSHIP TO luminos-train-ram (DECISION 20)
+#   That script is a TEMPORARY toggle for training and creates /swapfile.train at priority
+#   5. This one is PERMANENT, a different file, and priority 10. They can both be on: zram
+#   (100) fills first, this (10) second, the training file (5) last. Neither touches the
+#   other's file — that separation is deliberate, do not merge them.
+#
+#   DECISION 20 explicitly REJECTED a permanent swapfile ("would change normal-desktop
+#   memory behavior 24/7"). That was Shawn's constraint then; he has since asked for the
+#   opposite. DECISION 115 records both sides. This script is that reversal, made visible.
+#
+# WHAT IT DOES NOT DO
+#   It does not survive a reboot as *content* — swap is not an archive. A tab is alive
+#   until the machine is shut down, and then it is gone like any other memory. Reading a
+#   site with the internet down next week needs a saved copy of the page, which is a
+#   different tool (BUG-166 Part 3, not built).
+#
+# Usage:
+#   luminos-pagefile on               # create (if needed) + activate
+#   luminos-pagefile off              # deactivate + delete the file
+#   luminos-pagefile off --keep-file  # deactivate, keep the file (what the unit's stop does)
+#   luminos-pagefile status
+#   luminos-pagefile resize <GB>      # off --keep-file, delete, recreate at the new size
+#
+# Size: LUMINOS_PAGEFILE_GB (default 32). The systemd unit sets it via Environment=.
+
+set -u
+
+SWAPFILE="/swapfile.luminos"          # NEVER /swapfile.train — that one belongs to DECISION 20
+SWAP_GB="${LUMINOS_PAGEFILE_GB:-32}"
+SWAP_PRIO="${LUMINOS_PAGEFILE_PRIO:-10}"   # zram is 100 (used first); train file is 5 (used last)
+MIN_FREE_GB="${LUMINOS_PAGEFILE_MIN_FREE_GB:-25}"   # refuse to leave the root fs tighter than this
+
+QUIET=0
+say() { [ "$QUIET" -eq 1 ] || printf '%s\n' "$*"; }
+die() { printf 'luminos-pagefile: %s\n' "$*" >&2; exit 1; }
+
+need_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        exec sudo -E "$0" "$@"
+    fi
+}
+
+# Free space on the filesystem that actually holds $SWAPFILE, in GB. Probed, never assumed
+# — a baked-in path list is the third hardcoded-path fault this project has had.
+free_gb() {
+    df -B1G --output=avail "$(dirname "$SWAPFILE")" 2>/dev/null | tail -1 | tr -d ' '
+}
+
+is_active() {
+    swapon --show=NAME --noheadings 2>/dev/null | grep -qx "$SWAPFILE"
+}
+
+create_file() {
+    [ -f "$SWAPFILE" ] && return 0
+
+    local avail; avail="$(free_gb)"
+    case "$avail" in ''|*[!0-9]*) die "could not read free space on $(dirname "$SWAPFILE")" ;; esac
+    if [ "$((avail - SWAP_GB))" -lt "$MIN_FREE_GB" ]; then
+        die "refusing: ${SWAP_GB}G pagefile would leave $((avail - SWAP_GB))G free, below the ${MIN_FREE_GB}G floor (have ${avail}G).
+     Free some space, or choose a smaller size:  LUMINOS_PAGEFILE_GB=16 luminos-pagefile on"
+    fi
+
+    say "→ creating ${SWAP_GB}G pagefile at $SWAPFILE (${avail}G free before)"
+    if ! fallocate -l "${SWAP_GB}G" "$SWAPFILE" 2>/dev/null; then
+        say "  fallocate refused — falling back to dd (slow, this is normal on some filesystems)"
+        dd if=/dev/zero of="$SWAPFILE" bs=1M count=$((SWAP_GB*1024)) status=none || {
+            rm -f "$SWAPFILE"; die "could not allocate $SWAPFILE"
+        }
+    fi
+    chmod 600 "$SWAPFILE"
+    mkswap "$SWAPFILE" >/dev/null || { rm -f "$SWAPFILE"; die "mkswap failed on $SWAPFILE"; }
+}
+
+cmd_on() {
+    need_root on "$@"
+    if is_active; then say "→ already active: $SWAPFILE"; cmd_status; return 0; fi
+    create_file
+
+    if ! swapon --priority "$SWAP_PRIO" "$SWAPFILE" 2>/dev/null; then
+        # A fallocate'd file can carry unwritten extents that swapon refuses on some
+        # filesystems. Rewrite it solid and try once more, rather than reporting a
+        # filesystem quirk as a failure.
+        say "  swapon refused the allocated file — rewriting it solid with dd and retrying"
+        rm -f "$SWAPFILE"
+        dd if=/dev/zero of="$SWAPFILE" bs=1M count=$((SWAP_GB*1024)) status=none || die "dd failed"
+        chmod 600 "$SWAPFILE"; mkswap "$SWAPFILE" >/dev/null
+        swapon --priority "$SWAP_PRIO" "$SWAPFILE" || die "swapon still refused $SWAPFILE"
+    fi
+    say "✅ pagefile active (priority $SWAP_PRIO — below zram, above /swapfile.train)"
+    cmd_status
+}
+
+cmd_off() {
+    need_root off "$@"
+    local keep=0
+    for a in "$@"; do [ "$a" = "--keep-file" ] && keep=1; done
+
+    if is_active; then
+        say "→ swapoff $SWAPFILE (can take a while if pages are in use — they must come back to RAM)"
+        swapoff "$SWAPFILE" || die "swapoff failed — not enough free RAM to take the pages back?"
+    fi
+    if [ "$keep" -eq 0 ] && [ -f "$SWAPFILE" ]; then
+        rm -f "$SWAPFILE"
+        say "✅ pagefile removed — nothing left on disk"
+    else
+        say "✅ pagefile deactivated (file kept)"
+    fi
+}
+
+cmd_resize() {
+    need_root resize "$@"
+    local n="${1:-}"
+    case "$n" in ''|*[!0-9]*) die "usage: luminos-pagefile resize <GB>" ;; esac
+    SWAP_GB="$n"
+    cmd_off --keep-file
+    rm -f "$SWAPFILE"
+    cmd_on
+}
+
+cmd_status() {
+    echo
+    echo "pagefile : $SWAPFILE"
+    if is_active; then
+        swapon --show=NAME,TYPE,SIZE,USED,PRIO | sed 's/^/  /'
+    elif [ -f "$SWAPFILE" ]; then
+        echo "  present on disk, NOT active ($(du -h "$SWAPFILE" 2>/dev/null | cut -f1))"
+    else
+        echo "  not present"
+    fi
+
+    # The number Shawn actually asked about: how much memory this machine can hold in
+    # total. RAM + zram + pagefile. Printed from the live kernel, not from this script's
+    # own idea of the size.
+    local ram_kb zram_b pf_kb total_gb
+    ram_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+    zram_b=$(cat /sys/block/zram0/disksize 2>/dev/null || echo 0)
+    pf_kb=$(swapon --show=NAME,SIZE --bytes --noheadings 2>/dev/null \
+            | awk -v f="$SWAPFILE" '$1==f{print $2/1024}')
+    [ -z "${pf_kb:-}" ] && pf_kb=0
+    total_gb=$(awk -v r="$ram_kb" -v z="$zram_b" -v p="$pf_kb" \
+        'BEGIN{printf "%.1f", r/1048576 + z/1073741824 + p/1048576}')
+    echo
+    printf '  RAM       %6.1f GB\n' "$(awk -v r="$ram_kb" 'BEGIN{print r/1048576}')"
+    printf '  zram      %6.1f GB  (compressed, still in RAM)\n' "$(awk -v z="$zram_b" 'BEGIN{print z/1073741824}')"
+    printf '  pagefile  %6.1f GB  (on the SSD)\n' "$(awk -v p="$pf_kb" 'BEGIN{print p/1048576}')"
+    printf '  ─────────────────\n'
+    printf '  total     %6s GB addressable\n' "$total_gb"
+    echo
+    echo "all swap, in the order the kernel uses it (highest priority first):"
+    swapon --show=NAME,TYPE,SIZE,USED,PRIO | sed 's/^/  /'
+    echo
+}
+
+case "${1:-status}" in
+    on)     shift; for a in "$@"; do [ "$a" = "--quiet" ] && QUIET=1; done; cmd_on "$@" ;;
+    off)    shift; for a in "$@"; do [ "$a" = "--quiet" ] && QUIET=1; done; cmd_off "$@" ;;
+    resize) shift; cmd_resize "$@" ;;
+    status) cmd_status ;;
+    *)      die "usage: luminos-pagefile {on|off [--keep-file]|status|resize <GB>}" ;;
+esac

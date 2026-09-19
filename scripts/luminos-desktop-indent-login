@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# luminos-desktop-indent-login — finish BUG-163 at the next login, unattended.
+# [CHANGE: claude-code | 2026-09-16] BUG-163 / DECISION 111
+#
+# WHY THIS RUNS AT LOGIN INSTEAD OF BEING RUN BY HAND
+#   The fix needs one thing that only exists inside a live Plasma session: the
+#   answer to "which copy of main.qml did plasmashell actually load".  A Cowork
+#   session cannot get it - that runs on a separate machine with the user's
+#   folders bridged in, no session bus, no journal, no route (measured).  So
+#   instead of handing the user a command, the decision is scheduled for the
+#   next moment a session exists, which is login.
+#
+#   At login plasmashell starts fresh, so the shadow question is already
+#   answered by the time this runs - it only has to read the answer and act.
+#
+# WHAT IT DOES
+#   1. waits for plasmashell
+#   2. reads the journal for the probe the patched QML logs at startup
+#   3. probe present  -> the indent is live. Done. Removes its own autostart entry.
+#      probe absent   -> the ~/.local/share copy is inert. Applies the packaged-file
+#                        fallback with `sudo -n` (this box has NOPASSWD sudo),
+#                        restarts plasmashell once, re-checks, then removes itself.
+#      sudo refused   -> logs the exact command and retries at most MAX_TRIES logins,
+#                        so it never becomes a login-time nag.
+#
+# IT DELETES ITS OWN AUTOSTART ENTRY when it reaches a verdict. It is a one-shot
+# finisher, not a daemon.
+#
+# To cancel it before it ever runs:  rm ~/.config/autostart/luminos-desktop-indent.desktop
+# Log (readable from a Cowork session):  ~/luminos-os/.luminos-desktop-indent.log
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+OVERLAY="$REPO/scripts/luminos-kde-desktop-overlay"
+LOG="$REPO/.luminos-desktop-indent.log"
+AUTOSTART="$HOME/.config/autostart/luminos-desktop-indent.desktop"
+STATE="$HOME/.local/state/luminos-desktop-indent.tries"
+UNIT="plasma-plasmashell.service"
+TAG="LUMINOS-DESKTOP"
+MAX_TRIES=3
+
+log(){ printf '%s  %s\n' "$(date -Iseconds)" "$*" >> "$LOG"; }
+note(){ notify-send -a "Luminos" "Desktop indent" "$1" 2>/dev/null || true; }
+done_here(){ rm -f "$AUTOSTART" "$STATE"; log "removed autostart entry — finished"; exit "${1:-0}"; }
+
+log "=== login run, boot $(cat /proc/sys/kernel/random/boot_id 2>/dev/null | cut -c1-8) ==="
+
+# 1. wait for the shell to exist and settle
+for i in $(seq 1 60); do
+    qdbus6 2>/dev/null | grep -q '^ *org\.kde\.plasmashell$' && break
+    sleep 2
+done
+if ! qdbus6 2>/dev/null | grep -q '^ *org\.kde\.plasmashell$'; then
+    log "plasmashell never appeared on the session bus after 120s — not a Plasma session? leaving everything alone"
+    exit 0
+fi
+sleep 5   # containments are built a moment after the service is up
+
+# 2. ask the shell which main.qml it loaded
+probe_line(){
+    journalctl --user -b --no-pager 2>/dev/null | grep "$TAG" | tail -1
+}
+
+LINE="$(probe_line)"
+if [ -n "$LINE" ]; then
+    log "probe found: ${LINE#*"$TAG"}"
+    case "$LINE" in
+        *"(user)"*)   note "Fixed — desktop keeps clear of the bar (user overlay)." ;;
+        *"(system)"*) note "Fixed — desktop keeps clear of the bar (packaged file)." ;;
+    esac
+    done_here 0
+fi
+
+log "no probe in the journal — the ~/.local/share overlay is INERT (KPackage did not prefer it)"
+
+# 3. fallback: patch the packaged file. Needs root; this box has NOPASSWD sudo.
+TRIES=$(( $(cat "$STATE" 2>/dev/null || echo 0) + 1 ))
+mkdir -p "$(dirname "$STATE")"; echo "$TRIES" > "$STATE"
+
+if ! sudo -n true 2>/dev/null; then
+    log "sudo -n unavailable (try $TRIES/$MAX_TRIES). Run this by hand:"
+    log "    sudo $OVERLAY --system && systemctl --user restart $UNIT"
+    note "Needs one command — see $LOG"
+    [ "$TRIES" -ge "$MAX_TRIES" ] && { log "giving up after $TRIES tries so this stops nagging"; done_here 1; }
+    exit 1
+fi
+
+log "applying the packaged-file fallback"
+sudo -n install -Dm755 "$OVERLAY" /usr/local/bin/luminos-kde-desktop-overlay >>"$LOG" 2>&1
+if ! sudo -n /usr/local/bin/luminos-kde-desktop-overlay --system >>"$LOG" 2>&1; then
+    log "--system FAILED, see above. Packaged file untouched."
+    note "Fallback failed — see $LOG"
+    exit 1
+fi
+
+# The user-path copy shadows nothing now and would only make a future
+# "which one is live?" ambiguous.
+"$OVERLAY" --remove >>"$LOG" 2>&1 && log "removed the now-redundant user-path overlay"
+
+systemctl --user restart "$UNIT" >>"$LOG" 2>&1
+sleep 8
+LINE="$(probe_line)"
+if [ -n "$LINE" ]; then
+    log "CONFIRMED after fallback: ${LINE#*"$TAG"}"
+    note "Fixed — desktop keeps clear of the bar (packaged file)."
+    done_here 0
+fi
+
+log "still no probe even with the packaged file patched — the containment is not loading this QML at all"
+log "hand back:  grep -c $TAG /usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/main.qml"
+log "            journalctl --user -b -u $UNIT --no-pager | tail -40"
+note "Not fixed — diagnostics in $LOG"
+done_here 1

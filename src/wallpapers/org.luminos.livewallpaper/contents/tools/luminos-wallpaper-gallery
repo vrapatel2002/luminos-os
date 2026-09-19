@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""What is installed, as one JSON line the settings gallery can render.
+
+[CHANGE: claude-code | 2026-09-19] SPEC §3.3, CONTRACTS §5, DECISION 123.
+SPDX-License-Identifier: GPL-3.0-or-later
+
+    luminos-wallpaper-gallery            -> [ {...}, ... ]
+
+Split from luminos-wallpaper-install on purpose: installing is the write side and
+this is the read side, and only this one is called from QML — on every open of the
+settings dialog, by a Plasma config page that must never be able to modify anything.
+
+Each row carries absolute paths and an honest `playable`. A package we cannot show
+yet is listed with `playable: false` and a reason rather than hidden, because a
+Lively wallpaper that silently disappears after importing looks like a failed
+import (CONTRACTS §5: import, mark unsupported, do not pretend).
+"""
+import json, os, sys
+
+ROOT = os.path.expanduser("~/.local/share/luminos/wallpapers")
+MANIFEST = "luminos-wallpaper.json"
+# What the wallpaper can actually show today. `producer` is SPEC §3.6.
+PLAYABLE = {"scene", "shader", "js", "video", "image", "gif"}
+
+
+def describe(pkg_dir):
+    """One gallery row: the manifest, plus absolute paths and why-not."""
+    with open(os.path.join(pkg_dir, MANIFEST), encoding="utf-8-sig") as f:
+        m = json.load(f)
+    entry = os.path.join(pkg_dir, m.get("entry", ""))
+    preview = m.get("preview")
+    m["dir"] = pkg_dir
+    m["entryPath"] = entry
+    m["previewPath"] = os.path.join(pkg_dir, preview) if preview else ""
+    if not os.path.isfile(entry):
+        m["playable"], m["why"] = False, "its entry file is missing"
+    elif m.get("type") not in PLAYABLE:
+        m["playable"] = False
+        m["why"] = ("%s wallpapers need the external producer, which is not built yet "
+                    "(SPEC §3.6)" % m.get("type"))
+    else:
+        m["playable"], m["why"] = True, ""
+    return m
+
+
+def installed():
+    if not os.path.isdir(ROOT):
+        return []
+    out = []
+    for name in sorted(os.listdir(ROOT)):
+        d = os.path.join(ROOT, name)
+        if not os.path.isfile(os.path.join(d, MANIFEST)):
+            continue
+        try:
+            out.append(describe(d))
+        except (OSError, ValueError):
+            continue          # one broken package never empties the gallery
+    return out
+
+
+if __name__ == "__main__":
+    print(json.dumps(installed()))
+    sys.exit(0)

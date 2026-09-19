@@ -227,7 +227,8 @@ def moe_cpu_offload(patterns=(EXPERT_TENSORS,),
     orig_ctx = _internals.LlamaContext.__init__
 
     def patched_model(self, *, path_model, params, verbose=True):
-        if n_gpu_layers is not None and params.n_gpu_layers != n_gpu_layers:
+        # [CHANGE: antigravity | 2026-08-16] Only force all layers if n_gpu_layers was default (-1), preserving explicit layer offload tuning
+        if n_gpu_layers is not None and (params.n_gpu_layers == -1 or params.n_gpu_layers >= ALL_LAYERS):
             _note(f"n_gpu_layers {params.n_gpu_layers} -> {n_gpu_layers} "
                   f"(expert override is subtractive; all layers must start on the GPU)")
             params.n_gpu_layers = n_gpu_layers

@@ -1,0 +1,500 @@
+#!/usr/bin/env python3
+# [CHANGE: claude-code | 2026-09-16] BUG-163 / DECISION 111.
+#
+# Make the Plasma desktop keep its icons and widgets clear of the Caelestia bar.
+#
+# THE PROBLEM
+#   KWin honours the bar's layer-shell exclusive zone for real windows - a
+#   maximized Chrome starts at exactly the bar's right edge.  plasmashell does
+#   NOT: it computes `availableScreenRect` from its OWN Plasma panels, and there
+#   are none (Shawn deleted the panel in 2026-08-13, deliberately - it was what
+#   freed Caelestia's launcher, see DECISION 68).  So the desktop believes the
+#   whole 1440x900 is free, places icon #1 at 0,0, and the bar covers it.
+#   `main.qml` already honours the rect it is given; it is handed the wrong one.
+#
+# WHY AN OVERLAY AND NOT A FORK
+#   Same reasoning as luminos-caelestia-kwin-overlay: every file is a SYMLINK
+#   back to the packaged plasmoid and only the patched file is real, so a
+#   plasma-desktop upgrade keeps arriving.  The patch is re-derived from CURRENT
+#   upstream text on every run, so if upstream moves the code we anchor on, this
+#   FAILS LOUDLY instead of quietly shipping a stale desktop.
+#
+# WHY IT SHADOWS org.kde.desktopcontainment AND NOT org.kde.plasma.folder
+#   The containment in plasma-org.kde.plasma.desktop-appletsrc is
+#   `plugin=org.kde.plasma.folder`, but that package is metadata ONLY - 9 KB of
+#   JSON whose `X-Plasma-RootPath` is `org.kde.desktopcontainment`.  The QML
+#   that actually runs lives in desktopcontainment, so that is what gets
+#   shadowed.  KPackage searches GenericDataLocation user-first, so a copy under
+#   ~/.local/share wins over /usr/share.
+#
+# WHY THE PATCH IS A NEW PROPERTY AND NOT A ONE-LINE MARGIN EDIT
+#   The obvious edit is `leftMargin: Math.max(availableScreenRect.x, 44)`.  It is
+#   wrong.  Twelve lines further down, `AppletsLayout` has
+#       relayoutLock: width !== root.availableScreenRect.width || height !== ...
+#   and its width comes from the margined drop area.  Indent the drop area and
+#   that comparison is never again true, so `relayoutLock` latches ON and desktop
+#   WIDGETS stop relaying out - forever, silently, in a completely different part
+#   of the file.  So the fix corrects the RECT once and routes every consumer
+#   through it, which keeps the width the layout sees and the width it compares
+#   against consistent.  `configKey` deliberately still uses `screenGeometry`, so
+#   existing `ItemGeometries-1440x900` entries keep matching.
+#
+# Usage:
+#   luminos-kde-desktop-overlay            # build / rebuild
+#   luminos-kde-desktop-overlay --check    # verify, change nothing, exit 1 if stale
+#   luminos-kde-desktop-overlay --remove   # delete the overlay (the undo button)
+#
+# Fallback, only if the user-path overlay turns out to be inert (see --system below):
+#   sudo luminos-kde-desktop-overlay --system          # patch the packaged file + pacman hook
+#   sudo luminos-kde-desktop-overlay --system-remove   # put the packaged file back
+#
+# The journal says which copy actually loaded - "(user)" or "(system)":
+#   journalctl --user -b -u plasma-plasmashell -g LUMINOS-DESKTOP
+#
+# TAKES EFFECT on the next plasmashell start:
+#   systemctl --user restart plasma-plasmashell.service     (or log out and in)
+# IF THE DESKTOP COMES BACK BLANK, this is the undo:
+#   luminos-kde-desktop-overlay --remove && systemctl --user restart plasma-plasmashell.service
+
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+SRC = Path("/usr/share/plasma/plasmoids/org.kde.desktopcontainment")
+REPO = Path(__file__).resolve().parent.parent
+DST = Path.home() / ".local/share/plasma/plasmoids/org.kde.desktopcontainment"
+CONF = Path.home() / ".config/caelestia"
+MARKER = ".luminos-overlay"   # refuse to delete a directory that is not ours
+
+# ---------------------------------------------------------------------------
+# The SYSTEM fallback.  [CHANGE: claude-code | 2026-09-16]
+#
+# The user-path overlay above is the preferred half: it touches nothing pacman
+# owns.  It rests on one assumption - that a package under ~/.local/share
+# shadows the one under /usr/share when KPackage resolves `X-Plasma-RootPath`.
+# If that assumption is wrong the overlay is INERT, and inert looks exactly like
+# "you forgot to restart": no error, no log, nothing.  Hence `--system`, which
+# edits the packaged file directly and cannot be ignored, plus a pacman hook to
+# re-apply it after every plasma-desktop upgrade.
+#
+# PRISTINE is the pre-patch copy. It is kept because the patch anchors only
+# match UNPATCHED text: without it, a second run has nothing to derive from.
+# After an upgrade pacman restores the file, so the hook re-snapshots first and
+# the copy follows upstream instead of going stale.
+# ---------------------------------------------------------------------------
+SYS_FILE = SRC / "contents/ui/main.qml"
+PRISTINE = Path("/usr/local/share/luminos/desktopcontainment/main.qml.orig")
+HOOK_SRC = REPO / "config/pacman-hooks/luminos-desktop-indent.hook"
+HOOK_DST = Path("/etc/pacman.d/hooks/luminos-desktop-indent.hook")
+RESERVE_FILE = PRISTINE.parent / "reserve"
+HOOK_STASH = PRISTINE.parent / "luminos-desktop-indent.hook"
+TAG = "[LUMINOS-DESKTOP]"
+
+# Upstream defaults, for when the key is absent. Kept next to each other because
+# getting one wrong silently produces a plausible-but-wrong indent.
+UPSTREAM_INNER_WIDTH = 40     # Tokens.sizes.bar.innerWidth   (tokens.hpp:162)
+UPSTREAM_PADDING_SMALL = 8    # Tokens.padding.small          (tokens.hpp:87)
+UPSTREAM_BORDER_THICKNESS = 10  # Config.border.thickness     (borderconfig.hpp:13)
+
+
+def _conf_dir():
+    """The real user's Caelestia config, even when running as root.
+
+    `Path.home()` is /root under a pacman hook, and an absent config reads as
+    "all upstream defaults", which is a plausible-looking wrong answer rather
+    than an error. So: our own home, then the invoking user's, then give up
+    honestly rather than guess.
+    """
+    cands = [CONF]
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        cands.append(Path("/home") / sudo_user / ".config/caelestia")
+    cands.append(_repo_owner_conf())
+    for cand in cands:
+        if cand is None:
+            continue
+        try:
+            if (cand / "shell-tokens.json").is_file():
+                return cand
+        except OSError:
+            # Unreadable (root's home from an unprivileged run, a stale mount)
+            # is "not this one", not a crash. A probe that throws is a probe
+            # that takes the whole pacman transaction down with it.
+            continue
+    return None
+
+
+def _repo_owner_conf():
+    """Last resort: the home of whoever owns the repo this script came from."""
+    try:
+        import pwd
+        return Path(pwd.getpwuid(REPO.stat().st_uid).pw_dir) / ".config/caelestia"
+    except Exception:
+        return None
+
+
+def _read(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as e:
+        sys.exit(f"ERROR: {path} is not valid JSON ({e}). Caelestia falls back to ALL "
+                 f"defaults on a parse error, so the bar on screen is not the one "
+                 f"configured - fix that first, the indent derived from it would be wrong.")
+
+
+def reserved_left() -> int:
+    """The bar's own width, from the same numbers the bar uses.
+
+    modules/bar/BarWrapper.qml:21-23
+        padding      = max(Tokens.padding.small, Config.border.thickness)
+        contentWidth = Tokens.sizes.bar.innerWidth + padding * 2
+
+    Re-derived rather than hardcoded so changing the bar width and re-running
+    this script keeps the desktop in step. See DECISION 110 for where the values
+    are managed (config/caelestia/luminos-managed.json).
+    """
+    conf = _conf_dir()
+    if conf is None:
+        # Running as root out of a pacman hook, with no way to reach the real
+        # user's Caelestia config. Falling through to the UPSTREAM defaults here
+        # would silently re-patch at 60 px after every plasma-desktop upgrade -
+        # a wrong indent that looks deliberate and logs nothing. Use the number
+        # recorded when --system was last run by hand instead.
+        if RESERVE_FILE.is_file():
+            return int(RESERVE_FILE.read_text().strip())
+        sys.exit("ERROR: cannot find the Caelestia config and there is no recorded "
+                 f"reserve at {RESERVE_FILE}. Refusing to guess the indent - run "
+                 "`sudo luminos-kde-desktop-overlay --system` from a normal login once.")
+    tok = _read(conf / "shell-tokens.json")
+    cfg = _read(conf / "shell.json")
+    inner = tok.get("sizes", {}).get("bar", {}).get("innerWidth", UPSTREAM_INNER_WIDTH)
+    psmall = tok.get("padding", {}).get("small", UPSTREAM_PADDING_SMALL)
+    thick = cfg.get("border", {}).get("thickness", UPSTREAM_BORDER_THICKNESS)
+    return int(inner) + max(int(psmall), int(thick)) * 2
+
+
+# ---------------------------------------------------------------------------
+# The patches. Each entry is (relative path, [(anchor, replacement), ...]).
+# Anchors are exact text and must match EXACTLY ONCE. `__RESERVE__` in a
+# replacement is substituted with reserved_left().
+# ---------------------------------------------------------------------------
+PATCHES = {
+    "contents/ui/main.qml": [
+        # 1. The corrected rect, declared beside the properties it depends on.
+        (
+            "    property bool isContainment: Plasmoid.isContainment\n",
+            "    property bool isContainment: Plasmoid.isContainment\n"
+            "\n"
+            "    // [LUMINOS-DESKTOP] Generated by scripts/luminos-kde-desktop-overlay.\n"
+            "    // plasmashell builds availableScreenRect from its own Plasma panels, and\n"
+            "    // this machine has none - the left edge is a Caelestia layer-shell bar,\n"
+            "    // which KWin reserves for real windows but plasmashell cannot see. So the\n"
+            "    // desktop thinks x=0 is free and puts the first icon underneath the bar.\n"
+            "    // Floor the rect's x at the bar's width and derive everything from the\n"
+            "    // corrected rect, so the size the layout gets and the size it compares\n"
+            "    // itself against stay the same number.\n"
+            "    readonly property int luminosReservedLeft: __RESERVE__\n"
+            "    readonly property var luminosScreenRect: {\n"
+            "        const r = root.availableScreenRect;\n"
+            "        if (!r)\n"
+            "            return r;\n"
+            "        const x = Math.max(r.x, root.luminosReservedLeft);\n"
+            "        return Qt.rect(x, r.y, Math.max(0, r.width - (x - r.x)), r.height);\n"
+            "    }\n"
+            "\n"
+            "    // [LUMINOS-DESKTOP] One line in the journal, on purpose. Whether a package\n"
+            "    // under ~/.local/share actually shadows the one under /usr/share is not\n"
+            "    // something you can read off a filesystem - plasmashell resolves it at\n"
+            "    // startup and says nothing either way, so \"I restarted and the icon did not\n"
+            "    // move\" has two completely different causes and no way to tell them apart.\n"
+            "    // This makes the shell state which file it loaded:\n"
+            "    //     journalctl --user -b -u plasma-plasmashell -g LUMINOS-DESKTOP\n"
+            "    // A line means the overlay is live (so a still-overlapping icon is a\n"
+            "    // different bug). No line means the shadow did not resolve.\n"
+            "    Component.onCompleted: {\n"
+            "        if (root.isContainment)\n"
+            "            console.warn(\"[LUMINOS-DESKTOP] overlay live (__VARIANT__), reserving \"\n"
+            "                         + root.luminosReservedLeft + \" px on the left\");\n"
+            "    }\n",
+        ),
+        # 2. The drop area's margins.
+        (
+            "            leftMargin: (root.isContainment && root.availableScreenRect) ? root.availableScreenRect.x : 0\n"
+            "            topMargin: (root.isContainment && root.availableScreenRect) ? root.availableScreenRect.y : 0\n"
+            "\n"
+            "            rightMargin: (root.isContainment && root.availableScreenRect && parent)\n"
+            "                ? (parent.width - root.availableScreenRect.x - root.availableScreenRect.width) : 0\n"
+            "\n"
+            "            bottomMargin: (root.isContainment && root.availableScreenRect && parent)\n"
+            "                ? (parent.height - root.availableScreenRect.y - root.availableScreenRect.height) : 0\n",
+            "            leftMargin: (root.isContainment && root.luminosScreenRect) ? root.luminosScreenRect.x : 0\n"
+            "            topMargin: (root.isContainment && root.luminosScreenRect) ? root.luminosScreenRect.y : 0\n"
+            "\n"
+            "            rightMargin: (root.isContainment && root.luminosScreenRect && parent)\n"
+            "                ? (parent.width - root.luminosScreenRect.x - root.luminosScreenRect.width) : 0\n"
+            "\n"
+            "            bottomMargin: (root.isContainment && root.luminosScreenRect && parent)\n"
+            "                ? (parent.height - root.luminosScreenRect.y - root.luminosScreenRect.height) : 0\n",
+        ),
+        # 3. The widget layout. THIS is the half that a one-line margin edit breaks:
+        #    leave it reading availableScreenRect and relayoutLock latches on forever.
+        #    configKey stays on screenGeometry so saved ItemGeometries still match.
+        (
+            "            relayoutLock: width !== root.availableScreenRect.width || height !== root.availableScreenRect.height\n"
+            "            // NOTE: use root.availableScreenRect and not own width and height as they are updated not atomically\n"
+            "            configKey: \"ItemGeometries-\" + Math.round(root.screenGeometry.width) + \"x\" + Math.round(root.screenGeometry.height)\n"
+            "            fallbackConfigKey: root.availableScreenRect.width > root.availableScreenRect.height ? \"ItemGeometriesHorizontal\" : \"ItemGeometriesVertical\"\n",
+            "            relayoutLock: width !== root.luminosScreenRect.width || height !== root.luminosScreenRect.height\n"
+            "            // NOTE: use root.luminosScreenRect and not own width and height as they are updated not atomically\n"
+            "            // [LUMINOS-DESKTOP] configKey deliberately still uses screenGeometry, so\n"
+            "            // existing ItemGeometries-<W>x<H> entries keep matching after the indent.\n"
+            "            configKey: \"ItemGeometries-\" + Math.round(root.screenGeometry.width) + \"x\" + Math.round(root.screenGeometry.height)\n"
+            "            fallbackConfigKey: root.luminosScreenRect.width > root.luminosScreenRect.height ? \"ItemGeometriesHorizontal\" : \"ItemGeometriesVertical\"\n",
+        ),
+    ],
+}
+
+
+def patched_text(rel: str, reserve: int, variant: str = "user", text: str = None) -> str:
+    if text is None:
+        text = (SRC / rel).read_text()
+    for anchor, replacement in PATCHES[rel]:
+        n = text.count(anchor)
+        if n != 1:
+            sys.exit(
+                f"ERROR: {rel}: anchor matched {n} times, expected exactly 1.\n"
+                f"plasma-desktop has changed upstream. Re-read the file and update the\n"
+                f"anchor in {__file__} - do NOT relax the check. A wrong patch here is a\n"
+                f"blank desktop.\n--- anchor ---\n{anchor}\n"
+            )
+        text = text.replace(anchor,
+                            replacement.replace("__RESERVE__", str(reserve))
+                                       .replace("__VARIANT__", variant))
+    return text
+
+
+def system_apply() -> int:
+    """Patch the packaged file itself. Needs root. The fallback, not the default."""
+    reserve = reserved_left()
+    live = SYS_FILE.read_text()
+
+    if TAG in live:
+        if not PRISTINE.is_file():
+            sys.exit(f"ERROR: {SYS_FILE} is already patched but {PRISTINE} is missing, so\n"
+                     f"there is no unpatched text to re-derive from. Restore the packaged\n"
+                     f"file first:  sudo pacman -S --overwrite '*' plasma-desktop")
+        base = PRISTINE.read_text()
+    else:
+        # Unpatched: this is either the first run or the moment after an upgrade
+        # restored the file. Either way the live text IS pristine - snapshot it so
+        # the copy follows upstream instead of ageing.
+        base = live
+        PRISTINE.parent.mkdir(parents=True, exist_ok=True)
+        PRISTINE.write_text(base)
+        print(f"  snapshotted pristine -> {PRISTINE}")
+
+    want = patched_text("contents/ui/main.qml", reserve, variant="system", text=base)
+    if want == live:
+        RESERVE_FILE.write_text(f"{reserve}\n")
+        _stash_hook()
+        print(f"  {SYS_FILE} already carries the {reserve} px indent")
+        return 0
+    SYS_FILE.write_text(want)
+    RESERVE_FILE.write_text(f"{reserve}\n")
+    _stash_hook()
+    print(f"  patched {SYS_FILE} ({reserve} px, recorded in {RESERVE_FILE})")
+    return 0
+
+
+def system_remove() -> int:
+    if not PRISTINE.is_file():
+        sys.exit(f"ERROR: no {PRISTINE} to restore from. Use:\n"
+                 f"  sudo pacman -S --overwrite '*' plasma-desktop")
+    SYS_FILE.write_text(PRISTINE.read_text())
+    print(f"  restored {SYS_FILE} from {PRISTINE}")
+    if HOOK_DST.exists():
+        HOOK_DST.unlink()
+        print(f"  removed {HOOK_DST}")
+    return 0
+
+
+def _stash_hook() -> None:
+    """Keep a copy of the hook beside PRISTINE.
+
+    `REPO` comes from `__file__`, so the copy installed at /usr/local/bin - the
+    one pacman runs, and the one the login finisher runs - resolves HOOK_SRC to
+    /usr/local/config/..., which does not exist. Stashing the source where the
+    installed copy can always reach it is what stops `--system` from silently
+    skipping the hook, which is exactly what happened on 2026-09-15 22:52.
+    """
+    if HOOK_SRC.is_file():
+        HOOK_STASH.parent.mkdir(parents=True, exist_ok=True)
+        HOOK_STASH.write_text(HOOK_SRC.read_text())
+
+
+def _hook_source():
+    """Wherever the hook text can actually be found, best first."""
+    for cand in (HOOK_SRC, HOOK_STASH, _repo_owner_repo() / "config/pacman-hooks/luminos-desktop-indent.hook"):
+        try:
+            if cand is not None and cand.is_file():
+                return cand
+        except OSError:
+            continue
+    return None
+
+
+def _repo_owner_repo():
+    """The repo in the home of whoever owns this script - for the /usr/local copy."""
+    try:
+        import pwd
+        return Path(pwd.getpwuid(Path(__file__).resolve().stat().st_uid).pw_dir) / "luminos-os"
+    except Exception:
+        return Path("/nonexistent")
+
+
+def hook_install() -> int:
+    # REPO is derived from __file__, so the copy installed at /usr/local/bin -
+    # the one pacman and the login finisher run - resolves HOOK_SRC to
+    # /usr/local/config/..., which does not exist. On 2026-09-15 22:52 that made
+    # this function skip the hook with a quiet note, and the fix shipped without
+    # the only thing that would have made it survive an upgrade. So: look in
+    # several places (_hook_source), and if none of them has it, say so LOUDLY
+    # and return non-zero. Already-installed still returns 0, so a pacman-hook
+    # run never fails a transaction over work that is already done.
+    src = _hook_source()
+    if src is None:
+        if HOOK_DST.exists():
+            return 0
+        # Loud, not a note. A missing hook means the fix silently expires at the
+        # next plasma-desktop upgrade, which is the failure mode this whole
+        # thing exists to prevent - it does not get a quiet line in a log.
+        print(f"  WARNING: no hook source found (looked in {HOOK_SRC}, {HOOK_STASH}) and "
+              f"{HOOK_DST} is absent.\n"
+              f"  >>> THE INDENT WILL NOT SURVIVE A plasma-desktop UPGRADE <<<\n"
+              f"  Fix: sudo install -Dm644 <repo>/config/pacman-hooks/"
+              f"luminos-desktop-indent.hook {HOOK_DST}")
+        return 1
+    HOOK_DST.parent.mkdir(parents=True, exist_ok=True)
+    HOOK_DST.write_text(src.read_text())
+    print(f"  installed {HOOK_DST} (from {src})")
+    return 0
+
+
+
+def build() -> None:
+    reserve = reserved_left()
+
+    if DST.exists():
+        if not (DST / MARKER).exists():
+            sys.exit(f"ERROR: {DST} exists but has no {MARKER} - refusing to delete "
+                     f"something this script did not create.")
+        shutil.rmtree(DST)
+
+    links = 0
+    DST.mkdir(parents=True)
+    (DST / MARKER).write_text(
+        "Generated by luminos-kde-desktop-overlay (BUG-163 / DECISION 111).\n"
+        "Every file here is a symlink into /usr/share/plasma/plasmoids/\n"
+        "org.kde.desktopcontainment except the ones listed below.\n"
+        "Do not edit in place - edit the script and rebuild.\n"
+        f"reserved left edge: {reserve} logical px\n\n"
+        "patched:\n" + "".join(f"  {p}\n" for p in sorted(PATCHES))
+    )
+
+    for root, _dirs, files in os.walk(SRC):
+        rel_dir = Path(root).relative_to(SRC)
+        (DST / rel_dir).mkdir(parents=True, exist_ok=True)
+        for name in files:
+            rel = (rel_dir / name).as_posix().removeprefix("./")
+            if rel in PATCHES:
+                continue
+            (DST / rel).symlink_to(SRC / rel)
+            links += 1
+
+    for rel in PATCHES:
+        if not (SRC / rel).exists():
+            sys.exit(f"ERROR: upstream file {SRC / rel} is gone. plasma-desktop has been "
+                     f"restructured; the overlay needs rewriting.")
+        (DST / rel).write_text(patched_text(rel, reserve))
+
+    print(f"built {DST}")
+    print(f"  {links} symlinks to {SRC}")
+    print(f"  {len(PATCHES)} patched file(s): {', '.join(sorted(PATCHES))}")
+    print(f"  desktop keeps {reserve} logical px clear on the left")
+    print("  takes effect on the next plasmashell start:")
+    print("    systemctl --user restart plasma-plasmashell.service")
+
+
+def check() -> int:
+    if not DST.exists():
+        print(f"MISSING: {DST} does not exist - the desktop is not indented, so icons "
+              f"will be placed under the bar")
+        return 1
+    reserve = reserved_left()
+    bad = 0
+    for root, _dirs, files in os.walk(DST):
+        for name in files:
+            p = Path(root) / name
+            rel = p.relative_to(DST).as_posix()
+            if rel == MARKER:
+                continue
+            if rel in PATCHES:
+                if p.is_symlink():
+                    print(f"DRIFT: {rel} should be a real patched file, found a symlink")
+                    bad += 1
+                elif p.read_text() != patched_text(rel, reserve):
+                    print(f"STALE: {rel} does not match the patch applied to current "
+                          f"upstream at {reserve} px - rebuild")
+                    bad += 1
+            elif not p.is_symlink():
+                print(f"DRIFT: {rel} should be a symlink, found a real file")
+                bad += 1
+            elif not p.resolve().exists():
+                print(f"DANGLING: {rel} -> {os.readlink(p)}")
+                bad += 1
+    for root, _dirs, files in os.walk(SRC):
+        for name in files:
+            rel = (Path(root).relative_to(SRC) / name).as_posix().removeprefix("./")
+            if not (DST / rel).exists() and not (DST / rel).is_symlink():
+                print(f"MISSING: upstream has {rel}, the overlay does not")
+                bad += 1
+    if bad:
+        print(f"\n{bad} problem(s). Run without --check to rebuild.")
+        return 1
+    print(f"OK: {DST} is in sync with {SRC}, {len(PATCHES)} patched file(s) apply "
+          f"cleanly, desktop reserves {reserve} px on the left")
+    return 0
+
+
+if __name__ == "__main__":
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if not SRC.is_dir():
+        sys.exit(f"ERROR: {SRC} not found - is plasma-desktop installed?")
+    if arg == "--check":
+        sys.exit(check())
+    if arg == "--system":
+        if os.geteuid() != 0:
+            sys.exit("ERROR: --system writes /usr/share and /etc - run it with sudo.")
+        rc = system_apply()
+        rc |= hook_install()
+        print("  takes effect on the next plasmashell start")
+        sys.exit(rc)
+    if arg == "--system-remove":
+        if os.geteuid() != 0:
+            sys.exit("ERROR: --system-remove writes /usr/share and /etc - run it with sudo.")
+        sys.exit(system_remove())
+    if arg == "--remove":
+        if DST.exists() and not (DST / MARKER).exists():
+            sys.exit(f"ERROR: {DST} is not ours ({MARKER} missing) - refusing to delete")
+        shutil.rmtree(DST, ignore_errors=True)
+        print(f"removed {DST} - restart plasmashell to go back to the stock desktop")
+    elif arg in ("", "--build"):
+        build()
+        sys.exit(check())
+    else:
+        sys.exit(f"usage: {sys.argv[0]} "
+                 f"[--build|--check|--remove|--system|--system-remove]")

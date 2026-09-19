@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Luminos Tab Sleeper",
-  "version": "3.0",
-  "description": "Only the tab you are looking at stays in RAM. Caps Chrome at 2 tabs while an AI model is loaded.",
+  "version": "3.1",
+  "description": "Sleeps idle tabs only — never one that is still loading. Caps Chrome at 2 tabs while an AI model is loaded.",
   "permissions": ["tabs", "alarms", "contextMenus", "storage"],
   "host_permissions": ["http://127.0.0.1:9091/*"],
   "action": { "default_title": "Sleep this tab (Alt+S)" },

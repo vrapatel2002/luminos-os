@@ -1,5 +1,5 @@
 Luminos live wallpaper — self test
-  2026-09-19T18:14:57-04:00   7.0.5-arch1-1   plugin: /home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents
+  2026-09-19T18:27:03-04:00   7.0.5-arch1-1   plugin: /home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents
 
 [1] the package
   PASS  installed ui/QmlMode.qml
@@ -35,13 +35,14 @@ Luminos live wallpaper — self test
 [3b] budgets (SPEC §9)
   PASS  python budgets — 5 files within 150/40/3
   PASS  qml budgets — every file within 150 (scene) / 200 (host)
-  ..    exempt by name, pre-SPEC §9: main.qml config.qml (416 and 449 lines)
+  ..    exempt by name, pre-SPEC §9: main.qml config.qml (416 and 481 lines)
 
 [4] QML contract tests
   PASS  audio_contract — exit 0, every check passed
   PASS  props_contract — exit 0, every check passed
   PASS  editor_contract — exit 0, every check passed
   PASS  canvasjs_contract — exit 0, every check passed
+  PASS  gallery_contract — exit 0, every check passed
 
 [5] the running wallpaper
   PASS  plasmashell pid 101188
@@ -53,10 +54,10 @@ Luminos live wallpaper — self test
         WallpaperMode=qml
 
 [6] what the wallpaper said
-  ..    installed files last written 2026-09-19 18:14:57 — older warnings are previous versions
+  ..    installed files last written 2026-09-19 18:27:03 — older warnings are previous versions
   PASS  no [LUMINOS-WP] warnings since this build was installed
   ..    6 older line(s) in this boot, from previous versions
 
 -----------------------------------------------------------
-  34 passed, 0 failed
+  35 passed, 0 failed
   report written to /home/shawn/luminos-os/docs/wallpaper/SELFTEST.log

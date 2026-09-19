@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# luminos-desktop-indent-apply — one command that fixes desktop icons overlapping
+# the Caelestia bar, and proves which half of the fix did it.
+# [CHANGE: claude-code | 2026-09-16] BUG-163 / DECISION 111
+#
+# WHY THIS SCRIPT EXISTS
+#   The fix has two possible deliveries and no way to choose between them ahead
+#   of time.  The clean one is a user-path overlay that touches nothing pacman
+#   owns; it rests on KPackage resolving `X-Plasma-RootPath` user-first, which is
+#   not readable off a filesystem.  If that assumption is wrong the overlay is
+#   INERT - and inert is indistinguishable from "you forgot to restart": no
+#   error, no log, nothing.  So: try the clean one, ASK THE SHELL which file it
+#   loaded, and fall back only on the evidence.
+#
+#   It also exists because a Cowork session cannot do any of this.  That session
+#   reaches the filesystem through a folder bridge; it has no session bus, no
+#   systemd --user, no journal and no route to this machine (verified: 7
+#   processes visible, all its own, and no user `shawn`).  Everything below is
+#   the part that has to happen here.
+#
+# Usage:
+#   luminos-desktop-indent-apply             # fix it, fall back if needed
+#   luminos-desktop-indent-apply --user-only # try the clean half only, never sudo
+#
+# Undo:  luminos-kde-desktop-overlay --remove
+#        sudo luminos-kde-desktop-overlay --system-remove
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+OVERLAY="$REPO/scripts/luminos-kde-desktop-overlay"
+UNIT="plasma-plasmashell.service"
+USER_ONLY=0
+[ "${1:-}" = "--user-only" ] && USER_ONLY=1
+
+bold(){ printf '\033[1m%s\033[0m\n' "$1"; }
+ok(){   printf '  \033[32m✓\033[0m %s\n' "$1"; }
+bad(){  printf '  \033[31m✗\033[0m %s\n' "$1"; }
+inf(){  printf '  \033[33m·\033[0m %s\n' "$1"; }
+
+[ -x "$OVERLAY" ] || { bad "missing $OVERLAY"; exit 1; }
+
+# Restart the shell and return the one line that says which copy of main.qml the
+# shell actually loaded. Empty output means neither did.
+probe() {
+    local since; since="$(date '+%Y-%m-%d %H:%M:%S')"
+    if systemctl --user restart "$UNIT" 2>/dev/null; then
+        :
+    else
+        # Not every session runs plasmashell as a unit (uwsm, or a hand-started
+        # shell). Fall back rather than reporting a failure that is not one.
+        kquitapp6 plasmashell >/dev/null 2>&1 || killall plasmashell 2>/dev/null
+        sleep 1
+        (setsid plasmashell >/dev/null 2>&1 &)
+    fi
+    # plasmashell takes a few seconds to build containments; poll instead of
+    # guessing a sleep, because a too-short wait reads as "the fix failed".
+    local i line
+    for i in $(seq 1 20); do
+        sleep 1
+        line="$(journalctl --user -u "$UNIT" --since "$since" --no-pager 2>/dev/null \
+                | grep -m1 'LUMINOS-DESKTOP')"
+        [ -n "$line" ] && { echo "$line"; return 0; }
+    done
+    return 1
+}
+
+bold "[1/3] building the user-path overlay"
+"$OVERLAY" || exit 1
+
+bold "[2/3] restarting plasmashell and asking it which main.qml it loaded"
+if LINE="$(probe)"; then
+    ok "${LINE#*LUMINOS-DESKTOP}"
+    case "$LINE" in
+        *"(user)"*)
+            bold "DONE — the user-path overlay is live."
+            inf "Nothing pacman owns was touched. Undo: $OVERLAY --remove"
+            exit 0 ;;
+        *"(system)"*)
+            bold "DONE — the packaged file is patched (a previous --system run)."
+            inf "Undo: sudo $OVERLAY --system-remove"
+            exit 0 ;;
+    esac
+fi
+
+bad "plasmashell logged nothing — the user-path overlay is INERT."
+inf "KPackage did not resolve ~/.local/share ahead of /usr/share for"
+inf "X-Plasma-RootPath. That was the one unproven assumption; now it is answered."
+
+if [ "$USER_ONLY" = 1 ]; then
+    inf "--user-only given, stopping here. Re-run without it to patch the packaged file."
+    exit 1
+fi
+
+bold "[3/3] falling back to patching the packaged file (needs root)"
+sudo install -Dm755 "$OVERLAY" /usr/local/bin/luminos-kde-desktop-overlay || exit 1
+ok "installed /usr/local/bin/luminos-kde-desktop-overlay (the pacman hook calls it)"
+sudo /usr/local/bin/luminos-kde-desktop-overlay --system || exit 1
+
+# The user-path copy would now shadow nothing but still be a second thing to
+# maintain, and its presence would make a future "which one is live?" ambiguous.
+"$OVERLAY" --remove >/dev/null 2>&1 && inf "removed the now-redundant user-path overlay"
+
+if LINE="$(probe)"; then
+    ok "${LINE#*LUMINOS-DESKTOP}"
+    bold "DONE — the packaged file is patched and the pacman hook will re-apply it."
+    inf "pacman -Qkk plasma-desktop will report main.qml as altered. That is expected."
+    inf "Undo: sudo luminos-kde-desktop-overlay --system-remove"
+    exit 0
+fi
+
+bad "still nothing in the journal after patching the packaged file."
+inf "That means the desktop containment is not loading this QML at all."
+inf "Collect these three and hand them back:"
+inf "  grep -c LUMINOS-DESKTOP /usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/main.qml"
+inf "  journalctl --user -b -u $UNIT --no-pager | tail -40"
+inf "  kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc --group Containments --group 30 --key plugin"
+exit 1

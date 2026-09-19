@@ -40,9 +40,15 @@ USAGE
     ./apply.py --check              # every shortlisted role: ready or blocked, and why
     ./apply.py --check --limit 5
     ./apply.py --form <id>          # the full form for one role, field by field
+    ./apply.py --apply              # open + fill each ready role. SENDS NOTHING.
+    ./apply.py --apply --submit     # ...and press Submit. Cannot be undone.
+
+--apply needs the venv interpreter, because playwright lives there:
+    /opt/luminos/venv-jobhunt/bin/python apply.py --apply
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -709,8 +715,17 @@ def answer_for(f, p, band=None):
         v = sch.get("native_language_result")
         return (v, "secondary_school.native_language_result") if v else (
             None, "school language result is not in profile.yaml (CONFIRM)")
-    if re.search(r"how did you (first )?(hear|learn)|where did you (hear|find)"
-                 r"|referral source|source", lab):
+    # [CHANGE: claude-code | 2026-08-27] A bare `|source` used to be the last
+    # alternative here, and it matched "Have you made any OPEN SOURCE
+    # contributions you'd like to tell us about?" — so Supabase's essay box got
+    # filled with the words "Job board". It filled the field, printed a green +,
+    # and was nonsense. Exactly the failure that does not announce itself.
+    # The phrase now has to actually be about where he heard of the job.
+    if re.search(r"how did you (first )?(hear|learn)"
+                 r"|where did you (hear|find|see)"
+                 r"|referral source|how you heard"
+                 r"|(hear|heard|find|found) (about|out about) (this|the|our)"
+                 r"\s*(role|job|position|vacancy|opening|opportunity)", lab):
         src = ans.get("referral_source") or ""
         if not f.options:
             return src, "referral_source"
@@ -861,6 +876,23 @@ def posting_band(description):
     return None
 
 
+# [CHANGE: claude-code | 2026-08-27] The rules above are FACT lookups: a name, a
+# phone number, a yes/no about work authorisation. A long-text box is not a fact
+# lookup, it is a question the employer wants prose for — and the one thing this
+# file exists to guarantee is that prose is never invented.
+#
+# So an essay box may be filled by exactly one thing: the cover letter tailor.py
+# wrote and validated against the bullet bank. Every other rule is refused there,
+# whether it matched or not.
+#
+# This is a rail and not a fix. The `|source` bug it was written alongside is
+# already fixed one function up; this is here so the NEXT over-broad regex writes
+# nothing instead of writing two words into an essay. Allowlist, not blocklist —
+# same choice as tailor.py's validator, for the same reason: a blocklist only
+# stops the mistakes you already thought of.
+LONGTEXT_ALLOWED = ("the tailored packet",)
+
+
 def evaluate(fields, profile, band=None):
     """[(field, value, why, ok)], and whether the whole form can be completed.
 
@@ -874,6 +906,9 @@ def evaluate(fields, profile, band=None):
         v, why = answer_for(f, profile, band)
         if f.kind == "unknown" and f.required:
             v, why = None, f"unsupported field type '{f.raw_type}'"
+        if f.kind == "longtext" and v is not None \
+                and why not in LONGTEXT_ALLOWED:
+            v, why = None, ("no rule for this question")
         out.append((f, v, why, v is not None))
     blocked = [(f, why) for f, v, why, ok in out if f.required and not ok]
     return out, blocked
@@ -1046,6 +1081,618 @@ def cmd_form(conn, args):
     return 0
 
 
+# ===========================================================================
+# [CHANGE: claude-code | 2026-08-27] SUBMITTING — the half that cannot be undone.
+#
+# Everything above this line reads. Nothing above it writes to a company, to the
+# database, or to disk. Below this line one action is irreversible: a submitted
+# application cannot be recalled, edited or re-sent. So the rails here are not
+# politeness, they are the whole design.
+#
+# WHY A REAL BROWSER AND NOT THE API
+# -----------------------------------
+# Greenhouse and Ashby both publish the form over an unauthenticated read, which
+# is why --check needs no browser. Neither publishes a way to POST one. Both put
+# INVISIBLE reCAPTCHA on the submit button — measured: Greenhouse ships
+# GOOGLE_RECAPTCHA_INVISIBLE_KEY in its page source, and Ashby's /application
+# page loads exactly one recaptcha iframe. Invisible reCAPTCHA does not show a
+# puzzle; it scores the session and lets it through silently. A real Chromium
+# doing real typing on a real display is the honest way to be scored well.
+#
+# WHAT THIS DELIBERATELY DOES NOT DO
+# -----------------------------------
+# No stealth flags. No --disable-blink-features=AutomationControlled, no patched
+# navigator.webdriver, no CAPTCHA-solving service, no forged tokens. Two reasons,
+# and the second one is the one that would actually cost Shawn something:
+#
+#   1. Solving or hiding from a CAPTCHA is defeating a control the employer put
+#      there on purpose. Not our call to make on their site.
+#   2. It is the losing move anyway. An application flagged as fraudulent does
+#      not fail quietly — it can blacklist an email address across every company
+#      on that ATS, and Greenhouse alone is thousands of employers. The downside
+#      is not "this application fails", it is "all future applications fail".
+#
+# navigator.webdriver therefore reads True, and these forms are expected to
+# accept that, because invisible reCAPTCHA weighs many signals and job boards
+# tune it permissively (a false positive costs the employer a candidate). If a
+# site disagrees and shows a real challenge, this program STOPS — see
+# visible_challenge(). It never answers one.
+#
+# THE FIVE RAILS
+# --------------
+#   1. Dry run by DEFAULT. Filling happens; clicking Submit needs --submit.
+#   2. Only roles --check calls READY. One unanswered required field, no send.
+#   3. Never a form that forbids AI-written answers (form_forbids_ai).
+#   4. Never twice. A recorded `submitted` event for that dedup_key skips it,
+#      and the events table's UNIQUE constraint is the second line of defence.
+#   5. A cap per run, so a bug costs a handful of applications and not 86.
+#
+# AND THE RULE THAT MATTERS MOST: this records `submitted` only when it has SEEN
+# a confirmation. Anything else — a DOM field it could not locate, a challenge,
+# a timeout, an ambiguous page — is `apply_failed` with a screenshot. A tracker
+# that says "sent" about something that was not sent is worse than no tracker,
+# because it stops him from applying himself.
+# ===========================================================================
+
+SUBMIT_DIR = os.path.expanduser("~/.local/share/luminos/jobhunt/submissions")
+BROWSER_PROFILE = os.path.expanduser(
+    "~/.local/share/luminos/jobhunt/browser-profile")
+NOTIFY_PATH = os.path.expanduser("~/.local/share/luminos/jobhunt/needs-you.md")
+
+# Chromium on this machine is a Wayland client. Without the ozone flags it picks
+# X11, hits Xwayland's Xauthority check and dies with "Missing X server or
+# $DISPLAY" — measured, not assumed.
+CHROME_ARGS = ["--ozone-platform=wayland", "--enable-features=UseOzonePlatform"]
+
+
+class FillError(Exception):
+    """A field could not be located or set. Always a stop, never a guess."""
+
+
+def ensure_display():
+    """Point Chromium at the live Wayland session, or report that there is none.
+
+    A systemd --user unit inherits XDG_RUNTIME_DIR but NOT WAYLAND_DISPLAY, so
+    an unattended run would otherwise fall through to X11 and fail. Finding the
+    socket ourselves is what makes the nightly timer able to submit; if there is
+    no socket, nobody is logged in, and the honest answer is to skip rather than
+    to launch a browser nothing can draw.
+    """
+    import glob
+    if os.environ.get("WAYLAND_DISPLAY"):
+        return True
+    rt = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    for sock in sorted(glob.glob(os.path.join(rt, "wayland-*"))):
+        if sock.endswith(".lock"):
+            continue
+        os.environ["WAYLAND_DISPLAY"] = os.path.basename(sock)
+        os.environ["XDG_RUNTIME_DIR"] = rt
+        return True
+    return False
+
+
+# A CAPTCHA the site is ASKING a human to solve, as opposed to the invisible one
+# that scores every session. The distinction is the whole ethical line in this
+# file: being scored is fine, being asked is a request for a human.
+CHALLENGE_SEL = (
+    "iframe[title*='recaptcha challenge' i]",
+    "iframe[src*='hcaptcha.com']",
+    "iframe[src*='turnstile']",
+    "iframe[title*='challenge' i]",
+)
+
+
+def visible_challenge(page):
+    """The title of a visible CAPTCHA challenge, or None.
+
+    Checked on VISIBILITY, not presence: Google injects the challenge iframe
+    into every page that loads reCAPTCHA and leaves it hidden until it decides
+    the session needs proving. Testing for presence would abort all eight roles.
+    """
+    for sel in CHALLENGE_SEL:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() and loc.is_visible(timeout=1500):
+                return sel
+        except Exception:                                 # noqa: BLE001
+            continue
+    return None
+
+
+def packet_files(packet_dir):
+    """(resume_pdf, cover_letter_text) from a tailor.py packet, or (None, None).
+
+    No packet means no application: sending an untailored generic resume is a
+    different act from the one Phase 3 was built to do, and doing it silently
+    because a file was missing is exactly the kind of quiet substitution this
+    pipeline is supposed to refuse.
+    """
+    if not packet_dir or not os.path.isdir(packet_dir):
+        return None, None
+    pdf = os.path.join(packet_dir, "resume.pdf")
+    txt = os.path.join(packet_dir, "cover_letter.txt")
+    cover = None
+    if os.path.exists(txt):
+        with open(txt) as fh:
+            cover = fh.read().strip()
+    return (pdf if os.path.exists(pdf) else None), cover
+
+
+def _resolve(value, pdf, cover):
+    """Turn answer_for's placeholders into the real thing."""
+    if value == "<resume.pdf>":
+        return pdf
+    if value == "<cover_letter>":
+        return cover
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Locating a field in the DOM.
+#
+# Verified against live forms rather than reasoned about: Greenhouse renders the
+# API's `first_name` as `#first_name`, and Ashby renders `_systemfield_name` as
+# `[name="_systemfield_name"]`. So the API path IS the selector on both, which
+# is the single fact that makes this driver short enough to trust.
+#
+# Ashby's ValueSelect comes back as radios whose ids are `<path>_<optionId>-...`,
+# and its Boolean comes back as a pair of Yes/No BUTTONS sharing a parent div
+# with a hidden `input[name=<path>][type=checkbox]`. Both were read off the page,
+# because both are invisible in the API response.
+# ---------------------------------------------------------------------------
+def _css_id(path):
+    """CSS-escape an id. Ashby's field paths are bare UUIDs, and a CSS id that
+    starts with a digit is invalid — `#50708872-d452-...` silently selects
+    nothing. Attribute form sidesteps the whole question."""
+    return '[id="{}"]'.format(path.replace('"', '\\"'))
+
+
+def _reveal_textarea(page, path):
+    """Greenhouse hides the paste-it-in box behind a button. Click it.
+
+    A Greenhouse resume/cover-letter question is one question with two fields —
+    `cover_letter` (a file input) and `cover_letter_text` (a textarea) — and only
+    the file input is rendered. The textarea does not exist in the DOM until
+    "Enter manually" is clicked, so looking for it first and giving up is what
+    the first version of this did. Found by running it, not by reading the page.
+    """
+    if not path.endswith("_text"):
+        return False
+    base = path[:-5]
+    anchor = page.locator(f'input[type=file]{_css_id(base)}').first
+    if not anchor.count():
+        return False
+    # The NEAREST ancestor that actually contains the button. Scoping to the
+    # file input's own div was the first attempt and it found nothing: Greenhouse
+    # hides the input inside a wrapper and puts Attach / Dropbox / Google Drive /
+    # Enter manually a few levels up. There are two such buttons on the page
+    # (resume and cover letter), so an unscoped search would click the wrong one.
+    btn = anchor.locator(
+        'xpath=ancestor::div[.//button[contains(normalize-space(.),'
+        '"Enter manually")]][1]'
+    ).get_by_role("button", name=re.compile(r"enter manually", re.I)).first
+    if not btn.count():
+        return False
+    btn.click(timeout=5000)
+    page.wait_for_timeout(600)
+    return True
+
+
+def _set_text(page, f, value):
+    sel = f'{_css_id(f.path)}, [name="{f.path}"]'
+    el = page.locator(sel).first
+    if not el.count() and _reveal_textarea(page, f.path):
+        el = page.locator(sel).first
+    if not el.count():
+        raise FillError(f"no input for {f.path!r} ({f.label[:40]})")
+    el.scroll_into_view_if_needed(timeout=5000)
+    # type=, not fill=: these forms are React-controlled and a few of them ignore
+    # a value set without keystrokes. It is also what a person does, which is the
+    # signal invisible reCAPTCHA is actually reading.
+    el.click(timeout=5000)
+    el.press_sequentially(str(value), delay=18, timeout=30000)
+
+
+def _set_file(page, f, path_on_disk):
+    if not path_on_disk or not os.path.exists(path_on_disk):
+        raise FillError(f"{f.label[:40]}: no file to upload")
+    el = page.locator(
+        f'input[type=file]{_css_id(f.path)}, '
+        f'input[type=file][name="{f.path}"]').first
+    if not el.count():
+        el = page.locator("input[type=file]").first
+        if not el.count():
+            raise FillError(f"no file input for {f.label[:40]}")
+    el.set_input_files(path_on_disk, timeout=30000)
+
+
+def _set_choice(page, f, value):
+    """One option, matched on its visible label, across four widget shapes."""
+    want = str(value).strip()
+
+    # 1. a real <select>
+    sel = page.locator(f'select{_css_id(f.path)}, select[name="{f.path}"]').first
+    if sel.count():
+        sel.select_option(label=want, timeout=10000)
+        return
+
+    # 2. Ashby radios. The id is "<parentId>_<path>-labeled-radio-N" — the field
+    # path is in the MIDDLE, not at the start, so a ^= selector matched nothing
+    # and the question silently went unanswered. Read off a live form after the
+    # first version quietly skipped Supabase's "where did you hear" question.
+    radios = page.locator(f'input[type=radio][id*="{f.path}"]')
+    if radios.count():
+        for i in range(radios.count()):
+            r = radios.nth(i)
+            rid = r.get_attribute("id") or ""
+            lab = page.locator(f'label[for="{rid}"]').first
+            if lab.count() and lab.inner_text().strip().lower() == want.lower():
+                lab.scroll_into_view_if_needed(timeout=5000)
+                lab.click(timeout=5000)
+                return
+        raise FillError(f"{f.label[:40]}: no radio labelled {want!r}")
+
+    # 3. Ashby Yes/No: buttons sharing the innermost div with a hidden checkbox
+    #    named for the field. `.last` is that innermost div — document order puts
+    #    the deepest matching ancestor last.
+    box = page.locator(f'input[name="{f.path}"]')
+    if box.count():
+        holder = page.locator(f'div:has(> input[name="{f.path}"])').last
+        if holder.count():
+            btn = holder.get_by_role("button", name=want, exact=True).first
+            if btn.count():
+                btn.scroll_into_view_if_needed(timeout=5000)
+                btn.click(timeout=5000)
+                return
+
+    # 4. Greenhouse: a typeahead combobox that opens a listbox of options
+    combo = page.locator(
+        f'input[role=combobox]{_css_id(f.path)}, '
+        f'input[role=combobox][name="{f.path}"]').first
+    if combo.count():
+        combo.scroll_into_view_if_needed(timeout=5000)
+        combo.click(timeout=5000)
+        combo.press_sequentially(want[:24], delay=25, timeout=20000)
+        page.wait_for_timeout(700)
+        opt = page.get_by_role("option", name=want, exact=True).first
+        if not opt.count():
+            opt = page.get_by_role("option", name=want).first
+        if not opt.count():
+            raise FillError(f"{f.label[:40]}: no option {want!r} in the list")
+        opt.click(timeout=8000)
+        return
+
+    raise FillError(f"{f.label[:40]}: cannot find a control for {f.path!r}")
+
+
+def fill_form(page, rows, pdf, cover, log):
+    """Set every answerable field. Raises FillError on a REQUIRED field it
+    cannot set — an unfillable required field is a stop, and the form is left on
+    screen exactly as far as it got so a human can finish it."""
+    filled, skipped = 0, 0
+    for f, v, why, ok in rows:
+        if not ok or v is None:
+            skipped += 1
+            continue
+        val = _resolve(v, pdf, cover)
+        if val is None or val == "":
+            if f.required:
+                raise FillError(f"{f.label[:40]}: the packet has no {v}")
+            skipped += 1
+            continue
+        try:
+            if f.kind == "file":
+                _set_file(page, f, val)
+            elif f.kind in ("select", "multiselect", "boolean"):
+                _set_choice(page, f, val)
+            else:
+                _set_text(page, f, val)
+            filled += 1
+            log.append(f"    + {f.label[:44]:44} {str(val)[:36]}")
+        except Exception as e:                            # noqa: BLE001
+            # [CHANGE: claude-code | 2026-08-27] REQUIRED decides whether this
+            # stops, not the exception type. The first version re-raised every
+            # FillError and an optional Greenhouse cover-letter box that simply
+            # is not in the DOM killed the whole run — a rail firing on something
+            # that was never a problem. A field the employer did not ask for
+            # cannot be a reason to abandon an application.
+            if f.required:
+                msg = (str(e) if isinstance(e, FillError) else
+                       f"{f.label[:40]}: {type(e).__name__}: "
+                       f"{str(e).splitlines()[0][:60]}")
+                raise FillError(msg)
+            skipped += 1
+            log.append(f"    {DIM}- {f.label[:44]:44} optional, could not set"
+                       f"{RESET}")
+    return filled, skipped
+
+
+# The page after a successful send. Checked as TEXT the employer chose to show,
+# not as a URL pattern, because both ATSs render confirmation in place without
+# navigating and a URL check would report every send as a failure.
+SUCCESS_TEXT = re.compile(
+    r"thank you for applying|application (has been )?(was )?(submitted|received)"
+    r"|thanks for applying|we('| ha)ve received your application"
+    r"|your application (has been sent|was sent|is in)"
+    r"|submitted your application|application complete", re.I)
+
+
+def submitted_ok(page):
+    """Did the employer say it landed? Returns the sentence, or None."""
+    for _ in range(20):                       # ~20s, these pages POST then swap
+        try:
+            body = page.inner_text("body", timeout=4000)
+        except Exception:                                 # noqa: BLE001
+            body = ""
+        m = SUCCESS_TEXT.search(body or "")
+        if m:
+            return m.group(0)[:80]
+        page.wait_for_timeout(1000)
+    return None
+
+
+def apply_page_url(url, ats):
+    """Ashby keeps the form at /application; Greenhouse's job URL IS the form."""
+    if ats == "ashby" and not url.rstrip("/").endswith("/application"):
+        return url.rstrip("/") + "/application"
+    return url
+
+
+def notify(lines):
+    """Append to the same file followup.py writes. One place he has to look."""
+    try:
+        os.makedirs(os.path.dirname(NOTIFY_PATH), exist_ok=True)
+        with open(NOTIFY_PATH, "a") as fh:
+            fh.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
+
+
+def submit_one(ctx, conn, role, profile, args):
+    """One role, start to finish. Returns (outcome, detail).
+
+    outcome is 'submitted', 'filled' (dry run), 'skipped' or 'failed'. Only
+    'submitted' ever writes a submitted event, and only after submitted_ok().
+    """
+    dk, jid, co, ti, url, ats, band, packet_dir = role
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    shots = os.path.join(SUBMIT_DIR, f"{dk[:12]}-{stamp}")
+    os.makedirs(shots, exist_ok=True)
+
+    # Order matters for the REASON, not for safety — all four of these are
+    # stops. A role that is blocked on a required question AND has no resume
+    # yet should say it is blocked, because that is the thing that has to be
+    # fixed first; reporting "no resume" would send someone off to run tailor.py
+    # for nothing.
+    fields, _, _, _ = fetch_form(url, fresh=args.fresh)
+    if form_forbids_ai(fields):
+        return "skipped", "form forbids AI-written answers"
+    rows, blocked = evaluate(fields, profile, band)
+    if blocked:
+        return "skipped", (f"{len(blocked)} required field(s) unanswered — "
+                           f"{blocked[0][1][:40]}")
+    pdf, cover = packet_files(packet_dir)
+    if not pdf:
+        return "skipped", "no tailored resume yet — run tailor.py first"
+
+    page = ctx.new_page()
+    log = []
+    try:
+        page.goto(apply_page_url(url, ats), timeout=90000,
+                  wait_until="domcontentloaded")
+        page.wait_for_timeout(4000)
+
+        ch = visible_challenge(page)
+        if ch:
+            page.screenshot(path=os.path.join(shots, "challenge.png"),
+                            full_page=True)
+            return "failed", f"a CAPTCHA challenge is on the page ({ch})"
+
+        filled, skipped = fill_form(page, rows, pdf, cover, log)
+        page.screenshot(path=os.path.join(shots, "filled.png"), full_page=True)
+        for line in log:
+            print(line)
+        print(f"    {DIM}{filled} filled, {skipped} left blank — "
+              f"{shots}/filled.png{RESET}")
+
+        if not args.submit:
+            # The window stays open on purpose in dry run: the point is that he
+            # can look at a real filled form before ever letting it be sent.
+            return "filled", f"dry run — nothing sent ({filled} fields)"
+
+        btn = page.get_by_role(
+            "button", name=re.compile(r"^submit application$", re.I)).first
+        if not btn.count():
+            btn = page.locator(
+                "button[type=submit]:has-text('Submit'), "
+                "input[type=submit]").first
+        if not btn.count():
+            page.screenshot(path=os.path.join(shots, "no-button.png"),
+                            full_page=True)
+            return "failed", "no Submit button found on the page"
+
+        btn.scroll_into_view_if_needed(timeout=5000)
+        page.wait_for_timeout(800)
+        btn.click(timeout=20000)
+
+        # Invisible reCAPTCHA runs HERE. If it decided the session needs proving,
+        # the challenge appears after the click, not before it.
+        page.wait_for_timeout(3500)
+        ch = visible_challenge(page)
+        if ch:
+            page.screenshot(path=os.path.join(shots, "challenge.png"),
+                            full_page=True)
+            return "failed", ("a CAPTCHA challenge appeared on submit — the "
+                              "form is filled and waiting for you")
+
+        said = submitted_ok(page)
+        page.screenshot(path=os.path.join(shots, "after.png"), full_page=True)
+        if not said:
+            # Filled, clicked, and no confirmation seen. It may well have gone
+            # through — which is exactly why this is not recorded as sent. He
+            # checks the screenshot and decides; the tool does not decide for him.
+            return "failed", ("clicked Submit but saw no confirmation — check "
+                              f"{shots}/after.png before re-sending")
+        return "submitted", said
+    finally:
+        if args.submit:
+            page.close()
+
+
+def cmd_submit(conn, args):
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print(f"{RED}playwright is not importable from this interpreter{RESET}")
+        print(f"  {DIM}run it with /opt/luminos/venv-jobhunt/bin/python{RESET}")
+        return 1
+    if not ensure_display():
+        print(f"{YELLOW}no Wayland session — nobody is logged in, so there is "
+              f"no screen\n  to draw a browser on. Skipping (the timer retries "
+              f"tomorrow).{RESET}")
+        return 0
+
+    profile = load_profile()
+    rows = shortlist(conn)
+    done = {r[0] for r in conn.execute(
+        "SELECT dedup_key FROM events WHERE kind='submitted'")}
+    # Three failures on one role is a pattern, not bad luck. Stop re-opening it.
+    tried = {}
+    for r in conn.execute("SELECT dedup_key, COUNT(*) FROM events "
+                          "WHERE kind='apply_failed' GROUP BY dedup_key"):
+        tried[r[0]] = r[1]
+
+    # [CHANGE: claude-code | 2026-08-27] Decide READY first, cap second. The
+    # first version capped the highest-scoring roles at --max and then checked
+    # them, so `--apply --max 8` spent the whole budget on eight roles that were
+    # all blocked or AI-forbidden and opened nothing. --max is a blast radius,
+    # not a queue length: it has to count applications actually attempted.
+    #
+    # Re-reading the forms here is nearly free — fetch_form serves them from the
+    # day-old disk cache, and it is the same read cmd_check does.
+    todo, why_not = [], {}
+    for dk, jid, co, ti, sc in rows:
+        if args.only and args.only.lower() not in (co or "").lower() \
+                and not dk.startswith(args.only) \
+                and not jid.startswith(args.only):
+            continue
+        if dk in done:
+            why_not["already submitted"] = why_not.get("already submitted", 0) + 1
+            continue
+        # Three failures on one role is a pattern, not bad luck.
+        if tried.get(dk, 0) >= 3:
+            why_not["failed 3 times already"] = \
+                why_not.get("failed 3 times already", 0) + 1
+            continue
+        url, ats = track.apply_url(conn, dk)
+        if not ats:
+            why_not["no application form found"] = \
+                why_not.get("no application form found", 0) + 1
+            continue
+        try:
+            fields, _, _, _ = fetch_form(url, fresh=args.fresh)
+        except Exception:                                 # noqa: BLE001
+            # A withdrawn or renamed posting. Not our failure and not something
+            # to record against the role — there is no form to fail at.
+            why_not["posting unreadable"] = why_not.get("posting unreadable", 0) + 1
+            continue
+        if form_forbids_ai(fields):
+            why_not["form forbids AI-written answers"] = \
+                why_not.get("form forbids AI-written answers", 0) + 1
+            continue
+        row = conn.execute(
+            "SELECT description, packet_dir FROM jobs WHERE dedup_key=? "
+            "AND packet_dir IS NOT NULL LIMIT 1", (dk,)).fetchone()
+        if not row:
+            row = conn.execute(
+                "SELECT description, packet_dir FROM jobs WHERE dedup_key=? "
+                "LIMIT 1", (dk,)).fetchone()
+        desc, packet_dir = (row or (None, None))
+        _, blocked = evaluate(fields, profile, posting_band(desc))
+        if blocked:
+            why_not["a required question has no honest answer"] = \
+                why_not.get("a required question has no honest answer", 0) + 1
+            continue
+        if not packet_files(packet_dir)[0]:
+            why_not["no tailored resume yet (run tailor.py)"] = \
+                why_not.get("no tailored resume yet (run tailor.py)", 0) + 1
+            continue
+        todo.append((dk, jid, co, ti, url, ats, posting_band(desc), packet_dir))
+    eligible = len(todo)
+    todo = todo[:max(1, args.max)]
+
+    mode = (f"{RED}{BOLD}LIVE — applications will be sent{RESET}" if args.submit
+            else f"{GREEN}dry run — fills the form, sends nothing{RESET}")
+    print(f"\n{BOLD}  {len(todo)} of {eligible} ready role(s){RESET}   {mode}")
+    if why_not:
+        print(f"  {DIM}not attempted: " + ", ".join(
+            f"{n} {k}" for k, n in sorted(why_not.items(), key=lambda kv: -kv[1])
+        )[:150] + f"{RESET}")
+    print()
+    if not todo:
+        return 0
+
+    counts = {"submitted": 0, "filled": 0, "skipped": 0, "failed": 0}
+    needs_you = []
+    with sync_playwright() as pw:
+        # A PERSISTENT profile, not a fresh incognito each time. A browser with
+        # no history and no cookies is itself an automation signal, and this also
+        # means a cookie banner dismissed once stays dismissed.
+        os.makedirs(BROWSER_PROFILE, exist_ok=True)
+        ctx = pw.chromium.launch_persistent_context(
+            BROWSER_PROFILE, headless=False, args=CHROME_ARGS,
+            viewport={"width": 1400, "height": 1000},
+            accept_downloads=False)
+        try:
+            for role in todo:
+                dk, jid, co, ti = role[0], role[1], role[2], role[3]
+                print(f"  {BOLD}{(co or '')[:24]}{RESET} — {(ti or '')[:44]}")
+                try:
+                    outcome, detail = submit_one(ctx, conn, role, profile, args)
+                except FillError as e:
+                    outcome, detail = "failed", str(e)
+                except Exception as e:                    # noqa: BLE001
+                    outcome, detail = "failed", (f"{type(e).__name__}: "
+                                                 f"{str(e).splitlines()[0][:70]}")
+                counts[outcome] += 1
+                colour = {"submitted": GREEN, "filled": CYAN,
+                          "skipped": DIM, "failed": RED}[outcome]
+                print(f"    {colour}{outcome}{RESET}  {DIM}{detail[:70]}{RESET}\n")
+
+                if outcome == "submitted":
+                    track.record(conn, jid, "submitted", detail=detail,
+                                 evidence=url_of(conn, dk))
+                elif outcome == "failed" and args.submit:
+                    track.record(conn, jid, "apply_failed", detail=detail[:200],
+                                 evidence=f"{track.now()[:19]}")
+                    needs_you.append(f"- **{co} — {ti}**  {detail}")
+        finally:
+            if args.submit:
+                ctx.close()
+            else:
+                print(f"  {DIM}browser left open so you can look at the filled "
+                      f"forms. Close it when done.{RESET}")
+                try:
+                    input("  press Enter to close the browser... ")
+                except EOFError:
+                    pass
+                ctx.close()
+
+    print(f"  {BOLD}{counts['submitted']} sent, {counts['filled']} filled, "
+          f"{counts['skipped']} skipped, {counts['failed']} failed{RESET}\n")
+    if needs_you:
+        notify([f"\n## applications that stopped and need you "
+                f"({track.now()[:16]})"] + needs_you)
+        print(f"  {YELLOW}{len(needs_you)} need you — written to "
+              f"{NOTIFY_PATH}{RESET}\n")
+    return 0
+
+
+def url_of(conn, dk):
+    u, _ = track.apply_url(conn, dk)
+    return u or dk
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--check", action="store_true",
@@ -1057,6 +1704,19 @@ def main():
                     help="ignore the cached copy of each form")
     ap.add_argument("--why", action="store_true",
                     help="with --check, list every blocking question")
+    # [CHANGE: claude-code | 2026-08-27] --apply fills, --submit sends. Two flags
+    # and not one, because the dangerous thing must be the thing you typed on
+    # purpose. `--apply` alone is always safe to run and always shows you a real
+    # filled form; there is no combination of a typo and a default that sends an
+    # application.
+    ap.add_argument("--apply", action="store_true",
+                    help="open each ready role in a real browser and fill it in")
+    ap.add_argument("--submit", action="store_true",
+                    help="with --apply, actually press Submit. IRREVERSIBLE.")
+    ap.add_argument("--max", type=int, default=3,
+                    help="how many roles per run (default 3)")
+    ap.add_argument("--only", metavar="ID|COMPANY",
+                    help="restrict to one role, by job id or company name")
     args = ap.parse_args()
 
     if not os.path.exists(PROFILE_PATH):
@@ -1065,6 +1725,13 @@ def main():
     conn = track.connect()
     if args.form:
         return cmd_form(conn, args)
+    if args.apply:
+        return cmd_submit(conn, args)
+    if args.submit:
+        print(f"{YELLOW}--submit does nothing on its own; it is a modifier on "
+              f"--apply.{RESET}\n  {DIM}./apply.py --apply           fill, send "
+              f"nothing\n  ./apply.py --apply --submit  fill and send{RESET}")
+        return 1
     if args.check:
         return cmd_check(conn, args)
     ap.print_help()

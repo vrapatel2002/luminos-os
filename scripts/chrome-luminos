@@ -155,6 +155,25 @@ if [ "$GPU_CHOICE" = "nvidia" ]; then
   fi
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DevTools Protocol — opt-in, not always-on
+# ─────────────────────────────────────────────────────────────────────────────
+# [CHANGE: claude-code | 2026-09-12] --remote-debugging-port=9222 was hardcoded into BOTH
+# branches, so every Chrome launch advertised the DevTools Protocol — the same switch
+# Selenium/Puppeteer use. Two consequences, one visible and one not:
+#   1. Akamai Bot Manager (also Cloudflare / DataDome) fingerprint CDP and deny at the edge.
+#      That is the "Reference Error: <hex>" page with no explanation — ordinary human
+#      browsing was being classified as a bot, on every site behind Akamai.
+#   2. An open CDP port is unauthenticated remote control of the browser: any local process
+#      can attach, read every cookie, and lift logged-in sessions. Not a safe default.
+# Now gated. For an automation session: LUMINOS_CHROME_DEBUG=1 chrome-luminos
+# Flags only apply on a launch that really starts a browser — the single-instance handoff
+# above discards them — so close every Chrome window before expecting a change to take.
+DEBUG_FLAG=()
+if [ -n "${LUMINOS_CHROME_DEBUG:-}" ]; then
+  DEBUG_FLAG=(--remote-debugging-port=9222)
+fi
+
 if [ "$GPU_CHOICE" = "igpu" ]; then
   notify-send "Chrome" "Running on AMD Radeon 780M (HW accel)" --icon=dialog-information
   exec env \
@@ -168,7 +187,7 @@ if [ "$GPU_CHOICE" = "igpu" ]; then
     --enable-gpu-rasterization \
     --enable-features=VaapiVideoDecodeLinuxGL,VaapiVideoEncoder,MemorySaver \
     --ignore-gpu-blocklist \
-    --remote-debugging-port=9222 \
+    "${DEBUG_FLAG[@]}" \
     "$@"
 else
   # [CHANGE: claude-code | 2026-08-05] BUG-103: removed
@@ -201,7 +220,7 @@ else
     --enable-gpu-rasterization \
     --enable-features=MemorySaver \
     --ignore-gpu-blocklist \
-    --remote-debugging-port=9222 \
+    "${DEBUG_FLAG[@]}" \
     --render-node-override=/dev/dri/renderD128 \
     "$@"
 fi

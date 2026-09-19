@@ -755,3 +755,123 @@ down the list the school questions fell once Canonical was excluded — they wer
 Already landed from the transcript and Shawn's 2026-08-27 answers: nationality
 (31), willingness to travel (23), passport country (8), street address (7),
 `over_18` (5), degree result (23), sponsorship (15).
+
+## Phase 4b — actually pressing Submit
+
+Everything above reads. `--apply` is the first thing in this pipeline that
+writes to somebody else's system, and a sent application cannot be recalled,
+edited or re-sent. So this section is mostly about what stops it.
+
+```bash
+# fill eight real forms in a real browser and send nothing
+/opt/luminos/venv-jobhunt/bin/python apply.py --apply
+
+# ...and press Submit. Cannot be undone.
+/opt/luminos/venv-jobhunt/bin/python apply.py --apply --submit --max 3
+
+/opt/luminos/venv-jobhunt/bin/python apply.py --apply --only planetscale
+```
+
+It needs the venv interpreter. Playwright lives in `/opt/luminos/venv-jobhunt`
+and is deliberately not installed system-wide.
+
+### Why a browser here, when `--check` needs none
+
+Both ATSs publish the *form* over an unauthenticated read. Neither publishes a
+way to POST one, and both put **invisible reCAPTCHA** on the submit button —
+measured, not assumed: Greenhouse ships `GOOGLE_RECAPTCHA_INVISIBLE_KEY` in its
+page source, and Ashby's `/application` page loads exactly one recaptcha iframe.
+
+Invisible reCAPTCHA does not show a puzzle. It scores the session and lets it
+through silently. The honest way to be scored well is to *be* a real browser:
+headed Chromium, a persistent profile that accumulates real cookies and history,
+and text typed a keystroke at a time.
+
+### What it deliberately does not do
+
+No stealth flags. No `--disable-blink-features=AutomationControlled`, no patched
+`navigator.webdriver`, no solver service, no forged tokens. `navigator.webdriver`
+reads **True** and stays that way. Two reasons, and the second is the one that
+would actually cost Shawn something:
+
+1. Hiding from a control the employer put there on purpose is not our call.
+2. It is the losing move anyway. A flagged application does not fail quietly —
+   it can blacklist an email address across *every company on that ATS*, and
+   Greenhouse alone is thousands of employers. The downside is not "this
+   application fails", it is "all future applications fail".
+
+If a site disagrees and shows a real challenge, the program stops, screenshots
+it, and leaves the form filled for a human. It never answers one.
+
+### The rails
+
+1. **Dry run by default.** `--apply` fills; only `--apply --submit` sends. Two
+   flags, not one, so no combination of a typo and a default sends anything.
+2. **Only roles `--check` calls ready.** One unanswered required field, no send.
+3. **Never a form that forbids AI-written answers.**
+4. **Never twice.** A recorded `submitted` event skips the role, and the events
+   table's UNIQUE constraint is the second line of defence.
+5. **`--max 3` per run** — a blast radius, not a queue length. See below.
+
+### `submitted` means somebody said so
+
+The rule that matters more than the other five: this records a `submitted` event
+only when it has **seen the employer's confirmation text** on the page. Filled,
+clicked, and no confirmation is recorded as `apply_failed` with a screenshot —
+even though it very likely did go through. A tracker that says "sent" about
+something that was not sent is worse than no tracker, because it is the thing
+that stops him applying by hand.
+
+Everything lands in `~/.local/share/luminos/jobhunt/submissions/<key>-<stamp>/`
+as `filled.png`, `after.png`, or `challenge.png`.
+
+### Two bugs worth keeping written down
+
+**`--max` used to cap the wrong list.** It took the highest-*scoring* roles and
+then checked them, so `--apply --max 8` spent its whole budget on eight blocked
+roles and opened nothing. Readiness is decided first now, and `--max` counts
+applications actually attempted.
+
+**A rule wrote two words into an essay box.** The referral-source rule ended in
+a bare `|source`, which matched Supabase's *"Have you made any **open source**
+contributions you'd like to share with us?"* — so the box got filled with the
+words "Job board". It printed a green `+` and was nonsense: exactly the failure
+that does not announce itself. The regex is fixed, but the real fix is the rail
+next to it — **a long-text box may now be filled by exactly one thing, the cover
+letter tailor.py wrote and validated.** Every other rule is refused there whether
+it matched or not. Allowlist, not blocklist, for the same reason as tailor.py's
+validator: a blocklist only stops the mistakes you already thought of.
+
+### DOM facts that are not in either API
+
+Read off live pages, because guessing at them is how forms get half-filled.
+
+- On both ATSs the API's field `path` **is** the element's `id`/`name`.
+  Greenhouse renders `first_name` as `#first_name`; Ashby renders
+  `_systemfield_name` as `[name="_systemfield_name"]`.
+- Ashby field paths are bare UUIDs, and a CSS id starting with a digit is
+  invalid — `#50708872-...` silently selects nothing. Use `[id="..."]`.
+- **Greenhouse's cover-letter textarea does not exist in the DOM** until its
+  "Enter manually" button is clicked. There are two such buttons on the page
+  (resume and cover letter), so the click has to be scoped to the nearest
+  ancestor of *that* file input.
+- **Ashby's radio ids put the field path in the middle**, not at the start:
+  `<parentId>_<path>-labeled-radio-N`. A `^=` selector matches nothing and the
+  question goes silently unanswered.
+- **Ashby's booleans are Yes/No buttons**, not radios, sharing their innermost
+  parent div with a hidden `input[name=<path>][type=checkbox]`.
+- Ashby keeps the form at `<job-url>/application`. Greenhouse's job URL *is* the
+  form.
+- Chromium here is a Wayland client: without `--ozone-platform=wayland` it picks
+  X11, fails Xwayland's Xauthority check and dies with "Missing X server or
+  `$DISPLAY`". A systemd `--user` unit inherits `XDG_RUNTIME_DIR` but not
+  `WAYLAND_DISPLAY`, so `apply.py` finds the socket itself — and skips the step
+  cleanly when nobody is logged in, because then there is no screen to draw on.
+
+### Application limits are real
+
+Supabase's form says it in a banner: *"You can submit up to 3 applications
+within a 60-day period with us."* Nothing in this tool tracks per-employer
+limits yet. `--max 3` happens to make it hard to trip one by accident, but that
+is a coincidence and not a guarantee — if a company appears many times on the
+shortlist, that is worth a look before a big run.

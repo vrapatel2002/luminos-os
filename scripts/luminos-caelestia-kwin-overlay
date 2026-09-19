@@ -21,16 +21,50 @@
 #   luminos-caelestia-kwin-overlay            # build / rebuild
 #   luminos-caelestia-kwin-overlay --check    # verify, change nothing, exit 1 if stale
 #   luminos-caelestia-kwin-overlay --remove   # delete the overlay
+#
+# A build also asserts the managed keys in ~/.config/caelestia (see CONF_* below);
+# --check reports drift in them. --remove deletes only the overlay, never config.
 
+import json
 import os
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
 SRC = Path("/etc/xdg/quickshell/caelestia")
 DST = Path.home() / ".config/quickshell/caelestia-kwin"
 REPO = Path(__file__).resolve().parent.parent
 MARKER = ".luminos-overlay"   # refuse to delete a directory that is not ours
+
+# ---------------------------------------------------------------------------
+# The JSON config.  [CHANGE: claude-code | 2026-09-16] DECISION 110.
+#
+# WHY THIS IS HERE AT ALL.  The overlay above owns CODE.  These two files are
+# CONFIG - ~/.config/caelestia/shell.json and shell-tokens.json - and until now
+# nothing owned them: they were not in git, nothing installed them, and
+# luminos-verify did not look at them.  The bar's width lived in exactly one
+# untracked 81-byte file.  The 2026-09-13 20:48 profile reset that wiped the
+# Plasma desktop config (BUG-158) would have taken the bar with it and there
+# would have been nothing to restore from.  That is the hole this closes.
+#
+# WHY MERGE AND NOT OVERWRITE.  shell.json is USER config and Caelestia's own
+# settings UI writes it back.  Copying the repo file over it would silently
+# revert every toggle the user flipped in the GUI - the exact failure mode as
+# "the bar reset itself", just pointed at a different file.  So only the keys
+# in luminos-managed.json are asserted; everything else in the file is the
+# user's and is left alone.
+#
+# The snapshots (CONF_SNAPSHOTS) are for the OTHER case: the file is gone
+# entirely.  Then there is nothing to merge into and a full known-good copy is
+# the only thing that helps.  They are seeded only when the file is missing,
+# never over a file that exists.
+# ---------------------------------------------------------------------------
+CONF_DST = Path.home() / ".config/caelestia"
+CONF_SRC = REPO / "config/caelestia"
+CONF_MANAGED = "luminos-managed.json"     # {filename: {keys Luminos insists on}}
+CONF_SNAPSHOTS = ("shell.json", "shell-tokens.json")
+CONF_BACKUPS = Path.home() / ".luminos-backups"
 
 # ---------------------------------------------------------------------------
 # Performance tab geometry.  [CHANGE: claude-code | 2026-08-31]
@@ -83,6 +117,11 @@ PERF = {
 NEW_FILES = {
     "modules/dashboard/performance/GaugeCard.qml":
         "config/quickshell/caelestia-kwin-extra/GaugeCard.qml",
+    # [CHANGE: claude-code | 2026-09-13] The bar's "vitals" entry - see the
+    # matching PATCHES entry for modules/bar/Bar.qml, and the header of the
+    # file itself for why it has no GPU ring.
+    "modules/bar/components/Vitals.qml":
+        "config/quickshell/caelestia-kwin-extra/Vitals.qml",
 }
 
 # ---------------------------------------------------------------------------
@@ -977,6 +1016,90 @@ PATCHES = {
             "        }",
         ),
     ],
+    # [CHANGE: claude-code | 2026-09-16] BUG-165 / DECISION 114. Three of the
+    # Nexus window's four corners render SQUARE, filled with m3surface - the
+    # exact colour of the bar. Measured from a screenshot: top-left and
+    # bottom-left are square, both right corners curve cleanly.
+    #
+    # CAUSE: the rounded shape is not the window. It is a BlobInvertedRect
+    # painted ON TOP of a FloatingWindow whose `color` is an OPAQUE
+    # m3surface clear colour covering the whole surface. Wherever the blob's
+    # rounded corner cuts inward, that square opaque rectangle shows through.
+    #
+    # WHY NOT JUST `color: "transparent"`: Pages.qml paints NO background of its
+    # own - checked, it has no colour or Rectangle in it - so the whole content
+    # area IS that clear colour. Making it transparent would round the corners
+    # and turn the settings content see-through in the same move. The clear
+    # colour has to be REPLACED, not removed.
+    #
+    # So: transparent clear + a real Rectangle behind everything carrying the
+    # background. Its radius is deliberately LARGER than the blob's visible
+    # corner (extraLarge 28 vs large 16), because the frame is the outermost
+    # thing drawn - anything outside it is outside the window anyway, so erring
+    # large can only ever hide the rectangle further, never expose a gap.
+    "modules/nexus/WindowFactory.qml": [
+        (
+            "        FloatingWindow {\n"
+            "            id: win\n"
+            "\n"
+            "            color: Colours.tPalette.m3surface\n"
+            "            surfaceFormat.opaque: false\n",
+            "        FloatingWindow {\n"
+            "            id: win\n"
+            "\n"
+            "            // [LUMINOS-KWIN] See scripts/luminos-caelestia-kwin-overlay.\n"
+            "            color: \"transparent\"\n"
+            "            surfaceFormat.opaque: false\n"
+            "\n"
+            "            // The background the clear colour used to provide, with the\n"
+            "            // window's own shape instead of a square. Declared first so it\n"
+            "            // sits behind Nexus.\n"
+            "            Rectangle {\n"
+            "                anchors.fill: parent\n"
+            "                color: Colours.tPalette.m3surface\n"
+            "                radius: win.contentItem.Tokens.rounding.extraLarge\n"
+            "                antialiasing: true\n"
+            "            }\n",
+        ),
+    ],
+    # [CHANGE: claude-code | 2026-09-13] Teach the bar one new entry id,
+    # "vitals", so `Config.bar.entries` can put CPU/RAM/temperature rings into
+    # the dead space the two `spacer` entries leave behind (measured: 153 and
+    # 158 logical px on this 1800px screen, about a third of the bar).
+    #
+    # A DelegateChoice and nothing else.  The widget itself is a real versioned
+    # file (NEW_FILES -> modules/bar/components/Vitals.qml) for the same reason
+    # GaugeCard is: a component embedded in Python is a component nobody lints.
+    # Bar.qml already does `import "components"`, so no import change is needed.
+    #
+    # Inert until asked for: an id that is not in `entries` is never matched, so
+    # a stock config renders exactly as before.  The entry is added in
+    # ~/.config/caelestia/shell.json, which is user config, not code.
+    "modules/bar/Bar.qml": [
+        (
+            '            DelegateChoice {\n'
+            '                roleValue: "spacer"\n'
+            "                delegate: EntryWrapper {\n"
+            "                    Layout.fillHeight: true\n"
+            "                }\n"
+            "            }",
+            '            DelegateChoice {\n'
+            '                roleValue: "spacer"\n'
+            "                delegate: EntryWrapper {\n"
+            "                    Layout.fillHeight: true\n"
+            "                }\n"
+            "            }\n"
+            "            // [LUMINOS-KWIN] See scripts/luminos-caelestia-kwin-overlay.\n"
+            "            DelegateChoice {\n"
+            '                roleValue: "vitals"\n'
+            "                delegate: EntryWrapper {\n"
+            "                    Vitals {\n"
+            '                        objectName: "taskbarVitals"\n'
+            "                    }\n"
+            "                }\n"
+            "            }",
+        ),
+    ],
 }
 
 
@@ -1004,6 +1127,82 @@ def new_file_text(rel: str, src: str) -> str:
     if not p.is_file():
         sys.exit(f"ERROR: {p} is missing - the overlay cannot add {rel} without it.")
     return p.read_text()
+
+
+def managed() -> dict:
+    """{filename: {nested keys Luminos asserts}} - the single source of truth."""
+    src = CONF_SRC / CONF_MANAGED
+    if not src.is_file():
+        sys.exit(f"ERROR: {src} is missing - it defines which config keys are ours.")
+    return json.loads(src.read_text())
+
+
+def _merge(dst: dict, src: dict) -> dict:
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            _merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
+
+
+def _diff(live: dict, want: dict, path: str = "") -> list:
+    """Managed keys whose live value is wrong, as ['border.thickness: 10 != 8']."""
+    out = []
+    for k, v in want.items():
+        here = f"{path}{k}"
+        if isinstance(v, dict):
+            out += _diff(live.get(k) or {}, v, here + ".")
+        elif live.get(k) != v:
+            out.append(f"{here}: {live.get(k)!r} != {v!r}")
+    return out
+
+
+def install_config() -> None:
+    CONF_DST.mkdir(parents=True, exist_ok=True)
+    for name, want in managed().items():
+        live = CONF_DST / name
+        if not live.exists():
+            snap = CONF_SRC / name
+            if not snap.is_file():
+                sys.exit(f"ERROR: {live} is gone and there is no snapshot at {snap}.")
+            shutil.copyfile(snap, live)
+            print(f"  restored {live} from the repo snapshot (it was missing)")
+        try:
+            d = json.loads(live.read_text())
+        except json.JSONDecodeError as e:
+            sys.exit(f"ERROR: {live} is not valid JSON ({e}). Caelestia silently falls "
+                     f"back to ALL defaults on a parse error, so this is fixed by hand, "
+                     f"not overwritten: {CONF_SRC / name} is the known-good copy.")
+        wrong = _diff(d, want)
+        if not wrong:
+            continue
+        CONF_BACKUPS.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        shutil.copyfile(live, CONF_BACKUPS / f"{name}.bak-{stamp}")
+        live.write_text(json.dumps(_merge(d, want), indent=4, sort_keys=True) + "\n")
+        print(f"  {name}: set {', '.join(wrong)}")
+
+
+def check_config() -> int:
+    bad = 0
+    for name, want in managed().items():
+        live = CONF_DST / name
+        if not live.exists():
+            print(f"MISSING: {live} - run without --check to restore it from the repo")
+            bad += 1
+            continue
+        try:
+            d = json.loads(live.read_text())
+        except json.JSONDecodeError as e:
+            print(f"INVALID: {live} is not valid JSON ({e}) - Caelestia is running on "
+                  f"ALL defaults right now, silently")
+            bad += 1
+            continue
+        for w in _diff(d, want):
+            print(f"DRIFT: {name} {w}")
+            bad += 1
+    return bad
 
 
 def build() -> None:
@@ -1043,6 +1242,8 @@ def build() -> None:
 
     for rel, src in NEW_FILES.items():
         (DST / rel).write_text(new_file_text(rel, src))
+
+    install_config()
 
     print(f"built {DST}")
     print(f"  {links} symlinks to {SRC}")
@@ -1098,8 +1299,13 @@ def check() -> int:
     if bad:
         print(f"\n{bad} problem(s). Run without --check to rebuild.")
         return 1
+    bad += check_config()
+    if bad:
+        print(f"\n{bad} problem(s). Run without --check to rebuild.")
+        return 1
     print(f"OK: {DST} is in sync with {SRC}, {len(PATCHES)} patched + "
-          f"{len(NEW_FILES)} added files apply cleanly")
+          f"{len(NEW_FILES)} added files apply cleanly, and the managed keys in "
+          f"{CONF_DST} match {CONF_SRC / CONF_MANAGED}")
     return 0
 
 

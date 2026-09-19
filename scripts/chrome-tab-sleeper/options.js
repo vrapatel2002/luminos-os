@@ -2,16 +2,18 @@
 // Must stay in step with DEFAULTS in background.js — the two are separate contexts
 // and nothing enforces it. Adding a key here without adding it there silently does
 // nothing; adding it there without adding it here just leaves it un-editable.
+// [CHANGE: claude-code | 2026-09-18] graceSeconds 10 -> 1800, capOnPressure true -> false.
+// BUG-166 / DECISION 115. Kept identical to background.js on purpose — nothing enforces it.
 const DEFAULTS = {
   aggressive: true,
-  graceSeconds: 10,
+  graceSeconds: 1800,
   exemptPinned: true,
   exemptDirty: true,
   ramEnabled: true,
   pressureGB: 3.0,
   criticalGB: 1.5,
   capEnabled: true,
-  capOnPressure: true,
+  capOnPressure: false,
   tabCap: 2,
   audioSlots: 1,
   awaySeconds: 60

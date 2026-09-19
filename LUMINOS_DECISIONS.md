@@ -7641,3 +7641,35 @@ unplayable ones shown greyed and carrying their reason, and a Browse button that
 BUG-179 (the budget gate this work exposed) · CONTRACTS §5 · SPEC §3.3 ·
 DECISION 122 (§3.5, which is what makes an imported Lively `.js` actually run) ·
 `scripts/luminos-wallpaper-pkg` + `tests/wallpaper/test_pkg.py` (the 20 tests underneath)
+
+---
+
+## DECISION 123a — the gallery, and why the type→mode map is not in `config.qml`
+<!-- [CHANGE: claude-code | 2026-09-19] SPEC §3.3 complete -->
+
+Amends DECISION 123, which shipped the install and read halves. **SPEC §3.3 is now complete.**
+
+**`ui/WallpaperGallery.qml`, not more of `config.qml`.** That file was 449 lines and exempt from
+SPEC §9 **by name** (BUG-179); growing it further would be spending an exemption someone else
+granted. `config.qml` gets the wiring — a separator, the component, one signal handler — and
+nothing else.
+
+**Both tools moved INSIDE the package** (`contents/tools/`), with symlinks left in `scripts/` for
+the CLI. The config page must work from an installed KPackage with no repo beside it — the same
+rule DECISION 119 set for the shader baker. The installer now looks for the tested package layer
+in two places and takes the first that exists, rather than carrying a second copy of a
+security-critical path check.
+
+**The type → mode map moved to `ui/scene.js` as `modeForType()`.** Buried in `config.qml` as an
+if/else it was untestable except by clicking a grid in a running System Settings; as a pure
+function beside the other scene routing it is checked by
+`tests/wallpaper/gallery_contract.qml` — including that `producer` and any unknown type map to
+**null**, so a stray click on a row that should not have been clickable does nothing rather than
+setting a mode that cannot show it.
+
+**An unplayable package is greyed at 45 % with its reason in the tooltip, never hidden.** Verified
+on screen: a Lively web wallpaper (type 2 → `producer` → SPEC §3.6) sits beside a playable one,
+visibly present and visibly not selectable.
+
+### Cross-references
+DECISION 123 · BUG-179 · CONTRACTS §5 · SPEC §3.3 · `tests/wallpaper/gallery_contract.qml` (7 checks)

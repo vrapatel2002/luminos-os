@@ -1,10 +1,13 @@
-# The nightly run: fetch new postings, then rank them. [CHANGE: claude-code | 2026-08-06]
+# The nightly run: find work, rank it, write the resume, send it, read the reply.
+# [CHANGE: claude-code | 2026-08-06]
+# [CHANGE: claude-code | 2026-08-27] Extended from two steps to five — the whole
+# loop now runs without anybody typing anything.
 #
 # This is the unit that makes "I just want to look at progress" true. It is a
 # oneshot driven by jobhunt-pipeline.timer — it is not a daemon and holds
 # nothing open between runs.
 [Unit]
-Description=Jobhunt nightly — ingest new postings, then score them
+Description=Jobhunt nightly — ingest, score, tailor, apply, follow up
 Documentation=file:///home/shawn/luminos-os/scripts/jobhunt/PLAN.md
 # No network, no point. This is the user-slice equivalent of network-online.
 After=network-online.target
@@ -19,15 +22,49 @@ WorkingDirectory=/home/shawn/luminos-os/scripts/jobhunt
 # like a hung service right up until the moment it finishes.
 Environment=PYTHONUNBUFFERED=1
 
-# Two separate ExecStart lines rather than a shell one-liner: systemd runs them
-# in order and ABORTS ON THE FIRST FAILURE, and journalctl attributes the exit
-# code to the step that actually failed. A `sh -c 'a && b'` gives you one
-# opaque status for both.
-ExecStart=/usr/bin/python3 /home/shawn/luminos-os/scripts/jobhunt/ingest.py
-ExecStart=/usr/bin/python3 /home/shawn/luminos-os/scripts/jobhunt/score.py --quiet
+# Separate ExecStart lines rather than a shell one-liner: systemd runs them in
+# order and journalctl attributes the exit code to the step that actually
+# failed. A `sh -c 'a && b'` gives you one opaque status for all five.
+#
+# THE LEADING '-' ON STEPS 3-5 IS DELIBERATE. Without it systemd aborts the
+# whole unit at the first non-zero exit, so a single unreachable job board would
+# mean no resumes written, nothing applied for and — worst of the three — the
+# inbox never read. Ingest and score have no '-' because everything after them
+# depends on their output; the later steps are independent of each other.
+#
+# Steps 3-5 run on the venv interpreter, not /usr/bin/python3: playwright and
+# the Google API client live in /opt/luminos/venv-jobhunt and are deliberately
+# not installed system-wide.
 
-# The whole job — crawl plus GPU scoring — must not run away overnight. score.py
-# also has its own max_per_run rail in targets.yaml; this is the outer one.
+# 1. new postings
+ExecStart=/usr/bin/python3 /home/shawn/luminos-os/scripts/jobhunt/ingest.py
+# 2. rank them, shortlist the good ones
+ExecStart=/usr/bin/python3 /home/shawn/luminos-os/scripts/jobhunt/score.py --quiet
+# 3. write a resume per newly shortlisted role (skips ones already tailored)
+ExecStart=-/usr/bin/python3 /home/shawn/luminos-os/scripts/jobhunt/tailor.py --top 5
+# 4. fill and send the applications that are complete and honest.
+#
+#    THIS IS THE IRREVERSIBLE STEP. --max 3 is the blast radius: if something is
+#    wrong it costs three applications, not eighty-six. apply.py refuses on its
+#    own to touch a role that is already submitted, that has an unanswered
+#    required question, or whose form forbids AI-written answers, and it records
+#    `submitted` only when it has SEEN the employer's confirmation.
+#
+#    It needs a screen. There is no headless mode here on purpose — both ATSs
+#    run invisible reCAPTCHA on submit, and the honest way past that is to be a
+#    real browser rather than to hide from it. apply.py finds the Wayland socket
+#    itself and skips the step cleanly when nobody is logged in.
+#
+#    To go back to filling-but-not-sending, delete `--submit` from this line.
+ExecStart=-/opt/luminos/venv-jobhunt/bin/python /home/shawn/luminos-os/scripts/jobhunt/apply.py --apply --submit --max 3
+# 5. read the inbox, classify replies, put answers in Gmail Drafts.
+#    --draft and never --send: the OAuth token does not carry gmail.send, so a
+#    wrong reply cannot leave the machine.
+ExecStart=-/opt/luminos/venv-jobhunt/bin/python /home/shawn/luminos-os/scripts/jobhunt/followup.py --scan --days 7 --apply --draft
+
+# The whole job — crawl, GPU scoring, resume rendering, five browser sessions —
+# must not run away overnight. score.py also has its own max_per_run rail in
+# targets.yaml; this is the outer one.
 TimeoutStartSec=4h
 
 # If the run is killed mid-scoring, score.py's finally-block stops the model

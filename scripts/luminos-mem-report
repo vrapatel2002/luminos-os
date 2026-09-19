@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# luminos-mem-report — where the 16 GB actually went, in PSS, in one screen.
+# [CHANGE: claude-code | 2026-09-18]
+#
+# WHY NOT JUST `free -h` OR htop
+#   Three things make this machine's memory easy to misread, and all three are
+#   invisible in the usual tools:
+#
+#   1. RSS DOUBLE-COUNTS. Chrome's 15 processes and the two Qt shells each map
+#      the same libraries; RSS charges every process the full price. Adding an
+#      htop column up gives a number far larger than the machine has. PSS splits
+#      each shared page between the processes sharing it, so the column SUMS to
+#      something real. That is the only honest per-process number.
+#   2. THE iGPU EATS THIS SAME RAM. The 780M has no memory of its own - GTT and
+#      VRAM come out of the 16 GB. That allocation is not any process's RSS and
+#      not "cache", so it looks like RAM that vanished.
+#   3. ZRAM IS RAM. Swapped pages are compressed and stored in memory, not on
+#      disk (DECISION: zram-only, so memory never hits the SSD). "4 GB swapped"
+#      means roughly 1 GB of real RAM still held.
+#
+# Baseline from docs/LUMINOS_RAM_PLAN.md, measured May 2026: normal was ~12 GB
+# with Chrome alone at 8.5 GB. So 7 GB is not a lot on this box - it is about
+# what it looks like with a browser open and no model loaded.
+#
+# Usage: luminos-mem-report        (add --all to list every process, not the top 15)
+set -uo pipefail
+ALL=0; [ "${1:-}" = "--all" ] && ALL=1
+b(){ printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+b "Totals"
+free -h --si | sed 's/^/  /'
+echo
+awk '/^MemTotal|^MemAvailable|^Cached:|^Shmem:|^SReclaimable/{printf "  %-16s %8.2f GB\n",$1,$2/1048576}' /proc/meminfo
+echo "  ── 'used' in free already excludes cache. MemAvailable is what you can actually still get."
+
+b "Top consumers by PSS (shared pages split fairly — this column sums to something real)"
+printf '  %-26s %10s %10s %6s\n' PROCESS PSS RSS COUNT
+sudo -n true 2>/dev/null && SUDO="sudo -n" || SUDO=""
+for p in /proc/[0-9]*; do
+    [ -r "$p/smaps_rollup" ] || continue
+    n=$(tr -d '\0' < "$p/comm" 2>/dev/null) || continue
+    pss=$(awk '/^Pss:/{s+=$2} END{print s+0}' "$p/smaps_rollup" 2>/dev/null)
+    rss=$(awk '/^Rss:/{s+=$2} END{print s+0}' "$p/smaps_rollup" 2>/dev/null)
+    [ "${pss:-0}" -gt 0 ] && echo "$n $pss $rss"
+done | awk '{p[$1]+=$2; r[$1]+=$3; c[$1]++} END{for(k in p) printf "%d %d %d %s\n", p[k], r[k], c[k], k}' \
+  | sort -rn | { [ "$ALL" = 1 ] && cat || head -15; } \
+  | awk '{printf "  %-26s %7.2f GB %7.2f GB %6d\n", $4, $1/1048576, $2/1048576, $3}'
+echo "  ── PSS is your share of shared pages. RSS is what htop shows and it double-counts."
+
+b "zram (swapped pages live HERE, compressed, still in RAM)"
+if [ -e /sys/block/zram0/mm_stat ]; then
+    awk '{printf "  stored %.2f GB  ->  using %.2f GB of real RAM  (%.1fx compression)\n", $1/1073741824, $3/1073741824, ($3>0? $1/$3 : 0)}' /sys/block/zram0/mm_stat
+else
+    echo "  no zram0"
+fi
+swapon --show 2>/dev/null | sed 's/^/  /'
+
+b "iGPU — taken from the same 16 GB, and invisible to every other tool"
+for n in /sys/class/drm/card*/device/mem_info_vram_used /sys/class/drm/card*/device/mem_info_gtt_used; do
+    [ -r "$n" ] || continue
+    v=$(cat "$n" 2>/dev/null) || continue
+    printf '  %-58s %6.2f GB\n' "${n#/sys/class/drm/}" "$(awk -v x="$v" 'BEGIN{print x/1073741824}')"
+done
+
+b "Things this box loads on demand — check before blaming anything else"
+for u in llama-server hive-daemon; do
+    pgrep -a "$u" >/dev/null 2>&1 && echo "  $u: RUNNING  <- an 8B Q4 model is ~4-5 GB" || echo "  $u: not running"
+done
+pgrep -c chrome >/dev/null 2>&1 && echo "  chrome processes: $(pgrep -c chrome)  (RAM_PLAN measured 8.5 GB in May 2026)"
+echo
+echo "Read the PSS column, not free's 'used'. If PSS totals well under 'used',"
+echo "the difference is the iGPU and zram above, not a leak."

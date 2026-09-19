@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 11 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 13 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -17,9 +17,9 @@ i do not care every thing is just code at the end if some one else can do it tha
 Plan and gap analysis: `docs/wallpaper/SPEC.md`. Frozen interfaces: `docs/wallpaper/CONTRACTS.md`.
 Reasoning per session: `docs/wallpaper/BUILD_LOG.md`. Eyes-on brief: `docs/wallpaper/VERIFY.md`.
 
-**Four of six SPEC §3 items are done** (§3.1 audio, §3.2 per-scene settings, §3.4 runtime shaders, §3.5 .js canvas)
-and the box now reports **34/34 on `luminos-wallpaper-selftest`**.
-**§3.3 (packages + gallery + Lively import) is next**; §3.6 (games
+**Five of six SPEC §3 items are done** (§3.1 audio, §3.2 per-scene settings, §3.3 packages + gallery + Lively import, §3.4 runtime shaders, §3.5 .js canvas)
+and the box now reports **35/35 on `luminos-wallpaper-selftest`**.
+**§3.6 (games through a nested compositor) is all that is left**; §3.6 (games
 through a nested compositor) is the big one and the only thing that lets web mode finally be deleted.
 
 Standing constraint from Shawn: **it must stay light on resources compared to Chromium.**
@@ -155,17 +155,15 @@ Shawn "far lighter than Chromium" without naming the scene.
    The candidate is one `ShaderEffect` sampling the 128×1 `AudioTexture` we already build, with
    colours / bar count / beat flash as uniforms — machinery §3.4 already has. The shader scene
    costs 6.6 %. This is a redesign of `Spectrum.qml`, so it gets its own pass.
-2. **SPEC §3.3 — the GALLERY UI is all that is left.** The install and read halves are DONE
-   (DECISION 123): `scripts/luminos-wallpaper-install` (folder or .zip →
-   `~/.local/share/luminos/wallpapers/<id>/`, zip-slip refused whole, Lively's `LivelyInfo.json`
-   read unmodified) and `scripts/luminos-wallpaper-gallery` (one JSON line, absolute paths, an
-   honest `playable` + reason). Both verified end to end, including a real Lively manifest and an
-   archive containing `../../../../.bashrc`.
-   **To build:** a grid of previews in `config.qml` reading `luminos-wallpaper-gallery` through the
-   same executable `DataSource` the props reader uses, unplayable ones greyed with their reason,
-   and a Browse button that calls `luminos-wallpaper-install`. ⚠️ `config.qml` is already 449 lines
-   and exempt from SPEC §9 by name (BUG-179) — the gallery should be its OWN file under `ui/`, not
-   more of config.qml.
+2. **SPEC §3.6 — external producer (games), the last §3 item and the big one.** A nested
+   compositor (`cage`, present) → PipeWire → `PipeWireSourceItem` (kpipewire, present), with input
+   back through `zwlr_virtual_pointer_v1` / `zwp_virtual_keyboard_v1` or `/dev/uinput` (present,
+   but `root:input 660` — existence is not access). Contract already frozen in CONTRACTS §7:
+   NORMALISED 0..1 coordinates over a unix socket at
+   `~/.local/state/luminos/wallpaper-input.sock`, one JSON object per line; producer dies with its
+   wallpaper, no orphan on crash; interaction OFF by default and **Esc always releases**.
+   **This is the one that finally lets web mode and Chromium be deleted.**
+
 3. **Nothing else new here** — item 4 below is the big one.
 4. **SPEC §3.6 — external producer (games).** A nested compositor (`cage`) → PipeWire →
    `PipeWireSourceItem` (kpipewire), with input back through `zwlr_virtual_pointer_v1`. Prerequisite
@@ -328,7 +326,11 @@ Shawn "far lighter than Chromium" without naming the scene.
   `samples/luminos-shadertoy.frag{,.properties.json}`, `config/main.xml`.
 - **Installed copy:** `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` — keep it
   `diff -rq` clean against the repo, and restart plasmashell after touching it.
-- **SPEC §3.3 install half (DECISION 123), this turn:** `scripts/luminos-wallpaper-install`,
+- **SPEC §3.3 COMPLETE (DECISION 123 + 123a), this turn:** new `ui/WallpaperGallery.qml`,
+  `tests/wallpaper/gallery_contract.qml`; `luminos-wallpaper-{install,gallery}` moved into
+  `contents/tools/` with `scripts/` symlinks; `ui/scene.js` gained `modeForType()`; `ui/config.qml`
+  gained the wiring only.
+- **SPEC §3.3 install half (DECISION 123), earlier this turn:** `scripts/luminos-wallpaper-install`,
   `scripts/luminos-wallpaper-gallery`, `scripts/luminos-wallpaper-selftest` (section [3b]),
   `ui/scenes/Spectrum.qml` (154 → 150 lines, BUG-179).
 - **SPEC §3.5 (DECISION 122), last turn:** `ui/js/{JsSource,JsShim}.qml`, `ui/scenes/CanvasJs.qml`,

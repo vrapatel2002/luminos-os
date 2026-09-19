@@ -51,6 +51,23 @@ ColumnLayout {
     property string cfg_SceneProperties
     property string cfg_ScenePropertiesDefault: "{}"
 
+    // A package's `type` decides which mode shows it. One place, so the gallery
+    // need not know about config keys and config.qml need not know about
+    // manifests. [CHANGE: claude-code | 2026-09-19] SPEC §3.3
+    function usePackage(type, entryPath) {
+        var m = Scene.modeForType(type);
+        if (m === null)
+            return;              // never offered; the gallery emits only playable rows
+        root.cfg_WallpaperMode = m.mode;
+        if (m.key === "QmlScene")
+            root.cfg_QmlScene = entryPath;
+        else if (m.key === "Video")
+            root.cfg_Video = entryPath;
+        else
+            root.cfg_Image = entryPath;
+    }
+
+
     // Where the bundled sample web wallpapers live once installed.
     readonly property string samplesDir:
         Qt.resolvedUrl("../samples").toString().replace("file://", "")
@@ -82,6 +99,21 @@ ColumnLayout {
             Component.onCompleted: currentIndex = Math.max(0, indexOfValue(root.cfg_WallpaperMode))
             onActivated: root.cfg_WallpaperMode = currentValue
         }
+
+        // ---- INSTALLED WALLPAPERS — SPEC §3.3 ----------------------
+        // [CHANGE: claude-code | 2026-09-19] DECISION 123. The grid itself is
+        // ui/WallpaperGallery.qml; this file is already 449 lines and exempt from
+        // SPEC §9 by name (BUG-179), so it gets the wiring and nothing more.
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: i18n("Installed wallpapers")
+        }
+        WallpaperGallery {
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            onPicked: function (type, entryPath) { root.usePackage(type, entryPath); }
+        }
+        Item { Kirigami.FormData.isSection: true }
 
         // ---- IMAGE --------------------------------------------------
         RowLayout {

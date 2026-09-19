@@ -1,4 +1,17 @@
 // [CHANGE: claude-code | 2026-08-11] v3.0 — DECISION 66
+// [CHANGE: claude-code | 2026-09-18] v3.1 — BUG-166. Two guards and two default changes.
+//   1. A tab that has not finished loading is NEVER discarded. Discarding a tab whose
+//      first load never committed leaves a tab that will not come back: blank, spinning
+//      forever, with no page to restore. That was the reported "Chrome breaks past 2-3
+//      tabs" — it was never a crash.
+//   2. A failure of chrome.windows.getLastFocused() no longer reads as "the user left".
+//      It used to: focusState() returned WINDOW_ID_NONE on any error, pickKeepers() keeps
+//      the active tab only on an id match, so nothing was kept, the visible tab was
+//      discarded, Chrome reloaded it because it is active, and the next sweep did it
+//      again. That is the loop.
+//   3. Defaults moved to match DECISION 115: graceSeconds 10 -> 1800 and capOnPressure
+//      true -> false, because a real SSD pagefile now carries cold tabs instead of the
+//      sleeper deleting them. The cap still fires for an actually-loaded model.
 // Aggressive tab residency: only the tab you are looking at stays in RAM.
 //
 // Two things escalate it, both read from the luminos-ram daemon on
@@ -21,7 +34,11 @@
 
 const DEFAULTS = {
   aggressive: true,     // master switch
-  graceSeconds: 10,     // how long a tab you just left survives, at normal pressure
+  // [CHANGE: claude-code | 2026-09-18] 10 -> 1800 (BUG-166 / DECISION 115). Ten seconds
+  // meant every background tab was deleted almost as soon as you looked away, and a page
+  // that had not finished loading went with it. Cold tabs are now carried by the SSD
+  // pagefile, so this only needs to catch genuinely abandoned tabs.
+  graceSeconds: 1800,   // how long a tab you just left survives, at normal pressure
   exemptPinned: true,   // pinned tabs survive until CRITICAL
   exemptDirty: true,    // tabs you have typed into survive until CRITICAL
   ramEnabled: true,     // read luminos-ram and escalate under pressure
@@ -30,7 +47,11 @@ const DEFAULTS = {
 
   // ---- cap mode (new in v3.0) ----
   capEnabled: true,     // enforce a hard live-tab cap when a model is loaded
-  capOnPressure: true,  // ...and also when memory alone goes PRESSURE/CRITICAL
+  // [CHANGE: claude-code | 2026-09-18] true -> false (BUG-166 / DECISION 115). This is
+  // what made a 2-tab cap fire with no model loaded, on a box that dips under 3 GB free
+  // routinely. Memory pressure now has somewhere to go (the pagefile); the cap goes back
+  // to meaning what DECISION 66 named it for — an actually-resident model.
+  capOnPressure: false, // ...and also when memory alone goes PRESSURE/CRITICAL
   tabCap: 2,            // total tabs allowed to stay in RAM while capped
   audioSlots: 1,        // how many of those the background-audio tab may take
   awaySeconds: 60       // Chrome unfocused this long → even the active tab sleeps (capped only)
@@ -124,18 +145,30 @@ async function report(body) {
 
 // Asked directly rather than tracked through onFocusChanged events, because the MV3
 // worker dies between those events and would come back believing whatever it last saw.
+//
+// [CHANGE: claude-code | 2026-09-18] BUG-166 — it now says whether the answer is KNOWN.
+// Before, a thrown call and "you alt-tabbed away" were the same return value, so an API
+// failure was silently treated as evidence that you had left. Everything downstream then
+// discarded the tab you were looking at. `known: false` means "do not act on this".
 async function focusState() {
   try {
     const w = await chrome.windows.getLastFocused();
-    return { id: w ? w.id : chrome.windows.WINDOW_ID_NONE, focused: !!(w && w.focused) };
+    if (!w || w.id === chrome.windows.WINDOW_ID_NONE) {
+      return { id: chrome.windows.WINDOW_ID_NONE, focused: false, known: false };
+    }
+    return { id: w.id, focused: !!w.focused, known: true };
   } catch (e) {
-    return { id: chrome.windows.WINDOW_ID_NONE, focused: false };
+    return { id: chrome.windows.WINDOW_ID_NONE, focused: false, known: false };
   }
 }
 
 // How long Chrome has been in the background. Persisted in session storage for the
 // same worker-teardown reason as the dirty set.
-async function awayFor(focused, now) {
+async function awayFor(focused, now, known) {
+  // [CHANGE: claude-code | 2026-09-18] BUG-166 — an unknown focus state must not wind the
+  // away clock forward. Sixty seconds of that and the sweeper stops protecting the tab in
+  // front of you, on the strength of an answer we know we cannot trust.
+  if (!known) return 0;
   const { awaySince = 0 } = await chrome.storage.session.get('awaySince');
   if (focused) {
     if (awaySince) await chrome.storage.session.set({ awaySince: 0 });
@@ -156,16 +189,42 @@ function optedOut(tab) {
   return tab.autoDiscardable === false;
 }
 
+// [CHANGE: claude-code | 2026-09-18] BUG-166 — the guard this whole bug is about.
+//
+// A tab that has not finished loading is the one tab that must never be discarded.
+// chrome.tabs.discard() on a tab whose first navigation never committed leaves a tab with
+// nothing to restore: click it and it spins forever on a blank page. It is also pointless
+// — a page that never rendered is holding almost nothing, so discarding it frees nothing
+// and costs the page.
+//
+// Deliberately tests for 'loading' rather than requiring 'complete'. If `status` is ever
+// absent this fails OPEN (the tab stays discardable) instead of silently switching the
+// whole feature off, which is the worse failure of the two.
+function stillLoading(tab) {
+  return tab.status === 'loading';
+}
+
+// Kept, and not charged against the cap. Same reasoning for both: an opted-out tab is a
+// hand instruction, and a loading tab is holding nothing worth reclaiming.
+function ridesFree(tab) {
+  return optedOut(tab) || stillLoading(tab);
+}
+
 // UNCAPPED path. Returns null if the tab should stay resident.
-function mayDiscard(tab, { cfg, level, focusedWindowId, dirty, now, grace }) {
+function mayDiscard(tab, { cfg, level, focusedWindowId, focusKnown, dirty, now, grace }) {
   if (tab.discarded) return null;
   if (optedOut(tab)) return null;
+  if (stillLoading(tab)) return null;  // [CHANGE: claude-code | 2026-09-18] BUG-166
   if (tab.audible && !(tab.mutedInfo && tab.mutedInfo.muted)) return null;  // playing sound
 
   // The active tab of each window normally stays — a discarded tab that is still
   // in front is a blank page. Under CRITICAL only the focused window keeps one.
   if (tab.active) {
     if (level !== 'critical') return null;
+    // [CHANGE: claude-code | 2026-09-18] BUG-166 — with no trustworthy focus answer,
+    // every window keeps its active tab. Dropping them all on a failed API call is how
+    // the visible tab got discarded in the first place.
+    if (!focusKnown) return null;
     if (tab.windowId === focusedWindowId) return null;
   }
 
@@ -186,17 +245,28 @@ function mayDiscard(tab, { cfg, level, focusedWindowId, dirty, now, grace }) {
 //
 // Ties on audio are broken by lastAccessed, newest first: if three tabs are making
 // noise, the one you most recently opened on purpose is the one that survives.
-function pickKeepers(tabs, { cap, audioSlots, focusedWindowId, chromeAway }) {
+function pickKeepers(tabs, { cap, audioSlots, focusedWindowId, focusKnown, chromeAway }) {
   const keep = new Set();
   const live = tabs.filter((t) => !t.discarded);
 
   // Opted-out tabs are kept and are NOT charged against the cap — otherwise ticking
   // "never sleep" on three tabs would silently evict the tab you are reading.
-  for (const t of live) if (optedOut(t)) keep.add(t.id);
+  // [CHANGE: claude-code | 2026-09-18] BUG-166 — tabs that are still loading ride free
+  // on exactly the same terms. Under the cap there is no grace period at all, so without
+  // this a link opened in a new tab could be discarded before it had ever rendered.
+  for (const t of live) if (ridesFree(t)) keep.add(t.id);
 
   if (!chromeAway) {
-    const active = live.find((t) => t.active && t.windowId === focusedWindowId);
-    if (active) keep.add(active.id);
+    if (focusKnown) {
+      const active = live.find((t) => t.active && t.windowId === focusedWindowId);
+      if (active) keep.add(active.id);
+    } else {
+      // [CHANGE: claude-code | 2026-09-18] BUG-166 — getLastFocused() gave us nothing
+      // usable. Keep every window's active tab rather than none: the alternative is
+      // discarding the tab on screen, which Chrome immediately reloads because it is
+      // active, which the next sweep discards again. That loop is the reported symptom.
+      for (const t of live) if (t.active) keep.add(t.id);
+    }
   }
 
   const audible = live
@@ -231,7 +301,7 @@ function pickKeepers(tabs, { cap, audioSlots, focusedWindowId, chromeAway }) {
 // Opted-out tabs ride free, so the cap counts only the tabs the policy chose.
 function countingKeepers(keep, live) {
   let n = 0;
-  for (const t of live) if (keep.has(t.id) && !optedOut(t)) n++;
+  for (const t of live) if (keep.has(t.id) && !ridesFree(t)) n++;
   return n;
 }
 
@@ -254,8 +324,8 @@ async function sweep() {
   if (Date.now() - ram.at > RAM_POLL_SECONDS * 1000) await pollRam(cfg);
   const level = ram.level;
   const now = Date.now();
-  const { id: focusedWindowId, focused } = await focusState();
-  const away = await awayFor(focused, now);
+  const { id: focusedWindowId, focused, known: focusKnown } = await focusState();
+  const away = await awayFor(focused, now, focusKnown);
 
   // The cap is the model's doing first and pressure's second. Both are opt-out.
   const capped = cfg.capEnabled && (ram.model || (cfg.capOnPressure && level !== 'normal'));
@@ -279,7 +349,7 @@ async function sweep() {
     // "I am not using any tab, so all tabs go to sleep" — but only after awaySeconds,
     // or a ten-second glance at a terminal would blank the page you are reading.
     const chromeAway = !focused && away >= cfg.awaySeconds * 1000;
-    const keep = pickKeepers(tabs, { cap, audioSlots: cfg.audioSlots, focusedWindowId, chromeAway });
+    const keep = pickKeepers(tabs, { cap, audioSlots: cfg.audioSlots, focusedWindowId, focusKnown, chromeAway });
 
     for (const tab of tabs) {
       if (tab.discarded || keep.has(tab.id)) continue;
@@ -290,7 +360,7 @@ async function sweep() {
     if (!focused && !chromeAway) soonest = cfg.awaySeconds * 1000 - away;
   } else {
     const grace = level === 'normal' ? cfg.graceSeconds * 1000 : 0;
-    const ctx = { cfg, level, focusedWindowId, dirty, now, grace };
+    const ctx = { cfg, level, focusedWindowId, focusKnown, dirty, now, grace };
     for (const tab of tabs) {
       if (mayDiscard(tab, ctx)) {
         if (await discardTab(tab.id)) discarded++;

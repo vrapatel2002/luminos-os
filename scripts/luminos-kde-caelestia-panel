@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-08-09]
+#
+# Build a Plasma panel that follows Caelestia's LAYOUT: a vertical strip on the
+# LEFT edge, floating, ~60px thick, widgets ordered launcher -> workspaces ->
+# spacer -> tray -> clock -> battery -> power.  That is the shape of Caelestia's
+# bar (it reserves [l60, t10, r10, b10] on eDP-2).
+#
+# WHY A SCRIPT AND NOT A CONFIG FILE
+#   plasma-org.kde.plasma.desktop-appletsrc is generated, order-sensitive, and
+#   full of applet ids that must not collide.  Hand-writing it is how you get a
+#   Plasma session with no panel and no way to add one.  Plasma's own scripting
+#   API is the supported path and it validates as it goes.
+#
+# MUST BE RUN FROM INSIDE A RUNNING PLASMA SESSION
+#   It talks to org.kde.plasmashell over DBus.  If plasmashell is not running
+#   this exits without doing anything.
+#
+# Undo: ~/.local/share/luminos-kde-backup/restore-kde-config  (then re-login)
+
+set -euo pipefail
+
+DRY=0
+[ "${1:-}" = "--dry-run" ] && DRY=1
+
+if ! qdbus6 2>/dev/null | grep -q '^ *org\.kde\.plasmashell$'; then
+    echo "plasmashell is not on the session bus - run this inside a Plasma session." >&2
+    exit 1
+fi
+
+# Caelestia tokens that matter for the panel (see config/kde/caelestia-design-spec.json)
+THICKNESS=60     # matches Caelestia's reserved left edge (l60)
+
+# The desktop background must be the SAME image Caelestia derived its palette
+# from, otherwise Plasma wears colours picked from a picture it is not showing.
+# Read it live rather than hardcoding, so it follows `caelestia wallpaper`.
+WALL=$(cat "$HOME/.local/state/caelestia/wallpaper/path.txt" 2>/dev/null || true)
+if [ -n "$WALL" ] && [ ! -r "$WALL" ]; then
+    echo "  note: Caelestia wallpaper '$WALL' is not readable - leaving Plasma's alone" >&2
+    WALL=""
+fi
+
+read -r -d '' SCRIPT <<JS || true
+var WALL = "$WALL";
+JS
+read -r -d '' SCRIPT_BODY <<'JS' || true
+var removed = 0;
+for (var i = 0; i < panels().length; i++) { panels()[i].remove(); removed++; }
+
+var p = new Panel;
+p.location = "left";
+p.height = 60;              // for a vertical panel this is the THICKNESS
+p.hiding = "none";          // never auto-hide: auto-hide edges are the bug we left behind
+p.floating = true;          // Caelestia's bar floats inside a 10px border
+p.alignment = "center";
+p.lengthMode = "fill";
+
+p.addWidget("org.kde.plasma.kickoff");
+p.addWidget("org.kde.plasma.pager");
+p.addWidget("org.kde.plasma.panelspacer");
+var tray = p.addWidget("org.kde.plasma.systemtray");
+p.addWidget("org.kde.plasma.digitalclock");
+p.addWidget("org.kde.plasma.battery");
+p.addWidget("org.kde.plasma.lock_logout");
+
+// The tray defaults to capping icons at 22px, which makes it lay out TWO
+// columns inside a 60px strip.  Caelestia's bar is a single column of larger
+// icons, so let the tray scale its icons to the panel thickness instead.
+tray.currentConfigGroup = ["General"];
+tray.writeConfig("scaleIconsToFit", true);
+tray.reloadConfig();
+
+// NOTE: evaluateScript returns whatever print() emitted, NOT the value of the
+// last expression. Returning a bare string here yields "" over DBus and makes
+// the call look like it failed when it succeeded.
+var walled = 0;
+if (WALL !== "") {
+    var ds = desktops();
+    for (var j = 0; j < ds.length; j++) {
+        ds[j].wallpaperPlugin = "org.kde.image";
+        ds[j].currentConfigGroup = ["Wallpaper", "org.kde.image", "General"];
+        ds[j].writeConfig("Image", "file://" + WALL);
+        ds[j].writeConfig("FillMode", 2);   // preserve aspect, crop
+        ds[j].reloadConfig();
+        walled++;
+    }
+}
+
+print("removed=" + removed + " created=1 widgets=" + p.widgetIds.length
+      + " trayScaleIcons=" + tray.readConfig("scaleIconsToFit")
+      + " desktopsWallpapered=" + walled);
+JS
+SCRIPT="$SCRIPT
+$SCRIPT_BODY"
+
+if [ "$DRY" = "1" ]; then
+    echo "DRY RUN - would evaluate this Plasma layout script:"
+    echo "$SCRIPT" | sed 's/^/    /'
+    echo
+    echo "current panels: $(qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'panels().length' 2>&1)"
+    exit 0
+fi
+
+echo "Building Caelestia-layout panel (vertical, left, ${THICKNESS}px, floating)..."
+OUT=$(qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "$SCRIPT" 2>&1) || {
+    echo "FAILED: $OUT" >&2
+    exit 1
+}
+echo "  plasmashell says: $OUT"
+
+# Verify by reading back - do not trust the call's own return.
+# Every probe must use print(); a bare expression returns "".
+N=$(qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'print(panels().length)' 2>&1)
+if [ "$N" != "1" ]; then
+    echo "  VERIFY FAILED: expected 1 panel, plasmashell reports '$N'" >&2
+    exit 1
+fi
+DESC=$(qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+    'print(panels()[0].location + " thickness=" + panels()[0].height + " floating=" + panels()[0].floating + " widgets=" + panels()[0].widgetIds.length)' 2>&1)
+echo "  verified (live): 1 panel, $DESC"
+
+# The live object and the config FILES are two different places, and they do not
+# agree until plasmashell flushes.  Geometry does NOT live in the appletsrc:
+#   ~/.config/plasma-org.kde.plasma.desktop-appletsrc  -> which applets, in what order
+#   ~/.config/plasmashellrc  [PlasmaViews][Panel <id>] -> floating / thickness
+# Checking only the live object is how you ship a panel that comes back 44px
+# thick after the next login.  So read the disk too.
+PID=$(qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'print(panels()[0].id)' 2>&1)
+D_FLOAT=$(kreadconfig6 --file plasmashellrc --group PlasmaViews --group "Panel $PID" --key floating 2>/dev/null)
+D_THICK=$(kreadconfig6 --file plasmashellrc --group PlasmaViews --group "Panel $PID" --group Defaults --key thickness 2>/dev/null)
+D_ORDER=$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+    --group Containments --group "$PID" --group General --key AppletOrder 2>/dev/null)
+D_COUNT=$(printf '%s' "$D_ORDER" | tr ';' '\n' | grep -c .)
+
+FAIL=0
+[ "$D_FLOAT" = "1" ]           || { echo "  DISK VERIFY FAILED: floating='$D_FLOAT' (want 1)" >&2; FAIL=1; }
+[ "$D_THICK" = "$THICKNESS" ]  || { echo "  DISK VERIFY FAILED: thickness='$D_THICK' (want $THICKNESS)" >&2; FAIL=1; }
+[ "$D_COUNT" = "7" ]           || { echo "  DISK VERIFY FAILED: AppletOrder has $D_COUNT entries (want 7): '$D_ORDER'" >&2; FAIL=1; }
+[ "$FAIL" = "0" ] || {
+    echo "  The panel is correct in the running shell but will not survive a" >&2
+    echo "  re-login. Log out of Plasma cleanly, then re-run this script." >&2
+    exit 1
+}
+echo "  verified (disk): Panel $PID floating=$D_FLOAT thickness=$D_THICK applets=$D_COUNT"
+echo "Done."

@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Install a wallpaper package — ours or Lively's — and list what is installed.
+
+[CHANGE: claude-code | 2026-09-19] SPEC §3.3, CONTRACTS §5, DECISION 123.
+SPDX-License-Identifier: GPL-3.0-or-later
+
+    install <folder-or-zip> [--id ID]   |   remove <id>
+
+Listing is `luminos-wallpaper-gallery` — the read side, the only half QML calls.
+Refuses zip slip before writing anything; a Lively type we cannot play yet still
+installs, and the gallery marks it rather than hiding it.
+"""
+import argparse, importlib.machinery, importlib.util, json, os, re, shutil, sys, tempfile, zipfile
+
+ROOT = os.path.expanduser("~/.local/share/luminos/wallpapers")
+MANIFEST = "luminos-wallpaper.json"
+LIVELY = "LivelyInfo.json"
+
+
+def pkg_module():
+    """The tested package layer — beside this file, or in scripts/ where tests
+    import it by name. Two candidates rather than a second copy of a
+    security-critical path check."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for rel in ("luminos-wallpaper-pkg",
+                os.path.join("..", "..", "..", "..", "..", "scripts", "luminos-wallpaper-pkg")):
+        cand = os.path.normpath(os.path.join(here, rel))
+        if os.path.isfile(cand):
+            path = cand
+            break
+    else:
+        raise SystemExit("ERR cannot find luminos-wallpaper-pkg")
+    loader = importlib.machinery.SourceFileLoader("luminos_wallpaper_pkg", path)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(mod)
+    return mod
+
+
+P = pkg_module()
+
+
+def slug(text):
+    return (re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:64]) or "wallpaper"
+
+
+def read_json(path):
+    with open(path, encoding="utf-8-sig") as f:
+        return json.load(f)
+
+
+def unpack(src, workdir):
+    """A folder is used where it is; a zip is checked whole, then extracted."""
+    if os.path.isdir(src):
+        return src
+    if not zipfile.is_zipfile(src):
+        raise ValueError("%s is neither a folder nor a zip" % os.path.basename(src))
+    with zipfile.ZipFile(src) as z:
+        for name in z.namelist():
+            plain = name.rstrip("/")
+            if plain and not P._path_safe(plain):
+                raise ValueError("refusing this archive: unsafe path inside it: %r" % name)
+        z.extractall(workdir)
+    return workdir
+
+
+def find_root(base):
+    """A zip often holds one wrapper folder; look one level down for the manifest."""
+    for name in (MANIFEST, LIVELY):
+        if os.path.isfile(os.path.join(base, name)):
+            return base
+    entries = [e for e in os.listdir(base) if os.path.isdir(os.path.join(base, e))]
+    if len(entries) == 1:
+        inner = os.path.join(base, entries[0])
+        for name in (MANIFEST, LIVELY):
+            if os.path.isfile(os.path.join(inner, name)):
+                return inner
+    return base
+
+
+def manifest_for(root, wanted_id):
+    """(manifest, errors). Ours first, then Lively's."""
+    if os.path.isfile(os.path.join(root, MANIFEST)):
+        data = read_json(os.path.join(root, MANIFEST))
+        if wanted_id:
+            data["id"] = wanted_id
+        data.setdefault("id", slug(os.path.basename(root)))
+        return P.parse_manifest(data)
+    if os.path.isfile(os.path.join(root, LIVELY)):
+        info = read_json(os.path.join(root, LIVELY))
+        pkg_id = wanted_id or slug(info.get("Title") or os.path.basename(root))
+        return P.parse_manifest(P.lively_to_manifest(info, pkg_id))
+    return None, ["no %s and no %s in %s" % (MANIFEST, LIVELY, os.path.basename(root))]
+
+
+def install(src, wanted_id):
+    with tempfile.TemporaryDirectory() as tmp:
+        root = find_root(unpack(src, tmp))
+        manifest, errors = manifest_for(root, wanted_id)
+        if manifest is None:
+            raise ValueError("; ".join(errors))
+        entry = os.path.join(root, manifest["entry"])
+        if not os.path.isfile(entry):
+            raise ValueError("the manifest names %r, which is not in the package"
+                             % manifest["entry"])
+        dest = os.path.join(ROOT, manifest["id"])
+        if os.path.isdir(dest):
+            shutil.rmtree(dest)
+        shutil.copytree(root, dest)
+        with open(os.path.join(dest, MANIFEST), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+        return manifest
+
+
+def cmd_install(args):
+    os.makedirs(ROOT, exist_ok=True)
+    try:
+        m = install(args.path, args.id)
+    except (OSError, ValueError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
+        print("ERR %s" % exc)
+        return 1
+    print("OK %s" % m["id"])
+    return 0
+
+
+def cmd_remove(args):
+    target = os.path.join(ROOT, args.id)
+    if not P._path_safe(args.id) or not os.path.isdir(target):
+        print("ERR %s is not an installed package" % args.id)
+        return 1
+    shutil.rmtree(target)
+    print("OK removed %s" % args.id)
+    return 0
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(prog="luminos-wallpaper-install")
+    sub = ap.add_subparsers(dest="cmd")
+    ip = sub.add_parser("install"); ip.add_argument("path"); ip.add_argument("--id", default="")
+    rp = sub.add_parser("remove"); rp.add_argument("id")
+    args = ap.parse_args(argv[1:])
+    if args.cmd == "install":
+        return cmd_install(args)
+    if args.cmd == "remove":
+        return cmd_remove(args)
+    ap.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

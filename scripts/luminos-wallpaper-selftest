@@ -88,10 +88,10 @@ say ""
 # and exits 0 about zero files. It had never been wired in here at all, so SPEC
 # §9's "over budget is a red build" was not a build rule, it was a sentence.
 say "[3b] budgets (SPEC §9)"
-PYFILES="$REPO/scripts/luminos-wallpaper-pkg $REPO/scripts/luminos-wallpaper-install
-         $REPO/scripts/luminos-wallpaper-gallery
-         $REPO/src/wallpapers/org.luminos.livewallpaper/contents/tools/luminos-wallpaper-props
-         $REPO/src/wallpapers/org.luminos.livewallpaper/contents/tools/luminos-wallpaper-js"
+TOOLS="$REPO/src/wallpapers/org.luminos.livewallpaper/contents/tools"
+PYFILES="$REPO/scripts/luminos-wallpaper-pkg $TOOLS/luminos-wallpaper-install
+         $TOOLS/luminos-wallpaper-gallery $TOOLS/luminos-wallpaper-props
+         $TOOLS/luminos-wallpaper-js"
 if out="$(python3 "$REPO/tests/wallpaper/budget_check.py" $PYFILES 2>&1)"; then
     ok "python budgets — $(printf '%s' "$PYFILES" | wc -w) files within 150/40/3"
 else
@@ -125,7 +125,7 @@ if command -v qml6 >/dev/null 2>&1; then
     # not a tty, so `2>&1` captured NOTHING here and a failing check printed its
     # reason into a void. The exit code was all this ever had. BUG-173.
     # [CHANGE: claude-code | 2026-09-19]
-    for t in audio_contract props_contract editor_contract canvasjs_contract; do
+    for t in audio_contract props_contract editor_contract canvasjs_contract gallery_contract; do
         out="$(QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
                timeout 30 qml6 "$REPO/tests/wallpaper/$t.qml" 2>&1)"
         rc=$?

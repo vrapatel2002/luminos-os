@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# luminos-dgpu-watch — name the process that wakes the discrete GPU.
+# [CHANGE: claude-code | 2026-09-03]
+#
+# WHY THIS EXISTS
+#   "Something is using the dGPU but nvidia-smi shows nothing" is unanswerable after
+#   the fact: Linux keeps no per-process GPU-wake history, and a client vanishes from
+#   nvidia-smi the moment it exits. So we have to be watching when it happens.
+#
+# HOW IT WORKS
+#   Polls the PCI runtime-PM state at /sys/.../power/runtime_status. That read is a
+#   plain sysfs string and does NOT resume the card — unlike nvidia-smi, which must
+#   wake it to answer (that is why checking the GPU appears to show it "busy").
+#   On a suspended->active edge we immediately walk /proc/*/fd looking for handles on
+#   the NVIDIA render/card/compute nodes, and keep re-walking for the life of the wake
+#   because some clients open their fd a beat after the resume.
+#
+# CONTEXT (BUG-103, and the render-node inversion documented in chrome-luminos)
+#   On this box the dGPU enumerates FIRST:  renderD128 = NVIDIA,  renderD129 = AMD.
+#   So anything that defaults to "renderD128" — libva, ffmpeg, Vulkan device 0 — lands
+#   on the discrete card. That is the usual culprit, not a runaway process.
+#   With power/control=auto the card re-suspends on its own ~20s after the last fd
+#   closes, so a short wake is normal; what matters is WHO opened it and how often.
+#
+# USAGE
+#   scripts/luminos-dgpu-watch                 # watch until Ctrl-C
+#   scripts/luminos-dgpu-watch -d 3600         # watch for one hour
+#   sudo scripts/luminos-dgpu-watch            # also sees other users' processes
+#   scripts/luminos-dgpu-watch -l ~/dgpu.log   # tee to a file
+#
+# Read-only. Touches no configuration.
+
+set -uo pipefail
+
+DGPU_PCI=0000:01:00.0
+PM=/sys/bus/pci/devices/$DGPU_PCI/power/runtime_status
+INTERVAL=0.2
+DURATION=0
+LOGFILE=
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	-d | --duration)
+		DURATION=$2
+		shift 2
+		;;
+	-i | --interval)
+		INTERVAL=$2
+		shift 2
+		;;
+	-l | --log)
+		LOGFILE=$2
+		shift 2
+		;;
+	-h | --help)
+		sed -n '2,32p' "$0"
+		exit 0
+		;;
+	*)
+		echo "unknown argument: $1 (try --help)" >&2
+		exit 2
+		;;
+	esac
+done
+
+[ -r "$PM" ] || {
+	echo "cannot read $PM — is the dGPU at $DGPU_PCI?" >&2
+	exit 1
+}
+
+say() {
+	if [ -n "$LOGFILE" ]; then
+		printf '%s\n' "$*" | tee -a "$LOGFILE"
+	else
+		printf '%s\n' "$*"
+	fi
+}
+
+# Report "comm(pid) -> node" for every visible handle on the discrete card.
+# card1/renderD128 are its DRM nodes (graphics + video decode); /dev/nvidia* are the
+# compute/driver nodes (CUDA, NVENC, nvidia-smi itself).
+#
+# This MUST be fast. A wake edge lasts milliseconds, and the naive version — readlink
+# per fd — forks thousands of times per scan and reliably misses the culprit. One
+# `find -lname` walks every /proc/*/fd in a single process instead.
+#
+# MUST RUN AS ROOT — this is not a nicety. Every sanctioned dGPU client on this box
+# goes through the setgid `dgpu-exec` gate (DECISION 25), which leaves the process with
+# egid != rgid. The kernel marks such a process non-dumpable, so /proc/<pid>/fd flips to
+# root:root 0500. Measured: glxgears rendering on the RTX 4050 was completely invisible
+# to a scan running as shawn, and fully visible to the same scan under sudo. An
+# unprivileged watcher is blind to precisely the processes it is meant to catch.
+holders() {
+	find /proc/[0-9]*/fd -maxdepth 1 -type l \
+		\( -lname '/dev/dri/renderD128' -o -lname '/dev/dri/card1' \
+		-o -lname '/dev/nvidia' -o -lname '/dev/nvidia[0-9]*' \
+		-o -lname '/dev/nvidiactl' -o -lname '/dev/nvidia-uvm*' \
+		-o -lname '/dev/nvidia-modeset' \) \
+		-printf '%h %l\n' 2>/dev/null |
+		while read -r dir node; do
+			pid=${dir#/proc/}
+			pid=${pid%/fd}
+			comm=$(cat "/proc/$pid/comm" 2>/dev/null || echo '?')
+			# nvidia-powerd holds /dev/nvidia0 and /dev/nvidiactl for the entire
+			# uptime by design (it is the Dynamic Boost controller). It keeps the
+			# handles but submits no work, so the card still reaches D3 underneath
+			# it — confirmed by 120/120 suspended samples while it was running.
+			# Reporting it every cycle would bury the real culprit in noise.
+			[ "$comm" = nvidia-powerd ] && continue
+			printf '%s(%s) -> %s\n' "$comm" "$pid" "$node"
+		done | sort -u
+}
+
+if [ "$(id -u)" -ne 0 ]; then
+	say "REFUSING TO RUN UNPRIVILEGED."
+	say "dGPU clients go through the setgid dgpu-exec gate, which makes them non-dumpable:"
+	say "their /proc/<pid>/fd is root-only. As your user this watcher sees nothing and would"
+	say "report a clean idle GPU while a process is actively rendering on it."
+	say "Re-run:  sudo $0 $*"
+	exit 1
+fi
+say "watching dGPU $DGPU_PCI  (renderD128=NVIDIA, renderD129=AMD)"
+say "poll=${INTERVAL}s  reading runtime_status only — this does not wake the card"
+say "----------------------------------------------------------------------"
+
+started=$SECONDS
+prev=$(cat "$PM" 2>/dev/null)
+say "$(date '+%H:%M:%S')  initial state: $prev"
+
+# Client tracking is deliberately INDEPENDENT of the power state.
+#
+# The naive design — "on a suspended->active edge, go look for the culprit" — does not
+# work. Resuming this card from D3cold takes seconds, so by the time runtime_status
+# flips to `active` a short-lived client (a Vulkan probe, a codec capability query) has
+# already exited. Measured: vulkaninfo initialised the RTX 4050 and was gone before the
+# edge ever fired.
+#
+# So we poll the fd holders every tick regardless of state and report each client the
+# first time we see it. "Who is holding the discrete card" is the answer the user
+# actually wants; the wake/sleep edges are just context around it.
+wake_start=0
+seen=" "
+
+while :; do
+	[ "$DURATION" -gt 0 ] && [ $((SECONDS - started)) -ge "$DURATION" ] && break
+	now=$(cat "$PM" 2>/dev/null) || break
+
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		# Dedup on pid+node, NOT on the whole line. A process that is exiting has an
+		# unreadable /proc/<pid>/comm, so it renders as "?(pid)" and would otherwise
+		# be reported a second time as a phantom new client.
+		key=${line#*(}
+		case "$seen" in
+		*" $key "*) ;; # already reported this pid on this node
+		*)
+			seen="$seen$key "
+			say "$(date '+%H:%M:%S')  CLIENT  $line"
+			;;
+		esac
+	done <<<"$(holders)"
+
+	if [ "$now" = active ] && [ "$prev" != active ]; then
+		wake_start=$SECONDS
+		say "$(date '+%H:%M:%S')  ### dGPU WOKE"
+	elif [ "$now" = suspended ] && [ "$prev" = active ]; then
+		say "$(date '+%H:%M:%S')  ### dGPU SLEPT (awake $((SECONDS - wake_start))s)"
+		seen=" " # new wake cycle — report clients afresh
+	fi
+
+	prev=$now
+	sleep "$INTERVAL"
+done
+
+say ""
+say "----------------------------------------------------------------------"
+a=$(cat "/sys/bus/pci/devices/$DGPU_PCI/power/runtime_active_time" 2>/dev/null || echo 0)
+s=$(cat "/sys/bus/pci/devices/$DGPU_PCI/power/runtime_suspended_time" 2>/dev/null || echo 0)
+say "since boot: active $((a / 1000))s / suspended $((s / 1000))s  ($((a / 1000 * 100 / ((a + s) / 1000 + 1)))% awake)"

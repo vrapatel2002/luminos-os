@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# luminos-desktop-hook-login — install the pacman hook that keeps the BUG-163
+# desktop indent alive across plasma-desktop upgrades.
+# [CHANGE: claude-code | 2026-09-16] BUG-163 / DECISION 111
+#
+# WHY THIS EXISTS SEPARATELY
+#   The indent itself is already applied and confirmed live (journal, 2026-09-15
+#   22:52:16: "overlay live (system), reserving 44 px"). What did NOT happen that
+#   night is the hook: the finisher ran the copy at /usr/local/bin, whose REPO
+#   resolves to /usr/local, so it looked for the hook at
+#   /usr/local/config/pacman-hooks/... and skipped it with a quiet note.
+#
+#   Consequence, stated plainly: the desktop is fixed NOW, but the next
+#   `plasma-desktop` upgrade restores main.qml and the icons go straight back
+#   under the bar, with nothing to say why. This closes that.
+#
+#   It runs `--system` from the REPO (where the hook source resolves), which is
+#   idempotent - the file is already patched, so it verifies, rewrites the
+#   reserve, stashes the hook source, and installs the hook.
+#
+# One-shot: deletes its own autostart entry when the hook is in place.
+# Cancel:   rm ~/.config/autostart/luminos-desktop-hook.desktop
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+LOG="$REPO/.luminos-desktop-indent.log"
+AUTOSTART="$HOME/.config/autostart/luminos-desktop-hook.desktop"
+HOOK=/etc/pacman.d/hooks/luminos-desktop-indent.hook
+
+log(){ printf '%s  [hook] %s\n' "$(date -Iseconds)" "$*" >> "$LOG"; }
+
+if [ -f "$HOOK" ]; then
+    log "already installed — nothing to do"
+    rm -f "$AUTOSTART"; exit 0
+fi
+
+if ! sudo -n true 2>/dev/null; then
+    log "sudo -n unavailable. Run by hand:  sudo $REPO/scripts/luminos-kde-desktop-overlay --system"
+    notify-send -a Luminos "Desktop indent" "One command left — see $LOG" 2>/dev/null
+    exit 1
+fi
+
+log "installing the upgrade-survival hook"
+sudo -n install -Dm755 "$REPO/scripts/luminos-kde-desktop-overlay" /usr/local/bin/luminos-kde-desktop-overlay >>"$LOG" 2>&1
+sudo -n "$REPO/scripts/luminos-kde-desktop-overlay" --system >>"$LOG" 2>&1
+
+if [ -f "$HOOK" ]; then
+    log "CONFIRMED: $HOOK is installed — the indent now survives plasma-desktop upgrades"
+    notify-send -a Luminos "Desktop indent" "Now upgrade-proof." 2>/dev/null
+    rm -f "$AUTOSTART"; exit 0
+fi
+log "FAILED — $HOOK still absent after --system. See lines above."
+notify-send -a Luminos "Desktop indent" "Hook install failed — see $LOG" 2>/dev/null
+exit 1

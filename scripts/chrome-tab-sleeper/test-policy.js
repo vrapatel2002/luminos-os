@@ -233,9 +233,14 @@ async function main() {
   }
 
   // 6. No model, plenty of RAM: the cap must NOT engage, and the grace must hold.
+  //    [CHANGE: claude-code | 2026-09-18] The idle fixtures are now an hour old, because
+  //    graceSeconds went 10 -> 1800 (DECISION 114). They used to be 3-4 minutes old, which
+  //    silently became "inside the grace" and made this case fail for the right reason.
   {
+    const HOUR = 60 * 60 * 1000;
     const w = world({
-      tabs: [tab(1, { active: true }), tab(2, { lastAccessed: Date.now() }), tab(3), tab(4)]
+      tabs: [tab(1, { active: true }), tab(2, { lastAccessed: Date.now() }),
+             tab(3, { lastAccessed: T0 - HOUR }), tab(4, { lastAccessed: T0 - HOUR })]
     });
     await load(w).sweep();
     check('no model + no pressure → uncapped, grace protects a just-left tab',
@@ -245,20 +250,39 @@ async function main() {
       JSON.stringify(w.reports[0]));
   }
 
-  // 7. Memory pressure alone caps too, with no model in sight.
+  // 7. Memory pressure alone. [CHANGE: claude-code | 2026-09-18] BUG-166 / DECISION 114 —
+  //    capOnPressure now defaults to FALSE. This is the setting that made a hard 2-tab cap
+  //    fire with no model loaded, on a box that dips under 3 GB free routinely, and under
+  //    the cap there is no grace and no pinned/typed exemption. Pressure still has to be
+  //    REPORTED; it just no longer caps by itself.
   {
     const w = world({
       meminfo: { effective_available: 2.0, available: 2.0, total: 14.9, model_running: false },
       tabs: [tab(1, { active: true }), tab(2), tab(3), tab(4), tab(5)]
     });
     await load(w).sweep();
-    check('PRESSURE with no model → capped at 2', awake(w).length === 2, `awake: ${awake(w)}`);
+    check('PRESSURE with no model → NOT capped by default', w.reports[0].cap === 0,
+      JSON.stringify(w.reports[0]));
     check('...and reported as pressure', w.reports[0].level === 'pressure', JSON.stringify(w.reports[0]));
+  }
+
+  // 7b. ...but the mechanism must still work when it is asked for, or turning the option
+  //     back on would be a dead switch. Same world, one option flipped.
+  {
+    const w = world({
+      localCfg: { capOnPressure: true },
+      meminfo: { effective_available: 2.0, available: 2.0, total: 14.9, model_running: false },
+      tabs: [tab(1, { active: true }), tab(2), tab(3), tab(4), tab(5)]
+    });
+    await load(w).sweep();
+    check('capOnPressure ON → PRESSURE caps at 2 again', awake(w).length === 2, `awake: ${awake(w)}`);
   }
 
   // 8. The daemon being down must not stop tabs sleeping — it only stops escalation.
   {
-    const w = world({ tabs: [tab(1, { active: true }), tab(2), tab(3)] });
+    const w = world({
+      tabs: [tab(1, { active: true }), tab(2), tab(3, { lastAccessed: T0 - 60 * 60 * 1000 })]
+    });
     const src = load(w);
     w.meminfo = null;   // makes the stub's json() throw, like an unreachable daemon
     await src.sweep();
@@ -274,6 +298,129 @@ async function main() {
     });
     await load(w).sweep();
     check('never tries to discard the tab on screen', !w.tabs[0].discarded);
+  }
+
+  // ---- BUG-166 ----------------------------------------------------------
+  // [CHANGE: claude-code | 2026-09-18] Everything below is the reported bug: "the new tab
+  // never loads — blank, spinner forever, no error". Two independent holes, six cases.
+
+  // 10. A tab that has not finished loading must survive the cap, and must not eat a
+  //     slot. Under the cap there is NO grace period, so this guard is the only thing
+  //     between "open link in new tab" and a tab that never renders.
+  {
+    const w = world({
+      meminfo: { effective_available: 4.0, available: 4.0, total: 14.9, model_running: true },
+      tabs: [
+        tab(1, { active: true }),
+        tab(2, { status: 'loading', lastAccessed: Date.now() }),  // the link just opened
+        tab(3, { status: 'complete' }),
+        tab(4, { status: 'complete' })
+      ]
+    });
+    await load(w).sweep();
+    check('capped → a still-loading tab is never discarded', !w.tabs[1].discarded, `awake: ${awake(w)}`);
+    check('...and it does not consume a cap slot (tab 3 still awake)',
+      String(awake(w)) === '1,2,3', `awake: ${awake(w)}`);
+  }
+
+  // 10b. The case 10 fixture is NOT enough on its own, and finding that out is the point
+  //      of negative-testing: there the loading tab was also the most recent, so the
+  //      MRU slot-filler saved it even with the guard removed — a green light for the
+  //      wrong reason. Here the tab has been loading for five minutes while you carried
+  //      on browsing, so nothing else can save it. This is the realistic shape: open a
+  //      link in a new tab, keep reading, come back to a blank page.
+  {
+    const w = world({
+      meminfo: { effective_available: 4.0, available: 4.0, total: 14.9, model_running: true },
+      tabs: [
+        tab(1, { active: true, lastAccessed: T0 - 60 * 1000 }),
+        tab(2, { status: 'loading', lastAccessed: T0 - 5 * 60 * 1000 }),  // slow site, still spinning
+        tab(3, { status: 'complete', lastAccessed: T0 - 1000 }),
+        tab(4, { status: 'complete', lastAccessed: T0 - 10 * 60 * 1000 }),
+        tab(5, { status: 'complete', lastAccessed: T0 - 20 * 60 * 1000 })
+      ]
+    });
+    await load(w).sweep();
+    check('capped → a tab loading in the background survives when MRU would not save it',
+      !w.tabs[1].discarded, `awake: ${awake(w)}`);
+    check('...and the cap is still enforced around it', String(awake(w)) === '1,2,3',
+      `awake: ${awake(w)}`);
+  }
+
+  // 11. Same guard on the uncapped path, with the tab long past any grace.
+  {
+    const w = world({
+      tabs: [
+        tab(1, { active: true }),
+        tab(2, { status: 'loading', lastAccessed: T0 - 60 * 60 * 1000 }),
+        tab(3, { status: 'complete', lastAccessed: T0 - 60 * 60 * 1000 })
+      ]
+    });
+    await load(w).sweep();
+    check('uncapped → a still-loading tab survives even past the grace', !w.tabs[1].discarded,
+      `awake: ${awake(w)}`);
+    check('...while a finished idle tab still sleeps', w.tabs[2].discarded, `awake: ${awake(w)}`);
+  }
+
+  // 12. getLastFocused() gave us nothing usable. Keeping NO tab is what discarded the tab
+  //     on screen, which Chrome reloads because it is active, which the next sweep
+  //     discards again — the loop the user sees as "loading forever".
+  {
+    const w = world({
+      focusedWindowId: -1, focused: false,   // WINDOW_ID_NONE — the failure return
+      meminfo: { effective_available: 4.0, available: 4.0, total: 14.9, model_running: true },
+      tabs: [tab(1, { active: true }), tab(2), tab(3)]
+    });
+    await load(w).sweep();
+    check('focus unknown → the active tab is still kept', !w.tabs[0].discarded, `awake: ${awake(w)}`);
+  }
+
+  // 13. And an untrusted focus answer must not wind the away clock, or sixty seconds
+  //     later the sweeper stops protecting the visible tab on the strength of it.
+  {
+    const w = world({
+      focusedWindowId: -1, focused: false,
+      meminfo: { effective_available: 4.0, available: 4.0, total: 14.9, model_running: true },
+      tabs: [tab(1, { active: true }), tab(2), tab(3)]
+    });
+    w.session.awaySince = Date.now() - 90 * 1000;   // pretend we have "been away" 90 s
+    await load(w).sweep();
+    check('focus unknown → the away rule does not fire', !w.tabs[0].discarded, `awake: ${awake(w)}`);
+  }
+
+  // 14. Two windows, focus unknown, CRITICAL on the uncapped path — the one place the old
+  //     code discarded an active tab by design. Both windows must keep theirs.
+  {
+    const w = world({
+      focusedWindowId: -1, focused: false,
+      meminfo: { effective_available: 1.0, available: 1.0, total: 14.9, model_running: false },
+      tabs: [
+        tab(1, { active: true, windowId: 1 }),
+        tab(2, { active: true, windowId: 2 }),
+        tab(3, { windowId: 2, lastAccessed: T0 - 60 * 60 * 1000 })
+      ]
+    });
+    await load(w).sweep();
+    check('focus unknown at CRITICAL → every window keeps its active tab',
+      !w.tabs[0].discarded && !w.tabs[1].discarded, `awake: ${awake(w)}`);
+    check('...and the idle tab in the other window still sleeps', w.tabs[2].discarded,
+      `awake: ${awake(w)}`);
+  }
+
+  // 15. Regression guard: with focus KNOWN, CRITICAL still drops the unfocused window's
+  //     active tab. The fix must not quietly turn that rule off everywhere.
+  {
+    const w = world({
+      focusedWindowId: 1, focused: true,
+      meminfo: { effective_available: 1.0, available: 1.0, total: 14.9, model_running: false },
+      tabs: [
+        tab(1, { active: true, windowId: 1 }),
+        tab(2, { active: true, windowId: 2, lastAccessed: T0 - 60 * 60 * 1000 })
+      ]
+    });
+    await load(w).sweep();
+    check('focus known at CRITICAL → the other window\'s active tab still goes',
+      !w.tabs[0].discarded && w.tabs[1].discarded, `awake: ${awake(w)}`);
   }
 
   if (LIVE) {

@@ -139,6 +139,146 @@ say "\n[4] Fan & thermal (luminos-power owns the fan curve)"
 [ "$(systemctl is-active luminos-power 2>/dev/null)" = "active" ] \
   && ok "luminos-power active (fan curve live)" \
   || bad "luminos-power NOT active — fans may be on firmware default"
+
+# ---- 4b. Caelestia bar geometry (DECISION 110) ----
+# [CHANGE: claude-code | 2026-09-16]
+# The bar's width lived in ONE untracked file with nothing installing or checking
+# it, and it was reported as "reset itself" twice while measuring correct both
+# times. This section exists so the next drift is REPORTED rather than noticed
+# weeks later by eye -- and so "it looks thicker" can be answered with a number.
+# Source of truth is config/caelestia/luminos-managed.json; the width formula is
+# BarWrapper.qml:21-23, re-derived here rather than hardcoded.
+say "\n[4b] Caelestia bar geometry (managed config keys + resulting width)"
+BAR_OUT=$(/usr/bin/python3 - <<'BAREOF' 2>&1
+import json, os
+
+HOME = "/home/shawn"
+CONF = f"{HOME}/.config/caelestia"
+MANAGED = f"{HOME}/luminos-os/config/caelestia/luminos-managed.json"
+out = []
+def emit(lvl, msg): out.append(f"{lvl}:{msg}")
+
+def read(path):
+    if not os.path.exists(path):
+        return None
+    try:
+        return json.load(open(path))
+    except Exception as e:
+        emit("BAD", f"{path}: invalid JSON ({e}) - Caelestia falls back to ALL "
+                    f"defaults on a parse error, silently, so the shell you are "
+                    f"looking at is not the one you configured")
+        return {}
+
+want = read(MANAGED)
+if want is None:
+    emit("BAD", f"{MANAGED} missing - nothing defines which config keys are ours")
+    want = {}
+
+def diff(live, w, path=""):
+    bad = []
+    for k, v in w.items():
+        here = f"{path}{k}"
+        if isinstance(v, dict):
+            bad += diff(live.get(k) or {}, v, here + ".")
+        elif live.get(k) != v:
+            bad.append((here, live.get(k), v))
+    return bad
+
+live = {}
+for name in want:
+    d = read(f"{CONF}/{name}")
+    if d is None:
+        emit("BAD", f"{CONF}/{name} is MISSING - run luminos-caelestia-kwin-overlay "
+                    f"to restore it from the repo snapshot")
+        d = {}
+    live[name] = d
+    for key, got, exp in diff(d, want[name]):
+        emit("BAD", f"{name} {key} is {got!r}, expected {exp!r} - the bar has drifted; "
+                    f"luminos-caelestia-kwin-overlay puts it back")
+
+# The width itself. BarWrapper.qml:
+#   padding      = max(Tokens.padding.small, Config.border.thickness)
+#   contentWidth = Tokens.sizes.bar.innerWidth + padding * 2
+# Tokens.padding.small defaults to 8 and Luminos does not override it; read it
+# anyway so this stays true if that ever changes.
+tok = live.get("shell-tokens.json", {})
+cfg = live.get("shell.json", {})
+inner = tok.get("sizes", {}).get("bar", {}).get("innerWidth", 40)      # upstream default
+psmall = tok.get("padding", {}).get("small", 8)
+thick = cfg.get("border", {}).get("thickness", 10)                     # upstream default
+pad = max(psmall, thick)
+width = inner + pad * 2
+EXPECT = 44
+if width == EXPECT:
+    emit("OK", f"bar is {width} logical px ({inner} content + {pad}x2 padding) "
+               f"= {width * 2} device px at 2x")
+else:
+    emit("BAD", f"bar computes to {width} logical px, expected {EXPECT} "
+                f"(innerWidth={inner}, padding.small={psmall}, border.thickness={thick})")
+
+# --- the desktop indent must follow the bar (BUG-163 / DECISION 111) ---
+# plasmashell cannot see the bar's exclusive zone, so the desktop is indented by a
+# number BAKED INTO a patched main.qml. There are TWO places that file can live and
+# the delivery CHANGED on 2026-09-15: the user-path overlay turned out to be inert
+# (KPackage did not prefer ~/.local/share), so the packaged file is patched instead.
+# Check both, or this reports a false alarm the day the delivery moves.
+USER_QML = f"{HOME}/.local/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/main.qml"
+SYS_QML = "/usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/main.qml"
+HOOK = "/etc/pacman.d/hooks/luminos-desktop-indent.hook"
+
+import re
+def baked(path):
+    """(reserve, variant) if this copy carries the patch, else None."""
+    if not os.path.exists(path) or os.path.islink(path):
+        return None
+    try:
+        txt = open(path).read()
+    except OSError:
+        return None
+    m = re.search(r"luminosReservedLeft:\s*(\d+)", txt)
+    if not m:
+        return None
+    v = re.search(r"overlay live \((\w+)\)", txt)
+    return int(m.group(1)), (v.group(1) if v else "?")
+
+live_copies = [(lbl, b) for lbl, b in
+               (("user", baked(USER_QML)), ("system", baked(SYS_QML))) if b]
+
+if not live_copies:
+    emit("BAD", "the desktop indent is GONE from both the packaged file and "
+                f"{HOME}/.local/share - icons will be placed under the bar. "
+                "Fix: sudo luminos-kde-desktop-overlay --system")
+else:
+    for lbl, (r, variant) in live_copies:
+        if r != width:
+            emit("BAD", f"the {lbl} copy reserves {r} px but the bar is {width} px - they have "
+                        f"drifted apart. Fix: sudo luminos-kde-desktop-overlay --system")
+        else:
+            emit("OK", f"desktop indent live in the {lbl} copy: {r} px, matching the bar")
+    # The packaged file is pacman's. Without the hook the patch is silently
+    # reverted by the next plasma-desktop upgrade - which is exactly what nearly
+    # shipped on 2026-09-15, so it is checked, not assumed.
+    if any(lbl == "system" for lbl, _ in live_copies):
+        if os.path.exists(HOOK):
+            emit("OK", f"{HOOK} present - the indent survives a plasma-desktop upgrade")
+        else:
+            emit("BAD", f"the packaged main.qml is patched but {HOOK} is MISSING - the next "
+                        f"plasma-desktop upgrade silently reverts the indent. "
+                        f"Fix: sudo luminos-kde-desktop-overlay --system")
+
+print("\n".join(out))
+BAREOF
+)
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  case "$line" in
+    OK:*)   ok   "${line#OK:}"   ;;
+    BAD:*)  bad  "${line#BAD:}"  ;;
+    WARN:*) warn "${line#WARN:}" ;;
+    *)      warn "$line"         ;;
+  esac
+done <<< "$BAR_OUT"
+
 fi   # end ONLY_MCP guard
 
 # ---- 5. MCP tooling (code-review-graph + MemPalace) ----
