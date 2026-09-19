@@ -421,3 +421,49 @@ all Qt objects in a process that was already running.
 **§3.5** (`.js` canvas wallpapers, CONTRACTS §6 already specifies the shim) or **§3.3** (packages +
 gallery + Lively import, whose Python half is already written and tested). §3.6 — games through a
 nested compositor — remains the big one and the only thing that lets web mode finally be deleted.
+
+## 2026-09-19 — session 4b: the cost script's first run, and what it got wrong
+
+Shawn ran `luminos-wallpaper-cost 10` before restarting plasmashell. The reading:
+
+```
+mode           video / scene ?
+audio          false
+chromium       not mapped
+audio stack    libpipewire mapped
+PSS            355 MB
+CPU            1.9% of one core
+```
+
+**Two of those six lines were the instrument asking the wrong question**, which is the third time in
+this project, so it gets written down rather than quietly patched.
+
+1. **`audio stack  libpipewire mapped`** reads as "the wallpaper's audio is live". It is not evidence
+   of anything. **KDE maps PipeWire into plasmashell regardless** — volume, screencasting — and
+   `AudioReactive` was `false` on the very line above. The decisive library is **`libcava`**, which
+   nothing else on this box pulls in. Fixed to report libcava, and to say in the same breath that
+   libpipewire proves nothing.
+2. **`scene ?`** made a perfectly normal config look like a failed read. `QmlScene` had simply never
+   been changed, so the key is absent — which means *the default*, not *unknown*. Fixed to print
+   `shader (default, never set)`.
+3. And a latent one nobody saw yet: the config read took the **first match anywhere in the file**.
+   That file holds other containments and the lock screen. It happened to be right here because there
+   is exactly one containment — luck, not correctness. It now reads only the groups belonging to
+   `org.luminos.livewallpaper`.
+
+Also added: the run now says **"mode is not 'qml', so this is a BASELINE"**, because that is the most
+important thing about this particular reading — none of §3.1/§3.2/§3.4 was running when it was taken.
+And the comparison line now admits that **810 MB was RSS and 355 MB is PSS**, which are different
+measures; only the CPU numbers are comparable.
+
+### What the reading does legitimately say
+- **`chromium not mapped`** — the headline, and unambiguous. libQt6WebEngineCore is not in
+  plasmashell's address space. DECISION 112 is what made that possible and it is still holding.
+- **1.9% of one core** against BUG-083's **~24%** for the Chromium-era wallpaper. Same measure, same
+  kind of workload (a playing video), so this one is a fair comparison.
+- **355 MB PSS** is the whole shell, not the wallpaper.
+
+### The bridge trap fired again, and the documented check caught it
+`device_commit_files` answered `written`; the device still had the previous 160-line copy, and only
+the **md5 comparison** showed it. Re-sending fixed it. Second occurrence — this is a reliable hazard,
+not a one-off, and "always md5 the device copy against the container copy" earns its place.

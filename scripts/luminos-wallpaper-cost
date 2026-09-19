@@ -1,33 +1,25 @@
 #!/usr/bin/env python3
 """What the live wallpaper actually costs, as numbers.  SPEC §9.
 
-[CHANGE: claude-code | 2026-09-19] DECISION 119
+[CHANGE: claude-code | 2026-09-19] DECISION 119 — the reasoning lives there.
 SPDX-License-Identifier: GPL-3.0-or-later
 
     luminos-wallpaper-cost [seconds]        (default 10)
 
 "Lighter than Chromium" is a claim until someone measures it, and the measurement
-has to be repeatable by the person who doubts it. Run this on the box.
-
-What it reports, and what each number honestly means:
-
-  chromium mapped  Is libQt6WebEngineCore in plasmashell's maps? This is the one
-                   unambiguous answer here — the browser engine is either paged
-                   into the shell or it is not. DECISION 112 is what made it
-                   possible for it not to be.
-  PSS              Proportional set size of plasmashell from smaps_rollup, which
-                   divides shared libraries by how many processes map them. RSS
-                   double-counts and is why a shell can look like it owns a
-                   gigabyte it shares with everything else.
-  CPU              Jiffies over the sample window, as a percentage of ONE core.
-
-  This measures plasmashell, which is the desktop AND the wallpaper. It cannot
-  separate them, and it does not pretend to: what it gives you is the same number
-  before and after a change, taken the same way.
+has to be repeatable by whoever doubts it. Run this on the box. It reports whether
+libQt6WebEngineCore is mapped into plasmashell at all (the one unambiguous answer
+here), PSS rather than RSS — RSS double-counts shared libraries, which is why a
+shell can look like it owns a gigabyte it shares — and CPU as a percentage of one
+core. It measures plasmashell — desktop AND wallpaper — and cannot separate them.
 """
 import os, sys, time
 
 _HZ = os.sysconf("SC_CLK_TCK") or 100
+_CONFIG = "~/.config/plasma-org.kde.plasma.desktop-appletsrc"
+_PLUGIN = "org.luminos.livewallpaper"
+_DEFAULTS = {"WallpaperMode": "image", "QmlScene": "shader",
+             "AudioReactive": "false", "SceneProperties": "{}"}
 _BASELINE = (
     "BUG-083, 2026-07-24, web mode with Chromium: ~24% of a core visible, ~810 MB RSS.\n"
     "  DECISION 113 replaced the bundled effects with native QML; DECISION 112 made\n"
@@ -38,16 +30,12 @@ _BASELINE = (
 def pids_named(name):
     out = []
     for entry in os.listdir("/proc"):
-        if not entry.isdigit():
-            continue
         try:
-            comm = open("/proc/%s/comm" % entry).read().strip()
+            if entry.isdigit() and open("/proc/%s/comm" % entry).read().strip() == name:
+                out.append(entry)
         except OSError:
             continue
-        if comm == name:
-            out.append(entry)
     return out
-
 
 def maps_contain(pid, needle):
     try:
@@ -55,7 +43,6 @@ def maps_contain(pid, needle):
             return any(needle in line for line in fh)
     except OSError:
         return None
-
 
 def pss_kb(pid):
     try:
@@ -66,29 +53,12 @@ def pss_kb(pid):
         pass
     return None
 
-
 def jiffies(pid):
     try:
         parts = open("/proc/%s/stat" % pid).read().rsplit(") ", 1)[1].split()
     except (OSError, IndexError):
         return None
     return int(parts[11]) + int(parts[12])          # utime + stime
-
-
-def wallpaper_config():
-    """The wallpaper's own settings, straight from the containment config."""
-    path = os.path.expanduser("~/.config/plasma-org.kde.plasma.desktop-appletsrc")
-    wanted = ("WallpaperMode", "QmlScene", "AudioReactive", "SceneProperties")
-    found = {}
-    try:
-        for line in open(path, errors="replace"):
-            key, _, value = line.partition("=")
-            if key.strip() in wanted:
-                found.setdefault(key.strip(), value.strip())
-    except OSError:
-        return {}
-    return found
-
 
 def sample(pid, seconds):
     start = jiffies(pid)
@@ -99,6 +69,65 @@ def sample(pid, seconds):
     return None if end is None else (end - start) * 100.0 / (_HZ * seconds)
 
 
+def wallpaper_config():
+    """OUR plugin's settings only. The file also holds other containments and the
+    lock screen, and taking the first match found anywhere in it is how you end up
+    reporting the lock screen's wallpaper as the desktop's."""
+    found, group = {}, ""
+    try:
+        for line in open(os.path.expanduser(_CONFIG), errors="replace"):
+            group = line.strip() if line.startswith("[") else group
+            key, sep, value = line.partition("=")
+            if sep and _PLUGIN in group and key.strip() in _DEFAULTS:
+                found.setdefault(key.strip(), value.strip())
+    except OSError:
+        return {}
+    return found
+
+def setting(cfg, key):
+    """An absent key is not unknown — it means the default was never changed.
+    Printing "?" made a perfectly normal config look like a failed read."""
+    return cfg[key] if key in cfg else "%s  (default, never set)" % _DEFAULTS[key]
+
+def audio_line(pid):
+    """libpipewire is mapped into plasmashell whether or not the wallpaper uses
+    audio — KDE needs it for volume and screencasting — so seeing it proves
+    nothing. libcava is pulled in by nothing else here, so it is the decisive one."""
+    if maps_contain(pid, "libcava"):
+        return "libcava mapped — the wallpaper's audio path is live"
+    return ("libcava not mapped — no wallpaper audio (libpipewire may be mapped "
+            "anyway; KDE uses it for volume and screencasting)")
+
+def chromium_line(pid):
+    mapped = maps_contain(pid, "libQt6WebEngineCore")
+    if mapped is None:
+        return "unreadable"
+    return "MAPPED — web mode is loaded" if mapped else "not mapped"
+
+
+def report(pid, cfg, seconds):
+    print("plasmashell pid %s" % pid)
+    for key in ("WallpaperMode", "QmlScene", "AudioReactive"):
+        print("  %-14s %s" % (key.replace("Wallpaper", "").lower(), setting(cfg, key)))
+    print("  chromium       %s" % chromium_line(pid))
+    print("  audio stack    %s" % audio_line(pid))
+    pss = pss_kb(pid)
+    print("  PSS            %s" % ("%.0f MB" % (pss / 1024.0) if pss else "unreadable"))
+    print("  sampling CPU for %ds ..." % seconds)
+    cpu = sample(pid, seconds)
+    print("  CPU            %s" % ("%.1f%% of one core" % cpu if cpu is not None else "unreadable"))
+
+def footer(cfg):
+    if cfg.get("WallpaperMode", _DEFAULTS["WallpaperMode"]) != "qml":
+        print("\nNOTE: mode is not 'qml', so this is a BASELINE — none of the native QML")
+        print("      work (audio, per-scene settings, runtime shaders) is running here.")
+        print("      Switch to Native QML and run this again to compare like with like.")
+    print("\nfor comparison:\n  %s" % _BASELINE)
+    print("  The 810 MB there is RSS, which is NOT the same measure as the PSS above —")
+    print("  RSS double-counts shared libraries. The CPU percentages ARE comparable.")
+    print("\nThis is plasmashell as a whole. Take it the same way before and after a")
+    print("change, and the difference is the thing you changed.")
+
 def main(argv):
     seconds = 10
     if len(argv) > 1:
@@ -107,36 +136,13 @@ def main(argv):
         except ValueError:
             print("usage: luminos-wallpaper-cost [seconds]")
             return 2
-
     pids = pids_named("plasmashell")
     if not pids:
         print("plasmashell is not running — nothing to measure.")
         return 1
-    pid = pids[0]
-
     cfg = wallpaper_config()
-    print("plasmashell pid %s" % pid)
-    print("  mode           %s / scene %s"
-          % (cfg.get("WallpaperMode", "?"), cfg.get("QmlScene", "?")))
-    print("  audio          %s" % cfg.get("AudioReactive", "false"))
-
-    web = maps_contain(pid, "libQt6WebEngineCore")
-    print("  chromium       %s" % ("MAPPED — web mode is loaded" if web
-                                   else "not mapped" if web is False else "unreadable"))
-    for lib in ("libcava", "libaubio", "libpipewire"):
-        if maps_contain(pid, lib):
-            print("  audio stack    %s mapped" % lib)
-
-    pss = pss_kb(pid)
-    print("  PSS            %s" % ("%.0f MB" % (pss / 1024.0) if pss else "unreadable"))
-    print("  sampling CPU for %ds ..." % seconds)
-    cpu = sample(pid, seconds)
-    print("  CPU            %s" % ("%.1f%% of one core" % cpu if cpu is not None else "unreadable"))
-
-    print("\nfor comparison:\n  %s" % _BASELINE)
-    print("\nThis is plasmashell as a whole — the desktop AND the wallpaper. It cannot")
-    print("separate them. Take it the same way before and after a change and the")
-    print("difference is the thing you changed.")
+    report(pids[0], cfg, seconds)
+    footer(cfg)
     return 0
 
 
