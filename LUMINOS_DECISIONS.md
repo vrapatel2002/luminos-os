@@ -7395,3 +7395,70 @@ control types — is done.
 ### Cross-references
 SPEC §3.2, §3.4 · CONTRACTS §4 · DECISION 117 (audio, same delivery path) · DECISION 113 (native QML
 mode) · `scripts/luminos-wallpaper-pkg`
+
+## DECISION 119 — drop in any Shadertoy shader, and the compiler ships inside the wallpaper
+<!-- [CHANGE: claude-code | 2026-09-19] SPEC §3.4, CONTRACTS §1 -->
+
+### The problem Qt 6 creates
+`ShaderEffect.fragmentShader` is a **URL to a pre-compiled `.qsb`** — Qt 6.0 removed inline GLSL. So
+"drop in a shader" is not a file read, it is a **compile at runtime**, which means a subprocess. And
+the dangerous part of a subprocess is the string you build for it.
+
+### Decided
+
+**1. The whole risky half is Python, in `contents/tools/luminos-shader-bake`, with tests.** It reads
+the `.frag`, wraps it, runs `qsb` with `subprocess.run([...])` — a list, no shell — and prints two
+lines: `OK <path>` and `UNIFORMS <name>:<type> ...`. QML builds one command line and parses two lines.
+Every name that could collide, escape or inject is filtered there, where 31 tests hold it.
+
+**2. The compiler ships INSIDE the plugin, not on `PATH`.** A KPackage is meant to be self-contained:
+installing the wallpaper must not leave it half-working because a script was not copied to
+`/usr/local/bin`. The lock screen loads the same package, where nothing would have put it on `PATH`
+anyway. It is invoked as `python3 <path>` because a KPackage install is not guaranteed to preserve
+the executable bit.
+
+**3. Cached by content hash** in `~/.cache/luminos/wallpaper-shaders/`. The key is the hash of the
+**wrapped** source, so changing a property schema correctly invalidates it. Re-selecting a wallpaper
+compiles nothing; measured 0.1 ms on a cache hit against ~90 ms for a compile.
+
+**4. The ShaderEffect is generated, and that is what finishes DECISION 118.** §3.2 promised property
+keys mapping onto a shader's uniforms by name, and deferred it because **a QML object cannot gain a
+property at runtime**. Here the object is built from generated source with the property list already
+in it, so an arbitrary `.frag` with an arbitrary `properties.json` gets sliders wired to uniforms with
+no glue code. The generated text is assembled from names the baker validated **and re-validated in
+QML**, because they arrive over a pipe.
+
+**5. A `.frag` typed into the scene box IS a scene.** `ui/scene.js` routes `.frag`/`.glsl`/`.fsh` to
+`ShaderToy.qml` and hands it the file. One input box for "point it at your own file" rather than a
+second box per file type — and the scene's settings are read from beside **the shader**, not beside
+`ShaderToy.qml`, or every shader on the machine would share one settings panel.
+
+**6. CONTRACTS §1 gains one optional property, `source`.** Additive: a scene MAY declare it and the
+host binds the selected file path. Nothing that did not declare it changes.
+
+### Shadertoy compatibility, stated honestly
+Provided: `mainImage`, `iTime`, `iResolution`, `iMouse`, `iChannel0..3` (all four alias the 128×1
+spectrum), plus `iBass`/`iMid`/`iTreble`/`iAudioActive`. **Not provided:** `iFrame`, `iDate`,
+`iTimeDelta`, `iChannelTime`, multi-pass buffers, cube maps, video or webcam channels. A shader using
+those fails **at bake time with the compiler's own line**, which is a named error in the journal, not
+a blank desktop. A shader that already has its own `main()` is passed through untouched, so a
+hand-written Qt shader works too.
+
+### The bug the template taught, worth keeping
+The GLSL wrapper lives in `shader-wrapper.glsl` as data rather than a Python string, so it can be read
+as GLSL. Its header comment originally *mentioned* the `%(props)s` placeholder — and the whole file
+goes through one percent-format, so the uniform declarations were spliced **into the comment**, which
+broke the line after it. The compiler said `'\`' : unexpected token` on a line that looked innocent.
+The file now warns about this in its own header, and `test_the_template_placeholder_never_survives_into_the_output`
+is the test that keeps it fixed.
+
+### Verification
+`tests/wallpaper/test_shader_bake.py` — 31 tests. The ones that matter: **a reserved name can never
+become a uniform** (property-based over generated schemas — `iTime` as a property would compile into a
+duplicate declaration and take the wallpaper down), non-identifier names are dropped, control types
+with no GLSL meaning are dropped, wrapping never raises, and a real Shadertoy shader compiles and then
+hits the cache. Suite is now **58 passed**.
+
+### Cross-references
+SPEC §3.4, §3.2 · CONTRACTS §1, §2 · DECISION 118 (the deferred half, now done) · DECISION 117
+(`iChannel0` is the audio texture) · DECISION 112/113 · `scripts/luminos-wallpaper-cost`

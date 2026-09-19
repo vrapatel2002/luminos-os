@@ -315,3 +315,109 @@ that forces a real seam is doing its job; a budget met by deleting explanations 
 exists so Shadertoy audio shaders arrive with it. §3.3's Python half (`parse_manifest`,
 `lively_to_manifest`, `_path_safe`) is already written and tested; what it still needs is the gallery
 UI and the install path, which is a bigger surface than the shader loader.
+
+## 2026-09-19 — session 4: SPEC §3.4, and the promise §3.2 had to defer
+
+### What landed
+```
+contents/tools/luminos-shader-bake     new  the compiler, Python, 31 tests
+contents/tools/shader-wrapper.glsl     new  the GLSL shell, as data not a string
+ui/props/ShaderBaker.qml               new  runs it, validates the answer
+ui/scenes/ShaderToy.qml                new  generates the ShaderEffect
+ui/audio/AudioTexture.qml              new  the 128x1 spectrum, now shared
+ui/scenes/Shader.qml                   mod  uses the shared texture (136 -> 101 lines)
+ui/scene.js                            mod  a .frag is a scene
+ui/QmlMode.qml                         mod  binds `source`, props read beside the shader
+ui/props/PropertyStore.qml             mod  strips any extension, not just .qml
+ui/config.qml                          mod  one file box for both kinds + a sample
+samples/luminos-shadertoy.frag(+json)  new  a working Shadertoy-shaped example
+scripts/luminos-wallpaper-cost         new  what it costs, as numbers
+tests/wallpaper/test_shader_bake.py    new  31 tests
+```
+
+### Why the compiler ships inside the plugin
+The first design called `luminos-shader-bake` from `PATH`, which means the wallpaper only works if a
+separate install step copied a script to `/usr/local/bin`. Two things killed that: a KPackage is meant
+to be self-contained, and **the lock screen loads this same package**, where nothing would have put it
+on `PATH` at all. So it lives in `contents/tools/` and is called by a path derived from
+`Qt.resolvedUrl`, through `python3` — a KPackage install does not promise to keep the executable bit.
+
+### This is where §3.2's deferred half actually lands
+§3.2 promised property keys mapping onto shader uniforms by name and stopped short, because **a QML
+object cannot gain a property at runtime**. There is exactly one way round that: build the object from
+generated source. Doing it in §3.2, against one shader whose uniforms were already known, would have
+been inventing the hard part in the easy case. Here the source is arbitrary, so the machinery is
+justified and it covers both. A `properties.json` key next to any `.frag` is now a slider AND a
+uniform, with no glue code.
+
+### The template bug, because it cost twenty minutes and looked like anything but itself
+The GLSL wrapper is a data file so it can be read as GLSL. Its header comment *mentioned* the
+`%(props)s` placeholder — and the whole file goes through one percent-format, so the generated uniform
+declarations were spliced **into the comment**, leaving a stray backtick on the following line. The
+compiler said:
+
+```
+ERROR: .../8aa113cf.frag:9: '`' : unexpected token
+```
+
+on a line that reads perfectly. The lesson is narrow and worth keeping: **a template's own
+documentation is inside the template.** The file now says so in its header, and
+`test_the_template_placeholder_never_survives_into_the_output` keeps it fixed.
+
+### What is validated, and where
+A uniform name goes into **generated QML**, and a path goes into a **URL string**. Both are produced by
+the baker and both arrive in QML over a pipe, so both are checked twice:
+
+| | baker (Python) | scene (QML) |
+|---|---|---|
+| uniform name | `^[A-Za-z_][A-Za-z0-9_]{0,31}$`, not in `_RESERVED` | same regex again before splicing |
+| `.qsb` path | written by us into our own cache dir | absolute, ends `.qsb`, no `"` `'` `\` newline |
+| `.frag` path | opened, never interpolated | POSIX single-quoted into the command |
+
+`test_a_reserved_name_can_never_become_a_uniform` is property-based over generated schemas rather than
+a list of examples, because the failure it prevents — a property called `iTime` compiling into a
+duplicate declaration — takes the whole wallpaper down.
+
+### Budgets (SPEC §9)
+The baker hit 175 lines against a 150-line budget and `bake()` hit 41 against 40. Both were fixed by
+real seams, not by deleting explanations: the GLSL moved into its own data file (where it belongs
+anyway), and the compile step became `_compile()`. Same for the scene — `ShaderToy.qml` was 162, so
+the "how a shader gets compiled" half became `ShaderBaker.qml`. `budget_check.py` passes on all of it.
+
+| file | lines | budget |
+|---|---|---|
+| tools/luminos-shader-bake | 148 | 150 python |
+| ui/scenes/ShaderToy.qml | 120 | 150 scene |
+| ui/scenes/Shader.qml | 101 | 150 scene |
+| ui/props/ShaderBaker.qml | 91 | 200 host |
+| ui/audio/AudioTexture.qml | 67 | 200 host |
+| ui/QmlMode.qml | 132 | 200 host |
+
+### "Lighter than Chromium" is now a number
+Shawn asked for it to stay light. That is a claim until it is measured, so
+`scripts/luminos-wallpaper-cost` reports the three things that can actually be checked: whether
+`libQt6WebEngineCore` is mapped into plasmashell at all, PSS from `smaps_rollup` (not RSS — RSS
+double-counts shared libraries and is why a shell can look like it owns a gigabyte it shares), and CPU
+jiffies over a window as a percentage of one core. It prints BUG-083's recorded Chromium-era numbers
+next to them, and it says out loud that it measures plasmashell as a whole and cannot separate the
+desktop from the wallpaper. **Structurally the cost is already decided:** the only thing that maps
+WebEngine is web mode, and nothing in §3.1/§3.2/§3.4 touches it — audio, properties and shaders are
+all Qt objects in a process that was already running.
+
+### Verified
+| | |
+|---|---|
+| a real Shadertoy shader compiles | `mainImage` + `iTime`/`iResolution`/`iMouse`/`iChannel0`, all six qsb targets |
+| reserved/invalid names cannot become uniforms | property-based over generated schemas |
+| cache is content-addressed | same path twice; ~90 ms cold, 0.1 ms warm |
+| every failure is one line | missing file, bad JSON, missing qsb, broken GLSL — all tested |
+| QML syntax | `qmlformat` clean on every new and changed file |
+| budgets | `budget_check.py` PASS |
+| suite | **58 passed** (20 package + 7 schema + 31 shader) |
+| transfer | md5 identical cloud → device → installed, 11 files |
+| **on screen** | ❌ **still not verified — plasmashell has not been restarted since §3.1** |
+
+### Next
+**§3.5** (`.js` canvas wallpapers, CONTRACTS §6 already specifies the shim) or **§3.3** (packages +
+gallery + Lively import, whose Python half is already written and tested). §3.6 — games through a
+nested compositor — remains the big one and the only thing that lets web mode finally be deleted.

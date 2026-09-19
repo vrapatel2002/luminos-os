@@ -146,25 +146,44 @@ ColumnLayout {
             valueRole: "val"
             model: [
                 { text: i18n("Shader (GPU gradient)"),       val: "shader" },
+                { text: i18n("Shadertoy sample (audio-reactive)"), val: "sample-shadertoy" },
                 { text: i18n("Aurora (drifting blobs)"),     val: "aurora" },
                 { text: i18n("Particles (cursor-reactive)"), val: "particles" },
                 { text: i18n("System monitor (live stats)"), val: "sysmon" },
-                { text: i18n("Spectrum (audio-reactive bars)"), val: "spectrum" }
+                { text: i18n("Spectrum (audio-reactive bars)"), val: "spectrum" },
+                { text: i18n("Shadertoy shader (pick a .frag below)"), val: "shadertoy" }
             ]
             Component.onCompleted: {
                 var i = indexOfValue(root.cfg_QmlScene);
                 currentIndex = i >= 0 ? i : 0;
             }
-            onActivated: root.cfg_QmlScene = currentValue
+            // "shadertoy" is not a scene you can select — it is a prompt for a file.
+            // Storing it would leave the wallpaper with no shader, which falls back
+            // to Aurora and looks like the entry is broken.
+            // [CHANGE: claude-code | 2026-09-19] DECISION 119
+            onActivated: {
+                if (currentValue === "shadertoy")
+                    sceneDialog.open();
+                else if (currentValue === "sample-shadertoy")
+                    root.cfg_QmlScene = root.samplesDir + "/luminos-shadertoy.frag";
+                else
+                    root.cfg_QmlScene = currentValue;
+            }
         }
         RowLayout {
-            Kirigami.FormData.label: i18n("…or a .qml file:")
+            Kirigami.FormData.label: i18n("…or your own file:")
             visible: root.cfg_WallpaperMode === "qml"
             QQC2.TextField {
                 Layout.fillWidth: true
-                placeholderText: i18n("/path/to/your/scene.qml")
+                placeholderText: i18n("/path/to/scene.qml  or  /path/to/shader.frag")
                 text: root.cfg_QmlScene
                 onEditingFinished: root.cfg_QmlScene = text
+            }
+            // [CHANGE: claude-code | 2026-09-19] DECISION 119 — one box, both kinds.
+            QQC2.Button {
+                text: i18n("Browse…")
+                icon.name: "document-open"
+                onClicked: sceneDialog.open()
             }
         }
         QQC2.Label {
@@ -172,7 +191,7 @@ ColumnLayout {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
-            text: i18n("The same effects as the web samples, drawn by Qt directly. No browser engine is loaded, so this costs far less than Web mode. A scene may declare running, stats, audio, cursorX and cursorY and they will be bound for it.")
+            text: i18n("The same effects as the web samples, drawn by Qt directly. No browser engine is loaded, so this costs far less than Web mode. A scene may declare running, stats, audio, props, cursorX and cursorY and they will be bound for it. A .frag is compiled on the spot and run as a Shadertoy shader — iTime, iResolution, iMouse and iChannel0 (the audio spectrum) are all provided.")
         }
 
         // ---- NATIVE QML: audio --------------------------------------
@@ -317,9 +336,11 @@ ColumnLayout {
         id: sceneProps
         sceneId: root.cfg_QmlScene
         savedJson: root.cfg_SceneProperties
+        // Beside the shader for a .frag, beside the scene otherwise — the same
+        // rule QmlMode uses, from the same file. [CHANGE: claude-code | 2026-09-19]
         sceneUrl: {
-            var path = Scene.pathFor(root.cfg_QmlScene);
-            return Scene.isAbsolute(path) ? path : Qt.resolvedUrl(path);
+            var base = Scene.propsBaseFor(root.cfg_QmlScene);
+            return Scene.isAbsolute(base) ? base : Qt.resolvedUrl(base);
         }
     }
 
@@ -356,6 +377,12 @@ ColumnLayout {
         title: i18n("Choose a video")
         nameFilters: [ i18n("Videos (*.mp4 *.webm *.mkv *.mov *.avi)"), i18n("All files (*)") ]
         onAccepted: root.cfg_Video = root.localPath(selectedFile)
+    }
+    Dialogs.FileDialog {
+        id: sceneDialog
+        title: i18n("Choose a QML scene or a shader")
+        nameFilters: [ i18n("Scenes and shaders (*.qml *.frag *.glsl *.fsh)"), i18n("All files (*)") ]
+        onAccepted: root.cfg_QmlScene = root.localPath(selectedFile)
     }
     Dialogs.FileDialog {
         id: webDialog

@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 4 (Cowork chat; see the counter note)
+Last updated: 2026-09-19 — Response 5 (Cowork chat; see the counter note)
 
 > ⚠️ **Counter note, recorded deliberately per §0.1 — do not silently "fix" it.** This is a **Cowork**
 > chat (cloud container + device bridge), not Claude Code on the box. It ran a long way **without
@@ -21,8 +21,12 @@ separate media server — fixing what Shawn reports, and never leaving a change 
 do it than so can we."* Plan and gap analysis: `docs/wallpaper/SPEC.md`. Frozen interfaces:
 `docs/wallpaper/CONTRACTS.md`. Reasoning per session: `docs/wallpaper/BUILD_LOG.md`.
 
-Two of six SPEC §3 items are done. **§3.3 (packages + gallery + Lively import) is next** unless Shawn
-redirects — §3.4 (runtime shader loader) is the cheaper one and carries §3.2's deferred half with it.
+**Three of six SPEC §3 items are done** (§3.1 audio, §3.2 per-scene settings, §3.4 runtime shaders).
+**§3.5 (`.js` canvas wallpapers) or §3.3 (packages + gallery + Lively import) is next**; §3.6 (games
+through a nested compositor) is the big one and the only thing that lets web mode finally be deleted.
+
+Shawn has also asked, standing: **it must stay light on resources compared to Chromium.**
+`scripts/luminos-wallpaper-cost` is how that gets checked rather than claimed.
 
 ## Why / motivation
 The wallpaper already did image / GIF / video / YouTube / web, but the web path was Chromium
@@ -61,6 +65,15 @@ playable games.
   share one `PropertyStore` and one scene map (`ui/scene.js`) so they cannot disagree.
   `Spectrum.properties.json` + `Shader.properties.json` prove it end to end; shader `uSpeed` /
   `uAudioGain` / `uTint` bound by name at std140 104/108/112.
+- **SPEC §3.4 runtime shaders — DECISION 119.** Point the wallpaper at any Shadertoy `.frag` and it
+  is compiled on the spot by `contents/tools/luminos-shader-bake` — which **ships inside the plugin**,
+  not on `PATH`, because a KPackage must be self-contained and the lock screen loads the same package.
+  Cached by content hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is generated with
+  `Qt.createQmlObject`, **which is what finally makes §3.2's promise real for an arbitrary shader** — a
+  QML object cannot gain a property at runtime. A `.frag` typed into the scene box is a scene, and its
+  settings are read from beside the shader. Sample shipped: `samples/luminos-shadertoy.frag`.
+- **`scripts/luminos-wallpaper-cost`** — is `libQt6WebEngineCore` mapped into plasmashell at all, PSS
+  from `smaps_rollup`, CPU as a percentage of one core, with BUG-083's Chromium-era numbers alongside.
 - Package/manifest layer (`scripts/luminos-wallpaper-pkg`) and the capability gate
   (`scripts/luminos-wallpaper-capabilities`) were built earlier the same day. The gate **ran on the
   box**: `qsb` present (Qt 6.11.2), `Caelestia.Services` present with no Quickshell dep, kpipewire
@@ -92,7 +105,8 @@ Nothing is half-written. Every file named below is deployed to
 Wallpaper first; the server items below are unchanged and still Shawn's call.
 
 1. **Shawn, on the box — one command per line, no trailing comments** (a pasted `# comment` becomes
-   an argument; it already made systemd try to restart `then.service`):
+   an argument; it already made systemd try to restart `then.service`). Add the shader test and the
+   cost baseline to the run:
    ```
    qml6 ~/luminos-os/tests/wallpaper/audio_contract.qml ; echo $?
    ```
@@ -103,20 +117,25 @@ Wallpaper first; the server items below are unchanged and still Shawn's call.
    systemctl --user restart plasma-plasmashell
    ```
    ```
+   ~/luminos-os/scripts/luminos-wallpaper-cost 10
+   ```
+   ```
    git -C ~/luminos-os push origin main
    ```
    Then Wallpaper settings → **Native QML → Spectrum**, play something, and check the new **Scene
-   settings** panel moves the bars. `journalctl --user -b -t plasmashell | grep LUMINOS-WP` should be
-   silent.
-2. **SPEC §3.4 — runtime shader loader.** Cheapest remaining item and it carries §3.2's deferred half:
-   binding arbitrary property keys to arbitrary uniforms needs a `ShaderEffect` built with
-   `Qt.createQmlObject`, which is §3.4's machinery anyway. `iAudio` already exists, so Shadertoy audio
-   shaders come free.
+   settings** panel moves the bars. Then pick **Shadertoy sample (audio-reactive)** from the same
+   Scene list — it compiles `samples/luminos-shadertoy.frag` on selection.
+   `journalctl --user -b -t plasmashell | grep LUMINOS-WP` should be silent, and
+   `luminos-wallpaper-cost` should report **chromium: not mapped**.
+2. **SPEC §3.5 — `.js` canvas wallpapers.** CONTRACTS §6 already froze the shim (canvas, ctx, rAF,
+   `window.luminos`, `livelyAudioListener`, and a NAMED error for anything it does not provide). QML's
+   `Canvas` is the same `getContext('2d')` API and QML has its own JS engine, so no browser is needed.
 3. **SPEC §3.3 — packages + gallery + Lively import.** The Python half is already written and tested
    (`scripts/luminos-wallpaper-pkg`: `parse_manifest`, `lively_to_manifest`, `_path_safe`). What is
    missing is the gallery UI and the install path (`~/.local/share/luminos/wallpapers/<id>/`).
-4. **SPEC §3.5** `.js` canvas loader (CONTRACTS §6 already specifies the shim), then **§3.6** external
-   producer (games) — the big one, and the only thing that lets web mode finally be deleted.
+4. **SPEC §3.6 — external producer (games).** The big one: a nested compositor (`cage`, present) →
+   PipeWire → `PipeWireSourceItem` (kpipewire, present), with input back through
+   `zwlr_virtual_pointer_v1`. It is also the prerequisite for deleting web mode.
 5. **BUG-166 — verify it, then watch it for a day.** Both halves installed 2026-09-18, nothing proven.
    `luminos-tabs` must show a fresh `age_seconds`; `chrome://extensions` must read **3.1**. ⚠️ Saved
    options beat new defaults — check `graceSeconds`=1800 and `capOnPressure` unticked.
@@ -166,6 +185,13 @@ Wallpaper first; the server items below are unchanged and still Shawn's call.
   Do not investigate it a third time. Killing it kills the Cowork session.
 
 **Wallpaper**
+- **A template's own documentation is inside the template.** `shader-wrapper.glsl` mentioned its
+  `%(props)s` placeholder in its header comment; the whole file goes through one percent-format, so
+  the generated uniform declarations were spliced into the comment and broke the next line. The error
+  was `'\`' : unexpected token` on a line that reads perfectly.
+- **The compiler ships inside the plugin, not on `PATH`.** The lock screen loads the same KPackage,
+  where nothing would have installed a script. Same reason it is called through `python3`: a KPackage
+  install does not promise to keep the executable bit.
 - **`.qsb` files are not byte-reproducible** — a comment-only change differed in 3439 of 3493 bytes
   because the six shader variants are written unordered inside a compressed container. **Never md5 a
   `.qsb` to decide whether a shader changed; diff `qsb --dump`.** md5 is still right for transfers.
@@ -192,14 +218,17 @@ Wallpaper first; the server items below are unchanged and still Shawn's call.
 ## Files touched / relevant files
 - **Wallpaper plugin:** `src/wallpapers/org.luminos.livewallpaper/contents/` — `ui/main.qml`,
   `ui/QmlMode.qml`, `ui/WebMode.qml`, `ui/config.qml`, `ui/scene.js`,
-  `ui/audio/{AudioBridge,CaelestiaAudio}.qml`, `ui/props/{PropertyStore,PropertyEditor,PropertyControls}.qml`,
-  `ui/scenes/{Shader,Aurora,Particles,SysMon,Spectrum}.qml` + `{Shader,Spectrum}.properties.json`,
-  `shaders/luminos-shader.frag{,.qsb}`, `config/main.xml`.
+  `ui/audio/{AudioBridge,CaelestiaAudio,AudioTexture}.qml`,
+  `ui/props/{PropertyStore,PropertyEditor,PropertyControls,ShaderBaker}.qml`,
+  `ui/scenes/{Shader,Aurora,Particles,SysMon,Spectrum,ShaderToy}.qml` + `{Shader,Spectrum}.properties.json`,
+  `shaders/luminos-shader.frag{,.qsb}`, `tools/{luminos-shader-bake,shader-wrapper.glsl}`,
+  `samples/luminos-shadertoy.frag{,.properties.json}`, `config/main.xml`.
 - **Installed copy:** `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` — keep it
   `diff -rq` clean against the repo.
 - **Docs:** `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG}.md`, `LUMINOS_DECISIONS.md` (117, 118),
   `docs/BUGS.md` (BUG-168), `LUMINOS_STATUS.md`, `docs/CODE_REFERENCE.md`.
-- **Scripts/tests:** `scripts/luminos-wallpaper-{pkg,capabilities,probe}`,
-  `tests/wallpaper/{test_pkg.py,test_shipped_props.py,budget_check.py,audio_contract.qml,props_contract.qml}`.
+- **Scripts/tests:** `scripts/luminos-wallpaper-{pkg,capabilities,probe,cost}`,
+  `tests/wallpaper/{test_pkg,test_shipped_props,test_shader_bake,budget_check}.py`,
+  `tests/wallpaper/{audio_contract,props_contract}.qml`. Suite: **58 pytest + 43 QML checks**.
 - **Server/RAM thread:** `docs/LUMINOS_RAM_ARCHITECTURE.md`, `server/STATUS.md`, `server/DECISIONS.md`,
   `server/scripts/luminos-roku-compat`, `config/99-luminos-ram.conf` (BUG-167).

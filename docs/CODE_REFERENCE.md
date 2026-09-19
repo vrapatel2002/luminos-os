@@ -632,6 +632,21 @@ END OF CODE_REFERENCE.md
   parity), property schema, package manifest + Lively field map, JS shim surface, producer IPC
   (**normalised 0–1 coordinates**, never pixels — the wallpaper and the producer differ in resolution).
 - `docs/wallpaper/BUILD_LOG.md` — decisions and why, appended per session.
+- `src/wallpapers/org.luminos.livewallpaper/contents/tools/luminos-shader-bake` — **[EXISTS]** wraps a
+  Shadertoy `.frag` into a Qt 6 shader and bakes it with `qsb`. Prints `OK <path>` + `UNIFORMS
+  <name>:<type>`. Cached by content hash in `~/.cache/luminos/wallpaper-shaders/`. Ships inside the
+  package, not on PATH, so the plugin is self-contained. 31 tests. DECISION 119.
+- `src/wallpapers/org.luminos.livewallpaper/contents/tools/shader-wrapper.glsl` — **[EXISTS]** the
+  GLSL shell: uniform block, Shadertoy `#define`s, and the `main()` that calls `mainImage`.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/props/ShaderBaker.qml` — **[EXISTS]** runs the
+  baker, validates the path it returns, emits `ready(qsbPath, uniforms)` / `failed(why)`.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/scenes/ShaderToy.qml` — **[EXISTS]** builds the
+  ShaderEffect with `Qt.createQmlObject` so property keys become uniforms by name on any shader.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/audio/AudioTexture.qml` — **[EXISTS]** the
+  128×1 spectrum texture (CONTRACTS §2), shared by `Shader.qml` and `ShaderToy.qml`.
+- `scripts/luminos-wallpaper-cost` — **[EXISTS]** measures what the wallpaper costs: is
+  `libQt6WebEngineCore` mapped into plasmashell, PSS from `smaps_rollup`, CPU jiffies over a window.
+  Turns "lighter than Chromium" into a number anyone can re-run.
 - `src/wallpapers/org.luminos.livewallpaper/contents/ui/props/PropertyStore.qml` — **[EXISTS]** loads
   a scene's `properties.json`, validates it, merges saved values over defaults, exposes `schema`
   and `props`. `withValue()`/`clear()` return the new `SceneProperties` string. Used by the

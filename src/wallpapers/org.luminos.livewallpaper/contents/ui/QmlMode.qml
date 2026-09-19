@@ -4,6 +4,7 @@
     [CHANGE: claude-code | 2026-09-16] DECISION 113.
     [CHANGE: claude-code | 2026-09-19] DECISION 117 — audio (SPEC §3.1).
     [CHANGE: claude-code | 2026-09-19] DECISION 118 — per-scene props (SPEC §3.2).
+    [CHANGE: claude-code | 2026-09-19] DECISION 119 — a .frag is a scene too (SPEC §3.4).
 
     Web mode still exists and is still the right tool for arbitrary HTML from
     the internet. This mode is for the wallpapers we write ourselves, where
@@ -48,6 +49,16 @@ Item {
         return Scene.isAbsolute(path) ? path : Qt.resolvedUrl(path);
     }
 
+    // A .frag typed into the scene box loads ShaderToy.qml and hands it the file.
+    // Its settings live beside the SHADER, not beside ShaderToy.qml, or every
+    // shader on the machine would share one panel. [CHANGE: claude-code | 2026-09-19]
+    readonly property string sceneSource: Scene.isShaderFile(qmlRoot.scene)
+        ? Scene.rawPath(qmlRoot.scene) : ""
+    readonly property url propsUrl: {
+        var base = Scene.propsBaseFor(qmlRoot.scene);
+        return Scene.isAbsolute(base) ? base : Qt.resolvedUrl(base);
+    }
+
     // CONTRACTS §2. Always instantiated, never conditional: it costs one Item and
     // one QtObject, and in exchange `audio` is a stable object from the first
     // frame, with active:false, instead of flipping between null and an object
@@ -63,7 +74,7 @@ Item {
     // so the panel and the wallpaper cannot disagree about the merge.
     PropertyStore {
         id: propStore
-        sceneUrl: qmlRoot.sceneUrl
+        sceneUrl: qmlRoot.propsUrl
         sceneId: qmlRoot.scene
         savedJson: qmlRoot.sceneProperties
     }
@@ -101,6 +112,8 @@ Item {
                 item.audio = Qt.binding(() => audioBridge.audio);
             if (qmlRoot.sceneHas(item, "props"))
                 item.props = Qt.binding(() => propStore.props);
+            if (qmlRoot.sceneHas(item, "source"))
+                item.source = Qt.binding(() => qmlRoot.sceneSource);
             if (qmlRoot.sceneHas(item, "cursorX"))
                 item.cursorX = Qt.binding(() => qmlRoot.cursorX);
             if (qmlRoot.sceneHas(item, "cursorY"))

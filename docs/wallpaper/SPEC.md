@@ -130,9 +130,17 @@ A wallpaper becomes a folder with a manifest and a preview, not a path typed int
 Reading Lively's own `LivelyInfo.json` makes their entire community library installable for every
 type we support.
 
-### 3.4 Runtime shader loader — drop in any Shadertoy `.frag`
+### 3.4 Runtime shader loader — ✅ **DONE 2026-09-19, DECISION 119**
 Compile with `qsb` on load, cache by content hash. Shadertoy audio shaders work for free once §3.1
 lands, because Shadertoy's `iChannel0` audio convention is a 1-D texture.
+
+**Shipped:** `contents/tools/luminos-shader-bake` + `shader-wrapper.glsl` (the compiler, inside the
+package so the plugin is self-contained), `ui/props/ShaderBaker.qml` (runs it, parses two lines),
+`ui/scenes/ShaderToy.qml` (generates the ShaderEffect), `ui/audio/AudioTexture.qml` (the 128×1
+spectrum, now shared with `Shader.qml`), and `samples/luminos-shadertoy.frag` as a working example.
+A `.frag` typed into the scene box is a scene. **This also completes §3.2's deferred half:** property
+keys become uniforms of the same name on an arbitrary shader. Verified by
+`tests/wallpaper/test_shader_bake.py` (31 tests; suite 58 passed).
 
 ### 3.5 `.js` canvas loader — run Lively-style JS wallpapers natively
 QML's `Canvas` is the same `getContext('2d')` API; QML has its own JS engine. Needs a browser-shaped

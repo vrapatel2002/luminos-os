@@ -25,6 +25,8 @@ QtObject {
     // that is unambiguous — one scene per folder. The built-ins share
     // scenes/, so <Scene>.properties.json is tried first and plain
     // properties.json second. Packages are unaffected; built-ins stop colliding.
+    // For a runtime shader this is the .frag, not ShaderToy.qml — otherwise every
+    // shader on the machine would share one settings panel (DECISION 119).
     property url sceneUrl: ""
     // The key inside SceneProperties. The scene string the user chose IS the id:
     // "spectrum" for a built-in, the path for a file. Stable, and it survives a
@@ -117,7 +119,7 @@ QtObject {
         if (slash < 0)
             return [];
         var dir = s.substring(0, slash + 1);
-        var file = s.substring(slash + 1).replace(/\.qml$/i, "");
+        var file = s.substring(slash + 1).replace(/\.[^./]+$/, "");
         return [dir + file + ".properties.json", dir + "properties.json"];
     }
 

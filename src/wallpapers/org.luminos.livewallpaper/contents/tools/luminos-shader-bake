@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Bake any Shadertoy-style .frag into a Qt 6 ShaderEffect shader.  SPEC §3.4.
+
+[CHANGE: claude-code | 2026-09-19] DECISION 119 — the reasoning lives there.
+SPDX-License-Identifier: GPL-3.0-or-later
+
+    python3 <plugin>/contents/tools/luminos-shader-bake <source.frag> [properties.json]
+      -> OK <path to .qsb>   then   UNIFORMS <name>:<type> ...
+      -> ERR <one line, safe to show a user>
+
+Cached by content hash under ~/.cache/luminos/wallpaper-shaders/. Provides iTime,
+iResolution, iMouse, iChannel0 (the 128x1 audio texture, CONTRACTS §2) and
+iBass/iMid/iTreble/iAudioActive. NOT iFrame/iDate/iTimeDelta/iChannelTime or
+multi-pass buffers: those fail at bake time with the compiler's own message,
+which is a named error rather than a blank desktop.
+"""
+import hashlib, json, os, re, subprocess, sys
+
+_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,31}$")
+# Names the wrapper owns: a property called iTime would compile into a duplicate
+# declaration and take the whole wallpaper down with it.
+_RESERVED = set("""qt_Matrix qt_Opacity qt_TexCoord0 buf main mainImage texture texture2D
+    iTime iResolution iResolutionXY iMouse iChannel0 iChannel1 iChannel2 iChannel3
+    iBass iMid iTreble iAudioActive luminos_fragColor""".split())
+_UNIFORM_TYPES = {"slider": "float", "checkbox": "float", "dropdown": "float", "color": "vec4"}
+
+_QSB = "/usr/lib/qt6/bin/qsb"
+_QSB_ARGS = ["--glsl", "100es,120,150", "--hlsl", "50", "--msl", "12"]
+_TEMPLATE = "shader-wrapper.glsl"
+
+
+def uniform_decls(schema):
+    """properties.json -> [(name, glsl_type)]. Anything unusable is skipped, never fatal."""
+    out = []
+    if not isinstance(schema, dict):
+        return out
+    for key in sorted(schema):
+        entry = schema.get(key)
+        if not isinstance(entry, dict):
+            continue
+        glsl = _UNIFORM_TYPES.get(entry.get("type"))
+        if glsl and _NAME_RE.match(key) and key not in _RESERVED:
+            out.append((key, glsl))
+    # vec4 before float: std140 aligns a vec4 to 16 bytes, so grouping them keeps
+    # the block tight. Qt binds by name from the .qsb reflection either way.
+    out.sort(key=lambda kv: kv[1] != "vec4")
+    return out
+
+def _template():
+    """(preamble, epilogue) from shader-wrapper.glsl beside this script."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _TEMPLATE)
+    head, _, tail = open(path, encoding="utf-8").read().partition("//EPILOGUE-SPLIT\n")
+    return head, tail
+
+
+def wrap(source, decls):
+    """Shadertoy `mainImage` -> a Qt fragment shader. A shader that already has
+    its own `main()` is Qt-shaped already and is passed through untouched."""
+    if "mainImage" not in source:
+        return source
+    head, tail = _template()
+    props = "".join("    %-5s %s;\n" % (t, n) for n, t in decls)
+    return head % {"props": props} + source + tail
+
+def cache_key(wrapped):
+    return hashlib.sha256(wrapped.encode("utf-8")).hexdigest()[:32]
+
+def cache_dir():
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return os.path.join(base, "luminos", "wallpaper-shaders")
+
+
+def bake(source_path, schema_path=None, qsb=_QSB):
+    """Returns (ok, message). message is a .qsb path on success, else one safe line."""
+    try:
+        source = open(source_path, encoding="utf-8", errors="replace").read()
+    except OSError as exc:
+        return False, "cannot read %s: %s" % (os.path.basename(source_path), exc.strerror)
+
+    schema = {}
+    if schema_path and os.path.exists(schema_path):
+        try:
+            schema = json.load(open(schema_path, encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return False, "properties.json is not valid JSON: %s" % exc
+
+    wrapped = wrap(source, uniform_decls(schema))
+    out_dir = cache_dir()
+    key = cache_key(wrapped)
+    qsb_path = os.path.join(out_dir, key + ".qsb")
+    if os.path.exists(qsb_path):
+        return True, qsb_path
+
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        frag_path = os.path.join(out_dir, key + ".frag")
+        with open(frag_path, "w", encoding="utf-8") as fh:
+            fh.write(wrapped)
+    except OSError as exc:
+        return False, "cannot write the shader cache: %s" % exc.strerror
+
+    return _compile(qsb, frag_path, qsb_path)
+
+def _compile(qsb, frag_path, qsb_path):
+    if not os.path.exists(qsb):
+        return False, "qsb is missing — install qt6-shadertools"
+    # No shell, and every path in this list is ours: the only user-supplied string
+    # that reaches bake() is source_path, and it was opened, not interpolated.
+    try:
+        proc = subprocess.run([qsb] + _QSB_ARGS + ["-o", qsb_path, frag_path],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, "could not run qsb: %s" % exc
+    if proc.returncode != 0:
+        return False, _first_error(proc.stderr or proc.stdout)
+    return True, qsb_path
+
+def _first_error(text):
+    """One line, because this ends up in a journal entry a person has to read."""
+    for line in (text or "").splitlines():
+        if "ERROR" in line.upper():
+            return line.strip()[:200]
+    return (text or "shader failed to compile").strip().splitlines()[0][:200]
+
+def _schema_of(path):
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def main(argv):
+    if len(argv) < 2:
+        print("ERR usage: luminos-shader-bake <source.frag> [properties.json]")
+        return 2
+    schema_path = argv[2] if len(argv) > 2 else None
+    ok, msg = bake(argv[1], schema_path)
+    print(("OK " if ok else "ERR ") + msg)
+    if ok:
+        decls = uniform_decls(_schema_of(schema_path))
+        print("UNIFORMS " + " ".join("%s:%s" % (n, t) for n, t in decls))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

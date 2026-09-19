@@ -15,6 +15,7 @@ restates it). A scene MAY declare any of these; the host binds only what exists:
 | `audio` | var | audio object, §2 |
 | `props` | var | this scene's own property values, §4 |
 | `cursorX`, `cursorY` | real | pointer in scene pixels, `-1` when absent |
+| `source` | string | the file the scene was pointed at (a `.frag` for ShaderToy). **Added 2026-09-19, DECISION 119 — additive: a scene that does not declare it is unchanged.** |
 
 A scene declaring none of them still loads. A scene that throws → host falls back to the built-in
 shader scene and logs `[LUMINOS-WP]`.

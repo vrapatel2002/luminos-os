@@ -13,6 +13,7 @@
     in the repo because there is no build step at wallpaper-install time.
 */
 import QtQuick
+import "../audio"
 
 Item {
     id: scene
@@ -34,49 +35,13 @@ Item {
         return (v === undefined || v === null) ? fallback : v;
     }
 
-    readonly property var bands: (scene.audio && scene.audio.bands) ? scene.audio.bands : null
-    onBandsChanged: audioTex.requestPaint()
-
-    // CONTRACTS §2: the spectrum reaches a shader as a 128×1 texture named
-    // iAudio, matching Shadertoy's iChannel0 audio convention so a Shadertoy
-    // audio shader runs here unmodified.
-    //
-    // Drawn with 128 one-pixel fillRects rather than createImageData/putImageData:
-    // this is 128 operations on a 128×1 surface, it costs nothing, and it uses
-    // only the part of Context2D that is certain to behave the same on every Qt
-    // build. Clever here would buy microseconds and risk a blank texture.
-    Canvas {
+    // The spectrum texture moved to ui/audio/AudioTexture.qml when the runtime
+    // shader loader needed the same thing — one copy of the 128×1 sampling
+    // convention, because the convention is the part that must not drift.
+    // [CHANGE: claude-code | 2026-09-19] DECISION 119
+    AudioTexture {
         id: audioTex
-        width: 128
-        height: 1
-        visible: false
-        renderStrategy: Canvas.Immediate
-        renderTarget: Canvas.Image
-
-        onPaint: {
-            var ctx = getContext("2d");
-            var b = scene.bands;
-            for (var i = 0; i < 128; i++) {
-                var v = 0;
-                if (b && b.length > i) {
-                    v = b[i];
-                    v = v > 1 ? 1 : (v > 0 ? v : 0);
-                }
-                ctx.fillStyle = Qt.rgba(v, v, v, 1);
-                ctx.fillRect(i, 0, 1, 1);
-            }
-        }
-        Component.onCompleted: requestPaint()
-    }
-
-    ShaderEffectSource {
-        id: audioSrc
-        sourceItem: audioTex
-        width: 128
-        height: 1
-        live: true
-        hideSource: true
-        smooth: true
+        bands: (scene.audio && scene.audio.bands) ? scene.audio.bands : null
     }
 
     ShaderEffect {
@@ -99,7 +64,7 @@ Item {
         // without audio, so with no provider this renders byte-identically to the
         // pre-audio version. Adding a feature must not change the default picture.
         property real iAudioActive: (scene.audio && scene.audio.active) ? 1 : 0
-        property variant iAudio: audioSrc
+        property variant iAudio: audioTex.texture
 
         // Bound BY NAME to uniforms in the .frag — offsets 104/108/112, read from
         // `qsb --dump`. Declaring a key in properties.json is what produces the
