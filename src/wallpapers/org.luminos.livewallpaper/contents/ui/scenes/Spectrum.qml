@@ -52,18 +52,19 @@ Item {
     // idle shimmer would make a broken audio path look like a quiet room —
     // BUG-163's lesson. Delayed 3s because the provider loads asynchronously, and
     // a warning that fires on every start is one people scroll past.
-    onLiveChanged: {
-        if (scene.live)
-            settleWarn.stop();
-        else
-            settleWarn.restart();
-    }
+    onLiveChanged: settleWarn.restart()
+    onRunningChanged: settleWarn.restart()
     Timer {
         id: settleWarn
         interval: 3000
         onTriggered: {
-            if (!scene.live)
-                console.warn("[LUMINOS-WP] spectrum: no audio provider after 3s — bars will stay flat");
+            // Only an accusation when the scene is MEANT to be running. A wallpaper
+            // frozen by ObscurePolicy — any maximized window covering the desktop —
+            // has no provider by design, and warning there made a healthy box report
+            // a broken audio path and burned a selftest FAIL on nothing.
+            // [CHANGE: claude-code | 2026-09-19]
+            if (!scene.live && scene.running)
+                console.warn("[LUMINOS-WP] spectrum: audio is on but no provider arrived in 3s — bars will stay flat");
         }
     }
 

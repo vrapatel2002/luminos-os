@@ -6564,3 +6564,87 @@ the innocent explanation is worse than a crash.** "No settings" is a sentence a 
 believes. The test suite was 58 green while the feature had never once worked on the
 target machine, because every test exercised the logic and none of them read a file
 the way the product does.
+
+---
+
+## BUG-171 — deploying QML to a running plasmashell changes nothing, so three fixes were tested against the code they replaced
+<!-- [CHANGE: claude-code | 2026-09-19] found while Shawn was stuck on VERIFY.md test 2 -->
+
+**Status:** FIXED (process, not code) · **Severity:** invalidated a whole eyes-on test session ·
+**Files:** `docs/wallpaper/VERIFY.md`, `scripts/luminos-wallpaper-selftest` (already had the
+instrument that caught it)
+
+Shawn restarted plasmashell at **13:26:45**, exactly as VERIFY.md step 0 said, and then worked
+down the test list. The Scene settings panel behaved like it did before DECISION 118 — which is
+what he reported as "stuck at test 2".
+
+It was stuck because the fixes had not been loaded:
+
+| what | when |
+|---|---|
+| plasmashell restarted | 13:26:45 |
+| BUG-169 fix — the panel overflowed sideways and **hid its own new section** | 13:46 |
+| BUG-170 fix — **no scene had settings at all** | 13:58 |
+| `config.qml`, `PropertyEditor.qml`, `PropertyStore.qml`, `PropsReader.qml` written | 13:57 |
+| `Spectrum.qml` written | 15:50 |
+
+**`QQmlEngine` caches compiled components by URL for the lifetime of the engine, and does not
+re-stat the file.** plasmashell is one long-lived engine. So the second, third and fourth times the
+config dialog was opened, it re-used the component compiled at ~13:30 — the version with both bugs
+still in it. `diff -rq` was clean, the file on disk was correct, and the dialog was still running
+last hour's code. Nothing anywhere said so.
+
+The tell was in the journal the whole time and is worth keeping as the general method: the running
+build printed
+
+```
+[LUMINOS-WP] spectrum: no audio provider — bars will stay flat
+```
+
+while the file on disk read `no audio provider after 3s`. **A log line that does not match the
+source on disk is proof the process is running something else.** `luminos-wallpaper-selftest`
+section [6] already prints `installed files last written <ts>` for this reason; it now reads as the
+primary check rather than a footnote.
+
+#### Fix
+`docs/wallpaper/VERIFY.md` moves the restart from "step 0, once" to **the rule: restart
+plasmashell after every deploy, before every eyes-on check** — and says why, so it is not read as
+superstition. After the restart here, with no code change, the panel and the shader both worked.
+
+#### Lesson
+Fifth instrument failure in five days, and the first where the instrument was the *desktop*.
+"Deployed" meant `diff -rq` clean; it did not mean *loaded*. Anything long-lived that compiles QML
+holds the old copy until it is restarted, and `md5`-verified deployment says nothing about that.
+
+---
+
+## BUG-172 — the spectrum scene accused the audio path while it was deliberately frozen
+<!-- [CHANGE: claude-code | 2026-09-19] found by reading why a 30-check selftest failed on a healthy box -->
+
+**Status:** FIXED · **Severity:** a working audio path reported as broken, once per freeze ·
+**Files:** `contents/ui/scenes/Spectrum.qml`
+
+`ObscurePolicy=2` (the default) freezes the wallpaper whenever a maximized window covers the
+desktop. Freezing drops `AudioBridge.running`, which deactivates the provider Loader — that is the
+entire point of the freeze contract, CONTRACTS §2.
+
+`Spectrum.qml` then saw `live` go false and, 3 s later, logged:
+
+```
+[LUMINOS-WP] spectrum: no audio provider after 3s — bars will stay flat
+```
+
+So every time Shawn maximized a window, the wallpaper told him the audio stack was missing. It was
+not: `libcava.so.1.0.0` and `libcaelestia-services.so` were both mapped into plasmashell, which is
+only possible if the provider had loaded. `luminos-wallpaper-selftest` dutifully turned that line
+into a **FAIL** on a machine where nothing was wrong — 29/30 for three hours.
+
+#### Fix
+The warning is gated on `scene.running`. A wallpaper that is frozen on purpose has no provider by
+design and says nothing; a wallpaper that is running with audio on and no provider still says so,
+which is the case the warning was written for.
+
+#### Lesson
+Same shape as BUG-163 and BUG-170 one more time, from the other side: **a warning that cannot
+tell "off on purpose" from "broken" is noise, and noise in a checker is worse than no checker** —
+it trains you to scroll past the one line that matters.

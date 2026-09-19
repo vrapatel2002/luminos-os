@@ -27,10 +27,32 @@ pasting.
 | 5 | the running wallpaper | Chromium **not** mapped into plasmashell. `libcava` mapped only when an audio scene is selected |
 | 6 | the journal | no `[LUMINOS-WP]` lines. Any that appear name the real fault — they are worth reading, not filtering |
 
+## Restart plasmashell after EVERY deploy — before any eyes-on check
+<!-- [CHANGE: claude-code | 2026-09-19] BUG-171 -->
+
+```bash
+systemctl --user restart plasma-plasmashell
+```
+
+Not once at the start of the session — **after every single deploy.** `QQmlEngine` caches
+compiled components by URL for the life of the engine and never re-stats the file, and
+plasmashell is one long-lived engine. So a `diff -rq` clean install is **not** a loaded
+install: the config dialog keeps re-using the component it compiled the first time it was
+opened. BUG-171 cost a whole eyes-on session this way — three fixes were "tested" against
+the buggy code they had already replaced, with nothing anywhere saying so.
+
+The tell, if you ever doubt it: **compare a `[LUMINOS-WP]` line in the journal against the
+source on disk.** If the wording differs, the process is running something else. Section [6]
+of the self test prints `installed files last written <ts>` for exactly this.
+
 ## What still needs a pair of eyes
 
 The self test cannot see the screen. These three need a person, once:
 
+0. **Keep the desktop visible while you look.** `ObscurePolicy=2` (the default) freezes the
+   wallpaper whenever a maximized window covers the desktop, and a frozen audio scene shows
+   flat bars by design (BUG-172). Un-maximize, or set *Freeze when hidden* to never, before
+   deciding the audio path is broken.
 1. **Native QML → Spectrum**, with music playing in any player — the bars should move, the
    backdrop should swell on bass, and there should be a faint flash on the beat.
 2. **Scene settings** at the bottom of the wallpaper settings dialog — Sensitivity, Bars,
