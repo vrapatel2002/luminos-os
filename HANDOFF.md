@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 14 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 16 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -93,6 +93,30 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (`luminos-wallpaper-capabilities`) exist; the gate ran on the box and found everything §3.6 needs
   (`cage`, kpipewire, Qt Quick 3D, `/dev/uinput`).
 
+### SteamOS comparison — asked 2026-09-19 (Response 16), RESEARCH ONLY, nothing changed
+Shawn asked whether SteamOS is far lighter than Luminos because it is "like a console OS". Answer,
+with live numbers off this box rather than a feeling:
+- **SteamOS Desktop Mode IS what we run** — 3.8.10 is Arch + **KDE Plasma 6.4.3 on Wayland**. It is
+  not a lighter desktop; it is the same desktop. Its lightness lives entirely in **Game Mode**,
+  which is not a desktop at all: `gamescope` (a wlroots micro-compositor) plus the Steam client,
+  with **no plasmashell, no KWin, no containment, no wallpaper, no file indexer**.
+- **Measured on the G14 right now (PSS, 5 h uptime):** shell layer **1577 MB** — and the breakdown
+  is the finding: `baloo_file` **978 MB**, `qs` (Caelestia) **420 MB**, `plasmashell` **181 MB**,
+  `kded6` 37 MB. **The five Go daemons are 62 MB PSS COMBINED** (ram 23.8, sentinel 13.6, power
+  12.6, router 7.0, ai 6.8). Luminos's own code is not what costs; KDE's indexer is.
+- **`gamescope` 3.16.28-1 is in `extra` and is NOT installed** (`pacman -Q` confirms). Two separate
+  reasons to want it, both flagged not started:
+  (a) **games** — it would replace the BUG-138 "Wine Desktop" KWin-rule + work-area hack with
+      fullscreen by construction, and adds FSR upscaling + a frame limiter on the 780M;
+  (b) **SPEC §3.6** — it is the other wlroots nested compositor besides `cage` (which is already
+      present). ⚠️ It does **not** clear §3.6's actual blocker: still no `gst-plugin-pipewire` and
+      no `xdg-desktop-portal-wlr`, so there is still no way to make a PipeWire video node.
+- **Immutability is the one SteamOS idea that is actively WRONG for us.** A read-only `/usr` + A/B
+  root would make most of AGENTS.md §9 illegal (`/usr/local/bin/*`, the patched
+  `desktopcontainment/main.qml`, dkms NVIDIA, the pacman hooks). If Shawn wants the rollback
+  benefit, the shape that fits is **btrfs + snapper**, not an immutable base.
+- **No code, config or system state changed on that turn.**
+
 ### Server / RAM thread (2026-09-18, carried forward — not this chat's work)
 - **DECISION 116 — `vm.page-cluster` stays at 3. It already was 3**; the claim that it was 0 came
   from reading a repo file that has never been installed. Pagefile confirmed live (`USED 16.3M`,
@@ -155,7 +179,36 @@ Shawn "far lighter than Chromium" without naming the scene.
    The candidate is one `ShaderEffect` sampling the 128×1 `AudioTexture` we already build, with
    colours / bar count / beat flash as uniforms — machinery §3.4 already has. The shader scene
    costs 6.6 %. This is a redesign of `Spectrum.qml`, so it gets its own pass.
-2. **SPEC §3.6 — external producer (games), the last §3 item and the big one.** A nested
+2. **SPEC §3.6 — external producer (games), the last §3 item and the big one.**
+   **⚠️ THE CONSUMER HALF IS BUILT AND PROVEN (DECISION 124). What is left is the producer.**
+   Ship: `ui/scenes/Producer.qml` + `ui/scenes/PipeWireView.qml` (the only kpipewire importer,
+   loaded by URL). Verified on real hardware: gst producer → PipeWire node → colour SMPTE bars on
+   screen, `ready=true`, `streamSize=QSize(1280,800)`, `paintedRect` filling the item.
+   **To build:** spawn a producer under `cage`, hand the scene its node id, reap it on deselect and
+   on crash with no orphans; then input. `xdg-desktop-portal-wlr` is installed for the cage
+   screencast but **not yet proven to work with cage** (it was written for sway).
+   **⚠️ Three findings, two of which amend CONTRACTS §7:**
+   - **KWin does NOT advertise `zwlr_virtual_pointer_v1` or `zwp_virtual_keyboard_v1`.**
+     `wayland-info` on the live session lists `zwlr_layer_shell_v1` and the xdg protocols and
+     **zero** virtual-input interfaces. CONTRACTS §7 named those first; they are not an option
+     here. The `(or uinput)` fallback it also named **is** available: `/dev/uinput` is
+     `root:input 660` and shawn is NOT in group `input`, but there is an **ACL**
+     (`user:shawn:rw-`) and a real `os.open(O_WRONLY)` **succeeded**. So uinput is the input
+     route, and the earlier capability gate's "/dev/uinput present" was true but not the
+     question that mattered.
+   - **uinput injects at the KERNEL, so it goes wherever focus is — not into a headless nested
+     compositor.** Routing input to a producer nobody can focus is the real open problem, and it
+     is why interaction is OFF by default in CONTRACTS §7. Build the VIDEO half first.
+   - **`PipeWireSourceItem` exists** (`org.kde.pipewire`, the only type it exports) and `cage`
+     0.3.1 (wlroots 0.20) is present.
+   - **The producer must publish packed RGB, or use DMA-BUF.** Left on its default `I420` a
+     producer rendered as **greyscale** — structure perfect, no colour. `format=BGRx` fixed it
+     instantly on the `usingDmaBuf=false` path. A portal screencast hands over DMA-BUF and will not
+     hit this; a synthetic producer must be told.
+   - **Packages installed 2026-09-19 with Shawn's approval:** `gst-plugin-pipewire` (72 KB) and
+     `xdg-desktop-portal-wlr` (53 KB), both `extra`, neither on the IgnorePkg pin. `pacman -S`
+     without `-y`; the log shows only those two. `luminos-brain safe` first said NO citing
+     "torch, xgboost, mt5linux" (the AGENTS.md task 0b false-NO) and said YES with a reason. A nested
    compositor (`cage`, present) → PipeWire → `PipeWireSourceItem` (kpipewire, present), with input
    back through `zwlr_virtual_pointer_v1` / `zwp_virtual_keyboard_v1` or `/dev/uinput` (present,
    but `root:input 660` — existence is not access). Contract already frozen in CONTRACTS §7:
@@ -164,16 +217,14 @@ Shawn "far lighter than Chromium" without naming the scene.
    wallpaper, no orphan on crash; interaction OFF by default and **Esc always releases**.
    **This is the one that finally lets web mode and Chromium be deleted.**
 
-3. **Nothing else new here** — item 4 below is the big one.
-4. **SPEC §3.6 — external producer (games).** A nested compositor (`cage`) → PipeWire →
-   `PipeWireSourceItem` (kpipewire), with input back through `zwlr_virtual_pointer_v1`. Prerequisite
-   for deleting web mode.
-5. **BUG-166 — verify it, then watch it for a day.** Both halves installed 2026-09-18, nothing
+   Second nested-compositor option found 2026-09-19: **`gamescope` 3.16.28-1 (`extra`, not
+   installed)** alongside `cage`. Same blocker either way — no PipeWire video node on this box yet.
+3. **BUG-166 — verify it, then watch it for a day.** Both halves installed 2026-09-18, nothing
    proven. `luminos-tabs` must show a fresh `age_seconds`; `chrome://extensions` must read **3.1**.
    ⚠️ Saved options beat new defaults — check `graceSeconds`=1800 and `capOnPressure` unticked.
-6. **BUG-167 — reconcile `config/99-luminos-ram.conf` with the box**, keeping `page-cluster = 3`,
+4. **BUG-167 — reconcile `config/99-luminos-ram.conf` with the box**, keeping `page-cluster = 3`,
    then sweep **every** `config/*.conf` against its `/etc/` counterpart.
-7. **BUG-164 — Shawn's call:** confirm the model (S01E07 seeks fine, S01E09 breaks), then fix the 20
+5. **BUG-164 — Shawn's call:** confirm the model (S01E07 seeks fine, S01E09 breaks), then fix the 20
    ASS files by getting Bazarr to fetch real SRT sidecars (`use_embedded_subs` OFF), then run
    `--fix-audio` on ONE of the 26 DTS files and watch it before the rest.
 
@@ -260,6 +311,10 @@ Shawn "far lighter than Chromium" without naming the scene.
   nothing when run bare**, and was never wired into the self test. Every "BUDGETS PASS" reported
   before 2026-09-19 was vacuous. Now self-test section [3b]. `main.qml` and `config.qml` are over
   budget and exempt BY NAME, printed on every run.
+- **`grabToImage` returns a BLANK frame for anything the GPU composites** — black for a
+  `ShaderEffect` (BUG-175), white for a `PipeWireSourceItem`. Twice now. To see what such an item
+  really draws, put it in a real window and capture the window with `spectacle -a -b -n -o f.png`,
+  which also avoids photographing the whole desktop.
 - **The contract tests were MUTE.** Qt hands `console.log` to the journal when stderr is not a tty,
   so `qml6 … 2>&1` captured nothing and the self test's exit code was all it ever had.
   `QT_FORCE_STDERR_LOGGING=1`.

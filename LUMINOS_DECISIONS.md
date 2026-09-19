@@ -7673,3 +7673,60 @@ visibly present and visibly not selectable.
 
 ### Cross-references
 DECISION 123 · BUG-179 · CONTRACTS §5 · SPEC §3.3 · `tests/wallpaper/gallery_contract.qml` (7 checks)
+
+---
+
+## DECISION 124 — SPEC §3.6, the consumer half: proven, and CONTRACTS §7's input route does not exist here
+<!-- [CHANGE: claude-code | 2026-09-19] SPEC §3.6 first slice -->
+
+**Shipped: the consumer.** `ui/scenes/Producer.qml` takes a PipeWire node id and draws it;
+`ui/scenes/PipeWireView.qml` is the only file that imports `org.kde.pipewire`, loaded **by URL**
+for the DECISION 112 reason — naming kpipewire in the scene would pull it into plasmashell for
+every wallpaper including a still image, and would make the whole plugin fail to load on a machine
+without it. Useful on its own terms: point it at any PipeWire video node and that is your wallpaper.
+
+**Proven end to end on real hardware**, not asserted: a `gst-launch` producer → a PipeWire node →
+`PipeWireSourceItem` → **colour SMPTE bars on screen**, with kpipewire reporting `ready = true`,
+`streamSize = QSize(1280, 800)` and `paintedRect` filling the item.
+
+### Three findings that change the plan
+
+**1. KWin does not offer the input protocols CONTRACTS §7 names first.** `wayland-info` on the live
+session lists `zwlr_layer_shell_v1` and the xdg protocols and **zero** virtual-input interfaces —
+no `zwlr_virtual_pointer_v1`, no `zwp_virtual_keyboard_v1`. Those are wlroots protocols and this is
+KWin. The `(or uinput)` the contract also named **is** available: `/dev/uinput` is `root:input 660`
+and shawn is **not** in group `input`, but an **ACL** grants `user:shawn:rw-` and a real
+`open(O_WRONLY)` succeeds. The capability gate that once reported "/dev/uinput present" was true
+and was not the question.
+
+**2. But uinput injects at the KERNEL, so events go wherever focus is** — not into a headless
+nested compositor that nobody can focus. **Routing input to the producer is the real open problem
+of §3.6**, and it is why CONTRACTS §7 has interaction OFF by default. The video half stands alone
+and is worth having without it.
+
+**3. The producer must publish packed RGB, or use DMA-BUF.** A producer left on its default
+`I420` rendered as **greyscale** — structurally perfect, no colour. Forcing `format=BGRx` gave
+correct colour bars immediately, on the `usingDmaBuf = false` shared-memory path. A real producer
+(a portal screencast) hands over DMA-BUF and does not hit this; a synthetic one must be told.
+
+### Packages
+`gst-plugin-pipewire` (72 KB) and `xdg-desktop-portal-wlr` (53 KB), both from `extra`, neither on
+the `IgnorePkg` pin list, installed with Shawn's explicit approval. `pacman -S` without `-y`, so no
+partial upgrade; the log shows only those two. `luminos-brain safe` first answered **NO citing
+"torch, xgboost, mt5linux"** — the documented false-NO of AGENTS.md open task 0b — and answered
+**YES** once the reason was attached.
+
+### Still to build for §3.6
+Spawn a producer under `cage` and give the scene its node id; reap it on deselect and on crash, no
+orphans; then input. `xdg-desktop-portal-wlr` is installed for the cage screencast but **not yet
+proven to work with cage** — it is packaged for wlroots compositors generally and was written for
+sway.
+
+### Cross-references
+CONTRACTS §7 (amended by findings 1 and 2) · SPEC §3.6 · DECISION 112 (the by-URL import rule) ·
+BUG-175 (why `grabToImage` proves nothing here — see below)
+
+**And a tool note worth keeping:** `grabToImage` returns a blank frame for anything the GPU
+composites — black for a `ShaderEffect` (BUG-175), white for a `PipeWireSourceItem`. That is twice.
+To see what such an item really draws, put it in a real window and capture the window
+(`spectacle -a -b -n -o file.png`), which also avoids photographing the whole desktop.

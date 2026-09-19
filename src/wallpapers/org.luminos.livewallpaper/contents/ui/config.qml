@@ -190,7 +190,8 @@ ColumnLayout {
                 { text: i18n("Spectrum (audio-reactive bars)"), val: "spectrum" },
                 { text: i18n("Canvas sample (JavaScript, no browser)"), val: "sample-canvasjs" },
                 { text: i18n("Shadertoy shader (pick a .frag below)"), val: "shadertoy" },
-                { text: i18n("Canvas wallpaper (pick a .js below)"), val: "canvasjs" }
+                { text: i18n("Canvas wallpaper (pick a .js below)"), val: "canvasjs" },
+                { text: i18n("PipeWire node (SPEC §3.6, experimental)"), val: "producer" }
             ]
             Component.onCompleted: {
                 var i = indexOfValue(root.cfg_QmlScene);

@@ -19,7 +19,8 @@ var BUILTINS = {
     "sysmon":    "scenes/SysMon.qml",
     "spectrum":  "scenes/Spectrum.qml",
     "shadertoy": "scenes/ShaderToy.qml",
-    "canvasjs":  "scenes/CanvasJs.qml"
+    "canvasjs":  "scenes/CanvasJs.qml",
+    "producer":  "scenes/Producer.qml"
 };
 
 // A .frag / .glsl typed into the scene box is not a QML file — it is a shader,

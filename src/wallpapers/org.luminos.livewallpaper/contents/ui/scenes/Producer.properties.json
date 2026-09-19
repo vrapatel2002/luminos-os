@@ -1,0 +1,11 @@
+{
+  "nodeId": {
+    "type": "textbox",
+    "label": "PipeWire node id",
+    "value": ""
+  },
+  "note": {
+    "type": "label",
+    "value": "SPEC §3.6, first slice: the consumer end. Point it at any PipeWire video node — `pw-dump` lists them — and that is your wallpaper. Spawning a game under cage, reaping it, and routing input are still to come."
+  }
+}
