@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 3 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 4 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -80,10 +80,11 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (a KPackage must be self-contained; the lock screen loads the same package). Cached by content
   hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is built with `Qt.createQmlObject`, which is
   what makes §3.2 real for an arbitrary shader — a QML object cannot gain a property at runtime.
-- **BUG-168 / BUG-169 / BUG-170 / BUG-171 / BUG-172 / BUG-173 all fixed.** BUG-171 (a deploy is
+- **BUG-168 / BUG-169 / BUG-170 / BUG-171 / BUG-172 / BUG-173 / BUG-174 all fixed.** BUG-171 (a deploy is
   not a load) and BUG-173 (every settings row drew a label and no control) are why the eyes-on
   session kept failing — read both before re-testing. BUG-173 is now covered without a person by
-  `tests/wallpaper/editor_contract.qml`.
+  `tests/wallpaper/editor_contract.qml` (10 checks), which also guards BUG-174 — the colour
+  picker that could not be closed.
 - **`scripts/luminos-wallpaper-cost`** — is `libQt6WebEngineCore` mapped into plasmashell at all,
   PSS from `smaps_rollup`, CPU as a percentage of one core, with BUG-083's Chromium-era numbers
   alongside. Package/manifest layer (`luminos-wallpaper-pkg`) and the capability gate
@@ -108,7 +109,7 @@ Nothing is half-written. Everything is deployed and `diff -rq` clean.
 **The three eyes-only checks in `docs/wallpaper/VERIFY.md` are still unconfirmed.** Two separate
 faults have invalidated every attempt so far: BUG-171 (clicking on QML compiled before the fixes
 landed) and BUG-173 (the panel really did render labels with no controls). Both are fixed and
-plasmashell was restarted at **16:21:56** with everything in place, so they are ready to try again:
+plasmashell was restarted at **16:30** with everything in place, so they are ready to try again:
 
 1. **Native QML → Spectrum**, desktop visible, music playing → 64 bars moving, purple wash on bass,
    faint flash on the beat.
@@ -171,6 +172,15 @@ maximized window, and a frozen audio scene shows flat bars by design (BUG-172).
   The tell: a `[LUMINOS-WP]` journal line whose wording differs from the source on disk.
 - **BUG-172 — a warning that cannot tell "off on purpose" from "broken" is noise.** The spectrum
   scene accused the audio stack every time a window was maximized.
+- **BUG-174 — bind a control's value and write back from a PROPERTY-CHANGE signal and you have a
+  loop; write back from a USER-ACTION signal and you do not.** `onMoved`, `onActivated`,
+  `onEditingFinished`, `onToggled` are safe. `KQuickControls.ColorButton` has no user-action signal
+  — `onColorChanged` fires for a programmatic change too — so its value must be set once,
+  imperatively, never bound. Bound, it loops the internal ColorDialog's `selectedColor` and the
+  dialog can be neither accepted nor cancelled: the whole System Settings window is stranded.
+- **The settings page is NOT in plasmashell.** `config.qml` runs in `systemsettings` (or whatever
+  opened the dialog), so BUG-171's restart rule applies per process — quit System Settings and
+  reopen it after any `config.qml` change. Its journal tag is `systemsettings`.
 - **BUG-173 — in a Repeater delegate, the delegate's OWN properties resolve before the enclosing
   component's ids.** A `property string ctl` on the delegate shadowed `id: ctl` outside it, so
   `sourceComponent` was `undefined` and every row loaded nothing — and a Loader that loads nothing
@@ -250,6 +260,7 @@ maximized window, and a frozen audio scene shows flat bars by design (BUG-172).
 - **Installed copy:** `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` — keep it
   `diff -rq` clean against the repo, and restart plasmashell after touching it.
 - **This turn:** `ui/scenes/Spectrum.qml` (BUG-172), `ui/props/PropertyEditor.qml` (BUG-173),
+  `ui/props/PropertyControls.qml` + `ui/config.qml` (BUG-174),
   new `tests/wallpaper/editor_contract.qml`, `scripts/luminos-wallpaper-selftest` (adds it, and
   `QT_FORCE_STDERR_LOGGING=1` so a failing contract test can actually say why),
   `docs/BUGS.md` (BUG-171/172/173), `docs/wallpaper/VERIFY.md`, `LUMINOS_STATUS.md`, `HANDOFF.md`.

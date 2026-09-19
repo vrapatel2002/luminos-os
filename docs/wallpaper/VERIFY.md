@@ -23,7 +23,7 @@ pasting.
 | 1 | the package | every file installed, and the installed copy `diff -rq` clean against the repo |
 | 2 | scene settings (SPEC §3.2) | `Spectrum.qml` and the sample shader both return `OK {…}`. **`NONE` for Spectrum is a failure** — it ships six controls |
 | 3 | runtime shaders (SPEC §3.4) | `qsb` present, the sample shader compiles, the `.qsb` really lands in `~/.cache/luminos/wallpaper-shaders/` |
-| 4 | QML contracts | `audio_contract` 22 checks, `props_contract` 21 checks, `editor_contract` 6 checks (does a settings row actually RENDER a control — BUG-173), all exit 0 |
+| 4 | QML contracts | `audio_contract` 22 checks, `props_contract` 21 checks, `editor_contract` 10 checks (does a settings row actually RENDER a control — BUG-173 — and does the colour control avoid the binding that strands its dialog — BUG-174), all exit 0 |
 | 5 | the running wallpaper | Chromium **not** mapped into plasmashell. `libcava` mapped only when an audio scene is selected |
 | 6 | the journal | no `[LUMINOS-WP]` lines. Any that appear name the real fault — they are worth reading, not filtering |
 
@@ -41,9 +41,18 @@ install: the config dialog keeps re-using the component it compiled the first ti
 opened. BUG-171 cost a whole eyes-on session this way — three fixes were "tested" against
 the buggy code they had already replaced, with nothing anywhere saying so.
 
+And **the settings page is not in plasmashell.** `config.qml` is loaded by whatever opened the
+dialog — `systemsettings` if you went through System Settings. Restarting plasmashell does
+nothing for it; quit System Settings completely and reopen it (BUG-174).
+
 The tell, if you ever doubt it: **compare a `[LUMINOS-WP]` line in the journal against the
 source on disk.** If the wording differs, the process is running something else. Section [6]
-of the self test prints `installed files last written <ts>` for exactly this.
+of the self test prints `installed files last written <ts>` for exactly this. For the settings
+page the journal tag is `systemsettings`, not `plasmashell`:
+
+```bash
+journalctl --user -b -t systemsettings | grep -iE 'luminos|livewallpaper|binding loop'
+```
 
 ## What still needs a pair of eyes
 

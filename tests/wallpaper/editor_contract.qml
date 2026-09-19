@@ -23,6 +23,7 @@ Item {
     height: 700
 
     property int failures: 0
+    property string lastKey: ""
 
     function check(name, cond, got) {
         if (cond)
@@ -51,6 +52,7 @@ Item {
         width: harness.width
         schema: harness.everyType
         values: ({})
+        onChanged: function (key, value) { harness.lastKey = key; }
     }
 
     // Every Loader anywhere under the panel, with the key it was handed.
@@ -102,6 +104,35 @@ Item {
                 wrong.push("" + ld[k].item.pkey);
         }
         harness.check("every control was handed its own key", wrong.length === 0, wrong);
+
+        // ---- BUG-174: the colour control must NOT hold a live binding ----
+        // Every other control writes back from a user-action signal, so a
+        // binding on its value is safe. ColorButton's onColorChanged fires for
+        // a PROGRAMMATIC change too, so a binding that our own write-back
+        // re-evaluates loops its internal ColorDialog on selectedColor — and a
+        // looping dialog can be neither accepted nor cancelled. It strands the
+        // whole settings window. [CHANGE: claude-code | 2026-09-19]
+        var swatch = null;
+        for (var c = 0; c < ld.length; c++) {
+            if (ld[c].item !== null && ("" + ld[c].item.pkey) === "aColor")
+                swatch = ld[c].item;
+        }
+        harness.check("the colour row is there to test", swatch !== null, swatch);
+        if (swatch !== null) {
+            harness.check("colour control took its declared value",
+                          ("" + swatch.color).toLowerCase().indexOf("38bdf8") >= 0, "" + swatch.color);
+
+            var held = "" + swatch.color;
+            panel.values = ({ aColor: "#ff0000" });
+            harness.check("colour control does not re-bind from values (BUG-174)",
+                          ("" + swatch.color) === held,
+                          "moved " + held + " -> " + swatch.color + " — that binding loops the dialog");
+
+            harness.lastKey = "";
+            swatch.color = "#00ff00";
+            harness.check("changing the colour still reports it once",
+                          harness.lastKey === "aColor", harness.lastKey);
+        }
 
         console.log(harness.failures === 0
                     ? "PASS — the panel renders every control it declares"

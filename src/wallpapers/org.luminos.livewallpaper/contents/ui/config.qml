@@ -307,10 +307,21 @@ ColumnLayout {
 
         RowLayout {
             Kirigami.FormData.label: i18n("Background colour:")
+            // Set once, not bound: onColorChanged fires for a programmatic
+            // change too, so `color: <a value this handler writes>` loops
+            // ColorButton's internal ColorDialog and strands it open. BUG-174.
+            // [CHANGE: claude-code | 2026-09-19]
             KQuickControls.ColorButton {
                 id: colorButton
-                color: root.cfg_BackgroundColor
-                onColorChanged: root.cfg_BackgroundColor = color
+                property bool armed: false
+                Component.onCompleted: {
+                    color = root.cfg_BackgroundColor;
+                    armed = true;
+                }
+                onColorChanged: {
+                    if (colorButton.armed)
+                        root.cfg_BackgroundColor = "" + color;
+                }
             }
         }
 

@@ -40,12 +40,30 @@ QtObject {
             }
         }
     }
+    // The odd one out, and it has to be. Every other control writes back from a
+    // USER-ACTION signal — onMoved, onActivated, onEditingFinished, onToggled —
+    // which a programmatic change does not emit, so a binding on the value is
+    // safe. ColorButton has no such signal: onColorChanged fires however the
+    // colour got there. Bind `color` to a value our own write-back changes and
+    // ColorButton's internal ColorDialog loops on `selectedColor`, and the
+    // dialog can then be neither accepted nor cancelled. BUG-174.
+    // So the value is set ONCE, imperatively, when the key arrives.
+    // [CHANGE: claude-code | 2026-09-19]
     property Component color: Component {
         KQuickControls.ColorButton {
             property string pkey: ""
             property var pdef: ({})
-            color: "" + (controls.editor.val(pkey) || "#ffffff")
-            onColorChanged: controls.editor.changed(pkey, "" + color)
+            // False until the initial colour is in place, so loading the panel
+            // does not write a value nobody chose.
+            property bool armed: false
+            onPkeyChanged: {
+                color = "" + (controls.editor.val(pkey) || "#ffffff");
+                armed = true;
+            }
+            onColorChanged: {
+                if (armed)
+                    controls.editor.changed(pkey, "" + color);
+            }
         }
     }
     property Component dropdown: Component {

@@ -6713,3 +6713,60 @@ Sixth instrument failure in five days. The pattern is now unmistakable and worth
 **every one of these was a test that exercised the logic while the product was broken.** BUG-168
 bound no properties, BUG-170 read no files, BUG-173 rendered no controls — and the suite was green
 through all three. A check that never touches the thing the user looks at is not a check.
+
+---
+
+## BUG-174 — the colour picker could not be closed, by OK, Cancel or the X
+<!-- [CHANGE: claude-code | 2026-09-19] found by Shawn, with a screenshot -->
+
+**Status:** FIXED · **Severity:** stranded the whole System Settings window; only a kill got out ·
+**Files:** `contents/ui/props/PropertyControls.qml`, `contents/ui/config.qml`,
+`tests/wallpaper/editor_contract.qml`
+
+Clicking **Bar bottom** opened KDE's colour dialog, and then nothing closed it — not OK, not
+Cancel, not the window's X. The journal said why, at our own line:
+
+```
+QML ColorDialog: Binding loop detected for property "selectedColor":
+  .../contents/ui/props/PropertyControls.qml:47
+  .../contents/ui/config.qml:312
+```
+
+`KQuickControls.ColorButton` holds an internal `ColorDialog` whose `selectedColor` is bound to the
+button's `color`. We had written:
+
+```qml
+color: "" + (controls.editor.val(pkey) || "#ffffff")   // a binding
+onColorChanged: controls.editor.changed(pkey, "" + color)
+```
+
+Pick a colour → `onColorChanged` → `changed()` → the value is written to `SceneProperties` →
+`editor.val(pkey)` changes → the binding re-evaluates and re-assigns `color` → `onColorChanged`
+again. `selectedColor` is downstream of all of it, so the dialog never settles on a value and its
+accept and reject paths never complete.
+
+**Why only this control.** Every other one writes back from a **user-action** signal — `onMoved`,
+`onActivated`, `onEditingFinished`, `onToggled` — and none of those fire for a programmatic change,
+so a binding on the value is safe. `ColorButton` has no user-action signal: `onColorChanged` fires
+however the colour got there. That is the whole difference, and it is worth stating as a rule:
+
+> **Bind a control's value and write back from a property-change signal and you have a loop.
+> Write back from a user-action signal and you do not. If a control has no user-action signal,
+> set the value once, imperatively, and do not bind it.**
+
+#### Fix
+The colour control sets its value once, when the Loader hands it its key, and arms itself only
+after that so merely opening the panel does not write a colour nobody chose. Same treatment for
+`config.qml`'s **Background colour** button, which has carried this since July and had simply never
+been clicked.
+
+#### Regression check
+`editor_contract.qml` grew three checks: the colour control takes its declared value; **it does not
+move when `values` changes** (a binding there is the bug); and changing it still reports exactly
+once. Against the old code the middle one prints
+`moved #38bdf8 -> #ff0000 — that binding loops the dialog`.
+
+#### Also worth knowing
+The wallpaper settings page runs in **`systemsettings`**, not `plasmashell`. Restarting plasmashell
+does nothing for a `config.qml` change (BUG-171 applies per process): System Settings must be fully
+quit and reopened.
