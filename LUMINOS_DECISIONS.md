@@ -7496,3 +7496,53 @@ all three and fails on any disagreement (`test_props_read.py`).
 ### Cross-references
 BUG-170 · DECISION 118 (the properties layer) · DECISION 119 (same process pattern) ·
 CONTRACTS §4 · `tests/wallpaper/props_read_probe.qml` (the probe that settled it)
+
+---
+
+## DECISION 121 — the wallpaper's audio publish rate stays uncapped, because capping it measured WORSE
+<!-- [CHANGE: claude-code | 2026-09-19] SPEC §3.1, BUG-177's numbers -->
+
+**Rejected, with numbers.** Recorded so nobody tries it again on the same reasoning.
+
+BUG-177 established that the Spectrum scene costs **20.3 % of a core** with 128 bars and live
+audio, against **~24 %** for the Chromium web mode it replaced — the one number in the whole
+wallpaper effort that does not clearly beat what it replaced, and Shawn's standing constraint is
+that this stays light.
+
+A probe measured where that goes, rather than guessing:
+
+| what | CPU |
+|---|---|
+| cava + `AudioBridge`, no scene, nothing drawn | **4.6 %** |
+| 128 bars drawn, audio OFF (so they are static) | **2.0 %** |
+| 128 bars, audio ON | **20.3 %** |
+
+So ~14 % is neither cava nor drawing-once: it is **redrawing 128 gradient rectangles at
+2880×1800 every time new audio arrives**. A second probe measured that arrival rate at
+**84 Hz** — above anything an eye gets value from.
+
+The obvious move was to coalesce publishes to ~60 Hz, keeping the newest values so no peak is
+lost. Implemented, and measured at **57.2 Hz** confirmed. Then measured for cost, three samples
+each, alternating:
+
+| | samples | mean |
+|---|---|---|
+| uncapped, 84 Hz | 21.6 · 21.4 · 19.8 | **20.9 %** |
+| capped, 57 Hz | 25.9 · 23.0 · 22.1 | **23.7 %** |
+
+**Fewer publishes cost MORE, consistently, by about three points.** The likeliest reason is that
+the provider's own cadence batches into Qt's frame handling, and an independent coalescing timer
+adds wakeups out of phase with it — more scenegraph syncs, not fewer. Whatever the mechanism, the
+theory was wrong and the change was reverted whole.
+
+**What this leaves.** The real lever is not the rate, it is the 128 `Rectangle`s: the same data
+already exists as the 128×1 `AudioTexture` the shader path samples as `iChannel0`, and the shader
+scene draws a full-screen animation for **6.6 %**. Drawing the bars in one `ShaderEffect` — colours,
+bar count, beat flash all as uniforms, which the §3.4 pipeline already does for arbitrary shaders —
+is the candidate worth measuring next. It is a redesign of `Spectrum.qml`, so it gets its own pass.
+
+**Do not** re-attempt a publish-rate cap without first beating these numbers.
+
+### Cross-references
+BUG-177 (where the 20.3 % came from and why the first measurement of it was worthless) ·
+DECISION 117 (the audio layer) · CONTRACTS §2 · SPEC §9

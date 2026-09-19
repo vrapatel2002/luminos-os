@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 6 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 8 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -80,8 +80,9 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (a KPackage must be self-contained; the lock screen loads the same package). Cached by content
   hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is built with `Qt.createQmlObject`, which is
   what makes §3.2 real for an arbitrary shader — a QML object cannot gain a property at runtime.
-- **BUG-168 through BUG-175 and BUG-177 all fixed. BUG-176 is OPEN** (Show Desktop does not
-  unfreeze the wallpaper) — root-caused, deliberately not patched; see Next steps. BUG-171 (a deploy is
+- **BUG-168 through BUG-177 all fixed**, BUG-176 included: `org.kde.kwindowsystem` exports
+  `KWindowSystem.showingDesktop` as a notifiable QML singleton property, so Show Desktop now
+  unfreezes the wallpaper for one binding rather than a `qdbus6` poll. BUG-171 (a deploy is
   not a load) and BUG-173 (every settings row drew a label and no control) are why the eyes-on
   session kept failing — read both before re-testing. BUG-173 is now covered without a person by
   `tests/wallpaper/editor_contract.qml` (10 checks), which also guards BUG-174 — the colour
@@ -140,11 +141,13 @@ not.** The shader is a quarter of Chromium; Spectrum at 20.3 % is within noise o
 Shawn "far lighter than Chromium" without naming the scene.
 
 ## Next steps (ordered)
-1. **BUG-176 — decide how the wallpaper learns about Show Desktop.** KWin has the D-Bus property
-   `org.kde.KWin.showingDesktop`; `org.kde.taskmanager` exports no `ShowDesktop` type and
-   `P5Support.DataSource` has no D-Bus engine. Candidates: poll `qdbus6` through the executable
-   engine **only while `coverLevel > 0`** (cheap precisely because the thing is frozen, but ugly),
-   or find a Plasma-internal import that exposes it. This is a DECISION, not a patch.
+1. **Spectrum on the GPU — the one number that does not beat Chromium.** 128 bars + live audio is
+   **20.3 %** of a core against web mode's ~24 %. Measured breakdown: cava alone 4.6 %, the bars
+   drawn once 2.0 %, so ~14 % is redrawing 128 gradient `Rectangle`s at 2880×1800 per audio tick.
+   **Capping the publish rate was tried and measured WORSE — see DECISION 121, do not redo it.**
+   The candidate is one `ShaderEffect` sampling the 128×1 `AudioTexture` we already build, with
+   colours / bar count / beat flash as uniforms — machinery §3.4 already has. The shader scene
+   costs 6.6 %. This is a redesign of `Spectrum.qml`, so it gets its own pass.
 2. **SPEC §3.5 — `.js` canvas wallpapers.** CONTRACTS §6 already froze the shim (canvas, ctx, rAF,
    `window.luminos`, `livelyAudioListener`, and a NAMED error for anything it does not provide).
    QML's `Canvas` is the same `getContext('2d')` API and QML has its own JS engine — no browser.
@@ -219,7 +222,12 @@ Shawn "far lighter than Chromium" without naming the scene.
   frozen, and printed `0.0%` beside Chromium's 24%. Fourth cry-wolf instrument this week and the
   only one that flattered us, which is the more dangerous direction.
 - **BUG-176 — Show Desktop is a PEEK, not a minimise.** `IsMinimized` stays false, so `coverLevel`
-  stays 1 and the wallpaper freezes while it is the only thing on screen. OPEN.
+  stays 1. Fixed via `KWindowSystem.showingDesktop`. The lesson: the first search concluded "no
+  clean API" after looking only in `org.kde.taskmanager`, where `coverLevel` already came from. The
+  answer was one module over, and `grep -rl showingDesktop /usr/lib/qt6/qml/` names it in one line.
+  **"No clean API exists" deserves one more grep than it usually gets.**
+- **DECISION 121 — do NOT cap the audio publish rate.** Tried, measured 57.2 Hz from 84 Hz as
+  intended, and cost MORE: 23.7 % mean against 20.9 % uncapped, three samples each. Reverted whole.
 - **The contract tests were MUTE.** Qt hands `console.log` to the journal when stderr is not a tty,
   so `qml6 … 2>&1` captured nothing and the self test's exit code was all it ever had.
   `QT_FORCE_STDERR_LOGGING=1`.
@@ -300,7 +308,8 @@ Shawn "far lighter than Chromium" without naming the scene.
   `QT_FORCE_STDERR_LOGGING=1` so a failing contract test can actually say why),
   `samples/luminos-shadertoy.frag{,.properties.json}` + `ui/props/ShaderBaker.qml` (BUG-175),
   `docs/BUGS.md` (BUG-171 through BUG-177), `scripts/luminos-wallpaper-cost` (BUG-177),
-  `docs/wallpaper/VERIFY.md`, `LUMINOS_STATUS.md`, `HANDOFF.md`.
+  `ui/main.qml` (BUG-176 — `KWindowSystem.showingDesktop`), `LUMINOS_DECISIONS.md` (121, the
+  rejected publish-rate cap), `docs/wallpaper/VERIFY.md`, `LUMINOS_STATUS.md`, `HANDOFF.md`.
 - **Docs:** `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG,VERIFY,SELFTEST.log}.md`,
   `LUMINOS_DECISIONS.md` (117–120), `docs/BUGS.md`, `LUMINOS_STATUS.md`, `docs/CODE_REFERENCE.md`.
 - **Verification:** `scripts/luminos-wallpaper-selftest` (30 checks) and `docs/wallpaper/VERIFY.md`.

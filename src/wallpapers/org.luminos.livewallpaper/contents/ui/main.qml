@@ -12,6 +12,7 @@
 import QtQuick
 import QtMultimedia
 import org.kde.plasma.plasmoid
+import org.kde.kwindowsystem
 import org.kde.plasma.plasma5support as P5Support
 import org.kde.taskmanager as TaskManager
 
@@ -32,6 +33,15 @@ WallpaperItem {
     // ObscurePolicy: 0 never freeze, 1 freeze only under a fullscreen window,
     // 2 freeze whenever the desktop is hidden at all (default).
     readonly property bool notVisible: {
+        // "Show Desktop" beats every window state, because it means the user is
+        // LOOKING at the wallpaper. It is a peek, not a minimise: KWin hides the
+        // windows compositor-side and sets this flag, while TasksModel still
+        // reports the window behind it as maximized. Without this the one
+        // shortcut that means "let me see my wallpaper" froze it — BUG-176.
+        // KWindowSystem is a QML singleton and showingDesktop is notifiable, so
+        // this costs a binding, not a poll. [CHANGE: claude-code | 2026-09-19]
+        if (KWindowSystem.showingDesktop)
+            return false;
         var p = root.configuration.ObscurePolicy;
         if (p <= 0) return false;
         if (p === 1) return coverLevel >= 2;

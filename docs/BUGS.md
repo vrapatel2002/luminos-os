@@ -6835,7 +6835,7 @@ nothing either way.
 ## BUG-176 — "Show Desktop" does not unfreeze the wallpaper, so looking at it stops it
 <!-- [CHANGE: claude-code | 2026-09-19] found while screenshotting the desktop to run VERIFY.md test 3 -->
 
-**Status:** OPEN — root-caused, not fixed (no clean QML route yet; see below) ·
+**Status:** FIXED 2026-09-19 ·
 **Severity:** press the one shortcut that means "let me look at my wallpaper" and it becomes a
 still image · **Files:** `contents/ui/main.qml`
 
@@ -6857,17 +6857,40 @@ Measured, not reasoned: two full-screen captures 3 s apart during a Show Desktop
 the same pair differed by a mean of **41 levels per channel**. The scene was animating the whole
 time; the freeze policy was stopping it.
 
-#### Why it is not fixed yet
-KWin publishes the state as the D-Bus property `org.kde.KWin.showingDesktop` (verified: it answers
-`false` from a plain `qdbus6` call), but `org.kde.taskmanager` exports no `ShowDesktop` type — its
-whole export list is `RegionFilterMode, Screencasting, ScreencastingRequest, AbstractTasksModel,
-ActivityInfo, TasksModel, VirtualDesktopInfo`. `P5Support.DataSource` has no D-Bus engine, so the
-routes are: poll `qdbus6` through the executable engine **only while coverLevel > 0** (a short-lived
-process every couple of seconds, which is affordable precisely because the thing is frozen, but
-ugly), or find a Plasma-internal import that exposes it. Picking one is a DECISION, not a patch, and
-Rule 1 says do not bolt it on in the middle of another task.
+#### Fix
+`org.kde.taskmanager` exports no `ShowDesktop` type — its whole export list is `RegionFilterMode,
+Screencasting, ScreencastingRequest, AbstractTasksModel, ActivityInfo, TasksModel,
+VirtualDesktopInfo` — and `P5Support.DataSource` has no D-Bus engine, so the first plan was an ugly
+`qdbus6` poll. **`org.kde.kwindowsystem` already exports exactly this**, as a QML **singleton** with
+`showingDesktop: bool` and a `showingDesktopChanged` notify signal. So it costs one binding, not a
+process:
 
-Workaround meanwhile: **Stop rendering when hidden → Never**, or un-maximize rather than peeking.
+```qml
+import org.kde.kwindowsystem
+readonly property bool notVisible: {
+    if (KWindowSystem.showingDesktop)   // the user is LOOKING at it
+        return false;
+    ...
+}
+```
+
+It is checked **before** `ObscurePolicy`, because Show Desktop is a stronger statement of intent
+than any window's maximized flag.
+
+#### Verified the same way it was found
+Same procedure, same `ObscurePolicy=2`, two full-screen captures three seconds apart during a peek,
+mean luma difference between them:
+
+| | YAVG |
+|---|---|
+| before the fix | **0** (byte-identical md5) |
+| after the fix | **32.85** |
+
+#### Lesson
+The first search for an API looked in the obvious place (`org.kde.taskmanager`, because that is
+where `coverLevel` already came from) and concluded there was none. The answer was one module over.
+**"No clean API exists" deserves one more grep than it usually gets** — here,
+`grep -rl showingDesktop /usr/lib/qt6/qml/`, which names the module in one line.
 
 ---
 
