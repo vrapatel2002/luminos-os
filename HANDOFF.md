@@ -1,5 +1,6 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 1 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 2 (new Cowork chat, counter restarted deliberately)
+<!-- Response 2 restated the VERIFY.md checklist for Shawn; no code, config or system change. -->
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter

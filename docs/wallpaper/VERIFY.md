@@ -51,8 +51,8 @@ The self test cannot see the screen. These three need a person, once:
 
 0. **Keep the desktop visible while you look.** `ObscurePolicy=2` (the default) freezes the
    wallpaper whenever a maximized window covers the desktop, and a frozen audio scene shows
-   flat bars by design (BUG-172). Un-maximize, or set *Freeze when hidden* to never, before
-   deciding the audio path is broken.
+   flat bars by design (BUG-172). Un-maximize, or set **Stop rendering when hidden:** to
+   *Never — keep rendering even when hidden*, before deciding the audio path is broken.
 1. **Native QML → Spectrum**, with music playing in any player — the bars should move, the
    backdrop should swell on bass, and there should be a faint flash on the beat.
 2. **Scene settings** at the bottom of the wallpaper settings dialog — Sensitivity, Bars,
