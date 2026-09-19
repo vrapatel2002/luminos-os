@@ -1,5 +1,5 @@
 Luminos live wallpaper — self test
-  2026-09-19T16:30:31-04:00   7.0.5-arch1-1   plugin: /home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents
+  2026-09-19T16:45:51-04:00   7.0.5-arch1-1   plugin: /home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents
 
 [1] the package
   PASS  installed ui/QmlMode.qml
@@ -29,8 +29,8 @@ Luminos live wallpaper — self test
 [3] runtime shaders (SPEC §3.4)
   PASS  qsb present
   PASS  sample shader compiles
-        UNIFORMS uTint:vec4 uSpeed:float
-  PASS  cached at /home/shawn/.cache/luminos/wallpaper-shaders/4dd3b0bb1ea9be3aa252f68051dca437.qsb
+        UNIFORMS uTint:vec4 uRings:float uSpeed:float
+  PASS  cached at /home/shawn/.cache/luminos/wallpaper-shaders/54ce94bf20a9493dd66d446874df7f94.qsb
 
 [4] QML contract tests
   PASS  audio_contract — exit 0, every check passed
@@ -38,18 +38,18 @@ Luminos live wallpaper — self test
   PASS  editor_contract — exit 0, every check passed
 
 [5] the running wallpaper
-  PASS  plasmashell pid 56482
+  PASS  plasmashell pid 63159
   PASS  Chromium not mapped
   PASS  libcava mapped — the audio path is live
         AudioReactive=true
-        QmlScene=spectrum
+        QmlScene=/home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents/samples/luminos-shadertoy.frag
         SceneProperties={"spectrum":{"lowColor":"#38bdf8","highColor":"#fa8b8b","bars":2,"sensitivity":3}}
         WallpaperMode=qml
 
 [6] what the wallpaper said
-  ..    installed files last written 2026-09-19 16:30:16 — older warnings are previous versions
+  ..    installed files last written 2026-09-19 16:45:21 — older warnings are previous versions
   PASS  no [LUMINOS-WP] warnings since this build was installed
-  ..    5 older line(s) in this boot, from previous versions
+  ..    6 older line(s) in this boot, from previous versions
 
 -----------------------------------------------------------
   31 passed, 0 failed

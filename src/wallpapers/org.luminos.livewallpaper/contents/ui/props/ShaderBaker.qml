@@ -51,12 +51,29 @@ Item {
     onSourceChanged: baker.start()
     Component.onCompleted: baker.start()
 
+    // An empty source at construction is NORMAL: the host binds `source` in its
+    // Loader's onLoaded, which runs after this object completes. Reporting it
+    // immediately printed "[LUMINOS-WP] shader: no shader file selected" on every
+    // single healthy load, and that line is what made a working Test 3 look like
+    // a failure — the same cry-wolf shape as BUG-172. So the empty case settles
+    // first, and only a source that is STILL empty is a real complaint.
+    // [CHANGE: claude-code | 2026-09-19] BUG-175
+    Timer {
+        id: emptySettle
+        interval: 1500
+        onTriggered: {
+            if (("" + baker.source).trim().length === 0)
+                baker.failed("no shader file selected");
+        }
+    }
+
     function start() {
         var f = ("" + baker.source).trim();
         if (f.length === 0) {
-            baker.failed("no shader file selected");
+            emptySettle.restart();
             return;
         }
+        emptySettle.stop();
         var path = f.indexOf("file://") === 0 ? f.substring(7) : f;
         runner.connectSource("python3 " + baker.shQuote(baker.tool) + " "
                              + baker.shQuote(path) + " "

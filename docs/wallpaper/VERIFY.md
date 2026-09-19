@@ -64,17 +64,28 @@ The self test cannot see the screen. These three need a person, once:
    *Never — keep rendering even when hidden*, before deciding the audio path is broken.
 1. **Native QML → Spectrum**, with music playing in any player — the bars should move, the
    backdrop should swell on bass, and there should be a faint flash on the beat.
-2. **Scene settings** at the bottom of the wallpaper settings dialog. **Labels with no
-   controls beside them is BUG-173** — `editor_contract.qml` now catches that without a
+2. **Scene settings** at the bottom of the wallpaper settings dialog. ✅ **Confirmed working
+   2026-09-19** — the live config carries
+   `SceneProperties={"spectrum":{"lowColor":"#38bdf8","highColor":"#fa8b8b","bars":2,"sensitivity":3}}`,
+   one key, exactly the CONTRACTS §4 shape. **Labels with no controls beside them is BUG-173** — `editor_contract.qml` now catches that without a
    person, so check the self test first. Sensitivity, Bars,
    Bar bottom, Bar top, Flash on beat. Changing Bars to 128 should visibly change the
    wallpaper, and the value should survive closing and reopening the dialog.
-3. **Shadertoy sample (audio-reactive)** from the Scene list — rings pulsing from the
-   cursor, and a *different* settings panel (Speed, Tint) because it comes from that
-   shader's own `properties.json`.
+3. **Shadertoy sample (audio-reactive)** from the Scene list — **concentric rings** centred
+   on the cursor, moving outward, and a *different* settings panel (Speed, **Ring density**,
+   Tint) because it comes from that shader's own `properties.json`. Drag **Ring density**
+   and the rings visibly tighten — that is one slider driving a GLSL uniform, which is the
+   whole of §3.4 plus §3.2 in one gesture.
+   A soft blue blob with one dark spot is what the sample looked like *before* BUG-175, when
+   its ring frequency was two cycles per screen. If you see that again, you are on an old
+   build — check the restart rule above.
 
 ## Things that are already known — please do not re-diagnose them
 
+- **A shader that looks wrong is not necessarily wrong.** `grabToImage` under
+  `QT_QPA_PLATFORM=offscreen` returns a black frame — there is no GPU — so it proves nothing
+  either way. Re-implement the shader's own arithmetic somewhere you can print it (numpy at the
+  panel's aspect ratio is enough) and compare against the screen. That is how BUG-175 was settled.
 - **Qt 6.11 blocks `XMLHttpRequest` on local files** (BUG-170). Do **not** fix anything by
   setting `QML_XHR_ALLOW_FILE_READ=1`: it is per-process and would give every QML object
   in plasmashell arbitrary local file reads. The reader is `contents/tools/luminos-wallpaper-props`.

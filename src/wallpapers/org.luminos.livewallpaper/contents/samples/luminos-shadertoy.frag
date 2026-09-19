@@ -17,7 +17,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // iChannel0 is the 128x1 spectrum: x = frequency, red channel = level.
     float spec = texture(iChannel0, vec2(clamp(abs(uv.x) * 1.4, 0.0, 1.0), 0.5)).r;
 
-    float rings = sin(d * (10.0 + iTreble * 20.0) - t * 6.0) * 0.5 + 0.5;
+    // uRings, not a literal 10.0. At 10 the whole 2880-wide screen holds about two
+    // ring cycles, which reads as a blurry blob rather than rings — the sample meant
+    // to PROVE §3.4 works looked like a broken gradient instead. It is a slider now,
+    // so it also demonstrates §3.2 on a shader. [CHANGE: claude-code | 2026-09-19]
+    float rings = sin(d * (uRings + iTreble * 20.0) - t * 6.0) * 0.5 + 0.5;
     vec3 col = mix(vec3(0.04, 0.05, 0.11), uTint.rgb, rings * 0.55);
     col += uTint.rgb * iAudioActive * (iBass * 0.5 + spec * 0.4) * smoothstep(1.0, 0.0, d);
     col += 0.06 * sin(uv.y * 6.0 - t * 3.0);

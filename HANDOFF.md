@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 4 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 5 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -80,7 +80,7 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (a KPackage must be self-contained; the lock screen loads the same package). Cached by content
   hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is built with `Qt.createQmlObject`, which is
   what makes §3.2 real for an arbitrary shader — a QML object cannot gain a property at runtime.
-- **BUG-168 / BUG-169 / BUG-170 / BUG-171 / BUG-172 / BUG-173 / BUG-174 all fixed.** BUG-171 (a deploy is
+- **BUG-168 through BUG-175 all fixed.** BUG-171 (a deploy is
   not a load) and BUG-173 (every settings row drew a label and no control) are why the eyes-on
   session kept failing — read both before re-testing. BUG-173 is now covered without a person by
   `tests/wallpaper/editor_contract.qml` (10 checks), which also guards BUG-174 — the colour
@@ -106,10 +106,16 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
 ## State — what is IN PROGRESS (and exactly where it was left off)
 Nothing is half-written. Everything is deployed and `diff -rq` clean.
 
-**The three eyes-only checks in `docs/wallpaper/VERIFY.md` are still unconfirmed.** Two separate
-faults have invalidated every attempt so far: BUG-171 (clicking on QML compiled before the fixes
-landed) and BUG-173 (the panel really did render labels with no controls). Both are fixed and
-plasmashell was restarted at **16:30** with everything in place, so they are ready to try again:
+**SPEC §3.2 (check 2) is CONFIRMED ON SCREEN** — the live config carries
+`SceneProperties={"spectrum":{"lowColor":"#38bdf8","highColor":"#fa8b8b","bars":2,"sensitivity":3}}`,
+one key, exactly the CONTRACTS §4 shape. **§3.4 is confirmed mechanically** (a `qml6` probe of the
+real `QmlMode` reports `failure=''` and a live `QQuickShaderEffect`) but not yet on screen with the
+legible sample. Checks 1 and 3 remain eyes-only.
+
+Four separate faults invalidated the earlier attempts: BUG-171 (clicking on QML compiled before the
+fixes landed), BUG-173 (the panel really did render labels with no controls), BUG-174 (the colour
+dialog could not be closed) and BUG-175 (the shader worked and looked broken). All fixed;
+plasmashell was restarted at **16:45** with everything in place:
 
 1. **Native QML → Spectrum**, desktop visible, music playing → 64 bars moving, purple wash on bass,
    faint flash on the beat.
@@ -118,8 +124,9 @@ plasmashell was restarted at **16:30** with everything in place, so they are rea
    Proof it stored correctly: `grep SceneProperties ~/.config/plasma-org.kde.plasma.desktop-appletsrc`
    should show **one** key, e.g. `SceneProperties={"spectrum":{"bars":2}}`. It is **absent right
    now**, which is consistent with no setting ever having been saved successfully.
-3. **Shadertoy sample (audio-reactive)** from the Scene list → rings pulsing from the cursor and a
-   *different* panel (Speed, Tint), read from that shader's own `properties.json`.
+3. **Shadertoy sample (audio-reactive)** from the Scene list → concentric rings centred on the
+   cursor and a *different* panel (Speed, **Ring density**, Tint), read from that shader's own
+   `properties.json`. Dragging Ring density tightens them — one slider driving a GLSL uniform.
 
 ⚠️ **Keep the desktop visible while looking.** `ObscurePolicy=2` freezes the wallpaper under any
 maximized window, and a frozen audio scene shows flat bars by design (BUG-172).
@@ -185,6 +192,13 @@ maximized window, and a frozen audio scene shows flat bars by design (BUG-172).
   component's ids.** A `property string ctl` on the delegate shadowed `id: ctl` outside it, so
   `sourceComponent` was `undefined` and every row loaded nothing — and a Loader that loads nothing
   is not an error. Never give a delegate property the same name as an id in the same file.
+- **BUG-175 — a warning emitted on a path that has not finished yet is indistinguishable from a
+  real fault.** `ShaderBaker` ran from `Component.onCompleted`, before the host binds `source` in
+  its Loader's `onLoaded`, so it printed `no shader file selected` on every healthy load. Third
+  cry-wolf checker this week; it nearly buried a feature that worked.
+- **`grabToImage` under `QT_QPA_PLATFORM=offscreen` returns a BLACK frame** — no GPU — so it proves
+  nothing about a shader either way. To check what a shader draws, re-implement its arithmetic
+  somewhere you can print (numpy at the panel's aspect ratio) and compare with the screen.
 - **The contract tests were MUTE.** Qt hands `console.log` to the journal when stderr is not a tty,
   so `qml6 … 2>&1` captured nothing and the self test's exit code was all it ever had.
   `QT_FORCE_STDERR_LOGGING=1`.
@@ -263,7 +277,9 @@ maximized window, and a frozen audio scene shows flat bars by design (BUG-172).
   `ui/props/PropertyControls.qml` + `ui/config.qml` (BUG-174),
   new `tests/wallpaper/editor_contract.qml`, `scripts/luminos-wallpaper-selftest` (adds it, and
   `QT_FORCE_STDERR_LOGGING=1` so a failing contract test can actually say why),
-  `docs/BUGS.md` (BUG-171/172/173), `docs/wallpaper/VERIFY.md`, `LUMINOS_STATUS.md`, `HANDOFF.md`.
+  `samples/luminos-shadertoy.frag{,.properties.json}` + `ui/props/ShaderBaker.qml` (BUG-175),
+  `docs/BUGS.md` (BUG-171 through BUG-175), `docs/wallpaper/VERIFY.md`, `LUMINOS_STATUS.md`,
+  `HANDOFF.md`.
 - **Docs:** `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG,VERIFY,SELFTEST.log}.md`,
   `LUMINOS_DECISIONS.md` (117–120), `docs/BUGS.md`, `LUMINOS_STATUS.md`, `docs/CODE_REFERENCE.md`.
 - **Verification:** `scripts/luminos-wallpaper-selftest` (30 checks) and `docs/wallpaper/VERIFY.md`.

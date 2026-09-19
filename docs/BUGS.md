@@ -6770,3 +6770,62 @@ once. Against the old code the middle one prints
 The wallpaper settings page runs in **`systemsettings`**, not `plasmashell`. Restarting plasmashell
 does nothing for a `config.qml` change (BUG-171 applies per process): System Settings must be fully
 quit and reopened.
+
+---
+
+## BUG-175 — the shader sample worked and looked broken, and its own journal line said so
+<!-- [CHANGE: claude-code | 2026-09-19] found by Shawn asking "is it supposed to be blurred?" -->
+
+**Status:** FIXED · **Severity:** SPEC §3.4 passed every check and could not be recognised as passing ·
+**Files:** `contents/samples/luminos-shadertoy.frag{,.properties.json}`,
+`contents/ui/props/ShaderBaker.qml`
+
+Shawn picked **Shadertoy sample (audio-reactive)**, expecting rings from the cursor, and got an
+enormous soft blue blob. He asked whether it was supposed to be blurred. The journal said:
+
+```
+[LUMINOS-WP] shader: no shader file selected
+```
+
+Both the picture and the log line said "broken". **Neither was.**
+
+#### What was actually happening
+A probe (`qml6`, the real `QmlMode` pointed at the sample) reported
+`scene.failure = ''` and `scene.effect = QQuickShaderEffect` — the shader compiled and ran.
+
+The picture was the shader, drawn correctly. The sample computed
+
+```glsl
+float rings = sin(d * (10.0 + iTreble * 20.0) - t * 6.0) * 0.5 + 0.5;
+```
+
+`uv` is normalised by `iResolution.y`, so `d` spans about 0…1.3 across the panel and `d * 10` is
+**about two ring cycles on a 2880-wide screen**. With nothing playing, `iTreble` is 0, so the
+frequency sits at that floor. Two cycles of a sine is not "rings", it is a gradient with a dark
+spot — and the dark spot sat upper-left because `iMouse` starts at the cursor origin.
+
+Confirmed by re-implementing the shader's own arithmetic in numpy at 1440×900 and rendering it:
+the result is Shawn's screenshot, band for band. **The shader was never wrong; the demo was.**
+
+#### Fix
+`10.0` becomes a `uRings` uniform, default **26**, exposed as a **Ring density** slider (4–60) in
+`luminos-shadertoy.properties.json` — so the sample now reads as rings at a glance *and*
+demonstrates §3.2 on a shader while it is at it. The baker re-packs std140 by itself
+(`UNIFORMS uTint:vec4 uRings:float uSpeed:float`) and Qt binds uniforms by name, so adding one
+needed no other change — which is the §3.4 promise working.
+
+#### The journal line was the worse half
+`ShaderBaker` ran `start()` from `Component.onCompleted`, when `source` is still empty — because
+the host binds `source` in its Loader's `onLoaded`, which runs **after** this object completes. So
+`no shader file selected` was printed on **every healthy load**, and then the real bake succeeded
+half a second later with nothing said. The empty case now settles for 1.5 s first; a source that is
+still empty after that is a genuine complaint and still reported. Verified both ways: silent for the
+sample, still speaks up for the `shadertoy` built-in with no file chosen.
+
+#### Lesson
+Same family as BUG-172, and the third time this week a checker has cried wolf: **a warning emitted
+on a path that has not finished yet is indistinguishable from a real fault, and it costs more than
+silence would.** This one nearly buried a feature that worked. And the general method that settled
+it is worth keeping: when a shader looks wrong, *re-implement its arithmetic somewhere you can
+print* and compare — an offscreen `grabToImage` returns black because there is no GPU, so it proves
+nothing either way.
