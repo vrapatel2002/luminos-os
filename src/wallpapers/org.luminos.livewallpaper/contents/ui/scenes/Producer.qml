@@ -64,15 +64,18 @@ Item {
             item.nodeId = Qt.binding(() => scene.nodeId);
             scene.failure = "";
         }
-        // Loaded is not the same as showing anything. kpipewire reports its own
-        // state, so report THAT rather than assuming a connected node is a
-        // visible one.
+        // Loaded is not the same as showing anything, so kpipewire's own `ready`
+        // is what decides — but ONLY a not-ready node is worth a line. The first
+        // version logged the happy path too, and the self test counted that
+        // success message as a warning: 34 passed, 1 failed, about nothing wrong.
+        // A healthy load says nothing. [CHANGE: claude-code | 2026-09-19]
         Connections {
             target: viewer.item
             ignoreUnknownSignals: true
             function onReadyChanged() {
-                console.log("[LUMINOS-WP] producer: node", scene.nodeId,
-                            "ready =", viewer.item.ready, "size =", viewer.item.streamSize);
+                if (!viewer.item.ready)
+                    console.warn("[LUMINOS-WP] producer: node " + scene.nodeId
+                                 + " is not delivering frames");
             }
         }
     }
