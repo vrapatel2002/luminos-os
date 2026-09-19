@@ -164,8 +164,14 @@ ColumnLayout {
             onActivated: {
                 if (currentValue === "shadertoy")
                     sceneDialog.open();
-                else if (currentValue === "sample-shadertoy")
+                else if (currentValue === "sample-shadertoy") {
                     root.cfg_QmlScene = root.samplesDir + "/luminos-shadertoy.frag";
+                    // The entry says audio-reactive, and audio is opt-in and off by
+                    // default — so without this the sample renders and never reacts,
+                    // which reads as broken. Choosing it IS the opt-in, and the
+                    // checkbox below visibly shows what happened.
+                    root.cfg_AudioReactive = true;
+                }
                 else
                     root.cfg_QmlScene = currentValue;
             }
