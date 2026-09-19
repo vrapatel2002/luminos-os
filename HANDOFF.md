@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 5 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 6 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -80,7 +80,8 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (a KPackage must be self-contained; the lock screen loads the same package). Cached by content
   hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is built with `Qt.createQmlObject`, which is
   what makes §3.2 real for an arbitrary shader — a QML object cannot gain a property at runtime.
-- **BUG-168 through BUG-175 all fixed.** BUG-171 (a deploy is
+- **BUG-168 through BUG-175 and BUG-177 all fixed. BUG-176 is OPEN** (Show Desktop does not
+  unfreeze the wallpaper) — root-caused, deliberately not patched; see Next steps. BUG-171 (a deploy is
   not a load) and BUG-173 (every settings row drew a label and no control) are why the eyes-on
   session kept failing — read both before re-testing. BUG-173 is now covered without a person by
   `tests/wallpaper/editor_contract.qml` (10 checks), which also guards BUG-174 — the colour
@@ -106,35 +107,44 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
 ## State — what is IN PROGRESS (and exactly where it was left off)
 Nothing is half-written. Everything is deployed and `diff -rq` clean.
 
-**SPEC §3.2 (check 2) is CONFIRMED ON SCREEN** — the live config carries
-`SceneProperties={"spectrum":{"lowColor":"#38bdf8","highColor":"#fa8b8b","bars":2,"sensitivity":3}}`,
-one key, exactly the CONTRACTS §4 shape. **§3.4 is confirmed mechanically** (a `qml6` probe of the
-real `QmlMode` reports `failure=''` and a live `QQuickShaderEffect`) but not yet on screen with the
-legible sample. Checks 1 and 3 remain eyes-only.
+**ALL FOUR EYES-ON CHECKS ARE CONFIRMED ON SCREEN (2026-09-19).** The gap `docs/wallpaper/VERIFY.md`
+was written around is closed: **a Cowork session CAN see the display** through the host shell.
 
-Four separate faults invalidated the earlier attempts: BUG-171 (clicking on QML compiled before the
-fixes landed), BUG-173 (the panel really did render labels with no controls), BUG-174 (the colour
-dialog could not be closed) and BUG-175 (the shader worked and looked broken). All fixed;
-plasmashell was restarted at **16:45** with everything in place:
+```bash
+export XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+export WAYLAND_DISPLAY=wayland-0 DISPLAY=:0     # spectacle CORE-DUMPS without the first
+qdbus6 org.kde.kglobalaccel /component/kwin invokeShortcut "Show Desktop"
+spectacle -b -n -f -o /tmp/shot.png
+```
 
-1. **Native QML → Spectrum**, desktop visible, music playing → 64 bars moving, purple wash on bass,
-   faint flash on the beat.
-2. **Scene settings** at the bottom of the wallpaper dialog → Sensitivity / Bars / Bar bottom /
-   Bar top / Flash on beat. `Bars` → 128 visibly doubles them; the value survives reopening.
-   Proof it stored correctly: `grep SceneProperties ~/.config/plasma-org.kde.plasma.desktop-appletsrc`
-   should show **one** key, e.g. `SceneProperties={"spectrum":{"bars":2}}`. It is **absent right
-   now**, which is consistent with no setting ever having been saved successfully.
-3. **Shadertoy sample (audio-reactive)** from the Scene list → concentric rings centred on the
-   cursor and a *different* panel (Speed, **Ring density**, Tint), read from that shader's own
-   `properties.json`. Dragging Ring density tightens them — one slider driving a GLSL uniform.
+- **Test 1 — audio: PASS.** Pink noise from `ffmpeg -f lavfi -i anoisesrc=color=pink` + `paplay`;
+  128 bars responding, and a PipeWire capture stream open against the sink monitor.
+- **Test 2 — per-scene settings: PASS, twice over.** `SceneProperties={"spectrum":{"lowColor":
+  "#38bdf8","highColor":"#fa8b8b","bars":2,"sensitivity":3}}` — one key, CONTRACTS §4 shape — and
+  the bars on screen are 128 wide, blue-bottomed, pink-topped. The same screenshot proves 1 and 2.
+- **Test 3 — runtime shaders: PASS.** Concentric rings centred on the cursor; two captures 3 s
+  apart differ by a mean of 41 levels per channel, so it animates.
+- **Test 4 — cost: PASS with a caveat (BUG-177).** Numbers below.
 
-⚠️ **Keep the desktop visible while looking.** `ObscurePolicy=2` freezes the wallpaper under any
-maximized window, and a frozen audio scene shows flat bars by design (BUG-172).
+**The cost, taken honestly — and it does NOT all go our way:**
+
+| scene | CPU rendering | PSS |
+|---|---|---|
+| Shadertoy sample (GPU shader) | **6.6 %** of a core | 135 MB |
+| Spectrum, 128 bars + live audio | **20.3 %** of a core | 143 MB |
+| any scene, frozen by ObscurePolicy | 0.0 % | 136 MB |
+| Chromium web mode (BUG-083) | ~24 % | ~810 MB **RSS** |
+
+**Memory is a rout — 135–143 MB PSS against ~810 MB RSS, and PSS is the stricter measure. CPU is
+not.** The shader is a quarter of Chromium; Spectrum at 20.3 % is within noise of it. Do not tell
+Shawn "far lighter than Chromium" without naming the scene.
 
 ## Next steps (ordered)
-1. **Get the three eyes-on checks confirmed** (above). If any fails, the journal is the answer:
-   `journalctl --user -b -t plasmashell | grep LUMINOS-WP` — and check the wording against the file
-   on disk before believing it (BUG-171).
+1. **BUG-176 — decide how the wallpaper learns about Show Desktop.** KWin has the D-Bus property
+   `org.kde.KWin.showingDesktop`; `org.kde.taskmanager` exports no `ShowDesktop` type and
+   `P5Support.DataSource` has no D-Bus engine. Candidates: poll `qdbus6` through the executable
+   engine **only while `coverLevel > 0`** (cheap precisely because the thing is frozen, but ugly),
+   or find a Plasma-internal import that exposes it. This is a DECISION, not a patch.
 2. **SPEC §3.5 — `.js` canvas wallpapers.** CONTRACTS §6 already froze the shim (canvas, ctx, rAF,
    `window.luminos`, `livelyAudioListener`, and a NAMED error for anything it does not provide).
    QML's `Canvas` is the same `getContext('2d')` API and QML has its own JS engine — no browser.
@@ -199,6 +209,17 @@ maximized window, and a frozen audio scene shows flat bars by design (BUG-172).
 - **`grabToImage` under `QT_QPA_PLATFORM=offscreen` returns a BLACK frame** — no GPU — so it proves
   nothing about a shader either way. To check what a shader draws, re-implement its arithmetic
   somewhere you can print (numpy at the panel's aspect ratio) and compare with the screen.
+- **A Cowork session CAN see the screen** — `spectacle -b -n -f` over the host shell. It
+  **core-dumps without `WAYLAND_DISPLAY=wayland-0`**, same class of trap as `qml6` needing
+  `QT_QPA_PLATFORM=offscreen`. And screenshot the DESKTOP, not the screen: the first animation
+  check compared two captures that were mostly the Claude window, "proved" motion, and proved only
+  that a clock had ticked.
+- **BUG-177 — a measurement taken in a state the feature does not normally occupy is not a
+  measurement.** `luminos-wallpaper-cost` run from a terminal samples a wallpaper the terminal has
+  frozen, and printed `0.0%` beside Chromium's 24%. Fourth cry-wolf instrument this week and the
+  only one that flattered us, which is the more dangerous direction.
+- **BUG-176 — Show Desktop is a PEEK, not a minimise.** `IsMinimized` stays false, so `coverLevel`
+  stays 1 and the wallpaper freezes while it is the only thing on screen. OPEN.
 - **The contract tests were MUTE.** Qt hands `console.log` to the journal when stderr is not a tty,
   so `qml6 … 2>&1` captured nothing and the self test's exit code was all it ever had.
   `QT_FORCE_STDERR_LOGGING=1`.
@@ -278,8 +299,8 @@ maximized window, and a frozen audio scene shows flat bars by design (BUG-172).
   new `tests/wallpaper/editor_contract.qml`, `scripts/luminos-wallpaper-selftest` (adds it, and
   `QT_FORCE_STDERR_LOGGING=1` so a failing contract test can actually say why),
   `samples/luminos-shadertoy.frag{,.properties.json}` + `ui/props/ShaderBaker.qml` (BUG-175),
-  `docs/BUGS.md` (BUG-171 through BUG-175), `docs/wallpaper/VERIFY.md`, `LUMINOS_STATUS.md`,
-  `HANDOFF.md`.
+  `docs/BUGS.md` (BUG-171 through BUG-177), `scripts/luminos-wallpaper-cost` (BUG-177),
+  `docs/wallpaper/VERIFY.md`, `LUMINOS_STATUS.md`, `HANDOFF.md`.
 - **Docs:** `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG,VERIFY,SELFTEST.log}.md`,
   `LUMINOS_DECISIONS.md` (117–120), `docs/BUGS.md`, `LUMINOS_STATUS.md`, `docs/CODE_REFERENCE.md`.
 - **Verification:** `scripts/luminos-wallpaper-selftest` (30 checks) and `docs/wallpaper/VERIFY.md`.

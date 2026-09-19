@@ -54,9 +54,57 @@ page the journal tag is `systemsettings`, not `plasmashell`:
 journalctl --user -b -t systemsettings | grep -iE 'luminos|livewallpaper|binding loop'
 ```
 
-## What still needs a pair of eyes
+## ✅ All four checks CONFIRMED ON SCREEN — 2026-09-19
+<!-- [CHANGE: claude-code | 2026-09-19] -->
 
-The self test cannot see the screen. These three need a person, once:
+A Cowork session with the host shell **can** see the screen after all, which closes the gap this
+section was written around. The method, for next time:
+
+```bash
+export XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+export WAYLAND_DISPLAY=wayland-0 DISPLAY=:0        # the host shell has NEITHER by default
+qdbus6 org.kde.kglobalaccel /component/kwin invokeShortcut "Show Desktop"
+spectacle -b -n -f -o /tmp/shot.png                # -b background, -n no notification, -f full
+```
+
+`spectacle` **aborts (core dump) without `WAYLAND_DISPLAY`** — the same class of trap as `qml6`
+needing `QT_QPA_PLATFORM=offscreen`. Play audio for the spectrum check with
+`ffmpeg -f lavfi -i "anoisesrc=color=pink" …` into `paplay`; pink noise lights every band.
+
+⚠️ **Screenshot the DESKTOP, not the screen.** The first attempt at the animation check compared
+two captures that were mostly the Claude window, "proved" motion, and proved only that a clock had
+ticked. Peek the desktop first, and prefer comparing md5s of a known-static region.
+
+| # | check | result |
+|---|-------|--------|
+| 1 | Spectrum, audio playing | **PASS** — 128 bars responding, and rendered in the saved colours |
+| 2 | Scene settings persist and apply | **PASS** — `SceneProperties={"spectrum":{…}}`, one key, and the live wallpaper draws 128 bars blue→pink exactly as saved |
+| 3 | Shadertoy sample | **PASS** — concentric rings centred on the cursor, animating (mean 41/channel between frames 3 s apart) |
+| 4 | Cost | **PASS, with a caveat worth reading** — see BUG-177: memory is a rout, CPU is not |
+
+Test 1 and test 2 confirm each other: the bars on screen are blue-bottomed and pink-topped at 128
+wide, which are the values saved from the settings panel. One screenshot proves both.
+
+## Taking test 4 honestly
+
+`luminos-wallpaper-cost` run from a terminal measures a **frozen** wallpaper, because the terminal
+covers the desktop and `ObscurePolicy=2` stops it (BUG-177). The script now says so. Real numbers,
+2880×1800:
+
+| scene | CPU rendering | PSS |
+|---|---|---|
+| Shadertoy sample (GPU shader) | 6.6 % of a core | 135 MB |
+| Spectrum, 128 bars + audio | 20.3 % of a core | 143 MB |
+| frozen | 0.0 % | 136 MB |
+| Chromium web mode (BUG-083) | ~24 % | ~810 MB RSS |
+
+**Memory: 135–143 MB PSS vs ~810 MB RSS, and PSS is the stricter measure. CPU: the shader wins
+clearly, the Spectrum scene does not.** Do not say "far lighter than Chromium" without naming which
+scene.
+
+## What used to need a pair of eyes
+
+Kept for the description of what "working" looks like:
 
 0. **Keep the desktop visible while you look.** `ObscurePolicy=2` (the default) freezes the
    wallpaper whenever a maximized window covers the desktop, and a frozen audio scene shows

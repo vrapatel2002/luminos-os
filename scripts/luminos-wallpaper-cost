@@ -19,7 +19,9 @@ _HZ = os.sysconf("SC_CLK_TCK") or 100
 _CONFIG = "~/.config/plasma-org.kde.plasma.desktop-appletsrc"
 _PLUGIN = "org.luminos.livewallpaper"
 _DEFAULTS = {"WallpaperMode": "image", "QmlScene": "shader",
-             "AudioReactive": "false", "SceneProperties": "{}"}
+             "AudioReactive": "false", "SceneProperties": "{}",
+             # Same default as config/main.xml: freeze whenever the desktop is hidden.
+             "ObscurePolicy": "2"}
 _BASELINE = (
     "BUG-083, 2026-07-24, web mode with Chromium: ~24% of a core visible, ~810 MB RSS.\n"
     "  DECISION 113 replaced the bundled effects with native QML; DECISION 112 made\n"
@@ -113,9 +115,34 @@ def report(pid, cfg, seconds):
     print("  audio stack    %s" % audio_line(pid))
     pss = pss_kb(pid)
     print("  PSS            %s" % ("%.0f MB" % (pss / 1024.0) if pss else "unreadable"))
+    policy = str(setting(cfg, "ObscurePolicy"))
+    print("  freeze policy  %s" % _FREEZE.get(policy, policy))
     print("  sampling CPU for %ds ..." % seconds)
     cpu = sample(pid, seconds)
     print("  CPU            %s" % ("%.1f%% of one core" % cpu if cpu is not None else "unreadable"))
+    frozen_note(cpu, policy)
+
+
+# A wallpaper frozen by ObscurePolicy costs nothing, and "0.0% of one core" next to
+# Chromium's 24% reads as a triumph. It is not a measurement of anything. Say so
+# rather than letting the number flatter us. [CHANGE: claude-code | 2026-09-19] BUG-177
+_FREEZE = {
+    "0": "0 — never freeze",
+    "1": "1 — freeze only under a FULLSCREEN window",
+    "2": "2 — freeze whenever the desktop is hidden (the default)",
+}
+
+def frozen_note(cpu, policy):
+    if cpu is None or cpu >= 0.5 or policy == "0":
+        return
+    print("")
+    print("  ^ that is a FROZEN sample, not a cost.")
+    print("    Freeze policy %s stops the wallpaper whenever anything is maximized over" % policy)
+    print("    the desktop \u2014 including the terminal you are reading this in. 0% is what")
+    print("    the policy is FOR; it is not comparable to the Chromium figure below,")
+    print("    which was measured with the wallpaper visible.")
+    print("    To measure the real cost: un-cover the desktop, or set")
+    print("    \"Stop rendering when hidden\" to Never, and run this again.")
 
 def footer(cfg):
     if cfg.get("WallpaperMode", _DEFAULTS["WallpaperMode"]) != "qml":

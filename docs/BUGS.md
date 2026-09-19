@@ -6829,3 +6829,89 @@ silence would.** This one nearly buried a feature that worked. And the general m
 it is worth keeping: when a shader looks wrong, *re-implement its arithmetic somewhere you can
 print* and compare — an offscreen `grabToImage` returns black because there is no GPU, so it proves
 nothing either way.
+
+---
+
+## BUG-176 — "Show Desktop" does not unfreeze the wallpaper, so looking at it stops it
+<!-- [CHANGE: claude-code | 2026-09-19] found while screenshotting the desktop to run VERIFY.md test 3 -->
+
+**Status:** OPEN — root-caused, not fixed (no clean QML route yet; see below) ·
+**Severity:** press the one shortcut that means "let me look at my wallpaper" and it becomes a
+still image · **Files:** `contents/ui/main.qml`
+
+`coverLevel` is computed entirely from `TaskManager.TasksModel`, per window:
+
+```qml
+readonly property int cover: model.IsMinimized ? 0
+                           : model.IsFullScreen ? 2
+                           : model.IsMaximized ? 1 : 0
+```
+
+**Show Desktop is a peek, not a minimise.** KWin hides the windows compositor-side and sets its own
+`showingDesktop` property; `IsMinimized` stays false and the maximized window still reports
+`IsMaximized`. So `coverLevel` stays 1, `ObscurePolicy=2` keeps `shouldPlay` false, and the
+wallpaper is frozen **while it is the only thing on screen.**
+
+Measured, not reasoned: two full-screen captures 3 s apart during a Show Desktop peek were
+**byte-identical** (same md5) at `ObscurePolicy=2`. With `ObscurePolicy=0` and nothing else changed,
+the same pair differed by a mean of **41 levels per channel**. The scene was animating the whole
+time; the freeze policy was stopping it.
+
+#### Why it is not fixed yet
+KWin publishes the state as the D-Bus property `org.kde.KWin.showingDesktop` (verified: it answers
+`false` from a plain `qdbus6` call), but `org.kde.taskmanager` exports no `ShowDesktop` type — its
+whole export list is `RegionFilterMode, Screencasting, ScreencastingRequest, AbstractTasksModel,
+ActivityInfo, TasksModel, VirtualDesktopInfo`. `P5Support.DataSource` has no D-Bus engine, so the
+routes are: poll `qdbus6` through the executable engine **only while coverLevel > 0** (a short-lived
+process every couple of seconds, which is affordable precisely because the thing is frozen, but
+ugly), or find a Plasma-internal import that exposes it. Picking one is a DECISION, not a patch, and
+Rule 1 says do not bolt it on in the middle of another task.
+
+Workaround meanwhile: **Stop rendering when hidden → Never**, or un-maximize rather than peeking.
+
+---
+
+## BUG-177 — the cost script reported a frozen wallpaper as 0.0% and let it read as a triumph
+<!-- [CHANGE: claude-code | 2026-09-19] found by Shawn running VERIFY.md test 4 -->
+
+**Status:** FIXED · **Severity:** the one number that answers Shawn's standing "is it lighter than
+Chromium" question was meaningless and looked excellent · **Files:** `scripts/luminos-wallpaper-cost`
+
+Shawn ran the cost check from a terminal — which was, necessarily, covering the desktop. At
+`ObscurePolicy=2` that freezes the wallpaper, so the script sampled ten seconds of a wallpaper that
+was deliberately doing nothing and printed:
+
+```
+  CPU            0.0% of one core
+for comparison:
+  BUG-083 … web mode with Chromium: ~24% of a core visible
+```
+
+0.0 against 24 reads as a rout. It measured nothing. **Every** run of this script from a terminal
+had this problem, which means the script could never have answered the question it exists for.
+
+#### Fix
+It now prints the freeze policy as a line of its own, and when CPU is under 0.5 % with freezing
+enabled it says in as many words that this is a frozen sample, not a cost, that 0 % is what the
+policy is *for*, and how to take a real measurement.
+
+#### The numbers, taken properly (2026-09-19, G14, 2880×1800)
+
+| what | CPU, rendering | PSS |
+|---|---|---|
+| Shadertoy sample (GPU shader) | **6.6 %** of a core | 135 MB |
+| Spectrum, 128 bars + live audio | **20.3 %** of a core | 143 MB |
+| any scene, frozen by ObscurePolicy | 0.0 % | 136 MB |
+| web mode with Chromium (BUG-083) | ~24 % | ~810 MB **RSS** |
+
+**Memory is the rout: 135–143 MB PSS against ~810 MB RSS**, and PSS is the stricter measure of the
+two. **CPU is not a rout.** The shader is a quarter of Chromium's cost, but the Spectrum scene at
+20.3 % is within noise of it — 128 animated bars at 2880×1800 is genuinely expensive, and saying
+"far lighter than Chromium" without naming the scene would be a claim the numbers do not support.
+Worth revisiting if §3.5 or §3.6 changes the mix.
+
+#### Lesson
+Fourth cry-wolf instrument this week, and the only one that flattered us instead of alarming us —
+which is the more dangerous direction. **A measurement taken in a state the feature does not
+normally occupy is not a measurement**, and a checker that cannot tell "off on purpose" from "cheap"
+will happily confirm whatever you hoped.
