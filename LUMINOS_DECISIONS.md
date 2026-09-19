@@ -7462,3 +7462,37 @@ hits the cache. Suite is now **58 passed**.
 ### Cross-references
 SPEC §3.4, §3.2 · CONTRACTS §1, §2 · DECISION 118 (the deferred half, now done) · DECISION 117
 (`iChannel0` is the audio texture) · DECISION 112/113 · `scripts/luminos-wallpaper-cost`
+
+## DECISION 120 — the wallpaper reads its own settings files through a tool, not through QML
+<!-- [CHANGE: claude-code | 2026-09-19] BUG-170, SPEC §3.2 -->
+
+**Qt 6.11 disables `XMLHttpRequest` on local files** unless `QML_XHR_ALLOW_FILE_READ=1`
+is set for the process. QML has no other built-in file reader, so a wallpaper that must
+load a JSON file beside a scene has exactly three options:
+
+1. **Set the environment variable for plasmashell.** Rejected: it is per-process, so it
+   would grant every QML object in the shell arbitrary local file reads through XHR to
+   save one settings file, and it is an environment change that AGENTS.md §9 would have
+   to carry for ever.
+2. **Stop using JSON** — ship each schema as a `.qml` file. Rejected: `properties.json`
+   is CONTRACTS §4 and the shape Lively uses, and SPEC §3.3 imports third-party
+   `LivelyProperties.json` from packages we did not build.
+3. **Read it in a process.** Chosen.
+
+`contents/tools/luminos-wallpaper-props` prints `OK {json}` / `NONE` / `ERR <line>`, and
+`ui/props/PropsReader.qml` runs it through the executable `DataSource` the plugin already
+uses for `yt-dlp` and `luminos-monitor`. Same shape as DECISION 119's shader baker, for
+the same reason: **the risky part is a string you hand to a process, so it lives in Python
+where it has tests, and QML parses one line back.**
+
+**The part worth keeping:** the old reader could not distinguish *blocked* from *absent*,
+and chose to report "this scene declares no settings" — the explanation that sounds fine.
+The three outcomes are now separate values, and the panel says which one happened.
+
+**Accepted cost:** the eight control types are now listed in three files. There is no
+shared module that both Python and QML can import, so the mitigation is a test that reads
+all three and fails on any disagreement (`test_props_read.py`).
+
+### Cross-references
+BUG-170 · DECISION 118 (the properties layer) · DECISION 119 (same process pattern) ·
+CONTRACTS §4 · `tests/wallpaper/props_read_probe.qml` (the probe that settled it)

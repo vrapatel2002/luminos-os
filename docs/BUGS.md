@@ -6510,3 +6510,57 @@ An unreachable feature and a missing feature look identical from the chair. Both
 green: every test passed, because every test ran against the *logic* and nothing looked at the
 *panel*. Layout has no unit test here, so it needs eyes — which is exactly why "test-verified, not
 eye-verified" was worth saying out loud rather than calling §3.2 done.
+
+---
+
+## BUG-170 — Qt 6.11 blocks local file reads from QML, so every scene looked settings-less
+<!-- [CHANGE: claude-code | 2026-09-19] found by Shawn, DECISION 120 -->
+
+**Status:** FIXED · **Severity:** SPEC §3.2 did not work at all on this machine ·
+**Files:** `contents/ui/props/PropertyStore.qml`, new `PropsReader.qml`, new
+`contents/tools/luminos-wallpaper-props`
+
+The Scene settings panel said *"This scene declares no settings"* for a scene whose
+`Spectrum.properties.json` was sitting beside it — 650 bytes, valid JSON, six keys.
+
+`PropertyStore` read it with `XMLHttpRequest`. Qt prints, and returns nothing:
+
+```
+XMLHttpRequest: Using GET on a local file is disabled by default.
+Set QML_XHR_ALLOW_FILE_READ to 1 to enable this feature.
+```
+
+Confirmed on the box with `tests/wallpaper/props_read_probe.qml`, Qt 6.11.2.
+
+**Two faults, not one.** The reader could not work — and the code could not tell
+*blocked* from *absent*, so it reported the most reassuring of the two. An empty
+`responseText` fell through the same branch as a missing file.
+
+#### Why not just set the environment variable
+`QML_XHR_ALLOW_FILE_READ=1` is per-process. Setting it for plasmashell would let
+**every** QML thing in the shell read arbitrary local files through XHR, to save one
+settings file. That is a security default being weakened for a convenience, and it
+would need an AGENTS.md §9 entry for an `/etc` or environment change. Not worth it.
+
+#### Fix
+The read moved to `contents/tools/luminos-wallpaper-props` — Python, inside the
+package, run through the same executable `DataSource` the plugin already uses for
+`yt-dlp` and `luminos-monitor`. It prints one line: `OK {json}`, `NONE`, or
+`ERR <one line>`. `PropsReader.qml` runs it and is loaded BY URL, so a missing
+import is a named warning rather than a broken settings dialog.
+
+And the three states are now distinct: `NONE` → "this scene declares no settings";
+`ERR` or a failed reader → **"Could not read this scene's settings: …"** in the panel
+and a `[LUMINOS-WP]` line in the journal.
+
+#### Cost of the fix
+The control-type list now exists in three places — the package layer, the reader, and
+`PropertyStore.qml`. A silent disagreement would drop a control from a panel with no
+error anywhere, so `test_props_read.py` reads all three files and fails if they differ.
+
+#### Lesson
+This is the fourth time in five days, and the sharpest: **a failure path that reports
+the innocent explanation is worse than a crash.** "No settings" is a sentence a user
+believes. The test suite was 58 green while the feature had never once worked on the
+target machine, because every test exercised the logic and none of them read a file
+the way the product does.

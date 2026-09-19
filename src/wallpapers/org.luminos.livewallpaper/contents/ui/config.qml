@@ -393,6 +393,7 @@ ColumnLayout {
         visible: root.cfg_WallpaperMode === "qml"
         schema: sceneProps.schema
         values: sceneProps.props
+        problem: sceneProps.problem
         // The panel owns the config key; the wallpaper only ever reads it.
         onChanged: function (key, value) {
             root.cfg_SceneProperties = sceneProps.withValue(root.cfg_QmlScene, key, value);

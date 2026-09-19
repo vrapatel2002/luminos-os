@@ -1,6 +1,6 @@
 /*
     Luminos Live Wallpaper — per-scene properties.  SPEC §3.2, CONTRACTS §4.
-    [CHANGE: claude-code | 2026-09-19]  DECISION 118.
+    [CHANGE: claude-code | 2026-09-19]  DECISION 118, reader replaced 120.
     SPDX-License-Identifier: GPL-3.0-or-later
 
     One object, used by BOTH sides: the wallpaper reads `props`, the settings
@@ -9,24 +9,33 @@
     another, so there is one copy and it lives here.
 
     The merge rules deliberately mirror `scripts/luminos-wallpaper-pkg`'s
-    `validate_properties()` and `merge_props()` line for line — same known-type
-    set, same "unknown type is skipped, not fatal", same "saved wins, default
-    otherwise, null if the entry has no value". That Python is the tested copy
-    (20 tests, property-based); this is the one that runs in plasmashell. If you
-    change one, change both, and run tests/wallpaper/ for the pair.
+    `validate_properties()` and `merge_props()` — same known-type set, same
+    "unknown type is skipped, not fatal", same "saved wins, default otherwise,
+    null if the entry has no value". That Python is the tested copy; this is the
+    one that runs in plasmashell. Change one, change both, and run tests/wallpaper.
+
+    The FILE READ is not done here: Qt 6.11 disables local file reads through
+    XMLHttpRequest, and the version that used XHR could not tell "blocked" from
+    "no file", so it reported a scene as having no settings while its settings
+    file sat next to it (BUG-170). PropsReader.qml does the read, and is reached
+    by URL so that an import missing in some context is a named warning rather
+    than a broken settings dialog.
 */
 import QtQuick
 
-QtObject {
+Item {
     id: store
 
+    // Not rendered and not laid out — Qt Quick Layouts skip invisible items, so
+    // this can sit in the settings panel's ColumnLayout without leaving a gap.
+    visible: false
+    width: 0
+    height: 0
+
     // ---- inputs ---------------------------------------------------------
-    // CONTRACTS §4 says properties.json lives "beside the scene". For a package
-    // that is unambiguous — one scene per folder. The built-ins share
-    // scenes/, so <Scene>.properties.json is tried first and plain
-    // properties.json second. Packages are unaffected; built-ins stop colliding.
-    // For a runtime shader this is the .frag, not ShaderToy.qml — otherwise every
-    // shader on the machine would share one settings panel (DECISION 119).
+    // The file whose SIBLINGS hold properties.json: the scene for a built-in,
+    // the .frag for a runtime shader — otherwise every shader on the machine
+    // would share one settings panel (DECISION 119).
     property url sceneUrl: ""
     // The key inside SceneProperties. The scene string the user chose IS the id:
     // "spectrum" for a built-in, the path for a file. Stable, and it survives a
@@ -40,24 +49,24 @@ QtObject {
 
     // ---- outputs --------------------------------------------------------
     property var schema: ({})          // validated, unknown types removed
-    property var skipped: []           // names dropped, for the log
     property bool loaded: false
+    // Empty when all is well. Set ONLY when the schema could not be read — an
+    // empty schema and an unreadable one must never look the same again.
+    property string problem: ""
 
     readonly property var props: store.merge(store.schema, store.savedFor(store.sceneId))
 
     // ---- merge rules, mirrored from luminos-wallpaper-pkg ----------------
     function validate(raw) {
-        var ok = {}, out = [];
+        var ok = {};
         if (!raw || typeof raw !== "object")
-            return { schema: ok, skipped: out };
+            return ok;
         for (var key in raw) {
             var v = raw[key];
             if (v && typeof v === "object" && store.knownTypes.indexOf(v.type) !== -1)
                 ok[key] = v;
-            else
-                out.push(key);
         }
-        return { schema: ok, skipped: out };
+        return ok;
     }
 
     function merge(schema, saved) {
@@ -112,62 +121,44 @@ QtObject {
         return JSON.stringify(all);
     }
 
-    // ---- schema loading --------------------------------------------------
-    function candidates() {
-        var s = ("" + store.sceneUrl);
-        var slash = s.lastIndexOf("/");
-        if (slash < 0)
-            return [];
-        var dir = s.substring(0, slash + 1);
-        var file = s.substring(slash + 1).replace(/\.[^./]+$/, "");
-        return [dir + file + ".properties.json", dir + "properties.json"];
+    // ---- schema loading, via PropsReader ---------------------------------
+    function accept(schemaJson) {
+        store.problem = "";
+        if (("" + schemaJson).length === 0) {
+            store.schema = ({});          // genuinely no properties.json: normal
+            store.loaded = true;
+            return;
+        }
+        try {
+            store.schema = store.validate(JSON.parse(schemaJson));
+        } catch (e) {
+            store.reject("the properties reader returned something unparseable");
+            return;
+        }
+        store.loaded = true;
     }
 
-    function load() {
-        store.loaded = false;
+    function reject(why) {
         store.schema = ({});
-        store.skipped = [];
-        var list = store.candidates();
-        if (list.length === 0) {
-            store.loaded = true;
-            return;
-        }
-        store.tryNext(list, 0);
+        store.problem = "" + why;
+        store.loaded = true;
+        console.warn("[LUMINOS-WP] scene settings unavailable:", store.problem);
     }
 
-    // A missing properties.json is the normal case, not an error: most scenes
-    // have no settings. Only a malformed one is worth a warning.
-    function tryNext(list, i) {
-        if (i >= list.length) {
-            store.loaded = true;
-            return;
+    Loader {
+        id: readerLoader
+        source: "PropsReader.qml"
+        onStatusChanged: {
+            if (status === Loader.Error)
+                store.reject("the properties reader could not be loaded here");
         }
-        var xhr = new XMLHttpRequest();
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== XMLHttpRequest.DONE)
-                return;
-            var body = xhr.responseText;
-            if (!body || body.length === 0) {
-                store.tryNext(list, i + 1);
-                return;
-            }
-            try {
-                var res = store.validate(JSON.parse(body));
-                store.schema = res.schema;
-                store.skipped = res.skipped;
-                if (res.skipped.length > 0)
-                    console.warn("[LUMINOS-WP] properties.json: skipped unknown control types:",
-                                 res.skipped.join(", "));
-            } catch (e) {
-                console.warn("[LUMINOS-WP] properties.json is malformed, scene gets no settings:",
-                             list[i], e);
-            }
-            store.loaded = true;
-        };
-        xhr.open("GET", list[i]);
-        xhr.send();
+        onLoaded: item.base = Qt.binding(() => "" + store.sceneUrl)
     }
 
-    onSceneUrlChanged: store.load()
-    Component.onCompleted: store.load()
+    Connections {
+        target: readerLoader.item
+        ignoreUnknownSignals: true
+        function onDone(schemaJson) { store.accept(schemaJson); }
+        function onFailed(why) { store.reject(why); }
+    }
 }

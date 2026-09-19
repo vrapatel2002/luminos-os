@@ -25,6 +25,8 @@ ColumnLayout {
     // PropertyStore.schema (validated) and the merged current values.
     property var schema: ({})
     property var values: ({})
+    // PropertyStore.problem — non-empty only when the schema could not be READ.
+    property string problem: ""
 
     signal changed(string key, var value)
 
@@ -92,12 +94,17 @@ ColumnLayout {
         }
     }
 
+    // "could not read the settings" and "there are no settings" must never look
+    // the same — that is exactly how BUG-170 hid itself for a whole test round.
+    // [CHANGE: claude-code | 2026-09-19]
     QQC2.Label {
         visible: !editor.hasAny
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         font: Kirigami.Theme.smallFont
-        text: i18n("This scene declares no settings. A scene gets a panel here by shipping a properties.json beside it.")
+        text: editor.problem.length > 0
+            ? i18n("Could not read this scene's settings: %1", editor.problem)
+            : i18n("This scene declares no settings. A scene gets a panel here by shipping a properties.json beside it.")
     }
     PropertyControls {
         id: ctl

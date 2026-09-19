@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Read a scene's properties.json and print it validated, on one line.  SPEC §3.2.
+
+[CHANGE: claude-code | 2026-09-19] BUG-170 — reasoning in DECISION 120.
+SPDX-License-Identifier: GPL-3.0-or-later
+
+    python3 luminos-wallpaper-props <scene-or-shader path>
+      -> OK {"speed": {...}, ...}     validated schema, one line of JSON
+      -> NONE                         no properties.json beside it (normal)
+      -> ERR <one line>               there is one and it is unusable
+
+Qt 6.11 disables local file reads through XMLHttpRequest unless
+QML_XHR_ALLOW_FILE_READ=1, so QML cannot read this file itself. Weakening that
+default for the whole of plasmashell to load a settings file is not a trade worth
+making, so the read happens here — in the process the plugin already knows how to
+run, and where the validation rules are testable.
+
+"Beside the scene" resolves to <Scene>.properties.json first and plain
+properties.json second: a package is one scene per folder, the built-ins share
+one, and a shader's settings belong to the shader rather than to ShaderToy.qml.
+"""
+import json, os, sys
+
+# Must stay identical to _KNOWN_PROP_TYPES in scripts/luminos-wallpaper-pkg and
+# knownTypes in ui/props/PropertyStore.qml. tests/wallpaper/test_props_read.py
+# fails if the three ever disagree.
+KNOWN = ("slider", "color", "dropdown", "textbox", "checkbox", "file", "button", "label")
+
+
+def candidates(base):
+    """The files to try, in order, for a scene or shader at `base`."""
+    base = base[7:] if base.startswith("file://") else base
+    directory, name = os.path.split(base)
+    stem = os.path.splitext(name)[0]
+    if not stem:
+        return []
+    return [os.path.join(directory, stem + ".properties.json"),
+            os.path.join(directory, "properties.json")]
+
+
+def validate(raw):
+    """Unknown control type is skipped, never fatal (CONTRACTS §4)."""
+    ok = {}
+    if not isinstance(raw, dict):
+        return ok
+    for key, entry in raw.items():
+        if isinstance(entry, dict) and entry.get("type") in KNOWN:
+            ok[key] = entry
+    return ok
+
+
+def read(base):
+    """(status, payload). status is OK / NONE / ERR."""
+    for path in candidates(base):
+        if not os.path.isfile(path):
+            continue
+        try:
+            raw = json.load(open(path, encoding="utf-8"))
+        except ValueError as exc:
+            return "ERR", "%s is not valid JSON: %s" % (os.path.basename(path), exc)
+        except OSError as exc:
+            return "ERR", "cannot read %s: %s" % (os.path.basename(path), exc.strerror)
+        return "OK", json.dumps(validate(raw), separators=(",", ":"))
+    return "NONE", ""
+
+
+def main(argv):
+    if len(argv) < 2:
+        print("ERR usage: luminos-wallpaper-props <scene path>")
+        return 2
+    status, payload = read(argv[1])
+    print((status + " " + payload).strip())
+    return 0 if status in ("OK", "NONE") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
