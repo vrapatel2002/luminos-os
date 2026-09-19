@@ -156,7 +156,9 @@ ColumnLayout {
                 { text: i18n("Particles (cursor-reactive)"), val: "particles" },
                 { text: i18n("System monitor (live stats)"), val: "sysmon" },
                 { text: i18n("Spectrum (audio-reactive bars)"), val: "spectrum" },
-                { text: i18n("Shadertoy shader (pick a .frag below)"), val: "shadertoy" }
+                { text: i18n("Canvas sample (JavaScript, no browser)"), val: "sample-canvasjs" },
+                { text: i18n("Shadertoy shader (pick a .frag below)"), val: "shadertoy" },
+                { text: i18n("Canvas wallpaper (pick a .js below)"), val: "canvasjs" }
             ]
             Component.onCompleted: {
                 var i = indexOfValue(root.cfg_QmlScene);
@@ -167,8 +169,15 @@ ColumnLayout {
             // to Aurora and looks like the entry is broken.
             // [CHANGE: claude-code | 2026-09-19] DECISION 119
             onActivated: {
-                if (currentValue === "shadertoy")
+                if (currentValue === "shadertoy" || currentValue === "canvasjs")
                     sceneDialog.open();
+                else if (currentValue === "sample-canvasjs") {
+                    // Same reasoning as the shader sample: it listens to audio,
+                    // audio is opt-in, so picking it opts in visibly.
+                    // [CHANGE: claude-code | 2026-09-19] SPEC §3.5
+                    root.cfg_QmlScene = root.samplesDir + "/luminos-canvas.js";
+                    root.cfg_AudioReactive = true;
+                }
                 else if (currentValue === "sample-shadertoy") {
                     root.cfg_QmlScene = root.samplesDir + "/luminos-shadertoy.frag";
                     // The entry says audio-reactive, and audio is opt-in and off by
@@ -186,7 +195,7 @@ ColumnLayout {
             visible: root.cfg_WallpaperMode === "qml"
             QQC2.TextField {
                 Layout.fillWidth: true
-                placeholderText: i18n("/path/to/scene.qml  or  /path/to/shader.frag")
+                placeholderText: i18n("/path/to/scene.qml, /path/to/shader.frag or /path/to/wallpaper.js")
                 // A built-in is already named in the combo above; echoing its key
                 // here read as "this scene is a file called spectrum", which invited
                 // typing a media path into a box that takes scenes and shaders.
@@ -210,7 +219,7 @@ ColumnLayout {
             Layout.maximumWidth: Kirigami.Units.gridUnit * 26
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
-            text: i18n("The same effects as the web samples, drawn by Qt directly. No browser engine is loaded, so this costs far less than Web mode. A scene may declare running, stats, audio, props, cursorX and cursorY and they will be bound for it. A .frag is compiled on the spot and run as a Shadertoy shader — iTime, iResolution, iMouse and iChannel0 (the audio spectrum) are all provided.")
+            text: i18n("The same effects as the web samples, drawn by Qt directly. No browser engine is loaded, so this costs far less than Web mode. A scene may declare running, stats, audio, props, cursorX and cursorY and they will be bound for it. A .frag is compiled on the spot and run as a Shadertoy shader — iTime, iResolution, iMouse and iChannel0 (the audio spectrum) are all provided. A .js runs as a canvas wallpaper against canvas, ctx, requestAnimationFrame, window.luminos and livelyAudioListener — the surface a Lively JavaScript wallpaper expects. There is no DOM, no fetch and no WebGL, and a script needing one of those says so by name instead of showing you nothing.")
         }
 
         // ---- NATIVE QML: audio --------------------------------------
@@ -427,7 +436,8 @@ ColumnLayout {
     Dialogs.FileDialog {
         id: sceneDialog
         title: i18n("Choose a QML scene or a shader")
-        nameFilters: [ i18n("Scenes and shaders (*.qml *.frag *.glsl *.fsh)"), i18n("All files (*)") ]
+        nameFilters: [ i18n("Scenes, shaders and scripts (*.qml *.frag *.glsl *.fsh *.js *.mjs)"),
+                       i18n("All files (*)") ]
         onAccepted: root.cfg_QmlScene = root.localPath(selectedFile)
     }
     Dialogs.FileDialog {

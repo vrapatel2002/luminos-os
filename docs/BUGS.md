@@ -6938,3 +6938,66 @@ Fourth cry-wolf instrument this week, and the only one that flattered us instead
 which is the more dangerous direction. **A measurement taken in a state the feature does not
 normally occupy is not a measurement**, and a checker that cannot tell "off on purpose" from "cheap"
 will happily confirm whatever you hoped.
+
+---
+
+## BUG-178 — the first .js wallpaper leaked 2.5 GB in thirty seconds
+<!-- [CHANGE: claude-code | 2026-09-19] SPEC §3.5, found by measuring instead of shipping -->
+
+**Status:** FIXED (the leak). The cost that remains is a documented limit, not a bug ·
+**Severity:** would have OOM'd a 16 GB machine · **Files:** `contents/ui/js/JsShim.qml`,
+`contents/ui/scenes/CanvasJs.qml`, `contents/samples/luminos-canvas.properties.json`
+
+§3.5 worked on the first try — the shipped sample ran, drew, took the cursor. Then it went on the
+real desktop:
+
+```
+  PSS            1044 MB
+  CPU            128.7% of one core
+```
+
+and PSS kept climbing: **1951 MB → 1951 → 1951 → 2522 MB** over the next half-minute. It was taken
+off the desktop inside two minutes.
+
+#### Cause
+`JsShim.raf()` forwarded straight to `Canvas.requestAnimationFrame`. Nothing tied the producer to
+the consumer, so the script queued paint commands for a 2880×1800 surface faster than they could be
+rastered and the backlog grew without bound. A wallpaper loop is infinite by nature, so it never
+caught up.
+
+#### Fix
+The frame loop is driven by the canvas **actually painting** — `Canvas.onPainted` calls
+`JsShim.tick()`, which runs at most one frame of queued callbacks. The renderer sets the pace, the
+queue holds one frame, and a slow machine animates more slowly instead of drowning. PSS after:
+**154 MB, flat across every sample.**
+
+#### Then the CPU, which took four measurements to understand
+Fixing the leak left it at **72.8 %** of a core. Three theories, three measurements:
+
+| change | result |
+|---|---|
+| cap the surface at 960 px logical (from 1440, i.e. 1920 device px instead of 2880) | **80.1 %** — no help at all |
+| `renderTarget: Image` instead of `FramebufferObject` | **51.3 %** vs 52.7 % — noise |
+| cut the sample from 160 dots to 30 and remove every line | **56.6 %** from 76 % — helps, but only ~20 points |
+| cap the frame rate to 30 fps | **52.7 %** from 76 % |
+
+So the cost is dominated by the **per-frame cycle**, not by resolution, not by the render target,
+and only partly by what is drawn. **How often, not how much.** Qt 6 rasterises canvas on the CPU;
+Chrome's canvas2d is GPU-accelerated, which is why a browser makes this look cheap and we cannot.
+
+#### Where it landed, honestly
+The shipped sample now defaults to 90 dots at 24 fps: **41.1 % of a core, 154 MB PSS.** Both `fps`
+and `resolution` are sliders in its `properties.json`, and the note in the panel says outright that
+frames per second is the setting that moves the number and surface width barely does.
+
+**That is still worse than the Chromium web mode it is meant to replace (~24 %), and far worse than
+a `.frag` shader (6.6 %).** It is not hidden and it is not spun: a canvas wallpaper is the expensive
+way to do this here, a shader is the cheap way, and the settings panel now says so in those words.
+SPEC §3.5 asked for Lively's `.js` wallpapers to run natively, and they do — at a price worth
+knowing before you pick one.
+
+#### Lesson
+This is the first feature this week that was measured **before** being called done rather than
+after, and it is the only reason a 2.5 GB leak did not land on Shawn's machine as "§3.5 complete".
+The four cost experiments also each killed a plausible theory — the resolution cap in particular
+was obviously right and did nothing.

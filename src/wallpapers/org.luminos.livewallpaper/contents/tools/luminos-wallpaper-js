@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Read a .js wallpaper and hand it to QML, refusing what the shim cannot honour.
+
+[CHANGE: claude-code | 2026-09-19] SPEC §3.5, CONTRACTS §6.
+SPDX-License-Identifier: GPL-3.0-or-later
+
+    python3 luminos-wallpaper-js <path.js>
+      -> OK <bytes>\\n<source>     the script, ready to run
+      -> ERR <one line>            why it will not run, in words a person can act on
+
+Qt 6.11 disables local file reads from QML (BUG-170), so the read happens here —
+the same process pattern as luminos-wallpaper-props, for the same reason.
+
+The refusals matter as much as the read. CONTRACTS §6 promises "a script touching
+[DOM, fetch, timers, WebGL] fails AT LOAD with a named error, never a blank
+wallpaper". A missing global only throws when the line runs, which for an error
+path inside a rAF loop can be minutes later or never — so the check happens here,
+before anything is drawn, and says which feature is missing rather than dying at
+`undefined is not a function`.
+"""
+import os, re, sys
+
+MAX_BYTES = 512 * 1024
+
+# (regex, what to tell the user). Ordered: the first match is the one reported.
+UNSUPPORTED = [
+    (r"\bXMLHttpRequest\b",        "XMLHttpRequest"),
+    (r"\bfetch\s*\(",              "fetch()"),
+    (r"\bWebSocket\b",             "WebSocket"),
+    (r"\bsetTimeout\s*\(",         "setTimeout() — use requestAnimationFrame"),
+    (r"\bsetInterval\s*\(",        "setInterval() — use requestAnimationFrame"),
+    (r"getContext\s*\(\s*['\"]webgl",  "WebGL — use a .frag shader wallpaper instead"),
+    (r"\bWebGLRenderingContext\b", "WebGL — use a .frag shader wallpaper instead"),
+    (r"\bdocument\s*\.\s*createElement\b", "document.createElement — there is no DOM"),
+    (r"\bdocument\s*\.\s*querySelector", "document.querySelector — there is no DOM"),
+    (r"\bdocument\s*\.\s*getElementById", "document.getElementById — there is no DOM"),
+    (r"\blocalStorage\b",          "localStorage"),
+    (r"\bimport\s*\(",             "dynamic import()"),
+]
+
+# Comments and strings are stripped before the scan, so the word "fetch" in a
+# comment does not refuse a script that never calls it.
+_STRIP = re.compile(r"//[^\n]*|/\*.*?\*/|'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"|`(?:\\.|[^`\\])*`",
+                    re.S)
+
+
+def code_only(src):
+    """The source with comments and string literals blanked, newlines kept."""
+    return _STRIP.sub(lambda m: "\n" * m.group(0).count("\n"), src)
+
+
+def unsupported(src):
+    """(feature, line) for the first thing the shim cannot provide, or None."""
+    stripped = code_only(src)
+    for pattern, name in UNSUPPORTED:
+        m = re.search(pattern, stripped)
+        if m:
+            return name, stripped[:m.start()].count("\n") + 1
+    return None
+
+
+def read(path):
+    """(status, payload). status is OK / ERR."""
+    if not os.path.isfile(path):
+        return "ERR", "no such file: %s" % os.path.basename(path)
+    size = os.path.getsize(path)
+    if size > MAX_BYTES:
+        return "ERR", "%s is %d KB; the limit is %d KB" % (
+            os.path.basename(path), size // 1024, MAX_BYTES // 1024)
+    try:
+        src = open(path, encoding="utf-8").read()
+    except OSError as exc:
+        return "ERR", "cannot read %s: %s" % (os.path.basename(path), exc.strerror)
+    except UnicodeDecodeError:
+        return "ERR", "%s is not UTF-8 text" % os.path.basename(path)
+    bad = unsupported(src)
+    if bad:
+        return "ERR", "%s needs %s, which this wallpaper does not provide (line %d)" % (
+            os.path.basename(path), bad[0], bad[1])
+    return "OK", src
+
+
+def main(argv):
+    if len(argv) < 2:
+        print("ERR usage: luminos-wallpaper-js <path.js>")
+        return 2
+    status, payload = read(argv[1])
+    if status == "ERR":
+        print("ERR " + payload)
+        return 1
+    sys.stdout.write("OK %d\n" % len(payload.encode("utf-8")))
+    sys.stdout.write(payload)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

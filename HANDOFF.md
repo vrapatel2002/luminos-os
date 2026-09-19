@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 8 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 9 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -17,9 +17,9 @@ i do not care every thing is just code at the end if some one else can do it tha
 Plan and gap analysis: `docs/wallpaper/SPEC.md`. Frozen interfaces: `docs/wallpaper/CONTRACTS.md`.
 Reasoning per session: `docs/wallpaper/BUILD_LOG.md`. Eyes-on brief: `docs/wallpaper/VERIFY.md`.
 
-**Three of six SPEC §3 items are done** (§3.1 audio, §3.2 per-scene settings, §3.4 runtime shaders)
-and the box now reports **31/31 on `luminos-wallpaper-selftest`**.
-**§3.5 (`.js` canvas wallpapers) or §3.3 (packages + gallery + Lively import) is next**; §3.6 (games
+**Four of six SPEC §3 items are done** (§3.1 audio, §3.2 per-scene settings, §3.4 runtime shaders, §3.5 .js canvas)
+and the box now reports **32/32 on `luminos-wallpaper-selftest`**.
+**§3.3 (packages + gallery + Lively import) is next**; §3.6 (games
 through a nested compositor) is the big one and the only thing that lets web mode finally be deleted.
 
 Standing constraint from Shawn: **it must stay light on resources compared to Chromium.**
@@ -80,7 +80,7 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (a KPackage must be self-contained; the lock screen loads the same package). Cached by content
   hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is built with `Qt.createQmlObject`, which is
   what makes §3.2 real for an arbitrary shader — a QML object cannot gain a property at runtime.
-- **BUG-168 through BUG-177 all fixed**, BUG-176 included: `org.kde.kwindowsystem` exports
+- **BUG-168 through BUG-178 all fixed**, BUG-176 included: `org.kde.kwindowsystem` exports
   `KWindowSystem.showingDesktop` as a notifiable QML singleton property, so Show Desktop now
   unfreezes the wallpaper for one binding rather than a `qdbus6` poll. BUG-171 (a deploy is
   not a load) and BUG-173 (every settings row drew a label and no control) are why the eyes-on
@@ -148,12 +148,11 @@ Shawn "far lighter than Chromium" without naming the scene.
    The candidate is one `ShaderEffect` sampling the 128×1 `AudioTexture` we already build, with
    colours / bar count / beat flash as uniforms — machinery §3.4 already has. The shader scene
    costs 6.6 %. This is a redesign of `Spectrum.qml`, so it gets its own pass.
-2. **SPEC §3.5 — `.js` canvas wallpapers.** CONTRACTS §6 already froze the shim (canvas, ctx, rAF,
-   `window.luminos`, `livelyAudioListener`, and a NAMED error for anything it does not provide).
-   QML's `Canvas` is the same `getContext('2d')` API and QML has its own JS engine — no browser.
-3. **SPEC §3.3 — packages + gallery + Lively import.** The Python half is written and tested
+2. **SPEC §3.3 — packages + gallery + Lively import.** The Python half is written and tested
    (`scripts/luminos-wallpaper-pkg`: `parse_manifest`, `lively_to_manifest`, `_path_safe`). Missing:
-   the gallery UI and the install path (`~/.local/share/luminos/wallpapers/<id>/`).
+   the gallery UI and the install path (`~/.local/share/luminos/wallpapers/<id>/`). With §3.5 done,
+   an imported Lively `.js` will actually run.
+3. **Nothing else new here** — item 4 below is the big one.
 4. **SPEC §3.6 — external producer (games).** A nested compositor (`cage`) → PipeWire →
    `PipeWireSourceItem` (kpipewire), with input back through `zwlr_virtual_pointer_v1`. Prerequisite
    for deleting web mode.
@@ -228,6 +227,15 @@ Shawn "far lighter than Chromium" without naming the scene.
   **"No clean API exists" deserves one more grep than it usually gets.**
 - **DECISION 121 — do NOT cap the audio publish rate.** Tried, measured 57.2 Hz from 84 Hz as
   intended, and cost MORE: 23.7 % mean against 20.9 % uncapped, three samples each. Reverted whole.
+- **BUG-178 — a rAF loop with nothing pacing it queued 2.5 GB of paint commands in 30 s.** The
+  wallpaper frame loop MUST be driven by `Canvas.onPainted`, never by `Canvas.requestAnimationFrame`
+  directly: the renderer has to set the pace or the producer outruns it without bound.
+- **A `.js` canvas wallpaper is EXPENSIVE here and a shader is cheap** — 41.1 % of a core against
+  6.6 %, and worse than the Chromium it replaces (~24 %). Qt rasterises canvas on the CPU. Four
+  experiments: capping surface resolution did NOTHING, the render target did NOTHING, content
+  helped a little, **frame rate is the only real lever**. Do not re-run those experiments.
+- **Offscreen there is no vsync**, so a rAF wallpaper runs flat out and starves the event loop —
+  a 3.5 s Timer in a test fired at t+20.4 s. Test fixtures must stop themselves after a few frames.
 - **The contract tests were MUTE.** Qt hands `console.log` to the journal when stderr is not a tty,
   so `qml6 … 2>&1` captured nothing and the self test's exit code was all it ever had.
   `QT_FORCE_STDERR_LOGGING=1`.
@@ -302,7 +310,11 @@ Shawn "far lighter than Chromium" without naming the scene.
   `samples/luminos-shadertoy.frag{,.properties.json}`, `config/main.xml`.
 - **Installed copy:** `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` — keep it
   `diff -rq` clean against the repo, and restart plasmashell after touching it.
-- **This turn:** `ui/scenes/Spectrum.qml` (BUG-172), `ui/props/PropertyEditor.qml` (BUG-173),
+- **SPEC §3.5 (DECISION 122), this turn:** `ui/js/{JsSource,JsShim}.qml`, `ui/scenes/CanvasJs.qml`,
+  `tools/luminos-wallpaper-js`, `samples/luminos-canvas.js{,.properties.json}`, `ui/scene.js`,
+  `ui/QmlMode.qml`, `ui/config.qml`, `tests/wallpaper/canvasjs_contract.qml` (13 checks) +
+  `tests/wallpaper/fixtures/`.
+- **Earlier turns:** `ui/scenes/Spectrum.qml` (BUG-172), `ui/props/PropertyEditor.qml` (BUG-173),
   `ui/props/PropertyControls.qml` + `ui/config.qml` (BUG-174),
   new `tests/wallpaper/editor_contract.qml`, `scripts/luminos-wallpaper-selftest` (adds it, and
   `QT_FORCE_STDERR_LOGGING=1` so a failing contract test can actually say why),

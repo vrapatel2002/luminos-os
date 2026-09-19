@@ -52,7 +52,7 @@ Item {
     // A .frag typed into the scene box loads ShaderToy.qml and hands it the file.
     // Its settings live beside the SHADER, not beside ShaderToy.qml, or every
     // shader on the machine would share one panel. [CHANGE: claude-code | 2026-09-19]
-    readonly property string sceneSource: Scene.isShaderFile(qmlRoot.scene)
+    readonly property string sceneSource: Scene.isSourceFile(qmlRoot.scene)
         ? Scene.rawPath(qmlRoot.scene) : ""
     readonly property url propsUrl: {
         var base = Scene.propsBaseFor(qmlRoot.scene);

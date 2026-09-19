@@ -7546,3 +7546,55 @@ is the candidate worth measuring next. It is a redesign of `Spectrum.qml`, so it
 ### Cross-references
 BUG-177 (where the 20.3 % came from and why the first measurement of it was worthless) ·
 DECISION 117 (the audio layer) · CONTRACTS §2 · SPEC §9
+
+---
+
+## DECISION 122 — Lively's `.js` wallpapers run on QML's own JS engine, with `new Function` as the sandbox
+<!-- [CHANGE: claude-code | 2026-09-19] SPEC §3.5, CONTRACTS §6, BUG-178 -->
+
+QML's `Canvas` **is** `getContext('2d')`, and QML ships a JS engine, so a Lively-style canvas
+wallpaper needs no browser — only the browser **globals** it expects. Three things had to be
+decided.
+
+**1. How the script is run.** `new Function(...names, source)` — verified working in Qt 6.11's V4
+engine before anything was built on it. The script sees exactly the arguments named and **nothing
+of the file that called it**: `canvas`, `ctx`, `window`, `document`, `console`,
+`requestAnimationFrame`, `cancelAnimationFrame`, `livelyAudioListener`, plus deliberate throwing
+stubs for `fetch`, `XMLHttpRequest`, `setTimeout`, `setInterval`. "Not provided" is therefore the
+**default**, and every entry on that list is a grant someone made on purpose. The alternative,
+generating a QML file around the source, would have put the script in our scope.
+
+**2. Where "fails at load with a named error" happens.** CONTRACTS §6 promises it, and a missing
+global cannot keep that promise: it throws when the line runs, which inside a rAF loop can be
+minutes later or never. So `contents/tools/luminos-wallpaper-js` scans the source — with comments
+and string literals blanked first, so `fetch` in a comment does not refuse a script that never
+calls it — and refuses with the feature's name and line number before anything is drawn. The
+throwing stubs are the second layer, for a pattern the scan misses.
+
+**3. What paces the frame loop.** The obvious answer, `Canvas.requestAnimationFrame`, cost **2.5 GB
+of RSS in thirty seconds** (BUG-178): nothing tied the producer to the consumer. The loop is now
+driven by `Canvas.onPainted`, so the rasteriser sets the pace and the queue holds one frame.
+
+### The cost, which is the part to read before choosing this
+Measured on the G14 at 2880×1800, shipped sample, and **it does not go our way**:
+
+| wallpaper | CPU | PSS |
+|---|---|---|
+| `.frag` shader (GPU) | **6.6 %** | 135 MB |
+| `.js` canvas, 90 dots at 24 fps | **41.1 %** | 154 MB |
+| Chromium web mode (BUG-083) | ~24 % | ~810 MB RSS |
+
+Qt rasterises canvas on the CPU; Chrome's canvas2d is GPU-accelerated. So for a busy canvas
+wallpaper **we are slower than the browser we removed**, while using a fifth of its memory. Four
+experiments established that the lever is frame rate — surface resolution changed nothing, and the
+render target changed nothing — so `fps` and `resolution` are sliders in the sample's
+`properties.json` and the panel says which of the two actually matters.
+
+**A shader is the cheap way to do a live wallpaper here and a canvas script is the expensive one.**
+§3.5 exists so a Lively `.js` runs at all, unmodified, which it now does.
+
+### Cross-references
+BUG-178 · CONTRACTS §6 · SPEC §3.5 · DECISION 117 (the audio the shim forwards) ·
+DECISION 118 (the properties the shim exposes as `window.luminos.props`) ·
+DECISION 120 (same read-in-a-process pattern, same BUG-170 reason) ·
+`tests/wallpaper/canvasjs_contract.qml` (13 checks)

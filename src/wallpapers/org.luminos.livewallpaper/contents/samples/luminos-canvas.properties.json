@@ -1,0 +1,56 @@
+{
+  "count": {
+    "type": "slider",
+    "label": "Dots",
+    "value": 90,
+    "min": 20,
+    "max": 600,
+    "step": 10
+  },
+  "reach": {
+    "type": "slider",
+    "label": "Cursor reach",
+    "value": 170,
+    "min": 0,
+    "max": 600,
+    "step": 10
+  },
+  "speed": {
+    "type": "slider",
+    "label": "Drift speed",
+    "value": 1.0,
+    "min": 0.0,
+    "max": 4.0,
+    "step": 0.1
+  },
+  "tint": {
+    "type": "color",
+    "label": "Dot colour",
+    "value": "#7dd3fc"
+  },
+  "background": {
+    "type": "color",
+    "label": "Background",
+    "value": "#070912"
+  },
+  "fps": {
+    "type": "slider",
+    "label": "Frames per second",
+    "value": 24,
+    "min": 5,
+    "max": 60,
+    "step": 1
+  },
+  "resolution": {
+    "type": "slider",
+    "label": "Surface width (px)",
+    "value": 960,
+    "min": 320,
+    "max": 2880,
+    "step": 80
+  },
+  "note": {
+    "type": "label",
+    "value": "An ordinary canvas/JS wallpaper — no browser engine. It reads these values from window.luminos.props and the spectrum from livelyAudioListener, the surface a Lively .js already expects. Qt draws canvas on the CPU, so this costs far more than a .frag shader does (measured: ~50% of a core here against 6.6% for the Shadertoy sample). Frames per second is the setting that moves that number — surface width barely does."
+  }
+}

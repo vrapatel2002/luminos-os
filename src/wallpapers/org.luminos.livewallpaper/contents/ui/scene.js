@@ -18,7 +18,8 @@ var BUILTINS = {
     "particles": "scenes/Particles.qml",
     "sysmon":    "scenes/SysMon.qml",
     "spectrum":  "scenes/Spectrum.qml",
-    "shadertoy": "scenes/ShaderToy.qml"
+    "shadertoy": "scenes/ShaderToy.qml",
+    "canvasjs":  "scenes/CanvasJs.qml"
 };
 
 // A .frag / .glsl typed into the scene box is not a QML file — it is a shader,
@@ -29,10 +30,22 @@ function isShaderFile(scene) {
     return /\.(frag|glsl|fsh)$/i.test(("" + scene).trim());
 }
 
+// Same idea for a Lively-style canvas wallpaper: a .js typed into the scene box
+// is not a QML file, it is a script, and the scene that runs it is CanvasJs.qml.
+// [CHANGE: claude-code | 2026-09-19] SPEC §3.5, DECISION 122
+function isJsFile(scene) {
+    return /\.(js|mjs)$/i.test(("" + scene).trim());
+}
+
+// A file the host must hand to the scene as `source` rather than load directly.
+function isSourceFile(scene) {
+    return isShaderFile(scene) || isJsFile(scene);
+}
+
 // The file whose SIBLINGS hold properties.json. For a shader that is the .frag,
 // not ShaderToy.qml — otherwise every shader would share one settings panel.
 function propsBaseFor(scene) {
-    return isShaderFile(scene) ? rawPath(scene) : pathFor(scene);
+    return isSourceFile(scene) ? rawPath(scene) : pathFor(scene);
 }
 
 function pathFor(scene) {
@@ -41,6 +54,8 @@ function pathFor(scene) {
         return BUILTINS["shader"];
     if (isShaderFile(s))
         return BUILTINS["shadertoy"];
+    if (isJsFile(s))
+        return BUILTINS["canvasjs"];
     if (BUILTINS[s] !== undefined)
         return BUILTINS[s];
     if (s.indexOf("://") !== -1)
