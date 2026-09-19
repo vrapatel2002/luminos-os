@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# luminos-wallpaper-probe — measure what the live wallpaper actually costs, and
+# roll the plugin back automatically if the QML failed to load.
+# [CHANGE: claude-code | 2026-09-16] DECISION 112
+#
+# WHY IT ROLLS BACK BY ITSELF
+#   A broken wallpaper QML is a black desktop, which is BUG-158 all over again -
+#   and BUG-158 took two days to diagnose partly because nobody could say when
+#   it broke. This runs one login after the change, reads plasmashell's own QML
+#   errors, and if the plugin failed it restores the backup and restarts the
+#   shell rather than leaving a blank screen to be discovered.
+#
+# WHAT IT MEASURES (the point of DECISION 112)
+#   * whether libQt6WebEngineCore is mapped into plasmashell. In video or image
+#     mode it should now be ABSENT - that is the whole optimisation, and it is a
+#     yes/no fact rather than an opinion about memory.
+#   * plasmashell RSS and PSS. PSS is the honest number: both shells link the
+#     same Qt/KF6 libraries and RSS counts those shared pages in full.
+#   * whether a VA-API driver is mapped, i.e. whether the video is decoded on
+#     the 780M or on the CPU. Never verified before; BUG-083 measured 24% of a
+#     core when it was not.
+#
+# One-shot: removes its own autostart entry when done.
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+LOG="$REPO/.luminos-wallpaper-probe.log"
+AUTOSTART="$HOME/.config/autostart/luminos-wallpaper-probe.desktop"
+PLUGIN="$HOME/.local/share/plasma/wallpapers/org.luminos.livewallpaper"
+UNIT="plasma-plasmashell.service"
+
+log(){ printf '%s  %s\n' "$(date -Iseconds)" "$*" >> "$LOG"; }
+log "=== wallpaper probe ==="
+
+for i in $(seq 1 45); do pidof plasmashell >/dev/null && break; sleep 2; done
+PID=$(pidof plasmashell | awk '{print $1}')
+[ -z "${PID:-}" ] && { log "plasmashell not running — nothing to measure"; exit 0; }
+sleep 10   # let the wallpaper finish loading
+
+# --- 1. did the QML load at all? ---
+ERR=$(journalctl --user -b --no-pager 2>/dev/null \
+      | grep -iE "livewallpaper|WebMode\.qml|QmlMode\.qml|scenes/|LUMINOS-WP" | grep -iE "error|cannot|unable|is not a type|failed" | tail -8)
+if [ -n "$ERR" ]; then
+    log "QML ERRORS — rolling the plugin back:"
+    printf '%s\n' "$ERR" >> "$LOG"
+    BK=$(ls -d "$REPO"/backups/livewallpaper-* 2>/dev/null | tail -1)
+    if [ -n "$BK" ]; then
+        rm -rf "$PLUGIN" && cp -r "$BK" "$PLUGIN"
+        log "restored $BK -> $PLUGIN, restarting plasmashell"
+        systemctl --user restart "$UNIT" >/dev/null 2>&1
+        notify-send -a Luminos "Wallpaper" "QML failed — rolled back to the previous plugin." 2>/dev/null
+    else
+        log "NO BACKUP FOUND — plugin left as-is, fix by hand"
+        notify-send -a Luminos "Wallpaper" "QML failed and no backup — see $LOG" 2>/dev/null
+    fi
+    rm -f "$AUTOSTART"; exit 1
+fi
+log "no QML errors — plugin loaded"
+
+# --- 2. is Chromium mapped? ---
+MODE=$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+        --group Containments --group 30 --group Wallpaper \
+        --group org.luminos.livewallpaper --group General --key WallpaperMode 2>/dev/null)
+SCENE=$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc \
+        --group Containments --group 30 --group Wallpaper \
+        --group org.luminos.livewallpaper --group General --key QmlScene 2>/dev/null)
+log "wallpaper mode: ${MODE:-unknown}${SCENE:+ (scene: $SCENE)}"
+if grep -q "libQt6WebEngineCore" "/proc/$PID/maps" 2>/dev/null; then
+    log "WebEngine: MAPPED $( [ "$MODE" = web ] && echo '(expected in web mode)' || echo '<-- UNEXPECTED, the split did not take' )"
+else
+    log "WebEngine: not mapped  <-- DECISION 112 working, Chromium is out of plasmashell"
+fi
+
+# --- 3. memory, honestly ---
+RSS=$(awk '/^VmRSS/{print $2}' "/proc/$PID/status")
+PSS=$(awk '/^Pss:/{s+=$2} END{print s}' "/proc/$PID/smaps_rollup" 2>/dev/null \
+      || awk '/^Pss:/{s+=$2} END{print s}' "/proc/$PID/smaps" 2>/dev/null)
+log "plasmashell RSS ${RSS:-?} kB / PSS ${PSS:-?} kB  (PSS is the honest one — shared Qt libs counted once)"
+
+# --- 4. hardware video decode? ---
+if grep -qE "radeonsi_drv_video|libva|vdpau" "/proc/$PID/maps" 2>/dev/null; then
+    log "video decode: VA-API driver mapped — decoding on the 780M"
+else
+    log "video decode: NO VA-API driver mapped — likely SOFTWARE decode on the CPU."
+    log "  If CPU below is high, try QT_MEDIA_BACKEND=ffmpeg with LIBVA_DRIVER_NAME=radeonsi"
+    log "  in ~/.config/environment.d/, then re-run this probe."
+fi
+
+# --- 5. cost over 10s, not one instant ---
+C1=$(awk '{print $14+$15}' "/proc/$PID/stat"); sleep 10; C2=$(awk '{print $14+$15}' "/proc/$PID/stat")
+HZ=$(getconf CLK_TCK)
+log "plasmashell CPU over 10s: $(awk -v a="$C1" -v b="$C2" -v h="$HZ" 'BEGIN{printf "%.1f%%", (b-a)/h/10*100}')  (BUG-083 measured 24% before it was capped)"
+
+log "done"
+notify-send -a Luminos "Wallpaper" "Probe finished — see .luminos-wallpaper-probe.log" 2>/dev/null
+rm -f "$AUTOSTART"

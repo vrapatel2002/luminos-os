@@ -3,6 +3,437 @@ Last Updated: 2026-08-29 (BUG-149 **BUG-142 WAS NEVER A vkd3d BUG — WE DELETED
 
 ## Open Bugs
 
+### BUG-167 — `config/99-luminos-ram.conf` has never been installed, and three settings we document as live are not
+# [CHANGE: claude-code | 2026-09-18] · Found by DECISION 116's measurement turn · **OPEN**
+
+**Severity: low impact, high trust cost.** Nothing is broken. What is broken is that the repo's
+idea of this box's memory tuning and the box's actual memory tuning are different files, and
+**four documents plus two bug entries have been reasoning from the wrong one for four months.**
+
+### The evidence
+
+```
+$ cat /etc/sysctl.d/99-luminos-ram.conf          # installed, 18 bytes, mtime 2026-05-08
+vm.page-cluster=3
+
+$ cat config/99-luminos-ram.conf                 # repo, 179 bytes, mtime 2026-05-06
+# Luminos RAM tuning
+vm.swappiness = 30
+vm.vfs_cache_pressure = 50
+vm.page-cluster = 0
+```
+
+Live kernel vs. what the repo claims:
+
+| key | live (`/proc/sys/vm/`) | repo `config/99-luminos-ram.conf` | verdict |
+|---|---|---|---|
+| `page-cluster` | **3** | `0` | repo wrong — and `3` is the value we *want* (DECISION 116) |
+| `swappiness` | **60** | `30` | **repo setting is not live.** 60 is the kernel default |
+| `vfs_cache_pressure` | **100** | `50` | **repo setting is not live.** 100 is the kernel default |
+
+`/etc/sysctl.d/` contains **exactly one** file and it is the 18-byte one. A repo-wide grep finds
+no other writer of `page-cluster`. The installed file is not a copy of the repo file that drifted
+— it is a **different, hand-written file** created the day after, and the repo file has never been
+on the box at all.
+
+### Why it matters more than "two sysctls are at their defaults"
+
+- **`vm.swappiness = 30` is load-bearing in the story we tell about this machine.** The repo says
+  we bias *away* from swap; the kernel is at `60` and biases toward it. `scripts/luminos-train-ram`
+  flips swappiness 60 → 10 and back, and its "restore baseline exactly" behaviour is correct only
+  because the real baseline is 60 — which is true by luck, not by design.
+- **It cost two wrong conclusions in a row, in writing.** BUG-166 called `page-cluster` a
+  config-vs-doc contradiction and picked the config. Its own later "correction" picked the config
+  again, harder, and declared `docs/LUMINOS_RAM_ARCHITECTURE.md` false. Both were wrong in the
+  same way: **a file in git was treated as evidence that a setting is live.** The running kernel
+  was never read until 2026-09-18.
+- It is the same failure shape as the `ROOTS` / `JF_LOG_DIR` hardcoded-path faults in
+  `server/scripts/` — a value the code believes and the system does not.
+
+### The fix (NOT applied — read-only turn by instruction)
+
+Decide which file is canonical, then make them agree. Recommended:
+
+1. **Keep `page-cluster = 3`.** Measured correct — DECISION 116. Do not "fix" it to `0`.
+2. **Rewrite `config/99-luminos-ram.conf` to match reality**, i.e. `vm.page-cluster = 3`, and
+   either drop `swappiness`/`vfs_cache_pressure` or make a *deliberate* decision to install them.
+3. ⚠️ **Do not blind-install the current repo file.** It would drop `page-cluster` to `0` and
+   undo DECISION 116, and it would change `swappiness` on a 16 GB box that now has a 32 G pagefile
+   under it — a real behavioural change that deserves its own measurement, not a `cp`.
+4. Fix the stray comment in the repo file: `# KSM - merge identical pages` sits above
+   `vm.page-cluster`, which has nothing to do with KSM.
+5. Then sweep: is `99-luminos-ram.conf` the *only* repo `config/` file that was never installed?
+   Nobody has checked. `diff` every `config/*.conf` against its `/etc/` counterpart.
+
+### Cross-references
+DECISION 116 (found it) · DECISION 115 · BUG-166 (reasoned from the wrong file, twice) ·
+`docs/LUMINOS_RAM_ARCHITECTURE.md:111` (right all along) · `docs/LUMINOS_HANDBOOK.md:1077` ·
+`LUMINOS_MASTER_FILE.md:231`
+
+### BUG-166 — "Chrome breaks past 2-3 tabs" is not a crash: three systems are discarding tabs and two of them are ours
+<!-- [CHANGE: claude-code | 2026-09-18] -->
+- Status: **FIXED IN THE REPO 2026-09-18, NOT YET INSTALLED.** <!-- [CHANGE: claude-code | 2026-09-18] -->
+  Parts 1 and 2 are written and tested (DECISION 115); **two install steps are left and they are on
+  the box, not in the repo** — see "What shipped" at the end of this entry. Part 3 (offline page
+  archive) was **not** built. The investigation below is kept in full because the wrong diagnosis was
+  reached twice on the way, and both wrong turns are worth not repeating.
+- Reported by Shawn 2026-09-18: *"chrome is crashing or not working properly when i open more than
+  2 or 3 tabs"*. Asked what he actually sees, he chose **"tabs go blank / reload on click"**, and
+  **"from the app menu / picker"** for how Chrome is launched. That answer moves this out of the
+  crash family entirely: a blank tab that reloads on click with the tab strip intact is
+  `chrome.tabs.discard()`, which is **working as designed**. No renderer died, no OOM, no GPU fault.
+
+**Three things discard or page out his tabs, and they do not know about each other.**
+
+1. **`scripts/chrome-tab-sleeper` — DECISION 65, "aggressive by default".** `DEFAULTS.aggressive
+   = true`, `graceSeconds: 10`. In the uncapped path `mayDiscard()` keeps only: the active tab of
+   each window, anything audible, pinned, typed-into, or opted out. **Every other tab is discarded
+   10 seconds after you leave it, at NORMAL pressure, with no model loaded and 8 GB free.** This
+   alone produces the reported symptom exactly, and it is the primary cause. The "2 or 3 tabs"
+   framing is when it becomes noticeable, not a threshold being crossed.
+2. **The v3.0 hard cap (DECISION 66) may or may not be live, and that matters.** `capEnabled:
+   true`, `tabCap: 2`, and critically `capOnPressure: true` — so the 2-tab cap fires not only when
+   `model_running` is true but **whenever `effective_available` < `pressureGB` (3.0 GB)**. Under
+   the cap there is **no grace, no pinned exemption and no typed-into exemption**, and
+   `chrome.tabs.onCreated` triggers a sweep, so opening the 3rd tab discards one immediately.
+   ⚠️ **Which version is running is unknown from here.** `LUMINOS_STATUS.md:152` records **v2.0
+   live in Chrome and v3.0 only written to disk, pending one manual Reload click** as of
+   2026-08-11 — never confirmed since. The symptom is the same either way; the severity is not.
+3. **Chrome's own Memory Saver is ALSO on** — `chrome-luminos` passes
+   `--enable-features=MemorySaver` on both GPU branches, and Shawn launches from the picker, so he
+   gets it. DECISION 65 flagged this as an accepted cost and said to turn it off at
+   `chrome://settings/performance` *to keep the behaviour explainable*; that was never done. **Two
+   independent policies deciding about the same tabs is why the behaviour looks erratic rather
+   than like a rule.**
+
+**A fourth, separate mechanism makes the tabs that were NOT discarded feel broken too.**
+`luminos-ram` still touches Chrome renderers as ordinary processes via `MADV_PAGEOUT` (bottom-tier
+compression at 10 min idle, and `evictLast()` when the hot set passes `HotSetCapacity: 8`), pushing
+them into zram. ~~Coming back from zram is then made as slow as it can be: `config/99-luminos-ram.conf`
+sets `vm.page-cluster = 0` while `docs/LUMINOS_RAM_ARCHITECTURE.md` claims `=3`. Both cannot be
+true.~~ **RESOLVED 2026-09-18 by measurement — DECISION 116, and this paragraph had it backwards.**
+The live kernel reads `vm.page-cluster = 3`; the installed `/etc/sysctl.d/99-luminos-ram.conf` is a
+one-line file saying `3`, and **`config/99-luminos-ram.conf` was never installed** (→ **BUG-167**).
+The document was right; the repo config is the stale one. It also makes no difference to this
+symptom: `swap_ra 0` over 715 834 swap-ins shows readahead never runs for zram at all.
+
+**Ruled out, with reasons — do not spend time on these:**
+- **Not earlyoom.** It is `enabled` (preflight 2026-08-04) and it does fire on this box at 5% free
+  RAM (BUG-119, DECISION 67 table), but it **SIGTERMs a whole process**; the result is a dead
+  browser or an "Aw, Snap", never a clean blank tab that reloads on click.
+- **Not `luminos-ram`'s Cold Kill.** Real (`SIGKILL` at `ColdKillHours: 2`, and `isSafeToKill()`
+  does **not** exempt chrome, does not check audio and does not check CPU — worth knowing, filed
+  below) but it kills the process outright and needs 2 hours of idle. Wrong shape, wrong timescale.
+- **Not `freezeProcess`.** `freezeProcess()` returns early for any process whose name contains
+  `chrome`, so Chrome is never SIGSTOPped.
+- **Not the daemon's CDP path.** Dead since 2026-06-26 (BUG-118) and dead twice over since
+  2026-09-12, when `--remote-debugging-port=9222` became opt-in. `manageChromeMemory()` returns at
+  the failed `http.Get`, so its media protection never runs either.
+- **Not the GPU path** (BUG-046/102/103, DECISION 17/18) — that fails as corruption, software
+  rendering or a dead GPU process, not as discarded tabs.
+
+**Two things to check on the box before touching anything** (both read-only, both answer the one
+open question — which version is enforcing what):
+- `chrome://extensions` → Luminos Tab Sleeper → **version 2.0 or 3.0?** Then **Extension options**,
+  which prints a live line reading either `cap: ACTIVE — 2 tabs max` or `cap: not in force`.
+- `luminos-tabs` — the extension's own sweep report next to what the kernel shows.
+  **NEVER REPORTED** means the running worker is still v2.0 (v3.0 is what POSTs to `/tabs`).
+
+**The knobs, for when a fix is authorised** — all in the extension's options page, no code change
+needed: `graceSeconds` (10 → e.g. 300), `capOnPressure` (the one that makes a 2-tab cap fire with
+no model loaded), `tabCap`, or `aggressive` off entirely. Plus Memory Saver at
+`chrome://settings/performance`. **Do not** start by editing `background.js`: `DEFAULTS` there is
+overridden by whatever is already in `chrome.storage.local`, and `options.js` carries a duplicate
+`DEFAULTS` that nothing keeps in step.
+
+**Side finding, unrelated to the symptom, filed so it is not lost:** `isSafeToKill()` in
+`cmd/luminos-ram/main.go` protects terminals, LISTEN sockets, active downloads and `luminos-*`,
+but checks **neither audio nor CPU** (`isSafeToFreeze()` checks both). A Chrome that has sat in the
+cold set for 2 hours is a legal SIGKILL target even while playing audio.
+
+---
+
+#### AMENDMENT 2026-09-18 — the real symptom is worse than "discarded", and it points at a DEFECT, not at design
+<!-- [CHANGE: claude-code | 2026-09-18] -->
+
+Shawn corrected the symptom after the first pass, and the correction matters:
+
+> *"the new tab never loads. its one thing that it loads and than kicked out but it never loads …
+> when i do open a new link in new tab in youtube it usually loads when i go there but for other
+> sites … new link never loads"*
+
+So this is **not** "a tab loaded, was discarded, and reloads on click" — which is the designed
+behaviour and merely annoying. It is **a tab that never renders a page at all**. Everything above
+still stands as the surrounding cause; this narrows it to one specific hole.
+
+**The hole: the sleeper has no idea whether a tab is still loading.** `grep -n 'status' background.js`
+returns exactly one hit — `onUpdated`, used only to clear the dirty mark. Neither `mayDiscard()`
+(uncapped) nor `pickKeepers()` (capped) consults `tab.status`, `tab.pendingUrl`, or whether the tab
+has **ever committed a navigation**. A background tab opened with *Open link in new tab* is
+therefore a legal discard target **while its first load is still in flight**, and a tab discarded
+before it has ever committed has nothing to restore when you click it.
+
+**That is the difference between the two cases Shawn describes, and it is testable:**
+- **YouTube works** because a YouTube tab goes `audible` within seconds, and `tab.audible` is
+  exempt at *every* level, cap included — it is the one protection that fires fast enough to beat
+  a sweep.
+- **A plain article/site has no such protection.** It is silent, not pinned, not typed-into, and
+  not active, so the only thing between it and `discard()` is `graceSeconds` (10) — and in the
+  **capped** path not even that, because `pickKeepers()` has no grace at all.
+
+**Sweeps fire on tab creation.** `chrome.tabs.onCreated.addListener(() => sweep())`, plus
+`onActivated`, plus `onFocusChanged`, plus a 30 s alarm. Opening a link in a new tab is itself a
+trigger, so the worst case is a sweep landing on a tab that is milliseconds old.
+
+**Not yet excluded — the network half.** This box runs `DNSOverTLS=opportunistic` to Quad9
+(DECISION 88) on top of `systemd-resolved` (DECISION 27) and nftables with `policy drop` on input.
+A DNS/DoT fault would also read as "the new tab never loads", and it would also be site-dependent.
+**The discriminator is what the dead tab actually shows:** a blank/grey page with no error is a
+discard; `ERR_NAME_NOT_RESOLVED` / `ERR_CONNECTION_TIMED_OUT` / a Chrome error page is the network.
+**Establish that before going further** — the two causes share no repair.
+
+**Diagnosis, read-only, in this order:**
+1. **What is on the dead tab — blank, or an error page?** One look, and it halves the search.
+2. **The 10-second A/B.** Open a link in a new tab and switch to it *immediately*; then open
+   another and leave it a full minute before switching. If the first loads and the second never
+   does, it is the sweep and nothing else.
+3. **`chrome://discards`** — the per-tab table shows lifecycle state and a discard count, so a tab
+   that was discarded says so.
+4. **The extension's own console:** `chrome://extensions` → Luminos Tab Sleeper → *service worker*
+   → Console. `discardTab()` logs `[sleeper] refused <id>: <message>` on every failure, and those
+   warnings have never been read by anyone.
+5. If it is an error page instead: `resolvectl statistics`, `resolvectl query <the domain>`, and
+   compare against a domain that works.
+
+**If confirmed, the repair is a guard, not a setting** — the options page cannot express "do not
+discard a tab that has never finished loading". The smallest honest fix is one condition in both
+paths: never discard a tab whose `status` is `'loading'`, and never discard a tab that has not yet
+committed a navigation. **Not written, not applied — investigation only, by instruction.**
+
+---
+
+#### CONFIRMED + FIX PLAN 2026-09-18 — blank/grey, spinner forever, no error. Proposed, NOT applied.
+<!-- [CHANGE: claude-code | 2026-09-18] -->
+
+Shawn answered the discriminator: **"it just keeps loading forever, no error message, blank/grey
+page."** No Chrome error page, so the network half (DoT/DNS, DECISION 27/88) is **excluded**. This
+is the extension.
+
+**"Spinner forever" is worse than a one-shot discard and implies a LOOP, which is a second hole.**
+A tab discarded once reloads on click and then stays. A tab that never finishes has something
+killing it *repeatedly*. There are two ways this code can do that, and both are about the sweep
+deciding the tab you are looking at is not the tab you are looking at:
+
+1. **`pickKeepers()` keeps the active tab only if `t.active && t.windowId === focusedWindowId`.**
+   `focusState()` returns `{id: WINDOW_ID_NONE, focused: false}` on **any** failure of
+   `chrome.windows.getLastFocused()`. If that call ever answers wrongly on this Wayland/KWin box —
+   and window-focus reporting is precisely where this machine has a history — **no tab is kept at
+   all**, the visible tab is discarded, Chrome auto-reloads it because it is active, and the next
+   sweep 30 s later does it again. Spinner forever, on any page that takes longer than the cycle.
+2. **The away rule compounds it.** `focused === false` for `awaySeconds` (60) sets `chromeAway`,
+   which *deliberately* skips the active-tab slot. An API that under-reports focus therefore
+   convinces the sweeper you left, while you are sitting there.
+
+The same hole exists at CRITICAL in the uncapped path: `mayDiscard()` keeps an active tab only if
+`tab.windowId === focusedWindowId`.
+
+**FIX PLAN — three parts, independent, none applied.**
+
+**Part 1 — the guard (this is the actual bug fix).** In `scripts/chrome-tab-sleeper/background.js`:
+- Record completed loads: `chrome.tabs.onUpdated` → `change.status === 'complete'` → add the id to
+  a `loaded` set in **`chrome.storage.session`** (a module-scope Set is wrong for the same
+  MV3-worker-teardown reason the `dirty` set is documented with, and would fail only in production).
+- `mayDiscard()`: return null when `tab.status === 'loading'` **or** the tab has never completed a
+  load. `pickKeepers()`: treat those tabs like `optedOut` — kept, and **not charged a slot**,
+  because a page that never rendered is holding almost nothing, so discarding it frees nothing and
+  costs the page.
+- Close the focus hole: when `focusState()` reports `WINDOW_ID_NONE` (i.e. the API failed rather
+  than answered), keep every window's active tab instead of none. An API failure must not read as
+  "the user is not looking at anything."
+- Prove it the way DECISION 66 proved the rest: new cases in `test-policy.js`, which loads the
+  **real** `background.js` under a stubbed Chrome, and **negative-test them** — break each guard and
+  confirm the suite goes red. A green test that has never been red is not evidence.
+- ⚠️ **Chrome does not auto-reload unpacked extensions.** `chrome://extensions` → Reload, or the
+  change does nothing — the exact trap that left v3.0 on disk and v2.0 running since 2026-08-11.
+
+**Part 2 — "move it to the SSD instead of deleting it" (Shawn's actual ask).**
+State the limit first: **no browser API can do this.** `chrome.tabs.discard()` deletes the page;
+Chrome's Memory Saver does the same. Nothing in Chrome writes a live tab to disk.
+The way to get the behaviour he described is to **stop discarding and give the kernel somewhere to
+put cold pages**: a real on-disk swapfile at low priority *below* zram. The tab is then never
+destroyed — its cold memory is compressed into zram first and spills to SSD second, and clicking
+the tab faults it back with **no network**. That is literally "moved to the SSD, not deleted".
+- **The machinery already exists and is proven on this box:** `scripts/luminos-train-ram` creates
+  `/swapfile.train` (16 G, `fallocate`, prio 5, below zram@100), not in fstab, fully reversible.
+  Root FS is **ext4**, so there is none of the Btrfs NOCOW complication.
+- ⚠️ **This contradicts DECISION 20, which explicitly rejected a permanent swapfile** — *"would
+  change normal-desktop memory behavior 24/7 and re-introduce disk swap the system was deliberately
+  run without"*. That was Shawn's own constraint and he is now asking for the opposite. Per Rule 11
+  this needs a **new decision recording both sides**, not a quiet edit.
+- **Chrome's own Memory Saver must go off** (`chrome://settings/performance`) or it keeps deleting
+  tabs no matter what the extension does. `chrome-luminos` passes `--enable-features=MemorySaver`
+  on both branches; that flag should go too.
+- **Costs, stated:** ~16 G of SSD; SSD writes (negligible at desktop scale on NVMe, not zero);
+  memory pressure now degrades to *slow* instead of *tab lost*. **Bonus:** a real swapfile is also
+  the missing piece for hibernate, which is impossible today on zram-only (`CanHibernate = "na"`,
+  DECISION 68).
+- ~~**Correction to what this entry said earlier about `vm.page-cluster`.** I called config-vs-doc
+  a flat contradiction. The honest reading: `vm.page-cluster = 0` is the CORRECT value for a
+  zram-only box, and the `=3` claim in `docs/LUMINOS_RAM_ARCHITECTURE.md` is the false line.~~
+  **That "correction" was itself wrong — corrected again 2026-09-18 by measurement, DECISION 116.**
+  It was never config-vs-doc. It was **repo-vs-installed**: the live value is `3`, the installed
+  sysctl file says `3`, `docs/LUMINOS_RAM_ARCHITECTURE.md` was **right all along**, and
+  `config/99-luminos-ram.conf` is a file that has never been on the box (**BUG-167**). ⚠️ Twice now
+  this entry has declared a winner between two files without probing the running kernel. **Read
+  `/proc/sys/`, not the repo** — a config file in git is not evidence that a setting is live.
+
+**Part 3 — actual offline browsing, which Part 2 does NOT give.** Swap survives until reboot; it
+does not survive a reboot, and it is not a copy of the site. If the want is "the internet is down
+next week, let me read that page", that needs the page **content saved as a file** — e.g. the
+**SingleFile** extension auto-saving each page as one self-contained `.html` into a folder on the
+SSD. Separate tool, separate decision, and it stores a snapshot rather than a live page.
+
+**Nothing above is written or applied.** Parts 1, 2 and 3 are independent and Shawn picks which.
+
+---
+
+#### WHAT SHIPPED 2026-09-18 — Parts 1 and 2, in the repo, tested, not installed
+<!-- [CHANGE: claude-code | 2026-09-18] -->
+
+Shawn: *"move with 1 and 2 … make sure that all the other windows tab do get saved or moved to SSD
+… keep a separate space just like the windows have a separate RAM on ssd making its total memory way
+more than 16GB"*. Full reasoning in **DECISION 115**; this is the index.
+
+**Part 1 — `scripts/chrome-tab-sleeper` v3.0 → v3.1**
+- `stillLoading(tab)` / `ridesFree(tab)`: a tab whose `status` is `loading` is never discarded in
+  either path, and is **not charged a cap slot**. Tests for `'loading'` rather than requiring
+  `'complete'` so that a missing `status` fails **open** instead of switching the feature off.
+- `focusState()` now returns `known`. An unknown answer keeps **every window's** active tab (not
+  none) and does not wind the away clock. That closes the "loading forever" loop, and it is also
+  what makes the fix cover **all windows**, not just the focused one.
+- Defaults: `graceSeconds` 10 → **1800**, `capOnPressure` true → **false**. Mirrored into
+  `options.js`, which nothing enforces. `manifest.json` → 3.1.
+- **34 checks pass** (`node test-policy.js`), six of them new. **Every guard negative-tested**, and
+  one break came back green — the original case 10 had the loading tab as the most recent, so the
+  MRU filler saved it anyway. Case **10b** fixes that and goes red correctly.
+
+**Part 2 — `scripts/luminos-pagefile` + `systemd/luminos-pagefile.service`**
+- Permanent 32 G `/swapfile.luminos` at priority 10: zram (100) → pagefile (10) → `/swapfile.train`
+  (5). ~23 G → **~55 G** addressable. Free-space floor refuses rather than filling the disk.
+- **Partly reverses DECISION 20** (which rejected a permanent swapfile on Shawn's own instruction).
+  Both sides recorded in DECISION 115. `luminos-train-ram` untouched.
+
+**Still open after this, by choice:**
+1. **Chrome's Memory Saver is still on** and still deletes tabs independently. Untouched because
+   DECISION 27 records that removing it was *"REVERTED at user request"*. One checkbox at
+   `chrome://settings/performance`; Shawn's call.
+2. ~~**`vm.page-cluster = 0`** — right for zram, wrong for an SSD swapfile.~~ **CLOSED 2026-09-18 —
+   measured, DECISION 116. No change needed: it was already `3`, which is the correct value.**
+   32 KiB costs 1.35× a 4 KiB read for 8× the pages (54.4 → 323.8 MB/s; a 150 MB restore drops
+   2.76 s → 0.46 s), break-even readahead utility is 16.8 %, and it costs zram nothing because
+   `swap_ra` is `0`. ✅ **And the pagefile proved itself the same turn:** pressure rose, zram hit
+   **7.5 G of 8 G**, `/swapfile.luminos` took its **first traffic ever** (`USED 16.3M`), and
+   `swap_ra` jumped **0 → 2601** with `swap_ra_hit` **1 → 1967** — **75.6 % measured readahead
+   utility**, and proof that page-cluster reaches the pagefile and not zram. The leftover fault is
+   the repo file → **BUG-167**.
+3. **Part 3, offline reading, not built.** Swap is not an archive.
+4. **The extension version actually running is still unverified** — `chrome://extensions` will say,
+   and the options page prints `cap: ACTIVE / not in force` live.
+
+### BUG-163 — desktop icons are placed underneath the bar, because plasmashell cannot see it
+<!-- [CHANGE: claude-code | 2026-09-16] -->
+- Status: **FIXED AND CONFIRMED LIVE 2026-09-15 22:52:16** — journal reads
+  `[LUMINOS-DESKTOP] overlay live (system), reserving 44 px on the left`. **The user-path overlay was
+  INERT** (KPackage does not prefer `~/.local/share` for `X-Plasma-RootPath` — the one unproven
+  assumption, now answered), so the packaged file carries the patch.
+  ⚠️ **Not yet upgrade-proof:** the pacman hook did not install (see DECISION 111 amendment 3).
+  `~/.config/autostart/luminos-desktop-hook.desktop` installs it at the next login; until then the
+  next `plasma-desktop` upgrade reverts the indent. `luminos-verify` [4b] now fails on exactly this.
+  Superseded status line: No command needed:
+  `~/.config/autostart/luminos-desktop-indent.desktop` runs `scripts/luminos-desktop-indent-login`,
+  which reads the probe, falls back to the packaged file if the overlay is inert, and deletes
+  itself. Outcome lands in `~/luminos-os/.luminos-desktop-indent.log`.
+  Impatient path: `~/luminos-os/scripts/luminos-desktop-indent-apply`. Cancel:
+  `rm ~/.config/autostart/luminos-desktop-indent.desktop`. First delivery (user-path
+  overlay) was applied and reported still broken. Rather than guess whether that means "not
+  restarted" or "shadow inert", the patched QML now logs which copy loaded, and
+  `scripts/luminos-desktop-indent-apply` restarts plasmashell, reads that line, and falls back to
+  patching the packaged file **only on the evidence**. See DECISION 111's amendment.
+- ⚠️ **Numbering note: `HANDOFF.md` called this BUG-160 on 2026-09-14. BUG-160 was already taken**
+  by "the dGPU never sleeps because the daemon watching it keeps it awake". Two different bugs, one
+  number, for two days. This entry is the canonical one; if you find a BUG-160 that talks about
+  desktop icons, it means this.
+- Symptom: the `worldline` desktop icon sits half under the bar — label renders as `rldline`.
+- Cause: **KWin honours the bar's layer-shell exclusive zone; plasmashell does not.** A maximized
+  window starts at exactly the bar's right edge (measured), but plasmashell builds
+  `availableScreenRect` from **its own Plasma panels**, and there are none — Shawn deleted the
+  Plasma panel himself on 2026-08-13, deliberately, and that is what freed Caelestia's launcher
+  (DECISION 68). So the desktop believes the whole 1440×900 is free and auto-places icon #1 at 0,0.
+  `main.qml` already honours the rect it is handed; it is handed the wrong one.
+- **Not caused by the empty `ItemGeometries-1440x900=`.** The 2026-09-14 note blamed that key, and
+  it is the wrong key: `main.qml:291` shows `ItemGeometries-<W>x<H>` is the **`AppletsLayout`**
+  config — desktop *widgets* — not folder-view icon positions. It is empty because there are no
+  desktop widgets. Emptying it does not move an icon, and filling it would not have fixed this.
+- Fix: `scripts/luminos-kde-desktop-overlay` shadows `org.kde.desktopcontainment` under
+  `~/.local/share/plasma/plasmoids/` with **19 symlinks + 1 patched `contents/ui/main.qml`**, so
+  upstream fixes keep arriving and the diff stays one file. DECISION 111 has the reasoning.
+- **The obvious one-line fix is wrong, and wrong somewhere else in the file.**
+  `leftMargin: Math.max(availableScreenRect.x, 44)` indents the drop area — and 100 lines down,
+  `AppletsLayout.relayoutLock` compares its own width against `availableScreenRect.width`. Indent
+  one and not the other and that comparison is never true again, so **`relayoutLock` latches ON and
+  desktop widgets stop relaying out — permanently and silently.** The patch therefore corrects the
+  *rect* once (`luminosScreenRect`) and routes every consumer through it.
+- **The shadow package resolving is the one thing not proven.** `org.kde.plasma.folder` (what
+  `appletsrc` names) is metadata **only** — 9 KB of JSON whose `X-Plasma-RootPath` is
+  `org.kde.desktopcontainment`, which is where the QML actually lives, and therefore what is
+  shadowed. KPackage searches `GenericDataLocation` user-first, so the copy under `~/.local/share`
+  *should* win — but whether `X-Plasma-RootPath` re-resolves globally or within its own data dir
+  was **not** verifiable without restarting plasmashell.
+- **If it does not work:** `luminos-kde-desktop-overlay --remove && systemctl --user restart
+  plasma-plasmashell.service`. The verified fallback is one config key —
+  `[Containments][30][General] alignment=1` in `plasma-org.kde.plasma.desktop-appletsrc`
+  (`main.xml`: *"How Folder View icons are aligned: 0 = Left, 1 = Right"*), which lays icons out
+  from the right edge instead, away from the bar entirely.
+- Guard: `luminos-verify` **[4b]** now compares the number baked into the patched QML against the
+  bar's computed width, because those two can drift apart in silence — change the bar, forget to
+  rebuild, and the icons slide back under it with nothing complaining.
+
+### BUG-162 — the bar was reported as "thick again" twice, and measured correct both times
+<!-- [CHANGE: claude-code | 2026-09-16] -->
+- Status: **FIXED 2026-09-16** — but not the fix that was asked for. See the cause.
+- Reported 2026-09-14 and again 2026-09-16 as "this was made thin but it's somehow back to thick,
+  how did it get reset". **It never reset.** Measured both times, independently:
+  - 2026-09-14: `~/.config/caelestia/shell-tokens.json` held `sizes.bar.innerWidth: 32` (upstream
+    default is 40), one `qs` process running, screenshot changed colour at device x=104.
+  - 2026-09-16: same file, same value, and the screenshot supplied *with the report* changes colour
+    at device **x=104 on every sampled row** — logical **x=52** at 2× HiDPI. Byte-for-byte the
+    accepted value from two days earlier.
+- **Cause of the appearance:** the bar was 52 px of which **20 px is padding**, so 38% of it is
+  empty. `modules/bar/BarWrapper.qml:21-23`:
+  ```
+  padding      = max(Tokens.padding.small = 8, Config.border.thickness = 10) = 10
+  contentWidth = Tokens.sizes.bar.innerWidth (32) + padding * 2 (20) = 52
+  ```
+  `Config.border.thickness` was still at its **upstream default of 10** because `shell.json` had no
+  `border` key at all. Slimming had only ever touched `innerWidth`, so the larger of the two levers
+  had never been pulled. A bar that is mostly air reads as thick no matter what the number says.
+- **Cause of the fragility — this is the real bug.** Both files holding the width,
+  `~/.config/caelestia/shell.json` and `shell-tokens.json`, were **untracked**: not in git, installed
+  by nothing, checked by nothing. `config/caelestia/shell.json` in the repo was a month stale and
+  there was no tokens file at all. The bar's entire geometry lived in one 81-byte file that no
+  process on this machine would have missed. The profile reset of **2026-09-13 20:48** that wiped the
+  Plasma desktop config (BUG-158) would have taken the bar with it, and "how did it get reset" would
+  have had no answer and no restore path. The question was right even though the premise was wrong.
+- **Fix:** bar reduced to **44 logical px** (`innerWidth` 28, `border.thickness` 8 → padding 8), and
+  both files brought under management — tracked in `config/caelestia/`, merged into place by
+  `luminos-caelestia-kwin-overlay`, and asserted by `luminos-verify` section **[4b]**, which prints
+  the computed width so the next report can be answered with a number instead of an opinion.
+  Full reasoning: DECISION 110.
+- **Lesson, and it is the general one:** *two independent measurements agreeing does not make a
+  complaint wrong.* The number was right and the complaint was right — they were about different
+  things. Measuring only what was doubted (the width) confirmed it twice and never once asked what
+  the width was **made of**.
+
 ### BUG-161 — the RTX 4050 woke itself every couple of minutes on an idle machine, and no process was holding it
 <!-- [CHANGE: claude-code | 2026-09-15] -->
 - Status: **FIXED 2026-09-15, measured before and after.**
@@ -6009,3 +6440,40 @@ libs. That was luck, not protection.
 `kirigami 6.28.0-1.1 → 6.29.0-1` silently reverts **DECISION 72** on any full `-Syu`. Recorded in
 `HANDOFF.md` as a known gotcha; still no pacman hook holding it. Same failure shape: an upgrade
 quietly undoing a customisation, with nothing that fails loudly.
+
+---
+
+## BUG-168 — the QML wallpaper host never bound any `var` property a scene declared
+<!-- [CHANGE: claude-code | 2026-09-19] found while building SPEC §3.1, DECISION 117 -->
+
+**Status:** FIXED · **Severity:** latent, would have hit the first scene written by anyone else ·
+**File:** `src/wallpapers/org.luminos.livewallpaper/contents/ui/QmlMode.qml`
+
+CONTRACTS §1 says the host "binds only what exists" — a scene declares `running`, `stats`, `audio`,
+`cursorX`, `cursorY` and gets whichever of them it asked for. The test was:
+
+```qml
+if (item.stats !== undefined)
+    item.stats = Qt.binding(() => qmlRoot.stats);
+```
+
+That asks whether the property **holds a value**, not whether it **exists**. A `property var audio`
+declared the natural way — with no initialiser — *is* `undefined`, so a scene that implemented the
+contract correctly would have been silently skipped and handed nothing, for ever, with no warning.
+
+It never fired because all four shipped scenes happen to initialise: `SysMon.qml` writes
+`property var stats: ({})`, everything else uses `bool` and `real`, which are never undefined. So the
+bug was invisible for exactly as long as we were the only people writing scenes.
+
+**Fix:** ask the real question.
+
+```qml
+function sceneHas(item, name) {
+    return (name in item) || (item[name] !== undefined);
+}
+```
+
+**Lesson, and it is the third time this project has learned it:** a check that asks a *nearby*
+question passes for the wrong reason, and stays green until someone outside the original assumptions
+turns up. BUG-163 was a checker pointed at the wrong path; the `cava` WARN in the capability probe was
+a check on `PATH` instead of on `ldd`; this is a check on a value instead of on a declaration.

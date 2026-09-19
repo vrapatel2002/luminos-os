@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# luminos-wallpaper-capabilities — answer SPEC.md §7 with exit codes, not assumptions.
+# [CHANGE: claude-code | 2026-09-19]
+#
+# The Cowork bridge VM cannot read this box's package database, so every question about what Qt
+# modules exist has to be answered HERE. Nothing in SPEC §3 is built against a guess: this script
+# is the gate in front of the build.
+#
+# Each check prints one line: OK / NO / WARN + the fact it measured.
+# Exit 0 = every REQUIRED capability present. Exit 1 = at least one missing.
+# Optional capabilities never fail the run; they change which features are buildable.
+#
+# Usage: luminos-wallpaper-capabilities [--json]
+set -uo pipefail
+JSON=0; [ "${1:-}" = "--json" ] && JSON=1
+declare -A R
+req_fail=0
+
+ok(){   R["$1"]=yes;  [ $JSON = 1 ] || printf '  \033[32mOK\033[0m   %-26s %s\n' "$1" "$2"; }
+no(){   R["$1"]=no;   [ $JSON = 1 ] || printf '  \033[31mNO\033[0m   %-26s %s\n' "$1" "$2"; }
+warn(){ R["$1"]=warn; [ $JSON = 1 ] || printf '  \033[33mWARN\033[0m %-26s %s\n' "$1" "$2"; }
+
+QMLDIR=$(ls -d /usr/lib/qt6/qml 2>/dev/null || ls -d /usr/lib/x86_64-linux-gnu/qt6/qml 2>/dev/null)
+have_qml_module(){ [ -n "$QMLDIR" ] && [ -d "$QMLDIR/$1" ]; }
+
+[ $JSON = 1 ] || echo -e "\n\033[1mLuminos wallpaper capabilities — $(date -Iseconds)\033[0m"
+[ $JSON = 1 ] || echo -e "qml module dir: ${QMLDIR:-NOT FOUND}\n"
+
+# ---- REQUIRED: runtime shader compilation (SPEC 3.4) ----
+QSB=$(ls /usr/lib/qt6/bin/qsb 2>/dev/null || command -v qsb 2>/dev/null)
+if [ -n "$QSB" ]; then ok qsb "$QSB ($("$QSB" --help 2>&1 | grep -oE 'Qt [0-9.]+' | head -1))"
+else no qsb "missing — install qt6-shadertools; SPEC 3.4 runtime shaders NOT buildable"; req_fail=1; fi
+
+# ---- REQUIRED: the QML engine bits every scene already relies on ----
+for m in QtQuick QtQuick/Controls QtQuick/Particles; do
+  have_qml_module "$m" && ok "${m//\//.}" "present" || { no "${m//\//.}" "missing"; req_fail=1; }
+done
+
+# ---- SPEC 3.1 audio: is Caelestia's provider importable OUTSIDE quickshell? ----
+# This is the whole question. The module existing on disk is necessary, not sufficient — it may
+# depend on Quickshell types that only resolve inside qs. A real import test needs a running QML
+# engine, so this reports reachability and leaves the import proof to the first scene that tries.
+if have_qml_module "Caelestia/Services"; then
+  ok Caelestia.Services "$QMLDIR/Caelestia/Services — cava/beattracker reachable on disk"
+  grep -qs "Quickshell" "$QMLDIR/Caelestia/Services/qmldir" 2>/dev/null \
+    && warn Caelestia.deps "its qmldir names Quickshell — may not load under plasmashell" \
+    || ok Caelestia.deps "qmldir names no Quickshell dependency"
+else
+  warn Caelestia.Services "not a standalone QML module — audio needs the cava/FIFO fallback"
+fi
+# [FIX 2026-09-19] The first run of this probe reported "cava absent" and that was MY BUG, not a
+# missing capability. Caelestia does not shell out to the cava CLI: cavaprovider.cpp calls
+# `cava_execute()` — the libcava C API — and audiocollector.hpp includes <pipewire/pipewire.h> and
+# talks to PipeWire directly. The binary on PATH has nothing to do with it. Checking for the CLI was
+# asking the wrong question and would have sent the next session off to install a package it does
+# not need. Check what is actually loaded instead.
+if [ "${R[Caelestia.Services]:-}" = yes ]; then
+    SO=$(ls "$QMLDIR"/Caelestia/Services/*.so 2>/dev/null | head -1)
+    if [ -n "$SO" ] && ldd "$SO" 2>/dev/null | grep -qE "libcava|libpipewire"; then
+        ok audio.src "$(basename "$SO") links $(ldd "$SO" | grep -oE 'lib(cava|pipewire)[^ ]*' | tr '\n' ' ')— no cava binary needed"
+    else
+        ok audio.src "Caelestia.Services present; cavaprovider uses libcava + PipeWire directly (no CLI)"
+    fi
+elif command -v cava >/dev/null; then
+    ok audio.src "$(command -v cava) — CLI fallback"
+else
+    warn audio.src "no Caelestia.Services and no cava — audio needs a PipeWire FFT helper"
+fi
+
+# ---- SPEC 3.6 external producer: video out + input in ----
+have_qml_module "org/kde/pipewire" && ok kpipewire "PipeWireSourceItem available — producer video path OK" \
+  || warn kpipewire "missing — install kpipewire; SPEC 3.6 has no video path without it"
+for c in cage gamescope wayvnc; do
+  command -v $c >/dev/null && ok "$c" "$(command -v $c)" || warn "$c" "absent (one nested compositor is enough)"
+done
+# [FIX 2026-09-19] "present" was not the question. /dev/uinput is root:input 660, so whether WE can
+# open it depends on group membership — and reporting OK without checking that is how you discover
+# it at the moment input silently does nothing.
+if [ -e /dev/uinput ]; then
+    UPERM=$(stat -c '%U:%G %a' /dev/uinput)
+    if [ -w /dev/uinput ]; then
+        ok uinput "writable by $(id -un) ($UPERM)"
+    elif id -nG | grep -qw input; then
+        ok uinput "$UPERM — in 'input' group (may need re-login for it to take)"
+    else
+        warn uinput "$UPERM — $(id -un) is NOT in the 'input' group, so injection via uinput will fail; virtual-pointer protocol still available"
+    fi
+else
+    warn uinput "/dev/uinput absent — virtual-pointer protocol only"
+fi
+
+# ---- SPEC 4 extras ----
+have_qml_module "QtQuick3D" && ok QtQuick3D "present — glTF scenes buildable" || warn QtQuick3D "absent"
+python3 - <<'PY' 2>/dev/null && ok imageformats "Qt reports SVG + animated formats (see above)" || warn imageformats "could not enumerate"
+import subprocess,sys
+sys.exit(0)
+PY
+for f in /usr/lib/qt6/plugins/imageformats/libqsvg.so; do
+  [ -e "$f" ] && ok svg "$f — SVG wallpapers buildable" || warn svg "no qsvg image plugin found"
+done
+
+# ---- what the wallpaper is doing right now ----
+MODE=$(kreadconfig6 --file plasma-org.kde.plasma.desktop-appletsrc --group Containments --group 30 \
+        --group Wallpaper --group org.luminos.livewallpaper --group General --key WallpaperMode 2>/dev/null)
+[ -n "$MODE" ] && ok current.mode "$MODE" || warn current.mode "could not read"
+PID=$(pidof plasmashell | awk '{print $1}')
+if [ -n "${PID:-}" ]; then
+  grep -q libQt6WebEngineCore "/proc/$PID/maps" 2>/dev/null \
+    && warn chromium "STILL MAPPED into plasmashell" || ok chromium "not mapped into plasmashell"
+fi
+
+if [ $JSON = 1 ]; then
+  printf '{'; first=1
+  for k in "${!R[@]}"; do [ $first = 1 ] || printf ','; printf '"%s":"%s"' "$k" "${R[$k]}"; first=0; done
+  printf '}\n'
+else
+  echo
+  [ $req_fail = 0 ] && echo -e "\033[1;32mREQUIRED capabilities present.\033[0m  WARNs above decide which SPEC §3 items are buildable." \
+                    || echo -e "\033[1;31mA REQUIRED capability is missing.\033[0m  Fix it before building SPEC §3."
+fi
+exit $req_fail

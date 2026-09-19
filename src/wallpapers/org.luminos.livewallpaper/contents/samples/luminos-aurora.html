@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<!-- Luminos Live Wallpaper — sample web wallpaper. [CHANGE: claude-code | 2026-07-22]
+     Deliberately light: one canvas, capped ~30fps, a handful of soft blobs.
+     Point Web mode at this file to confirm the HTML/JS path works. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05060a; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  let W, H;
+  function resize() {
+    W = cv.width = window.innerWidth;
+    H = cv.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // A few soft drifting colour blobs — cheap "aurora" look.
+  const colours = ['#7c3aed', '#2563eb', '#0ea5e9', '#e95420', '#10b981'];
+  const blobs = colours.map((col, i) => ({
+    col,
+    x: Math.random(), y: Math.random(),
+    r: 0.35 + Math.random() * 0.25,
+    sx: (Math.random() - 0.5) * 0.0006,
+    sy: (Math.random() - 0.5) * 0.0006,
+  }));
+
+  let last = 0;
+  function frame(t) {
+    // Cap to ~30fps to stay light on the iGPU.
+    if (t - last > 33) {
+      last = t;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#05060a';
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = 'lighter';
+      for (const b of blobs) {
+        b.x += b.sx; b.y += b.sy;
+        if (b.x < 0 || b.x > 1) b.sx *= -1;
+        if (b.y < 0 || b.y > 1) b.sy *= -1;
+        const cx = b.x * W, cy = b.y * H, rad = b.r * Math.min(W, H);
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+        g.addColorStop(0, b.col);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, W, H);
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>

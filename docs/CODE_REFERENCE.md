@@ -623,3 +623,32 @@ When you modify files, update this doc:
 ---
 
 END OF CODE_REFERENCE.md
+
+## Live wallpaper — Lively parity (2026-09-19)
+<!-- [CHANGE: claude-code | 2026-09-19] -->
+- `docs/wallpaper/SPEC.md` — what we have, what Lively has, the gap, assumptions, budgets. §0 answers
+  "can you interact with a game rendered as video": yes — PipeWire out, virtual-pointer/keyboard in.
+- `docs/wallpaper/CONTRACTS.md` — **frozen**. Scene interface, audio object (128 bands 0–1, Lively
+  parity), property schema, package manifest + Lively field map, JS shim surface, producer IPC
+  (**normalised 0–1 coordinates**, never pixels — the wallpaper and the producer differ in resolution).
+- `docs/wallpaper/BUILD_LOG.md` — decisions and why, appended per session.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/audio/AudioBridge.qml` — **[EXISTS]** the
+  `audio` contract (CONTRACTS §2): 128 bands 0–1, bass/mid/treble, beat, bpm, active. Imports
+  QtQuick and nothing else; publishes silence and logs when there is no provider.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/audio/CaelestiaAudio.qml` — **[EXISTS]** the
+  only file that imports `Caelestia.Services` (`CavaProvider` 128 bars + `BeatTracker` + two
+  `ServiceRef`s). Reached BY URL, so libcava/aubio/PipeWire map into plasmashell only when audio is
+  actually on. DECISION 117.
+- `src/wallpapers/org.luminos.livewallpaper/contents/ui/scenes/Spectrum.qml` — **[EXISTS]** built-in
+  audio scene, 64 GPU-composited bars from the 128 contract bands, bass wash + beat flash.
+- `tests/wallpaper/audio_contract.qml` — **[EXISTS]** CONTRACTS §2 conformance, 22 checks, runs on
+  the box with `qml6`, exit 0/1. Drives `publish()` directly — needs no sound and loads no provider.
+- `scripts/luminos-wallpaper-capabilities` — capability gate. Exit 0 = required present. Answers
+  kpipewire / Caelestia.Services / qsb / Quick3D, which the Cowork bridge cannot see.
+- `scripts/luminos-wallpaper-pkg` — package/manifest layer. Pure functions: `validate_properties`,
+  `merge_props`, `lively_to_manifest`, `parse_manifest`. Python **so it can be tested with exit codes**;
+  QML consumes its JSON. `_path_safe()` rejects absolute, `..`, `~`, NUL and UNC paths — a manifest is
+  untrusted third-party input.
+- `tests/wallpaper/test_pkg.py` — 20 tests, hypothesis property-based.
+- `tests/wallpaper/budget_check.py` — line/function/nesting budgets. Collapses `elif` chains, which
+  Python's AST nests and a reader does not.

@@ -3,12 +3,13 @@
     One KDE wallpaper plugin. Pauses on battery and when nothing can see it (see
     ObscurePolicy). Web wallpapers can be mouse-reactive and can read live system
     stats via window.luminos.
-    [CHANGE: claude-code | 2026-07-22, occlusion policy 2026-07-24]
+    [CHANGE: claude-code | 2026-07-22, occlusion policy 2026-07-24,
+     web renderer split out 2026-09-16 — see WebMode.qml and DECISION 112,
+     audio 2026-09-19 — see ui/audio/AudioBridge.qml and DECISION 117]
     SPDX-License-Identifier: GPL-3.0-or-later
 */
 import QtQuick
 import QtMultimedia
-import QtWebEngine
 import org.kde.plasma.plasmoid
 import org.kde.plasma.plasma5support as P5Support
 import org.kde.taskmanager as TaskManager
@@ -198,14 +199,26 @@ WallpaperItem {
     P5Support.DataSource {
         id: statsSource
         engine: "executable"
-        interval: (root.mode === "web" && root.configuration.InjectSystemStats && root.shouldPlay) ? 2000 : 0
-        connectedSources: (root.mode === "web" && root.configuration.InjectSystemStats) ? ["luminos-monitor stats"] : []
+        interval: (root.wantStats && root.shouldPlay) ? 2000 : 0
+        connectedSources: root.wantStats ? ["luminos-monitor stats"] : []
         onNewData: (source, data) => root.injectStats("" + (data["stdout"] || ""))
     }
+    // [CHANGE: claude-code | 2026-09-16] DECISION 113. Web mode wants these as
+    // injected JavaScript; native QML mode wants them as an object. Parse once,
+    // publish once, and let each mode take what it needs.
+    readonly property bool wantStats: root.mode === "qml"
+        ? (root.configuration.QmlScene === "sysmon" || root.configuration.InjectSystemStats)
+        : (root.mode === "web" && root.configuration.InjectSystemStats)
+    property var statsObj: ({})
+
+    // [CHANGE: claude-code | 2026-09-19] DECISION 117, SPEC §3.1.
+    // Audio costs a PipeWire stream and an FFT thread, so it is opt-in and
+    // off by default — except for the spectrum scene, where a wallpaper that
+    // needs a checkbox ticked before it does anything is just broken.
+    readonly property bool wantAudio: root.mode === "qml"
+        && (root.configuration.AudioReactive || root.configuration.QmlScene === "spectrum")
+
     function injectStats(raw) {
-        var w = modeLoader.item;
-        if (!w || !w.webView)
-            return;
         var obj = {};
         var lines = raw.split("\n");
         for (var i = 0; i < lines.length; i++) {
@@ -213,9 +226,13 @@ WallpaperItem {
             if (eq > 0)
                 obj[lines[i].substring(0, eq).trim()] = lines[i].substring(eq + 1).trim();
         }
-        w.webView.runJavaScript(
-            "window.luminos=" + JSON.stringify(obj) +
-            ";window.dispatchEvent(new CustomEvent('luminos-stats',{detail:window.luminos}));");
+        root.statsObj = obj;
+        // Web mode only: the page cannot see statsObj, so it still gets injected.
+        var w = modeLoader.item;
+        if (root.mode === "web" && w && w.webView)
+            w.webView.runJavaScript(
+                "window.luminos=" + JSON.stringify(obj) +
+                ";window.dispatchEvent(new CustomEvent('luminos-stats',{detail:window.luminos}));");
     }
 
     // =====================================================================
@@ -251,6 +268,7 @@ WallpaperItem {
         anchors.fill: parent
         sourceComponent: root.mode === "video" ? videoComp
                        : root.mode === "web"   ? webComp
+                       : root.mode === "qml"   ? qmlComp
                        : imageComp
     }
 
@@ -333,50 +351,53 @@ WallpaperItem {
         }
     }
 
+    // ---- NATIVE QML (no browser) ----------------------------------------
+    // [CHANGE: claude-code | 2026-09-16] DECISION 113. Loaded by FILENAME for
+    // the same reason WebMode.qml is: referencing `QmlMode` as a TYPE would make
+    // QML resolve it - and everything it imports - while compiling main.qml.
+    // A URL defers the whole subtree until the mode is actually selected.
+    Component {
+        id: qmlComp
+        Loader {
+            id: qmlHost
+            anchors.fill: parent
+            source: "QmlMode.qml"
+            onLoaded: {
+                qmlHost.item.scene = Qt.binding(() => root.configuration.QmlScene);
+                qmlHost.item.shouldPlay = Qt.binding(() => root.shouldPlay);
+                qmlHost.item.stats = Qt.binding(() => root.statsObj);
+                qmlHost.item.audioEnabled = Qt.binding(() => root.wantAudio);
+            }
+        }
+    }
+
     // ---- WEB (HTML / JS / WebGL) ---------------------------------------
+    // [CHANGE: claude-code | 2026-09-16] DECISION 112. The renderer moved to
+    // WebMode.qml and is reached by FILENAME. That is the whole optimisation:
+    // `import QtWebEngine` lives in that file now, so Chromium (~130-150 MB of
+    // libQt6WebEngineCore) is mapped into plasmashell only when web mode is
+    // actually selected. Leaving it as a Component here would NOT have helped -
+    // a QML import runs when the file DECLARING it is loaded, and main.qml is
+    // always loaded, in every mode.
     Component {
         id: webComp
-        Item {
+        Loader {
+            id: webHost
             anchors.fill: parent
-            property alias webView: web
-
-            WebEngineView {
-                id: web
-                anchors.fill: parent
-                url: root.webSource
-                // Full interactivity steals desktop clicks, so it is opt-in.
-                enabled: root.configuration.WebInteractive
-                backgroundColor: root.configuration.BackgroundColor
-                settings.showScrollBars: false
-                settings.playbackRequiresUserGesture: false
-
-                function applyState() {
-                    web.lifecycleState = root.shouldPlay
-                        ? WebEngineView.LifecycleState.Active
-                        : WebEngineView.LifecycleState.Frozen;
-                }
-                Connections {
-                    target: root
-                    function onShouldPlayChanged() { web.applyState(); }
-                }
-                onLoadingChanged: function(info) {
-                    if (info.status === WebEngineView.LoadSucceededStatus)
-                        web.applyState();
-                }
-            }
-
-            // Cursor-follow without stealing clicks (non-interactive mode).
-            MouseArea {
-                anchors.fill: parent
-                enabled: !root.configuration.WebInteractive
-                visible: enabled
-                hoverEnabled: true
-                acceptedButtons: Qt.NoButton
-                propagateComposedEvents: true
-                onPositionChanged: function(m) {
-                    root.cursorX = m.x;
-                    root.cursorY = m.y;
-                }
+            source: "WebMode.qml"
+            // Keeps `modeLoader.item.webView` resolving, so injectStats() and the
+            // cursor forwarder above are untouched.
+            readonly property var webView: webHost.item ? webHost.item.webView : null
+            onLoaded: {
+                webHost.item.webSource = Qt.binding(() => root.webSource);
+                webHost.item.interactive = Qt.binding(() => root.configuration.WebInteractive);
+                webHost.item.bgColor = Qt.binding(() => root.configuration.BackgroundColor);
+                webHost.item.shouldPlay = Qt.binding(() => root.shouldPlay);
+                // The cursor MouseArea moved with the renderer, so the position
+                // now arrives from the loaded item instead of being written here.
+                // Guarded on `item` because the binding outlives a mode switch.
+                root.cursorX = Qt.binding(() => webHost.item ? webHost.item.cursorX : -1);
+                root.cursorY = Qt.binding(() => webHost.item ? webHost.item.cursorY : -1);
             }
         }
     }

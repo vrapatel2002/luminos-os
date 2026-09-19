@@ -6486,3 +6486,832 @@ trace before anyone calls the dGPU question closed.
 
 **Files:** `cmd/luminos-power/main.go`, `docs/BUGS.md` (BUG-161). Cross-ref: DECISION 102 (BUG-157,
 the same no-deadband latch shape), BUG-160 (the fix that made this observable).
+
+
+---
+
+## DECISION 110 — the bar's width is repo state, and the config it lives in is merged, never overwritten
+<!-- [CHANGE: claude-code | 2026-09-16] -->
+**Context: BUG-162.** The Caelestia bar was reported twice as having "reset itself to thick" and
+measured correct twice — 52 logical px both times, the accepted value. The report was still worth
+acting on, for two reasons that had nothing to do with a reset.
+
+**First: 38% of the bar was padding.** `BarWrapper.qml:21-23` computes
+`padding = max(Tokens.padding.small=8, Config.border.thickness=10)` and
+`contentWidth = innerWidth + padding*2`. Every slimming attempt had turned `innerWidth` and none had
+touched `border.thickness`, which sat at its **upstream default** because `shell.json` had no
+`border` key at all. 32 px of icons inside 20 px of air reads as thick whatever the ruler says. Now
+`innerWidth=28` and `border.thickness=8`, giving **44 logical px / 88 device px**. `thickness` is
+lowered to 8 and **not to 0**: `shell.qml` uses `Config.border.thickness` as the height of the
+launcher and dashboard edge indicators (lines 578, 757), so 0 would silently delete two hover
+affordances to save 16 px on a bar.
+
+**Second, and this is the decision: the width was not repo state.** `~/.config/caelestia/shell.json`
+and `shell-tokens.json` were untracked, installed by nothing and checked by nothing. The repo copy of
+`shell.json` was a month stale and there was no tokens file in git at all. The 2026-09-13 20:48
+profile reset that wiped the Plasma desktop config (BUG-158) would have taken the bar with it, and
+there would have been nothing to restore from. **A setting that exists in exactly one unmanaged file
+is not configured, it is remembered** — and it had already been re-derived by hand more than once.
+
+**Chosen: managed keys, merged. Not files, copied.** `config/caelestia/luminos-managed.json` names
+the exact keys Luminos insists on:
+```json
+{ "shell.json":        { "border": { "thickness": 8 } },
+  "shell-tokens.json": { "sizes": { "bar": { "innerWidth": 28 } } } }
+```
+`luminos-caelestia-kwin-overlay` deep-merges those into the live files on every build, backing up to
+`~/.luminos-backups/` first, and `--check` reports any drift.
+
+**Rejected: copying the repo files over the live ones.** `shell.json` is USER config and Caelestia's
+own settings UI writes it back — the live file was already a month ahead of git, carrying bar
+`entries` and dashboard toggles nobody recorded. Copying over it would silently revert every
+GUI toggle Shawn ever flipped. That is the same failure as "the bar reset itself", just aimed at a
+different file, and shipping it inside the fix for that complaint would have been absurd.
+
+**The snapshots are for the other case.** `config/caelestia/shell.json` and `shell-tokens.json` are
+full known-good copies, seeded **only when the live file is absent**, never merged over one that
+exists. Missing and wrong are different faults and want different repairs.
+
+**Invalid JSON is refused, not repaired.** Caelestia falls back to *all* defaults on a parse error,
+silently — so a corrupt `shell.json` means the shell you are looking at is not the one you
+configured. The installer exits and names the snapshot rather than overwriting, because a file that
+failed to parse may still hold the only copy of something.
+
+**`luminos-verify` section [4b] prints the computed width**, re-deriving it from the same formula
+rather than hardcoding 44. This is the part that answers BUG-162's actual question: the next time the
+bar "looks thicker", the answer is a number and a diff, not another round of measuring a screenshot.
+Verified against five states before shipping — current, upstream defaults, the old 52 px, a deleted
+file and corrupt JSON — the last two being the ones that would otherwise fail silently.
+
+**Lesson: two measurements agreeing does not make the complaint wrong.** The width was right both
+times. What was never checked was what the width was *made of*, or whether anything would survive a
+profile wipe. The reported symptom was wrong and the instinct behind it was correct.
+
+**Files:** `config/caelestia/luminos-managed.json` (new), `config/caelestia/shell.json`,
+`config/caelestia/shell-tokens.json` (new), `scripts/luminos-caelestia-kwin-overlay`,
+`scripts/luminos-verify`, `docs/BUGS.md` (BUG-162). Cross-ref: DECISION 103 / BUG-158 (the profile
+reset this hardens against), BUG-160 (the bar measurement that started this).
+
+
+---
+
+## DECISION 111 — the desktop is indented by patching the rect, not the margin
+<!-- [CHANGE: claude-code | 2026-09-16] -->
+**Context: BUG-163.** Desktop icons are placed under the Caelestia bar. KWin reserves the bar's
+exclusive zone for real windows; plasmashell does not, because it computes `availableScreenRect`
+from **its own Plasma panels** and there are none. The desktop containment QML already honours the
+rect it is given — it is given the wrong one.
+
+**Rejected first, because it is the obvious answer: re-add a Plasma panel.** A real panel would fix
+`availableScreenRect` for free, for icons and windows alike. But Shawn deleted the Plasma panel
+himself on 2026-08-13 and **that deletion is what freed Caelestia's launcher** (DECISION 68).
+Re-adding one to fix icon placement would re-break the launcher. A fix that reverses a deliberate
+user decision is not a fix.
+
+**Rejected: `alignment=1` (icons laid out from the right edge).** One verified config key, zero risk,
+instantly reversible — and it does not fix anything, it *avoids* the collision by moving the icons
+somewhere the bug cannot reach. It also moves every icon to the other side of the screen, which
+nobody asked for. **Kept as the documented fallback** in BUG-163, because it is the thing to reach
+for if the overlay turns out not to resolve.
+
+**Rejected: pinning `ItemGeometries`.** It was the standing suggestion from 2026-09-14 and it is
+aimed at the wrong key entirely — `main.qml:291` shows `ItemGeometries-<W>x<H>` belongs to
+`AppletsLayout` (desktop *widgets*), not folder-view icons. It would also only ever fix icons that
+already exist; the next new one still lands at 0,0.
+
+**Chosen: shadow `org.kde.desktopcontainment` with 19 symlinks and one patched file**, by the same
+overlay pattern `luminos-caelestia-kwin-overlay` already uses — every file a symlink so upstream
+fixes keep arriving, the patch re-derived from *current* upstream text on every run so a
+restructure fails loudly rather than shipping a stale desktop.
+
+**Shadow desktopcontainment, not plasma.folder.** `appletsrc` says
+`plugin=org.kde.plasma.folder`, which makes that look like the target. It is metadata **only** —
+9 KB of JSON whose `X-Plasma-RootPath` points at `org.kde.desktopcontainment`. Shadowing the name in
+the config file would have shadowed a file with no QML in it and done nothing.
+
+**Patch the RECT, not the MARGIN — this is the whole decision.** The obvious edit is
+`leftMargin: Math.max(root.availableScreenRect.x, 44)`. It is a trap. A hundred lines further down:
+```
+relayoutLock: width !== root.availableScreenRect.width || height !== root.availableScreenRect.height
+```
+`width` there comes from the drop area the margin just shrank. Indent the margin and leave the lock
+reading the raw rect, and that comparison is **never true again** — `relayoutLock` latches ON and
+desktop widgets stop relaying out, permanently, silently, in a part of the file nobody would connect
+to an icon-placement change. So the patch introduces `luminosScreenRect` (the raw rect with its `x`
+floored at the bar's width) and routes **every** consumer through it, which keeps the size the layout
+is given and the size it compares itself against the same number.
+`configKey` deliberately keeps using `screenGeometry`, so saved `ItemGeometries-1440x900` entries
+still match after the indent.
+
+**The indent is derived, not typed.** `reserved_left()` recomputes
+`innerWidth + max(padding.small, border.thickness) * 2` from the live Caelestia config — the same
+formula `BarWrapper.qml:21-23` uses — and bakes the result into the patched QML. Change the bar
+width (DECISION 110), re-run the overlay, and the desktop follows. Because a *baked* number can
+still drift from a *live* one, `luminos-verify` **[4b]** compares them and fails when they disagree.
+That failure mode — bar changed, overlay not rebuilt, icons quietly back under the bar — is the only
+way this fix rots, so it is the thing that is checked.
+
+**Not proven, and said plainly rather than assumed:** whether `X-Plasma-RootPath` re-resolves across
+data dirs user-first. If it resolves within its own dir instead, the shadow is inert and the desktop
+is unchanged (not broken). One plasmashell restart answers it; `--remove` is the undo.
+
+**Files:** `scripts/luminos-kde-desktop-overlay` (new), `scripts/luminos-verify`,
+`docs/BUGS.md` (BUG-163). Cross-ref: DECISION 110 (where the bar width is managed), DECISION 68
+(why there is no Plasma panel), DECISION 103 / BUG-158 (the last time this desktop broke).
+
+### DECISION 111 — amendment, 2026-09-16: the fallback is built, and the probe is the point
+<!-- [CHANGE: claude-code | 2026-09-16] -->
+Shawn reported the icon still overlapping. **That report has two causes and they are
+indistinguishable by looking**: plasmashell was never restarted, or the user-path package does not
+shadow the packaged one. Guessing between them is how a session burns an afternoon, so the patched
+QML now logs one line at startup naming *which copy loaded*:
+```
+journalctl --user -b -u plasma-plasmashell -g LUMINOS-DESKTOP
+   → [LUMINOS-DESKTOP] overlay live (user), reserving 44 px on the left
+   → [LUMINOS-DESKTOP] overlay live (system), reserving 44 px on the left
+   → (nothing)  = neither loaded
+```
+**`console.warn`, not `console.info`.** `console.info` is `QtInfoMsg` and can be filtered out by
+logging rules; `QtWarningMsg` is on by default everywhere. A probe that can be silently filtered is
+not a probe.
+
+**`--system` is the fallback**, patching the packaged `main.qml` directly with a pacman hook to
+re-apply after upgrades — the same shape as `luminos-skin-apply` for the web surface, and the same
+accepted cost (`pacman -Qkk` reports the file altered). `scripts/luminos-desktop-indent-apply` is
+the single command that tries the clean half, reads the journal, and falls back **only on the
+evidence**.
+
+**Two bugs found in that fallback before it ever ran, both of the silently-wrong-later kind:**
+1. **`reserved_left()` read `Path.home()`.** Under a pacman hook that is `/root`, where the Caelestia
+   config does not exist — and an absent config reads as *"all upstream defaults"*, so every
+   `plasma-desktop` upgrade would have quietly re-patched the desktop at **60 px instead of 44**. A
+   wrong indent that looks deliberate and logs nothing. Now: our home → `$SUDO_USER`'s home → the
+   repo owner's home → a `reserve` file written when `--system` last ran by hand → **refuse**. It
+   never guesses. `is_file()` on an unreadable path is caught too — a probe that throws takes the
+   whole pacman transaction with it.
+2. **`hook_install()` was fatal on a missing source.** `REPO` derives from `__file__`, so the copy
+   pacman runs from `/usr/local/bin` resolves it to `/usr/local/config/...`, which does not exist.
+   That copy has no reason to reinstall a hook that is already there, so it is best-effort now.
+   Left fatal, every `plasma-desktop` upgrade would have ended in a pacman error.
+
+**Also settled this turn, by measurement rather than assertion:** a Cowork session cannot run any of
+this. `device_bash` is a separate machine — 7 processes visible, all its own, no user `shawn`, empty
+`/run/user`, no session bus, no journal, no network route. Folder grants bridge **files, not
+sessions**. Anything needing the live session is handed back as one command, not attempted.
+
+### DECISION 111 — amendment 2, 2026-09-16: schedule the session step instead of asking for it
+<!-- [CHANGE: claude-code | 2026-09-16] -->
+Shawn asked for it fixed, not for a command to run. The fix needs exactly one thing that only exists
+inside a live Plasma session — the answer to *"which copy of `main.qml` did plasmashell load"* — and
+a Cowork session cannot get it (separate machine, folders bridged, no session bus, no journal, no
+route; measured, not assumed).
+
+**So the decision is scheduled for the next moment a session exists: login.**
+`scripts/luminos-desktop-indent-login`, launched by `~/.config/autostart/luminos-desktop-indent.desktop`.
+At login plasmashell starts fresh, so the shadow question is **already answered** by the time the
+script runs — it only reads the answer and acts. Probe present → done. Probe absent → the user-path
+copy is inert, so apply the packaged-file fallback with `sudo -n` (this box has `NOPASSWD: ALL`),
+restart plasmashell once, re-check.
+
+**XDG autostart, not a systemd user unit.** The `luminos-desktop-guard` pattern (DECISION 103) is the
+house style, but a *new* unit needs `daemon-reload` before systemd will see it, and whether the user
+instance survives a logout depends on lingering — neither is knowable from a Cowork session. Plasma
+re-reads `~/.config/autostart/` at every session start, so a file write is sufficient. This matters:
+the whole point was to need no command, and a mechanism that silently needs one defeats it.
+
+**It deletes its own autostart entry once it reaches a verdict**, and gives up after 3 logins if
+`sudo -n` is refused, so it can never become a login-time nag. Cancel before it ever runs with
+`rm ~/.config/autostart/luminos-desktop-indent.desktop`. It writes
+`~/luminos-os/.luminos-desktop-indent.log`, inside a connected folder, so the next Cowork session can
+read the outcome without asking.
+
+**The `sudo -n` step is stated, not buried.** It runs unattended, as root, on a box where sudo needs
+no password — a standing item DECISION 107 already flagged as Shawn's call. It does only the thing
+that was asked for, from a script that is readable, logged, announced by `notify-send`, and
+removable. If that trade is not wanted, delete the autostart entry; the manual path
+(`scripts/luminos-desktop-indent-apply`) is unchanged.
+
+### DECISION 111 — amendment 3, 2026-09-16: it worked, and the answer it gave was "no"
+<!-- [CHANGE: claude-code | 2026-09-16] -->
+**The login finisher ran and the shadow question is settled — the answer was no.** Journal, verbatim:
+```
+22:52:02  === login run, boot fc5df078 ===
+22:52:07  no probe in the journal — the ~/.local/share overlay is INERT
+22:52:07  applying the packaged-file fallback
+          snapshotted pristine -> /usr/local/share/luminos/desktopcontainment/main.qml.orig
+          patched /usr/share/.../main.qml (44 px)
+22:52:16  CONFIRMED after fallback: overlay live (system), reserving 44 px on the left
+22:52:16  removed autostart entry — finished
+```
+**KPackage does NOT prefer `~/.local/share` when resolving `X-Plasma-RootPath`.** That was the one
+thing flagged as unproven; it is now proven false, and the packaged-file route is the only one that
+works here. The 14 seconds Shawn saw — bug visible, then gone — are lines 1 and 4: plasmashell
+started on the stock desktop, the finisher patched and restarted it.
+
+**And it shipped without the hook.** Same log:
+```
+note: /usr/local/config/pacman-hooks/... not found and /etc/pacman.d/hooks/... is absent
+      - the indent will NOT survive a plasma-desktop upgrade until it is installed
+```
+`REPO` derives from `__file__`, and the finisher ran the copy at `/usr/local/bin`, so `HOOK_SRC`
+resolved to `/usr/local/config/...`. **Amendment 1 made that non-fatal to avoid failing a pacman
+transaction, and non-fatal is exactly why it slipped through as a quiet note in a log nobody had
+read yet.** The desktop was fixed and its only protection was missing, and nothing said so louder
+than one line of prose.
+
+**Three changes, so this cannot recur:**
+1. `_hook_source()` looks in the repo, then a stash beside `PRISTINE`, then the repo in the home of
+   whoever owns the script. `--system` writes that stash, so the `/usr/local/bin` copy always has a
+   source. Not-found is now a **loud WARNING and a non-zero return**; already-installed still
+   returns 0, so a pacman-hook run never fails a transaction over finished work.
+2. `luminos-verify` **[4b]** checks **both** delivery paths — the old check pointed only at
+   `~/.local/share`, which the finisher had just deleted, so it would have reported the working fix
+   as missing. It now also fails when the packaged file is patched and the hook is absent.
+3. `scripts/luminos-desktop-hook-login` + its autostart entry install the hook at the next login.
+
+**The lesson is the one this session keeps re-learning: a warning nobody reads is not a warning.**
+BUG-161 hid for four months because nothing counted the events. This hid for a day because the one
+line that mattered was prose in a log file rather than a non-zero exit and a `luminos-verify`
+failure. Both are the same mistake — *state that is only observable if someone happens to look*.
+
+---
+
+## DECISION 112 — the web renderer lives in its own file, so Chromium is not loaded to play an mp4
+<!-- [CHANGE: claude-code | 2026-09-16] -->
+**Context.** Shawn asked whether the video wallpaper could be made lighter without losing the other
+wallpaper types. `org.luminos.livewallpaper` supports image, GIF, video, YouTube and HTML/JS/WebGL,
+and it had `import QtWebEngine` on **line 10 of `main.qml`**, unconditionally.
+
+**The mode switching was already right, which is why this was easy to miss.** `modeLoader` uses
+`sourceComponent`, so a `WebEngineView` is never *created* while a video plays and no Chromium child
+processes spawn. But **a QML `import` is not conditional.** It runs when the file that declares it is
+loaded, and `main.qml` is loaded in every mode — so plasmashell mapped `libQt6WebEngineCore.so`,
+roughly 130–150 MB of Chromium, on every login, to play an mp4.
+
+**Chosen: move the renderer to `WebMode.qml` and load it by FILENAME.** A QML file that is never
+loaded never runs its imports. In image, GIF, video and YouTube mode Chromium is now never mapped at
+all; in web mode the behaviour is byte-identical — the body is the old `webComp` verbatim.
+
+**Rejected: `Loader { sourceComponent: webComp }` with the import left in `main.qml`.** That is what
+was already there, and it is exactly the thing that does not work. Deferring *instantiation* does not
+defer the *import*. Worth stating plainly because the code looked correct.
+
+**The four `root.*` references had to become properties.** A separate file cannot reach `root`, so
+`webSource`, `interactive`, `bgColor` and `shouldPlay` arrive as plain properties bound by the
+Loader's `onLoaded`. Plain, not `required`: a Loader can only pass required properties through
+`setSource()`, which cannot carry **bindings**, and these must stay live. The cursor `MouseArea`
+moved with the renderer, so `root.cursorX/Y` are now bound *from* the loaded item, guarded on `item`
+because the binding outlives a mode switch. `modeLoader.item.webView` still resolves, so
+`injectStats()` and the cursor forwarder are untouched.
+
+**Two drifts closed while in there, in opposite directions:** the installed `main.qml` was behind git
+by a comment, and the repo was missing `contents/samples/` — four sample web wallpapers that existed
+only on the live box. Repo and installed are now identical, verified with `diff -r`.
+
+**Not measured yet, and deliberately not assumed: hardware video decode.** Nothing sets
+`QT_MEDIA_BACKEND` or a VA-API driver, so Qt picks its own default and nobody has ever checked
+whether that 2880×1620 h264 is decoded on the 780M or on the CPU. BUG-083 measured **24% of a core
+and 810 MB** when this plugin was last badly behaved. `scripts/luminos-wallpaper-probe` reports it at
+the next login rather than leaving it a guess.
+
+**The probe rolls back by itself.** A broken wallpaper QML is a black desktop — BUG-158 again, which
+took two days partly because nobody could say when it broke. The probe reads plasmashell's own QML
+errors one login after the change and, if the plugin failed, restores
+`backups/livewallpaper-20260916-033053` and restarts the shell rather than leaving a blank screen to
+be discovered.
+
+**Files:** `src/wallpapers/org.luminos.livewallpaper/contents/ui/WebMode.qml` (new),
+`.../main.qml`, `.../contents/samples/*.html` (now tracked), `scripts/luminos-wallpaper-probe` (new),
+`~/.config/autostart/luminos-wallpaper-probe.desktop`. Cross-ref: BUG-083 (the last time this plugin
+was the cost), BUG-158 / DECISION 103 (why a black desktop gets an automatic rollback).
+
+---
+
+## DECISION 113 — a native QML wallpaper mode, because a browser was never buying anything
+<!-- [CHANGE: claude-code | 2026-09-16] -->
+**Context.** DECISION 112 took Chromium out of the process for video and image mode. It was still
+loaded for the four *bundled* wallpapers, and reading them showed why that was silly: a Shadertoy
+fragment shader is a `ShaderEffect`, a canvas animation is a `Canvas`, and a stats readout is a
+`Text`. Qt does all of it natively. The browser was only ever buying **arbitrary** HTML.
+
+**Chosen: a fifth mode, `qml`, alongside image / video / web.** Web mode stays, and stays the right
+answer for a Shadertoy URL or an HTML5 toy — there is no small browser engine (WebKitGTK is GTK4 and
+banned; Servo is not ready), and it now costs nothing when unused. All four samples ported:
+
+| scene | was | is |
+|---|---|---|
+| `shader` | WebGL fragment shader | `ShaderEffect` + a baked `.qsb` — GPU |
+| `aurora` | Canvas 2D + rAF | `Canvas` — QML's 2D context is the same API, so the sample's own code |
+| `particles` | Canvas 2D springs | `Canvas` — see below |
+| `sysmon` | `window.luminos` injected over `runJavaScript` | `Text` + the existing DataSource |
+
+**Loaded by URL, never as a type — the same trap as DECISION 112.** `Component { QmlMode {} }` looks
+equivalent to `Loader { source: "QmlMode.qml" }` and is not: a **type reference has to be resolved
+when main.qml is compiled**, which pulls in that file and everything it imports, in every mode. That
+is exactly the bug DECISION 112 fixed. Every mode now loads through a URL.
+
+**Rejected for `particles`: `QtQuick.Particles`.** It is GPU-driven and would have been the faster
+answer, but the sample is a per-particle spring toward a drifting home plus a cursor repel, and
+Particles models emitters and affectors, not springs. It would have been a different-looking
+wallpaper wearing the same name. A faithful `Canvas` port keeps the behaviour identical and still
+drops an entire browser; a GPU rewrite deserves its own change and its own before/after.
+
+**The `.qsb` is committed, and that needs saying out loud.** Qt 6 removed inline shader source from
+`ShaderEffect` — `fragmentShader` is a URL to a baked file — and a wallpaper plugin has no build
+step. So `contents/shaders/luminos-shader.frag` is the readable source of truth and
+`luminos-shader.frag.qsb` is a **checked-in build artefact**, with the rebuild command in the .frag's
+own header. It was baked with `qsb` 6.4 (QSB_VERSION 6); Qt 6.11 reads older QSB fine, and
+`Shader.qml` falls back to the Canvas aurora and **says so in the log** if it ever does not — a
+silent fallback is how you end up debugging the wrong thing.
+
+**The uniform block is hand-packed for std140.** Order is `mat4 / float qt_Opacity / float iTime /
+vec2 iResolution / vec2 iMouse`, chosen so both `vec2`s land on 8-byte boundaries. Getting that wrong
+does not fail to compile — it silently feeds the shader the wrong numbers.
+
+**Stats are parsed once and published once.** `injectStats()` now fills `root.statsObj` and only
+*additionally* does the `runJavaScript` injection in web mode. Native scenes get an object; the
+browser still gets its `window.luminos`.
+
+**The transfer of the `.qsb` is worth one line as a method note:** base64 through the shell corrupted
+it (2517 bytes instead of 2520, wrong md5, caught by checksum). `device_commit_files` moved it
+intact. **Checksum binary files across the bridge; do not trust a terminal round-trip.**
+
+**Files:** `contents/ui/QmlMode.qml`, `contents/ui/scenes/{Shader,Aurora,Particles,SysMon}.qml`,
+`contents/shaders/luminos-shader.frag{,.qsb}` (new); `contents/ui/main.qml`,
+`contents/config/main.xml`, `contents/ui/config.qml`; `scripts/luminos-wallpaper-probe`.
+Rollback target: `backups/livewallpaper-20260916-035041/`. Cross-ref DECISION 112.
+
+---
+
+## DECISION 114 — the Nexus window's rounded shape was never the window
+<!-- [CHANGE: claude-code | 2026-09-16] BUG-165 -->
+**Reported as "the left corner has no curve, the right one is perfect". Measured from the
+screenshot, it is worse than reported: THREE corners are square** — top-left and bottom-left are
+square, both right corners curve cleanly. And the square corners are filled with **(19,19,23)**,
+which is `m3surface`, the exact colour of the bar.
+
+**Cause.** The rounded shape is a `BlobInvertedRect` painted *on top of* a `FloatingWindow` whose
+`color` is an **opaque m3surface clear colour covering the whole square surface**. Wherever the
+blob's rounded corner cuts inward, that square rectangle shows through and fills the corner. The
+corners are not drawn wrong; there is a square window behind a rounded picture of one.
+
+**Why `color: "transparent"` alone would have been a trap.** `Pages.qml` paints **no background of
+its own** — checked, it contains no colour and no Rectangle — so the entire settings content area
+*is* that clear colour. Removing it would have rounded the corners and turned the content
+see-through in the same move. The clear colour had to be **replaced**, not removed: transparent
+clear plus a real `Rectangle` behind everything carrying the background.
+
+**Its radius is deliberately too large** (`extraLarge` 28 against the blob's `large` 16). The frame
+is the outermost thing drawn, so anything outside it is outside the window anyway — erring large can
+only hide the rectangle further behind the frame, never expose a gap. Erring small would have
+reproduced the bug at a smaller size.
+
+**⚠️ One thing does not fit, and it is recorded rather than smoothed over.** If an opaque square
+surface sits behind a rounded shape, **all four** corners should show the wedge. The right two do
+not. `BlobInvertedRect`'s geometry is symmetric (8 vertices, one outer rect, one hole), and its
+asymmetric `borderLeft` only moves the *hole*, not the outer corners. Candidate explanations not yet
+tested: the `windowBtnRect` blob anchored top-right merging into the group and covering that corner,
+or `BlobGroup.cornerFill` (default **true**) behaving differently where the frame is thin. **The fix
+addresses the root cause either way** — with no opaque square behind it, no corner can be filled —
+but if only the left corners change and the right ones look different afterwards, this unexplained
+half is where to look. Do not assume it is understood.
+
+**Applied by materialising the patch into the overlay** (`modules/nexus/WindowFactory.qml` is now a
+real file rather than a symlink into `/etc/xdg`), so it is live without a rebuild; quickshell
+hot-reloads QML, so reopening the settings window should be enough. Revert:
+`luminos-caelestia-kwin-overlay --build` after removing the entry from `PATCHES`, or
+`--remove` for the whole overlay.
+
+**Files:** `scripts/luminos-caelestia-kwin-overlay` (PATCHES + the reasoning),
+`~/.config/quickshell/caelestia-kwin/modules/nexus/WindowFactory.qml`. Cross-ref DECISION 68.
+
+---
+
+## DECISION 115 — the browser stops deleting pages; a real SSD pagefile holds them instead
+# [CHANGE: claude-code | 2026-09-18]
+
+**Decision, in one line.** The machine gets a permanent **32 GB pagefile on the SSD** below zram,
+and the tab sleeper stops throwing pages away for ordinary browsing — a cold tab's memory now moves
+to disk instead of being deleted, and clicking the tab brings it back **with no network**.
+
+Asked for in these words: *"rather than deleting it move it to ssd so in case of internet outage i
+can still visit that site"* and *"keep a separate space just like the windows have a separate RAM on
+ssd making its total memory way more than 16GB"*. That is a pagefile, and the machine did not have
+one.
+
+### What was actually wrong (BUG-166)
+
+Three systems were discarding tabs and none of them knew about the other two, but the reported
+symptom — *"the new tab never loads, blank, spinner forever"* — came from two specific holes in
+`scripts/chrome-tab-sleeper`:
+
+1. **It never asked whether a tab was still loading.** `grep -n status background.js` returned one
+   hit, unrelated. A background tab opened with *Open link in new tab* was a legal discard target
+   **while its first load was in flight**, and a tab discarded before it ever committed has nothing
+   to restore. YouTube survived only because a YouTube tab goes `audible` within a second or two,
+   and audible is exempt at every level — it was the only protection fast enough.
+2. **A failure of `chrome.windows.getLastFocused()` read as "the user left".** `focusState()`
+   returned `WINDOW_ID_NONE` on any error, and `pickKeepers()` keeps the active tab only on an id
+   match — so nothing was kept, the visible tab was discarded, Chrome reloaded it *because it is
+   active*, and the next sweep did it again. **That loop is the "loading forever".**
+
+### Why a pagefile, and not just a gentler sleeper
+
+Because there was nowhere else for a cold page to go. Swap was **zram only** — 15.3 GB of RAM plus
+8 GB of *compressed RAM* — so the only way to reclaim a background tab was to delete it. zram is not
+a spill valve; it competes for the same RAM it is relieving. With a real disk swap below it, the
+kernel compresses into zram first and spills to SSD second, the tab is **never destroyed**, and the
+restore is a page fault rather than an HTTP request. It applies to **every process and every window**,
+not just Chrome — which is the rest of what was asked for.
+
+| | RAM | zram | pagefile | total addressable |
+|---|---|---|---|---|
+| Before | 15.3 GB | 8 GB | — | ~23 GB, and no disk anywhere in it |
+| After | 15.3 GB | 8 GB | **32 GB SSD** | **~55 GB** |
+
+### ⚠️ This REVERSES part of DECISION 20, deliberately (Rule 11)
+
+DECISION 20 explicitly rejected a permanent swapfile: *"would change normal-desktop memory behavior
+24/7 and re-introduce disk swap the system was deliberately run without."* That was Shawn's own
+constraint in June, for a training toggle. He has now asked for the opposite for the desktop. Both
+sides stand on the record; this is the newer instruction, and it is scoped:
+
+- `luminos-train-ram` is **untouched**. It stays a temporary toggle, its own file
+  (`/swapfile.train`), its own priority (5).
+- The new pagefile is a **different file** (`/swapfile.luminos`) at **priority 10**. Order of use:
+  zram (100) → pagefile (10) → training file (5). Both can be on at once and neither touches the
+  other's file. **Do not merge them.**
+
+### What was rejected
+
+- **A bigger zram.** Rejected for the same reason DECISION 20 rejected it: compressed RAM cannot
+  relieve genuine RAM exhaustion, it competes for the same pages.
+- **`/etc/fstab`.** A swapfile that is missing, being resized, or deliberately deleted fails
+  `swap.target` and the boot with it. A `oneshot` unit that creates-if-missing and **refuses**
+  rather than half-creating cannot take the boot down.
+- **Turning the sleeper off entirely.** The 2-tab cap is still right when a 5 GB model is genuinely
+  resident (DECISION 66); that case has not changed. What was wrong was the cap firing with **no**
+  model loaded, via `capOnPressure`.
+- **Making the "don't discard a loading tab" behaviour an option.** It is a correctness guard, not
+  a preference. An option that can be switched off is a bug that can be switched back on.
+- **Editing `background.js`'s DEFAULTS as the whole fix.** `chrome.storage.local` overrides them,
+  so a saved value beats the file. The options page is the authority at runtime; the defaults only
+  decide what an untouched profile does.
+
+### The four changes, all shipped together
+
+1. **`background.js` → v3.1.** `stillLoading(tab)` and `ridesFree(tab)`; a loading tab is kept in
+   both the capped and uncapped paths and **is not charged a cap slot** (a page that never rendered
+   is holding nothing, so discarding it frees nothing and costs the page). `focusState()` now
+   returns `known`, and an unknown answer keeps **every window's** active tab rather than none, and
+   does not wind the away clock.
+   > `stillLoading()` tests for `'loading'` rather than requiring `'complete'` **on purpose**: if
+   > `status` were ever absent this fails OPEN (the tab stays discardable) instead of silently
+   > switching the whole feature off. The safe failure is the loud one.
+2. **Defaults:** `graceSeconds` 10 → **1800**, `capOnPressure` true → **false**. Ten seconds meant
+   every background tab was deleted almost as soon as you looked away; `capOnPressure` is what made
+   a hard 2-tab cap fire with no model, on a box that dips under 3 GB free routinely, **with no
+   grace and no pinned/typed exemption**. Mirrored into `options.js`, which nothing enforces.
+3. **`scripts/luminos-pagefile`** + **`systemd/luminos-pagefile.service`** — create, activate at
+   boot, `off`/`status`/`resize`, a free-space floor that **refuses** rather than filling the disk,
+   and a `status` readout that prints the RAM + zram + pagefile total from the **live kernel**
+   rather than from its own idea of the size.
+4. **Nothing was changed in `chrome-luminos`.** Chrome's own Memory Saver is still on and still
+   deletes tabs independently — see below.
+
+### How it was proven
+
+`node test-policy.js` loads the **real `background.js`** under a stubbed Chrome: **34 checks pass**,
+including six new ones for BUG-166 (loading tab under the cap, loading tab past the grace, focus
+unknown, the away rule with focus unknown, two windows at CRITICAL with focus unknown, and a
+regression guard that focus *known* at CRITICAL still drops the other window's active tab).
+
+**Every new guard was negative-tested — and one of them was wrong first:**
+
+| Guard broken | Result |
+|---|---|
+| `stillLoading` removed from `mayDiscard()` | 1 failure ✅ |
+| `ridesFree` → `optedOut` in `pickKeepers()` | **passed — the test was not testing it** |
+| `ridesFree` → `optedOut` in `countingKeepers()` | 2 failures ✅ |
+| focus-unknown guards removed (both paths) | 1 failure ✅ |
+| away clock trusting an unknown focus answer | 1 failure ✅ |
+
+The second row is the finding: in the original case 10 the loading tab was **also the most recent**,
+so the MRU slot-filler saved it even with the guard gone — green for the wrong reason. Case **10b**
+was added with the tab loading for five minutes while other tabs were touched, which is the
+realistic shape, and it goes red as it should. **A green test that has never been made to go red is
+not evidence** — and this is the second time that rule has earned its place.
+
+The pagefile script's own paths were exercised unprivileged: the free-space floor **refuses** with
+the shortfall named, and `create_file` produces a real swap area (`file` reports *"Linux swap file,
+4k page size, version 1"*). `systemd-analyze verify` passes on the unit.
+
+### Costs, stated plainly
+
+- **32 GB of SSD**, and SSD writes. Small at desktop scale on NVMe, not zero.
+- **Memory pressure now degrades to *slow* instead of *tab lost*.** That is the trade being bought,
+  and it is the right one here, but a badly thrashing machine will feel it.
+- **Swap is not an archive.** A tab is alive until shutdown and then it is gone like any other
+  memory. *"Visit that site during an outage next week"* needs a saved copy of the page — a
+  different tool, BUG-166 Part 3, **not built**.
+- **⚠️ Chrome's own Memory Saver is still on and still deletes tabs**, so the behaviour is not fully
+  explainable until it is off (`chrome://settings/performance`). It was **deliberately left alone**:
+  DECISION 27 records that removing it was tried and *"REVERTED at user request — MemorySaver
+  stays on"*. Reversing a second explicit user decision inside one change, without being asked, is
+  not a call an agent should make. It is one checkbox and it is Shawn's.
+- **⚠️ ~~`vm.page-cluster = 0`~~ — THIS BULLET WAS WRONG. Superseded by DECISION 116 (measured,
+  2026-09-18).** `vm.page-cluster` is **3** on this box and has been since 2026-05-08:
+  `/etc/sysctl.d/99-luminos-ram.conf` is a hand-written one-line file reading `vm.page-cluster=3`,
+  and **`config/99-luminos-ram.conf` was never installed** (BUG-167). So there was no trade-off to
+  weigh — the value was already the right one, `docs/LUMINOS_RAM_ARCHITECTURE.md` was **right** and
+  this bullet's claim that the document was "the false one" is the false part. Measured on the real
+  drive: 32 KiB costs 1.35× a 4 KiB read and returns 8× the pages (54.4 → 323.8 MB/s busy;
+  150 MB restores in 0.46 s instead of 2.76 s). And it costs zram **nothing**, because
+  `swap_ra 0` over 715 834 swap-ins says the knob never reaches zram at all. Full numbers,
+  method and caveats in **DECISION 116**.
+- **`swapoff` is slow when the pagefile is full** — it must read every page back into RAM. That is
+  why `systemctl stop` uses `off --keep-file` and `TimeoutStopSec=600`.
+- **⚠️ Nothing migrates a page from zram DOWN to the pagefile.** Shawn spotted this: *"i don't think
+  we have any thing in our ram manager to offload to ssd side"* — correct, and it is a property of
+  the kernel, not a gap in `luminos-ram`. `MADV_PAGEOUT` hands a page to *swap*, and the kernel picks
+  the **highest-priority** device with room, which is always zram (100). A page that lands in zram
+  **stays** in zram until it is faulted back; it does not age out to the SSD. So the pagefile only
+  receives traffic once **zram is full** (8 GB, and it was already 4.4 GB used at install). Tiering
+  by *coldness* rather than by *zram being full* is what **zram writeback** (`backing_dev` +
+  `idle`/`huge` writeback) exists for, and it is **not configured**. Worth investigating; not done,
+  and not to be switched on without measuring, since it adds SSD writes for pages that may never be
+  read again.
+
+### Side effects worth knowing
+
+- **earlyoom gets less likely to fire — but NOT for the reason first written here.**
+  <!-- [CHANGE: claude-code | 2026-09-18] correction, same day --> The original claim was that
+  32 GB of mostly-free swap keeps earlyoom's swap condition false. **That is wrong and the arithmetic
+  disproves it.** earlyoom here triggers on *mem avail ≤5%* **and** *swap free ≤90%* (BUG-119,
+  DECISION 67), and at install time zram alone already held 4.4 GB — so against a 40 GB total swap
+  pool that is 89% free, i.e. **the swap condition was already satisfied the moment the pagefile
+  came up**, and a bigger pool does not restore it. What the pagefile actually buys is the *other*
+  condition: **memory-available stays above 5% far longer**, because cold pages now have somewhere
+  to go instead of exhausting RAM. Same conclusion, different mechanism — and the mechanism is the
+  part that has to be right, because the wrong one would have been used to justify leaving earlyoom
+  untuned.
+- **Hibernate becomes possible for the first time.** It is impossible on zram-only (`CanHibernate =
+  "na"`, DECISION 68). Not wired up — it needs `resume=` plus `resume_offset=` and a deliberate
+  decision of its own.
+
+### Cross-references
+BUG-166 · DECISION 20 (reversed in part) · DECISION 65 / 66 (the sleeper) · DECISION 27 (Memory
+Saver, left alone) · BUG-118 (the daemon's dead CDP arm) · BUG-119 (earlyoom, pinned memory)
+
+---
+
+## DECISION 116 — `vm.page-cluster` stays at 3, because it already was 3, and the file that said 0 was never installed
+# [CHANGE: claude-code | 2026-09-18]
+
+**Status:** MEASURED, no change made. Read-only turn by instruction.
+
+### The premise everyone was arguing from was false
+
+DECISION 115, `docs/BUGS.md` BUG-166 and `HANDOFF.md` all reasoned about
+`vm.page-cluster = 0` being live and being "right for zram, wrong for the new SSD pagefile".
+It is not live and never was. Probed directly:
+
+| | value |
+|---|---|
+| `/proc/sys/vm/page-cluster` (live kernel) | **3** |
+| `/etc/sysctl.d/99-luminos-ram.conf` (installed, 18 bytes, mtime **2026-05-08**) | `vm.page-cluster=3` |
+| `config/99-luminos-ram.conf` (repo, 179 bytes, mtime 2026-05-06) | `vm.page-cluster = 0` |
+
+**The repo file was never installed.** The installed file is a different, one-line file that
+someone wrote by hand the day after. `docs/LUMINOS_RAM_ARCHITECTURE.md:111`,
+`docs/LUMINOS_HANDBOOK.md:1077` and `LUMINOS_MASTER_FILE.md:231` have said `=3` all along and
+**they were right**; BUG-166's "correction" of 2026-09-18, which declared the *document* to be
+the false one, was itself wrong. The conflict was never config-vs-doc. It was
+**repo-vs-installed** — see **BUG-167**, which is the real fault and is wider than this one key.
+
+### What was measured
+
+No `fio`, no `ioping`, no `hdparm` on the box, and they were **not installed** (instruction).
+`sudo` was unavailable in this session, so the raw partition could not be opened. Substitute:
+a stdlib-Python `O_DIRECT` harness doing random `preadv()` against a **13.6 GB file owned by the
+user on `/dev/nvme0n1p5`** — the same ext4 partition `/swapfile.luminos` sits on, on the only
+physical drive in the machine. `O_DIRECT` means the page cache serves nothing; ext4 supplies
+extents and the IO is the drive's. Real swap bypasses the filesystem entirely (`swapon` builds
+the extent map once), so this measurement **slightly over-states** overhead — the bias direction
+is known and is against the conclusion, not for it.
+
+**Drive:** Samsung SSD 990 PRO 2TB, fw `8B2QJXD7`, PCIe 4.0 ×4 at full `16.0 GT/s` ×4,
+`/dev/nvme0n1` → `nvme0n1p5` (ext4, `/`, 629 G, 76 % full). It is the **only** block device in
+the box besides `zram0`; there is no second NVMe to have guessed wrong about.
+
+#### Busy drive (back-to-back IO — what a bulk restore looks like after the first fault)
+
+| block | queue depth | mean | p50 | p99 | IOPS | throughput |
+|---|---|---|---|---|---|---|
+| 4 KiB | 1 | 74.1 µs | 75.6 µs | 94.7 µs | 13 293 | **54.4 MB/s** |
+| 32 KiB | 1 | 99.8 µs | 100.5 µs | 144.0 µs | 9 882 | **323.8 MB/s** |
+| 64 KiB | 1 | 118.9 µs | 118.1 µs | 178.7 µs | 8 314 | 544.9 MB/s |
+| 4 KiB | 8 | 75.8 µs | 74.7 µs | 128.0 µs | 102 735 | 420.8 MB/s |
+| 32 KiB | 8 | 124.2 µs | 112.3 µs | 244.3 µs | 63 228 | 2071.9 MB/s |
+
+**The number that decides it: 32 KiB costs 1.35× a 4 KiB read and returns 8× the pages.**
+
+#### Idle drive — and this is the finding that was not expected
+
+A lone read after the drive has been idle costs **~930 µs**, not 74 µs. Staircase, mapped:
+
+| idle gap before the read | mean | p50 |
+|---|---|---|
+| 0 ms | 78.9 µs | 80.7 µs |
+| 1 ms | 85.0 µs | 85.7 µs |
+| 5 ms | 103.9 µs | 93.6 µs |
+| 10 ms | 108.8 µs | 96.5 µs |
+| 25 ms | 278.2 µs | 130.5 µs |
+| 50 ms | 132.5 µs | 131.6 µs |
+| 100 ms | 416.8 µs | 349.7 µs |
+| 250 ms | 1027.3 µs | 933.5 µs |
+| 500 ms | 1135.8 µs | 934.7 µs |
+| 1000 ms | 728.9 µs | 925.5 µs |
+
+Plateau from 250 ms — the drive is fully down by then and costs **~930 µs to wake**.
+
+**This is the drive, not the CPU.** Controlled for, because `powersave` + `balance_power` +
+C-states could have faked the whole effect. After each idle gap, three things were timed in
+order: a pure-CPU spin (**182.3 µs** — that is the C-state exit and the governor ramp, and it is
+paid *before* the read), a page-cache `pread` with no device IO at all (**24.0 µs**), and only
+then the `O_DIRECT` read (**919.5 µs**). The CPU was already awake and already warm when the
+read was issued. The ~900 µs belongs to the SSD.
+
+⚠️ **Mechanism not confirmed.** It has the shape of NVMe **APST** dropping into a deep
+non-operational power state, but the APST table needs `nvme id-ctrl`, and **nvme-cli is not
+installed** — deliberately not installed. PCI runtime PM is *not* the cause: `power/control`
+reads `on`, so the device is not being runtime-suspended by the kernel. The **cost is measured
+and real**; only the name for it is unverified.
+
+### The answer
+
+| | page-cluster 0 (1 page/fault) | page-cluster 3 (8 pages/fault) | ratio |
+|---|---|---|---|
+| Effective swap-in rate, **busy** drive | 54.4 MB/s | **323.8 MB/s** | **5.95×** |
+| Effective swap-in rate, **idle** drive | 4.34 MB/s | **33.3 MB/s** | **7.67×** |
+| 150 MB working set, busy | **2.76 s** | **0.46 s** | saves 2.3 s |
+| 150 MB working set, idle-per-fault | 34.6 s | 4.51 s | saves 30 s |
+
+A real 150 MB fault-back pays the ~930 µs wake **once**, then runs busy: **≈2.76 s at
+page-cluster 0 versus ≈0.46 s at 3.**
+
+**Break-even readahead utility** — how many of the 8 pages must actually be wanted for `3` to
+beat `0`: **16.8 % busy** (1.35 of 8) and **13.0 % idle** (1.04 of 8). `3` loses only if
+readahead is wrong more than six times in seven.
+
+It will not be. `luminos-ram` evicts with `MADV_PAGEOUT` across a process's address range, so
+pages leave in **virtual-address order** and the swap allocator hands them **contiguous swap
+slots**. Swap-slot adjacency and virtual adjacency are the same thing for this workload, which
+is the best case readahead has.
+
+### What it costs zram: nothing. Measured, not argued.
+
+This is the part DECISION 115 got backwards, and the honest answer is embarrassingly simple:
+**page-cluster has been 3 since 2026-05-08 — four months — and zram has been living under it the
+whole time.** There is no cost to weigh, because the cost is already paid and already observed.
+
+The live counters say readahead is not even running:
+
+```
+pswpin 715834   pswpout 2389934   pgmajfault 842445
+swap_ra 0       swap_ra_hit 1
+```
+
+**Zero readahead pages in 21 h 57 m of uptime and 715 834 swap-ins.** Every one of those came
+from zram (`/swapfile.luminos` still reads `USED 0B` — it has never been touched). zram is
+`SWP_SYNCHRONOUS_IO`, so `do_swap_page()` takes the no-readahead fast path per entry and never
+consults `page-cluster` at all. `vma_ra_enabled` is `true` and neither swap device is rotational,
+so VMA readahead — the path that increments `swap_ra` — is the one that *would* run if readahead
+ran. It did not.
+
+⚠️ Residual uncertainty, stated: `swap_ra`/`swap_ra_hit` are bumped by the VMA path only; cluster
+readahead would not show there. The conclusion does not rest on that, though — it rests on the
+setting having been `3` for four months with zram doing the work.
+
+### ✅ The residual uncertainty resolved itself, live, during this very turn
+
+Memory pressure rose while the benchmark ran (zram 4.9 G → **7.5 G of 8 G**) and
+**`/swapfile.luminos` took its first traffic ever — `USED 16.3M`.** The counters moved the moment
+it did:
+
+| | before (pagefile `USED 0B`) | after (pagefile `USED 16.3M`) |
+|---|---|---|
+| `swap_ra` | **0** | **2601** |
+| `swap_ra_hit` | 1 | **1967** |
+| `pswpin` | 715 834 | 1 638 193 |
+
+**Readahead went from never running to running, exactly when the pagefile started being used.**
+That is direct empirical confirmation of the mechanism, not an inference: `page-cluster` reaches
+the **pagefile** and does not reach **zram**.
+
+And it hands over the one number that was missing — **measured readahead utility on the real
+workload: 1967 / 2601 = 75.6 %.** Break-even is **16.8 %**. It is not close.
+
+**This also closes, in passing, the "pagefile is installed but nothing is proven" item**: the
+pagefile has now demonstrably accepted pages under genuine pressure. It works end to end.
+
+**So "right for zram, wrong for SSD" was never a trade-off.** The knob does not reach zram on
+this kernel, and on the pagefile — the one device it does reach — it is already correct.
+
+### Decided
+
+- **`vm.page-cluster` stays at 3.** No sysctl written, nothing installed, nothing restarted.
+- **The thing that is wrong is `config/99-luminos-ram.conf`**, and it is wrong about three keys,
+  not one → **BUG-167**. Fixing the repo file is a separate, deliberate change; it was **not**
+  made on this read-only turn.
+- **`page-cluster = 4` (64 KiB, 16 pages) measures better still** — 544.9 MB/s, break-even
+  utility 3.9 % — and is **deliberately not recommended, but it is now a live candidate.** Sixteen
+  pages of swap cache per fault is real RAM on a 16 GB box that is currently sitting at 11 Gi used
+  with 3.6 Gi available, which is the argument against. The argument *for* is that the workload's
+  measured readahead hit rate is **75.6 %**, nowhere near either break-even. **Decide it on a
+  second reading of `swap_ra_hit / swap_ra` taken over a longer window**, now that the counters
+  finally move — a few thousand samples from one burst is not a week of desktop use.
+
+### Cross-references
+BUG-167 (the real fault) · DECISION 115 (premise corrected here) · BUG-166 · DECISION 20 ·
+`docs/LUMINOS_RAM_ARCHITECTURE.md` §Restore Speed Optimizations (was right all along)
+
+## DECISION 117 — the wallpaper hears the music through Caelestia's own C++ plugin, and audio never touches the file that is always loaded
+<!-- [CHANGE: claude-code | 2026-09-19] SPEC §3.1, CONTRACTS §2, BUG-168 -->
+
+### What was needed
+Lively's audio wallpapers are written against `livelyAudioListener(audioArray)`, and the array is
+**128 floats, roughly 0–1**. Matching that exactly is the whole point: it is what lets a wallpaper
+written for Lively run here unmodified. Picking 64 bands, or 0–255, would not have failed — it would
+have quietly rendered every ported wallpaper wrong.
+
+### The thing that made this cheap
+The obvious build was an FFT helper daemon: PipeWire capture, a window function, a transform, an IPC
+socket, a service unit. That was the plan until the capability probe answered the question instead of
+guessing at it. **Caelestia's plugin installs a plain Qt QML module at `/usr/lib/qt6/qml/Caelestia/Services`
+whose `qmldir` declares no Quickshell dependency**, so plasmashell can import it directly. Two facts,
+read from `reference_code/caelestia-shell-2.2.0/plugin/src/Caelestia/Services/` rather than assumed:
+
+- `cavaprovider.cpp:34` calls `cava_execute()` — it **links libcava** and reads PipeWire itself via
+  `audiocollector.hpp`. It never spawns the `cava` CLI, so whether that binary is on `PATH` is
+  irrelevant. (My own first probe got this wrong and told a future session to install a package it
+  does not need. Fixed in the probe; recorded here because the wrong answer was the plausible one.)
+- `service.hpp` — `Service::ref/unref` refcount the provider. It runs while at least one `ServiceRef`
+  points at it and **stops itself** when the last one goes away.
+
+That refcount is why the freeze contract cost nothing. CONTRACTS §2 says the provider stops when
+`running` is false; here that is one `Loader` whose `active` is `enabled && running`, and the FFT
+thread and the PipeWire stream end with it.
+
+### The layering, and why it is three files instead of one
+```
+QmlMode.qml          imports QtQuick + "audio"          always present in qml mode
+└── AudioBridge.qml  imports QtQuick ONLY               the contract, the maths, the fallback
+    └── CaelestiaAudio.qml  imports Caelestia.Services  loaded BY URL, only when audio is on
+```
+This is DECISION 112's rule applied a second time, and it is the only reason the bottom file exists
+separately: **a QML import runs when the file DECLARING it is loaded.** Naming `CavaProvider` inside
+`AudioBridge.qml` would map libcava, aubio and PipeWire into plasmashell for every wallpaper on the
+machine, including a still image. Behind a URL they arrive only when audio is switched on — and never
+at all on a box without the module, where the Loader reports `Loader.Error`, the bridge logs a named
+warning, and every scene keeps rendering against 128 zeros.
+
+`AudioBridge.qml` itself is reached as a **type**, not a URL, because its only import is QtQuick.
+Deferring it would buy nothing and hide the wiring. The rule is about what a file imports, not about
+loading everything late.
+
+### Decided
+- **128 bands, clamped to 0–1**, plus `bass` / `mid` / `treble` (means of 0–15, 16–63, 64–127),
+  `beat` (true for one frame), `bpm`, `active`. Exactly CONTRACTS §2, which is exactly Lively.
+- **Clamped on the way in.** cava's autosens overshoots 1 on a transient; a scene multiplying a bar
+  height by 1.4 looks broken in a way that is very hard to trace back to the provider.
+- **The published object is a `QtObject`, not a rebuilt JS literal.** cava ticks ~60 times a second
+  and allocating a seven-key object per tick buys nothing; scenes read `audio.bands` either way.
+- **Audio is opt-in** (`AudioReactive`, default off) because it opens a capture stream and runs an FFT
+  thread — **except** for the Spectrum scene, which turns it on for itself. A wallpaper that needs a
+  checkbox ticked before it does anything is broken, not configurable.
+- **Shaders get it as a 128×1 texture named `iAudio`** — Shadertoy's `iChannel0` audio convention, so
+  a Shadertoy audio shader works here unmodified — plus `iBass` / `iMid` / `iTreble` / `iAudioActive`
+  appended to the std140 block at offsets 88, 92, 96, 100. Offsets **verified from `qsb --dump`
+  reflection**, not from counting bytes by hand.
+- **Every audio term in the shader is multiplied by `iAudioActive`**, which is 0 without a provider.
+  With no audio the shader renders exactly what it rendered before this change. Adding a feature must
+  not change the default picture.
+- **No idle shimmer when there is no provider.** The Spectrum scene sits flat and says why in the log.
+  A pretty fake here would make a broken audio path indistinguishable from a quiet room — the same
+  mistake BUG-163 taught, where a green light nobody can trust is worse than no light.
+
+### Not done here, deliberately
+Web mode does not get `livelyAudioListener` — it is the mode being retired (SPEC §3.6), and wiring
+audio into Chromium would be work aimed at the thing we are removing. The JS-canvas loader (SPEC §3.5)
+is where that shim belongs, and CONTRACTS §6 already specifies it.
+
+### Verification
+`tests/wallpaper/audio_contract.qml` drives `AudioBridge.publish()` with synthetic frames and asserts
+the shape, the band split, the clamping, the short/null-frame behaviour and the freeze property —
+**22 checks, exit code 0 or 1**, runnable on the box with `qml6` and no sound playing. It is the part
+that could not be tested in the build container, so it is the part that ships as a test.
+
+### Cross-references
+SPEC §3.1 · CONTRACTS §1, §2 · DECISION 112 (import placement) · DECISION 113 (native QML mode) ·
+BUG-168 (the binding test this change had to fix first) · `scripts/luminos-wallpaper-capabilities`

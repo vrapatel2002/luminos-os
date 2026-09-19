@@ -23,6 +23,11 @@
       <default></default>
     </entry>
 
+    <entry name="QmlScene" type="String">
+      <label>Built-in scene name (shader, aurora, particles, sysmon) or a path to any .qml file</label>
+      <default>shader</default>
+    </entry>
+
     <entry name="WebUrl" type="String">
       <label>URL or local path to an HTML/JS page</label>
       <default></default>
@@ -72,6 +77,15 @@
     <!-- Web: feed luminos-monitor stats into window.luminos -->
     <entry name="InjectSystemStats" type="bool">
       <label>Expose live CPU/GPU/RAM stats to the web page</label>
+      <default>false</default>
+    </entry>
+
+    <!-- Native QML: feed the 128-band spectrum into the scene as `audio`.
+         Off by default because it opens a PipeWire capture stream and runs an
+         FFT thread; the spectrum scene turns it on for itself.
+         [CHANGE: claude-code | 2026-09-19] DECISION 117 -->
+    <entry name="AudioReactive" type="bool">
+      <label>Feed live audio into the QML scene</label>
       <default>false</default>
     </entry>
   </group>

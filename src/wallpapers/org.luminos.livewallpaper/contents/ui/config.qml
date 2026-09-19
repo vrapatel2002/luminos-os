@@ -20,6 +20,8 @@ ColumnLayout {
     // --- config keys (auto-bound by KDE) ---
     property string cfg_WallpaperMode
     property string cfg_WallpaperModeDefault: "image"
+    property string cfg_QmlScene
+    property string cfg_QmlSceneDefault: "shader"
     property string cfg_Image
     property string cfg_ImageDefault: ""
     property string cfg_Video
@@ -40,6 +42,9 @@ ColumnLayout {
     property bool cfg_WebInteractiveDefault: false
     property bool cfg_InjectSystemStats
     property bool cfg_InjectSystemStatsDefault: false
+    // [CHANGE: claude-code | 2026-09-19] DECISION 117
+    property bool cfg_AudioReactive
+    property bool cfg_AudioReactiveDefault: false
 
     // Where the bundled sample web wallpapers live once installed.
     readonly property string samplesDir:
@@ -62,7 +67,8 @@ ColumnLayout {
             model: [
                 { text: i18n("Image"),          val: "image" },
                 { text: i18n("Video"),          val: "video" },
-                { text: i18n("Web (HTML / JS)"), val: "web" }
+                { text: i18n("Web (HTML / JS)"), val: "web" },
+                { text: i18n("Native QML (no browser)"), val: "qml" }
             ]
             Component.onCompleted: currentIndex = Math.max(0, indexOfValue(root.cfg_WallpaperMode))
             onActivated: root.cfg_WallpaperMode = currentValue
@@ -123,7 +129,63 @@ ColumnLayout {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
-            text: i18n("Any HTML/CSS/JS or WebGL page. Local files and Shadertoy-style shaders work. YouTube links are auto-resolved for video mode.")
+            text: i18n("Any HTML/CSS/JS or WebGL page. Local files and Shadertoy-style shaders work. YouTube links are auto-resolved for video mode. This mode loads a full browser engine — for the bundled effects, Native QML does the same thing far more cheaply.")
+        }
+
+        // ---- NATIVE QML --------------------------------------------
+        // [CHANGE: claude-code | 2026-09-16] DECISION 113
+        QQC2.ComboBox {
+            Kirigami.FormData.label: i18n("Scene:")
+            visible: root.cfg_WallpaperMode === "qml"
+            textRole: "text"
+            valueRole: "val"
+            model: [
+                { text: i18n("Shader (GPU gradient)"),       val: "shader" },
+                { text: i18n("Aurora (drifting blobs)"),     val: "aurora" },
+                { text: i18n("Particles (cursor-reactive)"), val: "particles" },
+                { text: i18n("System monitor (live stats)"), val: "sysmon" },
+                { text: i18n("Spectrum (audio-reactive bars)"), val: "spectrum" }
+            ]
+            Component.onCompleted: {
+                var i = indexOfValue(root.cfg_QmlScene);
+                currentIndex = i >= 0 ? i : 0;
+            }
+            onActivated: root.cfg_QmlScene = currentValue
+        }
+        RowLayout {
+            Kirigami.FormData.label: i18n("…or a .qml file:")
+            visible: root.cfg_WallpaperMode === "qml"
+            QQC2.TextField {
+                Layout.fillWidth: true
+                placeholderText: i18n("/path/to/your/scene.qml")
+                text: root.cfg_QmlScene
+                onEditingFinished: root.cfg_QmlScene = text
+            }
+        }
+        QQC2.Label {
+            visible: root.cfg_WallpaperMode === "qml"
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            text: i18n("The same effects as the web samples, drawn by Qt directly. No browser engine is loaded, so this costs far less than Web mode. A scene may declare running, stats, audio, cursorX and cursorY and they will be bound for it.")
+        }
+
+        // ---- NATIVE QML: audio --------------------------------------
+        // [CHANGE: claude-code | 2026-09-19] DECISION 117, SPEC §3.1
+        QQC2.CheckBox {
+            Kirigami.FormData.label: i18n("Audio:")
+            visible: root.cfg_WallpaperMode === "qml"
+            text: i18n("React to whatever is playing")
+            checked: root.cfg_AudioReactive || root.cfg_QmlScene === "spectrum"
+            enabled: root.cfg_QmlScene !== "spectrum"
+            onToggled: root.cfg_AudioReactive = checked
+        }
+        QQC2.Label {
+            visible: root.cfg_WallpaperMode === "qml"
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            text: i18n("128 frequency bands from the current output, the same shape Lively uses, so a Lively audio wallpaper works here unchanged. Costs a PipeWire capture stream and an FFT thread while it runs, and stops with the wallpaper when the desktop is hidden. The Spectrum scene switches it on for itself.")
         }
 
         // ---- WEB: bundled samples ----------------------------------
