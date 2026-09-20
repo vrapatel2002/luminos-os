@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-20 — chat A Response 6 / chat B Response 18 (TWO Cowork chats ran in parallel; see the gaming-OS pointer below)
+Last updated: 2026-09-20 — Response 5 (iGPU measured; see docs/gamemode/IGPU-BENCH.md)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -93,6 +93,14 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 while that chat was mid-thread.** Nothing was lost — its output is durable in
 **`docs/gamemode/FEASIBILITY.md`** (304 lines) and in `luminos-notes.sh search "console"`.
 Pointer only, so this file stays short:
+- 🟢 **MEASURED 2026-09-20 (Cowork chat C) — `docs/gamemode/IGPU-BENCH.md`, harness in
+  `tools/gamemode-bench/`.** No packages installed (`luminos-brain safe` said NO for
+  vkpeak/clpeak; purpose-built Vulkan microbenchmarks written instead).
+  780M: **5.54 TF burst / 3.88 TF sustained (-30%)**, **84.6 GB/s** achieved of 102.4 theoretical,
+  and it pulls the package to **65 W / 95 C in 7 seconds on its own** with CPU idle and dGPU asleep.
+  That last number is the measured version of FEASIBILITY §2's argument: iGPU render work during a
+  game takes power and thermal headroom straight from the 4050. RAM re-confirmed 6400 vs 7500 rated.
+  ⚠️ Gotcha: a sub-second benchmark run reads ~15 W (idle-contaminated) — use RUNS=2000.
 - **Shawn is scoping a NEW Arch-based, gaming-only OS for this laptop** — Steam + Proton + games,
   nothing else. It is **not** a Luminos mode, so Luminos-specific findings do not carry to it.
 - 🔴 **AGENTS.md §2's "No MUX" was WRONG and is corrected in place.** `supergfxctl -s` →
