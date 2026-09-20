@@ -94,6 +94,23 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 while that chat was mid-thread.** Nothing was lost — its output is durable in
 **`docs/gamemode/FEASIBILITY.md`** (304 lines) and in `luminos-notes.sh search "console"`.
 Pointer only, so this file stays short:
+- 🟢 **VRAM FALLBACK 2026-09-20 — `docs/gamemode/VRAM-FALLBACK.md`. Corrects MEMORY-STRATEGY.md.**
+  NVIDIA's system-memory fallback IS real — **"CUDA - Sysmem Fallback Policy", driver 536.40** —
+  but it is **CUDA-only and Windows-only**; NVIDIA staff answered the Linux question directly with
+  *"not supported by the nvidia linux driver."* Windows can do it because **WDDM's VidMm owns
+  residency**; Linux's **TTM can too and amdgpu/i915 use it — that is why the 780M has 7.6 GB GTT** —
+  but NVIDIA's Linux driver does not use TTM. Driver choice, not a Linux limit.
+  Lying about VRAM size **backfires**: `dxgi.maxDeviceMemory` lies to the *game*, not the allocator;
+  heap size comes from the RM at init with no override; over-reporting turns graceful degradation
+  into `VK_ERROR_OUT_OF_DEVICE_MEMORY`.
+  🟢 **ACTIONABLE: the "one pool" code already exists.** `dxvk_memory.cpp` already retries with
+  `DEVICE_LOCAL` cleared, but gates HVV fallback behind a first-heap-only rule whose source comment
+  says it exists *"to avoid falling back to HVV on systems without resizable BAR"* — **this box HAS
+  ReBAR (BAR1 = 8 GB over a 6 GB framebuffer), so that gate does not apply to us.** vkd3d-proton
+  PR #741 `upload_hvv` measured **+12% fps in Horizon Zero Dawn** from removing one copy; issue #2258
+  is a live bug in the HVV->sysmem cascade. Next experiment: patched DXVK build vs Wukong.
+  ⚠️ Keep honest: BAR-mapped HVV is still VRAM (fast); real system RAM over PCIe is ~32 GB/s vs the
+  4050's 192 GB/s. Spilling prevents crashes, it does not add fast memory.
 - 🔴 **REHEARSAL 01 INVALID 2026-09-20 — `docs/gamemode/REHEARSAL-01.md`.** The harness ran
   `swapoff -a; swapon -a` and **permanently dropped `/swapfile.luminos`** — it is enabled by
   `/usr/local/bin/luminos-pagefile`, **NOT `/etc/fstab`**, so `swapon -a` could not restore it.
