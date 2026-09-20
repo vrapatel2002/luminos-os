@@ -1,477 +1,195 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 19 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 1 (new Cowork chat; counter legitimately restarts, §0.1)
 
-> **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
-> compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
-> legitimately starts at 1 again. §0.1's canary is about drift *within* one chat.
-> Previous copy: `git show c69af5b1:HANDOFF.md`.
+> **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
+> stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
+> History lives in git, `luminos-notes.sh`, `LUMINOS_DECISIONS.md` and `docs/BUGS.md` — this file
+> carries only what a newcomer must not re-learn or re-break.
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-**Lively Wallpaper parity for the KDE live wallpaper, without Chromium.** Shawn's words:
-*"what things i want is like lively wallpaper app from windows"*, and *"do not give me answer as NO
-i do not care every thing is just code at the end if some one else can do it than so can we."*
-Plan and gap analysis: `docs/wallpaper/SPEC.md`. Frozen interfaces: `docs/wallpaper/CONTRACTS.md`.
-Reasoning per session: `docs/wallpaper/BUILD_LOG.md`. Eyes-on brief: `docs/wallpaper/VERIFY.md`.
+**This turn: read-only dGPU investigation.** Shawn: *"find out why is/was the NVIDIA gpu on — do not
+turn it off just find out why its behaving such a way, and why our code that gate keeps the NVIDIA
+dgpu."* Answered in **BUG-182** (new) plus the gate map below. **Nothing was changed.**
 
-**Five of six SPEC §3 items are done** (§3.1 audio, §3.2 per-scene settings, §3.3 packages + gallery + Lively import, §3.4 runtime shaders, §3.5 .js canvas)
-and the box now reports **35/35 on `luminos-wallpaper-selftest`**.
-**§3.6 (games through a nested compositor) is all that is left**; §3.6 (games
-through a nested compositor) is the big one and the only thing that lets web mode finally be deleted.
-
-Standing constraint from Shawn: **it must stay light on resources compared to Chromium.**
-`scripts/luminos-wallpaper-cost` is how that gets checked rather than claimed.
+Standing aim before that, unchanged and still the main thread: **Lively Wallpaper parity for the KDE
+live wallpaper, without Chromium.** Five of six SPEC §3 items done, box reports 35/35 on
+`luminos-wallpaper-selftest`. **§3.6 (games through a nested compositor) is all that is left.**
+Docs: `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG,VERIFY}.md`.
 
 ## Why / motivation
-The wallpaper already did image / GIF / video / YouTube / web, but the web path was Chromium
-(~130–150 MB mapped into plasmashell, BUG-083's 24 % of a core). DECISION 112 moved that import
-behind a file; DECISION 113 replaced the four bundled effects with native QML. What is left is the
-part that makes it *Lively*: audio, per-wallpaper settings, installable packages, drop-in shaders
-and JS, and playable games.
+The dGPU question matters because BUG-047's true-0 W gating is the whole reason this laptop idles
+cheaply; a card stuck in D0 burns ~1.5 W all day for nothing. The gate question matters because the
+answer is *three unrelated mechanisms* that people keep conflating (see below), and conflating them
+is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 
 ## ⚡ READ THIS FIRST — two shells, and only one of them is the G14
-- `mcp__remote-devices__host-shell__run_command` **is the G14**, as shawn. `qml6`, `journalctl`,
-  `systemctl --user`, `pactl`, `luminos-brain`, `git push` all work. **Do not hand the user a list
-  of commands to paste — run them.**
-- **It starts with no session environment.** Every call that touches the user session needs
-  `export XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`,
-  and every `qml6` call needs `QT_QPA_PLATFORM=offscreen` (a bare `Item` without a display calls
-  `abort()`, which reads as "the test crashed"). Without the first,
-  `systemctl --user restart plasma-plasmashell` **exits 0 and does nothing** — it only says so on
-  stderr, and the old pid is still there.
-- Each call must finish well under 60 s; backgrounding does not survive the call.
-- `device_bash` is a **different machine** (the Cowork VM, uid 1004). Both see the same connected
-  folders; only the host shell sees the real desktop session.
-
-## Process / approach
-- **Prefer the host shell for everything on the box** — edit, deploy, test and commit there. It
-  avoids the bridge's git-lock and sqlite problems entirely (see Gotchas).
-- **Anything unverified is unfinished.** Python logic is property-tested; anything needing a QML
-  engine ships as a `qml6` contract test that exits 0/1. `scripts/luminos-wallpaper-selftest` is
-  the one command that runs the lot and writes `docs/wallpaper/SELFTEST.log`.
-- **Restart plasmashell after every deploy** — see BUG-171 below. This is not optional and not
-  superstition.
+- `mcp__remote-devices__host-shell__run_command` **is the G14**, as shawn. `sudo -n` is passwordless.
+  **Do not hand the user commands to paste — run them.**
+- It starts with **no session environment**. Anything touching the session needs
+  `export XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`;
+  every `qml6` call needs `QT_QPA_PLATFORM=offscreen`; `spectacle` needs `WAYLAND_DISPLAY=wayland-0`
+  or it **core-dumps**. Without the first, `systemctl --user restart …` **exits 0 and does nothing**.
+- **Each call must finish well under 60 s.** A 60 s watch loop is killed as "device did not respond".
+  Backgrounding does not survive the call. Split long observations across calls.
+- `device_bash` is a **different machine** (the Cowork VM, uid 1004). It sees the same connected
+  folders; it does **not** see the desktop session, the real `/dev`, systemd, or the GPU.
+  **A subagent told to "use device_bash" will silently investigate the wrong computer.**
 
 ## State — what is DONE
-### Wallpaper — verified on the box 2026-09-19 16:21, **31 passed / 0 failed**
-Live config: `WallpaperMode=qml QmlScene=spectrum AudioReactive=true ObscurePolicy=2`.
-Chromium **not** mapped into plasmashell; `libcava.so.1.0.0` **and**
-`libcaelestia-services.so` are — which is positive proof the audio provider loaded.
-Installed copy `diff -rq` clean against the repo. Shader cache populated
-(`~/.cache/luminos/wallpaper-shaders/4dd3b0bb….{frag,qsb}`).
 
-- **SPEC §3.1 audio — DECISION 117, commit `ef200445`.** Scenes get `audio` = 128 bands 0–1 +
-  bass/mid/treble/beat/bpm/active, Lively's exact shape. **No daemon:** `Caelestia.Services` is a
-  plain Qt QML module with no Quickshell dependency, `cavaprovider.cpp` links libcava (never spawns
-  the CLI), `service.hpp` refcounts via `ServiceRef`, so the freeze contract is one Loader's
-  `active`. `QmlMode.qml` → `ui/audio/AudioBridge.qml` (QtQuick only) → `ui/audio/CaelestiaAudio.qml`
-  (the only importer, loaded **by URL**). New `spectrum` scene. `Shader.qml` gets an `iAudio` 128×1
-  texture + `iBass`/`iMid`/`iTreble`/`iAudioActive`. `qml6 tests/wallpaper/audio_contract.qml` → 22/22.
-- **SPEC §3.2 per-scene properties — DECISION 118.** A scene ships `properties.json` and gets a
-  generated settings panel (all eight Lively control types). Values live in ONE `SceneProperties`
-  JSON config key, because a wallpaper's KConfig schema is fixed at build time. Panel and wallpaper
-  share one `PropertyStore` and one scene map (`ui/scene.js`) so they cannot disagree.
-  `Spectrum.properties.json` (6 controls) + `Shader.properties.json` prove it end to end.
-- **SPEC §3.4 runtime shaders — DECISION 119.** Point the wallpaper at any Shadertoy `.frag` and it
-  is compiled on the spot by `contents/tools/luminos-shader-bake`, which **ships inside the plugin**
-  (a KPackage must be self-contained; the lock screen loads the same package). Cached by content
-  hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is built with `Qt.createQmlObject`, which is
-  what makes §3.2 real for an arbitrary shader — a QML object cannot gain a property at runtime.
-- **BUG-168 through BUG-181 all fixed**, BUG-176 included: `org.kde.kwindowsystem` exports
-  `KWindowSystem.showingDesktop` as a notifiable QML singleton property, so Show Desktop now
-  unfreezes the wallpaper for one binding rather than a `qdbus6` poll. BUG-171 (a deploy is
-  not a load) and BUG-173 (every settings row drew a label and no control) are why the eyes-on
-  session kept failing — read both before re-testing. BUG-173 is now covered without a person by
-  `tests/wallpaper/editor_contract.qml` (10 checks), which also guards BUG-174 — the colour
-  picker that could not be closed.
-- **`scripts/luminos-wallpaper-cost`** — is `libQt6WebEngineCore` mapped into plasmashell at all,
-  PSS from `smaps_rollup`, CPU as a percentage of one core, with BUG-083's Chromium-era numbers
-  alongside. Package/manifest layer (`luminos-wallpaper-pkg`) and the capability gate
-  (`luminos-wallpaper-capabilities`) exist; the gate ran on the box and found everything §3.6 needs
-  (`cage`, kpipewire, Qt Quick 3D, `/dev/uinput`).
+### dGPU investigation — BUG-182, filed this turn, READ-ONLY
+**The card is awake and idle, and it is not our daemons doing it.**
+- `control=auto`, `runtime_status=active`, `power_state=D0`, `d3cold_allowed=1`; three samples over
+  11 min → `d_suspended = 0 ms` every time. P8 / 210 MHz / **1.54 W** / 2 MiB / 0 % util.
+- This boot: **6h22m active / 3h33m suspended** — it *was* cycling and then stopped.
+- `/proc/driver/nvidia/gpus/…/power` → `Runtime D3 status: Enabled (fine-grained)` but
+  **`Video Memory: Active`**. That live allocation, not the PCI layer, is what blocks D3cold.
+- **Ruled out by measurement, not reasoning:** `luminos-power` polling (45 s `/proc` scan caught
+  **zero** `nvidia-smi`/`dgpu-exec` execs — BUG-160's fix is working); `power/control=on` (BUG-103);
+  persistence mode (Disabled, persistenced dead); the compositor (kwin/plasmashell/qs/Chrome are all
+  on **card2/renderD129 AMD**, **zero** holders on card1/renderD128); an AC/DC transition
+  (`ACAD online=1` since boot); RTD3 config (`DynamicPowerManagement: 2`, as BUG-047 intended).
+- **Sole holder:** `nvidia-powerd` PID 877, 11 fds on `/dev/nvidia0` + 1 on `/dev/nvidiactl`.
+  Its own unit is **disabled** — **supergfxd starts it** on entering Hybrid. It errored at boot:
+  `Client (presumably SBIOS) has requested to disable Dynamic Boost DC controller`.
+- ⚠️ **DO NOT conclude "nvidia-powerd keeps it awake."** `/proc/877/fd` says those nvidia fds opened
+  at **23:18:51**, hours *after* the card stopped sleeping. Timestamps verified real (re-listed
+  twice, unchanged; fds 0–4 still read 13:26:33). **What opened them at 23:18:51 is the open
+  question.**
+- **Correlated trigger, not proven:** the only GPU-touching journal event all day is root
+  `nvidia-smi -q -d DISPLAY` at **20:29:35**, corroborated by `/dev/nvidia-caps/*` created 20:29:37
+  and the UVM ctime below. **Runtime PM has no last-transition timestamp**, so "it woke at 20:29" is
+  *not* derivable from the counters — an earlier pass asserted it anyway and was wrong to.
+- 🔴 **Separate live finding: the DECISION 25 gate is OPEN on two nodes.** `/dev/nvidia-uvm` and
+  `-uvm-tools` are **`0666 root:root`**, ctime **20:29:37**, against `root:dgpu 0660` at boot.
+  Textbook **BUG-146**: a root NVIDIA client makes setuid `nvidia-modprobe` re-apply the driver's
+  hardcoded defaults to the two nodes `NVreg_DeviceFile*` cannot cover. `nvidia0`, `nvidiactl` and
+  `nvidia-modeset` are still correct. Re-assert with `sudo systemctl restart luminos-uvm-gate`
+  (**restart** — it is `active (exited)`). Not done: read-only turn.
 
-### SteamOS comparison — 2026-09-19 (Response 16), research only, superseded by the block below
-SteamOS 3.8.10 Desktop Mode **is** Arch + KDE Plasma 6.4.3 — the same desktop we run. All its
-lightness is Game Mode: `gamescope` + the Steam client, with no plasmashell/KWin/containment/
-indexer. Measured here: shell layer **1577 MB PSS** — `baloo_file` **978 MB**, `qs` 420 MB,
-`plasmashell` 181 MB — while **all five Go daemons are 62 MB combined**. Our code is not the cost.
-Immutable/A-B root is the one SteamOS idea that is wrong for us: it would make most of AGENTS.md
-§9 illegal. btrfs+snapper is the shape that fits. Full detail: `luminos-notes.sh search steamos`.
+### The dGPU "gate" is THREE different mechanisms — stop conflating them
+| | What it gates | Mechanism | Lives in |
+|---|---|---|---|
+| **Access** (DECISION 25) | *who may open* `/dev/nvidia*` | `NVreg_DeviceFileUID/GID/Mode` → `root:dgpu 0660`, group `dgpu` gid 948 **empty on purpose**, `dgpu-exec-v2` setgid door | `/etc/modprobe.d/luminos-dgpu-gate.conf`, `scripts/dgpu-gate/` |
+| **UVM patch** (BUG-146/147) | the two nodes the driver params miss | `luminos-uvm-gate` on the PCI `add\|bind` uevent + a oneshot backstop | `scripts/dgpu-gate/luminos-uvm-gate.sh`, `config/udev/71-…` |
+| **Power** (BUG-047/103) | whether the card may *sleep* | `DPM=0x02`, `power/control=auto`, Mesa EGL pin + `KWIN_DRM_DEVICES` so nothing renders on it | `/etc/modprobe.d/nvidia-pm.conf`, `/etc/environment` |
+- Live verification of the gate's *purpose*: driver params read `DeviceFileUID: 0 / DeviceFileGID:
+  948 / DeviceFileMode: 432` (0660 octal). It is **not a security boundary** (DECISION 53) — anything
+  running as shawn can type `dgpu-exec-v2`. It stops *accidental* use.
+- **The access gate cannot help with power.** An ACPI NVPCF wake (BUG-161) never opens a device node,
+  so no fd scan will ever find that culprit — AGENTS.md §12 says so and it held again here.
+- `config/udev/70-luminos-dgpu-access.rules` is **dead code** — has never fired; still installed and
+  still miscited as "layer 2" by DECISION 90, STATUS.md:185 and `scripts/dgpu-gate/README.md`.
 
-### Console/game-mode feasibility — asked 2026-09-19 (Response 17), RESEARCH ONLY, nothing changed
-Shawn wants a console-like mode on this box: Steam + Proton + games only, "both GPUs at max".
-Full write-up: **`docs/gamemode/FEASIBILITY.md`**. The three findings that change other work:
-- 🔴 **AGENTS.md §2's "No MUX" was WRONG and is now corrected.** `supergfxctl -s` →
-  `[Integrated, Hybrid, AsusMuxDgpu]`, supergfxd 5.2.7 active, currently `Hybrid`. The board has a
-  MUX. ⚠️ **Do not switch to `AsusMuxDgpu` before checking** whether §9's
-  `KWIN_DRM_DEVICES=/dev/dri/card2` + `__EGL_VENDOR_LIBRARY_FILENAMES=50_mesa.json` pins strand the
-  desktop on a card that no longer drives the display — that is a plausible black screen.
-- 🔴 **SPEC §3.6 IS NO LONGER PACKAGE-BLOCKED.** `xdg-desktop-portal-wlr 0.8.4-1` and
-  `gst-plugin-pipewire 1:1.6.8-1` are **both installed** now (with `cage 0.3.1`). The
-  "BLOCKED ON PACKAGES" note in Next Steps item 2 is stale. Not investigated: who installed them.
-- **The TFLOPS premise was wrong.** 780M's 8.29–8.91 TF is the RDNA3 *dual-issue* peak; plain FP32
-  is **4.15–4.45 TF** vs PS5's 10.28 (RDNA2, no dual-issue, already a plain number). **The
-  PS5-class part in this laptop is the RTX 4050 (~12.1 TF FP32), not the iGPU.** Bandwidth is the
-  wall nothing fixes: 102.4 GB/s shared (iGPU) / 192 GB/s (4050) / **448 GB/s (PS5)**; 6 GB VRAM is
-  the hard ceiling. Heterogeneous multi-GPU is dead in shipping games — you pick Hybrid *or* MUX.
-- **Perf work must precede shell work.** BUG-157 (TGP sawtooth 90↔55 W mid-game, diagnosed NOT
-  fixed), BUG-069, DPM=0x02's P8/210 MHz, and the live `quiet`/`powersave`/EPP=`power` state are
-  where the frames are. ⚠️ BUG-157 lives in `cmd/` — **§11 says ask first.**
-- `gamescope` 3.16.28-1 and `gamemode` 1.8.2-3 are in `extra`, **neither installed**. gamescope's
-  NVIDIA bugs (#498/#611/#1220/#1590/#1643/#1662) are overwhelmingly *hybrid*-mode bugs, so
-  **MUX first, then gamescope** — testing it in Hybrid likely just reproduces an upstream issue.
-- **No code, config or system state changed.** New doc + AGENTS.md §2 correction only.
+### Wallpaper — verified on the box 2026-09-19, 35/35 selftest
+`WallpaperMode=qml QmlScene=spectrum AudioReactive=true ObscurePolicy=2`. Chromium **not** mapped
+into plasmashell; `libcava.so` + `libcaelestia-services.so` are. All four eyes-on checks PASS.
+SPEC §3.1 audio (DECISION 117) · §3.2 per-scene properties (118) · §3.3 packages + gallery + Lively
+import (123, and **BUG-181** — the Lively type map was invented and the test defended the guess) ·
+§3.4 runtime shaders (119) · §3.5 .js canvas (122). BUG-168→BUG-181 all fixed.
 
-### Server / RAM thread (2026-09-18, carried forward — not this chat's work)
-- **DECISION 116 — `vm.page-cluster` stays at 3. It already was 3**; the claim that it was 0 came
-  from reading a repo file that has never been installed. Pagefile confirmed live (`USED 16.3M`,
-  readahead utility **75.6 %** vs a 16.8 % break-even). `page-cluster = 4` measures better still and
-  is a live candidate, not a recommendation — needs a week's sample, not one burst.
-- **BUG-167 filed** — `config/99-luminos-ram.conf` has never been on the box; `swappiness = 30` and
-  `vfs_cache_pressure = 50` are **not live**. ⚠️ **Do not blind-install it** — it would set
-  `page-cluster = 0` and undo DECISION 116.
-- **BUG-164 root-caused** — Roku seek/Skip-Intro resets are **ASS subtitle burn-in**, not audio.
-  S01E07 was never the broken episode. 46 files flagged (26 `audio:dts`, 20 `subs:ass`), **none
-  fixed** — the DECISION 112 one-file-watched gate has never been satisfied.
+**Cost, honestly — memory is a rout, CPU is not:** shader scene **6.6 %** of a core / 135 MB PSS;
+Spectrum 128 bars **20.3 %** / 143 MB; frozen 0.0 %; Chromium web mode ~24 % / ~810 MB **RSS**.
+Never say "far lighter than Chromium" without naming the scene.
 
-## State — what is IN PROGRESS (and exactly where it was left off)
-Nothing is half-written. Everything is deployed and `diff -rq` clean.
-
-**ALL FOUR EYES-ON CHECKS ARE CONFIRMED ON SCREEN (2026-09-19).** The gap `docs/wallpaper/VERIFY.md`
-was written around is closed: **a Cowork session CAN see the display** through the host shell.
-
-```bash
-export XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-export WAYLAND_DISPLAY=wayland-0 DISPLAY=:0     # spectacle CORE-DUMPS without the first
-qdbus6 org.kde.kglobalaccel /component/kwin invokeShortcut "Show Desktop"
-spectacle -b -n -f -o /tmp/shot.png
-```
-
-- **Test 1 — audio: PASS.** Pink noise from `ffmpeg -f lavfi -i anoisesrc=color=pink` + `paplay`;
-  128 bars responding, and a PipeWire capture stream open against the sink monitor.
-- **Test 2 — per-scene settings: PASS, twice over.** `SceneProperties={"spectrum":{"lowColor":
-  "#38bdf8","highColor":"#fa8b8b","bars":2,"sensitivity":3}}` — one key, CONTRACTS §4 shape — and
-  the bars on screen are 128 wide, blue-bottomed, pink-topped. The same screenshot proves 1 and 2.
-- **Test 3 — runtime shaders: PASS.** Concentric rings centred on the cursor; two captures 3 s
-  apart differ by a mean of 41 levels per channel, so it animates.
-- **Test 4 — cost: PASS with a caveat (BUG-177).** Numbers below.
-
-**The cost, taken honestly — and it does NOT all go our way:**
-
-| scene | CPU rendering | PSS |
-|---|---|---|
-| Shadertoy sample (GPU shader) | **6.6 %** of a core | 135 MB |
-| Spectrum, 128 bars + live audio | **20.3 %** of a core | 143 MB |
-| any scene, frozen by ObscurePolicy | 0.0 % | 136 MB |
-| Chromium web mode (BUG-083) | ~24 % | ~810 MB **RSS** |
-
-**Memory is a rout — 135–143 MB PSS against ~810 MB RSS, and PSS is the stricter measure. CPU is
-not.** The shader is a quarter of Chromium; Spectrum at 20.3 % is within noise of it. Do not tell
-Shawn "far lighter than Chromium" without naming the scene.
+## State — what is IN PROGRESS
+Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instruction.
 
 ## Next steps (ordered)
-0. **FLAGGED, NOT NOW — the GPU optimisation pass.** Shawn 2026-09-19: *"flag all the things
-   for now and when everything is made than we will go again over all the features to optimize
-   it."* So build §3.3 and §3.6 FIRST, then revisit every cost number in one pass. Details in
-   AGENTS.md §14 item 0g. The constraint is **AMD 780M iGPU only, never the RTX 4050**, and it is
-   already satisfied: plasmashell holds `renderD129` and nothing else. See also DECISION 121 for
-   the one optimisation already tried and rejected.
-
-1. **Spectrum on the GPU — the one number that does not beat Chromium.** 128 bars + live audio is
-   **20.3 %** of a core against web mode's ~24 %. Measured breakdown: cava alone 4.6 %, the bars
-   drawn once 2.0 %, so ~14 % is redrawing 128 gradient `Rectangle`s at 2880×1800 per audio tick.
-   **Capping the publish rate was tried and measured WORSE — see DECISION 121, do not redo it.**
-   The candidate is one `ShaderEffect` sampling the 128×1 `AudioTexture` we already build, with
-   colours / bar count / beat flash as uniforms — machinery §3.4 already has. The shader scene
-   costs 6.6 %. This is a redesign of `Spectrum.qml`, so it gets its own pass.
-2. **SPEC §3.6 — external producer (games), the last §3 item and the big one.**
-   **⚠️ THE CONSUMER HALF IS BUILT AND PROVEN (DECISION 124). What is left is the producer.**
-   Ship: `ui/scenes/Producer.qml` + `ui/scenes/PipeWireView.qml` (the only kpipewire importer,
-   loaded by URL). Verified on real hardware: gst producer → PipeWire node → colour SMPTE bars on
-   screen, `ready=true`, `streamSize=QSize(1280,800)`, `paintedRect` filling the item.
-   **To build:** spawn a producer under `cage`, hand the scene its node id, reap it on deselect and
-   on crash with no orphans; then input. `xdg-desktop-portal-wlr` is installed for the cage
-   screencast but **not yet proven to work with cage** (it was written for sway).
-   **⚠️ CORRECTION (DECISION 124a) — read this before the findings below.** DECISION 124 said
-   CONTRACTS §7's input route "does not exist here" because KWin advertises no virtual-input
-   protocols. **That was wrong and was told to Shawn as fact.** Input goes into the PRODUCER's
-   compositor, not the desktop, and a live headless `cage` advertises exactly what the contract
-   named: `zwlr_virtual_pointer_manager_v1`, `zwp_virtual_keyboard_manager_v1`, plus
-   `zwlr_screencopy_manager_v1` and `zwlr_export_dmabuf_manager_v1`. **CONTRACTS §7 needs no
-   amendment on input.** uinput is not the route and the "kernel-level focus" problem is moot.
-   The measurement was taken against KWin — the wrong compositor, and the only one running at the
-   time, because cage had not been started yet to be asked.
-   **⚠️ Findings that still stand:**
-   - **KWin does NOT advertise `zwlr_virtual_pointer_v1` or `zwp_virtual_keyboard_v1`.**
-     `wayland-info` on the live session lists `zwlr_layer_shell_v1` and the xdg protocols and
-     **zero** virtual-input interfaces. CONTRACTS §7 named those first; they are not an option
-     here. The `(or uinput)` fallback it also named **is** available: `/dev/uinput` is
-     `root:input 660` and shawn is NOT in group `input`, but there is an **ACL**
-     (`user:shawn:rw-`) and a real `os.open(O_WRONLY)` **succeeded**. So uinput is the input
-     route, and the earlier capability gate's "/dev/uinput present" was true but not the
-     question that mattered.
-   - **uinput injects at the KERNEL, so it goes wherever focus is — not into a headless nested
-     compositor.** Routing input to a producer nobody can focus is the real open problem, and it
-     is why interaction is OFF by default in CONTRACTS §7. Build the VIDEO half first.
-   - **`PipeWireSourceItem` exists** (`org.kde.pipewire`, the only type it exports) and `cage`
-     0.3.1 (wlroots 0.20) is present.
-   **PRODUCER HALF — where it actually stands (2026-09-19):**
-   - ✅ **cage runs headless on the AMD 780M**: `WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1
-     cage -- <cmd>` makes its own `wayland-N` socket, `glxgears` inside it ran at **62.8 FPS**, and
-     it picks the iGPU by itself — Shawn's GPU constraint satisfied for free.
-   - ✅ **`xdg-desktop-portal-wlr` starts against that socket**, claims
-     `org.freedesktop.impl.portal.desktop.wlr`, and completes dmabuf-feedback + xdg_output
-     negotiation with cage.
-   - ❌ **The ScreenCast D-Bus handshake does not complete.** Calling
-     `org.freedesktop.impl.portal.ScreenCast.CreateSession` on the impl interface directly gave no
-     `Response` signal in 20 s. Open: does the impl portal require the frontend
-     (`xdg-desktop-portal`) as caller; is the request-handle path convention wrong; does xdpw need
-     a chooser configured (`chooser_type` / `outputname` are in its config). Probe kept at
-     `/tmp/sc.py`. **THIS IS THE NEXT THING TO DEBUG** and the last piece before a game on the
-     desktop.
-   - ⚠️ **Kill your test processes.** Stray `cage`/`glxgears` from probing sat at 60 fps each on
-     Shawn's machine. Use `ps -eo pid,comm` + `kill <pid>`, never `pkill -f cage` — that pattern
-     matches the probing shell's OWN command line and kills the session.
-   - **The producer must publish packed RGB, or use DMA-BUF.** Left on its default `I420` a
-     producer rendered as **greyscale** — structure perfect, no colour. `format=BGRx` fixed it
-     instantly on the `usingDmaBuf=false` path. A portal screencast hands over DMA-BUF and will not
-     hit this; a synthetic producer must be told.
-   - **Packages installed 2026-09-19 with Shawn's approval:** `gst-plugin-pipewire` (72 KB) and
-     `xdg-desktop-portal-wlr` (53 KB), both `extra`, neither on the IgnorePkg pin. `pacman -S`
-     without `-y`; the log shows only those two. `luminos-brain safe` first said NO citing
-     "torch, xgboost, mt5linux" (the AGENTS.md task 0b false-NO) and said YES with a reason. A nested
-   compositor (`cage`, present) → PipeWire → `PipeWireSourceItem` (kpipewire, present), with input
-   back through `zwlr_virtual_pointer_v1` / `zwp_virtual_keyboard_v1` or `/dev/uinput` (present,
-   but `root:input 660` — existence is not access). Contract already frozen in CONTRACTS §7:
-   NORMALISED 0..1 coordinates over a unix socket at
-   `~/.local/state/luminos/wallpaper-input.sock`, one JSON object per line; producer dies with its
-   wallpaper, no orphan on crash; interaction OFF by default and **Esc always releases**.
-   **This is the one that finally lets web mode and Chromium be deleted.**
-
-   Second nested-compositor option found 2026-09-19: **`gamescope` 3.16.28-1 (`extra`, not
-   installed)** alongside `cage`. Same blocker either way — no PipeWire video node on this box yet.
-3. **BUG-166 — verify it, then watch it for a day.** Both halves installed 2026-09-18, nothing
-   proven. `luminos-tabs` must show a fresh `age_seconds`; `chrome://extensions` must read **3.1**.
-   ⚠️ Saved options beat new defaults — check `graceSeconds`=1800 and `capOnPressure` unticked.
-4. **BUG-167 — reconcile `config/99-luminos-ram.conf` with the box**, keeping `page-cluster = 3`,
-   then sweep **every** `config/*.conf` against its `/etc/` counterpart.
-5. **BUG-164 — Shawn's call:** confirm the model (S01E07 seeks fine, S01E09 breaks), then fix the 20
-   ASS files by getting Bazarr to fetch real SRT sidecars (`use_embedded_subs` OFF), then run
-   `--fix-audio` on ONE of the 26 DTS files and watch it before the rest.
+1. **BUG-182 step 1 — find what opened nvidia-powerd's fds at 23:18:51.** Sample
+   `ls -l --time-style=full-iso /proc/$(pgrep -x nvidia-powerd)/fd` + `power/runtime_status` once a
+   minute for an hour. No state change, no GPU contact. **Only then** consider the
+   `systemctl stop nvidia-powerd` A/B — that needs Shawn's word.
+2. **Ask Shawn about the UVM gate re-assert** (`systemctl restart luminos-uvm-gate`). One command,
+   but it is a state change and this turn was read-only.
+3. **SPEC §3.6 — external producer (games).** Consumer half is built and proven (DECISION 124).
+   **Blocker:** `org.freedesktop.impl.portal.ScreenCast.CreateSession` against `xdg-desktop-portal-wlr`
+   gives no `Response` signal in 20 s. Probe at `/tmp/sc.py`. cage runs headless on the 780M
+   (glxgears 62.8 FPS, picks the iGPU by itself). Producer must publish **packed RGB** (`format=BGRx`)
+   or it renders greyscale. **DECISION 124a corrects 124:** input DOES exist — a live headless `cage`
+   advertises `zwlr_virtual_pointer_manager_v1` + `zwp_virtual_keyboard_manager_v1`; the earlier
+   measurement was taken against KWin, the wrong compositor.
+4. **Spectrum on the GPU** — one `ShaderEffect` over the existing 128×1 `AudioTexture`.
+   **DECISION 121: capping the publish rate was tried and measured WORSE. Do not redo it.**
+5. **BUG-166 / BUG-167** — verify the tab sleeper (`chrome://extensions` must read 3.1), then
+   reconcile `config/99-luminos-ram.conf` with the box **keeping `page-cluster = 3`** (DECISION 116).
+6. **BUG-164** — 20 ASS files (Bazarr `use_embedded_subs` OFF), then one of the 26 DTS files.
 
 ## Key decisions & constraints
-- **No Chromium in the wallpaper** — but `qt6-webengine` stays installed (HIVE needs it), and **web
-  mode stays until §3.6 replaces it**; deleting it first removes DOM support with nothing behind it.
-- **128 audio bands at 0–1** and the eight Lively control types are **Lively-exact on purpose**, so
-  their wallpapers port unmodified. Not a taste call.
-- **The plugin serves both the desktop containment and the lock screen** (`kscreenlockerrc`
-  Greeter). Anything broken is broken twice.
-- **Never a black desktop** (SPEC §6): malformed manifest → keep the previous wallpaper; shader
-  fails → fall back to the Canvas aurora **and say so in the journal**; no audio provider → zeros,
-  never a crash; no `properties.json` → no panel, not an error.
-- **Budgets (SPEC §9):** QML scene 150 lines, loader/host 200; Python helper 150, function 40,
-  nesting 3. Over budget is a red build. `python3 tests/wallpaper/budget_check.py`.
+- **AGENTS.md §0.2 / Rule 12 / §16: "no changes" scopes to code, config and system state.**
+  `HANDOFF.md` and the §13 doc triggers are written on **every** turn, investigation turns included.
+- **The dGPU optimisation pass is FLAGGED, NOT NOW** (§14 item 0g). Constraint: the wallpaper must
+  use the **AMD 780M, never the RTX 4050** — already satisfied, plasmashell holds `renderD129` only.
+- **No Chromium in the wallpaper**, but web mode stays until §3.6 replaces it.
 - **A config file in git is NOT evidence that a setting is live** (BUG-167). Read `/proc/sys/`.
-- **`vm.page-cluster` = 3 is correct and stays** (DECISION 116). Called "wrong" three times by
-  people reading a repo file.
-- **AGENTS.md §0.2 / Rule 12 / §16:** "no changes" scopes to code, config and system state. This
-  file and the §13 doc triggers are written on every turn regardless.
-
-## ⚠️ Open right now
-- **`contents/tools/luminos-wallpaper-install` is 154 lines against SPEC §9's 150**, so the self
-  test reports **1 failed** on purpose. Prose was trimmed three times chasing it and the file was
-  broken once doing so. It needs ONE deliberate decision — split the CLI out, or raise the budget
-  for a file that is mostly a security-critical unpack path — not another comment trim.
-- **`rocksdanister/lively` contains NO wallpapers.** It is the Windows app's C# source: 0
-  `LivelyInfo.json`, 0 html, 0 video, 0 js. Clone kept at `~/lively-test/lively` (81 MB, shallow,
-  unmodified). To actually test wallpapers Shawn needs to send **a folder containing
-  `LivelyInfo.json`, or a `.zip` exported from Lively itself** ("export wallpaper" in the app).
+- **Never switch to `AsusMuxDgpu`** before checking whether `KWIN_DRM_DEVICES=/dev/dri/card2` +
+  the Mesa EGL pin strand the desktop on a card that no longer drives the display. §2 was corrected
+  2026-09-19: this board **does** have a MUX.
 
 ## Gotchas / dead-ends / things NOT to redo
-**The instruments, which have now been wrong five times in five days**
-- **BUG-171 — a deploy is not a load.** `QQmlEngine` caches compiled components by URL for the life
-  of the engine and never re-stats the file; plasmashell is one long-lived engine. `diff -rq` clean
-  and md5-verified says nothing about what is running. **Restart plasmashell after every deploy.**
-  The tell: a `[LUMINOS-WP]` journal line whose wording differs from the source on disk.
-- **BUG-172 — a warning that cannot tell "off on purpose" from "broken" is noise.** The spectrum
-  scene accused the audio stack every time a window was maximized.
-- **BUG-174 — bind a control's value and write back from a PROPERTY-CHANGE signal and you have a
-  loop; write back from a USER-ACTION signal and you do not.** `onMoved`, `onActivated`,
-  `onEditingFinished`, `onToggled` are safe. `KQuickControls.ColorButton` has no user-action signal
-  — `onColorChanged` fires for a programmatic change too — so its value must be set once,
-  imperatively, never bound. Bound, it loops the internal ColorDialog's `selectedColor` and the
-  dialog can be neither accepted nor cancelled: the whole System Settings window is stranded.
-- **The settings page is NOT in plasmashell.** `config.qml` runs in `systemsettings` (or whatever
-  opened the dialog), so BUG-171's restart rule applies per process — quit System Settings and
-  reopen it after any `config.qml` change. Its journal tag is `systemsettings`.
-- **BUG-173 — in a Repeater delegate, the delegate's OWN properties resolve before the enclosing
-  component's ids.** A `property string ctl` on the delegate shadowed `id: ctl` outside it, so
-  `sourceComponent` was `undefined` and every row loaded nothing — and a Loader that loads nothing
-  is not an error. Never give a delegate property the same name as an id in the same file.
-- **BUG-175 — a warning emitted on a path that has not finished yet is indistinguishable from a
-  real fault.** `ShaderBaker` ran from `Component.onCompleted`, before the host binds `source` in
-  its Loader's `onLoaded`, so it printed `no shader file selected` on every healthy load. Third
-  cry-wolf checker this week; it nearly buried a feature that worked.
-- **`grabToImage` under `QT_QPA_PLATFORM=offscreen` returns a BLACK frame** — no GPU — so it proves
-  nothing about a shader either way. To check what a shader draws, re-implement its arithmetic
-  somewhere you can print (numpy at the panel's aspect ratio) and compare with the screen.
-- **A Cowork session CAN see the screen** — `spectacle -b -n -f` over the host shell. It
-  **core-dumps without `WAYLAND_DISPLAY=wayland-0`**, same class of trap as `qml6` needing
-  `QT_QPA_PLATFORM=offscreen`. And screenshot the DESKTOP, not the screen: the first animation
-  check compared two captures that were mostly the Claude window, "proved" motion, and proved only
-  that a clock had ticked.
-- **BUG-177 — a measurement taken in a state the feature does not normally occupy is not a
-  measurement.** `luminos-wallpaper-cost` run from a terminal samples a wallpaper the terminal has
-  frozen, and printed `0.0%` beside Chromium's 24%. Fourth cry-wolf instrument this week and the
-  only one that flattered us, which is the more dangerous direction.
-- **BUG-176 — Show Desktop is a PEEK, not a minimise.** `IsMinimized` stays false, so `coverLevel`
-  stays 1. Fixed via `KWindowSystem.showingDesktop`. The lesson: the first search concluded "no
-  clean API" after looking only in `org.kde.taskmanager`, where `coverLevel` already came from. The
-  answer was one module over, and `grep -rl showingDesktop /usr/lib/qt6/qml/` names it in one line.
-  **"No clean API exists" deserves one more grep than it usually gets.**
-- **DECISION 121 — do NOT cap the audio publish rate.** Tried, measured 57.2 Hz from 84 Hz as
-  intended, and cost MORE: 23.7 % mean against 20.9 % uncapped, three samples each. Reverted whole.
-- **BUG-178 — a rAF loop with nothing pacing it queued 2.5 GB of paint commands in 30 s.** The
-  wallpaper frame loop must be paced by real paints, never by `Canvas.requestAnimationFrame`
-  directly: the renderer has to set the pace or the producer outruns it without bound.
-- **BUG-180 — but NEVER run the frame synchronously inside `onPainted`.** A `requestPaint()`
-  issued from inside that handler is SWALLOWED (Qt marks the canvas clean when it returns), so the
-  loop dies after exactly one frame. Schedule the timer instead. And **`resume()` must kick the
-  timer, not the canvas** — waiting for `onPainted` makes recovery depend on the thing that
-  stopped, which is why a frozen wallpaper never came back.
-- **A wallpaper screenshot proves the first frame rendered and NOTHING else.** §3.5 shipped as a
-  still picture with every check green. When the feature is motion, count frames: `CanvasJs.frames`
-  exists for exactly that.
-- **A `.js` canvas wallpaper is EXPENSIVE here and a shader is cheap** — 41.1 % of a core against
-  6.6 %, and worse than the Chromium it replaces (~24 %). Qt rasterises canvas on the CPU. Four
-  experiments: capping surface resolution did NOTHING, the render target did NOTHING, content
-  helped a little, **frame rate is the only real lever**. Do not re-run those experiments.
-- **Offscreen there is no vsync**, so a rAF wallpaper runs flat out and starves the event loop —
-  a 3.5 s Timer in a test fired at t+20.4 s. Test fixtures must stop themselves after a few frames.
-- **BUG-179 — `budget_check.py` takes its files as ARGUMENTS and prints `BUDGETS PASS` about
-  nothing when run bare**, and was never wired into the self test. Every "BUDGETS PASS" reported
-  before 2026-09-19 was vacuous. Now self-test section [3b]. `main.qml` and `config.qml` are over
-  budget and exempt BY NAME, printed on every run.
-- **`grabToImage` returns a BLANK frame for anything the GPU composites** — black for a
-  `ShaderEffect` (BUG-175), white for a `PipeWireSourceItem`. Twice now. To see what such an item
-  really draws, put it in a real window and capture the window with `spectacle -a -b -n -o f.png`,
-  which also avoids photographing the whole desktop.
-- **NEVER invent a mapping for someone else's format.** BUG-181: our Lively `WallpaperType` map
-  had six entries for a twelve-member enum and not one was right — a Lively VIDEO wallpaper, the
-  commonest kind there is, imported as "unsupported". The authoritative list is one clone away, at
-  `src/Lively/Lively.Models/Enums/WallpaperType.cs`. And the test PINNED the invented table, so the
-  suite was green *because* it asserted the wrong answer.
-- **The contract tests were MUTE.** Qt hands `console.log` to the journal when stderr is not a tty,
-  so `qml6 … 2>&1` captured nothing and the self test's exit code was all it ever had.
-  `QT_FORCE_STDERR_LOGGING=1`.
-- **Six instrument failures in five days, all the same shape: the test exercised the logic while
-  the product was broken.** BUG-168 bound no properties, BUG-170 read no files, BUG-173 rendered no
-  controls — suite green through all three. A check that never touches what the user looks at is
-  not a check.
-- **Exit code 0 is not the whole result.** The audio test passed 22/22 while the engine printed
-  `Member enabled … overrides a member of the base object`. Read what a run prints.
-- **The near-miss question passes for the wrong reason.** `item.x !== undefined` instead of
-  `"x" in item` (BUG-168); `cava` on `PATH` instead of in `ldd`; a checker pointed at the path the
-  fix had just left (BUG-163).
-- **A failure path that reports the innocent explanation is worse than a crash** (BUG-170). "This
-  scene declares no settings" is a sentence a user believes.
+**Investigating the GPU**
+- **Running `nvidia-smi` wakes a sleeping card and resets its autosuspend timer.** That is why
+  `dgpuHasClients()` is a `/proc` walk (BUG-160) and why `luminos-monitor`/`luminos-verify` read
+  `runtime_status` from sysfs first. Budget yourself **one** `nvidia-smi`, and only on a card that
+  is already awake.
+- **A ROOT `nvidia-smi` — even a read-only query — re-opens the UVM gate** (BUG-146). Proven again
+  this turn by ctime. Use `nvidiaRead()` from the daemon; from a shell, expect to re-assert after.
+- **Runtime PM gives cumulative counters and NO last-transition timestamp.** You cannot derive when
+  a card woke by subtracting `runtime_active_time` from now — that assumes one contiguous block,
+  which is the thing you are testing. Two spaced samples prove *currently awake*, nothing more.
+- **`/proc/PID/fd` timestamps ARE real open-times here** (verified: re-listed twice, unchanged, and
+  low fds keep their boot time). Good enough to date when a holder grabbed the device.
+- `power/autosuspend_delay_ms` returns **`Input/output error`** on this device; `runtime_usage` does
+  not exist on this kernel. Do not read those two as evidence of anything.
+- **Delegating to a subagent: say `host-shell__run_command`, in those words.** A subagent told
+  "use device_bash" investigated the Cowork VM and reported `Ubuntu 22.04`, virtio devices and zero
+  nvidia modules — a completely coherent report about the wrong machine.
+
+**The instruments have been wrong repeatedly — assume they are before assuming the feature is**
+- **BUG-171 — a deploy is not a load.** `QQmlEngine` caches components by URL for the life of the
+  engine; plasmashell is one long-lived engine. **Restart plasmashell after every deploy.** The
+  settings page runs in `systemsettings`, so restart that separately after a `config.qml` change.
+- **BUG-177 — a measurement taken in a state the feature never occupies is not a measurement.**
+  `luminos-wallpaper-cost` from a terminal samples a wallpaper the terminal has frozen.
+- **BUG-172 / BUG-175 — a warning that cannot tell "off on purpose" or "not finished yet" from
+  "broken" is noise.** Three cry-wolf checkers in one week.
+- **`grabToImage` returns a BLANK frame for anything the GPU composites** — black for `ShaderEffect`,
+  white for `PipeWireSourceItem`. Capture the real window with `spectacle -a -b -n` instead.
+- **A screenshot proves the first frame rendered and nothing else.** When the feature is motion,
+  count frames (`CanvasJs.frames`).
+- **Qt sends `console.log` to the journal when stderr is not a tty** — `QT_FORCE_STDERR_LOGGING=1`,
+  or your contract tests are mute and exit code is all you have.
+- **A `.js` canvas is expensive here (41.1 %) and a shader is cheap (6.6 %)** — Qt rasterises Canvas
+  2D on the CPU. Resolution cap and render target both did NOTHING; frame rate is the only lever.
 
 **Repo hygiene**
-- **Never `git add -A` in this repo — and I did it anyway on 2026-09-19.** `git add -A scripts`
-  in commit `022faa74` swept ~20 unrelated files into a wallpaper commit: `chrome-luminos`, the
-  tab sleeper, `jobhunt/`, the caelestia overlay, and a dozen previously-UNTRACKED scripts
-  (`luminos-pagefile`, `luminos-verify`, `luminos-dgpu-watch`, `luminos-kde-desktop-overlay`…).
-  Nothing was lost and no credentials went in (checked), and several of those files are named in
-  AGENTS.md §9 as canonical repo copies so tracking them is arguably overdue — but the commit
-  message describes none of it. Not rewritten, because it is pushed. **The rule is `git add`
-  with named paths, and a directory path is not a named path.** An unpacked initramfs (`init`, `lib`, `sbin`, `usr/`, `var/`,
-  `kernel/`, `keymap.bin`, `consolefont.psfu`) and `_to_delete/` sit untracked at the root. Stage
-  named files only. The §13 git snippet says `-A`; it is wrong here.
-- **Git from the bridge VM (`device_bash`) can CREATE lock files but not DELETE them** — that is the
-  whole explanation for a 15-hour-old 0-byte `.git/index.lock`. **Use the host shell instead and the
-  problem does not arise.**
-- **`.notes.db` writes fail with `disk I/O error` through the bridge mount.** Host shell, again.
-- **`device_commit_files` can answer `written` before the bytes are visible to `device_bash`.** md5
-  both ends.
+- **Never `git add -A` in this repo** — commit `022faa74` swept ~20 unrelated files into a wallpaper
+  commit that way. **Name paths. A directory path is not a named path.** The §13 git snippet says
+  `-A`; it is wrong here. An unpacked initramfs and `_to_delete/` sit untracked at the root.
+- **Git from the bridge VM can CREATE lock files but not DELETE them** (a 15-hour `.git/index.lock`),
+  and `.notes.db` writes fail there with `disk I/O error`. **Use the host shell.**
 - **Cowork does not fire Claude Code hooks** (BUG-087) — call `code-review-graph` MCP explicitly.
-- **The `qemu-system-x86` process is Claude Desktop's own Cowork sandbox VM.** Identified
-  2026-09-18. Do not investigate it a third time. Killing it kills the Cowork session.
-
-**Wallpaper**
-- **Qt 6.11 disables `XMLHttpRequest` on local files** (BUG-170) — `QML_XHR_ALLOW_FILE_READ` is the
-  documented opt-in and we deliberately do **not** set it: it is per-process and would give every
-  QML object in plasmashell arbitrary local file reads. The reader is
-  `contents/tools/luminos-wallpaper-props`, run as a subprocess. It takes the **scene** path and
-  looks for `<Stem>.properties.json` beside it — handing it the `.properties.json` itself returns
-  `NONE`, which looks exactly like a bug and is not one.
-- **A `fillWidth` + wrapping label inside a `Kirigami.FormLayout` drags the whole form off-screen**
-  (BUG-169). Cap every long help label with `Layout.maximumWidth`.
-- **Never gate a whole UI section on an async flag.** The Scene settings block was invisible
-  whenever its file read had not completed, with nothing said.
-- **`qml6` aborts without a display** — `QT_QPA_PLATFORM=offscreen`. Exit 134 means that; exit 124
-  means something threw before `Qt.exit()` and the test hung.
-- **A template's own documentation is inside the template.** `shader-wrapper.glsl` mentioned its
-  `%(props)s` placeholder in its header comment and the whole file goes through one percent-format,
-  so the generated uniform declarations were spliced into the comment.
-- **The shader compiler ships inside the plugin, not on `PATH`** — the lock screen loads the same
-  KPackage. Called through `python3` because a KPackage install does not promise the executable bit.
-- **`.qsb` files are not byte-reproducible** — a comment-only change differed in 3439 of 3493 bytes.
-  **Never md5 a `.qsb` to decide whether a shader changed; diff `qsb --dump`.**
-- **Caelestia never spawns the `cava` CLI** — it links libcava and reads PipeWire itself.
-- **`/dev/uinput` is `root:input 660`** — existence is not access.
-- **`pytest`/`hypothesis` are not on the G14.** Installing them needs `luminos-brain safe` first.
-- **`luminos-brain safe` has produced a false `NO` five times.** Escape hatch:
+- **`qemu-system-x86` is Claude Desktop's own Cowork sandbox VM.** Identified 2026-09-18. Do not
+  investigate it again. Killing it kills the session.
+- **`luminos-brain safe` has produced a false NO five times.** Escape hatch:
   `luminos-brain safe "<action>" --reason "<why>"` → `OVERRIDE LOGGED`.
 
-**Media server**
-- Separate headless machine: `ssh -i ~/.ssh/luminos-server shawn@192.168.2.61` (server `.61`,
-  G14 `.16`), `sudo` NOPASSWD. Ground truth for any transcode question is **Jellyfin's own ffmpeg
-  command lines** in `/var/log/jellyfin/` — never a capability table.
-- `ass` is text but is **not** client-renderable on a Roku, so Jellyfin burns it in.
-- "Bazarr says nothing is missing" ≠ "these files are fine" (`use_embedded_subs` is ON).
-- The jpn/kor "E07.5 recap mis-map" audio theory (DECISION 98/101) is **disproven**.
+**Media server** — separate machine, `ssh -i ~/.ssh/luminos-server shawn@192.168.2.61`. Ground truth
+for any transcode question is Jellyfin's own ffmpeg command lines in `/var/log/jellyfin/`.
 
 ## Files touched / relevant files
-- **Wallpaper plugin:** `src/wallpapers/org.luminos.livewallpaper/contents/` — `ui/main.qml`,
-  `ui/QmlMode.qml`, `ui/WebMode.qml`, `ui/config.qml`, `ui/scene.js`,
-  `ui/audio/{AudioBridge,CaelestiaAudio,AudioTexture}.qml`,
-  `ui/props/{PropertyStore,PropertyEditor,PropertyControls,PropsReader,ShaderBaker}.qml`,
-  `ui/scenes/{Shader,Aurora,Particles,SysMon,Spectrum,ShaderToy}.qml` +
-  `{Shader,Spectrum}.properties.json`, `shaders/luminos-shader.frag{,.qsb}`,
-  `tools/{luminos-shader-bake,shader-wrapper.glsl,luminos-wallpaper-props}`,
-  `samples/luminos-shadertoy.frag{,.properties.json}`, `config/main.xml`.
-- **Installed copy:** `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` — keep it
-  `diff -rq` clean against the repo, and restart plasmashell after touching it.
-- **BUG-180 (the canvas freeze), this turn:** `ui/js/JsShim.qml`, `ui/scenes/CanvasJs.qml`
-  (new `frames` property), `tests/wallpaper/canvasjs_contract.qml` (17 checks now) +
-  `fixtures/looping.js`.
-- **SPEC §3.3 COMPLETE (DECISION 123 + 123a), earlier:** new `ui/WallpaperGallery.qml`,
-  `tests/wallpaper/gallery_contract.qml`; `luminos-wallpaper-{install,gallery}` moved into
-  `contents/tools/` with `scripts/` symlinks; `ui/scene.js` gained `modeForType()`; `ui/config.qml`
-  gained the wiring only.
-- **SPEC §3.3 install half (DECISION 123), earlier this turn:** `scripts/luminos-wallpaper-install`,
-  `scripts/luminos-wallpaper-gallery`, `scripts/luminos-wallpaper-selftest` (section [3b]),
-  `ui/scenes/Spectrum.qml` (154 → 150 lines, BUG-179).
-- **SPEC §3.5 (DECISION 122), last turn:** `ui/js/{JsSource,JsShim}.qml`, `ui/scenes/CanvasJs.qml`,
-  `tools/luminos-wallpaper-js`, `samples/luminos-canvas.js{,.properties.json}`, `ui/scene.js`,
-  `ui/QmlMode.qml`, `ui/config.qml`, `tests/wallpaper/canvasjs_contract.qml` (13 checks) +
-  `tests/wallpaper/fixtures/`.
-- **Earlier turns:** `ui/scenes/Spectrum.qml` (BUG-172), `ui/props/PropertyEditor.qml` (BUG-173),
-  `ui/props/PropertyControls.qml` + `ui/config.qml` (BUG-174),
-  new `tests/wallpaper/editor_contract.qml`, `scripts/luminos-wallpaper-selftest` (adds it, and
-  `QT_FORCE_STDERR_LOGGING=1` so a failing contract test can actually say why),
-  `samples/luminos-shadertoy.frag{,.properties.json}` + `ui/props/ShaderBaker.qml` (BUG-175),
-  `docs/BUGS.md` (BUG-171 through BUG-177), `scripts/luminos-wallpaper-cost` (BUG-177),
-  `ui/main.qml` (BUG-176 — `KWindowSystem.showingDesktop`), `LUMINOS_DECISIONS.md` (121, the
-  rejected publish-rate cap), `docs/wallpaper/VERIFY.md`, `LUMINOS_STATUS.md`, `HANDOFF.md`.
-- **Docs:** `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG,VERIFY,SELFTEST.log}.md`,
-  `LUMINOS_DECISIONS.md` (117–120), `docs/BUGS.md`, `LUMINOS_STATUS.md`, `docs/CODE_REFERENCE.md`.
-- **Verification:** `scripts/luminos-wallpaper-selftest` (30 checks) and `docs/wallpaper/VERIFY.md`.
-- **Scripts/tests:** `scripts/luminos-wallpaper-{pkg,capabilities,probe,cost}`,
-  `tests/wallpaper/{test_pkg,test_shipped_props,test_shader_bake,test_props_read,budget_check}.py`,
-  `tests/wallpaper/{audio_contract,props_contract}.qml`.
-- **Server/RAM thread:** `docs/LUMINOS_RAM_ARCHITECTURE.md`, `server/STATUS.md`,
-  `server/DECISIONS.md`, `server/scripts/luminos-roku-compat`, `config/99-luminos-ram.conf`.
+**This turn (docs only, no code/config/system change):** `docs/BUGS.md` (new **BUG-182**),
+`HANDOFF.md` (reset), `LUMINOS_STATUS.md`.
+**Evidence sources, for re-running the investigation:** `/sys/bus/pci/devices/0000:01:00.0/power/*`,
+`/proc/driver/nvidia/{params,gpus/0000:01:00.0/power}`, `/proc/$(pgrep -x nvidia-powerd)/fd`,
+`journalctl -b -u {supergfxd,nvidia-powerd,luminos-power}`.
+**Gate code:** `config/modprobe.d/luminos-dgpu-gate.conf`, `scripts/dgpu-gate/{dgpu-exec-v2.c,
+luminos-uvm-gate.sh,install-dgpu-gate.sh}`, `config/udev/71-luminos-uvm-gate.rules`,
+`systemd/luminos-uvm-gate.service`, `cmd/luminos-power/main.go` (`dgpuHasClients` 1594,
+`dgpuRuntimeSuspended` 1578, `nvidiaRead` 1692, `regateUVM` 1730, `setProfile` 1340).
+**Wallpaper:** `src/wallpapers/org.luminos.livewallpaper/contents/` + installed copy at
+`~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` — keep `diff -rq` clean.

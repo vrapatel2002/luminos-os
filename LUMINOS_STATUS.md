@@ -360,6 +360,26 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
 6. Go orchestrator (replace Python hive-daemon.py)
 7. Zone indicator Plasma widget
 8. SDDM custom Luminos theme
+11. 🔴 **BUG-182 — the dGPU is pinned in D0 with no client, and the UVM gate is currently OPEN.**
+    <!-- [CHANGE: cowork | 2026-09-19] investigation only, nothing changed by instruction -->
+    Live 2026-09-19 23:21–23:28: `control=auto`, `runtime_status=active`, `power_state=D0`,
+    **0 ms of suspend accrued across three samples 11 min apart**, card idle at P8 / 210 MHz /
+    **1.54 W** / 2 MiB / 0 %. This boot it managed 3h33m suspended and then stopped.
+    `/proc/driver/nvidia/gpus/…/power` reads `Runtime D3 status: Enabled (fine-grained)` but
+    **`Video Memory: Active`** — a live driver allocation, which is what blocks D3cold.
+    **Our daemons are innocent:** a 45 s `/proc` scan caught **zero** `nvidia-smi`/`dgpu-exec`
+    execs, so BUG-160's SENSE guard is working; `power/control` is `auto`, so BUG-103's fix is
+    holding; persistence mode is Disabled; the compositor is entirely on card2/renderD129 (AMD)
+    with **zero** holders on card1/renderD128. Sole fd holder is `nvidia-powerd` (started by
+    **supergfxd**, its own unit disabled) — but its nvidia fds opened at **23:18:51**, hours after
+    the card stopped sleeping, so it is the holder *now* and **not** the cause *then*.
+    ⚠️ **Separately and definitely: `/dev/nvidia-uvm` and `-uvm-tools` are `0666 root:root` right
+    now**, ctime `20:29:37`, against `root:dgpu 0660` at boot — BUG-146's documented failure mode,
+    triggered by a root `sudo nvidia-smi -q -d DISPLAY` at 20:29:35 (same second on
+    `/dev/nvidia-caps/*`). `nvidia0`, `nvidiactl`, `nvidia-modeset` are still correct. Re-assert
+    with `sudo systemctl restart luminos-uvm-gate` (**restart**, not start). Not done — read-only
+    turn. Full evidence and the next measurement in `docs/BUGS.md` BUG-182.
+
 9. ~~**BUG-146 — gate the `nvidia_uvm` device nodes.**~~ **DONE 2026-08-29** — see
    "dGPU gate (DECISION 25)" below. Superseded by task 10.
 10. **BUG-147 — reboot-verify the entire NVIDIA path.** <!-- [CHANGE: claude-code | 2026-08-29]

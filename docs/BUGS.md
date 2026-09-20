@@ -7153,3 +7153,108 @@ stopped: shaving comments off a file to satisfy a line count degrades it to make
 which is the opposite of what the budget is for. It needs one deliberate decision — split the CLI
 out, or raise the budget for a file that is mostly a security-critical unpack path — and that
 decision should be made rested, not at the end of a long session.
+
+---
+
+## BUG-182 — the dGPU is pinned in D0 with no client, and the UVM gate is open, both from one root `nvidia-smi`
+<!-- [CHANGE: cowork | 2026-09-19] investigation only — nothing changed, by instruction -->
+
+**Status:** OPEN (diagnosed, deliberately not fixed — Shawn: *"do not turn it off just find out why"*)
+· **Severity:** ~1.5 W burned continuously for nothing + the DECISION 25 gate is off on two nodes
+· **Files:** none changed. Evidence only.
+
+### Symptom (measured 2026-09-19 23:21–23:28)
+```
+0000:01:00.0  control=auto  runtime_status=active  power_state=D0  d3cold_allowed=1
+three samples, 11 min apart:  d_suspended = 0 ms  every time
+nvidia-smi: P8, 210 MHz, 1.54 W, 2 MiB used, 0 % util, Clocks Event Reason "Idle: Active"
+this boot: runtime_active_time 6h22m / runtime_suspended_time 3h33m  (it WAS cycling, then stopped)
+```
+An idle card that is simply not allowed to sleep — the same shape as **BUG-103**, but *not* the same
+cause: `power/control` is `auto`, so the BUG-103 fix is still holding.
+
+### What is NOT the cause (each ruled out by measurement, not by reasoning)
+| Suspect | Evidence against |
+|---|---|
+| `luminos-power` polling (BUG-160) | **45 s continuous `/proc` scan caught ZERO** `nvidia-smi` / `dgpu-exec` / `nvtop` / `luminos-monitor` execs. The BUG-160 SENSE guard is working. |
+| `power/control=on` (BUG-103) | reads `auto`. |
+| persistence mode | `Persistence Mode: Disabled`; `nvidia-persistenced` disabled + dead. |
+| compositor / PRIME offload | `kwin_wayland`, `plasmashell`, `qs`, Chrome all hold **card2 / renderD129 (AMD)**. **Zero** holders on `card1` or `renderD128`. |
+| AC/DC transition waking it | `ACAD online=1` since `13:26:30` — **plugged in since boot**, no transition. |
+| RTD3 misconfigured | `/proc/driver/nvidia/params`: `DynamicPowerManagement: 2`; `/proc/driver/nvidia/gpus/…/power`: `Runtime D3 status: Enabled (fine-grained)`. Configured exactly as BUG-047 intended. |
+
+### What the driver says is wrong
+```
+/proc/driver/nvidia/gpus/0000:01:00.0/power
+  Runtime D3 status:  Enabled (fine-grained)
+  Video Memory:       Active          <-- should be Off on an idle fine-grained RTD3 card
+```
+`Video Memory: Active` means the driver still holds a live allocation. That reference, not the PCI
+layer, is what blocks the return to D3cold.
+
+### The only holder — and the honest caveat
+```
+sudo fuser -v /dev/nvidia*
+/dev/nvidia0:    root  877  F....  nvidia-powerd
+/dev/nvidiactl:  root  877  F....  nvidia-powerd
+```
+`nvidia-powerd` (PID 877) holds **11 fds on `/dev/nvidia0` + 1 on `/dev/nvidiactl`** ≈ `nvidia refcnt 13`.
+It is **not** started by its own unit (`nvidia-powerd.service` is *disabled*) — **supergfxd starts it**
+on entering Hybrid: `supergfxd[795]: Did CommandArgs { inner: ["start", "nvidia-powerd.service"] }`.
+It then failed at its actual job: `ERROR! Client (presumably SBIOS) has requested to disable Dynamic
+Boost DC controller`.
+
+⚠️ **Do not write this up as "nvidia-powerd keeps the card awake" — the timing does not support it.**
+`/proc/877/fd` says those nvidia fds were opened at **23:18:51**, while the card had already been
+continuously awake for hours. The timestamps are real, not lookup artifacts (re-listed at 23:26:39
+and at 23:27:23 — unchanged, and fds 0–4 still read `13:26:33`). So powerd is the holder **now**;
+it is not the thing that stopped the card sleeping **then**. **What opened those fds at 23:18:51 is
+unknown and is the next thing to find out.** BUG-161 separately recorded that stopping powerd for
+10 min did not stop periodic *wakes* — a different question (what initiates a wake vs. what prevents
+re-suspend); neither result answers the other.
+
+### The correlated trigger — strong, but not proof
+The only GPU-touching event in the whole journal is a **root** `nvidia-smi` at 20:29:
+```
+Sep 19 20:29:35 sudo[160104]: shawn : COMMAND=/usr/bin/nvidia-smi -q -d DISPLAY
+```
+Two independent artefacts carry that exact timestamp:
+```
+/dev/nvidia-caps/nvidia-cap{1,2}   created 2026-09-19 20:29:37   (nvidia-modprobe ran)
+/dev/nvidia-uvm, -uvm-tools        ctime  2026-09-19 20:29:37.284795216
+```
+**Why this is NOT proof:** runtime PM exposes only *cumulative* counters — there is no
+last-transition timestamp anywhere. Deriving a wake time by solving `now − T = active_time` assumes
+all 6h22m of active time was one block, which is exactly the thing being tested. An earlier pass at
+this bug did make that assumption and produced a confident, unsupported "woke at 20:29:24".
+**The 20:29 root `nvidia-smi` is a correlated candidate. It is not established as the cause.**
+
+### Second, independent finding — the DECISION 25 gate is currently OPEN on the UVM nodes
+```
+/dev/nvidia0          mode=660  root:dgpu   ctime 13:26:33   <- correct
+/dev/nvidiactl        mode=660  root:dgpu   ctime 13:26:33   <- correct
+/dev/nvidia-modeset   mode=660  root:dgpu   ctime 13:26:31   <- correct
+/dev/nvidia-uvm       mode=666  root:root   ctime 20:29:37   <- RESET
+/dev/nvidia-uvm-tools mode=666  root:root   ctime 20:29:37   <- RESET
+```
+Boot was clean — `luminos-uvm-gate[726]: gated: /dev/nvidia-uvm root:dgpu 660 /dev/nvidia-uvm-tools
+root:dgpu 660` — and the ctime is the same second as the root `nvidia-smi`. This is **BUG-146's
+documented failure mode, live**: a root NVIDIA client makes setuid `nvidia-modprobe` re-apply the
+driver's hardcoded `0666 root:root` to the two nodes the `NVreg_DeviceFile*` params do not cover.
+`nvidiaCtl()` in `cmd/luminos-power/main.go` self-repairs after its own four root calls; an ad-hoc
+`sudo nvidia-smi` typed at a prompt is repaired by nothing. Re-assert with
+`sudo systemctl restart luminos-uvm-gate` (**restart**, not start — it is `active (exited)`).
+
+### Next steps (not taken — read-only turn)
+1. **Find what opened powerd's fds at 23:18:51.** It is periodic or event-driven; a `ls -l
+   --time-style=full-iso /proc/$(pgrep -x nvidia-powerd)/fd` sample every minute for an hour, logged
+   beside `power/runtime_status`, answers it without touching the card.
+2. **Then, and only then**, the A/B: `systemctl stop nvidia-powerd` and watch whether
+   `runtime_suspended_time` starts moving. That is a state change and needs Shawn's word.
+3. `/sys/kernel/tracing/events/rpm/rpm_resume` (AGENTS.md §12) answers *who resumed this device* —
+   but only for the **next** wake, so it must be armed before the card next sleeps. It cannot
+   explain a card that is already awake.
+4. **The systemic shape worth naming:** every dGPU reader on this box is built to "never wake a
+   sleeping card" (`luminos-monitor`, `luminos-verify`, `readGPUStats`) — none of them is built to
+   *stop touching an awake one*. That asymmetry means the first wake is cheap and every wake after
+   it is free, which is the wrong way round. Not a bug in any one file; worth a decision.
