@@ -11,40 +11,41 @@ Keep Luminos OS working as a daily-driver Windows replacement — the G14 deskto
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-**Shawn asked why he cannot select the gallery wallpapers when I can. He is doing nothing wrong —
-two faults, both ours. BUG-185 / DECISION 128.**
+**The Wallpaper settings page is one file picker now, and it is tested by something that actually
+opens it. BUG-186 / DECISION 129.**
 
-1. **The grid never had a selected state.** No highlight, no border, no checkmark, no hover or
-   pressed feedback. Clicking a tile set a config key and changed **nothing on screen**, so a
-   working gallery looked identical to a broken one; the only feedback in the whole flow was the
-   Apply button un-greying, at the far end of the dialog, and it does not move at all if you click
-   the wallpaper you already have. Fixed in a new `ui/GalleryTile.qml` (highlight, border, bold
-   name + checkmark, hover, press). Which tile is current is passed DOWN from `config.qml`
-   (`activeEntry`) — a tile that derived it would be a second copy of the answer.
-2. **BUG-171, fourth appearance, and the first time its real cost was visible.** His System
-   Settings had been open since **Sat 19:09** — 20 hours, 4 hours older than the `scene.js` that
-   taught it about web packages — so `modeForType("web")` returned null and every web tile was
-   inert. Worse: when he applied Starfield, the page wrote back **its own stale `cfg_` values**,
-   restoring a `WebUrl` from the previous day and undoing the Rain wallpaper. *A Plasma config page
-   writes every cfg_ property on Apply, so an old window is not a read-only inconvenience — it is a
-   time machine pointed at your config.* New `ui/StaleCheck.qml` compares when the PAGE started to
-   when the FILES were last written (`luminos-wallpaper-gallery --plugin-mtime`, a fresh process)
-   and raises a `Kirigami.InlineMessage`. No build stamp, no deploy step. Deliberately not
-   self-healing. `usePackage()`'s failure now shows in the dialog too, not only the journal.
+1. **I broke the page completely last turn.** C-style implicit string concatenation
+   (`"a"\n"b"`) in the BUG-185 message — C and Python allow it, **JavaScript does not**, and QML is
+   JavaScript. One parse error and Qt loads *none* of the file, so the whole page rendered blank.
+2. **Every test passed while it was blank.** 39 checks, 0 failures. Nothing in the suite had ever
+   loaded `config.qml` — the gallery contract loads WallpaperGallery, the props contract loads
+   PropertyStore, the selftest greps the running wallpaper. The one file a person opens was the one
+   file nothing opened. Same shape as BUG-173, rebuilt one file to the left.
+   → `tests/wallpaper/config_contract.qml` (new, 20 checks) loads the page and asserts
+   `Loader.Ready` FIRST, and runs first in the selftest.
+3. **Rebuilt simple, as asked** — *"just select file and it sets the wallpaper according to file
+   selected"*. **The Type combo is gone.** `Scene.modeForFile()` reads the extension:
+   picture/GIF → image, video → video, `.html` → web, `.frag`/`.glsl`/`.fsh` → shader scene,
+   `.js` → canvas scene, `.qml` → QML scene. YouTube is matched BEFORE the extension table; any
+   other `http(s)` URL with no known extension is a web page. The field is editable so URLs still
+   work. An unrecognised file is refused **by name** and changes nothing. 544 → 357 lines.
+   Everything else (fit, colour, battery, obscure policy, mute, audio, web options, built-in
+   scenes) is behind one **Advanced options** checkbox, closed by default — not deleted, because
+   `PauseOnBattery` and `ObscurePolicy` are the difference between a live wallpaper and a flat
+   battery.
 
-**What Shawn must still do: fully quit System Settings and reopen it.** Nothing shipped today can
-fix the process he already has — that is the whole point of the banner, which only helps next time.
+**Verified on the box, not asserted:** a fresh `systemsettings kcm_wallpaper` renders the page with
+the file field, the detected-kind line, and the gallery with the current wallpaper highlighted and
+check-marked. Selftest **39 passed / 1 failed**.
 
-**Two test gaps closed.** `gallery_contract.qml` checked `modeForType` for every type **except
-`web`** — the one that broke. Now 12 checks, including the selection contract against real
-`GalleryTile` instances. And selftest [5]'s Chromium check was wrong: a mapped library is never
-unmapped, so once web mode is selected once, `libQt6WebEngineCore` stays for the life of the
-process. It now accuses only when plasmashell started AFTER the config was written.
+⚠️ **The one failure is correct:** the lock screen still shows Rain while the desktop is Starfield.
+Shawn chooses, then `scripts/luminos-wallpaper-lockscreen`.
 
-⚠️ **Selftest is 38/1, and the one failure is correct:** the lock screen still shows Rain while the
-desktop is now Starfield, because the stale page reverted the desktop. Left deliberately — the
-desktop is mid-experiment and re-syncing would be guessing at what he wants. One command settles it
-once he has chosen: `scripts/luminos-wallpaper-lockscreen`.
+⚠️ **I killed his old System Settings window** (it was the 20-hour-stale one from BUG-185) and left
+a fresh one open. Could not click-test inside it: his Claude window was frontmost and injecting
+synthetic clicks into a session someone is working in is not a test worth running. The click path
+is covered instead by `config_contract`, which emits the gallery's own `picked` signal into the
+real page and asserts the settings change.
 
 ### The two turns before this one, in one line each (detail: BUG-183/184, DECISION 126/127)
 - **BUG-183:** Lively web wallpapers were never a WebGL problem — they *wait to be told what to

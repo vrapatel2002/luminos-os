@@ -1,7 +1,22 @@
 /*
     Luminos Live Wallpaper — configuration panel (shown inside KDE Wallpaper settings).
     [CHANGE: claude-code | 2026-07-22]
+    [CHANGE: claude-code | 2026-09-20]  DECISION 129 — ONE PICKER.
     SPDX-License-Identifier: GPL-3.0-or-later
+
+    Shawn: "just select file and it sets the wallpaper according to file
+    selected. simple that's it."
+
+    So there is no Type selector any more. There used to be one, and it was the
+    source of most of this plugin's usability bugs: the person had to know that a
+    .html is a "web" wallpaper and a .frag is a "qml" one before the file picker
+    would even offer the right files, and picking the wrong type left them
+    staring at a row that asked for a file they did not have. The file already
+    knows what it is. `Scene.modeForFile()` reads it, and that table is tested —
+    which a combo box never was.
+
+    Everything the old panel could still do, it still does; the controls nobody
+    changes are behind one "Advanced" toggle, closed by default.
 */
 import QtQuick
 import QtQuick.Controls as QQC2
@@ -72,33 +87,53 @@ ColumnLayout {
         if (m === null) {
             // BUG-183/BUG-185: a click that changes nothing must say so, and a
             // journal line is not saying so — nobody reads the journal while
-            // clicking a wallpaper. The gallery only emits playable rows, so
-            // reaching here means this process is running a scene.js older than
-            // the type it was just handed. Almost always BUG-171.
-            root.pickProblem = i18n(
-                "This page could not use a \"%1\" wallpaper. It is running an older "
-                "copy of the plugin — close System Settings completely and open it again.",
+            // clicking a wallpaper.
+            root.pickProblem = i18n("This page could not use a \"%1\" wallpaper. It is " +
+                "running an older copy of the plugin — close System Settings and open it again.",
                 type);
-            console.warn("[LUMINOS-WP] no mode for package type", type,
-                         "— cached QML? (BUG-171)");
+            console.warn("[LUMINOS-WP] no mode for package type", type, "— cached QML? (BUG-171)");
             return;
         }
+        root.apply(m, entryPath);
+    }
+
+    // The one place a chosen thing becomes settings. Both the file picker and the
+    // gallery end up here, so they cannot disagree. [CHANGE: claude-code | 2026-09-20]
+    function apply(m, path) {
         root.pickProblem = "";
         root.cfg_WallpaperMode = m.mode;
         if (m.key === "QmlScene")
-            root.cfg_QmlScene = entryPath;
+            root.cfg_QmlScene = path;
         else if (m.key === "Video")
-            root.cfg_Video = entryPath;
+            root.cfg_Video = path;
         else if (m.key === "WebUrl")
-            root.cfg_WebUrl = entryPath;
+            root.cfg_WebUrl = path;
         else
-            root.cfg_Image = entryPath;
+            root.cfg_Image = path;
     }
 
+    // DECISION 129: the file decides. Empty path is not an error — it is someone
+    // clearing the box — but an unrecognised one must say so, by name.
+    function useFile(path) {
+        var clean = ("" + path).trim();
+        if (clean.length === 0) {
+            root.pickProblem = "";
+            return;
+        }
+        var m = Scene.modeForFile(clean);
+        if (m === null) {
+            root.pickProblem = i18n("Luminos does not know how to show %1.", clean);
+            return;
+        }
+        root.apply(m, clean);
+    }
 
-    // Where the bundled sample web wallpapers live once installed.
-    readonly property string samplesDir:
-        Qt.resolvedUrl("../samples").toString().replace("file://", "")
+    // What the wallpaper is showing now, in one string, whatever the mode. Also
+    // what the gallery marks as current.
+    readonly property string currentFile: root.activeEntry
+    readonly property var currentKind: Scene.modeForFile(root.currentFile)
+    readonly property bool hasOwnSettings:
+        sceneProps.loaded && Object.keys(sceneProps.schema).length > 0
 
     function localPath(url) {
         var s = "" + url;
@@ -113,354 +148,78 @@ ColumnLayout {
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
         visible: staleCheck.stale
         type: Kirigami.MessageType.Warning
-        text: i18n("This page is running an older copy of the wallpaper plugin — it was "
-                   "updated after this window opened. Close System Settings completely and "
+        text: i18n("This page is running an older copy of the wallpaper plugin — it was " +
+                   "updated after this window opened. Close System Settings completely and " +
                    "open it again, or changes made here may not take effect.")
     }
 
-    Kirigami.FormLayout {
+    // =====================================================================
+    //  THE ONLY CONTROL THAT MATTERS: pick a file.
+    // =====================================================================
+    RowLayout {
         Layout.fillWidth: true
-        // Without a cap the form grows to its widest child, which on a maximised
-        // dialog drags every row to the right and leaves a gap on the left.
-        // [CHANGE: claude-code | 2026-09-19] BUG-169
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-
-        // ---- Type selector ------------------------------------------
-        QQC2.ComboBox {
-            id: modeCombo
-            Kirigami.FormData.label: i18n("Type:")
-            textRole: "text"
-            valueRole: "val"
-            model: [
-                { text: i18n("Image"),          val: "image" },
-                { text: i18n("Video"),          val: "video" },
-                { text: i18n("Web (HTML / JS)"), val: "web" },
-                { text: i18n("Native QML (no browser)"), val: "qml" }
-            ]
-            Component.onCompleted: currentIndex = Math.max(0, indexOfValue(root.cfg_WallpaperMode))
-            onActivated: root.cfg_WallpaperMode = currentValue
-        }
-
-        // ---- INSTALLED WALLPAPERS — SPEC §3.3 ----------------------
-        // [CHANGE: claude-code | 2026-09-19] DECISION 123. The grid itself is
-        // ui/WallpaperGallery.qml; this file is already 449 lines and exempt from
-        // SPEC §9 by name (BUG-179), so it gets the wiring and nothing more.
-        Kirigami.Separator {
-            Kirigami.FormData.isSection: true
-            Kirigami.FormData.label: i18n("Installed wallpapers")
-        }
-        WallpaperGallery {
+        QQC2.TextField {
+            id: fileField
             Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
-            currentEntry: root.activeEntry
-            onPicked: function (type, entryPath) { root.usePackage(type, entryPath); }
+            text: root.currentFile
+            placeholderText: i18n("Pick a picture, video, web page, shader or script…")
+            // Typed text is accepted too, so a YouTube or web address still works
+            // without a second box for it.
+            onEditingFinished: root.useFile(text)
         }
-        QQC2.Label {
-            visible: root.pickProblem.length > 0
-            Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-            wrapMode: Text.WordWrap
-            color: Kirigami.Theme.negativeTextColor
-            font: Kirigami.Theme.smallFont
-            text: root.pickProblem
-        }
-        Item { Kirigami.FormData.isSection: true }
-
-        // ---- IMAGE --------------------------------------------------
-        RowLayout {
-            Kirigami.FormData.label: i18n("Image file:")
-            visible: root.cfg_WallpaperMode === "image"
-            QQC2.TextField {
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 18
-                text: root.cfg_Image
-                onTextEdited: root.cfg_Image = text
-                placeholderText: i18n("/path/to/picture.jpg")
-            }
-            QQC2.Button {
-                text: i18n("Browse…")
-                icon.name: "document-open"
-                onClicked: imageDialog.open()
-            }
-        }
-
-        // ---- VIDEO --------------------------------------------------
-        RowLayout {
-            Kirigami.FormData.label: i18n("Video file:")
-            visible: root.cfg_WallpaperMode === "video"
-            QQC2.TextField {
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 18
-                text: root.cfg_Video
-                onTextEdited: root.cfg_Video = text
-                placeholderText: i18n("/path/to/clip.mp4")
-            }
-            QQC2.Button {
-                text: i18n("Browse…")
-                icon.name: "document-open"
-                onClicked: videoDialog.open()
-            }
-        }
-
-        // ---- WEB ----------------------------------------------------
-        RowLayout {
-            Kirigami.FormData.label: i18n("Web page:")
-            visible: root.cfg_WallpaperMode === "web"
-            QQC2.TextField {
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 18
-                text: root.cfg_WebUrl
-                onTextEdited: root.cfg_WebUrl = text
-                placeholderText: i18n("https://…  or  /path/to/index.html")
-            }
-            QQC2.Button {
-                text: i18n("Browse…")
-                icon.name: "document-open"
-                onClicked: webDialog.open()
-            }
-        }
-        QQC2.Label {
-            visible: root.cfg_WallpaperMode === "web"
-            Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-            wrapMode: Text.WordWrap
-            font: Kirigami.Theme.smallFont
-            text: i18n("Any HTML/CSS/JS or WebGL page. Local files and Shadertoy-style shaders work. YouTube links are auto-resolved for video mode. This mode loads a full browser engine — for the bundled effects, Native QML does the same thing far more cheaply.")
-        }
-
-        // ---- NATIVE QML --------------------------------------------
-        // [CHANGE: claude-code | 2026-09-16] DECISION 113
-        QQC2.ComboBox {
-            Kirigami.FormData.label: i18n("Scene:")
-            visible: root.cfg_WallpaperMode === "qml"
-            textRole: "text"
-            valueRole: "val"
-            model: [
-                { text: i18n("Shader (GPU gradient)"),       val: "shader" },
-                { text: i18n("Shadertoy sample (audio-reactive)"), val: "sample-shadertoy" },
-                { text: i18n("Aurora (drifting blobs)"),     val: "aurora" },
-                { text: i18n("Particles (cursor-reactive)"), val: "particles" },
-                { text: i18n("System monitor (live stats)"), val: "sysmon" },
-                { text: i18n("Spectrum (audio-reactive bars)"), val: "spectrum" },
-                { text: i18n("Canvas sample (JavaScript, no browser)"), val: "sample-canvasjs" },
-                { text: i18n("Shadertoy shader (pick a .frag below)"), val: "shadertoy" },
-                { text: i18n("Canvas wallpaper (pick a .js below)"), val: "canvasjs" },
-                { text: i18n("PipeWire node (SPEC §3.6, experimental)"), val: "producer" }
-            ]
-            Component.onCompleted: {
-                var i = indexOfValue(root.cfg_QmlScene);
-                currentIndex = i >= 0 ? i : 0;
-            }
-            // "shadertoy" is not a scene you can select — it is a prompt for a file.
-            // Storing it would leave the wallpaper with no shader, which falls back
-            // to Aurora and looks like the entry is broken.
-            // [CHANGE: claude-code | 2026-09-19] DECISION 119
-            onActivated: {
-                if (currentValue === "shadertoy" || currentValue === "canvasjs")
-                    sceneDialog.open();
-                else if (currentValue === "sample-canvasjs") {
-                    // Same reasoning as the shader sample: it listens to audio,
-                    // audio is opt-in, so picking it opts in visibly.
-                    // [CHANGE: claude-code | 2026-09-19] SPEC §3.5
-                    root.cfg_QmlScene = root.samplesDir + "/luminos-canvas.js";
-                    root.cfg_AudioReactive = true;
-                }
-                else if (currentValue === "sample-shadertoy") {
-                    root.cfg_QmlScene = root.samplesDir + "/luminos-shadertoy.frag";
-                    // The entry says audio-reactive, and audio is opt-in and off by
-                    // default — so without this the sample renders and never reacts,
-                    // which reads as broken. Choosing it IS the opt-in, and the
-                    // checkbox below visibly shows what happened.
-                    root.cfg_AudioReactive = true;
-                }
-                else
-                    root.cfg_QmlScene = currentValue;
-            }
-        }
-        RowLayout {
-            Kirigami.FormData.label: i18n("…or your own file:")
-            visible: root.cfg_WallpaperMode === "qml"
-            QQC2.TextField {
-                Layout.fillWidth: true
-                placeholderText: i18n("/path/to/scene.qml, /path/to/shader.frag or /path/to/wallpaper.js")
-                // A built-in is already named in the combo above; echoing its key
-                // here read as "this scene is a file called spectrum", which invited
-                // typing a media path into a box that takes scenes and shaders.
-                // [CHANGE: claude-code | 2026-09-19]
-                text: Scene.BUILTINS[root.cfg_QmlScene] !== undefined ? "" : root.cfg_QmlScene
-                onEditingFinished: {
-                    if (text.length > 0)
-                        root.cfg_QmlScene = text;
-                }
-            }
-            // [CHANGE: claude-code | 2026-09-19] DECISION 119 — one box, both kinds.
-            QQC2.Button {
-                text: i18n("Browse…")
-                icon.name: "document-open"
-                onClicked: sceneDialog.open()
-            }
-        }
-        QQC2.Label {
-            visible: root.cfg_WallpaperMode === "qml"
-            Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-            wrapMode: Text.WordWrap
-            font: Kirigami.Theme.smallFont
-            text: i18n("The same effects as the web samples, drawn by Qt directly. No browser engine is loaded, so this costs far less than Web mode. A scene may declare running, stats, audio, props, cursorX and cursorY and they will be bound for it. A .frag is compiled on the spot and run as a Shadertoy shader — iTime, iResolution, iMouse and iChannel0 (the audio spectrum) are all provided. A .js runs as a canvas wallpaper against canvas, ctx, requestAnimationFrame, window.luminos and livelyAudioListener — the surface a Lively JavaScript wallpaper expects. There is no DOM, no fetch and no WebGL, and a script needing one of those says so by name instead of showing you nothing.")
-        }
-
-        // ---- NATIVE QML: audio --------------------------------------
-        // [CHANGE: claude-code | 2026-09-19] DECISION 117, SPEC §3.1
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Audio:")
-            visible: root.cfg_WallpaperMode === "qml"
-            text: i18n("React to whatever is playing")
-            checked: root.cfg_AudioReactive || root.cfg_QmlScene === "spectrum"
-            enabled: root.cfg_QmlScene !== "spectrum"
-            onToggled: root.cfg_AudioReactive = checked
-        }
-        QQC2.Label {
-            visible: root.cfg_WallpaperMode === "qml"
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
-            wrapMode: Text.WordWrap
-            font: Kirigami.Theme.smallFont
-            text: i18n("This does not play anything — it listens to your speakers. Play a file in any player (VLC, mpv, Elisa) or a video in your browser and the wallpaper follows it. 128 frequency bands from the current output, the same shape Lively uses, so a Lively audio wallpaper works here unchanged. Costs a PipeWire capture stream and an FFT thread while it runs, and stops with the wallpaper when the desktop is hidden. The Spectrum scene switches it on for itself.")
-        }
-
-        // ---- WEB: bundled samples ----------------------------------
-        QQC2.ComboBox {
-            Kirigami.FormData.label: i18n("Load sample:")
-            visible: root.cfg_WallpaperMode === "web"
-            textRole: "text"
-            valueRole: "file"
-            model: [
-                { text: i18n("— pick a bundled wallpaper —"), file: "" },
-                { text: i18n("Aurora (drifting blobs)"),      file: "luminos-aurora.html" },
-                { text: i18n("Particles (cursor-reactive)"),  file: "luminos-particles.html" },
-                { text: i18n("Shader (WebGL gradient)"),      file: "luminos-shader.html" },
-                { text: i18n("System monitor (live stats)"),  file: "luminos-sysmon.html" }
-            ]
-            currentIndex: 0
-            onActivated: {
-                if (currentValue && currentValue.length > 0)
-                    root.cfg_WebUrl = root.samplesDir + "/" + currentValue;
-            }
-        }
-
-        // ---- WEB: interactivity + live stats -----------------------
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Web options:")
-            visible: root.cfg_WallpaperMode === "web"
-            text: i18n("Let the page receive mouse clicks")
-            checked: root.cfg_WebInteractive
-            onToggled: root.cfg_WebInteractive = checked
-        }
-        QQC2.Label {
-            visible: root.cfg_WallpaperMode === "web"
-            Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-            wrapMode: Text.WordWrap
-            font: Kirigami.Theme.smallFont
-            text: i18n("Off: cursor movement still reaches the page, but clicks go to the desktop icons. On: the page gets full mouse and clicks (desktop clicks are captured while it is on).")
-        }
-        QQC2.CheckBox {
-            visible: root.cfg_WallpaperMode === "web"
-            text: i18n("Expose live CPU/GPU/RAM stats to the page (window.luminos)")
-            checked: root.cfg_InjectSystemStats
-            onToggled: root.cfg_InjectSystemStats = checked
-        }
-
-        Item { Kirigami.FormData.isSection: true }
-
-        // ---- Scaling (image / video) — Windows-parity fit modes -----
-        // [CHANGE: claude-code | 2026-07-23]
-        QQC2.ComboBox {
-            id: fitCombo
-            Kirigami.FormData.label: i18n("Fit:")
-            visible: root.cfg_WallpaperMode !== "web"
-            textRole: "text"
-            valueRole: "val"
-            model: [
-                { text: i18n("Stretch — fill screen, no bars"), val: 0 },
-                { text: i18n("Fit — keep proportions (adds bars)"), val: 1 },
-                { text: i18n("Fill — crop to fill"), val: 2 },
-                { text: i18n("Center"), val: 3 },
-                { text: i18n("Tile"), val: 4 }
-            ]
-            Component.onCompleted: currentIndex = Math.max(0, indexOfValue(root.cfg_FillMode))
-            onActivated: root.cfg_FillMode = currentValue
-        }
-        QQC2.Label {
-            visible: root.cfg_WallpaperMode !== "web"
-            Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-            wrapMode: Text.WordWrap
-            font: Kirigami.Theme.smallFont
-            text: root.cfg_WallpaperMode === "video"
-                ? i18n("Stretch fills the screen edge-to-edge. Center and Tile fall back to Stretch for video.")
-                : i18n("Stretch fills the screen edge-to-edge with no black bars (slight distortion if the image shape differs from the screen).")
-        }
-
-        RowLayout {
-            Kirigami.FormData.label: i18n("Background colour:")
-            // Set once, not bound: onColorChanged fires for a programmatic
-            // change too, so `color: <a value this handler writes>` loops
-            // ColorButton's internal ColorDialog and strands it open. BUG-174.
-            // [CHANGE: claude-code | 2026-09-19]
-            KQuickControls.ColorButton {
-                id: colorButton
-                property bool armed: false
-                Component.onCompleted: {
-                    color = root.cfg_BackgroundColor;
-                    armed = true;
-                }
-                onColorChanged: {
-                    if (colorButton.armed)
-                        root.cfg_BackgroundColor = "" + color;
-                }
-            }
-        }
-
-        Item { Kirigami.FormData.isSection: true }
-
-        // ---- Power / thermal guards ---------------------------------
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Save power:")
-            text: i18n("Freeze while on battery")
-            checked: root.cfg_PauseOnBattery
-            onToggled: root.cfg_PauseOnBattery = checked
-        }
-        // [CHANGE: claude-code | 2026-07-24] was a single checkbox that treated a
-        // maximized window the same as a fullscreen one — all or nothing.
-        QQC2.ComboBox {
-            Kirigami.FormData.label: i18n("Stop rendering when hidden:")
-            model: [ i18n("Never — keep rendering even when hidden"),
-                     i18n("Only under a fullscreen window"),
-                     i18n("Whenever the desktop is hidden (recommended)") ]
-            currentIndex: Math.max(0, Math.min(2, root.cfg_ObscurePolicy))
-            onActivated: root.cfg_ObscurePolicy = currentIndex
-        }
-        QQC2.Label {
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
-            wrapMode: Text.WordWrap
-            font: Kirigami.Theme.smallFont
-            text: i18n("Frames drawn behind a window are decoded, uploaded and composited on the iGPU that also runs KWin and the browser. Nobody sees them.")
-        }
-        QQC2.CheckBox {
-            visible: root.cfg_WallpaperMode === "video"
-            text: i18n("Mute video audio")
-            checked: root.cfg_MuteAudio
-            onToggled: root.cfg_MuteAudio = checked
+        QQC2.Button {
+            text: i18n("Choose file…")
+            icon.name: "document-open"
+            onClicked: fileDialog.open()
         }
     }
+    QQC2.Label {
+        Layout.fillWidth: true
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        wrapMode: Text.WordWrap
+        font: Kirigami.Theme.smallFont
+        visible: root.pickProblem.length === 0
+        opacity: 0.8
+        // "nothing else to set" has to be TRUE. A wallpaper that ships its own
+        // properties (Rain has sixteen) has plenty else to set, and saying
+        // otherwise sends someone looking for a control they were told was not
+        // there. [CHANGE: claude-code | 2026-09-20]
+        text: root.currentKind === null
+            ? i18n("Pick any picture, video, .html page, .frag shader, .js canvas script or "
+                   + ".qml scene. A YouTube or web address works too.")
+            : root.hasOwnSettings
+            ? i18n("%1 — this one has its own settings, below.", root.currentKind.what)
+            : i18n("%1 — nothing else to set.", root.currentKind.what)
+    }
+    QQC2.Label {
+        Layout.fillWidth: true
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        wrapMode: Text.WordWrap
+        visible: root.pickProblem.length > 0
+        color: Kirigami.Theme.negativeTextColor
+        font: Kirigami.Theme.smallFont
+        text: root.pickProblem
+    }
 
-    // ---- THE SCENE'S OWN SETTINGS  (SPEC §3.2, CONTRACTS §4) -------------
-    // [CHANGE: claude-code | 2026-09-19] DECISION 118
-    // Nothing here knows what any scene's settings are. The scene ships a
-    // properties.json, this reads it, and the panel appears. Resolving the scene
-    // through scene.js is what guarantees the panel edits the properties of the
-    // scene the wallpaper will actually load.
-    // Web mode has properties too: a Lively page's LivelyProperties.json is read
-    // through the same store, keyed by the page URL. Without this the panel
-    // showed nothing for exactly the wallpapers that need it most (BUG-183).
-    // [CHANGE: claude-code | 2026-09-20]
+    // =====================================================================
+    //  INSTALLED WALLPAPERS — the other way to pick one.  SPEC §3.3
+    // =====================================================================
+    Kirigami.Separator {
+        Layout.fillWidth: true
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.topMargin: Kirigami.Units.largeSpacing
+    }
+    WallpaperGallery {
+        Layout.fillWidth: true
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        currentEntry: root.activeEntry
+        onPicked: function (type, entryPath) { root.usePackage(type, entryPath); }
+    }
+
+    // =====================================================================
+    //  THE WALLPAPER'S OWN SETTINGS (SPEC §3.2) — Rain's sliders live here.
+    // =====================================================================
     readonly property bool propsMode: root.cfg_WallpaperMode === "qml"
                                    || root.cfg_WallpaperMode === "web"
     readonly property string propsId: root.cfg_WallpaperMode === "web"
@@ -470,8 +229,6 @@ ColumnLayout {
         id: sceneProps
         sceneId: root.propsId
         savedJson: root.cfg_SceneProperties
-        // Beside the shader for a .frag, beside the scene otherwise — the same
-        // rule QmlMode uses, from the same file. [CHANGE: claude-code | 2026-09-19]
         sceneUrl: {
             if (root.cfg_WallpaperMode === "web")
                 return root.cfg_WebUrl;
@@ -479,66 +236,122 @@ ColumnLayout {
             return Scene.isAbsolute(base) ? base : Qt.resolvedUrl(base);
         }
     }
-
     Kirigami.Separator {
         Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
         Layout.topMargin: Kirigami.Units.largeSpacing
-        visible: root.propsMode
+        visible: root.propsMode && Object.keys(sceneProps.schema).length > 0
     }
     Kirigami.Heading {
-        visible: root.propsMode
+        visible: root.propsMode && Object.keys(sceneProps.schema).length > 0
         Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-        Layout.topMargin: Kirigami.Units.largeSpacing
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
         level: 3
-        text: i18n("Scene settings")
-    }
-    QQC2.Label {
-        visible: root.propsMode
-        Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-        wrapMode: Text.WordWrap
-        font: Kirigami.Theme.smallFont
-        text: i18n("Declared by the wallpaper itself — a properties.json beside the scene, or a Lively package's own LivelyProperties.json.")
+        text: i18n("This wallpaper's own settings")
     }
     PropertyEditor {
         Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
         visible: root.propsMode
         schema: sceneProps.schema
         values: sceneProps.props
         problem: sceneProps.problem
-        // The panel owns the config key; the wallpaper only ever reads it.
         onChanged: function (key, value) {
             root.cfg_SceneProperties = sceneProps.withValue(root.propsId, key, value);
         }
     }
 
-    // ---- file pickers ----
-    Dialogs.FileDialog {
-        id: imageDialog
-        title: i18n("Choose an image")
-        nameFilters: [ i18n("Images (*.jpg *.jpeg *.png *.webp *.bmp *.gif)"), i18n("All files (*)") ]
-        onAccepted: root.cfg_Image = root.localPath(selectedFile)
+    // =====================================================================
+    //  ADVANCED — closed by default. Nothing here is needed to set a wallpaper.
+    // =====================================================================
+    Kirigami.Separator {
+        Layout.fillWidth: true
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.topMargin: Kirigami.Units.largeSpacing
     }
-    Dialogs.FileDialog {
-        id: videoDialog
-        title: i18n("Choose a video")
-        nameFilters: [ i18n("Videos (*.mp4 *.webm *.mkv *.mov *.avi)"), i18n("All files (*)") ]
-        onAccepted: root.cfg_Video = root.localPath(selectedFile)
+    QQC2.CheckBox {
+        id: advanced
+        text: i18n("Advanced options")
+        checked: false
     }
+    Kirigami.FormLayout {
+        visible: advanced.checked
+        Layout.fillWidth: true
+        // Without a cap the form grows to its widest child, which on a maximised
+        // dialog drags every row to the right. [CHANGE: claude-code | 2026-09-19] BUG-169
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+
+        QQC2.ComboBox {
+            Kirigami.FormData.label: i18n("Built-in scene:")
+            textRole: "text"
+            valueRole: "val"
+            model: [
+                { text: i18n("Shader — animated rings"), val: "shader" },
+                { text: i18n("Spectrum — audio bars"),   val: "spectrum" },
+                { text: i18n("Aurora"),                  val: "aurora" },
+                { text: i18n("Particles"),               val: "particles" },
+                { text: i18n("System monitor"),          val: "sysmon" }
+            ]
+            onActivated: root.apply({ mode: "qml", key: "QmlScene" }, currentValue)
+        }
+        QQC2.ComboBox {
+            Kirigami.FormData.label: i18n("Fit:")
+            model: [ i18n("Stretch"), i18n("Keep proportions"), i18n("Fill and crop"),
+                     i18n("Centre"), i18n("Tile") ]
+            currentIndex: root.cfg_FillMode
+            onActivated: root.cfg_FillMode = currentIndex
+        }
+        KQuickControls.ColorButton {
+            Kirigami.FormData.label: i18n("Background colour:")
+            property bool armed: false
+            Component.onCompleted: { color = root.cfg_BackgroundColor; armed = true; }
+            // Set once, never bound — a bound colour strands the dialog (BUG-174).
+            onColorChanged: if (armed) root.cfg_BackgroundColor = color
+        }
+        QQC2.CheckBox {
+            Kirigami.FormData.label: i18n("Save power:")
+            text: i18n("Pause on battery")
+            checked: root.cfg_PauseOnBattery
+            onToggled: root.cfg_PauseOnBattery = checked
+        }
+        QQC2.ComboBox {
+            Kirigami.FormData.label: i18n("Stop rendering when hidden:")
+            model: [ i18n("Never"), i18n("Only under a fullscreen window"),
+                     i18n("Whenever a window covers the desktop") ]
+            currentIndex: root.cfg_ObscurePolicy
+            onActivated: root.cfg_ObscurePolicy = currentIndex
+        }
+        QQC2.CheckBox {
+            Kirigami.FormData.label: i18n("Sound:")
+            text: i18n("Mute the wallpaper")
+            checked: root.cfg_MuteAudio
+            onToggled: root.cfg_MuteAudio = checked
+        }
+        QQC2.CheckBox {
+            Kirigami.FormData.label: i18n("Audio:")
+            text: i18n("React to what is playing")
+            checked: root.cfg_AudioReactive
+            onToggled: root.cfg_AudioReactive = checked
+        }
+        QQC2.CheckBox {
+            Kirigami.FormData.label: i18n("Web pages:")
+            text: i18n("Let the page take clicks")
+            checked: root.cfg_WebInteractive
+            onToggled: root.cfg_WebInteractive = checked
+        }
+        QQC2.CheckBox {
+            text: i18n("Give the page live system stats")
+            checked: root.cfg_InjectSystemStats
+            onToggled: root.cfg_InjectSystemStats = checked
+        }
+    }
+
+    // ---- the one file picker -------------------------------------------
     Dialogs.FileDialog {
-        id: sceneDialog
-        title: i18n("Choose a QML scene or a shader")
-        nameFilters: [ i18n("Scenes, shaders and scripts (*.qml *.frag *.glsl *.fsh *.js *.mjs)"),
+        id: fileDialog
+        title: i18n("Choose a wallpaper file")
+        nameFilters: [ i18n("Wallpapers (%1)", Scene.fileDialogPatterns().join(" ")),
                        i18n("All files (*)") ]
-        onAccepted: root.cfg_QmlScene = root.localPath(selectedFile)
-    }
-    Dialogs.FileDialog {
-        id: webDialog
-        title: i18n("Choose an HTML page")
-        nameFilters: [ i18n("Web pages (*.html *.htm)"), i18n("All files (*)") ]
-        onAccepted: root.cfg_WebUrl = root.localPath(selectedFile)
+        onAccepted: root.useFile(root.localPath(selectedFile))
     }
 }

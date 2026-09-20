@@ -99,3 +99,64 @@ function modeForType(type) {
         return { mode: "web", key: "WebUrl" };
     return null;
 }
+
+// ---------------------------------------------------------------------------
+// ONE FILE IN, ONE ANSWER OUT.  [CHANGE: claude-code | 2026-09-20] DECISION 129.
+//
+// Shawn: "just select file and it sets the wallpaper according to file
+// selected. simple that's it". So the settings page no longer asks which KIND
+// of wallpaper this is — the file says. Everything the old Type combo did is
+// this table, and a table can be tested, which a combo box never was.
+//
+// Returns { mode, key, what } or null. `what` is shown to the person, so it
+// says what will happen rather than naming an internal mode.
+var FILE_KINDS = [
+    { re: /\.(jpg|jpeg|png|webp|bmp|avif|jxl|tif|tiff)$/i,
+      mode: "image", key: "Image",    what: "Picture" },
+    { re: /\.gif$/i,
+      mode: "image", key: "Image",    what: "Animated GIF" },
+    { re: /\.(mp4|mkv|webm|mov|avi|m4v|mpg|mpeg|wmv)$/i,
+      mode: "video", key: "Video",    what: "Video, looping" },
+    { re: /\.(html?|xhtml)$/i,
+      mode: "web",   key: "WebUrl",   what: "Web page (HTML/JS/WebGL)" },
+    { re: /\.(frag|glsl|fsh)$/i,
+      mode: "qml",   key: "QmlScene", what: "Shader, compiled on the spot" },
+    { re: /\.(js|mjs)$/i,
+      mode: "qml",   key: "QmlScene", what: "Canvas script (Lively style)" },
+    { re: /\.qml$/i,
+      mode: "qml",   key: "QmlScene", what: "QML scene" }
+];
+
+function modeForFile(pathOrUrl) {
+    var s = ("" + pathOrUrl).trim();
+    if (s.length === 0)
+        return null;
+    // A YouTube link is a video even though it has no extension at all; main.qml
+    // hands it to yt-dlp. Checked BEFORE the extension table so a URL ending in
+    // ".html" that is really a YouTube page is still treated as a video.
+    var low = s.toLowerCase();
+    if (low.indexOf("youtube.com") >= 0 || low.indexOf("youtu.be") >= 0)
+        return { mode: "video", key: "Video", what: "YouTube video" };
+    // Anything else remote with no usable extension is a web page: that is what
+    // a browser would do with it, and web mode IS a browser.
+    var bare = s.split("#")[0].split("?")[0];
+    for (var i = 0; i < FILE_KINDS.length; i++) {
+        if (FILE_KINDS[i].re.test(bare))
+            return { mode: FILE_KINDS[i].mode, key: FILE_KINDS[i].key,
+                     what: FILE_KINDS[i].what };
+    }
+    if (/^https?:\/\//i.test(s))
+        return { mode: "web", key: "WebUrl", what: "Web page" };
+    return null;
+}
+
+// The extensions the file dialog should offer, built from the SAME table, so a
+// format that plays can always be picked and one that cannot is never offered.
+function fileDialogPatterns() {
+    return ["*.jpg", "*.jpeg", "*.png", "*.webp", "*.bmp", "*.avif", "*.jxl",
+            "*.tif", "*.tiff", "*.gif",
+            "*.mp4", "*.mkv", "*.webm", "*.mov", "*.avi", "*.m4v", "*.mpg",
+            "*.mpeg", "*.wmv",
+            "*.html", "*.htm", "*.xhtml",
+            "*.frag", "*.glsl", "*.fsh", "*.js", "*.mjs", "*.qml"];
+}

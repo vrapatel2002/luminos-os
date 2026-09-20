@@ -8061,3 +8061,58 @@ and press are one thing to read instead of three conditions buried in a delegate
 ### Cost
 One extra subprocess per settings-dialog open (the same tool the gallery already runs, with a
 flag), and a `Kirigami.Icon` per tile. Against four debugging sessions, that is not a cost.
+
+---
+
+## DECISION 129 — the file decides; there is no Type selector any more
+Date: September 20, 2026
+Made by: claude-code
+**Status: SHIPPED — page rebuilt, 544 lines → 357, contract test added**
+
+### Context
+Shawn, after the settings page went blank (BUG-186): *"now just make it simple to use no different
+option to work with just select file and i sets the wallpaper according to file selected. simple
+that's it got it ?"*
+
+He is right, and the old panel had been quietly making this plugin hard to use since July. It
+opened with a **Type** combo — Image / Video / Web / Native QML — and every other row was hidden
+behind it. So before a person could choose a wallpaper they had to already know that a `.html` is a
+"Web" wallpaper, a `.frag` is a "Native QML" one, and a `.js` is also a "Native QML" one. Pick the
+wrong type and you got a file dialog filtered to files you did not have. The type combo was
+answering a question the file had already answered.
+
+### What We Decided
+One text field and one **Choose file…** button. `Scene.modeForFile()` reads the extension and sets
+the mode and the right config key. Nothing else is required to set a wallpaper.
+
+- pictures / GIF → image · video files → video · `.html` → web · `.frag` `.glsl` `.fsh` → shader
+  scene · `.js` → canvas scene · `.qml` → QML scene
+- YouTube is checked **before** the extension table, so a YouTube URL ending in `.html` is still a
+  video; any other `http(s)` address with no known extension is a web page, which is what a browser
+  would do with it.
+- The field is editable, so a URL still works without a second box for it.
+- An unrecognised file is **refused by name** and changes nothing — never guessed at.
+
+The hint under the field says what will happen ("Video, looping"), and says *"this one has its own
+settings, below"* when the wallpaper ships properties, because "nothing else to set" has to be true
+— Rain has sixteen sliders and telling someone there is nothing else sends them looking for a
+control they were told was not there.
+
+Everything the old panel could do it still does: fit mode, background colour, pause on battery,
+obscure policy, mute, audio-reactive, web interactivity, live stats and the built-in scenes are all
+behind one **Advanced options** checkbox, closed by default.
+
+### The Conflict (both sides, per Rule 11)
+- **Keep the Type combo.** It is explicit, and a person who wants a web wallpaper from a URL has an
+  obvious place to start. Rejected: it made the person do type inference that a regex does better,
+  and every wrong guess led to an empty-looking panel.
+- **Delete the advanced controls entirely**, which is the most literal reading of "no different
+  option". Rejected: `PauseOnBattery` and `ObscurePolicy` are the difference between a live
+  wallpaper and a flat battery, and removing the UI for config keys that still exist leaves them
+  unreachable rather than simple. One closed checkbox is not an option a person has to work with.
+- **Infer from file CONTENT rather than extension** (magic bytes). Rejected: it needs a subprocess
+  per pick for no gain — nobody names a video `.png` — and it cannot classify a URL at all.
+
+### Testable, which the combo never was
+The type rule is now a table in `scene.js` with twelve cases pinned in `config_contract.qml`. The
+old combo's mapping lived in the shape of the UI: the only way to check it was to click it.

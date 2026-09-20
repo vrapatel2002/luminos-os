@@ -7745,3 +7745,46 @@ Two of the four BUG-171 sightings were reported by a person as "nothing happens"
 first hypothesis was about the code that did not run. The cheap, general fix was never in that code:
 it was to let the page say *"I am old"*. A component that cannot detect its own staleness can still
 compare its start time to a file's.
+
+---
+
+## BUG-186 — the whole Wallpaper settings page went blank, and every test still passed
+<!-- [CHANGE: claude-code | 2026-09-20] DECISION 129 -->
+
+**Status:** FIXED · **Severity:** total — the page a person opens rendered nothing at all, with only
+the Wallpaper type combo and the Apply button left · **Files:** `contents/ui/config.qml`,
+`tests/wallpaper/config_contract.qml` (new), `scripts/luminos-wallpaper-selftest`
+
+### What I broke
+In BUG-185 I wrote a two-line message using **C-style implicit string concatenation**:
+
+```js
+root.pickProblem = i18n(
+    "This page could not use a \"%1\" wallpaper. It is running an older "
+    "copy of the plugin — close System Settings and open it again.", type);
+```
+
+C does that. Python does that. **JavaScript does not**, and QML is JavaScript. The result is
+`Expected token ')'` at config.qml:80 — one parse error, and Qt loads *none* of the file. A QML page
+does not partially load. The `Kirigami.InlineMessage` I added in the same change had the same
+mistake.
+
+### The part that matters more
+**Every single test passed while the page was blank.** 39 checks, 0 failures, a green selftest.
+Because not one of them had ever loaded `config.qml`: `gallery_contract` loads `WallpaperGallery`,
+`props_contract` loads `PropertyStore`, `editor_contract` loads `PropertyEditor`, and the selftest
+inspects the *running wallpaper*. The one file a person actually opens was the one file nothing
+opened. This is the same shape as BUG-173 (the settings rows were empty while the store's 21 checks
+passed) and I rebuilt it anyway, one file to the left.
+
+`tests/wallpaper/config_contract.qml` now loads the page, and its first assertion is simply
+`Loader.status === Loader.Ready`. That trivial-looking check would have caught this outright — and
+it runs **first** in the selftest, because if the page does not load, every other contract passing
+is noise. Twenty checks in total: the page loads, it still declares every `cfg_` key KDE binds,
+every supported file maps to a mode, an unknown one is refused by name and changes nothing, and a
+gallery tile's `picked` signal really does land in the settings.
+
+### Lesson
+Three of the last five wallpaper bugs were "the thing a person touches is broken while the thing it
+is built from is fine". The tests kept being written one layer below the failure. **Test the file
+that gets opened, even if the assertion looks too dumb to write.**
