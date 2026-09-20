@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# luminos-wallpaper-lockscreen — make the lock screen show the SAME wallpaper as the desktop.
+#
+# [CHANGE: claude-code | 2026-09-20] DECISION 127. Shawn: "the lock screen is not
+# having same wallpaper. can you make it same please?"
+#
+# The lock screen already ran org.luminos.livewallpaper (DECISION 77, July 2026) —
+# it just held its own frozen copy of the settings, pointing at a video from
+# months ago. Copying them by hand is how they drifted in the first place, so this
+# script is the copy, and it is the thing to re-run after changing the wallpaper.
+#
+#   luminos-wallpaper-lockscreen             apply
+#   luminos-wallpaper-lockscreen --dry-run   show what would change, touch nothing
+#
+# THREE KEYS ARE DELIBERATELY NOT COPIED. A lock screen is a security surface, not
+# a desktop, and the desktop's answer is the wrong one for all three:
+#   WebInteractive    -> false   a page that takes clicks in front of a locked
+#                                session is a way in; the desktop may allow it.
+#   InjectSystemStats -> false   CPU/RAM/network telemetry is readable by anyone
+#                                walking past a locked laptop.
+#   MuteAudio         -> true    a locked machine must not make noise.
+# ObscurePolicy is forced to 0 for a different reason, and it is a bug waiting to
+# happen rather than a preference: the policy freezes the wallpaper when a window
+# covers the desktop, and the windows the greeter's TasksModel can see are the
+# ones BEHIND the lock screen. Copy the desktop's "freeze when covered" and a
+# maximised window under the lock screen freezes the lock screen's wallpaper —
+# nothing can ever cover a greeter, so the whole question is meaningless there.
+# PauseOnBattery is forced on for power: with ObscurePolicy off, it is the only
+# clause left that can stop a locked laptop animating on battery until it is flat.
+set -uo pipefail
+
+DESK="$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
+LOCK="$HOME/.config/kscreenlockerrc"
+PLUGIN="org.luminos.livewallpaper"
+GROUP=(--group Greeter --group Wallpaper --group "$PLUGIN" --group General)
+DRY=0
+[ "${1:-}" = "--dry-run" ] && DRY=1
+
+command -v kwriteconfig6 >/dev/null || { echo "ERR kwriteconfig6 not found"; exit 1; }
+[ -f "$DESK" ] || { echo "ERR no desktop config at $DESK"; exit 1; }
+
+# Only groups that belong to THIS plugin, and only on a Containment — the same
+# file also carries other containments and the lock screen's own copy, and an
+# earlier tool in this repo read whichever matched first (luminos-notes, 17:18).
+mapfile -t groups < <(grep -o "^\[Containments\]\[[0-9]*\]\[Wallpaper\]\[$PLUGIN\]\[General\]$" "$DESK" | sort -u)
+if [ "${#groups[@]}" -eq 0 ]; then
+    echo "ERR the desktop is not using $PLUGIN — set the desktop wallpaper first"
+    exit 1
+fi
+if [ "${#groups[@]}" -gt 1 ]; then
+    echo "WARN ${#groups[@]} containments use $PLUGIN; taking the first: ${groups[0]}"
+fi
+want="${groups[0]}"
+
+# Read that group and nothing after it.
+mapfile -t lines < <(awk -v want="$want" '
+    /^\[/ { inside = ($0 == want); next }
+    inside && /=/ { print }
+' "$DESK")
+[ "${#lines[@]}" -eq 0 ] && { echo "ERR $want is empty"; exit 1; }
+
+declare -A OVERRIDE=( [WebInteractive]=false [InjectSystemStats]=false
+                      [MuteAudio]=true [PauseOnBattery]=true [ObscurePolicy]=0 )
+changed=0
+apply() {   # key value  — writes only if different, prints what it did
+    local key="$1" val="$2" now
+    now="$(kread "$key")"
+    [ "$now" = "$val" ] && return 0
+    changed=$((changed + 1))
+    printf '  %-18s %s -> %s\n' "$key" "${now:-<unset>}" "$val"
+    [ "$DRY" -eq 1 ] && return 0
+    kwriteconfig6 --file "$LOCK" "${GROUP[@]}" --key "$key" "$val"
+}
+kread() { kreadconfig6 --file "$LOCK" "${GROUP[@]}" --key "$1" 2>/dev/null; }
+
+echo "desktop group: $want"
+[ "$DRY" -eq 1 ] && echo "(dry run — nothing will be written)"
+for line in "${lines[@]}"; do
+    key="${line%%=*}"
+    val="${line#*=}"
+    [ -n "${OVERRIDE[$key]+x}" ] && continue
+    apply "$key" "$val"
+done
+for key in "${!OVERRIDE[@]}"; do apply "$key" "${OVERRIDE[$key]}"; done
+
+plug="$(kreadconfig6 --file "$LOCK" --group Greeter --key WallpaperPlugin 2>/dev/null)"
+if [ "$plug" != "$PLUGIN" ]; then
+    changed=$((changed + 1))
+    printf '  %-18s %s -> %s\n' "WallpaperPlugin" "${plug:-<unset>}" "$PLUGIN"
+    [ "$DRY" -eq 0 ] && kwriteconfig6 --file "$LOCK" --group Greeter \
+        --key WallpaperPlugin "$PLUGIN"
+fi
+
+if [ "$changed" -eq 0 ]; then
+    echo "OK already identical"
+elif [ "$DRY" -eq 1 ]; then
+    echo "OK $changed key(s) would change"
+else
+    echo "OK $changed key(s) written to $LOCK"
+    echo "   test it without locking:  kscreenlocker_greet --testing"
+fi

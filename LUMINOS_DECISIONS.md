@@ -7940,3 +7940,74 @@ mechanism that keeps the answer true, so it stays. The AGENTS.md §9 row is upda
 **Rejected:** unmasking powerd and "just remembering" to re-mask (that is the failure mode that
 created this); a kernel/driver change (610.57.04 is pinned by DECISION 26 — not casual); switching
 `NVreg_DynamicPowerManagement` (already 0x02, correct, and not the problem).
+
+---
+
+## DECISION 127 — the lock screen's wallpaper is a COPY of the desktop's, taken by a script, not by hand
+Date: September 20, 2026
+Made by: claude-code
+**Status: SHIPPED — applied, verified on screen with `kscreenlocker_greet --testing`**
+
+### Context
+Shawn: *"the lock screen is not having same wallpaper. can you make it same please?"*
+
+The lock screen was already running `org.luminos.livewallpaper` — DECISION 77 wired it in on
+2026-07-24 and verified it the same way. What it was **not** doing is sharing the desktop's
+settings: the greeter keeps its own `[Greeter][Wallpaper][…][General]` group in
+`kscreenlockerrc`, and that group still held `WallpaperMode=video` pointing at a video from July.
+Nothing was broken. The two configs were simply copied by hand once and then diverged for two
+months, which is what hand-copied configuration does.
+
+### What We Decided
+The copy is a script — `scripts/luminos-wallpaper-lockscreen` — and the selftest fails if the two
+drift. A one-off `kwriteconfig6` would have answered the question asked and left the same trap
+armed for the next wallpaper change.
+
+**Four keys are deliberately not copied.** A greeter is a security surface and a power surface,
+and the desktop's answer is the wrong one for all four:
+
+| key | lock value | why |
+|---|---|---|
+| `WebInteractive` | `false` | a page that accepts clicks in front of a locked session is a way in |
+| `InjectSystemStats` | `false` | CPU/RAM/network telemetry readable by anyone walking past |
+| `MuteAudio` | `true` | a locked machine must not make noise |
+| `ObscurePolicy` | `0` | see below — this one is a bug, not a preference |
+
+**`ObscurePolicy=0` is not new here** — DECISION 32 / BUG-083 already chose it for the lock screen
+in July ("Lock-screen copy deliberately `ObscurePolicy=0`", LUMINOS_STATUS.md). What is new is the
+evidence for *why*, and the fact that a naive "copy the desktop's settings" would have silently
+undone it. `ObscurePolicy` freezes the wallpaper when a window covers the desktop. The windows a
+**greeter's** `TasksModel` can see are the ones *behind* the lock screen, so copying the desktop's value across
+would freeze the lock screen's wallpaper whenever a maximised window sat underneath it — and
+nothing can ever cover a greeter, so the whole question is meaningless there. The greeter's own log
+settles it: `org.kde.plasma.libtaskmanager: The PlasmaWindowManagement protocol hasn't activated in
+time` — that model does not work in the greeter at all. With the policy off, `PauseOnBattery` is
+the only clause left that can stop a locked laptop animating until the battery is flat, so it is
+forced on.
+
+### Measured, in `kscreenlocker_greet --testing`
+```
+greeter pid 684990   Chromium mapped: YES      9 fds, all /dev/dri/renderD129 (AMD)
+NVIDIA nodes held by the greeter or any child:  none
+CPU: 10% of one core while animating
+screenshot: Rain's mountain and raindrops, with the Sugar-Candy clock over it
+```
+That screenshot is also the first visual confirmation that BUG-183's fix works on a real screen —
+the previous turn had pixel measurements but no picture, because the harness window kept landing
+off-screen and Shawn was at the keyboard.
+
+### The Conflict (both sides, per Rule 11)
+- **Make the greeter read the desktop's config directly** (one source of truth, no drift possible).
+  Rejected: it needs the four security overrides above, so it is not the same config; and the
+  greeter reading a desktop-writable file to decide what to execute is the wrong direction for a
+  lock screen.
+- **Copy on every wallpaper change, automatically** (a hook or a watcher). Rejected for now: it is
+  a daemon's worth of machinery for a setting that changes a few times a year, and it would copy
+  a half-finished choice the moment it was made. The selftest catching drift is the cheaper half.
+- **Copy by hand.** That is what produced the two-month divergence being fixed here.
+
+### Cost, stated plainly
+The lock screen now runs QtWebEngine — about 10% of one core plus Chromium's memory — for as long
+as the machine is locked and on AC. That is the price of "same wallpaper" when the wallpaper is a
+web page. `PauseOnBattery` covers the battery case; the AC case is deliberate and reversible with
+one `kwriteconfig6` (see AGENTS.md §9).

@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-20 — chat A Response 4 / chat B Response 18 (TWO Cowork chats ran in parallel; see the gaming-OS pointer below)
+Last updated: 2026-09-20 — chat A Response 5 / chat B Response 18 (TWO Cowork chats ran in parallel; see the gaming-OS pointer below)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -11,42 +11,50 @@ Keep Luminos OS working as a daily-driver Windows replacement — the G14 deskto
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-**Lively web wallpapers render, and the wallpaper is proven to stay off the dGPU.** Shawn:
-*"fix the WebGL thing and also make sure that those things never touches the NVIDIA's dgpu at any
-and all cost. and also why can't i select the wallpapers listed."* All three answered this turn:
+**The lock screen shows the same wallpaper as the desktop, and it is a script's job to keep it
+that way.** Shawn: *"the lock screen is not having same wallpaper. can you make it same please?"*
 
-1. **It was never WebGL (BUG-183, DECISION 126).** WebGL works, on the AMD 780M, and so does
-   `fetch()` from `file://`. Lively web wallpapers are pages that wait to be *told what to draw* —
-   Lively calls `livelyPropertyListener(name, value)` per property on load, and we never did.
-   Rain's background texture therefore stayed `undefined` and its shader drew black with a
-   perfectly healthy GL context. `contents/ui/LivelyApi.qml` (new) now makes those calls;
-   `luminos-wallpaper-props` reads the package's own `LivelyProperties.json` and converts it on the
-   way through, **without ever rewriting the package on disk**. Measured: Rain's framebuffer went
-   from mean brightness 0 to 126/255, `u_tex0` from `undefined` to a 1920×1080 texture, and its
-   sixteen Lively controls now appear in the settings panel.
-2. **Selecting a downloaded wallpaper did nothing** because his System Settings process was
-   started at 19:09 and the fix that taught `scene.js` about web packages landed at 23:23 —
-   **BUG-171 again, per process.** `usePackage()` also failed *silently*; it now warns with the
-   package type and says to restart System Settings.
-3. **dGPU (BUG-184).** The audit found the wallpaper clean (plasmashell holds ten handles, all
-   `renderD129`) and found a hole DECISION 25 never covered: **`/dev/dri/renderD128`, the NVIDIA
-   card's DRM render node, was mode 0666**. Now `root:dgpu 0660`, matched by DRIVER not by number.
-   Verified both ways — denied as `shawn`, still open through `dgpu-exec-v2`. Selftest gained
-   section **[3c]**, which asks the kernel (who holds a descriptor) rather than the environment.
+Nothing was broken. The greeter has run `org.luminos.livewallpaper` since DECISION 77 (July), but
+it keeps **its own** `[Greeter][Wallpaper][…][General]` group in `kscreenlockerrc`, and that group
+still held `WallpaperMode=video` pointing at a video from July. Two configs, copied by hand once,
+diverged for two months. Fixed by `scripts/luminos-wallpaper-lockscreen` (copies the desktop
+containment's group across) plus selftest **[7]**, which fails if they drift again. **DECISION 127.**
 
-**Selftest: 38 passed, 0 failed** — including the Python budget gate, red since BUG-179, now green
-because `slug()`/`find_root()` moved into the tested module rather than because comments were
-shaved.
+Four keys are deliberately NOT copied, and one of them is a latent bug rather than a preference:
+`ObscurePolicy` is forced to **0**, because the windows a greeter's `TasksModel` can see are the
+ones *behind* the lock screen — copy the desktop's "freeze when covered" and a maximised window
+under the lock screen freezes the lock screen. (The greeter logs `PlasmaWindowManagement protocol
+hasn't activated`; that model does not work there at all.) The other three are security/power:
+`WebInteractive=false`, `InjectSystemStats=false`, `MuteAudio=true`, and `PauseOnBattery=true` is
+then the only clause that can stop a locked laptop animating flat.
 
-### The one thing this turn found and did NOT finish
-`livelySystemInformation(json)` and `livelyAudioListener(float[])` are still unimplemented, and
-three of Lively's six stock wallpapers want them (Simple System; Music TV, Music Tunnel). The audio
-array already exists in `ui/audio/`; the system-information payload does not — `luminos-monitor
-stats` carries no RAM, network or hardware names, and filling those with zeroes would draw empty
-charts that look like a different bug. **Rain is confirmed rendering with pixels. The other five
-have not been visually confirmed** — the harness screenshots kept catching the wrong window, and
-Shawn was at the keyboard, so forcing Show Desktop was the wrong move. His desktop is currently set
-to Rain in web mode; looking at it is the remaining check.
+Verified in `kscreenlocker_greet --testing`: Chromium mapped, **9 fds all on renderD129 (AMD), zero
+NVIDIA nodes in the greeter or any child**, 10% of one core, and a screenshot showing Rain with the
+Sugar-Candy clock over it. **That screenshot is also the first visual proof that BUG-183's fix works
+on a real screen** — the previous turn had pixel measurements but no picture. Selftest **39/0**.
+
+### Previous turn, still the substance of the wallpaper work (BUG-183 / BUG-184 / DECISION 126)
+1. **It was never WebGL.** WebGL works on the AMD 780M and `fetch()` from `file://` works. Lively
+   web wallpapers wait to be *told what to draw* — `livelyPropertyListener(name, value)` per
+   property on load — and we never called it, so Rain's `u_tex0` stayed `undefined` and its shader
+   drew black with a healthy GL context. `ui/LivelyApi.qml` makes the calls;
+   `luminos-wallpaper-props` converts the package's own `LivelyProperties.json` on read **without
+   ever rewriting the package on disk**. Rain: framebuffer mean 0 → 126/255.
+2. **Selecting a downloaded wallpaper did nothing** — System Settings had been running since before
+   the fix landed. **BUG-171 again, per process.** `usePackage()` now warns instead of failing
+   silently. *(Shawn still needs to fully quit and reopen System Settings to pick packages.)*
+3. **BUG-184:** `/dev/dri/renderD128`, the NVIDIA card's DRM render node, was mode **0666** — a door
+   DECISION 25 never covered. Now `root:dgpu 0660`, matched by DRIVER not number, verified denied as
+   `shawn` and still open through `dgpu-exec-v2`. Recorded in **AGENTS.md §9** (this turn — it was
+   missed last turn, which is the §13 rule being broken and then caught).
+
+### Still open on the wallpaper
+`livelySystemInformation(json)` and `livelyAudioListener(float[])` are unimplemented; Simple System,
+Music TV and Music Tunnel need them. The audio array already exists in `ui/audio/`; the
+system-information payload does not — `luminos-monitor stats` carries no RAM, network or hardware
+names, and zeroes there would draw empty charts that look like a different bug. **Only Rain is
+confirmed rendering.** The other four web packages load with no JS errors but have not been
+visually checked.
 
 Standing aim, unchanged: **Lively Wallpaper parity for the KDE live wallpaper, without Chromium.**
 **§3.6 (games through a nested compositor) is still the largest unfinished item.**
@@ -365,41 +373,33 @@ luminos-uvm-gate.sh,install-dgpu-gate.sh}`, `config/udev/71-luminos-uvm-gate.rul
 
 ---
 
-## Desktop RAM audit — 2026-09-19 (added by a SECOND Cowork chat; see §0.1)
+## Desktop RAM audit — 2026-09-19/20 (appended by a SECOND Cowork chat; see §0.1)
 > ⚠️ **Counter canary, recorded not fixed.** This file's header says *Response 1*; the chat that
-> wrote this section is at **Response 10** and has been running since 2026-09-18 (BUG-166 /
-> DECISION 115, the tab sleeper + pagefile). Two chats, one file. This section is **appended, not
-> an overwrite** — nothing above it was touched.
+> wrote this section is at **Response 11** (BUG-166 / DECISION 115 — tab sleeper + pagefile). Two
+> chats, one file. Appended, never an overwrite. **Condensed on 2026-09-20 because appending pushed
+> the file to 420 lines, past §0.2's tripwire — the detail is in `luminos-notes.sh search AUDIT`.**
 
-**Nothing was changed. Read-only measurement on the box via the host shell.**
+**Read-only measurement. Nothing was changed.** Shawn's PSS table named `baloo_file` at 978 MB and a
+"shell layer" of 1577 MB. Both are wrong in the same way:
 
-Shawn's own PSS table named `baloo_file` at 978 MB and a "shell layer total" of 1577 MB. Measured
-with `/proc/<pid>/smaps_rollup`, splitting PSS into **anon (real) vs file-backed (page cache)**:
-
-| process | PSS | **real (anon)** | file cache | swapped |
-|---|---|---|---|---|
-| `baloo_file` | 924 MB | **138 MB** | 786 MB | 4 MB |
-| `qs` (Caelestia) | 335 MB | **292 MB** | 42 MB | 41 MB |
-| `kwin_wayland` | — | **~250 MB** (RSS 252) | — | — |
-| `plasmashell` | 133 MB | **71 MB** | 62 MB | 0 |
-| `krunner` | 101 MB | **65 MB** | 36 MB | 13 MB |
-| `kded6` | 25 MB | **20 MB** | 5 MB | 4 MB |
-
-- **`baloo_file` is not a 1 GB memory hog.** 786 MB of that PSS is the 3.0 GB
-  `~/.local/share/baloo/index` **mmapped read-only** — file-backed cache the kernel drops for free.
-  Real cost **138 MB**. **PSS counts file-backed pages; `Pss_Anon` is the number that answers "is
-  this eating my RAM".** A RAM report that does not split them chases the wrong process.
-- **`kwin_wayland` was missing from the report and is the second-largest real consumer** (~250 MB,
-  1852 s CPU in 10 h ≈ 5% of a core). It hid because `pgrep` matched only `kwin_wayland_wrapper`,
-  which is a 0 MB launcher.
-- **baloo's real cost is the SSD: `write_bytes` = 16.8 GB in 10 hours** (~1.7 GB/h), with
-  `baloo_file_extractor` children spawning every ~20–30 s. The parent shows only 6.7 s CPU because
-  the children do the work and exit — so a CPU check alone says "idle" and is wrong.
-  `baloofilerc` is still `dbVersion=2` only: defaults, all of `$HOME`, including **`~/re` (8.4 GB)**,
-  `research/` (550 M), `reference_code/` (277 M).
-- Corrected shell-layer total: **~730 MB real, not 1577 MB.** Two shells (plasmashell **and** qs),
-  two launchers (krunner **and** Caelestia's), three xdg portals (base + kde + gtk).
-- **RAM is not the current problem:** 4.6 GB available, zram 1.4/8 G, pagefile **0 B used**.
-- ⚠️ **`systemd/luminos-pagefile.service` is still UNTRACKED in git** (`?? systemd/luminos-pagefile.service`)
-  while the installed copy at `/etc/systemd/system/` is live. Same class as the untracked
-  `luminos-hive.service` in BUG-148. Commit it.
+- **PSS counts file-backed pages.** `baloo_file` = **138 MB anon** + 786 MB cache (the 3.0 GB index,
+  mmapped read-only, dropped for free under pressure). **`Pss_Anon` is the number that answers "is
+  this eating my RAM".** A report that does not split anon vs file chases the wrong process.
+- Real anon: **qs 292 MB** (the actual heavyweight) · **kwin_wayland ~250 MB** · plasmashell 71 MB ·
+  krunner 65 MB · kded6 20 MB. **Shell layer ≈ 730 MB real, not 1577 MB.**
+- **kwin was missing from the original report** — `pgrep` matched only `kwin_wayland_wrapper`, a
+  0 MB launcher. Always check the child.
+- **baloo's real cost is the SSD, not RAM:** 22.44 GB written by 25.7 h uptime, **steady state
+  ~362 MB/h (~8.7 GB/day)**. (An earlier "1.7 GB/h" in this file was front-loaded by the first
+  index — do not quote it.) The parent shows 6.7 s CPU because `baloo_file_extractor` children do
+  the work and exit, so **a CPU check alone says "idle" and is wrong.**
+- **99.3% of the index is file CONTENT**; filename terms are 4.87 MB. `contentIndexing false`
+  takes it 3.0 GB → ~20 MB and keeps filename search.
+- **baloo cannot be uninstalled** — *Required By: baloo-widgets, dolphin, plasma-desktop*. Disable,
+  never remove.
+- **krunner is D-Bus activated** (`org.kde.krunner.service` → `plasma-krunner.service`), nothing
+  autostarts it, nothing in `kglobalshortcutsrc` binds it. **Stopping it is safe; it comes back on
+  demand.**
+- **RAM is not the current problem:** 4.6 GB available, zram 1.4/8 G, pagefile 0 B used.
+- ⚠️ **`systemd/luminos-pagefile.service` is still UNTRACKED in git** while the installed copy at
+  `/etc/systemd/system/` is live — same class as `luminos-hive.service` in BUG-148. Commit it.

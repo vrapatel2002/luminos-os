@@ -237,6 +237,23 @@ say ""
 # they are what the last version said, and flagging them as current faults makes
 # the report cry wolf for the rest of the boot. Only lines newer than the newest
 # installed file are this build's problem. [CHANGE: claude-code | 2026-09-19]
+# ---------------------------------------------------------------------------
+# [CHANGE: claude-code | 2026-09-20] DECISION 127. The lock screen has run this
+# same plugin since DECISION 77, with its OWN copy of the settings — so it drifted
+# quietly, and five months later was still playing a video from July while the
+# desktop had moved on. Silent drift is exactly what a selftest is for.
+say "[7] the lock screen shows the same wallpaper (DECISION 127)"
+if out="$(bash "$REPO/scripts/luminos-wallpaper-lockscreen" --dry-run 2>&1)"; then
+    case "$out" in
+        *"already identical"*) ok "lock screen matches the desktop" ;;
+        *) bad "lock screen has drifted — run: luminos-wallpaper-lockscreen"
+           printf '%s\n' "$out" | grep '\->' | head -6 | sed 's/^/      /' | tee -a "$LOG" ;;
+    esac
+else
+    info "$(printf '%s' "$out" | tail -1)"
+fi
+say ""
+
 say "[6] what the wallpaper said"
 deployed="$(find "$PLUGIN" -type f -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1)"
 since="$(date -d "@${deployed:-0}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
