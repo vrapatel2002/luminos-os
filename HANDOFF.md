@@ -94,6 +94,21 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 while that chat was mid-thread.** Nothing was lost — its output is durable in
 **`docs/gamemode/FEASIBILITY.md`** (304 lines) and in `luminos-notes.sh search "console"`.
 Pointer only, so this file stays short:
+- 🟢 **REAL GAME MEASURED 2026-09-20 — `docs/gamemode/BMW-BENCH.md`.** Black Myth: Wukong via
+  Lutris/GE-Proton11-6. **Drivers are NOT old/broken** — 610.57.04 consistent across module,
+  DKMS, userspace on kernel 7.0.5, and `~/.config/lutris/system.yml` is byte-identical to the
+  repo copy, so DECISION 90's gate is intact and the game does reach the 4050. Plain
+  `vulkaninfo`/`nvidia-smi` failing as shawn is DECISION 25 working — **test through
+  `dgpu-exec-v2` or you will misdiagnose it.**
+  Measured gameplay: **53.6 avg / 37.9 1% low — and that is WITH frame generation ON**
+  (~27 real rendered fps), at Medium, **RT OFF**, 900p internal, DX11. VRAM **5.2 of 6.1 GB
+  with RT off**. The 60fps/max/RT/no-framegen target is empirically dead for this title class.
+  🔴 **Two conclusions that change the plan:** (1) dGPU had **2 MiB** used pre-launch, so the
+  gate already gives games the whole 6 GB — "move the compositor to the iGPU to free VRAM"
+  wins nothing and should be retired. (2) **System RAM is the real constraint**: 10.1 GB used
+  at idle, **11.5 GB in swap during play**; the 15 fps minimums and 70 ms frametime spikes
+  look like swap stalls, not GPU limits (GPU held a steady 93%).
+  ⚠️ MangoHud logged the **iGPU's** hardware counters, not the 4050's — pin `pci_dev=0000:01:00.0`.
 - 🟢 **MEASURED 2026-09-20 (Cowork chat C) — `docs/gamemode/IGPU-BENCH.md`, harness in
   `tools/gamemode-bench/`.** No packages installed (`luminos-brain safe` said NO for
   vkpeak/clpeak; purpose-built Vulkan microbenchmarks written instead).
