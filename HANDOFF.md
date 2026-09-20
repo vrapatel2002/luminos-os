@@ -94,6 +94,21 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 while that chat was mid-thread.** Nothing was lost — its output is durable in
 **`docs/gamemode/FEASIBILITY.md`** (304 lines) and in `luminos-notes.sh search "console"`.
 Pointer only, so this file stays short:
+- 🟢 **MEMORY STRATEGY 2026-09-20 — `docs/gamemode/MEMORY-STRATEGY.md`.** Answers "consoles do
+  it under 16 GB, why can't we". **Xbox Series S ships this generation of AAA on ~8 GB TOTAL and
+  never swaps; this G14 has 22 GB.** Budget is not the problem — split pools, no hardware
+  streaming, and **a 10.1 GB idle OS footprint against a console's ~2 GB** are.
+  🔴 **Correction to an earlier claim in this thread:** DX12+DXR is **~1.45-1.6x** VRAM, not 2x,
+  and it is **DXR/BVH specifically**, not DX12 generally (vkd3d-proton #1874). `VKD3D_CONFIG=nodxr`
+  removes it outright and is set nowhere on this box.
+  🔴 **VRAM overflow to system RAM DOES NOT EXIST on NVIDIA/Linux** — no GTT, UVM is compute-only,
+  HMM disabled in nvidia-open. Only DXVK/vkd3d userspace eviction (DXVK v3.1 confirmed in
+  GE-Proton11-6), which is a soft landing, not capacity. The **780M has 7.6 GB of GTT**; the dGPU has none.
+  🔴 **Measured during play: 18,143 `allocstall` direct-reclaim stalls, 4.2M pages swapped out.**
+  That is the mechanism behind the 70 ms frametime spikes — a memory-management failure, not GPU.
+  The zram(8 GB, saturated, prio 100) + swapfile(32 GB, prio 10) stack is LRU-inverted;
+  **zswap is compiled in and disabled**. Next test has a hard success metric: `allocstall_*`
+  under the same workload, baseline **18,143**.
 - 🟢 **REAL GAME MEASURED 2026-09-20 — `docs/gamemode/BMW-BENCH.md`.** Black Myth: Wukong via
   Lutris/GE-Proton11-6. **Drivers are NOT old/broken** — 610.57.04 consistent across module,
   DKMS, userspace on kernel 7.0.5, and `~/.config/lutris/system.yml` is byte-identical to the
