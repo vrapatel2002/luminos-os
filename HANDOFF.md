@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 16 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 17 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -93,29 +93,37 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (`luminos-wallpaper-capabilities`) exist; the gate ran on the box and found everything §3.6 needs
   (`cage`, kpipewire, Qt Quick 3D, `/dev/uinput`).
 
-### SteamOS comparison — asked 2026-09-19 (Response 16), RESEARCH ONLY, nothing changed
-Shawn asked whether SteamOS is far lighter than Luminos because it is "like a console OS". Answer,
-with live numbers off this box rather than a feeling:
-- **SteamOS Desktop Mode IS what we run** — 3.8.10 is Arch + **KDE Plasma 6.4.3 on Wayland**. It is
-  not a lighter desktop; it is the same desktop. Its lightness lives entirely in **Game Mode**,
-  which is not a desktop at all: `gamescope` (a wlroots micro-compositor) plus the Steam client,
-  with **no plasmashell, no KWin, no containment, no wallpaper, no file indexer**.
-- **Measured on the G14 right now (PSS, 5 h uptime):** shell layer **1577 MB** — and the breakdown
-  is the finding: `baloo_file` **978 MB**, `qs` (Caelestia) **420 MB**, `plasmashell` **181 MB**,
-  `kded6` 37 MB. **The five Go daemons are 62 MB PSS COMBINED** (ram 23.8, sentinel 13.6, power
-  12.6, router 7.0, ai 6.8). Luminos's own code is not what costs; KDE's indexer is.
-- **`gamescope` 3.16.28-1 is in `extra` and is NOT installed** (`pacman -Q` confirms). Two separate
-  reasons to want it, both flagged not started:
-  (a) **games** — it would replace the BUG-138 "Wine Desktop" KWin-rule + work-area hack with
-      fullscreen by construction, and adds FSR upscaling + a frame limiter on the 780M;
-  (b) **SPEC §3.6** — it is the other wlroots nested compositor besides `cage` (which is already
-      present). ⚠️ It does **not** clear §3.6's actual blocker: still no `gst-plugin-pipewire` and
-      no `xdg-desktop-portal-wlr`, so there is still no way to make a PipeWire video node.
-- **Immutability is the one SteamOS idea that is actively WRONG for us.** A read-only `/usr` + A/B
-  root would make most of AGENTS.md §9 illegal (`/usr/local/bin/*`, the patched
-  `desktopcontainment/main.qml`, dkms NVIDIA, the pacman hooks). If Shawn wants the rollback
-  benefit, the shape that fits is **btrfs + snapper**, not an immutable base.
-- **No code, config or system state changed on that turn.**
+### SteamOS comparison — 2026-09-19 (Response 16), research only, superseded by the block below
+SteamOS 3.8.10 Desktop Mode **is** Arch + KDE Plasma 6.4.3 — the same desktop we run. All its
+lightness is Game Mode: `gamescope` + the Steam client, with no plasmashell/KWin/containment/
+indexer. Measured here: shell layer **1577 MB PSS** — `baloo_file` **978 MB**, `qs` 420 MB,
+`plasmashell` 181 MB — while **all five Go daemons are 62 MB combined**. Our code is not the cost.
+Immutable/A-B root is the one SteamOS idea that is wrong for us: it would make most of AGENTS.md
+§9 illegal. btrfs+snapper is the shape that fits. Full detail: `luminos-notes.sh search steamos`.
+
+### Console/game-mode feasibility — asked 2026-09-19 (Response 17), RESEARCH ONLY, nothing changed
+Shawn wants a console-like mode on this box: Steam + Proton + games only, "both GPUs at max".
+Full write-up: **`docs/gamemode/FEASIBILITY.md`**. The three findings that change other work:
+- 🔴 **AGENTS.md §2's "No MUX" was WRONG and is now corrected.** `supergfxctl -s` →
+  `[Integrated, Hybrid, AsusMuxDgpu]`, supergfxd 5.2.7 active, currently `Hybrid`. The board has a
+  MUX. ⚠️ **Do not switch to `AsusMuxDgpu` before checking** whether §9's
+  `KWIN_DRM_DEVICES=/dev/dri/card2` + `__EGL_VENDOR_LIBRARY_FILENAMES=50_mesa.json` pins strand the
+  desktop on a card that no longer drives the display — that is a plausible black screen.
+- 🔴 **SPEC §3.6 IS NO LONGER PACKAGE-BLOCKED.** `xdg-desktop-portal-wlr 0.8.4-1` and
+  `gst-plugin-pipewire 1:1.6.8-1` are **both installed** now (with `cage 0.3.1`). The
+  "BLOCKED ON PACKAGES" note in Next Steps item 2 is stale. Not investigated: who installed them.
+- **The TFLOPS premise was wrong.** 780M's 8.29–8.91 TF is the RDNA3 *dual-issue* peak; plain FP32
+  is **4.15–4.45 TF** vs PS5's 10.28 (RDNA2, no dual-issue, already a plain number). **The
+  PS5-class part in this laptop is the RTX 4050 (~12.1 TF FP32), not the iGPU.** Bandwidth is the
+  wall nothing fixes: 102.4 GB/s shared (iGPU) / 192 GB/s (4050) / **448 GB/s (PS5)**; 6 GB VRAM is
+  the hard ceiling. Heterogeneous multi-GPU is dead in shipping games — you pick Hybrid *or* MUX.
+- **Perf work must precede shell work.** BUG-157 (TGP sawtooth 90↔55 W mid-game, diagnosed NOT
+  fixed), BUG-069, DPM=0x02's P8/210 MHz, and the live `quiet`/`powersave`/EPP=`power` state are
+  where the frames are. ⚠️ BUG-157 lives in `cmd/` — **§11 says ask first.**
+- `gamescope` 3.16.28-1 and `gamemode` 1.8.2-3 are in `extra`, **neither installed**. gamescope's
+  NVIDIA bugs (#498/#611/#1220/#1590/#1643/#1662) are overwhelmingly *hybrid*-mode bugs, so
+  **MUX first, then gamescope** — testing it in Hybrid likely just reproduces an upstream issue.
+- **No code, config or system state changed.** New doc + AGENTS.md §2 correction only.
 
 ### Server / RAM thread (2026-09-18, carried forward — not this chat's work)
 - **DECISION 116 — `vm.page-cluster` stays at 3. It already was 3**; the claim that it was 0 came
@@ -187,7 +195,16 @@ Shawn "far lighter than Chromium" without naming the scene.
    **To build:** spawn a producer under `cage`, hand the scene its node id, reap it on deselect and
    on crash with no orphans; then input. `xdg-desktop-portal-wlr` is installed for the cage
    screencast but **not yet proven to work with cage** (it was written for sway).
-   **⚠️ Three findings, two of which amend CONTRACTS §7:**
+   **⚠️ CORRECTION (DECISION 124a) — read this before the findings below.** DECISION 124 said
+   CONTRACTS §7's input route "does not exist here" because KWin advertises no virtual-input
+   protocols. **That was wrong and was told to Shawn as fact.** Input goes into the PRODUCER's
+   compositor, not the desktop, and a live headless `cage` advertises exactly what the contract
+   named: `zwlr_virtual_pointer_manager_v1`, `zwp_virtual_keyboard_manager_v1`, plus
+   `zwlr_screencopy_manager_v1` and `zwlr_export_dmabuf_manager_v1`. **CONTRACTS §7 needs no
+   amendment on input.** uinput is not the route and the "kernel-level focus" problem is moot.
+   The measurement was taken against KWin — the wrong compositor, and the only one running at the
+   time, because cage had not been started yet to be asked.
+   **⚠️ Findings that still stand:**
    - **KWin does NOT advertise `zwlr_virtual_pointer_v1` or `zwp_virtual_keyboard_v1`.**
      `wayland-info` on the live session lists `zwlr_layer_shell_v1` and the xdg protocols and
      **zero** virtual-input interfaces. CONTRACTS §7 named those first; they are not an option
@@ -201,6 +218,23 @@ Shawn "far lighter than Chromium" without naming the scene.
      is why interaction is OFF by default in CONTRACTS §7. Build the VIDEO half first.
    - **`PipeWireSourceItem` exists** (`org.kde.pipewire`, the only type it exports) and `cage`
      0.3.1 (wlroots 0.20) is present.
+   **PRODUCER HALF — where it actually stands (2026-09-19):**
+   - ✅ **cage runs headless on the AMD 780M**: `WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1
+     cage -- <cmd>` makes its own `wayland-N` socket, `glxgears` inside it ran at **62.8 FPS**, and
+     it picks the iGPU by itself — Shawn's GPU constraint satisfied for free.
+   - ✅ **`xdg-desktop-portal-wlr` starts against that socket**, claims
+     `org.freedesktop.impl.portal.desktop.wlr`, and completes dmabuf-feedback + xdg_output
+     negotiation with cage.
+   - ❌ **The ScreenCast D-Bus handshake does not complete.** Calling
+     `org.freedesktop.impl.portal.ScreenCast.CreateSession` on the impl interface directly gave no
+     `Response` signal in 20 s. Open: does the impl portal require the frontend
+     (`xdg-desktop-portal`) as caller; is the request-handle path convention wrong; does xdpw need
+     a chooser configured (`chooser_type` / `outputname` are in its config). Probe kept at
+     `/tmp/sc.py`. **THIS IS THE NEXT THING TO DEBUG** and the last piece before a game on the
+     desktop.
+   - ⚠️ **Kill your test processes.** Stray `cage`/`glxgears` from probing sat at 60 fps each on
+     Shawn's machine. Use `ps -eo pid,comm` + `kill <pid>`, never `pkill -f cage` — that pattern
+     matches the probing shell's OWN command line and kills the session.
    - **The producer must publish packed RGB, or use DMA-BUF.** Left on its default `I420` a
      producer rendered as **greyscale** — structure perfect, no colour. `format=BGRx` fixed it
      instantly on the `usingDmaBuf=false` path. A portal screencast hands over DMA-BUF and will not

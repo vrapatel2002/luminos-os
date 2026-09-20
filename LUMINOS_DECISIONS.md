@@ -7730,3 +7730,56 @@ BUG-175 (why `grabToImage` proves nothing here — see below)
 composites — black for a `ShaderEffect` (BUG-175), white for a `PipeWireSourceItem`. That is twice.
 To see what such an item really draws, put it in a real window and capture the window
 (`spectacle -a -b -n -o file.png`), which also avoids photographing the whole desktop.
+
+---
+
+## DECISION 124a — correcting DECISION 124: the input protocols DO exist, on the other side
+<!-- [CHANGE: claude-code | 2026-09-19] SPEC §3.6 -->
+
+**DECISION 124 finding 1 was wrong, and it was reported to Shawn as fact.** It said CONTRACTS §7's
+input route "does not exist here" because KWin advertises no virtual-input interfaces. KWin does
+not — and **it never needed to.**
+
+Input for §3.6 goes **into the producer's own compositor**, not into the desktop. And `cage`, being
+wlroots, advertises exactly what the contract named. Measured, from a live headless cage:
+
+```
+zwlr_export_dmabuf_manager_v1      zwlr_screencopy_manager_v1
+zwlr_foreign_toplevel_manager_v1   zwlr_virtual_pointer_manager_v1
+zwlr_gamma_control_manager_v1      zwp_virtual_keyboard_manager_v1
+zwlr_output_manager_v1
+```
+
+`zwlr_virtual_pointer_manager_v1` and `zwp_virtual_keyboard_manager_v1`, both present. **CONTRACTS
+§7 needs no amendment on input.** What DECISION 124 called "the real open problem of §3.6" — that
+uinput injects at the kernel and goes wherever focus is — is not a problem to solve at all: uinput
+is not the route, and was only ever the contract's fallback.
+
+**What DECISION 124 got right and still stands:** the consumer half works and is proven; a producer
+must publish packed RGB or DMA-BUF; and `/dev/uinput` is reachable through an ACL (true, and now
+irrelevant).
+
+**The lesson, which is the same one this project keeps paying for.** "Protocol X is not available"
+was measured on the wrong machine. `wayland-info` was run against KWin, which was the only
+compositor running at the time — the question was what the *nested* compositor offers, and cage
+was not running yet to be asked. **A capability answer is only as good as the thing it was asked
+about**, and this is the third time in this effort that a true measurement answered a question
+nobody had: `/dev/uinput` exists (true, wrong question), `cava` on PATH (true, wrong question),
+and now KWin's protocol list.
+
+### Where the producer half actually stands
+- **cage runs headless on the AMD 780M** — `WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 cage
+  -- <cmd>`, creating its own `wayland-N` socket, with `glxgears` inside it at **62.8 FPS**. It
+  picks the iGPU by itself, which is Shawn's GPU constraint satisfied for free.
+- **`xdg-desktop-portal-wlr` starts against that socket**, claims
+  `org.freedesktop.impl.portal.desktop.wlr`, and completes dmabuf-feedback and xdg_output
+  negotiation with cage.
+- **❌ The ScreenCast D-Bus handshake does not complete yet.** Calling
+  `org.freedesktop.impl.portal.ScreenCast.CreateSession` on the impl interface directly produced no
+  `Response` signal within 20 s. Unresolved: whether the impl portal expects the frontend
+  (`xdg-desktop-portal`) as caller, whether the request-handle path convention is wrong, or whether
+  xdpw wants a chooser configured (`chooser_type`/`outputname` exist in its config). **This is the
+  next thing to debug**, and it is the last piece between here and a game on the desktop.
+
+### Cross-references
+DECISION 124 (corrected by this) · CONTRACTS §7 (stands as written) · SPEC §3.6
