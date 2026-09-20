@@ -7089,3 +7089,67 @@ Same shape as BUG-175 one turn later, and I walked into it anyway. **A wallpaper
 the first frame rendered and nothing else.** Every check that existed for §3.5 was satisfied by a
 still picture, and the single question that mattered — *is it still going?* — was the one nothing
 asked. When the feature is motion, the test has to count frames.
+
+---
+
+## BUG-181 — every Lively type was mapped wrong, because the map was invented
+<!-- [CHANGE: claude-code | 2026-09-19] found by cloning Lively and reading its enum -->
+
+**Status:** FIXED · **Severity:** every Lively import was mislabelled; the two commonest types were
+not importable at all · **Files:** `scripts/luminos-wallpaper-pkg`, new
+`scripts/luminos-wallpaper-lively`, `tests/wallpaper/test_pkg.py`, new `tests/wallpaper/conftest.py`,
+`contents/tools/luminos-wallpaper-{install,gallery}`, `contents/ui/scene.js`, `contents/ui/config.qml`
+
+Shawn asked for Lively wallpapers to be downloaded and tried. Cloning
+`rocksdanister/lively` produced **no wallpapers** (see below) but did produce the one thing worth
+more: `src/Lively/Lively.Models/Enums/WallpaperType.cs`, Lively's own enum.
+
+| index | Lively really says | we said | now |
+|---|---|---|---|
+| 0 | `app` | video | producer |
+| 1 | `web` | gif | **web** |
+| 2 | `webaudio` | producer | **web** |
+| 3 | `url` | producer | **web** |
+| 4 | `bizhawk` | video | producer |
+| 5 | `unity` | image | producer |
+| 6 | `godot` | — | producer |
+| 7 | **`video`** | — *(unsupported!)* | **video** |
+| 8 | **`gif`** | — *(unsupported!)* | **gif** |
+| 9 | `unityaudio` | — | producer |
+| 10 | `videostream` | — | video |
+| 11 | `picture` | — | image |
+
+**Not one entry was right.** A Lively *video* wallpaper — the single commonest kind — imported as
+`unknown, unsupported`, and a *web* one imported as a GIF. The map had six entries for an enum with
+twelve members, and the six were guesses.
+
+**The test defended the guess.** `test_lively_unmapped_type_is_marked_not_faked` pinned that exact
+table, so the suite was green *because* it asserted the wrong answer. Twenty property tests passed
+over an importer that could not import the two most common formats.
+
+#### Fixes
+- The table is transcribed from Lively's source, and `Type` is accepted as an **index** (older
+  files) or a **name** (newer ones).
+- **`web` is playable now.** Web mode exists today — it is the Chromium path SPEC §3.6 is meant to
+  replace, but a Lively web wallpaper runs on it *now*, and greying out most of their library to
+  make a point would have been dishonest. `scene.js` maps `web → WebUrl`.
+- The Lively importer moved to its own file: it tracks an external project's enum, on someone
+  else's schedule.
+- **`tests/wallpaper/conftest.py` is new, and overdue.** `import luminos_wallpaper_pkg` had only
+  ever worked because something outside the repo staged that file under that name. An invisible
+  step is one nobody can fix when it breaks — and it is why splitting a tested module looked risky
+  enough to nearly not happen. Verified in the build container: **22 passed.**
+
+#### Two of my own mistakes on the way in
+`LIVELY = load(...)` shadowed the `LIVELY = "LivelyInfo.json"` constant, so `find_root()` joined a
+module onto a path — BUG-173's shape exactly, a year's lesson unlearned in one line. And the loader
+wrote `__pycache__` **inside the KPackage**, breaking `diff -rq` against the repo;
+`sys.dont_write_bytecode = True` now.
+
+#### ⚠️ Left failing on purpose
+`contents/tools/luminos-wallpaper-install` is **154 lines against SPEC §9's 150**, so the self test
+reports **1 failed**. I trimmed prose three times chasing it, broke the file once doing so, and
+stopped: shaving comments off a file to satisfy a line count degrades it to make a number go green,
+which is the opposite of what the budget is for. It needs one deliberate decision — split the CLI
+out, or raise the budget for a file that is mostly a security-critical unpack path — and that
+decision should be made rested, not at the end of a long session.

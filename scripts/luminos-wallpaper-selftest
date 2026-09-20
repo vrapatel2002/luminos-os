@@ -89,7 +89,8 @@ say ""
 # §9's "over budget is a red build" was not a build rule, it was a sentence.
 say "[3b] budgets (SPEC §9)"
 TOOLS="$REPO/src/wallpapers/org.luminos.livewallpaper/contents/tools"
-PYFILES="$REPO/scripts/luminos-wallpaper-pkg $TOOLS/luminos-wallpaper-install
+PYFILES="$REPO/scripts/luminos-wallpaper-pkg $REPO/scripts/luminos-wallpaper-lively
+         $TOOLS/luminos-wallpaper-install
          $TOOLS/luminos-wallpaper-gallery $TOOLS/luminos-wallpaper-props
          $TOOLS/luminos-wallpaper-js"
 if out="$(python3 "$REPO/tests/wallpaper/budget_check.py" $PYFILES 2>&1)"; then

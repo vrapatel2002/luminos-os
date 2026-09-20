@@ -63,6 +63,8 @@ ColumnLayout {
             root.cfg_QmlScene = entryPath;
         else if (m.key === "Video")
             root.cfg_Video = entryPath;
+        else if (m.key === "WebUrl")
+            root.cfg_WebUrl = entryPath;
         else
             root.cfg_Image = entryPath;
     }

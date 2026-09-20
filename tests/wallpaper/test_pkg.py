@@ -8,6 +8,7 @@ import pytest
 from hypothesis import given, strategies as st, settings, HealthCheck
 
 import luminos_wallpaper_pkg as P
+import luminos_wallpaper_lively as L
 
 CONTROL_TYPES = ["slider", "color", "dropdown", "textbox", "checkbox", "file", "button", "label"]
 
@@ -69,19 +70,50 @@ def test_merge_props_saved_wins(s):
 @settings(suppress_health_check=[HealthCheck.too_slow], max_examples=150)
 def test_lively_import_never_raises(d):
     """Third-party manifests are untrusted input."""
-    m = P.lively_to_manifest(d, pkg_id="x")
+    m = L.lively_to_manifest(d, pkg_id="x")
     assert isinstance(m, dict)
     for required in ("id", "title", "type", "source"):
         assert required in m
     assert m["source"] == "lively"
 
+# Lively's REAL WallpaperType enum order, transcribed from its own source at
+# src/Lively/Lively.Models/Enums/WallpaperType.cs. The table this replaces was
+# invented, and pinning it meant the suite DEFENDED a mapping in which a Lively
+# video wallpaper imported as "unsupported" and a web one imported as a gif.
+# [CHANGE: claude-code | 2026-09-19] BUG-181
+LIVELY_ENUM = ["app", "web", "webaudio", "url", "bizhawk", "unity", "godot",
+               "video", "gif", "unityaudio", "videostream", "picture"]
+LIVELY_TO_OURS = {"app": "producer", "web": "web", "webaudio": "web", "url": "web",
+                  "bizhawk": "producer", "unity": "producer", "godot": "producer",
+                  "video": "video", "gif": "gif", "unityaudio": "producer",
+                  "videostream": "video", "picture": "image"}
+
+
 @given(st.integers(min_value=-5, max_value=20))
-def test_lively_unmapped_type_is_marked_not_faked(t):
+def test_lively_type_index_maps_to_livelys_own_enum(t):
     """SPEC 6: import it, mark it unsupported, do not pretend."""
-    m = P.lively_to_manifest({"Title": "t", "Type": t, "FileName": "f"}, pkg_id="x")
-    known = {0: "video", 1: "gif", 2: "producer", 3: "producer", 4: "video", 5: "image"}
-    if t in known:
-        assert m["type"] == known[t] and m.get("unsupported") is not True
+    m = L.lively_to_manifest({"Title": "t", "Type": t, "FileName": "f"}, pkg_id="x")
+    if 0 <= t < len(LIVELY_ENUM):
+        assert m["type"] == LIVELY_TO_OURS[LIVELY_ENUM[t]]
+        assert m.get("unsupported") is not True
+        assert m["livelyType"] == LIVELY_ENUM[t]
+    else:
+        assert m.get("unsupported") is True
+
+
+@given(st.sampled_from(LIVELY_ENUM))
+def test_lively_type_name_is_accepted_too(name):
+    """Newer Lively files write Type as the NAME, older ones as the index."""
+    m = L.lively_to_manifest({"Title": "t", "Type": name, "FileName": "f"}, pkg_id="x")
+    assert m["type"] == LIVELY_TO_OURS[name]
+    assert m.get("unsupported") is not True
+
+
+@given(st.sampled_from(["", "nonsense", "WEB ", "Video"]))
+def test_lively_type_name_tolerates_case_and_space_but_is_not_credulous(name):
+    m = L.lively_to_manifest({"Title": "t", "Type": name, "FileName": "f"}, pkg_id="x")
+    if name.strip().lower() in LIVELY_TO_OURS:
+        assert m["type"] == LIVELY_TO_OURS[name.strip().lower()]
     else:
         assert m.get("unsupported") is True
 

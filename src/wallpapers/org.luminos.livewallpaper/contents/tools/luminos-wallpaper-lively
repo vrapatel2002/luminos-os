@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Import Lively's own `LivelyInfo.json`, unmodified, into our manifest shape.
+
+[CHANGE: claude-code | 2026-09-19] SPEC §3.3, CONTRACTS §5, BUG-181.
+SPDX-License-Identifier: GPL-3.0-or-later
+
+Its own file because it tracks an EXTERNAL project's enum, which changes on
+someone else's schedule, and because carrying it kept luminos-wallpaper-pkg over
+SPEC §9's 150 lines. The type table below is transcribed from Lively's source
+(src/Lively/Lively.Models/Enums/WallpaperType.cs) rather than guessed — the table
+it replaces was invented and every one of its entries was wrong.
+"""
+# Lively's WallpaperType enum IN ITS OWN ORDER, read from its source and mapped
+# to ours. Order matters: Lively writes Type as the enum INDEX. The map this
+# replaced was invented and every entry was wrong — see BUG-181.
+# [CHANGE: claude-code | 2026-09-19]
+_LIVELY_TYPE_MAP = {
+    "app": "producer", "web": "web", "webaudio": "web", "url": "web",
+    "bizhawk": "producer", "unity": "producer", "godot": "producer",
+    "video": "video", "gif": "gif", "unityaudio": "producer",
+    "videostream": "video", "picture": "image",
+}
+_LIVELY_ORDER = list(_LIVELY_TYPE_MAP)
+
+
+def lively_type_name(raw):
+    """Older Lively files write Type as the enum index, newer ones as the name."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int) and 0 <= raw < len(_LIVELY_ORDER):
+        return _LIVELY_ORDER[raw]
+    if isinstance(raw, str) and raw.strip().lower() in _LIVELY_TYPE_MAP:
+        return raw.strip().lower()
+    return None
+
+
+def lively_to_manifest(info: dict, pkg_id: str) -> dict:
+    manifest: dict = {"id": pkg_id, "source": "lively"}
+    try:
+        manifest["title"] = info.get("Title") or "Untitled"
+        name = lively_type_name(info.get("Type"))
+        if name is not None:
+            manifest["type"] = _LIVELY_TYPE_MAP[name]
+            manifest["livelyType"] = name
+        else:
+            manifest["type"] = "unknown"
+            manifest["unsupported"] = True
+        for src, dst in [("Author", "author"), ("FileName", "entry"), ("Arguments", "args")]:
+            val = info.get(src)
+            if val is not None:
+                manifest[dst] = val
+        preview = info.get("Thumbnail") or info.get("Preview")
+        if preview is not None:
+            manifest["preview"] = preview
+    except Exception:
+        manifest.setdefault("title", "Untitled")
+        manifest.setdefault("type", "unknown")
+        manifest["unsupported"] = True
+    return manifest
+
+

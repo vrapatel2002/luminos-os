@@ -95,5 +95,7 @@ function modeForType(type) {
         return { mode: "video", key: "Video" };
     if (t === "image" || t === "gif")
         return { mode: "image", key: "Image" };
+    if (t === "web")
+        return { mode: "web", key: "WebUrl" };
     return null;
 }

@@ -6,9 +6,6 @@ import os.path
 
 _KNOWN_PROP_TYPES = {"slider", "color", "dropdown", "textbox", "checkbox", "file", "button", "label"}
 
-_LIVELY_TYPE_MAP = {0: "video", 1: "gif", 2: "producer", 3: "producer", 4: "video", 5: "image"}
-
-
 def validate_properties(schema: dict) -> tuple[dict, list[str]]:
     ok: dict = {}
     skipped: list[str] = []
@@ -44,30 +41,6 @@ def merge_props(schema: dict, saved: dict) -> dict:
             except (KeyError, TypeError):
                 result[key] = None
     return result
-
-
-def lively_to_manifest(info: dict, pkg_id: str) -> dict:
-    manifest: dict = {"id": pkg_id, "source": "lively"}
-    try:
-        manifest["title"] = info.get("Title") or "Untitled"
-        raw_type = info.get("Type")
-        if raw_type in _LIVELY_TYPE_MAP:
-            manifest["type"] = _LIVELY_TYPE_MAP[raw_type]
-        else:
-            manifest["type"] = "unknown"
-            manifest["unsupported"] = True
-        for src, dst in [("Author", "author"), ("FileName", "entry"), ("Arguments", "args")]:
-            val = info.get(src)
-            if val is not None:
-                manifest[dst] = val
-        preview = info.get("Thumbnail") or info.get("Preview")
-        if preview is not None:
-            manifest["preview"] = preview
-    except Exception:
-        manifest.setdefault("title", "Untitled")
-        manifest.setdefault("type", "unknown")
-        manifest["unsupported"] = True
-    return manifest
 
 
 def _path_safe(path: str) -> bool:

@@ -20,7 +20,10 @@ import json, os, sys
 ROOT = os.path.expanduser("~/.local/share/luminos/wallpapers")
 MANIFEST = "luminos-wallpaper.json"
 # What the wallpaper can actually show today. `producer` is SPEC §3.6.
-PLAYABLE = {"scene", "shader", "js", "video", "image", "gif"}
+# `web` is here because web mode EXISTS today — it is the Chromium path SPEC §3.6
+# is meant to replace, but a Lively web wallpaper runs on it right now and
+# pretending otherwise would grey out most of their library. BUG-181.
+PLAYABLE = {"scene", "shader", "js", "video", "image", "gif", "web"}
 
 
 def describe(pkg_dir):

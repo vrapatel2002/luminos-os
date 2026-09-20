@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 17 (new Cowork chat, counter restarted deliberately)
+Last updated: 2026-09-19 — Response 19 (new Cowork chat, counter restarted deliberately)
 
 > **Counter note, per §0.1 — do not "fix" it.** The previous chat ran out of counter and had been
 > compacted; it recorded that and stopped at its Response 21. This is a **new chat**, so the counter
@@ -80,7 +80,7 @@ Installed copy `diff -rq` clean against the repo. Shader cache populated
   (a KPackage must be self-contained; the lock screen loads the same package). Cached by content
   hash (~90 ms cold, 0.1 ms warm). The `ShaderEffect` is built with `Qt.createQmlObject`, which is
   what makes §3.2 real for an arbitrary shader — a QML object cannot gain a property at runtime.
-- **BUG-168 through BUG-180 all fixed**, BUG-176 included: `org.kde.kwindowsystem` exports
+- **BUG-168 through BUG-181 all fixed**, BUG-176 included: `org.kde.kwindowsystem` exports
   `KWindowSystem.showingDesktop` as a notifiable QML singleton property, so Show Desktop now
   unfreezes the wallpaper for one binding rather than a `qdbus6` poll. BUG-171 (a deploy is
   not a load) and BUG-173 (every settings row drew a label and no control) are why the eyes-on
@@ -280,6 +280,16 @@ Shawn "far lighter than Chromium" without naming the scene.
 - **AGENTS.md §0.2 / Rule 12 / §16:** "no changes" scopes to code, config and system state. This
   file and the §13 doc triggers are written on every turn regardless.
 
+## ⚠️ Open right now
+- **`contents/tools/luminos-wallpaper-install` is 154 lines against SPEC §9's 150**, so the self
+  test reports **1 failed** on purpose. Prose was trimmed three times chasing it and the file was
+  broken once doing so. It needs ONE deliberate decision — split the CLI out, or raise the budget
+  for a file that is mostly a security-critical unpack path — not another comment trim.
+- **`rocksdanister/lively` contains NO wallpapers.** It is the Windows app's C# source: 0
+  `LivelyInfo.json`, 0 html, 0 video, 0 js. Clone kept at `~/lively-test/lively` (81 MB, shallow,
+  unmodified). To actually test wallpapers Shawn needs to send **a folder containing
+  `LivelyInfo.json`, or a `.zip` exported from Lively itself** ("export wallpaper" in the app).
+
 ## Gotchas / dead-ends / things NOT to redo
 **The instruments, which have now been wrong five times in five days**
 - **BUG-171 — a deploy is not a load.** `QQmlEngine` caches compiled components by URL for the life
@@ -349,6 +359,11 @@ Shawn "far lighter than Chromium" without naming the scene.
   `ShaderEffect` (BUG-175), white for a `PipeWireSourceItem`. Twice now. To see what such an item
   really draws, put it in a real window and capture the window with `spectacle -a -b -n -o f.png`,
   which also avoids photographing the whole desktop.
+- **NEVER invent a mapping for someone else's format.** BUG-181: our Lively `WallpaperType` map
+  had six entries for a twelve-member enum and not one was right — a Lively VIDEO wallpaper, the
+  commonest kind there is, imported as "unsupported". The authoritative list is one clone away, at
+  `src/Lively/Lively.Models/Enums/WallpaperType.cs`. And the test PINNED the invented table, so the
+  suite was green *because* it asserted the wrong answer.
 - **The contract tests were MUTE.** Qt hands `console.log` to the journal when stderr is not a tty,
   so `qml6 … 2>&1` captured nothing and the self test's exit code was all it ever had.
   `QT_FORCE_STDERR_LOGGING=1`.
