@@ -12,8 +12,6 @@ before writing anything; a type we cannot play yet still installs and is marked.
 import argparse, importlib.machinery, importlib.util, json, os, re, shutil, sys, tempfile, zipfile
 
 ROOT = os.path.expanduser("~/.local/share/luminos/wallpapers")
-MANIFEST = "luminos-wallpaper.json"
-LIVELY = "LivelyInfo.json"
 
 
 sys.dont_write_bytecode = True          # no __pycache__ inside the KPackage
@@ -41,6 +39,8 @@ def load(stem):
 # module to it made find_root() join a module onto a path. BUG-173's shape again.
 P = load("luminos-wallpaper-pkg")
 LIVELY_MOD = load("luminos-wallpaper-lively")
+# slug() and find_root() moved into the tested module, 2026-09-20.
+MANIFEST, LIVELY, find_root = (P.MANIFEST_NAME, P.LIVELY_INFO, P.find_root)
 
 
 def slug(text):
@@ -65,20 +65,6 @@ def unpack(src, workdir):
                 raise ValueError("refusing this archive: unsafe path inside it: %r" % name)
         z.extractall(workdir)
     return workdir
-
-
-def find_root(base):
-    """A zip often holds a wrapper folder; look one level down too."""
-    for name in (MANIFEST, LIVELY):
-        if os.path.isfile(os.path.join(base, name)):
-            return base
-    entries = [e for e in os.listdir(base) if os.path.isdir(os.path.join(base, e))]
-    if len(entries) == 1:
-        inner = os.path.join(base, entries[0])
-        for name in (MANIFEST, LIVELY):
-            if os.path.isfile(os.path.join(inner, name)):
-                return inner
-    return base
 
 
 def manifest_for(root, wanted_id):

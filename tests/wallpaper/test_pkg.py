@@ -157,3 +157,38 @@ def test_parse_manifest_rejects_sneaky_paths(bad):
 @given(st.text())
 def test_path_safe_never_raises(s):
     assert isinstance(P._path_safe(s), bool)
+
+
+# ---- find_root, moved out of the installer 2026-09-20 (DECISION 126) --------
+
+def test_find_root_uses_a_folder_that_holds_the_manifest(tmp_path):
+    (tmp_path / P.MANIFEST_NAME).write_text("{}")
+    assert P.find_root(str(tmp_path)) == str(tmp_path)
+
+
+def test_find_root_looks_one_level_into_a_zips_wrapper_folder(tmp_path):
+    inner = tmp_path / "Rain"
+    inner.mkdir()
+    (inner / P.LIVELY_INFO).write_text("{}")
+    assert P.find_root(str(tmp_path)) == str(inner)
+
+
+def test_find_root_refuses_to_guess_between_several_folders(tmp_path):
+    """An archive of many wallpapers must not install whichever sorts first."""
+    for name in ("Rain", "Medusae"):
+        d = tmp_path / name
+        d.mkdir()
+        (d / P.LIVELY_INFO).write_text("{}")
+    assert P.find_root(str(tmp_path)) == str(tmp_path)
+
+
+def test_find_root_does_not_descend_twice(tmp_path):
+    deep = tmp_path / "a" / "b"
+    deep.mkdir(parents=True)
+    (deep / P.MANIFEST_NAME).write_text("{}")
+    assert P.find_root(str(tmp_path)) == str(tmp_path)
+
+
+def test_find_root_on_an_unreadable_path_returns_it_unchanged(tmp_path):
+    missing = str(tmp_path / "not-here")
+    assert P.find_root(missing) == missing

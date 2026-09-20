@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 3 (new Cowork chat; counter legitimately restarts, §0.1)
+Last updated: 2026-09-20 — chat A Response 4 / chat B Response 18 (TWO Cowork chats ran in parallel; see the gaming-OS pointer below)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -11,13 +11,45 @@ Keep Luminos OS working as a daily-driver Windows replacement — the G14 deskto
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-**This turn: dGPU investigation, then a temporary audit log Shawn asked for.** Shawn: *"find out why is/was the NVIDIA gpu on — do not
-turn it off just find out why its behaving such a way, and why our code that gate keeps the NVIDIA
-dgpu."* Answered in **BUG-182** (new) plus the gate map below. **Nothing was changed.**
+**Lively web wallpapers render, and the wallpaper is proven to stay off the dGPU.** Shawn:
+*"fix the WebGL thing and also make sure that those things never touches the NVIDIA's dgpu at any
+and all cost. and also why can't i select the wallpapers listed."* All three answered this turn:
 
-Standing aim before that, unchanged and still the main thread: **Lively Wallpaper parity for the KDE
-live wallpaper, without Chromium.** Five of six SPEC §3 items done, box reports 35/35 on
-`luminos-wallpaper-selftest`. **§3.6 (games through a nested compositor) is all that is left.**
+1. **It was never WebGL (BUG-183, DECISION 126).** WebGL works, on the AMD 780M, and so does
+   `fetch()` from `file://`. Lively web wallpapers are pages that wait to be *told what to draw* —
+   Lively calls `livelyPropertyListener(name, value)` per property on load, and we never did.
+   Rain's background texture therefore stayed `undefined` and its shader drew black with a
+   perfectly healthy GL context. `contents/ui/LivelyApi.qml` (new) now makes those calls;
+   `luminos-wallpaper-props` reads the package's own `LivelyProperties.json` and converts it on the
+   way through, **without ever rewriting the package on disk**. Measured: Rain's framebuffer went
+   from mean brightness 0 to 126/255, `u_tex0` from `undefined` to a 1920×1080 texture, and its
+   sixteen Lively controls now appear in the settings panel.
+2. **Selecting a downloaded wallpaper did nothing** because his System Settings process was
+   started at 19:09 and the fix that taught `scene.js` about web packages landed at 23:23 —
+   **BUG-171 again, per process.** `usePackage()` also failed *silently*; it now warns with the
+   package type and says to restart System Settings.
+3. **dGPU (BUG-184).** The audit found the wallpaper clean (plasmashell holds ten handles, all
+   `renderD129`) and found a hole DECISION 25 never covered: **`/dev/dri/renderD128`, the NVIDIA
+   card's DRM render node, was mode 0666**. Now `root:dgpu 0660`, matched by DRIVER not by number.
+   Verified both ways — denied as `shawn`, still open through `dgpu-exec-v2`. Selftest gained
+   section **[3c]**, which asks the kernel (who holds a descriptor) rather than the environment.
+
+**Selftest: 38 passed, 0 failed** — including the Python budget gate, red since BUG-179, now green
+because `slug()`/`find_root()` moved into the tested module rather than because comments were
+shaved.
+
+### The one thing this turn found and did NOT finish
+`livelySystemInformation(json)` and `livelyAudioListener(float[])` are still unimplemented, and
+three of Lively's six stock wallpapers want them (Simple System; Music TV, Music Tunnel). The audio
+array already exists in `ui/audio/`; the system-information payload does not — `luminos-monitor
+stats` carries no RAM, network or hardware names, and filling those with zeroes would draw empty
+charts that look like a different bug. **Rain is confirmed rendering with pixels. The other five
+have not been visually confirmed** — the harness screenshots kept catching the wrong window, and
+Shawn was at the keyboard, so forcing Show Desktop was the wrong move. His desktop is currently set
+to Rain in web mode; looking at it is the remaining check.
+
+Standing aim, unchanged: **Lively Wallpaper parity for the KDE live wallpaper, without Chromium.**
+**§3.6 (games through a nested compositor) is still the largest unfinished item.**
 Docs: `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG,VERIFY}.md`.
 
 ## Why / motivation
@@ -38,6 +70,32 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 - `device_bash` is a **different machine** (the Cowork VM, uid 1004). It sees the same connected
   folders; it does **not** see the desktop session, the real `/dev`, systemd, or the GPU.
   **A subagent told to "use device_bash" will silently investigate the wrong computer.**
+
+### Separate thread — NEW gaming OS feasibility (Cowork chat B, 2026-09-19/20). READ-ONLY, no overlap.
+⚠️ **A second Cowork chat was running in parallel on this repo and this file was reset at 23:49
+while that chat was mid-thread.** Nothing was lost — its output is durable in
+**`docs/gamemode/FEASIBILITY.md`** (304 lines) and in `luminos-notes.sh search "console"`.
+Pointer only, so this file stays short:
+- **Shawn is scoping a NEW Arch-based, gaming-only OS for this laptop** — Steam + Proton + games,
+  nothing else. It is **not** a Luminos mode, so Luminos-specific findings do not carry to it.
+- 🔴 **AGENTS.md §2's "No MUX" was WRONG and is corrected in place.** `supergfxctl -s` →
+  `[Integrated, Hybrid, AsusMuxDgpu]`. ⚠️ Before ever switching, check whether §9's
+  `KWIN_DRM_DEVICES=/dev/dri/card2` + the Mesa EGL pin strand the desktop — plausible black screen.
+  **Cross-ref BUG-182: supergfxd is what starts `nvidia-powerd` on entering Hybrid**, so a mode
+  change moves that too.
+- 🔴 **SPEC §3.6 IS NO LONGER PACKAGE-BLOCKED** — `xdg-desktop-portal-wlr 0.8.4-1` and
+  `gst-plugin-pipewire 1:1.6.8-1` are now **both installed** (with `cage 0.3.1`). Verify before
+  trusting any older "BLOCKED ON PACKAGES" note.
+- **Hardware ceilings, measured, that no OS changes:** 128-bit LPDDR5 (4 × 32-bit channels) at
+  **6400 MT/s configured though rated 7500** = 102.4 GB/s shared; 780M has **2 MB L2 and no
+  Infinity Cache**; the 4050 is 96-bit/192 GB/s dedicated with **12 MB L2**, ~11–12 TF FP32 at our
+  90 W ceiling. **The PS5-class part in this laptop is the 4050, not the iGPU**, and **6 GB VRAM is
+  the hard ceiling.** DRAM speed is set at training time by AGESA — firmware, not kernel.
+- Carries to ANY OS on this hardware: **BUG-069** (`nvidia-smi -pl` is a no-op on this mobile part;
+  TGP must go via nvidia-powerd + read-back), the MUX, and gamescope's NVIDIA-*hybrid* bugs
+  (#498/#611/#1220/#1590/#1643/#1662 — argues MUX first, then gamescope).
+- `gamescope` 3.16.28-1 and `gamemode` 1.8.2-3 are in `extra`, **neither installed**. Nothing was
+  installed, switched or changed by that chat.
 
 ## State — what is DONE
 

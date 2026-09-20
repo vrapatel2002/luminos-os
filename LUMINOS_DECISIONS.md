@@ -7838,3 +7838,60 @@ daemon-reload`. The script stays in the repo either way.
 but `bpftrace` is not installed and installing it mid-investigation adds a variable); the
 `rpm_resume` tracepoint (answers "who resumed this device" but only for the **next** wake, so it is
 useless on a card that is already awake — worth arming *in addition*, later).
+
+---
+
+## DECISION 126 — Lively's web API is a protocol we implement, not a page we host
+Date: September 20, 2026
+Made by: claude-code
+**Status: SHIPPED — property half implemented and measured; two APIs named as missing**
+
+### Context
+Lively's six stock wallpapers imported perfectly and rendered black. Three passes at that symptom
+blamed WebGL, then Chromium's GPU process, then BUG-050's EGL pin — a subsystem named each time,
+never measured. Two probes settled it: WebGL works (ANGLE on the AMD 780M, clears magenta), local
+`fetch()` works, and Rain's shader was fetched, compiled and bound. What was missing was a texture
+that only ever arrives one way: `livelyPropertyListener("mediaSelect", "media/….jpg")`, which
+Lively's player calls on load and we never called at all.
+
+### What We Decided
+Treat Lively's web JavaScript API as **a protocol with a spec**, implemented against its source
+rather than against its behaviour as we imagine it, and implemented in one place
+(`contents/ui/LivelyApi.qml`) that owns the call shape:
+
+- Every argument JSON-serialised, the function called directly, guarded by a `typeof` check
+  (`CoreWebView2Extensions.cs`).
+- `folderDropdown` values travel as `folder/file`, not as the index we store
+  (`GetFolderDropdownValue()`).
+- `button` and `label` are skipped on restore (`LivelyPropertyUtil.cs`: "user interaction only").
+- `livelyWallpaperPlaybackChanged` receives a JSON **string**, because Lively serialises it twice.
+- Only changed properties are re-sent, because re-sending `mediaSelect` re-decodes a 4 MB JPEG.
+
+The schema comes from the package's own `LivelyProperties.json`, converted on read by
+`luminos-wallpaper-props`. **The package on disk is never rewritten** — Shawn's instruction when
+these were downloaded was "do not modify them", and it is also the only way to be sure a wallpaper
+that fails here fails for its own reasons. A side effect worth having: packages imported before
+today gained their settings panels with no re-import.
+
+### The Conflict (both sides, per Rule 11)
+- **Convert at install time, writing a `properties.json` into the package.** Simpler reader, one
+  conversion per package instead of one per settings-panel open. Rejected: it edits someone else's
+  wallpaper, it strands everything already installed, and a converter bug becomes permanent on disk.
+- **Convert on read.** Costs a `json.load` and a `listdir` each time the panel opens — measured in
+  single-digit milliseconds, against a subprocess we were already spawning. Chosen.
+
+### What is deliberately NOT done
+`livelySystemInformation(json)` and `livelyAudioListener(float[])` are not implemented. Simple
+System needs the first (its `Arguments` is `--system-information`, which Lively rewrites to
+`--wallpaper-system-information`); Music TV and Music Tunnel need the second. The audio array we
+already have; the system-information payload we do not — `luminos-monitor stats` carries no RAM,
+network or hardware names, and feeding those fields zeroes would draw empty charts that look like a
+different bug. Extending `luminos-monitor` is its own change with its own tests, so it is named here
+rather than half-done. See BUG-183.
+
+### Scope note
+`slug()` and `find_root()` moved from the installer into `luminos-wallpaper-pkg`, and both helper
+modules now ship inside the package. That second part fixed a real, unnoticed break: from the
+DEPLOYED copy the installer could not resolve `../../../../../scripts`, so the gallery's Install…
+button answered `ERR cannot find luminos-wallpaper-pkg` while every selftest check passed. The
+selftest now runs the deployed installer instead of only checking that the file exists.

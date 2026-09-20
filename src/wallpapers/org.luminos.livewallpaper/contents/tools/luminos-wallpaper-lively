@@ -59,3 +59,68 @@ def lively_to_manifest(info: dict, pkg_id: str) -> dict:
     return manifest
 
 
+
+# ---------------------------------------------------------------------------
+# LivelyProperties.json -> our properties schema.  BUG-183.
+# [CHANGE: claude-code | 2026-09-20]
+#
+# Transcribed from src/Lively/Lively.Models/LivelyControls/*.cs — the same rule
+# BUG-181 taught: read the other project's source, never guess its vocabulary.
+# Lively's own player skips `button` and `label` when it restores properties
+# (Lively.Common/Helpers/LivelyPropertyUtil.cs: "user interaction only"), so the
+# bridge in QML skips them too; they are kept here because the settings panel
+# still draws them.
+_LIVELY_CONTROL_MAP = {
+    "slider": "slider", "dropdown": "dropdown", "scalerdropdown": "dropdown",
+    "folderdropdown": "dropdown", "checkbox": "checkbox", "textbox": "textbox",
+    "color": "color", "button": "button", "label": "label",
+}
+_LIVELY_PASSTHROUGH = ("min", "max", "step", "items", "help")
+
+
+def _folder_control(entry, out, listdir):
+    """folderDropdown: items live in a folder on disk, and the value Lively sends
+    the page is `folder/file` — not the index our dropdown stores. The folder is
+    recorded so ui/LivelyApi.qml can rebuild that path."""
+    folder = entry.get("folder")
+    items = []
+    if folder and listdir is not None:
+        try:
+            items = sorted(listdir(folder))
+        except Exception:
+            items = []
+    out["items"] = items
+    out["livelyFolder"] = folder or ""
+    chosen = entry.get("value")
+    out["value"] = items.index(chosen) if chosen in items else 0
+    return out
+
+
+def lively_control_to_ours(entry, listdir=None):
+    """One LivelyProperties.json control -> one of ours. None means skip it."""
+    if not isinstance(entry, dict):
+        return None
+    kind = _LIVELY_CONTROL_MAP.get(str(entry.get("type", "")).strip().lower())
+    if kind is None:
+        return None
+    out = {"type": kind, "value": entry.get("value")}
+    if entry.get("text") is not None:
+        out["label"] = entry["text"]
+    for field in _LIVELY_PASSTHROUGH:
+        if entry.get(field) is not None:
+            out[field] = entry[field]
+    if str(entry.get("type", "")).strip().lower() == "folderdropdown":
+        return _folder_control(entry, out, listdir)
+    return out
+
+
+def lively_props_to_schema(raw, listdir=None):
+    """A whole LivelyProperties.json. An unknown control is skipped, never fatal."""
+    schema = {}
+    if not isinstance(raw, dict):
+        return schema
+    for key, entry in raw.items():
+        converted = lively_control_to_ours(entry, listdir)
+        if converted is not None:
+            schema[key] = converted
+    return schema

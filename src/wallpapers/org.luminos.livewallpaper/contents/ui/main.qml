@@ -405,6 +405,10 @@ WallpaperItem {
                 webHost.item.interactive = Qt.binding(() => root.configuration.WebInteractive);
                 webHost.item.bgColor = Qt.binding(() => root.configuration.BackgroundColor);
                 webHost.item.shouldPlay = Qt.binding(() => root.shouldPlay);
+                // BUG-183: a Lively page is told what to draw through its
+                // properties. Same config key as QML mode, keyed by URL.
+                webHost.item.sceneProperties =
+                    Qt.binding(() => root.configuration.SceneProperties);
                 // The cursor MouseArea moved with the renderer, so the position
                 // now arrives from the loaded item instead of being written here.
                 // Guarded on `item` because the binding outlives a mode switch.

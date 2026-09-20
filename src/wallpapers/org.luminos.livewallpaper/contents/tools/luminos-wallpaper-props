@@ -18,13 +18,43 @@ run, and where the validation rules are testable.
 "Beside the scene" resolves to <Scene>.properties.json first and plain
 properties.json second: a package is one scene per folder, the built-ins share
 one, and a shader's settings belong to the shader rather than to ShaderToy.qml.
+
+[CHANGE: claude-code | 2026-09-20] BUG-183 — LivelyProperties.json is a third
+candidate, converted on the way through. It is read, never rewritten: an
+imported Lively wallpaper stays byte-identical to what its author shipped, and
+a package installed before this existed gains its settings with no re-import.
 """
-import json, os, sys
+import importlib.machinery, importlib.util, json, os, sys
+
+sys.dont_write_bytecode = True          # no __pycache__ inside the KPackage
 
 # Must stay identical to _KNOWN_PROP_TYPES in scripts/luminos-wallpaper-pkg and
 # knownTypes in ui/props/PropertyStore.qml. tests/wallpaper/test_props_read.py
 # fails if the three ever disagree.
 KNOWN = ("slider", "color", "dropdown", "textbox", "checkbox", "file", "button", "label")
+
+LIVELY = "LivelyProperties.json"
+
+
+def lively_module():
+    """The tested converter — beside this file, or in scripts/ where the tests
+    import it by name. Returns None rather than raising: a missing helper must
+    cost a Lively package its settings panel, not every package its own."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for rel in ("luminos-wallpaper-lively",
+                os.path.join("..", "..", "..", "..", "..", "scripts", "luminos-wallpaper-lively")):
+        path = os.path.normpath(os.path.join(here, rel))
+        if not os.path.isfile(path):
+            continue
+        try:
+            loader = importlib.machinery.SourceFileLoader("luminos_wallpaper_lively", path)
+            mod = importlib.util.module_from_spec(
+                importlib.util.spec_from_loader("luminos_wallpaper_lively", loader))
+            loader.exec_module(mod)
+            return mod
+        except Exception:
+            return None
+    return None
 
 
 def candidates(base):
@@ -35,7 +65,18 @@ def candidates(base):
     if not stem:
         return []
     return [os.path.join(directory, stem + ".properties.json"),
-            os.path.join(directory, "properties.json")]
+            os.path.join(directory, "properties.json"),
+            os.path.join(directory, LIVELY)]
+
+
+def convert_lively(raw, directory):
+    """Lively's own schema, translated. `listdir` is what lets a folderDropdown
+    offer the files it actually has."""
+    mod = lively_module()
+    if mod is None:
+        return None
+    return mod.lively_props_to_schema(
+        raw, lambda folder: os.listdir(os.path.join(directory, folder)))
 
 
 def validate(raw):
@@ -60,6 +101,10 @@ def read(base):
             return "ERR", "%s is not valid JSON: %s" % (os.path.basename(path), exc)
         except OSError as exc:
             return "ERR", "cannot read %s: %s" % (os.path.basename(path), exc.strerror)
+        if os.path.basename(path) == LIVELY:
+            raw = convert_lively(raw, os.path.dirname(path))
+            if raw is None:
+                return "ERR", "the Lively property converter is not installed beside this tool"
         return "OK", json.dumps(validate(raw), separators=(",", ":"))
     return "NONE", ""
 

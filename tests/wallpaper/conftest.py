@@ -15,6 +15,8 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 CANDIDATES = {
     "luminos_wallpaper_pkg": ["scripts/luminos-wallpaper-pkg"],
     "luminos_wallpaper_lively": ["scripts/luminos-wallpaper-lively"],
+    "luminos_wallpaper_props": [
+        "src/wallpapers/org.luminos.livewallpaper/contents/tools/luminos-wallpaper-props"],
 }
 
 for name, rels in CANDIDATES.items():

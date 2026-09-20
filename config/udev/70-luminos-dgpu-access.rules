@@ -20,3 +20,21 @@ KERNEL=="nvidia[0-9]*",     GROUP="dgpu", MODE="0660"
 KERNEL=="nvidia-modeset",   GROUP="dgpu", MODE="0660"
 KERNEL=="nvidia-uvm",       GROUP="dgpu", MODE="0660"
 KERNEL=="nvidia-uvm-tools", GROUP="dgpu", MODE="0660"
+
+# [CHANGE: claude-code | 2026-09-20] BUG-184 — the gate had a door nobody had tried.
+#
+# The rules above cover the NVIDIA driver's OWN nodes. They do not cover the DRM
+# render node the same card exposes: /dev/dri/renderD128 (driver `nvidia`, the
+# AMD 780M is renderD129) comes up 0666 root:render, so any process could open
+# the discrete GPU through DRM without ever touching /dev/nvidia*. Chromium and
+# Mesa both ENUMERATE every render node at startup, and enumerating this one is
+# an open() on a card that is meant to be asleep.
+#
+# Matched by DRIVER rather than by node name: renderD128/129 are numbered in
+# probe order, and pinning the NVIDIA rule to a number would silently move to
+# the iGPU the day the probe order changes. This is a real device-model node
+# (unlike /dev/nvidia*, which nvidia-modprobe mknod()s — see the DECISION 25
+# amendment), so a udev rule genuinely fires for it.
+#
+# KILL SWITCH:  sudo chmod 0666 /dev/dri/renderD128
+SUBSYSTEM=="drm", KERNEL=="renderD[0-9]*", DRIVERS=="nvidia", GROUP="dgpu", MODE="0660"

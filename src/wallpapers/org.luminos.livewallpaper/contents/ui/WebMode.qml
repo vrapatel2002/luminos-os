@@ -25,6 +25,9 @@
 */
 import QtQuick
 import QtWebEngine
+// PropertyStore imports nothing but QtQuick; the file read behind it is a
+// subprocess, not a browser. Safe to pull in here. [CHANGE: claude-code | 2026-09-20]
+import "props"
 
 Item {
     id: webRoot
@@ -36,6 +39,9 @@ Item {
     property bool interactive: false
     property color bgColor: "black"
     property bool shouldPlay: true
+    // The raw SceneProperties config string, passed through untouched — the
+    // same key QML mode uses, keyed by the page's URL. BUG-183.
+    property string sceneProperties: "{}"
 
     // Cursor position, written here and read by main.qml's injector.
     property real cursorX: 0
@@ -61,9 +67,30 @@ Item {
                 : WebEngineView.LifecycleState.Frozen;
         }
         onLoadingChanged: function(info) {
-            if (info.status === WebEngineView.LoadSucceededStatus)
+            var ok = (info.status === WebEngineView.LoadSucceededStatus);
+            if (ok)
                 web.applyState();
+            // A Lively page draws nothing until its properties arrive, so this
+            // must flip on load and OFF on a reload — see LivelyApi.qml.
+            lively.ready = ok;
         }
+    }
+
+    // CONTRACTS §4. Defaults from the page's own LivelyProperties.json (or a
+    // properties.json beside it), saved values on top.
+    PropertyStore {
+        id: propStore
+        sceneUrl: webRoot.webSource
+        sceneId: "" + webRoot.webSource
+        savedJson: webRoot.sceneProperties
+    }
+
+    LivelyApi {
+        id: lively
+        view: web
+        schema: propStore.schema
+        values: propStore.props
+        playing: webRoot.shouldPlay
     }
 
     onShouldPlayChanged: web.applyState()

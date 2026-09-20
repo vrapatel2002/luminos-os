@@ -56,8 +56,14 @@ ColumnLayout {
     // manifests. [CHANGE: claude-code | 2026-09-19] SPEC §3.3
     function usePackage(type, entryPath) {
         var m = Scene.modeForType(type);
-        if (m === null)
-            return;              // never offered; the gallery emits only playable rows
+        if (m === null) {
+            // BUG-183: a click that changes nothing must say so. The gallery only
+            // emits playable rows, so reaching here means this process is running
+            // a scene.js older than the type it was just handed.
+            console.warn("luminos-wallpaper: no mode for package type '" + type
+                         + "' (stale settings process? restart System Settings)");
+            return;
+        }
         root.cfg_WallpaperMode = m.mode;
         if (m.key === "QmlScene")
             root.cfg_QmlScene = entryPath;
@@ -408,13 +414,24 @@ ColumnLayout {
     // properties.json, this reads it, and the panel appears. Resolving the scene
     // through scene.js is what guarantees the panel edits the properties of the
     // scene the wallpaper will actually load.
+    // Web mode has properties too: a Lively page's LivelyProperties.json is read
+    // through the same store, keyed by the page URL. Without this the panel
+    // showed nothing for exactly the wallpapers that need it most (BUG-183).
+    // [CHANGE: claude-code | 2026-09-20]
+    readonly property bool propsMode: root.cfg_WallpaperMode === "qml"
+                                   || root.cfg_WallpaperMode === "web"
+    readonly property string propsId: root.cfg_WallpaperMode === "web"
+                                    ? root.cfg_WebUrl : root.cfg_QmlScene
+
     PropertyStore {
         id: sceneProps
-        sceneId: root.cfg_QmlScene
+        sceneId: root.propsId
         savedJson: root.cfg_SceneProperties
         // Beside the shader for a .frag, beside the scene otherwise — the same
         // rule QmlMode uses, from the same file. [CHANGE: claude-code | 2026-09-19]
         sceneUrl: {
+            if (root.cfg_WallpaperMode === "web")
+                return root.cfg_WebUrl;
             var base = Scene.propsBaseFor(root.cfg_QmlScene);
             return Scene.isAbsolute(base) ? base : Qt.resolvedUrl(base);
         }
@@ -424,10 +441,10 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 26
         Layout.topMargin: Kirigami.Units.largeSpacing
-        visible: root.cfg_WallpaperMode === "qml"
+        visible: root.propsMode
     }
     Kirigami.Heading {
-        visible: root.cfg_WallpaperMode === "qml"
+        visible: root.propsMode
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 26
         Layout.topMargin: Kirigami.Units.largeSpacing
@@ -435,23 +452,23 @@ ColumnLayout {
         text: i18n("Scene settings")
     }
     QQC2.Label {
-        visible: root.cfg_WallpaperMode === "qml"
+        visible: root.propsMode
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 26
         wrapMode: Text.WordWrap
         font: Kirigami.Theme.smallFont
-        text: i18n("Declared by the scene itself, in a properties.json beside it.")
+        text: i18n("Declared by the wallpaper itself — a properties.json beside the scene, or a Lively package's own LivelyProperties.json.")
     }
     PropertyEditor {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 26
-        visible: root.cfg_WallpaperMode === "qml"
+        visible: root.propsMode
         schema: sceneProps.schema
         values: sceneProps.props
         problem: sceneProps.problem
         // The panel owns the config key; the wallpaper only ever reads it.
         onChanged: function (key, value) {
-            root.cfg_SceneProperties = sceneProps.withValue(root.cfg_QmlScene, key, value);
+            root.cfg_SceneProperties = sceneProps.withValue(root.propsId, key, value);
         }
     }
 

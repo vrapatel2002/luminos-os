@@ -43,6 +43,18 @@ for f in ui/QmlMode.qml ui/scene.js ui/audio/AudioBridge.qml ui/audio/CaelestiaA
          samples/luminos-shadertoy.frag; do
     [ -f "$PLUGIN/$f" ] && ok "installed $f" || bad "MISSING $f"
 done
+# [CHANGE: claude-code | 2026-09-20] The installer loads two tested helpers by
+# name. In the repo they resolve through ../../../../../scripts; from the
+# DEPLOYED copy that path does not exist, so the Install… button answered
+# "ERR cannot find luminos-wallpaper-pkg" while every other check passed. Both
+# helpers now ship inside the package, and this is what notices if one stops.
+if out="$(python3 "$PLUGIN/tools/luminos-wallpaper-install" install /nonexistent 2>&1)"; then
+    bad "the installer accepted a path that does not exist"
+elif printf '%s' "$out" | grep -q "cannot find"; then
+    bad "the DEPLOYED installer cannot load its helpers: $out"
+else
+    ok "the deployed installer runs and refuses a bad path"
+fi
 if diff -rq "$REPO/src/wallpapers/org.luminos.livewallpaper" \
             "${PLUGIN%/contents}" >/dev/null 2>&1; then
     ok "installed copy matches the repo"
@@ -120,6 +132,48 @@ fi
 info "exempt by name, pre-SPEC §9: $QML_EXEMPT ($(wc -l < "$REPO/src/wallpapers/org.luminos.livewallpaper/contents/ui/main.qml") and $(wc -l < "$REPO/src/wallpapers/org.luminos.livewallpaper/contents/ui/config.qml") lines)"
 say ""
 
+# ---------------------------------------------------------------------------
+# [CHANGE: claude-code | 2026-09-20] BUG-184. "The wallpaper must never touch the
+# NVIDIA dGPU" is a claim, and a claim that nothing checks is a claim that drifts.
+# This asks the kernel, not the environment: a process either holds a descriptor
+# on the card or it does not.
+say "[3c] the wallpaper stays on the iGPU (BUG-050, BUG-184)"
+NV_NODES="$(ls -d /sys/class/drm/renderD*/device/driver 2>/dev/null | while read -r d; do
+    case "$(basename "$(readlink -f "$d")")" in nvidia)
+        echo "/dev/dri/$(echo "$d" | cut -d/ -f5)" ;; esac; done)"
+holders=""
+for pid in $(pgrep -u "$(id -u)" '' 2>/dev/null); do
+    for fd in /proc/$pid/fd/*; do
+        t="$(readlink "$fd" 2>/dev/null)" || continue
+        case "$t" in
+            /dev/nvidia*) holders="$holders $(cat /proc/$pid/comm 2>/dev/null):$t" ;;
+            *) for n in $NV_NODES; do [ "$t" = "$n" ] &&
+                   holders="$holders $(cat /proc/$pid/comm 2>/dev/null):$t"; done ;;
+        esac
+    done 2>/dev/null
+done
+if [ -z "$holders" ]; then
+    ok "no process of this user holds an NVIDIA node ($(echo $NV_NODES) or /dev/nvidia*)"
+else
+    bad "a user process holds the dGPU:$holders"
+fi
+for n in $NV_NODES; do
+    mode="$(stat -c '%a %U:%G' "$n" 2>/dev/null)"
+    case "$mode" in
+        66[0-9]*dgpu) ok "$n gated ($mode)" ;;
+        *) bad "$n is NOT gated ($mode) — DECISION 25 / BUG-184" ;;
+    esac
+done
+if pid="$(pgrep -x plasmashell | head -1)" && [ -n "$pid" ]; then
+    nodes="$(for fd in /proc/$pid/fd/*; do readlink "$fd" 2>/dev/null; done \
+             | grep -o '/dev/dri/[a-zA-Z0-9]*' | sort -u | tr '\n' ' ')"
+    case "$nodes" in
+        *renderD*) ok "plasmashell holds: $nodes" ;;
+        *) info "plasmashell holds no DRM node right now" ;;
+    esac
+fi
+say ""
+
 say "[4] QML contract tests"
 if command -v qml6 >/dev/null 2>&1; then
     # QT_FORCE_STDERR_LOGGING: Qt hands console.log to the JOURNAL when stderr is
@@ -149,8 +203,19 @@ say "[5] the running wallpaper"
 pid="$(pgrep -x plasmashell | head -1)"
 if [ -n "$pid" ]; then
     ok "plasmashell pid $pid"
+    # [CHANGE: claude-code | 2026-09-20] DECISION 112 says Chromium must be mapped
+    # ONLY in web mode. Reporting it as a failure while web mode is genuinely
+    # selected is how a red line gets ignored — read the config, then judge.
+    wpmode="$(awk '/^\[/{g=$0} /^WallpaperMode=/{ if (g ~ /luminos/) { sub(/^WallpaperMode=/,""); print } }' \
+              "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" 2>/dev/null | tail -1)"
     if grep -q libQt6WebEngineCore "/proc/$pid/maps" 2>/dev/null; then
-        bad "Chromium IS mapped into plasmashell (web mode selected?)"
+        if [ "$wpmode" = "web" ]; then
+            ok "Chromium mapped, and web mode is selected — DECISION 112 holds"
+        else
+            bad "Chromium IS mapped into plasmashell but the mode is '$wpmode' — DECISION 112 broken"
+        fi
+    elif [ "$wpmode" = "web" ]; then
+        info "web mode selected but Chromium not mapped yet (the view may not have loaded)"
     else
         ok "Chromium not mapped"
     fi

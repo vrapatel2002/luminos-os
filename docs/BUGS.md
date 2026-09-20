@@ -7334,3 +7334,131 @@ line beside it is the BUG-161 ACPI path, which holds no descriptor and no fd sca
 frozen counter, and reached for a cause. The counter was frozen because of something that had
 already stopped happening. **A frozen counter dates the *end* of an event, not its cause**, and
 three samples over eleven minutes is not a sample of a three-hour window.
+
+---
+
+## BUG-183 — Lively's web wallpapers were never black: we were never telling them what to draw
+<!-- [CHANGE: claude-code | 2026-09-20] DECISION 126 -->
+
+**Status:** FIXED and measured · **Severity:** every Lively web wallpaper that gets its content
+from properties rendered black; the settings panel showed none of their controls · **Files:**
+`contents/ui/LivelyApi.qml` (new), `contents/ui/WebMode.qml`, `contents/ui/main.qml`,
+`contents/ui/config.qml`, `contents/tools/luminos-wallpaper-props`, `scripts/luminos-wallpaper-lively`
+
+### What the previous entry got wrong
+The BUG-182 write-up above concluded *"WebGL specifically is not producing pixels inside
+QtWebEngine in plasmashell"* and pointed the next step at `QTWEBENGINE_CHROMIUM_FLAGS` and at
+BUG-050's EGL pin. **All of that was wrong, and it was wrong in the most expensive way: it named a
+subsystem instead of measuring one.** The observation it rested on — "the dat.gui UI draws, the
+canvas stays black" — is equally consistent with a dozen causes, and the one it picked was the one
+that sounded most like the symptom.
+
+Two probes, five minutes, settled it:
+
+```
+minimal WebGL page, plasmashell's exact environment:
+  context=webgl2
+  UNMASKED=ANGLE (AMD, AMD Radeon 780M Graphics (radeonsi phoenix ACO DRM 3.64), OpenGL ES 3.2)
+  cleared magenta                      <- WebGL works, and on the iGPU
+fetch()/XHR from a file:// page:
+  fetch OK: hello-from-local-file      <- local file reads work too
+```
+
+### The actual cause
+A Lively web wallpaper is not a page that draws itself. It is a page that **waits to be told what
+to draw.** Lively calls `livelyPropertyListener(name, value)` once per saved property the moment
+the page finishes loading, and the wallpaper builds its scene from those calls. Rain's own code:
+
+```js
+case "mediaSelect":
+    new THREE.TextureLoader().load(val, function (tex) { material.uniforms.u_tex0.value = tex; });
+```
+
+We never made those calls. So `u_tex0` stayed `undefined`, the shader sampled nothing, and the
+canvas drew black — with a healthy GL context, a fetched 5 875-character fragment shader, three.js
+r150 running, and `#container` faded correctly to `opacity: 1`. Proof, from inside the page:
+
+```
+before:  {"tex0":"undefined", "fragLen":5875, "lost":false, "opacity":"1"}
+after:   {"tex0":"mi", "texRes":"1920x1080", "intensity":0.4, "zoom":2.61, "blurIter":16}
+         readPixels over the whole framebuffer: meanBrightness 126/255, max 200   (was 0)
+```
+
+### The fix, in three parts
+1. **`scripts/luminos-wallpaper-lively`** gains `lively_props_to_schema()` — Lively's control
+   vocabulary (`slider`, `dropdown`, `scalerDropdown`, `folderDropdown`, `checkbox`, `textbox`,
+   `color`, `button`, `label`) translated to ours. Transcribed from
+   `Lively.Models/LivelyControls/*.cs`, not guessed — BUG-181's lesson applied on purpose.
+2. **`contents/tools/luminos-wallpaper-props`** reads `LivelyProperties.json` as a third candidate
+   and converts on the way through. The package on disk is **never rewritten**: an imported Lively
+   wallpaper stays byte-identical to what its author shipped, and packages imported before today
+   gain their settings with no re-import.
+3. **`contents/ui/LivelyApi.qml`** makes the calls, on load and on every change, with Lively's own
+   serialisation. A `folderDropdown` stores an index here and is sent as `folder/file`, because
+   that is what `GetFolderDropdownValue()` does. `button` and `label` are skipped on restore,
+   because `LivelyPropertyUtil.cs` skips them.
+
+`config.qml` now points the same `PropertyStore` at the page URL in web mode, so those sixteen
+controls appear in the settings panel and edit the wallpaper live.
+
+### Still missing, and honestly named
+Two of Lively's web APIs are not implemented, and two of its six stock wallpapers need them:
+`livelySystemInformation(json)` (Simple System — its `Arguments` field is `--system-information`,
+which Lively rewrites to `--wallpaper-system-information`) and `livelyAudioListener(float[])`
+(Music TV, Music Tunnel). `luminos-monitor stats` does not currently carry RAM, network or hardware
+names, so wiring system information means extending that tool — feeding it zeroes would draw empty
+charts and look like a different bug. Tracked as the remaining §3.3 parity work.
+
+### Lesson
+Three separate sessions' worth of suspicion pointed at the GPU stack, and the GPU stack was never
+involved. **"The canvas is black" is a symptom of the whole pipeline, not of its last stage.** The
+probe that settled it — a fifteen-line page that reports `gl.getParameter(VENDOR)` and clears
+magenta — should have been the first thing written, not the tenth.
+
+---
+
+## BUG-184 — the dGPU gate had a door nobody had tried: `/dev/dri/renderD128`, world-open
+<!-- [CHANGE: claude-code | 2026-09-20] found while proving the wallpaper never touches the dGPU -->
+
+**Status:** FIXED, and the fix verified in both directions · **Severity:** DECISION 25 claims
+default-deny; any process could open the discrete GPU through DRM without ever touching
+`/dev/nvidia*` · **Files:** `config/udev/70-luminos-dgpu-access.rules`
+
+Asked to guarantee the wallpaper never touches the RTX 4050, the first step was to audit rather
+than to assert. The wallpaper was clean — plasmashell holds ten handles and every one is
+`renderD129` (AMD), the web view's GPU process holds no DRM node at all, and no process owned by
+`shawn` holds `renderD128`, `card1` or any `/dev/nvidia*`. The audit found something else:
+
+```
+/dev/dri/renderD128   crw-rw-rw-   root render    <- driver: nvidia
+/dev/dri/renderD129   crw-rw-rw-   root render    <- driver: amdgpu
+```
+
+DECISION 25's rules cover the NVIDIA driver's own nodes (`/dev/nvidia*`) and nothing else. The
+**DRM render node of the same card** was mode 0666 — and Chromium and Mesa both *enumerate* every
+render node at startup, which is an `open(2)` on a card that is supposed to be asleep.
+
+Now gated, matched by driver rather than by number (the node numbering follows probe order, and
+pinning the rule to `renderD128` would silently gate the iGPU the day that order changes):
+
+```
+SUBSYSTEM=="drm", KERNEL=="renderD[0-9]*", DRIVERS=="nvidia", GROUP="dgpu", MODE="0660"
+```
+
+Verified both ways, which is the part that matters — a gate that denies everyone is not a gate:
+
+```
+as shawn:              renderD128 DENIED    renderD129 OPEN
+through dgpu-exec-v2:  renderD128 OPEN      /dev/nvidia0 OPEN
+plasmashell / kwin:    still running, display untouched
+```
+
+Unlike `/dev/nvidia*` (which `nvidia-modprobe` creates with `mknod(2)`, so no uevent fires and no
+rule can match — the DECISION 25 amendment covers that), this is a real device-model node, so the
+udev rule genuinely fires. Kill switch: `sudo chmod 0666 /dev/dri/renderD128`.
+
+**Two further holes are recorded, not closed.** `/dev/dri/card1` is `root:video 0660` and `shawn`
+**is** in `video`, so the NVIDIA KMS node is openable; and `/dev/nvidia-uvm{,-tools}` are back at
+`0666 root:root` this boot despite `71-luminos-uvm-gate.rules` (BUG-146/147). Neither is a path the
+wallpaper uses, and closing `card1` risks the compositor's device enumeration, so both are left for
+a deliberate pass rather than folded into a wallpaper fix.
