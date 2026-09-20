@@ -360,7 +360,19 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
 6. Go orchestrator (replace Python hive-daemon.py)
 7. Zone indicator Plasma widget
 8. SDDM custom Luminos theme
-11. 🔴 **BUG-182 — the dGPU was pinned in D0 with no client; the UVM gate is currently OPEN.**
+11. 🟡 **BUG-182 — WAKER IDENTIFIED. `lspci` wakes the dGPU; nothing then holds it awake.**
+    <!-- [CHANGE: cowork | 2026-09-20] --> The DECISION 125 audit unit answered it in under an
+    hour. `### WOKE` at 23:57:43 with **no holder and no profile change**, and the journal names
+    `sudo /usr/bin/lspci -vnn -s 65:00.0` on the **same second** — `-s` filters what is *printed*,
+    pciutils still enumerates the whole bus and `-v` reads config space, which resumes a D3cold
+    device. **Already on file as BUG-151** (*"`lspci -s 01:00.0` flipped the card D3cold→D0 just by
+    asking"*) but never generalised to "any config-space reader". **Why it stays awake: nothing is
+    holding it.** 50 min of `slept_since_last=0s`, sole holder `nvidia-powerd` (which holds handles
+    while the card *sleeps*), and `Video Memory: Active` with zero clients — the driver resumed from
+    outside and never re-armed its idle path. **Cost:** every hardware-inventory pass (`lspci`,
+    `lshw`, `inxi`, `hwinfo`, a bare root `nvidia-smi`) pins the card at ~1.5 W for hours; both pins
+    this boot followed one. **Open:** confirm whether a clean client open/close re-arms it — one
+    `dgpu-exec-v2 -- nvidia-smi` and watch the counter. Original finding: 
     <!-- [CHANGE: cowork | 2026-09-19] AMENDED same evening --> **UPDATE 23:47 — the card went back
     to sleep on its own, and that exonerates `nvidia-powerd`:** it holds 11 handles on
     `/dev/nvidia0` **while the card sits in D3cold**, so holding a node does not block fine-grained

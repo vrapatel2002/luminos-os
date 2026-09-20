@@ -166,7 +166,25 @@ Never say "far lighter than Chromium" without naming the scene.
 Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instruction.
 
 ## Next steps (ordered)
-1. **BUG-182 — READ `/var/log/luminos/dgpu-watch.log`.** The temporary audit unit
+0. ✅ **BUG-182 ANSWERED (mostly), 2026-09-20 00:47 — the audit unit paid for itself in one hour.**
+   `### WOKE` at 23:57:43 with **no `HOLDER+` and no `PROFILE` change**, and the journal names
+   `sudo /usr/bin/lspci -vnn -s 65:00.0` on the **exact same second**. `lspci` woke the NVIDIA card
+   while being asked about the **AMD** one: `-s` filters what is *printed*, pciutils still
+   enumerates the whole bus, and `-v` reads config space — which resumes a D3cold device. No device
+   node is opened, so it is invisible to every fd-based check we own. **This was already on file as
+   BUG-151** and had been recorded as a note about one command instead of the general rule.
+   **Why it then stays awake: nothing is holding it.** 50 min of `slept_since_last=0s`, the only
+   holder is `nvidia-powerd` (which holds handles while the card *sleeps*), and `Video Memory:
+   Active` with zero clients. The driver was resumed from outside and never re-armed its idle path.
+   **Cost in practice:** every hardware-inventory pass pins the card at ~1.5 W for hours — both pins
+   this boot followed one (20:29 `nvidia-smi -q`+`dmidecode`, 23:57 `dmesg`+`dmidecode`+`lspci`).
+   `lspci`, `lshw`, `inxi`, `hwinfo` and a bare root `nvidia-smi` all do it.
+   **The one thing left to test** (cheap, needs Shawn's nod): with the card pinned, run
+   `sudo dgpu-exec-v2 -- nvidia-smi --query-gpu=name --format=csv` once and watch whether
+   `runtime_suspended_time` starts moving within ~2 min. The previous pin released ~2 min after two
+   such queries — **but the 20:29 bare root `nvidia-smi` was also a client cycle and was followed by
+   a 3-hour pin, so the rule is NOT established. Do not write it up as one.**
+1. **Keep reading `/var/log/luminos/dgpu-watch.log`.** The temporary audit unit
    (DECISION 125) is running and is the next move; it needs hours, not minutes. What to look for:
    a **`### WOKE` with a `HOLDER+` beside it** names the culprit outright; a **`### WOKE` with NO
    `HOLDER+` but a `PROFILE` line** beside it is the BUG-161 ACPI NVPCF path, which holds no
@@ -215,6 +233,13 @@ Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instructi
   moved in hours, and the first pass reached for a cause that was still present — when the thing
   responsible had already stopped. Three samples over eleven minutes is not a sample of a
   three-hour window.
+- **`lspci` wakes the dGPU — even when you point it at the other card.** `-s` filters output, not
+  the bus scan, and `-v` reads config space, which resumes a D3cold device. So do `lshw`, `inxi`,
+  `hwinfo` and a bare root `nvidia-smi`. **A hardware-inventory pass costs ~1.5 W for hours.** Was
+  already known as BUG-151 about one command and never generalised — that is why it cost two pins.
+- **A wake with no holder is not a mystery, it is a category.** Holderless wake + a `PROFILE` line =
+  ACPI NVPCF (BUG-161). Holderless wake + nothing = a config-space reader. Check `journalctl` for
+  that exact second before theorising.
 - **Holding `/dev/nvidia0` does NOT keep the card awake.** Proven: powerd held 11 fds while the card
   sat in D3cold. "Who holds it" and "what wakes it" are different questions — check the **fd open
   time**, not just the holder list.
@@ -262,7 +287,10 @@ Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instructi
 for any transcode question is Jellyfin's own ffmpeg command lines in `/var/log/jellyfin/`.
 
 ## Files touched / relevant files
-**This turn:** `scripts/luminos-dgpu-watch` (extended — powerd filter removed, `--once`, holder
+**Latest turn (2026-09-20):** `scripts/luminos-dgpu-watch` (HOLDER~ re-open detection — arrivals
+keyed on `pid:node` alone made powerd's 00:07:39 re-open invisible; lspci trap documented in the
+header), `docs/BUGS.md` (BUG-182 amendment 2), `LUMINOS_STATUS.md`, `HANDOFF.md`.
+**Previous turn:** `scripts/luminos-dgpu-watch` (extended — powerd filter removed, `--once`, holder
 identity + fd open time, `HOLDER-` on release, `PROFILE`/`BEAT` lines), new
 `systemd/luminos-dgpu-watch.service`, `docs/BUGS.md` (**BUG-182** + amendment),
 `LUMINOS_DECISIONS.md` (**DECISION 125**), `AGENTS.md` §9 row, `LUMINOS_STATUS.md`, `HANDOFF.md`.

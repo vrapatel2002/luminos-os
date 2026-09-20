@@ -31,6 +31,15 @@
 #   ACPI NVPCF with no process holding anything at all (BUG-161) — if you see a WOKE
 #   with no HOLDER+ beside it, look at the PROFILE line.
 #
+# ⚠️ A WOKE WITH NO HOLDER+ AND NO PROFILE LINE IS USUALLY A CONFIG-SPACE READ.
+#   [CHANGE: cowork | 2026-09-20] Caught live: `sudo lspci -vnn -s 65:00.0` at 23:57:43
+#   woke the card on the exact second, while targeting the *AMD* card — `lspci` still
+#   enumerates the whole bus, and `-v` reads config space, which resumes a D3cold device.
+#   Nothing opens a device node, so this watcher sees the wake and no holder. Same class as
+#   BUG-151's finding that `lspci -s 01:00.0` flipped the card D3cold->D0 just by asking.
+#   Cross-check a holderless wake against `journalctl` for lspci / lshw / inxi / hwinfo /
+#   sensors / a bare root nvidia-smi in that second.
+#
 # USAGE
 #   sudo luminos-dgpu-watch                    # watch until Ctrl-C
 #   sudo luminos-dgpu-watch -d 3600            # watch for one hour
@@ -158,7 +167,13 @@ prev_profile=$(cat $PROFILE 2>/dev/null)
 prev_susp=$(cat "$PMDIR/runtime_suspended_time" 2>/dev/null || echo 0)
 wake_start=$SECONDS
 last_beat=$SECONDS
-declare -A SEEN   # key "pid:node" -> epoch first seen
+declare -A SEEN    # key "pid:node" -> epoch first seen
+# [CHANGE: cowork | 2026-09-20] BUG-182: keying arrivals on pid+node alone made a RE-OPEN
+# invisible. nvidia-powerd dropped and re-acquired its 11 handles at 00:07:39 and the log said
+# nothing, because its pid and node had not changed. The re-open is the event we are hunting
+# (it is a candidate wake path), so the fd open time is tracked separately and a change in it
+# is reported as HOLDER~.
+declare -A OPENED  # key "pid:node" -> fd open time as last seen
 
 while :; do
 	[ "$DURATION" -gt 0 ] && [ $((SECONDS - started)) -ge "$DURATION" ] && break
@@ -183,7 +198,20 @@ while :; do
 	for key in "${!SEEN[@]}"; do
 		if [ -z "${CUR[$key]:-}" ]; then
 			say "$(ts)  HOLDER-  ${key%%:*} released ${key#*:} after $((SECONDS - SEEN[$key]))s"
-			unset 'SEEN[$key]'
+			unset 'SEEN[$key]' 'OPENED[$key]'
+			continue
+		fi
+		# same pid, same node, NEW open time = it closed and re-opened between two ticks
+		pid=${key%%:*}; node=${key#*:}
+		fdnum=$(holders_raw | awk -v p="$pid" -v nd="$node" '$1==p && $3==nd {print $2; exit}')
+		[ -n "$fdnum" ] || continue
+		op=$(stat -c '%y' "/proc/$pid/fd/$fdnum" 2>/dev/null | cut -d. -f1)
+		[ -n "$op" ] || continue
+		if [ -z "${OPENED[$key]:-}" ]; then
+			OPENED["$key"]=$op
+		elif [ "$op" != "${OPENED[$key]}" ]; then
+			say "$(ts)  HOLDER~  $(cat /proc/$pid/comm 2>/dev/null)($pid) RE-OPENED $node  was=${OPENED[$key]} now=$op  gpu=$now"
+			OPENED["$key"]=$op
 		fi
 	done
 

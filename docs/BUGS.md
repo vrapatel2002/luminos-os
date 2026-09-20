@@ -7462,3 +7462,55 @@ udev rule genuinely fires. Kill switch: `sudo chmod 0666 /dev/dri/renderD128`.
 `0666 root:root` this boot despite `71-luminos-uvm-gate.rules` (BUG-146/147). Neither is a path the
 wallpaper uses, and closing `card1` risks the compositor's device enumeration, so both are left for
 a deliberate pass rather than folded into a wallpaper fix.
+
+### AMENDMENT 2 — 2026-09-20 00:47: the waker is named. `lspci` woke it, and nothing is holding it.
+<!-- [CHANGE: cowork | 2026-09-20] the audit unit from DECISION 125 answered it in under an hour -->
+
+The card slept 589 s and then woke at **23:57:43**, with **no `HOLDER+` beside the edge** and no
+`PROFILE` change. The journal names it on the exact second:
+```
+2026-09-19 23:57:43  ### WOKE   (slept 589s)        <- /var/log/luminos/dgpu-watch.log
+Sep 19 23:57:41 sudo[306288]: shawn : COMMAND=/usr/bin/dmesg
+Sep 19 23:57:41 sudo[306302]: shawn : COMMAND=/usr/bin/dmidecode -t memory
+Sep 19 23:57:43 sudo[306307]: shawn : COMMAND=/usr/bin/lspci -vnn -s 65:00.0   <- same second
+```
+**`lspci` woke the discrete card while being asked about the AMD one.** `-s` filters what is
+*printed*; pciutils still enumerates the whole bus, and `-v` reads config space, which resumes a
+D3cold device. Nothing opens a device node, so it is invisible to every fd-based check we have.
+**This exact trap was already on file** — LUMINOS_STATUS.md, BUG-151: *"`lspci -s 01:00.0` flipped
+the card D3cold→D0 just by asking"*. It was recorded as a note about one command and never
+generalised into "any config-space reader wakes the card", which is what it actually is.
+
+**Why it will not go back to sleep: nothing is stopping it, and that is the point.**
+At 00:47, 50 minutes after the wake:
+- `runtime_suspended_time` has not moved since 23:57:43 — five consecutive `BEAT` lines at
+  `slept_since_last=0s`.
+- The **only** holder is `nvidia-powerd`, which we proved at 23:47 holds 11 handles *while the card
+  sleeps*. No other process holds any NVIDIA node.
+- `/proc/driver/nvidia/gpus/…/power` still reads `Runtime D3 status: Enabled (fine-grained)` with
+  **`Video Memory: Active`**.
+
+So the card is not being *held* awake — **the driver resumed and never re-armed its idle path.**
+A resume triggered from outside the driver (a PCI config-space read) has no client whose close
+drives the idle re-evaluation, so `Video Memory` stays `Active` and fine-grained RTD3 never fires.
+
+**Supporting observation, not yet a proof.** The previous pin released ~23:30, roughly two minutes
+after two `dgpu-exec-v2 -- nvidia-smi` queries at 23:23:58 and 23:27:55 — a clean client open *and
+close*. That is consistent with "a proper client cycle re-arms the idle path", **but the 20:29 bare
+root `nvidia-smi` was also a client cycle and was followed by a three-hour pin**, so the rule is not
+established. Do not write it up as one. The cheap test: with the card pinned, run a single
+`sudo dgpu-exec-v2 -- nvidia-smi --query-gpu=name --format=csv` and watch whether
+`runtime_suspended_time` starts moving within ~2 min. One query on an already-awake card, no state
+change, and the watcher records the outcome either way.
+
+**Practical consequence, and it is the useful half:** every hardware-inventory pass on this box
+costs ~1.5 W for hours. Both pins this boot follow one — 20:29 (`nvidia-smi -q`, `dmidecode`) and
+23:57 (`dmesg`, `dmidecode`, `lspci -vnn`). `lspci`, `lshw`, `inxi`, `hwinfo` and a bare root
+`nvidia-smi` all do it. If an agent session is surveying hardware on a schedule, that alone accounts
+for the card's duty cycle.
+
+**Watcher gap found and fixed the same hour** (`scripts/luminos-dgpu-watch`): arrivals were keyed on
+`pid:node`, so a **re-open** by the same process on the same node logged nothing. nvidia-powerd
+dropped and re-acquired its 11 handles at **00:07:39** — 26 minutes after the previous open, during
+the pin — and the log was silent. The fd open time is now tracked per holder and a change reports as
+`HOLDER~`. The re-open is a candidate wake path, so it was exactly the wrong thing to be blind to.
