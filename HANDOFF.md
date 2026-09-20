@@ -166,7 +166,31 @@ Never say "far lighter than Chromium" without naming the scene.
 Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instruction.
 
 ## Next steps (ordered)
-0. ✅ **BUG-182 ANSWERED (mostly), 2026-09-20 00:47 — the audit unit paid for itself in one hour.**
+0a. ✅ **BUG-182 ROOT CAUSE, 2026-09-20 01:10 — we were auditing the wrong layer.**
+   Every earlier check looked for a **process** (fds, `/proc`, `lsof`, `fuser`) and found none, and
+   the card still would not sleep. **The reference is inside the kernel, held by the nvidia module,
+   and no userspace tool can see it.** Proof — rpm tracepoints filtered to `0000:01:00.0`, 35 s,
+   `overrun: 0`, filter verified applied: **ZERO events**, while the AMD card shows dozens per
+   second with `usage_count` cycling 5↔6. **Zero is the finding:** a driver refusing would show
+   `rpm_suspend` → `rpm_return_int ret=-16`. There is no attempt, because `usage_count` never
+   reaches 0. The module took a `pm_runtime_get` on the externally-triggered resume (the `lspci`
+   config-space read) and never put it back. `Video Memory: Active` with zero clients is the same
+   stuck reference from the driver side.
+   ⚠️ **`power/autosuspend_delay_ms` returning `Input/output error` is LOAD-BEARING, not a broken
+   node** — the kernel returns EIO there when the driver has not enabled autosuspend, so **no kernel
+   timer will ever clean this up**; the nvidia driver alone decides. Earlier passes read it as noise.
+   ⚠️ **`CONFIG_PM_ADVANCED_DEBUG is not set`**, so `power/runtime_usage` and `runtime_enabled` do
+   not exist on this box. The tracepoints are the ONLY way to see the count — and they only report
+   it when an event fires, which is precisely what is not happening.
+   Ruled out read-only: parent bridge `00:01.1`, the `01:00.1` audio function (`suspended`, D3hot),
+   and every child of the GPU — `drm/card1`, `renderD128`, `controlD65`, `backlight/nvidia_0` all
+   read `unsupported`, i.e. they hold no PM reference.
+   **Levers, in order:** (a) stop running config-space readers on this box — the only one we fully
+   control; (b) the one-query test below, to see if a clean client open/close rebalances the
+   reference; (c) a driver bug report, noting 610.57.04 is pinned by DECISION 26.
+   **Tracing was enabled and then fully restored** (`tracing_on=0`, `rpm_enable=0`, filters `none`,
+   buffer back to default). Re-arm with the recipe in `docs/BUGS.md` BUG-182 amendment 3.
+0b. ✅ **BUG-182 WAKER, 2026-09-20 00:47 — the audit unit paid for itself in one hour.**
    `### WOKE` at 23:57:43 with **no `HOLDER+` and no `PROFILE` change**, and the journal names
    `sudo /usr/bin/lspci -vnn -s 65:00.0` on the **exact same second**. `lspci` woke the NVIDIA card
    while being asked about the **AMD** one: `-s` filters what is *printed*, pciutils still
@@ -233,6 +257,10 @@ Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instructi
   moved in hours, and the first pass reached for a cause that was still present — when the thing
   responsible had already stopped. Three samples over eleven minutes is not a sample of a
   three-hour window.
+- **When every tool you own says "nothing there", the absence IS the signal — go one layer down.**
+  Four passes hunted for a process holding the dGPU and found none; twice that absence was turned
+  into a wrong-but-plausible conclusion. The answer was three sysfs reads and a 35 s trace, and it
+  took less time than any of the failed passes. **Zero events is data. Read it as data.**
 - **`lspci` wakes the dGPU — even when you point it at the other card.** `-s` filters output, not
   the bus scan, and `-v` reads config space, which resumes a D3cold device. So do `lshw`, `inxi`,
   `hwinfo` and a bare root `nvidia-smi`. **A hardware-inventory pass costs ~1.5 W for hours.** Was

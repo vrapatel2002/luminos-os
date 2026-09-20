@@ -7514,3 +7514,69 @@ for the card's duty cycle.
 dropped and re-acquired its 11 handles at **00:07:39** — 26 minutes after the previous open, during
 the pin — and the log was silent. The fd open time is now tracked per holder and a change reports as
 `HOLDER~`. The re-open is a candidate wake path, so it was exactly the wrong thing to be blind to.
+
+### AMENDMENT 3 — 2026-09-20 01:10: **the kernel is never even asked to suspend it**
+<!-- [CHANGE: cowork | 2026-09-20] Shawn's question: "if nothing opened it, how was it not in cold
+     state — what are we missing?" The answer is that we were auditing the wrong layer. -->
+
+Every check up to here looked for a **process**: file descriptors, `/proc`, `lsof`, `fuser`. All of
+them came back clean, and the card still would not sleep. That is because **the reference holding it
+is inside the kernel, held by the nvidia module itself, and no userspace tool can see it.**
+
+**The measurement** (AGENTS.md §12's tool, the same one that cracked BUG-161):
+```
+/sys/kernel/tracing/events/rpm/{rpm_suspend,rpm_resume,rpm_idle,rpm_return_int}
+filter: name ~ "0000:01:00.0"        (verified applied, not silently dropped)
+35 s capture, buffer 8 MB, overrun: 0
+
+  NVIDIA 0000:01:00.0 ->  0 events.  Not one.
+  AMD    0000:65:00.0 ->  dozens per second: rpm_resume / rpm_usage, usage_count cycling 5<->6
+```
+**Zero is the finding.** Not "the kernel tried to suspend and the driver said no" — that would show
+as `rpm_suspend` followed by `rpm_return_int ... ret=-16 (EBUSY)`. There is **no attempt at all**.
+The PM core only considers suspending a device when its `usage_count` reaches 0, and it is not
+reaching 0, so the question is never asked. Contrast the AMD card, whose count visibly rises and
+falls all day: that is what a healthy refcount looks like.
+
+**So: the nvidia kernel module took a runtime-PM reference when the card was resumed and never put
+it back.** A leaked `pm_runtime_get` with no matching `pm_runtime_put`. The resume at 23:57:43 came
+from **outside the driver** — a PCI config-space read by `lspci` — so there was no client whose
+close would drive the matching release. `Video Memory: Active` with zero clients is the driver-side
+view of the same stuck reference.
+
+**Why we could not simply read the count.** `CONFIG_PM_ADVANCED_DEBUG is not set` on this kernel, so
+`power/runtime_usage` and `power/runtime_enabled` do not exist — the `power/` directory has only
+`control`, `runtime_status` and the two counters. The tracepoints are the **only** way to see the
+count on this box, and they only report it when an event fires, which is exactly what is not
+happening. Hence: **absence of events is the evidence.**
+
+**Second confirmation, from a file that looked like a broken sysfs node:**
+```
+cat power/autosuspend_delay_ms  ->  Input/output error
+```
+That is not a fault. The kernel returns `-EIO` from that attribute when the driver has not enabled
+autosuspend — so there is **no kernel timer that will eventually put this card to sleep regardless**.
+The nvidia driver alone decides, through its own get/put calls. Once its reference leaks, nothing
+else in the system will ever clean it up. Earlier passes read that EIO as noise; it is load-bearing.
+
+**Ruled out along the way, all read-only:**
+| Layer | Result |
+|---|---|
+| Parent bridge `00:01.1` | `active` — but it is active *because* its child is; not a cause |
+| Audio function `01:00.1` | `suspended`, D3hot, `hdaudioC0D0` suspended — not blocking D3cold |
+| DRM children `card1` / `renderD128` / `controlD65` | present, `runtime_status` **unsupported** (no PM of their own) |
+| Backlight child `backlight/nvidia_0` | `unsupported` — no PM reference either |
+| Any other child device under `01:00.0` | none with a PM state that could pin the parent |
+
+**What this changes practically.** The fix cannot be "find the process and stop it" — there is no
+process. It has to be one of: (a) stop triggering externally-initiated resumes, i.e. stop running
+config-space readers (`lspci`, `lshw`, `inxi`, `hwinfo`, bare root `nvidia-smi`) on this box, which
+is the only lever we fully control; (b) rebalance the driver's reference with a clean client
+open/close, which is what the 23:27 observation hints at and what the one-query test would settle;
+or (c) a driver bug report — 610.57.04 is pinned by DECISION 26, so a branch move is not casual.
+
+**Method note.** Four passes over this bug looked for a holder and found none, twice concluding
+something wrong-but-plausible from that absence. The absence *was* the signal. **When every tool
+you own reports "nothing there", stop asking the same tools harder and go one layer down** — here
+that was three sysfs reads and a 35-second trace, and it took less time than any of the earlier
+passes.

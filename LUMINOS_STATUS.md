@@ -360,7 +360,22 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
 6. Go orchestrator (replace Python hive-daemon.py)
 7. Zone indicator Plasma widget
 8. SDDM custom Luminos theme
-11. 🟡 **BUG-182 — WAKER IDENTIFIED. `lspci` wakes the dGPU; nothing then holds it awake.**
+11. 🟢 **BUG-182 — ROOT-CAUSED. `lspci` wakes the dGPU and the nvidia module leaks a runtime-PM
+    reference, so the kernel is never even asked to suspend it again.**
+    <!-- [CHANGE: cowork | 2026-09-20] --> **The clincher:** rpm tracepoints filtered to
+    `0000:01:00.0`, 35 s, overrun 0 → **zero events**, while the AMD card shows dozens per second
+    with `usage_count` cycling 5↔6. No `rpm_suspend` attempt at all — so it is **not** the driver
+    refusing (`ret=-EBUSY`), it is the PM core never asking, because `usage_count` never reaches 0.
+    The nvidia module took a `pm_runtime_get` on the externally-triggered resume and never put it
+    back; `Video Memory: Active` with zero clients is the same stuck reference seen from the driver
+    side. `power/autosuspend_delay_ms` returning **EIO is load-bearing, not noise** — it means the
+    driver does not use kernel autosuspend, so no kernel timer will ever clean this up.
+    `CONFIG_PM_ADVANCED_DEBUG is not set`, so `runtime_usage` does not exist and the tracepoints are
+    the only way to see it. **No process is involved** — every fd-based check was auditing the wrong
+    layer. Ruled out read-only: parent bridge, the `01:00.1` audio function (suspended), and the
+    DRM/backlight children (all `unsupported`, no PM reference). **Levers:** stop running
+    config-space readers on this box; or test whether a clean client open/close rebalances it.
+    Earlier finding: 
     <!-- [CHANGE: cowork | 2026-09-20] --> The DECISION 125 audit unit answered it in under an
     hour. `### WOKE` at 23:57:43 with **no holder and no profile change**, and the journal names
     `sudo /usr/bin/lspci -vnn -s 65:00.0` on the **same second** — `-s` filters what is *printed*,
