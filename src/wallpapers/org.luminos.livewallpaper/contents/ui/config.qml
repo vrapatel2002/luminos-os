@@ -51,19 +51,39 @@ ColumnLayout {
     property string cfg_SceneProperties
     property string cfg_ScenePropertiesDefault: "{}"
 
+    // Set when a gallery click could not be honoured, shown under the grid.
+    // [CHANGE: claude-code | 2026-09-20] BUG-185.
+    property string pickProblem: ""
+
+    // Which entry path the wallpaper is ACTUALLY showing, so the gallery can mark
+    // it. One place, because the cfg_ keys live here and a gallery that worked it
+    // out for itself would be a second copy of the answer.
+    readonly property string activeEntry:
+          root.cfg_WallpaperMode === "web"   ? root.cfg_WebUrl
+        : root.cfg_WallpaperMode === "video" ? root.cfg_Video
+        : root.cfg_WallpaperMode === "qml"   ? root.cfg_QmlScene
+        : root.cfg_Image
+
     // A package's `type` decides which mode shows it. One place, so the gallery
     // need not know about config keys and config.qml need not know about
     // manifests. [CHANGE: claude-code | 2026-09-19] SPEC §3.3
     function usePackage(type, entryPath) {
         var m = Scene.modeForType(type);
         if (m === null) {
-            // BUG-183: a click that changes nothing must say so. The gallery only
-            // emits playable rows, so reaching here means this process is running
-            // a scene.js older than the type it was just handed.
-            console.warn("luminos-wallpaper: no mode for package type '" + type
-                         + "' (stale settings process? restart System Settings)");
+            // BUG-183/BUG-185: a click that changes nothing must say so, and a
+            // journal line is not saying so — nobody reads the journal while
+            // clicking a wallpaper. The gallery only emits playable rows, so
+            // reaching here means this process is running a scene.js older than
+            // the type it was just handed. Almost always BUG-171.
+            root.pickProblem = i18n(
+                "This page could not use a \"%1\" wallpaper. It is running an older "
+                "copy of the plugin — close System Settings completely and open it again.",
+                type);
+            console.warn("[LUMINOS-WP] no mode for package type", type,
+                         "— cached QML? (BUG-171)");
             return;
         }
+        root.pickProblem = "";
         root.cfg_WallpaperMode = m.mode;
         if (m.key === "QmlScene")
             root.cfg_QmlScene = entryPath;
@@ -83,6 +103,19 @@ ColumnLayout {
     function localPath(url) {
         var s = "" + url;
         return s.indexOf("file://") === 0 ? s.substring(7) : s;
+    }
+
+    // [CHANGE: claude-code | 2026-09-20] BUG-185. Above everything, because if
+    // this page is stale then nothing below it does what it says.
+    StaleCheck { id: staleCheck }
+    Kirigami.InlineMessage {
+        Layout.fillWidth: true
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        visible: staleCheck.stale
+        type: Kirigami.MessageType.Warning
+        text: i18n("This page is running an older copy of the wallpaper plugin — it was "
+                   "updated after this window opened. Close System Settings completely and "
+                   "open it again, or changes made here may not take effect.")
     }
 
     Kirigami.FormLayout {
@@ -119,7 +152,17 @@ ColumnLayout {
         WallpaperGallery {
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            currentEntry: root.activeEntry
             onPicked: function (type, entryPath) { root.usePackage(type, entryPath); }
+        }
+        QQC2.Label {
+            visible: root.pickProblem.length > 0
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 26
+            wrapMode: Text.WordWrap
+            color: Kirigami.Theme.negativeTextColor
+            font: Kirigami.Theme.smallFont
+            text: root.pickProblem
         }
         Item { Kirigami.FormData.isSection: true }
 

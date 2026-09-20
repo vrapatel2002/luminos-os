@@ -70,9 +70,13 @@ Item {
 
             // The type -> mode mapping the gallery's click depends on. Pure, so
             // it is checked here instead of by clicking a grid.
+            // "web" is in this list because leaving it out is how BUG-183 shipped:
+            // every OTHER type was checked, the gallery's own rows said web was
+            // playable, and the click path had nowhere to send it.
             var cases = [["scene", "qml", "QmlScene"], ["shader", "qml", "QmlScene"],
                          ["js", "qml", "QmlScene"], ["video", "video", "Video"],
-                         ["image", "image", "Image"], ["gif", "image", "Image"]];
+                         ["image", "image", "Image"], ["gif", "image", "Image"],
+                         ["web", "web", "WebUrl"]];
             var wrong = [];
             for (var c = 0; c < cases.length; c++) {
                 var m = Scene.modeForType(cases[c][0]);
@@ -86,6 +90,18 @@ Item {
                           Scene.modeForType("nonsense") === null, "not null");
             console.log("  ..    " + rows.length + " installed, " + unplayable + " not playable yet");
 
+            // ---- BUG-185: the grid had no selected state at all -------------
+            harness.check("a tile whose entry IS the current one says so",
+                          tileCurrent.current === true, tileCurrent.current);
+            harness.check("a tile whose entry is NOT the current one does not",
+                          tileOther.current === false, tileOther.current);
+            harness.check("nothing is marked current when nothing is showing",
+                          tileNone.current === false, tileNone.current);
+            harness.check("an unplayable tile cannot be tapped",
+                          tileBlocked.playable === false, tileBlocked.playable);
+            harness.check("the gallery passes the current entry down to its tiles",
+                          "currentEntry" in g, "no currentEntry property");
+
             harness.done = true;
             console.log(harness.failures === 0
                         ? "PASS — gallery contract holds"
@@ -93,6 +109,19 @@ Item {
             Qt.exit(harness.failures === 0 ? 0 : 1);
         }
     }
+
+    // Four tiles, not a grid: the question is what a tile DOES with the answer,
+    // and building a grid to ask it would make the test depend on what happens to
+    // be installed. [CHANGE: claude-code | 2026-09-20] BUG-185.
+    readonly property var rowA: ({ id: "a", title: "A", type: "web", playable: true,
+                                   entryPath: "/tmp/a/index.html", previewPath: "", why: "" })
+    readonly property var rowBlocked: ({ id: "b", title: "B", type: "producer", playable: false,
+                                         entryPath: "/tmp/b/x", previewPath: "",
+                                         why: "producer wallpapers need SPEC §3.6" })
+    GalleryTile { id: tileCurrent; modelData: harness.rowA; currentEntry: "/tmp/a/index.html" }
+    GalleryTile { id: tileOther;   modelData: harness.rowA; currentEntry: "/tmp/z/index.html" }
+    GalleryTile { id: tileNone;    modelData: harness.rowA; currentEntry: "" }
+    GalleryTile { id: tileBlocked; modelData: harness.rowBlocked; currentEntry: "" }
 
     Timer {
         interval: 20000

@@ -7660,3 +7660,88 @@ On a device with runtime PM, those are different questions with different tools*
 tracepoints answer the second, and on a kernel without `CONFIG_PM_ADVANCED_DEBUG` they are the
 *only* thing that answers it. Four passes of this bug asked the first question and read the empty
 answer as evidence about the second.
+
+---
+
+## BUG-185 — "why can't I select these?" — the grid never showed selection, and a stale settings page writes old values back
+<!-- [CHANGE: claude-code | 2026-09-20] DECISION 128 -->
+
+**Status:** FIXED · **Severity:** the wallpaper gallery was unusable by anyone who did not already
+know it worked; and an old System Settings window silently reverted settings it had never been
+asked to touch · **Files:** `contents/ui/GalleryTile.qml` (new), `contents/ui/StaleCheck.qml` (new),
+`contents/ui/WallpaperGallery.qml`, `contents/ui/config.qml`,
+`contents/tools/luminos-wallpaper-gallery`, `tests/wallpaper/gallery_contract.qml`,
+`scripts/luminos-wallpaper-selftest`
+
+Shawn: *"why can i manually select and apply these wallpaper what am i doing wrong? i mean you can
+do it but why can i ?"* The answer is **nothing**. Two faults, both ours, and the second one is
+worse than the first.
+
+### Fault 1 — there was no selected state. At all.
+The tile delegate had a preview, a label, a tooltip and a `TapHandler`. It had no highlight, no
+border, no checkmark, no pressed state and no hover state. Clicking a tile set a config key and
+changed **nothing on screen**. So "I click them and nothing happens" was an accurate description of
+a gallery working exactly as written — the only feedback in the entire flow was the Apply button
+un-greying, which is at the other end of the dialog, and which does not move at all if the tile you
+clicked is the wallpaper you already have.
+
+Fixed by giving a tile something to say: `GalleryTile.qml` now draws a highlight and a border for
+the current wallpaper, bolds its name with a checkmark, and reacts to hover and press. Which tile is
+current is handed **down** from `config.qml` (`activeEntry`), because the cfg_ keys live there and a
+tile that worked it out for itself would be a second copy of the answer, free to drift. Proved by
+grabbing both states and differencing them — 1 542 520 channel-units apart over the whole tile, not
+a claim that it "should" look different.
+
+### Fault 2 — the stale page does not merely ignore new values, it writes old ones back
+This is **BUG-171's fourth appearance** and the first time its real cost was visible. Shawn's
+System Settings had been open since **Sat 19:09** — twenty hours, and four hours older than the
+`scene.js` that taught it about web packages. `QQmlEngine` caches compiled components for the life
+of the engine, so it was still running the old `modeForType()`, which answers `null` for `"web"`,
+so `usePackage()` returned early and every web tile was inert.
+
+Then he applied Starfield, and the config file showed this:
+
+```
+QmlScene=…/starfield/wallpaper.js      <- what he chose
+WallpaperMode=qml                      <- what he chose
+WebUrl=…/luminos-wallpaper-tests/luminos-particles.html   <- YESTERDAY'S VALUE, restored
+```
+
+A Plasma config page writes **all** its `cfg_` properties on Apply, and a stale page's `cfg_`
+properties hold the values it read when it opened. So applying one setting silently rolled another
+back by a day — it undid the Rain wallpaper set hours earlier. An old settings window is not a
+read-only inconvenience; it is a time machine pointed at your config.
+
+Fixed by making the page able to notice. `StaleCheck.qml` compares when the **page started**
+against when the **files were last written** (`luminos-wallpaper-gallery --plugin-mtime`, a fresh
+process every time, so it always reads the truth) and raises a `Kirigami.InlineMessage` above
+everything else. No version number, no build stamp, no deploy step to keep in sync — the page
+cannot know what it is running, but it knows when it started, and that is enough.
+
+Deliberately **not** self-healing: reloading QML behind a settings page that may hold unsaved edits
+is worse than asking someone to reopen a window. And `--plugin-mtime` is a separate invocation
+rather than a new field in the gallery JSON, because the page that must keep working is precisely
+the old one.
+
+`usePackage()`'s failure now appears **in the dialog** as well. Last turn it gained a
+`console.warn`, which was progress in the wrong direction: nobody reads the journal while clicking
+a wallpaper.
+
+### What the tests missed, and now do not
+`gallery_contract.qml` checked `modeForType` for `scene`, `shader`, `js`, `video`, `image` and
+`gif` — **every type except `web`**, which is the one that broke, while the gallery's own rows
+happily reported web packages as playable. It now covers `web`, and asserts the selection contract
+against real `GalleryTile` instances: current tile knows it, non-current tile knows it, nothing is
+marked when nothing matches, and an unplayable tile cannot be tapped. Twelve checks.
+
+Selftest `[5]`'s Chromium check was also wrong and is fixed here: a mapped library is never
+unmapped, so once web mode has been selected **once**, `libQt6WebEngineCore` stays in plasmashell's
+address space whatever the mode is now. The check called that a broken DECISION 112. It now
+accuses only when it can prove the process never saw web mode — when plasmashell started *after*
+the config was last written — and otherwise says plainly what it can and cannot tell.
+
+### Lesson
+Two of the four BUG-171 sightings were reported by a person as "nothing happens", and both times the
+first hypothesis was about the code that did not run. The cheap, general fix was never in that code:
+it was to let the page say *"I am old"*. A component that cannot detect its own staleness can still
+compare its start time to a file's.

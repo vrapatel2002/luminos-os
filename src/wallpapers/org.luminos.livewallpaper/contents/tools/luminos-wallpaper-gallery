@@ -5,6 +5,12 @@
 SPDX-License-Identifier: GPL-3.0-or-later
 
     luminos-wallpaper-gallery            -> [ {...}, ... ]
+    luminos-wallpaper-gallery --plugin-mtime -> 1789936000   (epoch seconds)
+
+`--plugin-mtime` is how the settings page finds out it is stale. A separate
+invocation rather than an extra field, so a page running the OLD cached QML keeps
+parsing the list exactly as it did — the one thing that must not break is the
+page that is already broken. [CHANGE: claude-code | 2026-09-20] BUG-185.
 
 Split from luminos-wallpaper-install on purpose: installing is the write side and
 this is the read side, and only this one is called from QML — on every open of the
@@ -46,6 +52,27 @@ def describe(pkg_dir):
     return m
 
 
+def plugin_mtime():
+    """Newest mtime under the plugin's contents/, in epoch seconds.
+
+    QQmlEngine caches compiled components for the life of the engine, so a
+    settings page keeps running the QML it loaded at startup no matter what lands
+    on disk afterwards (BUG-171, three times now). The page cannot see this about
+    itself — but it knows when IT started, and this says when the FILES were last
+    written, and comparing the two is the whole test.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    contents = os.path.dirname(here)
+    newest = 0.0
+    for base, _dirs, files in os.walk(contents):
+        for name in files:
+            try:
+                newest = max(newest, os.path.getmtime(os.path.join(base, name)))
+            except OSError:
+                continue
+    return int(newest)
+
+
 def installed():
     if not os.path.isdir(ROOT):
         return []
@@ -62,5 +89,8 @@ def installed():
 
 
 if __name__ == "__main__":
-    print(json.dumps(installed()))
+    if "--plugin-mtime" in sys.argv[1:]:
+        print(plugin_mtime())
+    else:
+        print(json.dumps(installed()))
     sys.exit(0)

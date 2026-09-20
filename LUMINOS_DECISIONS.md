@@ -8011,3 +8011,53 @@ The lock screen now runs QtWebEngine — about 10% of one core plus Chromium's m
 as the machine is locked and on AC. That is the price of "same wallpaper" when the wallpaper is a
 web page. `PauseOnBattery` covers the battery case; the AC case is deliberate and reversible with
 one `kwriteconfig6` (see AGENTS.md §9).
+
+---
+
+## DECISION 128 — a settings page that cannot know what it is running can still know that it is old
+Date: September 20, 2026
+Made by: claude-code
+**Status: SHIPPED — banner, visible failure, and a selection state the grid never had**
+
+### Context
+BUG-171 — `QQmlEngine` caches compiled components for the life of the engine, so a System Settings
+window opened before a deploy runs the old QML forever — has now cost four debugging sessions.
+Every one began with a person clicking something and nothing happening, and every one was
+diagnosed by comparing a process start time to a file mtime **by hand, afterwards**. The fourth
+also showed the part nobody had noticed: a stale page does not just ignore new values, it **writes
+its own stale ones back** on Apply, because a Plasma config page writes every `cfg_` property it
+holds. Applying Starfield silently restored a `WebUrl` from the previous day.
+
+### What We Decided
+The page compares **when it started** with **when the plugin's files were last written**, and says
+so in a `Kirigami.InlineMessage` if the files are newer. `StaleCheck.qml`, 61 lines, no build step.
+
+The page genuinely cannot know which version of itself it is running — the file it would have to
+read to find out is the file it is not running. It does not need to. It knows `Date.now()` at
+`Component.onCompleted`, and `luminos-wallpaper-gallery --plugin-mtime` is a **fresh process**, so
+it always reads the truth off disk. Newer files than page ⇒ stale. One second of slack, because a
+page and a deploy can land in the same second and that is not staleness.
+
+### The Conflict (both sides, per Rule 11)
+- **A version number or build stamp in the package.** Precise, and the obvious answer. Rejected:
+  it needs a deploy step that writes the stamp into two places and stays in sync, and a stamp that
+  is not bumped is worse than no stamp — it reports health it did not check. Timestamps are already
+  maintained by the filesystem, for free, and cannot be forgotten.
+- **Reload the QML automatically when staleness is detected.** Rejected: a settings page may hold
+  unsaved edits, and throwing them away to fix a cosmetic-looking problem is a worse bug than the
+  one being fixed. The banner tells the person; the person decides.
+- **A new field in the gallery's JSON instead of a separate `--plugin-mtime` invocation.** Rejected
+  for the reason the whole feature exists: the page that must keep working is the OLD one, and
+  changing the shape of what it parses is exactly how you break it further.
+
+### Also decided: a gallery tile must show that it is selected
+The grid had no selected state of any kind — no highlight, no border, no checkmark, no pressed or
+hover feedback. Clicking set a config key and changed nothing visible, so a working gallery and a
+broken one looked identical. Which tile is current is passed **down** from `config.qml`, which owns
+the `cfg_` keys; a tile that derived it would be a second copy of the answer, free to drift from
+the first. Extracted to `GalleryTile.qml` — a real seam, not a line-count dodge: selection, hover
+and press are one thing to read instead of three conditions buried in a delegate.
+
+### Cost
+One extra subprocess per settings-dialog open (the same tool the gallery already runs, with a
+flag), and a `Kirigami.Icon` per tile. Against four debugging sessions, that is not a cost.

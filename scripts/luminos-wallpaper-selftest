@@ -208,11 +208,22 @@ if [ -n "$pid" ]; then
     # selected is how a red line gets ignored — read the config, then judge.
     wpmode="$(awk '/^\[/{g=$0} /^WallpaperMode=/{ if (g ~ /luminos/) { sub(/^WallpaperMode=/,""); print } }' \
               "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" 2>/dev/null | tail -1)"
+    # [CHANGE: claude-code | 2026-09-20] A mapped library is never unmapped: once
+    # web mode has been selected ONCE, libQt6WebEngineCore stays in plasmashell's
+    # address space until it restarts, whatever the mode is now. The first version
+    # of this check called that a broken DECISION 112 and was wrong — so it only
+    # accuses when it can prove the process never saw web mode, which is when
+    # plasmashell started AFTER the config was last written.
+    cfgfile="$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
+    shellstart="$(stat -c %Y "/proc/$pid" 2>/dev/null || echo 0)"
+    cfgwritten="$(stat -c %Y "$cfgfile" 2>/dev/null || echo 0)"
     if grep -q libQt6WebEngineCore "/proc/$pid/maps" 2>/dev/null; then
         if [ "$wpmode" = "web" ]; then
             ok "Chromium mapped, and web mode is selected — DECISION 112 holds"
+        elif [ "$shellstart" -gt "$cfgwritten" ]; then
+            bad "Chromium IS mapped, mode is '$wpmode', and this plasmashell is newer than the config — DECISION 112 broken"
         else
-            bad "Chromium IS mapped into plasmashell but the mode is '$wpmode' — DECISION 112 broken"
+            info "Chromium mapped while the mode is '$wpmode' — web mode was selected earlier in this plasmashell and a mapped library is never unmapped; a restart clears it"
         fi
     elif [ "$wpmode" = "web" ]; then
         info "web mode selected but Chromium not mapped yet (the view may not have loaded)"

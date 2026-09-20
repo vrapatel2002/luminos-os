@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-20 — chat A Response 5 / chat B Response 18 (TWO Cowork chats ran in parallel; see the gaming-OS pointer below)
+Last updated: 2026-09-20 — chat A Response 6 / chat B Response 18 (TWO Cowork chats ran in parallel; see the gaming-OS pointer below)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -11,42 +11,51 @@ Keep Luminos OS working as a daily-driver Windows replacement — the G14 deskto
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-**The lock screen shows the same wallpaper as the desktop, and it is a script's job to keep it
-that way.** Shawn: *"the lock screen is not having same wallpaper. can you make it same please?"*
+**Shawn asked why he cannot select the gallery wallpapers when I can. He is doing nothing wrong —
+two faults, both ours. BUG-185 / DECISION 128.**
 
-Nothing was broken. The greeter has run `org.luminos.livewallpaper` since DECISION 77 (July), but
-it keeps **its own** `[Greeter][Wallpaper][…][General]` group in `kscreenlockerrc`, and that group
-still held `WallpaperMode=video` pointing at a video from July. Two configs, copied by hand once,
-diverged for two months. Fixed by `scripts/luminos-wallpaper-lockscreen` (copies the desktop
-containment's group across) plus selftest **[7]**, which fails if they drift again. **DECISION 127.**
+1. **The grid never had a selected state.** No highlight, no border, no checkmark, no hover or
+   pressed feedback. Clicking a tile set a config key and changed **nothing on screen**, so a
+   working gallery looked identical to a broken one; the only feedback in the whole flow was the
+   Apply button un-greying, at the far end of the dialog, and it does not move at all if you click
+   the wallpaper you already have. Fixed in a new `ui/GalleryTile.qml` (highlight, border, bold
+   name + checkmark, hover, press). Which tile is current is passed DOWN from `config.qml`
+   (`activeEntry`) — a tile that derived it would be a second copy of the answer.
+2. **BUG-171, fourth appearance, and the first time its real cost was visible.** His System
+   Settings had been open since **Sat 19:09** — 20 hours, 4 hours older than the `scene.js` that
+   taught it about web packages — so `modeForType("web")` returned null and every web tile was
+   inert. Worse: when he applied Starfield, the page wrote back **its own stale `cfg_` values**,
+   restoring a `WebUrl` from the previous day and undoing the Rain wallpaper. *A Plasma config page
+   writes every cfg_ property on Apply, so an old window is not a read-only inconvenience — it is a
+   time machine pointed at your config.* New `ui/StaleCheck.qml` compares when the PAGE started to
+   when the FILES were last written (`luminos-wallpaper-gallery --plugin-mtime`, a fresh process)
+   and raises a `Kirigami.InlineMessage`. No build stamp, no deploy step. Deliberately not
+   self-healing. `usePackage()`'s failure now shows in the dialog too, not only the journal.
 
-Four keys are deliberately NOT copied, and one of them is a latent bug rather than a preference:
-`ObscurePolicy` is forced to **0**, because the windows a greeter's `TasksModel` can see are the
-ones *behind* the lock screen — copy the desktop's "freeze when covered" and a maximised window
-under the lock screen freezes the lock screen. (The greeter logs `PlasmaWindowManagement protocol
-hasn't activated`; that model does not work there at all.) The other three are security/power:
-`WebInteractive=false`, `InjectSystemStats=false`, `MuteAudio=true`, and `PauseOnBattery=true` is
-then the only clause that can stop a locked laptop animating flat.
+**What Shawn must still do: fully quit System Settings and reopen it.** Nothing shipped today can
+fix the process he already has — that is the whole point of the banner, which only helps next time.
 
-Verified in `kscreenlocker_greet --testing`: Chromium mapped, **9 fds all on renderD129 (AMD), zero
-NVIDIA nodes in the greeter or any child**, 10% of one core, and a screenshot showing Rain with the
-Sugar-Candy clock over it. **That screenshot is also the first visual proof that BUG-183's fix works
-on a real screen** — the previous turn had pixel measurements but no picture. Selftest **39/0**.
+**Two test gaps closed.** `gallery_contract.qml` checked `modeForType` for every type **except
+`web`** — the one that broke. Now 12 checks, including the selection contract against real
+`GalleryTile` instances. And selftest [5]'s Chromium check was wrong: a mapped library is never
+unmapped, so once web mode is selected once, `libQt6WebEngineCore` stays for the life of the
+process. It now accuses only when plasmashell started AFTER the config was written.
 
-### Previous turn, still the substance of the wallpaper work (BUG-183 / BUG-184 / DECISION 126)
-1. **It was never WebGL.** WebGL works on the AMD 780M and `fetch()` from `file://` works. Lively
-   web wallpapers wait to be *told what to draw* — `livelyPropertyListener(name, value)` per
-   property on load — and we never called it, so Rain's `u_tex0` stayed `undefined` and its shader
-   drew black with a healthy GL context. `ui/LivelyApi.qml` makes the calls;
-   `luminos-wallpaper-props` converts the package's own `LivelyProperties.json` on read **without
-   ever rewriting the package on disk**. Rain: framebuffer mean 0 → 126/255.
-2. **Selecting a downloaded wallpaper did nothing** — System Settings had been running since before
-   the fix landed. **BUG-171 again, per process.** `usePackage()` now warns instead of failing
-   silently. *(Shawn still needs to fully quit and reopen System Settings to pick packages.)*
-3. **BUG-184:** `/dev/dri/renderD128`, the NVIDIA card's DRM render node, was mode **0666** — a door
-   DECISION 25 never covered. Now `root:dgpu 0660`, matched by DRIVER not number, verified denied as
-   `shawn` and still open through `dgpu-exec-v2`. Recorded in **AGENTS.md §9** (this turn — it was
-   missed last turn, which is the §13 rule being broken and then caught).
+⚠️ **Selftest is 38/1, and the one failure is correct:** the lock screen still shows Rain while the
+desktop is now Starfield, because the stale page reverted the desktop. Left deliberately — the
+desktop is mid-experiment and re-syncing would be guessing at what he wants. One command settles it
+once he has chosen: `scripts/luminos-wallpaper-lockscreen`.
+
+### The two turns before this one, in one line each (detail: BUG-183/184, DECISION 126/127)
+- **BUG-183:** Lively web wallpapers were never a WebGL problem — they *wait to be told what to
+  draw* (`livelyPropertyListener` per property on load) and we never called it. `ui/LivelyApi.qml`
+  now does; Rain's framebuffer went from mean 0 to 126/255. Their packages are never rewritten.
+- **BUG-184:** `/dev/dri/renderD128`, the NVIDIA card's DRM render node, was mode **0666** — a door
+  DECISION 25 never covered. Now `root:dgpu 0660`, matched by DRIVER not number, verified denied as
+  `shawn` and still open through `dgpu-exec-v2`. Recorded in AGENTS.md §9.
+- **DECISION 127:** the lock screen's wallpaper is a script's copy of the desktop's
+  (`scripts/luminos-wallpaper-lockscreen`), with four lock-screen overrides; selftest [7] catches
+  drift. Verified on screen in `kscreenlocker_greet --testing`.
 
 ### Still open on the wallpaper
 `livelySystemInformation(json)` and `livelyAudioListener(float[])` are unimplemented; Simple System,
@@ -107,43 +116,15 @@ Pointer only, so this file stays short:
 
 ## State — what is DONE
 
-### dGPU investigation — BUG-182, filed this turn, READ-ONLY
-**The card is awake and idle, and it is not our daemons doing it.**
-- `control=auto`, `runtime_status=active`, `power_state=D0`, `d3cold_allowed=1`; three samples over
-  11 min → `d_suspended = 0 ms` every time. P8 / 210 MHz / **1.54 W** / 2 MiB / 0 % util.
-- This boot: **6h22m active / 3h33m suspended** — it *was* cycling and then stopped.
-- `/proc/driver/nvidia/gpus/…/power` → `Runtime D3 status: Enabled (fine-grained)` but
-  **`Video Memory: Active`**. That live allocation, not the PCI layer, is what blocks D3cold.
-- **Ruled out by measurement, not reasoning:** `luminos-power` polling (45 s `/proc` scan caught
-  **zero** `nvidia-smi`/`dgpu-exec` execs — BUG-160's fix is working); `power/control=on` (BUG-103);
-  persistence mode (Disabled, persistenced dead); the compositor (kwin/plasmashell/qs/Chrome are all
-  on **card2/renderD129 AMD**, **zero** holders on card1/renderD128); an AC/DC transition
-  (`ACAD online=1` since boot); RTD3 config (`DynamicPowerManagement: 2`, as BUG-047 intended).
-- **Sole holder:** `nvidia-powerd` PID 877, 11 fds on `/dev/nvidia0` + 1 on `/dev/nvidiactl`.
-  Its own unit is **disabled** — **supergfxd starts it** on entering Hybrid. It errored at boot:
-  `Client (presumably SBIOS) has requested to disable Dynamic Boost DC controller`.
-- ✅ **RESOLVED 23:47 — `nvidia-powerd` is EXONERATED, and the card slept on its own.**
-  `luminos-dgpu-watch --once` caught `state=suspended` with powerd **still holding 11 fds on
-  `/dev/nvidia0`** — so holding a device node does **not** block fine-grained RTD3, and the original
-  2026-09-03 watcher comment was right all along. `suspended_time` moved for the first time in
-  hours (12786802 → 13115000 ms). **But powerd RE-OPENS those handles** (23:18:51 → 23:41:40, ~23
-  min apart), which makes it a candidate **waker**, not a **holder** — different mechanism,
-  different fix, and consistent with BUG-161's "second, unidentified wake path".
-  **What pinned the card for ~3 hours is still unknown and is now the whole question.**
-- ⚠️ **The earlier caveat was right and is the reason this was not written up as a false cause:** `/proc/877/fd` says those nvidia fds opened
-  at **23:18:51**, hours *after* the card stopped sleeping. Timestamps verified real (re-listed
-  twice, unchanged; fds 0–4 still read 13:26:33). **What opened them at 23:18:51 is the open
-  question.**
-- **Correlated trigger, not proven:** the only GPU-touching journal event all day is root
-  `nvidia-smi -q -d DISPLAY` at **20:29:35**, corroborated by `/dev/nvidia-caps/*` created 20:29:37
-  and the UVM ctime below. **Runtime PM has no last-transition timestamp**, so "it woke at 20:29" is
-  *not* derivable from the counters — an earlier pass asserted it anyway and was wrong to.
-- 🔴 **Separate live finding: the DECISION 25 gate is OPEN on two nodes.** `/dev/nvidia-uvm` and
-  `-uvm-tools` are **`0666 root:root`**, ctime **20:29:37**, against `root:dgpu 0660` at boot.
-  Textbook **BUG-146**: a root NVIDIA client makes setuid `nvidia-modprobe` re-apply the driver's
-  hardcoded defaults to the two nodes `NVreg_DeviceFile*` cannot cover. `nvidia0`, `nvidiactl` and
-  `nvidia-modeset` are still correct. Re-assert with `sudo systemctl restart luminos-uvm-gate`
-  (**restart** — it is `active (exited)`). Not done: read-only turn.
+### dGPU investigation — BUG-182, READ-ONLY, closed
+The card was awake and idle and it was **not** our daemons. `nvidia-powerd` was EXONERATED: it
+holds 11 fds on `/dev/nvidia0` while the card sits in D3cold, so holding a node does not block
+fine-grained RTD3 — but its open times move (23:18 → 23:41), making it a candidate *waker*, not a
+holder. What pinned the card for ~3 hours is still unknown; `luminos-dgpu-watch` is what answers it
+(a `### WOKE` line with a `HOLDER+` names the culprit; without one it is BUG-161's ACPI path).
+Ruled out by measurement: `luminos-power` polling, `power/control=on`, persistence mode, the
+compositor (all on card2/renderD129), AC/DC transitions, RTD3 config. Full detail in BUG-182.
+**Method note worth keeping: a frozen counter dates the END of an event, not its cause.**
 
 ### The dGPU "gate" is THREE different mechanisms — stop conflating them
 | | What it gates | Mechanism | Lives in |

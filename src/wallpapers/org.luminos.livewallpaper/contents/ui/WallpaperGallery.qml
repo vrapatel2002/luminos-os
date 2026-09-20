@@ -27,6 +27,13 @@ ColumnLayout {
     // (type, absolute entry path) for something the user picked.
     signal picked(string type, string entryPath)
 
+    // The entry path the wallpaper is ACTUALLY showing, so the grid can say which
+    // tile is the current one. [CHANGE: claude-code | 2026-09-20] BUG-185 — there
+    // was no selected state at all: a click changed a config key and nothing on
+    // screen, so "I clicked it and nothing happened" was a correct description of
+    // a working gallery.
+    property string currentEntry: ""
+
     property var items: []
     property string problem: ""
     property bool busy: false
@@ -112,50 +119,13 @@ ColumnLayout {
         clip: true
         model: gallery.items
 
-        delegate: Item {
-            required property var modelData
+        delegate: GalleryTile {
+            required property var model
             width: grid.cellWidth
             height: grid.cellHeight
-            opacity: modelData.playable ? 1.0 : 0.45
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: Kirigami.Units.smallSpacing
-                spacing: 2
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: Kirigami.Theme.alternateBackgroundColor
-                    radius: 3
-                    Image {
-                        anchors.fill: parent
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        source: modelData.previewPath ? "file://" + modelData.previewPath : ""
-                    }
-                    QQC2.Label {
-                        anchors.centerIn: parent
-                        visible: !modelData.previewPath
-                        text: "▦"
-                        opacity: 0.4
-                    }
-                }
-                QQC2.Label {
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    font: Kirigami.Theme.smallFont
-                    text: modelData.title || modelData.id
-                }
-            }
-            QQC2.ToolTip.visible: hover.hovered
-            QQC2.ToolTip.text: modelData.playable
-                ? i18n("%1 — %2", modelData.title || modelData.id, modelData.type)
-                : i18n("Cannot be shown yet: %1", modelData.why)
-            HoverHandler { id: hover }
-            TapHandler {
-                enabled: modelData.playable
-                onTapped: gallery.picked("" + modelData.type, "" + modelData.entryPath)
-            }
+            modelData: model.modelData
+            currentEntry: gallery.currentEntry
+            onPicked: function (type, entryPath) { gallery.picked(type, entryPath); }
         }
     }
 
