@@ -193,3 +193,44 @@ luminos-uvm-gate.sh,install-dgpu-gate.sh}`, `config/udev/71-luminos-uvm-gate.rul
 `dgpuRuntimeSuspended` 1578, `nvidiaRead` 1692, `regateUVM` 1730, `setProfile` 1340).
 **Wallpaper:** `src/wallpapers/org.luminos.livewallpaper/contents/` + installed copy at
 `~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/` — keep `diff -rq` clean.
+
+---
+
+## Desktop RAM audit — 2026-09-19 (added by a SECOND Cowork chat; see §0.1)
+> ⚠️ **Counter canary, recorded not fixed.** This file's header says *Response 1*; the chat that
+> wrote this section is at **Response 10** and has been running since 2026-09-18 (BUG-166 /
+> DECISION 115, the tab sleeper + pagefile). Two chats, one file. This section is **appended, not
+> an overwrite** — nothing above it was touched.
+
+**Nothing was changed. Read-only measurement on the box via the host shell.**
+
+Shawn's own PSS table named `baloo_file` at 978 MB and a "shell layer total" of 1577 MB. Measured
+with `/proc/<pid>/smaps_rollup`, splitting PSS into **anon (real) vs file-backed (page cache)**:
+
+| process | PSS | **real (anon)** | file cache | swapped |
+|---|---|---|---|---|
+| `baloo_file` | 924 MB | **138 MB** | 786 MB | 4 MB |
+| `qs` (Caelestia) | 335 MB | **292 MB** | 42 MB | 41 MB |
+| `kwin_wayland` | — | **~250 MB** (RSS 252) | — | — |
+| `plasmashell` | 133 MB | **71 MB** | 62 MB | 0 |
+| `krunner` | 101 MB | **65 MB** | 36 MB | 13 MB |
+| `kded6` | 25 MB | **20 MB** | 5 MB | 4 MB |
+
+- **`baloo_file` is not a 1 GB memory hog.** 786 MB of that PSS is the 3.0 GB
+  `~/.local/share/baloo/index` **mmapped read-only** — file-backed cache the kernel drops for free.
+  Real cost **138 MB**. **PSS counts file-backed pages; `Pss_Anon` is the number that answers "is
+  this eating my RAM".** A RAM report that does not split them chases the wrong process.
+- **`kwin_wayland` was missing from the report and is the second-largest real consumer** (~250 MB,
+  1852 s CPU in 10 h ≈ 5% of a core). It hid because `pgrep` matched only `kwin_wayland_wrapper`,
+  which is a 0 MB launcher.
+- **baloo's real cost is the SSD: `write_bytes` = 16.8 GB in 10 hours** (~1.7 GB/h), with
+  `baloo_file_extractor` children spawning every ~20–30 s. The parent shows only 6.7 s CPU because
+  the children do the work and exit — so a CPU check alone says "idle" and is wrong.
+  `baloofilerc` is still `dbVersion=2` only: defaults, all of `$HOME`, including **`~/re` (8.4 GB)**,
+  `research/` (550 M), `reference_code/` (277 M).
+- Corrected shell-layer total: **~730 MB real, not 1577 MB.** Two shells (plasmashell **and** qs),
+  two launchers (krunner **and** Caelestia's), three xdg portals (base + kde + gtk).
+- **RAM is not the current problem:** 4.6 GB available, zram 1.4/8 G, pagefile **0 B used**.
+- ⚠️ **`systemd/luminos-pagefile.service` is still UNTRACKED in git** (`?? systemd/luminos-pagefile.service`)
+  while the installed copy at `/etc/systemd/system/` is live. Same class as the untracked
+  `luminos-hive.service` in BUG-148. Commit it.

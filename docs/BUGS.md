@@ -7258,3 +7258,43 @@ driver's hardcoded `0666 root:root` to the two nodes the `NVreg_DeviceFile*` par
    sleeping card" (`luminos-monitor`, `luminos-verify`, `readGPUStats`) — none of them is built to
    *stop touching an awake one*. That asymmetry means the first wake is cheap and every wake after
    it is free, which is the wrong way round. Not a bug in any one file; worth a decision.
+
+---
+
+## BUG-182 — Lively's stock wallpapers import perfectly and render black: WebGL
+<!-- [CHANGE: claude-code | 2026-09-19] found by testing the real stock wallpapers -->
+
+**Status:** OPEN, found and evidenced, not root-caused · **Severity:** all six of Lively's own
+stock wallpapers load and show nothing · **Files:** web mode (`contents/ui/WebMode.qml`), and
+whatever governs QtWebEngine's GPU in plasmashell
+
+Lively's six stock wallpapers are not in its git repo — they ship as `app/Bundle/wallpapers/0..5.zip`
+inside the release installer, extracted on first run. Pulled from the official
+`lively_setup_x86_full_v2210.exe` with `innoextract` and installed **unmodified**:
+
+| id | Lively type | imports | plays |
+|---|---|---|---|
+| medusae, simple-system, music-tv-lq, rain, living-room, music-tunnel | **all Type 1 = web** | ✅ all six, with previews | ❌ black |
+
+**The import side is a complete success** — and only because BUG-181 was fixed hours earlier. Under
+the old invented map every one of these would have imported as a GIF and been unplayable.
+
+**The render side is not.** `rain` loads: its own *"Open Controls"* UI draws in the corner, so the
+HTML, CSS and `dat.gui` all run. The wallpaper itself is `three.js` — **WebGL** — and the canvas
+stays black. plasmashell logged nothing.
+
+#### What that means
+This is not a Lively-compatibility problem; it is our web mode. The page, its scripts and its DOM
+are all fine. **WebGL specifically is not producing pixels inside QtWebEngine in plasmashell.**
+Worth knowing that most good Lively web wallpapers are WebGL, so this gates most of their library.
+
+#### Next
+Test a minimal WebGL page in web mode to confirm it is WebGL and not three.js; then look at
+`QTWEBENGINE_CHROMIUM_FLAGS` (AGENTS.md §9 already sets no-throttle flags for the Plasma session
+via `~/.config/plasma-workspace/env/luminos-wallpaper-nothrottle.sh`) and at whether the GPU
+process is running at all for the wallpaper's web view. Note the interaction with BUG-050's
+`__EGL_VENDOR_LIBRARY_FILENAMES=50_mesa.json`, which pins EGL to Mesa globally to keep the dGPU
+asleep — correct for power, and a plausible suspect for a GL context that will not initialise.
+
+**Do not conclude "Lively wallpapers do not work here."** They import correctly, they load, and
+their non-GL parts run. One capability is missing.
