@@ -31,7 +31,18 @@ DESKTOP_WAS_UP=0
 systemctl is-active --quiet sddm && DESKTOP_WAS_UP=1
 
 restore() {
-  log "=== RESTORING DESKTOP ==="
+  log "=== RESTORING ==="
+  # re-enable any swap device that is no longer active (defensive; nothing should
+  # disable swap any more, but losing the user's swapfile once was enough)
+  if [ -f "$OUT/swap-devices.txt" ]; then
+    while read -r dev _; do
+      [ -n "$dev" ] || continue
+      if ! swapon --show --noheadings --raw 2>/dev/null | grep -q "^$dev "; then
+        log "swap device $dev is missing - re-enabling"
+        sudo -n swapon "$dev" 2>/dev/null || log "  FAILED to re-enable $dev - run: sudo luminos-pagefile"
+      fi
+    done < "$OUT/swap-devices.txt"
+  fi
   [ "$DESKTOP_WAS_UP" = 1 ] && sudo -n systemctl start sddm
   log "done. results in $OUT"
 }
@@ -56,15 +67,17 @@ sudo -n systemctl stop sddm
 sleep 8
 log "desktop stopped. memory now:"; free -m | tee -a "$OUT/run.log"
 
-log "clearing swap for a clean measurement (may take a minute)..."
-if sudo -n timeout 180 swapoff -a; then
-  sudo -n swapon -a 2>/dev/null
-  sudo -n systemctl restart systemd-zram-setup@zram0.service 2>/dev/null
-  sleep 2
-  log "swap cleared and re-enabled:"; swapon --show | tee -a "$OUT/run.log"
-else
-  log "WARNING: swapoff failed/timed out - continuing with swap as-is (deltas still valid)"
-fi
+# [FIX 2026-09-20] The first run used `swapoff -a; swapon -a` and PERMANENTLY DROPPED
+# /swapfile.luminos, because that file is enabled by /usr/local/bin/luminos-pagefile and
+# is NOT in /etc/fstab - so `swapon -a` had nothing to restore it from. The machine ran
+# the whole test on zram alone (8G instead of 41G), which made it MORE memory-constrained
+# than the baseline and invalidated the comparison. Never clear swap blindly again.
+#
+# Swap is now left ALONE. The vmstat counters are deltas, so a non-empty starting swap
+# does not invalidate anything - and leaving it intact keeps the test to ONE variable.
+log "recording swap layout (NOT clearing it - see FIX note above)"
+swapon --show --noheadings --raw > "$OUT/swap-devices.txt" 2>/dev/null
+cat "$OUT/swap-devices.txt" | tee -a "$OUT/run.log"
 
 free -m | tee -a "$OUT/run.log"
 counters T0_BEFORE_GAME

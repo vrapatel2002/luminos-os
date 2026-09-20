@@ -94,6 +94,20 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 while that chat was mid-thread.** Nothing was lost — its output is durable in
 **`docs/gamemode/FEASIBILITY.md`** (304 lines) and in `luminos-notes.sh search "console"`.
 Pointer only, so this file stays short:
+- 🔴 **REHEARSAL 01 INVALID 2026-09-20 — `docs/gamemode/REHEARSAL-01.md`.** The harness ran
+  `swapoff -a; swapon -a` and **permanently dropped `/swapfile.luminos`** — it is enabled by
+  `/usr/local/bin/luminos-pagefile`, **NOT `/etc/fstab`**, so `swapon -a` could not restore it.
+  Test ran on zram alone (8 GB not 41 GB), pegged full, RAM availability 1.35 GB — more starved
+  than baseline, so the comparison is void. **Swap restored manually; machine healthy. Harness
+  patched to never touch swap + re-enable missing devices in its trap.** ⚠️ Anything that calls
+  `swapoff -a` on this box loses the swapfile — remember `luminos-pagefile` owns it.
+  Still valid from the run: **cage + Lutris + Proton kiosk session works end to end** (VELA's
+  session shape validated); `pci_dev=0000:01:00.0` fixes MangoHud's GPU mis-attribution; and the
+  real VRAM figure is **5.56 GB avg / 5.69 GB peak of 6.14 GB = 93%** at Medium/RT-off/900p/DX11.
+  🟡 Signal to chase: avg FPS moved only 53.6 -> 52.5 despite far worse memory conditions, GPU load
+  89%, VRAM 93% — suggests **average fps is GPU/VRAM-bound, while the LOWS are the RAM-sensitive
+  part** (1% low 37.9 -> 34.0, min 15.4 -> 1.6). If that holds clean, a lighter OS buys frame-time
+  consistency rather than average frame rate.
 - 🟢 **MEMORY STRATEGY 2026-09-20 — `docs/gamemode/MEMORY-STRATEGY.md`.** Answers "consoles do
   it under 16 GB, why can't we". **Xbox Series S ships this generation of AAA on ~8 GB TOTAL and
   never swaps; this G14 has 22 GB.** Budget is not the problem — split pools, no hardware
