@@ -7783,3 +7783,58 @@ and now KWin's protocol list.
 
 ### Cross-references
 DECISION 124 (corrected by this) · CONTRACTS §7 (stands as written) · SPEC §3.6
+
+
+## DECISION 125 — a temporary dGPU audit log, because the card keeps no history of its own
+<!-- [CHANGE: cowork | 2026-09-19] -->
+
+**Context.** BUG-182: the RTX 4050 sat in D0 at 1.54 W for roughly three hours with nothing
+computing on it, then went back to sleep by itself. Every after-the-fact instrument we have is
+blind to that: `nvidia-smi` shows only *current* clients (and wakes the card to say so), runtime PM
+exposes cumulative counters with **no last-transition timestamp**, and a client vanishes the instant
+it exits. The question "who used the GPU, and when" is not answerable later — only while it happens.
+
+**Decision.** Extend the existing `scripts/luminos-dgpu-watch` (2026-09-03, never deployed) and run
+it as a **temporary** root systemd unit logging to `/var/log/luminos/dgpu-watch.log`.
+
+**Why extend rather than write a new one.** The script already existed and already had the two
+hard-won parts: the single-`find` fd walk (a `readlink` per fd forks thousands of times per scan and
+misses short wakes), and the root requirement. Writing a second watcher would have duplicated both
+and left two files to drift — the failure the caelestia session installers were carefully designed
+to avoid.
+
+**Three deliberate constraints:**
+1. **It never runs `nvidia-smi`.** sysfs `runtime_status` plus `/proc` only. Anything that queries
+   the card wakes it and resets the autosuspend timer, so a naive `watch nvidia-smi` would *create*
+   the condition it is meant to observe — that is precisely BUG-160, where the daemon watching the
+   GPU was what kept it awake. An observer that changes what it observes is not an instrument.
+2. **It logs the fd OPEN TIME, not just the current holder.** `/proc/<pid>/fd` timestamps are real
+   open-times on this kernel (verified in BUG-182 by re-listing twice unchanged while low fds kept
+   their boot time). That is what turns "powerd holds it" into "powerd *re-opened* it at 23:41:40,
+   23 minutes after the previous open" — a periodic **waker**, not a permanent **holder**. Without
+   the timestamp those are the same observation, and they have different fixes.
+3. **It no longer filters `nvidia-powerd`.** The 2026-09-03 version dropped powerd from every report
+   on the stated grounds that it holds the handles for the whole uptime by design. Half of that is
+   true — it holds handles while the card sleeps, which is what **exonerated** it — but the "whole
+   uptime" half is false, and the filter hid the only holder there was. `--quiet-powerd` restores
+   the old behaviour if it becomes noise.
+
+**It also logs the platform profile.** A profile write wakes the card through ACPI NVPCF holding no
+descriptor at all (BUG-161, DECISION 109), so a `### WOKE` with **no** `HOLDER+` beside it and a
+`PROFILE` line next to it is the diagnosis — and it is the one case no fd scan can ever catch.
+
+**Cost.** Two tiny sysfs reads plus one `/proc` walk every 0.5 s at `Nice=10`, and it writes only on
+change plus a 10-minute heartbeat, so the log stays readable rather than becoming a sample dump.
+
+**This is explicitly temporary and says so in three places** (the unit header, AGENTS.md §9, and
+here) with the removal command in each. A debug daemon that quietly becomes permanent is how a
+system accretes things nobody can justify later. Remove with:
+`sudo systemctl disable --now luminos-dgpu-watch && sudo rm
+/etc/systemd/system/luminos-dgpu-watch.service /usr/local/bin/luminos-dgpu-watch && sudo systemctl
+daemon-reload`. The script stays in the repo either way.
+
+**Rejected:** `watch nvidia-smi` (wakes the card — see constraint 1); an eBPF/`bpftrace` probe on
+`nv_indicate_not_idle` (genuinely better, and the right answer if the ACPI path turns out to be it,
+but `bpftrace` is not installed and installing it mid-investigation adds a variable); the
+`rpm_resume` tracepoint (answers "who resumed this device" but only for the **next** wake, so it is
+useless on a card that is already awake — worth arming *in addition*, later).

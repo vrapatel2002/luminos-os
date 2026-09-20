@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-19 — Response 1 (new Cowork chat; counter legitimately restarts, §0.1)
+Last updated: 2026-09-19 — Response 3 (new Cowork chat; counter legitimately restarts, §0.1)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -11,7 +11,7 @@ Keep Luminos OS working as a daily-driver Windows replacement — the G14 deskto
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-**This turn: read-only dGPU investigation.** Shawn: *"find out why is/was the NVIDIA gpu on — do not
+**This turn: dGPU investigation, then a temporary audit log Shawn asked for.** Shawn: *"find out why is/was the NVIDIA gpu on — do not
 turn it off just find out why its behaving such a way, and why our code that gate keeps the NVIDIA
 dgpu."* Answered in **BUG-182** (new) plus the gate map below. **Nothing was changed.**
 
@@ -56,7 +56,15 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 - **Sole holder:** `nvidia-powerd` PID 877, 11 fds on `/dev/nvidia0` + 1 on `/dev/nvidiactl`.
   Its own unit is **disabled** — **supergfxd starts it** on entering Hybrid. It errored at boot:
   `Client (presumably SBIOS) has requested to disable Dynamic Boost DC controller`.
-- ⚠️ **DO NOT conclude "nvidia-powerd keeps it awake."** `/proc/877/fd` says those nvidia fds opened
+- ✅ **RESOLVED 23:47 — `nvidia-powerd` is EXONERATED, and the card slept on its own.**
+  `luminos-dgpu-watch --once` caught `state=suspended` with powerd **still holding 11 fds on
+  `/dev/nvidia0`** — so holding a device node does **not** block fine-grained RTD3, and the original
+  2026-09-03 watcher comment was right all along. `suspended_time` moved for the first time in
+  hours (12786802 → 13115000 ms). **But powerd RE-OPENS those handles** (23:18:51 → 23:41:40, ~23
+  min apart), which makes it a candidate **waker**, not a **holder** — different mechanism,
+  different fix, and consistent with BUG-161's "second, unidentified wake path".
+  **What pinned the card for ~3 hours is still unknown and is now the whole question.**
+- ⚠️ **The earlier caveat was right and is the reason this was not written up as a false cause:** `/proc/877/fd` says those nvidia fds opened
   at **23:18:51**, hours *after* the card stopped sleeping. Timestamps verified real (re-listed
   twice, unchanged; fds 0–4 still read 13:26:33). **What opened them at 23:18:51 is the open
   question.**
@@ -100,24 +108,31 @@ Never say "far lighter than Chromium" without naming the scene.
 Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instruction.
 
 ## Next steps (ordered)
-1. **BUG-182 step 1 — find what opened nvidia-powerd's fds at 23:18:51.** Sample
-   `ls -l --time-style=full-iso /proc/$(pgrep -x nvidia-powerd)/fd` + `power/runtime_status` once a
-   minute for an hour. No state change, no GPU contact. **Only then** consider the
-   `systemctl stop nvidia-powerd` A/B — that needs Shawn's word.
-2. **Ask Shawn about the UVM gate re-assert** (`systemctl restart luminos-uvm-gate`). One command,
+1. **BUG-182 — READ `/var/log/luminos/dgpu-watch.log`.** The temporary audit unit
+   (DECISION 125) is running and is the next move; it needs hours, not minutes. What to look for:
+   a **`### WOKE` with a `HOLDER+` beside it** names the culprit outright; a **`### WOKE` with NO
+   `HOLDER+` but a `PROFILE` line** beside it is the BUG-161 ACPI NVPCF path, which holds no
+   descriptor and which no fd scan can ever catch; a **`BEAT` line with `slept_since_last=0s`**
+   means the pin is back. `nvidia-powerd` re-opening its handles (~23 min apart) will show as a
+   `HOLDER-`/`HOLDER+` pair — expected, and interesting only if a `### WOKE` sits next to it.
+   **Delete the unit when the question is answered** — command in AGENTS.md §9.
+2. **OLD step 1, now superseded and kept only so nobody redoes it —** sampling
+   powerd's fds by hand. The watcher does it continuously and better. The
+   `systemctl stop nvidia-powerd` A/B is **no longer worth running** — see the exoneration below.
+3. **Ask Shawn about the UVM gate re-assert** (`systemctl restart luminos-uvm-gate`). One command,
    but it is a state change and this turn was read-only.
-3. **SPEC §3.6 — external producer (games).** Consumer half is built and proven (DECISION 124).
+4. **SPEC §3.6 — external producer (games).** Consumer half is built and proven (DECISION 124).
    **Blocker:** `org.freedesktop.impl.portal.ScreenCast.CreateSession` against `xdg-desktop-portal-wlr`
    gives no `Response` signal in 20 s. Probe at `/tmp/sc.py`. cage runs headless on the 780M
    (glxgears 62.8 FPS, picks the iGPU by itself). Producer must publish **packed RGB** (`format=BGRx`)
    or it renders greyscale. **DECISION 124a corrects 124:** input DOES exist — a live headless `cage`
    advertises `zwlr_virtual_pointer_manager_v1` + `zwp_virtual_keyboard_manager_v1`; the earlier
    measurement was taken against KWin, the wrong compositor.
-4. **Spectrum on the GPU** — one `ShaderEffect` over the existing 128×1 `AudioTexture`.
+5. **Spectrum on the GPU** — one `ShaderEffect` over the existing 128×1 `AudioTexture`.
    **DECISION 121: capping the publish rate was tried and measured WORSE. Do not redo it.**
-5. **BUG-166 / BUG-167** — verify the tab sleeper (`chrome://extensions` must read 3.1), then
+6. **BUG-166 / BUG-167** — verify the tab sleeper (`chrome://extensions` must read 3.1), then
    reconcile `config/99-luminos-ram.conf` with the box **keeping `page-cluster = 3`** (DECISION 116).
-6. **BUG-164** — 20 ASS files (Bazarr `use_embedded_subs` OFF), then one of the 26 DTS files.
+7. **BUG-164** — 20 ASS files (Bazarr `use_embedded_subs` OFF), then one of the 26 DTS files.
 
 ## Key decisions & constraints
 - **AGENTS.md §0.2 / Rule 12 / §16: "no changes" scopes to code, config and system state.**
@@ -138,6 +153,13 @@ Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instructi
   is already awake.
 - **A ROOT `nvidia-smi` — even a read-only query — re-opens the UVM gate** (BUG-146). Proven again
   this turn by ctime. Use `nvidiaRead()` from the daemon; from a shell, expect to re-assert after.
+- **A frozen counter dates the END of an event, not its cause.** `runtime_suspended_time` had not
+  moved in hours, and the first pass reached for a cause that was still present — when the thing
+  responsible had already stopped. Three samples over eleven minutes is not a sample of a
+  three-hour window.
+- **Holding `/dev/nvidia0` does NOT keep the card awake.** Proven: powerd held 11 fds while the card
+  sat in D3cold. "Who holds it" and "what wakes it" are different questions — check the **fd open
+  time**, not just the holder list.
 - **Runtime PM gives cumulative counters and NO last-transition timestamp.** You cannot derive when
   a card woke by subtracting `runtime_active_time` from now — that assumes one contiguous block,
   which is the thing you are testing. Two spaced samples prove *currently awake*, nothing more.
@@ -182,8 +204,13 @@ Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instructi
 for any transcode question is Jellyfin's own ffmpeg command lines in `/var/log/jellyfin/`.
 
 ## Files touched / relevant files
-**This turn (docs only, no code/config/system change):** `docs/BUGS.md` (new **BUG-182**),
-`HANDOFF.md` (reset), `LUMINOS_STATUS.md`.
+**This turn:** `scripts/luminos-dgpu-watch` (extended — powerd filter removed, `--once`, holder
+identity + fd open time, `HOLDER-` on release, `PROFILE`/`BEAT` lines), new
+`systemd/luminos-dgpu-watch.service`, `docs/BUGS.md` (**BUG-182** + amendment),
+`LUMINOS_DECISIONS.md` (**DECISION 125**), `AGENTS.md` §9 row, `LUMINOS_STATUS.md`, `HANDOFF.md`.
+**System state changed (Shawn asked for it):** `/usr/local/bin/luminos-dgpu-watch` installed and
+`/etc/systemd/system/luminos-dgpu-watch.service` enabled + started — **TEMPORARY, delete when
+BUG-182 is answered.** Backup of the pre-edit script: `/tmp/dgpu-watch.bak` (and git).
 **Evidence sources, for re-running the investigation:** `/sys/bus/pci/devices/0000:01:00.0/power/*`,
 `/proc/driver/nvidia/{params,gpus/0000:01:00.0/power}`, `/proc/$(pgrep -x nvidia-powerd)/fd`,
 `journalctl -b -u {supergfxd,nvidia-powerd,luminos-power}`.

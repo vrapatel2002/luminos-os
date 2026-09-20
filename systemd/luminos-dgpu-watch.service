@@ -1,0 +1,31 @@
+# ⚠️ TEMPORARY DEBUG UNIT — BUG-182. NOT part of the Luminos runtime.
+# [CHANGE: cowork | 2026-09-19]
+#
+# Records WHO holds the NVIDIA dGPU, WHICH process, and WHEN — to /var/log/luminos/dgpu-watch.log
+# It is read-only: sysfs + /proc only. It NEVER runs nvidia-smi, so it can neither wake the
+# card nor keep an awake one from sleeping (the failure mode of BUG-160).
+#
+# REMOVE WHEN THE QUESTION IS ANSWERED:
+#   sudo systemctl disable --now luminos-dgpu-watch
+#   sudo rm /etc/systemd/system/luminos-dgpu-watch.service /usr/local/bin/luminos-dgpu-watch
+#   sudo systemctl daemon-reload
+# The script stays in the repo at scripts/luminos-dgpu-watch either way.
+
+[Unit]
+Description=TEMPORARY dGPU holder audit (BUG-182) — who/what/when holds the RTX 4050
+Documentation=file:///home/shawn/luminos-os/docs/BUGS.md
+After=nvidia-powerd.service supergfxd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/luminos-dgpu-watch -l /var/log/luminos/dgpu-watch.log -i 0.5 -b 600
+Restart=on-failure
+RestartSec=10
+Nice=10
+# root is mandatory: dGPU clients go through the setgid gate and are non-dumpable,
+# so an unprivileged scan reports a clean idle GPU while a process renders on it.
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

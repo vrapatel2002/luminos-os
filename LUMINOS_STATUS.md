@@ -360,7 +360,19 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
 6. Go orchestrator (replace Python hive-daemon.py)
 7. Zone indicator Plasma widget
 8. SDDM custom Luminos theme
-11. 🔴 **BUG-182 — the dGPU is pinned in D0 with no client, and the UVM gate is currently OPEN.**
+11. 🔴 **BUG-182 — the dGPU was pinned in D0 with no client; the UVM gate is currently OPEN.**
+    <!-- [CHANGE: cowork | 2026-09-19] AMENDED same evening --> **UPDATE 23:47 — the card went back
+    to sleep on its own, and that exonerates `nvidia-powerd`:** it holds 11 handles on
+    `/dev/nvidia0` **while the card sits in D3cold**, so holding a node does not block fine-grained
+    RTD3. It does, however, **re-open** those handles periodically (23:18:51 → 23:41:40), which
+    makes it a candidate *waker* rather than a *holder* — a different mechanism and a different fix.
+    **What pinned the card for ~3 hours is still unknown** and is now the whole question.
+    **DECISION 125 / a TEMPORARY audit unit is running to answer it:** `luminos-dgpu-watch.service`
+    → `/var/log/luminos/dgpu-watch.log`, recording who/which process/when (with the fd **open
+    time**), the wake and sleep edges, and profile changes. Read-only; never runs `nvidia-smi`, so
+    it cannot cause what it is watching (BUG-160's failure mode). **Delete it when answered** —
+    removal command in AGENTS.md §9.
+    Original finding: 
     <!-- [CHANGE: cowork | 2026-09-19] investigation only, nothing changed by instruction -->
     Live 2026-09-19 23:21–23:28: `control=auto`, `runtime_status=active`, `power_state=D0`,
     **0 ms of suspend accrued across three samples 11 min apart**, card idle at P8 / 210 MHz /

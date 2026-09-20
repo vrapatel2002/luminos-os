@@ -7298,3 +7298,39 @@ asleep — correct for power, and a plausible suspect for a GL context that will
 
 **Do not conclude "Lively wallpapers do not work here."** They import correctly, they load, and
 their non-GL parts run. One capability is missing.
+
+### AMENDMENT 2026-09-19 23:47 — the card slept on its own, and that exonerates nvidia-powerd
+<!-- [CHANGE: cowork | 2026-09-19] -->
+
+Roughly 20 minutes after the section above was written, `luminos-dgpu-watch --once` reported:
+```
+state=suspended   active=24151s suspended=13115s
+HOLDER  nvidia-powerd(877) user=root node=/dev/nvidia0   opened=2026-09-19 23:41:40  fds=10
+HOLDER  nvidia-powerd(877) user=root node=/dev/nvidiactl opened=2026-09-19 23:41:40  fds=1
+```
+Two things fall out of that one line, and both change the conclusion:
+
+1. **`nvidia-powerd` holds 11 handles on `/dev/nvidia0` while the card sits in D3cold.**
+   Holding a device node does **not** block fine-grained RTD3. So powerd was never what kept the
+   card awake — the *original* `luminos-dgpu-watch` comment ("it keeps the handles but submits no
+   work, so the card still reaches D3 underneath it") was right, and the suspicion recorded above
+   was wrong. **The caveat in the section above is what saved this from being written up as a
+   false root cause**; it was hedged for the right reason and the hedge paid.
+2. **Powerd's handles are not static — it re-opens them.** The open time moved `23:18:51` →
+   `23:41:40`, about 23 minutes apart. So powerd periodically drops and re-acquires the card, and
+   **each re-acquire is a wake**. That makes it a candidate *waker*, not a *holder*, which is a
+   different mechanism and a different fix — and it lines up with BUG-161's "a second, unidentified
+   wake path remains" rather than contradicting it.
+
+**And the card did go back to sleep**, so whatever pinned it from ~20:29 to ~23:30 released on its
+own. `suspended_time` moved for the first time in hours: `12786802 ms` → `13115000 ms`.
+
+**Still unanswered, and now the whole question:** what *pinned* it for those ~3 hours, given the
+holder we found cannot do it. The watcher installed below is what answers it — a `### WOKE` line
+with a `HOLDER+` beside it names the culprit; a `### WOKE` with **no** `HOLDER+` and a `PROFILE`
+line beside it is the BUG-161 ACPI path, which holds no descriptor and no fd scan can ever catch.
+
+**Method note worth keeping:** the first pass at this bug ran a 45 s scan, saw a stable holder and a
+frozen counter, and reached for a cause. The counter was frozen because of something that had
+already stopped happening. **A frozen counter dates the *end* of an event, not its cause**, and
+three samples over eleven minutes is not a sample of a three-hour window.
