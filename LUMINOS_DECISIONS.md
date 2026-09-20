@@ -7895,3 +7895,48 @@ modules now ship inside the package. That second part fixed a real, unnoticed br
 DEPLOYED copy the installer could not resolve `../../../../../scripts`, so the gallery's Install…
 button answered `ERR cannot find luminos-wallpaper-pkg` while every selftest check passed. The
 selftest now runs the deployed installer instead of only checking that the file exists.
+
+
+## DECISION 126 — nvidia-powerd stays MASKED at idle, and two guards keep it that way
+<!-- [CHANGE: cowork | 2026-09-20] BUG-182 -->
+
+**Context.** The RTX 4050 sat in D0 at ~1.5 W for hours at a time with no process holding any
+device node. `nvidia-powerd` holds exactly **one kernel runtime-PM reference** on `0000:01:00.0`,
+with no file descriptor attached, so `usage_count` never reaches 0 and the PM core never even
+*attempts* a suspend. Proven both directions on the rpm tracepoints: stop → `cnt-0` → `rpm_suspend
+ret=0` → asleep in 7 s; start → powerd calls `rpm_resume`, count climbs to 3, `rpm_idle` returns
+`-11`, awake forever.
+
+**Decision.** `systemctl mask nvidia-powerd`. **Masked, not disabled** — supergfxd runs
+`systemctl start nvidia-powerd.service` on entering Hybrid at every boot, so `disabled` is silently
+overridden and only `mask` holds.
+
+**This is a restoration, not a new policy.** `luminos-game-mode:40` and `luminos-train-mode`'s
+`off` path both already state that powerd is masked at idle under BUG-047's idle-drain policy, and
+both `unmask + start` on entry. The system had drifted out of the state its own scripts assume.
+
+**The Dynamic Boost trade-off, stated plainly.** powerd is the only mechanism that moves TGP on a
+GA403UU (`luminos-game-mode:17`), so masking it at idle does cost Dynamic Boost — **for exactly as
+long as nothing is using the GPU.** Both consumers unmask it themselves, so a game or a training
+run is unaffected. And on this machine it was failing anyway: at every boot it logs `ERROR! Client
+(presumably SBIOS) has requested to disable Dynamic Boost DC controller`.
+
+**Why a one-time mask is not enough.** `luminos-game-mode:36`, verified 2026-08-25: `luminos-train-mode
+on <pattern>`'s keep-alive matches its own argv, never fires, and "leaves nvidia-powerd unmasked
+forever". A crashed perf-mode session does the same. So two guards:
+
+1. **`luminos-verify` [3]** — `bad` when powerd is running unmasked (pinning the card now), `warn`
+   when merely unmasked (it will be started at the next boot). Section [3] runs from the
+   SessionStart hook, so every agent session sees the drift.
+2. **`luminos-dgpu-watch` self-heal** — awake + **no holder but powerd** + no game/train keep-alive,
+   continuously for `--autopark` seconds (default 300) → stop + re-mask + log `*** SELF-HEAL`.
+   A real workload always holds a device node, so it cannot fire against a live game or model.
+   End-to-end tested by planting the drift and watching it reverse.
+
+**Consequence: `luminos-dgpu-watch` is no longer temporary.** DECISION 125 installed it as a debug
+unit to be deleted once the question was answered. It answered the question **and** became the
+mechanism that keeps the answer true, so it stays. The AGENTS.md §9 row is updated accordingly.
+
+**Rejected:** unmasking powerd and "just remembering" to re-mask (that is the failure mode that
+created this); a kernel/driver change (610.57.04 is pinned by DECISION 26 — not casual); switching
+`NVreg_DynamicPowerManagement` (already 0x02, correct, and not the problem).

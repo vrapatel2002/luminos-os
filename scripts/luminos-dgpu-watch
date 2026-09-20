@@ -45,6 +45,7 @@
 #   sudo luminos-dgpu-watch -d 3600            # watch for one hour
 #   sudo luminos-dgpu-watch -l /var/log/luminos/dgpu-watch.log
 #   sudo luminos-dgpu-watch --once             # one snapshot of who holds it, then exit
+#   sudo luminos-dgpu-watch --autopark 0       # audit only, never self-heal
 #   sudo systemctl start luminos-dgpu-watch    # background, TEMPORARY debug unit
 #
 # Read-only. Touches no configuration and never contacts the GPU.
@@ -61,6 +62,7 @@ LOGFILE=
 HEARTBEAT=600
 ONCE=0
 QUIET_POWERD=0
+AUTOPARK=300   # seconds of 'awake + no real client + powerd running' before self-healing; 0 disables
 
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -70,6 +72,7 @@ while [ $# -gt 0 ]; do
 	-b | --heartbeat) HEARTBEAT=$2; shift 2 ;;
 	--once) ONCE=1; shift ;;
 	--quiet-powerd) QUIET_POWERD=1; shift ;;
+	--autopark) AUTOPARK=$2; shift 2 ;;
 	-h | --help) sed -n '2,45p' "$0"; exit 0 ;;
 	*) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
 	esac
@@ -134,6 +137,43 @@ describe() {
 		"$comm" "$pid" "$user" "$node" "${opened:-?}" "$cmd"
 }
 
+
+# ---------------------------------------------------------------------------
+# SELF-HEAL — the actual fix for BUG-182.  [CHANGE: cowork | 2026-09-20] DECISION 126
+#
+# nvidia-powerd holds ONE kernel runtime-PM reference on the dGPU. Measured both ways with
+# the rpm tracepoints:
+#   stop  -> usage_count 1->0 -> rpm_idle -> rpm_suspend ret=0 -> suspended within 7 s
+#   start -> powerd itself calls rpm_resume, count climbs to 3, rpm_idle returns -11 (EAGAIN),
+#            and the card never sleeps again.
+# No file descriptor is involved, which is why every fd scan in this script reported a clean
+# GPU while it sat at 1.5 W for hours.
+#
+# The project's OWN policy already said powerd must be masked at idle (luminos-game-mode:40,
+# luminos-train-mode:53, BUG-047). It had drifted to merely `disabled`, and supergfxd runs
+# `systemctl start nvidia-powerd.service` on entering Hybrid at every boot, so `disabled` is
+# silently overridden. The documented way it drifts: `luminos-train-mode on <pattern>` whose
+# keep-alive matches its OWN argv, never fires, and "leaves nvidia-powerd unmasked forever"
+# (game-mode:36, verified 2026-08-25). So it WILL drift again — hence this.
+#
+# Deliberately conservative. It fires only when ALL of these hold for $AUTOPARK seconds:
+#   - the card is awake, and
+#   - nothing but powerd holds any NVIDIA node (a game or model always holds one), and
+#   - no game-mode / train-mode keep-alive is running (they unmask powerd on purpose).
+# So it can never take Dynamic Boost away from a real workload.
+powerd_should_park() {
+	[ "$AUTOPARK" -gt 0 ] || return 1
+	[ "$(systemctl is-active nvidia-powerd 2>/dev/null)" = active ] || return 1
+	pgrep -x luminos-game-mode >/dev/null 2>&1 && return 1
+	pgrep -x luminos-train-mode >/dev/null 2>&1 && return 1
+	local key pid
+	for key in "${!SEEN[@]}"; do
+		pid=${key%%:*}
+		[ "$(cat "/proc/$pid/comm" 2>/dev/null)" = nvidia-powerd ] || return 1
+	done
+	return 0
+}
+
 snapshot() {
 	local any=0 key pid node n fdnum
 	while read -r key n; do
@@ -167,6 +207,7 @@ prev_profile=$(cat $PROFILE 2>/dev/null)
 prev_susp=$(cat "$PMDIR/runtime_suspended_time" 2>/dev/null || echo 0)
 wake_start=$SECONDS
 last_beat=$SECONDS
+park_for=0
 declare -A SEEN    # key "pid:node" -> epoch first seen
 # [CHANGE: cowork | 2026-09-20] BUG-182: keying arrivals on pid+node alone made a RE-OPEN
 # invisible. nvidia-powerd dropped and re-acquired its 11 handles at 00:07:39 and the log said
@@ -237,6 +278,21 @@ while :; do
 		say "$(ts)  BEAT     state=$now  $(counters)  slept_since_last=$(( (cur_susp - prev_susp) / 1000 ))s  holders=${#SEEN[@]}"
 		prev_susp=$cur_susp
 		last_beat=$SECONDS
+	fi
+
+	# --- self-heal: park nvidia-powerd if it is pinning an idle card ----------
+	if [ "$now" = active ] && powerd_should_park; then
+		park_for=$((park_for + 1))
+		if [ $((park_for * 2)) -ge "$AUTOPARK" ]; then
+			say "$(ts)  *** SELF-HEAL  dGPU awake ${AUTOPARK}s with no client but nvidia-powerd running."
+			say "$(ts)  *** SELF-HEAL  It holds a kernel runtime-PM reference (BUG-182). Stopping + masking it."
+			sudo_out=$(systemctl stop nvidia-powerd 2>&1; systemctl mask nvidia-powerd 2>&1)
+			say "$(ts)  *** SELF-HEAL  now is-enabled=$(systemctl is-enabled nvidia-powerd 2>/dev/null) ${sudo_out:+| $sudo_out}"
+			say "$(ts)  *** SELF-HEAL  game-mode/train-mode unmask it themselves; this only reverses drift."
+			park_for=0
+		fi
+	else
+		park_for=0
 	fi
 
 	prev=$now

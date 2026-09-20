@@ -7580,3 +7580,83 @@ something wrong-but-plausible from that absence. The absence *was* the signal. *
 you own reports "nothing there", stop asking the same tools harder and go one layer down** — here
 that was three sysfs reads and a 35-second trace, and it took less time than any of the earlier
 passes.
+
+### ✅ FIXED — 2026-09-20 13:16. **nvidia-powerd holds the reference. It was supposed to be masked.**
+<!-- [CHANGE: cowork | 2026-09-20] DECISION 126. Status: OPEN -> FIXED -->
+
+**Amendment 2 exonerated `nvidia-powerd`. That was WRONG, and the reason it was wrong is the whole
+lesson of this bug: a file descriptor and a runtime-PM reference are two different things.**
+Amendment 2 saw the card asleep while powerd held 11 fds and concluded powerd could not be the
+cause. True for the fds; irrelevant to the reference. Once the tracepoints could show
+`usage_count`, one stop settled it.
+
+#### The measurement, both directions
+```
+systemctl stop nvidia-powerd
+  nv_queue       rpm_idle:       0000:01:00.0 cnt-0 dep-0      <- count falls to ZERO
+  kworker/u64:28 rpm_suspend:    0000:01:00.0 cnt-0 dep-0
+  kworker/u64:28 rpm_return_int: rpm_suspend ... ret=0         <- suspend SUCCEEDS
+  -> runtime_status=suspended within 7 s, suspended_time climbing again
+
+systemctl start nvidia-powerd
+  nvidia-powerd  rpm_resume:     0000:01:00.0 cnt-1            <- powerd itself resumes it
+  kworker/u64:1  rpm_resume:     0000:01:00.0 cnt-2
+  nvidia-powerd  rpm_idle:       0000:01:00.0 cnt-3
+  nvidia-powerd  rpm_return_int: rpm_idle ... ret=-11 (EAGAIN) <- cannot idle, count > 0
+  -> active, and never sleeps again
+```
+Baseline with powerd running was `usage_count = 1, disable_depth = 0` (seen by bouncing
+`power/control` on→auto, which forces `pm_runtime_forbid()`/`allow()` and makes the count visible).
+**One reference, held by nvidia-powerd, with no file descriptor attached to it.**
+
+#### The fix is a state that was already policy here, and had drifted
+`scripts/luminos-game-mode:40` — *"nvidia-powerd IS MASKED ON PURPOSE (BUG-047 idle-drain policy).
+Leaving it running after the game is a real battery regression"* — and `luminos-train-mode` `off`
+does `stop + mask`. **Masked at idle is the state both scripts were written to expect.** It had
+drifted to merely `disabled`, and that is not enough: **supergfxd runs
+`systemctl start nvidia-powerd.service` on entering Hybrid at every boot**, which overrides
+`disabled` silently. Only `mask` stops it.
+```
+sudo systemctl stop nvidia-powerd && sudo systemctl mask nvidia-powerd
+```
+Verified: card suspended within 8 s and stayed suspended. `luminos-game-mode` and
+`luminos-train-mode` both `unmask + start` on entry, so Dynamic Boost is untouched where it matters
+— and DECISION 26's pinned driver is not involved at all.
+
+#### How it drifted, and why it would drift again
+`luminos-game-mode:36`, already on file and verified 2026-08-25: *"`luminos-train-mode on <pattern>`
+… its keep-alive loop carries that pattern in its OWN argv, so the watch matches itself, never
+fires, and leaves the fans pinned and **nvidia-powerd unmasked forever**."* A crashed or
+Ctrl-C'd perf-mode session does the same. So the one-time mask is not a fix on its own.
+
+#### Two guards so it cannot come back
+1. **`luminos-verify` section [3]** now fails on it: `bad` if powerd is running unmasked (it is
+   pinning the card *right now*), `warn` if merely unmasked (supergfxd will start it next boot).
+   Section [3] is in the SessionStart hook path, so every agent session sees it.
+2. **`luminos-dgpu-watch` self-heals.** If the card is awake, **nothing but powerd** holds any
+   NVIDIA node, and no game-mode/train-mode keep-alive is running — continuously for `--autopark`
+   seconds (default 300) — it stops and re-masks powerd and logs `*** SELF-HEAL`. A real workload
+   always holds a node, so it can never take Dynamic Boost from a live game or model.
+   **End-to-end tested:** powerd deliberately unmasked and started, watcher run with
+   `--autopark 20` → stopped and re-masked 30 s later, journal confirms, card asleep.
+
+#### Also closed in the same pass
+`/dev/nvidia-uvm{,-tools}` were still `0666 root:root` from the 20:29 root `nvidia-smi`.
+`sudo systemctl restart luminos-uvm-gate` restored all five nodes to `root:dgpu 660`.
+⚠️ **The unit exits 1 on that restart and that is CORRECT, not a malfunction** — it deliberately
+fails when it had to *repair* rather than find the nodes already gated, which is precisely the
+BUG-146 mid-session breach it exists to report. Do not "fix" that exit code.
+
+#### What the earlier amendments got right and wrong
+- **Right:** `lspci` wakes the card (amendment 2) — that stands, and it explains the *wakes*.
+- **Wrong:** that powerd was exonerated. Wakes and pins are different questions; `lspci` supplies
+  the wake, powerd supplies the pin. Both were needed to produce a 3-hour 1.5 W idle.
+- **Right:** "nothing is holding it" in the process sense (amendment 3). There genuinely was no
+  fd. The reference was a kernel one, and `usage_count = 1` was the missing number.
+
+#### The portable lesson
+**`lsof`/`fuser`/`/proc` answer "who has it open". They do not answer "who has a reference on it".
+On a device with runtime PM, those are different questions with different tools** — the rpm
+tracepoints answer the second, and on a kernel without `CONFIG_PM_ADVANCED_DEBUG` they are the
+*only* thing that answers it. Four passes of this bug asked the first question and read the empty
+answer as evidence about the second.

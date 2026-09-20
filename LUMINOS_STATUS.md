@@ -360,7 +360,20 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
 6. Go orchestrator (replace Python hive-daemon.py)
 7. Zone indicator Plasma widget
 8. SDDM custom Luminos theme
-11. 🟢 **BUG-182 — ROOT-CAUSED. `lspci` wakes the dGPU and the nvidia module leaks a runtime-PM
+11. ✅ **BUG-182 — FIXED 2026-09-20 (DECISION 126). `nvidia-powerd` is masked; the dGPU sleeps.**
+    <!-- [CHANGE: cowork | 2026-09-20] --> It holds **one kernel runtime-PM reference with no file
+    descriptor**, so `usage_count` never hits 0 and the kernel never attempts a suspend. Proven both
+    ways on the rpm tracepoints: stop → `cnt-0` → `rpm_suspend ret=0` → asleep in **7 s**; start →
+    powerd calls `rpm_resume`, count climbs to 3, `rpm_idle` returns `-11`, awake forever.
+    **Fix = `systemctl mask nvidia-powerd`** — masked, NOT disabled, because supergfxd starts it on
+    entering Hybrid every boot. **This restores existing policy** (`luminos-game-mode:40`,
+    `luminos-train-mode` `off`, BUG-047); both unmask it themselves, so Dynamic Boost is untouched
+    for games and training. **Two guards:** `luminos-verify` [3] now fails on it, and
+    `luminos-dgpu-watch` self-heals (awake + powerd-only holder + no perf-mode keep-alive for 300 s
+    → stop + re-mask + log), end-to-end tested. ⚠️ **Amendment 2's "nvidia-powerd is exonerated" was
+    WRONG** — an fd and a PM reference are different things, and that conflation cost three passes.
+    Same pass: `/dev/nvidia-uvm{,-tools}` re-gated to `root:dgpu 660`; all five nodes ✓; the
+    uvm-gate unit exiting 1 on a repair is **correct behaviour, not a fault**. Earlier detail:  `lspci` wakes the dGPU and the nvidia module leaks a runtime-PM
     reference, so the kernel is never even asked to suspend it again.**
     <!-- [CHANGE: cowork | 2026-09-20] --> **The clincher:** rpm tracepoints filtered to
     `0000:01:00.0`, 35 s, overrun 0 → **zero events**, while the AMD card shows dozens per second

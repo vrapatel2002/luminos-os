@@ -166,7 +166,29 @@ Never say "far lighter than Chromium" without naming the scene.
 Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instruction.
 
 ## Next steps (ordered)
-0a. ✅ **BUG-182 ROOT CAUSE, 2026-09-20 01:10 — we were auditing the wrong layer.**
+0. ✅✅ **BUG-182 FIXED, 2026-09-20 13:16 — DECISION 126. Nothing outstanding.**
+   **`nvidia-powerd` holds one kernel runtime-PM reference with NO file descriptor.** Proven both
+   directions on the rpm tracepoints: `stop` → `cnt-0` → `rpm_suspend ret=0` → asleep in **7 s**;
+   `start` → powerd itself calls `rpm_resume`, count climbs to 3, `rpm_idle` returns `-11` (EAGAIN),
+   awake forever. Baseline with powerd up was `usage_count=1, disable_depth=0`.
+   **Fix: `systemctl mask nvidia-powerd`. MASKED, not disabled** — supergfxd runs
+   `systemctl start nvidia-powerd.service` on entering Hybrid every boot, so `disabled` is silently
+   overridden. **This RESTORES existing policy** — `luminos-game-mode:40` and `luminos-train-mode`'s
+   `off` path both already say masked-at-idle (BUG-047), and both `unmask + start` on entry, so
+   Dynamic Boost is untouched for games and training. It had drifted; the documented drift path is a
+   `luminos-train-mode on <pattern>` whose keep-alive matches its own argv and "leaves nvidia-powerd
+   unmasked forever" (game-mode:36, verified 2026-08-25).
+   **Two guards, both tested:** `luminos-verify` [3] fails on it (SessionStart hook path, so every
+   agent session sees the drift); `luminos-dgpu-watch` self-heals after `--autopark` s (default 300)
+   when the card is awake, **nothing but powerd** holds a node, and no perf-mode keep-alive runs —
+   a real workload always holds a node, so it cannot fire against a live game.
+   **Also closed:** `/dev/nvidia-uvm{,-tools}` re-gated to `root:dgpu 660`, all five nodes ✓.
+   ⚠️ **`luminos-uvm-gate` exiting 1 after a restart is CORRECT** — it deliberately fails when it had
+   to *repair* rather than find the nodes already gated. Do not "fix" that exit code.
+   ⚠️ **I was WRONG in amendment 2 when I exonerated nvidia-powerd.** It held fds while the card
+   slept, and I read that as innocence. **An open file descriptor and a runtime-PM reference are
+   different things.** That conflation cost three passes.
+0a. ✅ **BUG-182 root cause detail, 2026-09-20 01:10 — we were auditing the wrong layer.**
    Every earlier check looked for a **process** (fds, `/proc`, `lsof`, `fuser`) and found none, and
    the card still would not sleep. **The reference is inside the kernel, held by the nvidia module,
    and no userspace tool can see it.** Proof — rpm tracepoints filtered to `0000:01:00.0`, 35 s,
@@ -257,6 +279,12 @@ Nothing half-written. BUG-182 is diagnosed and deliberately unfixed by instructi
   moved in hours, and the first pass reached for a cause that was still present — when the thing
   responsible had already stopped. Three samples over eleven minutes is not a sample of a
   three-hour window.
+- **`lsof`/`fuser`/`/proc` answer "who has it OPEN". They do not answer "who has a REFERENCE on it."**
+  On a runtime-PM device those are different questions with different tools. The rpm tracepoints
+  answer the second, and without `CONFIG_PM_ADVANCED_DEBUG` they are the only thing that does.
+  Bounce `power/control` on→auto to force an event and make `usage_count` visible.
+- **`nvidia-powerd` must stay MASKED at idle** (DECISION 126). `disabled` is not enough — supergfxd
+  starts it every boot into Hybrid. If the dGPU ever stops sleeping, check this FIRST.
 - **When every tool you own says "nothing there", the absence IS the signal — go one layer down.**
   Four passes hunted for a process holding the dGPU and found none; twice that absence was turned
   into a wrong-but-plausible conclusion. The answer was three sysfs reads and a 35 s trace, and it

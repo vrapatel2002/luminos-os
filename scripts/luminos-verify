@@ -89,6 +89,29 @@ if [ -r /proc/driver/nvidia/params ]; then
   [ -n "$dpm" ] && { [ "$dpm" = "2" ] && ok "NVreg_DynamicPowerManagement=0x02 (fine-grained)" || warn "DynamicPowerManagement=$dpm (expected 2/0x02)"; }
 fi
 
+# nvidia-powerd MUST be masked at idle — it is what pins the card in D0.
+# [CHANGE: cowork | 2026-09-20] BUG-182 / DECISION 126.
+# Measured, both directions, with the rpm tracepoints:
+#   systemctl stop nvidia-powerd  -> usage_count 1 -> 0 -> rpm_idle -> rpm_suspend ret=0
+#                                    -> suspended within 7 s
+#   systemctl start nvidia-powerd -> nvidia-powerd itself calls rpm_resume, count climbs to 3,
+#                                    rpm_idle returns -11 (EAGAIN) and the card never sleeps again
+# It holds ONE kernel runtime-PM reference. No file descriptor, no process shows up in any fd
+# scan — which is why four passes of BUG-182 looked for a holder and found nothing.
+# MASKED, not disabled: supergfxd runs `systemctl start nvidia-powerd.service` on entering
+# Hybrid at every boot, so `disable` is silently overridden. Only mask stops it.
+# luminos-game-mode and luminos-train-mode both unmask+start on entry and stop+mask on exit,
+# so masked-at-idle is the state they were written to expect — this restores that, it is not new.
+pw=$(systemctl is-enabled nvidia-powerd 2>/dev/null)
+pwa=$(systemctl is-active nvidia-powerd 2>/dev/null)
+if [ "$pw" = "masked" ]; then
+  ok "nvidia-powerd masked (idle-drain policy — BUG-047/BUG-182)"
+elif [ "$pwa" = "active" ]; then
+  bad "nvidia-powerd is RUNNING and unmasked — it holds a runtime-PM reference and the dGPU can never reach D3cold. Fix: sudo systemctl stop nvidia-powerd && sudo systemctl mask nvidia-powerd (game-mode/train-mode unmask it themselves)"
+else
+  warn "nvidia-powerd is '$pw' (not masked) — supergfxd will start it at the next boot into Hybrid and pin the dGPU. Fix: sudo systemctl mask nvidia-powerd"
+fi
+
 # ---- 3b. DECISION 25 device nodes — all five, presence AND ownership ----
 # [CHANGE: claude-code | 2026-08-29] BUG-149.
 # This exists because a MISSING node was invisible for weeks. dgpu-exec-v2 --check listed
