@@ -94,6 +94,26 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 while that chat was mid-thread.** Nothing was lost — its output is durable in
 **`docs/gamemode/FEASIBILITY.md`** (304 lines) and in `luminos-notes.sh search "console"`.
 Pointer only, so this file stays short:
+- 🟢 **SHARED-VRAM PLAN 2026-09-20 — `docs/gamemode/SHARED-VRAM-PLAN.md`.** How Windows does it,
+  wall-by-wall, and what to build. **Two findings that overturn earlier assumptions:**
+  (1) **WDDM is NOT demand paging** — no GPU faults, no exotic hardware. It is *ensure resident,
+  then submit*: fixed GPU VAs + a per-device residency list + a paging DMA buffer on the copy
+  engine. **amdgpu/Xe/nouveau all replicate it via TTM** — that is where the 780M's 7.6 GB GTT
+  comes from. So the mechanism is replicable and the hardware is not the blocker.
+  (2) 🟢 **The VRAM allocator is NOT in signed GSP firmware.** Traced in open-gpu-kernel-modules
+  @615.71.09: `video_mem.c` -> `pmaAllocatePages()` runs **unconditionally**, `phys_mem_allocator.c`
+  has **zero RPC calls**, and the one RPC branch is gated `if (!IS_GSP_CLIENT)` which an Ada card
+  **skips**. Repo has no precompiled non-firmware binaries. **It is patchable CPU code in the
+  nvidia.ko we build via DKMS.**
+  Walls: closed Vulkan ICD 🔴; **no eviction infrastructure in RM at all** (only `fbsr.c`
+  suspend/resume, needs all contexts torn down) 🔴; NVIDIA aperture/page-kind semantics vs AMD's
+  uniform GPU VA space 🔴 (= GH open-gpu-kernel-modules **#758**, open, no NVIDIA response);
+  host-imported memory is **not DEVICE_LOCAL** so it may not back a renderable image 🟠 (testable).
+  **Plan: Tier 1 = patch DXVK's first-heap gate (its own comment says it protects non-ReBAR
+  machines; WE HAVE ReBAR), vkd3d `upload_hvv` (+12% measured in HZD), and `vela-vramd` budget
+  preemption — throttle BEFORE the ceiling rather than page across it, which is what Windows'
+  own budget API expects of apps anyway.** Tier 3 = boot nouveau+NVK to *watch* GTT oversubscription
+  work on this 4050 (40-63% perf, no RT, reclocking now automatic on Ada via GSP).
 - 🟢 **VRAM FALLBACK 2026-09-20 — `docs/gamemode/VRAM-FALLBACK.md`. Corrects MEMORY-STRATEGY.md.**
   NVIDIA's system-memory fallback IS real — **"CUDA - Sysmem Fallback Policy", driver 536.40** —
   but it is **CUDA-only and Windows-only**; NVIDIA staff answered the Linux question directly with
