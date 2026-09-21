@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-21 — Response 32 (gaming OS split out to gameos/HANDOFF.md; this file back under the 400-line tripwire)
+Last updated: 2026-09-20 — Response 1 (fresh chat; this turn was gameos work, ZERO Luminos changes)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -96,6 +96,16 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 ### Gaming OS (Vela) — MOVED OUT, pointer only
 That project now lives in its own git repo at **`gameos/`** (parent `.gitignore`s it) with its own
 handoff: **`gameos/HANDOFF.md`**. Nothing about it belongs in this file.
+
+**2026-09-20: that repo's installer was run for the first time and Luminos was verified
+untouched afterwards** — no `/boot/grub/custom.cfg`, no `/boot/vela`, no `/vela.img`, nothing
+mounted, no loop attached, `swapon --show` unchanged (zram 8 G prio 100, `/swapfile.luminos`
+32 G prio 10), `nvidia-powerd` still `masked`. `swapoff` was never called. Details:
+`gameos/os/docs/DRY-RUN-01.md`. **One thing there is about THIS box and is worth knowing
+here:** `pacstrap` inherits the host's `/etc/pacman.conf`, so DECISION 26's `IgnorePkg` pin
+silently propagates into any `--root` install and skips the kernel and the NVIDIA stack.
+Anything on this machine that pacstraps, bootstraps a container, or builds a chroot needs its
+own pacman.conf or it inherits Luminos' driver policy by accident.
 
 One thing this file must carry, because it is a rule about THIS installation:
 **nothing from that project is installed or configured on Luminos.** Luminos is the reference
