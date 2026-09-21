@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-21 — Response 19 (gameos work; Vela installed and booted once, Luminos itself unchanged)
+Last updated: 2026-09-21 — Response 23 (gameos work; Vela installed and booted once, Luminos itself unchanged)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -129,8 +129,14 @@ could not resolve a name: its `/etc/resolv.conf` was a regular file with no name
 and NetworkManager runs `rc-manager=symlink`, which writes `/run/NetworkManager/resolv.conf`
 and refuses to clobber a real file. `ping 1.1.1.1`, `ip route get` and `nmcli device status`
 all said the network was fine. **Resolve a name before believing any of them.**
-Vela's graphics stack is now proven on real hardware — gamescope on `eDP-2` at
-2880x1800@120Hz — and Steam's sign-in is the only thing left. `gameos/os/docs/BOOT-05.md`.
+Vela's graphics stack is proven on real hardware — gamescope on `eDP-2` at
+2880x1800@120Hz. `gameos/os/docs/BOOT-05.md`.
+**Vela Home now exists and is the front end** (`gameos/os/docs/VELA-HOME-0{1,2}.md`):
+shelf, game detail and five settings pages in Go + Ebitengine, reading Shawn's real
+Lutris library through `/mnt/luminos` with no import step. Steam Big Picture is out.
+`vela-vramd` gained a read-only JSON status socket so Settings ▸ Memory can show the
+governor live. **None of it has been seen on the real panel yet** — it was reviewed at
+1920x1200 under software GL on an isolated Xvfb, which never touched Shawn's desktop.
 ⚠️ **One lesson from BOOT-03 is general and applies to THIS box too:** on Linux,
 `chown(2)`/`chgrp(2)` clear the setuid and setgid bits on every file they touch, **even
 when the ownership does not change**. A `chown -R root:root` over a packaged tree
