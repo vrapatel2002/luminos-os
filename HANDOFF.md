@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-21 — Response 12 (gameos work; Vela installed and booted once, Luminos itself unchanged)
+Last updated: 2026-09-21 — Response 16 (gameos work; Vela installed and booted once, Luminos itself unchanged)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -114,7 +114,16 @@ bootstrap offline) and **no login existed at all** (`useradd` with no `chpasswd`
 locked by pacstrap), so the crash-loop guard produced a prompt nobody could get past.
 Fixed with a password, a **tty2 autologin (Ctrl+Alt+F2)**, and a copy of this box's
 NetworkManager profiles into the image.
-Records: `gameos/os/docs/{INSTALL-01,BOOT-01,BOOT-02,BOOT-03}.md`, AGENTS.md §9, DECISION 130.
+Records: `gameos/os/docs/{INSTALL-01,BOOT-01,BOOT-02,BOOT-03,VM-HARNESS}.md`, AGENTS.md §9,
+DECISION 130. **Vela can now be booted in QEMU from here** (`gameos/os/scripts/vela-vm.sh`,
+~40 s, `-snapshot` so the image is never written), which is how it should be tested from
+now on — it covers the boot path, systemd, seats, network and login, but not the GPU.
+⚠️ **NEVER `pkill -f` anything qemu-shaped on this box**: the pattern matches the killing
+shell's own command line, and **Claude Desktop's Cowork sandbox is a `qemu-system-x86_64`
+too** — killing it ends the session. Use `gameos/os/scripts/vela-vm-kill.sh`.
+⚠️ **`NetworkManager-wait-online` does not wait for connectivity** — it runs `nm-online -s`
+("has NM finished starting"), which is true before the Wi-Fi device even appears. Anything
+here that needs a route must poll for one itself.
 ⚠️ **One lesson from BOOT-03 is general and applies to THIS box too:** on Linux,
 `chown(2)`/`chgrp(2)` clear the setuid and setgid bits on every file they touch, **even
 when the ownership does not change**. A `chown -R root:root` over a packaged tree
