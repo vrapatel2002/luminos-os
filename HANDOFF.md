@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-21 — Response 5 (gameos work; Vela installed and booted once, Luminos itself unchanged)
+Last updated: 2026-09-21 — Response 8 (gameos work; Vela installed and booted once, Luminos itself unchanged)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -108,7 +108,17 @@ verified after; `luminos-verify` PASS. Undo is `gameos/os/install/vela-uninstall
 Luminos boots exactly as before either way because `custom.cfg` is additive and
 `grub-mkconfig` never touches it — re-verified after: `grub.cfg` mtime still
 2026-08-30 01:01, its three entries intact, `luminos-verify` PASS 0 warnings.
-Records: `gameos/os/docs/{INSTALL-01,BOOT-01}.md`, AGENTS.md §9, DECISION 130.
+**Booted twice now; the graphics stack works** — gamescope on eDP-2 at 2880x1800@120Hz.
+What failed both times was plumbing, not Vela: no Wi-Fi in the image (Steam refuses to
+bootstrap offline) and **no login existed at all** (`useradd` with no `chpasswd`, root
+locked by pacstrap), so the crash-loop guard produced a prompt nobody could get past.
+Fixed with a password, a **tty2 autologin (Ctrl+Alt+F2)**, and a copy of this box's
+NetworkManager profiles into the image.
+Records: `gameos/os/docs/{INSTALL-01,BOOT-01,BOOT-02}.md`, AGENTS.md §9, DECISION 130.
+⚠️ **One thing that touched Luminos' data, read-only:** the four `BELL851*.nmconnection`
+profiles were **copied** out of `/etc/NetworkManager/system-connections/` into the Vela
+image. Luminos' own copies are untouched; the image now holds the Wi-Fi PSKs at
+`root:root 0600`. `vela-uninstall.sh` deletes the image and with it those copies.
 ⚠️ **The boot entry was rewritten** (`quiet` removed, `root=LABEL=VELA` added); the
 previous one is at `/boot/grub/custom.cfg.bak-20260920`.
 
