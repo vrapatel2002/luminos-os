@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-21 — Response 16 (gameos work; Vela installed and booted once, Luminos itself unchanged)
+Last updated: 2026-09-21 — Response 19 (gameos work; Vela installed and booted once, Luminos itself unchanged)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -124,6 +124,13 @@ too** — killing it ends the session. Use `gameos/os/scripts/vela-vm-kill.sh`.
 ⚠️ **`NetworkManager-wait-online` does not wait for connectivity** — it runs `nm-online -s`
 ("has NM finished starting"), which is true before the Wi-Fi device even appears. Anything
 here that needs a route must poll for one itself.
+⚠️ **A ROUTE IS NOT THE INTERNET, and this cost five boots.** Vela had a default route and
+could not resolve a name: its `/etc/resolv.conf` was a regular file with no nameserver,
+and NetworkManager runs `rc-manager=symlink`, which writes `/run/NetworkManager/resolv.conf`
+and refuses to clobber a real file. `ping 1.1.1.1`, `ip route get` and `nmcli device status`
+all said the network was fine. **Resolve a name before believing any of them.**
+Vela's graphics stack is now proven on real hardware — gamescope on `eDP-2` at
+2880x1800@120Hz — and Steam's sign-in is the only thing left. `gameos/os/docs/BOOT-05.md`.
 ⚠️ **One lesson from BOOT-03 is general and applies to THIS box too:** on Linux,
 `chown(2)`/`chgrp(2)` clear the setuid and setgid bits on every file they touch, **even
 when the ownership does not change**. A `chown -R root:root` over a packaged tree
