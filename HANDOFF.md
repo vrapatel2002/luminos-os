@@ -1,10 +1,14 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-20 — Response 5 (iGPU measured; see docs/gamemode/IGPU-BENCH.md)
+Last updated: 2026-09-21 — Response 32 (gaming OS split out to gameos/HANDOFF.md; this file back under the 400-line tripwire)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
 > History lives in git, `luminos-notes.sh`, `LUMINOS_DECISIONS.md` and `docs/BUGS.md` — this file
 > carries only what a newcomer must not re-learn or re-break.
+
+> ⚠️ **Counter canary, recorded not fixed (§0.1).** This chat's context overflowed and was
+> compacted; the `Response N` count was reconstructed from the user-turn history, not carried.
+> Treat the number as approximate and prefer a fresh chat started from this file.
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
@@ -89,144 +93,15 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
   folders; it does **not** see the desktop session, the real `/dev`, systemd, or the GPU.
   **A subagent told to "use device_bash" will silently investigate the wrong computer.**
 
-### Separate thread — NEW gaming OS feasibility (Cowork chat B, 2026-09-19/20). READ-ONLY, no overlap.
-⚠️ **A second Cowork chat was running in parallel on this repo and this file was reset at 23:49
-while that chat was mid-thread.** Nothing was lost — its output is durable in
-**`docs/gamemode/FEASIBILITY.md`** (304 lines) and in `luminos-notes.sh search "console"`.
-Pointer only, so this file stays short:
-- 🟢🟢 **WALL 3 BREACHED 2026-09-20 — `docs/gamemode/WALL3-BREACHED.md`, probes in `tools/vram-probe/`.**
-  **MEASURED ON THIS CARD, contradicts the published consensus.** The RTX 4050 exposes
-  **heap 1 = 11,451 MB of system RAM**, and **memory type 0 (heap 1, NO property flags)** is
-  device-accessible system memory. Proved by measurement: an **OPTIMALLY-TILED COLOR_ATTACHMENT
-  allocates and binds to type 0** (`memoryTypeBits=0x3` = types 0 and 1); **the GPU renders into it
-  correctly** (cleared to 0.25/0.5/0.75, read back 64,127,191,255 exact); and **11,264 MB allocated**
-  from it before failure. Cost, same kernel both ways: **VRAM 145.5 GB/s vs type 0 21.6 GB/s = 6.8x**.
-  Nobody uses type 0 because every allocator prefers DEVICE_LOCAL then requires HOST_VISIBLE, and
-  type 0 is **neither**. 🟢 So: **no kernel patch needed** (the patchable-PMA finding is moot),
-  **the closed ICD is not in the way** (heap is public Vulkan), and the only real remaining wall is
-  **eviction policy, which lives in DXVK userspace** — it already has budget tracking and
-  `evictResources()`, it just relocates to host-visible instead of type 0.
-  **THE WORK: teach DXVK to use type 0 as an eviction tier; `vela-vramd` decides what is cold.**
-  🟢 **FORMAT COVERAGE: 14 of 14** (probe4.c). Colour RT RGBA8/RGBA16F/2880x1800, depth D32,
-  depth+stencil D24S8, MSAA 2x and 4x, BC1/BC3/BC7 +mips, storage images, cubemap array,
-  shadow-map array — **all report 0x3 and all bind to type 0. No format restriction found.**
-  **PCIe measured: `LnkSta: 16GT/s x8`** — PCIe 4.0 **x8**, so 15.75 GB/s one direction /
-  31.5 aggregate; our 21.6 GB/s is **69% of theoretical**, i.e. ordinary efficiency, not slow code.
-  ⚠️ **Only open unknown: is DCC/delta-colour-compression silently disabled for type 0?**
-  ⛔ **Blocked:** `luminos-brain safe` returned **NO** for installing `mingw-w64-gcc`, which DXVK
-  needs to build its Windows DLLs (meson 1.12 + ninja are present, the cross-compiler is not).
-  Shawn's call whether to override with `--reason`. **Workaround that needs no install:** a native
-  Vulkan oversubscription stress test — fill VRAM, spill to type 0, render from both, measure —
-  proves the eviction tier end to end without DXVK.
-- 🟢 **SHARED-VRAM PLAN 2026-09-20 — `docs/gamemode/SHARED-VRAM-PLAN.md`.** How Windows does it,
-  wall-by-wall, and what to build. **Two findings that overturn earlier assumptions:**
-  (1) **WDDM is NOT demand paging** — no GPU faults, no exotic hardware. It is *ensure resident,
-  then submit*: fixed GPU VAs + a per-device residency list + a paging DMA buffer on the copy
-  engine. **amdgpu/Xe/nouveau all replicate it via TTM** — that is where the 780M's 7.6 GB GTT
-  comes from. So the mechanism is replicable and the hardware is not the blocker.
-  (2) 🟢 **The VRAM allocator is NOT in signed GSP firmware.** Traced in open-gpu-kernel-modules
-  @615.71.09: `video_mem.c` -> `pmaAllocatePages()` runs **unconditionally**, `phys_mem_allocator.c`
-  has **zero RPC calls**, and the one RPC branch is gated `if (!IS_GSP_CLIENT)` which an Ada card
-  **skips**. Repo has no precompiled non-firmware binaries. **It is patchable CPU code in the
-  nvidia.ko we build via DKMS.**
-  Walls: closed Vulkan ICD 🔴; **no eviction infrastructure in RM at all** (only `fbsr.c`
-  suspend/resume, needs all contexts torn down) 🔴; NVIDIA aperture/page-kind semantics vs AMD's
-  uniform GPU VA space 🔴 (= GH open-gpu-kernel-modules **#758**, open, no NVIDIA response);
-  host-imported memory is **not DEVICE_LOCAL** so it may not back a renderable image 🟠 (testable).
-  **Plan: Tier 1 = patch DXVK's first-heap gate (its own comment says it protects non-ReBAR
-  machines; WE HAVE ReBAR), vkd3d `upload_hvv` (+12% measured in HZD), and `vela-vramd` budget
-  preemption — throttle BEFORE the ceiling rather than page across it, which is what Windows'
-  own budget API expects of apps anyway.** Tier 3 = boot nouveau+NVK to *watch* GTT oversubscription
-  work on this 4050 (40-63% perf, no RT, reclocking now automatic on Ada via GSP).
-- 🟢 **VRAM FALLBACK 2026-09-20 — `docs/gamemode/VRAM-FALLBACK.md`. Corrects MEMORY-STRATEGY.md.**
-  NVIDIA's system-memory fallback IS real — **"CUDA - Sysmem Fallback Policy", driver 536.40** —
-  but it is **CUDA-only and Windows-only**; NVIDIA staff answered the Linux question directly with
-  *"not supported by the nvidia linux driver."* Windows can do it because **WDDM's VidMm owns
-  residency**; Linux's **TTM can too and amdgpu/i915 use it — that is why the 780M has 7.6 GB GTT** —
-  but NVIDIA's Linux driver does not use TTM. Driver choice, not a Linux limit.
-  Lying about VRAM size **backfires**: `dxgi.maxDeviceMemory` lies to the *game*, not the allocator;
-  heap size comes from the RM at init with no override; over-reporting turns graceful degradation
-  into `VK_ERROR_OUT_OF_DEVICE_MEMORY`.
-  🟢 **ACTIONABLE: the "one pool" code already exists.** `dxvk_memory.cpp` already retries with
-  `DEVICE_LOCAL` cleared, but gates HVV fallback behind a first-heap-only rule whose source comment
-  says it exists *"to avoid falling back to HVV on systems without resizable BAR"* — **this box HAS
-  ReBAR (BAR1 = 8 GB over a 6 GB framebuffer), so that gate does not apply to us.** vkd3d-proton
-  PR #741 `upload_hvv` measured **+12% fps in Horizon Zero Dawn** from removing one copy; issue #2258
-  is a live bug in the HVV->sysmem cascade. Next experiment: patched DXVK build vs Wukong.
-  ⚠️ Keep honest: BAR-mapped HVV is still VRAM (fast); real system RAM over PCIe is ~32 GB/s vs the
-  4050's 192 GB/s. Spilling prevents crashes, it does not add fast memory.
-- 🔴 **REHEARSAL 01 INVALID 2026-09-20 — `docs/gamemode/REHEARSAL-01.md`.** The harness ran
-  `swapoff -a; swapon -a` and **permanently dropped `/swapfile.luminos`** — it is enabled by
-  `/usr/local/bin/luminos-pagefile`, **NOT `/etc/fstab`**, so `swapon -a` could not restore it.
-  Test ran on zram alone (8 GB not 41 GB), pegged full, RAM availability 1.35 GB — more starved
-  than baseline, so the comparison is void. **Swap restored manually; machine healthy. Harness
-  patched to never touch swap + re-enable missing devices in its trap.** ⚠️ Anything that calls
-  `swapoff -a` on this box loses the swapfile — remember `luminos-pagefile` owns it.
-  Still valid from the run: **cage + Lutris + Proton kiosk session works end to end** (VELA's
-  session shape validated); `pci_dev=0000:01:00.0` fixes MangoHud's GPU mis-attribution; and the
-  real VRAM figure is **5.56 GB avg / 5.69 GB peak of 6.14 GB = 93%** at Medium/RT-off/900p/DX11.
-  🟡 Signal to chase: avg FPS moved only 53.6 -> 52.5 despite far worse memory conditions, GPU load
-  89%, VRAM 93% — suggests **average fps is GPU/VRAM-bound, while the LOWS are the RAM-sensitive
-  part** (1% low 37.9 -> 34.0, min 15.4 -> 1.6). If that holds clean, a lighter OS buys frame-time
-  consistency rather than average frame rate.
-- 🟢 **MEMORY STRATEGY 2026-09-20 — `docs/gamemode/MEMORY-STRATEGY.md`.** Answers "consoles do
-  it under 16 GB, why can't we". **Xbox Series S ships this generation of AAA on ~8 GB TOTAL and
-  never swaps; this G14 has 22 GB.** Budget is not the problem — split pools, no hardware
-  streaming, and **a 10.1 GB idle OS footprint against a console's ~2 GB** are.
-  🔴 **Correction to an earlier claim in this thread:** DX12+DXR is **~1.45-1.6x** VRAM, not 2x,
-  and it is **DXR/BVH specifically**, not DX12 generally (vkd3d-proton #1874). `VKD3D_CONFIG=nodxr`
-  removes it outright and is set nowhere on this box.
-  🔴 **VRAM overflow to system RAM DOES NOT EXIST on NVIDIA/Linux** — no GTT, UVM is compute-only,
-  HMM disabled in nvidia-open. Only DXVK/vkd3d userspace eviction (DXVK v3.1 confirmed in
-  GE-Proton11-6), which is a soft landing, not capacity. The **780M has 7.6 GB of GTT**; the dGPU has none.
-  🔴 **Measured during play: 18,143 `allocstall` direct-reclaim stalls, 4.2M pages swapped out.**
-  That is the mechanism behind the 70 ms frametime spikes — a memory-management failure, not GPU.
-  The zram(8 GB, saturated, prio 100) + swapfile(32 GB, prio 10) stack is LRU-inverted;
-  **zswap is compiled in and disabled**. Next test has a hard success metric: `allocstall_*`
-  under the same workload, baseline **18,143**.
-- 🟢 **REAL GAME MEASURED 2026-09-20 — `docs/gamemode/BMW-BENCH.md`.** Black Myth: Wukong via
-  Lutris/GE-Proton11-6. **Drivers are NOT old/broken** — 610.57.04 consistent across module,
-  DKMS, userspace on kernel 7.0.5, and `~/.config/lutris/system.yml` is byte-identical to the
-  repo copy, so DECISION 90's gate is intact and the game does reach the 4050. Plain
-  `vulkaninfo`/`nvidia-smi` failing as shawn is DECISION 25 working — **test through
-  `dgpu-exec-v2` or you will misdiagnose it.**
-  Measured gameplay: **53.6 avg / 37.9 1% low — and that is WITH frame generation ON**
-  (~27 real rendered fps), at Medium, **RT OFF**, 900p internal, DX11. VRAM **5.2 of 6.1 GB
-  with RT off**. The 60fps/max/RT/no-framegen target is empirically dead for this title class.
-  🔴 **Two conclusions that change the plan:** (1) dGPU had **2 MiB** used pre-launch, so the
-  gate already gives games the whole 6 GB — "move the compositor to the iGPU to free VRAM"
-  wins nothing and should be retired. (2) **System RAM is the real constraint**: 10.1 GB used
-  at idle, **11.5 GB in swap during play**; the 15 fps minimums and 70 ms frametime spikes
-  look like swap stalls, not GPU limits (GPU held a steady 93%).
-  ⚠️ MangoHud logged the **iGPU's** hardware counters, not the 4050's — pin `pci_dev=0000:01:00.0`.
-- 🟢 **MEASURED 2026-09-20 (Cowork chat C) — `docs/gamemode/IGPU-BENCH.md`, harness in
-  `tools/gamemode-bench/`.** No packages installed (`luminos-brain safe` said NO for
-  vkpeak/clpeak; purpose-built Vulkan microbenchmarks written instead).
-  780M: **5.54 TF burst / 3.88 TF sustained (-30%)**, **84.6 GB/s** achieved of 102.4 theoretical,
-  and it pulls the package to **65 W / 95 C in 7 seconds on its own** with CPU idle and dGPU asleep.
-  That last number is the measured version of FEASIBILITY §2's argument: iGPU render work during a
-  game takes power and thermal headroom straight from the 4050. RAM re-confirmed 6400 vs 7500 rated.
-  ⚠️ Gotcha: a sub-second benchmark run reads ~15 W (idle-contaminated) — use RUNS=2000.
-- **Shawn is scoping a NEW Arch-based, gaming-only OS for this laptop** — Steam + Proton + games,
-  nothing else. It is **not** a Luminos mode, so Luminos-specific findings do not carry to it.
-- 🔴 **AGENTS.md §2's "No MUX" was WRONG and is corrected in place.** `supergfxctl -s` →
-  `[Integrated, Hybrid, AsusMuxDgpu]`. ⚠️ Before ever switching, check whether §9's
-  `KWIN_DRM_DEVICES=/dev/dri/card2` + the Mesa EGL pin strand the desktop — plausible black screen.
-  **Cross-ref BUG-182: supergfxd is what starts `nvidia-powerd` on entering Hybrid**, so a mode
-  change moves that too.
-- 🔴 **SPEC §3.6 IS NO LONGER PACKAGE-BLOCKED** — `xdg-desktop-portal-wlr 0.8.4-1` and
-  `gst-plugin-pipewire 1:1.6.8-1` are now **both installed** (with `cage 0.3.1`). Verify before
-  trusting any older "BLOCKED ON PACKAGES" note.
-- **Hardware ceilings, measured, that no OS changes:** 128-bit LPDDR5 (4 × 32-bit channels) at
-  **6400 MT/s configured though rated 7500** = 102.4 GB/s shared; 780M has **2 MB L2 and no
-  Infinity Cache**; the 4050 is 96-bit/192 GB/s dedicated with **12 MB L2**, ~11–12 TF FP32 at our
-  90 W ceiling. **The PS5-class part in this laptop is the 4050, not the iGPU**, and **6 GB VRAM is
-  the hard ceiling.** DRAM speed is set at training time by AGESA — firmware, not kernel.
-- Carries to ANY OS on this hardware: **BUG-069** (`nvidia-smi -pl` is a no-op on this mobile part;
-  TGP must go via nvidia-powerd + read-back), the MUX, and gamescope's NVIDIA-*hybrid* bugs
-  (#498/#611/#1220/#1590/#1643/#1662 — argues MUX first, then gamescope).
-- `gamescope` 3.16.28-1 and `gamemode` 1.8.2-3 are in `extra`, **neither installed**. Nothing was
-  installed, switched or changed by that chat.
+### Gaming OS (Vela) — MOVED OUT, pointer only
+That project now lives in its own git repo at **`gameos/`** (parent `.gitignore`s it) with its own
+handoff: **`gameos/HANDOFF.md`**. Nothing about it belongs in this file.
+
+One thing this file must carry, because it is a rule about THIS installation:
+**nothing from that project is installed or configured on Luminos.** Luminos is the reference
+box. In particular **never run `swapoff -a`** — `/swapfile.luminos` is owned by
+`/usr/local/bin/luminos-pagefile`, not `/etc/fstab`, so it does not come back on reboot. This
+already destroyed one benchmark run. Full rule: `gameos/docs/gamemode/RULE-HANDS-OFF-LUMINOS.md`.
 
 ## State — what is DONE
 

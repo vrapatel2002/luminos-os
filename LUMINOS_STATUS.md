@@ -459,3 +459,10 @@ Record lives in `docs/paper/GENERALIZATION.md`, not here.
 |---|---|---|
 | Touchpad input lag | ✅ Fixed | libinput quirks (BUG-045) |
 | CPU governor | ✅ schedutil | Permanent udev rule (was powersave) |
+
+## Related project — Vela OS (gaming)
+| Component | Status | Notes |
+|---|---|---|
+| Vela OS | 🟡 Designed, not installed | [CHANGE: claude-code \| 2026-09-21] Separate Arch-based gaming-only OS for this laptop. Lives in its own git repo at `gameos/` (this repo `.gitignore`s it); its handoff is `gameos/HANDOFF.md`. **Nothing is installed or configured on Luminos for it** — Luminos is the reference box and does not change until Vela is finished and tested. Installs into **one file** (`/vela.img`, a 32 GiB ext4 loopback root) plus `/boot/vela/` and a single GRUB entry in `/boot/grub/custom.cfg`; **no repartitioning**, and uninstall is three `rm` lines. `os/install/vela-install.sh` is written and syntax-checked but **has never been run**. |
+| Vela — hard prohibition | ⚠️ Standing | **Never run `swapoff -a` on this machine.** `/swapfile.luminos` is owned by `/usr/local/bin/luminos-pagefile`, not `/etc/fstab`, so it does not come back on reboot. This already destroyed one full benchmark run. `gameos/docs/gamemode/RULE-HANDS-OFF-LUMINOS.md`. |
+| Vela — dual-ICD trap | ⚠️ Standing | `dgpu-exec-v2` pins `VK_DRIVER_FILES` to `nvidia_icd.json` only, so anything launched through the gate sees exactly one physical device and every multi-GPU experiment silently measures nothing. Pass both ICDs and `--keep-env`. `gameos/docs/gamemode/CRITICAL-DUAL-ICD.md`. |
