@@ -88,13 +88,48 @@ from the same DRAM, because it is on the memory bus rather than across PCIe.
 That is a real eviction tier built on a capability the driver already ships, and it is
 the thing that stops the 6 GB ceiling from ending a run.
 
+## Format coverage: 14 of 14 (probe4.c)
+
+The "which formats are eligible" risk is **gone**. Every resource class a real renderer
+uses reports `memoryTypeBits = 0x3` and binds to type 0 successfully:
+
+| resource | size | type 0 |
+|---|---|---|
+| colour RT 1080p RGBA8 / RGBA16F HDR / 2880x1800 | 8-21 MB | YES |
+| depth D32_SFLOAT, depth+stencil D24S8 | 8.4 MB | YES |
+| MSAA 2x and 4x colour | 17-32 MB | YES |
+| BC1 / BC3 / BC7 compressed +mips | 2.7-5.3 MB | YES |
+| storage image RGBA8 / RGBA16F | 8-17 MB | YES |
+| cubemap array 1024 x6 +mips | 32 MB | YES |
+| shadow map array D32 x4 | 64 MB | YES |
+
+**No format restriction of any kind was found.**
+
+## Why 21.6 GB/s — the link, measured
+
+`LnkSta: Speed 16GT/s, Width x8` — the 4050 is on **PCIe 4.0 x8**, not x16.
+
+| | |
+|---|---|
+| per lane (16 GT/s, 128b/130b) | 1.97 GB/s |
+| x8, one direction | **15.75 GB/s** |
+| x8 full duplex, aggregate | 31.5 GB/s |
+| measured | **21.6 GB/s aggregate = 10.8 GB/s each way = 69% of theoretical** |
+
+69% is ordinary PCIe efficiency after TLP overhead. Nothing is tunable here; x8 is how the
+board is wired. For scale, VRAM's measured 145.5 GB/s is itself 76% of the 4050's 192 GB/s
+spec, so both numbers carry the same efficiency.
+
 ## Honest limits
 
 - 21.6 GB/s is a cliff. Anything in the per-frame working set will thrash there. This
-  raises the ceiling before failure; it does not add fast memory.
-- Only one image configuration was tested. **Not yet tested:** depth/stencil, MSAA,
-  compressed (BCn) textures, storage images, mipmapped arrays, and whether DCC/compression
-  is silently disabled for type 0 allocations. Any of those could narrow what is eligible.
+  raises the ceiling before failure; it does not add fast memory. **Policy quality is
+  therefore the whole game** — bad eviction choices are worse than none.
+- **Still untested: whether DCC / delta colour compression is silently disabled for type 0
+  allocations.** If it is, effective bandwidth is worse than the raw 21.6 GB/s suggests for
+  colour targets specifically. Hard to observe directly; would show up as a render-heavy
+  workload underperforming the synthetic number.
+- All probes are synthetic. A real game under real pressure is the only proof that matters.
 - Host-*pointer* import (`VK_EXT_external_memory_host`) is a different, weaker path: it only
   offers types 2 and 3, so it can back a **linear** image (verified: bind succeeded) but
   **not** an optimal-tiled one. GreenBoost's trick does not generalise to graphics — but it

@@ -107,8 +107,17 @@ Pointer only, so this file stays short:
   **eviction policy, which lives in DXVK userspace** — it already has budget tracking and
   `evictResources()`, it just relocates to host-visible instead of type 0.
   **THE WORK: teach DXVK to use type 0 as an eviction tier; `vela-vramd` decides what is cold.**
-  ⚠️ Untested and could narrow eligibility: depth/stencil, MSAA, BCn compressed, storage images,
-  and whether DCC is silently off for type 0.
+  🟢 **FORMAT COVERAGE: 14 of 14** (probe4.c). Colour RT RGBA8/RGBA16F/2880x1800, depth D32,
+  depth+stencil D24S8, MSAA 2x and 4x, BC1/BC3/BC7 +mips, storage images, cubemap array,
+  shadow-map array — **all report 0x3 and all bind to type 0. No format restriction found.**
+  **PCIe measured: `LnkSta: 16GT/s x8`** — PCIe 4.0 **x8**, so 15.75 GB/s one direction /
+  31.5 aggregate; our 21.6 GB/s is **69% of theoretical**, i.e. ordinary efficiency, not slow code.
+  ⚠️ **Only open unknown: is DCC/delta-colour-compression silently disabled for type 0?**
+  ⛔ **Blocked:** `luminos-brain safe` returned **NO** for installing `mingw-w64-gcc`, which DXVK
+  needs to build its Windows DLLs (meson 1.12 + ninja are present, the cross-compiler is not).
+  Shawn's call whether to override with `--reason`. **Workaround that needs no install:** a native
+  Vulkan oversubscription stress test — fill VRAM, spill to type 0, render from both, measure —
+  proves the eviction tier end to end without DXVK.
 - 🟢 **SHARED-VRAM PLAN 2026-09-20 — `docs/gamemode/SHARED-VRAM-PLAN.md`.** How Windows does it,
   wall-by-wall, and what to build. **Two findings that overturn earlier assumptions:**
   (1) **WDDM is NOT demand paging** — no GPU faults, no exotic hardware. It is *ensure resident,
