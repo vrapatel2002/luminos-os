@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-21 — Response 8 (gameos work; Vela installed and booted once, Luminos itself unchanged)
+Last updated: 2026-09-21 — Response 12 (gameos work; Vela installed and booted once, Luminos itself unchanged)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -114,7 +114,14 @@ bootstrap offline) and **no login existed at all** (`useradd` with no `chpasswd`
 locked by pacstrap), so the crash-loop guard produced a prompt nobody could get past.
 Fixed with a password, a **tty2 autologin (Ctrl+Alt+F2)**, and a copy of this box's
 NetworkManager profiles into the image.
-Records: `gameos/os/docs/{INSTALL-01,BOOT-01,BOOT-02}.md`, AGENTS.md §9, DECISION 130.
+Records: `gameos/os/docs/{INSTALL-01,BOOT-01,BOOT-02,BOOT-03}.md`, AGENTS.md §9, DECISION 130.
+⚠️ **One lesson from BOOT-03 is general and applies to THIS box too:** on Linux,
+`chown(2)`/`chgrp(2)` clear the setuid and setgid bits on every file they touch, **even
+when the ownership does not change**. A `chown -R root:root` over a packaged tree
+disarmed all 20 setuid/setgid binaries in the Vela image (sudo, su, passwd, mount,
+pkexec, unix_chkpwd …). If it ever happens here, the repair is pacman's own mtree:
+`zcat /var/lib/pacman/local/*/mtree`, take every `4xxx`/`2xxx`/`6xxx` entry, replay it —
+group first, mode second.
 ⚠️ **One thing that touched Luminos' data, read-only:** the four `BELL851*.nmconnection`
 profiles were **copied** out of `/etc/NetworkManager/system-connections/` into the Vela
 image. Luminos' own copies are untouched; the image now holds the Wi-Fi PSKs at
