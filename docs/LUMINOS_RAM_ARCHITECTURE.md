@@ -109,3 +109,10 @@ not duplicates.
 - **Staged Thaw**: For large processes (> 500MB), a 200ms delay is inserted between prefetch and `SIGCONT` to allow the kernel to finish page-ins.
 - **Priority Boosting**: Process priority is boosted to `nice -10` for 5 seconds upon focus to speed up initial response.
 - **Bulk Page Reads**: `vm.page-cluster=3` set via sysctl to read 8 pages per fault instead of 1, reducing restore latency.
+  ✅ **VERIFIED LIVE and MEASURED CORRECT, 2026-09-18 — DECISION 116.** `/proc/sys/vm/page-cluster` reads `3`;
+  the installed `/etc/sysctl.d/99-luminos-ram.conf` says `3`. Measured on the real drive: 32 KiB costs **1.35×**
+  a 4 KiB read for **8×** the pages (54.4 → **323.8 MB/s**; a 150 MB restore drops **2.76 s → 0.46 s**),
+  break-even readahead utility **16.8 %**, and it costs zram nothing (`swap_ra 0` over 715 834 swap-ins).
+  ⚠️ **This line has twice been declared false by `docs/BUGS.md` on the strength of `config/99-luminos-ram.conf`
+  saying `0`. It was right both times — that repo file has never been installed (BUG-167). Do not "correct" it again
+  without reading `/proc/sys/vm/page-cluster` first.**
