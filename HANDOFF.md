@@ -94,6 +94,21 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 while that chat was mid-thread.** Nothing was lost — its output is durable in
 **`docs/gamemode/FEASIBILITY.md`** (304 lines) and in `luminos-notes.sh search "console"`.
 Pointer only, so this file stays short:
+- 🟢🟢 **WALL 3 BREACHED 2026-09-20 — `docs/gamemode/WALL3-BREACHED.md`, probes in `tools/vram-probe/`.**
+  **MEASURED ON THIS CARD, contradicts the published consensus.** The RTX 4050 exposes
+  **heap 1 = 11,451 MB of system RAM**, and **memory type 0 (heap 1, NO property flags)** is
+  device-accessible system memory. Proved by measurement: an **OPTIMALLY-TILED COLOR_ATTACHMENT
+  allocates and binds to type 0** (`memoryTypeBits=0x3` = types 0 and 1); **the GPU renders into it
+  correctly** (cleared to 0.25/0.5/0.75, read back 64,127,191,255 exact); and **11,264 MB allocated**
+  from it before failure. Cost, same kernel both ways: **VRAM 145.5 GB/s vs type 0 21.6 GB/s = 6.8x**.
+  Nobody uses type 0 because every allocator prefers DEVICE_LOCAL then requires HOST_VISIBLE, and
+  type 0 is **neither**. 🟢 So: **no kernel patch needed** (the patchable-PMA finding is moot),
+  **the closed ICD is not in the way** (heap is public Vulkan), and the only real remaining wall is
+  **eviction policy, which lives in DXVK userspace** — it already has budget tracking and
+  `evictResources()`, it just relocates to host-visible instead of type 0.
+  **THE WORK: teach DXVK to use type 0 as an eviction tier; `vela-vramd` decides what is cold.**
+  ⚠️ Untested and could narrow eligibility: depth/stencil, MSAA, BCn compressed, storage images,
+  and whether DCC is silently off for type 0.
 - 🟢 **SHARED-VRAM PLAN 2026-09-20 — `docs/gamemode/SHARED-VRAM-PLAN.md`.** How Windows does it,
   wall-by-wall, and what to build. **Two findings that overturn earlier assumptions:**
   (1) **WDDM is NOT demand paging** — no GPU faults, no exotic hardware. It is *ensure resident,
