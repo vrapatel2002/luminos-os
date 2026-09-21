@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-20 — Response 1 (fresh chat; this turn was gameos work, ZERO Luminos changes)
+Last updated: 2026-09-20 — Response 3 (gameos work; Vela installed at Shawn's instruction, Luminos itself unchanged)
 
 > **RESET, per §0.2's size tripwire.** The previous copy was **462 lines**, over the ~400 limit,
 > stacked with the full wallpaper build history. Recovered with `git show 71fc3a82:HANDOFF.md`.
@@ -97,7 +97,17 @@ is how BUG-103, BUG-146 and BUG-160 each got mis-diagnosed at least once.
 That project now lives in its own git repo at **`gameos/`** (parent `.gitignore`s it) with its own
 handoff: **`gameos/HANDOFF.md`**. Nothing about it belongs in this file.
 
-**2026-09-20: that repo's installer was run for the first time and Luminos was verified
+**2026-09-20 23:34: Vela is INSTALLED on this disk — DECISION 130.** `/vela.img` (32 G
+ext4 loopback root, `LABEL=VELA`), `/boot/vela/` (kernel 7.2.6 + a 136 M initramfs) and one
+menuentry in `/boot/grub/custom.cfg`. 143 G → 111 G free. **Luminos itself is unchanged**: no
+`/etc` edit, no service change, no package added; `grub.cfg` untouched (mtime still
+2026-08-30 01:01) and its three entries intact; ESP, swap and the `nvidia-powerd` mask all
+verified after; `luminos-verify` PASS. Undo is `gameos/os/install/vela-uninstall.sh`.
+**It has never been booted** — a reboot picking "Vela OS (gaming)" is the next test, and
+Luminos boots exactly as before either way because `custom.cfg` is additive and
+`grub-mkconfig` never touches it. Record: `gameos/os/docs/INSTALL-01.md`, AGENTS.md §9.
+
+**Earlier the same day: the installer's first (dry) run, and Luminos was verified
 untouched afterwards** — no `/boot/grub/custom.cfg`, no `/boot/vela`, no `/vela.img`, nothing
 mounted, no loop attached, `swapon --show` unchanged (zram 8 G prio 100, `/swapfile.luminos`
 32 G prio 10), `nvidia-powerd` still `masked`. `swapoff` was never called. Details:

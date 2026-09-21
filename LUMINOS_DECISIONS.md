@@ -8116,3 +8116,64 @@ behind one **Advanced options** checkbox, closed by default.
 ### Testable, which the combo never was
 The type rule is now a table in `scene.js` with twelve cases pinned in `config_contract.qml`. The
 old combo's mapping lived in the shape of the UI: the only way to check it was to click it.
+
+---
+
+## DECISION 130 — Vela OS lives in a file on Luminos' root, and Luminos does not know it is there
+# [CHANGE: cowork | 2026-09-20]
+
+**Installed 2026-09-20 23:34.** `gameos/os/install/vela-install.sh`, first real run.
+The gaming OS (Vela, its own git repo under `gameos/`) is now on this disk. Full record:
+`gameos/os/docs/INSTALL-01.md`.
+
+### What it put on Luminos
+| Path | Size | |
+|---|---|---|
+| `/vela.img` | 32 G, 6.7 G used | the entire OS, one ext4 file, `LABEL=VELA` |
+| `/boot/vela/vmlinuz-linux` | 17 M | kernel 7.2.6-arch2-1 |
+| `/boot/vela/initramfs-vela.img` | 136 M | carries the `vela` initcpio hook |
+| `/boot/vela/amd-ucode.img` | 300 K | |
+| `/boot/grub/custom.cfg` | 517 B | one menuentry, "Vela OS (gaming)" |
+
+143 G → 111 G free. Undo: `gameos/os/install/vela-uninstall.sh` (three `rm` lines).
+
+### Why a file and not a partition
+The single M.2 slot is full and the table is Windows + recovery + ESP + Luminos. A
+loopback image needs no repartition, no resize, no risk to the Windows volume, and it
+deletes with `rm`. Cost is one loop indirection on OS reads; games live on the NTFS
+partition and never traverse it. `gameos/docs/NO-PARTITION-INSTALL.md`.
+
+### Why `custom.cfg` and not `40_custom` + `grub-mkconfig`
+`grub-mkconfig` never touches `custom.cfg` — `41_custom` emits a runtime
+`if [ -f ${config_directory}/custom.cfg ]; then source ...`, verified present at
+`grub.cfg:179` **before** the install, which is why no regeneration was needed and why
+`grub.cfg`'s mtime is still 2026-08-30 01:01. A Luminos kernel upgrade regenerates
+`grub.cfg` and the Vela entry survives untouched, because it is not in it.
+
+### Verified after, not asserted
+`grub.cfg` untouched · its three entries (Arch Linux, Advanced options, Windows Boot
+Manager) intact · ESP untouched · swap unchanged (zram 8 G prio 100,
+`/swapfile.luminos` 32 G prio 10) · `nvidia-powerd` still `masked` (DECISION 126) ·
+`gpu_mux_mode` still `1` · nothing left mounted, no loop attached ·
+`luminos-verify` PASS, 0 failures.
+
+### The conflict, per Rule 11
+**`/boot/grub/custom.cfg` is now a Luminos file owned by another project.** Anything
+here that writes `custom.cfg` — a future theme, a second OS entry — will silently
+clobber Vela's boot entry, and `vela-install.sh` refuses to overwrite an existing one,
+so the collision surfaces as a *refused install* rather than a lost entry. That is the
+intended direction. If Luminos ever needs `custom.cfg` for its own purposes, the two
+must be merged by hand; there is no include mechanism.
+
+**Not a conflict but worth stating:** Vela pulls **current** packages —
+`nvidia-utils` 615.71.09, `linux` 7.2.6 — while Luminos stays pinned at 610.57.04 /
+7.0.5 under DECISION 26. Two driver policies, one machine, deliberately. The pin is
+kept out of the image by `gameos/os/install/pacman.conf.vela`; see the note in §9.
+
+### Standing rule, unchanged
+`gameos/docs/gamemode/RULE-HANDS-OFF-LUMINOS.md` still holds. Installing Vela was
+Shawn's explicit instruction and is the one sanctioned write; it changed no Luminos
+`/etc` file, no service, no package. `arch-install-scripts` was deliberately **not**
+installed — `pacman -Sw` into `/var/tmp/vela-tools`, extracted, run from there.
+
+**Nothing has been booted.** Everything above is static verification.
