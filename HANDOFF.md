@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-21 — Response 1 (new chat; read-only feasibility turn — NOTHING was changed)
+Last updated: 2026-09-23 — Response 1 (new chat; session-start read-only turn — NOTHING changed; content below is from 2026-09-21 and still current for Luminos. Vela state lives in gameos/HANDOFF.md, updated 2026-09-22.)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
