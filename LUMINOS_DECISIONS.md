@@ -8177,3 +8177,57 @@ Shawn's explicit instruction and is the one sanctioned write; it changed no Lumi
 installed — `pacman -Sw` into `/var/tmp/vela-tools`, extracted, run from there.
 
 **Nothing has been booted.** Everything above is static verification.
+
+---
+
+## DECISION 131 — Vela boots, displays and can hand the machine back, and Luminos is still untouched
+# [CHANGE: cowork | 2026-09-21]
+
+**Supersedes the closing line of DECISION 130 ("Nothing has been booted").** Eleven
+boots later Vela reaches its own front end on the panel. Everything below is the
+Luminos-facing part; the engineering is in `gameos/os/docs/BOOT-01.md` … `BOOT-11.md`
+and `gameos/os/docs/DECISIONS.md` V2–V8.
+
+### What changed on Luminos: nothing. Again.
+Verified after this round: `grub.cfg` mtime still **2026-08-30 01:01**, its three
+entries intact, `GRUB_DEFAULT` still `0`, `/etc/default/grub` unedited, **zero**
+pacman transactions, swap unchanged, `nvidia-powerd` still masked, `luminos-verify`
+PASS. The only Luminos-side files Vela touches remain the three from DECISION 130
+(`/vela.img`, `/boot/vela/`, `/boot/grub/custom.cfg`), plus one it now *reads and
+writes one variable in*:
+
+| Path | What Vela does to it | Why it is safe |
+|---|---|---|
+| `/boot/grub/grubenv` | Vela's power menu runs `grub-reboot --boot-directory=/mnt/luminos/boot 'Arch Linux'`, which sets `next_entry` for exactly one boot | This is GRUB's own one-shot mechanism. Luminos' `grub.cfg` already carries the stock Arch prologue that reads `next_entry`, uses it once and clears it — **checked before the feature was built, not assumed.** `GRUB_DEFAULT` stays `0`; no `grub-mkconfig`, no `grub-install`, ever. |
+
+⚠️ **Consequence for anything that regenerates `grub.cfg` on this machine:** the
+one-shot path depends on that prologue existing. It is stock and `grub-mkconfig`
+always emits it, so a normal Luminos kernel upgrade is fine — but a hand-written
+`grub.cfg` would silently break "Exit to Luminos". (It fails closed: you get the
+normal menu.)
+
+### The two bugs that cost nine boots, because both are traps for any project here
+1. **Never `export` a per-application variable from a session script.**
+   `vela-session` exported `__NV_PRIME_RENDER_OFFLOAD=1` meaning it for games;
+   `export` reaches every child, so the *front end* rendered on the dGPU. amdgpu
+   will not scan out a buffer imported from another GPU —
+   `amdgpu_display_supported_domains()` only allows GTT for a BO with
+   `AMDGPU_GEM_CREATE_CPU_GTT_USWC`, which an imported dma-buf never carries.
+   Black screen, no error, every check green. `gameos/os/docs/BOOT-10.md`.
+2. **`set -e` + `pipefail` + a noisy-but-fine command kills the whole script.**
+   `igpu=$(lspci -nn | awk …)` returns *lspci's* status, and lspci exits non-zero
+   when it cannot read one device label. Under the session user it happened to
+   exit 0, so it never fired — a silent whole-session kill waiting on any
+   permission or package change. Found by a regression test, not by reading.
+   ⚠️ **This shape is likely elsewhere in this repo's shell scripts and has not
+   been audited.**
+
+### The method note, which is the transferable part
+Nine boots produced three confident wrong diagnoses, every one of them reached by
+reading a log and reasoning about what it implied. The two real causes came from
+(a) turning on the kernel's own debug output and reading its sentence, and (b)
+reading the DRM plane state to see that nothing had ever been committed. Both are
+now automatic and in the first ten lines of every `vela-report`.
+
+**Ask the component that said no. Then check that the thing you fixed is the thing
+that was broken.**
