@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# luminos-claude-restart — restart Claude Desktop with a REAL session environment.
+# [CHANGE: claude-code | 2026-09-24] BUG-187.
+#
+# WHY THIS EXISTS
+#   /usr/bin/xdg-open decides what to do from two variables. detectDE() sets
+#   DE=kde when XDG_CURRENT_DESKTOP=KDE. open_kde() then branches on
+#   KDE_SESSION_VERSION — and when that is UNSET it runs `kfmclient exec`, which
+#   Plasma 6 removed. kfmclient_fix_exit_code() turns the resulting 127 into 0,
+#   so xdg-open exits SUCCESSFULLY having done nothing at all.
+#   Electron's shell.openExternal() goes through xdg-open, so an app started from
+#   a shell with that half-set environment can never open a browser: clicking
+#   "Continue with Google" logs the attempt and nothing happens. No error, no
+#   window, nothing in the journal.
+#
+#   Restarting the app from an agent shell is how this keeps happening. Use this
+#   script, or launch it from the KDE menu. Never `claude-desktop &` from a
+#   terminal you did not check.
+#
+# WHY IT ASSERTS INSTEAD OF SETTING
+#   Hardcoding KDE_SESSION_VERSION=6 here would paper over a broken session and
+#   hide the next variant of this bug. The systemd user manager is the session's
+#   own record of its environment, so we take the value from there and REFUSE to
+#   start if it is missing — a loud failure beats a silent no-op, which is the
+#   whole lesson of this bug.
+#
+#   /proc/<pid>/environ is NOT a way to check this afterwards: kernel.yama.
+#   ptrace_scope=1 and the app is not our descendant, so the read returns
+#   nothing. Assert before exec; there is no after.
+set -eu
+
+while IFS= read -r line; do
+    case "$line" in
+        KDE_*|XDG_*|WAYLAND_DISPLAY=*|DISPLAY=*|XAUTHORITY=*|\
+        DBUS_SESSION_BUS_ADDRESS=*|QT_*|LANG=*|PATH=*)
+            eval "export $line" ;;
+    esac
+done < <(systemctl --user show-environment)
+
+if [ -z "${KDE_SESSION_VERSION:-}" ]; then
+    echo "luminos-claude-restart: KDE_SESSION_VERSION is unset in the systemd" >&2
+    echo "  user environment. Starting the app now would give it an xdg-open" >&2
+    echo "  that silently fails, and sign-in would not work. Refusing." >&2
+    echo "  Check:  systemctl --user show-environment | grep KDE_" >&2
+    exit 1
+fi
+
+echo "session: KDE_SESSION_VERSION=$KDE_SESSION_VERSION" \
+     "XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-<unset>}"
+
+# Exact name, never `pkill -f`: an agent shell's own command line can contain
+# "claude-desktop", and a broad -f pattern on this box has a worse trap — the
+# Cowork sandbox is a qemu-system-x86_64 and killing it ends the session.
+if pgrep -x claude-desktop >/dev/null; then
+    echo "stopping running instance"
+    pkill -x claude-desktop
+    for _ in $(seq 20); do
+        pgrep -x claude-desktop >/dev/null || break
+        sleep 0.5
+    done
+    pgrep -x claude-desktop >/dev/null && { echo "did not exit" >&2; exit 1; }
+fi
+
+echo "starting"
+exec systemd-run --user --scope --quiet \
+    --unit="app-com.anthropic.Claude-restart-$$" \
+    /usr/bin/claude-desktop

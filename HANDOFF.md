@@ -1,85 +1,159 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-23 — Response 1 (new chat; session-start read-only turn — NOTHING changed; content below is from 2026-09-21 and still current for Luminos. Vela state lives in gameos/HANDOFF.md, updated 2026-09-22.)
+Last updated: 2026-09-24 — Response 4
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-**NEW IDEA ON THE TABLE (Shawn, 2026-09-21): make the wallpaper the launcher.** Starfield's stars
-become clickable app icons; no separate launcher. This turn was **read-only** — the idea was
-assessed against the code on the box. Verdict: **possible, and the graphics half is easy. The
-input half is the whole risk.**
+**Claude Desktop is FIXED and documented (BUG-187). Closed out.** Sign-in works, the Cowork bridge
+is green end-to-end, and two recurrence guards are in place. One cosmetic item left for Shawn.
 
-### What was established this turn, by reading the live code (not assumed)
-1. **The desktop containment eats left clicks on empty desktop.** `~/.config/plasma-org.kde.plasma.desktop-appletsrc`
-   `[Containments][30] plugin=org.kde.plasma.folder` — Folder View. That package instantiates
-   `FolderView.qml`'s `MouseEventListener`, `anchors.fill: parent`,
-   `acceptedButtons: … Qt.LeftButton` **even with `hoveredItem === null`** (FolderView.qml:243),
-   enabled whenever not in edit mode. It sits **above** the `WallpaperItem`. Rubber-band selection
-   is what it is for.
-2. **Therefore `WebInteractive` is SUSPECT, not proven.** It is `true` in the live config right now,
-   and `docs/wallpaper/SPEC.md` §0 asserts "the wallpaper already captures mouse events today —
-   that is exactly what `WebInteractive` does". **Nothing has ever verified a click reaching the
-   page on this desktop.** Same shape as BUG-173 / BUG-185: a feature defended by a test that never
-   exercised it. **Do not build on WebInteractive until a click is observed.** Not filed as a bug
-   yet — it is unproven in both directions.
-3. **The escape hatch is in Shawn's own idea.** `main.qml:429` `FolderViewLayerLoader` is
-   `active: root.isFolder ? … : false` and `isFolder` is `Plasmoid.pluginName === "org.kde.plasma.folder"`
-   (main.qml:53). Switch the containment to the plain **Desktop** containment
-   (`org.kde.plasma.desktop`) and that entire layer — and its click grab — is **never created**.
-   "No launcher, no desktop icons, the wallpaper IS the launcher" is exactly that configuration.
-   Cost: desktop icons go (he has one, `worldline.desktop`) and rubber-band selection goes.
-   BUG-163's desktop-indent overlay becomes moot in that configuration.
-4. **Do NOT bolt icons onto today's Starfield.** It is the `.js` Canvas path
-   (`QmlScene=~/.local/share/luminos/wallpapers/starfield/wallpaper.js`), which BUG-178 measured at
-   **41.1 % of a core** because Qt 6 rasterises Canvas 2D on the CPU. Canvas also has no
-   hit-testing and cannot draw themed icons. The right move is a **native `scenes/Starfield.qml`**:
-   far field as a `ShaderEffect` (6.6 % measured for the shader scene), and ~15–30 "app stars" as
-   real QML `Item`s with `Kirigami.Icon` + `TapHandler`. Real items give hit-testing for free and
-   composite on the 780M, which §14 item 0g already verified plasmashell holds (renderD129 only).
-   This is likely **cheaper** than the 41.1 % it replaces, not more expensive.
-5. **App list + launching already exists on the box:** `org.kde.plasma.private.kicker`
-   (`/usr/lib/qt6/qml/org/kde/plasma/private/kicker/libkickerplugin.so`) — `RootModel`/`AppsModel`
-   give name + icon + a `trigger()` that launches through KIO. No parsing of the 279 `.desktop`
-   files, no shelling out. ⚠️ It is a **private** import: a Plasma upgrade can break it, which is
-   exactly DECISION 26 rung L3 exposure (§14 0f). Fallback: `kstart --application <id>` through the
-   existing P5Support `executable` DataSource.
-6. **Two UX traps that decide whether the feature survives contact.** (a) **Accidental launches** —
-   a desktop full of click targets means a stray click opens an app. The icons must be *armed*, not
-   always live; `KWindowSystem.showingDesktop` is already read by `main.qml` (BUG-176) and is the
-   natural arming signal, Meta+D being the deliberate "I am looking at my wallpaper" gesture.
-   (b) **Keyboard** — type-to-search is what makes a launcher a launcher, and SPEC §0 constraint 2
-   says the containment does not take keyboard focus. That is the genuinely hard half. v1 is
-   click-only. If keys are ever grabbed, **Esc always releases** (SPEC §0).
-7. **SECURITY — the lock screen runs the same plugin** (DECISION 77/127). A launcher wallpaper in
-   front of a locked session is a hole. DECISION 127 already withholds `WebInteractive` and
-   `InjectSystemStats` from the greeter; any launcher key must join that withheld list and
-   selftest **[7]** must assert it.
-8. **Option B, if the containment fights us:** a Quickshell layer-shell window on the *background*
-   layer. Caelestia is Quickshell and already runs on both the KWin and Plasma sessions
-   (DECISION 63/68), layer-shell gets real clicks and `keyboardFocus: OnDemand` — it is designed
-   for this. Cost: it *becomes* the wallpaper, so audio reactivity, ObscurePolicy and PauseOnBattery
-   would be bypassed or re-plumbed. Only if option A's probe fails.
+### (a) SIGN-IN — FIXED. Root cause: `xdg-open` exits 0 without doing anything.
+`shell.openExternal()` → `/usr/bin/xdg-open`. `detectDE()` sets `DE=kde` from
+`XDG_CURRENT_DESKTOP=KDE`; `open_kde()` then branches on `KDE_SESSION_VERSION`, and when it is
+**unset** runs `kfmclient exec` — removed in Plasma 6 — after which `kfmclient_fix_exit_code()`
+**rewrites the 127 into 0**. xdg-open returns success having opened no browser, silently.
+`XDG_CURRENT_DESKTOP=KDE` + `KDE_SESSION_VERSION` unset is the **poison pair**. It is not a missing
+case; it is a case written to succeed.
+**Proved with a control, not by reasoning:** a real launch writes `Started Google Chrome - Web
+Browser` to the user journal. During the 32 s in which `main.log` recorded 22×
+`[Auth] Using system browser for: /login/app-google-auth`, the journal has **no such line**. Then
+traced directly with `sh -x /usr/bin/xdg-open`: unset → `kfmclient: command not found` → `rc 0`;
+`KDE_SESSION_VERSION=6` → `kde-open` → Chrome opens.
+**Source of the poison pair:** the `luminos-term` tmux server (socket `luminos`) held
+`XDG_CURRENT_DESKTOP=KDE` and **no `KDE_*` at all** in its global environment, and every agent shell
+under it inherits that. **Second time this shipped** — 2026-09-16 has the same root cause; that fix
+repaired the instance and nothing repaired the source.
+**Fixes, both applied and both tested:**
+- `scripts/luminos-claude-restart` — reads the session env from `systemctl --user show-environment`
+  and **refuses to start** if `KDE_SESSION_VERSION` is missing. It *asserts* rather than hardcodes,
+  so the next variant fails loudly. Verified both ways: exit 0 recovering `6` from a shell where it
+  was unset; exit 1 with a message when the value is stripped.
+- `~/.config/luminos-spin/tmux.conf` pins `KDE_SESSION_VERSION=6` and `KDE_FULL_SESSION=true`; also
+  applied live with `tmux -L luminos set-environment -g`.
+⚠️ **Never restart Claude Desktop from a bare agent shell.** Use the script or the KDE menu.
+⚠️ `/proc/<pid>/environ` of the app **cannot be read** — `kernel.yama.ptrace_scope=1` and it is not
+our descendant. Assert the env **before** exec; there is no after.
+⚠️ `pkill -f` is banned here — an agent shell's own command line matches its own pattern, and the
+Cowork sandbox is a `qemu-system-x86_64`. Use `pkill -x claude-desktop`.
 
-### The next action is a PROBE, and it needs Shawn's nod (it is a state change)
-~25-line scene with a `TapHandler` that logs to the journal and shows a visible marker; set as
-`QmlScene`; observe a click (a) under the current Folder View containment, (b) under the plain
-Desktop containment. Revert is one `kwriteconfig6`. **Restart plasmashell after deploying** —
-BUG-171: a deploy is not a load.
+### (b) DEVICE BRIDGE — FIXED. The handed-over diagnosis was wrong; do not chase the enclave key.
+- `[device-registry] enclave key unavailable — refusing to resolve row-PK` has been in the log since
+  **2026-08-07 22:48**, the day the device was registered, and `main.log` holds **158
+  `[remote-tools-device] authenticated` lines**, every one immediately *after* that same warning.
+  `claude-native-binding.node` contains the literal **`hardwareKeyUnavailable:
+  linux-not-yet-supported`**, and `app.asar` gates the software fallback on `lEr()`, compiled as
+  **`function lEr(){return!1}`**. Hardware device keys are **not implemented on Linux** in 1.52386.6
+  and the fallback is dead code. **Keyless is normal here.** No keyring, KWallet, TPM or `tss`-group
+  change can affect it.
+- **What actually broke:** `20:16:39 authenticated` → `20:16:59 served get_device_info` →
+  **`20:17:29 pong timeout (1 consecutive) — resetting`** → every reconnect thereafter got
+  `handshake timeout` (frame sent, server silent). Re-signing-in cleared it.
+- **Verified green end-to-end:** `22:00:07 authenticated`, then `served get_device_info` at
+  `22:05:53`, `22:13:16`, `22:15:02`. The cloud actually reached the laptop; a new Cowork chat works
+  and can read files (Shawn confirmed).
+- ⚠️ **Still unexplained, worth watching:** the app opens the DO bridge **twice in the same second**
+  on every start (`init` → `close` → `init`), seen at both 20:16:38 and 22:00:05. Suspected wedge,
+  **not proven** — do not write it up as the cause.
+
+### (c) OLD COWORK CHATS — settled by experiment: they do NOT come back.
+Signing in minted a **new device row**: `ant-device-registry.json` went `kl1:af780bec-…` →
+`kl1:f27001c8-…` (account key unchanged). Shawn opened one old chat at 22:12:43 and it produced
+`remote_cowork.bound_ledger_rehydrate_self_filtered {"sessionId":"cse_01Cak2Gby…",
+"cls":"foreign_device"}` with `scheduledOrDispatch:false` — **filtered out, no link offered**. The
+chat created at 22:05 got no such line and works. Folder grants are per-row and do not carry over,
+so a new chat must re-request access to `~/luminos-os`.
+⚠️ **`"verdict":"keyless"` in `late_link_offer_verdict` is NOT an error** — it appears on the working
+sessions too (20:45, 22:00, 22:05). The only line that ever distinguished a broken session is
+`cls":"foreign_device"`. Misreading `keyless` as a fault produced the original wrong diagnosis.
+
+
+## State — what is DONE
+- Backup before anything: `~/.config/Claude.bak-2026-09-24-2148` (14 G). Nothing deleted or moved.
+- Install: `aur/claude-desktop 1.52386.6-2`, `/usr/bin/claude-desktop`,
+  `/usr/share/applications/com.anthropic.Claude.desktop`.
+- **Checked and FINE — not the problem, do not re-investigate:** the `claude://` handler
+  (`xdg-mime query default x-scheme-handler/claude` → `com.anthropic.Claude.desktop`; the entry
+  carries `MimeType=x-scheme-handler/claude;`; `~/.config/mimeapps.list` agrees;
+  `claude-code-url-handler.desktop` only claims `claude-cli://` and does not collide) ·
+  gnome-keyring (owns `org.freedesktop.secrets`, `Login` collection **unlocked**, holds
+  `Claude Safe Storage`; ksecretd only has `org.kde.secretservicecompat`;
+  `--password-store=gnome-libsecret` still set in `~/.config/claude-desktop-flags.conf`) ·
+  the TPM and the `tss` group.
+- Written: `docs/BUGS.md` **BUG-187**, `LUMINOS_STATUS.md` (header + a new component row),
+  `scripts/luminos-claude-restart`, `~/.config/luminos-spin/tmux.conf`,
+  `luminos-notes.sh add [BUG]`, `luminos-brain log`.
+- ⚠️ **A secret was printed to a terminal this turn.** `secret-tool search --all application Claude`
+  echoes the *secret value* of `Claude Safe Storage`, not just metadata. It is in that session's
+  scrollback only — never written to a file, a note or a commit. Next time pipe through
+  `grep -v '^secret'`.
+- ⚠️ **MCP was not available in this session.** `mempalace_search` and `code-review-graph` are
+  Desktop/Cowork-side and this was a terminal CLI session, so AGENTS.md Rules 7/8 fell back to
+  `luminos-notes.sh search` plus reading the code directly. No Go or Python was edited, so the
+  CodeGraph requirement did not bite.
+
+
+## Next steps (ordered)
+1. **Shawn's one remaining item (cosmetic, not urgent):** delete the stale
+   **"Claude Desktop (Linux)"** device added 2026-08-07, from claude.ai in a browser, the Windows
+   app, or **now possibly the desktop app's own Settings → Cowork** — it used to refuse because that
+   row was "This computer", and after the rotation it no longer is. Deleting it cannot touch the
+   working row (different row id; `ant-device-registry.json` maps the account to the current row
+   only).
+2. Parked wallpaper work resumes — see "Parked" below. Next action there is the click probe.
+
+
+## Key decisions & constraints
+- **AGENTS.md §0.2 / Rule 12 / §16: "no changes" scopes to code, config and system state.**
+  `HANDOFF.md` and the §13 doc triggers are written on **every** turn, investigation turns included.
+- **Never restart Claude Desktop from a bare agent shell.** Use the relaunch helper, or launch it
+  from the KDE menu. A bare shell costs you the sign-in browser and gives no error.
+- **A warning that has been in the log for six weeks is not a root cause.** The enclave line was
+  read as the cause of a failure it long predates. Check the *first* occurrence against the *last
+  known-good* moment before believing any log line.
+- **`pkill -f` is banned on this box for anything matching a broad word** — Cowork's sandbox is a
+  `qemu-system-x86_64`, and an agent shell's own command line can match its own pattern. Use
+  `pkill -x <exact-name>` or a PID.
+- ⚠️ **A secret was printed to a terminal this turn.** `secret-tool search --all application Claude`
+  echoes the *secret value* of `Claude Safe Storage`, not just the metadata. It is in this session's
+  scrollback only — it was never written to a file, a note or a commit. Use
+  `secret-tool search --all ... | grep -v '^secret'` next time.
+
+## Parked — the wallpaper launcher idea (unchanged, from 2026-09-21)
+**Make the wallpaper the launcher**: Starfield's stars become clickable app icons. Verdict from the
+read-only assessment: possible, graphics half easy, **input half is the whole risk**.
+1. The desktop containment eats left clicks on empty desktop —
+   `~/.config/plasma-org.kde.plasma.desktop-appletsrc` `[Containments][30]
+   plugin=org.kde.plasma.folder`; `FolderView.qml:243` accepts `Qt.LeftButton` even with
+   `hoveredItem === null`, above the `WallpaperItem`.
+2. **`WebInteractive` is SUSPECT, not proven.** It is `true` live and `docs/wallpaper/SPEC.md` §0
+   asserts clicks already reach the page, but **nothing has ever observed one**. Same shape as
+   BUG-173/185. Do not build on it until a click is seen.
+3. Escape hatch: `main.qml:429 FolderViewLayerLoader` is `active: root.isFolder…`; switching the
+   containment to `org.kde.plasma.desktop` never creates that layer or its click grab. Cost: desktop
+   icons and rubber-band selection.
+4. **Do NOT bolt icons onto today's Starfield** — it is the `.js` Canvas path, **41.1 % of a core**
+   (BUG-178), no hit-testing, no themed icons. Write a native `scenes/Starfield.qml`: `ShaderEffect`
+   far field (6.6 % measured) + ~15–30 app stars as real `Item`s with `Kirigami.Icon` + `TapHandler`.
+   Likely **cheaper** than what it replaces.
+5. App list + launching already exists: `org.kde.plasma.private.kicker` `RootModel`/`AppsModel` with
+   `trigger()`. ⚠️ **private import** — DECISION 26 rung L3. Fallback `kstart --application <id>`.
+6. Two UX traps: accidental launches (arm the icons on `KWindowSystem.showingDesktop`, Meta+D) and
+   keyboard focus (the containment takes none; v1 is click-only, **Esc always releases**).
+7. **SECURITY — the lock screen runs the same plugin** (DECISION 77/127). Any launcher key joins the
+   greeter withhold list and selftest **[7]** must assert it.
+8. Option B if the containment fights us: a Quickshell layer-shell window on the background layer.
+**Next action there is a PROBE needing Shawn's nod:** ~25-line scene with a `TapHandler` that logs
+to the journal, set as `QmlScene`, tested under Folder View vs plain Desktop containment. Revert is
+one `kwriteconfig6`. **Restart plasmashell after deploying — BUG-171: a deploy is not a load.**
 
 ### Standing wallpaper aim, unchanged
-**Lively Wallpaper parity for the KDE live wallpaper, without Chromium.** §3.6 (games through a
-nested compositor) is still the largest unfinished item. Previous turn's work (BUG-186 /
-DECISION 129) left the Wallpaper settings page as **one file picker** — `Scene.modeForFile()` reads
-the extension, the Type combo is gone, everything else is behind **Advanced options**; and
-`tests/wallpaper/config_contract.qml` (20 checks) now actually *loads* that page and asserts
-`Loader.Ready` first, because 39 checks passed while the page rendered blank.
-Still open on the wallpaper: `livelySystemInformation(json)` and `livelyAudioListener(float[])` are
-unimplemented (Simple System, Music TV, Music Tunnel need them); **only Rain is confirmed
-rendering** of the five web packages. Lock screen still shows Rain while the desktop is Starfield —
-selftest's 1 failure, and it is correct; Shawn chooses, then `scripts/luminos-wallpaper-lockscreen`.
-Docs: `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG,VERIFY}.md`.
+Lively Wallpaper parity for the KDE live wallpaper, without Chromium. §3.6 (games through a nested
+compositor) is the largest unfinished item. `livelySystemInformation(json)` and
+`livelyAudioListener(float[])` are still unimplemented; **only Rain is confirmed rendering** of the
+five web packages. Lock screen still shows Rain while the desktop is Starfield — selftest's 1
+failure, and it is correct. Docs: `docs/wallpaper/{SPEC,CONTRACTS,BUILD_LOG,VERIFY}.md`.
 
 ## Why / motivation
 The dGPU rules matter because BUG-047's true-0 W gating is the whole reason this laptop idles
@@ -132,92 +206,6 @@ In particular **never run `swapoff -a`** — `/swapfile.luminos` is owned by
 `/usr/local/bin/luminos-pagefile`, not `/etc/fstab`, so it does not come back on reboot.
 Full rule: `gameos/docs/gamemode/RULE-HANDS-OFF-LUMINOS.md`.
 
-## State — what is DONE
-
-### dGPU — BUG-182 FIXED 2026-09-20, DECISION 126. Nothing outstanding.
-**`nvidia-powerd` holds one kernel runtime-PM reference with NO file descriptor**, so `usage_count`
-never reaches 0 and the kernel never even *attempts* a suspend. Proven both directions on the rpm
-tracepoints: `stop` → `cnt-0` → `rpm_suspend ret=0` → asleep in **7 s**; `start` → powerd calls
-`rpm_resume`, count climbs to 3, `rpm_idle` returns `-11`, awake forever.
-**Fix: `systemctl mask nvidia-powerd`. MASKED, not disabled** — supergfxd starts it on entering
-Hybrid every boot, so `disabled` is silently overridden. This **restores** existing policy
-(`luminos-game-mode:40`, `luminos-train-mode`'s `off` path), so Dynamic Boost is untouched for games
-and training. Two guards, both tested: `luminos-verify` [3] fails on drift (SessionStart hook, so
-every agent session sees it), and `luminos-dgpu-watch` re-masks after `--autopark` s.
-⚠️ **An open file descriptor and a runtime-PM reference are different things** — conflating them
-exonerated powerd wrongly and cost three passes.
-⚠️ `power/autosuspend_delay_ms` returning `Input/output error` is **load-bearing** (the driver has
-not enabled autosuspend, so no kernel timer will ever clean this up); `CONFIG_PM_ADVANCED_DEBUG is
-not set`, so `runtime_usage`/`runtime_enabled` do not exist here and the **tracepoints are the only
-way to see the count**.
-⚠️ **`luminos-uvm-gate` exiting 1 after a restart is CORRECT** — it fails deliberately when it had
-to *repair* rather than find the nodes already gated. Do not "fix" that exit code.
-
-### The dGPU "gate" is THREE different mechanisms — stop conflating them
-| | What it gates | Mechanism | Lives in |
-|---|---|---|---|
-| **Access** (DECISION 25) | *who may open* `/dev/nvidia*` | `NVreg_DeviceFileUID/GID/Mode` → `root:dgpu 0660`, group `dgpu` gid 948 **empty on purpose**, `dgpu-exec-v2` setgid door | `/etc/modprobe.d/luminos-dgpu-gate.conf`, `scripts/dgpu-gate/` |
-| **UVM patch** (BUG-146/147) | the two nodes the driver params miss | `luminos-uvm-gate` on the PCI `add\|bind` uevent + a oneshot backstop | `scripts/dgpu-gate/luminos-uvm-gate.sh`, `config/udev/71-…` |
-| **Power** (BUG-047/103) | whether the card may *sleep* | `DPM=0x02`, `power/control=auto`, Mesa EGL pin + `KWIN_DRM_DEVICES` so nothing renders on it | `/etc/modprobe.d/nvidia-pm.conf`, `/etc/environment` |
-It is **not a security boundary** (DECISION 53) — anything running as shawn can type `dgpu-exec-v2`.
-It stops *accidental* use. **The access gate cannot help with power**: an ACPI NVPCF wake (BUG-161)
-never opens a device node, so no fd scan will ever find that culprit.
-`config/udev/70-luminos-dgpu-access.rules` is **dead code** — never fired; still miscited as
-"layer 2" by DECISION 90, STATUS.md:185 and `scripts/dgpu-gate/README.md`.
-
-### Wallpaper — verified on the box, selftest 39 passed / 1 failed (the lock-screen mismatch)
-Live: `WallpaperMode=qml`, `QmlScene=…/starfield/wallpaper.js`, `AudioReactive=true`,
-`ObscurePolicy=2`, `PauseOnBattery=true`, `WebInteractive=true` (see the SUSPECT note above).
-Chromium **not** mapped into plasmashell in this mode; `libcava.so` + `libcaelestia-services.so` are.
-SPEC §3.1 audio (DECISION 117) · §3.2 per-scene properties (118) · §3.3 packages + gallery + Lively
-import (123, **BUG-181** — the Lively type map was invented and the test defended the guess) ·
-§3.4 runtime shaders (119) · §3.5 `.js` canvas (122) · §3.6 consumer half proven (124/124a).
-**BUG-183:** Lively web wallpapers *wait to be told what to draw* (`livelyPropertyListener` per
-property on load) and we never called it; `ui/LivelyApi.qml` now does.
-**BUG-184:** `/dev/dri/renderD128` was mode **0666** — now `root:dgpu 0660`, matched by **DRIVER not
-number**, recorded in AGENTS.md §9.
-**Cost, honestly — memory is a rout, CPU is not:** shader scene **6.6 %** of a core / 135 MB PSS;
-Spectrum 128 bars **20.3 %** / 143 MB; `.js` canvas **41.1 %**; frozen 0.0 %; Chromium web mode
-~24 % / ~810 MB RSS. Never say "far lighter than Chromium" without naming the scene.
-
-## State — what is IN PROGRESS
-Nothing half-written. The launcher-wallpaper idea is assessed, not started; it is waiting on the
-probe above and on Shawn's answer about losing desktop icons.
-
-## Next steps (ordered)
-1. **Probe: does a left click reach the `WallpaperItem`?** Folder View vs plain Desktop containment.
-   Needs Shawn's nod (state change). This single answer decides option A vs option B above.
-2. **If yes → `scenes/Starfield.qml`** (ShaderEffect far field + real `Item` app stars). Replaces the
-   41.1 % `.js` path. Measure before/after with `luminos-wallpaper-cost` — ⚠️ **never from a
-   terminal** (BUG-177: that samples a wallpaper the terminal has frozen).
-3. **Then icons via `org.kde.plasma.private.kicker` `RootModel`**, with the `kstart` fallback and a
-   `luminos-verify` check that fails loudly if the private import stops resolving (§14 0f).
-4. **Then arming** on `KWindowSystem.showingDesktop`, and the greeter withhold + selftest [7] assert.
-5. **SPEC §3.6 — external producer (games).** Consumer half proven (DECISION 124). **Blocker:**
-   `org.freedesktop.impl.portal.ScreenCast.CreateSession` against `xdg-desktop-portal-wlr` gives no
-   `Response` signal in 20 s. Probe at `/tmp/sc.py`. Producer must publish **packed RGB**
-   (`format=BGRx`) or it renders greyscale. DECISION 124a corrects 124: input DOES exist — a live
-   headless `cage` advertises `zwlr_virtual_pointer_manager_v1` + `zwp_virtual_keyboard_manager_v1`.
-6. **Spectrum on the GPU** — one `ShaderEffect` over the existing 128×1 `AudioTexture`.
-   **DECISION 121: capping the publish rate was tried and measured WORSE. Do not redo it.**
-7. **BUG-166 / BUG-167** — verify the tab sleeper (`chrome://extensions` must read 3.1), then
-   reconcile `config/99-luminos-ram.conf` with the box **keeping `page-cluster = 3`** (DECISION 116).
-8. **BUG-164** — 20 ASS files (Bazarr `use_embedded_subs` OFF), then one of the 26 DTS files.
-9. **Ask Shawn about the UVM gate re-assert** (`systemctl restart luminos-uvm-gate`) — one command,
-   but it is a state change.
-
-## Key decisions & constraints
-- **AGENTS.md §0.2 / Rule 12 / §16: "no changes" scopes to code, config and system state.**
-  `HANDOFF.md` and the §13 doc triggers are written on **every** turn, investigation turns included.
-- **The dGPU optimisation pass is FLAGGED, NOT NOW** (§14 0g). The wallpaper must use the **AMD
-  780M, never the RTX 4050** — already satisfied. Nothing is optimised before §3.3 and §3.6 exist.
-- **No Chromium in the wallpaper**, but web mode stays until §3.6 replaces it.
-- **A config file in git is NOT evidence that a setting is live** (BUG-167). Read `/proc/sys/`.
-  Corollary found this turn: **a config key being `true` is not evidence the feature does anything.**
-- **Never switch to `AsusMuxDgpu`** before checking whether `KWIN_DRM_DEVICES=/dev/dri/card2` + the
-  Mesa EGL pin strand the desktop on a card that no longer drives the display. This board **does**
-  have a MUX (§2 corrected 2026-09-19).
-
 ## Gotchas / dead-ends / things NOT to redo
 **Investigating the GPU**
 - **`lspci` wakes the dGPU — even pointed at the other card.** `-s` filters output, not the bus
@@ -267,13 +255,12 @@ probe above and on Shawn's answer about losing desktop icons.
 for any transcode question is Jellyfin's own ffmpeg command lines in `/var/log/jellyfin/`.
 
 ## Files touched / relevant files
-**This turn: NOTHING changed** (read-only feasibility assessment). Files *read*:
-`AGENTS.md`, `HANDOFF.md`, `docs/wallpaper/SPEC.md`,
-`src/wallpapers/org.luminos.livewallpaper/contents/ui/{main.qml,WebMode.qml,QmlMode.qml}`,
-`~/.config/plasma-org.kde.plasma.desktop-appletsrc`,
-`/usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/{main.qml,FolderView.qml}`,
-`/usr/lib/qt6/qml/org/kde/plasma/private/kicker/`.
-**Written this turn:** `HANDOFF.md` (this file) + `luminos-notes.sh` + `luminos-brain log` only.
-**Relevant for the next turn:** `src/wallpapers/org.luminos.livewallpaper/contents/ui/scenes/`
-(where `Starfield.qml` would go), `~/.local/share/luminos/wallpapers/starfield/wallpaper.js`
-(the current 41.1 % implementation), `tests/wallpaper/` (the contract harness a new scene must join).
+**Repo, this turn:** `docs/BUGS.md` (BUG-187), `LUMINOS_STATUS.md`, `HANDOFF.md`,
+`scripts/luminos-claude-restart` (new), `.notes.db`.
+**Outside the repo:** `~/.config/luminos-spin/tmux.conf` (two `set-environment -g` lines).
+System state: Claude Desktop stopped and relaunched with a real session environment. **No `/etc`
+change, no sudo, no package change** — so AGENTS.md §9 is untouched.
+**Read this turn:** `~/.config/Claude/logs/{main.log,main1.log,claude.ai-web.log}` (binary — always
+`grep -a`), `~/.config/Claude/{ant-device-registry.json,bridge-state.json}`,
+`/usr/lib/claude-desktop/resources/app.asar` and its `claude-native` binding, `/usr/bin/xdg-open`,
+`/usr/local/bin/luminos-caelestia-plasma`.

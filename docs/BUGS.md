@@ -7788,3 +7788,124 @@ gallery tile's `picked` signal really does land in the settings.
 Three of the last five wallpaper bugs were "the thing a person touches is broken while the thing it
 is built from is fine". The tests kept being written one layer below the failure. **Test the file
 that gets opened, even if the assertion looks too dumb to write.**
+
+---
+
+## BUG-187 — Claude Desktop could not sign in, and `xdg-open` reported success the whole time
+<!-- [CHANGE: claude-code | 2026-09-24] -->
+
+**Status:** FIXED · **Severity:** total for the app — no sign-in, therefore no Cowork, therefore no
+remote device · **Files:** `scripts/luminos-claude-restart` (new),
+`~/.config/luminos-spin/tmux.conf`
+
+### Symptom
+Clicking **Continue with Google** in Claude Desktop 1.52386.6 did nothing. No browser, no error, no
+dialog. `~/.config/Claude/logs/main.log` (binary — always `grep -a`) recorded the click 22 times in
+32 seconds:
+
+```
+2026-09-24 20:55:50 [info] [Auth] Using system browser for: /login/app-google-auth
+… ×22 …
+```
+
+and that is the *last* thing the app ever says about it. The app is not instrumented past the call.
+
+### Root cause
+`shell.openExternal()` → `/usr/bin/xdg-open`, and xdg-open decides what to do from **two**
+variables:
+
+```sh
+detectDE()  # XDG_CURRENT_DESKTOP=KDE  ->  DE=kde
+open_kde() {
+    if [ -n "${KDE_SESSION_VERSION}" ]; then
+      case "${KDE_SESSION_VERSION}" in 4) kde-open …;; 5) …;; 6) kde-open "$1";; esac
+    else
+        kfmclient exec "$1"          # <-- Plasma 6 removed kfmclient
+        kfmclient_fix_exit_code $?   # <-- turns 127 into 0
+    fi
+```
+
+`XDG_CURRENT_DESKTOP=KDE` **with `KDE_SESSION_VERSION` unset** is the poison pair. It is not a
+missing case; it is a case that was written to succeed. Traced live on the box:
+
+```
+$ sh -x /usr/bin/xdg-open https://example.com/probe-A      # KDE_SESSION_VERSION unset
++ DE=kde
++ kfmclient exec https://example.com/probe-A
+/usr/bin/xdg-open: line 757: kfmclient: command not found
++ kfmclient_fix_exit_code 127
++ exit_success
++ exit 0                                   <-- rc 0. Nothing opened. Nothing logged.
+
+$ KDE_SESSION_VERSION=6 sh -x /usr/bin/xdg-open https://example.com/probe-B
++ kde-open https://example.com/probe-B
+journal: Started Google Chrome - Web Browser / Opening in existing browser session
+```
+
+**Where the poison pair came from:** the `luminos-term` tmux server (socket `luminos`). Its global
+environment held `XDG_CURRENT_DESKTOP=KDE` and `XDG_SESSION_DESKTOP=KDE` but **no `KDE_*` at all**,
+and every agent shell under it inherits that. The app had been restarted from such a shell. This is
+the *second* time this exact failure shipped — the 2026-09-16 note records it and it came back,
+because the note fixed the instance and nothing fixed the source.
+
+### How it was proven, not assumed
+The app log alone cannot tell "openExternal failed" from "the user closed the tab". The **user
+journal** can, and it is the control: a working launch writes `Started Google Chrome - Web Browser`
+and `Opening in existing browser session`. Between 20:55:50 and 20:56:22 — 22 clicks — the journal
+has **neither line**. Chrome was last started at 20:54:46 and not again. The browser genuinely never
+opened.
+
+### Fix
+1. `scripts/luminos-claude-restart` — reads `KDE_*`/`XDG_*`/`WAYLAND_DISPLAY`/`DBUS_*` out of
+   `systemctl --user show-environment` and **refuses to start** if `KDE_SESSION_VERSION` is still
+   missing. It asserts rather than hardcodes, so the next variant fails loudly instead of silently.
+   Both paths tested: recovers `6` from a shell where it was unset (exit 0), and refuses with a
+   message when the value is stripped (exit 1).
+2. `~/.config/luminos-spin/tmux.conf` now pins `KDE_SESSION_VERSION=6` and `KDE_FULL_SESSION=true`
+   in the server's global environment, so no shell started there can carry the poison pair again.
+
+### Recovery next time
+`~/luminos-os/scripts/luminos-claude-restart`. If sign-in still does nothing, check the *journal*,
+not the app log:
+`journalctl --user --since "-5 min" | grep -iE "Started Google Chrome|Opening in existing"`.
+No line there while `[Auth] Using system browser for:` appears in `main.log` = xdg-open is lying
+again; check `systemctl --user show-environment | grep KDE_`.
+
+### The other half — the "enclave key" was never the bug
+The handed-over diagnosis blamed
+`[device-registry] enclave key unavailable — refusing to resolve row-PK`. **Wrong, and expensively
+so.** That line has been in the log since **2026-08-07 22:48**, the day the device was registered,
+and `main.log` holds **158 `[remote-tools-device] authenticated` lines**, every one of them
+immediately *after* that same warning. The app's own native module says why:
+`resources/app.asar.unpacked/node_modules/@ant/claude-native/claude-native-binding.node` contains
+the literal string **`hardwareKeyUnavailable: linux-not-yet-supported`**, and in `app.asar` the
+software fallback is gated on `lEr()`, compiled as **`function lEr(){return!1}`**. Hardware-backed
+device keys are **not implemented on Linux** in 1.52386.6 and the fallback is dead code. **Keyless
+is normal here.** No keyring, KWallet, TPM or `/dev/tpmrm0` change can affect it — and the `tss`
+group is a dead end too.
+
+What actually broke the bridge was ordinary session state:
+`20:16:39 authenticated` → `20:16:59 served get_device_info` → **`20:17:29 pong timeout (1
+consecutive) — resetting`** → every reconnect after that got `handshake timeout` (frame sent, server
+silent). Re-signing-in cleared it: `22:00:07 authenticated`, `22:05:53 served get_device_info`.
+**Still unexplained and worth watching:** the app opens the DO bridge **twice in the same second**
+on every start (`init` → `close` → `init`). Suspected wedge, not proven — do not write it up as
+cause.
+
+### Consequence of the re-login — old Cowork chats do not come back
+Signing in minted a **new device row**: `ant-device-registry.json` went from
+`kl1:af780bec-…` to `kl1:f27001c8-…` (account key unchanged). Cloud chats bound to the old row are
+now classified foreign, confirmed by experiment — opening one at 22:12:43 produced
+`remote_cowork.bound_ledger_rehydrate_self_filtered {"sessionId":"cse_01Cak2Gby…","cls":"foreign_device"}`
+with `scheduledOrDispatch:false`, i.e. **filtered out, no link offered**. A new chat created at
+22:05 got no such line and works. Folder grants are per-row and do not carry over.
+⚠️ **`"verdict":"keyless"` in `late_link_offer_verdict` is NOT an error** — it appears on the working
+sessions too. The only line that ever distinguished a broken session is `cls":"foreign_device"`.
+
+### Lesson
+**A command that exits 0 is not a command that worked, and a warning that predates the failure by
+six weeks is not its cause.** Both halves of this bug were the same mistake: trusting a status
+signal instead of a control. xdg-open's `exit_success` was believed because nothing checked whether
+a browser appeared; the enclave warning was believed because nobody checked when it started. The
+journal and the first timestamp settled both in minutes. **Find the independent witness before
+theorising.**
