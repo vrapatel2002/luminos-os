@@ -101,7 +101,11 @@ sessions too (20:45, 22:00, 22:05). The only line that ever distinguished a brok
    row was "This computer", and after the rotation it no longer is. Deleting it cannot touch the
    working row (different row id; `ant-device-registry.json` maps the account to the current row
    only).
-2. Parked wallpaper work resumes — see "Parked" below. Next action there is the click probe.
+2. **Push when Shawn is ready.** `main` is **2 commits ahead of origin** and was left unpushed on
+   purpose (Shawn's call, 2026-09-24): `80e0497d` (BUG-187, this work) and `f4d89003`
+   ("docs(agents): §9 Vela row"), which was already unpushed before this session. `git push origin
+   main` sends both. Nothing else is needed to close this out.
+3. Parked wallpaper work resumes — see "Parked" below. Next action there is the click probe.
 
 
 ## Key decisions & constraints
