@@ -2752,3 +2752,20 @@ text sidecar or subtitles off). **Zero `video:*`** — no file in the library ne
 
 **Still not done, deliberately:** `--fix-audio --apply` has not been run on the library. The gate
 from DECISION 112 stands — one file done by hand and **watched** before the other 25.
+
+## DECISION 132 — Subtitle cold-start is fixed by warming the cache, not by re-downloading or remuxing
+<!-- [CHANGE: cowork | 2026-09-25] BUG-188 -->
+**Context.** Ozark subtitles failed on every not-yet-watched episode (170–205 s first extraction).
+**Decision.** Deploy DECISION 113's `luminos-subtitle-warm` + daily timer (it had never been
+installed) and warm new imports; do **not** re-download or rewrite media files.
+**Options weighed:**
+- **A — warm the Jellyfin cache (CHOSEN).** Zero writes to `/srv/media`, reversible
+  (`systemctl disable --now luminos-subtitle-warm.timer`), costs one whole-file read per new file.
+- **B — extract English `.en.srt` sidecars next to each MKV.** Survives a Jellyfin cache wipe or
+  reinstall and is served instantly with no extraction ever. Costs the same one read per file,
+  adds small files Sonarr treats as extras. Good follow-up if the cache ever gets cleared.
+- **C — remux to drop the 15–31 unused subtitle tracks.** Rejected: extraction time is the whole
+  file read, not the track count; it rewrites ~250 GB for no gain.
+- **D — Bazarr external subs / re-download.** Rejected: embedded English tracks are already
+  correct and in sync; a fetched sub risks timing drift. Shawn: do not re-download.
+**Open:** new imports are cold until 04:00 — a Sonarr/Radarr On-Import warm hook would close it.

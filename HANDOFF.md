@@ -1,128 +1,65 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-24 — Response 4
+Last updated: 2026-09-25 — Response 1 (new Cowork chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now
-**Claude Desktop is FIXED and documented (BUG-187). Closed out.** Sign-in works, the Cowork bridge
-is green end-to-end, and two recurrence guards are in place. One cosmetic item left for Shawn.
-
-### (a) SIGN-IN — FIXED. Root cause: `xdg-open` exits 0 without doing anything.
-`shell.openExternal()` → `/usr/bin/xdg-open`. `detectDE()` sets `DE=kde` from
-`XDG_CURRENT_DESKTOP=KDE`; `open_kde()` then branches on `KDE_SESSION_VERSION`, and when it is
-**unset** runs `kfmclient exec` — removed in Plasma 6 — after which `kfmclient_fix_exit_code()`
-**rewrites the 127 into 0**. xdg-open returns success having opened no browser, silently.
-`XDG_CURRENT_DESKTOP=KDE` + `KDE_SESSION_VERSION` unset is the **poison pair**. It is not a missing
-case; it is a case written to succeed.
-**Proved with a control, not by reasoning:** a real launch writes `Started Google Chrome - Web
-Browser` to the user journal. During the 32 s in which `main.log` recorded 22×
-`[Auth] Using system browser for: /login/app-google-auth`, the journal has **no such line**. Then
-traced directly with `sh -x /usr/bin/xdg-open`: unset → `kfmclient: command not found` → `rc 0`;
-`KDE_SESSION_VERSION=6` → `kde-open` → Chrome opens.
-**Source of the poison pair:** the `luminos-term` tmux server (socket `luminos`) held
-`XDG_CURRENT_DESKTOP=KDE` and **no `KDE_*` at all** in its global environment, and every agent shell
-under it inherits that. **Second time this shipped** — 2026-09-16 has the same root cause; that fix
-repaired the instance and nothing repaired the source.
-**Fixes, both applied and both tested:**
-- `scripts/luminos-claude-restart` — reads the session env from `systemctl --user show-environment`
-  and **refuses to start** if `KDE_SESSION_VERSION` is missing. It *asserts* rather than hardcodes,
-  so the next variant fails loudly. Verified both ways: exit 0 recovering `6` from a shell where it
-  was unset; exit 1 with a message when the value is stripped.
-- `~/.config/luminos-spin/tmux.conf` pins `KDE_SESSION_VERSION=6` and `KDE_FULL_SESSION=true`; also
-  applied live with `tmux -L luminos set-environment -g`.
-⚠️ **Never restart Claude Desktop from a bare agent shell.** Use the script or the KDE menu.
-⚠️ `/proc/<pid>/environ` of the app **cannot be read** — `kernel.yama.ptrace_scope=1` and it is not
-our descendant. Assert the env **before** exec; there is no after.
-⚠️ `pkill -f` is banned here — an agent shell's own command line matches its own pattern, and the
-Cowork sandbox is a `qemu-system-x86_64`. Use `pkill -x claude-desktop`.
-
-### (b) DEVICE BRIDGE — FIXED. The handed-over diagnosis was wrong; do not chase the enclave key.
-- `[device-registry] enclave key unavailable — refusing to resolve row-PK` has been in the log since
-  **2026-08-07 22:48**, the day the device was registered, and `main.log` holds **158
-  `[remote-tools-device] authenticated` lines**, every one immediately *after* that same warning.
-  `claude-native-binding.node` contains the literal **`hardwareKeyUnavailable:
-  linux-not-yet-supported`**, and `app.asar` gates the software fallback on `lEr()`, compiled as
-  **`function lEr(){return!1}`**. Hardware device keys are **not implemented on Linux** in 1.52386.6
-  and the fallback is dead code. **Keyless is normal here.** No keyring, KWallet, TPM or `tss`-group
-  change can affect it.
-- **What actually broke:** `20:16:39 authenticated` → `20:16:59 served get_device_info` →
-  **`20:17:29 pong timeout (1 consecutive) — resetting`** → every reconnect thereafter got
-  `handshake timeout` (frame sent, server silent). Re-signing-in cleared it.
-- **Verified green end-to-end:** `22:00:07 authenticated`, then `served get_device_info` at
-  `22:05:53`, `22:13:16`, `22:15:02`. The cloud actually reached the laptop; a new Cowork chat works
-  and can read files (Shawn confirmed).
-- ⚠️ **Still unexplained, worth watching:** the app opens the DO bridge **twice in the same second**
-  on every start (`init` → `close` → `init`), seen at both 20:16:38 and 22:00:05. Suspected wedge,
-  **not proven** — do not write it up as the cause.
-
-### (c) OLD COWORK CHATS — settled by experiment: they do NOT come back.
-Signing in minted a **new device row**: `ant-device-registry.json` went `kl1:af780bec-…` →
-`kl1:f27001c8-…` (account key unchanged). Shawn opened one old chat at 22:12:43 and it produced
-`remote_cowork.bound_ledger_rehydrate_self_filtered {"sessionId":"cse_01Cak2Gby…",
-"cls":"foreign_device"}` with `scheduledOrDispatch:false` — **filtered out, no link offered**. The
-chat created at 22:05 got no such line and works. Folder grants are per-row and do not carry over,
-so a new chat must re-request access to `~/luminos-os`.
-⚠️ **`"verdict":"keyless"` in `late_link_offer_verdict` is NOT an error** — it appears on the working
-sessions too (20:45, 22:00, 22:05). The only line that ever distinguished a broken session is
-`cls":"foreign_device"`. Misreading `keyless` as a fault produced the original wrong diagnosis.
-
+**Ozark subtitles on the media server — BUG-188, DECISION 132. Fix applied, warm-up running.**
+Symptom: every episode has subs, but they load "sometimes", and the next episode never does.
+**Cause: cold embedded-subtitle cache, not missing subs.** All 20 files have English `subrip` at
+stream index 2. Jellyfin 10.11.11 extracts on first request by reading the whole 10–20 GB file off
+the 5400 rpm spindle: **170 s (S01E07), 205 s (S01E08)** in `/var/log/jellyfin/jellyfin2026092{3,4}.log`.
+The Roku gives up first. Watched eps were warm (6/20), everything unwatched cold (14/20).
+**Why it recurred:** DECISION 113's `luminos-subtitle-warm` timer was written 2026-09-16 *without a
+route to the server* and **never installed** (unit not found on the box).
 
 ## State — what is DONE
-- Backup before anything: `~/.config/Claude.bak-2026-09-24-2148` (14 G). Nothing deleted or moved.
-- Install: `aur/claude-desktop 1.52386.6-2`, `/usr/bin/claude-desktop`,
-  `/usr/share/applications/com.anthropic.Claude.desktop`.
-- **Checked and FINE — not the problem, do not re-investigate:** the `claude://` handler
-  (`xdg-mime query default x-scheme-handler/claude` → `com.anthropic.Claude.desktop`; the entry
-  carries `MimeType=x-scheme-handler/claude;`; `~/.config/mimeapps.list` agrees;
-  `claude-code-url-handler.desktop` only claims `claude-cli://` and does not collide) ·
-  gnome-keyring (owns `org.freedesktop.secrets`, `Login` collection **unlocked**, holds
-  `Claude Safe Storage`; ksecretd only has `org.kde.secretservicecompat`;
-  `--password-store=gnome-libsecret` still set in `~/.config/claude-desktop-flags.conf`) ·
-  the TPM and the `tss` group.
-- Written: `docs/BUGS.md` **BUG-187**, `LUMINOS_STATUS.md` (header + a new component row),
-  `scripts/luminos-claude-restart`, `~/.config/luminos-spin/tmux.conf`,
-  `luminos-notes.sh add [BUG]`, `luminos-brain log`.
-- ⚠️ **A secret was printed to a terminal this turn.** `secret-tool search --all application Claude`
-  echoes the *secret value* of `Claude Safe Storage`, not just metadata. It is in that session's
-  scrollback only — never written to a file, a note or a commit. Next time pipe through
-  `grep -v '^secret'`.
-- ⚠️ **MCP was not available in this session.** `mempalace_search` and `code-review-graph` are
-  Desktop/Cowork-side and this was a terminal CLI session, so AGENTS.md Rules 7/8 fell back to
-  `luminos-notes.sh search` plus reading the code directly. No Go or Python was edited, so the
-  CodeGraph requirement did not bite.
+- Installed on luminos-server: `/usr/local/bin/luminos-subtitle-warm`,
+  `/etc/systemd/system/luminos-subtitle-warm.{service,timer}`; timer **enabled**, next 04:00 daily.
+- Started transient unit **`ozark-warm-once`** (`/usr/local/bin/ozark-warm-once`) at 20:43 —
+  warms the 14 cold Ozark eps in watch order (S01E09, E10, E01, E02, S02E01…E10), ~3 min each,
+  then runs `systemctl start luminos-subtitle-warm.service` (full library).
+- Docs: `docs/BUGS.md` BUG-188, `server/DECISIONS.md` DECISION 132 (options A–D),
+  `server/STATUS.md` subtitle row, `luminos-notes.sh add [BUG]`, `luminos-brain log`,
+  MemPalace drawer (luminos-os/decisions).
+- **No media file modified, nothing re-downloaded** (Shawn's constraint).
 
+## State — IN PROGRESS
+- `ozark-warm-once` running. Check: `ssh … 'sudo journalctl -u ozark-warm-once -o cat'` — one
+  `http=200 Ns` line per episode. Then `journalctl -u luminos-subtitle-warm` for the full sweep.
 
 ## Next steps (ordered)
-1. **Shawn's one remaining item (cosmetic, not urgent):** delete the stale
-   **"Claude Desktop (Linux)"** device added 2026-08-07, from claude.ai in a browser, the Windows
-   app, or **now possibly the desktop app's own Settings → Cowork** — it used to refuse because that
-   row was "This computer", and after the rotation it no longer is. Deleting it cannot touch the
-   working row (different row id; `ant-device-registry.json` maps the account to the current row
-   only).
-2. **Push when Shawn is ready.** `main` is **2 commits ahead of origin** and was left unpushed on
-   purpose (Shawn's call, 2026-09-24): `80e0497d` (BUG-187, this work) and `f4d89003`
-   ("docs(agents): §9 Vela row"), which was already unpushed before this session. `git push origin
-   main` sends both. Nothing else is needed to close this out.
-3. Parked wallpaper work resumes — see "Parked" below. Next action there is the click probe.
-
+1. Confirm all 20 Ozark eps show `2.srt` in the cache (the check script is in BUG-188's shape:
+   `/var/lib/jellyfin/data/subtitles/<id[:2]>/<uuid>/2.srt`).
+2. Shawn confirms on the Roku with S01E09 → E10 back-to-back.
+3. **Shawn's call:** Option B (English `.en.srt` sidecars next to each MKV, survives cache wipes)
+   and/or a Sonarr/Radarr **On-Import** hook so same-day imports are warm immediately.
+4. After the one-off finishes: `sudo rm /usr/local/bin/ozark-warm-once` (transient unit disappears
+   on its own).
+5. Still pending from 2026-09-24: `main` is ahead of origin, unpushed on purpose — Shawn's call.
+6. Parked wallpaper work — see below.
 
 ## Key decisions & constraints
-- **AGENTS.md §0.2 / Rule 12 / §16: "no changes" scopes to code, config and system state.**
-  `HANDOFF.md` and the §13 doc triggers are written on **every** turn, investigation turns included.
-- **Never restart Claude Desktop from a bare agent shell.** Use the relaunch helper, or launch it
-  from the KDE menu. A bare shell costs you the sign-in browser and gives no error.
-- **A warning that has been in the log for six weeks is not a root cause.** The enclave line was
-  read as the cause of a failure it long predates. Check the *first* occurrence against the *last
-  known-good* moment before believing any log line.
-- **`pkill -f` is banned on this box for anything matching a broad word** — Cowork's sandbox is a
-  `qemu-system-x86_64`, and an agent shell's own command line can match its own pattern. Use
-  `pkill -x <exact-name>` or a PID.
-- ⚠️ **A secret was printed to a terminal this turn.** `secret-tool search --all application Claude`
-  echoes the *secret value* of `Claude Safe Storage`, not just the metadata. It is in this session's
-  scrollback only — it was never written to a file, a note or a commit. Use
-  `secret-tool search --all ... | grep -v '^secret'` next time.
+- **Do not re-download media to fix subtitles** (Shawn, 2026-09-25). Embedded tracks are correct.
+- **AGENTS.md §0.2 / Rule 12:** "no changes" scopes to code/config/system state; HANDOFF + §13 docs
+  are written every turn.
+- **Never restart Claude Desktop from a bare agent shell** (BUG-187) — use
+  `scripts/luminos-claude-restart` or the KDE menu.
+- **`pkill -f` is banned for broad patterns** — Cowork's sandbox is a `qemu-system-x86_64`.
+
+## Gotchas / things NOT to redo (new this turn)
+- **A timer in the repo is not a timer on the box.** Check `systemctl status <unit>` on the server
+  before believing any server/ STATUS row that says "timer".
+- **`IOSchedulingClass=idle` on `luminos-subtitle-warm.service` throttles nothing** — the read is
+  done by Jellyfin's own ffmpeg; the script only issues HTTP requests.
+- One Jellyfin request extracts **all** text tracks of a file in one pass — warm index 2 only.
+- ⚠️ The one-off `ozark-warm-once` passes the Jellyfin token on curl's command line, so it is
+  visible in `ps` on the server while it runs (and appeared in this session's tool output). Single-
+  user box, low risk, but don't copy that pattern — the Python script uses in-process headers.
+- Host-shell calls must stay well under 60 s; a long `ssh … grep` over logs timed out once.
+- Server access: `ssh -i ~/.ssh/luminos-server shawn@192.168.2.61`, `sudo -n` works.
 
 ## Parked — the wallpaper launcher idea (unchanged, from 2026-09-21)
 **Make the wallpaper the launcher**: Starfield's stars become clickable app icons. Verdict from the
@@ -259,12 +196,10 @@ Full rule: `gameos/docs/gamemode/RULE-HANDS-OFF-LUMINOS.md`.
 for any transcode question is Jellyfin's own ffmpeg command lines in `/var/log/jellyfin/`.
 
 ## Files touched / relevant files
-**Repo, this turn:** `docs/BUGS.md` (BUG-187), `LUMINOS_STATUS.md`, `HANDOFF.md`,
-`scripts/luminos-claude-restart` (new), `.notes.db`.
-**Outside the repo:** `~/.config/luminos-spin/tmux.conf` (two `set-environment -g` lines).
-System state: Claude Desktop stopped and relaunched with a real session environment. **No `/etc`
-change, no sudo, no package change** — so AGENTS.md §9 is untouched.
-**Read this turn:** `~/.config/Claude/logs/{main.log,main1.log,claude.ai-web.log}` (binary — always
-`grep -a`), `~/.config/Claude/{ant-device-registry.json,bridge-state.json}`,
-`/usr/lib/claude-desktop/resources/app.asar` and its `claude-native` binding, `/usr/bin/xdg-open`,
-`/usr/local/bin/luminos-caelestia-plasma`.
+**Repo, this turn:** `docs/BUGS.md` (BUG-188), `server/DECISIONS.md` (DECISION 132),
+`server/STATUS.md`, `HANDOFF.md`, `.notes.db`.
+**luminos-server (not the G14):** `/usr/local/bin/luminos-subtitle-warm`,
+`/etc/systemd/system/luminos-subtitle-warm.{service,timer}` (enabled),
+`/usr/local/bin/ozark-warm-once` (one-off). Jellyfin cache `/var/lib/jellyfin/data/subtitles` grows.
+**G14:** nothing changed — no `/etc`, no package, no service. AGENTS.md §9 untouched.
+Previous handoff (Claude Desktop, BUG-187): `git show HEAD:HANDOFF.md`.

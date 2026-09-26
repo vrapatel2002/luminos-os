@@ -7909,3 +7909,38 @@ signal instead of a control. xdg-open's `exit_success` was believed because noth
 a browser appeared; the enclave warning was believed because nobody checked when it started. The
 journal and the first timestamp settled both in minutes. **Find the independent witness before
 theorising.**
+
+## BUG-188 — Ozark subtitles "load sometimes", then never on the next episode (media server)
+<!-- [CHANGE: cowork | 2026-09-25] -->
+**Symptom (Shawn, Roku, 2026-09-25):** every Ozark episode has subtitles, but they often do not
+load, and when one episode works the *next* one does not.
+
+**Not missing, not broken — cold.** All 20 files carry an English `subrip` track at stream index 2
+(plus 15–31 other languages). Nothing to download. Jellyfin 10.11.11 demuxes embedded subtitles on
+the **first** subtitle request, reading the whole 10–20 GB 2160p file off the 5400 rpm spindle.
+Measured from `/var/log/jellyfin/jellyfin2026092{3,4}.log`: S01E07 **170 s**
+(22:55:31 → 22:58:21), S01E08 **205 s** (22:38:22 → 22:41:47). The Roku gives up on the subtitle
+request long before that. Once extracted, the track is cached forever — which is why an episode
+"works sometimes" (a re-watch, or turning subs on again minutes later) and why the next episode,
+auto-played, is always cold again. At diagnosis: 6 of 20 Ozark episodes warm (exactly the ones
+already watched), 14 cold, including S01E09, the next one up.
+
+**Why it came back:** DECISION 60 (2026-08-07) found this exact cause on MobLand. DECISION 113
+(2026-09-16) turned the fix into a daily timer — but it was **written without a route to the
+server and never installed**: `systemctl status luminos-subtitle-warm.service` → *could not be
+found*. `server/STATUS.md` said so ("Not run"). Ozark was imported 2026-09-07, after the only
+sweep ever run.
+
+**Fix (no media file touched, nothing re-downloaded):** installed
+`server/scripts/luminos-subtitle-warm` → `/usr/local/bin/`, the `.service` + `.timer` →
+`/etc/systemd/system/` on luminos-server, `enable --now` the timer (daily 04:00, `Persistent=true`).
+One-off `ozark-warm-once` transient unit warmed the 14 cold Ozark episodes in watch order, then
+started the full-library sweep.
+
+**Gotcha found:** the service's `IOSchedulingClass=idle` / `Nice=15` do **not** throttle the
+real work — the disk read is done by **Jellyfin's own ffmpeg**, the script only makes an HTTP
+request. If a sweep ever runs during playback it competes at Jellyfin's priority.
+
+**Remaining gap:** a new import is cold until the next 04:00 run. If an episode is watched the same
+day it lands, this recurs. Option: Sonarr/Radarr "On Import" custom script that warms just that
+item. Not built — Shawn's call.
