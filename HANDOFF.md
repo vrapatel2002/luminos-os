@@ -1,11 +1,23 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-25 — Response 1 (new Cowork chat)
+Last updated: 2026-09-26 — Response 2
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now
+## Aim right now (Response 2) — Ozark S02E03 violet picture, BUG-189
+Dolby Vision **Profile 5** (only P5 file in Ozark — the lone WEBDL). Same as DECISION 95.
+`luminos-dv-fix` started 13:17:32 on the server as unit **`dv-fix-ozark-s02e03`**
+(`journalctl -u dv-fix-ozark-s02e03`; temp file `Season 2/.dvfix.<pid>.mkv`). Original →
+`/srv/external/_dv_p5_originals/`. ETA ~2 h at 0.463x, **much slower while any Jellyfin
+transcode runs** (shared iGPU; measured ~0.1x with Shawn still streaming E03).
+After it finishes: confirm `ffprobe` shows bt2020/smpte2084 and no DV, re-warm subs for item
+`4b95fa4a6d35b193a852e1023cf6bd88`, Shawn re-watches E03.
+Jellyfin transcode does NOT rescue P5 here: `EnableTonemapping=false` → `setparams=bt709`.
+Open options (Shawn's call): Jellyfin tonemapping (needs Intel OpenCL runtime), and an
+on-import P5 scan.
+
+## Aim (Response 1) — Ozark subtitles
 **Ozark subtitles on the media server — BUG-188, DECISION 132. Fix applied, warm-up running.**
 Symptom: every episode has subs, but they load "sometimes", and the next episode never does.
 **Cause: cold embedded-subtitle cache, not missing subs.** All 20 files have English `subrip` at

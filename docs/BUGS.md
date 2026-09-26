@@ -7944,3 +7944,22 @@ request. If a sweep ever runs during playback it competes at Jellyfin's priority
 **Remaining gap:** a new import is cold until the next 04:00 run. If an episode is watched the same
 day it lands, this recurs. Option: Sonarr/Radarr "On Import" custom script that warms just that
 item. Not built — Shawn's call.
+
+## BUG-189 — Ozark S02E03 all violet: Dolby Vision Profile 5 (DECISION 95, again)
+<!-- [CHANGE: cowork | 2026-09-26] -->
+**Symptom (Shawn, Roku, 2026-09-26 ~13:10):** S02E03 "all violet, weird colour".
+**Cause:** the only WEBDL in the season (6.8 GB, Feb 2022 release) is **DV Profile 5**
+(`dv_profile=5, dv_bl_signal_compatibility_id=0`, colour tags all `unknown`) — IPT-PQ-C2 drawn as
+RGB. `luminos-dv-fix --scan /srv/media/tv/Ozark`: 19 files "no DV", **only S02E03** is P5.
+Roku reported `DirectPlayError`, so Jellyfin transcoded it — but with `EnableTonemapping=false`
+its filter chain is `setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709`, i.e. it
+labels the IPT data as BT.709 and passes the violet straight through. **The transcode does not
+rescue P5 on this box.**
+**Fix (no re-download):** `luminos-dv-fix` (DECISION 95) started 13:17:32 as transient unit
+`dv-fix-ozark-s02e03`. Original goes to `/srv/external/_dv_p5_originals/`, new tagged-HDR10 file
+at the same path. Expected ~2 h (0.463x on ANV + hevc_vaapi) — **but it shares the iGPU with any
+Jellyfin transcode**; measured ~0.1x while Shawn's stream was still running.
+**Follow-ups:** re-warm the subtitle cache for this item after the swap (new file = cache miss);
+the daily 04:00 timer will also catch it. Option: enable Jellyfin tonemapping (needs Intel
+OpenCL runtime on the server) as a safety net for future P5 files — Shawn's call, not done.
+**Why it wasn't caught:** `luminos-dv-fix --scan` is manual. Nothing scans new imports for P5.
