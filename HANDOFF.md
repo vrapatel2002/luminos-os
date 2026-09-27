@@ -1,11 +1,20 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-26 — Response 3
+Last updated: 2026-09-26 — Response 4
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (Response 3) — "stream lagging", READ-ONLY (Shawn: do not fix)
+## Aim right now (Response 4) — Roku TV lag = the TV's Wi-Fi link, read-only
+Shawn: only the Roku TV (Philips 65PUL7973, 192.168.2.18, Jellyfin Roku 3.2.3) lags; phone and
+others fine. Measured 21:40 from the server: TCP send queue to .18 backed up ~4 MB, **36,717
+retransmits** on the stream socket, ping to .18 **65–1616 ms (avg 486 ms)** vs 2 ms router.
+Delivery rate ~30 Mbit/s against a direct-played file averaging 26.6 Mbps with peaks to ~38
+(Ozark 2160p files are all 26–28 Mbps). Server side healthy. Fix options for Shawn: Ethernet to
+the TV (best), move router/5 GHz, or cap Roku app quality so Jellyfin transcodes to ~10–15 Mbps.
+Nothing changed.
+
+## Aim (Response 3) — "stream lagging", READ-ONLY (Shawn: do not fix)
 21:38 findings: server is NOT the bottleneck — load 0.21, enp2s0 up at 1000 Mb/s, last transcode
 ran at **5.17x** realtime, dv-fix finished 15:36 (E03 now 11.3 GB, 26.6 Mbps, no DV — same
 bitrate class as E04 at 28.4). Two clients on E03: **Jellyfin for Android from 100.77.43.36
