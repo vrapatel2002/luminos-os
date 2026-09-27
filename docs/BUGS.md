@@ -7963,3 +7963,20 @@ Jellyfin transcode**; measured ~0.1x while Shawn's stream was still running.
 the daily 04:00 timer will also catch it. Option: enable Jellyfin tonemapping (needs Intel
 OpenCL runtime on the server) as a safety net for future P5 files — Shawn's call, not done.
 **Why it wasn't caught:** `luminos-dv-fix --scan` is manual. Nothing scans new imports for P5.
+
+## BUG-190 — Fans pinned ~7000 RPM at 37 °C after AC replug (burst curve leaked onto Balanced)
+**Date:** 2026-09-26 · **Status:** FIXED · **Component:** `cmd/luminos-power/main.go` thermal burst
+**Symptom:** all three fans 6800–7500 RPM, Tctl 37 °C, profile Balanced, idle. Live Balanced curve read
+back `40c:255 … 90c:255` (cpu/gpu) and `40c:224` (mid) — the burst curve, not v5.
+**Timeline (journal):** 20:05:03 burst START on `balanced` (67.8 °C at boot) → suspend → 21:04:28 AC
+unplugged → profile Quiet mid-burst → burst curve applied to `quiet` too and `thermalBurstProfile`
+**overwritten** to `quiet` → 21:04:30 burst DONE restored **only quiet** → 21:47:36 AC plugged → firmware
+loads the stale 100 % Balanced curve.
+(Burst "after 20s" despite 59 min wall time = `time.Since` is monotonic and does not count suspend.)
+**Second leak, same shape:** the beast-mode cancel branch said "revert the burst curve" but never called
+anything, so a burst cancelled by Performance left its profile at 100 % too.
+**Fix:** `thermalBurstProfiles` set records every profile that got the burst curve; new
+`restoreBurstProfiles()` puts v5 back on all of them on DONE/TIMEOUT **and** on beast-mode cancel.
+**Immediate relief:** `sudo systemctl restart luminos-power` (startup re-applies v5 to balanced + quiet).
+**Revert:** `sudo install -m 755 ~/.luminos-backups/luminos-power.bak-bug190-20260926 /usr/local/bin/luminos-power && sudo systemctl restart luminos-power`
+**Check:** read `pwm{1,2,3}_auto_point*_pwm` on the `asus_custom_fan_curve` hwmon — at 40 °C cpu/gpu must be 13, not 255.

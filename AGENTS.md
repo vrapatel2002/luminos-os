@@ -624,6 +624,7 @@ Full reference with root causes: `docs/LUMINOS_HANDBOOK.md` Emergency Card.
 | Symptom | Fix |
 |---------|-----|
 | Fans silent at 70°C+ | `sudo systemctl restart luminos-power` |
+| Fans maxed at idle (~7000 RPM, <45°C) | Stale burst curve on a profile (BUG-190). `sudo systemctl restart luminos-power`; check the curve read-back |
 | HIVE not responding (SUPER+SPACE) | `pkill -f hive-daemon.py; pkill -f llama-server; SUPER+SPACE` |
 | NVIDIA won't sleep (stuck `active`, ~1.5 W) | **First: `systemctl is-enabled nvidia-powerd` — it must read `masked`.** It holds a runtime-PM reference with no fd, so `lsof`/`fuser` show nothing (BUG-182). Fix: `sudo systemctl stop nvidia-powerd && sudo systemctl mask nvidia-powerd`. Then `luminos-verify` [3]. `lspci`/`lshw`/`inxi`/a bare root `nvidia-smi` all WAKE it — don't diagnose with those. [CHANGE: cowork \| 2026-09-20] |
 | NVIDIA won't sleep (8W idle, EGL case) | Check `/etc/environment` has `__EGL_VENDOR_LIBRARY_FILENAMES=...50_mesa.json` |

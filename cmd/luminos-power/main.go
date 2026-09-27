@@ -302,6 +302,11 @@ var (
 	thermalBurstStart   time.Time // when burst mode was entered
 	thermalBurstLastEnd time.Time // when last burst ended (enforces cooldown period)
 	thermalBurstProfile string    // profile the burst curve was applied to (need to revert correctly)
+	// [CHANGE: claude-code | 2026-09-26] BUG-190: every profile that got the burst curve.
+	// A mid-burst profile switch (AC unplug Balanced→Quiet) used to overwrite
+	// thermalBurstProfile, so exit restored only the last one and Balanced kept the
+	// 100% curve until the next restart — fans maxed at 37°C on replug.
+	thermalBurstProfiles = map[string]bool{}
 
 	// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU TGP dynamic switching state
 	currentGPUTGPW   float64   // current GPU power limit in watts (55 or 90)
@@ -660,6 +665,7 @@ func monitorLoop(ctx context.Context) {
 					inThermalBurst = true
 					thermalBurstStart = time.Now()
 					thermalBurstProfile = profileLower
+					thermalBurstProfiles[profileLower] = true
 					lg.Info("thermal burst START: %.1f°C ≥ %.0f°C — 100%% fans until %.0f°C or 2min (profile=%s)",
 						temp, thermalBurstTriggerC, thermalBurstExitC, profileLower)
 					applyBurstFanCurve(profileLower)
@@ -672,6 +678,7 @@ func monitorLoop(ctx context.Context) {
 				// Re-apply burst curve if profile changed mid-burst (e.g. Balanced→Quiet).
 				if profileLower != thermalBurstProfile {
 					thermalBurstProfile = profileLower
+					thermalBurstProfiles[profileLower] = true
 					applyBurstFanCurve(profileLower)
 				}
 				elapsed := time.Since(thermalBurstStart)
@@ -687,7 +694,7 @@ func monitorLoop(ctx context.Context) {
 						lg.Warn("thermal burst TIMEOUT after %v (still %.1f°C) — v5 curve restored (next burst in 30min)",
 							elapsed.Round(time.Second), temp)
 					}
-					applyAggressiveFanCurve(profileLower)
+					restoreBurstProfiles()
 				}
 			}
 		} else if inThermalBurst && prevState.Profile == "Performance" {
@@ -696,6 +703,7 @@ func monitorLoop(ctx context.Context) {
 			inThermalBurst = false
 			thermalBurstLastEnd = time.Now()
 			lg.Info("thermal burst cancelled: beast mode active")
+			restoreBurstProfiles() // BUG-190: the old code never reverted here
 		}
 
 		// === EMERGENCY THERMAL ===
@@ -2176,6 +2184,15 @@ func applyAggressiveFanCurve(mode string) {
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "gpu", "--data", cpuGpuCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "mid", "--data", midCurve)
 	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--enable-fan-curves", "true")
+}
+
+// restoreBurstProfiles puts the v5 curve back on every profile the burst touched.
+// [CHANGE: claude-code | 2026-09-26] BUG-190.
+func restoreBurstProfiles() {
+	for prof := range thermalBurstProfiles {
+		applyAggressiveFanCurve(prof)
+	}
+	thermalBurstProfiles = map[string]bool{}
 }
 
 // applyBurstFanCurve sets fans to 100% from 40°C upward for rapid chassis cooling.

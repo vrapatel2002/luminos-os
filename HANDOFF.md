@@ -1,11 +1,21 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-26 — Response 4
+Last updated: 2026-09-26 — Response 1 (new chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (Response 4) — Roku TV lag = the TV's Wi-Fi link, read-only
+## Aim right now (Response 1, new chat) — fans maxed at idle, BUG-190, FIXED
+Shawn: fans spinning hard, not hot. Measured 21:52: Tctl 37 °C, cpu/gpu/mid 6900/6800/7500 RPM,
+Balanced curve read back as the **burst** curve (255 from 40 °C). Cause: a burst started on Balanced
+at boot, AC unplug switched to Quiet mid-burst, exit restored only Quiet; replug at 21:47 loaded the
+stale Balanced curve. Fixed in `cmd/luminos-power/main.go` (`thermalBurstProfiles` +
+`restoreBurstProfiles()`, also on beast-mode cancel), rebuilt, installed, restarted → fans ~2000 RPM.
+Backup: `~/.luminos-backups/luminos-power.bak-bug190-20260926`. Docs: BUGS.md BUG-190, AGENTS §15
+row, notes + brain. Not yet seen: a real burst → unplug → exit cycle on the new binary.
+Pre-existing: `gofmt -l` flags `cmd/luminos-power/fan_control.go` (not touched).
+
+## Aim (Response 4, previous chat) — Roku TV lag = the TV's Wi-Fi link, read-only
 Shawn: only the Roku TV (Philips 65PUL7973, 192.168.2.18, Jellyfin Roku 3.2.3) lags; phone and
 others fine. Measured 21:40 from the server: TCP send queue to .18 backed up ~4 MB, **36,717
 retransmits** on the stream socket, ping to .18 **65–1616 ms (avg 486 ms)** vs 2 ms router.
