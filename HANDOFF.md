@@ -1,11 +1,20 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-26 — Response 2
+Last updated: 2026-09-26 — Response 3
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (Response 2) — Ozark S02E03 violet picture, BUG-189
+## Aim right now (Response 3) — "stream lagging", READ-ONLY (Shawn: do not fix)
+21:38 findings: server is NOT the bottleneck — load 0.21, enp2s0 up at 1000 Mb/s, last transcode
+ran at **5.17x** realtime, dv-fix finished 15:36 (E03 now 11.3 GB, 26.6 Mbps, no DV — same
+bitrate class as E04 at 28.4). Two clients on E03: **Jellyfin for Android from 100.77.43.36
+(Tailscale = off-LAN)**, Transcode `ContainerBitrateExceedsLimit` at 2560w / 12.7 Mbps; and Roku
+DirectPlay, stopped/restarted at 21:31 and 21:37 around 42 min. Likely cause: remote link
+(home upload / phone network) can't carry 12.7 Mbps; Roku side = its own wifi pulling 27 Mbps
+direct. Not verified: home upload speed, Roku wifi. Post-dv-fix E03 colour not yet eyeballed.
+
+## Aim (Response 2) — Ozark S02E03 violet picture, BUG-189
 Dolby Vision **Profile 5** (only P5 file in Ozark — the lone WEBDL). Same as DECISION 95.
 `luminos-dv-fix` started 13:17:32 on the server as unit **`dv-fix-ozark-s02e03`**
 (`journalctl -u dv-fix-ozark-s02e03`; temp file `Season 2/.dvfix.<pid>.mkv`). Original →
