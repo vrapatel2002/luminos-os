@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-09 18:30 — Response 1 (new chat; AGENTS.md adopted mid-chat)
+Last updated: 2026-10-09 18:45 — Response 2
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
@@ -15,6 +15,12 @@ files if a local folder is in its context or granted to the chat. Fix: granted `
 chat (`device_request_folder_access`, Shawn approved). **For new chats:** add `~/luminos-os` to the
 Luminous project's context once ("Add a local folder"), or grant it per chat. Not yet confirmed by
 Shawn that the @ list now shows files.
+**Response 2 — root cause found: two different projects.** Desktop app's local projects ("spaces")
+live in `~/.config/Claude/local-agent-mode-sessions/<acct>/<org>/spaces.json`. Space **`luminos-os`**
+= folder `/home/shawn/luminos-os` (created via "pick a folder") — **never migrated** to the account.
+The chat Shawn opened is in **`Luminous`**, a claude.ai account project (4 Vela docs, `sync_sources: []`,
+no folder). Space `Games` *was* migrated (`migration.stage: complete`). So @ had nothing to list.
+Fix options: work in the `luminos-os` project, or add `~/luminos-os` as a local folder in Luminous.
 Earlier the same chat (Vela/tooling, not Luminos — nothing on Luminos changed):
 - `vela-crashd` crash/freeze reporter built and installed in `/vela.img` → `gameos/docs/tracks/CRASH.md`
   (Control froze 10-09 12:30:51, cause unknown, BOARD #18).
