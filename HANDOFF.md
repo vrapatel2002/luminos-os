@@ -1,11 +1,29 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-09-26 — Response 1 (new chat)
+Last updated: 2026-10-09 18:30 — Response 1 (new chat; AGENTS.md adopted mid-chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (Response 1, new chat) — fans maxed at idle, BUG-190, FIXED
+## Aim right now (2026-10-09, Response 1) — "@ can't mention project files" — FIXED for this chat
+Shawn: typing @ no longer lists repo files (@AGENTS.md, @HANDOFF.md) like it used to.
+Measured: `get_device_info` → `connectedFolders: []`. The @ picker only lists files in folders
+connected to the conversation. Two causes stacked: (1) **BUG-187's re-login (09-24) minted a new
+device row and folder grants are per row** — they did not carry over; (2) **Cowork merged into
+Claude** (support.claude.com/en/articles/16761823): a claude.ai Project ("Luminous") only knows local
+files if a local folder is in its context or granted to the chat. Fix: granted `~/luminos-os` to this
+chat (`device_request_folder_access`, Shawn approved). **For new chats:** add `~/luminos-os` to the
+Luminous project's context once ("Add a local folder"), or grant it per chat. Not yet confirmed by
+Shawn that the @ list now shows files.
+Earlier the same chat (Vela/tooling, not Luminos — nothing on Luminos changed):
+- `vela-crashd` crash/freeze reporter built and installed in `/vela.img` → `gameos/docs/tracks/CRASH.md`
+  (Control froze 10-09 12:30:51, cause unknown, BOARD #18).
+- `/build` skill (`~/.claude/skills/build/SKILL.md`, backup `.prev-20261009`): Opus 5.5 high for code
+  and tests, Fable 5.1 for review/escalation, Sonnet only for mechanical edits. Sonnet workers looped at
+  the 32k output cap on refactors; Opus did the same jobs in 3–5 min.
+- Local build dashboard: `~/builds/build-monitor` (`python3 monitor.py` → 127.0.0.1:8765).
+
+## Aim (Response 1, chat of 09-26) — fans maxed at idle, BUG-190, FIXED
 Shawn: fans spinning hard, not hot. Measured 21:52: Tctl 37 °C, cpu/gpu/mid 6900/6800/7500 RPM,
 Balanced curve read back as the **burst** curve (255 from 40 °C). Cause: a burst started on Balanced
 at boot, AC unplug switched to Quiet mid-burst, exit restored only Quiet; replug at 21:47 loaded the
@@ -236,6 +254,7 @@ Full rule: `gameos/docs/gamemode/RULE-HANDS-OFF-LUMINOS.md`.
 for any transcode question is Jellyfin's own ffmpeg command lines in `/var/log/jellyfin/`.
 
 ## Files touched / relevant files
+**2026-10-09:** `HANDOFF.md`, `.notes.db` (notes + brain log), MemPalace luminos-os/decisions drawer. No `/etc`, package or service change on Luminos.
 **Repo, this turn:** `docs/BUGS.md` (BUG-188), `server/DECISIONS.md` (DECISION 132),
 `server/STATUS.md`, `HANDOFF.md`, `.notes.db`.
 **luminos-server (not the G14):** `/usr/local/bin/luminos-subtitle-warm`,
