@@ -9,6 +9,13 @@
   A **foreground** model the user launched on purpose may use the **full 6GB** (DECISION 58).
 - **Rules**: NO DOCKER, NO OLLAMA, IDENTITY TAGS MANDATORY.
 
+## Working preferences (moved from the "Luminous" claude.ai project, 2026-10-09)
+<!-- [CHANGE: claude | 2026-10-09] -->
+- Stay out of personal files: only touch project data (plus the game/app folders and logs a task needs).
+- `/build`: at least one Opus (high) or Fable worker; never Sonnet-only.
+- Keep Vela `.md` docs updated as work happens; file work in MemPalace.
+- Full carried-over notes: `gameos/docs/claude-project/project-memory.md`.
+
 ## HIVE Models (llama.cpp GGUF — NOT Ollama)
 - **Nexus**: Dolphin3.0-Llama3.1-8B-Q4_K_M.gguf (GPU) — uncensored coordinator
 - **Bolt**: Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf (GPU) — coding specialist

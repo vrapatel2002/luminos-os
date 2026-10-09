@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-09 18:45 — Response 2
+Last updated: 2026-10-09 19:00 — Response 3
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
@@ -21,6 +21,11 @@ live in `~/.config/Claude/local-agent-mode-sessions/<acct>/<org>/spaces.json`. S
 The chat Shawn opened is in **`Luminous`**, a claude.ai account project (4 Vela docs, `sync_sources: []`,
 no folder). Space `Games` *was* migrated (`migration.stage: complete`). So @ had nothing to list.
 Fix options: work in the `luminos-os` project, or add `~/luminos-os` as a local folder in Luminous.
+**Response 3 — consolidating onto `luminos-os` (Shawn's choice).** Copied Luminous's 4 docs + its
+project memory to `gameos/docs/claude-project/` (gameos `231c243`); preferences pointer added to
+`CLAUDE.md`. **Left for Shawn in the app:** move Luminous chats into `luminos-os` (chat dropdown →
+move), then **Archive** Luminous (reversible) — delete only later. Luminous's project memory lives in
+the account and may go with the project; the copy above is the backup.
 Earlier the same chat (Vela/tooling, not Luminos — nothing on Luminos changed):
 - `vela-crashd` crash/freeze reporter built and installed in `/vela.img` → `gameos/docs/tracks/CRASH.md`
   (Control froze 10-09 12:30:51, cause unknown, BOARD #18).
