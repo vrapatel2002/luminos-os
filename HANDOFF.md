@@ -1,11 +1,26 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-10 11:20 — Response 1 (new chat, 11:11; previous chat's notes below kept)
+Last updated: 2026-10-10 12:02 — cloud chat Response 7 (the 11:11 chat's notes kept below)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-10 11:11 chat, Response 1) — verify the Claude Desktop upgrade held
+## Aim right now (2026-10-10 12:00, cloud chat R7) — host-shell MCP "Failed" = BUG-192, FIXED
+Settings → Local MCP servers showed `host-shell` **Failed / Server disconnected**. Log
+`~/.config/Claude/logs/mcp-server-host-shell.log` 15:39:09Z call id=31 → `TypeError: can only concatenate
+str (not "bytes") to str` → server exited 15:40:07. Cause: `~/.local/share/claude-host-shell/server.py` (not in
+git) — on a command **timeout** Python returns partial output as bytes even with `text=True`, and `tools/call`
+had no try/except, so one timed-out command killed the server. Fixed (decode, `killpg` on timeout, per-call
+error handling), tested over stdio. Backup `~/.luminos-backups/claude-host-shell-server.py.bak-20261010`.
+**Running server PID 28124 (started 10:57) still has the OLD code** — the app must respawn it: restart the
+app via `scripts/luminos-claude-restart` / KDE menu, or toggle the server in Settings.
+Suspicion, not proven: the timed-out call may be the command the 11:11 chat saw refused as "Remote Shell
+Writes" (a permission prompt waiting until timeout).
+**@ after the upgrade:** now offers only artifacts. Research found no official doc of the change; likely the
+Chat/Cowork merge + Oct 6 cloud Cowork tasks (Code tab docs: "@mention is not available in cloud sessions").
+Workarounds: Cowork (not Chat) + new task; type file paths; or **Code tab → Local → ~/luminos-os** for real `@file`.
+
+## Previous aim (2026-10-10 11:11 chat, Response 1) — verify the Claude Desktop upgrade held
 Shawn's prompt was only "read and follow AGENTS.md + HANDOFF.md" — no new task, so the open
 items were checked read-only.
 **Verified 11:15 on the G14:** `pacman -Q claude-desktop` = `2.31226.1-1`; main PID 27438 running;
