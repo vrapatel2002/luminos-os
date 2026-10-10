@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-09 19:00 — Response 3
+Last updated: 2026-10-10 10:35 — Response 4
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
@@ -26,6 +26,15 @@ project memory to `gameos/docs/claude-project/` (gameos `231c243`); preferences 
 `CLAUDE.md`. **Left for Shawn in the app:** move Luminous chats into `luminos-os` (chat dropdown →
 move), then **Archive** Luminous (reversible) — delete only later. Luminous's project memory lives in
 the account and may go with the project; the copy above is the backup.
+**Response 4 (10-10) — @ still dead even in `luminos-os` (folder IS in its Context) → the app is too old.**
+Installed `claude-desktop 1.52386.6-2` (aur, built 09-15). Official apt repo latest **2.31226.1**;
+AUR `claude-desktop` **2.31226.1-1** (updated 10-09). App banners say "Update Claude to move this
+project" and "Haiku 5.5 works best with the latest desktop app". The Linux app never self-updates
+(code.claude.com/docs/en/desktop-linux). Aug 7 chats in this project used `@/home/shawn/...` fine.
+**Not upgraded — waiting for Shawn's go**: `yay -S claude-desktop`, then restart ONLY via
+`scripts/luminos-claude-restart` (BUG-187). Risks: a 1→2 major jump; restart drops the cloud bridge
+(this chat) until reconnect; BUG-187 showed a re-login can mint a new device row (old chats go
+foreign, folder grants reset). Rollback: keep the 1.52386.6 pkg from yay cache / `downgrade`.
 Earlier the same chat (Vela/tooling, not Luminos — nothing on Luminos changed):
 - `vela-crashd` crash/freeze reporter built and installed in `/vela.img` → `gameos/docs/tracks/CRASH.md`
   (Control froze 10-09 12:30:51, cause unknown, BOARD #18).
