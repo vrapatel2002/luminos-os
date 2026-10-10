@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-10 10:35 — Response 4
+Last updated: 2026-10-10 10:55 — Response 5
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
@@ -34,7 +34,8 @@ project" and "Haiku 5.5 works best with the latest desktop app". The Linux app n
 **Not upgraded — waiting for Shawn's go**: `yay -S claude-desktop`, then restart ONLY via
 `scripts/luminos-claude-restart` (BUG-187). Risks: a 1→2 major jump; restart drops the cloud bridge
 (this chat) until reconnect; BUG-187 showed a re-login can mint a new device row (old chats go
-foreign, folder grants reset). Rollback: keep the 1.52386.6 pkg from yay cache / `downgrade`.
+foreign, folder grants reset). Rollback: **no cached 1.52386.6 pkg exists** (not in /var/cache/pacman/pkg) — back up `/usr/lib/claude-desktop` (or `bacman claude-desktop`) BEFORE upgrading.
+**Response 5:** Shawn will run the upgrade himself from a Claude Code terminal; a self-contained prompt for it was written in chat.
 Earlier the same chat (Vela/tooling, not Luminos — nothing on Luminos changed):
 - `vela-crashd` crash/freeze reporter built and installed in `/vela.img` → `gameos/docs/tracks/CRASH.md`
   (Control froze 10-09 12:30:51, cause unknown, BOARD #18).
