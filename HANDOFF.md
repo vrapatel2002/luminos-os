@@ -49,6 +49,7 @@ claude_desktop_config.json, ant-device-registry.json, bridge-state.json, Prefere
 `yay -S claude-desktop` → `2.31226.1-1`. Restarted via `scripts/luminos-claude-restart`; new PID
 started 10:57:31, `[remote-tools-device] authenticated` 10:57:37, no Crashpad dumps,
 `ant-device-registry.json` sha256 unchanged (`079c414f…`).
+**11:58:36 the app quit cleanly** (normal onQuitCleanup incl. cowork-vm-shutdown, no crash dump) after ~1 h up; not running at 11:58:41. Not relaunched — unknown whether Shawn closed it. If it should be running: `scripts/luminos-claude-restart` detached, or the KDE menu.
 **WAITING ON SHAWN (in the app):** (1) "Update Claude to move this project" banner gone? (2) @ in the
 `luminos-os` project lists repo files? (3) asked to sign in again? If (3) yes → compare
 `ant-device-registry.json` with the backup; a different key means old chats go `cls=foreign_device`
