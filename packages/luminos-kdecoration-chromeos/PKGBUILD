@@ -1,0 +1,28 @@
+# Maintainer: Luminos OS
+# [CHANGE: claude-code | 2026-10-10] DECISION 135 — ChromeOS-style KWin decoration, built from the repo.
+# Built against kdecoration 6.7.5 (KDecoration3). A Plasma bump can break the plugin ABI:
+# rebuild with `makepkg -sfi` here; KWin silently falls back to Breeze if the plugin fails to load.
+# Design constants derived from Chromium (ChromeOS frame code), (c) The Chromium Authors, BSD-3-Clause.
+pkgname=luminos-kdecoration-chromeos
+pkgver=1.0.0
+pkgrel=2
+pkgdesc="Luminos ChromeOS-style window decoration for KWin (org.kde.luminos.chromeos)"
+arch=('x86_64')
+url="https://github.com/luminos-os"
+license=('GPL-2.0-or-later' 'BSD-3-Clause')
+depends=('kdecoration' 'kconfig' 'kcoreaddons' 'qt6-base')
+makedepends=('cmake' 'extra-cmake-modules')
+source=()
+_srcdir="${LUMINOS_SRC:-$startdir/../../src/kdecoration-chromeos}"
+
+build() {
+  cmake -S "$_srcdir" -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  test -f "$pkgdir/usr/lib/qt6/plugins/org.kde.kdecoration3/org.kde.luminos.chromeos.so"
+}

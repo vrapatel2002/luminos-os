@@ -1,11 +1,23 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-10 12:02 — cloud chat Response 7 (the 11:11 chat's notes kept below)
+Last updated: 2026-10-10 18:40 — Response 1 (windowstyle chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-10 12:00, cloud chat R7) — host-shell MCP "Failed" = BUG-192, FIXED
+## Aim right now (2026-10-10 18:40, windowstyle chat R1) — ChromeOS/Nexus window style, DECISION 138, DONE
+Shawn: make every KWin window look like the Nexus screenshot, "use the code from chromeOS". Asked first
+(DECISION 71/72 history) → **both frame + insides, all KDE/Qt apps**.
+**Live now:** own KDecoration3 plugin `org.kde.luminos.chromeos` (`src/kdecoration-chromeos/`, pkg
+`luminos-kdecoration-chromeos 1.0.0-2`), Darkly 0.5.40 widget style radius 16, kirigami `6.30.0-1.1`
+(BUG-193: the DECISION 72 patch had been silently replaced by stock 6.30). `scripts/luminos-windowstyle-check`
+= 11/11 PASS incl. screenshot pixel probes. Undo: `luminos-windowstyle revert` (managed keys only).
+**Running KWin still has build 1.0.0-1 in memory** — review fixes (null-deref guard etc.) load at next login.
+**Waiting on Shawn:** look at it; likely asks — radius 16 vs ChromeOS 12, show title?, selected-row tint.
+Knobs: `~/.config/luminos-chromeosrc [Frame] CornerRadius/HeaderHeight/ShowTitle` then `qdbus6 org.kde.KWin /KWin reconfigure`.
+⚠️ Plugin, Darkly and kirigami must be rebuilt after every Plasma/Qt bump; KWin falls back to Breeze silently.
+
+## Previous aim (2026-10-10 12:00, cloud chat R7) — host-shell MCP "Failed" = BUG-192, FIXED
 Settings → Local MCP servers showed `host-shell` **Failed / Server disconnected**. Log
 `~/.config/Claude/logs/mcp-server-host-shell.log` 15:39:09Z call id=31 → `TypeError: can only concatenate
 str (not "bytes") to str` → server exited 15:40:07. Cause: `~/.local/share/claude-host-shell/server.py` (not in
@@ -290,6 +302,8 @@ Full rule: `gameos/docs/gamemode/RULE-HANDS-OFF-LUMINOS.md`.
 for any transcode question is Jellyfin's own ffmpeg command lines in `/var/log/jellyfin/`.
 
 ## Files touched / relevant files
+**2026-10-10 windowstyle chat:** `src/kdecoration-chromeos/`, `packages/luminos-kdecoration-chromeos/`, `packages/kirigami-luminos/PKGBUILD`, `config/pacman-hooks/luminos-kirigami.hook`, `scripts/luminos-windowstyle{,-check}`, `tests/windowstyle/`, `docs/windowstyle/`, AGENTS §9, STATUS, DECISIONS (138), BUGS (193). System: packages luminos-kdecoration-chromeos, darkly, kirigami 6.30.0-1.1; `/etc/pacman.d/hooks/luminos-kirigami.hook`; `/usr/local/bin/luminos-windowstyle`; kwinrc/kdeglobals/darklyrc/luminos-chromeosrc.
+**2026-10-10 multinet chat:** `server/DECISIONS.md` (DECISION 134), `server/STATUS.md`, `server/docs/multinet/{SPEC,BUILD_LOG}.md` (new), `HANDOFF.md`, `.notes.db`. Server: nothing persistent (wlan0 band switched for the test and restored).
 **2026-10-10 11:11 chat:** `HANDOFF.md` only (read-only checks).
 **2026-10-10:** package `claude-desktop` 1.52386.6-2 → 2.31226.1-1 (no /etc, no service); `LUMINOS_STATUS.md`, `docs/BUGS.md` (BUG-191), `LUMINOS_DECISIONS.md` (DECISION 133), `HANDOFF.md`, `.notes.db`, MemPalace drawer.
 **2026-10-09:** `HANDOFF.md`, `.notes.db` (notes + brain log), MemPalace luminos-os/decisions drawer. No `/etc`, package or service change on Luminos.

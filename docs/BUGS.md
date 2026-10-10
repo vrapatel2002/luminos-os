@@ -8031,3 +8031,11 @@ per-request try/except so one bad call returns an error instead of exiting. Back
 **Verified:** stdio test of the real server: normal call, invalid UTF-8, `echo partial; sleep 30 & sleep 30` with
 timeout 2 → returns partial output + "timed out after 2s" in 2 s, and the next call still answers.
 **Lesson:** `TimeoutExpired.stdout` is bytes regardless of `text=True` — a long-standing CPython quirk.
+
+## BUG-193 — the patched Kirigami was silently replaced by stock 6.30, undoing DECISION 72 for weeks
+<!-- [CHANGE: claude-code | 2026-10-10] -->
+- **Symptom:** none visible as an error — KDE apps simply went back to 5 px corners / 36 px rows. `/etc/environment` still set `KIRIGAMI_CORNER_RADIUS=16` etc., so everything *looked* configured.
+- **Cause:** DECISION 72 shipped `kirigami 6.28.0-1.1`. `pkgrel=1.1` beats a repo `-1` of the same version, but a **version** bump (6.30.0-1) wins, exactly as DECISION 72 predicted. No hook existed, so nothing said so.
+- **Found by:** a qml6 offscreen probe during the DECISION 138 build printed `cornerRadius=5`; `pacman -Q kirigami` = `6.30.0-1`.
+- **Fix:** patch applied unchanged to 6.30.0; `packages/kirigami-luminos/PKGBUILD` → 6.30.0, pkgrel 1.1, patch sha256 pinned. Installed `6.30.0-1.1`; probe = 16, `banana` → 5. Added `/etc/pacman.d/hooks/luminos-kirigami.hook` (warns loudly after any kirigami upgrade that isn't `-1.1`). `scripts/luminos-windowstyle-check` now fails on it too.
+- **Lesson:** a value-in-env lever is invisible when the thing reading it disappears. Check the reader, not the env.

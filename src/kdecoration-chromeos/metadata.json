@@ -1,0 +1,13 @@
+{
+    "_comment": "[CHANGE: claude-code | 2026-10-10] Luminos ChromeOS-style frame, DECISION 135",
+    "KPlugin": {
+        "Description": "ChromeOS-style rounded window frame for Luminos (constants from Chromium, BSD-3-Clause)",
+        "EnabledByDefault": true,
+        "Id": "org.kde.luminos.chromeos",
+        "Name": "Luminos ChromeOS"
+    },
+    "org.kde.kdecoration3": {
+        "blur": false,
+        "recommendedBorderSize": "None"
+    }
+}

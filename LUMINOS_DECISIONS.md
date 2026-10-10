@@ -8239,3 +8239,39 @@ project migration (BUG-191). Once a month: `yay -Si claude-desktop` vs `pacman -
 if behind, review the PKGBUILD (official `.deb` + pinned SHA256 only), back up
 `/usr/lib/claude-desktop`, `yay -S claude-desktop` (never `-Syu` as a side effect), restart only via
 `scripts/luminos-claude-restart` (BUG-187).
+
+---
+
+## DECISION 138 — every KWin window wears a ChromeOS frame of our own, and Nexus-style insides
+*[CHANGE: claude-code | 2026-10-10]*
+
+Shawn sent a screenshot of Caelestia **Nexus** (Connected devices) and asked for that style on every window,
+"use the code from chromeOS". Third round of this ask (DECISION 71 rounded the frame and was reverted —
+"I meant the inside"; DECISION 72 patched Kirigami). This time he was asked first and answered **both frame
+and insides, all KDE/Qt apps**.
+
+**Frame — own KDecoration3 plugin `org.kde.luminos.chromeos`** (`src/kdecoration-chromeos/`, 496 lines,
+package `packages/luminos-kdecoration-chromeos`). Constants read from Chromium source (BSD-3, credited in the
+header): header 40, buttons 36×40 + 8 trailing pad on close, 16 px glyphs, hover = circle r14 white 8 %
+(pressed 14 %), inactive icons 38 %, shadow elevation 24 active / 12 inactive (key `0 e e` 20 % + ambient
+`0 0 e` 10 %), 6 px outside resize. Radius **16** (Caelestia `large`; ChromeOS uses 12) on all four corners via
+KDecoration3 `setBorderRadius`, which KWin 6.7 uses to clip the client — so **no rounded-corners effect is
+needed** (it stays disabled; 0.9.0-3 is ABI-dead on 6.7.5 anyway). Header painted in the window's own
+`QPalette::Window` → no strip. No title, no icon (Nexus shows none); `luminos-chromeosrc [Frame] ShowTitle=true` brings it back.
+Square when maximized or touching a screen edge.
+
+**Why not Klassy:** it would get ~90 % of the look with less code, but Shawn asked for ChromeOS's code, and an
+own plugin has no upstream option churn. Same rebuild-on-Plasma-bump risk either way.
+
+**Insides:** Darkly 0.5.40 (AUR, built from source) at `CornerRadius=16`, all opacity 100, colours left to
+`Caelestia.colors`. Kirigami's patch re-applied for 6.30 (BUG-193). QML `Switch`, `GroupBox`, `Frame` in
+Kirigami apps are drawn in QML, not QStyle — Darkly doesn't reach them.
+
+**Not covered, by design:** Chrome, Electron (Claude Desktop, VS Code) and GTK/CSD windows draw their own frame
+and insides. Selected rows are solid lavender rather than Nexus's 30 % tint. The ring border is approximated
+(KWin outline + header-only inner ring) because a decoration can't paint over client content.
+
+**Reversible:** `luminos-windowstyle revert` resets only the 19 managed keys (proved with a dummy key that survived).
+**Proof:** `scripts/luminos-windowstyle-check` 11/11 PASS including pixel probes on a live spectacle capture
+(corners transparent at 3 px diagonal, header vs body RGB distance 0, glyphs only in the three button slots).
+Shots: `docs/windowstyle/shots/`. Independent review: 8 findings, all fixed (one null-deref crash risk).

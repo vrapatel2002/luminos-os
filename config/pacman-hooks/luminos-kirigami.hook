@@ -1,0 +1,14 @@
+# [CHANGE: claude-code | 2026-10-10] DECISION 72 / DECISION 135.
+# Installed at /etc/pacman.d/hooks/luminos-kirigami.hook. Kirigami 6.28 -> 6.30 silently
+# replaced the Luminos-patched build (pkgrel 1.1) with stock, so KIRIGAMI_* in
+# /etc/environment stopped doing anything and nobody noticed. This only WARNS; it changes nothing.
+# Rebuild: cd ~/luminos-os/packages/kirigami-luminos && bump pkgver/sha256 && makepkg -si
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = kirigami
+
+[Action]
+Description = Checking kirigami is still the Luminos-patched build (-1.1)...
+When = PostTransaction
+Exec = /usr/bin/bash -c 'v=$(pacman -Q kirigami 2>/dev/null); case "$v" in *-1.1) echo "luminos: OK $v is the patched build";; *) printf "\n%s\n%s\n%s\n%s\n\n" "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" "!!! LUMINOS WARNING: kirigami is now STOCK ($v), not the -1.1 fork." "!!! Kirigami.Units.cornerRadius is back to 5; KIRIGAMI_* in /etc/environment is ignored." "!!! Rebuild ~/luminos-os/packages/kirigami-luminos for the new pkgver (DECISION 72).";; esac; exit 0'

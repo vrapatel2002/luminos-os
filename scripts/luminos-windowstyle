@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# luminos-windowstyle — ChromeOS / Nexus window style for KWin + Qt apps.
+# [CHANGE: claude-code | 2026-10-10] DECISION 135, docs/windowstyle/SPEC.md + CONTRACTS.md.
+# The ONLY writer of kwinrc / kdeglobals / darklyrc for this look.
+#   apply   record each managed key's prior value once, write insides + frame, reconfigure
+#   revert  put back ONLY the managed keys (prior value, or delete if it was absent)
+#   status  print every managed key
+# Full-file copies in $BK are a manual escape hatch only; revert never copies whole files,
+# so unrelated KWin/Plasma settings changed later are left alone.
+# Every "OK" is printed only after the value is read back (BUG-088/089: no unconditional "done").
+set -uo pipefail
+
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+: "${DBUS_SESSION_BUS_ADDRESS:=unix:path=$XDG_RUNTIME_DIR/bus}"
+export XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
+
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}"
+BK="$HOME/.local/share/luminos-kde-backup/pre-windowstyle-20261010"
+STATE="$BK/managed-keys.prior"
+PLUGIN=/usr/lib/qt6/plugins/org.kde.kdecoration3/org.kde.luminos.chromeos.so
+FILES=(kwinrc kdeglobals darklyrc luminos-chromeosrc breezerc)
+ABSENT="__luminos_absent__"
+FAIL=0
+
+# file|group|key|value — insides: Darkly at radius 16, fully opaque, never touches ColorScheme.
+INSIDES=(
+  "kdeglobals|KDE|widgetStyle|Darkly"
+  "darklyrc|Common|CornerRadius|16"
+  "darklyrc|Style|MenuOpacity|100"
+  "darklyrc|Style|MenuBarOpacity|100"
+  "darklyrc|Style|ToolBarOpacity|100"
+  "darklyrc|Style|TabBarOpacity|100"
+  "darklyrc|Style|DolphinSidebarOpacity|100"
+  "darklyrc|Style|DolphinViewOpacity|100"
+  "darklyrc|Style|TransparentDolphinView|false"
+  "darklyrc|Style|AdjustToDarkThemes|false"
+  "kwinrc|Plugins|kwin4_effect_shapecornersEnabled|false"
+  "kwinrc|Plugins|kwin-effect-rounded-cornersEnabled|false"
+)
+FRAME=(
+  "kwinrc|org.kde.kdecoration2|library|org.kde.luminos.chromeos"
+  "kwinrc|org.kde.kdecoration2|theme|"
+  "kwinrc|org.kde.kdecoration2|BorderSize|None"
+  "kwinrc|org.kde.kdecoration2|BorderSizeAuto|false"
+)
+# Written only when the key is absent, so a hand-tuned value survives re-apply.
+CHROMEOS=(
+  "luminos-chromeosrc|Frame|CornerRadius|16"
+  "luminos-chromeosrc|Frame|HeaderHeight|40"
+  "luminos-chromeosrc|Frame|ShowTitle|false"
+)
+
+read_key() { kreadconfig6 --file "$1" --group "$2" --key "$3" --default "$ABSENT"; }
+
+# write_key file group key value — value $ABSENT means delete; read back before saying OK.
+write_key() {
+  local f=$1 g=$2 k=$3 v=$4 got
+  if [[ "$v" == "$ABSENT" ]]; then kwriteconfig6 --notify --file "$CFG/$f" --group "$g" --key "$k" --delete
+  else kwriteconfig6 --notify --file "$CFG/$f" --group "$g" --key "$k" "$v"; fi
+  got=$(read_key "$CFG/$f" "$g" "$k")
+  if [[ "$got" == "$v" ]]; then echo "OK   $f [$g] $k=${v/$ABSENT/<absent>}"
+  else echo "FAIL $f [$g] $k: wanted '${v/$ABSENT/<absent>}', read back '$got'"; FAIL=1; fi
+}
+
+set_key() { local f g k v; IFS='|' read -r f g k v <<<"$1"; write_key "$f" "$g" "$k" "$v"; }
+
+# Full-file escape-hatch copies, taken once.
+backup() {
+  mkdir -p "$BK" || { echo "FAIL cannot create $BK"; FAIL=1; return; }
+  local f
+  for f in "${FILES[@]}"; do
+    [[ -e "$BK/$f" || -e "$BK/$f.absent" ]] && continue
+    if [[ -e "$CFG/$f" ]]; then
+      cp -p "$CFG/$f" "$BK/$f" && cmp -s "$CFG/$f" "$BK/$f" || { echo "FAIL backup $f"; FAIL=1; }
+    else touch "$BK/$f.absent"; fi
+  done
+}
+
+# Record each managed key's pre-windowstyle value once. Source is the escape-hatch copy when
+# one exists (it predates any apply), otherwise the live file.
+record_prior() {
+  local e f g k v src prior
+  touch "$STATE" || { echo "FAIL cannot write $STATE"; FAIL=1; return; }
+  for e in "${INSIDES[@]}" "${FRAME[@]}" "${CHROMEOS[@]}"; do
+    IFS='|' read -r f g k v <<<"$e"
+    grep -qF -- "$f|$g|$k|" "$STATE" && continue
+    if [[ -e "$BK/$f.absent" ]]; then prior=$ABSENT
+    else src="$CFG/$f"; [[ -e "$BK/$f" ]] && src="$BK/$f"; prior=$(read_key "$src" "$g" "$k"); fi
+    printf '%s|%s|%s|%s\n' "$f" "$g" "$k" "$prior" >>"$STATE"
+  done
+  echo "OK   prior values recorded in $STATE ($(wc -l <"$STATE") keys)"
+}
+
+reload() {
+  if qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1; then echo "OK   KWin reconfigured"
+  else echo "FAIL KWin reconfigure (no session bus or KWin not running?)"; FAIL=1; fi
+  if dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange \
+      int32:2 int32:0 2>/dev/null; then echo "OK   style-change signal sent"
+  else echo "FAIL style-change signal not sent"; FAIL=1; fi
+}
+
+cmd_apply() {
+  local e f g k v frame_refused=0
+  backup; [[ $FAIL -eq 0 ]] && record_prior
+  [[ $FAIL -eq 0 ]] || { echo "Backup failed — refusing to write anything."; exit 1; }
+  [[ -e /usr/lib/qt6/plugins/styles/darkly6.so ]] \
+    || echo "WARN darkly6.so not installed — widgetStyle=Darkly will fall back to Fusion"
+  for e in "${INSIDES[@]}"; do set_key "$e"; done
+  for e in "${CHROMEOS[@]}"; do
+    IFS='|' read -r f g k v <<<"$e"
+    if [[ "$(read_key "$CFG/$f" "$g" "$k")" == "$ABSENT" ]]; then set_key "$e"
+    else echo "keep $f [$g] $k=$(read_key "$CFG/$f" "$g" "$k")"; fi
+  done
+  if [[ -e "$PLUGIN" ]]; then for e in "${FRAME[@]}"; do set_key "$e"; done
+  else echo "REFUSED decoration: $PLUGIN does not exist — frame NOT set, insides only."; frame_refused=1; fi
+  reload
+  [[ $FAIL -eq 0 && $frame_refused -eq 0 ]] && echo "applied: insides + frame (all values read back)"
+  [[ $FAIL -eq 0 && $frame_refused -eq 1 ]] && echo "applied: insides only"
+  [[ $FAIL -eq 0 && $frame_refused -eq 0 ]] || exit 1
+}
+
+cmd_revert() {
+  local f g k v
+  [[ -s "$STATE" ]] || { echo "FAIL no recorded prior values at $STATE — nothing to revert to"; exit 1; }
+  while IFS='|' read -r f g k v; do write_key "$f" "$g" "$k" "$v"; done <"$STATE"
+  reload
+  [[ $FAIL -eq 0 ]] && echo "reverted: every managed key back to its recorded prior value" || exit 1
+}
+
+cmd_status() {
+  local e f g k v
+  for e in "${INSIDES[@]}" "${CHROMEOS[@]}" "${FRAME[@]}"; do
+    IFS='|' read -r f g k v <<<"$e"
+    printf '%-20s [%s] %s=%s\n' "$f" "$g" "$k" "$(read_key "$CFG/$f" "$g" "$k" | sed "s/$ABSENT/<absent>/")"
+  done
+  printf '%-20s [%s] %s=%s\n' kdeglobals General ColorScheme "$(read_key "$CFG/kdeglobals" General ColorScheme | sed "s/$ABSENT/<absent> (colours live in [Colors:*])/")"
+  [[ -e "$PLUGIN" ]] && echo "plugin: present ($PLUGIN)" || echo "plugin: MISSING ($PLUGIN)"
+  [[ -s "$STATE" ]] && echo "prior values: $STATE ($(wc -l <"$STATE") keys)" || echo "prior values: none recorded yet"
+}
+
+case "${1:-}" in
+  apply)  cmd_apply ;;
+  revert) cmd_revert ;;
+  status) cmd_status ;;
+  *) echo "usage: luminos-windowstyle apply|revert|status"; exit 2 ;;
+esac

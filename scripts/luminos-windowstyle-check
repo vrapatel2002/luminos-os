@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-10-10] DECISION 135 — mechanical checker for the ChromeOS/Nexus window style.
+# Tests docs/windowstyle/CONTRACTS.md only. Read-only: never writes kwinrc/kdeglobals/darklyrc, installs nothing.
+# Usage: luminos-windowstyle-check [--no-screenshot]   -> one "PASS|FAIL <name>: <detail>" per check; exit 0 iff all pass.
+set -u
+export XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus WAYLAND_DISPLAY=wayland-0
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)/tests/windowstyle"
+PY=/usr/bin/python3            # not the pyenv shim
+PLUGIN=/usr/lib/qt6/plugins/org.kde.kdecoration3/org.kde.luminos.chromeos.so; FAILS=0
+res() { # res <ok 0|1> <name> <detail>
+    if [ "$1" -eq 0 ]; then echo "PASS $2: $3"; else echo "FAIL $2: $3"; FAILS=$((FAILS + 1)); fi
+}
+kr() { kreadconfig6 --file "$1" --group "$2" --key "$3" 2>/dev/null; }
+
+check_plugin_file() {
+    if [ ! -f "$PLUGIN" ]; then res 1 plugin-file "$PLUGIN missing"; return; fi
+    local own; own=$(pacman -Qo "$PLUGIN" 2>&1)
+    res $? plugin-file "$own"
+}
+
+check_kwinrc() {
+    local lib bs; lib=$(kr kwinrc org.kde.kdecoration2 library); bs=$(kr kwinrc org.kde.kdecoration2 BorderSize)
+    [ "$lib" = org.kde.luminos.chromeos ] && [ "$bs" = None ]
+    res $? kwinrc "library='${lib:-<unset=breeze>}' BorderSize='${bs:-<unset>}' (want org.kde.luminos.chromeos / None)"
+}
+
+check_kwin_loaded() {
+    local info plug
+    info=$(timeout 10 qdbus6 org.kde.KWin /KWin supportInformation 2>&1) || { res 1 kwin-loaded "supportInformation failed: ${info:0:80}"; return; }
+    # Format (KWin 6.7): a "Decoration" heading, a "====" underline, then "Plugin: <id>".
+    plug=$(printf '%s\n' "$info" | awk '/^Decoration$/{d=1;next} d&&/^Plugin:/{print $2;exit}')
+    [ "$plug" = org.kde.luminos.chromeos ]
+    res $? kwin-loaded "KWin reports decoration plugin '${plug:-<none>}'"
+}
+
+check_effect_off() {
+    local en loaded; en=$(kr kwinrc Plugins kwin4_effect_shapecornersEnabled)
+    loaded=$(timeout 10 qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadedEffects 2>&1) || { res 1 effect-off "loadedEffects failed"; return; }
+    if [ "$en" = true ]; then res 1 effect-off "kwinrc kwin4_effect_shapecornersEnabled=true"
+    elif printf '%s\n' "$loaded" | grep -qi shapecorners; then res 1 effect-off "shapecorners is in KWin's loadedEffects"
+    else res 0 effect-off "shapecorners enabled='${en:-<unset>}', not loaded"; fi
+}
+
+check_widget_style() {
+    local ws cs rad
+    ws=$(kr kdeglobals KDE widgetStyle); cs=$(kr kdeglobals General ColorScheme)
+    # Plasma keeps the look-and-feel ColorScheme in ~/.config/kdedefaults (on XDG_CONFIG_DIRS); user file wins.
+    [ -n "$cs" ] || cs=$(kr "$HOME/.config/kdedefaults/kdeglobals" General ColorScheme)
+    rad=$(grep -E '^CornerRadius=' "$HOME/.config/darklyrc" 2>/dev/null | tail -1 | cut -d= -f2)
+    [ "$ws" = Darkly ] && [ "$rad" = 16 ] && [ "$cs" = Caelestia ]
+    res $? widget-style "widgetStyle='${ws:-<unset>}' darklyrc CornerRadius='${rad:-<unset>}' ColorScheme='${cs:-<unset>}' (want Darkly / 16 / Caelestia)"
+}
+
+check_kirigami() {
+    local ver rad line envs=()
+    ver=$(pacman -Q kirigami 2>&1)
+    while IFS= read -r line; do envs+=("$line"); done < <(grep -E '^KIRIGAMI_[A-Z_]+=' /etc/environment)
+    rad=$(cd /tmp && env "${envs[@]}" QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
+        QT_QUICK_CONTROLS_STYLE=org.kde.desktop timeout 15 qml6 "$HERE/kirigami-radius.qml" 2>&1 |
+        grep -o 'cornerRadius=[0-9.]*' | cut -d= -f2)
+    [[ "$ver" == *-1.1 ]] && [ "$rad" = 16 ]
+    res $? kirigami "'$ver' (want -1.1), Kirigami.Units.cornerRadius='${rad:-<no output>}' (want 16)"
+}
+
+check_revert_script() {
+    local s=/usr/local/bin/luminos-windowstyle out rc
+    if [ ! -x "$s" ]; then res 1 revert-script-present "$s missing or not executable"; return; fi
+    out=$(timeout 20 "$s" status 2>&1); rc=$?
+    res $rc revert-script-present "'$s status' exit $rc: $(printf '%s' "$out" | head -1 | cut -c1-80)"
+}
+
+check_screenshot() {
+    # Test window: tests/windowstyle/probe-window.qml (kwrite is not installed on the G14). Launched as a
+    # transient user unit so it gets the Plasma session environment (platform theme -> Caelestia palette)
+    # and so we stop exactly our own process — never pkill.
+    local unit="luminos-ws-check-$$" dir pid scale shot out i
+    dir=$(mktemp -d /tmp/luminos-ws-check.XXXXXX); shot="$dir/shot.png"
+    scale=$(kscreen-doctor -j 2>/dev/null | "$PY" -I -B -c 'import json,sys
+o=[o for o in json.load(sys.stdin)["outputs"] if o["enabled"]];print(o[0]["scale"] if o else "")' 2>/dev/null)
+    if [ -z "$scale" ]; then res 1 screenshot "cannot read output scale from kscreen-doctor"; rm -rf "$dir"; return; fi
+    if ! systemd-run --user --collect --quiet --unit="$unit" qml6 "$HERE/probe-window.qml" 2>"$dir/err"; then
+        res 1 screenshot "could not launch probe window: $(head -c 120 "$dir/err")"; rm -rf "$dir"; return
+    fi
+    for i in $(seq 16); do   # poll <= 8 s for the process, then give it time to map and take focus
+        pid=$(systemctl --user show -p MainPID --value "$unit" 2>/dev/null); [ "${pid:-0}" -gt 0 ] && break; sleep 0.5
+    done
+    for i in 1 2; do
+        sleep 2; rm -f "$shot"
+        timeout 15 spectacle -b -n -a -o "$shot" >/dev/null 2>&1; sleep 0.5
+        [ -s "$shot" ] || { out="FAIL shot-window: spectacle wrote no file"; continue; }
+        out=$("$PY" -I -B "$HERE/probe.py" "$shot" "$scale" 2>&1)
+        printf '%s\n' "$out" | grep -q '^PASS shot-window' && break
+    done
+    [ "${pid:-0}" -gt 0 ] && kill "$pid" 2>/dev/null
+    systemctl --user stop "$unit" 2>/dev/null
+    rm -rf "$dir"
+    [ -n "$out" ] || out="FAIL shot-window: probe produced no output"
+    while IFS= read -r line; do
+        case "$line" in
+            "PASS "*) echo "$line" ;;
+            "FAIL "*) echo "$line"; FAILS=$((FAILS + 1)) ;;
+            *) echo "FAIL screenshot: probe error: ${line:0:120}"; FAILS=$((FAILS + 1)) ;;
+        esac
+    done <<<"$out"
+}
+
+SHOT=1
+for a in "$@"; do
+    case "$a" in --no-screenshot) SHOT=0 ;; *) echo "usage: $0 [--no-screenshot]" >&2; exit 2 ;; esac
+done
+check_plugin_file; check_kwinrc; check_kwin_loaded; check_effect_off
+check_widget_style; check_kirigami; check_revert_script
+[ "$SHOT" -eq 1 ] && check_screenshot
+exit $((FAILS > 0))
