@@ -8231,3 +8231,11 @@ now automatic and in the first ten lines of every `vela-report`.
 
 **Ask the component that said no. Then check that the thing you fixed is the thing
 that was broken.**
+
+## DECISION 133 — Claude Desktop updates are manual on Arch: check the AUR monthly
+<!-- [CHANGE: claude-code | 2026-10-10] -->
+The Linux app never self-updates, and running a major version behind silently broke @ mentions and
+project migration (BUG-191). Once a month: `yay -Si claude-desktop` vs `pacman -Q claude-desktop`;
+if behind, review the PKGBUILD (official `.deb` + pinned SHA256 only), back up
+`/usr/lib/claude-desktop`, `yay -S claude-desktop` (never `-Syu` as a side effect), restart only via
+`scripts/luminos-claude-restart` (BUG-187).

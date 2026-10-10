@@ -7980,3 +7980,36 @@ anything, so a burst cancelled by Performance left its profile at 100 % too.
 **Immediate relief:** `sudo systemctl restart luminos-power` (startup re-applies v5 to balanced + quiet).
 **Revert:** `sudo install -m 755 ~/.luminos-backups/luminos-power.bak-bug190-20260926 /usr/local/bin/luminos-power && sudo systemctl restart luminos-power`
 **Check:** read `pwm{1,2,3}_auto_point*_pwm` on the `asus_custom_fan_curve` hwmon — at 40 °C cpu/gpu must be 13, not 255.
+
+## BUG-191 — @ file mentions + project migration broken: Claude Desktop 1.52386.6 was a major version behind
+<!-- [CHANGE: claude-code | 2026-10-10] -->
+
+**Status:** FIXED (pending Shawn's in-app check) · **Severity:** @ picker and "move project" dead in the app ·
+**Related:** BUG-187
+
+**Symptom:** typing @ in the `luminos-os` project listed no repo files, even with the folder in the
+project's Context; the app showed "Update Claude to move this project" and "Haiku 5.5 works best
+with the latest desktop app".
+**Cause:** installed `aur/claude-desktop 1.52386.6-2` (built 2026-09-15) while the official apt repo
+and AUR were at **2.31226.1** — a major version behind. **The Linux app never self-updates**
+(code.claude.com/docs/en/desktop-linux), so it silently aged.
+**Fix:** `yay -S claude-desktop` → `2.31226.1-1` (2026-10-10 10:55; no new deps pulled). PKGBUILD
+reviewed: only the official `.deb` from `downloads.claude.ai` (SHA256-pinned) plus its own launcher
+script; `package()` only extracts, installs, chmods and symlinks. Restarted via
+`scripts/luminos-claude-restart` (BUG-187). Verified: `pacman -Q` and `app.asar` `package.json` both
+read 2.31226.1; `[remote-tools-device] authenticated` 10:57:37 on the new process; no Crashpad dumps;
+`ant-device-registry.json` sha256 unchanged (`079c414f…`) → **same device key, so no
+BUG-187-style foreign-device split.**
+**Gotchas from the upgrade:**
+- The old instance ran its quit cleanup (incl. `cowork-vm-shutdown`) but its main process then hung
+  past the script's 10 s wait — its binary had been replaced underneath it. Re-running the script
+  stopped it.
+- `luminos-claude-restart` `exec`s `systemd-run --scope` and stays in the foreground for the app's
+  whole life. **Never wrap it in `timeout`** — that kills the freshly started app. Run it detached.
+- `app.asar` contains several `"version"` strings (the first is the bundled Claude Code, 2.1.270);
+  read `package.json` from the asar header, not with `grep`.
+**Rollback:** `~/.luminos-backups/claude-desktop-1.52386.6-20261010/` holds `/usr/lib/claude-desktop`,
+`/usr/bin/claude-desktop` and the small `~/.config/Claude` state files. The copy was made as shawn, so
+`chrome-sandbox` lost root/setuid: restore with `sudo cp -a`, `sudo chown -R root:root`,
+`sudo chmod 4755 /usr/lib/claude-desktop/chrome-sandbox`. After a file-level restore **pacman will
+still say 2.31226.1** while 1.52386.6 is on disk — record that here if it is ever done.

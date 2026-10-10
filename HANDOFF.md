@@ -1,48 +1,31 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-10 10:55 — Response 5
+Last updated: 2026-10-10 11:00 — Response 1 (new Claude Code chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-09, Response 1) — "@ can't mention project files" — FIXED for this chat
-Shawn: typing @ no longer lists repo files (@AGENTS.md, @HANDOFF.md) like it used to.
-Measured: `get_device_info` → `connectedFolders: []`. The @ picker only lists files in folders
-connected to the conversation. Two causes stacked: (1) **BUG-187's re-login (09-24) minted a new
-device row and folder grants are per row** — they did not carry over; (2) **Cowork merged into
-Claude** (support.claude.com/en/articles/16761823): a claude.ai Project ("Luminous") only knows local
-files if a local folder is in its context or granted to the chat. Fix: granted `~/luminos-os` to this
-chat (`device_request_folder_access`, Shawn approved). **For new chats:** add `~/luminos-os` to the
-Luminous project's context once ("Add a local folder"), or grant it per chat. Not yet confirmed by
-Shawn that the @ list now shows files.
-**Response 2 — root cause found: two different projects.** Desktop app's local projects ("spaces")
-live in `~/.config/Claude/local-agent-mode-sessions/<acct>/<org>/spaces.json`. Space **`luminos-os`**
-= folder `/home/shawn/luminos-os` (created via "pick a folder") — **never migrated** to the account.
-The chat Shawn opened is in **`Luminous`**, a claude.ai account project (4 Vela docs, `sync_sources: []`,
-no folder). Space `Games` *was* migrated (`migration.stage: complete`). So @ had nothing to list.
-Fix options: work in the `luminos-os` project, or add `~/luminos-os` as a local folder in Luminous.
-**Response 3 — consolidating onto `luminos-os` (Shawn's choice).** Copied Luminous's 4 docs + its
-project memory to `gameos/docs/claude-project/` (gameos `231c243`); preferences pointer added to
-`CLAUDE.md`. **Left for Shawn in the app:** move Luminous chats into `luminos-os` (chat dropdown →
-move), then **Archive** Luminous (reversible) — delete only later. Luminous's project memory lives in
-the account and may go with the project; the copy above is the backup.
-**Response 4 (10-10) — @ still dead even in `luminos-os` (folder IS in its Context) → the app is too old.**
-Installed `claude-desktop 1.52386.6-2` (aur, built 09-15). Official apt repo latest **2.31226.1**;
-AUR `claude-desktop` **2.31226.1-1** (updated 10-09). App banners say "Update Claude to move this
-project" and "Haiku 5.5 works best with the latest desktop app". The Linux app never self-updates
-(code.claude.com/docs/en/desktop-linux). Aug 7 chats in this project used `@/home/shawn/...` fine.
-**Not upgraded — waiting for Shawn's go**: `yay -S claude-desktop`, then restart ONLY via
-`scripts/luminos-claude-restart` (BUG-187). Risks: a 1→2 major jump; restart drops the cloud bridge
-(this chat) until reconnect; BUG-187 showed a re-login can mint a new device row (old chats go
-foreign, folder grants reset). Rollback: **no cached 1.52386.6 pkg exists** (not in /var/cache/pacman/pkg) — back up `/usr/lib/claude-desktop` (or `bacman claude-desktop`) BEFORE upgrading.
-**Response 5:** Shawn will run the upgrade himself from a Claude Code terminal; a self-contained prompt for it was written in chat.
-Earlier the same chat (Vela/tooling, not Luminos — nothing on Luminos changed):
-- `vela-crashd` crash/freeze reporter built and installed in `/vela.img` → `gameos/docs/tracks/CRASH.md`
-  (Control froze 10-09 12:30:51, cause unknown, BOARD #18).
-- `/build` skill (`~/.claude/skills/build/SKILL.md`, backup `.prev-20261009`): Opus 5.5 high for code
-  and tests, Fable 5.1 for review/escalation, Sonnet only for mechanical edits. Sonnet workers looped at
-  the 32k output cap on refactors; Opus did the same jobs in 3–5 min.
-- Local build dashboard: `~/builds/build-monitor` (`python3 monitor.py` → 127.0.0.1:8765).
+## Aim right now (2026-10-10, Claude Code terminal chat, Response 1) — Claude Desktop upgraded to 2.31226.1
+**Why:** @ file mentions + "move project" were dead because the app was `1.52386.6-2`, a major version
+behind; the Linux app never self-updates (BUG-191, DECISION 133). Earlier diagnosis (10-09/10): @ only
+lists files in folders connected to the chat; BUG-187's re-login had reset folder grants; space
+`luminos-os` (folder project) vs account project `Luminous` (consolidated onto `luminos-os`, Luminous
+docs copied to `gameos/docs/claude-project/`; Shawn still to move chats + archive Luminous).
+**DONE 10:55–10:58:** PKGBUILD reviewed (only the official `.deb` from downloads.claude.ai, SHA256
+pinned, + its own launcher script; no new deps). Rollback copy
+`~/.luminos-backups/claude-desktop-1.52386.6-20261010/` (app files + config.json,
+claude_desktop_config.json, ant-device-registry.json, bridge-state.json, Preferences, spaces.json).
+`yay -S claude-desktop` → `2.31226.1-1`. Restarted via `scripts/luminos-claude-restart`; new PID
+started 10:57:31, `[remote-tools-device] authenticated` 10:57:37, no Crashpad dumps,
+`ant-device-registry.json` sha256 unchanged (`079c414f…`).
+**WAITING ON SHAWN (in the app):** (1) "Update Claude to move this project" banner gone? (2) @ in the
+`luminos-os` project lists repo files? (3) asked to sign in again? If (3) yes → compare
+`ant-device-registry.json` with the backup; a different key means old chats go `cls=foreign_device`
+and folder grants reset (BUG-187) — report, don't fix.
+**Rollback (only if it won't start / sign-in breaks):** `sudo cp -a` the two backed-up paths back,
+`sudo chown -R root:root /usr/lib/claude-desktop`, `sudo chmod 4755 …/chrome-sandbox` (backup was
+made as shawn, setuid lost), restart via the script, note in BUGS.md that pacman then says 2.31226.1.
+**Not pushed** — `main` is ahead of origin on purpose; pushing is Shawn's call.
 
 ## Aim (Response 1, chat of 09-26) — fans maxed at idle, BUG-190, FIXED
 Shawn: fans spinning hard, not hot. Measured 21:52: Tctl 37 °C, cpu/gpu/mid 6900/6800/7500 RPM,
@@ -275,11 +258,12 @@ Full rule: `gameos/docs/gamemode/RULE-HANDS-OFF-LUMINOS.md`.
 for any transcode question is Jellyfin's own ffmpeg command lines in `/var/log/jellyfin/`.
 
 ## Files touched / relevant files
+**2026-10-10:** package `claude-desktop` 1.52386.6-2 → 2.31226.1-1 (no /etc, no service); `LUMINOS_STATUS.md`, `docs/BUGS.md` (BUG-191), `LUMINOS_DECISIONS.md` (DECISION 133), `HANDOFF.md`, `.notes.db`, MemPalace drawer.
 **2026-10-09:** `HANDOFF.md`, `.notes.db` (notes + brain log), MemPalace luminos-os/decisions drawer. No `/etc`, package or service change on Luminos.
 **Repo, this turn:** `docs/BUGS.md` (BUG-188), `server/DECISIONS.md` (DECISION 132),
 `server/STATUS.md`, `HANDOFF.md`, `.notes.db`.
 **luminos-server (not the G14):** `/usr/local/bin/luminos-subtitle-warm`,
 `/etc/systemd/system/luminos-subtitle-warm.{service,timer}` (enabled),
 `/usr/local/bin/ozark-warm-once` (one-off). Jellyfin cache `/var/lib/jellyfin/data/subtitles` grows.
-**G14:** nothing changed — no `/etc`, no package, no service. AGENTS.md §9 untouched.
+**G14 (BUG-188 turn):** nothing changed — no `/etc`, no package, no service. AGENTS.md §9 untouched.
 Previous handoff (Claude Desktop, BUG-187): `git show HEAD:HANDOFF.md`.
