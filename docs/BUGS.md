@@ -8013,3 +8013,21 @@ BUG-187-style foreign-device split.**
 `chrome-sandbox` lost root/setuid: restore with `sudo cp -a`, `sudo chown -R root:root`,
 `sudo chmod 4755 /usr/lib/claude-desktop/chrome-sandbox`. After a file-level restore **pacman will
 still say 2.31226.1** while 1.52386.6 is on disk — record that here if it is ever done.
+
+## BUG-192 — host-shell MCP "Failed / Server disconnected" after one timed-out command
+<!-- [CHANGE: claude | 2026-10-10] -->
+**Status:** FIXED 2026-10-10 (needs the app to respawn the server to load it).
+**Symptom:** Claude Desktop → Settings → Local MCP servers: `host-shell` **Failed**, "Server disconnected".
+Every Cowork / cloud chat lost its shell on the G14.
+**Cause:** `~/.local/share/claude-host-shell/server.py` (not in git) ran commands with
+`subprocess.run(..., text=True, timeout=...)`. On `TimeoutExpired`, Python returns the partial output as
+**bytes** even with `text=True`; `"--- stdout ---\n" + out` raised `TypeError: can only concatenate str (not
+"bytes") to str`, and because `tools/call` had no try/except, the exception killed the stdio loop — the whole
+server. Log: `~/.config/Claude/logs/mcp-server-host-shell.log` 2026-10-10T15:39:09Z call id=31 → traceback → 15:40:07 "Server disconnected".
+**Fix:** decode with `_text()`; run under `start_new_session=True` and `os.killpg` the group on timeout (a
+backgrounded grandchild holding the pipe could otherwise keep `communicate()` hanging past the timeout);
+per-request try/except so one bad call returns an error instead of exiting. Backup:
+`~/.luminos-backups/claude-host-shell-server.py.bak-20261010`.
+**Verified:** stdio test of the real server: normal call, invalid UTF-8, `echo partial; sleep 30 & sleep 30` with
+timeout 2 → returns partial output + "timed out after 2s" in 2 s, and the next call still answers.
+**Lesson:** `TimeoutExpired.stdout` is bytes regardless of `text=True` — a long-standing CPython quirk.

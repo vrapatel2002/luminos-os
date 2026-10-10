@@ -1,11 +1,27 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-10 11:00 — Response 1 (new Claude Code chat)
+Last updated: 2026-10-10 11:20 — Response 1 (new chat, 11:11; previous chat's notes below kept)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-10, Claude Code terminal chat, Response 1) — Claude Desktop upgraded to 2.31226.1
+## Aim right now (2026-10-10 11:11 chat, Response 1) — verify the Claude Desktop upgrade held
+Shawn's prompt was only "read and follow AGENTS.md + HANDOFF.md" — no new task, so the open
+items were checked read-only.
+**Verified 11:15 on the G14:** `pacman -Q claude-desktop` = `2.31226.1-1`; main PID 27438 running;
+`~/.config/Claude/Crashpad/completed` = 0 dumps; `ant-device-registry.json` sha256 = `079c414f…`
+= same as before the upgrade → **no re-login, no foreign_device reset**. This chat's own device
+bridge (folder mount + host-shell) worked on the new build — the bridge is fine.
+**Still only Shawn can confirm (in the app):** "Update Claude to move this project" banner gone,
+and @ in the `luminos-os` project lists repo files.
+**Media server, verified 11:16:** `ozark-warm-once` and `dv-fix-ozark-s02e03` both inactive
+(finished). `luminos-subtitle-warm.timer` fires daily ~04:29; last run: **592 ok, 0 failed, 730
+files in cache** → BUG-188 warm-up is DONE. **Leftover:** `/usr/local/bin/ozark-warm-once` (has
+the Jellyfin token in it) is still on the server — `sudo rm` was **blocked by the session's
+permission check**; needs Shawn's OK or Shawn to run it.
+**Permission note:** mid-turn the host-shell refused the server `rm` and one read-only `find` ("Remote Shell Writes"); notes + brain log DID go through afterwards.
+
+## Previous aim (10:55, earlier chat) — Claude Desktop upgraded to 2.31226.1
 **Why:** @ file mentions + "move project" were dead because the app was `1.52386.6-2`, a major version
 behind; the Linux app never self-updates (BUG-191, DECISION 133). Earlier diagnosis (10-09/10): @ only
 lists files in folders connected to the chat; BUG-187's re-login had reset folder grants; space
@@ -89,7 +105,7 @@ route to the server* and **never installed** (unit not found on the box).
 - **No media file modified, nothing re-downloaded** (Shawn's constraint).
 
 ## State — IN PROGRESS
-- `ozark-warm-once` running. Check: `ssh … 'sudo journalctl -u ozark-warm-once -o cat'` — one
+- (2026-10-10) DONE — see top. Old note: `ozark-warm-once` running. Check: `ssh … 'sudo journalctl -u ozark-warm-once -o cat'` — one
   `http=200 Ns` line per episode. Then `journalctl -u luminos-subtitle-warm` for the full sweep.
 
 ## Next steps (ordered)
@@ -98,7 +114,7 @@ route to the server* and **never installed** (unit not found on the box).
 2. Shawn confirms on the Roku with S01E09 → E10 back-to-back.
 3. **Shawn's call:** Option B (English `.en.srt` sidecars next to each MKV, survives cache wipes)
    and/or a Sonarr/Radarr **On-Import** hook so same-day imports are warm immediately.
-4. After the one-off finishes: `sudo rm /usr/local/bin/ozark-warm-once` (transient unit disappears
+4. ⚠️ STILL OPEN (blocked by permission 10-10): `sudo rm /usr/local/bin/ozark-warm-once` (transient unit disappears
    on its own).
 5. Still pending from 2026-09-24: `main` is ahead of origin, unpushed on purpose — Shawn's call.
 6. Parked wallpaper work — see below.
@@ -258,6 +274,7 @@ Full rule: `gameos/docs/gamemode/RULE-HANDS-OFF-LUMINOS.md`.
 for any transcode question is Jellyfin's own ffmpeg command lines in `/var/log/jellyfin/`.
 
 ## Files touched / relevant files
+**2026-10-10 11:11 chat:** `HANDOFF.md` only (read-only checks).
 **2026-10-10:** package `claude-desktop` 1.52386.6-2 → 2.31226.1-1 (no /etc, no service); `LUMINOS_STATUS.md`, `docs/BUGS.md` (BUG-191), `LUMINOS_DECISIONS.md` (DECISION 133), `HANDOFF.md`, `.notes.db`, MemPalace drawer.
 **2026-10-09:** `HANDOFF.md`, `.notes.db` (notes + brain log), MemPalace luminos-os/decisions drawer. No `/etc`, package or service change on Luminos.
 **Repo, this turn:** `docs/BUGS.md` (BUG-188), `server/DECISIONS.md` (DECISION 132),
