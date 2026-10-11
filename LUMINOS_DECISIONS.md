@@ -8313,3 +8313,32 @@ Reviewer (Fable): 9 findings, all fixed.
 **Undo:** font `sudo pacman -Rns ttf-google-sans-flex`; switch `sudo pacman -U /var/cache/pacman/pkg/qqc2-desktop-style-6.30.0-1-x86_64.pkg.tar.zst`;
 icons `luminos-windowstyle revert` (+ `ICONS=` in persist, `pacman -Rns yamis-icon-theme-git`); colours
 `git checkout <pre-139> -- scripts/luminos-kde-caelestia-theme && scripts/luminos-kde-caelestia-theme --apply`.
+
+
+## DECISION 140 — replace "Ambient light for YouTube" with our own 295-line Luminos Ambient
+<!-- [CHANGE: claude-code | 2026-10-11] -->
+**Why:** on 2026-10-11 the G14 sat at 52–61 °C for an hour while YouTube played. In Shawn's Chrome the tab
+renderer used 45 % of a core and the GPU process 39 % while playing (PPT 7–14 W vs 6 W idle). The third-party
+extension "Ambient light for YouTube™" 2.38.17 (paponcgjfojgemddooebbgniglhkajkj) re-uploads the full
+1080p frame into WebGL and rebuilds mipmaps on every video frame, renders N glow layers (≈7 with Shawn's
+spread 76.2 / edge 17), then re-blurs through a Canvas2D filter. Full audit with line numbers:
+`docs/ambient/AUDIT.md`.
+**What:** `scripts/chrome-luminos-ambient/` (MV3, permission `storage` only). It samples the video into a
+16-px canvas 6×/s, blends and blurs on a ≤64-px canvas, and lets the compositor stretch it (own layer via
+`will-change`). It does no WebGL, no readback and no rAF loop, and stops completely when paused, hidden,
+fullscreen, off-screen, in the mini-player, or when the extension is disabled.
+**Measured** (`tests/ambient/bench.mjs`, throwaway Chromium 153 profile, maximized, muted, same video,
+runs that saw an ad redone; % of one core summed over all Chromium processes):
+- plain YouTube: 36.3 / 40.1 (two sessions)
+- Ambient light with Shawn's stored settings: 54.6 → **+18.3**
+- ours at 12/s: 41.0 → +4.7
+- ours at 6/s (the default): 38.1 → **no measurable cost** (inside plain YouTube's ±5 noise)
+
+Thresholds T1–T4 were written into SPEC.md before any run and all pass at 6/s. 80 tests pass.
+**Trade-off, stated honestly:** ours is softer and greyer than Ambient light at spread 76. It reaches at most
+60 % spread and does not fill the page behind the sidebar. The popup sliders (spread, intensity) are the knobs.
+**Install = Shawn's click** (Chrome 137+ ignores `--load-extension`): `chrome://extensions` → Developer
+mode → Load unpacked → `~/luminos-os/scripts/chrome-luminos-ambient`, then switch Ambient light **off**
+(both would draw).
+**Undo:** remove the extension at chrome://extensions and re-enable Ambient light. Nothing in /etc,
+no package, no service.

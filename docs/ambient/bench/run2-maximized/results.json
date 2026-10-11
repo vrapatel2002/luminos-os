@@ -1,0 +1,270 @@
+[
+ {
+  "cfg": "baseline",
+  "round": 1,
+  "before": {
+   "playing": true,
+   "t": 8.3,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": false
+  },
+  "after": {
+   "playing": true,
+   "t": 38.7,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": false
+  },
+  "cpu": {
+   "browser": 5.2,
+   "utility": 2.4,
+   "gpu-process": 10.6,
+   "renderer": 15
+  },
+  "total": 33.4,
+  "pptAvg": 8.44
+ },
+ {
+  "cfg": "ambientlight",
+  "round": 1,
+  "before": {
+   "playing": true,
+   "t": 8.7,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": true
+  },
+  "after": {
+   "playing": true,
+   "t": 39,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": true
+  },
+  "cpu": {
+   "browser": 3,
+   "utility": 1.7,
+   "gpu-process": 18.3,
+   "renderer": 28.8
+  },
+  "total": 51.6,
+  "pptAvg": 8.98
+ },
+ {
+  "cfg": "luminos",
+  "round": 1,
+  "before": {
+   "playing": true,
+   "t": 6.8,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    896,
+    504
+   ],
+   "glow": {
+    "display": "block",
+    "ticks": 481,
+    "w": 1433,
+    "h": 806,
+    "cw": 64,
+    "ch": 36
+   },
+   "htmlOn": true,
+   "ambientlight": false
+  },
+  "after": {
+   "playing": true,
+   "t": 37.2,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    896,
+    504
+   ],
+   "glow": {
+    "display": "block",
+    "ticks": 827,
+    "w": 1433,
+    "h": 806,
+    "cw": 64,
+    "ch": 36
+   },
+   "htmlOn": true,
+   "ambientlight": false
+  },
+  "cpu": {
+   "browser": 5.2,
+   "utility": 2.4,
+   "gpu-process": 11.8,
+   "renderer": 22.2
+  },
+  "total": 41.9,
+  "pptAvg": 10.67,
+  "pause": {
+   "ticksA": 840,
+   "ticksB": 840,
+   "display": "none",
+   "htmlOn": false
+  }
+ },
+ {
+  "cfg": "luminos",
+  "round": 2,
+  "before": {
+   "playing": true,
+   "t": 6.9,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": {
+    "display": "block",
+    "ticks": 239,
+    "w": 1531,
+    "h": 860,
+    "cw": 64,
+    "ch": 36
+   },
+   "htmlOn": true,
+   "ambientlight": false
+  },
+  "after": {
+   "playing": true,
+   "t": 37.3,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": {
+    "display": "block",
+    "ticks": 586,
+    "w": 1531,
+    "h": 860,
+    "cw": 64,
+    "ch": 36
+   },
+   "htmlOn": true,
+   "ambientlight": false
+  },
+  "cpu": {
+   "browser": 2.6,
+   "utility": 1.6,
+   "gpu-process": 11.5,
+   "renderer": 24.3
+  },
+  "total": 40,
+  "pptAvg": 10.38,
+  "pause": {
+   "ticksA": 599,
+   "ticksB": 599,
+   "display": "none",
+   "htmlOn": false
+  }
+ },
+ {
+  "cfg": "ambientlight",
+  "round": 2,
+  "before": {
+   "playing": true,
+   "t": 7.4,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": true
+  },
+  "after": {
+   "playing": true,
+   "t": 37.7,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": true
+  },
+  "cpu": {
+   "browser": 6.2,
+   "utility": 2.5,
+   "gpu-process": 22.2,
+   "renderer": 26.5
+  },
+  "total": 57.5,
+  "pptAvg": 9.71
+ },
+ {
+  "cfg": "baseline",
+  "round": 2,
+  "before": {
+   "playing": true,
+   "t": 8.5,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": false
+  },
+  "after": {
+   "playing": true,
+   "t": 38.9,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": false
+  },
+  "cpu": {
+   "browser": 2.5,
+   "utility": 1.6,
+   "gpu-process": 10.5,
+   "renderer": 24.6
+  },
+  "total": 39.1,
+  "pptAvg": 9.34
+ }
+]

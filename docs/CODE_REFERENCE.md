@@ -696,3 +696,15 @@ END OF CODE_REFERENCE.md
 - `tests/wallpaper/test_pkg.py` — 20 tests, hypothesis property-based.
 - `tests/wallpaper/budget_check.py` — line/function/nesting budgets. Collapses `elif` chains, which
   Python's AST nests and a reader does not.
+
+
+### Luminos Ambient (scripts/chrome-luminos-ambient/) — MV3 extension, DECISION 140
+# [CHANGE: claude-code | 2026-10-11]
+| File | What |
+|---|---|
+| `manifest.json` | MV3, youtube.com only (not live_chat/embed), permission `storage` only |
+| `core.js` | pure functions: clampSettings, sampleSize, glowRect, frameDelay, blendAlpha, shouldRun, rectChanged |
+| `content.js` | finds `#movie_player video` via capture-phase `play`; one setTimeout chain only while shouldRun; 16-px sample → ≤64-px blend/blur/mask → `canvas#luminos-ambient-glow` (z-index −1, stretched by CSS); `html.luminos-ambient-on` makes YouTube wrappers transparent |
+| `popup.html/js` | enable + spread / fps / intensity sliders → `chrome.storage.local.luminosAmbient` |
+Tests: `tests/ambient/*.test.js` (core properties, static API bans, budgets, fake-DOM behaviour). Benchmark: `tests/ambient/bench.mjs` (env CONFIGS, ROUNDS, WARM, WINDOW, OURS_FPS; run via `systemd-run --user`, it takes minutes).
+Docs: `docs/ambient/{SPEC,CONTRACTS,AUDIT,BUILD_LOG}.md`, results `docs/ambient/bench/run*/`.

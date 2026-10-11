@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<!-- [CHANGE: claude-code | 2026-10-11] -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Luminos Ambient</title>
+<style>
+  body { width: 230px; margin: 0; padding: 12px 14px; font: 13px/1.4 system-ui, sans-serif;
+         color: #e5e7eb; background: #111827; }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  label { display: block; margin: 8px 0; }
+  .row { display: flex; justify-content: space-between; color: #9ca3af; }
+  .row output { color: #e5e7eb; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #a78bfa; }
+  input[type=checkbox] { accent-color: #a78bfa; vertical-align: middle; }
+</style>
+</head>
+<body>
+  <h1>Luminos Ambient</h1>
+  <label><input type="checkbox" id="enabled"> Glow on</label>
+  <label><span class="row">Spread (%) <output id="spread-out"></output></span>
+    <input type="range" id="spread" min="0" max="60" step="1"></label>
+  <label><span class="row">Updates / s <output id="fps-out"></output></span>
+    <input type="range" id="fps" min="1" max="30" step="1"></label>
+  <label><span class="row">Intensity (%) <output id="intensity-out"></output></span>
+    <input type="range" id="intensity" min="0" max="100" step="1"></label>
+  <script src="core.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

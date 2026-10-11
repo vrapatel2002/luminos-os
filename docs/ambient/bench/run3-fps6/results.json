@@ -1,0 +1,297 @@
+[
+ {
+  "cfg": "baseline",
+  "round": 1,
+  "before": {
+   "playing": true,
+   "t": 7.4,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": false
+  },
+  "after": {
+   "playing": true,
+   "t": 37.7,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": false
+  },
+  "cpu": {
+   "browser": 2.9,
+   "utility": 1.6,
+   "gpu-process": 10.4,
+   "renderer": 26,
+   "renderer(ext)": 0.2
+  },
+  "total": 41.2,
+  "pptAvg": 10.01
+ },
+ {
+  "cfg": "luminos",
+  "round": 1,
+  "oursFps": 6,
+  "fpsSet": "set",
+  "before": {
+   "playing": true,
+   "t": 7.1,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": {
+    "display": "block",
+    "ticks": 246,
+    "w": 1531,
+    "h": 860,
+    "cw": 64,
+    "ch": 36
+   },
+   "htmlOn": true,
+   "ambientlight": false
+  },
+  "after": {
+   "playing": true,
+   "t": 37.4,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": {
+    "display": "block",
+    "ticks": 419,
+    "w": 1531,
+    "h": 860,
+    "cw": 64,
+    "ch": 36
+   },
+   "htmlOn": true,
+   "ambientlight": false
+  },
+  "cpu": {
+   "browser": 7.9,
+   "utility": 2.3,
+   "gpu-process": 9.7,
+   "renderer": 20.1
+  },
+  "total": 40.1,
+  "pptAvg": 8.78,
+  "pause": {
+   "ticksA": 423,
+   "ticksB": 423,
+   "display": "none",
+   "htmlOn": false
+  }
+ },
+ {
+  "cfg": "luminos",
+  "round": 2,
+  "oursFps": 6,
+  "fpsSet": "set",
+  "before": {
+   "playing": true,
+   "t": 8.2,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": {
+    "display": "block",
+    "ticks": 251,
+    "w": 1531,
+    "h": 860,
+    "cw": 64,
+    "ch": 36
+   },
+   "htmlOn": true,
+   "ambientlight": false
+  },
+  "after": {
+   "playing": true,
+   "t": 38.6,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": {
+    "display": "block",
+    "ticks": 424,
+    "w": 1531,
+    "h": 860,
+    "cw": 64,
+    "ch": 36
+   },
+   "htmlOn": true,
+   "ambientlight": false
+  },
+  "cpu": {
+   "browser": 5.2,
+   "utility": 2.4,
+   "gpu-process": 9.4,
+   "renderer": 19.8
+  },
+  "total": 36.9,
+  "pptAvg": 8.25,
+  "pause": {
+   "ticksA": 430,
+   "ticksB": 430,
+   "display": "none",
+   "htmlOn": false
+  }
+ },
+ {
+  "cfg": "baseline",
+  "round": 2,
+  "before": {
+   "playing": true,
+   "t": 8.2,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": false
+  },
+  "after": {
+   "playing": true,
+   "t": 38.6,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": false
+  },
+  "cpu": {
+   "browser": 2.7,
+   "utility": 1.6,
+   "gpu-process": 10.8,
+   "renderer": 24.1
+  },
+  "total": 39.2,
+  "pptAvg": 11.75
+ },
+ {
+  "cfg": "baseline",
+  "round": 3,
+  "before": {
+   "playing": true,
+   "t": 6.8,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": false
+  },
+  "after": {
+   "playing": true,
+   "t": 37.2,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": null,
+   "htmlOn": false,
+   "ambientlight": false
+  },
+  "cpu": {
+   "browser": 2.6,
+   "utility": 1.6,
+   "gpu-process": 11.1,
+   "renderer": 24.5
+  },
+  "total": 39.9,
+  "pptAvg": 10.15
+ },
+ {
+  "cfg": "luminos",
+  "round": 3,
+  "oursFps": 6,
+  "fpsSet": "set",
+  "before": {
+   "playing": true,
+   "t": 8.5,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": {
+    "display": "block",
+    "ticks": 252,
+    "w": 1531,
+    "h": 860,
+    "cw": 64,
+    "ch": 36
+   },
+   "htmlOn": true,
+   "ambientlight": false
+  },
+  "after": {
+   "playing": true,
+   "t": 38.9,
+   "vh": 1080,
+   "ad": false,
+   "vrect": [
+    957,
+    538
+   ],
+   "glow": {
+    "display": "block",
+    "ticks": 425,
+    "w": 1531,
+    "h": 860,
+    "cw": 64,
+    "ch": 36
+   },
+   "htmlOn": true,
+   "ambientlight": false
+  },
+  "cpu": {
+   "browser": 5.3,
+   "utility": 2.5,
+   "gpu-process": 9.6,
+   "renderer": 19.6
+  },
+  "total": 37.3,
+  "pptAvg": 9.73,
+  "pause": {
+   "ticksA": 430,
+   "ticksB": 430,
+   "display": "none",
+   "htmlOn": false
+  }
+ }
+]

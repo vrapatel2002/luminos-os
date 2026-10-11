@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Luminos Ambient",
+  "version": "1.0",
+  "description": "A cheap coloured glow around the YouTube player: tiny canvases, low tick rate, fully idle when paused or hidden.",
+  "permissions": ["storage"],
+  "action": { "default_title": "Luminos Ambient", "default_popup": "popup.html" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "exclude_matches": ["https://www.youtube.com/live_chat*", "https://www.youtube.com/embed/*"],
+      "js": ["core.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

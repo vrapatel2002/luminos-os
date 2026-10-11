@@ -1,11 +1,27 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-10 22:45 — Response 3 (windowstyle chat)
+Last updated: 2026-10-11 18:35 — Response 6 (windowstyle chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-10 18:40, windowstyle chat R1) — ChromeOS/Nexus window style, DECISION 138, DONE
+## Aim right now (2026-10-11 19:35, heat chat R2) — Luminos Ambient built (DECISION 140), waiting on Shawn's install click
+R1: hot hour (52–61 °C) = YouTube in Chrome. R2 (/build): Shawn is sure it's "Ambient light for YouTube"; wants better code + an
+audit of heavy/loose-end code.
+**DONE:** `docs/ambient/AUDIT.md`: per video frame it re-uploads the full 1080p frame into WebGL + generateMipmap, then renders ~7
+layers and re-blurs. Also lists loose ends: fps passed as ms to setTimeout, cancelAnimationFrame(true), a page-wide observer never
+disconnected, etc. **Our replacement** `scripts/chrome-luminos-ambient/` (295 lines, 80 tests): 16-px sample → ≤64-px canvas
+stretched by the compositor, 6 updates/s, stops when paused/hidden/fullscreen/off-screen/mini-player/disabled.
+**Measured** (tests/ambient/bench.mjs, throwaway Chromium, maximized): Ambient light +18.3 % of a core over plain YouTube; ours at
+6/s no measurable cost; ours at 12/s +4.7 %. Look: ours is softer/greyer than his spread-76 Ambient light.
+**NEXT (Shawn):** chrome://extensions → Developer mode → Load unpacked → `~/luminos-os/scripts/chrome-luminos-ambient`, then turn
+"Ambient light for YouTube" OFF. Then optionally re-measure in his real Chrome (the R1 MPRIS method: Play → /proc delta → Pause;
+the mute via pactl did NOT work, so audio plays).
+Gotchas: host-shell calls >60 s die → run bench via `systemd-run --user` with XDG_RUNTIME_DIR+DBUS set (without them systemd-run
+fails silently); the worker VM runs on this laptop, so PPT readings are polluted while agents run. `--load-extension` works in
+Chromium 153, not branded Chrome. Bench PNGs are git-excluded (.git/info/exclude). Upstream copy in `.scratch-ambient/` (excluded).
+
+## Previous aim (2026-10-10 18:40, windowstyle chat R1) — ChromeOS/Nexus window style, DECISION 138, DONE
 Shawn: make every KWin window look like the Nexus screenshot, "use the code from chromeOS". Asked first
 (DECISION 71/72 history) → **both frame + insides, all KDE/Qt apps**.
 **Live now:** own KDecoration3 plugin `org.kde.luminos.chromeos` (`src/kdecoration-chromeos/`, pkg
@@ -22,6 +38,15 @@ flat rows vs rows grouped in rounded tonal cards; System Settings' layout is com
 (`qqc2-desktop-style 6.30.0-1.2`), YAMIS mono icons, Nexus tones (Selection #45455c). Checker **17/17**. Login
 scripts no longer fight it. **Next if Shawn wants closer: layout** (cards, two-line rows, headline) = per-app work,
 start with System Settings only and show him first. His own System Settings (started 21:40) needs a relaunch.
+**R4 (10-11) read-only:** Shawn: paint pass "no where close" — wants the Nexus *layout* (connected groups, selected
+item morphs to a pill). Explained Nexus's design from source: `/etc/xdg/quickshell/caelestia/modules/nexus/`
+— `common/ConnectedRect.qml` (first/last → 28 px outer corners, 4 px inner), `navpane/NavLocations.qml`
+(isCategoryStart/End, isCurrentPage → 32 px all corners + secondaryContainer, pressed → 12 px, RadiusBehavior
+animates), 4 px gaps (2 px in pages), icon in a round `secondaryContainer` disc (`primary` when selected),
+two-line label + `onSurfaceVariant` description, `Nexus.qml` BlobInvertedRect = window frame with the page as a
+rounded hole. Waiting on Shawn to use these names to say what he wants built next.
+**R5:** built an interactive HTML/CSS replica of Nexus (artifact "Nexus Window Replica", claude.ai/artifact/LHwGAx7LJWBEw3cSceMDhS; source copy `docs/windowstyle/mock/nexus-replica.html`) with a component-name overlay + slow-motion toggle, to agree on the target before any KDE work.
+**R6:** same artifact (now titled "System Settings in Nexus Style") swapped to KDE System Settings' real sidebar (categories as small grey labels, chevrons, Bluetooth switch in the nav item) + pages Quick Settings (theme cards, M3 slider, select rows), Bluetooth, Sound, Wi-Fi, Mouse, Keyboard Backlight; Reset/Apply footer kept as pill buttons. Waiting on his feedback.
 **Waiting on Shawn:** look at it; likely asks — radius 16 vs ChromeOS 12, show title?, selected-row tint.
 Knobs: `~/.config/luminos-chromeosrc [Frame] CornerRadius/HeaderHeight/ShowTitle` then `qdbus6 org.kde.KWin /KWin reconfigure`.
 ⚠️ Plugin, Darkly and kirigami must be rebuilt after every Plasma/Qt bump; KWin falls back to Breeze silently.
