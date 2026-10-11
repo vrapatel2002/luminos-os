@@ -1,0 +1,267 @@
+diff --git a/src/formcard/FormButtonDelegate.qml b/src/formcard/FormButtonDelegate.qml
+index ba9604c..ebc8318 100644
+--- a/src/formcard/FormButtonDelegate.qml
++++ b/src/formcard/FormButtonDelegate.qml
+@@ -105,13 +105,27 @@ AbstractFormDelegate {
+             contentItem: root.leading
+         }
+ 
+-        Kirigami.Icon {
++        // [CHANGE: claude-code | 2026-10-11] LUMINOS DECISION 140 — Nexus icon disc:
++        // the leading icon sits in a round disc (Theme.highlightColor = secondaryContainer,
++        // glyph Theme.highlightedTextColor) of max(40, icon + 16) px, 12 px before the text.
++        // An explicit icon.color still wins.
++        Rectangle {
++            readonly property real iconSize: root.icon.width
+             visible: root.icon.name !== ""
+-            source: root.icon.name
+-            color: root.icon.color
+-            Layout.rightMargin: (root.icon.name !== "") ? Private.FormCardUnits.horizontalSpacing : 0
+-            implicitWidth: (root.icon.name !== "") ? root.icon.width : 0
+-            implicitHeight: (root.icon.name !== "") ? root.icon.height : 0
++            Layout.rightMargin: visible ? 12 : 0
++            Layout.alignment: Qt.AlignVCenter
++            implicitWidth: visible ? Math.max(40, iconSize + 16) : 0
++            implicitHeight: implicitWidth
++            radius: height / 2
++            color: Kirigami.Theme.highlightColor
++
++            Kirigami.Icon {
++                anchors.centerIn: parent
++                source: root.icon.name
++                color: root.icon.color.a > 0 ? root.icon.color : Kirigami.Theme.highlightedTextColor
++                width: parent.iconSize
++                height: parent.iconSize
++            }
+         }
+ 
+         ColumnLayout {
+diff --git a/src/formcard/FormCard.qml b/src/formcard/FormCard.qml
+index e99cc77..2142140 100644
+--- a/src/formcard/FormCard.qml
++++ b/src/formcard/FormCard.qml
+@@ -88,29 +88,36 @@ Item {
+ 
+     Layout.fillWidth: true
+ 
++    // [CHANGE: claude-code | 2026-10-11] LUMINOS DECISION 140 — two FormCards in a row
++    // with no FormHeader between them get the mock's 14 px group gap instead of touching.
++    readonly property bool _luminosFormCard: true
++    readonly property bool _luminosAfterCard: {
++        // children is a QML list property: indexOf() does not work on it, so walk it.
++        const c = parent ? parent.children : [];
++        let prev = null;
++        for (let i = 0; i < c.length; ++i) {
++            if (c[i] === root) return prev !== null && prev._luminosFormCard === true;
++            if (c[i].visible && c[i].height > 0) prev = c[i];
++        }
++        return false;
++    }
++    Layout.topMargin: _luminosAfterCard ? 14 : 0
++
+     implicitHeight: topPadding + bottomPadding + internalColumn.implicitHeight + rectangle.borderWidth * 2
+     implicitWidth: visible ? leftPadding + rightPadding + internalColumn.implicitWidth + rectangle.borderWidth * 2 : 0.0
+ 
+-    Kirigami.ShadowedRectangle {
++    // [CHANGE: claude-code | 2026-10-11] LUMINOS DECISION 140 — Nexus ConnectedRect.
++    // Stock draws ONE bordered, shadowed card with separators between rows. Luminos
++    // draws no card: every visible delegate gets its own rounded rect (first row
++    // 28 px top corners, last row 28 px bottom corners, touching corners 4 px) and
++    // rows sit 2 px apart. Colour = Theme.alternateBackgroundColor of the View set
++    // (Caelestia surfaceContainer). FormDelegateSeparator is hidden; separators
++    // placed by apps (1 px items) are skipped. Works for any child type, because the
++    // rects are drawn here behind the column rather than by each delegate.
++    Item {
+         id: rectangle
+ 
+-        readonly property real borderWidth: 1
+-        readonly property bool isDarkColor: {
+-            const temp = Qt.darker(Kirigami.Theme.backgroundColor, 1);
+-            return temp.a > 0 && getDarkness(Kirigami.Theme.backgroundColor) >= 0.4;
+-        }
+-
+-        // only have card radius if it isn't filling the entire width
+-        radius: root.cardWidthRestricted ? Kirigami.Units.cornerRadius : 0
+-        color: Kirigami.Theme.backgroundColor
+-
+-        function getDarkness(background: color): real {
+-            // Thanks to Gojir4 from the Qt forum
+-            // https://forum.qt.io/topic/106362/best-way-to-set-text-color-for-maximum-contrast-on-background-color/
+-            var temp = Qt.darker(background, 1);
+-            var a = 1 - ( 0.299 * temp.r + 0.587 * temp.g + 0.114 * temp.b);
+-            return a;
+-        }
++        readonly property real borderWidth: 0
+ 
+         anchors {
+             top: parent.top
+@@ -118,35 +125,62 @@ Item {
+             left: parent.left
+             right: parent.right
+ 
+-            leftMargin: root.cardWidthRestricted ? Math.round((root.width - root.maximumWidth) / 2) : -1
+-            rightMargin: root.cardWidthRestricted ? Math.round((root.width - root.maximumWidth) / 2) : -1
+-        }
+-
+-        border {
+-            color: isDarkColor ? Qt.darker(Kirigami.Theme.backgroundColor, 1.2) : Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, 0.15)
+-            width: borderWidth
++            leftMargin: root.cardWidthRestricted ? Math.round((root.width - root.maximumWidth) / 2) : 0
++            rightMargin: root.cardWidthRestricted ? Math.round((root.width - root.maximumWidth) / 2) : 0
+         }
+ 
+-        shadow {
+-            size: isDarkColor ? Kirigami.Units.smallSpacing : Kirigami.Units.largeSpacing
+-            color: Qt.alpha(Kirigami.Theme.textColor, 0.10)
++        // Driven by a plain count, so a row changing height only moves its rect;
++        // rects are created/destroyed only when the number of visible children changes.
++        Repeater {
++            model: internalColumn.visibleChildren.length
++
++            Kirigami.ShadowedRectangle {
++                required property int index
++
++                readonly property Item row: internalColumn.visibleChildren[index] ?? null
++                readonly property bool isFirst: row !== null && row === internalColumn._luminosFirst
++                readonly property bool isLast: row !== null && row === internalColumn._luminosLast
++
++                visible: row !== null && row.height >= 2
++                x: internalColumn.x + (row ? row.x : 0)
++                y: internalColumn.y + (row ? row.y : 0)
++                width: row ? row.width : 0
++                height: row ? row.height : 0
++                color: Kirigami.Theme.alternateBackgroundColor
++                corners {
++                    topLeftRadius: isFirst ? 28 : 4
++                    topRightRadius: isFirst ? 28 : 4
++                    bottomLeftRadius: isLast ? 28 : 4
++                    bottomRightRadius: isLast ? 28 : 4
++                }
++            }
+         }
+ 
+         ColumnLayout {
+             id: internalColumn
+ 
+-            // used in FormDelegateBackground to determine whether to round corners of the background
+-            readonly property bool _roundCorners: root.cardWidthRestricted
++            readonly property bool _roundCorners: true
++            readonly property bool _luminosConnected: true
++            // First/last visible child that is a real row (separators/zero-height items skipped).
++            readonly property Item _luminosFirst: {
++                const c = visibleChildren;
++                for (let i = 0; i < c.length; ++i) { if (c[i].height >= 2) return c[i]; }
++                return null;
++            }
++            readonly property Item _luminosLast: {
++                const c = visibleChildren;
++                for (let i = c.length - 1; i >= 0; --i) { if (c[i].height >= 2) return c[i]; }
++                return null;
++            }
+ 
+-            spacing: 0
++            spacing: 2
+ 
+-            // add 1 to margins to account for the border (so content doesn't overlap it)
+             anchors {
+                 fill: parent
+-                leftMargin: root.leftPadding + rectangle.borderWidth
+-                rightMargin: root.rightPadding + rectangle.borderWidth
+-                topMargin: root.topPadding + rectangle.borderWidth
+-                bottomMargin: root.bottomPadding + rectangle.borderWidth
++                leftMargin: root.leftPadding
++                rightMargin: root.rightPadding
++                topMargin: root.topPadding
++                bottomMargin: root.bottomPadding
+             }
+         }
+     }
+diff --git a/src/formcard/FormDelegateBackground.qml b/src/formcard/FormDelegateBackground.qml
+index 50398cb..78bf711 100644
+--- a/src/formcard/FormDelegateBackground.qml
++++ b/src/formcard/FormDelegateBackground.qml
+@@ -34,8 +34,14 @@ Kirigami.ShadowedRectangle {
+ 
+     readonly property bool _roundCorners: control?.parent?._roundCorners === true
+     readonly property list<Item> _visibleItems: control.parent.visibleChildren.filter(child => child.height !== 0)
+-    readonly property bool _isFirst: _roundCorners && _visibleItems[0] === control
+-    readonly property bool _isLast: _roundCorners && _visibleItems[_visibleItems.length - 1] === control
++    // [CHANGE: claude-code | 2026-10-11] LUMINOS DECISION 140 — inside a FormCard each
++    // row is its own ConnectedRect, so the hover/press layer follows that rect:
++    // 28 px on the card's outer corners, 4 px where rows touch.
++    readonly property bool _luminos: control?.parent?._luminosConnected === true
++    readonly property bool _isFirst: _luminos ? control.parent._luminosFirst === control : (_roundCorners && _visibleItems[0] === control)
++    readonly property bool _isLast: _luminos ? control.parent._luminosLast === control : (_roundCorners && _visibleItems[_visibleItems.length - 1] === control)
++    readonly property real _outerRadius: _luminos ? 28 : Kirigami.Units.cornerRadius
++    readonly property real _innerRadius: _luminos ? 4 : 0
+ 
+     color: {
+         let colorOpacity = 0;
+@@ -54,10 +60,10 @@ Kirigami.ShadowedRectangle {
+     }
+ 
+     corners {
+-        topLeftRadius: _isFirst ? Kirigami.Units.cornerRadius : 0
+-        topRightRadius: _isFirst ? Kirigami.Units.cornerRadius : 0
+-        bottomLeftRadius: _isLast ? Kirigami.Units.cornerRadius : 0
+-        bottomRightRadius: _isLast ? Kirigami.Units.cornerRadius : 0
++        topLeftRadius: _isFirst ? _outerRadius : _innerRadius
++        topRightRadius: _isFirst ? _outerRadius : _innerRadius
++        bottomLeftRadius: _isLast ? _outerRadius : _innerRadius
++        bottomRightRadius: _isLast ? _outerRadius : _innerRadius
+     }
+ 
+     Behavior on color {
+diff --git a/src/formcard/FormDelegateSeparator.qml b/src/formcard/FormDelegateSeparator.qml
+index 5ea685a..e2df82e 100644
+--- a/src/formcard/FormDelegateSeparator.qml
++++ b/src/formcard/FormDelegateSeparator.qml
+@@ -26,6 +26,10 @@ import org.kde.kirigami as Kirigami
+ Kirigami.Separator {
+     id: root
+ 
++    // [CHANGE: claude-code | 2026-10-11] LUMINOS DECISION 140 — rows are separate
++    // ConnectedRects with 2 px gaps, so the divider line is never drawn inside a FormCard.
++    visible: parent?._luminosConnected !== true
++
+     /*!
+        \brief The delegate immediately above the separator.
+      */
+diff --git a/src/formcard/FormTextDelegate.qml b/src/formcard/FormTextDelegate.qml
+index 9c8a726..879ecb3 100644
+--- a/src/formcard/FormTextDelegate.qml
++++ b/src/formcard/FormTextDelegate.qml
+@@ -98,13 +98,27 @@ AbstractFormDelegate {
+             contentItem: root.leading
+         }
+ 
+-        Kirigami.Icon {
++        // [CHANGE: claude-code | 2026-10-11] LUMINOS DECISION 140 — Nexus icon disc:
++        // the leading icon sits in a round disc (Theme.highlightColor = secondaryContainer,
++        // glyph Theme.highlightedTextColor) of max(40, icon + 16) px, 12 px before the text.
++        // An explicit icon.color still wins.
++        Rectangle {
++            readonly property real iconSize: Kirigami.Units.iconSizes.smallMedium
+             visible: root.icon.name !== ""
+-            source: root.icon.name
+-            color: root.icon.color
+-            Layout.rightMargin: (root.icon.name !== "") ? Private.FormCardUnits.horizontalSpacing : 0
+-            implicitWidth: (root.icon.name !== "") ? Kirigami.Units.iconSizes.smallMedium : 0
+-            implicitHeight: (root.icon.name !== "") ? Kirigami.Units.iconSizes.smallMedium : 0
++            Layout.rightMargin: visible ? 12 : 0
++            Layout.alignment: Qt.AlignVCenter
++            implicitWidth: visible ? Math.max(40, iconSize + 16) : 0
++            implicitHeight: implicitWidth
++            radius: height / 2
++            color: Kirigami.Theme.highlightColor
++
++            Kirigami.Icon {
++                anchors.centerIn: parent
++                source: root.icon.name
++                color: root.icon.color.a > 0 ? root.icon.color : Kirigami.Theme.highlightedTextColor
++                width: parent.iconSize
++                height: parent.iconSize
++            }
+         }
+ 
+         ColumnLayout {

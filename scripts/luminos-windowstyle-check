@@ -5,11 +5,8 @@
 set -u
 export XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus WAYLAND_DISPLAY=wayland-0
 HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)/tests/windowstyle"
-PY=/usr/bin/python3            # not the pyenv shim
-PLUGIN=/usr/lib/qt6/plugins/org.kde.kdecoration3/org.kde.luminos.chromeos.so; FAILS=0
-res() { # res <ok 0|1> <name> <detail>
-    if [ "$1" -eq 0 ]; then echo "PASS $2: $3"; else echo "FAIL $2: $3"; FAILS=$((FAILS + 1)); fi
-}
+PY=/usr/bin/python3; PLUGIN=/usr/lib/qt6/plugins/org.kde.kdecoration3/org.kde.luminos.chromeos.so; FAILS=0
+res() { if [ "$1" -eq 0 ]; then echo "PASS $2: $3"; else echo "FAIL $2: $3"; FAILS=$((FAILS + 1)); fi; }  # res <0|1> <name> <detail>
 kr() { kreadconfig6 --file "$1" --group "$2" --key "$3" 2>/dev/null; }
 check_plugin_file() {
     if [ ! -f "$PLUGIN" ]; then res 1 plugin-file "$PLUGIN missing"; return; fi
@@ -21,7 +18,6 @@ check_kwinrc() {
     [ "$lib" = org.kde.luminos.chromeos ] && [ "$bs" = None ]
     res $? kwinrc "library='${lib:-<unset=breeze>}' BorderSize='${bs:-<unset>}' (want org.kde.luminos.chromeos / None)"
 }
-
 check_kwin_loaded() {
     local info plug
     info=$(timeout 10 qdbus6 org.kde.KWin /KWin supportInformation 2>&1) || { res 1 kwin-loaded "supportInformation failed: ${info:0:80}"; return; }
@@ -30,7 +26,6 @@ check_kwin_loaded() {
     [ "$plug" = org.kde.luminos.chromeos ]
     res $? kwin-loaded "KWin reports decoration plugin '${plug:-<none>}'"
 }
-
 check_effect_off() {
     local en loaded; en=$(kr kwinrc Plugins kwin4_effect_shapecornersEnabled)
     loaded=$(timeout 10 qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadedEffects 2>&1) || { res 1 effect-off "loadedEffects failed"; return; }
@@ -38,7 +33,6 @@ check_effect_off() {
     elif printf '%s\n' "$loaded" | grep -qi shapecorners; then res 1 effect-off "shapecorners is in KWin's loadedEffects"
     else res 0 effect-off "shapecorners enabled='${en:-<unset>}', not loaded"; fi
 }
-
 check_widget_style() {
     local ws cs rad
     ws=$(kr kdeglobals KDE widgetStyle); cs=$(kr kdeglobals General ColorScheme)
@@ -48,35 +42,37 @@ check_widget_style() {
     [ "$ws" = Darkly ] && [ "$rad" = 16 ] && [ "$cs" = Caelestia ]
     res $? widget-style "widgetStyle='${ws:-<unset>}' darklyrc CornerRadius='${rad:-<unset>}' ColorScheme='${cs:-<unset>}' (want Darkly / 16 / Caelestia)"
 }
-
-qmlrun() { # qmlrun <qml> <grep -o pattern> -> value after '=' (KIRIGAMI_* from /etc/environment applied)
-    local line envs=()
+QD=$(mktemp -d /tmp/luminos-ws-qml.XXXXXX); trap 'rm -rf "$QD"' EXIT
+qmlout() { # qmlout <name>: run tests/windowstyle/<name>.qml offscreen once (software backend so grabToImage works;
+    # KIRIGAMI_* from /etc/environment applied) in $QD; images land in $QD/<name>/, log in $QD/<name>.log
+    local line envs=(); mkdir -p "$QD/$1"
     while IFS= read -r line; do envs+=("$line"); done < <(grep -E '^KIRIGAMI_[A-Z_]+=' /etc/environment)
-    (cd /tmp && env "${envs[@]}" QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
-        QT_QUICK_CONTROLS_STYLE=org.kde.desktop timeout 15 qml6 "$HERE/$1" 2>&1 | grep -o "$2" | head -1 | cut -d= -f2)
+    (cd "$QD/$1" && env "${envs[@]}" QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QT_FORCE_STDERR_LOGGING=1 \
+        QT_QUICK_CONTROLS_STYLE=org.kde.desktop timeout 20 qml6 "$HERE/$1.qml" >"$QD/$1.log" 2>&1)
 }
-
+qmlrun() { [ -f "$QD/$1.log" ] || qmlout "$1"; grep -o "$2" "$QD/$1.log" | head -1 | cut -d= -f2; }
+relay() { # forward PASS/FAIL/SKIP lines from a probe; anything else is a probe error
+    local line; while IFS= read -r line; do case "$line" in "PASS "*|"SKIP "*) echo "$line" ;;
+        "FAIL "*) echo "$line"; FAILS=$((FAILS + 1)) ;; *) echo "FAIL $1: probe error: ${line:0:120}"; FAILS=$((FAILS + 1)) ;; esac; done
+}
 check_kirigami() {
-    local ver rad; ver=$(pacman -Q kirigami 2>&1); rad=$(qmlrun kirigami-radius.qml 'cornerRadius=[0-9.]*')
+    local ver rad; ver=$(pacman -Q kirigami 2>&1); rad=$(qmlrun kit 'cornerRadius=[0-9.]*')
     [[ "$ver" =~ -1\.[0-9]+$ ]] && [ "$rad" = 16 ]
     res $? kirigami "'$ver' (want -1.N), Kirigami.Units.cornerRadius='${rad:-<no output>}' (want 16)"
 }
-
 check_revert_script() {
     local s=/usr/local/bin/luminos-windowstyle out rc
     if [ ! -x "$s" ]; then res 1 revert-script-present "$s missing or not executable"; return; fi
     out=$(timeout 20 "$s" status 2>&1); rc=$?
     res $rc revert-script-present "'$s status' exit $rc: $(printf '%s' "$out" | head -1 | cut -c1-80)"
 }
-
 check_screenshot() {
     # Test window: tests/windowstyle/probe-window.qml (kwrite is not installed on the G14). Launched as a
     # transient user unit so it gets the Plasma session environment (platform theme -> Caelestia palette)
     # and so we stop exactly our own process — never pkill.
     local unit="luminos-ws-check-$$" dir pid scale shot out i
     dir=$(mktemp -d /tmp/luminos-ws-check.XXXXXX); shot="$dir/shot.png"
-    scale=$(kscreen-doctor -j 2>/dev/null | "$PY" -I -B -c 'import json,sys
-o=[o for o in json.load(sys.stdin)["outputs"] if o["enabled"]];print(o[0]["scale"] if o else "")' 2>/dev/null)
+    scale=$(kscreen-doctor -j 2>/dev/null | "$PY" -I -B -c 'import json,sys;print(next((o["scale"] for o in json.load(sys.stdin)["outputs"] if o["enabled"]),""))' 2>/dev/null)
     if [ -z "$scale" ]; then res 1 screenshot "cannot read output scale from kscreen-doctor"; rm -rf "$dir"; return; fi
     if ! systemd-run --user --collect --quiet --unit="$unit" qml6 "$HERE/probe-window.qml" 2>"$dir/err"; then
         res 1 screenshot "could not launch probe window: $(head -c 120 "$dir/err")"; rm -rf "$dir"; return
@@ -95,15 +91,8 @@ o=[o for o in json.load(sys.stdin)["outputs"] if o["enabled"]];print(o[0]["scale
     systemctl --user stop "$unit" 2>/dev/null
     rm -rf "$dir"
     [ -n "$out" ] || out="FAIL shot-window: probe produced no output"
-    while IFS= read -r line; do
-        case "$line" in
-            "PASS "*) echo "$line" ;;
-            "FAIL "*) echo "$line"; FAILS=$((FAILS + 1)) ;;
-            *) echo "FAIL screenshot: probe error: ${line:0:120}"; FAILS=$((FAILS + 1)) ;;
-        esac
-    done <<<"$out"
+    relay screenshot <<<"$out"
 }
-
 # --- Phase 2 (Nexus paint pass, CONTRACTS.md "Phase 2 contracts") ---
 GSF='^[Gg]oogle ?[Ss]ans ?[Ff]lex'
 check_font_installed() {
@@ -135,7 +124,7 @@ check_selection() {
     res $? selection-colour "secondaryContainer=${want:-?} Caelestia.colors=${cols:-?} kdeglobals=${live:-?} (all must match)"
 }
 check_qqc2() {
-    local ver sz w h; ver=$(pacman -Q qqc2-desktop-style 2>&1); sz=$(qmlrun switch.qml 'switch-indicator=[0-9.x]*')
+    local ver sz w h; ver=$(pacman -Q qqc2-desktop-style 2>&1); sz=$(qmlrun controls 'switch-indicator=[0-9.x]*')
     w=${sz%x*}; h=${sz#*x}; w=${w%.*}; h=${h%.*}; [[ "$w$h" =~ ^[0-9]+$ ]] || w=0
     [[ "$ver" =~ -1\.[0-9]+$ ]] && [ -n "$sz" ] && [ $(( (w-52)*(w-52) )) -le 16 ] && [ $(( (h-32)*(h-32) )) -le 16 ]
     res $? qqc2 "'$ver' (want -1.N), checked Switch indicator '${sz:-<no output>}' (want 52x32 +-4)"
@@ -159,7 +148,40 @@ check_ubuntu_look() {
     done
     [ -z "$bad" ]; res $? ubuntu-look-agrees "${bad:-no conflicting icon/font writes in /usr/local/bin/luminos-ubuntu-look, ${svc:-<no service>}}"
 }
-
+# --- Phase 3 (Nexus rows, CONTRACTS.md "Phase 3 contracts") ---
+REPO="$(dirname "$HERE")/.."; FORKS="qqc2-desktop-style:qqc2:1.3 kirigami:kirigami:1.2 kirigami-addons:kirigami-addons:0.1 systemsettings:systemsettings:0.1 darkly:darkly:0.1"
+check_forks() { # pkgrel must carry the fork's .N (>= min); hook installed byte-identical to config/pacman-hooks/
+    local f p hk min v rel bad="" det=""
+    for f in $FORKS; do IFS=: read -r p hk min <<<"$f"; v=$(pacman -Q "$p" 2>/dev/null); rel=${v##*-}; det+="$v; "
+        [[ "$rel" == *.* ]] && [ "$(vercmp "$rel" "$min")" -ge 0 ] || bad+="$p pkgrel '${rel:-?}' < $min; "
+        cmp -s "$REPO/config/pacman-hooks/luminos-$hk.hook" "/etc/pacman.d/hooks/luminos-$hk.hook" || bad+="luminos-$hk.hook not installed/identical; "
+    done
+    [ -z "$bad" ]; res $? forks-installed "$det${bad:+FAIL: }$bad"
+}
+check_qml_probes() { local disc; qmlrun controls x >/dev/null; disc=$(qmlrun kit 'icondisc=.*')
+    relay qml-rows < <("$PY" -I -B "$HERE/shapes.py" "$QD/controls" rows 2>&1)
+    relay qml-slider-radio < <("$PY" -I -B "$HERE/shapes.py" "$QD/controls" slider-radio "handle=$(qmlrun controls 'handle=[-0-9.]*')" 2>&1)
+    [[ "$disc" =~ ^[1-9] ]]; res $? icondisc "IconTitleSubtitle in ItemDelegate: icondisc=${disc:-<no output: $(tail -c 120 "$QD/kit.log")>} (want >= 1 round item round the icon)"
+    relay formcard < <("$PY" -I -B "$HERE/shapes.py" "$QD/kit" formcard "seps=$(qmlrun kit 'seps=[0-9]*')" "fcrects=$(qmlrun kit 'fcrects=[-0-9.:/;]*')" 2>&1)
+}
+check_no_services() { # idle cost: none of our packages may ship a unit, and none of their units may be running
+    local pk units run hit=""; pk="$(for f in $FORKS; do printf '%s ' "${f%%:*}"; done)luminos-kdecoration-chromeos"
+    units=$(pacman -Ql $pk 2>/dev/null | awk '$2 ~ /\.(service|timer|socket)$/ {print $2}')
+    run=$( { systemctl --user list-units --state=running,active --no-legend --plain; systemctl list-units --state=running,active --no-legend --plain; } | awk '{print $1}')
+    for f in $units; do grep -qxF "$(basename "$f")" <<<"$run" && hit+="$(basename "$f") "; done
+    [ -z "$units" ]; res $? no-new-services "unit files in [$pk]: $(echo ${units:-none}); running: ${hit:-none}"
+}
+check_live_ss() {
+    local p dir unit=wscheck-ss i scale sel; p=$(pgrep -x systemsettings | xargs)
+    if [ -n "$p" ]; then echo "SKIP live-systemsettings: systemsettings already running (pid $p) - not touching the user's window"; return; fi
+    dir=$(mktemp -d /tmp/luminos-ws-ss.XXXXXX); sel=$(rgb "$(kr kdeglobals Colors:Selection BackgroundNormal)")
+    scale=$(kscreen-doctor -j 2>/dev/null | "$PY" -I -B -c 'import json,sys;print(next((o["scale"] for o in json.load(sys.stdin)["outputs"] if o["enabled"]),1))' 2>/dev/null)
+    systemd-run --user --collect --quiet --unit=$unit systemsettings 2>"$dir/err" || { res 1 live-systemsettings "launch failed: $(head -c 120 "$dir/err")"; rm -rf "$dir"; return; }
+    for i in $(seq 20); do sleep 0.5; [ "$(systemctl --user show -p MainPID --value $unit)" -gt 0 ] 2>/dev/null && break; done
+    sleep 4; timeout 15 spectacle -b -n -a -o "$dir/ss.png" >/dev/null 2>&1
+    systemctl --user stop $unit 2>/dev/null; if [ -s "$dir/ss.png" ]; then relay live-systemsettings < <("$PY" -I -B "$HERE/shapes.py" "$dir/ss.png" pill "$sel" "${scale:-1}" 2>&1)
+    else res 1 live-systemsettings "spectacle wrote no file"; fi; rm -rf "$dir"
+}
 SHOT=1
 for a in "$@"; do
     case "$a" in --no-screenshot) SHOT=0 ;; *) echo "usage: $0 [--no-screenshot]" >&2; exit 2 ;; esac
@@ -167,5 +189,6 @@ done
 check_plugin_file; check_kwinrc; check_kwin_loaded; check_effect_off
 check_widget_style; check_kirigami; check_revert_script
 check_font_installed; check_font_keys; check_selection; check_qqc2; check_icons; check_ubuntu_look
-[ "$SHOT" -eq 1 ] && check_screenshot
+check_forks; check_qml_probes; check_no_services
+[ "$SHOT" -eq 1 ] && { check_screenshot; check_live_ss; }
 exit $((FAILS > 0))

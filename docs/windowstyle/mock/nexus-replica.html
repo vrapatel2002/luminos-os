@@ -1,0 +1,577 @@
+<title>Nexus Window Replica</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,400..600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400..600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400..500,0..1,0..200&display=block">
+<style>
+/* Layout: one Nexus window (frame + nav pane + page "hole") centred on a dark desk, with a control strip above and a name legend below.
+   Single dark look on purpose: it copies Caelestia's live dark scheme (scheme.json, 2026-10-10). Values from /etc/xdg/quickshell/caelestia/modules/nexus. */
+:root {
+  color-scheme: dark;
+  /* Caelestia M3 roles */
+  --desk: #0b0b0e;
+  --surface: #131317;              /* page hole */
+  --sc-lowest: #0e0e12;            /* search bar */
+  --sc-low: #1c1b1f;               /* window frame / blob */
+  --sc: #201f23;                   /* ConnectedRect */
+  --sc-high: #2a292e;              /* nav item */
+  --sc-highest: #353438;           /* switch track off */
+  --secondary-container: #45455c;  /* selected nav item, icon disc */
+  --on-secondary-container: #b4b2ce;
+  --primary: #c2c1ff;
+  --on-primary: #2a2a60;
+  --on-surface: #e5e1e7;
+  --on-surface-variant: #c8c5d1;
+  --outline: #918f9a;
+  --outline-variant: #47464f;
+  --error: #ffb4ab;
+  /* Tokens.rounding */
+  --r-xs: 4px; --r-s: 8px; --r-m: 12px; --r-l: 16px; --r-xl: 28px; --r-xli: 32px;
+  /* Tokens.anim (M3 expressive) */
+  --t: 1;
+  --spatial-default: cubic-bezier(0.38, 1.21, 0.22, 1.00);
+  --spatial-fast: cubic-bezier(0.42, 1.67, 0.21, 0.90);
+  --effects: cubic-bezier(0.34, 0.80, 0.34, 1.00);
+  --d-spatial: calc(500ms * var(--t));
+  --d-fast: calc(350ms * var(--t));
+  --d-effects: calc(200ms * var(--t));
+  /* type */
+  --font-ui: "Google Sans Flex", "Google Sans", "Roboto Flex", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+html, body { height: 100%; }
+body {
+  background: var(--desk);
+  color: var(--on-surface);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  padding-inline: 16px;
+  padding-block: 24px 40px;
+  box-sizing: border-box;
+}
+* { box-sizing: border-box; }
+.ms {
+  font-family: "Material Symbols Rounded";
+  font-weight: 500; font-style: normal; font-size: 22px; line-height: 1;
+  letter-spacing: normal; text-transform: none; white-space: nowrap; direction: ltr;
+  font-feature-settings: "liga"; -webkit-font-smoothing: antialiased;
+  font-variation-settings: "FILL" 1, "GRAD" 25, "wght" 500, "opsz" 24;
+  user-select: none; display: inline-block; width: 1em; height: 1em; overflow: hidden;
+}
+.ms.nofill { font-variation-settings: "FILL" 0, "GRAD" 25, "wght" 500, "opsz" 24; }
+
+/* ---------- control strip ---------- */
+.strip {
+  max-width: 1040px; margin: 0 auto 18px; display: flex; flex-wrap: wrap; gap: 10px 18px;
+  align-items: center; justify-content: space-between;
+}
+.strip h1 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: .01em; text-wrap: balance; }
+.strip h1 small { display: block; font-size: 12.5px; color: var(--on-surface-variant); font-weight: 400; margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font: inherit; font-size: 13px; color: var(--on-surface-variant); background: var(--sc);
+  border: 1px solid var(--outline-variant); border-radius: 999px; padding: 7px 14px 7px 10px;
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  transition: background-color var(--d-effects) var(--effects), color var(--d-effects) var(--effects);
+}
+.chip .ms { font-size: 18px; }
+.chip[aria-pressed="true"] { background: var(--secondary-container); color: var(--on-secondary-container); border-color: transparent; }
+.chip:focus-visible, .nav-item:focus-visible, .row:focus-visible, .sw:focus-visible, .search input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* ---------- window ---------- */
+.stage { overflow-x: auto; padding-block: 6px 18px; }
+.win {
+  --nav-w: 330px;
+  position: relative; width: 1040px; height: 680px; margin: 0 auto;
+  background: var(--sc-low); border-radius: var(--r-l);
+  box-shadow: 0 24px 48px rgba(0,0,0,.45), 0 0 24px rgba(0,0,0,.25);
+}
+/* the page "hole" cut out of the blob */
+.hole {
+  position: absolute; top: 12px; right: 12px; bottom: 12px; left: calc(var(--nav-w) + 32px);
+  background: var(--surface); border-radius: var(--r-l);
+}
+/* top-right bump that grows out of the frame (BlobRect windowBtnRect) */
+.bump {
+  position: absolute; top: 0; right: 0; width: 52px; height: 46px;
+  background: var(--sc-low); border-bottom-left-radius: var(--r-m); z-index: 3;
+  display: grid; place-items: center;
+}
+.bump::before, .bump::after { content: ""; position: absolute; width: 12px; height: 12px; }
+.bump::before { left: -12px; top: 12px; background: radial-gradient(circle at 0 100%, transparent 11.5px, var(--sc-low) 12px); }
+.bump::after { right: 12px; bottom: -12px; background: radial-gradient(circle at 0 100%, transparent 11.5px, var(--sc-low) 12px); }
+.bump button {
+  background: none; border: 0; color: var(--on-surface-variant); cursor: pointer; padding: 4px; border-radius: 999px;
+  transition: color var(--d-effects) var(--effects), transform var(--d-fast) var(--spatial-fast);
+  margin: 6px 0 0 6px;
+}
+.bump button:hover { color: var(--primary); }
+.bump button:active { transform: scale(.8); }
+.bump .ms { font-variation-settings: "FILL" 0, "GRAD" 0, "wght" 400, "opsz" 24; font-size: 24px; }
+
+/* ---------- nav pane ---------- */
+.nav {
+  position: absolute; top: 16px; bottom: 16px; left: 16px; width: var(--nav-w);
+  display: flex; flex-direction: column; gap: 16px; min-width: 0;
+}
+.search {
+  position: relative; height: 54px; border-radius: 999px; background: var(--sc-lowest);
+  border: 1px solid var(--outline-variant); display: flex; align-items: center;
+  transition: border-color var(--d-effects) var(--effects);
+}
+.search:focus-within { border-color: var(--primary); }
+.search .ms { position: absolute; left: 20px; font-size: 22px; color: var(--on-surface-variant); font-variation-settings: "FILL" 0, "wght" 400, "opsz" 24; }
+.search input {
+  all: unset; box-sizing: border-box; width: 100%; height: 100%; padding: 0 20px 0 54px;
+  font: 400 16px/1 var(--font-ui); color: var(--on-surface); border-radius: 999px;
+}
+.search input::placeholder { color: var(--on-surface-variant); }
+.navlist {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
+  padding-block: 2px; scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%);
+}
+.navlist::-webkit-scrollbar { display: none; }
+.nav-item {
+  position: relative; flex: none; display: flex; align-items: center; gap: 12px;
+  padding: 16px; min-height: 72px; background: var(--sc-high); cursor: pointer;
+  border-radius: var(--tl) var(--tr) var(--br) var(--bl);
+  transition:
+    border-radius var(--d-spatial) var(--spatial-default),
+    background-color var(--d-effects) var(--effects);
+  overflow: hidden; isolation: isolate; outline: none; user-select: none;
+}
+.nav-item.cat-gap { margin-top: 12px; }
+.nav-item.current { background: var(--secondary-container); }
+.disc {
+  flex: none; width: 40px; height: 40px; border-radius: 999px; display: grid; place-items: center;
+  background: var(--secondary-container); color: var(--on-secondary-container);
+  transition: background-color var(--d-effects) var(--effects), color var(--d-effects) var(--effects);
+}
+.nav-item.current .disc { background: var(--primary); color: var(--on-primary); }
+.nav-item .text { min-width: 0; display: flex; flex-direction: column; }
+.label { font-size: 16px; font-weight: 400; color: var(--on-surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desc { font-size: 13px; color: var(--on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+/* StateLayer: hover tint + ripple */
+.state { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: -1; }
+.state::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--on-surface); opacity: 0; transition: opacity var(--d-effects) var(--effects); }
+.hoverable:hover > .state::before { opacity: .08; }
+.ripple {
+  position: absolute; border-radius: 50%; background: var(--on-surface); opacity: .1; transform: scale(0);
+  pointer-events: none; animation: ripple calc(600ms * var(--t)) cubic-bezier(.2,0,0,1) forwards;
+}
+.ripple.fade { animation: ripple calc(600ms * var(--t)) cubic-bezier(.2,0,0,1) forwards, fade calc(300ms * var(--t)) var(--effects) forwards; }
+@keyframes ripple { to { transform: scale(1); } }
+@keyframes fade { to { opacity: 0; } }
+
+/* ---------- page ---------- */
+.page {
+  position: absolute; top: 28px; right: 28px; bottom: 28px; left: calc(var(--nav-w) + 16px + 44px);
+  display: flex; flex-direction: column; gap: 32px; min-width: 0;
+}
+.page h2 { margin: 0; font-size: 30px; font-weight: 400; letter-spacing: -.005em; line-height: 1.15; }
+.page-body { overflow-y: auto; scrollbar-width: none; flex: 1; padding-bottom: 12px; }
+.page-body::-webkit-scrollbar { display: none; }
+.page-inner { width: min(100%, 720px); margin: 0 auto; display: flex; flex-direction: column; gap: 2px; }
+.page-inner .group-gap { margin-top: 14px; }
+.page-swap { animation: pagein calc(350ms * var(--t)) var(--effects); }
+@keyframes pagein { from { opacity: 0; transform: translateY(10px); } }
+
+/* ConnectedRect */
+.crect {
+  position: relative; background: var(--sc);
+  border-radius: var(--tl) var(--tr) var(--br) var(--bl);
+  transition: border-radius var(--d-spatial) var(--spatial-default), opacity var(--d-effects) var(--effects), height var(--d-spatial) var(--spatial-default);
+  overflow: hidden; isolation: isolate;
+}
+.crect.dim { opacity: .5; pointer-events: none; }
+.row {
+  position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 20px; min-height: 56px;
+  cursor: pointer; overflow: hidden; isolation: isolate; border-radius: var(--r-xs); outline: none; user-select: none;
+}
+.row.toggle { min-height: 60px; }
+.row .text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.row .label { font-size: 16px; }
+.row .sub { font-size: 13px; color: var(--on-surface-variant); margin-top: 1px; }
+.row .sub.outline { color: var(--outline); }
+.row .disc { width: 40px; height: 40px; }
+.row .disc .ms { font-size: 22px; }
+.row .disc.on { background: var(--primary); color: var(--on-primary); }
+.iconbtn { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 999px; color: var(--on-surface-variant); }
+.iconbtn .ms { font-variation-settings: "FILL" 0, "wght" 500, "opsz" 24; }
+.iconbtn.on { color: var(--primary); }
+.placeholder { display: grid; place-items: center; gap: 4px; padding: 28px; color: var(--outline); text-align: center; }
+.placeholder .ms { font-size: 30px; }
+.placeholder span:last-child { font-size: 16px; }
+
+/* StyledSwitch (M3) */
+.sw {
+  --h: 30px; --w: 51px; --thumb: calc(var(--h) - 4px);
+  position: relative; flex: none; width: var(--w); height: var(--h); border-radius: 999px;
+  background: var(--sc-highest); border: 0; padding: 0; cursor: pointer;
+  transition: background-color var(--d-effects) var(--effects);
+}
+.sw[aria-checked="true"] { background: var(--primary); }
+.sw .thumb {
+  position: absolute; top: 2px; left: 2px; height: var(--thumb); width: var(--thumb); border-radius: 999px;
+  background: var(--outline); display: grid; place-items: center;
+  transition: left var(--d-fast) var(--spatial-fast), width var(--d-fast) var(--spatial-fast), background-color var(--d-effects) var(--effects);
+}
+.sw[aria-checked="true"] .thumb { left: calc(var(--w) - var(--thumb) - 2px); background: var(--on-primary); }
+.sw.pressed .thumb { width: calc(var(--thumb) * 1.2); }
+.sw.pressed[aria-checked="true"] .thumb { left: calc(var(--w) - var(--thumb) * 1.2 - 2px); }
+.sw .thumb::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--on-surface); opacity: 0; transition: opacity var(--d-effects) var(--effects); }
+.sw:hover .thumb::after { opacity: .08; }
+.sw.pressed .thumb::after { opacity: .1; }
+.sw[aria-checked="true"] .thumb::after { background: var(--primary); }
+.sw svg { width: 18px; height: 18px; overflow: visible; position: relative; z-index: 1; }
+.sw path {
+  fill: none; stroke: var(--sc-highest); stroke-width: .135; stroke-linecap: round;
+  transition: d var(--d-spatial) var(--spatial-default), stroke var(--d-effects) var(--effects);
+}
+.sw[aria-checked="true"] path { stroke: var(--primary); }
+
+/* ---------- component-name overlay ---------- */
+[data-name] { --name-c: #f5b2e0; }
+.annot [data-name] { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--name-c) 70%, transparent); }
+.annot [data-name]::after {
+  content: attr(data-name); position: absolute; z-index: 20; left: 6px; top: 4px;
+  font: 600 10.5px/1 var(--font-mono); letter-spacing: .02em; color: #2b0d26; background: var(--name-c);
+  padding: 3px 6px; border-radius: 6px; pointer-events: none; white-space: nowrap;
+}
+.annot .win[data-name]::after { top: -22px; left: 0; }
+.annot .hole[data-name]::after { top: auto; bottom: 8px; left: 8px; }
+.annot .row[data-name] { --name-c: #9dceff; }
+.annot .row[data-name]::after { left: auto; right: 6px; top: 4px; color: #0b2235; }
+.annot .disc[data-name], .annot .sw[data-name] { position: relative; --name-c: #c8e3ff; }
+.annot .disc[data-name]::after, .annot .sw[data-name]::after { top: -16px; left: -4px; color: #0b2235; }
+.annot .search[data-name]::after { top: -18px; left: 18px; }
+.annot .page h2[data-name] { position: relative; }
+
+/* ---------- legend ---------- */
+.legend { max-width: 1040px; margin: 8px auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 22px; }
+.legend div { min-width: 0; font-size: 13px; color: var(--on-surface-variant); line-height: 1.45; }
+.legend b { display: block; color: var(--on-surface); font-weight: 500; font-size: 13.5px; font-family: var(--font-mono); letter-spacing: -.01em; }
+.legend h3 { grid-column: 1 / -1; margin: 6px 0 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--outline); font-weight: 500; }
+
+@media (prefers-reduced-motion: reduce) { :root { --t: 0.001; } }
+</style>
+
+<div class="strip">
+  <h1>Nexus window, rebuilt in HTML
+    <small>Click the pages on the left, press and hold a row, flip the switches. Numbers come from Caelestia's QML.</small>
+  </h1>
+  <div class="chips">
+    <button class="chip" id="annotBtn" aria-pressed="false"><span class="ms nofill">label</span>Show component names</button>
+    <button class="chip" id="slowBtn" aria-pressed="false"><span class="ms nofill">slow_motion_video</span>Slow motion ×4</button>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="win" id="win" data-name="Nexus window · BlobGroup frame">
+    <div class="hole" data-name="page hole · BlobInvertedRect (r16)"></div>
+    <div class="bump" data-name="windowBtnRect"><button aria-label="Pop out into a window"><span class="ms">pip</span></button></div>
+
+    <nav class="nav" aria-label="Settings pages">
+      <label class="search" data-name="SearchBar">
+        <span class="ms">search</span>
+        <input id="search" type="text" placeholder="Search settings" autocomplete="off">
+      </label>
+      <div class="navlist" id="navlist" role="listbox" aria-label="Pages"></div>
+    </nav>
+
+    <main class="page" id="page">
+      <h2 id="pageTitle" data-name="PageBase title">Connected devices</h2>
+      <div class="page-body"><div class="page-inner" id="pageInner"></div></div>
+    </main>
+  </div>
+</div>
+
+<section class="legend" aria-label="Component names">
+  <h3>The names, so we can talk about them</h3>
+  <div><b>Nav item</b>A page in the left list: icon disc, label, grey description. Its corners depend on where it sits in its category.</div>
+  <div><b>Category group</b>Nav items that belong together (Network, Connected devices, Audio). 4 px gaps inside, 16 px between groups.</div>
+  <div><b>Connected corners</b>First item 28 px on top, last 28 px on the bottom, everything that touches a neighbour 4 px. Read together, they look like one card.</div>
+  <div><b>Selected pill</b>The current nav item turns #45455c and takes 32 px on all four corners. The change animates.</div>
+  <div><b>Press squash</b>While a row is held down, every corner drops to 12 px and a ripple spreads from your finger.</div>
+  <div><b>Icon disc</b>Round backing behind each icon. Soft grey normally, bright lavender with a dark icon when selected or connected.</div>
+  <div><b>ConnectedRect</b>The same corner rule on the page side, with first/last switches: Bluetooth (first), device list, Pair new device (last).</div>
+  <div><b>ToggleRow / ItemList</b>A ConnectedRect holding a switch, or a list of transparent rows. Rows inside a list keep 4 px corners.</div>
+  <div><b>StyledSwitch</b>Pill track with a round thumb. The ✗ morphs into a ✓ when flipped, and the thumb stretches while pressed.</div>
+  <div><b>Frame and hole</b>The window is one solid shape with the page cut out of it, which is why the right side looks recessed.</div>
+</section>
+
+<script>
+(() => {
+  const PAGES = [
+    { id: "wall",  label: "Wallpaper & style", icon: "palette",       desc: "Wallpaper, fonts, colours",            cat: "appearance" },
+    { id: "net",   label: "Network",           icon: "wifi",          desc: "Wi-Fi, ethernet",                      cat: "connectivity" },
+    { id: "bt",    label: "Connected devices", icon: "devices_other", desc: "Bluetooth, pairing",                   cat: "connectivity", noFill: true },
+    { id: "audio", label: "Audio",             icon: "volume_up",     desc: "App volumes, sound devices",           cat: "connectivity" },
+    { id: "upd",   label: "Updates",           icon: "update",        desc: "System updates",                       cat: "system" },
+    { id: "plug",  label: "Plugins",           icon: "extension",     desc: "Manage plugins",                       cat: "system" },
+    { id: "panels",label: "Panels",            icon: "dock_to_bottom",desc: "Dashboard, taskbar, launcher, sidebar",cat: "shell" },
+    { id: "apps",  label: "Apps",              icon: "apps",          desc: "Default apps, favourites, hidden apps",cat: "shell" },
+    { id: "svc",   label: "Services",          icon: "build",         desc: "Poll intervals, lyrics backend",       cat: "shell" },
+    { id: "lang",  label: "Language & region", icon: "globe",         desc: "UI language, weather location, display units", cat: "shell" },
+    { id: "about", label: "About",             icon: "info",          desc: "System information, credits",          cat: "about" },
+  ];
+  const R = { xs: 4, m: 12, xl: 28, xli: 32 };
+  const state = { current: 2, bt: true, discoverable: false, pairable: true, wifi: true, pressed: -1 };
+
+  const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+  const setCorners = (node, tl, tr, br, bl) => {
+    node.style.setProperty("--tl", tl + "px"); node.style.setProperty("--tr", tr + "px");
+    node.style.setProperty("--br", br + "px"); node.style.setProperty("--bl", bl + "px");
+  };
+
+  /* StateLayer: hover tint (CSS) + ripple from the press point */
+  function addStateLayer(host, onPressChange) {
+    host.classList.add("hoverable");
+    host.prepend(el("span", "state"));
+    host.addEventListener("pointerdown", e => {
+      if (e.button !== 0) return;
+      const r = host.getBoundingClientRect();
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      const end = Math.max(Math.hypot(x, y), Math.hypot(r.width - x, y), Math.hypot(x, r.height - y), Math.hypot(r.width - x, r.height - y)) * 1.3;
+      const rip = el("span", "ripple");
+      Object.assign(rip.style, { width: end * 2 + "px", height: end * 2 + "px", left: x - end + "px", top: y - end + "px" });
+      host.querySelector(".state").appendChild(rip);
+      const release = () => {
+        rip.classList.add("fade");
+        setTimeout(() => rip.remove(), 900 * parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--t") || 1));
+        onPressChange && onPressChange(false);
+        window.removeEventListener("pointerup", release); window.removeEventListener("pointercancel", release);
+      };
+      window.addEventListener("pointerup", release); window.addEventListener("pointercancel", release);
+      onPressChange && onPressChange(true);
+    });
+  }
+
+  /* ---------- nav ---------- */
+  const navlist = document.getElementById("navlist");
+  const navItems = [];
+  function navCorners(i) {
+    const p = PAGES[i];
+    const start = i === 0 || PAGES[i - 1].cat !== p.cat;
+    const end = i === PAGES.length - 1 || PAGES[i + 1].cat !== p.cat;
+    const cur = i === state.current;
+    const top = state.pressed === i ? R.m : cur ? R.xli : start ? R.xl : R.xs;
+    const bot = state.pressed === i ? R.m : cur ? R.xli : end ? R.xl : R.xs;
+    const role = state.pressed === i ? "pressed" : cur ? "selected pill" : start && end ? "only" : start ? "category start" : end ? "category end" : "middle";
+    return { top, bot, role };
+  }
+  function paintNav() {
+    navItems.forEach((n, i) => {
+      const { top, bot, role } = navCorners(i);
+      setCorners(n, top, top, bot, bot);
+      n.classList.toggle("current", i === state.current);
+      n.setAttribute("aria-selected", i === state.current);
+      n.dataset.name = `nav item · ${role} · ${top}/${bot}`;
+    });
+  }
+  PAGES.forEach((p, i) => {
+    const n = el("div", "nav-item");
+    n.tabIndex = 0; n.setAttribute("role", "option");
+    if (i !== 0 && PAGES[i - 1].cat !== p.cat) n.classList.add("cat-gap");
+    n.innerHTML = `<span class="disc" data-name="icon disc"><span class="ms${p.noFill ? " nofill" : ""}">${p.icon}</span></span>
+      <span class="text"><span class="label">${p.label}</span><span class="desc">${p.desc}</span></span>`;
+    addStateLayer(n, down => { state.pressed = down ? i : -1; paintNav(); });
+    n.addEventListener("click", () => select(i));
+    n.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(i); }
+      if (e.key === "ArrowDown") { e.preventDefault(); navItems[Math.min(i + 1, PAGES.length - 1)].focus(); }
+      if (e.key === "ArrowUp") { e.preventDefault(); navItems[Math.max(i - 1, 0)].focus(); }
+    });
+    navItems.push(n); navlist.appendChild(n);
+  });
+  function select(i) {
+    if (i === state.current) return;
+    state.current = i; paintNav(); renderPage(true);
+  }
+
+  /* ---------- switch ---------- */
+  const P = {
+    on:      "M .15 .5 L .4 .7 M .4 .7 L .85 .2",
+    off:     "M .15 .15 L .85 .85 M .15 .85 L .85 .15",
+    pOn:     "M .2 .5 L .4 .5 M .4 .5 L .8 .5",
+    pOff:    "M .2 .5 L .8 .5 M .2 .5 L .8 .5",
+  };
+  function makeSwitch(checked, onToggle, label) {
+    const s = el("button", "sw");
+    s.setAttribute("role", "switch"); s.setAttribute("aria-label", label); s.dataset.name = "StyledSwitch";
+    s.innerHTML = `<span class="thumb"><svg viewBox="0 0 1 1" aria-hidden="true"><path></path></svg></span>`;
+    const path = s.querySelector("path");
+    const paint = () => {
+      const on = s.getAttribute("aria-checked") === "true", pr = s.classList.contains("pressed");
+      const d = pr ? (on ? P.pOn : P.pOff) : (on ? P.on : P.off);
+      path.style.d = `path("${d}")`; path.setAttribute("d", d);
+    };
+    s.setAttribute("aria-checked", checked);
+    s.addEventListener("pointerdown", () => { s.classList.add("pressed"); paint(); });
+    const up = () => { s.classList.remove("pressed"); paint(); };
+    s.addEventListener("pointerup", up); s.addEventListener("pointerleave", up);
+    s.addEventListener("click", e => {
+      e.stopPropagation();
+      const v = s.getAttribute("aria-checked") !== "true";
+      s.setAttribute("aria-checked", v); paint(); onToggle && onToggle(v);
+    });
+    paint();
+    return s;
+  }
+
+  /* ---------- page builders ---------- */
+  function crect(first, last, name) {
+    const c = el("div", "crect");
+    setCorners(c, first ? R.xl : R.xs, first ? R.xl : R.xs, last ? R.xl : R.xs, last ? R.xl : R.xs);
+    c.dataset.name = `${name || "ConnectedRect"} · ${first && last ? "first+last" : first ? "first" : last ? "last" : "middle"}`;
+    return c;
+  }
+  function toggleRow({ first, last, label, sub, checked, onToggle, dim, gap }) {
+    const c = crect(first, last, "ToggleRow");
+    if (dim) c.classList.add("dim");
+    if (gap) c.classList.add("group-gap");
+    const r = el("div", "row toggle");
+    r.innerHTML = `<span class="text"><span class="label">${label}</span>${sub ? `<span class="sub">${sub}</span>` : ""}</span>`;
+    const sw = makeSwitch(checked, onToggle, label);
+    r.appendChild(sw);
+    addStateLayer(r);
+    r.addEventListener("click", () => sw.click());
+    r.style.borderRadius = "inherit";
+    c.appendChild(r);
+    return c;
+  }
+  function listRow({ icon, label, sub, on, trailing, subOutline, noFill }) {
+    const r = el("div", "row");
+    r.tabIndex = 0; r.dataset.name = "row (4 px)";
+    r.innerHTML = `${icon ? `<span class="disc${on ? " on" : ""}"><span class="ms${noFill || !on ? " nofill" : ""}">${icon}</span></span>` : ""}
+      <span class="text"><span class="label">${label}</span>${sub ? `<span class="sub${subOutline ? " outline" : ""}">${sub}</span>` : ""}</span>
+      ${trailing ? `<span class="iconbtn${on ? " on" : ""}"><span class="ms">${trailing}</span></span>` : ""}`;
+    addStateLayer(r);
+    return r;
+  }
+  function itemList({ first, last, rows, show, placeholderIcon, placeholderText, dim }) {
+    const c = crect(first, last, "ItemList");
+    if (dim) c.classList.add("dim");
+    if (show && rows.length) rows.forEach(r => c.appendChild(listRow(r)));
+    else c.appendChild(el("div", "placeholder", `<span class="ms nofill">${placeholderIcon}</span><span>${placeholderText}</span>`));
+    return c;
+  }
+  function actionRow({ first, last, icon, label, dim, gap }) {
+    const c = crect(first, last);
+    if (dim) c.classList.add("dim");
+    if (gap) c.classList.add("group-gap");
+    const r = el("div", "row");
+    r.tabIndex = 0; r.style.borderRadius = "inherit";
+    r.innerHTML = `<span class="ms nofill" style="color:var(--on-surface)">${icon}</span><span class="text"><span class="label">${label}</span></span>`;
+    addStateLayer(r);
+    c.appendChild(r);
+    return c;
+  }
+  function navRow({ first, last, icon, label, sub, gap }) {
+    const c = crect(first, last, "NavRow");
+    if (gap) c.classList.add("group-gap");
+    const r = listRow({ icon, label, sub, trailing: "chevron_right" });
+    r.style.borderRadius = "inherit";
+    c.appendChild(r);
+    return c;
+  }
+
+  const BUILD = {
+    bt() {
+      const off = !state.bt;
+      return [
+        toggleRow({ first: true, label: "Bluetooth", checked: state.bt, onToggle: v => { state.bt = v; renderPage(false); } }),
+        itemList({ show: state.bt, placeholderIcon: state.bt ? "devices_other" : "bluetooth_disabled", placeholderText: state.bt ? "No saved devices" : "Bluetooth disabled",
+          rows: [
+            { icon: "headphones", label: "Galaxy Buds3 (F19B)", sub: "Saved", subOutline: true, trailing: "settings" },
+            { icon: "headphones", label: "ULT WEAR", sub: "Saved", subOutline: true, trailing: "settings" },
+          ] }),
+        actionRow({ last: true, icon: "add", label: "Pair new device", dim: off }),
+        toggleRow({ first: true, gap: true, label: "Discoverable", sub: "Allow nearby devices to find this one", checked: state.discoverable, dim: off, onToggle: v => state.discoverable = v }),
+        toggleRow({ last: true, label: "Pairable", sub: "Allow nearby devices to pair with this one", checked: state.pairable, dim: off, onToggle: v => state.pairable = v }),
+      ];
+    },
+    net() {
+      return [
+        toggleRow({ first: true, label: "Wi-Fi", checked: state.wifi, onToggle: v => { state.wifi = v; renderPage(false); } }),
+        itemList({ show: state.wifi, placeholderIcon: "wifi_off", placeholderText: "Wi-Fi disabled", rows: [
+          { icon: "wifi", label: "luminos-home 5G", sub: "Connected • WPA2", on: true, trailing: "settings" },
+          { icon: "wifi_2_bar", label: "luminos-home", sub: "Saved", subOutline: true, trailing: "settings", noFill: true },
+          { icon: "wifi_1_bar", label: "Tims Guest", sub: "Open", subOutline: true, noFill: true },
+        ] }),
+        actionRow({ last: true, icon: "add", label: "Add network", dim: !state.wifi }),
+        navRow({ first: true, last: true, gap: true, icon: "lan", label: "Ethernet", sub: "enp2s0 • 1000 Mb/s" }),
+      ];
+    },
+    audio() {
+      return [
+        itemList({ first: true, show: true, rows: [
+          { icon: "speaker", label: "Laptop speakers", sub: "Output • Default", on: true },
+          { icon: "headphones", label: "Galaxy Buds3 (F19B)", sub: "Output", subOutline: true },
+        ] }),
+        navRow({ last: true, icon: "tune", label: "App volumes", sub: "Firefox, Spotify, Discord" }),
+        itemList({ first: true, last: true, show: true, rows: [
+          { icon: "mic", label: "Internal microphone", sub: "Input • Default", on: true },
+        ] }),
+      ].map((n, i) => (i === 2 && n.classList.add("group-gap"), n));
+    },
+    wall() {
+      return [
+        navRow({ first: true, icon: "wallpaper", label: "Wallpaper", sub: "Starfield" }),
+        navRow({ icon: "format_paint", label: "Colour scheme", sub: "From wallpaper • Tonal spot" }),
+        navRow({ last: true, icon: "text_fields", label: "Fonts", sub: "Google Sans Flex" }),
+        toggleRow({ first: true, gap: true, label: "Dark mode", checked: true }),
+        toggleRow({ last: true, label: "Transparency", sub: "Blur panels and the window frame", checked: false }),
+      ];
+    },
+    upd() {
+      return [
+        navRow({ first: true, icon: "update", label: "Check for updates", sub: "Last checked 18 min ago" }),
+        toggleRow({ last: true, label: "Notify me about updates", checked: true }),
+      ];
+    },
+    plug() {
+      return [ itemList({ first: true, last: true, show: true, rows: [
+        { icon: "extension", label: "Lyrics", sub: "Enabled", on: true, trailing: "settings" },
+        { icon: "extension", label: "Weather", sub: "Enabled", on: true, trailing: "settings" },
+        { icon: "extension", label: "Media controls", sub: "Disabled", subOutline: true, trailing: "settings" },
+      ] }) ];
+    },
+  };
+  const generic = p => () => [
+    navRow({ first: true, icon: p.icon, label: p.label, sub: p.desc }),
+    toggleRow({ label: "Example option", sub: "Placeholder row so the page isn't empty", checked: true }),
+    actionRow({ last: true, icon: "restart_alt", label: "Reset to defaults" }),
+  ];
+
+  const inner = document.getElementById("pageInner");
+  const title = document.getElementById("pageTitle");
+  function renderPage(animate) {
+    const p = PAGES[state.current];
+    title.textContent = p.label;
+    inner.replaceChildren(...(BUILD[p.id] || generic(p))());
+    if (animate) { inner.classList.remove("page-swap"); void inner.offsetWidth; inner.classList.add("page-swap"); }
+  }
+
+  /* ---------- search filters the nav ---------- */
+  document.getElementById("search").addEventListener("input", e => {
+    const q = e.target.value.trim().toLowerCase();
+    navItems.forEach((n, i) => { const p = PAGES[i]; n.hidden = !!q && !(p.label + " " + p.desc).toLowerCase().includes(q); });
+  });
+
+  /* ---------- strip toggles ---------- */
+  const annotBtn = document.getElementById("annotBtn"), slowBtn = document.getElementById("slowBtn");
+  annotBtn.addEventListener("click", () => {
+    const v = annotBtn.getAttribute("aria-pressed") !== "true";
+    annotBtn.setAttribute("aria-pressed", v); document.body.classList.toggle("annot", v);
+  });
+  slowBtn.addEventListener("click", () => {
+    const v = slowBtn.getAttribute("aria-pressed") !== "true";
+    slowBtn.setAttribute("aria-pressed", v); document.documentElement.style.setProperty("--t", v ? 4 : 1);
+  });
+
+  paintNav(); renderPage(false);
+})();
+</script>

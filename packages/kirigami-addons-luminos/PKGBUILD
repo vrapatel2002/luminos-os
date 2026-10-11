@@ -1,0 +1,65 @@
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+#
+# [CHANGE: claude-code | 2026-10-11] LUMINOS FORK — DECISION 140 (Phase 3).
+# Arch's stock kirigami-addons PKGBUILD (tag 1.13.1-1) plus one patch:
+# kirigami-addons-luminos-connectedrect.patch turns every FormCard into Nexus
+# ConnectedRects — each delegate is its own rounded rect (first 28 top, last 28
+# bottom, touching 4), 2 px apart, colour Theme.alternateBackgroundColor (View);
+# no card border/shadow, FormDelegateSeparator hidden. FormHeader untouched.
+# FormButtonDelegate / FormTextDelegate leading icons sit in the Nexus icon disc.
+# 1.2: rect Repeater driven by a count (height changes only move rects); back-to-back
+# FormCards get a 14 px gap.
+# pkgrel 1.N sorts ABOVE the repo's 1; when Arch ships a newer pkgver the repo
+# wins and /etc/pacman.d/hooks/luminos-kirigami-addons.hook warns — rebase then.
+# QML is compiled into the plugin (qmldir prefer :/), so editing on-disk QML does nothing.
+#
+#   Rebuild:  makepkg -f && sudo pacman -U kirigami-addons-*-1.N-*.pkg.tar.zst
+#   Revert:   sudo pacman -U /var/cache/pacman/pkg/kirigami-addons-1.13.1-1-x86_64.pkg.tar.zst
+
+pkgname=kirigami-addons
+pkgver=1.13.1
+pkgrel=1.2
+pkgdesc='Add-ons for the Kirigami framework'
+url='https://invent.kde.org/libraries/kirigami-addons'
+arch=(x86_64)
+license=(GPL-2.0-or-later
+         LGPL-2.1-or-later)
+depends=(glibc
+         kcolorscheme
+         kconfig
+         kcoreaddons
+         kcrash
+         kglobalaccel
+         kguiaddons
+         ki18n
+         kiconthemes
+         kirigami
+         kitemmodels
+         ksvg
+         libstdc++
+         qt6-base
+         qt6-declarative
+         qt6-multimedia
+         sonnet)
+makedepends=(extra-cmake-modules)
+source=(https://download.kde.org/stable/$pkgname/$pkgname-$pkgver.tar.xz{,.sig}
+        kirigami-addons-luminos-connectedrect.patch)
+sha256sums=('76026f0abe8c948208ce75a02a9ecac60c618ac5288ca546e09da64bc4af7050'
+            'SKIP'
+            'ae9f9f31cc339b4931f97e77c298c970e7166144e6ce075ddb1493f5e00b7010')
+validpgpkeys=(0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D  # Bhushan Shah (mykolab address) <bshah@mykolab.com>
+              39FFA93CAE9C6AFC212AD00202325448204E452A) # Carl Schwan <carl@carlschwan.eu>
+
+prepare() {
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/kirigami-addons-luminos-connectedrect.patch
+}
+
+build() {
+  cmake -B build -S $pkgname-$pkgver \
+    -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}

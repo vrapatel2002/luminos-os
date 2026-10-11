@@ -1,0 +1,80 @@
+diff --git a/src/delegates/IconTitleSubtitle.qml b/src/delegates/IconTitleSubtitle.qml
+index 95dabc0..632f43b 100644
+--- a/src/delegates/IconTitleSubtitle.qml
++++ b/src/delegates/IconTitleSubtitle.qml
+@@ -153,31 +153,61 @@ Item {
+      */
+     signal linkHovered(string link)
+ 
+-    implicitWidth: iconItem.implicitWidth + titleSubtitle.anchors.leftMargin + titleSubtitle.implicitWidth
+-    implicitHeight: Math.max(iconItem.implicitHeight, titleSubtitle.implicitHeight)
+-
+-    Primitives.Icon {
+-        id: iconItem
++    // [CHANGE: claude-code | 2026-10-11] LUMINOS DECISION 140 — Nexus "icon disc".
++    // When the row has an icon, it sits centred in a round disc of
++    // max(40, icon + 16) logical px. Colours come only from Kirigami.Theme:
++    //   disc  = highlightColor (Selection bg = M3 secondaryContainer)
++    //   glyph = highlightedTextColor (Selection fg = onSecondaryContainer)
++    // selected row: disc = focusColor (primary), glyph = onPrimary, derived from
++    // focusColor's hue (M3 onPrimary is tone ~27 of the primary hue).
++    // An explicit icon.color set by the app still wins. No icon -> stock layout.
++    readonly property bool __luminosDisc: root.icon.width > 0
++        && (root.icon.name.length > 0 || (!!root.icon.source && root.icon.source.toString().length > 0))
++    readonly property real __luminosDiscSize: __luminosDisc ? Math.max(40, root.icon.width + 16) : root.icon.width
++    readonly property color __luminosOnPrimary: Qt.hsla(Math.max(0, Platform.Theme.focusColor.hslHue),
++        Platform.Theme.focusColor.hslSaturation * 0.4, 0.27, 1)
++
++    implicitWidth: discItem.width + titleSubtitle.anchors.leftMargin + titleSubtitle.implicitWidth
++    implicitHeight: Math.max(__luminosDisc ? __luminosDiscSize : iconItem.implicitHeight, titleSubtitle.implicitHeight)
++
++    Rectangle {
++        id: discItem
+ 
+         anchors {
+             left: parent.left
+-            top: parent.top
+-            bottom: parent.bottom
++            verticalCenter: parent.verticalCenter
++        }
++        width: root.__luminosDiscSize
++        height: root.__luminosDisc ? root.__luminosDiscSize : parent.height
++        radius: height / 2
++        color: !root.__luminosDisc ? "transparent"
++            : (root.selected ? Platform.Theme.focusColor : Platform.Theme.highlightColor)
++        Behavior on color {
++            ColorAnimation { duration: Platform.Units.longDuration; easing.type: Easing.OutCubic }
+         }
+ 
+-        source: root.icon.name.length > 0 ? root.icon.name : root.icon.source
+-        implicitWidth: root.icon.width
+-        implicitHeight: root.icon.height
+-        selected: root.selected
+-        color: root.icon.color
++        Primitives.Icon {
++            id: iconItem
++
++            anchors.centerIn: parent
++            width: root.icon.width
++            height: root.__luminosDisc ? root.icon.height : parent.height
++
++            source: root.icon.name.length > 0 ? root.icon.name : root.icon.source
++            implicitWidth: root.icon.width
++            implicitHeight: root.icon.height
++            selected: root.selected
++            color: (root.icon.color.a > 0 || !root.__luminosDisc) ? root.icon.color
++                : (root.selected ? root.__luminosOnPrimary : Platform.Theme.highlightedTextColor)
++        }
+     }
+ 
+     TitleSubtitle {
+         id: titleSubtitle
+ 
+         anchors {
+-            left: iconItem.right
+-            leftMargin: root.icon.width > 0 ? Platform.Units.mediumSpacing : 0
++            left: discItem.right
++            leftMargin: root.icon.width > 0 ? (root.__luminosDisc ? 12 : Platform.Units.mediumSpacing) : 0
+             top: parent.top
+             bottom: parent.bottom
+             right: parent.right

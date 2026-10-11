@@ -1,0 +1,77 @@
+# Luminos fork of systemsettings (maintained in ~/luminos-os).
+# Based on Arch PKGBUILD by Felix Yan / Antonio Rojas (gitlab.archlinux.org/archlinux/packaging/packages/systemsettings).
+#
+# [CHANGE: claude-code | 2026-10-11] LUMINOS FORK — DECISION 140 (Phase 3 "the mockup, for real").
+# Stock systemsettings plus one patch: the Nexus sidebar (search pill, grey category labels,
+# two-line rows with icon discs + connected corners + selected pill, chevrons) and the page
+# drawn in a rounded "hole" (View colour, r16, 12 px inset) on the Window colour, 30 px title.
+# [CHANGE: claude-code | 2026-10-11] 1.2: review fixes (corner overlay raise, title font outside paint, top-level pages only, no corner anim while scrolling).
+# Do not "clean up" the pkgrel: 1.x sorts ABOVE the repo's 1. When upstream moves to a new
+# pkgver the repo wins again; /etc/pacman.d/hooks/luminos-systemsettings.hook warns.
+# QML is compiled into the binary (qt_add_qml_module), so editing files on disk does nothing.
+#
+#   Rebuild:  makepkg -si
+#   Revert:   sudo pacman -U /var/cache/pacman/pkg/systemsettings-6.7.5-1-x86_64.pkg.tar.zst
+#
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+pkgname=systemsettings
+pkgver=6.7.5
+_dirver=$(echo $pkgver | cut -d. -f1-3)
+pkgrel=1.2
+pkgdesc='KDE system manager for hardware, software, and workspaces'
+arch=(x86_64)
+url='https://kde.org/plasma-desktop/'
+license=(LGPL-2.0-or-later)
+depends=(glibc
+         plasma-activities
+         kauth
+         kcmutils
+         kcolorscheme
+         kconfig
+         kconfigwidgets
+         kcoreaddons
+         kcrash
+         kdbusaddons
+         ki18n
+         kio
+         kirigami
+         kitemmodels
+         kitemviews
+         kjobwidgets
+         krunner
+         kservice
+         kwidgetsaddons
+         kwindowsystem
+         kxmlgui
+         libstdc++
+         qt6-base
+         qt6-declarative)
+makedepends=(extra-cmake-modules
+             kdoctools)
+groups=(plasma)
+source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig}
+        systemsettings-luminos-nexus-sidebar.patch)
+sha256sums=('317a21165709d61796fba19f5454397577ffd8aa96655b29dd286a1df252cddb'
+            'SKIP'
+            '8914feeeb690a3f2fcb3f4c2d5cc2774937aa6bce6d59f15a23d3a58efb5c4df')
+validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
+              '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
+              'D07BD8662C56CB291B316EB2F5675605C74E02CF'  # David Edmundson <davidedmundson@kde.org>
+              '1FA881591C26B276D7A5518EEAAF29B42A678C20') # Marco Martin <notmart@gmail.com>
+
+prepare() {
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/systemsettings-luminos-nexus-sidebar.patch
+}
+
+build() {
+  cmake -B build  -S $pkgname-$pkgver \
+    -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}

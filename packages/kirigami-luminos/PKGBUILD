@@ -18,10 +18,15 @@
 # impossible — Kirigami exposes them as read-only QML properties and reads no
 # config file. With the environment unset the package behaves exactly like
 # stock. Live values are set in /etc/environment.
+#
+# [CHANGE: claude-code | 2026-10-11] DECISION 140 (Phase 3) — pkgrel 1.2 adds
+# kirigami-luminos-icondisc.patch: IconTitleSubtitle draws its icon inside a round
+# Nexus "icon disc" (Theme.highlightColor; focusColor when selected). Only when
+# an icon is present. QML is compiled in (qmldir prefer :/), so it needs this rebuild.
 
 pkgname=kirigami
 pkgver=6.30.0
-pkgrel=1.1
+pkgrel=1.2
 pkgdesc='A QtQuick based components set'
 arch=(x86_64)
 url='https://develop.kde.org/products/frameworks/'
@@ -39,15 +44,18 @@ makedepends=(doxygen
              qt6-tools)
 groups=(kf6)
 source=(https://download.kde.org/stable/frameworks/${pkgver%.*}/$pkgname-$pkgver.tar.xz{,.sig}
-        kirigami-luminos-units.patch)
+        kirigami-luminos-units.patch
+        kirigami-luminos-icondisc.patch)
 sha256sums=('6de811e559c20dc1086c0cf2c34bb98712dbe4d45f960c62c3c3f887332c95f8'
             'SKIP'
-            '992c86c174d4e2d5873d66dd9a6d86594e9883916e618d436dace6412c39e1b9')
+            '992c86c174d4e2d5873d66dd9a6d86594e9883916e618d436dace6412c39e1b9'
+            'd45fdde7c2e664fcacf78cccd83798d201200b40083b728d54db43d48489a4b8')
 validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB  # David Faure <faure@kde.org>
               90A968ACA84537CC27B99EAF2C8DF587A6D4AAC1) # Nicolas Fella <nicolas.fella@kde.org>
 
 prepare() {
   patch -p1 -d $pkgname-$pkgver < "$srcdir"/kirigami-luminos-units.patch
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/kirigami-luminos-icondisc.patch
 }
 
 build() {

@@ -55,3 +55,18 @@ Deps: kdecoration, Qt6, KF6 already installed + AUR `darkly`. Nothing else.
 | `scripts/luminos-windowstyle-check`, `tests/windowstyle/*` | test writer only |
 Two workers touch `luminos-ubuntu-look`: font worker owns FONT lines, icon worker owns ICON lines — edit only your lines, re-read the file right before editing.
 Checker budget raised to **320 lines** (bash + helpers). Patch packages: pkgrel `<n>.1`, hook warns when stock replaces them.
+
+---
+## Phase 3 contracts (frozen 2026-10-11 18:40)
+| Path | Owner |
+|---|---|
+| `packages/qqc2-desktop-style-luminos/` (new patch file `qqc2-luminos-nexus-rows.patch`, pkgrel 1.3) | qqc2 worker |
+| `packages/kirigami-luminos/` (add `kirigami-luminos-icondisc.patch`, pkgrel 1.2), `packages/kirigami-addons-luminos/` (+hook) | kirigami worker |
+| `packages/systemsettings-luminos/` (+hook) | systemsettings worker |
+| `packages/darkly-luminos/` (+hook) | darkly worker |
+| `scripts/luminos-windowstyle-check`, `tests/windowstyle/*` | test writer only (budget raised to 450 lines) |
+Shared rules: one hook per fork in `config/pacman-hooks/luminos-<pkg>.hook` (warn when pkgrel loses `.N`, exit 0).
+Patches pinned by sha256. Colours ONLY from the palette/Kirigami.Theme (never hex in QML) — they already map to
+Caelestia (Window #1c1b1f, View #131317, Alternate #201f23, Button #2a292e, Selection #45455c, Highlight/focus #c2c1ff).
+Token numbers (logical px): 4 / 12 / 16 / 28 / 32 radii; 2 px row inset; 4 px group gap; animation 350–500 ms.
+Reference mock: `docs/windowstyle/mock/nexus-replica.html` (CSS = ground truth for sizes).

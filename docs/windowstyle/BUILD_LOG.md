@@ -12,3 +12,8 @@
 - Tester/implementer disagreement on icons-mono: probe counted Inkscape namedview colours → probe bug, fixed by test writer.
 - Reviewer (Fable): 9 findings — login persist dead heal + Yaru colour clobber, ubuntu-look Yaru apply, revert gaps, sudo hang, fc_family crash, thumb jump, maintainer label. All fixed; qqc2 → 1.2; checker accepts -1.N.
 - Checker 17/17. Budgets: windowstyle 147/150, checker 320/320.
+- 10-11 17:47 Shawn: paint pass "no where close" — wants Nexus's layout. Explained Nexus from its QML; built HTML mock; swapped in KDE's real sidebar/pages; Shawn: "now we have actual end product … make this exact thing for all … light weight".
+- Phase 3 workers (Opus high ×4 + test writer): qqc2 rows/slider/radio, kirigami disc + kirigami-addons FormCard, systemsettings sidebar/hole, darkly QtWidgets rows. All installed as forks with warn-only hooks.
+- Tester/implementer disagreement ×2, both probe bugs: rows probe measured clamped 24 px rows (spec amended: radius = min(token, h/2)); FormCard probe grabbed `background: null`.
+- Reviewer (Fable): 9 findings (combobox popups, alternating rows, O(n·visible) lookups, hole corners z-order, paint-time setFont, nested page restyle, ON-switch pill, Behaviors on recycle, FormCard Repeater churn) → all fixed.
+- Checker 25/25 (+1 SKIP while Shawn's System Settings is open). Spawns this round: 6.

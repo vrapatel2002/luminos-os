@@ -1,0 +1,668 @@
+diff -ruN a/app/MenuModel.cpp b/app/MenuModel.cpp
+--- a/app/MenuModel.cpp	2026-10-11 18:38:55.186311376 -0400
++++ b/app/MenuModel.cpp	2026-10-11 18:38:55.494516748 -0400
+@@ -83,6 +83,7 @@
+     names[IconNameRole] = "iconName";
+     names[IsRelevantRole] = "isRelevant";
+     names[AuxiliaryActionRole] = "auxiliaryAction";
++    names[CommentRole] = "comment";
+     return names;
+ }
+ 
+@@ -190,6 +191,22 @@
+     case MenuModel::IsRelevantRole:
+         theData.setValue(!mi->moduleData() || mi->moduleData()->isRelevant());
+         break;
++    case MenuModel::CommentRole: {
++        // [CHANGE: claude-code | 2026-10-11] Luminos (DECISION 140): KCM description, or the
++        // children's names when a category has no Comment of its own.
++        QString text = mi->comment();
++        if (text.isEmpty() && mi->menu()) {
++            QStringList names;
++            for (MenuItem *child : mi->children()) {
++                if (!child->isCategoryOwner() && names.size() < 4) {
++                    names << child->name();
++                }
++            }
++            text = names.join(QStringLiteral(", "));
++        }
++        theData.setValue(text);
++        break;
++    }
+     case MenuModel::AuxiliaryActionRole:
+         if (mi->moduleData()) {
+             theData.setValue(QVariant::fromValue(mi->moduleData()->auxiliaryAction()));
+diff -ruN a/app/MenuModel.h b/app/MenuModel.h
+--- a/app/MenuModel.h	2026-10-11 18:38:55.186445719 -0400
++++ b/app/MenuModel.h	2026-10-11 18:38:55.492529261 -0400
+@@ -53,6 +53,8 @@
+         IsRelevantRole,
+ 
+         AuxiliaryActionRole,
++
++        CommentRole, // [CHANGE: claude-code | 2026-10-11] Luminos: second line in the sidebar
+     };
+ 
+     /**
+diff -ruN a/app/ModuleView.cpp b/app/ModuleView.cpp
+--- a/app/ModuleView.cpp	2026-10-11 18:38:55.186906487 -0400
++++ b/app/ModuleView.cpp	2026-10-11 19:34:17.320815072 -0400
+@@ -13,6 +13,14 @@
+ #include <QDesktopServices>
+ #include <QDialogButtonBox>
+ #include <QKeyEvent>
++#include <QLabel>
++#include <QQmlContext>
++#include <QQmlListReference>
++#include <QQmlProperty>
++#include <QQuickItem>
++#include <QQuickWidget>
++#include <QTimer>
++#include <QPainterPath>
+ #include <QLoggingCategory>
+ #include <QMap>
+ #include <QPainter>
+@@ -40,6 +48,88 @@
+ 
+ #include <cmath>
+ 
++// [CHANGE: claude-code | 2026-10-11] Luminos Nexus "hole" (DECISION 140). The page (View colour)
++// sits in a 16 px rounded rect, 12 px in from the window edges, on the Window colour. Child
++// widgets (QQuickWidget KCMs) paint square, so this overlay repaints the four corners on top.
++static constexpr int LuminosHoleInset = 12;
++static constexpr qreal LuminosHoleRadius = 16;
++
++static QPainterPath luminosHoleCorners(const QRectF &r)
++{
++    QPainterPath outer;
++    outer.addRect(r);
++    QPainterPath inner;
++    inner.addRoundedRect(r, LuminosHoleRadius, LuminosHoleRadius);
++    return outer.subtracted(inner);
++}
++
++// QML KCMs: draw the page on View (the hole) instead of Window, drop the header strip's colour
++// and line, and give the page title the mock's 30 px. Kirigami.Theme.View == 0.
++static void luminosRestyleQmlKcm(QWidget *widget, bool lastTry)
++{
++    static bool warned = false;
++    auto warnOnce = [](const char *what) {
++        if (!warned) {
++            warned = true;
++            qWarning() << "luminos: KCM restyle skipped," << what << "not found (Kirigami internals changed?)";
++        }
++    };
++    auto qqw = qobject_cast<QQuickWidget *>(widget);
++    qqw = qqw ? qqw : widget->findChild<QQuickWidget *>();
++    QObject *root = qqw ? qqw->rootObject() : nullptr;
++    QObject *pageRow = root ? root->property("pageStack").value<QObject *>() : nullptr;
++    auto toolBar = pageRow ? pageRow->property("globalToolBar").value<QObject *>() : nullptr;
++    if (!toolBar) {
++        return warnOnce("pageStack.globalToolBar");
++    }
++    toolBar->setProperty("colorSet", 0);
++    toolBar->setProperty("separatorVisible", false);
++    QQmlListReference pages(pageRow, "items");
++    bool titled = false;
++    for (qsizetype i = 0; i < pages.count(); ++i) { // only the KCM's own top-level pages
++        QObject *page = pages.at(i);
++        QQmlProperty(page, QStringLiteral("Kirigami.Theme.colorSet"), qmlContext(root)).write(0);
++        QList<QQuickItem *> todo{page->property("globalToolBarItem").value<QQuickItem *>()};
++        while (!todo.isEmpty()) {
++            QQuickItem *o = todo.takeLast();
++            if (!o) {
++                continue;
++            }
++            todo << o->childItems();
++            if (QByteArray(o->metaObject()->className()).startsWith("Heading") && o->parentItem()
++                && QByteArray(o->parentItem()->metaObject()->className()).startsWith("DefaultPageTitleDelegate")) {
++                QFont f = o->property("font").value<QFont>();
++                f.setPixelSize(30);
++                f.setWeight(QFont::Normal);
++                o->setProperty("font", f);
++                titled = true;
++            }
++        }
++    }
++    if (lastTry && !titled && pages.count() > 0) {
++        warnOnce("DefaultPageTitleDelegate heading");
++    }
++}
++
++class LuminosHoleCorners : public QWidget
++{
++public:
++    explicit LuminosHoleCorners(QWidget *parent)
++        : QWidget(parent)
++    {
++        setAttribute(Qt::WA_TransparentForMouseEvents);
++        setAttribute(Qt::WA_NoSystemBackground);
++    }
++
++protected:
++    void paintEvent(QPaintEvent *) override
++    {
++        QPainter p(this);
++        p.setRenderHint(QPainter::Antialiasing);
++        p.fillPath(luminosHoleCorners(rect()), palette().color(QPalette::Window));
++    }
++};
++
+ class CustomTitle : public KTitleWidget
+ {
+     Q_OBJECT
+@@ -50,6 +140,10 @@
+     void changeEvent(QEvent *event) override;
+     void paintEvent(QPaintEvent *event) override;
+     void colorsChanged();
++
++public:
++    void setTitle(const QString &text); // [CHANGE: claude-code | 2026-10-11] Luminos 30 px title
++    void applyTitleFont();
+ };
+ 
+ CustomTitle::CustomTitle(QWidget *parent)
+@@ -60,7 +154,7 @@
+     // 18px is Standard Kirigami gridUnit for 10pt Noto Sans.
+     // TODO: make this use a real gridUnit so it will adjust to the user's font,
+     // once we have a QmlEngine object such that  using it won't risk crashes!
+-    setContentsMargins(18,
++    setContentsMargins(28, // [CHANGE: claude-code | 2026-10-11] Luminos: mock .page padding
+                        style()->pixelMetric(QStyle::PM_LayoutTopMargin),
+                        style()->pixelMetric(QStyle::PM_LayoutRightMargin),
+                        style()->pixelMetric(QStyle::PM_LayoutBottomMargin));
+@@ -70,6 +164,11 @@
+ 
+ void CustomTitle::changeEvent(QEvent *event)
+ {
++    if (event->type() == QEvent::FontChange || event->type() == QEvent::StyleChange) {
++        KTitleWidget::changeEvent(event);
++        applyTitleFont();
++        return;
++    }
+     if (event->type() == QEvent::PaletteChange) {
+         colorsChanged();
+         return; // deliberately intercept
+@@ -113,8 +212,26 @@
+                                              qBound(0.0, linearlyInterpolateDouble(window.saturation(), text.saturation(), balance), 255.0),
+                                              qBound(0.0, linearlyInterpolateDouble(window.value(), text.value(), balance), 255.0),
+                                              qBound(0.0, linearlyInterpolateDouble(window.alpha(), text.alpha(), balance), 255.0));
+-    p.fillRect(event->rect(), window);
+-    p.fillRect(QRect(QPoint(0, height() - 1), QSize(width(), 1)), separator);
++    Q_UNUSED(separator) // [CHANGE: claude-code | 2026-10-11] Luminos: no Header strip, no separator line
++}
++
++void CustomTitle::setTitle(const QString &text)
++{
++    setText(text);
++    applyTitleFont();
++}
++
++void CustomTitle::applyTitleFont()
++{
++    // Luminos: ~30 px page title like the mock's h2 (re-applied on font/style changes).
++    for (QLabel *label : findChildren<QLabel *>()) {
++        QFont f = label->font();
++        if (f.pixelSize() != 30) {
++            f.setPixelSize(30);
++            f.setWeight(QFont::Normal);
++            label->setFont(f);
++        }
++    }
+ }
+ 
+ class ModuleView::Private
+@@ -141,6 +258,7 @@
+     bool mDefaultsIndicatorsVisible = false;
+     KCModule::Buttons mButtonMask = ~KCModule::Buttons(KCModule::NoAdditionalButton);
+     KAuth::Action authAction;
++    QWidget *mHoleCorners = nullptr; // [CHANGE: claude-code | 2026-10-11] Luminos hole overlay
+ };
+ 
+ ModuleView::ModuleView(const std::shared_ptr<QQmlEngine> &engine, QWidget *parent)
+@@ -148,7 +266,7 @@
+     , d(new Private())
+ {
+     auto rootLayout = new QVBoxLayout(this);
+-    rootLayout->setContentsMargins(0, 0, 0, 0);
++    rootLayout->setContentsMargins(0, LuminosHoleInset, LuminosHoleInset, LuminosHoleInset);
+     rootLayout->setSpacing(0);
+     // Configure a layout first
+     d->mLayout = new QVBoxLayout();
+@@ -171,6 +289,7 @@
+     // Create the dialog
+     d->mButtons = new QDialogButtonBox(Qt::Horizontal, this);
+     d->mLayout->addWidget(d->mButtons);
++    d->mButtons->setContentsMargins(16, 8, 16, 12);
+ 
+     // Create the buttons in it
+     d->mApply = d->mButtons->addButton(QDialogButtonBox::Apply);
+@@ -215,6 +334,25 @@
+     });
+ 
+     d->engine = engine;
++    d->mHoleCorners = new LuminosHoleCorners(this);
++}
++
++void ModuleView::paintEvent(QPaintEvent *)
++{
++    QPainter p(this);
++    p.setRenderHint(QPainter::Antialiasing);
++    p.fillRect(rect(), palette().color(QPalette::Window));
++    p.setPen(Qt::NoPen);
++    p.setBrush(palette().color(QPalette::Base));
++    p.drawRoundedRect(QRectF(contentsRect()), LuminosHoleRadius, LuminosHoleRadius);
++}
++
++void ModuleView::resizeEvent(QResizeEvent *event)
++{
++    QWidget::resizeEvent(event);
++    const QRect hole = rect().adjusted(0, LuminosHoleInset, -LuminosHoleInset, -LuminosHoleInset);
++    d->mHoleCorners->setGeometry(hole);
++    d->mHoleCorners->raise();
+ }
+ 
+ ModuleView::~ModuleView()
+@@ -281,13 +419,17 @@
+     if (item->isExternalAppModule()) {
+         auto externalWidget = new ExternalAppModule(KService::Ptr(new KService(item->metaData().fileName())));
+         moduleScroll->setWidget(externalWidget);
+-        d->mCustomHeader->setText(item->metaData().name()); // We have to set this manually, BUG: 448672
++        d->mCustomHeader->setTitle(item->metaData().name()); // We have to set this manually, BUG: 448672
+         page->setName(QString());
+     } else { // It must be a normal module then
+         auto kcm = KCModuleLoader::loadModule(data, moduleScroll, QVariantList(args.begin(), args.end()), d->engine);
+         moduleScroll->setWidget(kcm->widget());
+         kcm->widget()->setAutoFillBackground(false);
+         kcm->load();
++        luminosRestyleQmlKcm(kcm->widget(), false);
++        QTimer::singleShot(400, kcm->widget(), [w = kcm->widget()] { // title header loads lazily
++            luminosRestyleQmlKcm(w, true);
++        });
+         connect(kcm, &KCModule::needsSaveChanged, this, &ModuleView::stateChanged);
+         connect(kcm, &KCModule::buttonsChanged, this, &ModuleView::updateButtons);
+         connect(kcm, &KCModule::representsDefaultsChanged, this, [this, kcm]() {
+@@ -303,6 +445,7 @@
+     updatePageIconHeader(page);
+     // Add the new page
+     d->mPageWidget->addPage(page);
++    d->mHoleCorners->raise(); // [CHANGE: claude-code | 2026-10-11] keep the hole corners on top
+ }
+ 
+ void ModuleView::updatePageIconHeader(KPageWidgetItem *page)
+@@ -328,7 +471,7 @@
+             d->mCustomHeader->hide();
+         }
+         if (!page->name().isEmpty()) {
+-            d->mCustomHeader->setText(page->name());
++            d->mCustomHeader->setTitle(page->name());
+             page->setHeaderVisible(false);
+         }
+         return;
+@@ -344,7 +487,7 @@
+     // Only affect visibility if it's the current page
+     if (d->mPageWidget->currentPage() == page) {
+         if (!isQml) {
+-            d->mCustomHeader->setText(moduleName); // also includes show()
++            d->mCustomHeader->setTitle(moduleName); // also includes show()
+         } else {
+             d->mCustomHeader->hide();
+         }
+diff -ruN a/app/ModuleView.h b/app/ModuleView.h
+--- a/app/ModuleView.h	2026-10-11 18:38:55.187058844 -0400
++++ b/app/ModuleView.h	2026-10-11 18:42:47.548140079 -0400
+@@ -165,6 +165,9 @@
+      * Reimplemented for internal reasons.\n
+      */
+     void keyPressEvent(QKeyEvent *event) override;
++    // [CHANGE: claude-code | 2026-10-11] Luminos (DECISION 140): page drawn in a rounded "hole".
++    void paintEvent(QPaintEvent *event) override;
++    void resizeEvent(QResizeEvent *event) override;
+ 
+ private:
+     bool resolveChanges(KCModule *currentProxy);
+diff -ruN a/app/qml/CategoriesPage.qml b/app/qml/CategoriesPage.qml
+--- a/app/qml/CategoriesPage.qml	2026-10-11 18:38:55.189016511 -0400
++++ b/app/qml/CategoriesPage.qml	2026-10-11 18:58:25.977304776 -0400
+@@ -16,14 +16,24 @@
+     id: mainColumn
+     readonly property bool searchMode: searchField.text.length > 0
+ 
+-    Kirigami.Theme.colorSet: Kirigami.Theme.View
++    // [CHANGE: claude-code | 2026-10-11] Luminos Nexus sidebar (DECISION 140): the sidebar sits on
++    // the Window colour; only the page "hole" is View-coloured.
++    Kirigami.Theme.colorSet: Kirigami.Theme.Window
+     Kirigami.Theme.inherit: false
+ 
+     header: Kirigami.AbstractApplicationHeader {
+         id: pageHeader
+ 
+         // TODO Plasma 6.6 align size to grid
+-        height: Math.round((sizeHelper.implicitHeight + Kirigami.Units.smallSpacing * 2) * systemsettings.devicePixelRatio) / systemsettings.devicePixelRatio
++        minimumHeight: 48 + 16 + 8
++        preferredHeight: minimumHeight
++        maximumHeight: minimumHeight
++        leftPadding: 16
++        rightPadding: 16
++        topPadding: 16
++        bottomPadding: 8
++        separatorVisible: false
++        background: Item {}
+ 
+         // Not visible; just to get its size so we can match this custom header
+         // with the height of a standard header
+@@ -38,7 +48,7 @@
+             // FIXME: left and right anchors shouldn't be needed here, but if
+             // they're removed, the layout doesn't span the full width
+             anchors.fill: parent
+-            spacing: Kirigami.Units.smallSpacing
++            spacing: 8
+ 
+             Keys.onDownPressed: event => {
+                 categoryView.currentIndex = 0;
+@@ -50,6 +60,15 @@
+ 
+                 focus: !Kirigami.InputMethod.willShowOnActive
+                 Layout.fillWidth: true
++                Layout.preferredHeight: 48
++                font.pixelSize: 16
++                background: Rectangle {
++                    radius: height / 2
++                    Kirigami.Theme.colorSet: Kirigami.Theme.View
++                    color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
++                    border.width: 1
++                    border.color: searchField.activeFocus ? Kirigami.Theme.focusColor : Qt.alpha(Kirigami.Theme.disabledTextColor, 0.45)
++                }
+                 onTextChanged: {
+                     systemsettings.searchModel.filterRegExp = text;
+                 }
+@@ -123,6 +142,9 @@
+         activeFocusOnTab: true
+         keyNavigationWraps: true
+         Accessible.role: Accessible.List
++        leftMargin: 16
++        rightMargin: 16
++        bottomMargin: 16
+ 
+         KeyNavigation.up: searchField
+         KeyNavigation.backtab: hamburgerMenuButton
+@@ -138,12 +160,20 @@
+ 
+         section {
+             property: "categoryDisplayRole"
+-            delegate: Kirigami.ListSectionHeader {
+-
++            delegate: QQC2.Label {
+                 required property string section
+ 
+                 width: ListView.view.width
+-                label: section
++                text: section
++                visible: section.length > 0
++                height: visible ? implicitHeight : 0
++                topPadding: 14
++                bottomPadding: 4
++                leftPadding: 18
++                font.pixelSize: 12
++                font.weight: Font.Medium
++                font.letterSpacing: 0.5
++                color: Kirigami.Theme.disabledTextColor
+             }
+         }
+ 
+@@ -159,6 +189,9 @@
+ 
+             text: model.display
+             icon.name: iconName
++            description: model.comment ?? ""
++            groupStart: index === 0 || ListView.previousSection !== ListView.section
++            groupEnd: index === ListView.view.count - 1 || ListView.nextSection !== ListView.section
+ 
+             showArrow: {
+                 if (!isCategory) {
+diff -ruN a/app/qml/CategoryItem.qml b/app/qml/CategoryItem.qml
+--- a/app/qml/CategoryItem.qml	2026-10-11 18:38:55.189528421 -0400
++++ b/app/qml/CategoryItem.qml	2026-10-11 19:32:31.664988575 -0400
+@@ -6,6 +6,7 @@
+ import QtQuick
+ import QtQuick.Controls
+ import QtQuick.Layouts
++import QtQuick.Shapes
+ import org.kde.kirigami as Kirigami
+ 
+ ItemDelegate {
+@@ -17,22 +18,88 @@
+     property real leadingPadding: 0
+     required property bool showDefaultIndicator
+     required property QtObject /*QAction*/ auxiliaryAction
+-
+-    width: ListView.view?.width ?? 0
++    // [CHANGE: claude-code | 2026-10-11] Luminos Nexus row (DECISION 140): second line,
++    // connected corners inside a group (28 outer / 4 touching / 32 selected / 12 pressed).
++    property string description: ""
++    property bool groupStart: true
++    property bool groupEnd: true
++    readonly property real cornerTop: pressed ? 12 : highlighted ? 32 : groupStart ? 28 : 4
++    readonly property real cornerBottom: pressed ? 12 : highlighted ? 32 : groupEnd ? 28 : 4
++
++    width: (ListView.view?.width ?? 0) - (ListView.view?.leftMargin ?? 0) - (ListView.view?.rightMargin ?? 0)
++
++    Kirigami.Theme.colorSet: Kirigami.Theme.Button
++    Kirigami.Theme.inherit: false
++
++    topInset: 2
++    bottomInset: 2
++    topPadding: 16 + topInset
++    bottomPadding: 16 + bottomInset
++    leftPadding: 16
++    rightPadding: 16
+ 
+     Accessible.name: text
+     Accessible.onPressAction: clicked()
+ 
++    background: Rectangle {
++        readonly property color base: delegate.highlighted ? Kirigami.Theme.highlightColor : Kirigami.Theme.backgroundColor
++        color: delegate.hovered && !delegate.highlighted ? Qt.tint(base, Qt.alpha(Kirigami.Theme.textColor, 0.08)) : base
++        topLeftRadius: delegate.cornerTop
++        topRightRadius: delegate.cornerTop
++        bottomLeftRadius: delegate.cornerBottom
++        bottomRightRadius: delegate.cornerBottom
++        Behavior on topLeftRadius { enabled: !(delegate.ListView.view?.moving ?? false); NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.38, 1.21, 0.22, 1.0, 1, 1] } }
++        Behavior on topRightRadius { enabled: !(delegate.ListView.view?.moving ?? false); NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.38, 1.21, 0.22, 1.0, 1, 1] } }
++        Behavior on bottomLeftRadius { enabled: !(delegate.ListView.view?.moving ?? false); NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.38, 1.21, 0.22, 1.0, 1, 1] } }
++        Behavior on bottomRightRadius { enabled: !(delegate.ListView.view?.moving ?? false); NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.38, 1.21, 0.22, 1.0, 1, 1] } }
++        Behavior on color { ColorAnimation { duration: 200 } }
++    }
++
+     contentItem: RowLayout {
+         spacing: Kirigami.Units.smallSpacing
+ 
+-        Kirigami.IconTitleSubtitle {
++        Rectangle { // icon disc
++            Layout.leftMargin: delegate.leadingPadding
++            Layout.alignment: Qt.AlignVCenter
++            implicitWidth: 40
++            implicitHeight: 40
++            radius: 20
++            color: delegate.highlighted ? Kirigami.Theme.focusColor : Kirigami.Theme.highlightColor
++            Behavior on color { ColorAnimation { duration: 200 } }
++            Kirigami.Icon {
++                anchors.centerIn: parent
++                width: Kirigami.Units.iconSizes.smallMedium
++                height: width
++                source: delegate.icon.name
++                isMask: true
++                color: delegate.highlighted ? Kirigami.Theme.highlightColor : Kirigami.Theme.highlightedTextColor
++            }
++        }
++
++        ColumnLayout {
+             id: titleItem
+             Layout.fillWidth: true
+-            Layout.leftMargin: delegate.leadingPadding
+-            icon: icon.fromControlsIcon(delegate.icon)
+-            title: delegate.text
+-            selected: delegate.selected
++            Layout.leftMargin: Kirigami.Units.smallSpacing
++            spacing: 1
++            Label {
++                Layout.fillWidth: true
++                text: delegate.text
++                elide: Text.ElideRight
++                textFormat: Text.PlainText
++                color: Kirigami.Theme.textColor
++                font.pixelSize: 16
++            }
++            Label {
++                Layout.fillWidth: true
++                visible: text.length > 0
++                text: delegate.description
++                elide: Text.ElideRight
++                maximumLineCount: 1
++                textFormat: Text.PlainText
++                color: Kirigami.Theme.textColor
++                opacity: 0.75
++                font.pixelSize: 13
++            }
+         }
+ 
+         Kirigami.Badge {
+@@ -50,7 +117,7 @@
+             ToolButton {
+                 implicitWidth: height
+                 implicitHeight: titleItem.height
+-                icon.color: delegate.selected || pressed || visualFocus ? palette.highlight : palette.buttonText
++                icon.color: Kirigami.Theme.textColor
+ 
+                 display: AbstractButton.IconOnly
+                 text: delegate.auxiliaryAction.text
+@@ -102,15 +169,24 @@
+             }
+         }
+ 
+-        Kirigami.Icon {
++        Shape { // Material chevron_right, drawn so it does not depend on the icon theme
+             Layout.alignment: Qt.AlignVCenter
+-            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+-            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+-
+-            opacity: delegate.showArrow ? 0.7 : 0.0
+-            source: LayoutMirroring.enabled ? "go-next-symbolic-rtl" : "go-next-symbolic"
+-            selected: delegate.selected
++            Layout.preferredWidth: 20
++            Layout.preferredHeight: 20
++            opacity: delegate.showArrow ? 1 : 0
+             visible: !delegate.auxiliaryAction?.visible ?? true
++            transform: Scale { origin.x: 10; xScale: delegate.mirrored ? -1 : 1 }
++            preferredRendererType: Shape.CurveRenderer
++            ShapePath {
++                strokeColor: Kirigami.Theme.textColor
++                strokeWidth: 1.8
++                fillColor: "transparent"
++                capStyle: ShapePath.RoundCap
++                joinStyle: ShapePath.RoundJoin
++                startX: 8; startY: 5
++                PathLine { x: 13; y: 10 }
++                PathLine { x: 8; y: 15 }
++            }
+         }
+     }
+ }
+diff -ruN a/app/qml/HamburgerMenuButton.qml b/app/qml/HamburgerMenuButton.qml
+--- a/app/qml/HamburgerMenuButton.qml	2026-10-11 18:38:55.190780634 -0400
++++ b/app/qml/HamburgerMenuButton.qml	2026-10-11 19:04:38.673363387 -0400
+@@ -15,6 +15,23 @@
+ QQC2.ToolButton {
+     icon.name: "application-menu"
+ 
++    // [CHANGE: claude-code | 2026-10-11] Luminos (DECISION 140): round icon button.
++    implicitWidth: 40
++    implicitHeight: 40
++    contentItem: Kirigami.Icon {
++        implicitWidth: Kirigami.Units.iconSizes.smallMedium
++        implicitHeight: implicitWidth
++        source: "application-menu"
++        isMask: true
++        color: Kirigami.Theme.textColor
++    }
++    background: Rectangle {
++        radius: width / 2
++        color: Kirigami.Theme.textColor
++        opacity: parent.pressed || parent.checked ? 0.14 : parent.hovered ? 0.08 : 0
++        Behavior on opacity { NumberAnimation { duration: 200 } }
++    }
++
+     checkable: true
+     checked: systemsettings.actionMenuVisible
+     onToggled: if (checked) {
+diff -ruN a/app/qml/Main.qml b/app/qml/Main.qml
+--- a/app/qml/Main.qml	2026-10-11 18:38:55.192301529 -0400
++++ b/app/qml/Main.qml	2026-10-11 19:34:22.368857874 -0400
+@@ -30,6 +30,7 @@
+         }
+         Kirigami.Theme.inherit: false
+         Kirigami.Theme.colorSet: Kirigami.Theme.Header
++        visible: false // [CHANGE: claude-code | 2026-10-11] Luminos (DECISION 140): no strip, no separators
+         color: Kirigami.Theme.backgroundColor
+         width: separator.width
+         height: sideBar.pageStack.currentItem?.header.height
+@@ -43,6 +44,7 @@
+     }
+ 
+     Kirigami.Separator {
++        visible: false
+         z: 1
+         anchors {
+             top: parent.top
+@@ -56,6 +58,7 @@
+ 
+     Kirigami.Separator {
+         id: separator
++        visible: false
+         z: 1
+         anchors {
+             top: parent.top
+diff -ruN a/app/qml/SideBarItem.qml b/app/qml/SideBarItem.qml
+--- a/app/qml/SideBarItem.qml	2026-10-11 18:38:55.192458955 -0400
++++ b/app/qml/SideBarItem.qml	2026-10-11 18:41:37.442039205 -0400
+@@ -12,7 +12,7 @@
+ Kirigami.ApplicationItem {
+     id: root
+ 
+-    implicitWidth: wideScreen ? Kirigami.Units.gridUnit * 30 :  Kirigami.Units.gridUnit * 15
++    implicitWidth: wideScreen ? 2 * (330 + 32) : 330 + 32 // [CHANGE: claude-code | 2026-10-11] Luminos: mock nav width
+     wideScreen: pageStack.depth > 1 && systemsettings.width > Kirigami.Units.gridUnit * 70
+ 
+     pageStack.initialPage: mainColumn
+diff -ruN a/app/qml/SubCategoryPage.qml b/app/qml/SubCategoryPage.qml
+--- a/app/qml/SubCategoryPage.qml	2026-10-11 18:38:55.192707092 -0400
++++ b/app/qml/SubCategoryPage.qml	2026-10-11 18:41:37.441877280 -0400
+@@ -18,7 +18,7 @@
+     id: subCategoryColumn
+     title: systemsettings.subCategoryModel.title
+ 
+-    Kirigami.Theme.colorSet: Kirigami.Theme.View
++    Kirigami.Theme.colorSet: Kirigami.Theme.Window // [CHANGE: claude-code | 2026-10-11] Luminos DECISION 140
+     Kirigami.Theme.inherit: false
+ 
+     header: Kirigami.AbstractApplicationHeader {
+@@ -125,6 +125,9 @@
+         id: subCategoryView
+ 
+         anchors.fill: parent
++        leftMargin: 16
++        rightMargin: 16
++        bottomMargin: 16
+         model: systemsettings.subCategoryModel
+         currentIndex: systemsettings.activeSubCategoryRow
+         activeFocusOnTab: true
+@@ -182,6 +185,9 @@
+ 
+             text: model.display
+             icon.name: model.iconName
++            description: model.comment ?? ""
++            groupStart: index === 0
++            groupEnd: index === ListView.view.count - 1
+ 
+             // Indent items that are children of other KCMs within the same group
+             leadingPadding: depth > 2 ? (( depth - 2 ) * Kirigami.Units.iconSizes.smallMedium) + Kirigami.Units.largeSpacing : 0

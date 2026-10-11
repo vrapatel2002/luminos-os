@@ -1,0 +1,303 @@
+diff --git a/kstyle/darklystyle.cpp b/kstyle/darklystyle.cpp
+index b9eac1a..30cacd5 100644
+--- a/kstyle/darklystyle.cpp
++++ b/kstyle/darklystyle.cpp
+@@ -80,6 +80,45 @@
+ 
+ // #include <QDebug>
+ 
++// [LUMINOS] DECISION 140 (Phase 3): Nexus rows, M3 slider, M3 radio. Logical px, no animation.
++namespace
++{
++constexpr int LumRowOuter = 28, LumRowInner = 4, LumRowPill = 32, LumRowInset = 2;
++constexpr int LumTrack = 16, LumBar = LumTrack + 20, LumGap = 5;
++constexpr int LumGroupRole = 0x0a5b64ee; // KFilePlacesModel::GroupRole (Dolphin places sections)
++
++QPainterPath lumRoundRect(const QRectF &r, qreal tl, qreal tr, qreal br, qreal bl)
++{
++    const qreal m = qMin(r.width(), r.height()) / 2;
++    tl = qMin(tl, m), tr = qMin(tr, m), br = qMin(br, m), bl = qMin(bl, m);
++    QPainterPath p;
++    p.moveTo(r.left() + tl, r.top());
++    p.arcTo(r.right() - 2 * tr, r.top(), 2 * tr, 2 * tr, 90, -90);
++    p.arcTo(r.right() - 2 * br, r.bottom() - 2 * br, 2 * br, 2 * br, 0, -90);
++    p.arcTo(r.left(), r.bottom() - 2 * bl, 2 * bl, 2 * bl, 270, -90);
++    p.arcTo(r.left(), r.top(), 2 * tl, 2 * tl, 180, -90);
++    p.closeSubpath();
++    return p;
++}
++
++// is the visually adjacent row (step -1 above, +1 below) in the same group as index?
++bool lumNeighbour(const QModelIndex &index, int step, const QAbstractItemView *view)
++{
++    const QModelIndex idx = index.siblingAtColumn(0);
++    const QVariant group = idx.data(LumGroupRole);
++    if (const auto tree = qobject_cast<const QTreeView *>(view)) {
++        const QModelIndex n = step < 0 ? tree->indexAbove(idx) : tree->indexBelow(idx);
++        return n.isValid() && n.parent() == idx.parent() && n.data(LumGroupRole) == group;
++    }
++    const auto list = qobject_cast<const QListView *>(view);
++    for (int r = idx.row() + step; r >= 0 && r < idx.model()->rowCount(idx.parent()); r += step) {
++        if (!list->isRowHidden(r))
++            return idx.model()->index(r, 0, idx.parent()).data(LumGroupRole) == group;
++    }
++    return false;
++}
++}
++
+ namespace DarklyPrivate
+ {
+ 
+@@ -958,10 +997,10 @@ int Style::pixelMetric(PixelMetric metric, const QStyleOption *option, const QWi
+         return 2 * Metrics::TitleBar_MarginWidth + pixelMetric(PM_SmallIconSize, option, widget);
+ 
+     // sliders
+-    case PM_SliderThickness:
+-        return Metrics::Slider_ControlThickness;
++    case PM_SliderThickness: // [LUMINOS] room for the 36 px M3 bar handle
++        return LumBar;
+     case PM_SliderControlThickness:
+-        return Metrics::Slider_ControlThickness;
++        return LumBar;
+     case PM_SliderLength:
+         return Metrics::Slider_ControlThickness;
+ 
+@@ -3540,7 +3579,7 @@ QRect Style::sliderSubControlRect(const QStyleOptionComplex *option, SubControl
+ 
+     switch (subControl) {
+     case SC_SliderHandle: {
+-        QRect ret(centerRect(rect, Metrics::Slider_ControlThickness, Metrics::Slider_ControlThickness));
++        QRect ret(centerRect(rect, horizontal ? Metrics::Slider_ControlThickness : LumBar, horizontal ? LumBar : Metrics::Slider_ControlThickness)); // [LUMINOS]
+ 
+         constexpr int len = Metrics::Slider_ControlThickness;
+         const int sliderPos = sliderPositionFromValue(sliderOption->minimum,
+@@ -3562,9 +3601,9 @@ QRect Style::sliderSubControlRect(const QStyleOptionComplex *option, SubControl
+ 
+         // centering
+         if (horizontal) {
+-            grooveRect = centerRect(rect, grooveRect.width(), Metrics::Slider_GrooveThickness);
++            grooveRect = centerRect(rect, grooveRect.width(), LumTrack); // [LUMINOS]
+         } else {
+-            grooveRect = centerRect(rect, Metrics::Slider_GrooveThickness, grooveRect.height());
++            grooveRect = centerRect(rect, LumTrack, grooveRect.height());
+         }
+         return grooveRect;
+     }
+@@ -4837,6 +4876,58 @@ bool Style::drawPanelItemViewItemPrimitive(const QStyleOption *option, QPainter
+     const bool hasSolidBackground = !hasCustomBackground || viewItemOption->backgroundBrush.style() == Qt::SolidPattern;
+     const bool hasAlternateBackground(viewItemOption->features & QStyleOptionViewItem::Alternate);
+ 
++    // [LUMINOS] Nexus rows for list/tree views. Sidebars (Window-background or transparent viewport, e.g. Dolphin
++    // places): every row filled (Button tone) with connected corners from model neighbours (28 outer / 4 touching).
++    // Content views: stock unless selected/hovered, which get a pill (no neighbour lookups). Selected = 32 pill in
++    // Highlight, 2 px inset, hover 8 % overlay. Popups (combobox/completer), tables and grids stay stock.
++    const auto lumView = abstractItemView ? abstractItemView : qobject_cast<const QAbstractItemView *>(viewItemOption->widget);
++    const auto lumList = qobject_cast<const QListView *>(lumView);
++    if (lumView && !hasCustomBackground && lumView->window()->windowType() != Qt::Popup && !lumView->inherits("QComboBoxListView")
++        && (qobject_cast<const QTreeView *>(lumView) || (lumList && lumList->viewMode() == QListView::ListMode && lumList->flow() == QListView::TopToBottom))) {
++        const auto vp = lumView->viewport();
++        const bool sidebar = lumView->property(PropertyNames::sidePanelView).toBool() || vp->backgroundRole() == QPalette::Window
++            || !vp->autoFillBackground() || vp->palette().color(vp->backgroundRole()).alpha() == 0;
++        const bool hover = mouseOver && lumView->selectionMode() != QAbstractItemView::NoSelection;
++        if (sidebar || selected || hover) {
++            const QPalette::ColorGroup cg = !enabled ? QPalette::Disabled : active ? QPalette::Active : QPalette::Inactive;
++            const auto pos = viewItemOption->viewItemPosition;
++            const bool left = pos != QStyleOptionViewItem::Middle && pos != QStyleOptionViewItem::End;
++            const bool right = pos != QStyleOptionViewItem::Middle && pos != QStyleOptionViewItem::Beginning;
++            qreal top = LumRowPill, bot = LumRowPill;
++            if (sidebar && !selected && (left || right)) {
++                // views do not fill option.index (only QStyledItemDelegate does); custom delegates (Dolphin places) need indexAt.
++                // Neighbours are computed once per row: an End cell reuses what its row's Beginning cell found.
++                static struct {
++                    const void *view, *painter;
++                    int row;
++                    QModelIndex parent;
++                    bool above, below;
++                } cache{nullptr, nullptr, -1, {}, false, false};
++                const QModelIndex idx = viewItemOption->index.isValid() ? viewItemOption->index : lumView->indexAt(rect.center());
++                if (idx.isValid()) {
++                    if (!(pos == QStyleOptionViewItem::End && cache.view == lumView && cache.painter == painter && cache.row == idx.row()
++                          && cache.parent == idx.parent()))
++                        cache = {lumView, painter, idx.row(), idx.parent(), lumNeighbour(idx, -1, lumView), lumNeighbour(idx, 1, lumView)};
++                    top = cache.above ? LumRowInner : LumRowOuter;
++                    bot = cache.below ? LumRowInner : LumRowOuter;
++                }
++            }
++            painter->save();
++            if (!sidebar && hasAlternateBackground && !selected) {
++                painter->setPen(Qt::NoPen);
++                painter->fillRect(rect, palette.brush(cg, QPalette::AlternateBase));
++            }
++            const QPainterPath path = lumRoundRect(QRectF(rect).adjusted(0, LumRowInset, 0, -LumRowInset), left ? top : 0, right ? top : 0, right ? bot : 0, left ? bot : 0);
++            painter->setRenderHint(QPainter::Antialiasing);
++            if (selected || sidebar)
++                painter->fillPath(path, palette.color(cg, selected ? QPalette::Highlight : QPalette::Button));
++            if (hover)
++                painter->fillPath(path, _helper->alphaColor(palette.color(cg, selected ? QPalette::HighlightedText : sidebar ? QPalette::WindowText : QPalette::Text), 0.08));
++            painter->restore();
++            return true;
++        }
++    }
++
+     // do nothing if no background is to be rendered
+     if (!(mouseOver || selected || hasCustomBackground || hasAlternateBackground)) {
+         return true;
+@@ -4969,40 +5060,31 @@ bool Style::drawIndicatorCheckBoxPrimitive(const QStyleOption *option, QPainter
+ }
+ 
+ //___________________________________________________________________________________
+-bool Style::drawIndicatorRadioButtonPrimitive(const QStyleOption *option, QPainter *painter, const QWidget *widget) const
++bool Style::drawIndicatorRadioButtonPrimitive(const QStyleOption *option, QPainter *painter, const QWidget *) const
+ {
+-    // copy rect and palette
+-    const auto &rect(option->rect);
++    // [LUMINOS] M3 radio: unchecked = 2 px outline ring; checked = filled focus-colour disc with a check. No animation.
+     const auto &palette(option->palette);
+-
+-    // store flags
+-    const State &state(option->state);
+-    const bool enabled(state & State_Enabled);
+-    const bool mouseOver(enabled && (state & State_MouseOver));
+-    const bool sunken(state & State_Sunken);
+-    // const bool checked( state & State_On );
+-
+-    // radio button state
+-    RadioButtonState radioButtonState(state & State_On ? RadioOn : RadioOff);
+-
+-    // animation state
+-    _animations->widgetStateEngine().updateState(widget, AnimationHover, mouseOver);
+-    _animations->widgetStateEngine().updateState(widget, AnimationPressed, radioButtonState != RadioOff, AnimationOutBack);
+-    if (_animations->widgetStateEngine().isAnimated(widget, AnimationPressed))
+-        radioButtonState = RadioAnimated;
+-    const qreal animation(_animations->widgetStateEngine().opacity(widget, AnimationPressed));
+-
+-    // colors
+-    // const auto shadow( _helper->shadowColor( palette ) );
+-    // const AnimationMode mode( _animations->widgetStateEngine().isAnimated( widget, AnimationHover ) ? AnimationHover:AnimationNone );
+-    // const qreal opacity( _animations->widgetStateEngine().opacity( widget, AnimationHover ) );
+-    // QColor background = itemViewParent( widget ) ? palette.color( QPalette::Base ) : palette.color( QPalette::Window );
+-    // const auto background( checked ? palette.color( QPalette::Highlight ) : _helper->buttonBackgroundColor( palette, mouseOver, false, sunken, opacity, mode
+-    // ) ); const QColor color( palette.color( QPalette::HighlightedText ) );
+-    // render
+-    //_helper->renderRadioButtonBackground( painter, rect, background, sunken );
+-    _helper->renderRadioButton(painter, rect, palette, mouseOver, sunken, radioButtonState, false, animation);
+-
++    const bool enabled(option->state & State_Enabled);
++    const bool mouseOver(enabled && (option->state & State_MouseOver));
++    const qreal d = qMin(option->rect.width(), option->rect.height());
++    const QRectF r(QRectF(option->rect).center() - QPointF(d / 2, d / 2), QSizeF(d, d));
++    const QColor primary(enabled ? _helper->focusColor(palette) : _helper->alphaColor(palette.color(QPalette::WindowText), 0.38));
++    painter->save();
++    painter->setRenderHint(QPainter::Antialiasing);
++    if (option->state & State_On) {
++        painter->setPen(Qt::NoPen);
++        painter->setBrush(primary);
++        painter->drawEllipse(r);
++        painter->setPen(QPen(palette.color(QPalette::Window), qMax<qreal>(1.5, d / 9), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
++        painter->setBrush(Qt::NoBrush);
++        const QPointF o(r.topLeft());
++        painter->drawPolyline(QPolygonF({o + QPointF(0.28 * d, 0.52 * d), o + QPointF(0.43 * d, 0.67 * d), o + QPointF(0.72 * d, 0.36 * d)}));
++    } else {
++        painter->setPen(QPen(mouseOver ? primary : _helper->alphaColor(palette.color(QPalette::WindowText), enabled ? 0.6 : 0.3), 2));
++        painter->setBrush(Qt::NoBrush);
++        painter->drawEllipse(r.adjusted(1, 1, -1, -1));
++    }
++    painter->restore();
+     return true;
+ }
+ 
+@@ -8189,66 +8271,35 @@ bool Style::drawSliderComplexControl(const QStyleOptionComplex *option, QPainter
+         }
+     }
+ 
+-    // groove
+-    if (sliderOption->subControls & SC_SliderGroove) {
+-        // retrieve groove rect
+-        auto grooveRect(subControlRect(CC_Slider, sliderOption, SC_SliderGroove, widget));
+-
+-        // base color
+-        const auto grooveColor(_helper->alphaColor(palette.color(QPalette::WindowText), 0.3));
+-
+-        if (!enabled)
+-            _helper->renderSliderGroove(painter, grooveRect, grooveColor);
+-        else {
+-            const bool upsideDown(sliderOption->upsideDown);
+-
+-            // handle rect
+-            auto handleRect(subControlRect(CC_Slider, sliderOption, SC_SliderHandle, widget));
+-
+-            // highlight color
+-            const auto &highlight = palette.color(QPalette::Highlight);
+-
+-            if (sliderOption->orientation == Qt::Horizontal) {
+-                auto leftRect(grooveRect);
+-                leftRect.setRight(handleRect.right() - Metrics::Slider_ControlThickness / 2);
+-                _helper->renderSliderGroove(painter, upsideDown ? leftRect.adjusted(0, 1, 0, -1) : leftRect, upsideDown ? grooveColor : highlight);
+-
+-                auto rightRect(grooveRect);
+-                rightRect.setLeft(handleRect.left() + Metrics::Slider_ControlThickness / 2);
+-                _helper->renderSliderGroove(painter, upsideDown ? rightRect : rightRect.adjusted(0, 1, 0, -1), upsideDown ? highlight : grooveColor);
+-
+-            } else {
+-                auto topRect(grooveRect);
+-                topRect.setBottom(handleRect.bottom() - Metrics::Slider_ControlThickness / 2);
+-                _helper->renderSliderGroove(painter, upsideDown ? topRect.adjusted(1, 0, -1, 0) : topRect, upsideDown ? grooveColor : highlight);
+-
+-                auto bottomRect(grooveRect);
+-                bottomRect.setTop(handleRect.top() + Metrics::Slider_ControlThickness / 2);
+-                _helper->renderSliderGroove(painter, upsideDown ? bottomRect : bottomRect.adjusted(1, 0, -1, 0), upsideDown ? highlight : grooveColor);
+-            }
++    // [LUMINOS] M3 slider: 16 px round track, active part in the focus colour, rest in Highlight (secondaryContainer),
++    // split by a 4 x 36 bar handle with 5 px gaps. No animation.
++    Q_UNUSED(mouseOver);
++    Q_UNUSED(hasFocus);
++    if (sliderOption->subControls & (SC_SliderGroove | SC_SliderHandle)) {
++        const QRectF groove(subControlRect(CC_Slider, sliderOption, SC_SliderGroove, widget));
++        const QPointF c(QRectF(subControlRect(CC_Slider, sliderOption, SC_SliderHandle, widget)).center());
++        const QColor primary(enabled ? _helper->focusColor(palette) : _helper->alphaColor(palette.color(QPalette::WindowText), 0.38));
++        const QColor rest(enabled ? palette.color(QPalette::Highlight) : _helper->alphaColor(palette.color(QPalette::WindowText), 0.12));
++        const qreal h = horizontal ? c.x() : c.y(), g0 = horizontal ? groove.left() : groove.top(), g1 = horizontal ? groove.right() : groove.bottom();
++        painter->save();
++        painter->setRenderHint(QPainter::Antialiasing);
++        const auto segment = [&](qreal from, qreal to, bool outerFirst, const QColor &color) {
++            if (to - from < 1)
++                return;
++            const qreal o = LumTrack / 2.0, in = 2, a = outerFirst ? o : in, b = outerFirst ? in : o;
++            painter->fillPath(horizontal ? lumRoundRect(QRectF(from, groove.top(), to - from, groove.height()), a, b, b, a)
++                                         : lumRoundRect(QRectF(groove.left(), from, groove.width(), to - from), a, a, b, b),
++                              color);
++        };
++        if (sliderOption->subControls & SC_SliderGroove) {
++            segment(g0, h - 2 - LumGap, true, sliderOption->upsideDown ? rest : primary);
++            segment(h + 2 + LumGap, g1, false, sliderOption->upsideDown ? primary : rest);
+         }
+-    }
+-
+-    // handle
+-    if (sliderOption->subControls & SC_SliderHandle) {
+-        // get rect and center
+-        auto handleRect(subControlRect(CC_Slider, sliderOption, SC_SliderHandle, widget));
+-
+-        // handle state
+-        const bool handleActive(sliderOption->activeSubControls & SC_SliderHandle);
+-        const bool sunken(state & (State_On | State_Sunken));
+-
+-        // animation state
+-        _animations->widgetStateEngine().updateState(widget, AnimationHover, handleActive && mouseOver);
+-        _animations->widgetStateEngine().updateState(widget, AnimationFocus, hasFocus);
+-        // const AnimationMode mode( _animations->widgetStateEngine().buttonAnimationMode( widget ) );
+-        // const qreal opacity( _animations->widgetStateEngine().buttonOpacity( widget ) );
+-
+-        // define colors
+-        const auto &background = (hasFocus || mouseOver) ? palette.color(QPalette::Highlight).lighter(105) : palette.color(QPalette::Button).lighter(110);
+-
+-        // render
+-        _helper->renderSliderHandle(painter, handleRect, background, (hasFocus || mouseOver), sunken);
++        if (sliderOption->subControls & SC_SliderHandle) {
++            const QSizeF bar(horizontal ? 4 : LumBar, horizontal ? LumBar : 4);
++            painter->fillPath(lumRoundRect(QRectF(c - QPointF(bar.width() / 2, bar.height() / 2), bar), 2, 2, 2, 2), primary);
++        }
++        painter->restore();
+     }
+ 
+     return true;

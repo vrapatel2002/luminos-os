@@ -1,7 +1,6 @@
 # [CHANGE: claude-code | 2026-10-10] icons-mono probe for luminos-windowstyle-check. Usage: icons.py <theme> <icon>...
-# Resolves each icon at 22 then 24 px (scale 1) through the theme's index.theme Inherits chain (+hicolor), like the
-# freedesktop lookup; monochrome = <= 2 distinct fill/stroke/stop-color values on rendered elements (namedview/metadata
-# skipped; ColorScheme-*/currentColor = 1). Proven 2026-10-10: Papirus-Dark sound/network = 4/3 colours -> FAIL; YAMIS = 1.
+# Freedesktop lookup at 22/24 px via Inherits (+hicolor); mono = <= 2 distinct fill/stroke/stop-color (currentColor/
+# ColorScheme-* = 1, namedview skipped). Proven 2026-10-10: Papirus-Dark sound/network 4/3 colours FAIL; YAMIS 1.
 import configparser, gzip, os, re, sys, xml.etree.ElementTree as ET
 ROOTS = [os.path.expanduser("~/.local/share/icons"), os.path.expanduser("~/.icons"), "/usr/share/icons"]
 def theme_dirs(name):

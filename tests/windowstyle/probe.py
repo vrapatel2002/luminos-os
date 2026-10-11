@@ -1,13 +1,8 @@
 # [CHANGE: claude-code | 2026-10-10] Pixel probes for luminos-windowstyle-check on a `spectacle -b -a` capture of
 # tests/windowstyle/probe-window.qml (800x500 logical, body = palette Window). Usage: probe.py <png> <scale>
-# Spectacle (Plasma 6.7) includes the shadow, and everything outside the window shape is alpha < 255,
-# so the window rectangle is the alpha==255 run across the middle row / a column at 30 % width.
-# What each probe proved against stock Breeze + Caelestia colours (2026-10-10, 1860x1316 capture at 2x):
-#   corners:  Breeze rounds the top corners only slightly and leaves the bottom ones square, so the
-#             pixel 3 logical px in on the diagonal is opaque at all four corners -> FAIL (radius 16 makes it clear).
-#   no-strip: Caelestia gives the Breeze titlebar the same colour as the window (32,31,35) -> PASS today;
-#             it still FAILs whenever the header colour differs from the body by RGB distance >= 6.
-#   header:   Breeze draws the app icon + pin buttons top-left and the title text mid-header -> FAIL.
+# Window = alpha==255 run (Spectacle 6.7 includes the shadow). Proven vs stock Breeze 2026-10-10 (1860x1316 @2x):
+# corners FAIL (bottom square, top barely rounded); no-strip PASSes when header==body (FAILs at RGB distance >= 6);
+# header FAILs on Breeze's icon/pin buttons top-left and centred title.
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import png

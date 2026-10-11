@@ -8342,3 +8342,34 @@ mode → Load unpacked → `~/luminos-os/scripts/chrome-luminos-ambient`, then s
 (both would draw).
 **Undo:** remove the extension at chrome://extensions and re-enable Ambient light. Nothing in /etc,
 no package, no service.
+
+---
+
+## DECISION 140 — the Nexus layout lives in the shared KDE libraries, not in a new layer
+*[CHANGE: claude-code | 2026-10-11]*
+
+Shawn approved an HTML target (`docs/windowstyle/mock/nexus-replica.html`, artifact "System Settings in Nexus
+Style") and asked: *"make this exact thing for all … make sure its light weight"*. The paint pass (DECISION 139)
+had failed his eye test because the **layout** — connected row groups, the selected pill, icon discs — is not a
+colour or a radius, it is how list rows are drawn. Reverse-engineered from Caelestia's own QML
+(`modules/nexus/common/ConnectedRect.qml`, `navpane/NavLocations.qml`): a row's four corners are chosen by its
+position in its group — first 28 top, last 28 bottom, touching 4, selected 32 all, pressed 12 — with 4 px gaps.
+
+**Lightweight by construction: no daemon, no KWin effect.** The rule is put into the code KDE apps already load:
+
+| Package (fork) | What it draws |
+|---|---|
+| `qqc2-desktop-style 6.30.0-1.4` | Every QML list row (DefaultListItemBackground): connected corners by ListView section, pill on `highlighted`, press squash, 2 px insets, 400 ms M3 corner animation (off while scrolling/recycling); M3 slider; radio with ✓ |
+| `kirigami 6.30.0-1.2` | Icon disc in `IconTitleSubtitle` (sidebars of System Settings, kinfocenter, Discover) |
+| `kirigami-addons 1.13.1-1.2` | FormCard rows as separate connected rects, no separators |
+| `systemsettings 6.7.5-1.2` | Sidebar = mock: search pill, grey category labels, two-line rows (new `comment` model role), chevrons, page inside a rounded "hole", 30 px title |
+| `darkly 0.5.40-1.2` | QtWidgets lists/trees (Dolphin places etc.): connected corners from model neighbours (KFilePlacesModel GroupRole splits sections), pill selection, M3 slider, radio ✓; popups, comboboxes and alternating rows keep stock; no animation |
+
+Corner radii are clamped to half the row height (Qt does this anyway) — the spec gap found when the checker and
+the qqc2 build disagreed. **Review (Fable): 9 findings**, all fixed — notably Darkly painting combobox dropdowns as
+rects and killing alternating row colours, an O(rows·visible) neighbour lookup per repaint (now first/last column
+only, cached; 5000×4 tree repaint 3.4–3.7 ms vs Breeze 3.6), and ON switch rows rendering as selected pills.
+
+**Cost:** every Frameworks/Plasma/Qt bump replaces these silently (BUG-193 pattern). Hooks warn; rebuild all five +
+the decoration and run `scripts/luminos-windowstyle-check`. **Not covered:** GTK/Electron/Chrome, Plasma panel and
+applets (Plasma style), layouts inside individual KCMs. Undo per package: `pacman -U` the stock build in the cache.

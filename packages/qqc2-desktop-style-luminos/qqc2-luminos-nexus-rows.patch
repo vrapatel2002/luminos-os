@@ -1,0 +1,373 @@
+diff --git a/org.kde.desktop/CheckDelegate.qml b/org.kde.desktop/CheckDelegate.qml
+index ffb2d1b..c3dca02 100644
+--- a/org.kde.desktop/CheckDelegate.qml
++++ b/org.kde.desktop/CheckDelegate.qml
+@@ -31,7 +31,7 @@ T.CheckDelegate {
+     // the delegate will have a space only on top, in the form of a big top padding,
+     // while the bottom one will have a tiny padding and no inset as the spacing between items
+     // will be done by the top inset of the next item
+-    bottomPadding: Kirigami.Units.smallSpacing
++    bottomPadding: TableView.view ? Kirigami.Units.smallSpacing : topPadding // luminos: symmetric so Nexus rows centre their content
+     leftPadding: !mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
+     rightPadding: mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
+ 
+diff --git a/org.kde.desktop/ItemDelegate.qml b/org.kde.desktop/ItemDelegate.qml
+index e24a1f4..b916698 100644
+--- a/org.kde.desktop/ItemDelegate.qml
++++ b/org.kde.desktop/ItemDelegate.qml
+@@ -32,7 +32,7 @@ T.ItemDelegate {
+     // while the bottom one will have a tiny padding and no inset as the spacing between items
+     // will be done by the top inset of the next item
+     // Give a bigger bottom padding only to the last item, if we detect we are in a listview
+-    bottomPadding: typeof index !== "undefined" && ListView.view?.count === index + 1 ? topPadding : Kirigami.Units.smallSpacing
++    bottomPadding: TableView.view && !(typeof index !== "undefined" && ListView.view?.count === index + 1) ? Kirigami.Units.smallSpacing : topPadding // luminos: symmetric so Nexus rows centre their content
+     leftPadding: !mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
+     rightPadding: mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
+ 
+diff --git a/org.kde.desktop/RadioButton.qml b/org.kde.desktop/RadioButton.qml
+index 5d75eb6..a2042cf 100644
+--- a/org.kde.desktop/RadioButton.qml
++++ b/org.kde.desktop/RadioButton.qml
+@@ -27,8 +27,7 @@ T.RadioButton {
+ 
+     hoverEnabled: true
+ 
+-    indicator: Private.CheckIndicator {
+-        elementType: "radiobutton"
++    indicator: Private.M3RadioIndicator { // luminos DECISION 140
+         x: if (control.contentItem !== null && control.contentItem.width > 0) {
+             return control.mirrored ?
+                 control.width - width - control.rightPadding : control.leftPadding
+diff --git a/org.kde.desktop/RadioDelegate.qml b/org.kde.desktop/RadioDelegate.qml
+index d8976c2..f12b6f9 100644
+--- a/org.kde.desktop/RadioDelegate.qml
++++ b/org.kde.desktop/RadioDelegate.qml
+@@ -31,7 +31,7 @@ T.RadioDelegate {
+     // the delegate will have a space only on top, in the form of a big top padding,
+     // while the bottom one will have a tiny padding and no inset as the spacing between items
+     // will be done by the top inset of the next item
+-    bottomPadding: Kirigami.Units.smallSpacing
++    bottomPadding: TableView.view ? Kirigami.Units.smallSpacing : topPadding // luminos: symmetric so Nexus rows centre their content
+     leftPadding: !mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
+     rightPadding: mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
+ 
+@@ -86,13 +86,11 @@ T.RadioDelegate {
+         }
+     }
+ 
+-    indicator: Private.CheckIndicator {
+-        elementType: "radiobutton"
++    indicator: Private.M3RadioIndicator { // luminos DECISION 140
+         x: !controlRoot.mirrored ? controlRoot.horizontalPadding : controlRoot.width - width - controlRoot.horizontalPadding
+         y: controlRoot.topPadding + (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : ((controlRoot.availableHeight - height) / 2) )
+ 
+         control: controlRoot
+-        drawIcon: false
+     }
+ 
+     background: Private.DefaultListItemBackground {
+diff --git a/org.kde.desktop/Slider.qml b/org.kde.desktop/Slider.qml
+index 3c1e86a..feb6f30 100644
+--- a/org.kde.desktop/Slider.qml
++++ b/org.kde.desktop/Slider.qml
+@@ -32,24 +32,53 @@ T.Slider {
+ 
+     snapMode: T.Slider.SnapOnRelease
+ 
+-    background: StylePrivate.StyleItem {
+-        control: controlRoot
+-        elementType: "slider"
+-        sunken: controlRoot.pressed
+-
+-        minimum: 0
+-        maximum: 100000
+-        step: 100000 * (controlRoot.stepSize / (controlRoot.to - controlRoot.from))
+-        value: 100000 * controlRoot.position
+-
+-        horizontal: controlRoot.orientation === Qt.Horizontal
+-        enabled: controlRoot.enabled
+-        hasFocus: controlRoot.activeFocus
+-        hover: controlRoot.hovered
+-        activeControl: controlRoot.stepSize > 0 && controlRoot.Kirigami.StyleHints.tickMarkStepSize >= 0 ? "ticks" : ""
+-
+-        properties: {
+-            "tickMarkStepSize": 100000 * (controlRoot.Kirigami.StyleHints.tickMarkStepSize / (controlRoot.to - controlRoot.from))
++    // [CHANGE: luminos | 2026-10-11] DECISION 140 — Material 3 slider: 16 px round track split around a 4x36 bar
++    // handle with a 5 px gap; active = focusColor (primary), inactive = highlightColor (secondaryContainer).
++    background: Item {
++        id: track
++        readonly property bool horizontal: controlRoot.horizontal
++        readonly property real length: horizontal ? controlRoot.availableWidth : controlRoot.availableHeight
++        readonly property real hpos: horizontal ? controlRoot.handle.x - controlRoot.leftPadding : controlRoot.handle.y - controlRoot.topPadding
++        readonly property real hsize: horizontal ? controlRoot.handle.width : controlRoot.handle.height
++        readonly property bool activeFirst: horizontal && !controlRoot.mirrored
++        readonly property real gap: 5
++        implicitWidth: horizontal ? Kirigami.Units.gridUnit * 12 : 36
++        implicitHeight: horizontal ? 36 : Kirigami.Units.gridUnit * 12
++
++        Repeater { // segment 0 runs from the track start to the handle, segment 1 from the handle to the end
++            model: 2
++            Rectangle {
++                required property int index
++                readonly property real a: index === 0 ? 0 : track.hpos + track.hsize + track.gap
++                readonly property real b: index === 0 ? track.hpos - track.gap : track.length
++                x: track.horizontal ? controlRoot.leftPadding + a : controlRoot.leftPadding + (controlRoot.availableWidth - 16) / 2
++                y: track.horizontal ? controlRoot.topPadding + (controlRoot.availableHeight - 16) / 2 : controlRoot.topPadding + a
++                width: track.horizontal ? Math.max(0, b - a) : 16
++                height: track.horizontal ? 16 : Math.max(0, b - a)
++                visible: b - a > 0.5
++                // inner ends (beside the handle) only slightly rounded, like M3
++                topLeftRadius: index === 1 ? 2 : 8
++                topRightRadius: (index === 0) === track.horizontal ? 2 : 8
++                bottomLeftRadius: (index === 1) === track.horizontal ? 2 : 8
++                bottomRightRadius: index === 0 ? 2 : 8
++                readonly property bool active: (index === 0) === track.activeFirst
++                // disabled: M3 onSurface 38 % / 12 %
++                color: !controlRoot.enabled ? Qt.alpha(Kirigami.Theme.textColor, active ? 0.38 : 0.12)
++                     : active ? Kirigami.Theme.focusColor : Kirigami.Theme.highlightColor
++            }
++        }
++        Repeater { // tick marks, when the app asks for them
++            model: controlRoot.stepSize > 0 && controlRoot.Kirigami.StyleHints.tickMarkStepSize > 0
++                ? Math.floor((controlRoot.to - controlRoot.from) / controlRoot.Kirigami.StyleHints.tickMarkStepSize) + 1 : 0
++            Rectangle {
++                required property int index
++                readonly property real p: track.length > 0 ? 8 + (track.length - 16) * index * controlRoot.Kirigami.StyleHints.tickMarkStepSize / (controlRoot.to - controlRoot.from) : 0
++                width: 4; height: 4; radius: 2
++                x: track.horizontal ? controlRoot.leftPadding + p - 2 : controlRoot.leftPadding + controlRoot.availableWidth / 2 - 2
++                y: track.horizontal ? controlRoot.topPadding + controlRoot.availableHeight / 2 - 2 : controlRoot.topPadding + p - 2
++                color: Kirigami.Theme.textColor
++                opacity: 0.5
++            }
+         }
+ 
+         // `wheelEnabled: true` doesn't work since it doesn't snap to tickmarks,
+diff --git a/org.kde.desktop/SwitchDelegate.qml b/org.kde.desktop/SwitchDelegate.qml
+index c33aa74..8fabb48 100644
+--- a/org.kde.desktop/SwitchDelegate.qml
++++ b/org.kde.desktop/SwitchDelegate.qml
+@@ -30,7 +30,7 @@ T.SwitchDelegate {
+     // the delegate will have a space only on top, in the form of a big top padding,
+     // while the bottom one will have a tiny padding and no inset as the spacing between items
+     // will be done by the top inset of the next item
+-    bottomPadding: Kirigami.Units.smallSpacing
++    bottomPadding: TableView.view ? Kirigami.Units.smallSpacing : topPadding // luminos: symmetric so Nexus rows centre their content
+     leftPadding: !mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
+     rightPadding: mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
+ 
+diff --git a/org.kde.desktop/private/DefaultListItemBackground.qml b/org.kde.desktop/private/DefaultListItemBackground.qml
+index 812c310..02106b4 100644
+--- a/org.kde.desktop/private/DefaultListItemBackground.qml
++++ b/org.kde.desktop/private/DefaultListItemBackground.qml
+@@ -7,6 +7,7 @@
+ */
+ 
+ 
++// [CHANGE: luminos | 2026-10-11] DECISION 140 — Nexus rows: connected corners per ListView group, selected pill, press squash.
+ import QtQuick
+ import QtQuick.Templates as T
+ import org.kde.kirigami as Kirigami
+@@ -30,13 +31,60 @@ Item {
+     // Workaround for QTBUG-113304
+     readonly property bool reallyFocus: control.visualFocus || (control.activeFocus && control.focusReason === Qt.OtherFocusReason)
+ 
++    readonly property bool isTable: control.TableView.view !== null
++    readonly property ListView view: control.ListView.view
++    readonly property int idx: "index" in control ? control.index : (view ? view.indexAt(control.x + 1, control.y + 1) : -1)
++    readonly property bool sectioned: view !== null && view.section.property !== ""
++    readonly property bool first: view !== null && (idx === 0 || (sectioned && control.ListView.previousSection !== control.ListView.section))
++    readonly property bool last: view !== null && (idx === view.count - 1 || (sectioned && control.ListView.nextSection !== control.ListView.section))
++    readonly property bool selected: control.highlighted // not `checked`: ON switch/check delegates are not selected rows
++    // animate corner/colour changes only from user interaction: never while the view scrolls or a pooled delegate is reused
++    property bool settled: true
++    readonly property bool animate: settled && !(view?.moving ?? false)
++    Connections {
++        target: background.view ? background.control.ListView : null
++        function onPooled() { background.settled = false }
++        function onReused() { Qt.callLater(() => background.settled = true) }
++    }
++    // radii (logical px): pressed 12, selected pill 32, group ends 28, touching 4, standalone 12
++    readonly property real topR: control.down ? 12 : selected ? 32 : view === null ? 12 : first ? 28 : 4
++    readonly property real bottomR: control.down ? 12 : selected ? 32 : view === null ? 12 : last ? 28 : 4
++
++    Item { id: tone; Kirigami.Theme.colorSet: Kirigami.Theme.Button; Kirigami.Theme.inherit: false }
++
++    Rectangle {
++        id: row
++        visible: !background.isTable
++        anchors {
++            fill: parent // drawn over the vertical insets, 2 px in, so neighbours show a 4 px gap
++            topMargin: 2 - background.control.topInset
++            bottomMargin: 2 - background.control.bottomInset
++        }
++        opacity: background.control.enabled ? 1 : 0.5
++        color: background.selected ? Kirigami.Theme.highlightColor : tone.Kirigami.Theme.backgroundColor
++        property real tr: background.topR
++        property real br: background.bottomR
++        topLeftRadius: tr; topRightRadius: tr; bottomLeftRadius: br; bottomRightRadius: br
++        // M3 expressive spatial easing cubic-bezier(0.38, 1.21, 0.22, 1.00), 400 ms
++        Behavior on tr { enabled: background.animate; NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.38, 1.21, 0.22, 1.0, 1, 1] } }
++        Behavior on br { enabled: background.animate; NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.38, 1.21, 0.22, 1.0, 1, 1] } }
++        Behavior on color { enabled: background.animate; ColorAnimation { duration: 200; easing.type: Easing.OutCubic } }
++        Rectangle { // state layer: onSurface 8 % on hover/focus
++            anchors.fill: parent
++            topLeftRadius: row.tr; topRightRadius: row.tr; bottomLeftRadius: row.br; bottomRightRadius: row.br
++            color: Kirigami.Theme.textColor
++            opacity: background.control.down ? 0.10 : (background.control.hovered || background.reallyFocus) ? 0.08 : 0
++            Behavior on opacity { NumberAnimation { duration: 200 } }
++        }
++    }
++
+     StylePrivate.StyleItem {
+         anchors {
+             fill: parent
+             leftMargin: Math.min(0, -background.control.leftInset)
+             rightMargin: -background.control.rightInset
+         }
+-        visible: background.control.enabled
++        visible: background.control.enabled && background.isTable
+         control: background.control
+         elementType: "itemrow"
+         activeControl: background.useAlternatingColors ? "alternate" : ""
+@@ -48,7 +96,7 @@ Item {
+             leftMargin: Math.min(0, -(background.control.leftPadding - background.control.leftInset))
+             rightMargin: -(background.control.rightPadding - background.control.rightInset)
+         }
+-        visible: background.control.enabled
++        visible: background.control.enabled && background.isTable
+         control: background.control
+         elementType: "item"
+         hover: background.control.hovered || background.reallyFocus
+diff --git a/org.kde.desktop/private/DefaultSliderHandle.qml b/org.kde.desktop/private/DefaultSliderHandle.qml
+index 7546d67..39c0880 100644
+--- a/org.kde.desktop/private/DefaultSliderHandle.qml
++++ b/org.kde.desktop/private/DefaultSliderHandle.qml
+@@ -5,45 +5,30 @@
+ */
+ 
+ import QtQuick
++// [CHANGE: luminos | 2026-10-11] DECISION 140 — M3 slider handle: a 4x36 bar in the active colour.
+ import QtQuick.Templates as T
+-import org.kde.qqc2desktopstyle.private as StylePrivate
++import org.kde.kirigami as Kirigami
+ 
+-Item {
++Rectangle {
+     id: handle
+ 
+     required property T.Slider control
+ 
+-    readonly property StylePrivate.StyleItem styleItem: {
+-        const item = control.background;
+-        return (item instanceof StylePrivate.StyleItem) ? item : null;
+-    }
+-
+-    // It won't keep track of an actual position, but QtQuick.Templates code
+-    // only accounts for handle size and does not care for x/y anyway.
+-    property size size
+-
+-    function updateHandleSize() {
+-        if (styleItem) {
+-            const rect = styleItem.subControlRect("handle");
+-            size = Qt.size(rect.width, rect.height);
+-        }
+-    }
+-
+     x: control.leftPadding + Math.round(control.horizontal ? control.visualPosition * (control.availableWidth - width) : (control.availableWidth - width) / 2)
+     y: control.topPadding + Math.round(control.horizontal ? (control.availableHeight - height) / 2 : control.visualPosition * (control.availableHeight - height))
+ 
+-    implicitWidth: size.width
+-    implicitHeight: size.height
+-
+-    Connections {
+-        target: handle.styleItem
+-
+-        function onStyleNameChanged() {
+-            handle.updateHandleSize();
+-        }
+-    }
+-
+-    Component.onCompleted: {
+-        updateHandleSize();
++    implicitWidth: control.horizontal ? 4 : 36
++    implicitHeight: control.horizontal ? 36 : 4
++    radius: 2
++    color: control.enabled ? Kirigami.Theme.focusColor : Qt.alpha(Kirigami.Theme.textColor, 0.38)
++
++    Rectangle { // keyboard focus ring
++        anchors.fill: parent
++        anchors.margins: -4
++        radius: 4
++        visible: handle.control.visualFocus
++        color: "transparent"
++        border.width: 2
++        border.color: Kirigami.Theme.focusColor
+     }
+ }
+diff --git a/org.kde.desktop/private/M3RadioIndicator.qml b/org.kde.desktop/private/M3RadioIndicator.qml
+new file mode 100644
+index 0000000..6259138
+--- /dev/null
++++ b/org.kde.desktop/private/M3RadioIndicator.qml
+@@ -0,0 +1,61 @@
++/*
++    SPDX-FileCopyrightText: 2026 Luminos
++    SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-or-later
++*/
++// [CHANGE: luminos | 2026-10-11] DECISION 140 — Nexus radio: 2 px outline circle; checked = filled primary with a check.
++import QtQuick
++import QtQuick.Shapes
++import QtQuick.Templates as T
++import org.kde.kirigami as Kirigami
++
++Rectangle {
++    id: indicator
++    property T.AbstractButton control
++    property bool drawIcon: false // kept for API parity with CheckIndicator (ignored)
++    // the label code in RadioButton.qml asks the indicator for these style metrics
++    function pixelMetric(name: string): int {
++        return name === "exclusiveindicatorwidth" ? width : name === "radiobuttonlabelspacing" ? Kirigami.Units.mediumSpacing : 0
++    }
++
++    implicitWidth: 24
++    implicitHeight: 24
++    radius: width / 2
++    color: control.checked ? Kirigami.Theme.focusColor : "transparent"
++    border.width: control.checked ? 0 : 2
++    border.color: control.hovered || control.visualFocus ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor
++    opacity: control.enabled ? 1 : 0.38
++    Behavior on color { ColorAnimation { duration: 200; easing.type: Easing.OutCubic } }
++
++    Rectangle { // hover / press state layer, M3 40 px circle
++        anchors.centerIn: parent
++        width: 40; height: 40; radius: 20
++        color: Kirigami.Theme.textColor
++        opacity: indicator.control.down ? 0.10 : indicator.control.hovered ? 0.08 : 0
++    }
++    Rectangle { // keyboard focus ring
++        anchors.fill: parent
++        anchors.margins: -3
++        radius: width / 2
++        visible: indicator.control.visualFocus
++        color: "transparent"
++        border.width: 2
++        border.color: Kirigami.Theme.focusColor
++    }
++    Shape { // check glyph on a 24-unit grid, drawn in onPrimary
++        anchors.centerIn: parent
++        width: 24; height: 24
++        scale: indicator.control.checked ? indicator.width / 24 * 0.8 : 0.3
++        opacity: indicator.control.checked ? 1 : 0
++        preferredRendererType: Shape.CurveRenderer
++        Behavior on scale { NumberAnimation { duration: 350; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.42, 1.67, 0.21, 0.90, 1, 1] } }
++        Behavior on opacity { NumberAnimation { duration: 200 } }
++        ShapePath {
++            strokeColor: Qt.hsla(Kirigami.Theme.focusColor.hslHue, Kirigami.Theme.focusColor.hslSaturation * 0.4, Kirigami.Theme.focusColor.hslLightness > 0.5 ? 0.27 : 1.0, 1)
++            strokeWidth: 2.6
++            fillColor: "transparent"
++            capStyle: ShapePath.RoundCap
++            joinStyle: ShapePath.RoundJoin
++            PathSvg { path: "M6.5 12.5 L10.5 16.5 L17.5 8.5" }
++        }
++    }
++}

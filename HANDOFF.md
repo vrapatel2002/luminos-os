@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-11 18:35 — Response 6 (windowstyle chat)
+Last updated: 2026-10-11 20:30 — Response 7 (windowstyle chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
@@ -46,7 +46,8 @@ animates), 4 px gaps (2 px in pages), icon in a round `secondaryContainer` disc 
 two-line label + `onSurfaceVariant` description, `Nexus.qml` BlobInvertedRect = window frame with the page as a
 rounded hole. Waiting on Shawn to use these names to say what he wants built next.
 **R5:** built an interactive HTML/CSS replica of Nexus (artifact "Nexus Window Replica", claude.ai/artifact/LHwGAx7LJWBEw3cSceMDhS; source copy `docs/windowstyle/mock/nexus-replica.html`) with a component-name overlay + slow-motion toggle, to agree on the target before any KDE work.
-**R6:** same artifact (now titled "System Settings in Nexus Style") swapped to KDE System Settings' real sidebar (categories as small grey labels, chevrons, Bluetooth switch in the nav item) + pages Quick Settings (theme cards, M3 slider, select rows), Bluetooth, Sound, Wi-Fi, Mouse, Keyboard Backlight; Reset/Apply footer kept as pill buttons. Waiting on his feedback.
+**R6:** same artifact (now titled "System Settings in Nexus Style") swapped to KDE System Settings' real sidebar (categories as small grey labels, chevrons, Bluetooth switch in the nav item) + pages Quick Settings (theme cards, M3 slider, select rows), Bluetooth, Sound, Wi-Fi, Mouse, Keyboard Backlight; Reset/Apply footer kept as pill buttons.
+**R7 DONE — DECISION 140:** the mock is now real in every KDE app via five forks (qqc2 1.4, kirigami 1.2, kirigami-addons 1.2, systemsettings 1.2, darkly 1.2) + warn-only hooks; checker 25/25. **Shawn must close+reopen System Settings (pid 116823 is the old binary).** Next per Shawn: "light weight" pass — measure (PSS / startup / repaint) and trim. Rebuild all forks after any Plasma/KF/Qt bump.
 **Waiting on Shawn:** look at it; likely asks — radius 16 vs ChromeOS 12, show title?, selected-row tint.
 Knobs: `~/.config/luminos-chromeosrc [Frame] CornerRadius/HeaderHeight/ShowTitle` then `qdbus6 org.kde.KWin /KWin reconfigure`.
 ⚠️ Plugin, Darkly and kirigami must be rebuilt after every Plasma/Qt bump; KWin falls back to Breeze silently.

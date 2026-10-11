@@ -1,0 +1,15 @@
+# [CHANGE: claude-code | 2026-10-11] DECISION 140 (Phase 3 Nexus look).
+# Installed at /etc/pacman.d/hooks/luminos-systemsettings.hook. When stock systemsettings replaces
+# the Luminos-patched build (pkgrel -<n>.<m>), the Nexus sidebar and rounded page hole silently go
+# back to the KDE look. This only WARNS; it changes nothing and never blocks the transaction.
+# Rebuild: cd ~/luminos-os/packages/systemsettings-luminos && bump pkgver/sha256 && makepkg -si
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = systemsettings
+
+[Action]
+Description = Checking systemsettings is still the Luminos-patched build (-<n>.<m>)...
+When = PostTransaction
+Exec = /usr/bin/bash -c 'v=$(pacman -Q systemsettings 2>/dev/null); case "$v" in *-[0-9]*.[0-9]*) echo "luminos: OK $v is the patched build";; *) printf "\n%s\n%s\n%s\n\n" "!!! LUMINOS WARNING: systemsettings is now STOCK ($v), not the -<n>.<m> fork." "!!! The Nexus sidebar and rounded page are back to the KDE look." "!!! Rebuild ~/luminos-os/packages/systemsettings-luminos for the new pkgver (DECISION 140).";; esac; exit 0'

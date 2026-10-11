@@ -3,8 +3,5 @@
 import QtQuick
 import QtQuick.Controls
 ApplicationWindow {
-    title: "luminos-windowstyle-probe"
-    width: 800; height: 500; visible: true
-    color: palette.window
-    Component.onCompleted: { raise(); requestActivate() }
-}
+    title: "luminos-windowstyle-probe"; width: 800; height: 500; visible: true; color: palette.window
+    Component.onCompleted: { raise(); requestActivate() } }

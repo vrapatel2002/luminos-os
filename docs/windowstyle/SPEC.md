@@ -71,3 +71,43 @@ Reference: Nexus screenshot `/root/.claude/uploads/933e1464-f383-5550-bca8-82d5a
    `scripts/luminos-kde-caelestia-theme` (the generator), never by hand-editing Caelestia.colors.
 5. Everything reversible; `luminos-windowstyle revert` (or the generator's own restore) documented.
 6. Checker extended; side-by-side screenshot of System Settings vs Nexus reviewed by the PM.
+
+---
+# Phase 3 — the mockup, for real, in every KDE app (2026-10-11 18:32, Response 7)
+<!-- [CHANGE: claude-code | 2026-10-11] DECISION 140 -->
+Shawn, after approving the HTML target (`docs/windowstyle/mock/nexus-replica.html`, artifact "System Settings in
+Nexus Style"): "now we have actual end product … make this exact thing for all … make sure its light weight".
+Order he gave: look first, lightness second — but nothing heavy is allowed in either.
+
+## How (lightweight by construction)
+No new daemon, no KWin effect, no compositor work. The look goes into the **shared drawing code KDE apps
+already load**, so it costs nothing at runtime beyond what those apps already pay:
+1. **qqc2-desktop-style** (already our fork, 1.2 → 1.3): every QML list row (`DefaultListItemBackground` /
+   ItemDelegate) gets **connected corners** — first-in-group 28 top, last 28 bottom, touching edges 4; group =
+   the ListView section (`ListView.previousSection/nextSection`), or the whole list with no sections — a
+   **selected pill** (32 all corners, secondaryContainer), **press squash** (12), hover 8 %, corners animate
+   (~350–500 ms, M3 expressive easing). Rows are drawn inset 2 px top/bottom so neighbours show a 4 px gap.
+   Plus the **M3 slider** (16 px track, primary active / secondaryContainer inactive, 4×36 bar handle with a
+   gap) and **select/radio** indicator (filled primary circle with a ✓).
+2. **kirigami** (already our fork): list icons in `Kirigami` delegates sit in a round **icon disc**
+   (secondaryContainer; primary + onPrimary when the row is selected).
+3. **kirigami-addons** (new fork): **FormCard** groups become separate connected rects with 2 px gaps
+   (ConnectedRect rule) instead of one card with dividers.
+4. **systemsettings** (new fork): sidebar = mock — search pill (sc-lowest, outline-variant border), category
+   names as small grey labels, two-line rows (name + KCM description from metadata), chevron on items with
+   children, content area as a **rounded "hole"** (surface #131317, r16, 12 px inset) in the Window-coloured frame,
+   Reset/Apply as pills.
+5. **Darkly** (new fork, QtWidgets apps — Dolphin, Kate, Konsole sidebars and lists): item-view rows drawn with
+   connected corners (from model row neighbours) + selected pill + 2 px inset gaps; M3 slider; radio as filled
+   check circle. No animation in QtWidgets (snaps) — lightweight.
+
+## Done means
+- System Settings looks like the mock: sidebar groups with connected corners, selected pill, icon discs,
+  two-line rows, grey category labels, search pill, page in a rounded hole, pills for buttons.
+- The same row look appears in other KDE apps without touching them: a Kirigami app (e.g. kinfocenter / Discover)
+  and a QtWidgets app (Dolphin places panel).
+- Every fork is a pacman package with `-<n>.<m>` pkgrel and a hook that warns when stock replaces it.
+- Idle cost unchanged: no new process; checker confirms none of our packages adds a running service.
+- `luminos-windowstyle-check` extended and green; screenshots of System Settings, kinfocenter, Dolphin vs the mock.
+Not in scope: GTK/Electron/Chrome insides; Plasma panel/applets (their own Plasma style); Nexus's theme-card
+layout inside individual KCMs.
