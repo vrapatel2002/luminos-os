@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-10 18:40 — Response 1 (windowstyle chat)
+Last updated: 2026-10-10 22:45 — Response 3 (windowstyle chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
@@ -13,6 +13,15 @@ Shawn: make every KWin window look like the Nexus screenshot, "use the code from
 (BUG-193: the DECISION 72 patch had been silently replaced by stock 6.30). `scripts/luminos-windowstyle-check`
 = 11/11 PASS incl. screenshot pixel probes. Undo: `luminos-windowstyle revert` (managed keys only).
 **Running KWin still has build 1.0.0-1 in memory** — review fixes (null-deref guard etc.) load at next login.
+**21:50 Shawn (R2): "no where near close"** — compared Nexus vs System Settings side by side. Gap is the INSIDE
+(layout/cards/icons/font), not the frame. Showed him ChromeOS screenshots → **he picked Nexus** (R3).
+Measured gaps: Google Sans NOT installed (fc-list empty, Noto substitutes); full-colour Papirus icons vs monochrome
+glyphs in tinted circles; Breeze-style switch vs M3 switch with check/X (qqc2 `org/kde/desktop/private/SwitchIndicator.qml`);
+flat rows vs rows grouped in rounded tonal cards; System Settings' layout is compiled C++/QML — a theme cannot regroup it.
+**R3 DONE — DECISION 139 Nexus paint pass:** Google Sans Flex (`ttf-google-sans-flex 5.000-1`), M3 switch
+(`qqc2-desktop-style 6.30.0-1.2`), YAMIS mono icons, Nexus tones (Selection #45455c). Checker **17/17**. Login
+scripts no longer fight it. **Next if Shawn wants closer: layout** (cards, two-line rows, headline) = per-app work,
+start with System Settings only and show him first. His own System Settings (started 21:40) needs a relaunch.
 **Waiting on Shawn:** look at it; likely asks — radius 16 vs ChromeOS 12, show title?, selected-row tint.
 Knobs: `~/.config/luminos-chromeosrc [Frame] CornerRadius/HeaderHeight/ShowTitle` then `qdbus6 org.kde.KWin /KWin reconfigure`.
 ⚠️ Plugin, Darkly and kirigami must be rebuilt after every Plasma/Qt bump; KWin falls back to Breeze silently.

@@ -84,33 +84,33 @@ COMMON_FG = {
 COLOR_GROUPS = {
     "Colors:Window": {
         **COMMON_FG,
-        "BackgroundNormal": "surfaceContainer",
-        "BackgroundAlternate": "surfaceVariant",
+        "BackgroundNormal": "surfaceContainerLow",  # [CHANGE: claude-code | 2026-10-10] Nexus measured #1c1b1f (left pane)
+        "BackgroundAlternate": "surfaceContainer",  # [CHANGE: claude-code | 2026-10-10] Nexus measured #201f23 (cards)
         "ForegroundNormal": "onSurfaceVariant",
         "ForegroundActive": "klink",
     },
     "Colors:View": {
         **COMMON_FG,
-        "BackgroundNormal": "surface",
-        "BackgroundAlternate": "surfaceContainer",
+        "BackgroundNormal": "surface",  # [CHANGE: claude-code | 2026-10-10] Nexus measured #131317 (right pane)
+        "BackgroundAlternate": "surfaceContainer",  # [CHANGE: claude-code | 2026-10-10] Nexus measured #201f23 (cards)
         "ForegroundNormal": "onSurface",
         "ForegroundActive": "onSurface",
         "DecorationHover": "inversePrimary",
     },
     "Colors:Button": {
         **COMMON_FG,
-        "BackgroundNormal": "surfaceContainerHigh",
+        "BackgroundNormal": "surfaceContainerHigh",  # [CHANGE: claude-code | 2026-10-10] Nexus measured #2a292e (list rows)
         "BackgroundAlternate": "surfaceVariant",
         "ForegroundNormal": "onSurface",
         "ForegroundActive": "onSurface",
     },
     "Colors:Selection": {
         **COMMON_FG,
-        "BackgroundNormal": "primary",
-        "BackgroundAlternate": "primary",
-        "ForegroundNormal": "onPrimary",
-        "ForegroundActive": "onPrimary",
-        "ForegroundInactive": "onPrimary",
+        "BackgroundNormal": "secondaryContainer",  # [CHANGE: claude-code | 2026-10-10] Nexus measured #45455c (selected row)
+        "BackgroundAlternate": "secondaryContainer",  # [CHANGE: claude-code | 2026-10-10]
+        "ForegroundNormal": "onSecondaryContainer",  # [CHANGE: claude-code | 2026-10-10] SPEC phase 2
+        "ForegroundActive": "onSecondaryContainer",  # [CHANGE: claude-code | 2026-10-10]
+        "ForegroundInactive": "onSecondaryContainer",  # [CHANGE: claude-code | 2026-10-10] onPrimary was dark-on-dark here
         "ForegroundNeutral": "kneutralSelection",
         "DecorationHover": "secondary",
     },
@@ -130,15 +130,15 @@ COLOR_GROUPS = {
     },
     "Colors:Header": {
         **COMMON_FG,
-        "BackgroundNormal": "surfaceContainer",
-        "BackgroundAlternate": "surfaceContainer",
+        "BackgroundNormal": "surfaceContainerLow",  # [CHANGE: claude-code | 2026-10-10] Nexus measured #1c1b1f (= window)
+        "BackgroundAlternate": "surfaceContainerLow",  # [CHANGE: claude-code | 2026-10-10]
         "ForegroundNormal": "onSurfaceVariant",
         "ForegroundActive": "onSurface",
     },
     "Colors:Header][Inactive": {
         **COMMON_FG,
-        "BackgroundNormal": "surfaceContainer",
-        "BackgroundAlternate": "surfaceContainer",
+        "BackgroundNormal": "surfaceContainerLow",  # [CHANGE: claude-code | 2026-10-10] Nexus measured #1c1b1f (= window)
+        "BackgroundAlternate": "surfaceContainerLow",  # [CHANGE: claude-code | 2026-10-10]
         "ForegroundNormal": "onSurfaceVariant",
         "ForegroundActive": "onSurface",
     },
@@ -229,6 +229,24 @@ def kread(file: str, group: str, key: str) -> str:
     return r.stdout.strip()
 
 
+def fc_family(name: str) -> str:  # [CHANGE: claude-code | 2026-10-10]
+    """Return the family name fontconfig itself reports for `name`, when installed.
+
+    Caelestia's token is "GoogleSansFlex"; the font's real family is "Google Sans Flex".
+    fontconfig happens to resolve the squashed name, Qt's own matcher need not.  Write the
+    exact name so every reader agrees.  Not installed -> keep the token (see check_fonts)."""
+    try:
+        r = subprocess.run(["fc-match", "-f", "%{family[0]}\\n%{fullname[0]}", name],
+                           capture_output=True, text=True)
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):  # [CHANGE: claude-code | 2026-10-10]
+        return name
+    lines = (r.stdout.splitlines() + ["", ""])[:2]
+    squash = lambda s: s.replace(" ", "").lower()
+    if any(squash(l).startswith(squash(name)) for l in lines if l):
+        return lines[0]
+    return name
+
+
 def font_settings(spec: dict) -> dict:
     """KDE font strings, in the 19-field form QFont::toString() emits on Qt 6.
 
@@ -251,7 +269,7 @@ def font_settings(spec: dict) -> dict:
     weight, so naming "Medium" on a family that is not installed can resolve
     worse than just asking for weight 500 and letting fontconfig substitute.
     """
-    fam = spec["font"]["families"]
+    fam = {k: fc_family(v) for k, v in spec["font"]["families"].items()}  # [CHANGE: claude-code | 2026-10-10]
     m = spec["kde_mapping"]
 
     def f(family: str, pt: int, weight: int) -> str:
@@ -304,7 +322,7 @@ def check_fonts(spec: dict) -> list:
         return []
     missing = []
     for role, fam in spec["font"]["families"].items():
-        if fam.lower() not in installed.lower():
+        if fc_family(fam).lower() not in installed.lower():  # [CHANGE: claude-code | 2026-10-10]
             resolved = subprocess.run(["fc-match", "-f", "%{family}", fam],
                                       capture_output=True, text=True).stdout.strip()
             missing.append((role, fam, resolved or "?"))
@@ -373,6 +391,13 @@ def main() -> None:
     for key, val in fonts.items():
         group = "WM" if key == "activeFont" else "General"
         kwrite("kdeglobals", group, key, val, dry)
+    # [CHANGE: claude-code | 2026-10-10] [General] activeFont is not read by KWin (it reads
+    # [WM] activeFont); a stray Ubuntu value there came from luminos-ubuntu-look/persist.
+    if dry:
+        print("    would delete kdeglobals [General] activeFont")
+    else:
+        subprocess.run(["kwriteconfig6", "--file", "kdeglobals", "--group", "General",
+                        "--key", "activeFont", "--delete"], check=True)
 
     # 4. motion - Caelestia's normal duration is 400ms.
     #    KWin AnimationSpeed is an INVERTED 0..6 scale (0=instant, 3=default 250ms,
@@ -390,7 +415,7 @@ def main() -> None:
     if kread("kdeglobals", "General", "ColorScheme") != SCHEME_NAME:
         print("    FAIL: ColorScheme did not stick"); ok = False
     got_font = kread("kdeglobals", "General", "font")
-    if not got_font.startswith(spec["font"]["families"]["sans"]):
+    if not got_font.startswith(fc_family(spec["font"]["families"]["sans"]) + ","):  # [CHANGE: claude-code | 2026-10-10]
         print(f"    FAIL: font did not stick (got {got_font!r})"); ok = False
     if kread("kwinrc", "Compositing", "AnimationSpeed") != "4":
         print("    FAIL: AnimationSpeed did not stick"); ok = False

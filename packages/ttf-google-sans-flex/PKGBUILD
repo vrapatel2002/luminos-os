@@ -1,0 +1,26 @@
+# [CHANGE: claude-code | 2026-10-10] DECISION 139 phase 2 — Nexus font.
+# Google Sans Flex (OFL-1.1) variable TTF from github.com/google/fonts, pinned to the
+# commit that added GSF v5.000. Own PKGBUILD because AUR ttf-google-sans-flex-variable
+# (0 votes) points at refs/heads/main and a filename upstream has since renamed, so its
+# checksum can no longer match. fontconfig family name: "Google Sans Flex".
+pkgname=ttf-google-sans-flex
+pkgver=5.000
+pkgrel=1
+_commit=bd8f81ddb5c74d5c8897b36ad88b440266245103
+_file='GoogleSansFlex[ROND,opsz,slnt,wdth,wght].ttf'
+pkgdesc="Google Sans Flex variable font (OFL), as used by Caelestia/Nexus"
+arch=('any')
+url='https://github.com/googlefonts/googlesans-flex'
+license=('OFL-1.1')
+provides=('ttf-google-sans-flex-variable')
+conflicts=('ttf-google-sans-flex-variable')
+_base="https://raw.githubusercontent.com/google/fonts/${_commit}/ofl/googlesansflex"
+source=("${pkgname}-${pkgver}.ttf::${_base}/GoogleSansFlex%5BROND%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf"
+        "OFL-${pkgver}.txt::${_base}/OFL.txt")
+sha256sums=('a9ac770798857d5e8ac593ced42b22e40a7c08cec98319f92b0eccc2783a77ba'
+            'fc13d69f63e36d284b6e383d4d1463d8ad404f0aa065e57cf961252d51063137')
+
+package() {
+  install -Dm644 "${srcdir}/${pkgname}-${pkgver}.ttf" "${pkgdir}/usr/share/fonts/TTF/${_file}"
+  install -Dm644 "${srcdir}/OFL-${pkgver}.txt" "${pkgdir}/usr/share/licenses/${pkgname}/OFL.txt"
+}

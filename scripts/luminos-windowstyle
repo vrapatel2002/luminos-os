@@ -25,6 +25,7 @@ FAIL=0
 # file|group|key|value — insides: Darkly at radius 16, fully opaque, never touches ColorScheme.
 INSIDES=(
   "kdeglobals|KDE|widgetStyle|Darkly"
+  "kdeglobals|Icons|Theme|yet-another-monochrome-icon-set"  # [CHANGE: claude-code | 2026-10-10] DECISION 139 mono icons
   "darklyrc|Common|CornerRadius|16"
   "darklyrc|Style|MenuOpacity|100"
   "darklyrc|Style|MenuBarOpacity|100"
@@ -95,8 +96,8 @@ reload() {
   if qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1; then echo "OK   KWin reconfigured"
   else echo "FAIL KWin reconfigure (no session bus or KWin not running?)"; FAIL=1; fi
   if dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange \
-      int32:2 int32:0 2>/dev/null; then echo "OK   style-change signal sent"
-  else echo "FAIL style-change signal not sent"; FAIL=1; fi
+      int32:2 int32:0 2>/dev/null && dbus-send --session --type=signal /KIconLoader org.kde.KIconLoader.iconChanged int32:0 2>/dev/null; then echo "OK   style + icon change signals sent"
+  else echo "FAIL style/icon change signal not sent"; FAIL=1; fi
 }
 
 cmd_apply() {

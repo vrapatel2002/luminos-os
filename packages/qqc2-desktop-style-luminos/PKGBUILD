@@ -1,0 +1,58 @@
+# Luminos fork of qqc2-desktop-style (maintained in ~/luminos-os).
+# Based on Arch PKGBUILD by Antonio Rojas <arojas@archlinux.org>
+#
+# [CHANGE: claude-code | 2026-10-10] LUMINOS FORK (pkgrel 1.2: thumb grows about its centre; relabelled) — DECISION 139 (Phase 2 "Nexus paint pass").
+# This is Arch's stock qqc2-desktop-style PKGBUILD plus one patch. Do not "clean up" the
+# pkgrel: 1.x sorts ABOVE the repo's 1, which is what stops a routine `pacman -Syu`
+# from silently reverting the switch look. When upstream moves to a new pkgver the repo
+# wins again; /etc/pacman.d/hooks/luminos-qqc2.hook (source: config/pacman-hooks/) warns.
+#
+#   Rebuild:  makepkg -si
+#   Revert:   sudo pacman -U /var/cache/pacman/pkg/qqc2-desktop-style-6.30.0-1-x86_64.pkg.tar.zst
+#
+# The patch only rewrites org.kde.desktop/private/SwitchIndicator.qml into a Material 3
+# switch (52x32 round track, 24px thumb with drawn check/cross, 28px while pressed).
+# Editing the file on disk does nothing: the module qmldir says `prefer :/qt/qml/...`,
+# so the copy compiled into liborg_kde_desktop_private.so always wins — hence the rebuild.
+
+pkgname=qqc2-desktop-style
+pkgver=6.30.0
+pkgrel=1.2
+pkgdesc='A style for Qt Quick Controls 2 to make it follow your desktop theme'
+arch=(x86_64)
+url='https://develop.kde.org/products/frameworks/'
+license=(LGPL-2.0-only
+         LGPL-3.0-only)
+depends=(libstdc++
+         glibc
+         kcolorscheme
+         kconfig
+         kiconthemes
+         kirigami
+         qt6-base
+         qt6-declarative
+         sonnet)
+makedepends=(extra-cmake-modules
+             qt6-tools)
+groups=(kf6)
+source=(https://download.kde.org/stable/frameworks/${pkgver%.*}/$pkgname-$pkgver.tar.xz{,.sig}
+        qqc2-luminos-m3-switch.patch)
+sha256sums=('74c6402fa697a76254e1c68ebd86136be49e03fad86482e86a27e5478f662c41'
+            'SKIP'
+            '95fd5482558aa2b0d3c7b63bae848dae7410bd9ef5285e0c5dd8df124f3bec34')
+validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB  # David Faure <faure@kde.org>
+              90A968ACA84537CC27B99EAF2C8DF587A6D4AAC1) # Nicolas Fella <nicolas.fella@kde.org>
+
+prepare() {
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/qqc2-luminos-m3-switch.patch
+}
+
+build() {
+  cmake -B build -S $pkgname-$pkgver \
+    -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}

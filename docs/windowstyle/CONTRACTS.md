@@ -44,3 +44,14 @@ Deps: kdecoration, Qt6, KF6 already installed + AUR `darkly`. Nothing else.
 - Before any package action: `~/luminos-os/scripts/luminos-brain safe "<action>"`; known false NO → `--reason "<why>"`.
 - Never `pkill -f` broad patterns, never `git add -A`, never `swapoff`, never run `nvidia-smi`/`lspci`. Do not commit — PM commits.
 - Restart KWin's decoration via `qdbus6 org.kde.KWin /KWin reconfigure` — **never** `kwin_wayland --replace` (kills the session).
+
+---
+## Phase 2 contracts (frozen 2026-10-10 22:00)
+| Path | Owner |
+|---|---|
+| `packages/ttf-google-sans-flex/PKGBUILD` (if no sane AUR pkg), `scripts/luminos-kde-caelestia-theme`, `scripts/luminos-ubuntu-look` font lines | font+colour worker |
+| `packages/qqc2-desktop-style-luminos/` (PKGBUILD + patch), `config/pacman-hooks/luminos-qqc2.hook` | switch worker |
+| icon theme package/choice, `scripts/luminos-ubuntu-look` icon lines, `scripts/luminos-windowstyle` managed-key list (add icon key) | icon worker |
+| `scripts/luminos-windowstyle-check`, `tests/windowstyle/*` | test writer only |
+Two workers touch `luminos-ubuntu-look`: font worker owns FONT lines, icon worker owns ICON lines — edit only your lines, re-read the file right before editing.
+Checker budget raised to **320 lines** (bash + helpers). Patch packages: pkgrel `<n>.1`, hook warns when stock replaces them.

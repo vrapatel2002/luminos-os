@@ -1,0 +1,148 @@
+--- a/org.kde.desktop/private/SwitchIndicator.qml
++++ b/org.kde.desktop/private/SwitchIndicator.qml
+@@ -5,14 +5,16 @@
+     SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-or-later
+ */
+ 
++// [CHANGE: luminos | 2026-10-10] DECISION 139 — Material 3 switch (52x32 track, 24 thumb with check/cross, 28 pressed).
+ import QtQuick
++import QtQuick.Shapes
+ import QtQuick.Templates as T
+ import org.kde.kirigami as Kirigami
+ 
+ Item {
+     id: indicator
+-    implicitWidth: implicitHeight * 2
+-    implicitHeight: Kirigami.Units.gridUnit
++    implicitWidth: Math.round(implicitHeight * 52 / 32)
++    implicitHeight: Math.round(Kirigami.Units.gridUnit * 16 / 9)
+     layer.enabled: control.opacity < 1.0
+ 
+     property T.AbstractButton control
+@@ -24,65 +26,69 @@
+     QtObject { // colors collected in one place so that main code remains clean and these properties are not exposed
+         id: colorFactory
+ 
+-        readonly property color switchBorderColor: indicator.control.checked ? Kirigami.Theme.highlightColor : handleBorderColor
++        readonly property real s: indicator.height / 32
++        // Nexus/M3 tones: off track = surfaceContainerHighest, thumb = outline, glyph = track colour
++        readonly property color offTrackColor: Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, 0.06)
++        readonly property color switchBorderColor: Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, 0.14)
++        readonly property color outlineColor: indicator.control.hovered ? Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.disabledTextColor, Kirigami.Theme.textColor, 0.3) : Kirigami.Theme.disabledTextColor
++        // primary = focus colour (the selection set may be a muted secondaryContainer); onPrimary = same hue, tone 20 (dark) or white
++        readonly property color primaryColor: Kirigami.Theme.focusColor
++        readonly property color thumbOnColor: toneOnPrimary(primaryColor)
++        readonly property color trackColor: indicator.control.checked ? primaryColor : offTrackColor
++        readonly property color handleColor: indicator.control.checked ? thumbOnColor : outlineColor
++        readonly property color glyphColor: indicator.control.checked ? primaryColor : offTrackColor
+ 
+-        readonly property color handleColor: Kirigami.Theme.backgroundColor
+-        readonly property color handleBorderColor: (indicator.control.hovered || indicator.control.visualFocus) ? Kirigami.Theme.hoverColor : Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, Kirigami.Theme.frameContrast)
+-
+-        function blendBackgroundWithTextColorWithRatio(factor: double): color {
+-            // blending of background color with text color for producing a border color. The usual ratios are 70:30, 80:20 and 75:25. The more the background color, the more the contrast.
+-            return Qt.tint(Kirigami.Theme.textColor, Qt.alpha(Kirigami.Theme.backgroundColor, factor))
++        function toneOnPrimary(p: color): color {
++            return Qt.hsla(p.hslHue, p.hslSaturation * 0.4, p.hslLightness > 0.5 ? 0.27 : 1.0, 1)
+         }
+     }
+ 
+     Rectangle {
+         id: inactive
+ 
+-        anchors {
+-            fill: parent
+-            // margins so that the background is a bit shorter than the handle
+-            topMargin: Math.floor(parent.height / 6)
+-            bottomMargin: Math.floor(parent.height / 6)
+-        }
+-
+-        radius: Math.round(height / 2)
+-        color: colorFactory.blendBackgroundWithTextColorWithRatio(0.9)
++        anchors.fill: parent
++        radius: height / 2
++        color: colorFactory.trackColor
++        border.width: indicator.control.checked ? 0 : Math.max(1, Math.round(2 * colorFactory.s))
+         border.color: colorFactory.switchBorderColor
+-    }
+ 
+-    Rectangle {
+-        anchors {
+-            left: inactive.left
+-            top: inactive.top
+-            bottom: inactive.bottom
+-            right: handle.right
++        Behavior on color {
++            enabled: Kirigami.Units.shortDuration > 0
++            ColorAnimation { duration: Kirigami.Units.shortDuration }
+         }
++    }
+ 
+-        radius: inactive.radius
+-        color: Qt.alpha(Kirigami.Theme.highlightColor, 0.5)
++    Rectangle { // focus ring
++        anchors.fill: parent
++        anchors.margins: -Math.round(3 * colorFactory.s)
++        radius: height / 2
++        visible: indicator.control.visualFocus
++        color: "transparent"
++        border.width: Math.max(1, Math.round(2 * colorFactory.s))
++        border.color: Kirigami.Theme.focusColor
+     }
+ 
+     Rectangle {
+         id: handle
+ 
+-        x: Math.max(0, Math.min(parent.width - width, indicator.control.visualPosition * parent.width - (width / 2)))
+-
+-        anchors {
+-            top: parent.top
+-            bottom: parent.bottom
+-        }
+-
+-        width: height
+-        radius: Math.floor(width / 2)
++        property real cx: indicator.height / 2 + indicator.control.visualPosition * (indicator.width - indicator.height)
++        x: cx - width / 2 // follows the animated width, so press/release grows the thumb about its centre
++        y: Math.round((indicator.height - height) / 2)
++        width: Math.round((indicator.control.pressed ? 28 : 24) * colorFactory.s)
++        height: width
++        radius: width / 2
+         color: colorFactory.handleColor
+-        border.color: colorFactory.handleBorderColor
+ 
+-        Behavior on x {
++        Behavior on cx {
+             enabled: !indicator.control.pressed && Kirigami.Units.shortDuration > 0
+             SmoothedAnimation {
+                 duration: Kirigami.Units.shortDuration
+             }
+         }
++        Behavior on width {
++            enabled: Kirigami.Units.shortDuration > 0
++            NumberAnimation { duration: Kirigami.Units.shortDuration; easing.type: Easing.OutCubic }
++        }
+ 
+         Behavior on color {
+             enabled: Kirigami.Units.shortDuration > 0
+@@ -91,5 +97,20 @@
+                 duration: Kirigami.Units.shortDuration
+             }
+         }
++
++        Shape { // check or cross drawn on a 24-unit grid, scaled to the thumb
++            width: 24; height: 24
++            anchors.centerIn: parent
++            scale: handle.width / 24
++            preferredRendererType: Shape.CurveRenderer
++            ShapePath {
++                strokeColor: colorFactory.glyphColor
++                strokeWidth: 2.2
++                fillColor: "transparent"
++                capStyle: ShapePath.RoundCap
++                joinStyle: ShapePath.RoundJoin
++                PathSvg { path: indicator.control.checked ? "M7 12.5 L10.5 16 L17.5 8.5" : "M8 8 L16 16 M16 8 L8 16" }
++            }
++        }
+     }
+ }

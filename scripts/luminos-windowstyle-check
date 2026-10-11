@@ -11,13 +11,11 @@ res() { # res <ok 0|1> <name> <detail>
     if [ "$1" -eq 0 ]; then echo "PASS $2: $3"; else echo "FAIL $2: $3"; FAILS=$((FAILS + 1)); fi
 }
 kr() { kreadconfig6 --file "$1" --group "$2" --key "$3" 2>/dev/null; }
-
 check_plugin_file() {
     if [ ! -f "$PLUGIN" ]; then res 1 plugin-file "$PLUGIN missing"; return; fi
     local own; own=$(pacman -Qo "$PLUGIN" 2>&1)
     res $? plugin-file "$own"
 }
-
 check_kwinrc() {
     local lib bs; lib=$(kr kwinrc org.kde.kdecoration2 library); bs=$(kr kwinrc org.kde.kdecoration2 BorderSize)
     [ "$lib" = org.kde.luminos.chromeos ] && [ "$bs" = None ]
@@ -51,15 +49,17 @@ check_widget_style() {
     res $? widget-style "widgetStyle='${ws:-<unset>}' darklyrc CornerRadius='${rad:-<unset>}' ColorScheme='${cs:-<unset>}' (want Darkly / 16 / Caelestia)"
 }
 
-check_kirigami() {
-    local ver rad line envs=()
-    ver=$(pacman -Q kirigami 2>&1)
+qmlrun() { # qmlrun <qml> <grep -o pattern> -> value after '=' (KIRIGAMI_* from /etc/environment applied)
+    local line envs=()
     while IFS= read -r line; do envs+=("$line"); done < <(grep -E '^KIRIGAMI_[A-Z_]+=' /etc/environment)
-    rad=$(cd /tmp && env "${envs[@]}" QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
-        QT_QUICK_CONTROLS_STYLE=org.kde.desktop timeout 15 qml6 "$HERE/kirigami-radius.qml" 2>&1 |
-        grep -o 'cornerRadius=[0-9.]*' | cut -d= -f2)
-    [[ "$ver" == *-1.1 ]] && [ "$rad" = 16 ]
-    res $? kirigami "'$ver' (want -1.1), Kirigami.Units.cornerRadius='${rad:-<no output>}' (want 16)"
+    (cd /tmp && env "${envs[@]}" QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
+        QT_QUICK_CONTROLS_STYLE=org.kde.desktop timeout 15 qml6 "$HERE/$1" 2>&1 | grep -o "$2" | head -1 | cut -d= -f2)
+}
+
+check_kirigami() {
+    local ver rad; ver=$(pacman -Q kirigami 2>&1); rad=$(qmlrun kirigami-radius.qml 'cornerRadius=[0-9.]*')
+    [[ "$ver" =~ -1\.[0-9]+$ ]] && [ "$rad" = 16 ]
+    res $? kirigami "'$ver' (want -1.N), Kirigami.Units.cornerRadius='${rad:-<no output>}' (want 16)"
 }
 
 check_revert_script() {
@@ -104,11 +104,68 @@ o=[o for o in json.load(sys.stdin)["outputs"] if o["enabled"]];print(o[0]["scale
     done <<<"$out"
 }
 
+# --- Phase 2 (Nexus paint pass, CONTRACTS.md "Phase 2 contracts") ---
+GSF='^[Gg]oogle ?[Ss]ans ?[Ff]lex'
+check_font_installed() {
+    local n fam file bad="" det=""
+    for n in GoogleSansFlex "Google Sans Flex"; do
+        IFS='|' read -r fam file < <(fc-match -f '%{family[0]}|%{file}\n' "$n" 2>/dev/null)
+        det+="'$n'->'$fam' ($file); "; [[ "$fam" =~ $GSF ]] || bad=1
+        pacman -Qo "$file" >/dev/null 2>&1 || { bad=1; det+="not pacman-owned; "; }
+    done
+    [ -z "$bad" ]; res $? font-installed "$det"
+}
+check_font_keys() {
+    local g k v bad="" ub
+    for g in General:font General:menuFont General:smallestReadableFont General:toolBarFont WM:activeFont; do
+        v=$(kr kdeglobals "${g%%:*}" "${g#*:}"); [[ "${v%%,*}" =~ $GSF ]] || bad+="[${g%%:*}] ${g#*:}='${v%%,*}' "
+    done
+    ub=$(grep -nE '^[A-Za-z]*[Ff]ont=Ubuntu' "$HOME/.config/kdeglobals" | tr '\n' ' ')
+    [ -z "$bad$ub" ]; res $? font-keys "${bad:-all 5 keys Google Sans Flex}; Ubuntu font lines: ${ub:-none}"
+}
+rgb() { "$PY" -I -c 'import sys;v=sys.argv[1].strip().lstrip("#")
+print(",".join(str(int(x)) for x in v.split(",")[:3]) if "," in v else ",".join(str(int(v[i:i+2],16)) for i in (0,2,4)))' "$1" 2>/dev/null; }
+check_selection() {
+    local want cols live
+    want=$(rgb "$("$PY" -I -c 'import json,sys;print(json.load(open(sys.argv[1]))["colours"]["secondaryContainer"])' \
+        "$HOME/.local/state/caelestia/scheme.json" 2>/dev/null)")
+    cols=$(rgb "$(kr "$HOME/.local/share/color-schemes/Caelestia.colors" Colors:Selection BackgroundNormal)")
+    live=$(rgb "$(kr kdeglobals Colors:Selection BackgroundNormal)")
+    [ -n "$want" ] && [ "$cols" = "$want" ] && [ "$live" = "$cols" ]
+    res $? selection-colour "secondaryContainer=${want:-?} Caelestia.colors=${cols:-?} kdeglobals=${live:-?} (all must match)"
+}
+check_qqc2() {
+    local ver sz w h; ver=$(pacman -Q qqc2-desktop-style 2>&1); sz=$(qmlrun switch.qml 'switch-indicator=[0-9.x]*')
+    w=${sz%x*}; h=${sz#*x}; w=${w%.*}; h=${h%.*}; [[ "$w$h" =~ ^[0-9]+$ ]] || w=0
+    [[ "$ver" =~ -1\.[0-9]+$ ]] && [ -n "$sz" ] && [ $(( (w-52)*(w-52) )) -le 16 ] && [ $(( (h-32)*(h-32) )) -le 16 ]
+    res $? qqc2 "'$ver' (want -1.N), checked Switch indicator '${sz:-<no output>}' (want 52x32 +-4)"
+}
+check_icons() {
+    local t out; t=$(kr kdeglobals Icons Theme); [ -n "$t" ] || t=$(kr "$HOME/.config/kdedefaults/kdeglobals" Icons Theme)
+    out=$(cd /tmp && "$PY" -I -B "$HERE/icons.py" "${t:-<unset>}" preferences-system-bluetooth \
+        preferences-desktop-sound preferences-system-network 2>&1 | tail -1)
+    [[ "$out" == "PASS icons-mono:"* ]]; res $? icons-mono "${out#* icons-mono: }"
+}
+check_ubuntu_look() {
+    # luminos-ubuntu-look has no --check mode (apply|--revert only), so read statically: the installed script and the
+    # script luminos-ubuntu-look.service actually runs at login must not assign another icon theme or Ubuntu UI fonts.
+    local t f v bad="" svc; t=$(kr kdeglobals Icons Theme)
+    svc=$(systemctl --user show -p ExecStart luminos-ubuntu-look.service 2>/dev/null | grep -o 'path=[^ ;]*' | cut -d= -f2)
+    for f in /usr/local/bin/luminos-ubuntu-look "$svc"; do
+        [ -f "$f" ] || continue
+        for v in $(grep -E '^\s*(ICON_THEME|ICONS)=' "$f" | cut -d= -f2 | tr -d "\"'"); do
+            [ "$v" = "$t" ] || bad+="$f sets icons '$v' (live '$t'); "; done
+        grep -qE '^[^#]*(Ubuntu,[0-9]|font-name[^#]*Ubuntu [0-9])' "$f" && bad+="$f sets Ubuntu UI font; "
+    done
+    [ -z "$bad" ]; res $? ubuntu-look-agrees "${bad:-no conflicting icon/font writes in /usr/local/bin/luminos-ubuntu-look, ${svc:-<no service>}}"
+}
+
 SHOT=1
 for a in "$@"; do
     case "$a" in --no-screenshot) SHOT=0 ;; *) echo "usage: $0 [--no-screenshot]" >&2; exit 2 ;; esac
 done
 check_plugin_file; check_kwinrc; check_kwin_loaded; check_effect_off
 check_widget_style; check_kirigami; check_revert_script
+check_font_installed; check_font_keys; check_selection; check_qqc2; check_icons; check_ubuntu_look
 [ "$SHOT" -eq 1 ] && check_screenshot
 exit $((FAILS > 0))

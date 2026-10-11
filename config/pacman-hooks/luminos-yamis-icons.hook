@@ -1,0 +1,20 @@
+# luminos-yamis-icons.hook — keep the YAMIS (monochrome) icon fallback chain after updates.
+#
+# yamis-icon-theme-git ships Inherits=Papirus-Dark,breeze-dark,Cosmic,Adwaita,hicolor.
+# Cosmic is not installed here, so every icon miss that reaches it would log
+# `Icon theme "Cosmic" not found` (same shape as BUG-090 / Humanity). Rewrite the chain
+# with the order-preserving helper — never kwriteconfig6 an index.theme (BUG-090).
+#
+# Install to /etc/pacman.d/hooks/luminos-yamis-icons.hook
+# [CHANGE: claude-code | 2026-10-10] DECISION 139 phase 2 (icons)
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = yamis-icon-theme-git
+
+[Action]
+Description = Restoring the Luminos icon fallback chain for YAMIS...
+When = PostTransaction
+Exec = /bin/sh -c 't=/usr/share/icons/yet-another-monochrome-icon-set; [ -f "$t/index.theme" ] && /usr/local/bin/luminos-icon-inherits.py "$t/index.theme" "Papirus-Dark,breeze-dark,Adwaita,hicolor"; gtk-update-icon-cache -f -q "$t" 2>/dev/null; exit 0'

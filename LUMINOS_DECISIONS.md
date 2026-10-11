@@ -8275,3 +8275,41 @@ and insides. Selected rows are solid lavender rather than Nexus's 30 % tint. The
 **Proof:** `scripts/luminos-windowstyle-check` 11/11 PASS including pixel probes on a live spectacle capture
 (corners transparent at 3 px diagonal, header vs body RGB distance 0, glyphs only in the three button slots).
 Shots: `docs/windowstyle/shots/`. Independent review: 8 findings, all fixed (one null-deref crash risk).
+
+---
+
+## DECISION 139 — Nexus paint pass: font, Material 3 switch, monochrome icons, Nexus tones
+*[CHANGE: claude-code | 2026-10-10]*
+
+After DECISION 138 Shawn put System Settings beside Nexus: *"its no where near close to it"*. The frame was
+already the same; the gap was all inside. Shown ChromeOS screenshots, he chose **Nexus**, and the "paint-level"
+fixes. Layout (rows grouped into cards, grey second line, big headline) was explained as out of reach for a
+theme — System Settings' layout is compiled in — and is **not** part of this decision.
+
+1. **Font — Google Sans Flex 5.000** (OFL), own `packages/ttf-google-sans-flex` pinned to google/fonts commit
+   bd8f81dd + sha256. The AUR package pulls a moving `main` file under a renamed path. Fontconfig's family is
+   **"Google Sans Flex"** (with spaces) — kdeglobals had `GoogleSansFlex` since 08-09 and nothing was installed, so
+   every KDE app had silently been on Noto. `luminos-kde-caelestia-theme` now writes the family fontconfig reports.
+   A stray `[General] activeFont=Ubuntu` came from `luminos-ubuntu-look`/`-persist`; both no longer write KDE fonts.
+2. **Switch — patched `qqc2-desktop-style` 6.30.0-1.2** (`packages/qqc2-desktop-style-luminos/`, 97-line patch to
+   `SwitchIndicator.qml`): M3 track 52×32, thumb 24 (28 pressed) with ✓/✗ drawn by QtQuick.Shapes, ON colour from
+   `focusColor` (because Selection is now the dull secondaryContainer). Same trap as Kirigami: qmldir `prefer :/…` —
+   the on-disk QML is a decoy. Reaches every Kirigami/QQC2 Switch incl. kirigami-addons FormCard. Pixels match Nexus
+   (#c2c1ff track, #2a2960 thumb). Hook warns when stock returns.
+3. **Icons — YAMIS** (`yamis-icon-theme-git`), FollowsColorScheme + `ColorScheme-Text` SVGs, so KDE recolours them
+   with Caelestia's text colour. Breeze rejected (its `preferences-*` icons are colour). Side effect: ~1,950 app
+   icons it covers go one-colour too; uncovered ones fall back to Papirus-Dark. Supersedes Yaru/Papirus as the
+   icon name (DECISION 30 / BUG-090 mechanics unchanged).
+4. **Tones from the Nexus screenshot**, mapped in `luminos-kde-caelestia-theme`: Window/Header = surfaceContainerLow
+   #1c1b1f, View = surface #131317, alternates = surfaceContainer #201f23, Selection = secondaryContainer #45455c
+   with onSecondaryContainer #b4b2ce text.
+5. **Login scripts stopped fighting:** `luminos-ubuntu-persist` heals icons before its colour gate and heals a blank
+   scheme to **Caelestia**, not Yaru; `luminos-ubuntu-look apply` only applies Yaru colours when the scheme is blank/Breeze.
+
+**Proof:** checker 17/17 (font resolves, keys, selection colour, qqc2 52×32 probe, icon SVGs single-colour, login
+scripts agree, frame pixel probes). Screenshots `docs/windowstyle/shots/nexus-paint-{bluetooth,dolphin}.png`.
+Reviewer (Fable): 9 findings, all fixed.
+
+**Undo:** font `sudo pacman -Rns ttf-google-sans-flex`; switch `sudo pacman -U /var/cache/pacman/pkg/qqc2-desktop-style-6.30.0-1-x86_64.pkg.tar.zst`;
+icons `luminos-windowstyle revert` (+ `ICONS=` in persist, `pacman -Rns yamis-icon-theme-git`); colours
+`git checkout <pre-139> -- scripts/luminos-kde-caelestia-theme && scripts/luminos-kde-caelestia-theme --apply`.

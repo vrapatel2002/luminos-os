@@ -18,90 +18,76 @@
 #      [Colors:*] blocks*. Name said Yaru, payload stayed Breeze Dark.
 #   3. Its drift check read only the scheme NAME, so once (2) happened it saw "Yaru" and
 #      declared victory forever. It now checks an actual colour value.
+#
+# [CHANGE: claude-code | 2026-10-10] DECISION 139 phase 2 — the look is now Caelestia colours +
+# YAMIS monochrome icons, not Yaru. Rewritten so that:
+#   * the icon/GTK-icon heal runs on EVERY login (it used to sit behind the colour gate, which
+#     exits on ColorScheme=Caelestia, so it never ran);
+#   * a blanked/Breeze colour scheme heals to Caelestia via luminos-kde-caelestia-theme --apply,
+#     never to Yaru (which clobbered Caelestia);
+#   * GTK settings.ini is edited key-by-key (gtk-theme-name/cursor stay as configured), and
+#     fonts are never written here (luminos-kde-caelestia-theme owns them).
 set -uo pipefail
 
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+REPO="${LUMINOS_REPO:-$HOME/luminos-os}"
 
-SCHEME=Yaru
-ICONS=Yaru
-CURSOR=Yaru
-UI_FONT="Ubuntu,10,-1,5,50,0,0,0,0,0"
-MONO_FONT="Ubuntu Mono,10,-1,5,50,0,0,0,0,0"
-# Canary: Yaru's accent (#E95420). Present in kdeglobals only if the scheme really got applied.
-ACCENT="233,84,32"
+SCHEME=Caelestia
+# Monochrome YAMIS — same value as scripts/luminos-ubuntu-look ICON_THEME
+# (luminos-windowstyle-check asserts they agree).
+ICONS=yet-another-monochrome-icon-set
+log() { echo "luminos-ubuntu-persist: $*"; }
 
 # 0. Kill the actual cause. KDE's day/night + on-idle Global Theme switcher re-applies a whole
-#    Look-and-Feel package (colours, icons, cursor, widget style, Plasma style, decoration),
-#    which is exactly the "Global Theme reset" this script was written to clean up after.
-#    Both keys default to... different things: AutomaticLookAndFeel defaults false, but
-#    AutomaticLookAndFeelOnIdle defaults TRUE — so it must be written explicitly, not assumed.
+#    Look-and-Feel package (colours, icons, cursor, widget style, Plasma style, decoration).
+#    AutomaticLookAndFeelOnIdle defaults TRUE, so it must be written explicitly (BUG-088).
 kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel       false
 kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeelOnIdle false
-# Also stop it in the *running* session, not just for the next login.
 qdbus6 org.kde.kded6 /kded org.kde.kded6.unloadModule lookandfeelautoswitcher >/dev/null 2>&1 || true
 
-# Only heal when the look has actually drifted. If the user deliberately picked some OTHER
-# named scheme we leave it alone — we only fix the blank-out / Breeze fallback.
-cur="$(kreadconfig6 --file kdeglobals --group General --key ColorScheme 2>/dev/null || true)"
-case "$cur" in
-	"$SCHEME") ;;                       # name is right — payload checked below
-	""|Breeze*|BreezeDark|breeze*) ;;   # blanked or fell back to Breeze — heal it
-	*) echo "luminos-ubuntu-persist: user chose '$cur' — leaving it"; exit 0 ;;
-esac
-
-# Persisted keys (read by plasmashell/kwin at their own startup).
-kwriteconfig6 --file kdeglobals --group Icons   --key Theme       "$ICONS"
-# The Look-and-Feel package drops its own defaults into ~/.config/kdedefaults/kdeglobals,
-# which sits in XDG_CONFIG_DIRS. The user file outranks it, but kde-gtk-config was observed
-# syncing GTK to that file's breeze-dark instead. Align it so no reader can disagree.
+# 1. Icons (Qt) — always. kdedefaults/kdeglobals is aligned too: kde-gtk-config was observed
+#    syncing GTK from that file instead of the user file.
+if [[ "$(kreadconfig6 --file kdeglobals --group Icons --key Theme)" != "$ICONS" ]]; then
+	log "Qt icon theme drifted — healing to $ICONS"
+	kwriteconfig6 --file kdeglobals --group Icons --key Theme "$ICONS"
+	/usr/lib/plasma-changeicons "$ICONS" >/dev/null 2>&1 || true
+fi
 kwriteconfig6 --file "$HOME/.config/kdedefaults/kdeglobals" --group Icons --key Theme "$ICONS"
-kwriteconfig6 --file kcminputrc --group Mouse   --key cursorTheme "$CURSOR"
-for key in font menuFont toolBarFont activeFont; do
-	kwriteconfig6 --file kdeglobals --group General --key "$key" "$UI_FONT"
-done
-kwriteconfig6 --file kdeglobals --group General --key fixed "$MONO_FONT"
 
-# Colours: verify the PAYLOAD, not the name. plasma-apply-colorscheme refuses to do anything
-# when the name key already matches, so if the blocks are stale we must clear the name first.
-live_accent="$(kreadconfig6 --file kdeglobals --group "Colors:Button" --key DecorationFocus 2>/dev/null || true)"
-if [[ "$live_accent" != "$ACCENT" ]]; then
-	echo "luminos-ubuntu-persist: colour payload drifted (accent='$live_accent') — re-applying $SCHEME"
-	kwriteconfig6 --file kdeglobals --group General --key ColorScheme BreezeDark
-	plasma-apply-colorscheme "$SCHEME" >/dev/null 2>&1 || \
-		kwriteconfig6 --file kdeglobals --group General --key ColorScheme "$SCHEME"
-fi
-plasma-apply-cursortheme "$CURSOR"   >/dev/null 2>&1 || true
-if command -v plasma-changeicons >/dev/null 2>&1; then plasma-changeicons "$ICONS" >/dev/null 2>&1 || true
-elif [[ -x /usr/lib/plasma-changeicons ]]; then /usr/lib/plasma-changeicons "$ICONS" >/dev/null 2>&1 || true
-fi
-
-# GTK side. A Look-and-Feel apply also rewrites the GTK settings (via the kde-gtk-config
-# `gtkconfig` kded module), and nothing here used to put them back — so GTK apps stayed on
-# breeze-dark icons + breeze_cursors while the Qt side was already Yaru. That is why the
-# desktop looked "half Ubuntu". Re-affirm them explicitly rather than trusting the sync.
+# 2. Icons (GTK) — always, one key per file, in place (keeps comments and the other keys;
+#    the repo copies in config/gtk-*/ are meant to stay byte-identical).
 for v in gtk-3.0 gtk-4.0; do
 	ini="$HOME/.config/$v/settings.ini"
-	mkdir -p "$(dirname "$ini")"
-	kwriteconfig6 --file "$ini" --group Settings --key gtk-icon-theme-name   "$ICONS"
-	kwriteconfig6 --file "$ini" --group Settings --key gtk-cursor-theme-name "$CURSOR"
-	kwriteconfig6 --file "$ini" --group Settings --key gtk-theme-name        Yaru
+	[[ -f "$ini" ]] || printf '[Settings]\n' >"$ini"
+	if ! grep -qx "gtk-icon-theme-name=$ICONS" "$ini"; then
+		log "$v icon theme drifted — healing to $ICONS"
+		if grep -q '^gtk-icon-theme-name=' "$ini"; then sed -i "s/^gtk-icon-theme-name=.*/gtk-icon-theme-name=$ICONS/" "$ini"
+		else sed -i "/^\[Settings\]/a gtk-icon-theme-name=$ICONS" "$ini"; fi
+	fi
 done
-if command -v gsettings >/dev/null 2>&1; then
-	gsettings set org.gnome.desktop.interface icon-theme   "$ICONS"  2>/dev/null || true
-	gsettings set org.gnome.desktop.interface cursor-theme "$CURSOR" 2>/dev/null || true
-	gsettings set org.gnome.desktop.interface gtk-theme    Yaru      2>/dev/null || true
-fi
+[[ "$(gsettings get org.gnome.desktop.interface icon-theme 2>/dev/null)" == "'$ICONS'" ]] || \
+	gsettings set org.gnome.desktop.interface icon-theme "$ICONS" 2>/dev/null || true
 
-# Report what is actually true on disk, not what we attempted. A script that always prints
-# "re-affirmed" is how this stayed broken from 2026-07-22 to 2026-07-26.
-final_accent="$(kreadconfig6 --file kdeglobals --group "Colors:Button" --key DecorationFocus 2>/dev/null || true)"
+# 3. Colours — only heal a blank-out / Breeze fallback, and heal it to Caelestia. Any other
+#    named scheme is a deliberate user choice and is left alone.
+cur="$(kreadconfig6 --file kdeglobals --group General --key ColorScheme 2>/dev/null || true)"
+case "$cur" in
+	""|Breeze*|breeze*)
+		log "colour scheme is '${cur:-<blank>}' — healing to $SCHEME"
+		python3 "$REPO/scripts/luminos-kde-caelestia-theme" --apply >/dev/null 2>&1 \
+			|| log "warn: luminos-kde-caelestia-theme --apply failed (run it by hand)" ;;
+	*) ;;
+esac
+
+# Report what is actually true on disk, not what we attempted (BUG-088/089).
 final_icons="$(kreadconfig6 --file kdeglobals --group Icons --key Theme 2>/dev/null || true)"
 final_gtk3="$(kreadconfig6 --file "$HOME/.config/gtk-3.0/settings.ini" --group Settings --key gtk-icon-theme-name 2>/dev/null || true)"
 final_gtk4="$(kreadconfig6 --file "$HOME/.config/gtk-4.0/settings.ini" --group Settings --key gtk-icon-theme-name 2>/dev/null || true)"
-if [[ "$final_accent" == "$ACCENT" && "$final_icons" == "$ICONS" \
-   && "$final_gtk3" == "$ICONS" && "$final_gtk4" == "$ICONS" ]]; then
-	echo "luminos-ubuntu-persist: OK — Yaru colours (accent $ACCENT), Qt icons and GTK icons applied."
+final_scheme="$(kreadconfig6 --file kdeglobals --group General --key ColorScheme 2>/dev/null || true)"
+if [[ "$final_icons" == "$ICONS" && "$final_gtk3" == "$ICONS" && "$final_gtk4" == "$ICONS" \
+   && -n "$final_scheme" && "$final_scheme" != Breeze* ]]; then
+	log "OK — scheme '$final_scheme', Qt + GTK icons '$ICONS' (read back)."
 else
-	echo "luminos-ubuntu-persist: FAILED — accent='$final_accent' (want $ACCENT), icons='$final_icons', gtk3='$final_gtk3', gtk4='$final_gtk4' (want $ICONS)" >&2
+	log "FAILED — scheme='$final_scheme', icons='$final_icons', gtk3='$final_gtk3', gtk4='$final_gtk4' (want $ICONS)" >&2
 	exit 1
 fi

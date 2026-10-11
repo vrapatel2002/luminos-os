@@ -49,3 +49,25 @@ Chrome / Electron / GTK insides are out of scope (the app draws them, KWin canno
 - Their insides: rounded (16) text fields/buttons/frames from Darkly; Kirigami rows/radius bigger again.
 - `scripts/luminos-windowstyle-check` exits 0, including pixel probes on a **real screenshot** of the live desktop.
 - `luminos-windowstyle revert` puts the old look back, proven once.
+
+---
+# Phase 2 — Nexus paint pass (2026-10-10 21:58, Response 3)
+<!-- [CHANGE: claude-code | 2026-10-10] DECISION 139 -->
+Shawn (after seeing System Settings beside Nexus): "its no where near close" → picked **Nexus** over ChromeOS,
+and "do the paint level fix". Layout (cards, two-line rows, headline) is explicitly NOT in this phase.
+Reference: Nexus screenshot `/root/.claude/uploads/933e1464-f383-5550-bca8-82d5a34a3ac7/e552a30b-image.png` (cloud container).
+
+## Done means (phase 2)
+1. **Font:** Google Sans Flex installed system-wide from a pacman package; `fc-match GoogleSansFlex` resolves to it
+   (not Noto); every kdeglobals/KDE font key uses it (no stray `Ubuntu`), and nothing re-writes them at login.
+2. **Switch:** Kirigami/QQC2 apps draw a Material 3 switch: track 52×32 fully round; ON = track primary, thumb 24
+   onPrimary-ish with a ✓ glyph in primary/onPrimaryContainer; OFF = track surfaceContainerHighest with 2px outline,
+   thumb 16 outline colour with ✗ glyph (Nexus shows the ✗). Via a patched `qqc2-desktop-style` (pkgrel `.1`, same model as kirigami-luminos).
+3. **Icons:** a monochrome (single-colour, line/symbolic) icon theme for apps' UI icons, so System Settings' sidebar
+   is one-colour like Nexus. Must not be fought by `luminos-ubuntu-look.service` (it re-affirms icon/GTK keys at login — BUG-090/DECISION 30).
+4. **Colours:** Nexus tones from the Caelestia scheme: selected row = `secondaryContainer` (#45455c) with
+   `onSecondaryContainer` text (not solid lavender primary); window = `surface`/`surfaceContainerLow`; cards/views/buttons
+   = `surfaceContainer`/`surfaceContainerHigh` — chosen by measuring the Nexus screenshot. Done in
+   `scripts/luminos-kde-caelestia-theme` (the generator), never by hand-editing Caelestia.colors.
+5. Everything reversible; `luminos-windowstyle revert` (or the generator's own restore) documented.
+6. Checker extended; side-by-side screenshot of System Settings vs Nexus reviewed by the PM.
