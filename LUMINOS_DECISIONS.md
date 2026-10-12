@@ -8373,3 +8373,28 @@ only, cached; 5000×4 tree repaint 3.4–3.7 ms vs Breeze 3.6), and ON switch ro
 **Cost:** every Frameworks/Plasma/Qt bump replaces these silently (BUG-193 pattern). Hooks warn; rebuild all five +
 the decoration and run `scripts/luminos-windowstyle-check`. **Not covered:** GTK/Electron/Chrome, Plasma panel and
 applets (Plasma style), layouts inside individual KCMs. Undo per package: `pacman -U` the stock build in the cache.
+
+---
+
+## DECISION 141 — settings pages become card rows by patching Kirigami's form layout once
+*[CHANGE: claude-code | 2026-10-12]*
+
+Shawn: the build "was no where near close to the html prototype … why are they not global". Diagnosis: page
+contents belong to each settings plugin, and nearly all of them lay out through **Kirigami FormLayout** (or the
+newer **Form / FormGroup / FormEntry**) — grey label left, control right, separator lines. DECISION 140 never
+touched it. A detailed spec artifact was built first ("System Settings in Nexus Style": Window / Components / Map
+views, repo copy `docs/windowstyle/mock/nexus-replica.html`).
+
+`kirigami 6.30.0-1.4` (`kirigami-luminos-formcards.patch`, 315 lines): every labelled form row is its own rect
+(View alternate #201f23, ≥60 px, 2 px gaps, ConnectedRect corners 28/4 clamped to h/2); title left (colon dropped),
+control right capped at 55 %; fill-width controls (sliders, text fields, grids) stack below the title; unlabelled
+rows join the previous rect; `FormData.isSection` → 13 px grey label; a bare Separator draws nothing and ends the
+group; no lines. Global: every QML settings page and any app using FormLayout/Form.
+
+`systemsettings 6.7.5-1.4` (350 lines, at budget): the 1 px column left by the hidden sidebar separator, the
+QDialogButtonBox top line, the hole painted over the whole page (second rounded corner under the footer) and the
+33 px reserved by the sidebar scrollbar were the "line / overlap / gap" Shawn saw. The 30 px title was dropped for
+the few QtWidgets KCMs to stay in budget.
+
+Checker 26/26 (FormLayout probe proven to fail on stock). Open: Dolphin details-view bugs (the Darkly worker was
+stopped by Shawn mid-task — not resumed without his say), InlineMessage, KCM-own list areas, menus/tooltips/scrollbars.

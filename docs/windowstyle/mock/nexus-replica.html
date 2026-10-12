@@ -1,21 +1,21 @@
-<title>Nexus Window Replica</title>
+<title>System Settings in Nexus Style</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,400..600&display=swap">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400..600&display=swap">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400..500,0..1,0..200&display=block">
 <style>
-/* Layout: one Nexus window (frame + nav pane + page "hole") centred on a dark desk, with a control strip above and a name legend below.
-   Single dark look on purpose: it copies Caelestia's live dark scheme (scheme.json, 2026-10-10). Values from /etc/xdg/quickshell/caelestia/modules/nexus. */
+/* Layout: control strip with three views (Window / Components / Map). Window = the real KWin frame (our ChromeOS decoration)
+   around KDE System Settings drawn with Nexus rules. Components = every control as a spec card. Map = what draws what, and where it gets fixed.
+   Single dark look on purpose: it copies Caelestia's live dark scheme. */
 :root {
   color-scheme: dark;
-  /* Caelestia M3 roles */
   --desk: #0b0b0e;
-  --surface: #131317;              /* page hole */
-  --sc-lowest: #0e0e12;            /* search bar */
-  --sc-low: #1c1b1f;               /* window frame / blob */
-  --sc: #201f23;                   /* ConnectedRect */
-  --sc-high: #2a292e;              /* nav item */
-  --sc-highest: #353438;           /* switch track off */
-  --secondary-container: #45455c;  /* selected nav item, icon disc */
+  --surface: #131317;              /* page hole (View)            */
+  --sc-lowest: #0e0e12;            /* text fields, search          */
+  --sc-low: #1c1b1f;               /* window frame (Window)        */
+  --sc: #201f23;                   /* cards / ConnectedRect        */
+  --sc-high: #2a292e;              /* nav rows, menus              */
+  --sc-highest: #353438;           /* fields on cards, switch off  */
+  --secondary-container: #45455c;  /* selection, tonal buttons     */
   --on-secondary-container: #b4b2ce;
   --primary: #c2c1ff;
   --on-primary: #2a2a60;
@@ -24,9 +24,9 @@
   --outline: #918f9a;
   --outline-variant: #47464f;
   --error: #ffb4ab;
-  /* Tokens.rounding */
+  --inverse-surface: #e5e1e7;
+  --inverse-on-surface: #313034;
   --r-xs: 4px; --r-s: 8px; --r-m: 12px; --r-l: 16px; --r-xl: 28px; --r-xli: 32px;
-  /* Tokens.anim (M3 expressive) */
   --t: 1;
   --spatial-default: cubic-bezier(0.38, 1.21, 0.22, 1.00);
   --spatial-fast: cubic-bezier(0.42, 1.67, 0.21, 0.90);
@@ -34,544 +34,674 @@
   --d-spatial: calc(500ms * var(--t));
   --d-fast: calc(350ms * var(--t));
   --d-effects: calc(200ms * var(--t));
-  /* type */
   --font-ui: "Google Sans Flex", "Google Sans", "Roboto Flex", system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 html, body { height: 100%; }
-body {
-  background: var(--desk);
-  color: var(--on-surface);
-  font-family: var(--font-ui);
-  font-size: 14px;
-  padding-inline: 16px;
-  padding-block: 24px 40px;
-  box-sizing: border-box;
-}
+body { background: var(--desk); color: var(--on-surface); font-family: var(--font-ui); font-size: 14px; padding-inline: 16px; padding-block: 20px 40px; box-sizing: border-box; }
 * { box-sizing: border-box; }
-.ms {
-  font-family: "Material Symbols Rounded";
-  font-weight: 500; font-style: normal; font-size: 22px; line-height: 1;
-  letter-spacing: normal; text-transform: none; white-space: nowrap; direction: ltr;
-  font-feature-settings: "liga"; -webkit-font-smoothing: antialiased;
-  font-variation-settings: "FILL" 1, "GRAD" 25, "wght" 500, "opsz" 24;
-  user-select: none; display: inline-block; width: 1em; height: 1em; overflow: hidden;
-}
-.ms.nofill { font-variation-settings: "FILL" 0, "GRAD" 25, "wght" 500, "opsz" 24; }
+.ms { font-family: "Material Symbols Rounded"; font-weight: 500; font-style: normal; font-size: 22px; line-height: 1; letter-spacing: normal; text-transform: none; white-space: nowrap; direction: ltr;
+  font-feature-settings: "liga"; -webkit-font-smoothing: antialiased; font-variation-settings: "FILL" 0, "GRAD" 0, "wght" 500, "opsz" 24; user-select: none;
+  display: inline-block; width: 1em; height: 1em; overflow: hidden; flex: none; }
+.ms.fill { font-variation-settings: "FILL" 1, "GRAD" 25, "wght" 500, "opsz" 24; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
-/* ---------- control strip ---------- */
-.strip {
-  max-width: 1040px; margin: 0 auto 18px; display: flex; flex-wrap: wrap; gap: 10px 18px;
-  align-items: center; justify-content: space-between;
-}
-.strip h1 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: .01em; text-wrap: balance; }
-.strip h1 small { display: block; font-size: 12.5px; color: var(--on-surface-variant); font-weight: 400; margin-top: 2px; }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.chip {
-  font: inherit; font-size: 13px; color: var(--on-surface-variant); background: var(--sc);
-  border: 1px solid var(--outline-variant); border-radius: 999px; padding: 7px 14px 7px 10px;
-  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-  transition: background-color var(--d-effects) var(--effects), color var(--d-effects) var(--effects);
-}
-.chip .ms { font-size: 18px; }
+/* ---------- strip ---------- */
+.strip { max-width: 1120px; margin: 0 auto 14px; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between; }
+.strip h1 { margin: 0; font-size: 18px; font-weight: 500; text-wrap: balance; }
+.strip h1 small { display: block; font-size: 12.5px; color: var(--on-surface-variant); font-weight: 400; margin-top: 2px; max-width: 62ch; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; gap: 2px; }
+.seg button { border: 0; cursor: pointer; background: var(--sc-high); color: var(--on-surface-variant); padding: 8px 14px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px;
+  border-radius: var(--r-xs); transition: background-color var(--d-effects) var(--effects), border-radius var(--d-fast) var(--spatial-fast); }
+.seg button:first-child { border-radius: 999px var(--r-xs) var(--r-xs) 999px; }
+.seg button:last-child { border-radius: var(--r-xs) 999px 999px var(--r-xs); }
+.seg button[aria-pressed="true"] { background: var(--secondary-container); color: var(--on-secondary-container); border-radius: 999px; }
+.seg button .ms { font-size: 17px; }
+.seg button[aria-pressed="false"] .ms.chk { display: none; }
+.chip { border: 1px solid var(--outline-variant); background: transparent; color: var(--on-surface-variant); border-radius: 999px; padding: 7px 13px 7px 10px; font-size: 13px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.chip .ms { font-size: 17px; }
 .chip[aria-pressed="true"] { background: var(--secondary-container); color: var(--on-secondary-container); border-color: transparent; }
-.chip:focus-visible, .nav-item:focus-visible, .row:focus-visible, .sw:focus-visible, .search input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.view[hidden] { display: none !important; }
 
-/* ---------- window ---------- */
-.stage { overflow-x: auto; padding-block: 6px 18px; }
-.win {
-  --nav-w: 330px;
-  position: relative; width: 1040px; height: 680px; margin: 0 auto;
-  background: var(--sc-low); border-radius: var(--r-l);
-  box-shadow: 0 24px 48px rgba(0,0,0,.45), 0 0 24px rgba(0,0,0,.25);
-}
-/* the page "hole" cut out of the blob */
-.hole {
-  position: absolute; top: 12px; right: 12px; bottom: 12px; left: calc(var(--nav-w) + 32px);
-  background: var(--surface); border-radius: var(--r-l);
-}
-/* top-right bump that grows out of the frame (BlobRect windowBtnRect) */
-.bump {
-  position: absolute; top: 0; right: 0; width: 52px; height: 46px;
-  background: var(--sc-low); border-bottom-left-radius: var(--r-m); z-index: 3;
-  display: grid; place-items: center;
-}
-.bump::before, .bump::after { content: ""; position: absolute; width: 12px; height: 12px; }
-.bump::before { left: -12px; top: 12px; background: radial-gradient(circle at 0 100%, transparent 11.5px, var(--sc-low) 12px); }
-.bump::after { right: 12px; bottom: -12px; background: radial-gradient(circle at 0 100%, transparent 11.5px, var(--sc-low) 12px); }
-.bump button {
-  background: none; border: 0; color: var(--on-surface-variant); cursor: pointer; padding: 4px; border-radius: 999px;
-  transition: color var(--d-effects) var(--effects), transform var(--d-fast) var(--spatial-fast);
-  margin: 6px 0 0 6px;
-}
-.bump button:hover { color: var(--primary); }
-.bump button:active { transform: scale(.8); }
-.bump .ms { font-variation-settings: "FILL" 0, "GRAD" 0, "wght" 400, "opsz" 24; font-size: 24px; }
+/* ---------- window = KWin frame (luminos-chromeos decoration) ---------- */
+.stage { overflow-x: auto; padding-block: 4px 14px; }
+.win { --nav-w: 330px; position: relative; width: 1120px; height: 760px; margin: 0 auto; background: var(--sc-low); border-radius: var(--r-l);
+  box-shadow: 0 24px 48px rgba(0,0,0,.45), 0 0 24px rgba(0,0,0,.25), inset 0 0 0 1px rgba(255,255,255,.05); transition: width var(--d-spatial) var(--spatial-default); }
+.win.narrow { width: 760px; --nav-w: 72px; }
+.deco { position: absolute; inset: 0 0 auto 0; height: 40px; display: flex; justify-content: flex-end; align-items: center; padding-right: 8px; }
+.deco button { width: 36px; height: 40px; border: 0; background: none; cursor: pointer; display: grid; place-items: center; color: var(--on-surface); position: relative; }
+.deco button::before { content: ""; position: absolute; width: 28px; height: 28px; border-radius: 50%; background: #fff; opacity: 0; transition: opacity var(--d-effects) var(--effects); }
+.deco button:hover::before { opacity: .08; } .deco button:active::before { opacity: .14; }
+.deco button:last-child { margin-right: 0; width: 44px; padding-right: 8px; }
+.deco .ms { font-size: 18px; font-variation-settings: "FILL" 0, "wght" 400, "opsz" 20; }
+.hole { position: absolute; top: 40px; right: 12px; bottom: 12px; left: calc(var(--nav-w) + 28px); background: var(--surface); border-radius: var(--r-l);
+  transition: left var(--d-spatial) var(--spatial-default); }
 
-/* ---------- nav pane ---------- */
-.nav {
-  position: absolute; top: 16px; bottom: 16px; left: 16px; width: var(--nav-w);
-  display: flex; flex-direction: column; gap: 16px; min-width: 0;
-}
-.search {
-  position: relative; height: 54px; border-radius: 999px; background: var(--sc-lowest);
-  border: 1px solid var(--outline-variant); display: flex; align-items: center;
-  transition: border-color var(--d-effects) var(--effects);
-}
+/* ---------- sidebar ---------- */
+.nav { position: absolute; top: 40px; bottom: 12px; left: 14px; width: var(--nav-w); display: flex; flex-direction: column; gap: 12px; min-width: 0; transition: width var(--d-spatial) var(--spatial-default); }
+.navhead { display: flex; gap: 8px; align-items: center; }
+.search { position: relative; flex: 1; height: 52px; border-radius: 999px; background: var(--sc-lowest); border: 1px solid var(--outline-variant); display: flex; align-items: center; transition: border-color var(--d-effects) var(--effects); min-width: 0; }
 .search:focus-within { border-color: var(--primary); }
-.search .ms { position: absolute; left: 20px; font-size: 22px; color: var(--on-surface-variant); font-variation-settings: "FILL" 0, "wght" 400, "opsz" 24; }
-.search input {
-  all: unset; box-sizing: border-box; width: 100%; height: 100%; padding: 0 20px 0 54px;
-  font: 400 16px/1 var(--font-ui); color: var(--on-surface); border-radius: 999px;
-}
+.search .ms { position: absolute; left: 18px; color: var(--on-surface-variant); }
+.search input { all: unset; box-sizing: border-box; width: 100%; height: 100%; padding: 0 18px 0 50px; font: 400 16px/1 var(--font-ui); color: var(--on-surface); border-radius: 999px; }
 .search input::placeholder { color: var(--on-surface-variant); }
-.navlist {
-  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
-  padding-block: 2px; scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%);
-          mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 22px), transparent 100%);
-}
+.iconbtn { width: 40px; height: 40px; border-radius: 999px; border: 0; background: transparent; color: var(--on-surface-variant); display: grid; place-items: center; cursor: pointer; flex: none; position: relative; isolation: isolate; overflow: hidden; }
+.iconbtn.tonal { background: var(--sc-high); }
+.iconbtn:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+.iconbtn.tonal:hover { background: color-mix(in srgb, var(--on-surface) 8%, var(--sc-high)); }
+.backrow { display: flex; gap: 10px; align-items: center; }
+.backrow .title { font-size: 16px; color: var(--on-surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.win.narrow .search, .win.narrow .navcat, .win.narrow .text, .win.narrow .chev, .win.narrow .nav-item .sw, .win.narrow .backrow .title { display: none; }
+.win.narrow .navhead { justify-content: center; }
+.navlist { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-block: 2px 8px; scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 20px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 20px), transparent 100%); }
 .navlist::-webkit-scrollbar { display: none; }
-.nav-item {
-  position: relative; flex: none; display: flex; align-items: center; gap: 12px;
-  padding: 16px; min-height: 72px; background: var(--sc-high); cursor: pointer;
-  border-radius: var(--tl) var(--tr) var(--br) var(--bl);
-  transition:
-    border-radius var(--d-spatial) var(--spatial-default),
-    background-color var(--d-effects) var(--effects);
-  overflow: hidden; isolation: isolate; outline: none; user-select: none;
-}
-.nav-item.cat-gap { margin-top: 12px; }
+.navcat { flex: none; font-size: 12.5px; font-weight: 500; letter-spacing: .04em; color: var(--outline); padding: 12px 18px 2px; }
+.nav-item { position: relative; flex: none; display: flex; align-items: center; gap: 12px; padding: 14px 16px; min-height: 68px; background: var(--sc-high); cursor: pointer;
+  border-radius: var(--tl) var(--tr) var(--br) var(--bl); transition: border-radius var(--d-spatial) var(--spatial-default), background-color var(--d-effects) var(--effects), padding var(--d-spatial) var(--spatial-default);
+  overflow: hidden; isolation: isolate; user-select: none; }
 .nav-item.current { background: var(--secondary-container); }
-.disc {
-  flex: none; width: 40px; height: 40px; border-radius: 999px; display: grid; place-items: center;
-  background: var(--secondary-container); color: var(--on-secondary-container);
-  transition: background-color var(--d-effects) var(--effects), color var(--d-effects) var(--effects);
-}
-.nav-item.current .disc { background: var(--primary); color: var(--on-primary); }
-.nav-item .text { min-width: 0; display: flex; flex-direction: column; }
-.label { font-size: 16px; font-weight: 400; color: var(--on-surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.desc { font-size: 13px; color: var(--on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.win.narrow .nav-item { justify-content: center; padding: 14px 0; }
+.disc { flex: none; width: 40px; height: 40px; border-radius: 999px; display: grid; place-items: center; background: var(--secondary-container); color: var(--on-secondary-container);
+  transition: background-color var(--d-effects) var(--effects), color var(--d-effects) var(--effects); }
+.nav-item.current .disc, .disc.on { background: var(--primary); color: var(--on-primary); }
+.text { min-width: 0; display: flex; flex-direction: column; flex: 1; }
+.label { font-size: 16px; color: var(--on-surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desc, .sub { font-size: 13px; color: var(--on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.sub.wrap { white-space: normal; }
+.chev { color: var(--on-surface-variant); font-size: 20px; }
+.nav-item .sw { --h: 26px; --w: 44px; }
+.nav-item .sw svg { width: 15px; height: 15px; }
 
-/* StateLayer: hover tint + ripple */
+/* StateLayer */
 .state { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: -1; }
 .state::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--on-surface); opacity: 0; transition: opacity var(--d-effects) var(--effects); }
 .hoverable:hover > .state::before { opacity: .08; }
-.ripple {
-  position: absolute; border-radius: 50%; background: var(--on-surface); opacity: .1; transform: scale(0);
-  pointer-events: none; animation: ripple calc(600ms * var(--t)) cubic-bezier(.2,0,0,1) forwards;
-}
+.ripple { position: absolute; border-radius: 50%; background: var(--on-surface); opacity: .1; transform: scale(0); pointer-events: none; animation: ripple calc(600ms * var(--t)) cubic-bezier(.2,0,0,1) forwards; }
 .ripple.fade { animation: ripple calc(600ms * var(--t)) cubic-bezier(.2,0,0,1) forwards, fade calc(300ms * var(--t)) var(--effects) forwards; }
-@keyframes ripple { to { transform: scale(1); } }
-@keyframes fade { to { opacity: 0; } }
+@keyframes ripple { to { transform: scale(1); } } @keyframes fade { to { opacity: 0; } }
 
 /* ---------- page ---------- */
-.page {
-  position: absolute; top: 28px; right: 28px; bottom: 28px; left: calc(var(--nav-w) + 16px + 44px);
-  display: flex; flex-direction: column; gap: 32px; min-width: 0;
-}
-.page h2 { margin: 0; font-size: 30px; font-weight: 400; letter-spacing: -.005em; line-height: 1.15; }
-.page-body { overflow-y: auto; scrollbar-width: none; flex: 1; padding-bottom: 12px; }
-.page-body::-webkit-scrollbar { display: none; }
-.page-inner { width: min(100%, 720px); margin: 0 auto; display: flex; flex-direction: column; gap: 2px; }
-.page-inner .group-gap { margin-top: 14px; }
+.page { position: absolute; top: 40px; right: 12px; bottom: 12px; left: calc(var(--nav-w) + 28px); padding: 24px 28px 16px; display: flex; flex-direction: column; gap: 22px; min-width: 0;
+  transition: left var(--d-spatial) var(--spatial-default); }
+.page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.page-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 30px; font-weight: 400; line-height: 1.15; }
+.page-head .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.page-body { overflow-y: auto; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--outline) 45%, transparent) transparent; flex: 1; padding-right: 4px; }
+.page-inner { width: min(100%, 760px); margin: 0 auto; display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; }
 .page-swap { animation: pagein calc(350ms * var(--t)) var(--effects); }
 @keyframes pagein { from { opacity: 0; transform: translateY(10px); } }
+.section { display: flex; align-items: center; gap: 10px; padding: 18px 20px 8px; font-size: 13px; font-weight: 500; color: var(--on-surface-variant); letter-spacing: .02em; }
+.section:first-child { padding-top: 0; }
+.section .grow { flex: 1; }
+.footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.footer .left, .footer .right { display: flex; gap: 6px; align-items: center; }
+.footer .hint { font-size: 13px; color: var(--on-surface-variant); }
 
-/* ConnectedRect */
-.crect {
-  position: relative; background: var(--sc);
-  border-radius: var(--tl) var(--tr) var(--br) var(--bl);
-  transition: border-radius var(--d-spatial) var(--spatial-default), opacity var(--d-effects) var(--effects), height var(--d-spatial) var(--spatial-default);
-  overflow: hidden; isolation: isolate;
-}
+/* ConnectedRect + rows */
+.crect { position: relative; background: var(--sc); border-radius: var(--tl) var(--tr) var(--br) var(--bl);
+  transition: border-radius var(--d-spatial) var(--spatial-default), opacity var(--d-effects) var(--effects); overflow: hidden; isolation: isolate; }
 .crect.dim { opacity: .5; pointer-events: none; }
-.row {
-  position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 20px; min-height: 56px;
-  cursor: pointer; overflow: hidden; isolation: isolate; border-radius: var(--r-xs); outline: none; user-select: none;
-}
-.row.toggle { min-height: 60px; }
-.row .text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.row .label { font-size: 16px; }
-.row .sub { font-size: 13px; color: var(--on-surface-variant); margin-top: 1px; }
-.row .sub.outline { color: var(--outline); }
-.row .disc { width: 40px; height: 40px; }
-.row .disc .ms { font-size: 22px; }
-.row .disc.on { background: var(--primary); color: var(--on-primary); }
-.iconbtn { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 999px; color: var(--on-surface-variant); }
-.iconbtn .ms { font-variation-settings: "FILL" 0, "wght" 500, "opsz" 24; }
-.iconbtn.on { color: var(--primary); }
-.placeholder { display: grid; place-items: center; gap: 4px; padding: 28px; color: var(--outline); text-align: center; }
+.row { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 20px; min-height: 60px; overflow: hidden; isolation: isolate; border-radius: inherit; user-select: none; }
+.row.click { cursor: pointer; }
+.row.stack { flex-direction: column; align-items: stretch; gap: 12px; padding-block: 14px 16px; }
+.row.stack .rowtop { display: flex; align-items: center; gap: 12px; }
+.row .ctl { display: flex; align-items: center; gap: 8px; flex: none; max-width: 60%; }
+.row .ctl.wide { flex: 1; max-width: 55%; justify-content: flex-end; }
+.inlist .row { border-radius: var(--r-xs); min-height: 56px; }
+.placeholder { display: grid; place-items: center; gap: 6px; padding: 30px; color: var(--outline); text-align: center; }
 .placeholder .ms { font-size: 30px; }
-.placeholder span:last-child { font-size: 16px; }
+.placeholder span:last-child { font-size: 15px; }
 
-/* StyledSwitch (M3) */
-.sw {
-  --h: 30px; --w: 51px; --thumb: calc(var(--h) - 4px);
-  position: relative; flex: none; width: var(--w); height: var(--h); border-radius: 999px;
-  background: var(--sc-highest); border: 0; padding: 0; cursor: pointer;
-  transition: background-color var(--d-effects) var(--effects);
-}
+/* ---------- controls ---------- */
+.btn, .tabs button, .seg button, .chip { white-space: nowrap; }
+.tip { align-self: flex-start; }
+.btn { border: 0; cursor: pointer; border-radius: 999px; height: 40px; padding: 0 18px; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; flex: none; position: relative; isolation: isolate; overflow: hidden;
+  transition: border-radius var(--d-fast) var(--spatial-fast), background-color var(--d-effects) var(--effects); }
+.btn .ms { font-size: 18px; }
+.btn:active { border-radius: var(--r-m); }
+.btn.filled { background: var(--primary); color: var(--on-primary); }
+.btn.tonal { background: var(--secondary-container); color: var(--on-secondary-container); }
+.btn.text { background: transparent; color: var(--primary); padding: 0 12px; }
+.btn.outlined { background: transparent; color: var(--on-surface-variant); border: 1px solid var(--outline-variant); }
+.btn:disabled { background: color-mix(in srgb, var(--on-surface) 10%, transparent); color: color-mix(in srgb, var(--on-surface) 38%, transparent); cursor: default; }
+.btn.text:disabled, .btn.outlined:disabled { background: transparent; }
+.btn::after { content: ""; position: absolute; inset: 0; background: currentColor; opacity: 0; transition: opacity var(--d-effects) var(--effects); z-index: -1; }
+.btn:not(:disabled):hover::after { opacity: .08; }
+
+.field { height: 44px; border-radius: 999px; background: var(--sc-lowest); border: 1px solid var(--outline-variant); display: flex; align-items: center; padding: 0 16px; gap: 8px; min-width: 0;
+  transition: border-color var(--d-effects) var(--effects), box-shadow var(--d-effects) var(--effects); }
+.field:focus-within { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.field input { all: unset; flex: 1; min-width: 0; font-size: 15px; color: var(--on-surface); }
+.field input::placeholder { color: var(--on-surface-variant); }
+.field .ms { color: var(--on-surface-variant); font-size: 20px; }
+
+.combo { position: relative; }
+.combo > button { height: 40px; border: 0; border-radius: 999px; background: var(--sc-highest); color: var(--on-surface); padding: 0 12px 0 16px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; max-width: 100%; min-width: 180px; justify-content: space-between; }
+.combo > button span.v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo > button .ms { color: var(--on-surface-variant); font-size: 20px; transition: transform var(--d-fast) var(--spatial-fast); }
+.combo.open > button { border-radius: 20px 20px 8px 8px; }
+.combo.open > button .ms { transform: rotate(180deg); }
+.menu { position: absolute; z-index: 30; right: 0; top: calc(100% + 4px); min-width: 100%; background: var(--sc-high); border-radius: var(--r-l); padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45); animation: menuin calc(250ms * var(--t)) var(--spatial-fast); transform-origin: top; }
+@keyframes menuin { from { opacity: 0; transform: scaleY(.85); } }
+.menu button { border: 0; background: transparent; color: var(--on-surface); text-align: left; height: 44px; padding: 0 14px; border-radius: var(--r-m); cursor: pointer; display: flex; align-items: center; gap: 10px; font-size: 14px; white-space: nowrap; }
+.menu button:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+.menu button[aria-selected="true"] { background: var(--secondary-container); color: var(--on-secondary-container); }
+.menu .ms { font-size: 18px; }
+.menu hr { border: 0; height: 1px; background: var(--outline-variant); margin: 4px 8px; }
+
+.spin { height: 40px; display: inline-flex; align-items: center; gap: 4px; background: var(--sc-highest); border-radius: 999px; padding: 0 4px; }
+.spin .val { min-width: 92px; text-align: center; font-size: 14px; font-variant-numeric: tabular-nums; }
+.spin button { width: 32px; height: 32px; border-radius: 999px; border: 0; background: var(--secondary-container); color: var(--on-secondary-container); cursor: pointer; display: grid; place-items: center; }
+.spin button .ms { font-size: 18px; }
+
+.cb { width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--outline); background: transparent; display: grid; place-items: center; cursor: pointer; padding: 0; flex: none;
+  transition: background-color var(--d-effects) var(--effects), border-color var(--d-effects) var(--effects); }
+.cb .ms { font-size: 16px; color: var(--on-primary); opacity: 0; transform: scale(.4); transition: opacity var(--d-effects) var(--effects), transform var(--d-fast) var(--spatial-fast); font-variation-settings: "FILL" 0, "wght" 700, "opsz" 20; }
+.cb[aria-checked="true"] { background: var(--primary); border-color: var(--primary); }
+.cb[aria-checked="true"] .ms { opacity: 1; transform: none; }
+.radio { width: 24px; height: 24px; border-radius: 999px; display: grid; place-items: center; border: 2px solid var(--outline); flex: none; transition: background-color var(--d-effects) var(--effects), border-color var(--d-effects) var(--effects); }
+.radio .ms { font-size: 16px; color: var(--on-primary); opacity: 0; transform: scale(.4); transition: opacity var(--d-effects) var(--effects), transform var(--d-fast) var(--spatial-fast); font-variation-settings: "FILL" 0, "wght" 700, "opsz" 20; }
+[aria-checked="true"] > .radio { background: var(--primary); border-color: var(--primary); }
+[aria-checked="true"] > .radio .ms { opacity: 1; transform: none; }
+
+.sw { --h: 30px; --w: 51px; --thumb: calc(var(--h) - 4px); position: relative; flex: none; width: var(--w); height: var(--h); border-radius: 999px; background: var(--sc-highest); border: 0; padding: 0; cursor: pointer; transition: background-color var(--d-effects) var(--effects); }
 .sw[aria-checked="true"] { background: var(--primary); }
-.sw .thumb {
-  position: absolute; top: 2px; left: 2px; height: var(--thumb); width: var(--thumb); border-radius: 999px;
-  background: var(--outline); display: grid; place-items: center;
-  transition: left var(--d-fast) var(--spatial-fast), width var(--d-fast) var(--spatial-fast), background-color var(--d-effects) var(--effects);
-}
+.sw .thumb { position: absolute; top: 2px; left: 2px; height: var(--thumb); width: var(--thumb); border-radius: 999px; background: var(--outline); display: grid; place-items: center;
+  transition: left var(--d-fast) var(--spatial-fast), width var(--d-fast) var(--spatial-fast), background-color var(--d-effects) var(--effects); }
 .sw[aria-checked="true"] .thumb { left: calc(var(--w) - var(--thumb) - 2px); background: var(--on-primary); }
 .sw.pressed .thumb { width: calc(var(--thumb) * 1.2); }
 .sw.pressed[aria-checked="true"] .thumb { left: calc(var(--w) - var(--thumb) * 1.2 - 2px); }
-.sw .thumb::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--on-surface); opacity: 0; transition: opacity var(--d-effects) var(--effects); }
-.sw:hover .thumb::after { opacity: .08; }
-.sw.pressed .thumb::after { opacity: .1; }
-.sw[aria-checked="true"] .thumb::after { background: var(--primary); }
-.sw svg { width: 18px; height: 18px; overflow: visible; position: relative; z-index: 1; }
-.sw path {
-  fill: none; stroke: var(--sc-highest); stroke-width: .135; stroke-linecap: round;
-  transition: d var(--d-spatial) var(--spatial-default), stroke var(--d-effects) var(--effects);
-}
+.sw svg { width: 18px; height: 18px; overflow: visible; }
+.sw path { fill: none; stroke: var(--sc-highest); stroke-width: .135; stroke-linecap: round; transition: d var(--d-spatial) var(--spatial-default), stroke var(--d-effects) var(--effects); }
 .sw[aria-checked="true"] path { stroke: var(--primary); }
 
-/* ---------- component-name overlay ---------- */
-[data-name] { --name-c: #f5b2e0; }
-.annot [data-name] { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--name-c) 70%, transparent); }
-.annot [data-name]::after {
-  content: attr(data-name); position: absolute; z-index: 20; left: 6px; top: 4px;
-  font: 600 10.5px/1 var(--font-mono); letter-spacing: .02em; color: #2b0d26; background: var(--name-c);
-  padding: 3px 6px; border-radius: 6px; pointer-events: none; white-space: nowrap;
-}
-.annot .win[data-name]::after { top: -22px; left: 0; }
-.annot .hole[data-name]::after { top: auto; bottom: 8px; left: 8px; }
-.annot .row[data-name] { --name-c: #9dceff; }
-.annot .row[data-name]::after { left: auto; right: 6px; top: 4px; color: #0b2235; }
-.annot .disc[data-name], .annot .sw[data-name] { position: relative; --name-c: #c8e3ff; }
-.annot .disc[data-name]::after, .annot .sw[data-name]::after { top: -16px; left: -4px; color: #0b2235; }
-.annot .search[data-name]::after { top: -18px; left: 18px; }
-.annot .page h2[data-name] { position: relative; }
+.slider { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.slider .ends { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--on-surface-variant); }
+.m3s { -webkit-appearance: none; appearance: none; width: 100%; height: 36px; background: transparent; cursor: pointer; margin: 0; }
+.m3s::-webkit-slider-runnable-track { height: 16px; border-radius: 999px; background: radial-gradient(circle, var(--ticks, transparent) 1.6px, transparent 2px) 0 50% / var(--tickw, 100%) 4px repeat-x, linear-gradient(to right, var(--primary) 0 var(--p), var(--secondary-container) var(--p) 100%); }
+.m3s::-moz-range-track { height: 16px; border-radius: 999px; background: linear-gradient(to right, var(--primary) 0 var(--p), var(--secondary-container) var(--p) 100%); }
+.m3s::-webkit-slider-thumb { -webkit-appearance: none; width: 4px; height: 36px; margin-top: -10px; border-radius: 2px; background: var(--primary); box-shadow: 0 0 0 6px var(--sc); }
+.m3s::-moz-range-thumb { width: 4px; height: 36px; border: 0; border-radius: 2px; background: var(--primary); box-shadow: 0 0 0 6px var(--sc); }
+.m3s:focus-visible { outline: none; }
+.m3s:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px var(--sc), 0 0 0 8px var(--primary); }
 
-/* ---------- legend ---------- */
-.legend { max-width: 1040px; margin: 8px auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 22px; }
-.legend div { min-width: 0; font-size: 13px; color: var(--on-surface-variant); line-height: 1.45; }
-.legend b { display: block; color: var(--on-surface); font-weight: 500; font-size: 13.5px; font-family: var(--font-mono); letter-spacing: -.01em; }
-.legend h3 { grid-column: 1 / -1; margin: 6px 0 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--outline); font-weight: 500; }
+.keyseq { height: 40px; border-radius: 999px; background: var(--sc-highest); display: inline-flex; align-items: center; gap: 8px; padding: 0 16px; font-size: 14px; font-family: var(--font-mono); letter-spacing: -.01em; }
+.tabs { display: flex; gap: 2px; padding: 0 0 10px; }
+.tabs button { border: 0; cursor: pointer; background: var(--sc-high); color: var(--on-surface-variant); height: 40px; padding: 0 16px; display: inline-flex; gap: 6px; align-items: center; border-radius: var(--r-xs);
+  transition: border-radius var(--d-fast) var(--spatial-fast), background-color var(--d-effects) var(--effects); font-size: 14px; }
+.tabs button:first-child { border-radius: 999px var(--r-xs) var(--r-xs) 999px; }
+.tabs button:last-child { border-radius: var(--r-xs) 999px 999px var(--r-xs); }
+.tabs button[aria-selected="true"] { background: var(--secondary-container); color: var(--on-secondary-container); border-radius: 999px; }
+.tabs button .ms { font-size: 18px; }
+.tabs button[aria-selected="false"] .ms { display: none; }
+.themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 8px 14px 16px; }
+.theme { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 8px; align-items: center; text-align: center; font-size: 14px; color: var(--on-surface-variant); border-radius: var(--r-l); padding: 6px 6px 10px; position: relative; isolation: isolate; overflow: hidden; }
+.theme .thumb { width: 100%; aspect-ratio: 16 / 10; border-radius: var(--r-m); position: relative; overflow: hidden; outline: 3px solid transparent; outline-offset: 3px; transition: outline-color var(--d-effects) var(--effects), border-radius var(--d-spatial) var(--spatial-default); }
+.theme[aria-checked="true"] { color: var(--on-surface); }
+.theme[aria-checked="true"] .thumb { outline-color: var(--primary); border-radius: var(--r-l); }
+.thumb::before { content: ""; position: absolute; inset: 0; background: var(--wp); }
+.thumb::after { content: ""; position: absolute; left: 30%; top: 18%; width: 52%; height: 56%; border-radius: 5px; background: var(--winc); box-shadow: -18px 10px 0 -2px var(--winc2), 0 4px 10px rgba(0,0,0,.3); }
+.thumb.light { --wp: linear-gradient(160deg, #9fd3ee, #f1c6d4 60%, #5c84d6); --winc: #f7f7fa; --winc2: #e3e3ea; }
+.thumb.dark { --wp: linear-gradient(160deg, #3b1d5e, #d23f6c 55%, #1b3d8f); --winc: #1f1f26; --winc2: #2b2b33; }
+.thumb.auto { --wp: linear-gradient(115deg, #9fd3ee 0 50%, #3b1d5e 50% 100%); --winc: linear-gradient(115deg, #f7f7fa 0 46%, #1f1f26 46% 100%); --winc2: #e3e3ea; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.msg { display: flex; gap: 12px; align-items: flex-start; padding: 14px 18px; border-radius: var(--r-l); background: var(--secondary-container); color: var(--on-secondary-container); font-size: 14px; line-height: 1.45; margin-bottom: 10px; }
+.msg .ms { font-size: 20px; margin-top: 1px; }
+.prog { height: 4px; border-radius: 999px; background: var(--secondary-container); position: relative; overflow: hidden; width: 100%; }
+.prog i { position: absolute; inset: 0 auto 0 0; width: var(--v, 40%); background: var(--primary); border-radius: 999px; }
+.tip { display: inline-block; background: var(--inverse-surface); color: var(--inverse-on-surface); font-size: 12.5px; padding: 6px 10px; border-radius: var(--r-s); }
+.dialog { background: var(--sc-high); border-radius: var(--r-xl); padding: 24px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 16px 40px rgba(0,0,0,.5); max-width: 380px; }
+.dialog h4 { margin: 0; font-size: 22px; font-weight: 400; }
+.dialog p { margin: 0; color: var(--on-surface-variant); font-size: 14px; line-height: 1.5; }
+.dialog .acts { display: flex; justify-content: flex-end; gap: 4px; }
+.scrollbar-demo { display: flex; gap: 16px; align-items: stretch; height: 90px; }
+.scrollbar-demo span { width: 4px; border-radius: 999px; background: color-mix(in srgb, var(--outline) 45%, transparent); position: relative; }
+.scrollbar-demo span.hover { width: 8px; background: color-mix(in srgb, var(--outline) 80%, transparent); }
 
+/* ---------- components view ---------- */
+.comps { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+.comp { background: var(--sc-low); border-radius: var(--r-l); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.comp h3 { margin: 0; font-size: 15px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.comp h3 .tag { font: 500 10.5px/1 var(--font-mono); padding: 4px 7px; border-radius: 6px; background: var(--sc-high); color: var(--on-surface-variant); margin-left: auto; white-space: nowrap; }
+.comp h3 .tag.g { background: #213328; color: #b6e7c2; } .comp h3 .tag.a { background: #3a2f20; color: #f3d39b; }
+.comp .demo { background: var(--surface); border-radius: var(--r-m); padding: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; position: relative; min-height: 70px; }
+.comp .demo.col { flex-direction: column; align-items: stretch; }
+.comp .spec { margin: 0; font-size: 12.5px; color: var(--on-surface-variant); line-height: 1.55; }
+.comp .spec b { color: var(--on-surface); font-weight: 500; }
+.comp .kde { font: 11.5px/1.5 var(--font-mono); color: var(--outline); }
+
+/* ---------- map view ---------- */
+.mapwrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.mapwrap p { margin: 0; max-width: 78ch; color: var(--on-surface-variant); line-height: 1.6; font-size: 14px; }
+.mapwrap p b { color: var(--on-surface); font-weight: 500; }
+.tablewrap { overflow-x: auto; background: var(--sc-low); border-radius: var(--r-l); }
+table { border-collapse: collapse; width: 100%; min-width: 860px; font-size: 13.5px; }
+th, td { text-align: left; padding: 11px 14px; vertical-align: top; border-bottom: 1px solid var(--outline-variant); }
+th { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--outline); font-weight: 500; }
+td code { font: 12px/1.4 var(--font-mono); color: var(--on-surface-variant); }
+tr:last-child td { border-bottom: 0; }
+.pill { display: inline-block; font: 500 11px/1 var(--font-mono); padding: 4px 7px; border-radius: 6px; white-space: nowrap; }
+.pill.g { background: #213328; color: #b6e7c2; } .pill.a { background: #3a2f20; color: #f3d39b; } .pill.r { background: #3b2226; color: #ffb4ab; } .pill.b { background: #22263b; color: #c2c1ff; }
+
+/* ---------- name overlay ---------- */
+.annot [data-name] { box-shadow: inset 0 0 0 1.5px rgba(245,178,224,.7); }
+.annot [data-name]::after { content: attr(data-name); position: absolute; z-index: 40; left: 6px; top: 4px; font: 600 10.5px/1 var(--font-mono); color: #2b0d26; background: #f5b2e0; padding: 3px 6px; border-radius: 6px; pointer-events: none; white-space: nowrap; }
+.annot .row[data-name]::after { left: auto; right: 6px; background: #9dceff; color: #0b2235; }
+.annot .page-head h2, .annot .footer, .annot .navhead { position: relative; }
 @media (prefers-reduced-motion: reduce) { :root { --t: 0.001; } }
 </style>
 
 <div class="strip">
-  <h1>Nexus window, rebuilt in HTML
-    <small>Click the pages on the left, press and hold a row, flip the switches. Numbers come from Caelestia's QML.</small>
+  <h1>System Settings in Nexus style: the spec
+    <small>Window shows real KDE pages redrawn by the rules. Components lists every control with its exact numbers. Map says which library draws each piece and whether a fix there is global.</small>
   </h1>
   <div class="chips">
-    <button class="chip" id="annotBtn" aria-pressed="false"><span class="ms nofill">label</span>Show component names</button>
-    <button class="chip" id="slowBtn" aria-pressed="false"><span class="ms nofill">slow_motion_video</span>Slow motion ×4</button>
+    <div class="seg" role="group" aria-label="View">
+      <button data-view="win" aria-pressed="true"><span class="ms chk">check</span>Window</button>
+      <button data-view="comps" aria-pressed="false"><span class="ms chk">check</span>Components</button>
+      <button data-view="map" aria-pressed="false"><span class="ms chk">check</span>Map</button>
+    </div>
+    <button class="chip" id="narrowBtn" aria-pressed="false"><span class="ms">width</span>Narrow window</button>
+    <button class="chip" id="annotBtn" aria-pressed="false"><span class="ms">label</span>Names</button>
+    <button class="chip" id="slowBtn" aria-pressed="false"><span class="ms">slow_motion_video</span>Slow ×4</button>
   </div>
 </div>
 
-<div class="stage">
-  <div class="win" id="win" data-name="Nexus window · BlobGroup frame">
-    <div class="hole" data-name="page hole · BlobInvertedRect (r16)"></div>
-    <div class="bump" data-name="windowBtnRect"><button aria-label="Pop out into a window"><span class="ms">pip</span></button></div>
-
-    <nav class="nav" aria-label="Settings pages">
-      <label class="search" data-name="SearchBar">
-        <span class="ms">search</span>
-        <input id="search" type="text" placeholder="Search settings" autocomplete="off">
-      </label>
-      <div class="navlist" id="navlist" role="listbox" aria-label="Pages"></div>
-    </nav>
-
-    <main class="page" id="page">
-      <h2 id="pageTitle" data-name="PageBase title">Connected devices</h2>
-      <div class="page-body"><div class="page-inner" id="pageInner"></div></div>
-    </main>
+<section class="view" id="view-win">
+  <div class="stage">
+    <div class="win" id="win" data-name="KWin frame · luminos-chromeos (Window #1c1b1f)">
+      <div class="deco" aria-hidden="true">
+        <button tabindex="-1"><span class="ms">remove</span></button>
+        <button tabindex="-1"><span class="ms">crop_square</span></button>
+        <button tabindex="-1"><span class="ms">close</span></button>
+      </div>
+      <div class="hole" data-name="page hole · View #131317, r16, 12px inset"></div>
+      <nav class="nav" aria-label="Settings pages">
+        <div class="navhead" id="navhead" data-name="sidebar header"></div>
+        <div class="navlist" id="navlist" role="listbox" aria-label="Pages"></div>
+      </nav>
+      <main class="page" id="page">
+        <div class="page-head" data-name="page header · title 30px + tonal actions"><h2 id="pageTitle">Quick Settings</h2><div class="actions" id="pageActions"></div></div>
+        <div class="page-body" id="pageBody"><div class="page-inner" id="pageInner"></div></div>
+        <div class="footer" data-name="footer · text / filled pills">
+          <div class="left" id="footLeft"></div>
+          <span class="hint" id="hint">No changes</span>
+          <div class="right"><button class="btn text" id="resetBtn" disabled><span class="ms">undo</span>Reset</button><button class="btn filled" id="applyBtn" disabled><span class="ms">check</span>Apply</button></div>
+        </div>
+      </main>
+    </div>
   </div>
-</div>
+</section>
 
-<section class="legend" aria-label="Component names">
-  <h3>The names, so we can talk about them</h3>
-  <div><b>Nav item</b>A page in the left list: icon disc, label, grey description. Its corners depend on where it sits in its category.</div>
-  <div><b>Category group</b>Nav items that belong together (Network, Connected devices, Audio). 4 px gaps inside, 16 px between groups.</div>
-  <div><b>Connected corners</b>First item 28 px on top, last 28 px on the bottom, everything that touches a neighbour 4 px. Read together, they look like one card.</div>
-  <div><b>Selected pill</b>The current nav item turns #45455c and takes 32 px on all four corners. The change animates.</div>
-  <div><b>Press squash</b>While a row is held down, every corner drops to 12 px and a ripple spreads from your finger.</div>
-  <div><b>Icon disc</b>Round backing behind each icon. Soft grey normally, bright lavender with a dark icon when selected or connected.</div>
-  <div><b>ConnectedRect</b>The same corner rule on the page side, with first/last switches: Bluetooth (first), device list, Pair new device (last).</div>
-  <div><b>ToggleRow / ItemList</b>A ConnectedRect holding a switch, or a list of transparent rows. Rows inside a list keep 4 px corners.</div>
-  <div><b>StyledSwitch</b>Pill track with a round thumb. The ✗ morphs into a ✓ when flipped, and the thumb stretches while pressed.</div>
-  <div><b>Frame and hole</b>The window is one solid shape with the page cut out of it, which is why the right side looks recessed.</div>
+<section class="view" id="view-comps" hidden><div class="comps" id="comps"></div></section>
+
+<section class="view" id="view-map" hidden>
+  <div class="mapwrap">
+    <p><b>Why the last build didn't match.</b> The sidebar and window were patched, but a settings page's contents belong to that page's own plugin. Quick Settings, Keyboard and Fonts lay themselves out with KDE's form layout: grey labels on the left, controls on the right, thin separator lines. The prototype redrew those pages as cards, and nothing in the build ever touched the form layout. Below is every piece, who draws it, and the one place to change so the fix is global.</p>
+    <div class="tablewrap"><table id="mapTable">
+      <thead><tr><th>Piece on screen</th><th>Drawn by</th><th>Nexus target</th><th>Fix lives in</th><th>Reach</th><th>State</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <p><b>Global</b> means one change reaches every KDE app that uses that piece, with nothing running in the background. <b>App only</b> means the code belongs to System Settings itself. <b>Outside</b> means the app draws its own window (Chrome, Electron, GTK) and KDE can't restyle it.</p>
+  </div>
 </section>
 
 <script>
 (() => {
-  const PAGES = [
-    { id: "wall",  label: "Wallpaper & style", icon: "palette",       desc: "Wallpaper, fonts, colours",            cat: "appearance" },
-    { id: "net",   label: "Network",           icon: "wifi",          desc: "Wi-Fi, ethernet",                      cat: "connectivity" },
-    { id: "bt",    label: "Connected devices", icon: "devices_other", desc: "Bluetooth, pairing",                   cat: "connectivity", noFill: true },
-    { id: "audio", label: "Audio",             icon: "volume_up",     desc: "App volumes, sound devices",           cat: "connectivity" },
-    { id: "upd",   label: "Updates",           icon: "update",        desc: "System updates",                       cat: "system" },
-    { id: "plug",  label: "Plugins",           icon: "extension",     desc: "Manage plugins",                       cat: "system" },
-    { id: "panels",label: "Panels",            icon: "dock_to_bottom",desc: "Dashboard, taskbar, launcher, sidebar",cat: "shell" },
-    { id: "apps",  label: "Apps",              icon: "apps",          desc: "Default apps, favourites, hidden apps",cat: "shell" },
-    { id: "svc",   label: "Services",          icon: "build",         desc: "Poll intervals, lyrics backend",       cat: "shell" },
-    { id: "lang",  label: "Language & region", icon: "globe",         desc: "UI language, weather location, display units", cat: "shell" },
-    { id: "about", label: "About",             icon: "info",          desc: "System information, credits",          cat: "about" },
-  ];
   const R = { xs: 4, m: 12, xl: 28, xli: 32 };
-  const state = { current: 2, bt: true, discoverable: false, pairable: true, wifi: true, pressed: -1 };
-
+  const t = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--t")) || 1;
   const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
-  const setCorners = (node, tl, tr, br, bl) => {
-    node.style.setProperty("--tl", tl + "px"); node.style.setProperty("--tr", tr + "px");
-    node.style.setProperty("--br", br + "px"); node.style.setProperty("--bl", bl + "px");
-  };
+  const setCorners = (n, tl, tr, br, bl) => { n.style.setProperty("--tl", tl + "px"); n.style.setProperty("--tr", tr + "px"); n.style.setProperty("--br", br + "px"); n.style.setProperty("--bl", bl + "px"); };
 
-  /* StateLayer: hover tint (CSS) + ripple from the press point */
-  function addStateLayer(host, onPressChange) {
-    host.classList.add("hoverable");
-    host.prepend(el("span", "state"));
+  function addStateLayer(host, onPress) {
+    host.classList.add("hoverable"); host.prepend(el("span", "state"));
     host.addEventListener("pointerdown", e => {
-      if (e.button !== 0) return;
-      const r = host.getBoundingClientRect();
-      const x = e.clientX - r.left, y = e.clientY - r.top;
+      if (e.button !== 0 || e.target.closest(".sw, .btn, .m3s, .combo, .spin, .cb, .field")) return;
+      const r = host.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
       const end = Math.max(Math.hypot(x, y), Math.hypot(r.width - x, y), Math.hypot(x, r.height - y), Math.hypot(r.width - x, r.height - y)) * 1.3;
-      const rip = el("span", "ripple");
-      Object.assign(rip.style, { width: end * 2 + "px", height: end * 2 + "px", left: x - end + "px", top: y - end + "px" });
+      const rip = el("span", "ripple"); Object.assign(rip.style, { width: end * 2 + "px", height: end * 2 + "px", left: x - end + "px", top: y - end + "px" });
       host.querySelector(".state").appendChild(rip);
-      const release = () => {
-        rip.classList.add("fade");
-        setTimeout(() => rip.remove(), 900 * parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--t") || 1));
-        onPressChange && onPressChange(false);
-        window.removeEventListener("pointerup", release); window.removeEventListener("pointercancel", release);
-      };
-      window.addEventListener("pointerup", release); window.addEventListener("pointercancel", release);
-      onPressChange && onPressChange(true);
+      const up = () => { rip.classList.add("fade"); setTimeout(() => rip.remove(), 900 * t()); onPress && onPress(false); removeEventListener("pointerup", up); removeEventListener("pointercancel", up); };
+      addEventListener("pointerup", up); addEventListener("pointercancel", up); onPress && onPress(true);
     });
   }
 
-  /* ---------- nav ---------- */
-  const navlist = document.getElementById("navlist");
-  const navItems = [];
-  function navCorners(i) {
-    const p = PAGES[i];
-    const start = i === 0 || PAGES[i - 1].cat !== p.cat;
-    const end = i === PAGES.length - 1 || PAGES[i + 1].cat !== p.cat;
-    const cur = i === state.current;
-    const top = state.pressed === i ? R.m : cur ? R.xli : start ? R.xl : R.xs;
-    const bot = state.pressed === i ? R.m : cur ? R.xli : end ? R.xl : R.xs;
-    const role = state.pressed === i ? "pressed" : cur ? "selected pill" : start && end ? "only" : start ? "category start" : end ? "category end" : "middle";
-    return { top, bot, role };
-  }
-  function paintNav() {
-    navItems.forEach((n, i) => {
-      const { top, bot, role } = navCorners(i);
-      setCorners(n, top, top, bot, bot);
-      n.classList.toggle("current", i === state.current);
-      n.setAttribute("aria-selected", i === state.current);
-      n.dataset.name = `nav item · ${role} · ${top}/${bot}`;
-    });
-  }
-  PAGES.forEach((p, i) => {
-    const n = el("div", "nav-item");
-    n.tabIndex = 0; n.setAttribute("role", "option");
-    if (i !== 0 && PAGES[i - 1].cat !== p.cat) n.classList.add("cat-gap");
-    n.innerHTML = `<span class="disc" data-name="icon disc"><span class="ms${p.noFill ? " nofill" : ""}">${p.icon}</span></span>
-      <span class="text"><span class="label">${p.label}</span><span class="desc">${p.desc}</span></span>`;
-    addStateLayer(n, down => { state.pressed = down ? i : -1; paintNav(); });
-    n.addEventListener("click", () => select(i));
-    n.addEventListener("keydown", e => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(i); }
-      if (e.key === "ArrowDown") { e.preventDefault(); navItems[Math.min(i + 1, PAGES.length - 1)].focus(); }
-      if (e.key === "ArrowUp") { e.preventDefault(); navItems[Math.max(i - 1, 0)].focus(); }
-    });
-    navItems.push(n); navlist.appendChild(n);
-  });
-  function select(i) {
-    if (i === state.current) return;
-    state.current = i; paintNav(); renderPage(true);
-  }
+  /* ---------- state + Reset/Apply ---------- */
+  const DEF = { theme: "dark", anim: 60, click: "open", bt: true, repeat: true, delay: 600, rate: 25, model: "Generic | Generic 104-key PC", numlock: "Leave unchanged", layouts: false,
+    aa: "Enabled", hint: "Slight", dpi: false, dpiv: 96, pointer: 45, tap: true, natural: true, accel: "Adaptive", kbdTab: "hardware" };
+  const KEYS = Object.keys(DEF).filter(k => k !== "kbdTab");
+  const S = { page: "quick", sub: null, pressed: null, ...structuredClone(DEF) };
+  let saved = structuredClone(DEF);
+  const resetBtn = document.getElementById("resetBtn"), applyBtn = document.getElementById("applyBtn"), hint = document.getElementById("hint");
+  function changed() { const n = KEYS.filter(k => S[k] !== saved[k]).length; resetBtn.disabled = applyBtn.disabled = !n; hint.textContent = !n ? "No changes" : n === 1 ? "1 unsaved change" : n + " unsaved changes"; }
+  resetBtn.onclick = () => { KEYS.forEach(k => S[k] = saved[k]); renderPage(false); renderNav(); changed(); };
+  applyBtn.onclick = () => { KEYS.forEach(k => saved[k] = S[k]); changed(); hint.textContent = "Applied"; };
+  const set = (k, v, re) => { S[k] = v; changed(); if (re) renderPage(false); };
 
-  /* ---------- switch ---------- */
-  const P = {
-    on:      "M .15 .5 L .4 .7 M .4 .7 L .85 .2",
-    off:     "M .15 .15 L .85 .85 M .15 .85 L .85 .15",
-    pOn:     "M .2 .5 L .4 .5 M .4 .5 L .8 .5",
-    pOff:    "M .2 .5 L .8 .5 M .2 .5 L .8 .5",
-  };
-  function makeSwitch(checked, onToggle, label) {
-    const s = el("button", "sw");
-    s.setAttribute("role", "switch"); s.setAttribute("aria-label", label); s.dataset.name = "StyledSwitch";
+  /* ---------- controls ---------- */
+  const P = { on: "M .15 .5 L .4 .7 M .4 .7 L .85 .2", off: "M .15 .15 L .85 .85 M .15 .85 L .85 .15", pOn: "M .2 .5 L .4 .5 M .4 .5 L .8 .5", pOff: "M .2 .5 L .8 .5 M .2 .5 L .8 .5" };
+  function sw(on, cb, label) {
+    const s = el("button", "sw"); s.setAttribute("role", "switch"); s.setAttribute("aria-label", label || "Switch");
     s.innerHTML = `<span class="thumb"><svg viewBox="0 0 1 1" aria-hidden="true"><path></path></svg></span>`;
     const path = s.querySelector("path");
-    const paint = () => {
-      const on = s.getAttribute("aria-checked") === "true", pr = s.classList.contains("pressed");
-      const d = pr ? (on ? P.pOn : P.pOff) : (on ? P.on : P.off);
-      path.style.d = `path("${d}")`; path.setAttribute("d", d);
-    };
-    s.setAttribute("aria-checked", checked);
-    s.addEventListener("pointerdown", () => { s.classList.add("pressed"); paint(); });
-    const up = () => { s.classList.remove("pressed"); paint(); };
-    s.addEventListener("pointerup", up); s.addEventListener("pointerleave", up);
-    s.addEventListener("click", e => {
+    const paint = () => { const o = s.getAttribute("aria-checked") === "true", p = s.classList.contains("pressed"); const d = p ? (o ? P.pOn : P.pOff) : (o ? P.on : P.off); path.style.d = `path("${d}")`; path.setAttribute("d", d); };
+    s.setAttribute("aria-checked", on);
+    s.onpointerdown = e => { e.stopPropagation(); s.classList.add("pressed"); paint(); };
+    s.onpointerup = s.onpointerleave = () => { s.classList.remove("pressed"); paint(); };
+    s.onclick = e => { e.stopPropagation(); const v = s.getAttribute("aria-checked") !== "true"; s.setAttribute("aria-checked", v); paint(); cb && cb(v); };
+    paint(); return s;
+  }
+  function cb(on, f, label) {
+    const b = el("button", "cb", `<span class="ms">check</span>`); b.setAttribute("role", "checkbox"); b.setAttribute("aria-checked", on); b.setAttribute("aria-label", label || "Check");
+    b.onclick = e => { e.stopPropagation(); const v = b.getAttribute("aria-checked") !== "true"; b.setAttribute("aria-checked", v); f && f(v); }; return b;
+  }
+  let openCombo = null;
+  document.addEventListener("click", e => { if (openCombo && !openCombo.contains(e.target)) { openCombo.classList.remove("open"); openCombo.querySelector(".menu")?.remove(); openCombo = null; } });
+  function combo(value, options, f, label) {
+    const c = el("div", "combo"); const b = el("button", "", `<span class="v">${value}</span><span class="ms">expand_more</span>`); b.setAttribute("aria-label", label || "Choose"); b.setAttribute("aria-haspopup", "listbox");
+    b.onclick = e => {
       e.stopPropagation();
-      const v = s.getAttribute("aria-checked") !== "true";
-      s.setAttribute("aria-checked", v); paint(); onToggle && onToggle(v);
-    });
-    paint();
+      if (openCombo && openCombo !== c) { openCombo.classList.remove("open"); openCombo.querySelector(".menu")?.remove(); }
+      if (c.classList.contains("open")) { c.classList.remove("open"); c.querySelector(".menu")?.remove(); openCombo = null; return; }
+      const m = el("div", "menu"); m.setAttribute("role", "listbox");
+      options.forEach(o => { const it = el("button", "", `${o === value ? '<span class="ms">check</span>' : '<span class="ms"></span>'}${o}`); it.setAttribute("aria-selected", o === value);
+        it.onclick = ev => { ev.stopPropagation(); value = o; b.querySelector(".v").textContent = o; c.classList.remove("open"); m.remove(); openCombo = null; f && f(o); }; m.appendChild(it); });
+      c.appendChild(m); c.classList.add("open"); openCombo = c;
+    };
+    c.appendChild(b); return c;
+  }
+  function spin(v, step, min, max, unit, f) {
+    const s = el("div", "spin"); s.innerHTML = `<button aria-label="Less"><span class="ms">remove</span></button><span class="val"></span><button aria-label="More"><span class="ms">add</span></button>`;
+    const val = s.querySelector(".val"); const paint = () => val.textContent = v + unit; paint();
+    const [minus, plus] = s.querySelectorAll("button");
+    minus.onclick = e => { e.stopPropagation(); v = Math.max(min, v - step); paint(); f && f(v); };
+    plus.onclick = e => { e.stopPropagation(); v = Math.min(max, v + step); paint(); f && f(v); };
     return s;
   }
+  function slider(v, min, max, step, f, ends, ticks) {
+    const w = el("div", "slider"); const i = el("input", "m3s"); Object.assign(i, { type: "range", min, max, step, value: v }); i.setAttribute("aria-label", "Value");
+    const paint = () => { i.style.setProperty("--p", ((i.value - min) / (max - min)) * 100 + "%"); };
+    if (ticks) { i.style.setProperty("--ticks", "rgba(0,0,0,.35)"); i.style.setProperty("--tickw", (100 / (ticks - 1)) + "%"); }
+    i.oninput = () => { paint(); f && f(+i.value); }; paint(); w.appendChild(i);
+    if (ends) w.appendChild(el("div", "ends", `<span>${ends[0]}</span><span>${ends[1]}</span>`)); return w;
+  }
+  const btn = (kind, label, icon, onClick, disabled) => { const b = el("button", "btn " + kind, `${icon ? `<span class="ms">${icon}</span>` : ""}${label}`); if (onClick) b.onclick = e => { e.stopPropagation(); onClick(); }; if (disabled) b.disabled = true; return b; };
+  const ibtn = (icon, label, tonal, onClick) => { const b = el("button", "iconbtn" + (tonal ? " tonal" : ""), `<span class="ms">${icon}</span>`); b.setAttribute("aria-label", label); if (onClick) b.onclick = e => { e.stopPropagation(); onClick(); }; return b; };
+  const field = (ph, icon) => { const f = el("label", "field", `${icon ? `<span class="ms">${icon}</span>` : ""}<input placeholder="${ph}">`); return f; };
 
-  /* ---------- page builders ---------- */
-  function crect(first, last, name) {
-    const c = el("div", "crect");
-    setCorners(c, first ? R.xl : R.xs, first ? R.xl : R.xs, last ? R.xl : R.xs, last ? R.xl : R.xs);
-    c.dataset.name = `${name || "ConnectedRect"} · ${first && last ? "first+last" : first ? "first" : last ? "last" : "middle"}`;
+  /* ---------- page building blocks (the FormLayout → card translation) ---------- */
+  function crect(first, last, name) { const c = el("div", "crect"); setCorners(c, first ? R.xl : R.xs, first ? R.xl : R.xs, last ? R.xl : R.xs, last ? R.xl : R.xs); c.dataset.name = `${name || "row"} · ${first && last ? "only" : first ? "first" : last ? "last" : "middle"}`; return c; }
+  /* group(items): items = [{title, sub, ctl, stack, click, icon, on}] → connected rects */
+  function group(items) {
+    return items.map((it, i) => {
+      const c = crect(i === 0, i === items.length - 1, it.name || "FormLayout row");
+      if (it.dim) c.classList.add("dim");
+      if (it.node) { c.appendChild(it.node); return c; }
+      const r = el("div", "row" + (it.stack ? " stack" : "") + (it.click ? " click" : ""));
+      const head = `${it.icon ? `<span class="disc${it.on ? " on" : ""}"><span class="ms">${it.icon}</span></span>` : ""}<span class="text"><span class="label">${it.title}</span>${it.sub ? `<span class="sub${it.wrapSub ? " wrap" : ""}">${it.sub}</span>` : ""}</span>`;
+      if (it.stack) { const top = el("div", "rowtop", head); if (it.trail) top.appendChild(it.trail); r.appendChild(top); r.appendChild(it.ctl); }
+      else { r.innerHTML = head; if (it.ctl) { const box = el("span", "ctl" + (it.wide ? " wide" : "")); [].concat(it.ctl).forEach(n => box.appendChild(n)); r.appendChild(box); } if (it.click) r.appendChild(el("span", "ms chev", "chevron_right")); }
+      addStateLayer(r); if (typeof it.click === "function") r.addEventListener("click", it.click);
+      if (it.toggles) r.addEventListener("click", () => it.toggles.click());
+      c.appendChild(r); return c;
+    });
+  }
+  const section = (text, trail) => { const s = el("div", "section", `<span>${text}</span><span class="grow"></span>`); s.dataset.name = "section label (was FormLayout section / Kirigami.Heading)"; if (trail) [].concat(trail).forEach(n => s.appendChild(n)); return s; };
+  function itemList(rows, empty) {
+    const c = crect(false, true, "ItemList"); c.classList.add("inlist");
+    if (!rows.length) { c.appendChild(el("div", "placeholder", `<span class="ms">${empty[0]}</span><span>${empty[1]}</span>`)); return c; }
+    rows.forEach(rw => { const r = el("div", "row", `<span class="disc${rw.on ? " on" : ""}"><span class="ms">${rw.icon}</span></span><span class="text"><span class="label">${rw.title}</span><span class="sub">${rw.sub}</span></span>`);
+      if (rw.ctl) [].concat(rw.ctl).forEach(n => r.appendChild(n)); addStateLayer(r); c.appendChild(r); });
     return c;
   }
-  function toggleRow({ first, last, label, sub, checked, onToggle, dim, gap }) {
-    const c = crect(first, last, "ToggleRow");
-    if (dim) c.classList.add("dim");
-    if (gap) c.classList.add("group-gap");
-    const r = el("div", "row toggle");
-    r.innerHTML = `<span class="text"><span class="label">${label}</span>${sub ? `<span class="sub">${sub}</span>` : ""}</span>`;
-    const sw = makeSwitch(checked, onToggle, label);
-    r.appendChild(sw);
-    addStateLayer(r);
-    r.addEventListener("click", () => sw.click());
-    r.style.borderRadius = "inherit";
-    c.appendChild(r);
-    return c;
-  }
-  function listRow({ icon, label, sub, on, trailing, subOutline, noFill }) {
-    const r = el("div", "row");
-    r.tabIndex = 0; r.dataset.name = "row (4 px)";
-    r.innerHTML = `${icon ? `<span class="disc${on ? " on" : ""}"><span class="ms${noFill || !on ? " nofill" : ""}">${icon}</span></span>` : ""}
-      <span class="text"><span class="label">${label}</span>${sub ? `<span class="sub${subOutline ? " outline" : ""}">${sub}</span>` : ""}</span>
-      ${trailing ? `<span class="iconbtn${on ? " on" : ""}"><span class="ms">${trailing}</span></span>` : ""}`;
-    addStateLayer(r);
-    return r;
-  }
-  function itemList({ first, last, rows, show, placeholderIcon, placeholderText, dim }) {
-    const c = crect(first, last, "ItemList");
-    if (dim) c.classList.add("dim");
-    if (show && rows.length) rows.forEach(r => c.appendChild(listRow(r)));
-    else c.appendChild(el("div", "placeholder", `<span class="ms nofill">${placeholderIcon}</span><span>${placeholderText}</span>`));
-    return c;
-  }
-  function actionRow({ first, last, icon, label, dim, gap }) {
-    const c = crect(first, last);
-    if (dim) c.classList.add("dim");
-    if (gap) c.classList.add("group-gap");
-    const r = el("div", "row");
-    r.tabIndex = 0; r.style.borderRadius = "inherit";
-    r.innerHTML = `<span class="ms nofill" style="color:var(--on-surface)">${icon}</span><span class="text"><span class="label">${label}</span></span>`;
-    addStateLayer(r);
-    c.appendChild(r);
-    return c;
-  }
-  function navRow({ first, last, icon, label, sub, gap }) {
-    const c = crect(first, last, "NavRow");
-    if (gap) c.classList.add("group-gap");
-    const r = listRow({ icon, label, sub, trailing: "chevron_right" });
-    r.style.borderRadius = "inherit";
-    c.appendChild(r);
-    return c;
+  function selectRows(key, opts) {
+    return group(opts.map(o => {
+      const node = el("div", "row click", `<span class="text"><span class="label">${o.title}</span><span class="sub">${o.sub}</span></span><span class="radio"><span class="ms">check</span></span>`);
+      node.setAttribute("role", "radio"); node.setAttribute("aria-checked", S[key] === o.v); node.tabIndex = 0; node.dataset.group = key;
+      addStateLayer(node); node.onclick = () => { set(key, o.v); document.querySelectorAll(`[data-group="${key}"]`).forEach(n => n.setAttribute("aria-checked", n === node)); };
+      return { node, name: "select row (was RadioButton)" };
+    }));
   }
 
-  const BUILD = {
-    bt() {
-      const off = !state.bt;
-      return [
-        toggleRow({ first: true, label: "Bluetooth", checked: state.bt, onToggle: v => { state.bt = v; renderPage(false); } }),
-        itemList({ show: state.bt, placeholderIcon: state.bt ? "devices_other" : "bluetooth_disabled", placeholderText: state.bt ? "No saved devices" : "Bluetooth disabled",
-          rows: [
-            { icon: "headphones", label: "Galaxy Buds3 (F19B)", sub: "Saved", subOutline: true, trailing: "settings" },
-            { icon: "headphones", label: "ULT WEAR", sub: "Saved", subOutline: true, trailing: "settings" },
-          ] }),
-        actionRow({ last: true, icon: "add", label: "Pair new device", dim: off }),
-        toggleRow({ first: true, gap: true, label: "Discoverable", sub: "Allow nearby devices to find this one", checked: state.discoverable, dim: off, onToggle: v => state.discoverable = v }),
-        toggleRow({ last: true, label: "Pairable", sub: "Allow nearby devices to pair with this one", checked: state.pairable, dim: off, onToggle: v => state.pairable = v }),
-      ];
-    },
-    net() {
-      return [
-        toggleRow({ first: true, label: "Wi-Fi", checked: state.wifi, onToggle: v => { state.wifi = v; renderPage(false); } }),
-        itemList({ show: state.wifi, placeholderIcon: "wifi_off", placeholderText: "Wi-Fi disabled", rows: [
-          { icon: "wifi", label: "luminos-home 5G", sub: "Connected • WPA2", on: true, trailing: "settings" },
-          { icon: "wifi_2_bar", label: "luminos-home", sub: "Saved", subOutline: true, trailing: "settings", noFill: true },
-          { icon: "wifi_1_bar", label: "Tims Guest", sub: "Open", subOutline: true, noFill: true },
-        ] }),
-        actionRow({ last: true, icon: "add", label: "Add network", dim: !state.wifi }),
-        navRow({ first: true, last: true, gap: true, icon: "lan", label: "Ethernet", sub: "enp2s0 • 1000 Mb/s" }),
-      ];
-    },
-    audio() {
-      return [
-        itemList({ first: true, show: true, rows: [
-          { icon: "speaker", label: "Laptop speakers", sub: "Output • Default", on: true },
-          { icon: "headphones", label: "Galaxy Buds3 (F19B)", sub: "Output", subOutline: true },
-        ] }),
-        navRow({ last: true, icon: "tune", label: "App volumes", sub: "Firefox, Spotify, Discord" }),
-        itemList({ first: true, last: true, show: true, rows: [
-          { icon: "mic", label: "Internal microphone", sub: "Input • Default", on: true },
-        ] }),
-      ].map((n, i) => (i === 2 && n.classList.add("group-gap"), n));
-    },
-    wall() {
-      return [
-        navRow({ first: true, icon: "wallpaper", label: "Wallpaper", sub: "Starfield" }),
-        navRow({ icon: "format_paint", label: "Colour scheme", sub: "From wallpaper • Tonal spot" }),
-        navRow({ last: true, icon: "text_fields", label: "Fonts", sub: "Google Sans Flex" }),
-        toggleRow({ first: true, gap: true, label: "Dark mode", checked: true }),
-        toggleRow({ last: true, label: "Transparency", sub: "Blur panels and the window frame", checked: false }),
-      ];
-    },
-    upd() {
-      return [
-        navRow({ first: true, icon: "update", label: "Check for updates", sub: "Last checked 18 min ago" }),
-        toggleRow({ last: true, label: "Notify me about updates", checked: true }),
-      ];
-    },
-    plug() {
-      return [ itemList({ first: true, last: true, show: true, rows: [
-        { icon: "extension", label: "Lyrics", sub: "Enabled", on: true, trailing: "settings" },
-        { icon: "extension", label: "Weather", sub: "Enabled", on: true, trailing: "settings" },
-        { icon: "extension", label: "Media controls", sub: "Disabled", subOutline: true, trailing: "settings" },
-      ] }) ];
-    },
-  };
-  const generic = p => () => [
-    navRow({ first: true, icon: p.icon, label: p.label, sub: p.desc }),
-    toggleRow({ label: "Example option", sub: "Placeholder row so the page isn't empty", checked: true }),
-    actionRow({ last: true, icon: "restart_alt", label: "Reset to defaults" }),
+  /* ---------- sidebar data (KDE 6.7) ---------- */
+  const PAGES = [
+    { id: "quick", label: "Quick Settings", icon: "tune", desc: "Theme, animation speed, clicking", cat: "" },
+    { id: "mouse", label: "Mouse & Touchpad", icon: "mouse", desc: "Pointer speed, tap to click, scrolling", cat: "Input & Output", kids: ["mouse", "touchpad"] },
+    { id: "kbd", label: "Keyboard", icon: "keyboard", desc: "Layouts, repeat rate, shortcuts", cat: "Input & Output" },
+    { id: "kbl", label: "Keyboard Backlight", icon: "backlight_high", desc: "Brightness, Aura colours", cat: "Input & Output" },
+    { id: "sound", label: "Sound", icon: "volume_up", desc: "Output, input, app volumes", cat: "Input & Output" },
+    { id: "disp", label: "Display & Monitor", icon: "desktop_windows", desc: "Scale, refresh rate, night light", cat: "Input & Output" },
+    { id: "bt", label: "Bluetooth", icon: "bluetooth", desc: "Galaxy Buds3, ULT WEAR", cat: "Connected Devices", toggle: "bt" },
+    { id: "disks", label: "Disks & Cameras", icon: "hard_drive", desc: "Auto-mount, SMART, webcams", cat: "Connected Devices" },
+    { id: "wifi", label: "Wi-Fi & Internet", icon: "wifi", desc: "Wi-Fi, ethernet, VPN", cat: "Networking" },
+    { id: "theme", label: "Colors & Themes", icon: "palette", desc: "Global theme, colours, icons", cat: "Appearance & Style" },
+    { id: "text", label: "Text & Fonts", icon: "text_fields", desc: "Fonts, font management, spell check", cat: "Appearance & Style", kids: ["fonts", "fontmgmt", "spell"] },
+    { id: "wm", label: "Window Management", icon: "select_window", desc: "Decorations, effects, tiling", cat: "Apps & Windows" },
+    { id: "power", label: "Power Management", icon: "battery_charging_full", desc: "Profiles, sleep, battery limit", cat: "System" },
+    { id: "about", label: "About this System", icon: "info", desc: "Arch Linux, Plasma 6.7.5", cat: "System" },
   ];
+  const SUBS = {
+    fonts: { label: "Fonts", icon: "match_case", desc: "Configure user interface fonts" },
+    fontmgmt: { label: "Font Management", icon: "font_download", desc: "Install, manage and preview fonts" },
+    spell: { label: "Spell Check", icon: "spellcheck", desc: "Language, auto-correct" },
+    mouse: { label: "Mouse", icon: "mouse", desc: "Pointer speed, buttons" },
+    touchpad: { label: "Touchpad", icon: "touchpad_mouse", desc: "Tap to click, scrolling, gestures" },
+  };
 
-  const inner = document.getElementById("pageInner");
-  const title = document.getElementById("pageTitle");
-  function renderPage(animate) {
-    const p = PAGES[state.current];
-    title.textContent = p.label;
-    inner.replaceChildren(...(BUILD[p.id] || generic(p))());
-    if (animate) { inner.classList.remove("page-swap"); void inner.offsetWidth; inner.classList.add("page-swap"); }
+  const navlist = document.getElementById("navlist"), navhead = document.getElementById("navhead");
+  function cornersFor(list, i, cur) {
+    const start = i === 0 || list[i - 1].cat !== list[i].cat, end = i === list.length - 1 || list[i + 1].cat !== list[i].cat;
+    const top = S.pressed === list[i].id ? R.m : cur ? R.xli : start ? R.xl : R.xs, bot = S.pressed === list[i].id ? R.m : cur ? R.xli : end ? R.xl : R.xs;
+    return [top, bot, S.pressed === list[i].id ? "pressed" : cur ? "selected pill" : start && end ? "only" : start ? "group start" : end ? "group end" : "middle"];
+  }
+  function renderNav() {
+    const parent = S.sub ? PAGES.find(p => p.id === S.sub) : null;
+    navhead.replaceChildren();
+    if (parent) {
+      const b = el("div", "backrow"); b.appendChild(ibtn("arrow_back", "Back", true, () => { S.sub = null; go(parent.id, true); }));
+      b.appendChild(el("span", "title", parent.label)); navhead.appendChild(b); navhead.dataset.name = "sub-category header · round tonal back + title";
+    } else {
+      const f = field("Search settings", "search"); f.classList.replace("field", "search"); f.querySelector("input").oninput = e => filter(e.target.value);
+      navhead.appendChild(f); navhead.appendChild(ibtn("menu", "Menu", false)); navhead.dataset.name = "search pill (sc-lowest) + round menu button";
+    }
+    const list = parent ? parent.kids.map(k => ({ id: k, ...SUBS[k], cat: "sub" })) : PAGES;
+    navlist.replaceChildren();
+    list.forEach((p, i) => {
+      if (!parent && p.cat && (i === 0 || list[i - 1].cat !== p.cat)) navlist.appendChild(el("div", "navcat", p.cat));
+      const cur = parent ? S.page === p.id : S.page === p.id || (SUBS[S.page] && PAGES.find(x => x.kids && x.kids.includes(S.page))?.id === p.id);
+      const n = el("div", "nav-item" + (cur ? " current" : "")); n.tabIndex = 0; n.setAttribute("role", "option"); n.setAttribute("aria-selected", !!cur);
+      const [top, bot, role] = cornersFor(list, i, cur); setCorners(n, top, top, bot, bot); n.dataset.name = `nav item · ${role} · ${top}/${bot}`;
+      n.innerHTML = `<span class="disc"><span class="ms">${p.icon}</span></span><span class="text"><span class="label">${p.label}</span><span class="desc">${p.desc}</span></span>${p.kids ? `<span class="ms chev">chevron_right</span>` : ""}`;
+      if (p.toggle) n.appendChild(sw(S[p.toggle], v => set(p.toggle, v, S.page === "bt"), p.label));
+      n.title = p.label;
+      addStateLayer(n, d => { S.pressed = d ? p.id : null; const [a, b] = cornersFor(list, i, n.classList.contains("current")); setCorners(n, a, a, b, b); });
+      n.onclick = () => { if (p.kids && !parent) { S.sub = p.id; go(p.kids[0], true); } else go(p.id); };
+      n.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); n.click(); } };
+      navlist.appendChild(n);
+    });
+  }
+  function filter(q) { q = q.trim().toLowerCase(); navlist.querySelectorAll(".nav-item").forEach(n => n.hidden = !!q && !n.textContent.toLowerCase().includes(q)); navlist.querySelectorAll(".navcat").forEach(c => c.hidden = !!q); }
+  function go(id, keepNav) { S.page = id; renderNav(); renderPage(true); }
+
+  /* ---------- pages ---------- */
+  const inner = document.getElementById("pageInner"), title = document.getElementById("pageTitle"), actions = document.getElementById("pageActions"), footLeft = document.getElementById("footLeft");
+  const PAGEDEF = {
+    quick: () => ({ title: "Quick Settings", nodes: [
+      section("Appearance"),
+      ...group([
+        { name: "theme picker (KCM's own grid)", node: (() => { const w = el("div"); w.appendChild(el("div", "row", `<span class="text"><span class="label">Theme</span></span>`)); const g = el("div", "themes");
+          [["light", "Breeze"], ["dark", "Breeze Dark"], ["auto", "Automatic"]].forEach(([v, n]) => { const b = el("button", "theme hoverable", `<span class="state"></span><span class="thumb ${v}"></span><span>${n}</span>`); b.setAttribute("role", "radio"); b.setAttribute("aria-checked", S.theme === v);
+            b.onclick = () => { set("theme", v); g.querySelectorAll(".theme").forEach(x => x.setAttribute("aria-checked", x === b)); }; g.appendChild(b); }); w.appendChild(g); return w; })() },
+        { title: "Wallpaper", sub: "Desktop and lock screen", icon: "wallpaper", click: () => {} },
+        { title: "Global Theme", sub: "Colours, icons, cursors, splash", icon: "palette", click: () => go("theme") },
+      ]),
+      section("Behaviour"),
+      ...group([{ title: "Animation speed", stack: true, ctl: slider(S.anim, 0, 100, 1, v => set("anim", v), ["Slow", "Instant"], 7) }]),
+      section("Clicking files or folders"),
+      ...selectRows("click", [{ v: "select", title: "Selects them", sub: "Open by double-clicking instead" }, { v: "open", title: "Opens them", sub: "Select by clicking on item's selection marker" }]),
+      ...group([{ title: "General Behavior", sub: "Scrolling, feedback, tooltips", icon: "settings", click: () => {} }]).map(n => (n.style.marginTop = "14px", n)),
+      section("Most used pages"),
+      (() => { const g = el("div", "grid2"); const items = [["wallpaper", "Wallpaper"], ["bluetooth", "Bluetooth", "bt"], ["match_case", "Fonts", "fonts"], ["keyboard", "Keyboard", "kbd"], ["search", "KRunner Settings"], ["palette", "Global Theme", "theme"]];
+        items.forEach(([ic, lb, to], i) => { const c = crect(false, false, "most used tile"); const first = i < 2, last = i >= items.length - 2, left = i % 2 === 0;
+          setCorners(c, first && left ? R.xl : R.xs, first && !left ? R.xl : R.xs, last && !left ? R.xl : R.xs, last && left ? R.xl : R.xs);
+          const r = el("div", "row click", `<span class="disc"><span class="ms">${ic}</span></span><span class="text"><span class="label">${lb}</span></span>`); addStateLayer(r);
+          r.onclick = () => { if (to === "fonts") { S.sub = "text"; go("fonts"); } else if (to) go(to); }; c.appendChild(r); g.appendChild(c); }); return g; })(),
+    ] }),
+    kbd: () => {
+      const tabs = el("div", "tabs"); tabs.setAttribute("role", "tablist"); tabs.dataset.name = "tabs → connected segmented buttons";
+      [["hardware", "Hardware"], ["layouts", "Layouts"], ["advanced", "Key Bindings"]].forEach(([v, n]) => { const b = el("button", "", `<span class="ms">check</span>${n}`); b.setAttribute("role", "tab"); b.setAttribute("aria-selected", S.kbdTab === v); b.onclick = () => { S.kbdTab = v; renderPage(false); }; tabs.appendChild(b); });
+      const hw = [
+        ...group([
+          { title: "Model", ctl: combo(S.model, ["Generic | Generic 104-key PC", "Generic | Generic 105-key PC", "ASUS | ROG laptop"], v => set("model", v)), wide: true },
+          { title: "NumLock on startup", ctl: combo(S.numlock, ["Turn on", "Turn off", "Leave unchanged"], v => set("numlock", v)), wide: true },
+        ]),
+        section("Key repeat", [sw(S.repeat, v => set("repeat", v, true), "Key repeat")]),
+        ...group([
+          { title: "Delay", sub: "Before a held key starts repeating", ctl: spin(S.delay, 50, 100, 2000, " ms", v => set("delay", v)), dim: !S.repeat },
+          { title: "Rate", sub: "Repeats per second while held", ctl: spin(S.rate, 1, 1, 100, " repeats/s", v => set("rate", v)), dim: !S.repeat },
+          { title: "Test area", stack: true, ctl: field("Type here to test settings") },
+        ]),
+      ];
+      const lay = [
+        section("Layouts", [sw(S.layouts, v => set("layouts", v, true), "Enable layouts"), btn("tonal", "Add…", "add", null, !S.layouts)]),
+        itemList(S.layouts ? [{ icon: "keyboard", title: "English (US)", sub: "us • Default", on: true, ctl: ibtn("more_vert", "More") }, { icon: "keyboard", title: "French (Canada)", sub: "ca", ctl: ibtn("more_vert", "More") }] : [], ["keyboard_off", "Turn on layouts to add more than one"]),
+        section("Switching"),
+        ...group([
+          { title: "Change layout shortcut", ctl: [el("span", "keyseq", "Meta+Alt+K"), ibtn("backspace", "Clear", true)] },
+          { title: "Spare layouts", sub: "Extra layouts reachable from the menu only", ctl: spin(0, 1, 0, 9, " spare", null), dim: !S.layouts },
+          { title: "Configure switching", sub: "Per window, per app or global", icon: "tune", click: () => {} },
+        ]),
+      ];
+      const adv = [ el("div", "msg", `<span class="ms">info</span><span>Key Bindings is KDE's long checkbox tree. It becomes an ItemList of collapsible groups, each option a select row. Not drawn here.</span>`) ];
+      return { title: "Keyboard", actions: [btn("tonal", "Key Bindings", "keyboard_command_key", () => { S.kbdTab = "advanced"; renderPage(false); })], nodes: [tabs, ...(S.kbdTab === "hardware" ? hw : S.kbdTab === "layouts" ? lay : adv)] };
+    },
+    fonts: () => ({ title: "Fonts", actions: [btn("tonal", "Adjust All Fonts…", "text_increase", () => {})], nodes: [
+      ...group([
+        { title: "General", sub: "Google Sans Flex 10pt", ctl: ibtn("edit", "Change", true) },
+        { title: "Fixed width", sub: "CaskaydiaCove Nerd Font 10pt", ctl: ibtn("edit", "Change", true) },
+        { title: "Small", sub: "Google Sans Flex 8pt", ctl: ibtn("edit", "Change", true) },
+        { title: "Toolbar", sub: "Google Sans Flex 10pt", ctl: ibtn("edit", "Change", true) },
+        { title: "Menu", sub: "Google Sans Flex 10pt", ctl: ibtn("edit", "Change", true) },
+        { title: "Window title", sub: "Google Sans Flex 10pt • Medium", ctl: ibtn("edit", "Change", true) },
+      ]),
+      section("Rendering"),
+      ...group([
+        { title: "Anti-aliasing", ctl: combo(S.aa, ["Enabled", "Disabled", "System default"], v => set("aa", v)) },
+        { title: "Hinting", sub: "Sharper text at small sizes", ctl: combo(S.hint, ["None", "Slight", "Medium", "Full"], v => set("hint", v)) },
+        { title: "Force font DPI", sub: "Only if text looks the wrong size", ctl: [cb(S.dpi, v => set("dpi", v, true), "Force DPI"), spin(S.dpiv, 1, 48, 300, " dpi", v => set("dpiv", v))].map((n, i) => (i && !S.dpi && n.classList.add("dim-off"), n)) },
+      ]),
+    ] }),
+    fontmgmt: () => ({ title: "Font Management", actions: [btn("tonal", "Install from file…", "upload_file", () => {})], nodes: [
+      el("div", "field", `<span class="ms">search</span><input placeholder="Search fonts">`),
+      section("Personal"),
+      itemList([{ icon: "match_case", title: "Google Sans Flex", sub: "Variable • 5 axes", on: true, ctl: ibtn("more_vert", "More") }, { icon: "match_case", title: "CaskaydiaCove Nerd Font", sub: "Mono • 12 styles", ctl: ibtn("more_vert", "More") }]),
+    ] }),
+    spell: () => ({ title: "Spell Check", nodes: [...group([{ title: "Automatic spell checking", ctl: sw(true, null, "Spell check") }, { title: "Default language", ctl: combo("English (Canada)", ["English (Canada)", "English (US)", "French (Canada)"]) }])] }),
+    mouse: () => ({ title: "Mouse", nodes: [
+      ...group([{ title: "Device", ctl: combo("USB receiver", ["USB receiver"]), wide: true }]),
+      section("Pointer"),
+      ...group([
+        { title: "Pointer speed", stack: true, ctl: slider(S.pointer, 0, 100, 1, v => set("pointer", v), ["Slow", "Fast"]) },
+        { title: "Acceleration profile", ctl: combo(S.accel, ["Flat", "Adaptive"], v => set("accel", v)) },
+        { title: "Left-handed mode", ctl: sw(false, null, "Left-handed") },
+      ]),
+    ] }),
+    touchpad: () => ({ title: "Touchpad", nodes: [
+      el("div", "msg", `<span class="ms">touchpad_mouse</span><span>ASUP1208 Touchpad • built in</span>`),
+      ...group([{ title: "Tap to click", sub: "Tap with one finger", ctl: sw(S.tap, v => set("tap", v), "Tap") }, { title: "Natural scrolling", sub: "Content moves with your fingers", ctl: sw(S.natural, v => set("natural", v), "Natural") }, { title: "Pointer speed", stack: true, ctl: slider(S.pointer, 0, 100, 1, v => set("pointer", v), ["Slow", "Fast"]) }]),
+    ] }),
+    bt: () => ({ title: "Bluetooth", actions: [btn("tonal", "Pair Device…", "add", null, !S.bt), btn("text", "Configure…", "tune")], nodes: [
+      ...group([{ title: "Bluetooth", sub: S.bt ? "Enabled" : "Disabled", ctl: sw(S.bt, v => { set("bt", v, true); renderNav(); }, "Bluetooth") }]).map(n => (setCorners(n, 28, 28, 4, 4), n)),
+      itemList(S.bt ? [{ icon: "headphones", title: "Galaxy Buds3 (F19B)", sub: "Headset • Saved", ctl: [btn("tonal", "Connect"), ibtn("delete", "Remove")] }, { icon: "headphones", title: "ULT WEAR", sub: "Headset • Saved", ctl: [btn("tonal", "Connect"), ibtn("delete", "Remove")] }] : [], ["bluetooth_disabled", "Bluetooth is off"]),
+    ] }),
+  };
+  const generic = p => () => ({ title: p.label, nodes: [el("div", "msg", `<span class="ms">info</span><span>Not drawn in the spec. It follows the same rules: form rows become connected cards, lists become ItemLists.</span>`), ...group([{ title: p.label, sub: p.desc, icon: p.icon }])] });
+
+  function renderPage(anim) {
+    const p = PAGES.find(x => x.id === S.page) || { id: S.page, ...SUBS[S.page] };
+    const def = (PAGEDEF[S.page] || generic(p))();
+    title.textContent = def.title; actions.replaceChildren(...(def.actions || []));
+    footLeft.replaceChildren(btn("text", "Help", "help"), btn("text", "Defaults", "settings_backup_restore"));
+    const body = inner.parentElement, sc = body.scrollTop; inner.replaceChildren(...def.nodes);
+    if (anim) { body.scrollTop = 0; inner.classList.remove("page-swap"); void inner.offsetWidth; inner.classList.add("page-swap"); } else body.scrollTop = sc;
   }
 
-  /* ---------- search filters the nav ---------- */
-  document.getElementById("search").addEventListener("input", e => {
-    const q = e.target.value.trim().toLowerCase();
-    navItems.forEach((n, i) => { const p = PAGES[i]; n.hidden = !!q && !(p.label + " " + p.desc).toLowerCase().includes(q); });
-  });
+  /* ---------- components view ---------- */
+  const comps = document.getElementById("comps");
+  function comp(name, reach, spec, kde, demo, col) {
+    const c = el("article", "comp"); const tagc = reach === "global" ? "g" : reach === "app" ? "a" : "";
+    c.innerHTML = `<h3>${name}<span class="tag ${tagc}">${reach}</span></h3>`; const d = el("div", "demo" + (col ? " col" : "")); [].concat(demo).forEach(n => d.appendChild(n)); c.appendChild(d);
+    c.appendChild(el("p", "spec", spec)); c.appendChild(el("div", "kde", kde)); comps.appendChild(c);
+  }
+  function buildComps() {
+    comps.replaceChildren();
+    const navDemo = (() => { const w = el("div"); w.style.cssText = "display:flex;flex-direction:column;gap:4px;width:100%";
+      [["Mouse & Touchpad", "mouse", 28, 4], ["Keyboard", "keyboard", 4, 4, true], ["Sound", "volume_up", 4, 28]].forEach(([l, i, a, b, cur], k) => { const n = el("div", "nav-item" + (cur ? " current" : ""), `<span class="disc"><span class="ms">${i}</span></span><span class="text"><span class="label">${l}</span><span class="desc">Two-line row</span></span>`);
+        cur ? setCorners(n, 32, 32, 32, 32) : setCorners(n, a, a, b, b); addStateLayer(n); w.appendChild(n); }); return w; })();
+    comp("Sidebar row + group", "app", "<b>Rows</b> 68 tall, padding 14/16, 4 px gaps. Corners: group start 28 top, end 28 bottom, touching 4, <b>selected 32 all</b> (#45455c), pressed 12. Disc 40 (#45455c / selected #c2c1ff). Category label 12.5 px medium #918f9a. Corners animate 500 ms, M3 expressive.", "systemsettings: SideBarItem.qml / CategoryItem.qml", navDemo, true);
+    const rowsDemo = el("div"); rowsDemo.style.cssText = "display:flex;flex-direction:column;gap:2px;width:100%";
+    group([{ title: "Model", ctl: combo("Generic 104-key PC", ["Generic 104-key PC", "ROG laptop"]) }, { title: "Delay", sub: "Before a key repeats", ctl: spin(600, 50, 100, 2000, " ms") }, { title: "Test area", stack: true, ctl: field("Type here") }]).forEach(n => rowsDemo.appendChild(n));
+    comp("Form row (the missing piece)", "global", "KDE's form layout puts a grey label left and the control right, with separator lines. In Nexus each label becomes the <b>row title</b> (16 px), help text the grey sub line (13 px), the control sits right. Wide controls (sliders, text areas, lists) drop <b>below</b> the title. Each section is one connected group on #201f23, 2 px gaps, 60 px min height. Section separators become a 13 px label with 18 px above.", "kirigami: FormLayout.qml (+ FormData.isSection)", rowsDemo, true);
+    comp("Buttons", "global", "40 tall, full pill, 18 px side padding, 18 px icon. <b>Filled</b> #c2c1ff for the default action (Apply, OK). <b>Tonal</b> #45455c for ordinary push buttons. <b>Text</b> for Help / Defaults / Reset / Cancel. Pressed squashes to 12. Disabled 10 % fill, 38 % text.",
+      "qqc2: Button.qml • darkly: CE_PushButton", [btn("filled", "Apply", "check"), btn("tonal", "Add…", "add"), btn("text", "Reset", "undo"), btn("outlined", "Outlined"), btn("filled", "Disabled", null, null, true)]);
+    comp("Icon buttons", "global", "40 round. Plain for toolbars, <b>tonal</b> (#2a292e) for back and row actions, 8 % hover circle.", "qqc2: ToolButton • darkly: CE_ToolButton", [ibtn("arrow_back", "Back", true), ibtn("edit", "Edit", true), ibtn("more_vert", "More"), ibtn("delete", "Delete")]);
+    comp("Combo box + menu", "global", "Field 40 tall, pill, #353438 on cards, chevron rotates. Opening squares the bottom corners to 8. Menu r16 on #2a292e, 6 px padding, items 44 tall r12, the current one #45455c with a ✓, shadow 0 8 24.", "qqc2: ComboBox / Menu • darkly: CC_ComboBox, PE_PanelMenu", [combo("Leave unchanged", ["Turn on", "Turn off", "Leave unchanged"])]);
+    comp("Spin box", "global", "Pill 40 tall, #353438, value centred (tabular digits), round 32 tonal − and + buttons at each end instead of stacked arrows.", "qqc2: SpinBox • darkly: CC_SpinBox", [spin(600, 50, 100, 2000, " ms"), spin(25, 1, 1, 100, " /s")]);
+    comp("Text field + search", "global", "Pill 44 tall, #0e0e12 fill, 1 px #47464f outline, focus 2 px #c2c1ff. Search adds a leading icon. Text areas use r16 instead of a pill.", "qqc2: TextField, SearchField • darkly: PE_PanelLineEdit", [field("Type here to test settings"), field("Search settings", "search")], true);
+    comp("Switch", "global", "52×32 (30 in rows). On: #c2c1ff track, #2a2a60 thumb with ✓. Off: #353438 track, #918f9a thumb with ✗. Thumb stretches 1.2× while pressed; the mark morphs.", "qqc2: SwitchIndicator ✔ done • darkly: none (QtWidgets has no switch)", [sw(true), sw(false)]);
+    comp("Check box", "global", "20×20, r6, 2 px #918f9a outline. Checked: #c2c1ff fill with a dark ✓ that scales in.", "qqc2: CheckIndicator • darkly: PE_IndicatorCheckBox", [cb(true), cb(false)]);
+    comp("Radio / select row", "global", "24 round, 2 px outline. Selected: filled #c2c1ff with ✓. Inside forms a radio group becomes <b>select rows</b>: whole row clickable, mark on the right.", "qqc2: RadioIndicator ✔ done • darkly: PE_IndicatorRadioButton ✔ done", (() => { const w = el("div"); w.style.cssText = "display:flex;flex-direction:column;gap:2px;width:100%"; S._demo = "a"; selectRows("_demo", [{ v: "a", title: "Opens them", sub: "Single click" }, { v: "b", title: "Selects them", sub: "Double click opens" }]).forEach(n => w.appendChild(n)); return w; })(), true);
+    comp("Slider", "global", "16 px round track: active #c2c1ff, rest #45455c. Handle is a 4×36 bar with a 6 px gap cut from the track. Tick marks become dots on the track.", "qqc2: Slider ✔ done • darkly: CC_Slider ✔ done", [slider(60, 0, 100, 1, null, ["Slow", "Instant"], 7)], true);
+    const tb = el("div", "tabs"); [["Hardware", true], ["Layouts"], ["Key Bindings"]].forEach(([n, s]) => { const b = el("button", "", `<span class="ms">check</span>${n}`); b.setAttribute("aria-selected", !!s); b.onclick = () => tb.querySelectorAll("button").forEach(x => x.setAttribute("aria-selected", x === b)); tb.appendChild(b); });
+    comp("Tabs", "global", "Tab bars become connected segmented buttons: 40 tall, outer ends full round, inner 4, 2 px gaps. Selected #45455c pill with a ✓.", "qqc2: TabBar/TabButton • darkly: CE_TabBarTab", [tb]);
+    comp("List / ItemList", "global", "Rows inside a list are transparent with 4 px corners and a hover tint; the list itself is one connected rect. Empty lists show a centred icon + message.", "qqc2: ItemDelegate ✔ done • kirigami-addons: FormCard ✔ done • darkly: item views ✔ done",
+      [itemList([{ icon: "headphones", title: "Galaxy Buds3", sub: "Saved", ctl: btn("tonal", "Connect") }, { icon: "headphones", title: "ULT WEAR", sub: "Saved", ctl: btn("tonal", "Connect") }])], true);
+    comp("Page header + footer", "app", "Title 30 px regular, header actions are tonal pills. Footer: Help and Defaults as text buttons left, Reset text + Apply filled right. No separator lines anywhere.", "systemsettings: ModuleView / KCM page header", [btn("tonal", "Key Bindings", "keyboard_command_key"), btn("text", "Help", "help"), btn("filled", "Apply", "check")]);
+    comp("Inline message", "global", "Tonal card r16 on #45455c with a leading icon. Warning and error variants use the error container.", "kirigami: InlineMessage", [el("div", "msg", `<span class="ms">info</span><span>Changes take effect after you log in again.</span>`)], true);
+    comp("Dialog / sheet", "global", "r28 on #2a292e, 24 padding, title 22 px, body #c8c5d1, actions right-aligned text buttons (default filled).", "kirigami: Dialog, OverlaySheet • darkly: QDialog frame", [(() => { const d = el("div", "dialog", `<h4>Remove device?</h4><p>Galaxy Buds3 will need to be paired again.</p>`); const a = el("div", "acts"); a.append(btn("text", "Cancel"), btn("filled", "Remove")); d.appendChild(a); return d; })()]);
+    comp("Progress, tooltip, scroll bar", "global", "Progress: 4 px pill track #45455c, active #c2c1ff. Tooltip: r8, inverse surface. Scroll bar: 4 px pill at 45 % outline, 8 px on hover, no arrows.", "qqc2: ProgressBar, ToolTip, ScrollBar • darkly: same",
+      [(() => { const p = el("div", "prog"); p.appendChild(el("i")); p.style.setProperty("--v", "62%"); return p; })(), el("span", "tip", "Pair a new device"), (() => { const s = el("div", "scrollbar-demo", "<span></span><span class='hover'></span>"); return s; })()], true);
+  }
 
-  /* ---------- strip toggles ---------- */
-  const annotBtn = document.getElementById("annotBtn"), slowBtn = document.getElementById("slowBtn");
-  annotBtn.addEventListener("click", () => {
-    const v = annotBtn.getAttribute("aria-pressed") !== "true";
-    annotBtn.setAttribute("aria-pressed", v); document.body.classList.toggle("annot", v);
-  });
-  slowBtn.addEventListener("click", () => {
-    const v = slowBtn.getAttribute("aria-pressed") !== "true";
-    slowBtn.setAttribute("aria-pressed", v); document.documentElement.style.setProperty("--t", v ? 4 : 1);
-  });
+  /* ---------- map ---------- */
+  const MAP = [
+    ["Window frame, buttons, corners, shadow", "KWin decoration", "40 px header = window colour, 36×40 buttons, r16", "luminos-kdecoration-chromeos", "g", "every window", "done"],
+    ["Sidebar rows, search, back, category labels", "System Settings' own QML", "Connected nav items, discs, two lines", "systemsettings fork", "a", "System Settings", "done; 1.3 fixes line + narrow"],
+    ["Page hole + title + footer", "System Settings' own C++", "r16 hole, 30 px title, pill footer", "systemsettings fork", "a", "System Settings", "done; 1.3 fixes box-in-box"],
+    ["Form rows (label left, control right)", "Kirigami FormLayout", "Connected card rows, label = title", "kirigami fork (FormLayout.qml)", "g", "every QML settings page + many apps", "NOT DONE: why Quick Settings looked different"],
+    ["Form sections + separator lines", "Kirigami FormData.isSection / Separator", "13 px label, new group, no lines", "kirigami fork", "g", "every QML settings page", "NOT DONE"],
+    ["List rows (QML)", "qqc2 ItemDelegate background", "Connected rows, pill selection", "qqc2-desktop-style fork", "g", "every Kirigami app", "done"],
+    ["Settings cards (newer pages)", "kirigami-addons FormCard", "Connected rects, no dividers", "kirigami-addons fork", "g", "apps using FormCard", "done"],
+    ["Buttons, combo, spin, text field, check, tabs (QML)", "qqc2 → QStyle (Darkly)", "Pills, tonal fills, see Components", "darkly fork (+ qqc2 for tabs)", "g", "every Qt app", "partly: radius 16 only"],
+    ["Same controls (QtWidgets apps)", "Darkly QStyle", "Same as above", "darkly fork", "g", "Dolphin, Kate, Konsole…", "partly"],
+    ["Switch, slider, radio", "qqc2 + Darkly", "M3 versions", "both forks", "g", "every Qt app", "done"],
+    ["Menus, tooltips, scroll bars", "Darkly + qqc2", "r16 menu, inverse tooltip, 4 px bar", "darkly + qqc2 forks", "g", "every Qt app", "NOT DONE"],
+    ["Dolphin details view rows", "Darkly item view", "stock header, clean selection", "darkly fork", "g", "QtWidgets lists", "bug: blob + line (reported)"],
+    ["Theme picker cards on Quick Settings", "kcm_landingpage's own QML", "cards in a row group", "would need that KCM", "r", "that page only", "skip unless asked"],
+    ["Chrome, Electron, GTK apps", "the app itself", "–", "outside KDE", "r", "–", "out of scope"],
+  ];
+  function buildMap() {
+    const tb = document.querySelector("#mapTable tbody"); tb.replaceChildren();
+    MAP.forEach(([a, b, c, d, r, reach, st]) => { const tr = el("tr"); const cls = st.startsWith("done") ? "g" : st.startsWith("NOT") || st.startsWith("bug") ? "r" : st.startsWith("partly") ? "a" : "b";
+      tr.innerHTML = `<td>${a}</td><td><code>${b}</code></td><td>${c}</td><td><code>${d}</code></td><td><span class="pill ${r === "g" ? "g" : r === "a" ? "a" : "r"}">${r === "g" ? "global" : r === "a" ? "app only" : "outside"}</span><br><span style="color:var(--outline);font-size:12px">${reach}</span></td><td><span class="pill ${cls}">${st}</span></td>`; tb.appendChild(tr); });
+  }
 
-  paintNav(); renderPage(false);
+  /* ---------- strip ---------- */
+  document.querySelectorAll(".seg [data-view]").forEach(b => b.onclick = () => {
+    document.querySelectorAll(".seg [data-view]").forEach(x => x.setAttribute("aria-pressed", x === b));
+    document.querySelectorAll(".view").forEach(v => v.hidden = v.id !== "view-" + b.dataset.view);
+    try { localStorage.setItem("nexus-spec-view", b.dataset.view); } catch (e) {}
+  });
+  const toggleChip = (id, f) => { const b = document.getElementById(id); b.onclick = () => { const v = b.getAttribute("aria-pressed") !== "true"; b.setAttribute("aria-pressed", v); f(v); }; };
+  toggleChip("narrowBtn", v => document.getElementById("win").classList.toggle("narrow", v));
+  toggleChip("annotBtn", v => document.body.classList.toggle("annot", v));
+  toggleChip("slowBtn", v => document.documentElement.style.setProperty("--t", v ? 4 : 1));
+
+  renderNav(); renderPage(false); changed(); buildComps(); buildMap();
+  try { const v = localStorage.getItem("nexus-spec-view"); if (v) document.querySelector(`.seg [data-view="${v}"]`)?.click(); } catch (e) {}
 })();
 </script>

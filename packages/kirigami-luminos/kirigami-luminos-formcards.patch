@@ -1,0 +1,578 @@
+diff --git a/src/forms/flat/FormEntry.qml b/src/forms/flat/FormEntry.qml
+index fb7676a..7d740a7 100644
+--- a/src/forms/flat/FormEntry.qml
++++ b/src/forms/flat/FormEntry.qml
+@@ -16,8 +16,45 @@ import org.kde.kirigami.forms.private.templates as FT
+ FT.FormEntry {
+     id: root
+ 
++    // [CHANGE: claude-code | 2026-10-12] LUMINOS DECISION 140 (phase 4) — Nexus form rows.
++    // Each entry is a connected card (View alternateBackground): title left, control
++    // right (max 55 %); wide/fill controls stack below the title. An untitled entry joins
++    // the previous card; a FormSeparator or group edge ends the group (28 px corners).
++    readonly property var lxSibs: parent?.visibleChildren ?? []
++    readonly property int lxIdx: lxSibs.indexOf(root)
++    readonly property Item lxPrev: lxIdx > 0 ? lxSibs[lxIdx - 1] : null
++    readonly property Item lxNext: lxIdx >= 0 && lxIdx + 1 < lxSibs.length ? lxSibs[lxIdx + 1] : null
++    readonly property bool lxJoined: lxPrev instanceof FT.FormEntry && root.title.length === 0
++    readonly property bool lxJoinNext: lxNext instanceof FT.FormEntry && lxNext.title.length === 0
++    readonly property bool lxCompact: contentItem instanceof T.ComboBox || contentItem instanceof T.SpinBox || contentItem instanceof T.AbstractButton
++    readonly property bool lxStack: root.fullWidth || (mainLayout.formLayout?.__collapsed ?? false)
++        || ((contentItem?.Layout.fillWidth ?? false) && !lxCompact)
++        || (contentItem?.implicitWidth ?? 0) > width * 0.55
++    // A lone, untitled check box / switch: its own text becomes the row title.
++    readonly property bool lxSelfTitled: root.title.length === 0 && !lxJoined && !lxStack
++        && (contentItem instanceof T.CheckBox || contentItem instanceof T.Switch) && contentItem.text.length > 0
++    Binding {
++        target: root.contentItem; property: "display"; value: T.AbstractButton.IconOnly; when: root.lxSelfTitled
++    }
++    readonly property real lxTopPad: lxJoined ? 4 : 12
++    readonly property real lxBottomPad: lxJoinNext ? 0 : 12
++
++    Primitives.ShadowedRectangle {
++        z: -1
++        readonly property real rTop: root.lxJoined ? 0 : Math.min(root.lxPrev instanceof FT.FormEntry ? 4 : 28, height / 2)
++        readonly property real rBottom: root.lxJoinNext ? 0 : Math.min(root.lxNext instanceof FT.FormEntry ? 4 : 28, height / 2)
++        anchors.fill: parent
++        anchors.topMargin: root.lxJoined ? -2 : 0
++        Platform.Theme.colorSet: Platform.Theme.View
++        Platform.Theme.inherit: false
++        color: Platform.Theme.alternateBackgroundColor
++        corners { topLeftRadius: rTop; topRightRadius: rTop; bottomLeftRadius: rBottom; bottomRightRadius: rBottom }
++    }
++
+     implicitWidth: Math.max(contentItemWrapper.implicitWidth +  Platform.Units.largeSpacing * 2, Platform.Units.gridUnit * 20 +  Platform.Units.largeSpacing * 2)
+-    implicitHeight: mainLayout.implicitHeight
++    implicitHeight: Math.max(mainLayout.implicitHeight, lxSub.visible ? label.implicitHeight + lxSub.implicitHeight : 0)
++        + lxTopPad + lxBottomPad
++    Layout.minimumHeight: lxJoined ? 0 : 60
+ 
+     Layout.fillWidth: true
+ 
+@@ -28,11 +65,16 @@ FT.FormEntry {
+         id: label
+         anchors {
+             top: parent.top
+-            right: mainLayout.left
+-            rightMargin: Platform.Units.largeSpacing
+-            topMargin: root.contentItem?.parent.y + root.contentItem?.KirigamiLayouts.FormData.buddyFor.y + layout.y + root.contentItem?.KirigamiLayouts.FormData.buddyFor.height/2 - label.height/2 ?? 0
++            left: parent.left
++            leftMargin: 20
++            topMargin: mainLayout.y + root.contentItem?.parent.y + root.contentItem?.KirigamiLayouts.FormData.buddyFor.y + layout.y + root.contentItem?.KirigamiLayouts.FormData.buddyFor.height/2 - label.height/2 - (lxSub.visible ? lxSub.height / 2 : 0) ?? 0
+         }
+-        visible: text.length > 0 && (!mainLayout.formLayout?.__collapsed ?? true) && !root.fullWidth
++        width: Math.min(implicitWidth, root.width * 0.45)
++        elide: Text.ElideRight
++        font.pointSize: Platform.Theme.defaultFont.pointSize * 1.2
++        Platform.Theme.colorSet: Platform.Theme.View
++        Platform.Theme.inherit: false
++        visible: text.length > 0 && !root.lxStack
+         Primitives.MnemonicData.enabled: {
+                 const buddy = root.contentItem?.KirigamiLayouts.FormData.buddyFor;
+                 if (buddy && buddy.enabled && buddy.visible && buddy.activeFocusOnTab) {
+@@ -44,8 +86,8 @@ FT.FormEntry {
+                 }
+             }
+         Primitives.MnemonicData.controlType: Primitives.MnemonicData.FormLabel
+-        Primitives.MnemonicData.label: root.title
+-        text: Primitives.MnemonicData.richTextLabel
++        Primitives.MnemonicData.label: root.lxSelfTitled ? root.contentItem.text : root.title
++        text: Primitives.MnemonicData.richTextLabel.replace(/:(\s*)$/, "$1")
+         Accessible.name: Primitives.MnemonicData.plainTextLabel
+         // We should use this instead of the binding but this makes qt crash due to QTBUG-146127
+         // Accessible.labelFor: visible ? root.contentItem : null
+@@ -81,6 +123,18 @@ FT.FormEntry {
+     }
+ 
+     // Replace with Accessible.labelFor once QTBUG-146127 is fixed
++    QQC.Label { // LUMINOS: the grey 13 px sub line sits under the row title
++        id: lxSub
++        anchors { top: label.bottom; left: label.left }
++        width: root.width * 0.45
++        visible: label.visible && text.length > 0
++        text: root.subtitle
++        font: Platform.Theme.smallFont
++        wrapMode: Text.WordWrap
++        Platform.Theme.colorSet: Platform.Theme.Window
++        Platform.Theme.inherit: false
++    }
++
+     Binding {
+         target: root.contentItem?.Accessible ?? null
+         property: "labelledBy"
+@@ -94,7 +148,10 @@ FT.FormEntry {
+             right: parent.right
+             top: parent.top
+             bottom: parent.bottom
+-            leftMargin: !mainLayout.formLayout || mainLayout.formLayout.__collapsed || root.fullWidth || !formGroup ? padding : formGroup.__assignedWidthForLabels + Platform.Units.largeSpacing * 2
++            topMargin: root.lxTopPad
++            bottomMargin: root.lxBottomPad
++            rightMargin: 20
++            leftMargin: root.lxStack || !formGroup ? 20 : 20 + Math.min(Math.max(formGroup.__assignedWidthForLabels, label.implicitWidth), root.width * 0.45) + 12
+         }
+ 
+         spacing: Platform.Units.smallSpacing
+@@ -142,7 +199,7 @@ FT.FormEntry {
+             Layout.fillWidth: true
+             Layout.minimumWidth: contentItemWrapper.Layout.minimumWidth
+             Layout.preferredWidth: contentItemWrapper.implicitWidth
+-            Layout.maximumWidth: contentItemWrapper.Layout.maximumWidth
++            Layout.maximumWidth: root.lxStack ? contentItemWrapper.Layout.maximumWidth : Infinity
+ 
+             Binding {
+                 readonly property bool firstEntry: root.parent?.children[0] === root
+@@ -153,15 +210,20 @@ FT.FormEntry {
+             QQC.Label {
+                 id: titleLabel
+                 Layout.fillWidth: true
+-                topPadding: Platform.Units.largeSpacing
+-                visible: ((mainLayout.formLayout?.__collapsed ?? true) || root.fullWidth) && text.length > 0
+-                text: label.Primitives.MnemonicData.richTextLabel
++                bottomPadding: 6
++                font.pointSize: Platform.Theme.defaultFont.pointSize * 1.2
++                visible: root.lxStack && text.length > 0
++                text: label.text
+             }
+ 
+             RowLayout {
+                 id: contentItemAndTrailingLayout
+                 Layout.fillWidth: true
+                 spacing: parent.spacing
++                Item { // LUMINOS: pushes inline controls to the right edge
++                    Layout.fillWidth: true
++                    visible: !root.lxStack && !contentItemWrapper.Layout.fillWidth
++                }
+                 QQC.Control {
+                     id: contentItemWrapper
+ 
+@@ -172,9 +234,10 @@ FT.FormEntry {
+ 
+                     spacing: parent.spacing // Ensure that `contentItem.parent.spacing` works
+                     implicitWidth: contentItem?.Layout.preferredWidth > 0 ? (contentItem?.Layout.preferredWidth ?? 0) : (contentItem?.implicitWidth ?? 0)
+-                    Layout.fillWidth: contentItem?.Layout.fillWidth ?? false
++                    // LUMINOS: check/radio/push buttons stay at their own width on the right
++                    Layout.fillWidth: (contentItem?.Layout.fillWidth ?? false) && (root.lxStack || !(contentItem instanceof T.AbstractButton))
+                     Layout.minimumWidth: contentItem?.Layout.minimumWidth ?? -1
+-                    Layout.maximumWidth: contentItem?.Layout.maximumWidth ?? -1
++                    Layout.maximumWidth: Math.min(contentItem?.Layout.maximumWidth ?? Infinity, root.lxStack ? Infinity : root.width * 0.55)
+                     contentItem: root.contentItem
+                 }
+ 
+@@ -193,9 +256,12 @@ FT.FormEntry {
+             QQC.Label {
+                 Layout.fillWidth: true
+                 font: Platform.Theme.smallFont
++                horizontalAlignment: root.lxStack ? Text.AlignLeft : Text.AlignRight
++                Platform.Theme.colorSet: Platform.Theme.Window
++                Platform.Theme.inherit: false
+                 wrapMode: Text.WordWrap
+                 elide: Text.ElideRight
+-                visible: text.length > 0
++                visible: text.length > 0 && !lxSub.visible
+                 text: root.subtitle
+                 leftPadding:
+                     Application.layoutDirection === Qt.LeftToRight
+diff --git a/src/forms/flat/FormGroup.qml b/src/forms/flat/FormGroup.qml
+index 9c7af41..8975267 100644
+--- a/src/forms/flat/FormGroup.qml
++++ b/src/forms/flat/FormGroup.qml
+@@ -34,8 +34,10 @@ FT.FormGroup {
+         id: layout
+         anchors.fill: parent
+         spacing: 0
++        // [CHANGE: claude-code | 2026-10-12] LUMINOS DECISION 140 (phase 4): no separator
++        // lines between groups; the title is the Nexus section label (13 px, medium, grey).
+         Primitives.Separator {
+-            visible: root.parent?.visibleChildren[0] !== root && root.title.length === 0
++            visible: false
+             Layout.fillWidth: true
+             Layout.margins: Platform.Units.largeSpacing
+             Layout.topMargin: root.__formSpacing
+@@ -43,11 +45,14 @@ FT.FormGroup {
+         }
+         KirigamiControls.Heading {
+             Layout.fillWidth: true
+-            Layout.topMargin: root.__formSpacing
+-            Layout.bottomMargin: Platform.Units.largeSpacing
+-            level: 3
+-            horizontalAlignment: Text.AlignHCenter
+-            type: KirigamiControls.Heading.Primary
++            Layout.topMargin: root.parent?.visibleChildren[0] !== root ? 18 : 0
++            Layout.bottomMargin: 8
++            leftPadding: 20
++            level: 5
++            font.weight: Font.Medium
++            Platform.Theme.colorSet: Platform.Theme.Window
++            Platform.Theme.inherit: false
++            type: KirigamiControls.Heading.Normal
+             visible: text.length > 0
+             text: root.title
+         }
+@@ -69,7 +74,7 @@ FT.FormGroup {
+                 }
+                 labelWidth = w;
+             }
+-            spacing: Platform.Units.smallSpacing
++            spacing: 2 // LUMINOS: 2 px between connected rows
+         }
+     }
+ }
+diff --git a/src/forms/templates/Form.qml b/src/forms/templates/Form.qml
+index c7e709d..7156d2a 100644
+--- a/src/forms/templates/Form.qml
++++ b/src/forms/templates/Form.qml
+@@ -67,6 +67,9 @@ Item {
+     // Implementation detail, don't document
+     default property alias entries: layout.data
+     Accessible.role: Accessible.Form
++    // LUMINOS: take the page's full column width (in a layout, or as a page's direct child)
++    Layout.fillWidth: true
++    width: parent ? parent.width : implicitWidth
+ 
+     implicitWidth: layout.implicitWidth + Platform.Units.smallSpacing * 2
+     implicitHeight: layout.implicitHeight + Platform.Units.smallSpacing * 2
+@@ -124,7 +127,7 @@ Item {
+ 
+         width: root.__collapsed
+                 ? Math.min(implicitWidth, parent.width, Platform.Units.gridUnit * 30)
+-                : Math.min(Math.max(implicitWidth, twinImplicitWidth), parent.width)
++                : Math.min(Math.max(implicitWidth, twinImplicitWidth, Platform.Units.gridUnit * 42), parent.width) // LUMINOS: page-wide cards
+         spacing: Platform.Units.largeSpacing + Platform.Units.smallSpacing
+     }
+ }
+diff --git a/src/layouts/FormLayout.qml b/src/layouts/FormLayout.qml
+index d9e964b..89fb535 100644
+--- a/src/layouts/FormLayout.qml
++++ b/src/layouts/FormLayout.qml
+@@ -126,6 +126,59 @@ Item {
+         }
+     }
+ 
++    // [CHANGE: claude-code | 2026-10-12] LUMINOS DECISION 140 (phase 4) — Nexus form rows.
++    // Every labelled row is drawn as a connected card (View alternateBackground), label
++    // = row title on the left, control on the right (max 55 %). Fill-width controls drop
++    // below the title (".row.stack"). Unlabelled rows join the previous card. Sections
++    // become a small label and break the group; separator lines are hidden. Cards are
++    // drawn by one background object per form item (created once in relayout, geometry
++    // bound to the grid cells), so geometry changes only move them.
++    // Stacked below the title: text fields/areas, sliders, and fill-width containers
++    // (lists, grids, row layouts). Combos, spin boxes and buttons stay inline even when
++    // they fill: they just grow to the 55 % control column.
++    function __lxCompact(item: Item): bool {
++        return item instanceof T.ComboBox || item instanceof T.SpinBox || item instanceof T.AbstractButton;
++    }
++    // A section, or a bare Separator: draws nothing, ends the current card group.
++    function __lxBreak(item: Item): bool {
++        return !!item && (item.KirigamiLayouts.FormData.isSection || item instanceof Primitives.Separator);
++    }
++    function __lxStack(item: Item): bool {
++        return !!item && !__lxBreak(item)
++            && (item instanceof TextInput || item instanceof TextEdit || item instanceof T.Slider
++                || (item.Layout.fillWidth && !__lxCompact(item)));
++    }
++    function __lxRecompute(): void {
++        const vis = [];
++        for (let i = 2; i < root.children.length; ++i) {
++            const it = root.children[i];
++            if (!(it instanceof Repeater) && it.visible) {
++                vis.push(it);
++            }
++        }
++        const bgOf = it => lay.lxBgs.find(b => b.item === it) ?? null;
++        let groupStart = true;
++        let prev = null;
++        for (let k = 0; k < vis.length; ++k) {
++            const it = vis[k], bg = bgOf(it);
++            const fd = it.KirigamiLayouts.FormData;
++            if (root.__lxBreak(it)) {
++                groupStart = true;
++                if (prev) { prev.joinNext = false; prev.lastInGroup = true; }
++                prev = null;
++                continue;
++            }
++            if (!bg) { continue; }
++            bg.joinedPrev = !groupStart && prev !== null && fd.label.length === 0;
++            bg.firstInGroup = groupStart;
++            bg.joinNext = false;
++            bg.lastInGroup = true;
++            if (prev) { prev.joinNext = bg.joinedPrev; prev.lastInGroup = false; }
++            groupStart = false;
++            prev = bg;
++        }
++    }
++
+     implicitWidth: lay.wideImplicitWidth
+     implicitHeight: lay.implicitHeight
+     Layout.preferredHeight: lay.implicitHeight
+@@ -136,8 +189,9 @@ Item {
+         id: lay
+         property int wideImplicitWidth
+         columns: root.wideMode ? 2 : 1
+-        rowSpacing: Platform.Units.smallSpacing
+-        columnSpacing: Platform.Units.largeSpacing
++        rowSpacing: 2 // LUMINOS: the 2 px gap between connected cards
++        columnSpacing: 12
++        property var lxBgs: []
+ 
+         //TODO: use state machine
+         Binding {
+@@ -145,14 +199,15 @@ Item {
+             target: lay
+             property: "width"
+             // Works out to 576px by default; any higher and it's not really very narrow!
+-            value: Math.min(lay.implicitWidth, Platform.Units.gridUnit * 32, root.width)
++            value: root.width
+             restoreMode: Binding.RestoreBinding
+         }
+         Binding {
+             when: root.wideMode
+             target: lay
+             property: "width"
+-            value: root.implicitWidth
++            // LUMINOS: cards span the page column (mock: min(100 %, 760 px))
++            value: Math.min(root.width, Math.max(root.implicitWidth, Platform.Units.gridUnit * 42))
+             restoreMode: Binding.RestoreBinding
+         }
+         anchors.horizontalCenter: root.horizontalCenter
+@@ -250,6 +305,7 @@ Item {
+ 
+     Item {
+         id: temp
++        z: -1 // LUMINOS: hosts the card backgrounds, below the form items
+ 
+         /*!
+          * The following two functions are used in the label buddy items.
+@@ -277,10 +333,10 @@ Item {
+                 : Qt.AlignTop;
+ 
+             if (item.KirigamiLayouts.FormData.isSection) {
+-                return Qt.AlignHCenter;
++                return Qt.AlignLeft | Qt.AlignBottom;
+             }
+-            if (root.wideMode) {
+-                return Qt.AlignRight | verticalAlignment;
++            if (root.wideMode && !root.__lxStack(item)) {
++                return Qt.AlignLeft | (item.KirigamiLayouts.FormData.labelAlignment !== 0 ? verticalAlignment : Qt.AlignVCenter);
+             }
+             return Qt.AlignLeft | Qt.AlignBottom;
+         }
+@@ -293,7 +349,7 @@ Item {
+             if (!item) {
+                 return 0;
+             }
+-            if (root.wideMode && !item.KirigamiLayouts.FormData.isSection) {
++            if (root.wideMode && !item.KirigamiLayouts.FormData.isSection && !root.__lxStack(item)) {
+                 return item.KirigamiLayouts.FormData.labelAlignment !== 0 ? item.KirigamiLayouts.FormData.labelAlignment : Text.AlignVCenter;
+             }
+             return Text.AlignBottom;
+@@ -310,7 +366,7 @@ Item {
+             if (!(item instanceof Repeater)) {
+                 item.Layout.row = row;
+                 item.Layout.column = 1;
+-                row += root.wideMode && !item.KirigamiLayouts.FormData.isSection ? 1 : 2;
++                row += root.wideMode && !root.__lxBreak(item) && !root.__lxStack(item) ? 1 : 2;
+             }
+ 
+             // skip items that are already there
+@@ -323,7 +379,10 @@ Item {
+             const buddy = buddyComponent.createObject(lay, { item, index: i - 2 });
+ 
+             lay.buddies.push(buddy);
++            lay.lxBgs.push(cardComponent.createObject(temp, { item, buddy, container: itemContainer }));
++            itemContainer.lxBg = buddy.lxBg = lay.lxBgs[lay.lxBgs.length - 1];
+         }
++        __lxRecompute();
+ 
+         leadingPlaceholder.Layout.row = row
+         leadingPlaceholder.Layout.column = 0
+@@ -348,9 +407,16 @@ Item {
+             id: container
+ 
+             property Item item
++            property QtObject lxBg
++            readonly property bool lxInline: root.wideMode && !!item && !root.__lxBreak(item) && !root.__lxStack(item)
++            readonly property bool lxSection: root.__lxBreak(item)
+ 
+-            Layout.row: item?.Layout?.row + (root.wideMode && !item.KirigamiLayouts.FormData.isSection ? 0 : 1)
+-            Layout.column: root.wideMode && !item?.KirigamiLayouts.FormData.isSection ? 1 : 0
++            Layout.row: item?.Layout?.row + (lxInline ? 0 : 1)
++            Layout.column: lxInline ? 1 : 0
++            Layout.leftMargin: lxInline || lxSection ? 0 : 20
++            Layout.rightMargin: lxSection ? 0 : 20
++            Layout.topMargin: lxSection ? 0 : (lxBg?.joinedPrev ? 4 : (lxInline ? 12 : 10))
++            Layout.bottomMargin: lxSection ? 0 : (lxBg?.joinNext ? 0 : (lxInline ? 12 : 14))
+ 
+             enabled: item?.enabled ?? false
+             visible: item?.visible ?? false
+@@ -364,12 +430,12 @@ Item {
+             Layout.minimumWidth: item?.Layout.minimumWidth ?? 0
+             Layout.minimumHeight: item?.Layout.minimumHeight ?? 0
+ 
+-            Layout.maximumWidth: item?.Layout.maximumWidth ?? 0
++            Layout.maximumWidth: Math.min(item?.Layout.maximumWidth ?? 0, lxInline ? lay.width * 0.55 : Infinity)
+             Layout.maximumHeight: item?.Layout.maximumHeight ?? 0
+ 
+-            Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+-            Layout.fillWidth: item !== null && (item instanceof TextInput || item.Layout.fillWidth || item.KirigamiLayouts.FormData.isSection)
+-            Layout.columnSpan: item?.KirigamiLayouts.FormData.isSection ? lay.columns : 1
++            Layout.alignment: (lxInline ? Qt.AlignRight : Qt.AlignLeft) | Qt.AlignVCenter
++            Layout.fillWidth: item !== null && (lxInline ? item.Layout.fillWidth && !(item instanceof T.AbstractButton) : (item instanceof TextInput || item.Layout.fillWidth || lxSection || root.wideMode))
++            Layout.columnSpan: lxInline ? 1 : lay.columns
+             onItemChanged: {
+                 if (!item) {
+                     container.destroy();
+@@ -379,7 +445,13 @@ Item {
+             // Assume lay.y is always 0
+             onYChanged: if (item !== null) { item.y = y + lay.y; }
+             onWidthChanged: if (item !== null) { item.width = width; }
+-            Component.onCompleted: item.x = x + lay.x;
++            Component.onCompleted: {
++                item.x = x + lay.x;
++                // LUMINOS: no separator lines; a bare section Separator only breaks the group
++                if (lxSection && item instanceof Primitives.Separator) {
++                    item.opacity = 0;
++                }
++            }
+             Connections {
+                 target: lay
+                 function onXChanged(): void {
+@@ -397,9 +469,21 @@ Item {
+ 
+             property Item item
+             property int index
++            property QtObject lxBg
++            readonly property bool lxSection: root.__lxBreak(item)
++            readonly property bool lxInline: root.wideMode && !lxSection && !root.__lxStack(item)
+ 
+             Layout.row: item?.Layout?.row
+             Layout.column: 0
++            Layout.leftMargin: 20
++            Layout.rightMargin: lxInline ? 0 : 20
++            Layout.bottomMargin: lxSection ? 8 : (lxInline && !lxBg?.joinNext ? 12 : 0)
++            // Rows are titles in the card (no trailing colon); sections are the small grey label.
++            Platform.Theme.colorSet: lxSection ? Platform.Theme.Window : Platform.Theme.View
++            Platform.Theme.inherit: false
++            font.weight: lxSection ? Font.Medium : Font.Normal
++            // mock: title 16 px / section 13 px over a 13.3 px (10 pt) body font
++            font.pointSize: Platform.Theme.defaultFont.pointSize * (lxSection ? 1.0 : 1.2)
+ 
+             enabled: {
+                 const buddy = item?.KirigamiLayouts.FormData.buddyFor;
+@@ -422,51 +506,40 @@ Item {
+             }
+             Primitives.MnemonicData.controlType: Primitives.MnemonicData.FormLabel
+             Primitives.MnemonicData.label: item?.KirigamiLayouts.FormData.label ?? ""
+-            text: Primitives.MnemonicData.richTextLabel
++            text: Primitives.MnemonicData.richTextLabel.replace(/:(\s*)$/, "$1")
+             Accessible.name: Primitives.MnemonicData.plainTextLabel
+-            type: item?.KirigamiLayouts.FormData.isSection ? KirigamiControls.Heading.Type.Primary : KirigamiControls.Heading.Type.Normal
++            type: KirigamiControls.Heading.Type.Normal
+ 
+-            level: item?.KirigamiLayouts.FormData.isSection ? 3 : 5
++            level: 5
+ 
+-            Layout.columnSpan: item?.KirigamiLayouts.FormData.isSection ? lay.columns : 1
++            Layout.columnSpan: lxInline ? 1 : lay.columns
+             Layout.preferredHeight: {
+                 if (!item) {
+                     return 0;
+                 }
+-                if (item.KirigamiLayouts.FormData.label.length > 0) {
+-                    // Add extra whitespace before textual section headers, which
+-                    // looks better than separator lines
+-                    if (item.KirigamiLayouts.FormData.isSection && labelItem.index !== 0) {
+-                        return implicitHeight + Platform.Units.largeSpacing * 2;
+-                    }
+-                    else if (root.wideMode && !(item.KirigamiLayouts.FormData.buddyFor instanceof TextEdit)) {
+-                        return Math.max(implicitHeight, item.KirigamiLayouts.FormData.buddyFor?.height ?? implicitHeight)
+-                    }
+-                    return implicitHeight;
++                if (lxSection) {
++                    return text.length > 0 ? implicitHeight : Platform.Units.smallSpacing;
+                 }
+-                return Platform.Units.smallSpacing;
++                if (!lxInline) { // title above a stacked / narrow control
++                    return text.length > 0 ? implicitHeight : 0;
++                }
++                return lxBg?.joinedPrev ? 1 : Math.max(implicitHeight, 36); // 60 px card row
+             }
+ 
+             Layout.alignment: temp.effectiveLayout(item)
+             verticalAlignment: temp.effectiveTextLayout(item)
+ 
+-            Layout.fillWidth: !root.wideMode
++            Layout.fillWidth: !lxInline
+             wrapMode: Text.Wrap
+ 
+             Layout.topMargin: {
+                 if (!item) {
+                     return 0;
+                 }
+-                if (item.KirigamiLayouts.FormData.buddyFor && root.wideMode && item.KirigamiLayouts.FormData.buddyFor.parent !== root) {
+-                    return item.KirigamiLayouts.FormData.buddyFor.y;
+-                }
+-                if (item?.KirigamiLayouts.FormData.isSection && text.length > 0) {
+-                    return Platform.Units.largeSpacing * 2;
+-                }
+-                if (index === 0 || root.wideMode) {
+-                    return 0;
++                if (lxSection) {
++                    return text.length > 0 && index !== 0 ? 18 : 0;
+                 }
+-                return Platform.Units.largeSpacing * 2;
++                return lxBg?.joinedPrev ? 0 : 12;
+             }
+             onItemChanged: {
+                 if (item.Accessible.hasOwnProperty("labelledBy")) {
+@@ -494,4 +567,51 @@ Item {
+             }
+         }
+     }
++
++    // LUMINOS: one connected card background per form item (see __lxRecompute).
++    Component {
++        id: cardComponent
++        Primitives.ShadowedRectangle {
++            id: card
++            property Item item
++            property Item buddy
++            property Item container
++            property bool joinedPrev: false
++            property bool joinNext: false
++            property bool firstInGroup: true
++            property bool lastInGroup: true
++
++            readonly property real lxTop: Math.min(buddy.visible ? buddy.y - buddy.Layout.topMargin : Infinity,
++                                                    container.y - container.Layout.topMargin)
++            readonly property real lxBottom: Math.max(buddy.visible ? buddy.y + buddy.height + buddy.Layout.bottomMargin : -Infinity,
++                                                       container.y + container.height + container.Layout.bottomMargin)
++            readonly property real rTop: joinedPrev ? 0 : Math.min(firstInGroup ? 28 : 4, height / 2)
++            readonly property real rBottom: joinNext ? 0 : Math.min(lastInGroup ? 28 : 4, height / 2)
++
++            visible: !!item && item.visible && !root.__lxBreak(item)
++            x: lay.x
++            y: lay.y + lxTop - (joinedPrev ? lay.rowSpacing : 0)
++            width: lay.width
++            height: lxBottom - lxTop + (joinedPrev ? lay.rowSpacing : 0)
++            Platform.Theme.colorSet: Platform.Theme.View
++            Platform.Theme.inherit: false
++            color: Platform.Theme.alternateBackgroundColor
++            corners {
++                topLeftRadius: rTop
++                topRightRadius: rTop
++                bottomLeftRadius: rBottom
++                bottomRightRadius: rBottom
++            }
++            onItemChanged: if (!item) { destroy(); }
++            Connections {
++                target: card.item
++                function onVisibleChanged(): void { Qt.callLater(root.__lxRecompute); }
++            }
++            Connections {
++                target: card.item?.KirigamiLayouts.FormData ?? null
++                function onLabelChanged(): void { Qt.callLater(root.__lxRecompute); }
++                function onIsSectionChanged(): void { Qt.callLater(root.__lxRecompute); }
++            }
++        }
++    }
+ }

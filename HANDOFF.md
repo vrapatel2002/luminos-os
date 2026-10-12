@@ -1,11 +1,21 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-11 20:30 — Response 7 (windowstyle chat)
+Last updated: 2026-10-12 19:10 — Response 1 (remote-stream chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-11 19:35, heat chat R2) — Luminos Ambient built (DECISION 140), waiting on Shawn's install click
+## Aim right now (2026-10-12 19:10, remote-stream chat R1) — phone streams stall on mobile data, BUG-194, READ-ONLY
+Shawn: server "not very responsive", streams don't load over mobile data; wants a list to fix (/build — diagnosis only, no workers spawned, nothing built yet).
+**Found (all measured on the server):** (1) Pixel 9 Tailscale peer: 90 DERP-relay contacts, **0 direct** in 10 days. (2) Jellyfin
+transcoded a 4K HDR remux to the phone at **54.8 Mbps** (`RemoteClientBitrateLimit=0`); app quit after 38 s. (3) nftables `policy drop`
+has no accept for udp 41641 → inbound hole-punch + UPnP/NAT-PMP replies dropped (`portmap=` empty). (4) Dual NIC .61/.62 both on
+41641 → STUN saw 2 public ports, `varies=true` → home looks like hard NAT. (5) Not the cause: server load 0, encode 3.07x, upload ~100+ Mbit/s.
+**Proposed fixes, waiting on Shawn's pick:** A) `RemoteClientBitrateLimit` ~8 Mbps (one setting, biggest win). B) nftables `udp dport 41641 accept`
+(+ allow router UPnP/PMP replies, or a router UDP 41641 port-forward). C) Tailscale bound to one NIC / one public port. D) Enable tonemapping (OpenCL) for HDR remote transcodes.
+Each server change: 300 s auto-revert, re-check `tailscale status` shows `direct` for the phone while on mobile data.
+
+## Previous aim (2026-10-11 19:35, heat chat R2) — Luminos Ambient built (DECISION 140), waiting on Shawn's install click
 R1: hot hour (52–61 °C) = YouTube in Chrome. R2 (/build): Shawn is sure it's "Ambient light for YouTube"; wants better code + an
 audit of heavy/loose-end code.
 **DONE:** `docs/ambient/AUDIT.md`: per video frame it re-uploads the full 1080p frame into WebGL + generateMipmap, then renders ~7
@@ -48,6 +58,11 @@ rounded hole. Waiting on Shawn to use these names to say what he wants built nex
 **R5:** built an interactive HTML/CSS replica of Nexus (artifact "Nexus Window Replica", claude.ai/artifact/LHwGAx7LJWBEw3cSceMDhS; source copy `docs/windowstyle/mock/nexus-replica.html`) with a component-name overlay + slow-motion toggle, to agree on the target before any KDE work.
 **R6:** same artifact (now titled "System Settings in Nexus Style") swapped to KDE System Settings' real sidebar (categories as small grey labels, chevrons, Bluetooth switch in the nav item) + pages Quick Settings (theme cards, M3 slider, select rows), Bluetooth, Sound, Wi-Fi, Mouse, Keyboard Backlight; Reset/Apply footer kept as pill buttons.
 **R7 DONE — DECISION 140:** the mock is now real in every KDE app via five forks (qqc2 1.4, kirigami 1.2, kirigami-addons 1.2, systemsettings 1.2, darkly 1.2) + warn-only hooks; checker 25/25. **Shawn must close+reopen System Settings (pid 116823 is the old binary).** Next per Shawn: "light weight" pass — measure (PSS / startup / repaint) and trim. Rebuild all forks after any Plasma/KF/Qt bump.
+**R8 (10-12):** Shawn reported visible bugs: System Settings separator line, half-pill Back row, narrow-window blobs, Keyboard KCM box-in-box → fixed in **systemsettings 6.7.5-1.3** (installed; patch now 374 lines, over its 350 budget). Dolphin details-view bugs (dark blob on header, thin lavender line under a row) were NOT sent to the darkly worker — Shawn interrupted that message. Still open.
+**R9:** Shawn: "why are they not global… detailed prototype that you can follow". Diagnosis: page CONTENTS belong to each KCM; Quick Settings/Keyboard/Fonts use **Kirigami FormLayout** (label left, control right, separator lines) which no fork touches — that is why pages look nothing like the mock. Rebuilt the artifact as a SPEC with 3 views: Window (KWin frame + Quick Settings, Keyboard w/ tabs, Text & Fonts sub-sidebar w/ Back, Fonts, Font Management, Mouse, Touchpad, Bluetooth, narrow mode), Components (every control with numbers + which library + global/app tag), Map (piece → drawn by → fix location → reach → state). Repo copy `docs/windowstyle/mock/nexus-replica.html`.
+**R10 DONE — DECISION 141:** kirigami 1.4 FormLayout/Form → card rows (global), systemsettings 1.4 line/overlap/gap fixed; checker 26/26. Shawn must reopen System Settings. Darkly worker was STOPPED BY SHAWN — don't relaunch Dolphin fixes unless he asks.
+**Was next:** global FormLayout → connected card rows patch in the kirigami fork; Darkly controls per Components sheet (combo/spin/field/check/tabs/menus/tooltips/scrollbars); Dolphin bugs.
+
 **Waiting on Shawn:** look at it; likely asks — radius 16 vs ChromeOS 12, show title?, selected-row tint.
 Knobs: `~/.config/luminos-chromeosrc [Frame] CornerRadius/HeaderHeight/ShowTitle` then `qdbus6 org.kde.KWin /KWin reconfigure`.
 ⚠️ Plugin, Darkly and kirigami must be rebuilt after every Plasma/Qt bump; KWin falls back to Breeze silently.

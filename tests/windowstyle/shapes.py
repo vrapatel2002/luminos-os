@@ -59,9 +59,41 @@ def pill(path, sel, S):   # live System Settings capture: is the sidebar's selec
     hit = [n for n, (x, y) in zip(("TL", "TR", "BL", "BR"), ((x0+k, y0+k), (x1-k, y0+k), (x0+k, y1-k), (x1-k, y1-k))) if near(x, y)]
     out(fill > 0.5 and not hit, "live-systemsettings", "selected row x%d..%d y%d..%d, centre-line fill %.2f (want > 0.5), "
         "selection colour at 3px-diagonal corners: %s (want none)" % (x0, x1, y0, y1, fill, ",".join(hit) or "none"))
+def formlayout(fl):   # Phase 4 Kirigami.FormLayout: one visual rect per labelled row, joined pieces (gap 0, radii 0) merge
+    cs, vis = sorted(fl["cards"]), []
+    for c in cs:
+        if vis and abs(c[0] - vis[-1][0] - vis[-1][1]) <= 0.5 and max(vis[-1][4:6] + c[2:4]) <= 0.5: vis[-1] = vis[-1][:1] + [c[0] + c[1] - vis[-1][0]] + vis[-1][2:4] + c[4:6]
+        else: vis.append(list(c))
+    own = {k: next((i for i, v in enumerate(vis) if v[0] <= y <= v[0] + v[1]), None) for k, y in fl["ctl"].items()}
+    o = lambda i: min(28, vis[i][1] / 2) - 3.5; bad = []
+    main = [own[k] for k in ("combo", "spin", "sw", "sl", "tf")]
+    if None in main or len(set(main)) != 5: bad.append("labelled rows not in 5 separate rects %s" % own)
+    elif own["check"] != own["spin"]: bad.append("unlabelled CheckBox not in the SpinBox rect")
+    else:
+        c, sp, sw, sl, tf = main; r = lambda i: vis[i][2:]
+        if not (min(r(c)[:2]) >= o(c) and max(r(c)[2:]) <= 6): bad.append("first rect corners %s" % r(c))
+        if max(r(sp) + r(sw) + r(sl)[:2]) > 6 or min(r(sl)[2:]) < o(sl): bad.append("touching/last corners %s" % [r(sp), r(sw), r(sl)])
+        if min(r(tf)) < o(tf): bad.append("bare Separator does not split groups: TextField rect %s" % r(tf))
+        gaps = [vis[b][0] - vis[a][0] - vis[a][1] for a, b in ((c, sp), (sp, sw), (sw, sl))]
+        if not all(1 <= g <= 3 for g in gaps): bad.append("gaps %s (want ~2)" % gaps)
+    if not fl["sliderBelow"]: bad.append("Slider not below its label")
+    if fl["secLine"] or not fl["pointer"]: bad.append("section drawn as a line (or no 'Pointer' label)")
+    out(not bad, "formlayout", "rects y/h/TL/TR/BL/BR %s; %s" % (vis, "; ".join(bad) or "groups, joins, corners, gaps, slider, section OK"))
+def boundary(path, frame, view, S):   # live System Settings: no separator lines at the sidebar/hole edge or above the footer
+    w, h, px = png.load(path); near = lambda x, y: dist(px(x, y), view) < 10
+    br = lambda x, y: max(px(x, y)[i] - frame[i] for i in range(3)) > 12; s = lambda v: int(round(v * S))
+    _, hx0, hx1 = max([(0, 0, 0)] + [(len(g), g[0], g[-1]) for k, it in __import__("itertools").groupby(range(w), lambda x: near(x, h // 2)) if k for g in [list(it)]]); ys = [y for y in range(h) if near(hx0 + s(3), y)] or [0]; hy0, hy1 = ys[0], ys[-1]
+    edge = sum(br(x, y) for x in range(max(0, hx0 - s(3)), hx0 + 1) for y in range(hy0, hy1 + 1))
+    lines = [y for y in range(hy1 - (hy1 - hy0) * 3 // 10, hy1) if sum(br(x, y) for x in range(hx0, hx1, 2)) * 2 > (hx1 - hx0) // 2]
+    corner = [k for k in range(s(6), s(12)) if not near(hx1 - k, hy1 - k)]
+    out(hx1 - hx0 > s(100) and not edge and not lines and not corner, "live-ss-boundary", "hole x%d..%d y%d..%d; bright px at "
+        "sidebar edge %d, full-width lines in bottom 30%% %s, non-hole px on BR diagonal 6..12 %s (want all none)" % (hx0, hx1, hy0, hy1, edge, lines[:5], corner[:5]))
 def main(a=sys.argv):
     kv = dict(x.split("=", 1) for x in a[3:] if "=" in x)
-    if a[2] == "pill": return pill(a[1], tuple(int(v) for v in a[3].split(",")), float(a[4]))
+    rgb3 = lambda v: tuple(int(x) for x in v.split(","))
+    if a[2] == "formlayout": return formlayout(__import__("json").loads(kv["fl"]))
+    if a[2] == "pill":
+        pill(a[1], rgb3(a[3]), float(a[4])); return boundary(a[1], rgb3(kv["frame"]), rgb3(kv["view"]), float(a[4]))
     if a[2] == "rows": connected("qml-rows", [pixrow(a[1], i) for i in range(6)], "fclfml")
     elif a[2] == "slider-radio": slider_radio(a[1], float(kv.get("handle") or -1))
     else: out(kv.get("seps") == "0", "formcard-separators", "%s of 2 FormDelegateSeparators visible (want 0)" % kv.get("seps"))
