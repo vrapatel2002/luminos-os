@@ -1,8 +1,8 @@
 diff --git a/kstyle/darklystyle.cpp b/kstyle/darklystyle.cpp
-index b9eac1a..30cacd5 100644
+index b9eac1a..ea26b5f 100644
 --- a/kstyle/darklystyle.cpp
 +++ b/kstyle/darklystyle.cpp
-@@ -80,6 +80,45 @@
+@@ -80,6 +80,54 @@
  
  // #include <QDebug>
  
@@ -12,6 +12,15 @@ index b9eac1a..30cacd5 100644
 +constexpr int LumRowOuter = 28, LumRowInner = 4, LumRowPill = 32, LumRowInset = 2;
 +constexpr int LumTrack = 16, LumBar = LumTrack + 20, LumGap = 5;
 +constexpr int LumGroupRole = 0x0a5b64ee; // KFilePlacesModel::GroupRole (Dolphin places sections)
++constexpr int LumSbExtent = 12, LumMenuItem = 40; // Phase 6: scroll bar 12 (4 px pill, 8 px hovered), menu items 40
++
++// Phase 6: is widget the viewport Dolphin's item views paint into (KItemListContainer > QGraphicsView > viewport)?
++// Only Dolphin's own header gets the Nexus look; QHeaderViews in other apps stay stock Darkly.
++bool lumDolphinViewport(const QWidget *widget)
++{
++    const QWidget *view = widget ? widget->parentWidget() : nullptr;
++    return view && view->parentWidget() && view->parentWidget()->inherits("KItemListContainer");
++}
 +
 +QPainterPath lumRoundRect(const QRectF &r, qreal tl, qreal tr, qreal br, qreal bl)
 +{
@@ -48,7 +57,92 @@ index b9eac1a..30cacd5 100644
  namespace DarklyPrivate
  {
  
-@@ -958,10 +997,10 @@ int Style::pixelMetric(PixelMetric metric, const QStyleOption *option, const QWi
+@@ -385,7 +433,7 @@ void Style::polish(QWidget *widget)
+ 
+     if (qobject_cast<QLabel*>(widget)) {
+         QWidget* parent = widget->parentWidget();
+-        if (!parent)
++        if (!parent && !widget->inherits("QTipLabel")) // [LUMINOS] a parentless QToolTip label must still reach the polish below
+             return;
+ 
+         while (parent) {
+@@ -627,6 +675,16 @@ void Style::polish(QWidget *widget)
+ 
+     } else if (widget->inherits("QTipLabel")) {
+         setTranslucentBackground(widget);
++        // [LUMINOS] Phase 6: inverse tooltip (Text colour as surface, Window colour as text); 6 x 10 padding.
++        QPalette tip(widget->palette());
++        const QPalette app(QApplication::palette());
++        for (int g = 0; g < QPalette::NColorGroups; ++g) {
++            const auto cg = QPalette::ColorGroup(g);
++            tip.setColor(cg, QPalette::ToolTipBase, app.color(cg, QPalette::Text));
++            tip.setColor(cg, QPalette::ToolTipText, app.color(cg, QPalette::Window));
++        }
++        widget->setPalette(tip);
++        widget->setContentsMargins(4, 0, 4, 0);
+ 
+     } else if (qobject_cast<QMainWindow *>(widget)) {
+         widget->setAttribute(Qt::WA_StyledBackground);
+@@ -666,6 +724,15 @@ void Style::polishScrollArea(QAbstractScrollArea *scrollArea)
+         scrollArea->setAttribute(Qt::WA_Hover);
+     }
+ 
++    // [LUMINOS] Phase 6: no alternate rows in Dolphin. Its items fill AlternateBase themselves, from the palette of the
++    // inner QGraphicsView and of its scene, so make that role transparent there.
++    if (const auto view = scrollArea->inherits("KItemListContainer") ? qobject_cast<QGraphicsView *>(scrollArea->viewport()) : nullptr) {
++        QPalette pal(view->palette());
++        pal.setColor(QPalette::AlternateBase, Qt::transparent);
++        view->setPalette(pal);
++        if (view->scene())
++            view->scene()->setPalette(pal);
++    }
+     if (scrollArea->viewport() && scrollArea->inherits("KItemListContainer") && scrollArea->frameShape() == QFrame::NoFrame) {
+         scrollArea->viewport()->setBackgroundRole(QPalette::Window);
+         scrollArea->viewport()->setForegroundRole(QPalette::WindowText);
+@@ -775,6 +842,13 @@ int Style::pixelMetric(PixelMetric metric, const QStyleOption *option, const QWi
+ {
+     // handle special cases
+     switch (metric) {
++    case PM_ScrollBarExtent: // [LUMINOS] Phase 6: thin Nexus scroll bar, no arrows/track
++        return LumSbExtent;
++    case PM_MenuHMargin: // [LUMINOS] 4 frame + 2 = 6 px menu padding
++    case PM_MenuVMargin:
++        return 2;
++    case PM_ToolTipLabelFrameWidth: // [LUMINOS] QTipLabel margin = 1 + this = 6
++        return 5;
+     // frame width
+     case PM_DefaultFrameWidth: {
+         const auto isControl = isQtQuickControl(option, widget);
+@@ -838,8 +912,6 @@ int Style::pixelMetric(PixelMetric metric, const QStyleOption *option, const QWi
+         return Metrics::SpinBox_FrameWidth;
+     case PM_ToolBarFrameWidth:
+         return Metrics::ToolBar_FrameWidth;
+-    case PM_ToolTipLabelFrameWidth:
+-        return Metrics::ToolTip_FrameWidth;
+ 
+     // layout
+     case PM_LayoutLeftMargin:
+@@ -932,19 +1004,6 @@ int Style::pixelMetric(PixelMetric metric, const QStyleOption *option, const QWi
+         return 28;
+ 
+         // scrollbars
+-    case PM_ScrollBarExtent:
+-        if (proxy()->styleHint(SH_ScrollBar_Transient, option, widget)) {
+-            if (option && (option->state & State_MouseOver)) {
+-                return Metrics::ScrollBar_Extend;
+-            }
+-
+-            const QObject *scrollBarObject = widget;
+-            if (!scrollBarObject && option) {
+-                scrollBarObject = option->styleObject;
+-            }
+-            return _animations->scrollBarEngine().isNeedPreExpand(scrollBarObject) ? Metrics::ScrollBar_Extend : Metrics::ScrollBar_TransientExtend;
+-        }
+-        return Metrics::ScrollBar_Extend;
+     case PM_ScrollBarSliderMin:
+         return Metrics::ScrollBar_MinSliderHeight;
+     case PM_ScrollView_ScrollBarOverlap:
+@@ -958,10 +1017,10 @@ int Style::pixelMetric(PixelMetric metric, const QStyleOption *option, const QWi
          return 2 * Metrics::TitleBar_MarginWidth + pixelMetric(PM_SmallIconSize, option, widget);
  
      // sliders
@@ -62,7 +156,34 @@ index b9eac1a..30cacd5 100644
      case PM_SliderLength:
          return Metrics::Slider_ControlThickness;
  
-@@ -3540,7 +3579,7 @@ QRect Style::sliderSubControlRect(const QStyleOptionComplex *option, SubControl
+@@ -1501,6 +1560,14 @@ void Style::drawControl(ControlElement element, const QStyleOption *option, QPai
+ {
+     StyleControl fcn;
+ 
++    // [LUMINOS] Phase 6: Dolphin's header labels in WindowText, the sorted column brighter (Text).
++    if (const auto header = element == CE_HeaderLabel && lumDolphinViewport(widget) ? qstyleoption_cast<const QStyleOptionHeader *>(option) : nullptr) {
++        QStyleOptionHeader copy(*header);
++        copy.palette.setColor(QPalette::ButtonText, header->palette.color(header->sortIndicator ? QPalette::Text : QPalette::WindowText));
++        ParentStyleClass::drawControl(element, &copy, painter, widget);
++        return;
++    }
++
+ #if DARKLY_HAVE_KSTYLE
+     if (element == CE_CapacityBar) {
+         fcn = &Style::drawProgressBarControl;
+@@ -3368,9 +3435,9 @@ QRect Style::scrollBarSubControlRect(const QStyleOptionComplex *option, SubContr
+     const bool horizontal(state & State_Horizontal);
+ 
+     switch (subControl) {
+-    case SC_ScrollBarSubLine:
++    case SC_ScrollBarSubLine: // [LUMINOS] Phase 6: no arrow buttons, so no arrow hit areas
+     case SC_ScrollBarAddLine:
+-        return scrollBarInternalSubControlRect(option, subControl);
++        return QRect();
+ 
+     case SC_ScrollBarGroove: {
+         auto topRect = visualRect(option, scrollBarInternalSubControlRect(option, SC_ScrollBarSubLine));
+@@ -3540,7 +3607,7 @@ QRect Style::sliderSubControlRect(const QStyleOptionComplex *option, SubControl
  
      switch (subControl) {
      case SC_SliderHandle: {
@@ -71,7 +192,7 @@ index b9eac1a..30cacd5 100644
  
          constexpr int len = Metrics::Slider_ControlThickness;
          const int sliderPos = sliderPositionFromValue(sliderOption->minimum,
-@@ -3562,9 +3601,9 @@ QRect Style::sliderSubControlRect(const QStyleOptionComplex *option, SubControl
+@@ -3562,9 +3629,9 @@ QRect Style::sliderSubControlRect(const QStyleOptionComplex *option, SubControl
  
          // centering
          if (horizontal) {
@@ -83,10 +204,98 @@ index b9eac1a..30cacd5 100644
          }
          return grooveRect;
      }
-@@ -4837,6 +4876,58 @@ bool Style::drawPanelItemViewItemPrimitive(const QStyleOption *option, QPainter
+@@ -3871,7 +3938,8 @@ QSize Style::menuItemSizeFromContents(const QStyleOption *option, const QSize &c
+         size.setHeight(qMax(size.height(), int(Metrics::MenuButton_IndicatorWidth)));
+         size.setHeight(qMax(size.height(), int(Metrics::CheckBox_Size)));
+         size.setHeight(qMax(size.height(), iconWidth));
+-        return expandSize(size, Metrics::MenuItem_MarginWidth, (Metrics::MenuItem_MarginHeight + StyleConfigData::menuItemHeight()));
++        size = expandSize(size, Metrics::MenuItem_MarginWidth + 7, (Metrics::MenuItem_MarginHeight + StyleConfigData::menuItemHeight()));
++        return size.expandedTo(QSize(0, LumMenuItem)); // [LUMINOS] Phase 6
+     }
+ 
+     case QStyleOptionMenuItem::Separator: {
+@@ -3880,6 +3948,8 @@ QSize Style::menuItemSizeFromContents(const QStyleOption *option, const QSize &c
+         // Have at least 1px for separator line.
+         int w = 1;
+         int h = 1;
++        if (menuItemOption->text.isEmpty()) // [LUMINOS] Phase 6: 1 px line with 4 px above and below
++            return {w + Metrics::MenuItem_MarginWidth * 2, 9};
+ 
+         // If the menu item is a section, add width for text
+         // and make height the same as other menu items, plus extra top padding.
+@@ -4317,6 +4387,18 @@ bool Style::drawFrameFocusRectPrimitive(const QStyleOption *option, QPainter *pa
+         return true;
+     }
+ 
++    // [LUMINOS] BUG-196: Dolphin's current (unselected) item gets a 2 px focus-colour outline matching its pill
++    // (r12 rows / r16 tiles), inset 1, instead of the Highlight underline that was the lavender line under a row.
++    if (qobject_cast<const QGraphicsWidget *>(option->styleObject)) {
++        const QRectF r(QRectF(option->rect).adjusted(2, 2, -2, -2));
++        const qreal radius = option->rect.width() > 2.5 * option->rect.height() ? 11 : 15;
++        painter->setRenderHint(QPainter::Antialiasing);
++        painter->setBrush(Qt::NoBrush);
++        painter->setPen(QPen(_helper->focusColor(option->palette), 2));
++        painter->drawRoundedRect(r, radius, radius);
++        return true;
++    }
++
+     const auto rect(option->rect.adjusted(0, 0, 0, 1));
+     const auto &palette(option->palette);
+ 
+@@ -4775,10 +4857,9 @@ bool Style::drawPanelMenuPrimitive(const QStyleOption *option, QPainter *painter
+         return true;
+ 
+     const auto &palette(option->palette);
+-    const auto outline(_helper->isDarkTheme(palette) ? QColor(255, 255, 255, 30) : QColor());
++    const QColor outline; // [LUMINOS] Phase 6: r16 on the Button tone (#2a292e), shadow only, no outline
+     const bool hasAlpha(_helper->hasAlphaChannel(widget));
+-    // auto background( _helper->frameBackgroundColor( palette ) );
+-    auto background(palette.color(QPalette::Base));
++    auto background(palette.color(QPalette::Button));
+ 
+     painter->save();
+ 
+@@ -4802,12 +4883,11 @@ bool Style::drawPanelTipLabelPrimitive(const QStyleOption *option, QPainter *pai
+         _shadowHelper->registerWidget(widget->window(), true);
+     }
+ 
+-    const auto &palette(option->palette);
+-    const auto &background = palette.color(QPalette::ToolTipBase);
+-    // const auto outline( KColorUtils::mix( palette.color( QPalette::ToolTipBase ), palette.color( QPalette::ToolTipText ), 0.25 ) );
+-    const bool hasAlpha(_helper->hasAlphaChannel(widget));
+-
+-    _helper->renderMenuFrame(painter, option->rect, background, QColor(), hasAlpha);
++    // [LUMINOS] Phase 6: r8 inverse surface (palette set in polish)
++    painter->setRenderHint(QPainter::Antialiasing, _helper->hasAlphaChannel(widget));
++    painter->setPen(Qt::NoPen);
++    painter->setBrush(option->palette.color(QPalette::ToolTipBase));
++    painter->drawRoundedRect(QRectF(option->rect), 8, 8);
+     return true;
+ }
+ 
+@@ -4837,6 +4917,77 @@ bool Style::drawPanelItemViewItemPrimitive(const QStyleOption *option, QPainter
      const bool hasSolidBackground = !hasCustomBackground || viewItemOption->backgroundBrush.style() == Qt::SolidPattern;
      const bool hasAlternateBackground(viewItemOption->features & QStyleOptionViewItem::Alternate);
  
++    // [LUMINOS] Phase 6: Dolphin items (KItemListWidget, a QGraphicsWidget). The option rect is the full selection rect
++    // (all columns in Details), so one pill: r12 for rows, r16 for icon tiles; selected = Highlight, hover 8 %.
++    if (qobject_cast<const QGraphicsWidget *>(option->styleObject)) {
++        if (selected || mouseOver) {
++            const QPalette::ColorGroup cg = !enabled ? QPalette::Disabled : active ? QPalette::Active : QPalette::Inactive;
++            const qreal radius = rect.width() > 2.5 * rect.height() ? 12 : 16;
++            QPainterPath path;
++            path.addRoundedRect(QRectF(rect), radius, radius);
++            painter->save();
++            painter->setRenderHint(QPainter::Antialiasing);
++            if (selected)
++                painter->fillPath(path, palette.color(cg, QPalette::Highlight));
++            if (mouseOver)
++                painter->fillPath(path, _helper->alphaColor(palette.color(cg, selected ? QPalette::HighlightedText : QPalette::Text), 0.08));
++            painter->restore();
++        }
++        return true;
++    }
++
 +    // [LUMINOS] Nexus rows for list/tree views. Sidebars (Window-background or transparent viewport, e.g. Dolphin
 +    // places): every row filled (Button tone) with connected corners from model neighbours (28 outer / 4 touching).
 +    // Content views: stock unless selected/hovered, which get a pill (no neighbour lookups). Selected = 32 pill in
@@ -142,7 +351,7 @@ index b9eac1a..30cacd5 100644
      // do nothing if no background is to be rendered
      if (!(mouseOver || selected || hasCustomBackground || hasAlternateBackground)) {
          return true;
-@@ -4969,40 +5060,31 @@ bool Style::drawIndicatorCheckBoxPrimitive(const QStyleOption *option, QPainter
+@@ -4969,40 +5120,31 @@ bool Style::drawIndicatorCheckBoxPrimitive(const QStyleOption *option, QPainter
  }
  
  //___________________________________________________________________________________
@@ -206,7 +415,144 @@ index b9eac1a..30cacd5 100644
      return true;
  }
  
-@@ -8189,66 +8271,35 @@ bool Style::drawSliderComplexControl(const QStyleOptionComplex *option, QPainter
+@@ -5273,8 +5415,8 @@ bool Style::drawIndicatorBranchPrimitive(const QStyleOption *option, QPainter *p
+         _helper->renderArrow(painter, arrowRect, arrowColor, orientation);
+     }
+ 
+-    // tree branches
+-    if (!StyleConfigData::viewDrawTreeBranchLines())
++    // tree branches: [LUMINOS] Phase 6 chevrons only, no lines
++    if (true)
+         return true;
+ 
+     const auto center(rect.center());
+@@ -5663,7 +5805,9 @@ bool Style::drawComboBoxLabelControl(const QStyleOption *option, QPainter *paint
+         else
+             textRole = QPalette::WindowText;
+ 
+-    } else if (option->state & State_HasFocus || sunken)
++    } else if (sunken) // [LUMINOS] Phase 6: open combo keeps the field tone, so its text colour too
++        textRole = QPalette::ButtonText;
++    else if (option->state & State_HasFocus)
+         textRole = QPalette::HighlightedText;
+     else
+         textRole = QPalette::ButtonText;
+@@ -6004,8 +6148,8 @@ bool Style::drawMenuItemControl(const QStyleOption *option, QPainter *painter, c
+     if (menuItemOption->menuItemType == QStyleOptionMenuItem::Separator) {
+         // normal separator
+         if (menuItemOption->text.isEmpty() && menuItemOption->icon.isNull()) {
+-            const auto color(_helper->separatorColor(palette));
+-            _helper->renderSeparator(painter, rect.adjusted(Metrics::MenuItem_MarginWidth * 2, 0, -Metrics::MenuItem_MarginWidth * 2, 0), color);
++            // [LUMINOS] Phase 6: 1 px outline-variant line, inset 10
++            painter->fillRect(QRect(rect.left() + 10, rect.center().y(), rect.width() - 20, 1), _helper->alphaColor(palette.color(QPalette::WindowText), 0.17));
+             return true;
+ 
+         } else {
+@@ -6026,7 +6170,7 @@ bool Style::drawMenuItemControl(const QStyleOption *option, QPainter *painter, c
+     const bool selected(enabled && (state & State_Selected));
+     const bool sunken(enabled && (state & (State_On | State_Sunken)));
+     const bool reverseLayout(option->direction == Qt::RightToLeft);
+-    const bool useStrongFocus(StyleConfigData::menuItemDrawStrongFocus());
++    const bool useStrongFocus(false); // [LUMINOS] Phase 6: r10 Highlight (Selection colour) pill, text keeps its colour
+ 
+     _animations->inputWidgetEngine().updateState(widget, AnimationHover, selected);
+     _animations->inputWidgetEngine().buttonAnimationMode(widget);
+@@ -6034,19 +6178,15 @@ bool Style::drawMenuItemControl(const QStyleOption *option, QPainter *painter, c
+ 
+     // render hover and focus
+     if (selected || sunken) {
+-        const auto color = useStrongFocus ? _helper->focusColor(palette).darker(sunken ? 120 : 0) : _helper->separatorColor(palette);
+         painter->setRenderHints(QPainter::Antialiasing);
+-        painter->setBrush(color);
++        painter->setBrush(palette.color(QPalette::Highlight));
+         painter->setPen(Qt::NoPen);
+-        const qreal radius = _helper->frameRadius(0, -1);
+-        if (StyleConfigData::cornerRadius() > 1)
+-            painter->drawRoundedRect(sunken ? rect.adjusted(2, 2, -2, -2) : rect.adjusted(1, 1, -1, -1), radius, radius);
+-        else
+-            painter->drawRoundedRect(sunken ? rect.adjusted(1, 1, -1, -1) : rect, radius, radius);
++        painter->drawRoundedRect(QRectF(rect), 10, 10);
+     }
+ 
+     // get rect available for contents
+     auto contentsRect(insideMargin(rect, Metrics::MenuItem_MarginWidth, (Metrics::MenuItem_MarginHeight + StyleConfigData::menuItemHeight())));
++    contentsRect.setRight(contentsRect.right() - 7); // [LUMINOS] 12 px right padding for shortcuts / submenu arrows
+ 
+     // define relevant rectangles
+     // checkbox
+@@ -6166,11 +6306,8 @@ bool Style::drawMenuItemControl(const QStyleOption *option, QPainter *painter, c
+         // locate accelerator and render
+         const int tabPosition(text.indexOf(QLatin1Char('\t')));
+         if (tabPosition >= 0) {
+-            // add a bit of transparency
+-            QColor c(palette.color(role));
+-            c.setAlpha(100);
+-            QPalette p;
+-            p.setColor(role, c);
++            QPalette p; // [LUMINOS] Phase 6: shortcut in the outline colour
++            p.setColor(role, palette.color(QPalette::PlaceholderText));
+ 
+             const int textFlags(Qt::AlignVCenter | Qt::AlignRight);
+             QString accelerator(text.mid(tabPosition + 1));
+@@ -6183,16 +6320,6 @@ bool Style::drawMenuItemControl(const QStyleOption *option, QPainter *painter, c
+         textRect = option->fontMetrics.boundingRect(textRect, textFlags, text);
+         drawItemText(painter, textRect, textFlags, palette, enabled, text, role);
+ 
+-        // render hover and focus
+-        if (!useStrongFocus && (selected || sunken)) {
+-            QColor outlineColor;
+-            if (sunken)
+-                outlineColor = _helper->focusColor(palette);
+-            else if (selected)
+-                outlineColor = _helper->hoverColor(palette);
+-
+-            _helper->renderFocusLine(painter, textRect, outlineColor);
+-        }
+     }
+ 
+     return true;
+@@ -6902,6 +7029,16 @@ bool Style::drawHeaderSectionControl(const QStyleOption *option, QPainter *paint
+     const bool isCorner(widget && widget->inherits("QTableCornerButton"));
+     const bool reverseLayout(option->direction == Qt::RightToLeft);
+ 
++    // [LUMINOS] Phase 6 / BUG-196: Dolphin's header on the page colour, no band, no section/bottom lines, hover 8 %.
++    // Dolphin paints its leading padding as a narrow "Beginning" section; the rounded first-corner code below drew it
++    // as the dark round blob left of "Name".
++    if (horizontal && lumDolphinViewport(widget)) {
++        painter->fillRect(rect, widget->palette().brush(widget->backgroundRole()));
++        if (mouseOver || sunken)
++            painter->fillRect(rect, _helper->alphaColor(palette.color(QPalette::WindowText), sunken ? 0.12 : 0.08));
++        return true;
++    }
++
+     // update animation state
+     _animations->headerViewEngine().updateState(widget, rect.topLeft(), mouseOver);
+     const bool animated(enabled && _animations->headerViewEngine().isAnimated(widget, rect.topLeft()));
+@@ -7989,6 +8126,14 @@ bool Style::drawComboBoxComplexControl(const QStyleOptionComplex *option, QPaint
+                 const auto color(_helper->toolButtonColor(palette, mouseOver, hasFocus, sunken, opacity, mode));
+                 _helper->renderToolButtonFrame(painter, rect, color, sunken);
+ 
++            } else if (sunken) {
++                // [LUMINOS] Phase 6: open/pressed combo keeps the field tone with a 1 px focus-colour ring, bottom corners 8
++                const QRectF r(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5));
++                const qreal top = qMin<qreal>(r.height() / 2, 20);
++                painter->setRenderHint(QPainter::Antialiasing);
++                painter->setBrush(palette.color(QPalette::Button));
++                painter->setPen(QPen(_helper->focusColor(palette), 1));
++                painter->drawPath(lumRoundRect(r, top, top, 8, 8));
+             } else {
+                 // define colors
+                 // const auto shadow( _helper->shadowColor( palette ) );
+@@ -8045,6 +8190,8 @@ bool Style::drawComboBoxComplexControl(const QStyleOptionComplex *option, QPaint
+ 
+         } else if (empty || !enabled)
+             arrowColor = _helper->arrowColor(palette, QPalette::Disabled, QPalette::ButtonText);
++        else if (sunken) // [LUMINOS] open combo: field tone, so the normal arrow colour
++            arrowColor = _helper->arrowColor(palette, QPalette::ButtonText);
+         // arrow in dropdown menu shoud use light color (highlightedtext) upon mouseover
+         else if (hasFocus)
+             arrowColor = palette.color(QPalette::HighlightedText);
+@@ -8189,66 +8336,35 @@ bool Style::drawSliderComplexControl(const QStyleOptionComplex *option, QPainter
          }
      }
  
@@ -301,3 +647,29 @@ index b9eac1a..30cacd5 100644
      }
  
      return true;
+@@ -8328,6 +8444,25 @@ bool Style::drawDialComplexControl(const QStyleOptionComplex *option, QPainter *
+ //______________________________________________________________
+ bool Style::drawScrollBarComplexControl(const QStyleOptionComplex *option, QPainter *painter, const QWidget *widget) const
+ {
++    // [LUMINOS] Phase 6: no track, no arrows; a 4 px pill at 45 % outline (PlaceholderText), 8 px at 75 % while the
++    // bar is hovered or dragged; 4 px (hovered 2 px) inset. No animation.
++    if (const auto bar = qstyleoption_cast<const QStyleOptionSlider *>(option)) {
++        const QRectF slider(subControlRect(CC_ScrollBar, option, SC_ScrollBarSlider, widget));
++        const bool hover((bar->state & (State_MouseOver | State_Sunken)) || (bar->activeSubControls & SC_ScrollBarSlider));
++        const qreal w = hover ? 8 : 4, inset = (LumSbExtent - w) / 2;
++        if (bar->minimum != bar->maximum && slider.isValid() && (bar->state & State_Enabled)) {
++            const QRectF pill = bar->orientation == Qt::Horizontal ? QRectF(slider.left() + inset, bar->rect.top() + inset, slider.width() - 2 * inset, w)
++                                                                   : QRectF(bar->rect.left() + inset, slider.top() + inset, w, slider.height() - 2 * inset);
++            painter->save();
++            painter->setRenderHint(QPainter::Antialiasing);
++            painter->setPen(Qt::NoPen);
++            painter->setBrush(_helper->alphaColor(bar->palette.color(QPalette::PlaceholderText), hover ? 0.75 : 0.45));
++            painter->drawRoundedRect(pill, w / 2, w / 2);
++            painter->restore();
++        }
++        return true;
++    }
++
+     // the animation for QStyle::SC_ScrollBarGroove is special: it will animate
+     // the opacity of everything else as well, included slider and arrows
+     qreal opacity(_animations->scrollBarEngine().opacity(widget, QStyle::SC_ScrollBarGroove));

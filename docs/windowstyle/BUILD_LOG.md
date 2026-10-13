@@ -19,3 +19,4 @@
 - Checker 25/25 (+1 SKIP while Shawn's System Settings is open). Spawns this round: 6.
 - 10-12: Shawn: "not global / not close to the prototype" → detailed spec artifact (3 views). Found the real gap: Kirigami FormLayout/Form. kirigami 1.3→1.4 card rows (checker caught bare-Separator not splitting groups). systemsettings 1.4: line/overlap/gap root causes fixed. Darkly worker stopped by Shawn → Dolphin bugs open. Checker 26/26.
 - 10-12 21:40: Phase 6 prototype (popups.html) published; real build waits for Shawn's approval.
+- 10-12 22:50: Phase 6 built after Shawn's 'do it': darkly 1.5, qqc2 1.8, kirigami 1.8, plasma-desktop 1.2, semantic colours. Checker 40 PASS. Review: 7 findings fixed. New darkly worker spawned (Shawn explicitly asked for Dolphin).

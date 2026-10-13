@@ -73,9 +73,20 @@ SCHEME_NAME = "Caelestia"
 COMMON_FG = {
     "ForegroundInactive": "outline",
     "ForegroundLink": "klink",
-    "ForegroundNegative": "knegative",
-    "ForegroundNeutral": "kneutral",
-    "ForegroundPositive": "kpositive",
+    # [CHANGE: claude-code | 2026-10-12] Semantic message colours (info bars read the
+    # Background*/Foreground* Positive/Neutral/Negative pairs). k* were blue/lilac/purple,
+    # so success/warning/error all looked purple. Error comes from scheme.json's M3 error
+    # roles; Caelestia has no success/warning roles, so those are fixed M3-style dark tonal
+    # values from the approved Nexus prototype (popups.html --ok-c/--warn-c). "#..." = literal.
+    # NOTE (verified 2026-10-12): KF6 KColorScheme does NOT read Background{Positive,Neutral,
+    # Negative} - it derives them by tinting BackgroundNormal toward Foreground*. Live result on
+    # View: pos #29332c, neu #352f24, neg #373030. The Background* keys are kept for other readers.
+    "BackgroundNegative": "errorContainer",  # [CHANGE: claude-code | 2026-10-12]
+    "ForegroundNegative": "onErrorContainer",  # [CHANGE: claude-code | 2026-10-12]
+    "BackgroundNeutral": "#4a3a1c",  # [CHANGE: claude-code | 2026-10-12] fixed: warning container
+    "ForegroundNeutral": "#f3d39b",  # [CHANGE: claude-code | 2026-10-12] fixed: on-warning container
+    "BackgroundPositive": "#234032",  # [CHANGE: claude-code | 2026-10-12] fixed: success container
+    "ForegroundPositive": "#b6e7c2",  # [CHANGE: claude-code | 2026-10-12] fixed: on-success container
     "ForegroundVisited": "kvisited",
     "DecorationFocus": "primary",
     "DecorationHover": "primary",
@@ -165,6 +176,8 @@ def build_colors(colours: dict) -> str:
     """Render the Plasma .colors file from the live Caelestia palette."""
 
     def c(key: str) -> str:
+        if key.startswith("#"):  # [CHANGE: claude-code | 2026-10-12] literal colour
+            return key
         if key not in colours:
             sys.exit(f"ERROR: scheme.json has no colour '{key}'. "
                      f"Caelestia's palette shape changed - update COLOR_GROUPS.")

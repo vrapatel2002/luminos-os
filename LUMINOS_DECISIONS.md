@@ -8425,3 +8425,33 @@ his own idea — Caelestia-style edge drawers** — and "Snappy 180 ms".
 
 Checker: 31 PASS (motion, rows-no-sections, frame-card, disabled-visible, inlineheader added; each proven to fail on
 the previous build). Open: BUG-196 Dolphin (needs Shawn's go), Layouts empty-state text (Keyboard KCM's own code).
+
+---
+
+## DECISION 144 — prototype first, then build: Dolphin, popups, info bars and empty lists
+*[CHANGE: claude-code | 2026-10-12]*
+
+Shawn asked for an HTML prototype before any real change ("so we know how the final product will look"), approved
+it ("do it"), and the real build followed it: `docs/windowstyle/mock/popups.html` (artifact "Dolphin and Popups in
+Nexus Style"). Workflow kept from now on: **prototype → approval → build → checker → independent review.**
+
+- **darkly 0.5.40-1.5** (QtWidgets): BUG-196 fixed; Dolphin-only quiet header, full-row selection pill, focus
+  outline for a current-but-unselected row, chevron-only tree, no alternate rows in Dolphin; QMenu r16 on #2a292e,
+  40 px items r10, shortcuts grey, 1 px separators; QToolTip inverse r8 (upstream skipped parentless labels — that
+  is how tooltips are created); QScrollBar with no arrows/track, 4 px pill → 8 px on hover; open ComboBox stays the
+  field tone with a focus ring.
+- **qqc2 6.30.0-1.8** (QML): same menu/combo popup/tooltip/scroll bar rules; scroll bar always visible (no fade) to
+  match QtWidgets and keep the affordance on static pages.
+- **kirigami 6.30.0-1.8**: InlineMessage = tonal r16 card, round close, text actions; Positive/Warning/Error fills
+  derived from the scheme's text colours (hue, sat×0.45, L 0.22) because KF6 ignores Background{Positive,…};
+  PlaceholderMessage = 56 px disc + title + text + tonal action.
+- **plasma-desktop 6.7.5-1.2**: only kcm_keyboard — "Using the system layout" / "No layouts yet" empty states.
+  Built by unpacking Arch's sha-pinned 6.7.5-1 binary package and swapping in a rebuilt `kcm_keyboard.so` (file
+  list, deps and size identical to stock; a load failure can only break the Keyboard page). Next upstream release
+  replaces it silently — hook warns; rebuild steps in the PKGBUILD.
+- **luminos-kde-caelestia-theme**: semantic text colours green/amber/red (KF6 tints backgrounds from them).
+
+Checker 40 PASS (qml-menu, qml-tooltip, qml-scrollbar, inlinemessage, placeholder-disc, semantic-colours,
+widgets-menu/tooltip/scrollbar via a C++ probe compiled into /tmp). Review (Fable): 7 findings — Dolphin focus cue
+lost (a11y), header styling leaking into every app, QML scroll bar invisible when idle, menu 41 px pitch, tooltip
+radius typo, dead Background* keys, alternate-row reset on split (verified fine) — all resolved.

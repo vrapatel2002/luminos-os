@@ -149,7 +149,7 @@ check_ubuntu_look() {
     [ -z "$bad" ]; res $? ubuntu-look-agrees "${bad:-no conflicting icon/font writes in /usr/local/bin/luminos-ubuntu-look, ${svc:-<no service>}}"
 }
 # --- Phase 3 (Nexus rows, CONTRACTS.md "Phase 3 contracts") ---
-REPO="$(dirname "$HERE")/.."; FORKS="qqc2-desktop-style:qqc2:1.6 kirigami:kirigami:1.5 kirigami-addons:kirigami-addons:1.2 systemsettings:systemsettings:1.5 darkly:darkly:0.1 kcmutils:kcmutils:0.1"
+REPO="$(dirname "$HERE")/.."; FORKS="qqc2-desktop-style:qqc2:1.7 kirigami:kirigami:1.7 kirigami-addons:kirigami-addons:1.2 systemsettings:systemsettings:1.5 darkly:darkly:1.3 kcmutils:kcmutils:0.1 plasma-desktop:plasma-desktop:0.1"
 check_forks() { # pkgrel must carry the fork's .N (>= min); hook installed byte-identical to config/pacman-hooks/
     local f p hk min v rel bad="" det=""
     for f in $FORKS; do IFS=: read -r p hk min <<<"$f"; v=$(pacman -Q "$p" 2>/dev/null); rel=${v##*-}; det+="$v; "
@@ -166,13 +166,25 @@ check_qml_probes() { local disc; qmlrun controls x >/dev/null; disc=$(qmlrun kit
     relay formlayout < <("$PY" -I -B "$HERE/shapes.py" - formlayout "fl=$(qmlrun formlayout 'fl=.*')" 2>&1)
     relay phase5 < <("$PY" -I -B "$HERE/shapes.py" "$QD/p5" p5 "motion=$(qmlrun p5 'motion=.*')" \
         "alt=$(rgb "$(kr kdeglobals Colors:View BackgroundAlternate)")" 2>&1)
+    relay phase6 < <("$PY" -I -B "$HERE/shapes.py" "$QD/p6" p6 "p6=$(qmlrun p6 'p6=.*')" \
+        "win=$(rgb "$(kr kdeglobals Colors:Window BackgroundNormal)")" "sel=$(rgb "$(kr kdeglobals Colors:Selection BackgroundNormal)")" 2>&1)
+    relay semantic-colours < <("$PY" -I -B "$HERE/shapes.py" - sem "sem=$(qmlrun p6 'sem=.*')" 2>&1)
 }
-check_no_services() { # idle cost: none of our packages may ship a unit, and none of their units may be running
-    local pk units run hit=""; pk="$(for f in $FORKS; do printf '%s ' "${f%%:*}"; done)luminos-kdecoration-chromeos"
-    units=$(pacman -Ql $pk 2>/dev/null | awk '$2 ~ /\.(service|timer|socket)$/ {print $2}')
+check_widgets() { # QtWidgets (Darkly) probe, compiled on the fly into $QD - no build artefacts in the repo
+    local err; if ! err=$(g++ -std=c++17 -fPIC -o "$QD/widgets" "$HERE/widgets.cpp" $(pkg-config --cflags --libs Qt6Widgets) 2>&1); then
+        res 1 widgets-probe "compile failed: ${err:0:160}"; return; fi
+    err=$(QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=kde timeout 20 "$QD/widgets" 2>&1 | grep -E '^(PASS|FAIL) ')
+    relay widgets-probe <<<"${err:-FAIL widgets-probe: probe printed nothing (crashed?)}"
+}
+check_no_services() { # idle cost: our packages may not ADD a systemd unit (vs the stock build in the pacman cache) or run one
+    local p v st units="" run hit=""; pk="$(for f in $FORKS; do printf '%s ' "${f%%:*}"; done)luminos-kdecoration-chromeos"
+    for p in $pk; do v=$(pacman -Q "$p" 2>/dev/null | awk '{print $2}'); st=$(ls /var/cache/pacman/pkg/"$p-${v%.*}"-*.pkg.tar.zst 2>/dev/null | head -1)
+        [[ "$v" == *-*.* && -n "$st" ]] && st=$(bsdtar -tf "$st" | sed 's|^|/|') || st=""   # stock list only for forks (-N.M)
+        units+=" $(pacman -Qlq "$p" 2>/dev/null | grep -E '/systemd/.*\.(service|timer|socket)$' | grep -vxF -f <(printf '%s\n' "${st:-/nonexistent}") | tr '\n' ' ')"; done
+    units=$(echo $units)
     run=$( { systemctl --user list-units --state=running,active --no-legend --plain; systemctl list-units --state=running,active --no-legend --plain; } | awk '{print $1}')
     for f in $units; do grep -qxF "$(basename "$f")" <<<"$run" && hit+="$(basename "$f") "; done
-    [ -z "$units" ]; res $? no-new-services "unit files in [$pk]: $(echo ${units:-none}); running: ${hit:-none}"
+    [ -z "$units" ]; res $? no-new-services "systemd units added by [$pk]: ${units:-none}; running: ${hit:-none}"
 }
 check_live_ss() {
     local p dir unit=wscheck-ss i scale sel; p=$(pgrep -x systemsettings | xargs)
@@ -193,6 +205,6 @@ done
 check_plugin_file; check_kwinrc; check_kwin_loaded; check_effect_off
 check_widget_style; check_kirigami; check_revert_script
 check_font_installed; check_font_keys; check_selection; check_qqc2; check_icons; check_ubuntu_look
-check_forks; check_qml_probes; check_no_services
+check_forks; check_qml_probes; check_widgets; check_no_services
 [ "$SHOT" -eq 1 ] && { check_screenshot; check_live_ss; }
 exit $((FAILS > 0))

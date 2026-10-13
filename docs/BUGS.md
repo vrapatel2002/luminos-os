@@ -8055,3 +8055,9 @@ timeout 2 → returns partial output + "timed out after 2s" in 2 s, and the next
 <!-- [CHANGE: claude-code | 2026-10-12] -->
 - **Cause:** DECISION 140 copied Nexus's expressive timing (500 ms, bezier .38,1.21,.22,1) onto every list row in qqc2 / systemsettings / the icon disc.
 - **Fix:** all added motion 180 ms (colour 120 ms), bezier 0.2,0,0,1, no overshoot; Behaviors off while scrolling/recycling. qqc2 1.5, kirigami 1.5, systemsettings 1.5. Checker `motion` grabs at ~100 ms (fails on 1.4: 8.1 vs 4).
+
+### BUG-196 — FIXED 2026-10-12 (darkly 0.5.40-1.5, DECISION 144)
+<!-- [CHANGE: claude-code | 2026-10-12] -->
+- **Blob:** Dolphin's KItemListHeader paints the empty area left of "Name" as a narrow first header section; Darkly's first-section top-left rounding turned that strip into a dark disc.
+- **Line:** Dolphin requests a focus rect on the current row; Darkly drew it as a 1 px Highlight line along the row's bottom (old code skipped only selected rows).
+- **Fix:** Dolphin-only header (no band/lines, sorted column brighter), full-row selection pill, focus cue = 2 px focus-colour r12 outline on a current-but-unselected row (reviewer a11y finding), tree chevrons without lines, no alternate rows in Dolphin. Other apps' headers stay stock.

@@ -3,6 +3,7 @@
 #
 # [CHANGE: claude-code | 2026-10-10] LUMINOS FORK (pkgrel 1.2: thumb grows about its centre; relabelled) — DECISION 139 (Phase 2 "Nexus paint pass").
 # [CHANGE: claude-code | 2026-10-11] pkgrel 1.3 — DECISION 140 (Phase 3): + qqc2-luminos-nexus-rows.patch; 1.4: review fixes (selected = highlighted only; animations gated on scroll/reuse); 1.5: snappy 180/120 ms standard easing, framed ScrollView + Frame = Nexus card, disabled CheckBox/SpinBox outlines; 1.6: row index from model context (unsectioned row 0 got 4 px)
+#   1.7: phase 6 — Menu/MenuItem/MenuSeparator, ComboBox check, ToolTip (inverse r8), ScrollBar (pill); 1.8: bar always visible (no fade), menu spacing 0
 #   (list rows with connected corners / selected pill / press squash, M3 slider, M3 radio).
 # This is Arch's stock qqc2-desktop-style PKGBUILD plus two patches. Do not "clean up" the
 # pkgrel: 1.x sorts ABOVE the repo's 1, which is what stops a routine `pacman -Syu`
@@ -19,7 +20,7 @@
 
 pkgname=qqc2-desktop-style
 pkgver=6.30.0
-pkgrel=1.6
+pkgrel=1.8
 pkgdesc='A style for Qt Quick Controls 2 to make it follow your desktop theme'
 arch=(x86_64)
 url='https://develop.kde.org/products/frameworks/'
@@ -43,7 +44,7 @@ source=(https://download.kde.org/stable/frameworks/${pkgver%.*}/$pkgname-$pkgver
 sha256sums=('74c6402fa697a76254e1c68ebd86136be49e03fad86482e86a27e5478f662c41'
             'SKIP'
             '95fd5482558aa2b0d3c7b63bae848dae7410bd9ef5285e0c5dd8df124f3bec34'
-            '86e6cab23c8a2ccfe19625eb0bb3c795fbe4cd94a76da32f2ca6af96c5e68c5c')
+            '58e0e22cc7f69ddb326eb8a53060f0305b1f8e0c568f73b4e567d94fd3894693')
 validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB  # David Faure <faure@kde.org>
               90A968ACA84537CC27B99EAF2C8DF587A6D4AAC1) # Nicolas Fella <nicolas.fella@kde.org>
 

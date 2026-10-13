@@ -1,0 +1,62 @@
+diff --git a/kcms/keyboard/ui/main.qml b/kcms/keyboard/ui/main.qml
+index 9a28cf9..779fe86 100644
+--- a/kcms/keyboard/ui/main.qml
++++ b/kcms/keyboard/ui/main.qml
+@@ -248,7 +248,9 @@ KCM.ScrollViewKCM {
+ 
+     view: ListView {
+         id: list
+-        model: kcm.userLayoutModel
++        // [CHANGE: claude-code | 2026-10-12] LUMINOS DECISION 140 (phase 6): while layouts are
++        // off the list shows the "system layout" empty state instead of greyed rows.
++        model: kcm.keyboardSettings.configureLayouts ? kcm.userLayoutModel : null
+ 
+         headerPositioning: ListView.OverlayHeader
+         header: Kirigami.InlineViewHeader {
+@@ -257,6 +259,46 @@ KCM.ScrollViewKCM {
+             actions: [ configureLayoutsAction, addLayoutAction ]
+         }
+ 
++        // LUMINOS: Nexus empty states, as the list's footer so a short window can scroll them
++        // (styled by the Luminos Kirigami PlaceholderMessage).
++        footer: Item {
++            width: list.width
++            visible: list.count === 0
++            height: visible ? Math.max(lxEmpty.implicitHeight + 48, list.height - (list.headerItem?.height ?? 0)) : 0
++
++            Kirigami.PlaceholderMessage {
++                id: lxEmpty
++                readonly property bool layoutsOn: kcm.keyboardSettings.configureLayouts
++                // QKeySequence has no JS string form; a disabled Shortcut renders it as text.
++                readonly property string shortcutText: lxShortcut.nativeText.length > 0
++                    ? lxShortcut.nativeText : i18nc("@info placeholder fallback", "the layout switching shortcut")
++                Shortcut {
++                    id: lxShortcut
++                    enabled: false
++                    sequence: kcm.shortcutHelper.alternativeShortcut
++                }
++                anchors.centerIn: parent
++                width: parent.width - Kirigami.Units.largeSpacing * 4
++                icon.name: "input-keyboard"
++                text: layoutsOn ? i18nc("@info:placeholder", "No layouts yet")
++                                : i18nc("@info:placeholder", "Using the system layout")
++                explanation: layoutsOn
++                    ? i18nc("@info:placeholder %1 is a keyboard shortcut", "Add the layouts you type in. The first one becomes the default; switch between them with %1.", shortcutText)
++                    : i18nc("@info:placeholder", "Your keyboard follows the layout chosen when the system was installed. Turn on layouts to type in more than one language.")
++                helpfulAction: Kirigami.Action {
++                    icon.name: lxEmpty.layoutsOn ? "list-add-symbolic" : "dialog-ok-apply-symbolic"
++                    text: lxEmpty.layoutsOn ? i18nc("@action:button", "Add layout") : i18nc("@action:button", "Turn on layouts")
++                    onTriggered: {
++                        if (kcm.keyboardSettings.configureLayouts) {
++                            root.addLayoutAction.trigger();
++                        } else {
++                            kcm.keyboardSettings.configureLayouts = true;
++                        }
++                    }
++                }
++            }
++        }
++
+         readonly property int maxKeySequenceItemWidth: Math.max(...contentItem.children.map(item => item?.keySequenceItemWidth || 0))
+ 
+         delegate: LayoutDelegate {

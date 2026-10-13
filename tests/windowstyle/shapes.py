@@ -109,10 +109,40 @@ def phase5(d, mo, alt):
     w, h, px = png.load(os.path.join(d, "disabled.png")); lum = lambda c: 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
     top = max(lum(px(x, y)) for x in range(w) for y in range(h)); bg = max(lum(px(0, 0)), 1)
     out(top >= 1.6 * bg, "disabled-visible", "disabled CheckBox brightest px luminance %.1f vs background %.1f = %.2fx (want >= 1.6)" % (top, bg, top / bg))
+def phase6(d, j, win, sel):
+    lum = lambda c: 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    def img(n):
+        w, h, px = png.load(os.path.join(d, n + ".png")); ops = [px(x, y) for y in range(h) for x in range(w) if px(x, y)[3] >= 128]
+        return w, h, px, (median(ops) if ops else (0, 0, 0, 0))
+    w, h, px, _ = img("sep"); col = [px(w // 2, y) for y in range(h)]; sep = sum(dist(c, median(col)) > 10 for c in col)   # line rows
+    out(j["menuR"] >= 14 and all(38 <= v <= 42 for v in j["items"]) and sep == 1, "qml-menu",
+        "background r%g (want >= 14), item heights %s (want 38-42), separator %d px (want 1)" % (j["menuR"], j["items"], sep))
+    tt = img("tooltip")[3]; a, b = lum(tt) / 255, lum(win) / 255
+    out(a > b + 0.5 and 6 <= j["ttR"] <= 10, "qml-tooltip", "fill %s luminance %.2f vs window %.2f (want > +0.5), r%g (want 6-10)" % (tt[:3], a, b, j["ttR"]))
+    w, h, px, _ = img("sb"); cols = [x for x in range(w) if any(px(x, y)[3] >= 30 for y in range(h))]   # pill is 45 % alpha
+    rows = sum(any(px(x, y)[3] >= 30 for x in range(w)) for y in range(h)); thick = len(cols)
+    out(3 <= thick <= 5 and rows <= h // 2, "qml-scrollbar", "idle painted width %d px (want 3-5), painted rows %d of %d (want <= half: no groove/arrows)" % (thick, rows, h))
+    w, h, px, fill = img("msg"); ring = [px(x, y) for x, y in ((1, h // 2), (w - 2, h // 2), (w // 2, 1), (w // 2, h - 2))]
+    edge = max(abs(lum(c) - lum(fill)) for c in ring)
+    out(14 <= j["msgR"] <= 18 and edge <= 6 and dist(fill, sel) < 6, "inlinemessage", "r%g (want 14-18), fill %s (want Selection %s), edge ring "
+        "luminance off by %.1f (want <= 6)" % (j["msgR"], fill[:3], sel, edge))
+    out(any(52 <= v <= 60 for v in j["discs"]), "placeholder-disc", "round items in PlaceholderMessage: %s px (want one 52-60)" % j["discs"])
+def semantic(sem):   # info-bar tones: hue band per tone and WCAG contrast of *Text on *Background
+    import colorsys; bad, notes = [], []
+    lin = lambda v: v / 12.92 if v <= 10.31 else ((v / 255 + 0.055) / 1.055) ** 2.4
+    rl = lambda c: 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+    for k, ok in (("pos", lambda h: 90 <= h <= 170), ("neu", lambda h: 25 <= h <= 60), ("neg", lambda h: h >= 340 or h <= 20)):
+        bg, tx = sem[k]; hue = colorsys.rgb_to_hsv(*[v / 255 for v in bg])[0] * 360
+        a, b = sorted((rl(bg), rl(tx))); cr = (b + 0.05) / (a + 0.05)
+        notes.append("%s bg %s hue %.0f text %s contrast %.1f" % (k, tuple(bg), hue, tuple(tx), cr))
+        if not ok(hue) or cr < 4.5: bad.append(k)
+    out(not bad, "semantic-colours", "; ".join(notes) + " (want hue green 90-170 / amber 25-60 / red 340-20, contrast >= 4.5)" + (" bad: " + ",".join(bad) if bad else ""))
 def main(a=sys.argv):
     kv = dict(x.split("=", 1) for x in a[3:] if "=" in x)
     rgb3 = lambda v: tuple(int(x) for x in v.split(","))
     if a[2] == "p5": return phase5(a[1], __import__("json").loads(kv["motion"]), rgb3(kv["alt"]))
+    if a[2] == "sem": return semantic(__import__("json").loads(kv["sem"]))
+    if a[2] == "p6": return phase6(a[1], __import__("json").loads(kv["p6"]), rgb3(kv["win"]), rgb3(kv["sel"]))
     if a[2] == "formlayout": return formlayout(__import__("json").loads(kv["fl"]))
     if a[2] == "pill":
         pill(a[1], rgb3(a[3]), float(a[4])); return boundary(a[1], rgb3(kv["frame"]), rgb3(kv["view"]), float(a[4]))

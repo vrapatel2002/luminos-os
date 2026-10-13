@@ -70,3 +70,14 @@ Patches pinned by sha256. Colours ONLY from the palette/Kirigami.Theme (never he
 Caelestia (Window #1c1b1f, View #131317, Alternate #201f23, Button #2a292e, Selection #45455c, Highlight/focus #c2c1ff).
 Token numbers (logical px): 4 / 12 / 16 / 28 / 32 radii; 2 px row inset; 4 px group gap; animation 350–500 ms.
 Reference mock: `docs/windowstyle/mock/nexus-replica.html` (CSS = ground truth for sizes).
+
+---
+## Phase 6 contracts (frozen 2026-10-12 21:45) — target `docs/windowstyle/mock/popups.html` (approved)
+| Piece | Owner | Where |
+|---|---|---|
+| Dolphin details/icons (BUG-196), QtWidgets menus, tooltips, scroll bars | darkly worker (new) | `packages/darkly-luminos` pkgrel 1.3 |
+| QML Menu/MenuItem, ToolTip, ScrollBar | qqc2 worker | qqc2 fork pkgrel 1.7 |
+| InlineMessage (4 tones), PlaceholderMessage look | kirigami worker | kirigami fork pkgrel 1.7 |
+| Keyboard Layouts empty states (text + Turn on / Add layout) | kirigami worker | new `packages/plasma-desktop-luminos` (kcm_keyboard QML only) |
+| Checks | test writer | checker (budget 700 lines) |
+Numbers (logical px): menu r16 on #2a292e, 6 padding, items 40 tall r10, icon left, shortcut right in outline colour, separators 1 px outline-variant inset 10, danger = error colour; tooltip inverse surface r8 12.5 px, delay 500 ms, fade 120 ms; rich tooltip r12 on #353438; scroll bar: no track/arrows, 4 px pill at 45 % outline, 8 px at 75 % on hover, 4 px inset from edge; info bar r16, 4 tones (info=Selection colours; positive/warning/error from the colour scheme's Positive/Neutral/Negative backgrounds), leading icon, one text action, round close; Dolphin header on page colour, 12.5 px, no band/lines, sorted column brighter; rows 44 px r12 full width, selection one #45455c pill across all columns, hover 8 %; group labels grey; tree: chevrons only, no lines; icon tiles r16. Motion 180 ms / 120 ms, no overshoot. No new processes.

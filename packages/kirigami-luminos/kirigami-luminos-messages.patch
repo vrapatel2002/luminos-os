@@ -1,0 +1,249 @@
+diff --git a/src/controls/InlineMessage.qml b/src/controls/InlineMessage.qml
+index 04b5b29..0f4b14d 100644
+--- a/src/controls/InlineMessage.qml
++++ b/src/controls/InlineMessage.qml
+@@ -10,52 +10,62 @@ import QtQuick
+ import org.kde.kirigami.controls as KC
+ import org.kde.kirigami.platform as Platform
+ import org.kde.kirigami.templates as KT
++import org.kde.kirigami.primitives as Primitives
+ 
+ KT.InlineMessage {
+     id: root
+ 
+-    // a rectangle padded with anchors.margins is used to simulate a border
+-    leftPadding: bgFillRect.anchors.leftMargin + Platform.Units.smallSpacing
+-    topPadding: bgFillRect.anchors.topMargin + Platform.Units.smallSpacing
+-    rightPadding: bgFillRect.anchors.rightMargin + Platform.Units.smallSpacing
+-    bottomPadding: bgFillRect.anchors.bottomMargin + Platform.Units.smallSpacing
+-
+-    background: Rectangle {
+-        id: bgBorderRect
+-
+-        color: switch (root.type) {
+-            case KC.MessageType.Positive: return Platform.Theme.positiveTextColor;
+-            case KC.MessageType.Warning: return Platform.Theme.neutralTextColor;
+-            case KC.MessageType.Error: return Platform.Theme.negativeTextColor;
+-            default: return Platform.Theme.activeTextColor;
++    // [CHANGE: claude-code | 2026-10-12] LUMINOS DECISION 140 (phase 6) — Nexus info bar:
++    // a tonal card (r16, no border), leading icon, text, flat text actions, round close.
++    // Information = Selection colours; Positive/Warning/Error = the colour scheme's
++    // Positive/Neutral/Negative background + text. Header/Footer bars keep the page's
++    // side margins and round only the corners facing the content.
++    readonly property bool lxHeader: position === KT.InlineMessage.Position.Header
++    readonly property bool lxFooter: position === KT.InlineMessage.Position.Footer
++    readonly property color lxBg: {
++        switch (root.type) {
++        // KF6 ignores Background{Positive,Neutral,Negative} and only tints lightly, and a
++        // tint of a pale text colour can never reach a saturated container — so derive an
++        // M3-like container from the tone's hue: saturation x0.45, lightness 0.22.
++        case KC.MessageType.Positive: return lxContainer(Platform.Theme.positiveTextColor);
++        case KC.MessageType.Warning: return lxContainer(Platform.Theme.neutralTextColor);
++        case KC.MessageType.Error: return lxContainer(Platform.Theme.negativeTextColor);
++        default: return Platform.Theme.highlightColor;
+         }
+-
+-        radius: root.position === KT.InlineMessage.Position.Inline ? Platform.Units.cornerRadius : 0
+-
+-        Rectangle {
+-            id: bgFillRect
+-
+-            anchors.fill: parent
+-            anchors {
+-                leftMargin: root.position === KT.InlineMessage.Position.Inline ? 1 : 0
+-                topMargin: root.position === KT.InlineMessage.Position.Header ? 0 : 1
+-                rightMargin: root.position === KT.InlineMessage.Position.Inline ? 1 : 0
+-                bottomMargin: root.position === KT.InlineMessage.Position.Footer ? 0 : 1
+-            }
+-
+-            color: Platform.Theme.backgroundColor
+-
+-            radius: bgBorderRect.radius * 0.60
++    }
++    function lxContainer(c: color): color {
++        return Qt.hsla(Math.max(0, c.hslHue), c.hslSaturation * 0.45, 0.22, 1);
++    }
++    readonly property color lxFg: {
++        switch (root.type) {
++        case KC.MessageType.Positive: return Platform.Theme.positiveTextColor;
++        case KC.MessageType.Warning: return Platform.Theme.neutralTextColor;
++        case KC.MessageType.Error: return Platform.Theme.negativeTextColor;
++        default: return Platform.Theme.highlightedTextColor;
+         }
++    }
++    // Tone the text/icons of the content only (setting it on root would re-trigger lxFg).
++    Binding {
++        target: root.contentItem ? root.contentItem.Platform.Theme : null
++        property: "textColor"
++        value: root.lxFg
++    }
++    icon.color: lxFg
+ 
+-        Rectangle {
+-            anchors.fill: bgFillRect
+-
+-            color: bgBorderRect.color
+-
+-            opacity: 0.20
++    leftInset: lxHeader || lxFooter ? 12 : 0
++    rightInset: leftInset
++    leftPadding: leftInset + 10
++    rightPadding: rightInset + 10
++    topPadding: Math.max(10, (52 - (contentItem?.implicitHeight ?? 0)) / 2)
++    bottomPadding: topPadding
+ 
+-            radius: bgFillRect.radius
++    background: Primitives.ShadowedRectangle {
++        color: root.lxBg
++        corners {
++            topLeftRadius: root.lxHeader ? 0 : 16
++            topRightRadius: root.lxHeader ? 0 : 16
++            bottomLeftRadius: root.lxFooter ? 0 : 16
++            bottomRightRadius: root.lxFooter ? 0 : 16
+         }
+     }
+ }
+diff --git a/src/controls/PlaceholderMessage.qml b/src/controls/PlaceholderMessage.qml
+index 35d40dd..6b56029 100644
+--- a/src/controls/PlaceholderMessage.qml
++++ b/src/controls/PlaceholderMessage.qml
+@@ -239,7 +239,10 @@ ColumnLayout {
+     signal linkActivated(string link)
+ //END properties
+ 
+-    spacing: Platform.Units.largeSpacing
++    // [CHANGE: claude-code | 2026-10-12] LUMINOS DECISION 140 (phase 6) — Nexus empty state:
++    // 56 px tonal disc with the icon, 16 px medium title, 13.5 px grey explanation,
++    // the helpful action as a tonal pill button. Colours from Kirigami.Theme only.
++    spacing: 8
+ 
+     Component.onCompleted: _announce();
+     onVisibleChanged: {
+@@ -256,23 +259,29 @@ ColumnLayout {
+         }
+     }
+ 
+-    Primitives.Icon {
+-        visible: source !== undefined
+-        opacity: root.type === PlaceholderMessage.Type.Actionable ? 1 : 0.75
+-
++    Rectangle {
++        visible: discIcon.source !== undefined
+         Layout.alignment: Qt.AlignHCenter
+-        Layout.preferredWidth: root.icon.width
+-        Layout.preferredHeight: root.icon.height
+-
+-        color: root.icon.color
+-
+-        source: {
+-            if (root.icon.source?.length > 0) {
+-                return root.icon.source
+-            } else if (root.icon.name.length > 0) {
+-                return root.icon.name
++        Layout.bottomMargin: 4
++        implicitWidth: 56
++        implicitHeight: 56
++        radius: 28
++        color: Platform.Theme.highlightColor
++
++        Primitives.Icon {
++            id: discIcon
++            anchors.centerIn: parent
++            width: 28
++            height: 28
++            color: Platform.Theme.highlightedTextColor
++            source: {
++                if (root.icon.source?.length > 0) {
++                    return root.icon.source
++                } else if (root.icon.name.length > 0) {
++                    return root.icon.name
++                }
++                return undefined
+             }
+-            return undefined
+         }
+     }
+ 
+@@ -280,8 +289,9 @@ ColumnLayout {
+         text: root.text
+         visible: text.length > 0
+ 
+-        type: KC.Heading.Primary
+-        opacity: root.type === PlaceholderMessage.Type.Actionable ? 1 : 0.75
++        level: 5
++        font.weight: Font.Medium
++        font.pointSize: Platform.Theme.defaultFont.pointSize * 1.2
+ 
+ 
+         Layout.fillWidth: true
+@@ -296,12 +306,15 @@ ColumnLayout {
+ 
+         text: root.explanation
+         visible:  root.explanation.length > 0
+-        opacity: root.type === PlaceholderMessage.Type.Actionable ? 1 : 0.75
++        Platform.Theme.colorSet: Platform.Theme.Window
++        Platform.Theme.inherit: false
+ 
+         horizontalAlignment: Qt.AlignHCenter
+         wrapMode: Text.Wrap
+ 
+         Layout.fillWidth: true
++        Layout.maximumWidth: Platform.Units.gridUnit * 22
++        Layout.alignment: Qt.AlignHCenter
+ 
+         onLinkHovered: link => root.linkHovered(link)
+         onLinkActivated: link => root.linkActivated(link)
+@@ -311,9 +324,11 @@ ColumnLayout {
+         id: actionButton
+ 
+         Layout.alignment: Qt.AlignHCenter
+-        Layout.topMargin: Platform.Units.gridUnit
++        Layout.topMargin: 8
+         Layout.maximumWidth: implicitWidth
+         Layout.fillWidth: true
++        Platform.Theme.colorSet: Platform.Theme.Selection // tonal pill
++        Platform.Theme.inherit: false
+ 
+         visible: action?.enabled ?? false
+     }
+diff --git a/src/templates/InlineMessage.qml b/src/templates/InlineMessage.qml
+index 85d3b30..8376ac1 100644
+--- a/src/templates/InlineMessage.qml
++++ b/src/templates/InlineMessage.qml
+@@ -227,7 +227,8 @@ T.Control {
+ 
+         SequentialAnimation {
+             PropertyAction { targets: root; property: "_animating"; value: true }
+-            NumberAnimation { duration: Platform.Units.longDuration }
++            // LUMINOS: Snappy 180 ms slide-in, standard curve, no overshoot
++            NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+         }
+     }
+ 
+@@ -242,7 +243,7 @@ T.Control {
+     Behavior on opacity {
+         enabled: !root.visible
+ 
+-        NumberAnimation { duration: Platform.Units.shortDuration }
++        NumberAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+     }
+ 
+     onOpacityChanged: {
+@@ -268,7 +269,7 @@ T.Control {
+             enabled: root.visible && contentLayout.complete
+ 
+             SequentialAnimation {
+-                NumberAnimation { duration: Platform.Units.shortDuration * 2 }
++                NumberAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+                 PropertyAction { targets: root; property: "_animating"; value: false }
+             }
+         }
+@@ -405,7 +406,7 @@ T.Control {
+         KirigamiControls.ActionToolBar {
+             id: actionsLayout
+ 
+-            flat: false
++            flat: true // LUMINOS: actions are text buttons
+             actions: root.actions
+             visible: root.actions.length > 0
+             Accessible.ignored: !visible || !root.visible

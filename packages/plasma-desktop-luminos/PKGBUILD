@@ -1,0 +1,152 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+#
+# [CHANGE: claude-code | 2026-10-12] LUMINOS FORK — DECISION 140 (phase 6).
+# Arch's stock plasma-desktop PKGBUILD (tag 6.7.5-1) plus ONE patch touching only
+# kcms/keyboard/ui/main.qml: the Layouts list shows Nexus empty states ("Using the
+# system layout" + Turn on layouts / "No layouts yet" + Add layout) through
+# Kirigami.PlaceholderMessage. Everything else is byte-for-byte the stock build:
+# package() unpacks Arch's own signed-and-pinned 6.7.5-1 package and replaces only
+# kcm_keyboard.so, which build() compiles alone (`--target kcm_keyboard`) — a full
+# plasma-desktop build would need build-only deps (scim, libibus, packagekit-qt6,
+# xorg-server-devel) that this machine does not have and does not need.
+# pkgrel 1.1 sorts above the repo's 1; /etc/pacman.d/hooks/luminos-plasma-desktop.hook
+# warns when stock returns. QML is compiled into kcm_keyboard.so, so a rebuild is needed.
+#
+#   Rebuild:  makepkg -f && sudo pacman -U plasma-desktop-*-1.N-*.pkg.tar.zst
+#
+# NOTE the stock binary URL hard-codes Arch's pkgrel "-1" (plasma-desktop-$pkgver-1-...).
+# For the next upstream release (e.g. 6.7.6-1 or a 6.7.5-2 rebuild):
+#   1. set pkgver (and the "-1" in source/noextract if Arch's pkgrel is not 1);
+#   2. update the tarball sha256 from Arch's PKGBUILD for that tag and the stock .pkg sha256
+#      (sha256sum /var/cache/pacman/pkg/plasma-desktop-<ver>-<rel>-x86_64.pkg.tar.zst
+#      after `pacman -Sw plasma-desktop`, or from archive.archlinux.org);
+#   3. check the patch still applies (kcms/keyboard/ui/main.qml), re-pin its sha256;
+#   4. pkgrel=1.1, makepkg -f, then diff the file lists of stock vs fork (must be identical).
+# [CHANGE: claude-code | 2026-10-12] 1.2: shortcut text via a disabled Shortcut (QKeySequence
+# has no JS string form); verified off / on+empty / on+2 layouts with no QML warnings.
+#   Revert:   sudo pacman -U /var/cache/pacman/pkg/plasma-desktop-6.7.5-1-x86_64.pkg.tar.zst
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+pkgname=plasma-desktop
+pkgver=6.7.5
+_dirver=$(echo $pkgver | cut -d. -f1-3)
+pkgrel=1.2
+pkgdesc='KDE Plasma Desktop'
+arch=(x86_64)
+url='https://kde.org/plasma-desktop/'
+license=(LGPL-2.0-or-later)
+depends=(attica
+         baloo
+         emoji-font # for clock and language KCMs
+         glibc
+         kbookmarks
+         kcmutils
+         kcodecs
+         kcompletion
+         kconfig
+         kconfigwidgets
+         kcoreaddons
+         kcrash
+         kdbusaddons
+         kdeclarative
+         kglobalaccel
+         kguiaddons
+         ki18n
+         kiconthemes
+         kio
+         kirigami
+         kirigami-addons
+         kitemmodels
+         kitemviews
+         kjobwidgets
+         kmenuedit
+         knewstuff
+         knotifications
+         knotifyconfig
+         kpackage
+         kpipewire
+         krunner
+         kservice
+         ksvg
+         kwidgetsaddons
+         kwindowsystem
+         kxmlgui
+         libcanberra
+         libksysguard
+         libstdc++
+         libwacom
+         libx11
+         libxcb
+         libxcursor
+         libxi
+         libxkbcommon
+         libxkbfile
+         libplasma
+         plasma-activities
+         plasma-activities-stats
+         plasma-workspace
+         plasma5support
+         polkit-kde-agent
+         powerdevil
+         qt6-5compat
+         qt6-base
+         qt6-declarative
+         sdl2
+         solid
+         sonnet
+         systemd-libs
+         systemsettings
+         wayland
+         xcb-util-keysyms
+         xdg-user-dirs)
+optdepends=('bluedevil: Bluetooth applet'
+            'glib2: kimpanel IBUS support'
+            'ibus: kimpanel IBUS support'
+            'kaccounts-integration: OpenDesktop integration plugin'
+            'kscreen: screen management'
+            'libaccounts-qt: OpenDesktop integration plugin'
+            'packagekit-qt6: to install new krunner plugins'
+            'plasma-nm: Network manager applet'
+            'plasma-pa: Audio volume applet'
+            'scim: kimpanel SCIM support')
+makedepends=(extra-cmake-modules
+             intltool
+             kaccounts-integration
+             kdoctools
+             wayland-protocols
+             xf86-input-libinput) # LUMINOS: libibus packagekit-qt6 scim xorg-server-devel dropped — only kcm_keyboard is compiled
+groups=(plasma)
+source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig}
+        plasma-desktop-luminos-kbd-empty.patch
+        https://archive.archlinux.org/packages/p/plasma-desktop/plasma-desktop-$pkgver-1-x86_64.pkg.tar.zst)
+noextract=(plasma-desktop-$pkgver-1-x86_64.pkg.tar.zst)
+sha256sums=('079fcf6b87d7bf65e3f2a4670d605fac9469344c279a285a98ad549332d7b53e'
+            'SKIP'
+            'fc02e4fc25cf8844616c5d210a4559bda5a15979d2d93f8f49ac0519b6efae4a'
+            'df7998845a5f8c73e41afea586a89c4cac3004c2a8f18f363f2ccaaf36e1fda4')
+validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
+              '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
+              'D07BD8662C56CB291B316EB2F5675605C74E02CF'  # David Edmundson <davidedmundson@kde.org>
+              '1FA881591C26B276D7A5518EEAAF29B42A678C20') # Marco Martin <notmart@gmail.com>
+
+prepare() {
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/plasma-desktop-luminos-kbd-empty.patch
+}
+
+build() {
+  cmake -B build  -S $pkgname-$pkgver \
+    -DCMAKE_INSTALL_LIBEXECDIR=lib \
+    -DBUILD_TESTING=OFF \
+    -DBUILD_KCM_TOUCHPAD_X11=OFF
+  cmake --build build --target kcm_keyboard
+}
+
+package() {
+  # stock files (minus pacman metadata), then the one rebuilt plugin
+  bsdtar -xf "$srcdir"/plasma-desktop-$pkgver-1-x86_64.pkg.tar.zst -C "$pkgdir" \
+    --exclude .PKGINFO --exclude .BUILDINFO --exclude .MTREE --exclude .INSTALL
+  local so=$(find build -name kcm_keyboard.so -type f | head -n1)
+  [[ -n $so ]] || { echo "kcm_keyboard.so not built"; return 1; }
+  install -Dm755 "$so" "$pkgdir"/usr/lib/qt6/plugins/plasma/kcms/systemsettings/kcm_keyboard.so
+}

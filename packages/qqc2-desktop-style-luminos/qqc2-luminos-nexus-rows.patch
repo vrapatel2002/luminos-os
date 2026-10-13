@@ -11,6 +11,18 @@ index ffb2d1b..c3dca02 100644
      leftPadding: !mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
      rightPadding: mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
  
+diff --git a/org.kde.desktop/ComboBox.qml b/org.kde.desktop/ComboBox.qml
+index 7433ca7..d321620 100644
+--- a/org.kde.desktop/ComboBox.qml
++++ b/org.kde.desktop/ComboBox.qml
+@@ -39,6 +39,7 @@ T.ComboBox {
+         required property int index
+         text: model[controlRoot.textRole]
+         highlighted: controlRoot.highlightedIndex === index
++        luminosCurrent: controlRoot.currentIndex === index // luminos phase 6
+     }
+ 
+     indicator: Item {}
 diff --git a/org.kde.desktop/Frame.qml b/org.kde.desktop/Frame.qml
 index 4c648ff..ca6e6e6 100644
 --- a/org.kde.desktop/Frame.qml
@@ -45,6 +57,143 @@ index e24a1f4..b916698 100644
      leftPadding: !mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
      rightPadding: mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
  
+diff --git a/org.kde.desktop/Menu.qml b/org.kde.desktop/Menu.qml
+index 5070fde..8d632a8 100644
+--- a/org.kde.desktop/Menu.qml
++++ b/org.kde.desktop/Menu.qml
+@@ -26,8 +26,9 @@ T.Menu {
+ 
+     rightPadding: (scrollbar.visible &&  !mirrored) ? scrollbar.width : undefined
+     leftPadding: (scrollbar.visible &&  mirrored) ? scrollbar.width : undefined
+-    horizontalPadding: style.pixelMetric("menuhmargin")
+-    verticalPadding: style.pixelMetric("menuvmargin")
++    // [CHANGE: luminos | 2026-10-12] DECISION 140 phase 6 — Nexus menu: r16 on the Button tone, 6 padding, 1 px item gap
++    horizontalPadding: 6
++    verticalPadding: 6
+ 
+     property Item __style: StylePrivate.StyleItem {
+         id: style
+@@ -110,9 +111,9 @@ T.Menu {
+             property: "opacity"
+             from: 0
+             to: 1
+-            easing.type: Easing.InOutQuad
+-            duration: Kirigami.Units.shortDuration
++            duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+         }
++        NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+     }
+ 
+     exit: Transition {
+@@ -120,22 +121,19 @@ T.Menu {
+             property: "opacity"
+             from: 1
+             to: 0
+-            easing.type: Easing.InOutQuad
+-            duration: Kirigami.Units.shortDuration
++            duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+         }
+     }
+ 
+     background: Kirigami.ShadowedRectangle {
+-        radius: Kirigami.Units.cornerRadius
+-        implicitWidth: Kirigami.Units.gridUnit * 8
++        Kirigami.Theme.colorSet: Kirigami.Theme.Button
++        Kirigami.Theme.inherit: false
++        radius: 16
++        implicitWidth: 240
+         color: Kirigami.Theme.backgroundColor
+-
+-        border.color: Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, Kirigami.Theme.frameContrast)
+-        border.width: 1
+-
+         shadow.xOffset: 0
+-        shadow.yOffset: 2
+-        shadow.color: Qt.rgba(0, 0, 0, 0.3)
+-        shadow.size: 8
++        shadow.yOffset: 12
++        shadow.color: Qt.rgba(0, 0, 0, 0.5)
++        shadow.size: 32
+     }
+ }
+diff --git a/org.kde.desktop/MenuItem.qml b/org.kde.desktop/MenuItem.qml
+index a23172c..e0f4281 100644
+--- a/org.kde.desktop/MenuItem.qml
++++ b/org.kde.desktop/MenuItem.qml
+@@ -19,7 +19,9 @@ T.MenuItem {
+     implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset,
+                             implicitContentWidth + leftPadding + rightPadding + (arrow ? arrow.implicitWidth : 0))
+ 
+-    implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
++    // [CHANGE: luminos | 2026-10-12] DECISION 140 phase 6 — Nexus menu item 40/r10; luminosCurrent = ComboBox check
++    property bool luminosCurrent: false
++    implicitHeight: Math.max(40, implicitBackgroundHeight + topInset + bottomInset,
+                              implicitContentHeight + topPadding + bottomPadding,
+                              implicitIndicatorHeight + topPadding + bottomPadding)
+ 
+@@ -31,6 +33,7 @@ T.MenuItem {
+     height: visible ? undefined : 0
+ 
+     padding: Kirigami.Units.smallSpacing
++    horizontalPadding: 8
+     verticalPadding: Kirigami.Settings.hasTransientTouchInput ? 8 : 4 // Hardcoded to the Breeze theme value
+     hoverEnabled: !Kirigami.Settings.isMobile
+ 
+@@ -89,10 +92,16 @@ T.MenuItem {
+ 
+             text: visible ? itemShortcut.nativeText : ""
+             font: controlRoot.font
+-            color: label.color
++            color: Kirigami.Theme.disabledTextColor
+             horizontalAlignment: Text.AlignRight
+             verticalAlignment: Text.AlignVCenter
+         }
++        Label {
++            visible: controlRoot.luminosCurrent
++            text: "\u2713"
++            color: Kirigami.Theme.focusColor
++            font: controlRoot.font
++        }
+         Item {
+             Layout.preferredWidth: Kirigami.Units.smallSpacing
+         }
+@@ -121,9 +130,8 @@ T.MenuItem {
+     background: Rectangle {
+         implicitWidth: Kirigami.Units.gridUnit * 8
+         opacity: (controlRoot.highlighted || controlRoot.down) ? 1 : 0
+-        color: controlRoot.pressed ? Kirigami.Theme.focusColor : Qt.alpha(Kirigami.Theme.focusColor, 0.3);
+-        border.color: Kirigami.Theme.focusColor
+-        border.width: 1
+-        radius: Kirigami.Units.cornerRadius
++        color: Kirigami.Theme.highlightColor
++        radius: 10
++        Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
+     }
+ }
+diff --git a/org.kde.desktop/MenuSeparator.qml b/org.kde.desktop/MenuSeparator.qml
+index bb27754..d543404 100644
+--- a/org.kde.desktop/MenuSeparator.qml
++++ b/org.kde.desktop/MenuSeparator.qml
+@@ -23,12 +23,16 @@ T.MenuSeparator {
+     // RESET method so that width would follow implicit width automatically.
+     width: parent?.width
+ 
+-    verticalPadding: Math.round(Kirigami.Units.smallSpacing / 2)
++    verticalPadding: 4
++    horizontalPadding: 10 // luminos phase 6: 1 px outline-variant line inset 10
+     hoverEnabled: false
+     focusPolicy: Qt.NoFocus
+ 
+-    contentItem: Kirigami.Separator {
+-        // same as MenuItem background
++    contentItem: Rectangle {
++        Kirigami.Theme.colorSet: Kirigami.Theme.Button
++        Kirigami.Theme.inherit: false
+         implicitWidth: Kirigami.Units.gridUnit * 8
++        implicitHeight: 1
++        color: Kirigami.Theme.alternateBackgroundColor // #47464f outline-variant in this scheme
+     }
+ }
 diff --git a/org.kde.desktop/RadioButton.qml b/org.kde.desktop/RadioButton.qml
 index 5d75eb6..a2042cf 100644
 --- a/org.kde.desktop/RadioButton.qml
@@ -87,6 +236,75 @@ index d8976c2..f12b6f9 100644
      }
  
      background: Private.DefaultListItemBackground {
+diff --git a/org.kde.desktop/ScrollBar.qml b/org.kde.desktop/ScrollBar.qml
+index 6642c6e..8ec3aab 100644
+--- a/org.kde.desktop/ScrollBar.qml
++++ b/org.kde.desktop/ScrollBar.qml
+@@ -15,8 +15,10 @@ import org.kde.kirigami as Kirigami
+ T.ScrollBar {
+     id: controlRoot
+ 
+-    implicitWidth: mouseArea.implicitWidth
+-    implicitHeight: mouseArea.implicitHeight
++    implicitWidth: vertical ? 12 : mouseArea.implicitWidth
++    implicitHeight: vertical ? mouseArea.implicitHeight : 12
++    // [CHANGE: luminos | 2026-10-12] DECISION 140 phase 6 — Nexus scroll bar: no track/arrows (style item only hit-tests);
++    // 4 px pill 45 % outline (always shown when content overflows), 8 px 75 % on hover, 4 px inset
+ 
+     hoverEnabled: true
+ 
+@@ -29,10 +31,7 @@ T.ScrollBar {
+         restoreMode: Binding.RestoreBindingOrValue
+         value: controlRoot.size < 1.0 && controlRoot.size > 0 && controlRoot.policy !== T.ScrollBar.AlwaysOff && controlRoot.parent !== null
+     }
+-    topPadding: style.topScrollbarPadding
+-    leftPadding: style.leftScrollbarPadding
+-    rightPadding: style.rightScrollbarPadding
+-    bottomPadding: style.bottomScrollbarPadding
++    padding: 4
+ 
+     onPositionChanged: {
+         if (handleGraphics.visible) {
+@@ -42,10 +41,20 @@ T.ScrollBar {
+     }
+ 
+     contentItem: Item {
+-        visible: !controlRoot.interactive
++        implicitWidth: 12
++        implicitHeight: 12
++        readonly property bool wide: controlRoot.hovered || controlRoot.pressed || mouseArea.containsMouse
++        Rectangle {
++            anchors.centerIn: parent
++            width: controlRoot.vertical ? (parent.wide ? 8 : 4) : parent.width
++            height: controlRoot.vertical ? parent.height : (parent.wide ? 8 : 4)
++            radius: Math.min(width, height) / 2
++            color: Qt.alpha(Kirigami.Theme.disabledTextColor, parent.wide ? 0.75 : 0.45)
++        }
+ 
+         Rectangle {
+             id: handleGraphics
++            visible: false // luminos: replaced by the pill above
+ 
+             // Controls auto-hide behavior state, 0 = hidden, 1 = fully visible
+             property real handleState: 0
+@@ -237,7 +246,7 @@ T.ScrollBar {
+             horizontal: controlRoot.horizontal
+             enabled: controlRoot.enabled
+ 
+-            visible: controlRoot.size < 1.0
++            visible: false // luminos: hit-testing only, never painted
+             opacity: 1
+         }
+         StylePrivate.StyleItem {
+@@ -253,7 +262,7 @@ T.ScrollBar {
+             horizontal: style.horizontal
+             enabled: controlRoot.enabled
+ 
+-            visible: controlRoot.size < 1.0
++            visible: false // luminos: hit-testing only, never painted
+             opacity: 1
+         }
+         state: "inactive"
 diff --git a/org.kde.desktop/ScrollView.qml b/org.kde.desktop/ScrollView.qml
 index 3f1abfe..9bff10d 100644
 --- a/org.kde.desktop/ScrollView.qml
@@ -224,6 +442,84 @@ index c33aa74..8fabb48 100644
      leftPadding: !mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
      rightPadding: mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
  
+diff --git a/org.kde.desktop/ToolTip.qml b/org.kde.desktop/ToolTip.qml
+index e602454..33495e1 100644
+--- a/org.kde.desktop/ToolTip.qml
++++ b/org.kde.desktop/ToolTip.qml
+@@ -30,7 +30,9 @@ T.ToolTip {
+                              Math.ceil(contentHeight) + topPadding + bottomPadding)
+ 
+     margins: 6
+-    padding: 6
++    // [CHANGE: luminos | 2026-10-12] DECISION 140 phase 6 — inverse-surface tooltip, r8, 12.5 px, padding 6x10, 120 ms fade
++    topPadding: 6; bottomPadding: 6; leftPadding: 10; rightPadding: 10
++    Item { id: inv; Kirigami.Theme.colorSet: Kirigami.Theme.Window; Kirigami.Theme.inherit: false }
+ 
+     visible: {
+         if (!parent || text.length === 0) {
+@@ -41,7 +43,7 @@ T.ToolTip {
+         }
+         return parent.hovered ?? parent.containsMouse ?? false;
+     }
+-    delay: Kirigami.Settings.tabletMode ? Qt.styleHints.mousePressAndHoldInterval : Kirigami.Units.toolTipDelay
++    delay: Kirigami.Settings.tabletMode ? Qt.styleHints.mousePressAndHoldInterval : 500
+     // Never time out while being hovered; it's annoying
+     timeout: -1
+ 
+@@ -52,8 +54,7 @@ T.ToolTip {
+             property: "opacity"
+             from: 0.0
+             to: 1.0
+-            duration: Kirigami.Units.longDuration
+-            easing.type: Easing.OutCubic
++            duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+         }
+     }
+ 
+@@ -62,8 +63,7 @@ T.ToolTip {
+             property: "opacity"
+             from: 1.0
+             to: 0.0
+-            duration: Kirigami.Units.longDuration
+-            easing.type: Easing.OutCubic
++            duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+         }
+     }
+ 
+@@ -84,8 +84,9 @@ T.ToolTip {
+             // Using Wrap instead of WordWrap to prevent tooltips with long URLs
+             // from overflowing
+             wrapMode: Text.Wrap
+-            font: control.font
+-            color: Kirigami.Theme.textColor
++            font.family: control.font.family
++            font.pointSize: (control.font.pointSize > 0 ? control.font.pointSize : 10.5) * 12.5 / 14
++            color: inv.Kirigami.Theme.backgroundColor
+ 
+             Kirigami.Theme.colorSet: control.Kirigami.Theme.colorSet
+             // ensure that long text actually gets wrapped
+@@ -98,9 +99,8 @@ T.ToolTip {
+ 
+     // TODO: Consider replacing this with a StyleItem
+     background: Kirigami.ShadowedRectangle {
+-        radius: Kirigami.Units.cornerRadius
+-        color: Kirigami.Theme.backgroundColor
+-        Kirigami.Theme.colorSet: control.Kirigami.Theme.colorSet
++        radius: 8
++        color: inv.Kirigami.Theme.textColor
+ 
+         // Roughly but doesn't exactly match the medium shadow setting for Breeze menus/tooltips.
+         // TODO: Find a way to more closely match the user's Breeze settings.
+@@ -109,9 +109,5 @@ T.ToolTip {
+         shadow.size: 16
+         shadow.color: Qt.rgba(0, 0, 0, 0.2)
+ 
+-        border.width: 1
+-        // TODO: Replace this with a frame or separator color role if that becomes a thing.
+-        // Matches the color used by Breeze::Style::drawPanelTipLabelPrimitive()
+-        border.color: Kirigami.ColorUtils.linearInterpolation(color, Kirigami.Theme.textColor, Kirigami.Theme.frameContrast)
+     }
+ }
 diff --git a/org.kde.desktop/private/CheckIndicator.qml b/org.kde.desktop/private/CheckIndicator.qml
 index 8ccd8ec..46e3597 100644
 --- a/org.kde.desktop/private/CheckIndicator.qml
