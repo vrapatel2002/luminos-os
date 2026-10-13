@@ -111,3 +111,17 @@ already load**, so it costs nothing at runtime beyond what those apps already pa
 - `luminos-windowstyle-check` extended and green; screenshots of System Settings, kinfocenter, Dolphin vs the mock.
 Not in scope: GTK/Electron/Chrome insides; Plasma panel/applets (their own Plasma style); Nexus's theme-card
 layout inside individual KCMs.
+
+---
+# Phase 6 — prototype gate for the last three items (2026-10-12 21:35, Response 13)
+<!-- [CHANGE: claude-code | 2026-10-12] -->
+Shawn: "first do in html prototype so … we know how will final product look like, then we can work on real one".
+Prototype: artifact "Dolphin and Popups in Nexus Style", repo `docs/windowstyle/mock/popups.html`.
+1. Dolphin (BUG-196): header on the page colour, no blob/line/column lines, sorted column brighter; rows 44 px r12,
+   selection one #45455c pill with the icon on a lavender disc; groups as grey labels; tree chevrons, no tree lines;
+   icons view tiles r16; pill breadcrumb, connected view switch, round icon buttons.
+2. Keyboard Layouts empty states: off → "Using the system layout" + Turn on; on+empty → "No layouts yet" + Add layout;
+   filled → list card rows with drag handle, code disc, ⋮ menu.
+3. Info bars (4 tones, action + close, r16), menus (r16, 40 px items r10, shortcuts right, danger red, headings),
+   tooltips (inverse r8 after 500 ms; rich r12), scroll bars (4 px pill → 8 px on hover, no track/arrows).
+**Gate:** nothing on the laptop changes until Shawn approves the prototype.

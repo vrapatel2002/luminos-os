@@ -1,0 +1,457 @@
+<title>Dolphin and Popups in Nexus Style</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,400..600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400..600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400..500,0..1,0..200&display=block">
+<style>
+/* Layout: strip with three tabs — Dolphin (file manager window), Keyboard empty list, Popups (info bars, menus, tooltips, scroll bars).
+   Single dark look on purpose: Caelestia dark scheme. Motion 180 ms, no overshoot (DECISION 143). */
+:root {
+  color-scheme: dark;
+  --desk: #0b0b0e; --surface: #131317; --sc-lowest: #0e0e12; --sc-low: #1c1b1f; --sc: #201f23; --sc-high: #2a292e; --sc-highest: #353438;
+  --sec: #45455c; --on-sec: #b4b2ce; --primary: #c2c1ff; --on-primary: #2a2a60; --on-surface: #e5e1e7; --on-var: #c8c5d1; --outline: #918f9a; --outline-var: #47464f;
+  --inv: #e5e1e7; --on-inv: #313034;
+  --ok-c: #234032; --on-ok: #b6e7c2; --warn-c: #4a3a1c; --on-warn: #f3d39b; --err-c: #5c1f1f; --on-err: #ffdad6; --err: #ffb4ab;
+  --ease: cubic-bezier(.2, 0, 0, 1); --dur: 180ms; --fx: 120ms;
+  --font: "Google Sans Flex", "Google Sans", "Roboto Flex", system-ui, sans-serif;
+}
+html, body { height: 100%; }
+body { background: var(--desk); color: var(--on-surface); font: 14px/1.35 var(--font); padding-inline: 16px; padding-block: 20px 40px; box-sizing: border-box; }
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ms { font-family: "Material Symbols Rounded"; font-size: 22px; line-height: 1; font-variation-settings: "FILL" 0, "wght" 500, "opsz" 24; display: inline-block; width: 1em; height: 1em; overflow: hidden; flex: none; font-feature-settings: "liga"; user-select: none; white-space: nowrap; }
+.ms.fill { font-variation-settings: "FILL" 1, "wght" 500, "opsz" 24; }
+
+.strip { max-width: 1100px; margin: 0 auto 14px; display: flex; flex-direction: column; gap: 10px; }
+.strip h1 { margin: 0; font-size: 18px; font-weight: 500; }
+.strip p { margin: 0; color: var(--on-var); font-size: 13px; max-width: 82ch; }
+.seg { display: flex; flex-wrap: wrap; gap: 2px; }
+.seg button { border: 0; cursor: pointer; background: var(--sc-high); color: var(--on-var); padding: 9px 14px; font-size: 13px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; border-radius: 4px; transition: border-radius var(--dur) var(--ease), background-color var(--fx) var(--ease); }
+.seg button:first-child { border-radius: 999px 4px 4px 999px; } .seg button:last-child { border-radius: 4px 999px 999px 4px; }
+.seg button[aria-pressed="true"], .seg button[aria-selected="true"] { background: var(--sec); color: var(--on-sec); border-radius: 999px; }
+.seg button .ms { font-size: 17px; }
+.view[hidden] { display: none !important; }
+.stage { overflow-x: auto; padding-block: 2px 12px; }
+.notes { max-width: 1100px; margin: 12px auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.notes div { background: var(--sc-low); border-radius: 16px; padding: 12px 14px; font-size: 12.5px; color: var(--on-var); line-height: 1.55; min-width: 0; }
+.notes b { display: block; color: var(--on-surface); font-size: 13.5px; font-weight: 500; margin-bottom: 4px; }
+.notes code { font-size: 11.5px; color: var(--outline); }
+
+/* window frame */
+.win { position: relative; width: 1100px; height: 700px; margin: 0 auto; background: var(--sc-low); border-radius: 16px; box-shadow: 0 24px 48px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.05); overflow: hidden; }
+.deco { position: absolute; top: 0; right: 0; height: 40px; display: flex; align-items: center; padding-right: 8px; z-index: 3; }
+.deco span { width: 36px; display: grid; place-items: center; }
+.deco .ms { font-size: 18px; }
+.icon-btn { width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; color: var(--on-var); display: grid; place-items: center; cursor: pointer; flex: none; position: relative; transition: background-color var(--fx) var(--ease); }
+.icon-btn:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+.icon-btn.tonal { background: var(--sc-high); }
+
+/* ---------- Dolphin ---------- */
+.d-side { position: absolute; top: 40px; left: 14px; bottom: 12px; width: 240px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; scrollbar-width: none; }
+.d-cat { font-size: 12px; font-weight: 500; letter-spacing: .04em; color: var(--outline); padding: 10px 14px 2px; }
+.d-cat:first-child { padding-top: 4px; }
+.place { display: flex; align-items: center; gap: 12px; padding: 0 12px; height: 44px; background: var(--sc-high); border-radius: 4px; cursor: pointer; transition: border-radius var(--dur) var(--ease), background-color var(--fx) var(--ease); position: relative; overflow: hidden; font-size: 14.5px; flex: none; }
+.place .ms { color: var(--on-sec); font-size: 20px; }
+.place.f { border-top-left-radius: 22px; border-top-right-radius: 22px; } .place.l { border-bottom-left-radius: 22px; border-bottom-right-radius: 22px; }
+.place.cur { background: var(--sec); color: var(--on-sec); border-radius: 22px; }
+.place.cur .ms { color: var(--primary); font-variation-settings: "FILL" 1, "wght" 500, "opsz" 24; }
+.place:hover::after, .drow:hover::after, .tile:hover::after, .menu .mi:hover::after { content: ""; position: absolute; inset: 0; background: var(--on-surface); opacity: .08; border-radius: inherit; pointer-events: none; }
+.d-hole { position: absolute; top: 40px; right: 12px; bottom: 12px; left: 268px; background: var(--surface); border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; }
+.d-tools { display: flex; align-items: center; gap: 6px; padding: 12px 12px 8px 16px; }
+.crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; height: 40px; background: var(--sc-lowest); border: 1px solid var(--outline-var); border-radius: 999px; padding: 0 6px; overflow: hidden; }
+.crumbs button { border: 0; background: transparent; height: 30px; padding: 0 10px; border-radius: 999px; cursor: pointer; color: var(--on-var); white-space: nowrap; font-size: 14px; }
+.crumbs button:hover { background: var(--sc-high); }
+.crumbs button.last { color: var(--on-surface); font-weight: 500; background: var(--sc-high); }
+.crumbs .ms { font-size: 16px; color: var(--outline); }
+.viewseg { display: flex; gap: 2px; }
+.viewseg button { border: 0; height: 40px; width: 44px; display: grid; place-items: center; background: var(--sc-high); color: var(--on-var); cursor: pointer; border-radius: 4px; transition: border-radius var(--dur) var(--ease), background-color var(--fx) var(--ease); }
+.viewseg button:first-child { border-radius: 999px 4px 4px 999px; } .viewseg button:last-child { border-radius: 4px 999px 999px 4px; }
+.viewseg button[aria-pressed="true"] { background: var(--sec); color: var(--on-sec); border-radius: 999px; }
+.d-body { flex: 1; overflow: auto; padding: 0 12px 8px 16px; position: relative; }
+.d-status { display: flex; justify-content: space-between; align-items: center; padding: 6px 16px 12px; font-size: 12.5px; color: var(--on-var); }
+.d-status .pill { background: var(--sc-high); border-radius: 999px; padding: 6px 12px; }
+.zoom { width: 140px; height: 4px; border-radius: 99px; background: linear-gradient(to right, var(--primary) 0 45%, var(--sec) 45%); position: relative; }
+.zoom::after { content: ""; position: absolute; left: 45%; top: -8px; width: 4px; height: 20px; border-radius: 2px; background: var(--primary); box-shadow: 0 0 0 3px var(--surface); }
+
+/* details header — the BUG-196 spot */
+.dhead { position: sticky; top: 0; z-index: 2; background: var(--surface); display: grid; grid-template-columns: var(--cols); align-items: center; height: 40px; font-size: 12.5px; color: var(--on-var); font-weight: 500; letter-spacing: .02em; }
+.dhead span { padding: 0 12px; display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; }
+.dhead span.sort { color: var(--on-surface); }
+.dhead span:first-child { padding-left: 52px; }
+.dgroup { font-size: 12.5px; font-weight: 500; color: var(--outline); padding: 14px 12px 6px; letter-spacing: .03em; }
+.drow { display: grid; grid-template-columns: var(--cols); align-items: center; height: 44px; border-radius: 12px; cursor: default; position: relative; margin: 1px 0; transition: background-color var(--fx) var(--ease); }
+.drow span { padding: 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--on-var); font-size: 13.5px; }
+.drow span.name { display: flex; align-items: center; gap: 12px; color: var(--on-surface); font-size: 14px; }
+.drow .fi { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--sc-high); color: var(--on-sec); flex: none; }
+.drow .fi .ms { font-size: 18px; }
+.drow .fi.folder { background: var(--sec); }
+.drow.sel { background: var(--sec); }
+.drow.sel span { color: var(--on-sec); }
+.drow.sel span.name { color: var(--on-surface); }
+.drow.sel .fi { background: var(--primary); color: var(--on-primary); }
+.drow .exp { width: 20px; color: var(--outline); font-size: 18px; margin-right: -6px; }
+.drow.child span.name { padding-left: 40px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; padding-top: 6px; }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px 10px; border-radius: 16px; position: relative; cursor: default; text-align: center; font-size: 13px; transition: background-color var(--fx) var(--ease); }
+.tile .big { width: 64px; height: 56px; border-radius: 14px; display: grid; place-items: center; background: var(--sc-high); color: var(--on-sec); }
+.tile .big.folder { background: var(--sec); }
+.tile .big .ms { font-size: 30px; }
+.tile.sel { background: var(--sec); color: var(--on-sec); }
+.tile.sel .big { background: var(--primary); color: var(--on-primary); }
+.tile span.n { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- scroll bars (Nexus) ---------- */
+.nexus-scroll { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--outline) 45%, transparent) transparent; }
+.nexus-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
+.nexus-scroll::-webkit-scrollbar-track { background: transparent; }
+.nexus-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--outline) 45%, transparent); border-radius: 99px; border: 4px solid transparent; background-clip: content-box; }
+.nexus-scroll:hover::-webkit-scrollbar-thumb { border-width: 2px; background-color: color-mix(in srgb, var(--outline) 75%, transparent); }
+
+/* ---------- menus ---------- */
+.menu { position: absolute; z-index: 50; min-width: 240px; background: var(--sc-high); border-radius: 16px; padding: 6px; display: flex; flex-direction: column; gap: 1px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
+  animation: menuin var(--dur) var(--ease); transform-origin: top left; }
+@keyframes menuin { from { opacity: 0; transform: scale(.96); } }
+.menu .mi { position: relative; display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: 10px; cursor: pointer; font-size: 14px; border: 0; background: transparent; text-align: left; width: 100%; }
+.menu .mi .ms { font-size: 19px; color: var(--on-var); }
+.menu .mi .k { margin-left: auto; font-size: 12px; color: var(--outline); letter-spacing: .02em; }
+.menu .mi .chev { margin-left: auto; font-size: 18px; }
+.menu .mi.danger, .menu .mi.danger .ms { color: var(--err); }
+.menu .mi.checked .ms.lead { color: var(--primary); }
+.menu .mi:disabled { opacity: .38; cursor: default; }
+.menu .gap { height: 1px; margin: 4px 10px; background: var(--outline-var); }
+.menu .mh { font-size: 11.5px; font-weight: 500; letter-spacing: .05em; color: var(--outline); padding: 8px 12px 4px; text-transform: uppercase; }
+
+/* ---------- tooltip ---------- */
+.tip { position: absolute; z-index: 60; background: var(--inv); color: var(--on-inv); font-size: 12.5px; padding: 6px 10px; border-radius: 8px; pointer-events: none; white-space: nowrap; animation: tipin var(--fx) var(--ease); box-shadow: 0 4px 12px rgba(0,0,0,.35); }
+.tip .k { color: #6a6872; margin-left: 8px; }
+.rich { position: absolute; z-index: 60; width: 260px; background: var(--sc-highest); border-radius: 12px; padding: 12px 14px; font-size: 13px; color: var(--on-var); line-height: 1.45; box-shadow: 0 8px 24px rgba(0,0,0,.45); pointer-events: none; animation: tipin var(--fx) var(--ease); }
+.rich b { display: block; color: var(--on-surface); font-weight: 500; margin-bottom: 3px; font-size: 13.5px; }
+@keyframes tipin { from { opacity: 0; transform: translateY(2px); } }
+
+/* ---------- info bars ---------- */
+.msg { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 16px; border-radius: 16px; font-size: 14px; line-height: 1.4; min-height: 52px; animation: msgin var(--dur) var(--ease); }
+@keyframes msgin { from { opacity: 0; transform: translateY(-6px); } }
+.msg .ms.lead { font-size: 20px; }
+.msg .t { flex: 1; min-width: 0; }
+.msg .t b { font-weight: 500; }
+.msg .act { border: 0; height: 34px; padding: 0 14px; border-radius: 999px; background: transparent; color: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.msg .act:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+.msg .x { width: 34px; height: 34px; border: 0; border-radius: 50%; background: transparent; color: inherit; display: grid; place-items: center; cursor: pointer; }
+.msg .x:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+.msg .x .ms { font-size: 18px; }
+.msg.info { background: var(--sec); color: var(--on-sec); }
+.msg.ok { background: var(--ok-c); color: var(--on-ok); }
+.msg.warn { background: var(--warn-c); color: var(--on-warn); }
+.msg.err { background: var(--err-c); color: var(--on-err); }
+.msg.header { border-radius: 0 0 16px 16px; }
+
+/* ---------- settings page bits (keyboard + popups demo) ---------- */
+.s-side { position: absolute; top: 40px; left: 14px; bottom: 12px; width: 280px; display: flex; flex-direction: column; gap: 4px; }
+.s-hole { position: absolute; top: 40px; right: 12px; bottom: 12px; left: 308px; background: var(--surface); border-radius: 16px; padding: 22px 28px 14px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+.s-hole h2 { margin: 0; font-size: 30px; font-weight: 400; }
+.s-body { flex: 1; overflow-y: auto; }
+.inner { width: min(100%, 720px); margin: 0 auto; display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; }
+.secrow { display: flex; align-items: center; gap: 10px; padding: 16px 20px 8px; font-size: 13px; font-weight: 500; color: var(--on-var); }
+.secrow .grow { flex: 1; }
+.card { background: var(--sc); border-radius: 4px; display: flex; align-items: center; gap: 12px; padding: 12px 20px; min-height: 60px; }
+.card.f { border-radius: 28px 28px 4px 4px; } .card.l { border-radius: 4px 4px 28px 28px; } .card.fl { border-radius: 28px; }
+.card .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.card .lb { font-size: 16px; } .card .ds { font-size: 13px; color: var(--on-var); }
+.chip { height: 36px; border-radius: 999px; background: var(--sc-highest); display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; font-size: 13.5px; }
+.btn { border: 0; height: 40px; padding: 0 18px; border-radius: 999px; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; white-space: nowrap; transition: border-radius var(--dur) var(--ease); }
+.btn:active { border-radius: 12px; }
+.btn.tonal { background: var(--sec); color: var(--on-sec); } .btn.filled { background: var(--primary); color: var(--on-primary); } .btn.text { background: transparent; color: var(--primary); padding: 0 12px; }
+.btn:disabled { background: color-mix(in srgb, var(--on-surface) 10%, transparent); color: color-mix(in srgb, var(--on-surface) 38%, transparent); cursor: default; }
+.btn .ms { font-size: 18px; }
+.sw { width: 51px; height: 30px; border-radius: 99px; border: 0; background: var(--sc-highest); position: relative; cursor: pointer; flex: none; transition: background-color var(--fx) var(--ease); }
+.sw::after { content: "✕"; position: absolute; left: 2px; top: 2px; width: 26px; height: 26px; border-radius: 50%; background: var(--outline); color: var(--sc-highest); display: grid; place-items: center; font-size: 13px; font-weight: 700; transition: left var(--dur) var(--ease), background-color var(--fx) var(--ease); }
+.sw[aria-checked="true"] { background: var(--primary); } .sw[aria-checked="true"]::after { content: "✓"; left: 23px; background: var(--on-primary); color: var(--primary); }
+.empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 34px 24px 28px; background: var(--sc); border-radius: 4px 4px 28px 28px; }
+.empty.fl { border-radius: 28px; }
+.empty .disc { width: 56px; height: 56px; border-radius: 50%; background: var(--sec); color: var(--on-sec); display: grid; place-items: center; margin-bottom: 4px; }
+.empty .disc .ms { font-size: 28px; }
+.empty h4 { margin: 0; font-size: 16px; font-weight: 500; }
+.empty p { margin: 0 0 8px; font-size: 13.5px; color: var(--on-var); max-width: 44ch; line-height: 1.5; }
+.lrow { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 4px; min-height: 60px; position: relative; }
+.lrow:hover::after { content: ""; position: absolute; inset: 0; background: var(--on-surface); opacity: .08; border-radius: inherit; pointer-events: none; }
+.lrow .disc { width: 40px; height: 40px; border-radius: 50%; background: var(--sec); color: var(--on-sec); display: grid; place-items: center; flex: none; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+.lrow .disc.on { background: var(--primary); color: var(--on-primary); }
+.lrow .handle { color: var(--outline); cursor: grab; }
+.listcard { background: var(--sc); border-radius: 4px 4px 28px 28px; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.navrow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; min-height: 64px; background: var(--sc-high); border-radius: 4px; }
+.navrow .disc { width: 40px; height: 40px; border-radius: 50%; background: var(--sec); color: var(--on-sec); display: grid; place-items: center; }
+.navrow.cur { background: var(--sec); border-radius: 32px; } .navrow.cur .disc { background: var(--primary); color: var(--on-primary); }
+.navrow.f { border-radius: 28px 28px 4px 4px; } .navrow.l { border-radius: 4px 4px 28px 28px; }
+.navrow .txt { display: flex; flex-direction: column; min-width: 0; } .navrow .ds { font-size: 12.5px; color: var(--on-var); }
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 1100px; margin: 0 auto 14px; }
+.cmp figure { margin: 0; background: var(--sc-low); border-radius: 16px; padding: 12px; min-width: 0; }
+.cmp figcaption { font-size: 12.5px; color: var(--on-var); margin-bottom: 8px; }
+.cmp figcaption b { color: var(--on-surface); font-weight: 500; }
+.mini { background: var(--surface); border-radius: 12px; padding: 0 8px 8px; position: relative; overflow: hidden; }
+.mini .bad-blob { position: absolute; left: 8px; top: 8px; width: 26px; height: 26px; border-radius: 50%; background: #0c0c0f; }
+.mini .bad-line { height: 2px; background: #6f6bb8; margin: 0 8px 0 50px; }
+.demo-area { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 1100px; margin: 0 auto; }
+.panel { background: var(--sc-low); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; position: relative; }
+.panel h3 { margin: 0 0 2px; font-size: 15px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.panel h3 .tag { margin-left: auto; font: 500 10.5px/1 ui-monospace, monospace; padding: 4px 7px; border-radius: 6px; background: #213328; color: #b6e7c2; }
+.panel p.spec { margin: 0; font-size: 12.5px; color: var(--on-var); line-height: 1.55; }
+.panel .stagebox { background: var(--surface); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; position: relative; min-height: 120px; }
+.scrolldemo { height: 150px; overflow-y: scroll; background: var(--surface); border-radius: 12px; padding: 4px 6px 4px 12px; }
+.scrolldemo div { padding: 9px 4px; font-size: 13.5px; color: var(--on-var); }
+.hint { font-size: 12px; color: var(--outline); }
+@media (max-width: 760px) { .cmp, .demo-area { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { :root { --dur: 1ms; --fx: 1ms; } }
+</style>
+
+<div class="strip">
+  <h1>Dolphin, empty lists and popups in Nexus style</h1>
+  <p>Prototype for the three open items: Dolphin's details view (BUG-196 fixed and redrawn), the empty Layouts list on the Keyboard page, and info bars, menus, tooltips and scroll bars. Right-click files, hover the toolbar, switch views.</p>
+  <div class="seg" role="tablist">
+    <button role="tab" data-tab="dolphin" aria-selected="true"><span class="ms">folder</span>Dolphin</button>
+    <button role="tab" data-tab="kbd" aria-selected="false"><span class="ms">keyboard</span>Keyboard empty list</button>
+    <button role="tab" data-tab="pop" aria-selected="false"><span class="ms">chat_bubble</span>Info bars, menus, tooltips, scroll bars</button>
+  </div>
+</div>
+
+<!-- ============ DOLPHIN ============ -->
+<section class="view" id="tab-dolphin">
+  <div class="cmp">
+    <figure><figcaption><b>Today (BUG-196)</b> · dark blob on the header, stray lavender line under a row</figcaption>
+      <div class="mini"><div class="bad-blob"></div><div class="dhead" style="--cols: 1.4fr 1.6fr .8fr; position: static; background: #2a292e; border-radius: 6px; margin-top: 8px;"><span>Name</span><span>Path</span><span>Accessed</span></div>
+      <div class="drow" style="--cols: 1.4fr 1.6fr .8fr; border-radius: 0;"><span class="name"><span class="fi"><span class="ms">description</span></span>timestamp</span><span>~/src/darkly-work/…</span><span>Just now</span></div><div class="bad-line"></div>
+      <div class="drow" style="--cols: 1.4fr 1.6fr .8fr; background: #1d1c21; border-radius: 0;"><span class="name"><span class="fi"><span class="ms">description</span></span>timestamp</span><span>~/build-ss/wb/…</span><span>Just now</span></div></div></figure>
+    <figure><figcaption><b>Target</b> · quiet header on the page colour, no blob, no line, selection is one rounded pill</figcaption>
+      <div class="mini"><div class="dhead" style="--cols: 1.4fr 1.6fr .8fr; position: static;"><span>Name</span><span>Path</span><span class="sort">Accessed <span class="ms" style="font-size:16px">arrow_upward</span></span></div>
+      <div class="drow sel" style="--cols: 1.4fr 1.6fr .8fr;"><span class="name"><span class="fi"><span class="ms">description</span></span>timestamp</span><span>~/src/darkly-work/…</span><span>Just now</span></div>
+      <div class="drow" style="--cols: 1.4fr 1.6fr .8fr;"><span class="name"><span class="fi"><span class="ms">description</span></span>timestamp</span><span>~/build-ss/wb/…</span><span>Just now</span></div></div></figure>
+  </div>
+  <div class="stage">
+    <div class="win" id="dwin">
+      <div class="deco" aria-hidden="true"><span><span class="ms">remove</span></span><span><span class="ms">crop_square</span></span><span><span class="ms">close</span></span></div>
+      <nav class="d-side" id="dside" aria-label="Places"></nav>
+      <div class="d-hole">
+        <div class="d-tools">
+          <button class="icon-btn" data-tip="Back" data-key="Alt+Left"><span class="ms">arrow_back</span></button>
+          <button class="icon-btn" data-tip="Forward" data-key="Alt+Right"><span class="ms">arrow_forward</span></button>
+          <div class="crumbs" id="crumbs"></div>
+          <div class="viewseg" role="group" aria-label="View mode">
+            <button data-mode="icons" aria-pressed="false" data-tip="Icons" data-key="Ctrl+1"><span class="ms">grid_view</span></button>
+            <button data-mode="details" aria-pressed="true" data-tip="Details" data-key="Ctrl+3"><span class="ms">view_list</span></button>
+          </div>
+          <button class="icon-btn" data-tip="Split view" data-key="F3"><span class="ms">splitscreen_right</span></button>
+          <button class="icon-btn" data-tip="Search" data-key="Ctrl+F"><span class="ms">search</span></button>
+          <button class="icon-btn" id="hamb" data-tip="Main menu"><span class="ms">menu</span></button>
+        </div>
+        <div class="d-body nexus-scroll" id="dbody"></div>
+        <div class="d-status"><span class="pill" id="dstat">55 folders, 20 files (43.7 MiB)</span><div class="zoom" aria-hidden="true"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="notes">
+    <div><b>Header</b>Sits on the page colour, 12.5 px grey labels, no band, no blob, no column lines. The sorted column is brighter with an arrow. Stays put while scrolling. <code>darkly: CE_Header* (stock path) + KItemListHeader</code></div>
+    <div><b>Rows</b>44 px tall, full-width rounded 12 px. Hover is an 8 % tint. Selected is one #45455c pill across all columns, with the file icon on a lavender disc. No lines anywhere. <code>darkly: PE_PanelItemViewItem for KItemListView</code></div>
+    <div><b>Groups and tree</b>"Today" / "Yesterday" become grey section labels. Expand arrows are plain chevrons; children indent 40 px with no tree lines. <code>dolphin draws these via KStyle; darkly patch</code></div>
+    <div><b>Icons view</b>Tiles r16 with the icon on a rounded tonal square, selected tile #45455c. Toolbar: pill breadcrumb, connected view switch, round icon buttons. <code>darkly + qqc2 (breadcrumb is QtWidgets)</code></div>
+  </div>
+</section>
+
+<!-- ============ KEYBOARD ============ -->
+<section class="view" id="tab-kbd" hidden>
+  <div class="stage">
+    <div class="win" style="height: 640px;">
+      <div class="deco" aria-hidden="true"><span><span class="ms">remove</span></span><span><span class="ms">crop_square</span></span><span><span class="ms">close</span></span></div>
+      <div class="s-side">
+        <div style="display:flex;align-items:center;gap:8px;height:48px"><button class="btn tonal" style="height:36px;padding:0 12px;font-size:13px"><span class="ms">left_panel_open</span>All settings</button></div>
+        <div style="font-size:13px;color:var(--on-var);padding:2px 8px 6px;display:flex;gap:6px;align-items:center"><span class="ms" style="font-size:16px">keyboard</span>Keyboard</div>
+        <div class="navrow cur"><span class="disc"><span class="ms">keyboard</span></span><span class="txt"><span>Keyboard</span><span class="ds">Hardware and layout</span></span></div>
+        <div class="navrow"><span class="disc"><span class="ms">keyboard_alt</span></span><span class="txt"><span>On-Screen Keyboard</span><span class="ds">Plasma keyboard</span></span></div>
+        <div class="navrow"><span class="disc"><span class="ms">keyboard_hide</span></span><span class="txt"><span>Virtual Keyboard</span><span class="ds">Which keyboard to use</span></span></div>
+        <div class="navrow l"><span class="disc"><span class="ms">shortcut</span></span><span class="txt"><span>Shortcuts</span><span class="ds">Global and app shortcuts</span></span></div>
+      </div>
+      <div class="s-hole">
+        <h2>Keyboard</h2>
+        <div class="s-body nexus-scroll"><div class="inner" id="kinner"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="notes">
+    <div><b>Empty state</b>Inside the list card: a 56 px tonal disc with the icon, a 16 px title, one helpful sentence, and the next step as a tonal button. Never an empty black box.</div>
+    <div><b>Off vs on</b>Layouts off: explains that the system layout is used and offers to turn it on. On but empty: offers "Add layout". Flip the switch to see both, then add two layouts.</div>
+    <div><b>Where it lives</b>The text belongs to the Keyboard page's own code (kcm_keyboard). The card, disc and button styling are global. Other pages with empty lists get the same look from <code>kcmutils</code> + Kirigami <code>PlaceholderMessage</code>.</div>
+  </div>
+</section>
+
+<!-- ============ POPUPS ============ -->
+<section class="view" id="tab-pop" hidden>
+  <div class="demo-area">
+    <div class="panel">
+      <h3>Info bars <span class="tag">global</span></h3>
+      <div class="stagebox" id="msgs"></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn tonal" id="addMsg"><span class="ms">add</span>Show again</button></div>
+      <p class="spec">Tonal card r16 with a leading icon, the message, one text action and a round close button. Four tones: info (#45455c), positive, warning, error. Slides in over 180 ms. When pinned to the top of a page (like "No pointer device found") it keeps the page's side margins and rounds only the bottom corners. <code>kirigami: InlineMessage</code></p>
+    </div>
+    <div class="panel">
+      <h3>Menus <span class="tag">global</span></h3>
+      <div class="stagebox" id="menuStage" style="min-height: 300px"><span class="hint">Right-click anywhere in this box, or press the button.</span><button class="btn tonal" id="menuBtn" style="align-self:flex-start"><span class="ms">more_horiz</span>Open menu</button><div style="flex:1"></div>
+        <div style="display:flex;gap:8px;align-items:center"><span class="hint">Combo box:</span><button class="chip" id="comboBtn" style="border:0;cursor:pointer">Leave unchanged <span class="ms" style="font-size:18px">expand_more</span></button></div></div>
+      <p class="spec">r16 on #2a292e, 6 px padding, shadow. Items 40 tall, r10, icon on the left, shortcut on the right in grey, submenus with a chevron. Groups split by a hairline or a small grey heading. Destructive items in the error colour. Opens in 180 ms from the click point. <code>darkly: PE_PanelMenu, CE_MenuItem · qqc2: Menu, MenuItem</code></p>
+    </div>
+    <div class="panel">
+      <h3>Tooltips <span class="tag">global</span></h3>
+      <div class="stagebox" style="flex-direction:row;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="icon-btn tonal" data-tip="Copy" data-key="Ctrl+C"><span class="ms">content_copy</span></button>
+        <button class="icon-btn tonal" data-tip="Paste" data-key="Ctrl+V"><span class="ms">content_paste</span></button>
+        <button class="icon-btn tonal" data-tip="Delete permanently" data-key="Shift+Del"><span class="ms">delete_forever</span></button>
+        <button class="btn tonal" data-rich="Hinting|Makes small text sharper by snapping letter shapes to the pixel grid. Slight keeps the shape closest to the design."><span class="ms">help</span>What is hinting?</button>
+      </div>
+      <p class="spec">Plain: inverse surface (#e5e1e7 on #313034), r8, 12.5 px, shortcut in grey, shows after 500 ms, 120 ms fade. Rich (help text): r12 on #353438 with a title line, max 260 px wide. <code>darkly: PE_PanelTipLabel · qqc2: ToolTip</code></p>
+    </div>
+    <div class="panel">
+      <h3>Scroll bars <span class="tag">global</span></h3>
+      <div class="scrolldemo nexus-scroll" id="scrolld"></div>
+      <p class="spec">No track, no arrows. A 4 px pill at 45 % outline that grows to 8 px and 75 % when the pointer is over the list. Rounded ends, 4 px from the edge. Fades out 1.5 s after scrolling stops (QML views). <code>darkly: CC_ScrollBar · qqc2: ScrollBar</code></p>
+    </div>
+  </div>
+</section>
+
+<script>
+(() => {
+  const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
+
+  /* ---------- tabs ---------- */
+  document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => {
+    document.querySelectorAll("[data-tab]").forEach(x => x.setAttribute("aria-selected", x === b));
+    document.querySelectorAll(".view").forEach(v => v.hidden = v.id !== "tab-" + b.dataset.tab);
+    closeMenu(); hideTip();
+  });
+
+  /* ---------- tooltips ---------- */
+  let tip = null, tipT = null;
+  function hideTip() { clearTimeout(tipT); tip && tip.remove(); tip = null; }
+  document.addEventListener("mouseover", e => {
+    const t = e.target.closest("[data-tip],[data-rich]"); if (!t) return;
+    hideTip(); tipT = setTimeout(() => {
+      const r = t.getBoundingClientRect();
+      if (t.dataset.rich) { const [h, b] = t.dataset.rich.split("|"); tip = el("div", "rich", `<b>${h}</b>${b}`); }
+      else tip = el("div", "tip", t.dataset.tip + (t.dataset.key ? `<span class="k">${t.dataset.key}</span>` : ""));
+      document.body.appendChild(tip); tip.style.position = "fixed";
+      const tw = tip.offsetWidth; tip.style.left = Math.max(8, Math.min(innerWidth - tw - 8, r.left + r.width / 2 - tw / 2)) + "px"; tip.style.top = (r.bottom + 8) + "px";
+    }, 500);
+  });
+  document.addEventListener("mouseout", e => { if (e.target.closest("[data-tip],[data-rich]")) hideTip(); });
+
+  /* ---------- menus ---------- */
+  let menu = null;
+  function closeMenu() { menu && menu.remove(); menu = null; }
+  document.addEventListener("click", e => { if (menu && !menu.contains(e.target) && !e.target.closest("#menuBtn,#comboBtn,#hamb")) closeMenu(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { closeMenu(); hideTip(); } });
+  function openMenu(items, x, y) {
+    closeMenu(); menu = el("div", "menu"); menu.setAttribute("role", "menu");
+    items.forEach(it => {
+      if (it === "-") return menu.appendChild(el("div", "gap"));
+      if (it.h) return menu.appendChild(el("div", "mh", it.h));
+      const b = el("button", "mi" + (it.danger ? " danger" : "") + (it.checked ? " checked" : ""), `<span class="ms lead">${it.checked ? "check" : it.i || ""}</span>${it.t}${it.k ? `<span class="k">${it.k}</span>` : it.sub ? `<span class="ms chev">chevron_right</span>` : ""}`);
+      b.setAttribute("role", "menuitem"); if (it.off) b.disabled = true; b.onclick = () => { if (it.cb) it.cb(); closeMenu(); }; menu.appendChild(b);
+    });
+    document.body.appendChild(menu); menu.style.position = "fixed";
+    const w = menu.offsetWidth, h = menu.offsetHeight; menu.style.left = Math.min(x, innerWidth - w - 8) + "px"; menu.style.top = Math.min(y, innerHeight - h - 8) + "px";
+  }
+  const FILEMENU = [{ i: "open_in_new", t: "Open", k: "Enter" }, { i: "apps", t: "Open with", sub: true }, "-", { i: "content_cut", t: "Cut", k: "Ctrl+X" }, { i: "content_copy", t: "Copy", k: "Ctrl+C" }, { i: "content_paste", t: "Paste", k: "Ctrl+V", off: true }, { i: "drive_file_rename_outline", t: "Rename…", k: "F2" }, "-", { i: "delete", t: "Move to Trash", k: "Del" }, { i: "delete_forever", t: "Delete permanently", k: "Shift+Del", danger: true }, "-", { i: "info", t: "Properties", k: "Alt+Enter" }];
+
+  /* ---------- Dolphin ---------- */
+  const PLACES = [["Places", [["home", "Home", 1], ["download", "Downloads"], ["description", "Documents"], ["delete", "Trash"]]], ["Remote", [["lan", "Network"]]], ["Recent", [["schedule", "Recent Files"], ["history", "Modified Yesterday"]]], ["Devices", [["hard_drive", "OS"], ["usb", "629.3 GiB Drive"]]]];
+  let curPlace = "Home";
+  function renderSide() {
+    const s = document.getElementById("dside"); s.replaceChildren();
+    PLACES.forEach(([cat, items]) => { s.appendChild(el("div", "d-cat", cat));
+      items.forEach(([ic, n], i) => { const p = el("div", "place" + (i === 0 ? " f" : "") + (i === items.length - 1 ? " l" : "") + (curPlace === n ? " cur" : ""), `<span class="ms">${ic}</span>${n}`);
+        p.onclick = () => { curPlace = n; renderSide(); renderCrumbs(); }; s.appendChild(p); }); });
+  }
+  function renderCrumbs() {
+    const c = document.getElementById("crumbs"); c.replaceChildren();
+    const parts = curPlace === "Home" ? ["shawn"] : curPlace === "Modified Yesterday" ? ["Recent", "Modified Yesterday"] : [curPlace];
+    parts.forEach((p, i) => { if (i) c.appendChild(el("span", "ms", "chevron_right")); c.appendChild(el("button", i === parts.length - 1 ? "last" : "", p)); });
+  }
+  const FILES = [
+    { g: "Today", n: "luminos-os", p: "~/", a: "Just now", folder: 1, kids: [{ n: "docs", p: "~/luminos-os", a: "Just now", folder: 1 }, { n: "packages", p: "~/luminos-os", a: "4 min ago", folder: 1 }] },
+    { g: "Today", n: "timestamp", p: "~/src/darkly-work/Darkly-0.5.40/build", a: "Just now" },
+    { g: "Today", n: "meta_types", p: "~/build-ss/wb/app", a: "Just now", folder: 1, kids: [] },
+    { g: "Today", n: "luminos-r3.png", p: "~/luminos-os/docs/ambient/bench", a: "12 min ago", img: 1 },
+    { g: "Yesterday", n: "nexus-replica.html", p: "~/luminos-os/docs/windowstyle/mock", a: "Yesterday 21:40" },
+    { g: "Yesterday", n: "Ozark S02E03.mkv", p: "/srv/external/tv", a: "Yesterday 20:12", vid: 1 },
+    { g: "Yesterday", n: "Forex-Trading-Bot-main", p: "~/", a: "Yesterday 09:03", folder: 1, kids: [] },
+    { g: "Earlier", n: "resume-draft.pdf", p: "~/Documents", a: "Oct 3", pdf: 1 },
+    { g: "Earlier", n: "bios-photos", p: "~/", a: "Sep 28", folder: 1, kids: [] },
+  ];
+  let mode = "details", sel = new Set(["timestamp"]), open = new Set(["luminos-os"]);
+  const iconFor = f => f.folder ? "folder" : f.img ? "image" : f.vid ? "movie" : f.pdf ? "picture_as_pdf" : "description";
+  function renderBody() {
+    const b = document.getElementById("dbody"); b.replaceChildren(); const cols = "minmax(220px,1.3fr) minmax(200px,1.7fr) 150px";
+    if (mode === "details") {
+      const h = el("div", "dhead", `<span>Name</span><span>Path</span><span class="sort">Accessed <span class="ms" style="font-size:16px">arrow_upward</span></span>`); h.style.setProperty("--cols", cols); b.appendChild(h);
+      let g = null;
+      const addRow = (f, child) => { const r = el("div", "drow" + (sel.has(f.n) ? " sel" : "") + (child ? " child" : ""));
+        r.style.setProperty("--cols", cols);
+        r.innerHTML = `<span class="name">${f.folder && f.kids ? `<span class="ms exp">${open.has(f.n) ? "expand_more" : "chevron_right"}</span>` : `<span style="width:14px"></span>`}<span class="fi${f.folder ? " folder" : ""}"><span class="ms${f.folder ? " fill" : ""}">${iconFor(f)}</span></span>${f.n}</span><span>${f.p}</span><span>${f.a}</span>`;
+        r.onclick = e => { if (e.target.closest(".exp")) { open.has(f.n) ? open.delete(f.n) : open.add(f.n); return renderBody(); } if (!e.ctrlKey) sel.clear(); sel.add(f.n); renderBody(); };
+        r.oncontextmenu = e => { e.preventDefault(); if (!sel.has(f.n)) { sel.clear(); sel.add(f.n); renderBody(); } openMenu(FILEMENU, e.clientX, e.clientY); };
+        b.appendChild(r); if (f.kids && open.has(f.n)) f.kids.forEach(k => addRow(k, true)); };
+      FILES.forEach(f => { if (f.g !== g) { g = f.g; b.appendChild(el("div", "dgroup", g)); } addRow(f); });
+    } else {
+      const grid = el("div", "grid");
+      FILES.forEach(f => { const t = el("div", "tile" + (sel.has(f.n) ? " sel" : ""), `<span class="big${f.folder ? " folder" : ""}"><span class="ms${f.folder ? " fill" : ""}">${iconFor(f)}</span></span><span class="n">${f.n}</span>`);
+        t.onclick = e => { if (!e.ctrlKey) sel.clear(); sel.add(f.n); renderBody(); };
+        t.oncontextmenu = e => { e.preventDefault(); sel.clear(); sel.add(f.n); renderBody(); openMenu(FILEMENU, e.clientX, e.clientY); }; grid.appendChild(t); });
+      b.appendChild(grid);
+    }
+    b.oncontextmenu = e => { if (e.target.closest(".drow,.tile")) return; e.preventDefault(); openMenu([{ i: "create_new_folder", t: "Create New", sub: true }, { i: "content_paste", t: "Paste", k: "Ctrl+V", off: true }, "-", { h: "View" }, { t: "Icons", checked: mode === "icons", cb: () => setMode("icons") }, { t: "Details", checked: mode === "details", cb: () => setMode("details") }, "-", { i: "visibility", t: "Show Hidden Files", k: "Ctrl+H" }, { i: "info", t: "Properties" }], e.clientX, e.clientY); };
+    document.getElementById("dstat").textContent = sel.size ? `${[...sel][0]} selected` : "55 folders, 20 files (43.7 MiB)";
+  }
+  function setMode(m) { mode = m; document.querySelectorAll("[data-mode]").forEach(x => x.setAttribute("aria-pressed", x.dataset.mode === m)); renderBody(); }
+  document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+  document.getElementById("hamb").onclick = e => { const r = e.currentTarget.getBoundingClientRect(); openMenu([{ i: "tab", t: "New Tab", k: "Ctrl+T" }, { i: "open_in_new", t: "New Window", k: "Ctrl+N" }, "-", { i: "splitscreen_right", t: "Split", k: "F3" }, { i: "terminal", t: "Show Terminal Panel", k: "F4" }, "-", { i: "settings", t: "Configure Dolphin…" }], r.right - 250, r.bottom + 6); };
+  renderSide(); renderCrumbs(); renderBody();
+
+  /* ---------- Keyboard ---------- */
+  let kOn = false, layouts = [];
+  const LAYS = [["US", "English (US)", "us • Default"], ["CA", "French (Canada)", "ca • fr"], ["IN", "Hindi (Bolnagri)", "in • bolnagri"]];
+  function renderKbd() {
+    const k = document.getElementById("kinner"); k.replaceChildren();
+    k.appendChild(el("div", "card f", `<span class="txt"><span class="lb">Model</span></span><span class="chip">Generic 104-key PC <span class="ms" style="font-size:18px">expand_more</span></span>`));
+    k.appendChild(el("div", "card l", `<span class="txt"><span class="lb">NumLock on startup</span></span><span class="chip">Leave unchanged <span class="ms" style="font-size:18px">expand_more</span></span>`));
+    const sec = el("div", "secrow", `<span>Layouts</span><span class="grow"></span>`); const sw = el("button", "sw"); sw.setAttribute("role", "switch"); sw.setAttribute("aria-checked", kOn); sw.setAttribute("aria-label", "Use custom layouts");
+    sw.onclick = () => { kOn = !kOn; renderKbd(); }; const add = el("button", "btn text", `<span class="ms">add</span>Add…`); add.disabled = !kOn; add.onclick = () => addLayout();
+    sec.append(sw, el("span", "", "Enable"), add); k.appendChild(sec);
+    k.appendChild(el("div", "card f", `<span class="txt"><span class="lb">Layouts in use</span><span class="ds">${kOn ? (layouts.length ? layouts.length + " layout" + (layouts.length > 1 ? "s" : "") + ", switch with Meta+Alt+K" : "None yet") : "Following the system layout"}</span></span>`));
+    if (!kOn) {
+      k.appendChild(el("div", "empty", `<span class="disc"><span class="ms">keyboard</span></span><h4>Using the system layout</h4><p>Your keyboard follows the layout chosen when Arch was installed. Turn on layouts to type in more than one language.</p>`));
+      const b = el("button", "btn tonal", `<span class="ms">toggle_on</span>Turn on layouts`); b.onclick = () => { kOn = true; renderKbd(); }; k.lastChild.appendChild(b);
+    } else if (!layouts.length) {
+      k.appendChild(el("div", "empty", `<span class="disc"><span class="ms">keyboard_off</span></span><h4>No layouts yet</h4><p>Add the layouts you type in. The first one becomes the default; switch between them with Meta+Alt+K.</p>`));
+      const b = el("button", "btn tonal", `<span class="ms">add</span>Add layout`); b.onclick = () => addLayout(); k.lastChild.appendChild(b);
+    } else {
+      const lc = el("div", "listcard");
+      layouts.forEach((l, i) => { const r = el("div", "lrow", `<span class="ms handle">drag_indicator</span><span class="disc${i === 0 ? " on" : ""}">${l[0]}</span><span style="flex:1;display:flex;flex-direction:column"><span style="font-size:15px">${l[1]}</span><span style="font-size:12.5px;color:var(--on-var)">${i === 0 ? "Default • " : ""}${l[2]}</span></span>`);
+        const more = el("button", "icon-btn", `<span class="ms">more_vert</span>`); more.setAttribute("aria-label", "More"); more.onclick = e => { const rr = more.getBoundingClientRect(); openMenu([{ i: "star", t: "Make default", off: i === 0, cb: () => { layouts.unshift(layouts.splice(i, 1)[0]); renderKbd(); } }, { i: "label", t: "Set label…" }, "-", { i: "delete", t: "Remove", danger: true, cb: () => { layouts.splice(i, 1); renderKbd(); } }], rr.right - 240, rr.bottom + 4); };
+        r.appendChild(more); lc.appendChild(r); });
+      k.appendChild(lc);
+    }
+    k.appendChild(el("div", "secrow", `<span>Switching</span>`));
+    k.appendChild(el("div", "card fl", `<span class="txt"><span class="lb">Change layout shortcut</span></span><span class="chip" style="font-family:ui-monospace,monospace">Meta+Alt+K</span>`));
+  }
+  function addLayout() { const next = LAYS.find(l => !layouts.some(x => x[1] === l[1])); if (next) { layouts.push(next); renderKbd(); } }
+  renderKbd();
+
+  /* ---------- popups tab ---------- */
+  const MSGS = [["info", "info", "No pointer device found. <b>Connect one</b> to change its settings.", "Retry"], ["ok", "check_circle", "Layouts saved. They apply to new windows.", null], ["warn", "warning", "Changes take effect after you log in again.", "Log out"], ["err", "error", "Couldn't apply the font: Google Sans Flex isn't installed.", "Details"]];
+  function renderMsgs() { const m = document.getElementById("msgs"); m.replaceChildren();
+    MSGS.forEach(([k, ic, t, a]) => { const d = el("div", "msg " + k, `<span class="ms lead">${ic}</span><span class="t">${t}</span>${a ? `<button class="act">${a}</button>` : ""}<button class="x" aria-label="Dismiss"><span class="ms">close</span></button>`);
+      d.querySelector(".x").onclick = () => d.remove(); m.appendChild(d); }); }
+  renderMsgs(); document.getElementById("addMsg").onclick = renderMsgs;
+  const ms = document.getElementById("menuStage");
+  ms.oncontextmenu = e => { e.preventDefault(); openMenu(FILEMENU, e.clientX, e.clientY); };
+  document.getElementById("menuBtn").onclick = e => { const r = e.currentTarget.getBoundingClientRect(); openMenu(FILEMENU, r.left, r.bottom + 6); };
+  document.getElementById("comboBtn").onclick = e => { const r = e.currentTarget.getBoundingClientRect(); openMenu([{ t: "Turn on" }, { t: "Turn off" }, { t: "Leave unchanged", checked: true }], r.left, r.bottom + 4); };
+  const sd = document.getElementById("scrolld"); ["Ozark S01E01", "Ozark S01E02", "Ozark S01E03", "Ozark S01E04", "Ozark S01E05", "Ozark S01E06", "Ozark S01E07", "Ozark S01E08", "Ozark S01E09", "Ozark S01E10", "Ozark S02E01", "Ozark S02E02"].forEach(t => sd.appendChild(el("div", "", t)));
+})();
+</script>
