@@ -31,41 +31,17 @@ Gotchas: host-shell calls >60 s die → run bench via `systemd-run --user` with 
 fails silently); the worker VM runs on this laptop, so PPT readings are polluted while agents run. `--load-extension` works in
 Chromium 153, not branded Chrome. Bench PNGs are git-excluded (.git/info/exclude). Upstream copy in `.scratch-ambient/` (excluded).
 
-## Previous aim (2026-10-10 18:40, windowstyle chat R1) — ChromeOS/Nexus window style, DECISION 138, DONE
-Shawn: make every KWin window look like the Nexus screenshot, "use the code from chromeOS". Asked first
-(DECISION 71/72 history) → **both frame + insides, all KDE/Qt apps**.
-**Live now:** own KDecoration3 plugin `org.kde.luminos.chromeos` (`src/kdecoration-chromeos/`, pkg
-`luminos-kdecoration-chromeos 1.0.0-2`), Darkly 0.5.40 widget style radius 16, kirigami `6.30.0-1.1`
-(BUG-193: the DECISION 72 patch had been silently replaced by stock 6.30). `scripts/luminos-windowstyle-check`
-= 11/11 PASS incl. screenshot pixel probes. Undo: `luminos-windowstyle revert` (managed keys only).
-**Running KWin still has build 1.0.0-1 in memory** — review fixes (null-deref guard etc.) load at next login.
-**21:50 Shawn (R2): "no where near close"** — compared Nexus vs System Settings side by side. Gap is the INSIDE
-(layout/cards/icons/font), not the frame. Showed him ChromeOS screenshots → **he picked Nexus** (R3).
-Measured gaps: Google Sans NOT installed (fc-list empty, Noto substitutes); full-colour Papirus icons vs monochrome
-glyphs in tinted circles; Breeze-style switch vs M3 switch with check/X (qqc2 `org/kde/desktop/private/SwitchIndicator.qml`);
-flat rows vs rows grouped in rounded tonal cards; System Settings' layout is compiled C++/QML — a theme cannot regroup it.
-**R3 DONE — DECISION 139 Nexus paint pass:** Google Sans Flex (`ttf-google-sans-flex 5.000-1`), M3 switch
-(`qqc2-desktop-style 6.30.0-1.2`), YAMIS mono icons, Nexus tones (Selection #45455c). Checker **17/17**. Login
-scripts no longer fight it. **Next if Shawn wants closer: layout** (cards, two-line rows, headline) = per-app work,
-start with System Settings only and show him first. His own System Settings (started 21:40) needs a relaunch.
-**R4 (10-11) read-only:** Shawn: paint pass "no where close" — wants the Nexus *layout* (connected groups, selected
-item morphs to a pill). Explained Nexus's design from source: `/etc/xdg/quickshell/caelestia/modules/nexus/`
-— `common/ConnectedRect.qml` (first/last → 28 px outer corners, 4 px inner), `navpane/NavLocations.qml`
-(isCategoryStart/End, isCurrentPage → 32 px all corners + secondaryContainer, pressed → 12 px, RadiusBehavior
-animates), 4 px gaps (2 px in pages), icon in a round `secondaryContainer` disc (`primary` when selected),
-two-line label + `onSurfaceVariant` description, `Nexus.qml` BlobInvertedRect = window frame with the page as a
-rounded hole. Waiting on Shawn to use these names to say what he wants built next.
-**R5:** built an interactive HTML/CSS replica of Nexus (artifact "Nexus Window Replica", claude.ai/artifact/LHwGAx7LJWBEw3cSceMDhS; source copy `docs/windowstyle/mock/nexus-replica.html`) with a component-name overlay + slow-motion toggle, to agree on the target before any KDE work.
-**R6:** same artifact (now titled "System Settings in Nexus Style") swapped to KDE System Settings' real sidebar (categories as small grey labels, chevrons, Bluetooth switch in the nav item) + pages Quick Settings (theme cards, M3 slider, select rows), Bluetooth, Sound, Wi-Fi, Mouse, Keyboard Backlight; Reset/Apply footer kept as pill buttons.
-**R7 DONE — DECISION 140:** the mock is now real in every KDE app via five forks (qqc2 1.4, kirigami 1.2, kirigami-addons 1.2, systemsettings 1.2, darkly 1.2) + warn-only hooks; checker 25/25. **Shawn must close+reopen System Settings (pid 116823 is the old binary).** Next per Shawn: "light weight" pass — measure (PSS / startup / repaint) and trim. Rebuild all forks after any Plasma/KF/Qt bump.
-**R8 (10-12):** Shawn reported visible bugs: System Settings separator line, half-pill Back row, narrow-window blobs, Keyboard KCM box-in-box → fixed in **systemsettings 6.7.5-1.3** (installed; patch now 374 lines, over its 350 budget). Dolphin details-view bugs (dark blob on header, thin lavender line under a row) were NOT sent to the darkly worker — Shawn interrupted that message. Still open.
-**R9:** Shawn: "why are they not global… detailed prototype that you can follow". Diagnosis: page CONTENTS belong to each KCM; Quick Settings/Keyboard/Fonts use **Kirigami FormLayout** (label left, control right, separator lines) which no fork touches — that is why pages look nothing like the mock. Rebuilt the artifact as a SPEC with 3 views: Window (KWin frame + Quick Settings, Keyboard w/ tabs, Text & Fonts sub-sidebar w/ Back, Fonts, Font Management, Mouse, Touchpad, Bluetooth, narrow mode), Components (every control with numbers + which library + global/app tag), Map (piece → drawn by → fix location → reach → state). Repo copy `docs/windowstyle/mock/nexus-replica.html`.
-**R10 DONE — DECISION 141:** kirigami 1.4 FormLayout/Form → card rows (global), systemsettings 1.4 line/overlap/gap fixed; checker 26/26. Shawn must reopen System Settings. Darkly worker was STOPPED BY SHAWN — don't relaunch Dolphin fixes unless he asks.
-**Was next:** global FormLayout → connected card rows patch in the kirigami fork; Darkly controls per Components sheet (combo/spin/field/check/tabs/menus/tooltips/scrollbars); Dolphin bugs.
-
-**Waiting on Shawn:** look at it; likely asks — radius 16 vs ChromeOS 12, show title?, selected-row tint.
-Knobs: `~/.config/luminos-chromeosrc [Frame] CornerRadius/HeaderHeight/ShowTitle` then `qdbus6 org.kde.KWin /KWin reconfigure`.
-⚠️ Plugin, Darkly and kirigami must be rebuilt after every Plasma/Qt bump; KWin falls back to Breeze silently.
+## Windowstyle (Nexus look) — current state, 2026-10-12 21:00, windowstyle chat R12
+Goal: every KDE window looks like Caelestia Nexus (spec artifacts: "System Settings in Nexus Style" =
+`docs/windowstyle/mock/nexus-replica.html`, "Sub-page Layouts" = `docs/windowstyle/mock/subpages.html`).
+**Live:** KWin decoration `luminos-kdecoration-chromeos 1.0.0-2`; forks qqc2-desktop-style 6.30.0-1.6, kirigami 6.30.0-1.6,
+kirigami-addons 1.13.1-1.2, kcmutils 6.30.0-1.1 (new), systemsettings 6.7.5-1.5, darkly 0.5.40-1.2 — all `packages/*-luminos/`, warn-only
+hooks `luminos-<pkg>.hook`. `scripts/luminos-windowstyle-check` = 31 PASS (live System Settings probes SKIP while Shawn's instance runs).
+DECISIONS 138–141 + 143, BUGS 193, 195–197. Sub-pages = Shawn's edge-drawer idea (left = all settings, top = search, right = page sections),
+motion 180 ms no overshoot. Test aid: `LUMINOS_SS_OPEN_DRAWER=left|top[:q]|right systemsettings`.
+**Open:** BUG-196 Dolphin (worker stopped by Shawn — needs his go); Keyboard Layouts empty-state text; Autostart's own section lines;
+InlineMessage, menus/tooltips/scrollbars per Components sheet; systemsettings patch at its 520-line budget.
+**Rule:** after ANY Plasma/KF/Qt upgrade rebuild all six forks + the decoration, then run the checker. Never `git add -A` (parallel chats share this tree).
 
 ## Previous aim (2026-10-10 12:00, cloud chat R7) — host-shell MCP "Failed" = BUG-192, FIXED
 Settings → Local MCP servers showed `host-shell` **Failed / Server disconnected**. Log

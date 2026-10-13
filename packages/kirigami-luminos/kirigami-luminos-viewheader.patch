@@ -1,0 +1,49 @@
+diff --git a/src/controls/InlineViewHeader.qml b/src/controls/InlineViewHeader.qml
+index 10a1177..d51c1c2 100644
+--- a/src/controls/InlineViewHeader.qml
++++ b/src/controls/InlineViewHeader.qml
+@@ -24,10 +24,13 @@ KT.InlineViewHeader {
+     implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                              implicitContentHeight + topPadding + bottomPadding)
+ 
+-    topPadding: Platform.Units.smallSpacing + (root.position === T.ToolBar.Footer ? separator.implicitHeight : 0)
+-    leftPadding: Platform.Units.largeSpacing
++    // [CHANGE: claude-code | 2026-10-12] LUMINOS DECISION 140 — Nexus section row: no band,
++    // no line; the title is the small grey section label, actions stay on the right.
++    // Transparent at rest; a hole-coloured fill appears only while rows scroll under it.
++    topPadding: 18 - Platform.Units.smallSpacing
++    leftPadding: 20
+     rightPadding: Platform.Units.smallSpacing
+-    bottomPadding: Platform.Units.smallSpacing + (root.position === T.ToolBar.Header ? separator.implicitHeight : 0)
++    bottomPadding: 4
+ 
+ 
+     background: Rectangle {
+@@ -38,10 +41,14 @@ KT.InlineViewHeader {
+         // scopes, only one will be available at a time. So to get basically the
+         // same thing, we blend the view background color with a smidgen of the
+         // text color.
+-        color: Qt.tint(Platform.Theme.backgroundColor, Qt.alpha(Platform.Theme.textColor, 0.03))
++        color: Platform.Theme.backgroundColor
++        // Only shown while list rows scroll under a sticky (overlay/pull-back) header.
++        visible: !!root.ListView.view && root.ListView.view.headerPositioning !== ListView.InlineHeader
++            && !root.ListView.view.atYBeginning
+ 
+         Primitives.Separator {
+             id: separator
++            visible: false
+ 
+             anchors {
+                 top: root.position === T.ToolBar.Footer ? parent.top : undefined
+@@ -70,7 +77,10 @@ KT.InlineViewHeader {
+                     - buttonsLoader.Layout.minimumWidth;
+             }
+             Layout.alignment: Qt.AlignVCenter
+-            level: 2
++            level: 5
++            font.weight: Font.Medium
++            Platform.Theme.colorSet: Platform.Theme.Window
++            Platform.Theme.inherit: false
+             text: root.text
+             elide: Text.ElideRight
+             wrapMode: Text.NoWrap

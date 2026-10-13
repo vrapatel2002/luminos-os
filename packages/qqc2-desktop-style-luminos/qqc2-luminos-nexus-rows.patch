@@ -11,6 +11,27 @@ index ffb2d1b..c3dca02 100644
      leftPadding: !mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
      rightPadding: mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
  
+diff --git a/org.kde.desktop/Frame.qml b/org.kde.desktop/Frame.qml
+index 4c648ff..ca6e6e6 100644
+--- a/org.kde.desktop/Frame.qml
++++ b/org.kde.desktop/Frame.qml
+@@ -18,11 +18,12 @@ T.Frame {
+     implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                              contentHeight + topPadding + bottomPadding)
+ 
+-    padding: 6
++    padding: 12 // luminos: room for the r28 corners
+ 
++    // [CHANGE: luminos | 2026-10-12] DECISION 140 — Nexus card: View-alternate fill, r28 (clamped), no border
+     background: Rectangle {
+-        color: "transparent"
+-        border.color: Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.backgroundColor, Kirigami.Theme.textColor, Kirigami.Theme.frameContrast)
+-        radius: Kirigami.Units.cornerRadius
++        Item { id: viewTone; Kirigami.Theme.colorSet: Kirigami.Theme.View; Kirigami.Theme.inherit: false }
++        color: viewTone.Kirigami.Theme.alternateBackgroundColor
++        radius: Math.min(28, width / 2, height / 2)
+     }
+ }
 diff --git a/org.kde.desktop/ItemDelegate.qml b/org.kde.desktop/ItemDelegate.qml
 index e24a1f4..b916698 100644
 --- a/org.kde.desktop/ItemDelegate.qml
@@ -66,6 +87,36 @@ index d8976c2..f12b6f9 100644
      }
  
      background: Private.DefaultListItemBackground {
+diff --git a/org.kde.desktop/ScrollView.qml b/org.kde.desktop/ScrollView.qml
+index 3f1abfe..9bff10d 100644
+--- a/org.kde.desktop/ScrollView.qml
++++ b/org.kde.desktop/ScrollView.qml
+@@ -32,16 +32,16 @@ T.ScrollView {
+     bottomPadding: (controlRoot.background?.visible ? (background.bottomPadding ?? 0) : 0)
+                     + internal.horizontalScrollBarHeight
+ 
+-    background: StylePrivate.StyleItem {
+-        id: styled
+-        control: controlRoot
+-        elementType: "frame"
++    // [CHANGE: luminos | 2026-10-12] DECISION 140 — framed ScrollViews (KCM list boxes) are Nexus cards:
++    // View-alternate fill, r28 (clamped), no border. Unframed ScrollViews keep no background, as before.
++    background: Rectangle {
+         visible: controlRoot.Kirigami.StyleHints.showFramedBackground
+-        sunken: true
+-        raised: false
+-        enabled: controlRoot.contentItem.enabled
+-        hasFocus: controlRoot.activeFocus || controlRoot.contentItem.activeFocus
+-        hover: controlRoot.hovered
++        readonly property real topPadding: 8
++        readonly property real bottomPadding: 8
++        readonly property real leftPadding: 8
++        readonly property real rightPadding: 8
++        color: Kirigami.Theme.alternateBackgroundColor
++        radius: Math.min(28, width / 2, height / 2)
+     }
+ 
+     data: [
 diff --git a/org.kde.desktop/Slider.qml b/org.kde.desktop/Slider.qml
 index 3c1e86a..feb6f30 100644
 --- a/org.kde.desktop/Slider.qml
@@ -142,6 +193,24 @@ index 3c1e86a..feb6f30 100644
          }
  
          // `wheelEnabled: true` doesn't work since it doesn't snap to tickmarks,
+diff --git a/org.kde.desktop/SpinBox.qml b/org.kde.desktop/SpinBox.qml
+index ea37a80..985ed32 100644
+--- a/org.kde.desktop/SpinBox.qml
++++ b/org.kde.desktop/SpinBox.qml
+@@ -153,5 +153,13 @@ T.SpinBox {
+             }
+             return value;
+         }
++        Rectangle { // luminos: M3 disabled outline (onSurface 38 %) so a disabled field stays visible
++            anchors.fill: parent
++            visible: !controlRoot.enabled
++            color: "transparent"
++            radius: height / 2
++            border.width: 1
++            border.color: Qt.alpha(Kirigami.Theme.textColor, 0.6)
++        }
+     }
+ }
 diff --git a/org.kde.desktop/SwitchDelegate.qml b/org.kde.desktop/SwitchDelegate.qml
 index c33aa74..8fabb48 100644
 --- a/org.kde.desktop/SwitchDelegate.qml
@@ -155,8 +224,27 @@ index c33aa74..8fabb48 100644
      leftPadding: !mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
      rightPadding: mirrored ? horizontalPadding + (indicator ? (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : implicitIndicatorWidth) + spacing : 0) : horizontalPadding
  
+diff --git a/org.kde.desktop/private/CheckIndicator.qml b/org.kde.desktop/private/CheckIndicator.qml
+index 8ccd8ec..46e3597 100644
+--- a/org.kde.desktop/private/CheckIndicator.qml
++++ b/org.kde.desktop/private/CheckIndicator.qml
+@@ -40,4 +40,14 @@ StylePrivate.StyleItem {
+ 
+         "partiallyChecked": buttonControl.checkState === Qt.PartiallyChecked
+     }
++
++    Rectangle { // luminos: M3 disabled checkbox outline (onSurface 38 %) — the style draws nothing visible when disabled
++        anchors.centerIn: parent
++        width: Math.min(parent.width, parent.height) - 2; height: width
++        radius: width / 2
++        visible: !styleitem.enabled && styleitem.elementType === "checkbox"
++        color: "transparent"
++        border.width: 2
++        border.color: Qt.alpha(Kirigami.Theme.textColor, 0.6)
++    }
+ }
 diff --git a/org.kde.desktop/private/DefaultListItemBackground.qml b/org.kde.desktop/private/DefaultListItemBackground.qml
-index 812c310..02106b4 100644
+index 812c310..764c5ce 100644
 --- a/org.kde.desktop/private/DefaultListItemBackground.qml
 +++ b/org.kde.desktop/private/DefaultListItemBackground.qml
 @@ -7,6 +7,7 @@
@@ -167,13 +255,17 @@ index 812c310..02106b4 100644
  import QtQuick
  import QtQuick.Templates as T
  import org.kde.kirigami as Kirigami
-@@ -30,13 +31,60 @@ Item {
+@@ -30,13 +31,64 @@ Item {
      // Workaround for QTBUG-113304
      readonly property bool reallyFocus: control.visualFocus || (control.activeFocus && control.focusReason === Qt.OtherFocusReason)
  
 +    readonly property bool isTable: control.TableView.view !== null
 +    readonly property ListView view: control.ListView.view
-+    readonly property int idx: "index" in control ? control.index : (view ? view.indexAt(control.x + 1, control.y + 1) : -1)
++    // delegate index: its own `index` property, else the model context `index`, else a position lookup
++    // (re-run when count changes: during creation the view may not know the item yet)
++    readonly property int idx: "index" in control ? control.index
++        : typeof index !== "undefined" ? index
++        : view ? (view.count, view.indexAt(control.x + 1, control.y + 1)) : -1
 +    readonly property bool sectioned: view !== null && view.section.property !== ""
 +    readonly property bool first: view !== null && (idx === 0 || (sectioned && control.ListView.previousSection !== control.ListView.section))
 +    readonly property bool last: view !== null && (idx === view.count - 1 || (sectioned && control.ListView.nextSection !== control.ListView.section))
@@ -205,16 +297,16 @@ index 812c310..02106b4 100644
 +        property real tr: background.topR
 +        property real br: background.bottomR
 +        topLeftRadius: tr; topRightRadius: tr; bottomLeftRadius: br; bottomRightRadius: br
-+        // M3 expressive spatial easing cubic-bezier(0.38, 1.21, 0.22, 1.00), 400 ms
-+        Behavior on tr { enabled: background.animate; NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.38, 1.21, 0.22, 1.0, 1, 1] } }
-+        Behavior on br { enabled: background.animate; NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.38, 1.21, 0.22, 1.0, 1, 1] } }
-+        Behavior on color { enabled: background.animate; ColorAnimation { duration: 200; easing.type: Easing.OutCubic } }
++        // "Snappy": 180 ms, M3 standard easing cubic-bezier(0.2, 0, 0, 1), no overshoot (colours 120 ms)
++        Behavior on tr { enabled: background.animate; NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
++        Behavior on br { enabled: background.animate; NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
++        Behavior on color { enabled: background.animate; ColorAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
 +        Rectangle { // state layer: onSurface 8 % on hover/focus
 +            anchors.fill: parent
 +            topLeftRadius: row.tr; topRightRadius: row.tr; bottomLeftRadius: row.br; bottomRightRadius: row.br
 +            color: Kirigami.Theme.textColor
 +            opacity: background.control.down ? 0.10 : (background.control.hovered || background.reallyFocus) ? 0.08 : 0
-+            Behavior on opacity { NumberAnimation { duration: 200 } }
++            Behavior on opacity { NumberAnimation { duration: 120 } }
 +        }
 +    }
 +
@@ -229,7 +321,7 @@ index 812c310..02106b4 100644
          control: background.control
          elementType: "itemrow"
          activeControl: background.useAlternatingColors ? "alternate" : ""
-@@ -48,7 +96,7 @@ Item {
+@@ -48,7 +100,7 @@ Item {
              leftMargin: Math.min(0, -(background.control.leftPadding - background.control.leftInset))
              rightMargin: -(background.control.rightPadding - background.control.rightInset)
          }
@@ -306,7 +398,7 @@ index 7546d67..39c0880 100644
  }
 diff --git a/org.kde.desktop/private/M3RadioIndicator.qml b/org.kde.desktop/private/M3RadioIndicator.qml
 new file mode 100644
-index 0000000..6259138
+index 0000000..8a05a6b
 --- /dev/null
 +++ b/org.kde.desktop/private/M3RadioIndicator.qml
 @@ -0,0 +1,61 @@
@@ -336,7 +428,7 @@ index 0000000..6259138
 +    border.width: control.checked ? 0 : 2
 +    border.color: control.hovered || control.visualFocus ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor
 +    opacity: control.enabled ? 1 : 0.38
-+    Behavior on color { ColorAnimation { duration: 200; easing.type: Easing.OutCubic } }
++    Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
 +
 +    Rectangle { // hover / press state layer, M3 40 px circle
 +        anchors.centerIn: parent
@@ -359,8 +451,8 @@ index 0000000..6259138
 +        scale: indicator.control.checked ? indicator.width / 24 * 0.8 : 0.3
 +        opacity: indicator.control.checked ? 1 : 0
 +        preferredRendererType: Shape.CurveRenderer
-+        Behavior on scale { NumberAnimation { duration: 350; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.42, 1.67, 0.21, 0.90, 1, 1] } }
-+        Behavior on opacity { NumberAnimation { duration: 200 } }
++        Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
++        Behavior on opacity { NumberAnimation { duration: 120 } }
 +        ShapePath {
 +            strokeColor: Qt.hsla(Kirigami.Theme.focusColor.hslHue, Kirigami.Theme.focusColor.hslSaturation * 0.4, Kirigami.Theme.focusColor.hslLightness > 0.5 ? 0.27 : 1.0, 1)
 +            strokeWidth: 2.6
@@ -371,3 +463,42 @@ index 0000000..6259138
 +        }
 +    }
 +}
+diff --git a/org.kde.desktop/private/SwitchIndicator.qml b/org.kde.desktop/private/SwitchIndicator.qml
+index 27424ef..eff9e43 100644
+--- a/org.kde.desktop/private/SwitchIndicator.qml
++++ b/org.kde.desktop/private/SwitchIndicator.qml
+@@ -54,7 +54,7 @@ Item {
+ 
+         Behavior on color {
+             enabled: Kirigami.Units.shortDuration > 0
+-            ColorAnimation { duration: Kirigami.Units.shortDuration }
++            ColorAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+         }
+     }
+ 
+@@ -81,20 +81,20 @@ Item {
+ 
+         Behavior on cx {
+             enabled: !indicator.control.pressed && Kirigami.Units.shortDuration > 0
+-            SmoothedAnimation {
+-                duration: Kirigami.Units.shortDuration
++            NumberAnimation { // luminos: snappy 180 ms, standard easing
++                duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+             }
+         }
+         Behavior on width {
+             enabled: Kirigami.Units.shortDuration > 0
+-            NumberAnimation { duration: Kirigami.Units.shortDuration; easing.type: Easing.OutCubic }
++            NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+         }
+ 
+         Behavior on color {
+             enabled: Kirigami.Units.shortDuration > 0
+             ColorAnimation {
+-                easing.type: Easing.InCubic
+-                duration: Kirigami.Units.shortDuration
++                easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
++                duration: 120
+             }
+         }
+ 

@@ -1,0 +1,68 @@
+diff --git a/src/qml/components/AbstractKCM.qml b/src/qml/components/AbstractKCM.qml
+index 1ba8c33..37dd09f 100644
+--- a/src/qml/components/AbstractKCM.qml
++++ b/src/qml/components/AbstractKCM.qml
+@@ -141,7 +141,7 @@ Kirigami.Page {
+                 right: parent.right
+             }
+ 
+-            visible: root.__headerSeparatorVisible()
++            visible: false // LUMINOS: no separator lines (Nexus); the list sits on its own card
+         }
+     }
+ 
+@@ -163,7 +163,7 @@ Kirigami.Page {
+                 right: parent.right
+             }
+ 
+-            visible: root.__footerSeparatorVisible()
++            visible: false // LUMINOS: no separator lines (Nexus)
+         }
+ 
+         Kirigami.Padding {
+diff --git a/src/qml/components/ScrollViewKCM.qml b/src/qml/components/ScrollViewKCM.qml
+index 63bb9cc..89c7711 100644
+--- a/src/qml/components/ScrollViewKCM.qml
++++ b/src/qml/components/ScrollViewKCM.qml
+@@ -5,6 +5,7 @@
+ */
+ 
+ import QtQuick
++import org.kde.kirigami as Kirigami
+ import org.kde.kcmutils as KCMUtils
+ 
+ /*!
+@@ -44,9 +45,32 @@ KCMUtils.AbstractKCM {
+         }
+     }
+ 
++    // [CHANGE: claude-code | 2026-10-12] LUMINOS DECISION 140 — Nexus ItemList card.
++    // The page's main list sits in the same ~760 px column as the form cards, on a
++    // rounded card (View alternateBackground, r28 clamped) over the page "hole"; the
++    // view's own header (e.g. an InlineViewHeader) stays above the card as a section row.
++    Kirigami.ShadowedRectangle {
++        readonly property real headerH: root.framedView ? 0 : (scroll.view?.headerItem?.height ?? 0)
++        visible: !root.framedView
++        x: scroll.x
++        y: scroll.y + headerH
++        width: scroll.width
++        height: Math.max(0, scroll.height - headerH)
++        radius: Math.min(28, height / 2)
++        Kirigami.Theme.colorSet: Kirigami.Theme.View
++        Kirigami.Theme.inherit: false
++        color: Kirigami.Theme.alternateBackgroundColor
++    }
++
+     KCMUtils.ScrollView {
+         id: scroll
+-        anchors.fill: parent
++        anchors {
++            top: parent.top
++            bottom: parent.bottom
++            bottomMargin: root.framedView ? 0 : root.margins
++            horizontalCenter: parent.horizontalCenter
++        }
++        width: root.framedView ? parent.width : Math.min(parent.width - root.margins * 2, Kirigami.Units.gridUnit * 42)
+         framedView: root.framedView
+     }
+ }

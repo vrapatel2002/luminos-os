@@ -8039,3 +8039,19 @@ timeout 2 → returns partial output + "timed out after 2s" in 2 s, and the next
 - **Found by:** a qml6 offscreen probe during the DECISION 138 build printed `cornerRadius=5`; `pacman -Q kirigami` = `6.30.0-1`.
 - **Fix:** patch applied unchanged to 6.30.0; `packages/kirigami-luminos/PKGBUILD` → 6.30.0, pkgrel 1.1, patch sha256 pinned. Installed `6.30.0-1.1`; probe = 16, `banana` → 5. Added `/etc/pacman.d/hooks/luminos-kirigami.hook` (warns loudly after any kirigami upgrade that isn't `-1.1`). `scripts/luminos-windowstyle-check` now fails on it too.
 - **Lesson:** a value-in-env lever is invisible when the thing reading it disappears. Check the reader, not the env.
+
+## BUG-195 — System Settings fork: sidebar column line, footer line, overlapping footer, scrollbar gap, third-column blobs
+<!-- [CHANGE: claude-code | 2026-10-12] -->
+- **Symptom (Shawn's screenshots 10-12):** 1 px bright line between sidebar and page; a line above Reset/Apply; a second rounded corner under the footer; a black slot between list and page; with sub-pages, the main list collapsed to a strip of clipped blobs and the selected sub-row pill was cut off.
+- **Causes:** stock `Main.qml` still subtracted the hidden separator's 1 px; QDialogButtonBox draws a top line; the hole was painted over the whole page while the corner overlay used the inset rect; the sidebar scrollbar reserved ~33 px; KDE's 3-column sub-category layout.
+- **Fix:** systemsettings 1.4 (lines/overlap/gap) and 1.5 (one sidebar column + edge drawers, DECISION 143). Pixel checks on all four hole corners and the boundary column.
+
+## BUG-196 — Dolphin details view: dark blob on the column header + thin lavender line under a row (Darkly fork) — OPEN
+<!-- [CHANGE: claude-code | 2026-10-12] -->
+- **Symptom:** Recent → Modified Yesterday, Details view: a dark round shape left of the "Name" header; a 1–2 px lavender line under the first row.
+- **Suspect:** the darkly 1.2 row-pill code reaching KItemListView (QGraphicsView) or the header corner. Not investigated — the worker was stopped by Shawn on 10-12; waiting for his go.
+
+## BUG-197 — "animation is slow and laggy": every row corner animated 400–500 ms with an overshoot curve
+<!-- [CHANGE: claude-code | 2026-10-12] -->
+- **Cause:** DECISION 140 copied Nexus's expressive timing (500 ms, bezier .38,1.21,.22,1) onto every list row in qqc2 / systemsettings / the icon disc.
+- **Fix:** all added motion 180 ms (colour 120 ms), bezier 0.2,0,0,1, no overshoot; Behaviors off while scrolling/recycling. qqc2 1.5, kirigami 1.5, systemsettings 1.5. Checker `motion` grabs at ~100 ms (fails on 1.4: 8.1 vs 4).

@@ -8398,3 +8398,30 @@ the few QtWidgets KCMs to stay in budget.
 
 Checker 26/26 (FormLayout probe proven to fail on stock). Open: Dolphin details-view bugs (the Darkly worker was
 stopped by Shawn mid-task — not resumed without his say), InlineMessage, KCM-own list areas, menus/tooltips/scrollbars.
+
+---
+
+## DECISION 143 — sub-pages use Shawn's edge drawers; all motion 180 ms with no overshoot
+*[CHANGE: claude-code | 2026-10-12]*
+
+Numbering note: DECISION 140–142 were claimed in parallel by three chats (this one, the heat chat, and the server
+chat in `server/DECISIONS.md`). This entry takes 143 to stop the collision; the duplicates are left as written.
+
+Shawn found the motion "slow and laggy" (BUG-197) and the sub-category layout wasteful (KDE's third column). Five
+options were prototyped ("Sub-page Layouts" artifact, `docs/windowstyle/mock/subpages.html`); he picked **option 1,
+his own idea — Caelestia-style edge drawers** — and "Snappy 180 ms".
+
+- **systemsettings 6.7.5-1.5** (520-line patch, at budget): a category with sub-pages shows one sidebar column
+  (All-settings chip + its sub-pages). 14 px hot zones with hint lines: **left** = full settings list, **top** =
+  search (pages + sub-pages), **right** = this page's section headings (hidden when a page has none). One drawer at a
+  time, built once and shown/hidden, closes 220 ms after the pointer leaves or on Esc. Hole is one rect inset 12 px;
+  nothing drawn outside it (BUG-195). Test aid `LUMINOS_SS_OPEN_DRAWER`.
+- **Motion everywhere we added it:** 180 ms (colour 120 ms), bezier 0.2,0,0,1, no overshoot; Behaviors off while
+  scrolling/recycling (qqc2 1.5, kirigami 1.5, systemsettings 1.5).
+- **List pages as cards, globally:** qqc2 1.6 draws framed ScrollView/Frame as cards and keeps disabled controls
+  visible; the Keyboard "Layouts" area was kcmutils' ScrollViewKCM (frame off) + Kirigami InlineViewHeader (band) →
+  new **kcmutils 6.30.0-1.1** fork (list card in the 760 px column, no header/footer lines) + kirigami 1.6 (header
+  without band). Row 0 of unsectioned lists now gets its 28 px corners (qqc2 1.6).
+
+Checker: 31 PASS (motion, rows-no-sections, frame-card, disabled-visible, inlineheader added; each proven to fail on
+the previous build). Open: BUG-196 Dolphin (needs Shawn's go), Layouts empty-state text (Keyboard KCM's own code).

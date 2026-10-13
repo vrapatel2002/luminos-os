@@ -4,6 +4,7 @@
 # Stock qqc2 6.30.0-1.2 (2026-10-11): rows paint nothing / current r 8.5, groove 4 px, handle 20, radio symmetric: FAIL.
 import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import png
 out = lambda ok, name, detail: print("%s %s: %s" % ("PASS" if ok else "FAIL", name, detail))
+median = lambda cs: tuple(sorted(c[i] for c in cs)[len(cs) // 2] for i in range(3))
 dist = lambda a, b: sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
 def shape(path):
     if not os.path.isfile(path): return None
@@ -88,9 +89,30 @@ def boundary(path, frame, view, S):   # live System Settings: no separator lines
     corner = [k for k in range(s(6), s(12)) if not near(hx1 - k, hy1 - k)]
     out(hx1 - hx0 > s(100) and not edge and not lines and not corner, "live-ss-boundary", "hole x%d..%d y%d..%d; bright px at "
         "sidebar edge %d, full-width lines in bottom 30%% %s, non-hole px on BR diagonal 6..12 %s (want all none)" % (hx0, hx1, hy0, hy1, edge, lines[:5], corner[:5]))
+def phase5(d, mo, alt):
+    bad = ["row%d %s -> %s" % (i, e, n) for i, (e, n) in enumerate(zip(mo["early"], mo["end"])) if not e or not n or max(abs(x - y) for x, y in zip(e, n)) > 2]
+    out(not bad, "motion", "row radii [h,TL,TR,BL,BR] %d ms after the current row moved 0->1 %s vs settled %s (want within 2 px)%s"
+        % (mo["ms"], mo["early"], mo["end"], ("; " + "; ".join(bad)) if bad else ""))
+    e0, e2 = mo["end"][0], mo["end"][2]; ok = e0 and e2 and max(abs(v - min(28, e0[0] / 2)) for v in e0[1:3] + e2[3:5]) <= 2.5
+    out(ok, "rows-no-sections", "list without sections: row0 %s, last row %s (want row0 top and last bottom ~ min(28,h/2) +-2.5)" % (e0, e2))
+    w, h, px = png.load(os.path.join(d, "header.png")); page = px(w - 1, h - 1)
+    band = [median([px(x, y) for x in range(w)]) for y in range(1, h - 1)]; diff = [y + 1 for y, c in enumerate(band) if dist(c, page) > 6]
+    out(not diff, "inlineheader", "InlineViewHeader on page %s: rows whose median colour differs (a band) %s (want none)" % (page[:3], diff[:8]))
+    notes, bad = [], []
+    for n in ("frame", "framedsv", "plainsv"):
+        sh = shape(os.path.join(d, n + ".png")); c = sh["px"](sh["w"] // 2, sh["h"] // 2) if sh and sh["cov"] else None
+        styled = bool(c) and sh["cov"] > 0.9 and dist(c, alt) < 6 and min(sh["r"]) >= min(24, sh["h"] / 2) - 3.5
+        notes.append("%s=%s" % (n, "r%s fill %s" % ("/".join("%g" % v for v in sh["r"]), c[:3]) if c else "none"))
+        if styled != (n != "plainsv"): bad.append(n + (" styled" if styled else " not a rounded View-alternate card"))
+    out(not bad, "frame-card", "%s; want Frame + framed ScrollView r>=min(24,h/2) fill %s, plain ScrollView unstyled%s"
+        % (" ".join(notes), alt, ("; " + "; ".join(bad)) if bad else ""))
+    w, h, px = png.load(os.path.join(d, "disabled.png")); lum = lambda c: 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    top = max(lum(px(x, y)) for x in range(w) for y in range(h)); bg = max(lum(px(0, 0)), 1)
+    out(top >= 1.6 * bg, "disabled-visible", "disabled CheckBox brightest px luminance %.1f vs background %.1f = %.2fx (want >= 1.6)" % (top, bg, top / bg))
 def main(a=sys.argv):
     kv = dict(x.split("=", 1) for x in a[3:] if "=" in x)
     rgb3 = lambda v: tuple(int(x) for x in v.split(","))
+    if a[2] == "p5": return phase5(a[1], __import__("json").loads(kv["motion"]), rgb3(kv["alt"]))
     if a[2] == "formlayout": return formlayout(__import__("json").loads(kv["fl"]))
     if a[2] == "pill":
         pill(a[1], rgb3(a[3]), float(a[4])); return boundary(a[1], rgb3(kv["frame"]), rgb3(kv["view"]), float(a[4]))

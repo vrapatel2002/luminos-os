@@ -1,8 +1,8 @@
 diff --git a/src/delegates/IconTitleSubtitle.qml b/src/delegates/IconTitleSubtitle.qml
-index 95dabc0..632f43b 100644
+index 95dabc0..26c788f 100644
 --- a/src/delegates/IconTitleSubtitle.qml
 +++ b/src/delegates/IconTitleSubtitle.qml
-@@ -153,31 +153,61 @@ Item {
+@@ -153,31 +153,62 @@ Item {
       */
      signal linkHovered(string link)
  
@@ -43,7 +43,8 @@ index 95dabc0..632f43b 100644
 +        color: !root.__luminosDisc ? "transparent"
 +            : (root.selected ? Platform.Theme.focusColor : Platform.Theme.highlightColor)
 +        Behavior on color {
-+            ColorAnimation { duration: Platform.Units.longDuration; easing.type: Easing.OutCubic }
++            // Snappy: 120 ms colour, M3 standard curve (0.2,0,0,1), no overshoot; only on state change
++            ColorAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
          }
  
 -        source: root.icon.name.length > 0 ? root.icon.name : root.icon.source

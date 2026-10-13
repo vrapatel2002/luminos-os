@@ -31,10 +31,13 @@
 # FormEntry (flat style, e.g. Quick Settings). Public API unchanged.
 # 1.4: a bare Separator also ends a card group; Form subtitles sit under the title;
 # a lone untitled check box / switch uses its text as the row title.
+# 1.5: icon-disc colour change is 120 ms, curve (0.2,0,0,1) — Shawn chose "Snappy" (DECISION 140 phase 5).
+# 1.6: kirigami-luminos-viewheader.patch — InlineViewHeader is a section row (no band,
+# no line, small grey title, actions right) over the Nexus list card.
 
 pkgname=kirigami
 pkgver=6.30.0
-pkgrel=1.4
+pkgrel=1.6
 pkgdesc='A QtQuick based components set'
 arch=(x86_64)
 url='https://develop.kde.org/products/frameworks/'
@@ -54,12 +57,14 @@ groups=(kf6)
 source=(https://download.kde.org/stable/frameworks/${pkgver%.*}/$pkgname-$pkgver.tar.xz{,.sig}
         kirigami-luminos-units.patch
         kirigami-luminos-icondisc.patch
-        kirigami-luminos-formcards.patch)
+        kirigami-luminos-formcards.patch
+        kirigami-luminos-viewheader.patch)
 sha256sums=('6de811e559c20dc1086c0cf2c34bb98712dbe4d45f960c62c3c3f887332c95f8'
             'SKIP'
             '992c86c174d4e2d5873d66dd9a6d86594e9883916e618d436dace6412c39e1b9'
-            'd45fdde7c2e664fcacf78cccd83798d201200b40083b728d54db43d48489a4b8'
-            'a85ed70422ff8446a39bb5eb46a81b6636026284a1544310b6a103f78802ce9f')
+            'd96d895b94fc97c6f7bf6b7a5d4b751a02716d0c632e947334367aec48550193'
+            'a85ed70422ff8446a39bb5eb46a81b6636026284a1544310b6a103f78802ce9f'
+            'ffc6e55fda91bb6bace79c23e679887c4821c7e70a7419fa077a48ccb7b9f29b')
 validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB  # David Faure <faure@kde.org>
               90A968ACA84537CC27B99EAF2C8DF587A6D4AAC1) # Nicolas Fella <nicolas.fella@kde.org>
 
@@ -67,6 +72,7 @@ prepare() {
   patch -p1 -d $pkgname-$pkgver < "$srcdir"/kirigami-luminos-units.patch
   patch -p1 -d $pkgname-$pkgver < "$srcdir"/kirigami-luminos-icondisc.patch
   patch -p1 -d $pkgname-$pkgver < "$srcdir"/kirigami-luminos-formcards.patch
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/kirigami-luminos-viewheader.patch
 }
 
 build() {

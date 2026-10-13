@@ -1,0 +1,64 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+#
+# [CHANGE: claude-code | 2026-10-12] LUMINOS FORK — DECISION 140.
+# Arch's stock kcmutils PKGBUILD (tag 6.30.0-1) plus kcmutils-luminos-listcard.patch:
+# ScrollViewKCM puts the page's main list on a Nexus card (View alternateBackground,
+# r28 clamped) in the same ~760 px column as the form cards, over the page "hole";
+# AbstractKCM draws no header/footer separator lines. pkgrel 1.1 sorts above the
+# repo's 1; /etc/pacman.d/hooks/luminos-kcmutils.hook warns when stock returns.
+# QML is compiled in (qmldir prefer :/), so on-disk QML edits do nothing.
+#
+#   Rebuild:  makepkg -f && sudo pacman -U kcmutils-*-1.N-*.pkg.tar.zst
+#   Revert:   sudo pacman -U /var/cache/pacman/pkg/kcmutils-6.30.0-1-x86_64.pkg.tar.zst
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+pkgname=kcmutils
+pkgver=6.30.0
+pkgrel=1.1
+pkgdesc='Utilities for interacting with KCModules'
+arch=(x86_64)
+url='https://develop.kde.org/products/frameworks/'
+license=(LGPL-2.0-only LGPL-3.0-only)
+depends=(libstdc++
+         glibc
+         kconfig
+         kconfigwidgets
+         kcoreaddons
+         kguiaddons
+         ki18n
+         kio
+         kirigami
+         kitemviews
+         kservice
+         kwidgetsaddons
+         kxmlgui
+         qt6-base
+         qt6-declarative)
+makedepends=(doxygen
+             extra-cmake-modules
+             qt6-tools)
+groups=(kf6)
+source=(https://download.kde.org/stable/frameworks/${pkgver%.*}/$pkgname-$pkgver.tar.xz{,.sig}
+        kcmutils-luminos-listcard.patch)
+sha256sums=('0159f80d030ac250b0b353113a55c013ed7e38cb0b678df44d2f0d0b2aca944c'
+            'SKIP'
+            'b41e2498b4d570e4b36987f8bac2c0c89b1a3965016ecd5488e74ca1f89d2b43')
+validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB # David Faure <faure@kde.org>
+              90A968ACA84537CC27B99EAF2C8DF587A6D4AAC1 # Nicolas Fella <nicolas.fella@kde.org>
+              )
+
+prepare() {
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/kcmutils-luminos-listcard.patch
+}
+
+build() {
+  cmake -B build -S $pkgname-$pkgver \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_INSTALL_LIBEXECDIR=lib
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}
