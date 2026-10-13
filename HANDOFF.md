@@ -39,7 +39,8 @@ kirigami-addons 1.13.1-1.2, kcmutils 6.30.0-1.1 (new), systemsettings 6.7.5-1.5,
 hooks `luminos-<pkg>.hook`. `scripts/luminos-windowstyle-check` = 31 PASS (live System Settings probes SKIP while Shawn's instance runs).
 DECISIONS 138–141 + 143, BUGS 193, 195–197. Sub-pages = Shawn's edge-drawer idea (left = all settings, top = search, right = page sections),
 motion 180 ms no overshoot. Test aid: `LUMINOS_SS_OPEN_DRAWER=left|top[:q]|right systemsettings`.
-**Open:** BUG-196 Dolphin (worker stopped by Shawn — needs his go); Keyboard Layouts empty-state text; Autostart's own section lines;
+**Phase 6 DONE (R14, DECISION 144):** approved prototype `docs/windowstyle/mock/popups.html` built for real — darkly 0.5.40-1.5 (BUG-196 fixed; QtWidgets menus/tooltips/scroll bars), qqc2 6.30.0-1.8, kirigami 6.30.0-1.8 (InlineMessage, PlaceholderMessage), plasma-desktop 6.7.5-1.2 (Keyboard empty states; repacked Arch binary + rebuilt kcm_keyboard.so, rebuild steps in its PKGBUILD), semantic colours. Checker 40 PASS. Workflow now: prototype → Shawn approves → build → checker → review.
+**Known limits:** Dolphin row height / group lines are Dolphin's own; no red "danger" items in plain QMenu; Keyboard empty-state shortcut text not runtime-verified.
 InlineMessage, menus/tooltips/scrollbars per Components sheet; systemsettings patch at its 520-line budget.
 **Rule:** after ANY Plasma/KF/Qt upgrade rebuild all six forks + the decoration, then run the checker. Never `git add -A` (parallel chats share this tree).
 
