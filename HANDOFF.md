@@ -1,17 +1,32 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-12 19:10 — Response 1 (remote-stream chat)
+Last updated: 2026-10-15 17:45 — Response 3 (heat/Chrome chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-12 19:10, remote-stream chat R1) — phone streams stall on mobile data, BUG-194, READ-ONLY
+## Aim right now (2026-10-15 17:45, heat chat R3) — "still hot after turning the blur off" — READ-ONLY, explained
+17:16 measured: 55 °C, 16 W. Chrome YouTube tab renderer (pid 32847) at 118 % of a core: **main JS thread ~100 %**, Compositor 14 %,
+Media 1 %, so it was neither decoding nor drawing. RSS grew 989 MB → 1.4 GB in ~5 min, then it dropped on its own to 0 % / 535 MB when the
+playlist moved on. Ambient light is still enabled in Chrome, but its own switch is `enabled false`; Luminos Ambient (DECISION 140) is
+NOT installed. Bench run4 (same playlist aSugSGCC12I, throwaway Chromium, 30 s): plain YouTube 60.2 %, Ambient light switched off
+49.3 % → the switched-off extension adds nothing measurable. **Verdict: a runaway inside the YouTube page itself, cause not identified**;
+a 30 s fresh-browser run can't reproduce a build-up. dGPU: holderless kworker resumes of 01:00.0 + 01:00.1 (HDMI audio function;
+WirePlumber holds /dev/snd/controlC0), awake only ~5 % of uptime → minor, not chased.
+⚠️ My benchmark (amb-bench4) ran 17:18–17:35 and caused part of that hour's 72–86 °C readings; it's stopped and the /tmp profiles are removed.
+After the stop: 45.6 °C, 7 W, his YouTube still playing (renderer 16 %).
+If it recurs: Chrome Task Manager (Shift+Esc) shows the tab; catch it live and check its main thread.
+
+## Previous aim (2026-10-12 19:10, remote-stream chat R1) — phone streams stall on mobile data, BUG-194, READ-ONLY
 Shawn: server "not very responsive", streams don't load over mobile data; wants a list to fix (/build — diagnosis only, no workers spawned, nothing built yet).
 **Found (all measured on the server):** (1) Pixel 9 Tailscale peer: 90 DERP-relay contacts, **0 direct** in 10 days. (2) Jellyfin
 transcoded a 4K HDR remux to the phone at **54.8 Mbps** (`RemoteClientBitrateLimit=0`); app quit after 38 s. (3) nftables `policy drop`
 has no accept for udp 41641 → inbound hole-punch + UPnP/NAT-PMP replies dropped (`portmap=` empty). (4) Dual NIC .61/.62 both on
 41641 → STUN saw 2 public ports, `varies=true` → home looks like hard NAT. (5) Not the cause: server load 0, encode 3.07x, upload ~100+ Mbit/s.
-**Proposed fixes, waiting on Shawn's pick:** A) `RemoteClientBitrateLimit` ~8 Mbps (one setting, biggest win). B) nftables `udp dport 41641 accept`
+**R2 DONE — DECISION 142:** Shawn rejected "just use :8096". Real fix: Jellyfin `KnownProxies=127.0.0.1` + `LocalNetworkSubnets=192.168.2.0/24`
++ `RemoteClientBitrateLimit=8000000` (backups `*.pre-bug194`). Verified 6 paths via `/System/Endpoint` (tailnet via Caddy now remote, forged XFF ignored,
+LAN + Roku still home) and PlaybackInfo: tailnet via Caddy → 6.46 Mbps video. Shawn should replay something on mobile data to confirm by eye.
+**Remaining (not applied):** A) `RemoteClientBitrateLimit` ~8 Mbps (one setting, biggest win). B) nftables `udp dport 41641 accept`
 (+ allow router UPnP/PMP replies, or a router UDP 41641 port-forward). C) Tailscale bound to one NIC / one public port. D) Enable tonemapping (OpenCL) for HDR remote transcodes.
 Each server change: 300 s auto-revert, re-check `tailscale status` shows `direct` for the phone while on mobile data.
 
