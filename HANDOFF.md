@@ -1,11 +1,22 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-15 17:45 — Response 3 (heat/Chrome chat)
+Last updated: 2026-10-15 18:25 — Response 4 (heat/Chrome chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-15 17:45, heat chat R3) — "still hot after turning the blur off" — READ-ONLY, explained
+## Aim right now (2026-10-15 18:25, heat chat R4) — BUG-198: dGPU wake cause PROVEN + YouTube runaway guard BUILT (Tab Sleeper 3.2)
+Shawn: "why is the NVIDIA card waking, it should be cold until something uses it" + "why the loop, make sure it never happens again".
+**dGPU, proven by an rpm_resume stacktrace trigger:** 18:12:45 wake = acpi_ev_notify_dispatch → rm_acpi_notify → nv_indicate_not_idle (ASUS
+firmware ACPI notify, NVPCF class like BUG-161), fired as CPU went 74→86 °C with no profile change; awake 22 s. Chromium launch / sensors /
+lsof / asound reads all tested, none wake it. Heat → firmware notify → wake. The tracer was armed only for this session and is now OFF.
+**Loop:** YouTube page leak in long autoplay → main thread pegged; exact JS not recoverable. **Guard** in scripts/chrome-tab-sleeper
+(content.js + background.js handleRunaway): heap > 600 MB, or long tasks ≥ 50 % for 2×60 s → reload at the same second; max 1 per tab per
+10 min; runawayLog in storage.local. Live tests 3/3 PASS (test-runaway-live.mjs heap|busy|none). **NEXT (Shawn): chrome://extensions → Luminos
+Tab Sleeper → Reload.** If it ever logs "gave-up", read runawayLog: that's the evidence for a deeper fix.
+⚠️ My live tests briefly heated the laptop to 88 °C (two Chromiums + an injected burn) — that was me, not him.
+
+## Previous aim (2026-10-15 17:45, heat chat R3) — "still hot after turning the blur off" — READ-ONLY, explained
 17:16 measured: 55 °C, 16 W. Chrome YouTube tab renderer (pid 32847) at 118 % of a core: **main JS thread ~100 %**, Compositor 14 %,
 Media 1 %, so it was neither decoding nor drawing. RSS grew 989 MB → 1.4 GB in ~5 min, then it dropped on its own to 0 % / 535 MB when the
 playlist moved on. Ambient light is still enabled in Chrome, but its own switch is `enabled false`; Luminos Ambient (DECISION 140) is

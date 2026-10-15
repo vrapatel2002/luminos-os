@@ -451,6 +451,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg && msg.type === 'dirty' && sender.tab) markDirty(sender.tab.id);
+  if (msg && msg.type === 'runaway' && sender.tab) handleRunaway(sender.tab, msg); // [CHANGE: claude-code | 2026-10-15] BUG-198
 });
 
 // A navigation replaces the page, so whatever was typed is already gone.
@@ -485,3 +486,24 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({ id: 'never-sleep', title: 'Never sleep this tab', type: 'checkbox', contexts: ['tab'] });
   sweep();
 });
+
+// [CHANGE: claude-code | 2026-10-15] BUG-198 — a YouTube tab whose page has run away (see content.js) is
+// reloaded at the same second of the video. One reload per tab per 10 minutes: if it runs away again that fast,
+// reloading is not helping, so it is only logged. Every event lands in storage.local.runawayLog
+// (last 30) — that log is the evidence for finding out WHY it happens.
+const RUNAWAY_COOLDOWN_MS = 10 * 60 * 1000;
+
+async function handleRunaway(tab, msg) {
+  const { runawayLog = [] } = await chrome.storage.local.get('runawayLog');
+  const now = Date.now();
+  const again = runawayLog.some((e) => e.tabId === tab.id && e.action === 'reloaded' && now - e.at < RUNAWAY_COOLDOWN_MS);
+  const action = again ? 'gave-up' : 'reloaded';
+  if (!again) {
+    const url = new URL(tab.url);
+    if (msg.t > 0) url.searchParams.set('t', `${msg.t}s`);
+    await chrome.tabs.update(tab.id, { url: url.toString() });
+  }
+  runawayLog.push({ at: now, tabId: tab.id, url: tab.url, reason: String(msg.reason).slice(0, 80), action });
+  await chrome.storage.local.set({ runawayLog: runawayLog.slice(-30) });
+  console.warn('[Luminos Tab Sleeper] runaway tab', action, msg.reason, tab.url);
+}

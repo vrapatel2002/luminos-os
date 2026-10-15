@@ -8040,6 +8040,20 @@ timeout 2 → returns partial output + "timed out after 2s" in 2 s, and the next
 - **Fix:** patch applied unchanged to 6.30.0; `packages/kirigami-luminos/PKGBUILD` → 6.30.0, pkgrel 1.1, patch sha256 pinned. Installed `6.30.0-1.1`; probe = 16, `banana` → 5. Added `/etc/pacman.d/hooks/luminos-kirigami.hook` (warns loudly after any kirigami upgrade that isn't `-1.1`). `scripts/luminos-windowstyle-check` now fails on it too.
 - **Lesson:** a value-in-env lever is invisible when the thing reading it disappears. Check the reader, not the env.
 
+## BUG-194 — Remote streams (phone on mobile data) stall: 55 Mbps 4K transcode pushed through a Tailscale relay
+<!-- [CHANGE: claude | 2026-10-12] -->
+**Status:** PARTLY FIXED 2026-10-12 — stall cause fixed by DECISION 142 (real client IP through Caddy + 8 Mbps remote cap, verified). Still open: phone always on DERP relay (items 4a–c).
+**Symptom:** Shawn: server "not very responsive", streams don't load properly over mobile data.
+**Evidence (luminos-server, measured 2026-10-12 ~19:00):**
+1. **The phone has NEVER had a direct Tailscale path.** `journalctl -u tailscaled --since -10days`: Pixel 9 peer `[uT9qn]` = **90 contacts via=derp, 0 via=direct**. All its video rides Tailscale's shared DERP relay (Toronto).
+2. **Jellyfin sent it the full source bitrate.** 2026-10-11 12:02–12:05, Jellyfin for Android 2.7.3 from `100.77.43.36`, *Dragon Ball Super: Super Hero* 2160p HEVC HDR10 + TrueHD 7.1 remux (55.8 Mbps): ffmpeg `h264_vaapi -b:v 54827024 -maxrate 54827024` at full 4K. Three restarts in 3 min, gave up at 38 s. Server encoded at **3.07x realtime** — the box was not the bottleneck.
+3. **No server-side cap:** `/etc/jellyfin/system.xml` `RemoteClientBitrateLimit=0`. Jellyfin's LAN = 127/8, 10/8, 172.16/12, 192.168/16, so tailnet clients ARE "remote" — the cap would apply to them.
+4. **Why direct fails (server side):** (a) `/etc/nftables.conf` input is `policy drop` with no accept for **udp 41641** from the internet; Tailscale's own `udp dport 41641 accept` lives in the iptables-nft table and does not override ours (same trap DECISION 51 documented for tcp). (b) Tailscale's port mapper finds nothing (`portmap=` empty) — UPnP/NAT-PMP replies from the router are unsolicited UDP and hit the same drop. (c) Dual-NIC: wlan0 .61 and enp2s0 .62 both bind 41641; STUN saw two public ports (41641 and 28145) and `NetInfo varies=true` on 2026-10-11 17:00 — the home side then looks like a "hard NAT", and hard NAT + the phone carrier's CGNAT = relay only. 31 `endpoints changed` events in 3 days.
+5. **Not the cause:** home internet measured from the server: ~100–370 Mbit/s up, ~500 Mbit/s down. Load 0.00, 13 GB RAM free.
+**Side issue:** HDR10 source + `EnableTonemapping=false` → transcode only relabels to bt709, so remote transcodes of HDR files look washed out (same as BUG-189 notes).
+**Trap for the fix:** Caddy (`:8443`) makes every request look like 127.0.0.1 (`KnownProxies` empty) → Jellyfin treats it as LAN and the remote cap would NOT apply. The Android app currently hits `:8096` directly (log shows the 100.x IP), so the cap works for it — keep it that way or add 127.0.0.1 to KnownProxies.
+**Fix options (Shawn's call):** see HANDOFF.md / server/STATUS.md "Remote streaming" row.
+
 ## BUG-195 — System Settings fork: sidebar column line, footer line, overlapping footer, scrollbar gap, third-column blobs
 <!-- [CHANGE: claude-code | 2026-10-12] -->
 - **Symptom (Shawn's screenshots 10-12):** 1 px bright line between sidebar and page; a line above Reset/Apply; a second rounded corner under the footer; a black slot between list and page; with sub-pages, the main list collapsed to a strip of clipped blobs and the selected sub-row pill was cut off.
@@ -8067,3 +8081,36 @@ timeout 2 → returns partial output + "timed out after 2s" in 2 s, and the next
 - **Symptom (Shawn, 10-15):** after lid-open the lock screen shows a black background; the live wallpaper does not run.
 - **Evidence:** `journalctl --user` 17:38:27 — `kwin_wayland: Greeter Process encountered an unhandled error: QProcess::Crashed … Restarting lock.` (same on 10-14 20:51:57). The restarted `kscreenlocker_greet` (pid 67978) came up at 17:38:28, *inside* the suspend/resume transition, and its QtWebEngine GPU process got no GPU: `THREE.WebGLRenderer: A WebGL context could not be created … GL_VENDOR = Disabled … BindToCurrentSequence failed` → the Rain web wallpaper (three.js) never renders → black. Chromium keeps GPU disabled for the life of that process, so it stays black until the greeter restarts.
 - **Not found:** why the greeter crashed at suspend entry (no greeter coredump recorded).
+
+
+## BUG-198 — YouTube tab runs away (leak → main thread 100 %) and heats the laptop; the heat wakes the dGPU
+<!-- [CHANGE: claude-code | 2026-10-15] -->
+**Symptom (2026-10-15 17:16):** 55 °C / 16 W while "only YouTube" played. Shawn's Chrome YouTube renderer was at 118 % of a core:
+main JS thread ~100 %, Compositor 14 %, Media 1 % (so not decoding, not drawing). RSS grew 989 MB → 1.4 GB in ~5 min. The next
+autoplay tab repeated the slow part of the pattern: 510 MB → 794 MB in ~40 min.
+**Not the glow extension:** Ambient light had its own switch `enabled false`; a 30 s A/B on the same playlist in a throwaway Chromium
+measured plain YouTube 60.2 % vs Ambient light switched off 49.3 %.
+**Root cause:** a leak inside YouTube's own page in long autoplay "Mix" sessions, which ends in a main-thread runaway. Nothing
+recorded the JS stack (no crash, no OOM), so the exact YouTube code is **not identified**.
+**Fix: a guard in the Tab Sleeper (v3.2).** content.js on www.youtube.com top frames measures the page from inside: JS heap
+(`performance.memory`) and long-task time (`PerformanceObserver('longtask')`). A healthy page measured 119 MB heap and 0.5 %
+long-task time. If the heap is over 600 MB, or long tasks are ≥ 50 % for two consecutive 60 s windows, the background reloads the
+tab at the same second (`&t=<n>s`). It never reloads a tab the user typed into, and allows at most one reload per tab per 10 min
+(after that it only logs). Every event goes to `chrome.storage.local.runawayLog` (last 30) — the evidence for the real root cause.
+**Proven live** (`scripts/chrome-tab-sleeper/test-runaway-live.mjs`, throwaway Chromium on real YouTube, host_permissions stripped):
+- heap: 809 MB leak injected → reloaded after 45 s at `&t=37s`. PASS
+- busy: 70 % long-task burn → reloaded after 162 s at `&t=148s`; never under 60 s. PASS
+- none: healthy page for 150 s → no reload. PASS
+
+`node test-policy.js` still passes. Two test-harness bugs found on the way: "busy" expected > 115 s, which window alignment
+doesn't guarantee; and `url.includes('t=')` matched `list=`.
+**Limits:** long tasks only count tasks over 50 ms, so a runaway built from many short tasks is caught by the heap check
+instead. YouTube only.
+**dGPU part, proven with an rpm_resume stacktrace trigger:** the wake at 18:12:45 was
+`acpi_ev_notify_dispatch → rm_acpi_notify → os_ref_dynamic_power → nv_indicate_not_idle`, i.e. an ACPI notify from the ASUS
+firmware (NVPCF class, same mechanism as BUG-161). It fired as the CPU jumped 74 → 86 °C, with NO profile change logged. The card
+was awake 22 s, then D3cold again. ~5 % of uptime awake. Neither Chromium launch, `sensors`, lsof nor /proc/asound reads woke it
+(tested). The firmware re-announces its power/thermal budget when the platform heats → the driver wakes. **Heat causes the wake,
+not the other way round**; cutting the runaways cuts the wakes. Not blockable cleanly (no NVIDIA module option ignores ACPI
+notifies; nvidia-powerd is already masked).
+**Install:** chrome://extensions → Luminos Tab Sleeper → **Reload** (unpacked extensions don't auto-reload).
