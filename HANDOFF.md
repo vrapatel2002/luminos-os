@@ -1,11 +1,24 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-15 18:25 — Response 4 (heat/Chrome chat)
+Last updated: 2026-10-15 18:50 — Response 5 (heat/Chrome chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-15 18:25, heat chat R4) — BUG-198: dGPU wake cause PROVEN + YouTube runaway guard BUILT (Tab Sleeper 3.2)
+## Aim right now (2026-10-15 18:50, heat chat R5) — WHY the firmware wakes the dGPU: mapped + proven live; fix choice is Shawn's
+Decompiled DSDT/SSDTs (copy in .scratch-acpi/, git-excluded; decompile done off-box). Every wake path = `Notify(\_SB.NPCF, 0xC0)`
+("platform power budget changed" to NVIDIA's NVPCF device) → the nvidia 610.57 open module resumes the card. Senders:
+A) **asusd WMI calls** (DSDT WMNB): 0x00110024 = CPU fan curve (fires on `asusctl fan-curve --enable-fan-curves true`), 0x00120098
+(NV dynamic boost), 0x001200C0 (NV temp target), and platform-profile switches. PROVEN live with kprobes on acpi_ev_queue_notify_request
++ nv_acpi_notify_event: a profile flip (thread tokio-rt-worker = asusd) and a no-op fan-curve re-enable (zbus thread) each → NPCF 0xC0 → rpm_resume.
+B) **EC queries on its own**: _QA8, _QD4 (thermal table change, notifies twice), _Q7A/_QA9 (PEGP), _QBC (DNOT). GPIO pins 5/16 → PEGP 0x81 never fired (0 IRQs).
+luminos-power today: 3 bursts + 3 restores = 6 fan-curve enables = 6 wakes. Probes + rpm trace removed afterwards. Profile restored to balanced.
+Options put to Shawn: (1) luminos-power stops re-sending unchanged fan curves/profiles + drops the 52 °C 100 % burst (also matches his
+"never max fan at 50-55 °C" preference); (2) Integrated mode (dgpu_disable=1) when no GPU job runs: card powered off at the firmware, no
+notify can reach it; needs a switch to Hybrid before HIVE/games; (3) ACPI SSDT override to drop the NPCF notifies: not recommended,
+it blinds NVIDIA power limiting when the card IS used. cmd/ is untouched pending his choice (§11).
+
+## Previous aim (2026-10-15 18:25, heat chat R4) — BUG-198: dGPU wake cause PROVEN + YouTube runaway guard BUILT (Tab Sleeper 3.2)
 Shawn: "why is the NVIDIA card waking, it should be cold until something uses it" + "why the loop, make sure it never happens again".
 **dGPU, proven by an rpm_resume stacktrace trigger:** 18:12:45 wake = acpi_ev_notify_dispatch → rm_acpi_notify → nv_indicate_not_idle (ASUS
 firmware ACPI notify, NVPCF class like BUG-161), fired as CPU went 74→86 °C with no profile change; awake 22 s. Chromium launch / sensors /
