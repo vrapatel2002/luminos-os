@@ -1,0 +1,26 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-10-15] BUG-199: install / remove / check the lock-screen crash catcher.
+# install: moves pacman's /usr/lib/kscreenlocker_greet to .luminos-real and puts the wrapper in its place;
+#          a pacman hook re-applies it after every kscreenlocker upgrade (an upgrade overwrites the wrapper).
+# remove:  puts the real binary back and deletes the hook. Reports: ~/.local/state/luminos/greeter-crash/
+set -uo pipefail
+BIN=/usr/lib/kscreenlocker_greet; REAL=$BIN.luminos-real
+SRC=/home/shawn/luminos-os/scripts/luminos-greeter-wrapper
+HOOK=/etc/pacman.d/hooks/luminos-greeter-catch.hook
+HOOKSRC=/home/shawn/luminos-os/config/pacman-hooks/luminos-greeter-catch.hook
+is_wrapper() { head -c 200 "$1" 2>/dev/null | grep -q "luminos greeter crash catcher"; }
+case "${1:-status}" in
+install)
+    if ! is_wrapper "$BIN"; then file -b "$BIN" | grep -q ^ELF || { echo "FAIL $BIN is neither the wrapper nor an ELF binary"; exit 1; }; cp -a "$BIN" "$REAL" || exit 1; fi        # fresh binary (first run or after upgrade)
+    install -m755 -o root -g root "$SRC" "$BIN.tmp" && mv -f "$BIN.tmp" "$BIN" || exit 1
+    [ -f "$HOOKSRC" ] && install -m644 "$HOOKSRC" "$HOOK"
+    is_wrapper "$BIN" && [ -x "$REAL" ] && ! is_wrapper "$REAL" && echo "OK catcher installed" || { echo "FAIL install"; exit 1; } ;;
+remove)
+    [ -x "$REAL" ] && ! is_wrapper "$REAL" || { echo "FAIL no real binary at $REAL"; exit 1; }
+    mv -f "$REAL" "$BIN" && rm -f "$HOOK"
+    ! is_wrapper "$BIN" && echo "OK catcher removed" || { echo "FAIL remove"; exit 1; } ;;
+status)
+    is_wrapper "$BIN" && echo "installed (real: $REAL)" || echo "not installed"
+    ls -1t /home/shawn/.local/state/luminos/greeter-crash/crash-*.log 2>/dev/null | head -5 ;;
+*) echo "usage: $0 install|remove|status"; exit 2 ;;
+esac

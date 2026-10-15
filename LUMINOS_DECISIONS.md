@@ -8455,3 +8455,13 @@ Checker 40 PASS (qml-menu, qml-tooltip, qml-scrollbar, inlinemessage, placeholde
 widgets-menu/tooltip/scrollbar via a C++ probe compiled into /tmp). Review (Fable): 7 findings — Dolphin focus cue
 lost (a11y), header styling leaking into every app, QML scroll bar invisible when idle, menu 41 px pitch, tooltip
 radius typo, dead Background* keys, alternate-row reset on split (verified fine) — all resolved.
+
+## DECISION 145 — wrap the lock-screen greeter to catch how it dies (BUG-199)
+<!-- [CHANGE: claude-code | 2026-10-15] -->
+The greeter dies at suspend entry and leaves no core, so the journal only says "QProcess::Crashed". We put a small bash
+wrapper at `/usr/lib/kscreenlocker_greet` (real binary moved to `.luminos-real`). It runs the greeter as a child with all
+args, stdin and fds (`--ksldfd`), forwards TERM/INT/HUP/QUIT/USR1/USR2, and on an abnormal exit writes a report to
+`~/.local/state/luminos/greeter-crash/` (keeps 20), then re-raises the same signal / exit code so KWin behaves exactly
+as before (crash → restart lock; security unchanged). A pacman hook re-applies it after kscreenlocker upgrades.
+Rejected: gdb/strace attach (too heavy, races the lock), KCrash/DrKonqi (does not see KILL/TERM). Temporary — remove with
+`sudo luminos-greeter-catch remove` once BUG-199 is fixed.

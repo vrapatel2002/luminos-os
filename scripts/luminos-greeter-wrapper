@@ -1,0 +1,40 @@
+#!/bin/bash
+# [CHANGE: claude-code | 2026-10-15] luminos greeter crash catcher (BUG-199) for the KDE lock screen.
+# Installed as /usr/lib/kscreenlocker_greet by luminos-greeter-catch; the real binary is
+# /usr/lib/kscreenlocker_greet.luminos-real. Runs it as a child, keeps its stderr in a log,
+# and when it dies abnormally writes a report with the exact exit status / signal plus the
+# user + kernel journal around it. It then dies the SAME way (same signal or exit code) so
+# KWin reacts exactly as it would have without this wrapper (crash => restart the lock).
+REAL=/usr/lib/kscreenlocker_greet.luminos-real
+DIR="$HOME/.local/state/luminos/greeter-crash"
+mkdir -p "$DIR" 2>/dev/null
+LOG="$DIR/last-run.log"
+START=$(date '+%Y-%m-%d %H:%M:%S')
+{ echo "== greeter start $START wrapper-pid $$ args: $*"; } > "$LOG" 2>/dev/null
+export QTWEBENGINE_CHROMIUM_FLAGS="${QTWEBENGINE_CHROMIUM_FLAGS:+$QTWEBENGINE_CHROMIUM_FLAGS }--enable-logging=stderr --log-level=0"
+
+"$REAL" "$@" <&0 2> >(tee -a "$LOG" >&2) &
+CHILD=$!
+for s in TERM INT HUP QUIT USR1 USR2; do trap "kill -$s $CHILD 2>/dev/null" "$s"; done
+
+RC=0
+while kill -0 "$CHILD" 2>/dev/null; do wait "$CHILD"; RC=$?; done
+wait "$CHILD" 2>/dev/null; R2=$?; [ "$R2" -ne 127 ] && RC=$R2   # real status (an earlier wait may have been cut short by a forwarded signal)
+
+if [ "$RC" -ne 0 ]; then
+    REP="$DIR/crash-$(date "+%Y%m%d-%H%M%S")-$$.log"
+    SIG=""; [ "$RC" -gt 128 ] && SIG=$(kill -l $((RC - 128)) 2>/dev/null)
+    {
+        echo "== kscreenlocker_greet ended abnormally at $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "   exit status: $RC${SIG:+  => killed by signal SIG$SIG}"
+        echo "   started: $START   child pid: $CHILD"
+        echo; echo "== suspend/lid state"; cat /sys/power/state 2>/dev/null; cat /proc/acpi/button/lid/*/state 2>/dev/null
+        echo; echo "== greeter stderr (last 200 lines)"; tail -n 200 "$LOG"
+        echo; echo "== user journal since start"; journalctl --user --since "$START" -o short-iso --no-pager 2>/dev/null | grep -v -i -E "kwin_libinput|audit" | tail -n 150
+        echo; echo "== system journal since start (suspend, gpu, kernel)"; journalctl --since "$START" -o short-iso --no-pager 2>/dev/null | grep -i -E "PM:|suspend|resume|amdgpu|drm|lid|segfault|traps|oom|killed" | tail -n 80
+        echo; echo "== coredumps since start"; coredumpctl list --since "$START" --no-pager 2>&1 | tail -n 5
+    } > "$REP" 2>&1
+    ls -1t "$DIR"/crash-*.log 2>/dev/null | tail -n +21 | xargs -r rm -f   # keep the newest 20
+    if [ -n "$SIG" ]; then trap - "$SIG"; kill -"$SIG" $$; fi
+fi
+exit "$RC"

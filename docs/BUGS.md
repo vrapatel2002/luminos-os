@@ -8076,11 +8076,15 @@ timeout 2 → returns partial output + "timed out after 2s" in 2 s, and the next
 - **Line:** Dolphin requests a focus rect on the current row; Darkly drew it as a 1 px Highlight line along the row's bottom (old code skipped only selected rows).
 - **Fix:** Dolphin-only header (no band/lines, sorted column brighter), full-row selection pill, focus cue = 2 px focus-colour r12 outline on a current-but-unselected row (reviewer a11y finding), tree chevrons without lines, no alternate rows in Dolphin. Other apps' headers stay stock.
 
-## BUG-198 — lock screen wallpaper black after opening the lid (OPEN, read-only findings)
+## BUG-199 — lock screen wallpaper black after opening the lid (OPEN; crash catcher installed)
+(renumbered from BUG-198 — another chat took 198 the same day)
 <!-- [CHANGE: claude-code | 2026-10-15] -->
 - **Symptom (Shawn, 10-15):** after lid-open the lock screen shows a black background; the live wallpaper does not run.
 - **Evidence:** `journalctl --user` 17:38:27 — `kwin_wayland: Greeter Process encountered an unhandled error: QProcess::Crashed … Restarting lock.` (same on 10-14 20:51:57). The restarted `kscreenlocker_greet` (pid 67978) came up at 17:38:28, *inside* the suspend/resume transition, and its QtWebEngine GPU process got no GPU: `THREE.WebGLRenderer: A WebGL context could not be created … GL_VENDOR = Disabled … BindToCurrentSequence failed` → the Rain web wallpaper (three.js) never renders → black. Chromium keeps GPU disabled for the life of that process, so it stays black until the greeter restarts.
 - **Not found:** why the greeter crashed at suspend entry (no greeter coredump recorded).
+- **No core ⇒ not an ordinary crash:** core_pattern pipes to systemd-coredump, suid_dumpable=2, kwin LimitCORE=infinity — yet no greeter core. So it was most likely killed by a signal that leaves no core (KILL/TERM/HUP/PIPE), or exited non-zero by itself.
+- **Crash catcher (DECISION 145, 10-15):** `/usr/lib/kscreenlocker_greet` is now the wrapper `scripts/luminos-greeter-wrapper`; the real binary is `/usr/lib/kscreenlocker_greet.luminos-real`. On any abnormal exit it writes `~/.local/state/luminos/greeter-crash/crash-<time>-<pid>.log` (exit status + signal name, greeter stderr with QtWebEngine logging on, user journal, kernel suspend/GPU lines, coredumps) then dies with the same signal so KWin still restarts the lock. Tested: real greeter `--testing` + SIGSEGV → report with signal + WebEngine stack, service saw status=11. `luminos-greeter-catch status|remove`.
+- **Next:** close/open the lid until the wallpaper is black again, then read the newest crash log.
 
 
 ## BUG-198 — YouTube tab runs away (leak → main thread 100 %) and heats the laptop; the heat wakes the dGPU

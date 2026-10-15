@@ -1,0 +1,11 @@
+# [CHANGE: claude-code | 2026-10-15] BUG-199: a kscreenlocker upgrade overwrites the crash-catcher wrapper; put it back.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = kscreenlocker
+
+[Action]
+Description = luminos: re-installing the lock-screen crash catcher (BUG-199)
+When = PostTransaction
+Exec = /bin/sh -c '/usr/local/bin/luminos-greeter-catch install || true'
