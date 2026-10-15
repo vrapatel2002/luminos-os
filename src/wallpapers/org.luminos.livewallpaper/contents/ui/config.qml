@@ -146,6 +146,7 @@ ColumnLayout {
     Kirigami.InlineMessage {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
         visible: staleCheck.stale
         type: Kirigami.MessageType.Warning
         text: i18n("This page is running an older copy of the wallpaper plugin — it was " +
@@ -159,6 +160,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
         QQC2.TextField {
             id: fileField
             Layout.fillWidth: true
@@ -177,6 +179,7 @@ ColumnLayout {
     QQC2.Label {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
         wrapMode: Text.WordWrap
         font: Kirigami.Theme.smallFont
         visible: root.pickProblem.length === 0
@@ -195,6 +198,7 @@ ColumnLayout {
     QQC2.Label {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
         wrapMode: Text.WordWrap
         visible: root.pickProblem.length > 0
         color: Kirigami.Theme.negativeTextColor
@@ -208,11 +212,13 @@ ColumnLayout {
     Kirigami.Separator {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
         Layout.topMargin: Kirigami.Units.largeSpacing
     }
     WallpaperGallery {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
         currentEntry: root.activeEntry
         onPicked: function (type, entryPath) { root.usePackage(type, entryPath); }
     }
@@ -239,6 +245,7 @@ ColumnLayout {
     Kirigami.Separator {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
         Layout.topMargin: Kirigami.Units.largeSpacing
         visible: root.propsMode && Object.keys(sceneProps.schema).length > 0
     }
@@ -246,12 +253,14 @@ ColumnLayout {
         visible: root.propsMode && Object.keys(sceneProps.schema).length > 0
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
         level: 3
         text: i18n("This wallpaper's own settings")
     }
     PropertyEditor {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
         visible: root.propsMode
         schema: sceneProps.schema
         values: sceneProps.props
@@ -267,10 +276,14 @@ ColumnLayout {
     Kirigami.Separator {
         Layout.fillWidth: true
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
         Layout.topMargin: Kirigami.Units.largeSpacing
     }
     QQC2.CheckBox {
         id: advanced
+        Layout.fillWidth: true
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter
         text: i18n("Advanced options")
         checked: false
     }
@@ -280,6 +293,7 @@ ColumnLayout {
         // Without a cap the form grows to its widest child, which on a maximised
         // dialog drags every row to the right. [CHANGE: claude-code | 2026-09-19] BUG-169
         Layout.maximumWidth: Kirigami.Units.gridUnit * 40
+        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
 
         QQC2.ComboBox {
             Kirigami.FormData.label: i18n("Built-in scene:")

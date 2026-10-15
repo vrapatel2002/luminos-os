@@ -8147,3 +8147,9 @@ resets while dGPU load < 20 %; the CPU counter also resets whenever load sits be
 ticks with a fixed offset, so the exit can be missed indefinitely. Seen 2026-10-15: entered 18:48:15 on a test load. Still `performance`
 profile + EPP 5+ min later at 93 % idle, with no "beast mode exit" logged. Restored by `systemctl restart luminos-power`. Effect: Performance
 limits and fans stay on after load ends → heat, and each eventual profile flip is another dGPU wake. **Not fixed** (cmd/ needs Shawn's go, §11).
+
+## BUG-201 — live-wallpaper settings stuck to the left of the Wallpaper page (FIXED 10-15)
+<!-- [CHANGE: claude-code | 2026-10-15] -->
+- **Symptom (Shawn):** on a wide System Settings window the "Wallpaper type" card is centred but everything under it (file row, gallery, Advanced) hugs the left edge.
+- **Cause:** that part is our plugin's `config.qml` (org.luminos.livewallpaper). Every block was capped at 40 grid units (BUG-169) but had no `Layout.alignment`, so a ColumnLayout puts it at x=0.
+- **Fix:** `Layout.alignment: Qt.AlignHCenter` on all 11 capped blocks + the Advanced checkbox. Proven in an offscreen 1800 px harness: x=0 before → x=540 (=(1800−720)/2) after.
