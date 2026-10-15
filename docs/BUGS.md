@@ -8118,3 +8118,32 @@ was awake 22 s, then D3cold again. ~5 % of uptime awake. Neither Chromium launch
 not the other way round**; cutting the runaways cuts the wakes. Not blockable cleanly (no NVIDIA module option ignores ACPI
 notifies; nvidia-powerd is already masked).
 **Install:** chrome://extensions → Luminos Tab Sleeper → **Reload** (unpacked extensions don't auto-reload).
+
+### BUG-198 addendum — WHY the firmware wakes the dGPU (proven 2026-10-15 18:41–18:58 with kprobes)
+<!-- [CHANGE: claude-code | 2026-10-15] -->
+Probes: acpi_ev_queue_notify_request (device + value), asus_wmi_evaluate_method3 (every BIOS call + caller thread),
+acpi_ec_event_processor + ec.c dynamic debug (EC query number), rpm_resume/suspend on 01:00.0. All removed afterwards.
+**Idle, AC, battery Full 100 %: 6.5 min → 0 BIOS calls, 0 EC events, 0 notifies, 0 wakes.** The card stays cold in normal use.
+**Every wake came from a power-setting change** reaching the BIOS. The BIOS/EC then recomputes how many watts the NVIDIA chip may
+draw (shared CPU+GPU thermal budget) and pushes it: `_QD9: PEGP.NLIM = 1; PEGP.TGPU = EC.GPSV; Notify(PEGP, 0xC0)`, or
+`Notify(\_SB.NPCF, 0xC0)` from WMNB. The NVIDIA 610.57 open driver takes a runtime-PM ref for every such notify, waking the card
+~20 s just to note "re-read the limit". This is upstream NVIDIA issue #1300 / PR #1299 (same G14 GA403 family; NVIDIA silent, not merged).
+Live captures:
+- 18:48:15 luminos-power "beast mode → Performance" (CPU 100 %) → asusd DEVS 0x120075=1 + 3 fan curves → EC Query 0xD9 → Notify(PEGP,0xC0) → wake 22 s.
+- profile flip via asusctl → Notify(NPCF,0xC0) ×2 + PEGP 0xC0 → wake.
+- `asusctl fan-curve --enable-fan-curves true` (no actual change) → Notify(NPCF,0xC0) → wake. WMNB devid 0x00110024 = CPU fan curve.
+- luminos-power restart → its startup `nvidia-smi` woke the card directly (BUG-078 class), and one profile change = asusd wrote 0x120075 FIVE times.
+Last 27 h: 19 platform-profile changes, 11 fan-curve applies, 6 thermal bursts, all by luminos-power via asusd ≈ the ~19 min awake.
+Known firmware triggers NOT active here: battery 1 % ticks (on battery only) and charging `Notify(PEGP,0xD1–D3)` every ~30 s (stops at charge limit).
+GPIO 5/16 → PEGP 0x81: 0 IRQs since boot.
+**Fix options (Shawn's call, nothing changed):** fewer/needless profile + fan-curve writes in luminos-power (and BUG-200); Integrated
+mode when idle; a DKMS patch in the style of NVIDIA PR #1299 (covers only the NPCF path, not PEGP _QD9); an ACPI override is not recommended.
+
+## BUG-200 — beast mode can stay stuck in Performance: exit needs two independent counters to hit 30 on the same tick
+<!-- [CHANGE: claude-code | 2026-10-15] -->
+`cmd/luminos-power/main.go` ~601: exit requires `applyGamingDetection(...) == "Balanced" && applyCPUBeastDetection(...) == "Balanced"`
+on the SAME 2 s tick. Each returns "Balanced" only on the one tick its low-counter reaches 30, then resets it to 0. The GPU counter never
+resets while dGPU load < 20 %; the CPU counter also resets whenever load sits between 25 and 75 %. Once out of phase, both wrap every 30
+ticks with a fixed offset, so the exit can be missed indefinitely. Seen 2026-10-15: entered 18:48:15 on a test load. Still `performance`
+profile + EPP 5+ min later at 93 % idle, with no "beast mode exit" logged. Restored by `systemctl restart luminos-power`. Effect: Performance
+limits and fans stay on after load ends → heat, and each eventual profile flip is another dGPU wake. **Not fixed** (cmd/ needs Shawn's go, §11).

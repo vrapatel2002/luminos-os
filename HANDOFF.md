@@ -1,11 +1,20 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-15 18:50 — Response 5 (heat/Chrome chat)
+Last updated: 2026-10-15 19:00 — Response 6 (heat/Chrome chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-15 18:50, heat chat R5) — WHY the firmware wakes the dGPU: mapped + proven live; fix choice is Shawn's
+## Aim right now (2026-10-15 19:00, heat chat R6) — exact reason for the dGPU wakes FOUND (read-only); fix choice is Shawn's
+Shawn: "find why it's firing, then we decide the fix". Answer (BUGS.md, BUG-198 addendum): idle on AC with a full battery → 0 wakes in 6.5 min.
+Every wake = a power-setting change → EC/BIOS recomputes the GPU's power share → Notify(PEGP or NPCF, 0xC0) → nvidia driver wakes the card ~20 s
+(upstream NVIDIA #1300/#1299). Senders here: luminos-power profile switches (19 in 27 h), fan-curve applies (11), bursts (6), nvidia-smi at
+daemon start. NEW **BUG-200**: beast-mode exit counters can desync, so it stays stuck in Performance (seen after my heat test; I restored it by restarting luminos-power).
+(Notes/brain entries written at 19:00 said "BUG-199" — that number belongs to another chat's lock-screen bug; the beast-mode bug is BUG-200.)
+All probes/dynamic-debug removed. Decompiled tables in .scratch-acpi (git-excluded); decompile done off-box.
+NEXT: Shawn picks a fix (luminos-power write reduction + BUG-200, Integrated mode, or a DKMS patch).
+
+## Previous aim (2026-10-15 18:50, heat chat R5) — WHY the firmware wakes the dGPU: mapped + proven live; fix choice is Shawn's
 Decompiled DSDT/SSDTs (copy in .scratch-acpi/, git-excluded; decompile done off-box). Every wake path = `Notify(\_SB.NPCF, 0xC0)`
 ("platform power budget changed" to NVIDIA's NVPCF device) → the nvidia 610.57 open module resumes the card. Senders:
 A) **asusd WMI calls** (DSDT WMNB): 0x00110024 = CPU fan curve (fires on `asusctl fan-curve --enable-fan-curves true`), 0x00120098
