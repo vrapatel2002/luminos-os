@@ -1,41 +1,15 @@
-// Command luminos-power monitors AC adapter state and CPU temperature on the ASUS ROG G14,
-// applying EPP-based CPU power hints and asusctl profiles automatically.
+// Command luminos-power turns ONE continuous dial — the CPU package power limit (PPT,
+// asus-nb-wmi ppt_*) — toward min(demand hand, heat hand, battery/dGPU ceilings) at a
+// bounded rate of watts per second. Every decision lives in spectrum.go (pure Step);
+// this file is the I/O layer only: config, socket, fixed 1 Hz loop, sensors, writers,
+// sd_notify. docs/spectrum/DESIGN.md is the spec of record; CONTRACTS.md is binding.
 //
-// [CHANGE: gemini-cli | 2026-05-10] v2.1 Quiet Daily Driver (load-tracking)
-// [CHANGE: claude-code | 2026-05-14] v3.0 EPP-based control — replaces load-tracking algorithm
-//   - governor=powersave always; EPP hint set by AC state
-//   - Poll rate: 2s on AC, 10s on battery (ROOT-05 fix)
-//   - WiFi power save, KSM, display Hz managed on AC transitions (ROOT-04, ROOT-06)
-//   - GPU gaming detection retained (asusctl profile Performance on AC only)
-//   - Emergency thermal: EPP=power immediately (no delay)
-//
-// [CHANGE: claude-code | 2026-05-15] v3.1 Thermal governor — 45°C target
-//   - 4 thermal zones with 5°C hysteresis, scaling_max_freq caps per zone
-//   - Gaming mode bypasses thermal capping on AC (user explicitly wants performance)
-//   - Hardware max freq read at startup (no hardcoded value)
-//
-// [CHANGE: claude-code | 2026-05-26] v4.0 Adaptive Dual Governor
-//   - Continuous CPU cap: baseCap + (smoothedLoad/100) × (maxCap - baseCap)
-//   - EMA smoothing (α=0.3) on CPU load — no snap changes
-//   - Thermal zone tracking decoupled from cap writes (zone only sets emergency/ZoneHot caps)
-//   - Exec watcher: /proc scan for new app launches → pre-alloc cap headroom
-//   - PSI watcher: poll /proc/pressure/cpu — event-driven wake when idle, tight loop when near cap
-//   - iGPU dominance penalty: when iGPU busier than CPU, up to 0.3 GHz CPU reduction (shared TDP)
-//   - App history table: known apps pre-allocate cap headroom on launch for smooth startup
-//
-// [CHANGE: claude-code | 2026-05-31] v4.1 Thermal Burst Cooling + Resource Coordinator
-//   - Thermal burst: 52°C → 100% fans until chassis drops to 40°C (or 3min safety timeout)
-//     Addresses aluminium heat-soak: curve was correct but body couldn't dissipate fast enough
-//   - Resource coordinator: reads /proc/meminfo RAM pressure into effective CPU load
-//     When RAM < 20% available + temp > 45°C → pressure bonus on effective load (up to 30%)
-//   - System pressure index logged each tick: combined thermal/CPU/GPU/RAM health score
-//
-// [CHANGE: claude-code | 2026-06-03] v4.2 GPU TGP dynamic switching
-//   - Switch NVIDIA GPU power limit 55W → 90W when draw ≥ 47W (85% of cap) on AC
-//   - Gate: GPU temp < 83°C (thermal headroom required before uplifting)
-//   - Revert: power < 15W AND util < 20% sustained 60s, or temp ≥ 83°C (thermal override)
-//   - 60s hysteresis between any switch to prevent oscillation
-//   - GPU power/temp read from sysfs hwmon (fast); falls back to nvidia-smi if unavailable
+// [CHANGE: claude-code | 2026-10-15] spectrum — v5.0. Deleted: beast mode, quiet idle,
+// thermal zones/emergency/burst, GPU TGP manager, Conductor (conductor.go, fan_control.go),
+// exec/input watchers, PSI sleep bands, SPI index, RAM bonus, every tick-counter constant,
+// every platform_profile / fan-curve / nvidia-smi write at startup and in the loop.
+// Kept: socket request/reply shapes, offload_* pin path, report_power, AC side effects
+// (Wi-Fi power save, KSM, display Hz), setProfile choke point (unused unless assert_profile).
 package main
 
 import (
@@ -43,12 +17,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"os/user"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,270 +30,117 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/luminos-os/luminos/internal/config"
 	"github.com/luminos-os/luminos/internal/logger"
 	"github.com/luminos-os/luminos/internal/socket"
-	"golang.org/x/sys/unix"
 )
 
-// PowerState is the payload reported to luminos-ai on every state change.
+// PowerState is the status payload (socket `status`, report_power to luminos-ai).
+// Every pre-spectrum key is kept; the dial fields are DESIGN §3.10.
+// [CHANGE: claude-code | 2026-10-15] spectrum — dial fields added
 type PowerState struct {
 	OnAC      bool      `json:"on_ac"`
 	CPUTempC  float64   `json:"cpu_temp_c"`
-	GPULoad   float64   `json:"gpu_load"`
+	GPULoad   float64   `json:"gpu_load"` // kept for consumers; always 0 (nvidia-smi polling is gone)
 	EPP       string    `json:"epp"`
 	Profile   string    `json:"profile"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	Level          float64 `json:"level"`
+	PptW           int     `json:"ppt_w"`
+	PptTargetW     int     `json:"ppt_target_w"`
+	PmaxW          float64 `json:"pmax_w"`
+	TempTargetC    float64 `json:"temp_target_c"`
+	Demand         float64 `json:"demand"`
+	Binding        string  `json:"binding"`
+	FreqCapKHz     int     `json:"freq_cap_khz"`
+	DGPU           string  `json:"dgpu"`
+	PPTOwner       string  `json:"ppt_owner"`
+	WMIWritesTotal int     `json:"wmi_writes_total"`
+	PPTWriteOK     bool    `json:"ppt_write_ok"` // false while the last ppt_* write failed (retried every tick)
 }
 
 const (
 	wifiIface = "wlp3s0"
 	// kscreen output ID for the built-in eDP panel
 	displayOutputID = "1"
-	// dGPU (NVIDIA) gaming thresholds — beast mode trigger
-	gpuHighThreshPct   = 80.0
-	gpuHighThreshTicks = 15 // 30s at 2s poll
-	gpuLowThreshPct    = 20.0
-	gpuLowThreshTicks  = 30 // 60s at 2s poll
 
-	// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU TGP dynamic switching
-	// When GPU power draw nears the 55W cap, uplift to 90W so the GPU isn't
-	// artificially constrained. Revert when idle, or temperature-override when too hot.
-	gpuTGPLowW        = 55.0             // default TGP (W)
-	gpuTGPHighW       = 90.0             // boosted TGP (W)
-	gpuTGPUpThreshW   = 47.0             // 85% of 55W → trigger uplift
-	gpuTGPDownPowerW  = 15.0             // revert when power draw < 15W …
-	gpuTGPDownUtilPct = 20.0             // … AND GPU util < 20%
-	gpuTGPDownTicks   = 30               // 60s sustained idle at 2s poll before revert
-	gpuTGPHysteresis  = 60 * time.Second // minimum time between any TGP switch
-
-	// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 3 — THERMAL DEADBAND.
-	// These replace the single gpuTGPThermalCeilC = 83.0, which was both the drop
-	// threshold AND the re-uplift gate. With one number there is no deadband, so at
-	// steady-state load the pair (drop at ≥83, re-uplift at <83) is a latch that cannot
-	// settle: gpuTGPHysteresis did not damp that oscillation, it only set its PERIOD.
-	// Measured 2026-09-13 19:34→19:43: five full 90W↔55W cycles, one every ~63s.
-	//
-	// 83°C was also simply too low. The card's OWN limits, read from the hardware this
-	// session (nvidia-smi -q -d TEMPERATURE, T.Limit values are offsets from current):
-	//   GPU Target Temperature Specification : 87°C   ← firmware's own management target
-	//   Max Operating  ≈ 89°C   Slowdown ≈ 91°C   Shutdown ≈ 101°C
-	// So the daemon was cutting power 4°C BELOW the point the firmware itself considers
-	// normal, and 8°C below hardware slowdown — which never fired even at 84°C. We now
-	// hand the 87→89°C band back to the firmware, which manages it per-clock instead of
-	// by amputating 35W of TGP.
-	gpuTGPThermalDownC = 87.0 // at/above this, drop 90W → 55W
-	gpuTGPThermalUpC   = 82.0 // only return to 90W below this (5°C deadband)
-
-	// [CHANGE: claude-code | 2026-09-14] BUG-160. Above this draw the dGPU core is
-	// demonstrably awake and doing work, so querying utilization.gpu costs nothing extra.
-	// Measured idle-in-D0 on this RTX 4050 is 2.5W, so 10W is ~4x headroom: no idle state
-	// can cross it, and any real 3D load clears it immediately. See readGPUStats.
-	dgpuActiveW = 10.0
-
-	// CPU beast-mode thresholds — catches CPU-heavy work (ML training, compilation)
-	cpuHighThreshPct   = 75.0
-	cpuHighThreshTicks = 10 // 20s at 2s poll
-	cpuLowThreshPct    = 25.0
-	cpuLowThreshTicks  = 30 // 60s at 2s poll
-	// [CHANGE: claude-code | 2026-05-24] Load-based Quiet idle detection.
-	// Balanced→Quiet when CPU+iGPU+dGPU all idle for 60s on AC.
-	// Quiet→Balanced immediately when any load rises.
-	quietIdleCPUPct  = 25.0 // CPU% threshold for idle
-	quietIdleIGPUPct = 15.0 // iGPU% threshold for idle (card2=AMD 780M)
-	quietIdleDGPUPct = 5.0  // dGPU% threshold for idle (card1=NVIDIA)
-	quietIdleTicks   = 30   // 60s sustained idle (30 × 2s) → drop to Quiet
-	// [CHANGE: claude-code | 2026-09-15] BUG-161: leaving Quiet needs its own, higher
-	// thresholds. Entry and exit used to share the numbers above, with no deadband — the
-	// same no-hysteresis latch BUG-157 fixed for GPU TGP. On an idle desktop the AMD 780M
-	// oscillates 4%↔17% just compositing, so the box fell into Quiet after its 60s of calm
-	// and bounced straight back out on the next tick. Measured over 20 minutes: four
-	// round trips, dwelling in Quiet 5s, 10s, 16s and 36s, and in all four the iGPU was the
-	// only signal that crossed — CPU never exceeded 19%.
-	//
-	// The cost is not the profile change. Each one calls asusctl, so asusd writes the ASUS
-	// platform profile, and the firmware answers by firing an ACPI NVPCF notify (Dynamic
-	// Boost renegotiating the CPU/GPU power split). The nvidia driver handles that in
-	// rm_acpi_nvpcf_notify → os_ref_dynamic_power → nv_indicate_not_idle, which RESUMES the
-	// discrete GPU out of D3cold. Confirmed by ftrace: every dGPU wake landed 1-3s after one
-	// of these switches, and the card then idled at ~2W for ~60s until RTD3 dropped it again.
-	// That is what kept an RTX 4050 "17% awake" on a machine doing nothing.
-	quietExitCPUPct  = 40.0
-	quietExitIGPUPct = 30.0
-	quietExitDGPUPct = 10.0
-	// Emergency thermal threshold
-	// [CHANGE: claude-code | 2026-05-24] BUG-055: raised from 85°C→92°C (ZoneHot entry raised to 87°C)
-	thermalEmergencyC = 92.0
-
-	// [CHANGE: claude-code | 2026-05-26] v4.0 Adaptive Governor constants.
-	//
-	// The governor sets a continuous CPU frequency cap based on smoothed load:
-	//   cap = baseCap + (smoothedLoad/100) × (maxCap - baseCap)
-	//
-	// At 0% load → baseCap (floor, power saving).
-	// At 100% load → maxCap (ceiling, full performance).
-	// Thermal zones still apply ZoneHot (87°C→3.0GHz) and Emergency (92°C→2.0GHz) as overrides.
-	//
-	// iGPU dominance: when iGPU is busier than CPU by >20%, apply a small CPU penalty
-	// (up to 0.3 GHz) to redistribute shared APU TDP toward the iGPU.
-	//
-	// Pre-allocation: when a known app launches, temporarily raise effective load estimate
-	// by the app's PreAllocPct for 30s, giving startup headroom without waiting for load to ramp.
-	adaptiveBaseCap            = 1800000 // kHz — floor cap when fully idle (1.8 GHz)
-	adaptiveMaxCapAC           = 0       // 0 = hardware max on AC (5.137 GHz)
-	adaptiveMaxCapBat          = 3500000 // kHz — max cap on battery (3.5 GHz, power saving)
-	adaptiveEMAAlpha           = 0.30    // EMA weight for new sample (0.7 old + 0.3 new)
-	adaptiveCapChangeThreshKHz = 150000  // only write sysfs if cap shifts by >150 MHz
-	preAllocDuration           = 30 * time.Second
-	// iGPU dominance: penalty per 1% of dominance delta, capped at 300 MHz total
-	dominancePenaltyPerPct = 12000 // kHz per 1% dominance (0.012 GHz/%)
-	dominanceMaxPenaltyKHz = 300000
-
-	// [CHANGE: claude-code | 2026-07-22] v4.4 interactive burst-boost tunables.
-	// Gated by LUMINOS_INTERACTIVE=1 (default OFF). When on, live user input briefly
-	// raises the effective-load estimate (→ higher cap) AND flips EPP to an eager mode so
-	// pointer/UI repaints ramp instantly. Both decay to the idle cap + EPP=power within
-	// interactiveWindow of the last input — the sustained/idle ceiling is NOT changed.
-	interactiveBonusPct      = 45.0                    // effective-load headroom injected on fresh input
-	interactiveWindow        = 1500 * time.Millisecond // bonus decays linearly to 0 over this window after last input
-	interactiveEPP           = "balance_performance"   // eager EPP applied only while interacting
-	interactiveInputThrottle = 100 * time.Millisecond  // min gap between lastInput timestamp updates (cheap)
-
-	// Thermal governor zones (ZoneCool→ZoneHot) with 5°C hysteresis for exit.
-	// Target: 45°C idle via EPP hints alone. Freq caps only for genuinely hot temps.
-	// On AC: ZoneWarm has no cap (fans at 100% from 70°C handle it). Only ZoneHot+ caps.
-	// On battery: caps start at 62°C — saves power and battery.
-	thermalHysteresisC        = 5.0
-	thermalDowngradeHoldTicks = 5 // must stay below exit threshold for 5 ticks (10s on AC) before downgrading zone
-
-	// AC thresholds — permissive, caps only when actually overheating
-	// [CHANGE: claude-code | 2026-05-24] BUG-055: raised Zone3 from 80°C→87°C.
-	// 8845HS TJmax=105°C. YouTube/normal load sits at 80-85°C with fans at 100%.
-	// Old 80°C threshold triggered 3.0GHz cap during normal use, causing oscillation+stutter.
-	thermalACZone1C = 60.0 // cool→mild on AC: EPP nudge only, no cap
-	thermalACZone2C = 72.0 // mild→warm on AC: no cap (fans 100% at 70°C handle cooling — BUG-055)
-	thermalACZone3C = 87.0 // warm→hot on AC:  3.0 GHz cap (was 80°C — raised, BUG-055)
-
-	// Battery thresholds — more aggressive to save power and extend range
-	thermalBatZone1C = 50.0 // cool→mild on bat: EPP=power (already set), no cap
-	thermalBatZone2C = 62.0 // mild→warm on bat: 3.5 GHz cap
-	thermalBatZone3C = 72.0 // warm→hot on bat:  2.5 GHz cap
-
-	// [CHANGE: claude-code | 2026-05-31] v4.1 — Thermal burst cooling
-	// [CHANGE: claude-code | 2026-06-08] exit raised 45°C→48°C (BUG: burst timed out every cycle)
-	//
-	// When chassis temp hits 52°C (below Zone1=60°C, so the zone system won't react),
-	// override the fan curve to 100% until the aluminium body cools by ~4°C to 48°C.
-	// The v5 curve alone is correct but the chassis stores heat — at 52°C the fans are at
-	// ~62% which isn't enough to pull the body back down quickly. Blasting 100% for
-	// up to 2 minutes achieves that without triggering the emergency thermal path.
-	//
-	// Exit at 48°C: background processes (forex bots, iGPU) keep the chassis at ~47-50°C
-	// idle, making 45°C unreachable within 2 min → burst always timed out → fans blasted
-	// every 30 min permanently. 48°C is achievable and breaks the timeout cycle.
-	// Cooldown: 30 min after any burst before re-triggering, prevents constant loudness.
-	thermalBurstTriggerC       = 52.0
-	thermalBurstExitC          = 48.0 // [CHANGE: claude-code | 2026-06-08] was 45°C — unreachable under load
-	thermalBurstMaxDuration    = 2 * time.Minute
-	thermalBurstCooldownPeriod = 30 * time.Minute // minimum quiet time between bursts
-
-	// [CHANGE: claude-code | 2026-05-31] v4.1 — Resource coordinator RAM threshold
-	// When available RAM falls below 20%, treat the deficit as extra effective CPU load
-	// to nudge the adaptive cap down and reduce memory allocation pressure.
-	ramPressureLowFrac = 0.20
+	// [CHANGE: claude-code | 2026-10-15] spectrum — the dial's files and event sources (DESIGN §3.3, §3.8).
+	pptDir           = "/sys/devices/platform/asus-nb-wmi"
+	profilePath      = "/sys/firmware/acpi/platform_profile"
+	suspendStatsPath = "/sys/power/suspend_stats/success"
+	dgpuStatusPath   = "/sys/bus/pci/devices/0000:01:00.0/power/runtime_status"
+	powerdInvocation = "/run/systemd/units/invocation:nvidia-powerd.service"
+	configFile       = "/etc/luminos/config.toml" // [power] overrides of Params (DESIGN §3.11)
+	// offload_start reply shape is frozen (CURRENT.md §5); the TGP manager that used it is gone.
+	offloadTGPTargetW = 90.0
+	logEvery          = 30 * time.Second
+	reportEvery       = 60 * time.Second
+	reportLevelDelta  = 0.05
+	sideEffectTimeout = 5 * time.Second  // iw / kscreen-doctor must never block the loop
+	fanRecheckAfter   = 60 * time.Second // asusd may apply curves after us at boot
+	eppRewriteTicks   = 3                // asusd's linked-EPP lands up to a few ticks after a profile change
 )
 
-// appProfile describes a known application's expected CPU load and launch headroom.
-// PreAllocPct is added to the smoothed load estimate for preAllocDuration after launch,
-// giving the app enough cap headroom to start up without being throttled.
-// It does NOT limit the app — it raises the frequency ceiling so startup feels smooth.
-type appProfile struct {
-	PreAllocPct float64 // extra % load to add to cap estimate at launch (e.g. 15 = +15%)
-}
+// pptFiles are written in this order with the same value (CONTRACTS.md); each is one WMI call.
+var pptFiles = [3]string{"ppt_pl1_spl", "ppt_pl2_sppt", "ppt_fppt"}
 
-// knownApps maps process comm names (from /proc/N/comm) to their launch profiles.
-// Update this table as new apps are added; unknown apps get no pre-alloc bonus.
-// [CHANGE: claude-code | 2026-05-26] v4.0 app history table
-var knownApps = map[string]appProfile{
-	"chrome":         {PreAllocPct: 20}, // Chrome GPU process + initial tab load
-	"terminal64.exe": {PreAllocPct: 15}, // MetaTrader 5 (Wine) — heavy on launch
-	"python.exe":     {PreAllocPct: 10}, // Forex bot bridge (Wine Python)
-	"python3":        {PreAllocPct: 10}, // hive-daemon, forex bot
-	"claude":         {PreAllocPct: 18}, // Claude Desktop (Electron)
-	"konsole":        {PreAllocPct: 8},
-	"kwin_wayland":   {PreAllocPct: 5},
-	"plasmashell":    {PreAllocPct: 8},
-	"code":           {PreAllocPct: 20}, // VS Code (Electron)
-	"wine64":         {PreAllocPct: 12},
-}
-
-// ThermalZone represents current CPU temperature zone.
-type ThermalZone int
-
-const (
-	ZoneCool ThermalZone = iota // <60°C  — no throttle (AC)
-	ZoneMild                    // 60-72°C — no cap (AC)
-	ZoneWarm                    // 72-87°C — no cap (fans at 100% handle it — BUG-055)
-	ZoneHot                     // >87°C  — 3.0 GHz cap (AC, below emergency 92°C)
-)
+// fanCurveV6 is the cpu-fan duty % per EC point (DESIGN §3.5) — verified read-only, never written.
+var fanCurveV6 = [8]int{0, 10, 20, 35, 52, 72, 88, 100}
 
 var (
-	lg        *logger.Logger
-	cfg       *config.Config
-	prevState PowerState
-	cpuCount  int
-
-	gpuHighTicks int
-	gpuLowTicks  int
-	cpuHighTicks int
-	cpuLowTicks  int
-	quietTicks   int // ticks of all-idle load → Quiet profile
-
-	currentThermalZone  ThermalZone = ZoneCool
-	thermalDownholdTick int         // consecutive ticks below exit threshold before downgrading
-	cpuHardwareMaxFreq  int         // read from sysfs at startup, kHz
-
-	// [CHANGE: claude-code | 2026-05-26] v4.0 adaptive governor state
-	smoothedCPULoad   float64   // EMA-smoothed CPU% (α=0.3)
-	prevAppliedCapKHz int       // last cap written to sysfs — avoid redundant writes
-	preAllocBonus     float64   // extra % added to load estimate (decays after preAllocDuration)
-	preAllocExpiry    time.Time // when preAllocBonus expires
-
-	// [CHANGE: claude-code | 2026-07-22] v4.4 interactive burst-boost state (gated by LUMINOS_INTERACTIVE=1)
-	interactiveBoostEnabled = os.Getenv("LUMINOS_INTERACTIVE") == "1" // default OFF — see v4.4 tunables
-	lastInputNanos          atomic.Int64                              // unix-nanos of most recent user input (mouse/keyboard); 0 = none seen
-	interactiveEPPSet       bool                                      // true while the eager interactive EPP is applied (avoids per-tick EPP writes)
+	lg                 *logger.Logger
+	cfg                *config.Config
+	cpuHardwareMaxFreq int // read from sysfs at startup, kHz
 
 	// /proc/stat snapshots for delta-based CPU load calculation
 	lastCPUStatIdle  uint64
 	lastCPUStatTotal uint64
 	lastCoreIdle     []uint64 // per-core idle snapshot (busiest-core detection)
 	lastCoreTotal    []uint64 // per-core total snapshot
-	smoothedMaxCore  float64  // EMA of busiest single-core load (α=adaptiveEMAAlpha)
-
-	// [CHANGE: claude-code | 2026-05-31] v4.1 — thermal burst cooling state
-	inThermalBurst      bool      // true while burst fan curve is active
-	thermalBurstStart   time.Time // when burst mode was entered
-	thermalBurstLastEnd time.Time // when last burst ended (enforces cooldown period)
-	thermalBurstProfile string    // profile the burst curve was applied to (need to revert correctly)
-	// [CHANGE: claude-code | 2026-09-26] BUG-190: every profile that got the burst curve.
-	// A mid-burst profile switch (AC unplug Balanced→Quiet) used to overwrite
-	// thermalBurstProfile, so exit restored only the last one and Balanced kept the
-	// 100% curve until the next restart — fans maxed at 37°C on replug.
-	thermalBurstProfiles = map[string]bool{}
-
-	// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU TGP dynamic switching state
-	currentGPUTGPW   float64   // current GPU power limit in watts (55 or 90)
-	gpuTGPLastSwitch time.Time // time of last TGP switch (hysteresis enforcement)
-	gpuTGPDownTick   int       // consecutive ticks of low power+util → revert
 
 	// [CHANGE: claude-code | 2026-06-28] v4.3 — weight-offload session pin (DECISION 23)
-	// Set true while the weight-offload inference engine holds a session open. When
-	// active, the dGPU is kept at full performance (clocks locked, TGP pinned high)
-	// so streamed-layer micro-gaps don't let the GPU downclock mid-token. Read by
-	// monitorLoop (atomic — set from the socket goroutine in handleMessage).
+	// Set true while the weight-offload inference engine holds a session open; the dial
+	// treats it as "dGPU busy" (DESIGN §3.7). Set from the socket goroutine, read by the loop.
 	offloadActive atomic.Bool
+
+	// [CHANGE: claude-code | 2026-10-15] spectrum — status snapshot (DESIGN §4): the loop
+	// writes it, the socket handler only ever reads it.
+	stateMu  sync.RWMutex
+	snapshot PowerState
+
+	wmiWrites   int       // successful ppt_* file writes since start (DESIGN §3.9)
+	lastPPTWarn time.Time // ppt write failures warn at most once per minute
+	notifyConn  *net.UnixConn
+	acWant      = make(chan bool, 1) // latest requested AC state for the side-effect worker (coalesced)
 )
+
+// dial is the I/O layer's memory around the pure core. One instance, touched only by the
+// loop goroutine (startup runs its first tick before the goroutine starts).
+// [CHANGE: claude-code | 2026-10-15] spectrum
+type dial struct {
+	p             Params
+	s             State
+	assertProfile string // config assert_profile; "" = never write the profile (default)
+	tctlPath      string // k10temp temp1_input, resolved by hwmon name
+	igpuPath      string // gpu_busy_percent of the DRM card with vendor 0x1002
+	socPath       string // BAT*/capacity
+
+	last          time.Time
+	profile       string // raw sysfs platform_profile seen last tick
+	suspends      string // suspend_stats/success seen last tick
+	dgpu          string // runtime_status this tick
+	onAC          bool
+	extOwner      bool
+	pptOK         bool // last ppt_* write succeeded on all three files
+	pptLastOK     int  // last value successfully written (status ppt_w)
+	eppTicks      int  // remaining forced EPP re-writes after a profile change
+	event         bool // something worth a log line happened this tick
+	lastLog       time.Time
+	lastReport    time.Time
+	reportedLevel float64
+}
 
 func main() {
 	var err error
@@ -328,58 +149,45 @@ func main() {
 		fmt.Fprintf(os.Stderr, "luminos-power: config load: %v\n", err)
 		os.Exit(1)
 	}
-
 	lg, err = logger.New("luminos-power", cfg.Log.Dir+"/power.log", logger.INFO)
 	if err != nil {
 		lg = logger.NewStdout("luminos-power", logger.INFO)
 	}
-
-	cpuCount = runtime.NumCPU()
 	cpuHardwareMaxFreq = readCPUHardwareMax()
-	prevAppliedCapKHz = cpuHardwareMaxFreq // start uncapped
 	lg.Info("CPU hardware max freq: %d kHz (%.2f GHz)", cpuHardwareMaxFreq, float64(cpuHardwareMaxFreq)/1e6)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	l := listen()
+	d := newDial()
+	lg.Info("luminos-power v5.0 spectrum started — one dial %g–%g W, thi %g C, listening on %s",
+		d.p.PminW, d.p.PmaxAcW, d.p.ThiAcC, cfg.Sockets.Power)
+	d.startup()
 
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		d.run(ctx)
+	}()
+	socket.Serve(ctx, l, handleMessage)
+	<-loopDone
+	shutdown()
+	os.Remove(cfg.Sockets.Power)
+	lg.Info("luminos-power stopped")
+}
+
+// listen creates /run/luminos and the power socket, or exits.
+func listen() net.Listener {
 	if err := os.MkdirAll("/run/luminos", 0755); err != nil {
 		lg.Error("create /run/luminos: %v", err)
 		os.Exit(1)
 	}
-
 	l, err := socket.NewListener(cfg.Sockets.Power)
 	if err != nil {
 		lg.Error("listen: %v", err)
 		os.Exit(1)
 	}
-
-	lg.Info("luminos-power v4.2 started — Adaptive Dual Governor + Thermal Burst + Resource Coordinator + GPU TGP, listening on %s", cfg.Sockets.Power)
-
-	// Apply fan curves to all profiles once at startup
-	applyAggressiveFanCurve("balanced")
-	applyAggressiveFanCurve("quiet")
-
-	// Read current GPU TGP and initialise state from it (handles daemon restarts)
-	initGPUTGP()
-
-	// Set initial power state based on current AC state
-	onAC := readACState()
-	applyACTransition(onAC)
-
-	// [CHANGE: claude-code | 2026-06-30] Conductor (DECISION 24) — gated OFF by default.
-	// Only builds and takes over the fan/PCIe levers when launched with
-	// LUMINOS_CONDUCTOR=1. When off, conductor stays nil and monitorLoop is unchanged.
-	if conductorEnabled {
-		conductor = NewConductor()
-		defer conductor.Revert() // never leave the GPU pinned / fan on a stale duty
-		lg.Info("CONDUCTOR ENABLED (LUMINOS_CONDUCTOR=1) — closed-loop fan + workload PCIe pin active")
-	}
-
-	go monitorLoop(ctx)
-	socket.Serve(ctx, l, handleMessage)
-
-	os.Remove(cfg.Sockets.Power)
-	lg.Info("luminos-power stopped")
+	return l
 }
 
 func handleMessage(msg socket.Message) socket.Message {
@@ -387,7 +195,7 @@ func handleMessage(msg socket.Message) socket.Message {
 	case "ping":
 		return replyOK(msg, map[string]string{"pong": "ok", "daemon": "luminos-power"})
 	case "status":
-		b, _ := json.Marshal(prevState)
+		b, _ := json.Marshal(getSnapshot())
 		return socket.Message{
 			Type:      "status_response",
 			Payload:   json.RawMessage(b),
@@ -399,7 +207,7 @@ func handleMessage(msg socket.Message) socket.Message {
 	// offload_stop on teardown. The pin is fully reversible.
 	case "offload_start":
 		applyOffloadPin(true)
-		return replyOK(msg, map[string]interface{}{"offload": "started", "tgp_target_w": gpuTGPHighW})
+		return replyOK(msg, map[string]interface{}{"offload": "started", "tgp_target_w": offloadTGPTargetW})
 	case "offload_stop":
 		applyOffloadPin(false)
 		return replyOK(msg, map[string]string{"offload": "stopped"})
@@ -410,920 +218,453 @@ func handleMessage(msg socket.Message) socket.Message {
 	}
 }
 
-// monitorLoop is the main control loop for luminos-power v4.0.
-//
-// Sleep strategy (replaces fixed 2s ticker):
-//   - Idle (all loads <20%): block on PSI poll up to 10s — wakes only on CPU pressure event
-//   - Active (20-60%): 2s sleep
-//   - Near cap (>60%): 500ms tight loop — fast trigger detection
-//
-// Cap strategy:
-//
-//	adaptive cap = baseCap + (effectiveLoad/100) × (maxCap - baseCap), EMA smoothed
-//	effectiveLoad = smoothedCPULoad + preAllocBonus (decays 30s after app launch)
-//	thermal override: ZoneHot (87°C) → 3.0 GHz cap replaces adaptive cap if lower
-//	emergency: 92°C → 2.0 GHz, Quiet profile — overrides everything
-//
-// [CHANGE: claude-code | 2026-05-26] v4.0
-func monitorLoop(ctx context.Context) {
-	// PSI watcher — event-driven wake on CPU pressure.
-	// Falls back to time.After if /proc/pressure/cpu is unavailable.
-	psiFile, psiErr := openPSIWatcher()
-	if psiErr != nil {
-		lg.Warn("PSI watcher unavailable (%v) — using time-based sleep", psiErr)
-	} else {
-		lg.Info("PSI watcher active — event-driven idle sleep")
-		defer psiFile.Close()
+// --- the loop: sense → Step → apply → publish ---
+// [CHANGE: claude-code | 2026-10-15] spectrum (DESIGN §3.2, §3.3, §3.8)
+
+// newDial resolves every sensor path once, by name/vendor, never by card or hwmon number.
+func newDial() *dial {
+	d := &dial{p: DefaultParams(cpuHardwareMaxFreq)}
+	d.assertProfile = loadParamOverrides(&d.p)
+	if h := hwmonByName("k10temp"); h != "" {
+		d.tctlPath = h + "/temp1_input"
 	}
-
-	// Exec watcher — /proc scanner detects new app launches.
-	ew := newExecWatcher()
-	go ew.run(ctx)
-
-	// [CHANGE: claude-code | 2026-07-22] v4.4 Input watcher — detects user interaction
-	// (mouse/touchpad/keyboard) to drive the interactive burst-boost. Gated OFF by default.
-	if interactiveBoostEnabled {
-		startInputWatcher(ctx)
+	d.igpuPath = igpuBusyPath()
+	if bats, _ := filepath.Glob("/sys/class/power_supply/BAT*/capacity"); len(bats) > 0 {
+		d.socPath = bats[0]
 	}
+	d.profile, d.suspends, d.onAC = readTrim(profilePath), readTrim(suspendStatsPath), readACState()
+	if d.tctlPath == "" || d.igpuPath == "" {
+		lg.Warn("sensor missing (reads 0): tctl=%q igpu=%q — check k10temp hwmon / DRM vendor 0x1002", d.tctlPath, d.igpuPath)
+	}
+	lg.Info("sensors: tctl=%s (%s) igpu=%s soc=%s profile=%s", d.tctlPath,
+		readTrim(filepath.Dir(d.tctlPath)+"/temp1_label"), d.igpuPath, d.socPath, titleCase(d.profile))
+	return d
+}
 
+// startup is DESIGN §3.8: governor once, AC side effects, one forced tick (writes EPP,
+// cap = hwmax and PPT = PminW), read-only fan-curve check, READY=1. No profile write,
+// no curve write, no nvidia-smi.
+func (d *dial) startup() {
+	setAllGovernor("powersave")
+	if d.assertProfile != "" { // off by default (DESIGN §3.5, §7 Q10)
+		setProfile(d.assertProfile)
+	}
+	d.tick(time.Now())
+	if !checkFanCurve(false) {
+		time.AfterFunc(fanRecheckAfter, func() { checkFanCurve(true) })
+	}
+	sdNotify("READY=1")
+	go acWorker()
+	requestAC(d.onAC) // side effects run after READY=1, off the loop goroutine
+	if cfg.Power.PollIntervalSecs != 1 {
+		lg.Info("poll_interval_secs=%d ignored — the tick is fixed at %gs (re-plan ruling)", cfg.Power.PollIntervalSecs, d.p.TickS)
+	}
+}
+
+// run is the fixed ticker at p.TickS; config poll_interval_secs is ignored (re-plan ruling).
+func (d *dial) run(ctx context.Context) {
+	t := time.NewTicker(time.Duration(d.p.TickS * float64(time.Second)))
+	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case now := <-t.C:
+			d.tick(now)
+			sdNotify("WATCHDOG=1")
 		}
-
-		// === SENSE ===
-		onAC := readACState()
-		temp := readCPUTemp()
-		igpuLoad := readIGPULoad() // AMD 780M
-		// [CHANGE: claude-code | 2026-07-03] dGPU RTD3 power-off completion (BUG-078):
-		// when the discrete GPU is runtime-suspended (D3cold, ~0W) do NOT sense or manage it.
-		// readGPUStats' nvidia-smi fallback AND setGPUTGP (nvidia-smi -pl) both WAKE a sleeping
-		// card — that was re-waking the dGPU every monitor tick, creating a wake/sleep loop that
-		// pinned the card at D0 and blocked true 0W idle. A suspended card is idle by definition,
-		// so report 0 load/power/temp and skip all dGPU access. During an offload session the card
-		// is actively in use, so always sense/manage it (offloadActive short-circuits the guard).
-		// [CHANGE: claude-code | 2026-09-14] BUG-160: that guard alone is one-way. It keeps us
-		// off a card that is ALREADY suspended, but every nvidia-smi read resets the driver's
-		// autosuspend timer, and this loop polls up to twice a second — far shorter than the
-		// ~50s the card needs untouched before it drops to D3cold. So the card could never
-		// REACH suspended and the guard could never engage: the daemon's own monitoring was
-		// what pinned the dGPU at D0 forever. dgpuHasClients is the missing half — it answers
-		// "is the dGPU actually in use" without touching the card, so when nothing is using it
-		// we go quiet and let RTD3 do its job.
-		var dgpuLoad, gpuPowerW, gpuTempC float64
-		if offloadActive.Load() || (!dgpuRuntimeSuspended() && dgpuHasClients()) {
-			// [CHANGE: claude-code | 2026-09-13] BUG-157: one nvidia-smi call now yields
-			// util + power + temp. `dgpuLoad` used to come from a sysfs attribute that does
-			// not exist on an NVIDIA node, so it was always 0 — which made beast mode
-			// unreachable from GPU load and let the Quiet-idle branch throttle the box
-			// mid-game. See readGPUStats.
-			// [CHANGE: claude-code | 2026-06-03] v4.2 — GPU power draw and temp for TGP management
-			dgpuLoad, gpuPowerW, gpuTempC = readGPUStats()
-			// [CHANGE: claude-code | 2026-06-28] v4.3 — during an offload session, pin TGP to the
-			// 90W ceiling instead of letting it idle-revert in the micro-gaps between streamed
-			// layers. Thermal safety still wins: drop to 55W if the GPU reaches the thermal ceiling.
-			// (Clock lock + persistence are applied immediately in applyOffloadPin; this only owns
-			// the TGP write so currentGPUTGPW stays single-writer — no data race.)
-			// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 3: deadband here too. This
-			// branch previously dropped at ≥83°C and re-raised the instant temp fell below
-			// 83°C, i.e. the same no-deadband latch as manageGPUTGP — and being an
-			// unconditional per-tick reassertion it could flip every 2s, not every 60s.
-			if offloadActive.Load() {
-				if gpuTempC >= gpuTGPThermalDownC {
-					if currentGPUTGPW != gpuTGPLowW {
-						lg.Warn("offload: GPU %.1f°C ≥ %.0f°C thermal ceiling → %.0fW", gpuTempC, gpuTGPThermalDownC, gpuTGPLowW)
-						setGPUTGP(gpuTGPLowW)
-					}
-				} else if currentGPUTGPW != gpuTGPHighW && gpuTempC < gpuTGPThermalUpC {
-					setGPUTGP(gpuTGPHighW)
-				}
-			} else {
-				manageGPUTGP(gpuPowerW, dgpuLoad, gpuTempC, onAC)
-			}
-		}
-		// [CHANGE: claude-code | 2026-05-31] ROOT-BUG: drive cap off busiest core, not 16-core avg.
-		// scaling_max_freq is a per-core ceiling — a single pinned thread (7-zip, Wine, compiler)
-		// hits 100% on one core while the 16-core average collapses to ~6%, starving the cap.
-		cpuLoad, maxCoreLoad := readCPULoad()
-
-		// EMA smoothing on both signals — prevents snap decisions on spikes.
-		// First tick (==0): seed from raw to avoid starting at 0%.
-		if smoothedCPULoad == 0 && cpuLoad > 0 {
-			smoothedCPULoad = cpuLoad
-		} else {
-			smoothedCPULoad = (1-adaptiveEMAAlpha)*smoothedCPULoad + adaptiveEMAAlpha*cpuLoad
-		}
-		if smoothedMaxCore == 0 && maxCoreLoad > 0 {
-			smoothedMaxCore = maxCoreLoad
-		} else {
-			smoothedMaxCore = (1-adaptiveEMAAlpha)*smoothedMaxCore + adaptiveEMAAlpha*maxCoreLoad
-		}
-
-		// [CHANGE: claude-code | 2026-06-30] Conductor tick (DECISION 24) — gated OFF
-		// by default. When enabled it owns the fan PID + PCIe pin off the SAME sensed
-		// signals (no extra sysfs reads). The legacy fan-curve / burst writes below
-		// no-op while it owns the fan (see conductorOwnsFan), so there is one writer.
-		if conductorEnabled && conductor != nil {
-			conductor.Tick(Signals{
-				OnAC:      onAC,
-				CPUTempC:  temp,
-				GPUTempC:  gpuTempC,
-				CPULoad:   cpuLoad,
-				DGPULoad:  dgpuLoad,
-				IGPULoad:  igpuLoad,
-				GPUPowerW: gpuPowerW,
-			})
-		}
-
-		// Drain exec events → update pre-alloc bonus.
-		// Takes the max bonus of all apps launched since last tick.
-	drainExec:
-		for {
-			select {
-			case appName := <-ew.events:
-				if p, ok := knownApps[appName]; ok {
-					if p.PreAllocPct > preAllocBonus {
-						preAllocBonus = p.PreAllocPct
-					}
-					preAllocExpiry = time.Now().Add(preAllocDuration)
-					lg.Info("exec: %s → pre-alloc +%.0f%% for %v", appName, p.PreAllocPct, preAllocDuration)
-				}
-			default:
-				break drainExec
-			}
-		}
-		if time.Now().After(preAllocExpiry) {
-			preAllocBonus = 0
-		}
-
-		// [CHANGE: claude-code | 2026-07-22] v4.4 interactive burst-boost signal.
-		// Computed once per tick; folded into effectiveLoad in the adaptive block below
-		// and used to keep the loop responsive (500ms band) while the user is interacting.
-		// Returns (0, false) when gated OFF, so this is inert unless LUMINOS_INTERACTIVE=1.
-		iBonus, iActive := interactiveBoost()
-
-		// === AC TRANSITION ===
-		if onAC != prevState.OnAC {
-			applyACTransition(onAC)
-			cpuHighTicks = 0
-			cpuLowTicks = 0
-			quietTicks = 0
-			smoothedCPULoad = cpuLoad // reset EMA on AC change — old average no longer valid
-			smoothedMaxCore = maxCoreLoad
-			prevAppliedCapKHz = cpuHardwareMaxFreq
-		}
-
-		// === BEAST MODE ===
-		// Uses dGPU only (iGPU load = compositing, not gaming).
-		// Beast mode disables the adaptive governor and runs uncapped.
-		if onAC && prevState.Profile != "Performance" {
-			gpuProfile := applyGamingDetection(dgpuLoad, prevState.Profile)
-			cpuProfile := applyCPUBeastDetection(cpuLoad, prevState.Profile)
-			if gpuProfile == "Performance" || cpuProfile == "Performance" {
-				src := "gpu"
-				if cpuProfile == "Performance" {
-					src = "cpu"
-				}
-				lg.Info("beast mode → Performance (trigger: %s, cpu=%.0f%%, dgpu=%.0f%%)", src, cpuLoad, dgpuLoad)
-				setProfile("Performance")
-				setEPPAfterAsusctl("performance")
-				setAllMaxFreq(0) // full boost — adaptive governor suspended
-				prevAppliedCapKHz = cpuHardwareMaxFreq
-				currentThermalZone = ZoneCool
-				thermalDownholdTick = 0
-				quietTicks = 0
-				updateState(onAC, temp, dgpuLoad, "performance", "Performance")
-				sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
-				continue
-			}
-		} else if onAC && prevState.Profile == "Performance" {
-			gpuProfile := applyGamingDetection(dgpuLoad, "Performance")
-			cpuProfile := applyCPUBeastDetection(cpuLoad, "Performance")
-			if gpuProfile == "Balanced" && cpuProfile == "Balanced" {
-				lg.Info("beast mode exit → Balanced (cpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, dgpuLoad)
-				setProfile("Balanced")
-				applyAggressiveFanCurve("balanced") // re-apply: asusctl loses custom curve on profile switch
-				currentThermalZone = ZoneCool
-				thermalDownholdTick = 0
-				quietTicks = 0
-				setEPPAfterAsusctl("power")
-				updateState(onAC, temp, dgpuLoad, "power", "Balanced")
-				sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
-				continue
-			}
-		}
-
-		// === QUIET IDLE DETECTION (AC, non-Performance) ===
-		// Balanced→Quiet: all loads idle for 60s. Quiet→Balanced: immediate on load.
-		if onAC && prevState.Profile == "Balanced" {
-			if cpuLoad < quietIdleCPUPct && igpuLoad < quietIdleIGPUPct && dgpuLoad < quietIdleDGPUPct {
-				quietTicks++
-				if quietTicks >= quietIdleTicks {
-					quietTicks = 0
-					lg.Info("idle → Quiet (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
-					setProfile("Quiet")
-					applyAggressiveFanCurve("quiet") // re-apply: asusctl loses custom curve on profile switch
-					updateState(onAC, temp, dgpuLoad, prevState.EPP, "Quiet")
-					sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
-					continue
-				}
-			} else {
-				quietTicks = 0
-			}
-		} else if onAC && prevState.Profile == "Quiet" {
-			if cpuLoad >= quietExitCPUPct || igpuLoad >= quietExitIGPUPct || dgpuLoad >= quietExitDGPUPct {
-				quietTicks = 0
-				lg.Info("load → Balanced (cpu=%.0f%%, igpu=%.0f%%, dgpu=%.0f%%)", cpuLoad, igpuLoad, dgpuLoad)
-				setProfile("Balanced")
-				applyAggressiveFanCurve("balanced") // re-apply: asusctl loses custom curve on profile switch
-				updateState(onAC, temp, dgpuLoad, prevState.EPP, "Balanced")
-				sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
-				continue
-			}
-		}
-
-		// === THERMAL BURST COOLING ===
-		// [CHANGE: claude-code | 2026-05-31] v4.1
-		//
-		// Handles the aluminium heat-soak problem: the v5 curve hits ~62% at 52°C which
-		// isn't enough fan to pull the chassis back to the 40°C idle target. At 52°C we're
-		// still below Zone1 (60°C) so the zone system does nothing. This burst mode fills
-		// that gap: slam fans to 100% for a few minutes until the body cools down, then
-		// restore the normal v5 curve so idle stays quiet again.
-		//
-		// Skipped during Performance (beast mode handles its own thermal).
-		// Skipped when temp >= thermalEmergencyC (emergency path takes over).
-		if prevState.Profile != "Performance" && temp < thermalEmergencyC {
-			profileLower := strings.ToLower(prevState.Profile)
-			if !inThermalBurst {
-				// Respect cooldown: don't re-trigger within 30 min of last burst.
-				cooldownDone := thermalBurstLastEnd.IsZero() ||
-					time.Since(thermalBurstLastEnd) >= thermalBurstCooldownPeriod
-				if temp >= thermalBurstTriggerC && cooldownDone {
-					inThermalBurst = true
-					thermalBurstStart = time.Now()
-					thermalBurstProfile = profileLower
-					thermalBurstProfiles[profileLower] = true
-					lg.Info("thermal burst START: %.1f°C ≥ %.0f°C — 100%% fans until %.0f°C or 2min (profile=%s)",
-						temp, thermalBurstTriggerC, thermalBurstExitC, profileLower)
-					applyBurstFanCurve(profileLower)
-				} else if temp >= thermalBurstTriggerC && !cooldownDone {
-					remaining := thermalBurstCooldownPeriod - time.Since(thermalBurstLastEnd)
-					lg.Info("thermal burst suppressed: %.1f°C but in cooldown — next burst in %v",
-						temp, remaining.Round(time.Minute))
-				}
-			} else {
-				// Re-apply burst curve if profile changed mid-burst (e.g. Balanced→Quiet).
-				if profileLower != thermalBurstProfile {
-					thermalBurstProfile = profileLower
-					thermalBurstProfiles[profileLower] = true
-					applyBurstFanCurve(profileLower)
-				}
-				elapsed := time.Since(thermalBurstStart)
-				cooledDown := temp <= thermalBurstExitC
-				timedOut := elapsed >= thermalBurstMaxDuration
-				if cooledDown || timedOut {
-					inThermalBurst = false
-					thermalBurstLastEnd = time.Now()
-					if cooledDown {
-						lg.Info("thermal burst DONE: %.1f°C ≤ %.0f°C after %v — v5 curve restored (next burst in 30min)",
-							temp, thermalBurstExitC, elapsed.Round(time.Second))
-					} else {
-						lg.Warn("thermal burst TIMEOUT after %v (still %.1f°C) — v5 curve restored (next burst in 30min)",
-							elapsed.Round(time.Second), temp)
-					}
-					restoreBurstProfiles()
-				}
-			}
-		} else if inThermalBurst && prevState.Profile == "Performance" {
-			// Beast mode kicked in while burst was active — revert the burst curve
-			// (beast mode manages its own thermal; we don't want to override asusctl Performance fans).
-			inThermalBurst = false
-			thermalBurstLastEnd = time.Now()
-			lg.Info("thermal burst cancelled: beast mode active")
-			restoreBurstProfiles() // BUG-190: the old code never reverted here
-		}
-
-		// === EMERGENCY THERMAL ===
-		// Overrides adaptive governor entirely.
-		emergencyThreshC := thermalEmergencyC
-		if prevState.Profile == "Performance" {
-			emergencyThreshC = 95.0 // TJmax 105°C, 95°C is safe under gaming load
-		}
-		if temp > emergencyThreshC {
-			if prevState.Profile == "Performance" {
-				lg.Warn("%.1f°C > %.0f°C in beast mode — throttle 3.5GHz", temp, emergencyThreshC)
-				setAllMaxFreq(3500000)
-				prevAppliedCapKHz = 3500000
-			} else {
-				lg.Warn("%.1f°C > %.0f°C — Emergency: Quiet + 2GHz cap", temp, thermalEmergencyC)
-				setProfile("Quiet")
-				setAllEPP("power")
-				setAllMaxFreq(2000000)
-				prevAppliedCapKHz = 2000000
-				updateState(onAC, temp, dgpuLoad, "power", "Quiet")
-			}
-			sleepAdaptive(ctx, psiFile, smoothedCPULoad, igpuLoad)
-			continue
-		}
-
-		// demand is hoisted here so the bottom sleepAdaptive can use it regardless of profile.
-		// Beast-mode and quiet-idle checks above use raw cpuLoad (average) intentionally.
-		demand := math.Max(smoothedCPULoad, smoothedMaxCore)
-
-		// === ADAPTIVE GOVERNOR (non-Performance, non-Emergency) ===
-		// Advance thermal zone for ZoneHot detection (only zone with a cap on AC).
-		// Then compute the final cap as min(adaptiveCap, thermalCap).
-		if prevState.Profile != "Performance" {
-			advanceThermalZone(temp, onAC)
-
-			// Effective load = max(avg, busiest-core) + pre-alloc headroom (capped at 100%).
-			// Using the busiest-core signal here is the key fix: a single-threaded 7-zip/Wine
-			// extract pins one core at ~100% while the 16-core average sits near 6% — without
-			// this max(), the cap would stay near 1.8 GHz and starve the hot core entirely.
-			// Beast-mode and quiet-idle detection remain average-driven (intentional).
-			effectiveLoad := math.Min(demand+preAllocBonus, 100)
-
-			// [CHANGE: claude-code | 2026-07-22] v4.4 interactive burst-boost:
-			// live input lifts the cap via effectiveLoad headroom, and flips EPP to an
-			// eager mode so the core sprints to the (now higher) cap. Both revert within
-			// interactiveWindow of the last input. EPP is written only on transitions to
-			// avoid per-tick sysfs churn. Suppressed in Performance/Emergency (those paths
-			// continue before reaching here). On battery the cap still clamps to maxCapBat.
-			if iBonus > 0 {
-				effectiveLoad = math.Min(effectiveLoad+iBonus, 100)
-			}
-			if interactiveBoostEnabled {
-				if iActive && !interactiveEPPSet {
-					setAllEPP(interactiveEPP)
-					interactiveEPPSet = true
-				} else if !iActive && interactiveEPPSet {
-					setAllEPP(prevState.EPP) // restore idle EPP (power)
-					interactiveEPPSet = false
-				}
-			}
-
-			// [CHANGE: claude-code | 2026-05-31] v4.1 Resource coordinator: RAM pressure.
-			// When available RAM < 20% and the machine is warm, treat the deficit as extra
-			// effective load to nudge the CPU cap down. Reduces memory allocation rate and
-			// gives the kernel more breathing room before we hit swap pressure.
-			// Scale: each 1% below 20% threshold → +2% effective load, capped at +30%.
-			ramAvailFrac := readRAMPressure()
-			if ramAvailFrac < ramPressureLowFrac && temp > 45.0 {
-				ramBonus := math.Min((ramPressureLowFrac-ramAvailFrac)*200.0, 30.0)
-				effectiveLoad = math.Min(effectiveLoad+ramBonus, 100)
-				lg.Info("resource coord: RAM %.0f%% avail → +%.0f%% effective load (cap nudged down)",
-					ramAvailFrac*100, ramBonus)
-			}
-
-			adaptiveCap := computeAdaptiveCap(effectiveLoad, igpuLoad, onAC)
-
-			// Thermal override: ZoneHot applies a hard cap that adaptive governor must respect.
-			// ZoneCool/ZoneMild/ZoneWarm have no cap — fans handle it (BUG-055).
-			thermalCap := thermalCapForCurrentZone(onAC)
-			finalCap := adaptiveCap
-			if thermalCap > 0 && thermalCap < adaptiveCap {
-				finalCap = thermalCap
-			}
-
-			// Smooth cap transitions: 70% old + 30% target — prevents rapid sysfs churn.
-			smoothedCap := int(0.7*float64(prevAppliedCapKHz) + 0.3*float64(finalCap))
-
-			// Only write sysfs if the change is meaningful (>150 MHz).
-			if abs(smoothedCap-prevAppliedCapKHz) > adaptiveCapChangeThreshKHz {
-				setAllMaxFreq(smoothedCap)
-				prevAppliedCapKHz = smoothedCap
-				lg.Info("adaptive cap → %.2f GHz (avg=%.0f%% smoothAvg=%.0f%% maxCore=%.0f%% smoothMax=%.0f%% prealloc=%.0f%% igpu=%.0f%%)",
-					float64(smoothedCap)/1e6, cpuLoad, smoothedCPULoad, maxCoreLoad, smoothedMaxCore, preAllocBonus, igpuLoad)
-			}
-		}
-
-		updateState(onAC, temp, dgpuLoad, prevState.EPP, prevState.Profile)
-
-		// [CHANGE: claude-code | 2026-05-31] v4.1 System pressure index (informational log).
-		// Combined score 0-100: thermal(40%) + cpu(25%) + gpu(20%) + ram(15%).
-		// Not used for decisions yet — gives a single health number to tail in logs.
-		{
-			ramFrac := readRAMPressure()
-			spi := systemPressureIndex(temp, smoothedCPULoad, igpuLoad, dgpuLoad, ramFrac)
-			if spi > 60 || inThermalBurst {
-				lg.Info("SPI=%.0f  temp=%.1f°C  cpu=%.0f%%  igpu=%.0f%%  dgpu=%.0f%%  ram=%.0f%%avail  burst=%v",
-					spi, temp, smoothedCPULoad, igpuLoad, dgpuLoad, ramFrac*100, inThermalBurst)
-			}
-		}
-
-		// Use demand (max of avg/maxCore) so single-threaded extract keeps the loop in 500ms
-		// band — not 10s PSI idle sleep — while the cap EMA ramps up.
-		// [CHANGE: claude-code | 2026-07-22] v4.4 while interacting, force the fast band so
-		// the cap/EPP track input instead of napping in the 2s/10s idle bands.
-		sleepLoad := demand
-		if iActive && sleepLoad < 60 {
-			sleepLoad = 60
-		}
-		sleepAdaptive(ctx, psiFile, sleepLoad, igpuLoad)
 	}
 }
 
-// applyACTransition handles the full set of changes when AC state changes.
-// Called at startup and on every AC plug/unplug event.
-func applyACTransition(onAC bool) {
-	// Reset thermal zone, hold counter, freq cap, and idle counter on any AC transition
-	currentThermalZone = ZoneCool
-	thermalDownholdTick = 0
-	quietTicks = 0
-	setAllMaxFreq(0)
+func (d *dial) tick(now time.Time) {
+	in := d.sense(now)
+	if in.OnAC != d.onAC {
+		d.onAC, d.event = in.OnAC, true
+		requestAC(in.OnAC)
+	}
+	var o Outputs
+	d.s, o = Step(d.p, d.s, in)
+	d.apply(o)
+	d.publish(now, in, o)
+}
 
+// sense builds Inputs from the six cheap reads of DESIGN §3.3. Never ppt_* read-back,
+// never fan rpm, never nvidia-smi.
+func (d *dial) sense(now time.Time) Inputs {
+	dt := d.p.TickS
+	if !d.last.IsZero() {
+		dt = now.Sub(d.last).Seconds() // monotonic
+	}
+	d.last = now
+	avg, maxCore := readCPULoad()
+	in := Inputs{DT: dt, UtilAvg: avg / 100, UtilMax: maxCore / 100, SOC: 1,
+		TempC: readFloat(d.tctlPath) / 1000, IGPUBusy: readFloat(d.igpuPath) / 100, OnAC: readACState()}
+	if !in.OnAC && d.socPath != "" {
+		in.SOC = readFloat(d.socPath) / 100
+	}
+	d.dgpu = readTrim(dgpuStatusPath)
+	in.DGPUBusy = d.dgpu == "active" && (offloadActive.Load() || dgpuHasClients())
+	_, err := os.Stat(powerdInvocation)
+	in.PPTOwnerExternal = err == nil
+	in.ProfileChanged, in.Resumed = d.events(readTrim(profilePath), readTrim(suspendStatsPath), dt, in.PPTOwnerExternal)
+	return in
+}
+
+// events detects profile change, resume and PPT-owner edges, logging each once.
+func (d *dial) events(profile, suspends string, dt float64, ext bool) (changed, resumed bool) {
+	if profile != d.profile {
+		lg.Info("profile changed externally %s → %s — PPT and EPP re-asserted", titleCase(d.profile), titleCase(profile))
+		d.profile, changed = profile, true
+	}
+	switch {
+	case suspends != d.suspends:
+		lg.Info("resumed (suspend_stats %s→%s, dt=%.0fs) — PPT, EPP and cap re-asserted", d.suspends, suspends, dt)
+		d.suspends, resumed = suspends, true
+	case dt > 5:
+		lg.Warn("loop stalled %.0fs — re-seeded, PPT, EPP and cap re-asserted", dt)
+		resumed = true
+	}
+	if changed {
+		d.eppTicks = eppRewriteTicks
+	}
+	if ext != d.extOwner {
+		lg.Info("ppt owner → %s", ownerName(ext))
+		d.extOwner = ext
+		d.event = true
+	}
+	d.event = d.event || changed || resumed
+	return changed, resumed
+}
+
+// apply writes exactly what Outputs says and nothing else (CONTRACTS.md boundary).
+// A failed PPT write is retried next tick by invalidating the core's PptWritten (state only;
+// spectrum.go is untouched). EPP is re-written for a few ticks after a profile change
+// because asusd's platform_profile_linked_epp lands asynchronously (cheap sysfs, no BIOS).
+func (d *dial) apply(o Outputs) {
+	if o.WritePPT {
+		if d.pptOK = writePPT(o.PptW, o.PptW, o.PptW); d.pptOK {
+			d.pptLastOK = o.PptW
+		} else {
+			d.s.PptWritten = -1
+		}
+	}
+	if o.WriteFreq {
+		setAllMaxFreq(o.FreqCapKHz)
+	}
+	if o.WriteEPP {
+		setAllEPP(o.EPP)
+	} else if d.eppTicks > 0 {
+		setAllEPP(o.EPP)
+		d.eppTicks--
+	}
+}
+
+// publish updates the snapshot, logs every 30 s or on an event, and reports to luminos-ai
+// on a ≥ 5 % level change or every 60 s (DESIGN §3.10, fixes NEW-5).
+func (d *dial) publish(now time.Time, in Inputs, o Outputs) {
+	ps := PowerState{OnAC: in.OnAC, CPUTempC: in.TempC, EPP: o.EPP, Profile: titleCase(d.profile), UpdatedAt: now,
+		Level: o.Level, PptW: d.pptLastOK, PptTargetW: o.PptW, PPTWriteOK: d.pptOK, PmaxW: o.PmaxW, TempTargetC: o.TargetTempC,
+		Demand: o.Demand, Binding: o.Binding, FreqCapKHz: o.FreqCapKHz, DGPU: d.dgpu,
+		PPTOwner: ownerName(in.PPTOwnerExternal), WMIWritesTotal: wmiWrites}
+	setSnapshot(ps)
+	if d.event || now.Sub(d.lastLog) >= logEvery {
+		lg.Info("%s", spectrumLine(ps))
+		d.lastLog = now
+	}
+	if d.event || math.Abs(ps.Level-d.reportedLevel) >= reportLevelDelta || now.Sub(d.lastReport) >= reportEvery {
+		reportToAI(ps)
+		d.lastReport, d.reportedLevel = now, ps.Level
+	}
+	d.event = false
+}
+
+// spectrumLine is the CONTRACTS.md log format; `profile=` keeps the Plasma widget alive.
+func spectrumLine(ps PowerState) string {
+	ac := 0
+	if ps.OnAC {
+		ac = 1
+	}
+	return fmt.Sprintf("spectrum: level=%.0f%% ppt=%dW tgt=%dW pmax=%.0fW temp=%.1fC thi=%.0fC demand=%.2f binding=%s dgpu=%s profile=%s epp=%s ac=%d writes=%d",
+		ps.Level*100, ps.PptW, ps.PptTargetW, ps.PmaxW, ps.CPUTempC, ps.TempTargetC, ps.Demand, ps.Binding,
+		ps.DGPU, ps.Profile, ps.EPP, ac, ps.WMIWritesTotal)
+}
+
+// shutdown is the SIGTERM path (DESIGN §3.8): dial wide open and stock-like, no cap.
+// The firmware's own table can only be restored by a profile write (a wake) — left to a human.
+func shutdown() {
+	writePPT(45, 54, 65)
+	setAllMaxFreq(0)
+	lg.Info("shutdown: PPT 45/54/65 W, cap → hardware max")
+}
+
+// --- writers and systemd ---
+
+// writePPT writes spl, sppt, fppt in that order. Each is ~33 ms of WMI and no dGPU wake
+// (HARDWARE.md Q12). Errors warn at most once per minute; successes count into wmi_writes_total.
+func writePPT(spl, sppt, fppt int) (ok bool) {
+	ok = true
+	for i, w := range [3]int{spl, sppt, fppt} {
+		if err := writeSysfs(pptDir+"/"+pptFiles[i], strconv.Itoa(w)); err != nil {
+			if time.Since(lastPPTWarn) > time.Minute {
+				lg.Warn("ppt %s → %dW: %v (retrying every tick)", pptFiles[i], w, err)
+				lastPPTWarn = time.Now()
+			}
+			ok = false
+			continue
+		}
+		wmiWrites++
+	}
+	return ok
+}
+
+// sdNotify sends one state line to $NOTIFY_SOCKET (abstract '@' names supported). No-op outside systemd.
+func sdNotify(state string) {
+	addr := os.Getenv("NOTIFY_SOCKET")
+	if addr == "" {
+		return
+	}
+	if notifyConn == nil {
+		if addr[0] == '@' {
+			addr = "\x00" + addr[1:]
+		}
+		c, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: addr, Net: "unixgram"})
+		if err != nil {
+			return
+		}
+		notifyConn = c
+	}
+	notifyConn.Write([]byte(state))
+}
+
+// checkFanCurve compares the EC's cpu-fan points with v6 (DESIGN §3.5). Read-only — the
+// read is driver-cached (HARDWARE.md Q2) and the daemon never writes a curve.
+// At boot asusd may apply its curves after us, so the first check only announces a
+// re-check; MISMATCH is logged when the second (final) check still differs.
+func checkFanCurve(final bool) bool {
+	h := hwmonByName("asus_custom_fan_curve")
+	if h == "" {
+		lg.Warn("fan curve: asus_custom_fan_curve hwmon not found — cannot verify v6")
+		return true
+	}
+	var got [8]int
+	ok := true
+	for i, pct := range fanCurveV6 {
+		got[i] = int(readFloat(fmt.Sprintf("%s/pwm1_auto_point%d_pwm", h, i+1)))
+		if abs(got[i]-pct*255/100) > 4 {
+			ok = false
+		}
+	}
+	switch {
+	case ok:
+		lg.Info("fan curve: v6 OK")
+	case final:
+		lg.Warn("fan curve: MISMATCH (run luminos-fan-curve-install) — pwm1 points %v", got)
+	default:
+		lg.Info("fan curve: differs from v6 at start (pwm1 points %v) — re-checking in %s", got, fanRecheckAfter)
+	}
+	return ok
+}
+
+func setSnapshot(ps PowerState) {
+	stateMu.Lock()
+	snapshot = ps
+	stateMu.Unlock()
+}
+
+func getSnapshot() PowerState {
+	stateMu.RLock()
+	defer stateMu.RUnlock()
+	return snapshot
+}
+
+// loadParamOverrides applies the optional [power] keys of DESIGN §3.11 and returns assert_profile.
+// Unknown keys are ignored; missing file = defaults. epp_mode/ppt_burst_headroom_w are not in v1 (A4, Q9).
+func loadParamOverrides(p *Params) string {
+	var raw struct {
+		Power map[string]interface{} `toml:"power"`
+	}
+	if _, err := toml.DecodeFile(configFile, &raw); err != nil {
+		raw.Power = nil // absent/unreadable file = defaults (config.Load already rejected a bad parse)
+	}
+	overrides := countOverrides(raw.Power)
+	floats := map[string]*float64{"pmin_w": &p.PminW, "pmax_ac_w": &p.PmaxAcW, "pmax_bat_hi_w": &p.PmaxBatHiW,
+		"pmax_bat_lo_w": &p.PmaxBatLoW, "pmax_dgpu_w": &p.PmaxDgpuW, "t_hi_ac_c": &p.ThiAcC, "t_hi_bat_c": &p.ThiBatC,
+		"t_hi_dgpu_c": &p.ThiDgpuC, "slew_up_w_s": &p.SlewUpWS, "slew_down_w_s": &p.SlewDownWS, "refresh_s": &p.RefreshS}
+	for k, dst := range floats {
+		if v, ok := tomlFloat(raw.Power[k]); ok {
+			*dst = clampKey(k, v, *dst)
+		}
+	}
+	orderCeilings(p)
+	if v, ok := tomlFloat(raw.Power["freq_bat_floor_mhz"]); ok {
+		p.FreqBatFloorKHz = int(v * 1000)
+	}
+	if v, ok := tomlFloat(raw.Power["freq_bat_ceil_mhz"]); ok {
+		p.FreqBatCeilKHz = int(v * 1000)
+	}
+	if s, ok := raw.Power["epp"].(string); ok && s != "" {
+		p.EPP = s
+	}
+	s, _ := raw.Power["assert_profile"].(string)
+	if overrides == 0 && *p != DefaultParams(p.HwMaxKHz) {
+		lg.Error("params drifted from DefaultParams with no [power] overrides — clamp bug")
+	}
+	lg.Info("params: pmin=%g pmax ac/bat-hi/bat-lo/dgpu=%g/%g/%g/%g thi ac/bat/dgpu=%g/%g/%g slew up/down=%g/%g refresh=%gs freq bat %d–%d kHz epp=%s assert_profile=%q",
+		p.PminW, p.PmaxAcW, p.PmaxBatHiW, p.PmaxBatLoW, p.PmaxDgpuW, p.ThiAcC, p.ThiBatC, p.ThiDgpuC,
+		p.SlewUpWS, p.SlewDownWS, p.RefreshS, p.FreqBatFloorKHz, p.FreqBatCeilKHz, p.EPP, s)
+	return s
+}
+
+// countOverrides counts the Params keys present in [power] (for the defaults-unchanged check).
+func countOverrides(m map[string]interface{}) (n int) {
+	for _, k := range []string{"pmin_w", "pmax_ac_w", "pmax_bat_hi_w", "pmax_bat_lo_w", "pmax_dgpu_w", "t_hi_ac_c",
+		"t_hi_bat_c", "t_hi_dgpu_c", "slew_up_w_s", "slew_down_w_s", "refresh_s", "freq_bat_floor_mhz", "freq_bat_ceil_mhz", "epp"} {
+		if _, ok := m[k]; ok {
+			n++
+		}
+	}
+	return n
+}
+
+// orderCeilings enforces the ceiling invariants (DESIGN §3.4: bat-lo may equal PminW):
+// PmaxBatLoW ≥ PminW; PmaxAcW, PmaxBatHiW, PmaxDgpuW ≥ PminW+5; BatLo ≤ BatHi ≤ Ac.
+// DefaultParams already satisfies all of them, so with no overrides nothing changes.
+func orderCeilings(p *Params) {
+	raise := func(name string, v *float64, floor float64) {
+		if *v < floor {
+			lg.Warn("config %s=%g is below its floor — using %g", name, *v, floor)
+			*v = floor
+		}
+	}
+	raise("pmax_bat_lo_w", &p.PmaxBatLoW, p.PminW)
+	raise("pmax_ac_w", &p.PmaxAcW, p.PminW+5)
+	raise("pmax_bat_hi_w", &p.PmaxBatHiW, p.PminW+5)
+	raise("pmax_dgpu_w", &p.PmaxDgpuW, p.PminW+5)
+	raise("pmax_bat_hi_w", &p.PmaxBatHiW, p.PmaxBatLoW)
+	raise("pmax_ac_w", &p.PmaxAcW, p.PmaxBatHiW)
+}
+
+// paramRange is the tested range per config key (HARDWARE.md: PPT tested 15–65 W; DESIGN §3.4).
+var paramRange = map[string][2]float64{"pmin_w": {10, 30}, "pmax_ac_w": {15, 65}, "pmax_bat_hi_w": {15, 65},
+	"pmax_bat_lo_w": {15, 65}, "pmax_dgpu_w": {15, 65}, "t_hi_ac_c": {60, 92}, "t_hi_bat_c": {60, 92},
+	"t_hi_dgpu_c": {60, 92}, "refresh_s": {10, 600}, "slew_up_w_s": {1, 20}, "slew_down_w_s": {1, 20}}
+
+// clampKey rejects a config value outside its tested range (keeps the default, warns).
+func clampKey(k string, v, def float64) float64 {
+	r := paramRange[k]
+	if v < r[0] || v > r[1] || v != v {
+		lg.Warn("config %s=%g outside tested range [%g, %g] — keeping %g", k, v, r[0], r[1], def)
+		return def
+	}
+	return v
+}
+
+func tomlFloat(v interface{}) (float64, bool) {
+	switch x := v.(type) {
+	case int64:
+		return float64(x), true
+	case float64:
+		return x, true
+	}
+	return 0, false
+}
+
+// --- small readers and resolvers ---
+
+func readTrim(path string) string {
+	d, _ := os.ReadFile(path)
+	return strings.TrimSpace(string(d))
+}
+
+func readFloat(path string) float64 {
+	v, _ := strconv.ParseFloat(readTrim(path), 64)
+	return v
+}
+
+// hwmonByName returns the hwmon directory whose name file matches, or "".
+func hwmonByName(name string) string {
+	names, _ := filepath.Glob("/sys/class/hwmon/hwmon*/name")
+	for _, n := range names {
+		if readTrim(n) == name {
+			return filepath.Dir(n)
+		}
+	}
+	return ""
+}
+
+// igpuBusyPath finds gpu_busy_percent on the DRM card whose device vendor is AMD (0x1002).
+func igpuBusyPath() string {
+	vendors, _ := filepath.Glob("/sys/class/drm/card[0-9]/device/vendor")
+	for _, v := range vendors {
+		p := filepath.Dir(v) + "/gpu_busy_percent"
+		if _, err := os.Stat(p); err == nil && readTrim(v) == "0x1002" {
+			return p
+		}
+	}
+	return ""
+}
+
+// titleCase renders the sysfs profile as the Quiet/Balanced/Performance the status always showed.
+func titleCase(s string) string {
+	if s == "" {
+		return "unknown"
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func ownerName(external bool) string {
+	if external {
+		return "nvidia-powerd"
+	}
+	return "luminos-power"
+}
+
+// applyACTransition applies the NON-power AC side effects, unchanged from v4.x, at startup
+// and on every plug/unplug. The profile/EPP/cap writes that used to live here are gone:
+// the dial's ceilings blend on AC change (DESIGN §3.4) and the daemon never writes
+// platform_profile (§3.5). Governor is set once at startup.
+// It runs on the acWorker goroutine only (never the loop): iw and kscreen-doctor fork and
+// can hang, so each has a 5 s timeout, and requests are coalesced to the latest state.
+// [CHANGE: claude-code | 2026-10-15] spectrum
+func applyACTransition(onAC bool) {
 	if onAC {
-		lg.Info("AC plugged — applying AC power settings")
-		setAllGovernor("powersave")
+		lg.Info("AC plugged — applying AC side effects")
 		setWiFiPowerSave(false)
 		setKSM(true)
 		setDisplayHz(120)
-		setProfile("Balanced")
-		// asusd applies EPP asynchronously via D-Bus — wait for it to finish
-		// before overwriting. EPP=power targets 45°C idle on AC and battery alike.
-		setEPPAfterAsusctl("power")
-		prevState.EPP = "power"
-		prevState.Profile = "Balanced"
-	} else {
-		lg.Info("AC unplugged — applying battery power settings")
-		setAllGovernor("powersave")
-		setWiFiPowerSave(true)
-		setKSM(false)
-		setDisplayHz(60)
-		setProfile("Quiet")
-		setEPPAfterAsusctl("power")
-		prevState.EPP = "power"
-		prevState.Profile = "Quiet"
-	}
-	prevState.OnAC = onAC
-	prevState.UpdatedAt = time.Now()
-	reportToAI()
-}
-
-// applyGamingDetection tracks GPU load and returns the desired profile.
-// GPU > 80% for 30s → Performance; GPU < 20% for 60s after Performance → Balanced.
-func applyGamingDetection(gpuLoad float64, currentProfile string) string {
-	if gpuLoad > gpuHighThreshPct {
-		gpuHighTicks++
-		gpuLowTicks = 0
-	} else if currentProfile == "Performance" && gpuLoad < gpuLowThreshPct {
-		gpuLowTicks++
-		gpuHighTicks = 0
-	} else {
-		gpuHighTicks = 0
-		gpuLowTicks = 0
-	}
-
-	if gpuHighTicks >= gpuHighThreshTicks {
-		gpuHighTicks = gpuHighThreshTicks // cap
-		return "Performance"
-	}
-	if gpuLowTicks >= gpuLowThreshTicks {
-		gpuLowTicks = 0
-		return "Balanced"
-	}
-	return currentProfile
-}
-
-// applyCPUBeastDetection mirrors applyGamingDetection for CPU-heavy workloads.
-// Catches ML training, XGBoost, compilation — anything GPU detection misses.
-func applyCPUBeastDetection(cpuLoad float64, currentProfile string) string {
-	if cpuLoad > cpuHighThreshPct {
-		cpuHighTicks++
-		cpuLowTicks = 0
-	} else if currentProfile == "Performance" && cpuLoad < cpuLowThreshPct {
-		cpuLowTicks++
-		cpuHighTicks = 0
-	} else {
-		cpuHighTicks = 0
-		cpuLowTicks = 0
-	}
-
-	if cpuHighTicks >= cpuHighThreshTicks {
-		cpuHighTicks = cpuHighThreshTicks // cap
-		return "Performance"
-	}
-	if cpuLowTicks >= cpuLowThreshTicks {
-		cpuLowTicks = 0
-		return "Balanced"
-	}
-	return currentProfile
-}
-
-func eppForProfile(profile string) string {
-	switch profile {
-	case "Performance":
-		return "performance"
-	case "Balanced":
-		return "balance_performance"
-	default:
-		return "balance_performance"
-	}
-}
-
-// --- thermal zone tracking ---
-
-// advanceThermalZone updates currentThermalZone based on temperature.
-// Does NOT write sysfs — the adaptive governor reads thermalCapForCurrentZone()
-// and applies the final merged cap. This separation prevents double-writes.
-//
-// [CHANGE: claude-code | 2026-05-26] v4.0: decoupled zone tracking from cap writes.
-// Previously applyThermalGovernor() both tracked zone AND wrote sysfs — the adaptive
-// governor now owns all sysfs writes and calls thermalCapForCurrentZone() to get
-// the thermal constraint.
-func advanceThermalZone(temp float64, onAC bool) {
-	z1, z2, z3 := thermalACZone1C, thermalACZone2C, thermalACZone3C
-	if !onAC {
-		z1, z2, z3 = thermalBatZone1C, thermalBatZone2C, thermalBatZone3C
-	}
-
-	prev := currentThermalZone
-	newZone := prev
-
-	switch prev {
-	case ZoneCool:
-		if temp >= z1 {
-			thermalDownholdTick = 0
-			newZone = ZoneMild
-		}
-	case ZoneMild:
-		if temp >= z2 {
-			thermalDownholdTick = 0
-			newZone = ZoneWarm
-		} else if temp < z1-thermalHysteresisC {
-			thermalDownholdTick++
-			if thermalDownholdTick >= thermalDowngradeHoldTicks {
-				thermalDownholdTick = 0
-				newZone = ZoneCool
-			}
-		} else {
-			thermalDownholdTick = 0
-		}
-	case ZoneWarm:
-		if temp >= z3 {
-			thermalDownholdTick = 0
-			newZone = ZoneHot
-		} else if temp < z2-thermalHysteresisC {
-			thermalDownholdTick++
-			if thermalDownholdTick >= thermalDowngradeHoldTicks {
-				thermalDownholdTick = 0
-				newZone = ZoneMild
-			}
-		} else {
-			thermalDownholdTick = 0
-		}
-	case ZoneHot:
-		if temp < z3-thermalHysteresisC {
-			thermalDownholdTick++
-			if thermalDownholdTick >= thermalDowngradeHoldTicks {
-				thermalDownholdTick = 0
-				newZone = ZoneWarm
-			}
-		} else {
-			thermalDownholdTick = 0
-		}
-	}
-
-	if newZone != prev {
-		currentThermalZone = newZone
-		lg.Info("thermal zone %d→%d (%.1f°C, on_ac=%v)", prev, newZone, temp, onAC)
-	}
-}
-
-// thermalCapForCurrentZone returns the thermal cap in kHz for the current zone.
-// Returns 0 (= no cap) for ZoneCool/ZoneMild/ZoneWarm on AC (fans handle it).
-// Returns non-zero for ZoneHot and battery warm zones.
-func thermalCapForCurrentZone(onAC bool) int {
-	switch currentThermalZone {
-	case ZoneHot:
-		if onAC {
-			return 3000000 // 3.0 GHz — only cap on AC, fans can't keep up at this point
-		}
-		return 2500000 // 2.5 GHz on battery
-	case ZoneWarm:
-		if onAC {
-			return 0 // no cap — fan curve v5 handles it (BUG-055)
-		}
-		return 3500000 // 3.5 GHz on battery (power saving)
-	default:
-		return 0 // ZoneCool, ZoneMild: no cap needed
-	}
-}
-
-// --- adaptive governor ---
-
-// computeAdaptiveCap returns the target CPU cap in kHz based on smoothed load.
-//
-// Formula:
-//
-//	cap = baseCap + (effectiveLoad/100) × (maxCap - baseCap)
-//
-// iGPU dominance penalty: when iGPU is running harder than CPU (e.g. video decode
-// while CPU is light), reduce CPU cap slightly to give shared TDP headroom to iGPU.
-// Penalty = dominance% × 12kHz, capped at 300 MHz.
-//
-// [CHANGE: claude-code | 2026-05-26] v4.0
-func computeAdaptiveCap(effectiveLoad, igpuLoad float64, onAC bool) int {
-	maxCap := cpuHardwareMaxFreq
-	if !onAC && adaptiveMaxCapBat > 0 {
-		maxCap = adaptiveMaxCapBat
-	}
-
-	// Linear interpolation: idle→baseCap, full load→maxCap
-	cap := adaptiveBaseCap + int((effectiveLoad/100.0)*float64(maxCap-adaptiveBaseCap))
-
-	// iGPU dominance: when iGPU is doing more work than CPU, it needs more of the
-	// shared APU TDP. Nudge CPU cap down proportionally.
-	dominance := igpuLoad - effectiveLoad
-	if dominance > 20 {
-		penalty := int(dominance * dominancePenaltyPerPct)
-		if penalty > dominanceMaxPenaltyKHz {
-			penalty = dominanceMaxPenaltyKHz
-		}
-		cap -= penalty
-	}
-
-	// Clamp to [baseCap, maxCap]
-	if cap < adaptiveBaseCap {
-		cap = adaptiveBaseCap
-	}
-	if cap > maxCap {
-		cap = maxCap
-	}
-	return cap
-}
-
-// sleepAdaptive sleeps for an interval based on current load:
-//   - Idle (<20% all): PSI event-driven sleep up to 10s — wakes on CPU pressure
-//   - Active (20-60%): 2s
-//   - Near cap (>60%): 500ms — tight loop for trigger detection
-//
-// [CHANGE: claude-code | 2026-05-26] v4.0
-func sleepAdaptive(ctx context.Context, psiFile *os.File, cpuLoad, igpuLoad float64) {
-	maxLoad := math.Max(cpuLoad, igpuLoad)
-	var d time.Duration
-	switch {
-	case maxLoad < 20:
-		d = 10 * time.Second
-	case maxLoad < 60:
-		d = 2 * time.Second
-	default:
-		d = 500 * time.Millisecond
-	}
-
-	// In the idle zone, block on PSI rather than sleeping — wakes only when
-	// CPU stall pressure exceeds the threshold (70ms stall in 1s window).
-	if psiFile != nil && maxLoad < 20 {
-		waitPSI(psiFile, d)
 		return
 	}
+	lg.Info("AC unplugged — applying battery side effects")
+	setWiFiPowerSave(true)
+	setKSM(false)
+	setDisplayHz(60)
+}
 
+// requestAC hands the latest AC state to acWorker, replacing any not-yet-applied one.
+func requestAC(onAC bool) {
 	select {
-	case <-ctx.Done():
-	case <-time.After(d):
+	case <-acWant: // drop the stale request
+	default:
+	}
+	acWant <- onAC
+}
+
+// acWorker applies AC side effects one at a time, in order, off the loop goroutine.
+func acWorker() {
+	for onAC := range acWant {
+		applyACTransition(onAC)
 	}
 }
 
-// --- PSI (Pressure Stall Information) watcher ---
-// Linux 4.20+. /proc/pressure/cpu supports poll(POLLPRI) with a threshold trigger.
-// The kernel wakes the fd only when the stall rate crosses the threshold — zero CPU wasted.
-//
-// [CHANGE: claude-code | 2026-05-26] v4.0
-
-// openPSIWatcher opens /proc/pressure/cpu and arms a stall threshold.
-// The file stays open; call waitPSI() to block until the threshold fires.
-func openPSIWatcher() (*os.File, error) {
-	f, err := os.OpenFile("/proc/pressure/cpu", os.O_RDWR, 0)
+// runCmdTimeout is runCmd with a deadline, for the AC side-effect commands.
+func runCmdTimeout(d time.Duration, name string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("%s %v: %w\noutput: %s", name, args, err, strings.TrimSpace(string(out)))
 	}
-	// "some 70000 1000000" = wake when any CPU stall exceeds 70ms in a 1s window.
-	// This fires under moderate load — light enough to catch real work, ignores pure idle.
-	if _, err := fmt.Fprintf(f, "some 70000 1000000"); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("write PSI threshold: %w", err)
-	}
-	return f, nil
-}
-
-// waitPSI blocks until the PSI threshold fires or timeout elapses.
-// Returns true if the PSI event fired, false on timeout.
-func waitPSI(f *os.File, timeout time.Duration) bool {
-	pfd := []unix.PollFd{{
-		Fd:     int32(f.Fd()),
-		Events: unix.POLLPRI | unix.POLLERR,
-	}}
-	ms := int(timeout.Milliseconds())
-	n, _ := unix.Poll(pfd, ms)
-	return n > 0
-}
-
-// --- exec watcher ---
-// Scans /proc every 1s for new PIDs. On detecting an unknown PID whose comm matches
-// a knownApp, fires the app name on the events channel.
-// This is simpler than fanotify/netlink and sufficient for our pre-allocation use case.
-//
-// [CHANGE: claude-code | 2026-05-26] v4.0
-
-type execWatcher struct {
-	knownPIDs map[int]struct{}
-	mu        sync.Mutex
-	events    chan string // comm names of newly launched known apps
-}
-
-func newExecWatcher() *execWatcher {
-	return &execWatcher{
-		knownPIDs: make(map[int]struct{}),
-		events:    make(chan string, 16),
-	}
-}
-
-// run scans /proc every 1s for new process launches.
-// Sends the comm name to events when a known app appears.
-func (w *execWatcher) run(ctx context.Context) {
-	// Seed known PIDs without firing events (they were already running at daemon start).
-	w.seed()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			w.scan()
-		}
-	}
-}
-
-func (w *execWatcher) seed() {
-	entries, _ := os.ReadDir("/proc")
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	for _, e := range entries {
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil {
-			continue
-		}
-		w.knownPIDs[pid] = struct{}{}
-	}
-}
-
-func (w *execWatcher) scan() {
-	entries, _ := os.ReadDir("/proc")
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	seen := make(map[int]struct{}, len(entries))
-	for _, e := range entries {
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil {
-			continue
-		}
-		seen[pid] = struct{}{}
-		if _, known := w.knownPIDs[pid]; !known {
-			w.knownPIDs[pid] = struct{}{}
-			comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
-			if err != nil {
-				continue
-			}
-			name := strings.TrimSpace(string(comm))
-			if _, ok := knownApps[name]; ok {
-				select {
-				case w.events <- name:
-				default: // drop if channel full — non-blocking
-				}
-			}
-		}
-	}
-	// Prune dead PIDs to keep the map bounded.
-	for pid := range w.knownPIDs {
-		if _, alive := seen[pid]; !alive {
-			delete(w.knownPIDs, pid)
-		}
-	}
-}
-
-// --- interactive burst-boost (v4.4) ---
-// Detects user interaction and lifts the CPU cap + EPP briefly so pointer/UI repaints
-// feel instant, decaying back to the idle cap within interactiveWindow. Gated OFF unless
-// LUMINOS_INTERACTIVE=1. Privacy: only a timestamp is recorded — event bytes (including any
-// keycodes) are read into a scratch buffer and discarded; nothing is inspected or logged.
-//
-// [CHANGE: claude-code | 2026-07-22] v4.4
-
-// interactiveBoost returns the current decaying input-boost bonus (0..interactiveBonusPct)
-// and whether interaction is currently active. Full on fresh input, linear decay to 0 over
-// interactiveWindow. Returns (0, false) when the feature is gated OFF or no input seen yet.
-func interactiveBoost() (bonus float64, active bool) {
-	if !interactiveBoostEnabled {
-		return 0, false
-	}
-	last := lastInputNanos.Load()
-	if last == 0 {
-		return 0, false
-	}
-	since := time.Since(time.Unix(0, last))
-	if since >= interactiveWindow {
-		return 0, false
-	}
-	frac := 1.0 - float64(since)/float64(interactiveWindow)
-	return interactiveBonusPct * frac, true
-}
-
-// startInputWatcher discovers pointer/keyboard devices and spawns a blocking reader per
-// device. Reads are event-driven (kernel wakes them only on real input) so cost is ~0 at idle.
-func startInputWatcher(ctx context.Context) {
-	paths := discoverInputDevices()
-	if len(paths) == 0 {
-		lg.Warn("input watcher: no pointer/keyboard devices found — interactive boost inert")
-		return
-	}
-	lg.Info("input watcher active — %d device(s) for interactive boost", len(paths))
-	for _, p := range paths {
-		go watchInputDevice(ctx, p)
-	}
-}
-
-// discoverInputDevices parses /proc/bus/input/devices and returns the /dev/input/eventN paths
-// for devices reporting keyboard (EV_KEY bit) or pointer ("mouse" handler) capability. This
-// skips pure-sensor devices (e.g. accelerometers) that would wake the watcher needlessly.
-func discoverInputDevices() []string {
-	data, err := os.ReadFile("/proc/bus/input/devices")
-	if err != nil {
-		return nil
-	}
-	var paths []string
-	var handlers string
-	var evKey bool
-	flush := func() {
-		if handlers == "" {
-			return
-		}
-		if strings.Contains(handlers, "mouse") || evKey {
-			for _, f := range strings.Fields(handlers) {
-				if strings.HasPrefix(f, "event") {
-					paths = append(paths, "/dev/input/"+f)
-				}
-			}
-		}
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		switch {
-		case strings.HasPrefix(line, "H: Handlers="):
-			handlers = strings.TrimPrefix(line, "H: Handlers=")
-		case strings.HasPrefix(line, "B: EV="):
-			v, _ := strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(line, "B: EV=")), 16, 64)
-			evKey = v&0x1 != 0 // EV_KEY
-		case strings.TrimSpace(line) == "": // blank line ends a device block
-			flush()
-			handlers, evKey = "", false
-		}
-	}
-	flush() // last block — file may not end with a blank line
-	return paths
-}
-
-// watchInputDevice blocks on the device fd; every input event refreshes lastInputNanos
-// (throttled to interactiveInputThrottle). Event content is read and discarded.
-func watchInputDevice(ctx context.Context, path string) {
-	f, err := os.Open(path)
-	if err != nil {
-		lg.Warn("input watcher: open %s: %v", path, err)
-		return
-	}
-	defer f.Close()
-	buf := make([]byte, 256) // struct input_event is 24B; one read drains a burst
-	var lastStore int64
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		n, err := f.Read(buf)
-		if err != nil {
-			return // device unplugged or fd closed on shutdown
-		}
-		if n <= 0 {
-			continue
-		}
-		now := time.Now().UnixNano()
-		if now-lastStore >= int64(interactiveInputThrottle) {
-			lastInputNanos.Store(now)
-			lastStore = now
-		}
-	}
-}
-
-// abs returns the absolute value of an int.
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
+	return nil
 }
 
 // [CHANGE: claude-code | 2026-09-15] BUG-161 follow-up: every profile write goes
@@ -1375,14 +716,6 @@ func noteProfileChange() {
 }
 
 var recentProfileChanges []time.Time
-
-// setEPPAfterAsusctl waits for asusd's async D-Bus write to complete before
-// overwriting EPP. asusctl returns immediately but asusd applies the profile
-// EPP ~100-300ms later via the kernel driver, clobbering a direct sysfs write.
-func setEPPAfterAsusctl(epp string) {
-	time.Sleep(350 * time.Millisecond)
-	setAllEPP(epp)
-}
 
 // --- sysfs writers ---
 
@@ -1469,7 +802,7 @@ func setWiFiPowerSave(enable bool) {
 	if enable {
 		val = "on"
 	}
-	if err := runCmd("/usr/bin/iw", "dev", wifiIface, "set", "power_save", val); err != nil {
+	if err := runCmdTimeout(sideEffectTimeout, "/usr/bin/iw", "dev", wifiIface, "set", "power_save", val); err != nil {
 		lg.Warn("WiFi power_save %s: %v", val, err)
 	} else {
 		lg.Info("WiFi power_save → %s", val)
@@ -1497,7 +830,9 @@ func setDisplayHz(hz int) {
 		lg.Warn("setDisplayHz: no active user session found")
 		return
 	}
-	cmd := exec.Command("runuser", "-u", uid, "--",
+	ctx, cancel := context.WithTimeout(context.Background(), sideEffectTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "runuser", "-u", uid, "--",
 		"env",
 		"WAYLAND_DISPLAY="+wayland,
 		"DBUS_SESSION_BUS_ADDRESS="+dbus,
@@ -1552,45 +887,6 @@ func readACState() bool {
 	return true
 }
 
-func readCPUTemp() float64 {
-	entries, _ := filepath.Glob("/sys/class/hwmon/hwmon*/temp*_input")
-	var max float64
-	for _, p := range entries {
-		d, _ := os.ReadFile(p)
-		m, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
-		if c := m / 1000.0; c > max {
-			max = c
-		}
-	}
-	return max
-}
-
-// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 1 — readGPULoad and readDGPULoad
-// DELETED, not fixed. Both read `gpu_busy_percent`, which is an **amdgpu-only** sysfs
-// attribute. It exists on card2 (the 780M) and has NEVER existed on card1 (the RTX 4050):
-// verified this session, `/sys/class/drm/card1/device/gpu_busy_percent` → ENOENT while
-// card1/device/vendor reads 0x10de. Both discarded the error into `_`, so dGPU load was
-// hard-wired to 0.0% forever, and the daemon's own logs prove it — every beast-mode line
-// this boot reads `dgpu=0%` while nvidia-smi reported 99% util at the same moment.
-//
-// readDGPULoad's caller now takes utilisation from readGPUStats (nvidia-smi
-// utilization.gpu), which is the only honest source on this driver. readGPULoad had ZERO
-// callers and is gone rather than left in place: it globs `card*` and returns the MAX
-// across both GPUs, so anything that adopted it for "dGPU detection" — which is what its
-// comment invited — would silently have been reading the AMD iGPU.
-
-// dgpuRuntimeSuspended reports whether the NVIDIA dGPU is runtime-suspended (D3cold, ~0W).
-// [CHANGE: claude-code | 2026-07-03] BUG-078: reading runtime_status does NOT wake the card
-// (unlike nvidia-smi or current_link_speed). Used to skip all dGPU sense/manage while asleep,
-// so the daemon stops poking the card and it can hold true 0W idle.
-func dgpuRuntimeSuspended() bool {
-	d, err := os.ReadFile("/sys/bus/pci/devices/0000:01:00.0/power/runtime_status")
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(d)) == "suspended"
-}
-
 // dgpuHasClients reports whether any process holds an NVIDIA device node open — a game
 // under PRIME offload, a CUDA job, anything. It is a /proc walk: it never contacts the
 // card, which is the whole point. nvidia-smi cannot answer this question because asking
@@ -1620,12 +916,94 @@ func dgpuHasClients() bool {
 	return false
 }
 
-// readIGPULoad returns AMD iGPU (card2) busy percent. 0 if unavailable.
-func readIGPULoad() float64 {
-	d, _ := os.ReadFile("/sys/class/drm/card2/device/gpu_busy_percent")
-	val, _ := strconv.ParseFloat(strings.TrimSpace(string(d)), 64)
-	return val
+// readCPULoad returns system-wide average utilisation and the busiest single-core
+// utilisation (both 0-100), from /proc/stat deltas.
+// maxCore is the value a frequency ceiling must respect: scaling_max_freq caps every
+// core's peak clock, so one pinned core (7-zip, Wine, compiler) needs the ceiling
+// raised even when the 16-core average is near idle.
+// First call returns (0, 0) — no previous snapshot to diff against.
+// [CHANGE: claude-code | 2026-05-31] ROOT-BUG fix: cap driven by busiest core, not avg
+func readCPULoad() (avg, maxCore float64) {
+	data, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return 0, 0
+	}
+	lines := strings.Split(string(data), "\n")
+
+	parse := func(fields []string) (idle, total uint64) {
+		var vals [10]uint64
+		for i, f := range fields[1:] {
+			if i >= 10 {
+				break
+			}
+			vals[i], _ = strconv.ParseUint(f, 10, 64)
+		}
+		idle = vals[3] + vals[4] // idle + iowait
+		for _, v := range vals {
+			total += v
+		}
+		return
+	}
+
+	// Aggregate line (first): "cpu user nice system idle iowait ..."
+	agg := strings.Fields(lines[0])
+	if len(agg) < 5 || agg[0] != "cpu" {
+		return 0, 0
+	}
+	aggIdle, aggTotal := parse(agg)
+
+	// Per-core lines: cpu0, cpu1, ... (contiguous block after the aggregate line)
+	type coreSample struct{ idle, total uint64 }
+	var cores []coreSample
+	for _, ln := range lines[1:] {
+		if !strings.HasPrefix(ln, "cpu") {
+			break
+		}
+		i, t := parse(strings.Fields(ln))
+		cores = append(cores, coreSample{i, t})
+	}
+
+	// Seed on first call or core-count change — return (0,0), no delta yet.
+	if lastCPUStatTotal == 0 || len(lastCoreTotal) != len(cores) {
+		lastCPUStatIdle, lastCPUStatTotal = aggIdle, aggTotal
+		lastCoreIdle = make([]uint64, len(cores))
+		lastCoreTotal = make([]uint64, len(cores))
+		for i, c := range cores {
+			lastCoreIdle[i], lastCoreTotal[i] = c.idle, c.total
+		}
+		return 0, 0
+	}
+
+	// Aggregate delta → system-wide average
+	if dT := aggTotal - lastCPUStatTotal; dT > 0 {
+		avg = float64(dT-(aggIdle-lastCPUStatIdle)) / float64(dT) * 100.0
+	}
+	lastCPUStatIdle, lastCPUStatTotal = aggIdle, aggTotal
+
+	// Per-core deltas → find busiest core
+	for i, c := range cores {
+		dT := c.total - lastCoreTotal[i]
+		dI := c.idle - lastCoreIdle[i]
+		lastCoreIdle[i], lastCoreTotal[i] = c.idle, c.total
+		if dT == 0 {
+			continue
+		}
+		if u := float64(dT-dI) / float64(dT) * 100.0; u > maxCore {
+			maxCore = u
+		}
+	}
+	return avg, maxCore
 }
+
+// abs returns the absolute value of an int.
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// --- dGPU control (offload_* only — never called by the loop or at startup) ---
 
 // unprivUID is the uid that read-only nvidia-smi polls are dropped to. 65534 = nobody.
 // It only needs to be some uid that is not root; all of the access comes from the gid.
@@ -1763,74 +1141,6 @@ func nvidiaCtl(args ...string) error {
 	return err
 }
 
-// readGPUStats returns NVIDIA dGPU utilisation (%), power draw (W) and temperature (°C).
-//
-// [CHANGE: claude-code | 2026-09-14] BUG-160. Utilisation is read in a SECOND call, and only
-// when power says the card is already working. power.draw and temperature.gpu come from
-// board-level sensors that answer while the GPU core is gated down; utilization.gpu is read
-// from performance counters INSIDE the core, so asking for it forces the core to D0 and
-// resets the pm_runtime autosuspend timer. On a 2s poll that timer never expires and the
-// card can never runtime-suspend. Bundling all three into one query (the 2026-09-13 shape)
-// is what pinned the dGPU awake forever. The extra exec only happens while the card is
-// already awake and drawing >dgpuActiveW, so it costs nothing at idle — which is the only
-// time the cost would have mattered.
-//
-// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 1. Utilisation comes from nvidia-smi,
-// not from the deleted sysfs readDGPULoad, which read an amdgpu-only attribute off the
-// NVIDIA node and therefore returned 0 forever.
-//
-// The sysfs hwmon branch that used to sit here is GONE. The 2026-08-29 comment correctly
-// established that it can never fire on this machine — the NVIDIA proprietary driver
-// exposes no hwmon, `/sys/class/drm/card1/device/hwmon/` does not exist — but kept it "in
-// case a future driver exports it". That is no longer worth it: utilisation has to come
-// from nvidia-smi regardless, so keeping the branch would split one reading across two
-// sources and leave power/temp on a path that has never once executed. Missing-sysfs
-// silently returning 0 is the exact shape of the bug being fixed here.
-// [CHANGE: claude-code | 2026-06-03] v4.2
-func readGPUStats() (loadPct, powerW, tempC float64) {
-	v, ok := nvidiaFloats("power.draw,temperature.gpu", 2)
-	if !ok {
-		return 0, 0, 0
-	}
-	powerW, tempC = v[0], v[1]
-	// Sanity cap: RTX 4050 max TGP is 90W — anything higher is a bad read (driver quirk).
-	// [CHANGE: claude-code | 2026-06-08] Observed 590W spurious read causing false TGP uplift.
-	if powerW > 110.0 {
-		lg.Warn("GPU power read %.1fW exceeds hardware max — discarding (driver quirk)", powerW)
-		powerW = 0
-	}
-	if powerW >= dgpuActiveW {
-		if u, ok := nvidiaFloats("utilization.gpu", 1); ok {
-			loadPct = u[0]
-		}
-	}
-	return
-}
-
-// nvidiaFloats runs one --query-gpu read and parses exactly n comma-separated numbers.
-// [CHANGE: claude-code | 2026-09-14]
-func nvidiaFloats(query string, n int) ([]float64, bool) {
-	out, err := nvidiaQuery(query)
-	if err != nil {
-		lg.Warn("nvidia-smi %s failed: %v — treating dGPU as idle this tick", query, err)
-		return nil, false
-	}
-	parts := strings.Split(strings.TrimSpace(string(out)), ",")
-	if len(parts) != n {
-		lg.Warn("nvidia-smi %s: unexpected output %q", query, strings.TrimSpace(string(out)))
-		return nil, false
-	}
-	vals := make([]float64, n)
-	for i, p := range parts {
-		vals[i], _ = strconv.ParseFloat(strings.TrimSpace(p), 64)
-	}
-	return vals, true
-}
-
-// initGPUTGP reads the current GPU power limit at startup and seeds currentGPUTGPW.
-// Avoids a spurious setGPUTGP call if the daemon restarts while already at 90W.
-// Falls back to forcing 55W if the limit cannot be read.
-// [CHANGE: claude-code | 2026-06-03] v4.2
 // offloadSignalFile is the shared cross-daemon signal for an active weight-offload
 // session (DECISION 23). luminos-power writes it on offload_start and removes it on
 // offload_stop; luminos-ram (Phase 2) reads it to know when to exempt the pinned
@@ -1857,13 +1167,13 @@ func readGPUMaxGraphicsClock() int {
 //   - enables persistence mode so the driver/CUDA context stays resident between calls,
 //   - locks the GPU graphics clock to its max so the sub-millisecond gaps between streamed
 //     layers can't trigger a P-state downclock mid-token,
-//   - flips offloadActive so monitorLoop pins TGP to the 90W ceiling (thermal-gated).
+//   - flips offloadActive so the dial counts the dGPU as busy (DESIGN §3.7).
 //
 // The PCIe link is deliberately NOT pinned: Phase 0 measurement proved it holds Gen4 x8
 // under sustained streaming on its own (DPM Gen1 is an idle-only state), so the link
 // self-manages and only the GPU core clocks needed an explicit pin.
 //
-// On stop it reverses everything: clears the flag (TGP returns to the dynamic manager),
+// On stop it reverses everything: clears the flag,
 // resets the GPU clocks, and removes the shared signal file. Requires root (nvidia-smi).
 // [CHANGE: claude-code | 2026-06-28] v4.3
 func applyOffloadPin(on bool) {
@@ -1885,7 +1195,7 @@ func applyOffloadPin(on bool) {
 		if err := os.WriteFile(offloadSignalFile, []byte(marker), 0644); err != nil {
 			lg.Warn("offload: write signal file %s: %v", offloadSignalFile, err)
 		}
-		lg.Info("offload session START — dGPU pinned for weight streaming (TGP→90W on next tick)")
+		lg.Info("offload session START — dGPU pinned for weight streaming (dial treats dGPU as busy)") // [CHANGE: claude-code | 2026-10-15] spectrum
 		return
 	}
 	offloadActive.Store(false)
@@ -1895,323 +1205,7 @@ func applyOffloadPin(on bool) {
 	if err := os.Remove(offloadSignalFile); err != nil && !os.IsNotExist(err) {
 		lg.Warn("offload: remove signal file: %v", err)
 	}
-	lg.Info("offload session STOP — GPU clocks reset, TGP returned to dynamic manager")
-}
-
-// [CHANGE: claude-code | 2026-09-13] BUG-157 defect 4 / BUG-069.
-// `--query-gpu=power.limit` returns the literal string `[N/A]` on this driver, so the
-// ParseFloat below ALWAYS failed and initGPUTGP always fell through to the "can't read"
-// branch — meaning every daemon restart blind-wrote 55W to the card. Harmless at idle,
-// not harmless mid-game: it yanks 35W off a rendering GPU, and if the card happens to be
-// at/above gpuTGPThermalUpC at that moment the uplift gate refuses to give it back for up
-// to gpuTGPHysteresis. Observed live this session at 20:35:10 — `GPU TGP → 55W` one second
-// before `uplift … → 90W`, a pointless round trip through 55W under load.
-//
-// The value IS readable, just not from --query-gpu: `nvidia-smi -q -d POWER` prints a real
-// "Current Power Limit : 90.00 W". That is the same field, via the verbose query, and it is
-// what this now parses. Confirmed against the live card, which read 90.00 W while
-// --query-gpu=power.limit read [N/A].
-func readGPUPowerLimit() (float64, bool) {
-	out, err := nvidiaRead("-q", "-d", "POWER")
-	if err != nil {
-		return 0, false
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		// Match the ceiling field only. "Default Power Limit" and "Max Power Limit" also
-		// contain "Power Limit", so anchor on the exact label.
-		if !strings.Contains(line, "Current Power Limit") {
-			continue
-		}
-		f := strings.SplitN(line, ":", 2)
-		if len(f) != 2 {
-			continue
-		}
-		v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(f[1]), "W")), 64)
-		if err == nil && v > 0 {
-			return v, true
-		}
-	}
-	return 0, false
-}
-
-func initGPUTGP() {
-	if v, ok := readGPUPowerLimit(); ok {
-		currentGPUTGPW = v
-		lg.Info("GPU TGP init: current limit %.0fW (adopted, no write)", v)
-		return
-	}
-	// Genuinely unreadable — force a known baseline.
-	lg.Warn("GPU TGP init: could not read current limit — forcing %.0fW baseline", gpuTGPLowW)
-	setGPUTGP(gpuTGPLowW)
-}
-
-// setGPUTGP applies a new NVIDIA GPU power limit via nvidia-smi and updates currentGPUTGPW.
-// Requires the daemon to run as root (nvidia-smi -pl is root-only).
-// [CHANGE: claude-code | 2026-06-03] v4.2
-func setGPUTGP(watts float64) {
-	if err := nvidiaCtl("-pl", fmt.Sprintf("%.0f", watts)); err != nil {
-		lg.Warn("GPU TGP → %.0fW failed: %v", watts, err)
-		return
-	}
-	currentGPUTGPW = watts
-	lg.Info("GPU TGP → %.0fW", watts)
-}
-
-// manageGPUTGP handles dynamic switching of the NVIDIA GPU power limit.
-//
-// Uplift to 90W when:
-//   - Power draw ≥ 47W (85% of 55W cap) — GPU is about to be constrained
-//   - GPU temp < 83°C — thermal headroom exists
-//   - On AC power — never boost on battery
-//   - 60s hysteresis since last switch
-//
-// Revert to 55W when:
-//   - GPU temp ≥ 83°C (thermal override, regardless of load)
-//   - OR power draw < 15W AND util < 20% sustained for 60s (idle)
-//
-// [CHANGE: claude-code | 2026-06-03] v4.2
-func manageGPUTGP(gpuPowerW, gpuLoad, gpuTempC float64, onAC bool) {
-	// Always revert to low cap on battery
-	if !onAC {
-		if currentGPUTGPW != gpuTGPLowW {
-			lg.Info("GPU TGP: AC lost → %.0fW", gpuTGPLowW)
-			setGPUTGP(gpuTGPLowW)
-			gpuTGPDownTick = 0
-		}
-		return
-	}
-
-	now := time.Now()
-	hysteresisOK := gpuTGPLastSwitch.IsZero() || now.Sub(gpuTGPLastSwitch) >= gpuTGPHysteresis
-
-	if currentGPUTGPW < gpuTGPHighW {
-		// Currently at 55W: uplift if power draw is near the cap and temp is safe
-		if gpuPowerW >= gpuTGPUpThreshW && gpuTempC < gpuTGPThermalUpC && hysteresisOK {
-			gpuTGPLastSwitch = now
-			gpuTGPDownTick = 0
-			lg.Info("GPU TGP uplift: %.1fW draw ≥ %.0fW threshold, temp=%.1f°C", gpuPowerW, gpuTGPUpThreshW, gpuTempC)
-			setGPUTGP(gpuTGPHighW)
-		}
-		return
-	}
-
-	// Currently at 90W: check thermal override first, then idle revert
-	if gpuTempC >= gpuTGPThermalDownC && hysteresisOK {
-		lg.Warn("GPU TGP thermal override: %.1f°C ≥ %.0f°C → %.0fW", gpuTempC, gpuTGPThermalDownC, gpuTGPLowW)
-		gpuTGPLastSwitch = now
-		gpuTGPDownTick = 0
-		setGPUTGP(gpuTGPLowW)
-		return
-	}
-
-	if gpuPowerW < gpuTGPDownPowerW && gpuLoad < gpuTGPDownUtilPct {
-		gpuTGPDownTick++
-		if gpuTGPDownTick >= gpuTGPDownTicks && hysteresisOK {
-			gpuTGPLastSwitch = now
-			gpuTGPDownTick = 0
-			lg.Info("GPU TGP revert: idle %.0fs (%.1fW, %.0f%% util) → %.0fW",
-				float64(gpuTGPDownTicks)*2, gpuPowerW, gpuLoad, gpuTGPLowW)
-			setGPUTGP(gpuTGPLowW)
-		}
-	} else {
-		gpuTGPDownTick = 0
-	}
-}
-
-// readCPULoad returns system-wide average utilisation and the busiest single-core
-// utilisation (both 0-100), from /proc/stat deltas.
-// maxCore is the value a frequency ceiling must respect: scaling_max_freq caps every
-// core's peak clock, so one pinned core (7-zip, Wine, compiler) needs the ceiling
-// raised even when the 16-core average is near idle.
-// First call returns (0, 0) — no previous snapshot to diff against.
-// [CHANGE: claude-code | 2026-05-31] ROOT-BUG fix: cap driven by busiest core, not avg
-func readCPULoad() (avg, maxCore float64) {
-	data, err := os.ReadFile("/proc/stat")
-	if err != nil {
-		return 0, 0
-	}
-	lines := strings.Split(string(data), "\n")
-
-	parse := func(fields []string) (idle, total uint64) {
-		var vals [10]uint64
-		for i, f := range fields[1:] {
-			if i >= 10 {
-				break
-			}
-			vals[i], _ = strconv.ParseUint(f, 10, 64)
-		}
-		idle = vals[3] + vals[4] // idle + iowait
-		for _, v := range vals {
-			total += v
-		}
-		return
-	}
-
-	// Aggregate line (first): "cpu user nice system idle iowait ..."
-	agg := strings.Fields(lines[0])
-	if len(agg) < 5 || agg[0] != "cpu" {
-		return 0, 0
-	}
-	aggIdle, aggTotal := parse(agg)
-
-	// Per-core lines: cpu0, cpu1, ... (contiguous block after the aggregate line)
-	type coreSample struct{ idle, total uint64 }
-	var cores []coreSample
-	for _, ln := range lines[1:] {
-		if !strings.HasPrefix(ln, "cpu") {
-			break
-		}
-		i, t := parse(strings.Fields(ln))
-		cores = append(cores, coreSample{i, t})
-	}
-
-	// Seed on first call or core-count change — return (0,0), no delta yet.
-	if lastCPUStatTotal == 0 || len(lastCoreTotal) != len(cores) {
-		lastCPUStatIdle, lastCPUStatTotal = aggIdle, aggTotal
-		lastCoreIdle = make([]uint64, len(cores))
-		lastCoreTotal = make([]uint64, len(cores))
-		for i, c := range cores {
-			lastCoreIdle[i], lastCoreTotal[i] = c.idle, c.total
-		}
-		return 0, 0
-	}
-
-	// Aggregate delta → system-wide average
-	if dT := aggTotal - lastCPUStatTotal; dT > 0 {
-		avg = float64(dT-(aggIdle-lastCPUStatIdle)) / float64(dT) * 100.0
-	}
-	lastCPUStatIdle, lastCPUStatTotal = aggIdle, aggTotal
-
-	// Per-core deltas → find busiest core
-	for i, c := range cores {
-		dT := c.total - lastCoreTotal[i]
-		dI := c.idle - lastCoreIdle[i]
-		lastCoreIdle[i], lastCoreTotal[i] = c.idle, c.total
-		if dT == 0 {
-			continue
-		}
-		if u := float64(dT-dI) / float64(dT) * 100.0; u > maxCore {
-			maxCore = u
-		}
-	}
-	return avg, maxCore
-}
-
-// readRAMPressure returns available RAM as a fraction of total (0.0=empty, 1.0=all free).
-// Reads MemAvailable from /proc/meminfo — same metric the kernel uses for OOM decisions.
-// Returns 1.0 on any read error so callers stay conservative (no false pressure penalty).
-// [CHANGE: claude-code | 2026-05-31] v4.1 resource coordinator.
-func readRAMPressure() float64 {
-	data, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		return 1.0
-	}
-	var total, available uint64
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		switch fields[0] {
-		case "MemTotal:":
-			total, _ = strconv.ParseUint(fields[1], 10, 64)
-		case "MemAvailable:":
-			available, _ = strconv.ParseUint(fields[1], 10, 64)
-		}
-		if total > 0 && available > 0 {
-			break
-		}
-	}
-	if total == 0 {
-		return 1.0
-	}
-	return float64(available) / float64(total)
-}
-
-// systemPressureIndex returns a 0–100 health score combining thermal, CPU, GPU, and RAM pressure.
-// Weights: thermal 40%, CPU 25%, GPU 20%, RAM 15%.
-// 0 = fully idle and cool; 100 = maximum stress on all fronts.
-// Used for informational logging (SPI= lines) and future decision-making.
-// [CHANGE: claude-code | 2026-05-31] v4.1 resource coordinator.
-func systemPressureIndex(temp, cpuLoad, igpuLoad, dgpuLoad, ramAvailFrac float64) float64 {
-	// Thermal: 0 at 40°C, 100 at 90°C
-	thermalScore := math.Max(0, math.Min(100, (temp-40.0)/50.0*100))
-	// GPU: worst of iGPU/dGPU
-	gpuScore := math.Max(igpuLoad, dgpuLoad)
-	// RAM: 0 when all free, 100 when fully consumed
-	ramScore := (1.0 - ramAvailFrac) * 100
-	return 0.40*thermalScore + 0.25*cpuLoad + 0.20*gpuScore + 0.15*ramScore
-}
-
-// --- helpers ---
-
-func updateState(onAC bool, temp, gpuLoad float64, epp, profile string) {
-	prevState = PowerState{
-		OnAC:      onAC,
-		CPUTempC:  temp,
-		GPULoad:   gpuLoad,
-		EPP:       epp,
-		Profile:   profile,
-		UpdatedAt: time.Now(),
-	}
-}
-
-func applyAggressiveFanCurve(mode string) {
-	// [CHANGE: claude-code | 2026-06-30] Single-writer: the Conductor PID owns the fan
-	// when enabled — skip the asusctl curve so we never fight it on the same hwmon.
-	if conductorOwnsFan() {
-		return
-	}
-	// [CHANGE: claude-code | 2026-05-24] Fan curve v5 — steep recovery above 47°C
-	//
-	// Problem with v4: 50°C breakpoint was only 25%. At 52°C the firmware interpolated
-	// to ~29% — not enough fan to pull the CPU back down to 47°C. The curve was quiet
-	// below 47°C but had no recovery bite above it.
-	//
-	// Fix: raise 50°C from 25% → 55%. Creates a steep 45→50°C slope so any overshoot
-	// above 47°C gets aggressively corrected:
-	//   40°C → 5%   (silent at idle — same as v4)
-	//   47°C → 22 + (2/5)·(55−22) = 35%  (good hold — up from 21%)
-	//   48°C → 22 + (3/5)·(55−22) = 42%  (noticeably ramping)
-	//   50°C → 55%  (aggressive recovery threshold)
-	//   52°C → 55 + (2/10)·(88−55) = 62%  (strong pullback from overshoot)
-	//
-	// Mid fan is 67% of CPU/GPU curve throughout.
-	lg.Info("Applying fan curve to %s profile (v5: steep 47°C recovery)", mode)
-	cpuGpuCurve := "30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%"
-	midCurve := "30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%"
-	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "cpu", "--data", cpuGpuCurve)
-	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "gpu", "--data", cpuGpuCurve)
-	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--fan", "mid", "--data", midCurve)
-	runCmd("asusctl", "fan-curve", "--mod-profile", mode, "--enable-fan-curves", "true")
-}
-
-// restoreBurstProfiles puts the v5 curve back on every profile the burst touched.
-// [CHANGE: claude-code | 2026-09-26] BUG-190.
-func restoreBurstProfiles() {
-	for prof := range thermalBurstProfiles {
-		applyAggressiveFanCurve(prof)
-	}
-	thermalBurstProfiles = map[string]bool{}
-}
-
-// applyBurstFanCurve sets fans to 100% from 40°C upward for rapid chassis cooling.
-// Used during thermal burst mode (52°C trigger). Reversed by applyAggressiveFanCurve.
-// CPU/GPU fans run at 100% from 40°C; mid fan at 88% (slightly softer for noise balance).
-// [CHANGE: claude-code | 2026-05-31] v4.1 thermal burst cooling.
-func applyBurstFanCurve(profile string) {
-	// [CHANGE: claude-code | 2026-06-30] Single-writer: when the Conductor owns the fan
-	// it handles cooling via the PID + baked-in EC failsafe ramp — skip the burst curve.
-	if conductorOwnsFan() {
-		return
-	}
-	lg.Info("burst fan curve → 100%% on %s profile (chassis cool-down mode)", profile)
-	cpuGpuBurst := "30c:0%,40c:100%,45c:100%,50c:100%,60c:100%,70c:100%,80c:100%,90c:100%"
-	midBurst := "30c:0%,40c:88%,45c:88%,50c:88%,60c:88%,70c:88%,80c:88%,90c:100%"
-	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--fan", "cpu", "--data", cpuGpuBurst)
-	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--fan", "gpu", "--data", cpuGpuBurst)
-	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--fan", "mid", "--data", midBurst)
-	runCmd("asusctl", "fan-curve", "--mod-profile", profile, "--enable-fan-curves", "true")
+	lg.Info("offload session STOP — GPU clocks reset") // [CHANGE: claude-code | 2026-10-15] spectrum
 }
 
 func runCmd(name string, args ...string) error {
@@ -2222,8 +1216,9 @@ func runCmd(name string, args ...string) error {
 	return nil
 }
 
-func reportToAI() {
-	msg, _ := socket.NewMessage("report_power", "luminos-power", prevState)
+// reportToAI sends the snapshot to luminos-ai (report_power); luminos-ai serves it under "power".
+func reportToAI(ps PowerState) {
+	msg, _ := socket.NewMessage("report_power", "luminos-power", ps)
 	socket.Send(cfg.Sockets.AI, msg)
 }
 

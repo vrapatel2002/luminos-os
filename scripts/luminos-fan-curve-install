@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-10-15] spectrum
+# luminos-fan-curve-install — ONE-TIME, human-run install of fan curve v6 (docs/spectrum/DESIGN.md §3.5)
+# on quiet/balanced/performance, plus /etc/asusd/asusd.ron change_platform_profile_on_ac/battery: false.
+#   sudo luminos-fan-curve-install            install (idempotent)
+#   sudo luminos-fan-curve-install --check    read-only report
+#   sudo luminos-fan-curve-install --revert   restore the .ron backup, print the v5 curve commands
+set -uo pipefail   # deliberately no -e: every step is checked and reported
+
+RON=/etc/asusd/asusd.ron
+V6_CG="30c:0%,40c:10%,50c:20%,60c:35%,70c:52%,80c:72%,85c:88%,90c:100%"
+V6_MID="30c:0%,40c:5%,50c:13%,60c:23%,70c:35%,80c:48%,85c:70%,90c:100%"
+V5_CG="30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%"
+V5_MID="30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%"
+PROFILES=(quiet balanced performance)
+FAILS=0
+
+ok()   { echo "  OK    $*"; }
+bad()  { echo "  FAIL  $*"; FAILS=$((FAILS + 1)); }
+run()  { if "$@" >/dev/null 2>&1; then ok "$*"; else bad "$* (exit $?)"; fi; }
+
+# duty-% curve string -> "t1 .. t8|p1 .. p8" with pwm 0-255
+expect() {
+    local IFS=, pt t=() p=()
+    for pt in $1; do t+=("${pt%%c:*}"); local d=${pt#*:}; d=${d%\%}; p+=($(( (d * 255 + 50) / 100 ))); done
+    IFS=' '; echo "${t[*]}|${p[*]}"
+}
+
+near() {   # "t..|p.." vs "t..|p..": temps exact, each pwm within ±2 (asusd may truncate)
+    local -a gt gp et ep; local i
+    read -ra gt <<< "${1%|*}"; read -ra gp <<< "${1#*|}"; read -ra et <<< "${2%|*}"; read -ra ep <<< "${2#*|}"
+    [[ ${#gp[@]} -eq 8 && "${gt[*]}" == "${et[*]}" ]] || return 1
+    for i in 0 1 2 3 4 5 6 7; do
+        [[ ${gp[i]} =~ ^[0-9]+$ ]] || return 1
+        (( gp[i] - ep[i] <= 2 && ep[i] - gp[i] <= 2 )) || return 1
+    done
+}
+
+hwmon_curve() {   # print the active profile's curve as the EC driver caches it; compare with v6
+    local h n f name exp got_t got_p
+    for h in /sys/class/hwmon/hwmon*; do [[ $(cat "$h/name" 2>/dev/null) == asus_custom_fan_curve ]] && break; h=; done
+    if [[ -z ${h:-} ]]; then bad "no hwmon named asus_custom_fan_curve"; return; fi
+    echo "Active platform profile: $(cat /sys/firmware/acpi/platform_profile 2>/dev/null || echo '?')  ($h)"
+    echo "  (only the ACTIVE profile's curve is visible in hwmon; the other two cannot be read back from the EC)"
+    for f in 1:cpu 2:gpu 3:mid; do
+        n=${f%%:*}; name=${f#*:}
+        [[ $name == mid ]] && exp=$(expect "$V6_MID") || exp=$(expect "$V6_CG")
+        got_t=$(for i in 1 2 3 4 5 6 7 8; do cat "$h/pwm${n}_auto_point${i}_temp" 2>/dev/null || echo '?'; done | tr '\n' ' ')
+        got_p=$(for i in 1 2 3 4 5 6 7 8; do cat "$h/pwm${n}_auto_point${i}_pwm" 2>/dev/null || echo '?'; done | tr '\n' ' ')
+        echo "  $name fan (pwm$n) enable=$(cat "$h/pwm${n}_enable" 2>/dev/null) temp: $got_t pwm: $got_p"
+        if near "${got_t% }|${got_p% }" "$exp"; then ok "$name matches v6 (pwm within ±2)"
+        else bad "$name differs from v6 (expected temp|pwm = $exp)"; fi
+    done
+}
+
+ron_report() {
+    echo "$RON:"
+    grep -nE "$RON_KEYS" "$RON" 2>/dev/null | sed 's/^/  /'
+    ls -1 "$RON".bak-spectrum-* 2>/dev/null | sed 's/^/  backup: /'
+}
+
+RON_KEYS='change_platform_profile_on_(ac|battery)|platform_profile_linked_epp'
+ron_is_set() { local f=${1:-$RON}   # all three keys present AND false
+    grep -Eq 'change_platform_profile_on_ac:[[:space:]]*false' "$f" &&
+    grep -Eq 'change_platform_profile_on_battery:[[:space:]]*false' "$f" &&
+    grep -Eq 'platform_profile_linked_epp:[[:space:]]*false' "$f"; }
+
+stored_curves() {   # asusd's own stored copy per profile (in-memory/fan_curves.ron, not the EC)
+    local p; for p in "${PROFILES[@]}"; do echo "asusd stored curve, $p:"; asusctl fan-curve --mod-profile "$p" 2>&1 | sed 's/^/  /'; done
+}
+
+if [[ $EUID -ne 0 ]]; then
+    echo "luminos-fan-curve-install: must run as root (sudo $0 ${*:-})" >&2; exit 1
+fi
+command -v asusctl >/dev/null || { echo "asusctl not found" >&2; exit 1; }
+[[ -f $RON ]] || { echo "$RON not found" >&2; exit 1; }
+
+case "${1:-}" in
+--check)
+    ron_report; ron_is_set && ok "asusd.ron: profile flipping + linked EPP disabled" || bad "asusd.ron: a change_platform_profile_on_* or platform_profile_linked_epp is not false"
+    hwmon_curve; stored_curves
+    echo "check: $FAILS problem(s)"; exit $(( FAILS > 0 ));;
+--revert)
+    b=$(ls -1 "$RON".bak-spectrum-* 2>/dev/null | head -n1)
+    if [[ -z $b ]]; then echo "no $RON.bak-spectrum-* backup found — nothing to restore" >&2; exit 1; fi
+    if cmp -s "$b" "$RON"; then ok "$RON already equals $b"
+    else run cp -a "$b" "$RON"; cmp -s "$b" "$RON" && ok "restored $b" || bad "restore of $b did not read back"
+         run systemctl restart asusd; fi
+    echo "To restore curve v5 (each call wakes the dGPU briefly — BUG-198), run:"
+    for p in "${PROFILES[@]}"; do
+        echo "  asusctl fan-curve --mod-profile $p --fan cpu --data $V5_CG"
+        echo "  asusctl fan-curve --mod-profile $p --fan gpu --data $V5_CG"
+        echo "  asusctl fan-curve --mod-profile $p --fan mid --data $V5_MID"
+        echo "  asusctl fan-curve --mod-profile $p --enable-fan-curves true"
+    done
+    exit $(( FAILS > 0 ));;
+"") ;;
+*) echo "usage: sudo $0 [--check|--revert]" >&2; exit 2;;
+esac
+
+echo "WARNING: every fan-curve write (and the asusd restart) wakes the RTX 4050 for ~20 s (BUG-198)."
+echo "         This is a known, accepted ONE-TIME cost; the power daemon itself never writes curves."
+echo
+echo "== 1/3 curve v6 on ${PROFILES[*]}"
+for p in "${PROFILES[@]}"; do
+    run asusctl fan-curve --mod-profile "$p" --fan cpu --data "$V6_CG"
+    run asusctl fan-curve --mod-profile "$p" --fan gpu --data "$V6_CG"
+    run asusctl fan-curve --mod-profile "$p" --fan mid --data "$V6_MID"
+    run asusctl fan-curve --mod-profile "$p" --enable-fan-curves true
+done
+
+echo "== 2/3 $RON"
+NEW=$(mktemp) || exit 1
+sed -E "s/(($RON_KEYS):)[[:space:]]*true/\\1 false/" "$RON" > "$NEW" || bad "sed on a copy of $RON failed"
+if cmp -s "$NEW" "$RON"; then
+    ron_is_set && ok "already all false — file unchanged, asusd NOT restarted" \
+               || bad "nothing to change but a key is missing (not 'true' either) — edit $RON by hand"
+elif ! ron_is_set "$NEW"; then
+    bad "edited copy still not all false — $RON left untouched"
+else
+    # back up ONCE: an existing bak-spectrum-* is the pre-spectrum original and is never overwritten
+    if ls "$RON".bak-spectrum-* >/dev/null 2>&1; then ok "backup kept: $(ls -1 "$RON".bak-spectrum-* | head -n1)"
+    else run cp -a "$RON" "$RON.bak-spectrum-$(date +%Y%m%d)"; fi
+    # stop asusd first so it cannot write its in-memory config back over the edit on exit
+    run systemctl stop asusd
+    cat "$NEW" > "$RON" && ok "edit written (owner/mode kept)" || bad "write to $RON failed"
+    ron_is_set && ok "read-back: on_ac, on_battery, linked_epp all false" || bad "read-back is not all false"
+    run systemctl start asusd
+    sleep 2
+    ron_is_set && ok "after asusd start: still all false" || bad "asusd rewrote $RON after start"
+fi
+rm -f "$NEW"
+ron_report
+
+echo "== 3/3 read-back"
+hwmon_curve
+stored_curves
+echo
+if (( FAILS == 0 )); then echo "luminos-fan-curve-install: done, 0 failures"
+else echo "luminos-fan-curve-install: $FAILS FAILURE(S) — see FAIL lines above"; fi
+exit $(( FAILS > 0 ))

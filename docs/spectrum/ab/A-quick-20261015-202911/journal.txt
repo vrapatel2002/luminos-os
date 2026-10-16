@@ -1,0 +1,478 @@
+Oct 15 20:29:14 archlinux luminos-power[92323]: 2026-10-15T20:29:14 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:16 archlinux luminos-power[92323]: 2026-10-15T20:29:16 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:18 archlinux luminos-power[92323]: 2026-10-15T20:29:18 [INFO ] luminos-power: thermal burst suppressed: 54.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:20 archlinux luminos-power[92323]: 2026-10-15T20:29:20 [INFO ] luminos-power: thermal burst suppressed: 54.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:22 archlinux luminos-power[92323]: 2026-10-15T20:29:22 [INFO ] luminos-power: thermal burst suppressed: 54.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:24 archlinux luminos-power[92323]: 2026-10-15T20:29:24 [INFO ] luminos-power: thermal burst suppressed: 54.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:26 archlinux luminos-power[92323]: 2026-10-15T20:29:26 [INFO ] luminos-power: thermal burst suppressed: 54.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:28 archlinux luminos-power[92323]: 2026-10-15T20:29:28 [INFO ] luminos-power: thermal burst suppressed: 54.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:30 archlinux luminos-power[92323]: 2026-10-15T20:29:30 [INFO ] luminos-power: thermal burst suppressed: 54.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:32 archlinux luminos-power[92323]: 2026-10-15T20:29:32 [INFO ] luminos-power: thermal burst suppressed: 54.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:34 archlinux luminos-power[92323]: 2026-10-15T20:29:34 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:36 archlinux luminos-power[92323]: 2026-10-15T20:29:36 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:38 archlinux luminos-power[92323]: 2026-10-15T20:29:38 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:40 archlinux luminos-power[92323]: 2026-10-15T20:29:40 [INFO ] luminos-power: thermal burst suppressed: 54.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:42 archlinux luminos-power[92323]: 2026-10-15T20:29:42 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:44 archlinux luminos-power[92323]: 2026-10-15T20:29:44 [INFO ] luminos-power: thermal burst suppressed: 54.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:46 archlinux luminos-power[92323]: 2026-10-15T20:29:46 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 27m0s
+Oct 15 20:29:48 archlinux luminos-power[92323]: 2026-10-15T20:29:48 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:29:50 archlinux luminos-power[92323]: 2026-10-15T20:29:50 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:29:52 archlinux luminos-power[92323]: 2026-10-15T20:29:52 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:29:54 archlinux luminos-power[92323]: 2026-10-15T20:29:54 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:04 archlinux luminos-power[92323]: 2026-10-15T20:30:04 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:14 archlinux luminos-power[92323]: 2026-10-15T20:30:14 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:16 archlinux luminos-power[92323]: 2026-10-15T20:30:16 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:18 archlinux luminos-power[92323]: 2026-10-15T20:30:18 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:20 archlinux luminos-power[92323]: 2026-10-15T20:30:20 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:22 archlinux luminos-power[92323]: 2026-10-15T20:30:22 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:32 archlinux luminos-power[92323]: 2026-10-15T20:30:32 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:34 archlinux luminos-power[92323]: 2026-10-15T20:30:34 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:34 archlinux luminos-power[92323]: 2026-10-15T20:30:34 [INFO ] luminos-power: max_freq → 2.8 GHz (16 cores)
+Oct 15 20:30:34 archlinux luminos-power[92323]: 2026-10-15T20:30:34 [INFO ] luminos-power: adaptive cap → 2.85 GHz (avg=31% smoothAvg=16% maxCore=96% smoothMax=46% prealloc=0% igpu=22%)
+Oct 15 20:30:36 archlinux luminos-power[92323]: 2026-10-15T20:30:36 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:36 archlinux luminos-power[92323]: 2026-10-15T20:30:36 [INFO ] luminos-power: max_freq → 3.1 GHz (16 cores)
+Oct 15 20:30:36 archlinux luminos-power[92323]: 2026-10-15T20:30:36 [INFO ] luminos-power: adaptive cap → 3.10 GHz (avg=31% smoothAvg=21% maxCore=81% smoothMax=57% prealloc=0% igpu=21%)
+Oct 15 20:30:38 archlinux luminos-power[92323]: 2026-10-15T20:30:38 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:38 archlinux luminos-power[92323]: 2026-10-15T20:30:38 [INFO ] luminos-power: max_freq → 3.4 GHz (16 cores)
+Oct 15 20:30:38 archlinux luminos-power[92323]: 2026-10-15T20:30:38 [INFO ] luminos-power: adaptive cap → 3.38 GHz (avg=31% smoothAvg=24% maxCore=90% smoothMax=67% prealloc=0% igpu=19%)
+Oct 15 20:30:39 archlinux luminos-power[92323]: 2026-10-15T20:30:39 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:39 archlinux luminos-power[92323]: 2026-10-15T20:30:39 [INFO ] luminos-power: max_freq → 3.7 GHz (16 cores)
+Oct 15 20:30:39 archlinux luminos-power[92323]: 2026-10-15T20:30:39 [INFO ] luminos-power: adaptive cap → 3.68 GHz (avg=31% smoothAvg=26% maxCore=100% smoothMax=77% prealloc=0% igpu=20%)
+Oct 15 20:30:39 archlinux luminos-power[92323]: 2026-10-15T20:30:39 [INFO ] luminos-power: thermal burst suppressed: 56.0°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:39 archlinux luminos-power[92323]: 2026-10-15T20:30:39 [INFO ] luminos-power: max_freq → 4.0 GHz (16 cores)
+Oct 15 20:30:39 archlinux luminos-power[92323]: 2026-10-15T20:30:39 [INFO ] luminos-power: adaptive cap → 3.95 GHz (avg=30% smoothAvg=27% maxCore=100% smoothMax=84% prealloc=0% igpu=21%)
+Oct 15 20:30:40 archlinux luminos-power[92323]: 2026-10-15T20:30:40 [INFO ] luminos-power: thermal burst suppressed: 57.4°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:40 archlinux luminos-power[92323]: 2026-10-15T20:30:40 [INFO ] luminos-power: max_freq → 4.2 GHz (16 cores)
+Oct 15 20:30:40 archlinux luminos-power[92323]: 2026-10-15T20:30:40 [INFO ] luminos-power: adaptive cap → 4.18 GHz (avg=31% smoothAvg=28% maxCore=96% smoothMax=87% prealloc=0% igpu=21%)
+Oct 15 20:30:40 archlinux luminos-power[92323]: 2026-10-15T20:30:40 [INFO ] luminos-power: thermal burst suppressed: 60.2°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:40 archlinux luminos-power[92323]: 2026-10-15T20:30:40 [INFO ] luminos-power: thermal zone 0→1 (60.2°C, on_ac=true)
+Oct 15 20:30:40 archlinux luminos-power[92323]: 2026-10-15T20:30:40 [INFO ] luminos-power: max_freq → 4.4 GHz (16 cores)
+Oct 15 20:30:40 archlinux luminos-power[92323]: 2026-10-15T20:30:40 [INFO ] luminos-power: adaptive cap → 4.36 GHz (avg=30% smoothAvg=29% maxCore=92% smoothMax=89% prealloc=0% igpu=21%)
+Oct 15 20:30:41 archlinux luminos-power[92323]: 2026-10-15T20:30:41 [INFO ] luminos-power: thermal burst suppressed: 63.6°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:41 archlinux luminos-power[92323]: 2026-10-15T20:30:41 [INFO ] luminos-power: max_freq → 4.5 GHz (16 cores)
+Oct 15 20:30:41 archlinux luminos-power[92323]: 2026-10-15T20:30:41 [INFO ] luminos-power: adaptive cap → 4.51 GHz (avg=31% smoothAvg=29% maxCore=100% smoothMax=92% prealloc=0% igpu=22%)
+Oct 15 20:30:41 archlinux luminos-power[92323]: 2026-10-15T20:30:41 [INFO ] luminos-power: thermal burst suppressed: 67.8°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:42 archlinux luminos-power[92323]: 2026-10-15T20:30:42 [INFO ] luminos-power: thermal burst suppressed: 70.4°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:42 archlinux luminos-power[92323]: 2026-10-15T20:30:42 [INFO ] luminos-power: thermal burst suppressed: 72.5°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:42 archlinux luminos-power[92323]: 2026-10-15T20:30:42 [INFO ] luminos-power: thermal zone 1→2 (72.5°C, on_ac=true)
+Oct 15 20:30:43 archlinux luminos-power[92323]: 2026-10-15T20:30:43 [INFO ] luminos-power: thermal burst suppressed: 73.8°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:43 archlinux luminos-power[92323]: 2026-10-15T20:30:43 [INFO ] luminos-power: max_freq → 4.7 GHz (16 cores)
+Oct 15 20:30:43 archlinux luminos-power[92323]: 2026-10-15T20:30:43 [INFO ] luminos-power: adaptive cap → 4.67 GHz (avg=30% smoothAvg=30% maxCore=100% smoothMax=97% prealloc=0% igpu=23%)
+Oct 15 20:30:43 archlinux luminos-power[92323]: 2026-10-15T20:30:43 [INFO ] luminos-power: thermal burst suppressed: 77.2°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:44 archlinux luminos-power[92323]: 2026-10-15T20:30:44 [INFO ] luminos-power: thermal burst suppressed: 79.6°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:44 archlinux luminos-power[92323]: 2026-10-15T20:30:44 [INFO ] luminos-power: thermal burst suppressed: 81.2°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:45 archlinux luminos-power[92323]: 2026-10-15T20:30:45 [INFO ] luminos-power: thermal burst suppressed: 82.6°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:45 archlinux luminos-power[92323]: 2026-10-15T20:30:45 [INFO ] luminos-power: thermal burst suppressed: 83.6°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:46 archlinux luminos-power[92323]: 2026-10-15T20:30:46 [INFO ] luminos-power: thermal burst suppressed: 84.4°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:46 archlinux luminos-power[92323]: 2026-10-15T20:30:46 [INFO ] luminos-power: thermal burst suppressed: 84.9°C but in cooldown — next burst in 26m0s
+Oct 15 20:30:47 archlinux luminos-power[92323]: 2026-10-15T20:30:47 [INFO ] luminos-power: thermal burst suppressed: 85.2°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:47 archlinux luminos-power[92323]: 2026-10-15T20:30:47 [INFO ] luminos-power: thermal burst suppressed: 85.2°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:48 archlinux luminos-power[92323]: 2026-10-15T20:30:48 [INFO ] luminos-power: thermal burst suppressed: 85.9°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:48 archlinux luminos-power[92323]: 2026-10-15T20:30:48 [INFO ] luminos-power: thermal burst suppressed: 86.1°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:49 archlinux luminos-power[92323]: 2026-10-15T20:30:49 [INFO ] luminos-power: thermal burst suppressed: 86.4°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:49 archlinux luminos-power[92323]: 2026-10-15T20:30:49 [INFO ] luminos-power: thermal burst suppressed: 86.8°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:50 archlinux luminos-power[92323]: 2026-10-15T20:30:50 [INFO ] luminos-power: thermal burst suppressed: 88.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:50 archlinux luminos-power[92323]: 2026-10-15T20:30:50 [INFO ] luminos-power: thermal zone 2→3 (88.0°C, on_ac=true)
+Oct 15 20:30:50 archlinux luminos-power[92323]: 2026-10-15T20:30:50 [INFO ] luminos-power: max_freq → 4.2 GHz (16 cores)
+Oct 15 20:30:50 archlinux luminos-power[92323]: 2026-10-15T20:30:50 [INFO ] luminos-power: adaptive cap → 4.17 GHz (avg=30% smoothAvg=30% maxCore=71% smoothMax=87% prealloc=0% igpu=21%)
+Oct 15 20:30:50 archlinux luminos-power[92323]: 2026-10-15T20:30:50 [INFO ] luminos-power: SPI=60  temp=88.0°C  cpu=30%  igpu=21%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:30:50 archlinux luminos-power[92323]: 2026-10-15T20:30:50 [INFO ] luminos-power: thermal burst suppressed: 86.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:50 archlinux luminos-power[92323]: 2026-10-15T20:30:50 [INFO ] luminos-power: max_freq → 3.8 GHz (16 cores)
+Oct 15 20:30:50 archlinux luminos-power[92323]: 2026-10-15T20:30:50 [INFO ] luminos-power: adaptive cap → 3.82 GHz (avg=30% smoothAvg=30% maxCore=90% smoothMax=88% prealloc=0% igpu=21%)
+Oct 15 20:30:51 archlinux luminos-power[92323]: 2026-10-15T20:30:51 [INFO ] luminos-power: thermal burst suppressed: 82.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:51 archlinux luminos-power[92323]: 2026-10-15T20:30:51 [INFO ] luminos-power: max_freq → 3.6 GHz (16 cores)
+Oct 15 20:30:51 archlinux luminos-power[92323]: 2026-10-15T20:30:51 [INFO ] luminos-power: adaptive cap → 3.57 GHz (avg=31% smoothAvg=30% maxCore=100% smoothMax=91% prealloc=0% igpu=22%)
+Oct 15 20:30:51 archlinux luminos-power[92323]: 2026-10-15T20:30:51 [INFO ] luminos-power: thermal burst suppressed: 82.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:51 archlinux luminos-power[92323]: 2026-10-15T20:30:51 [INFO ] luminos-power: max_freq → 3.4 GHz (16 cores)
+Oct 15 20:30:51 archlinux luminos-power[92323]: 2026-10-15T20:30:51 [INFO ] luminos-power: adaptive cap → 3.40 GHz (avg=31% smoothAvg=31% maxCore=90% smoothMax=91% prealloc=0% igpu=22%)
+Oct 15 20:30:52 archlinux luminos-power[92323]: 2026-10-15T20:30:52 [INFO ] luminos-power: thermal burst suppressed: 82.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:52 archlinux luminos-power[92323]: 2026-10-15T20:30:52 [INFO ] luminos-power: thermal burst suppressed: 74.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:53 archlinux luminos-power[92323]: 2026-10-15T20:30:53 [INFO ] luminos-power: thermal burst suppressed: 74.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:53 archlinux luminos-power[92323]: 2026-10-15T20:30:53 [INFO ] luminos-power: thermal burst suppressed: 68.4°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:54 archlinux luminos-power[92323]: 2026-10-15T20:30:54 [INFO ] luminos-power: thermal burst suppressed: 68.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:54 archlinux luminos-power[92323]: 2026-10-15T20:30:54 [INFO ] luminos-power: thermal burst suppressed: 68.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:54 archlinux luminos-power[92323]: 2026-10-15T20:30:54 [INFO ] luminos-power: thermal zone 3→2 (68.0°C, on_ac=true)
+Oct 15 20:30:54 archlinux luminos-power[92323]: 2026-10-15T20:30:54 [INFO ] luminos-power: max_freq → 3.8 GHz (16 cores)
+Oct 15 20:30:54 archlinux luminos-power[92323]: 2026-10-15T20:30:54 [INFO ] luminos-power: adaptive cap → 3.83 GHz (avg=31% smoothAvg=31% maxCore=100% smoothMax=91% prealloc=0% igpu=21%)
+Oct 15 20:30:55 archlinux luminos-power[92323]: 2026-10-15T20:30:55 [INFO ] luminos-power: thermal burst suppressed: 65.5°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:55 archlinux luminos-power[92323]: 2026-10-15T20:30:55 [INFO ] luminos-power: max_freq → 4.1 GHz (16 cores)
+Oct 15 20:30:55 archlinux luminos-power[92323]: 2026-10-15T20:30:55 [INFO ] luminos-power: adaptive cap → 4.08 GHz (avg=32% smoothAvg=31% maxCore=75% smoothMax=86% prealloc=0% igpu=20%)
+Oct 15 20:30:55 archlinux luminos-power[92323]: 2026-10-15T20:30:55 [INFO ] luminos-power: thermal burst suppressed: 66.2°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:55 archlinux luminos-power[92323]: 2026-10-15T20:30:55 [INFO ] luminos-power: max_freq → 4.3 GHz (16 cores)
+Oct 15 20:30:55 archlinux luminos-power[92323]: 2026-10-15T20:30:55 [INFO ] luminos-power: adaptive cap → 4.29 GHz (avg=30% smoothAvg=31% maxCore=98% smoothMax=90% prealloc=0% igpu=20%)
+Oct 15 20:30:56 archlinux luminos-power[92323]: 2026-10-15T20:30:56 [INFO ] luminos-power: thermal burst suppressed: 68.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:56 archlinux luminos-power[92323]: 2026-10-15T20:30:56 [INFO ] luminos-power: thermal burst suppressed: 69.9°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:56 archlinux luminos-power[92323]: 2026-10-15T20:30:56 [INFO ] luminos-power: max_freq → 4.4 GHz (16 cores)
+Oct 15 20:30:56 archlinux luminos-power[92323]: 2026-10-15T20:30:56 [INFO ] luminos-power: adaptive cap → 4.45 GHz (avg=30% smoothAvg=30% maxCore=94% smoothMax=90% prealloc=0% igpu=20%)
+Oct 15 20:30:57 archlinux luminos-power[92323]: 2026-10-15T20:30:57 [INFO ] luminos-power: thermal burst suppressed: 72.6°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:57 archlinux luminos-power[92323]: 2026-10-15T20:30:57 [INFO ] luminos-power: thermal burst suppressed: 74.4°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:57 archlinux luminos-power[92323]: 2026-10-15T20:30:57 [INFO ] luminos-power: max_freq → 4.6 GHz (16 cores)
+Oct 15 20:30:57 archlinux luminos-power[92323]: 2026-10-15T20:30:57 [INFO ] luminos-power: adaptive cap → 4.61 GHz (avg=30% smoothAvg=30% maxCore=100% smoothMax=95% prealloc=0% igpu=21%)
+Oct 15 20:30:58 archlinux luminos-power[92323]: 2026-10-15T20:30:58 [INFO ] luminos-power: thermal burst suppressed: 77.5°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:58 archlinux luminos-power[92323]: 2026-10-15T20:30:58 [INFO ] luminos-power: thermal burst suppressed: 79.8°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:59 archlinux luminos-power[92323]: 2026-10-15T20:30:59 [INFO ] luminos-power: thermal burst suppressed: 81.5°C but in cooldown — next burst in 25m0s
+Oct 15 20:30:59 archlinux luminos-power[92323]: 2026-10-15T20:30:59 [INFO ] luminos-power: thermal burst suppressed: 83.6°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:00 archlinux luminos-power[92323]: 2026-10-15T20:31:00 [INFO ] luminos-power: thermal burst suppressed: 87.5°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:00 archlinux luminos-power[92323]: 2026-10-15T20:31:00 [INFO ] luminos-power: thermal zone 2→3 (87.5°C, on_ac=true)
+Oct 15 20:31:00 archlinux luminos-power[92323]: 2026-10-15T20:31:00 [INFO ] luminos-power: max_freq → 4.1 GHz (16 cores)
+Oct 15 20:31:00 archlinux luminos-power[92323]: 2026-10-15T20:31:00 [INFO ] luminos-power: adaptive cap → 4.13 GHz (avg=57% smoothAvg=41% maxCore=100% smoothMax=94% prealloc=0% igpu=21%)
+Oct 15 20:31:00 archlinux luminos-power[92323]: 2026-10-15T20:31:00 [INFO ] luminos-power: SPI=63  temp=87.5°C  cpu=41%  igpu=21%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:00 archlinux luminos-power[92323]: 2026-10-15T20:31:00 [INFO ] luminos-power: thermal burst suppressed: 87.1°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:00 archlinux luminos-power[92323]: 2026-10-15T20:31:00 [INFO ] luminos-power: max_freq → 3.8 GHz (16 cores)
+Oct 15 20:31:00 archlinux luminos-power[92323]: 2026-10-15T20:31:00 [INFO ] luminos-power: adaptive cap → 3.79 GHz (avg=55% smoothAvg=45% maxCore=100% smoothMax=96% prealloc=0% igpu=22%)
+Oct 15 20:31:00 archlinux luminos-power[92323]: 2026-10-15T20:31:00 [INFO ] luminos-power: SPI=64  temp=87.1°C  cpu=45%  igpu=22%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:01 archlinux luminos-power[92323]: 2026-10-15T20:31:01 [INFO ] luminos-power: thermal burst suppressed: 85.1°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:01 archlinux luminos-power[92323]: 2026-10-15T20:31:01 [INFO ] luminos-power: max_freq → 3.6 GHz (16 cores)
+Oct 15 20:31:01 archlinux luminos-power[92323]: 2026-10-15T20:31:01 [INFO ] luminos-power: adaptive cap → 3.55 GHz (avg=56% smoothAvg=48% maxCore=100% smoothMax=97% prealloc=0% igpu=22%)
+Oct 15 20:31:01 archlinux luminos-power[92323]: 2026-10-15T20:31:01 [INFO ] luminos-power: SPI=63  temp=85.1°C  cpu=48%  igpu=22%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:01 archlinux luminos-power[92323]: 2026-10-15T20:31:01 [INFO ] luminos-power: thermal burst suppressed: 85.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:01 archlinux luminos-power[92323]: 2026-10-15T20:31:01 [INFO ] luminos-power: max_freq → 3.4 GHz (16 cores)
+Oct 15 20:31:01 archlinux luminos-power[92323]: 2026-10-15T20:31:01 [INFO ] luminos-power: adaptive cap → 3.39 GHz (avg=55% smoothAvg=50% maxCore=100% smoothMax=98% prealloc=0% igpu=22%)
+Oct 15 20:31:01 archlinux luminos-power[92323]: 2026-10-15T20:31:01 [INFO ] luminos-power: SPI=63  temp=85.0°C  cpu=50%  igpu=22%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:02 archlinux luminos-power[92323]: 2026-10-15T20:31:02 [INFO ] luminos-power: thermal burst suppressed: 85.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:02 archlinux luminos-power[92323]: 2026-10-15T20:31:02 [INFO ] luminos-power: SPI=64  temp=85.0°C  cpu=52%  igpu=22%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:03 archlinux luminos-power[92323]: 2026-10-15T20:31:03 [INFO ] luminos-power: thermal burst suppressed: 78.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:03 archlinux luminos-power[92323]: 2026-10-15T20:31:03 [INFO ] luminos-power: thermal burst suppressed: 78.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:04 archlinux luminos-power[92323]: 2026-10-15T20:31:04 [INFO ] luminos-power: thermal burst suppressed: 78.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:04 archlinux luminos-power[92323]: 2026-10-15T20:31:04 [INFO ] luminos-power: thermal burst suppressed: 74.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:05 archlinux luminos-power[92323]: 2026-10-15T20:31:05 [INFO ] luminos-power: thermal burst suppressed: 74.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:05 archlinux luminos-power[92323]: 2026-10-15T20:31:05 [INFO ] luminos-power: thermal zone 3→2 (74.0°C, on_ac=true)
+Oct 15 20:31:05 archlinux luminos-power[92323]: 2026-10-15T20:31:05 [INFO ] luminos-power: max_freq → 3.9 GHz (16 cores)
+Oct 15 20:31:05 archlinux luminos-power[92323]: 2026-10-15T20:31:05 [INFO ] luminos-power: adaptive cap → 3.91 GHz (avg=56% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=20%)
+Oct 15 20:31:05 archlinux luminos-power[92323]: 2026-10-15T20:31:05 [INFO ] luminos-power: thermal burst suppressed: 73.5°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:05 archlinux luminos-power[92323]: 2026-10-15T20:31:05 [INFO ] luminos-power: max_freq → 4.3 GHz (16 cores)
+Oct 15 20:31:05 archlinux luminos-power[92323]: 2026-10-15T20:31:05 [INFO ] luminos-power: adaptive cap → 4.28 GHz (avg=55% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=20%)
+Oct 15 20:31:06 archlinux luminos-power[92323]: 2026-10-15T20:31:06 [INFO ] luminos-power: thermal burst suppressed: 78.1°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:06 archlinux luminos-power[92323]: 2026-10-15T20:31:06 [INFO ] luminos-power: max_freq → 4.5 GHz (16 cores)
+Oct 15 20:31:06 archlinux luminos-power[92323]: 2026-10-15T20:31:06 [INFO ] luminos-power: adaptive cap → 4.53 GHz (avg=55% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=20%)
+Oct 15 20:31:06 archlinux luminos-power[92323]: 2026-10-15T20:31:06 [INFO ] luminos-power: thermal burst suppressed: 84.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:06 archlinux luminos-power[92323]: 2026-10-15T20:31:06 [INFO ] luminos-power: max_freq → 4.7 GHz (16 cores)
+Oct 15 20:31:06 archlinux luminos-power[92323]: 2026-10-15T20:31:06 [INFO ] luminos-power: adaptive cap → 4.71 GHz (avg=54% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=21%)
+Oct 15 20:31:06 archlinux luminos-power[92323]: 2026-10-15T20:31:06 [INFO ] luminos-power: SPI=63  temp=84.0°C  cpu=55%  igpu=21%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:07 archlinux luminos-power[92323]: 2026-10-15T20:31:07 [INFO ] luminos-power: thermal burst suppressed: 87.8°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:07 archlinux luminos-power[92323]: 2026-10-15T20:31:07 [INFO ] luminos-power: thermal zone 2→3 (87.8°C, on_ac=true)
+Oct 15 20:31:07 archlinux luminos-power[92323]: 2026-10-15T20:31:07 [INFO ] luminos-power: max_freq → 4.2 GHz (16 cores)
+Oct 15 20:31:07 archlinux luminos-power[92323]: 2026-10-15T20:31:07 [INFO ] luminos-power: adaptive cap → 4.20 GHz (avg=55% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=21%)
+Oct 15 20:31:07 archlinux luminos-power[92323]: 2026-10-15T20:31:07 [INFO ] luminos-power: SPI=66  temp=87.8°C  cpu=55%  igpu=21%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:07 archlinux luminos-power[92323]: 2026-10-15T20:31:07 [INFO ] luminos-power: thermal burst suppressed: 87.9°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:07 archlinux luminos-power[92323]: 2026-10-15T20:31:07 [INFO ] luminos-power: max_freq → 3.8 GHz (16 cores)
+Oct 15 20:31:07 archlinux luminos-power[92323]: 2026-10-15T20:31:07 [INFO ] luminos-power: adaptive cap → 3.84 GHz (avg=55% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=22%)
+Oct 15 20:31:07 archlinux luminos-power[92323]: 2026-10-15T20:31:07 [INFO ] luminos-power: SPI=67  temp=87.9°C  cpu=55%  igpu=22%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:08 archlinux luminos-power[92323]: 2026-10-15T20:31:08 [INFO ] luminos-power: thermal burst suppressed: 86.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:08 archlinux luminos-power[92323]: 2026-10-15T20:31:08 [INFO ] luminos-power: max_freq → 3.6 GHz (16 cores)
+Oct 15 20:31:08 archlinux luminos-power[92323]: 2026-10-15T20:31:08 [INFO ] luminos-power: adaptive cap → 3.59 GHz (avg=56% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=22%)
+Oct 15 20:31:08 archlinux luminos-power[92323]: 2026-10-15T20:31:08 [INFO ] luminos-power: SPI=65  temp=86.0°C  cpu=55%  igpu=22%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:08 archlinux luminos-power[92323]: 2026-10-15T20:31:08 [INFO ] luminos-power: thermal burst suppressed: 86.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:08 archlinux luminos-power[92323]: 2026-10-15T20:31:08 [INFO ] luminos-power: max_freq → 3.4 GHz (16 cores)
+Oct 15 20:31:08 archlinux luminos-power[92323]: 2026-10-15T20:31:08 [INFO ] luminos-power: adaptive cap → 3.41 GHz (avg=55% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=23%)
+Oct 15 20:31:08 archlinux luminos-power[92323]: 2026-10-15T20:31:08 [INFO ] luminos-power: SPI=65  temp=86.0°C  cpu=55%  igpu=23%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:09 archlinux luminos-power[92323]: 2026-10-15T20:31:09 [INFO ] luminos-power: thermal burst suppressed: 86.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:09 archlinux luminos-power[92323]: 2026-10-15T20:31:09 [INFO ] luminos-power: SPI=65  temp=86.0°C  cpu=55%  igpu=22%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:09 archlinux luminos-power[92323]: 2026-10-15T20:31:09 [INFO ] luminos-power: thermal burst suppressed: 80.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:09 archlinux luminos-power[92323]: 2026-10-15T20:31:09 [INFO ] luminos-power: SPI=60  temp=80.0°C  cpu=55%  igpu=22%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:10 archlinux luminos-power[92323]: 2026-10-15T20:31:10 [INFO ] luminos-power: thermal burst suppressed: 80.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:10 archlinux luminos-power[92323]: 2026-10-15T20:31:10 [INFO ] luminos-power: SPI=61  temp=80.0°C  cpu=56%  igpu=22%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:10 archlinux luminos-power[92323]: 2026-10-15T20:31:10 [INFO ] luminos-power: thermal burst suppressed: 76.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:11 archlinux luminos-power[92323]: 2026-10-15T20:31:11 [INFO ] luminos-power: thermal burst suppressed: 76.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:11 archlinux luminos-power[92323]: 2026-10-15T20:31:11 [INFO ] luminos-power: thermal burst suppressed: 76.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:11 archlinux luminos-power[92323]: 2026-10-15T20:31:11 [INFO ] luminos-power: thermal zone 3→2 (76.0°C, on_ac=true)
+Oct 15 20:31:11 archlinux luminos-power[92323]: 2026-10-15T20:31:11 [INFO ] luminos-power: max_freq → 3.9 GHz (16 cores)
+Oct 15 20:31:11 archlinux luminos-power[92323]: 2026-10-15T20:31:11 [INFO ] luminos-power: adaptive cap → 3.93 GHz (avg=55% smoothAvg=56% maxCore=100% smoothMax=100% prealloc=0% igpu=23%)
+Oct 15 20:31:12 archlinux luminos-power[92323]: 2026-10-15T20:31:12 [INFO ] luminos-power: thermal burst suppressed: 74.8°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:12 archlinux luminos-power[92323]: 2026-10-15T20:31:12 [INFO ] luminos-power: max_freq → 4.3 GHz (16 cores)
+Oct 15 20:31:12 archlinux luminos-power[92323]: 2026-10-15T20:31:12 [INFO ] luminos-power: adaptive cap → 4.29 GHz (avg=56% smoothAvg=56% maxCore=100% smoothMax=100% prealloc=0% igpu=22%)
+Oct 15 20:31:12 archlinux luminos-power[92323]: 2026-10-15T20:31:12 [INFO ] luminos-power: thermal burst suppressed: 79.1°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:12 archlinux luminos-power[92323]: 2026-10-15T20:31:12 [INFO ] luminos-power: max_freq → 4.5 GHz (16 cores)
+Oct 15 20:31:12 archlinux luminos-power[92323]: 2026-10-15T20:31:12 [INFO ] luminos-power: adaptive cap → 4.55 GHz (avg=55% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=22%)
+Oct 15 20:31:13 archlinux luminos-power[92323]: 2026-10-15T20:31:13 [INFO ] luminos-power: thermal burst suppressed: 84.6°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:13 archlinux luminos-power[92323]: 2026-10-15T20:31:13 [INFO ] luminos-power: max_freq → 4.7 GHz (16 cores)
+Oct 15 20:31:13 archlinux luminos-power[92323]: 2026-10-15T20:31:13 [INFO ] luminos-power: adaptive cap → 4.72 GHz (avg=55% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=22%)
+Oct 15 20:31:13 archlinux luminos-power[92323]: 2026-10-15T20:31:13 [INFO ] luminos-power: SPI=64  temp=84.6°C  cpu=55%  igpu=22%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:13 archlinux luminos-power[92323]: 2026-10-15T20:31:13 [INFO ] luminos-power: thermal burst suppressed: 88.2°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:13 archlinux luminos-power[92323]: 2026-10-15T20:31:13 [INFO ] luminos-power: thermal zone 2→3 (88.2°C, on_ac=true)
+Oct 15 20:31:13 archlinux luminos-power[92323]: 2026-10-15T20:31:13 [INFO ] luminos-power: max_freq → 4.2 GHz (16 cores)
+Oct 15 20:31:13 archlinux luminos-power[92323]: 2026-10-15T20:31:13 [INFO ] luminos-power: adaptive cap → 4.21 GHz (avg=54% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=21%)
+Oct 15 20:31:13 archlinux luminos-power[92323]: 2026-10-15T20:31:13 [INFO ] luminos-power: SPI=67  temp=88.2°C  cpu=55%  igpu=21%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:14 archlinux luminos-power[92323]: 2026-10-15T20:31:14 [INFO ] luminos-power: thermal burst suppressed: 88.2°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:14 archlinux luminos-power[92323]: 2026-10-15T20:31:14 [INFO ] luminos-power: max_freq → 3.8 GHz (16 cores)
+Oct 15 20:31:14 archlinux luminos-power[92323]: 2026-10-15T20:31:14 [INFO ] luminos-power: adaptive cap → 3.84 GHz (avg=56% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=21%)
+Oct 15 20:31:14 archlinux luminos-power[92323]: 2026-10-15T20:31:14 [INFO ] luminos-power: SPI=67  temp=88.2°C  cpu=55%  igpu=21%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:31:14 archlinux luminos-power[92323]: 2026-10-15T20:31:14 [INFO ] luminos-power: thermal burst suppressed: 88.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:14 archlinux luminos-power[92323]: 2026-10-15T20:31:14 [INFO ] luminos-power: max_freq → 3.6 GHz (16 cores)
+Oct 15 20:31:14 archlinux luminos-power[92323]: 2026-10-15T20:31:14 [INFO ] luminos-power: adaptive cap → 3.59 GHz (avg=72% smoothAvg=60% maxCore=100% smoothMax=100% prealloc=0% igpu=21%)
+Oct 15 20:31:14 archlinux luminos-power[92323]: 2026-10-15T20:31:14 [INFO ] luminos-power: SPI=68  temp=88.0°C  cpu=60%  igpu=21%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:15 archlinux luminos-power[92323]: 2026-10-15T20:31:15 [INFO ] luminos-power: thermal burst suppressed: 88.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:15 archlinux luminos-power[92323]: 2026-10-15T20:31:15 [INFO ] luminos-power: max_freq → 3.4 GHz (16 cores)
+Oct 15 20:31:15 archlinux luminos-power[92323]: 2026-10-15T20:31:15 [INFO ] luminos-power: adaptive cap → 3.41 GHz (avg=57% smoothAvg=59% maxCore=100% smoothMax=100% prealloc=0% igpu=22%)
+Oct 15 20:31:15 archlinux luminos-power[92323]: 2026-10-15T20:31:15 [INFO ] luminos-power: SPI=68  temp=88.0°C  cpu=59%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:15 archlinux luminos-power[92323]: 2026-10-15T20:31:15 [INFO ] luminos-power: thermal burst suppressed: 82.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:15 archlinux luminos-power[92323]: 2026-10-15T20:31:15 [INFO ] luminos-power: SPI=63  temp=82.0°C  cpu=58%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:16 archlinux luminos-power[92323]: 2026-10-15T20:31:16 [INFO ] luminos-power: thermal burst suppressed: 82.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:16 archlinux luminos-power[92323]: 2026-10-15T20:31:16 [INFO ] luminos-power: SPI=63  temp=82.0°C  cpu=58%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:16 archlinux luminos-power[92323]: 2026-10-15T20:31:16 [INFO ] luminos-power: thermal burst suppressed: 82.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:16 archlinux luminos-power[92323]: 2026-10-15T20:31:16 [INFO ] luminos-power: SPI=63  temp=82.0°C  cpu=57%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:17 archlinux luminos-power[92323]: 2026-10-15T20:31:17 [INFO ] luminos-power: thermal burst suppressed: 77.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:17 archlinux luminos-power[92323]: 2026-10-15T20:31:17 [INFO ] luminos-power: thermal burst suppressed: 77.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:18 archlinux luminos-power[92323]: 2026-10-15T20:31:18 [INFO ] luminos-power: thermal burst suppressed: 74.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:18 archlinux luminos-power[92323]: 2026-10-15T20:31:18 [INFO ] luminos-power: thermal burst suppressed: 74.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:19 archlinux luminos-power[92323]: 2026-10-15T20:31:19 [INFO ] luminos-power: thermal burst suppressed: 74.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:19 archlinux luminos-power[92323]: 2026-10-15T20:31:19 [INFO ] luminos-power: thermal zone 3→2 (74.0°C, on_ac=true)
+Oct 15 20:31:19 archlinux luminos-power[92323]: 2026-10-15T20:31:19 [INFO ] luminos-power: max_freq → 3.9 GHz (16 cores)
+Oct 15 20:31:19 archlinux luminos-power[92323]: 2026-10-15T20:31:19 [INFO ] luminos-power: adaptive cap → 3.93 GHz (avg=57% smoothAvg=56% maxCore=100% smoothMax=100% prealloc=0% igpu=23%)
+Oct 15 20:31:19 archlinux luminos-power[92323]: 2026-10-15T20:31:19 [INFO ] luminos-power: thermal burst suppressed: 73.8°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:19 archlinux luminos-power[92323]: 2026-10-15T20:31:19 [INFO ] luminos-power: max_freq → 4.3 GHz (16 cores)
+Oct 15 20:31:19 archlinux luminos-power[92323]: 2026-10-15T20:31:19 [INFO ] luminos-power: adaptive cap → 4.29 GHz (avg=55% smoothAvg=56% maxCore=100% smoothMax=100% prealloc=0% igpu=23%)
+Oct 15 20:31:20 archlinux luminos-power[92323]: 2026-10-15T20:31:20 [INFO ] luminos-power: thermal burst suppressed: 78.9°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:20 archlinux luminos-power[92323]: 2026-10-15T20:31:20 [INFO ] luminos-power: max_freq → 4.5 GHz (16 cores)
+Oct 15 20:31:20 archlinux luminos-power[92323]: 2026-10-15T20:31:20 [INFO ] luminos-power: adaptive cap → 4.55 GHz (avg=58% smoothAvg=56% maxCore=100% smoothMax=100% prealloc=0% igpu=24%)
+Oct 15 20:31:20 archlinux luminos-power[92323]: 2026-10-15T20:31:20 [INFO ] luminos-power: thermal burst suppressed: 84.5°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:20 archlinux luminos-power[92323]: 2026-10-15T20:31:20 [INFO ] luminos-power: max_freq → 4.7 GHz (16 cores)
+Oct 15 20:31:20 archlinux luminos-power[92323]: 2026-10-15T20:31:20 [INFO ] luminos-power: adaptive cap → 4.72 GHz (avg=57% smoothAvg=57% maxCore=100% smoothMax=100% prealloc=0% igpu=25%)
+Oct 15 20:31:20 archlinux luminos-power[92323]: 2026-10-15T20:31:20 [INFO ] luminos-power: SPI=65  temp=84.5°C  cpu=57%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:21 archlinux luminos-power[92323]: 2026-10-15T20:31:21 [INFO ] luminos-power: thermal burst suppressed: 88.1°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:21 archlinux luminos-power[92323]: 2026-10-15T20:31:21 [INFO ] luminos-power: thermal zone 2→3 (88.1°C, on_ac=true)
+Oct 15 20:31:21 archlinux luminos-power[92323]: 2026-10-15T20:31:21 [INFO ] luminos-power: max_freq → 4.2 GHz (16 cores)
+Oct 15 20:31:21 archlinux luminos-power[92323]: 2026-10-15T20:31:21 [INFO ] luminos-power: adaptive cap → 4.21 GHz (avg=57% smoothAvg=57% maxCore=100% smoothMax=100% prealloc=0% igpu=25%)
+Oct 15 20:31:21 archlinux luminos-power[92323]: 2026-10-15T20:31:21 [INFO ] luminos-power: SPI=68  temp=88.1°C  cpu=57%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:21 archlinux luminos-power[92323]: 2026-10-15T20:31:21 [INFO ] luminos-power: thermal burst suppressed: 88.2°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:21 archlinux luminos-power[92323]: 2026-10-15T20:31:21 [INFO ] luminos-power: max_freq → 3.8 GHz (16 cores)
+Oct 15 20:31:21 archlinux luminos-power[92323]: 2026-10-15T20:31:21 [INFO ] luminos-power: adaptive cap → 3.84 GHz (avg=55% smoothAvg=56% maxCore=100% smoothMax=100% prealloc=0% igpu=25%)
+Oct 15 20:31:21 archlinux luminos-power[92323]: 2026-10-15T20:31:21 [INFO ] luminos-power: SPI=68  temp=88.2°C  cpu=56%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:22 archlinux luminos-power[92323]: 2026-10-15T20:31:22 [INFO ] luminos-power: thermal burst suppressed: 88.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:22 archlinux luminos-power[92323]: 2026-10-15T20:31:22 [INFO ] luminos-power: max_freq → 3.6 GHz (16 cores)
+Oct 15 20:31:22 archlinux luminos-power[92323]: 2026-10-15T20:31:22 [INFO ] luminos-power: adaptive cap → 3.59 GHz (avg=56% smoothAvg=56% maxCore=100% smoothMax=100% prealloc=0% igpu=25%)
+Oct 15 20:31:22 archlinux luminos-power[92323]: 2026-10-15T20:31:22 [INFO ] luminos-power: SPI=67  temp=88.0°C  cpu=56%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:22 archlinux luminos-power[92323]: 2026-10-15T20:31:22 [INFO ] luminos-power: thermal burst suppressed: 88.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:22 archlinux luminos-power[92323]: 2026-10-15T20:31:22 [INFO ] luminos-power: max_freq → 3.4 GHz (16 cores)
+Oct 15 20:31:22 archlinux luminos-power[92323]: 2026-10-15T20:31:22 [INFO ] luminos-power: adaptive cap → 3.41 GHz (avg=56% smoothAvg=56% maxCore=100% smoothMax=100% prealloc=0% igpu=25%)
+Oct 15 20:31:22 archlinux luminos-power[92323]: 2026-10-15T20:31:22 [INFO ] luminos-power: SPI=67  temp=88.0°C  cpu=56%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:23 archlinux luminos-power[92323]: 2026-10-15T20:31:23 [INFO ] luminos-power: thermal burst suppressed: 82.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:23 archlinux luminos-power[92323]: 2026-10-15T20:31:23 [INFO ] luminos-power: SPI=62  temp=82.0°C  cpu=56%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:23 archlinux luminos-power[92323]: 2026-10-15T20:31:23 [INFO ] luminos-power: thermal burst suppressed: 82.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:23 archlinux luminos-power[92323]: 2026-10-15T20:31:23 [INFO ] luminos-power: SPI=63  temp=82.0°C  cpu=56%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:24 archlinux luminos-power[92323]: 2026-10-15T20:31:24 [INFO ] luminos-power: thermal burst suppressed: 82.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:24 archlinux luminos-power[92323]: 2026-10-15T20:31:24 [INFO ] luminos-power: SPI=62  temp=82.0°C  cpu=56%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:24 archlinux luminos-power[92323]: 2026-10-15T20:31:24 [INFO ] luminos-power: thermal burst suppressed: 77.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:25 archlinux luminos-power[92323]: 2026-10-15T20:31:25 [INFO ] luminos-power: thermal burst suppressed: 77.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:25 archlinux luminos-power[92323]: 2026-10-15T20:31:25 [INFO ] luminos-power: thermal burst suppressed: 74.2°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:26 archlinux luminos-power[92323]: 2026-10-15T20:31:26 [INFO ] luminos-power: thermal burst suppressed: 74.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:26 archlinux luminos-power[92323]: 2026-10-15T20:31:26 [INFO ] luminos-power: thermal burst suppressed: 74.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:26 archlinux luminos-power[92323]: 2026-10-15T20:31:26 [INFO ] luminos-power: thermal zone 3→2 (74.0°C, on_ac=true)
+Oct 15 20:31:26 archlinux luminos-power[92323]: 2026-10-15T20:31:26 [INFO ] luminos-power: max_freq → 3.9 GHz (16 cores)
+Oct 15 20:31:26 archlinux luminos-power[92323]: 2026-10-15T20:31:26 [INFO ] luminos-power: adaptive cap → 3.93 GHz (avg=55% smoothAvg=57% maxCore=100% smoothMax=100% prealloc=0% igpu=22%)
+Oct 15 20:31:27 archlinux luminos-power[92323]: 2026-10-15T20:31:27 [INFO ] luminos-power: thermal burst suppressed: 73.8°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:27 archlinux luminos-power[92323]: 2026-10-15T20:31:27 [INFO ] luminos-power: max_freq → 4.3 GHz (16 cores)
+Oct 15 20:31:27 archlinux luminos-power[92323]: 2026-10-15T20:31:27 [INFO ] luminos-power: adaptive cap → 4.28 GHz (avg=55% smoothAvg=57% maxCore=98% smoothMax=99% prealloc=0% igpu=22%)
+Oct 15 20:31:27 archlinux luminos-power[92323]: 2026-10-15T20:31:27 [INFO ] luminos-power: thermal burst suppressed: 78.2°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:27 archlinux luminos-power[92323]: 2026-10-15T20:31:27 [INFO ] luminos-power: max_freq → 4.5 GHz (16 cores)
+Oct 15 20:31:27 archlinux luminos-power[92323]: 2026-10-15T20:31:27 [INFO ] luminos-power: adaptive cap → 4.53 GHz (avg=55% smoothAvg=56% maxCore=100% smoothMax=99% prealloc=0% igpu=22%)
+Oct 15 20:31:28 archlinux luminos-power[92323]: 2026-10-15T20:31:28 [INFO ] luminos-power: thermal burst suppressed: 84.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:28 archlinux luminos-power[92323]: 2026-10-15T20:31:28 [INFO ] luminos-power: max_freq → 4.7 GHz (16 cores)
+Oct 15 20:31:28 archlinux luminos-power[92323]: 2026-10-15T20:31:28 [INFO ] luminos-power: adaptive cap → 4.71 GHz (avg=55% smoothAvg=56% maxCore=100% smoothMax=100% prealloc=0% igpu=22%)
+Oct 15 20:31:28 archlinux luminos-power[92323]: 2026-10-15T20:31:28 [INFO ] luminos-power: SPI=64  temp=84.0°C  cpu=56%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:28 archlinux luminos-power[92323]: 2026-10-15T20:31:28 [INFO ] luminos-power: thermal burst suppressed: 87.8°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:28 archlinux luminos-power[92323]: 2026-10-15T20:31:28 [INFO ] luminos-power: thermal zone 2→3 (87.8°C, on_ac=true)
+Oct 15 20:31:29 archlinux luminos-power[92323]: 2026-10-15T20:31:29 [INFO ] luminos-power: max_freq → 4.2 GHz (16 cores)
+Oct 15 20:31:29 archlinux luminos-power[92323]: 2026-10-15T20:31:29 [INFO ] luminos-power: adaptive cap → 4.20 GHz (avg=54% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=23%)
+Oct 15 20:31:29 archlinux luminos-power[92323]: 2026-10-15T20:31:29 [INFO ] luminos-power: SPI=67  temp=87.8°C  cpu=55%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:29 archlinux luminos-power[92323]: 2026-10-15T20:31:29 [INFO ] luminos-power: thermal burst suppressed: 87.9°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:29 archlinux luminos-power[92323]: 2026-10-15T20:31:29 [INFO ] luminos-power: max_freq → 3.8 GHz (16 cores)
+Oct 15 20:31:29 archlinux luminos-power[92323]: 2026-10-15T20:31:29 [INFO ] luminos-power: adaptive cap → 3.84 GHz (avg=55% smoothAvg=55% maxCore=100% smoothMax=100% prealloc=0% igpu=22%)
+Oct 15 20:31:29 archlinux luminos-power[92323]: 2026-10-15T20:31:29 [INFO ] luminos-power: SPI=66  temp=87.9°C  cpu=55%  igpu=22%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:30 archlinux luminos-power[92323]: 2026-10-15T20:31:30 [INFO ] luminos-power: thermal burst suppressed: 87.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:30 archlinux luminos-power[92323]: 2026-10-15T20:31:30 [INFO ] luminos-power: max_freq → 3.6 GHz (16 cores)
+Oct 15 20:31:30 archlinux luminos-power[92323]: 2026-10-15T20:31:30 [INFO ] luminos-power: adaptive cap → 3.59 GHz (avg=82% smoothAvg=63% maxCore=98% smoothMax=99% prealloc=0% igpu=22%)
+Oct 15 20:31:30 archlinux luminos-power[92323]: 2026-10-15T20:31:30 [INFO ] luminos-power: SPI=68  temp=87.0°C  cpu=63%  igpu=22%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:30 archlinux luminos-power[92323]: 2026-10-15T20:31:30 [INFO ] luminos-power: thermal burst suppressed: 87.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:30 archlinux luminos-power[92323]: 2026-10-15T20:31:30 [INFO ] luminos-power: max_freq → 3.4 GHz (16 cores)
+Oct 15 20:31:30 archlinux luminos-power[92323]: 2026-10-15T20:31:30 [INFO ] luminos-power: adaptive cap → 3.41 GHz (avg=100% smoothAvg=74% maxCore=100% smoothMax=99% prealloc=0% igpu=22%)
+Oct 15 20:31:30 archlinux luminos-power[92323]: 2026-10-15T20:31:30 [INFO ] luminos-power: SPI=71  temp=87.0°C  cpu=74%  igpu=22%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:31 archlinux luminos-power[92323]: 2026-10-15T20:31:31 [INFO ] luminos-power: thermal burst suppressed: 83.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:31 archlinux luminos-power[92323]: 2026-10-15T20:31:31 [INFO ] luminos-power: SPI=69  temp=83.0°C  cpu=82%  igpu=22%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:31 archlinux luminos-power[92323]: 2026-10-15T20:31:31 [INFO ] luminos-power: thermal burst suppressed: 83.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:31 archlinux luminos-power[92323]: 2026-10-15T20:31:31 [INFO ] luminos-power: SPI=71  temp=83.0°C  cpu=87%  igpu=22%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:32 archlinux luminos-power[92323]: 2026-10-15T20:31:32 [INFO ] luminos-power: thermal burst suppressed: 83.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:32 archlinux luminos-power[92323]: 2026-10-15T20:31:32 [INFO ] luminos-power: SPI=72  temp=83.0°C  cpu=91%  igpu=23%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:32 archlinux luminos-power[92323]: 2026-10-15T20:31:32 [INFO ] luminos-power: thermal burst suppressed: 79.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:32 archlinux luminos-power[92323]: 2026-10-15T20:31:32 [INFO ] luminos-power: SPI=69  temp=79.0°C  cpu=93%  igpu=24%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:33 archlinux luminos-power[92323]: 2026-10-15T20:31:33 [INFO ] luminos-power: thermal burst suppressed: 79.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:33 archlinux luminos-power[92323]: 2026-10-15T20:31:33 [INFO ] luminos-power: SPI=70  temp=79.0°C  cpu=95%  igpu=24%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:33 archlinux luminos-power[92323]: 2026-10-15T20:31:33 [INFO ] luminos-power: thermal burst suppressed: 76.5°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:33 archlinux luminos-power[92323]: 2026-10-15T20:31:33 [INFO ] luminos-power: SPI=68  temp=76.5°C  cpu=97%  igpu=24%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:34 archlinux luminos-power[92323]: 2026-10-15T20:31:34 [INFO ] luminos-power: thermal burst suppressed: 76.0°C but in cooldown — next burst in 25m0s
+Oct 15 20:31:34 archlinux luminos-power[92323]: 2026-10-15T20:31:34 [INFO ] luminos-power: SPI=68  temp=76.0°C  cpu=98%  igpu=24%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:34 archlinux luminos-power[92323]: 2026-10-15T20:31:34 [INFO ] luminos-power: beast mode → Performance (trigger: cpu, cpu=100%, dgpu=0%)
+Oct 15 20:31:35 archlinux luminos-power[92323]: 2026-10-15T20:31:35 [INFO ] luminos-power: EPP → performance (16 cores)
+Oct 15 20:31:35 archlinux luminos-power[92323]: 2026-10-15T20:31:35 [INFO ] luminos-power: max_freq → 5.1 GHz (16 cores)
+Oct 15 20:31:35 archlinux luminos-power[92323]: 2026-10-15T20:31:35 [INFO ] luminos-power: SPI=72  temp=81.8°C  cpu=99%  igpu=21%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:36 archlinux luminos-power[92323]: 2026-10-15T20:31:36 [INFO ] luminos-power: SPI=76  temp=86.1°C  cpu=99%  igpu=21%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:36 archlinux luminos-power[92323]: 2026-10-15T20:31:36 [INFO ] luminos-power: SPI=79  temp=89.2°C  cpu=99%  igpu=22%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:37 archlinux luminos-power[92323]: 2026-10-15T20:31:37 [INFO ] luminos-power: SPI=79  temp=92.1°C  cpu=99%  igpu=22%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:38 archlinux luminos-power[92323]: 2026-10-15T20:31:38 [INFO ] luminos-power: SPI=79  temp=93.5°C  cpu=99%  igpu=22%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:39 archlinux luminos-power[92323]: 2026-10-15T20:31:39 [INFO ] luminos-power: SPI=79  temp=94.2°C  cpu=99%  igpu=23%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:40 archlinux luminos-power[92323]: 2026-10-15T20:31:40 [INFO ] luminos-power: SPI=79  temp=94.6°C  cpu=100%  igpu=23%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:41 archlinux luminos-power[92323]: 2026-10-15T20:31:41 [INFO ] luminos-power: SPI=79  temp=94.8°C  cpu=100%  igpu=23%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:41 archlinux luminos-power[92323]: 2026-10-15T20:31:41 [INFO ] luminos-power: SPI=79  temp=94.9°C  cpu=100%  igpu=22%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:42 archlinux luminos-power[92323]: 2026-10-15T20:31:42 [INFO ] luminos-power: SPI=80  temp=95.0°C  cpu=100%  igpu=25%  dgpu=0%  ram=34%avail  burst=false
+Oct 15 20:31:43 archlinux luminos-power[92323]: 2026-10-15T20:31:43 [INFO ] luminos-power: SPI=80  temp=95.0°C  cpu=100%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:44 archlinux luminos-power[92323]: 2026-10-15T20:31:44 [INFO ] luminos-power: SPI=80  temp=95.0°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:45 archlinux luminos-power[92323]: 2026-10-15T20:31:45 [WARN ] luminos-power: 95.1°C > 95°C in beast mode — throttle 3.5GHz
+Oct 15 20:31:45 archlinux luminos-power[92323]: 2026-10-15T20:31:45 [INFO ] luminos-power: max_freq → 3.5 GHz (16 cores)
+Oct 15 20:31:46 archlinux luminos-power[92323]: 2026-10-15T20:31:46 [INFO ] luminos-power: SPI=80  temp=95.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:47 archlinux luminos-power[92323]: 2026-10-15T20:31:47 [INFO ] luminos-power: SPI=79  temp=89.0°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:47 archlinux luminos-power[92323]: 2026-10-15T20:31:47 [INFO ] luminos-power: SPI=79  temp=89.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:48 archlinux luminos-power[92323]: 2026-10-15T20:31:48 [INFO ] luminos-power: SPI=76  temp=85.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:49 archlinux luminos-power[92323]: 2026-10-15T20:31:49 [INFO ] luminos-power: SPI=73  temp=82.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:50 archlinux luminos-power[92323]: 2026-10-15T20:31:50 [INFO ] luminos-power: SPI=73  temp=82.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:51 archlinux luminos-power[92323]: 2026-10-15T20:31:51 [INFO ] luminos-power: SPI=72  temp=80.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:52 archlinux luminos-power[92323]: 2026-10-15T20:31:52 [INFO ] luminos-power: SPI=71  temp=79.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:53 archlinux luminos-power[92323]: 2026-10-15T20:31:53 [INFO ] luminos-power: exec: chrome → pre-alloc +20% for 30s
+Oct 15 20:31:53 archlinux luminos-power[92323]: 2026-10-15T20:31:53 [INFO ] luminos-power: SPI=71  temp=79.0°C  cpu=100%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:53 archlinux luminos-power[92323]: 2026-10-15T20:31:53 [INFO ] luminos-power: SPI=70  temp=78.4°C  cpu=100%  igpu=21%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:54 archlinux luminos-power[92323]: 2026-10-15T20:31:54 [INFO ] luminos-power: SPI=70  temp=78.0°C  cpu=100%  igpu=21%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:55 archlinux luminos-power[92323]: 2026-10-15T20:31:55 [INFO ] luminos-power: SPI=70  temp=78.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:56 archlinux luminos-power[92323]: 2026-10-15T20:31:56 [INFO ] luminos-power: SPI=70  temp=77.5°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:57 archlinux luminos-power[92323]: 2026-10-15T20:31:57 [INFO ] luminos-power: SPI=69  temp=77.2°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:58 archlinux luminos-power[92323]: 2026-10-15T20:31:58 [INFO ] luminos-power: SPI=69  temp=77.1°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:58 archlinux luminos-power[92323]: 2026-10-15T20:31:58 [INFO ] luminos-power: SPI=69  temp=77.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:59 archlinux luminos-power[92323]: 2026-10-15T20:31:59 [INFO ] luminos-power: SPI=69  temp=76.8°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:31:59 archlinux luminos-power[92323]: 2026-10-15T20:31:59 [INFO ] luminos-power: SPI=69  temp=76.6°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:00 archlinux luminos-power[92323]: 2026-10-15T20:32:00 [INFO ] luminos-power: SPI=69  temp=76.5°C  cpu=100%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:00 archlinux luminos-power[92323]: 2026-10-15T20:32:00 [INFO ] luminos-power: SPI=69  temp=76.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:01 archlinux luminos-power[92323]: 2026-10-15T20:32:01 [INFO ] luminos-power: SPI=68  temp=76.2°C  cpu=100%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:01 archlinux luminos-power[92323]: 2026-10-15T20:32:01 [INFO ] luminos-power: SPI=68  temp=76.1°C  cpu=100%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:02 archlinux luminos-power[92323]: 2026-10-15T20:32:02 [INFO ] luminos-power: SPI=68  temp=76.0°C  cpu=100%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:02 archlinux luminos-power[92323]: 2026-10-15T20:32:02 [INFO ] luminos-power: SPI=68  temp=76.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:03 archlinux luminos-power[92323]: 2026-10-15T20:32:03 [INFO ] luminos-power: SPI=68  temp=75.9°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:03 archlinux luminos-power[92323]: 2026-10-15T20:32:03 [INFO ] luminos-power: SPI=68  temp=75.8°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:04 archlinux luminos-power[92323]: 2026-10-15T20:32:04 [INFO ] luminos-power: SPI=68  temp=75.6°C  cpu=100%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:04 archlinux luminos-power[92323]: 2026-10-15T20:32:04 [INFO ] luminos-power: SPI=68  temp=75.5°C  cpu=100%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:05 archlinux luminos-power[92323]: 2026-10-15T20:32:05 [INFO ] luminos-power: SPI=68  temp=75.4°C  cpu=100%  igpu=26%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:05 archlinux luminos-power[92323]: 2026-10-15T20:32:05 [INFO ] luminos-power: SPI=69  temp=75.2°C  cpu=100%  igpu=27%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:06 archlinux luminos-power[92323]: 2026-10-15T20:32:06 [INFO ] luminos-power: SPI=68  temp=75.1°C  cpu=100%  igpu=27%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:06 archlinux luminos-power[92323]: 2026-10-15T20:32:06 [INFO ] luminos-power: SPI=68  temp=75.1°C  cpu=100%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:07 archlinux luminos-power[92323]: 2026-10-15T20:32:07 [INFO ] luminos-power: SPI=68  temp=75.1°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:07 archlinux luminos-power[92323]: 2026-10-15T20:32:07 [INFO ] luminos-power: SPI=68  temp=75.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:08 archlinux luminos-power[92323]: 2026-10-15T20:32:08 [INFO ] luminos-power: SPI=68  temp=75.0°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:08 archlinux luminos-power[92323]: 2026-10-15T20:32:08 [INFO ] luminos-power: SPI=67  temp=75.0°C  cpu=100%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:09 archlinux luminos-power[92323]: 2026-10-15T20:32:09 [INFO ] luminos-power: SPI=67  temp=75.0°C  cpu=100%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:09 archlinux luminos-power[92323]: 2026-10-15T20:32:09 [INFO ] luminos-power: SPI=67  temp=75.0°C  cpu=100%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:10 archlinux luminos-power[92323]: 2026-10-15T20:32:10 [INFO ] luminos-power: SPI=67  temp=75.0°C  cpu=100%  igpu=21%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:10 archlinux luminos-power[92323]: 2026-10-15T20:32:10 [INFO ] luminos-power: SPI=67  temp=74.8°C  cpu=100%  igpu=20%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:11 archlinux luminos-power[92323]: 2026-10-15T20:32:11 [INFO ] luminos-power: SPI=67  temp=74.8°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:12 archlinux luminos-power[92323]: 2026-10-15T20:32:12 [INFO ] luminos-power: SPI=68  temp=74.8°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:12 archlinux luminos-power[92323]: 2026-10-15T20:32:12 [INFO ] luminos-power: SPI=68  temp=74.8°C  cpu=100%  igpu=26%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:13 archlinux luminos-power[92323]: 2026-10-15T20:32:13 [INFO ] luminos-power: SPI=68  temp=74.6°C  cpu=100%  igpu=27%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:13 archlinux luminos-power[92323]: 2026-10-15T20:32:13 [INFO ] luminos-power: SPI=68  temp=74.6°C  cpu=100%  igpu=27%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:14 archlinux luminos-power[92323]: 2026-10-15T20:32:14 [INFO ] luminos-power: SPI=68  temp=74.5°C  cpu=100%  igpu=28%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:14 archlinux luminos-power[92323]: 2026-10-15T20:32:14 [INFO ] luminos-power: SPI=68  temp=74.5°C  cpu=100%  igpu=28%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:15 archlinux luminos-power[92323]: 2026-10-15T20:32:15 [INFO ] luminos-power: SPI=68  temp=74.5°C  cpu=100%  igpu=28%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:15 archlinux luminos-power[92323]: 2026-10-15T20:32:15 [INFO ] luminos-power: SPI=68  temp=74.5°C  cpu=100%  igpu=27%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:16 archlinux luminos-power[92323]: 2026-10-15T20:32:16 [INFO ] luminos-power: SPI=68  temp=74.4°C  cpu=100%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:16 archlinux luminos-power[92323]: 2026-10-15T20:32:16 [INFO ] luminos-power: SPI=67  temp=74.5°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:17 archlinux luminos-power[92323]: 2026-10-15T20:32:17 [INFO ] luminos-power: SPI=67  temp=74.5°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:17 archlinux luminos-power[92323]: 2026-10-15T20:32:17 [INFO ] luminos-power: SPI=67  temp=74.5°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:18 archlinux luminos-power[92323]: 2026-10-15T20:32:18 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:18 archlinux luminos-power[92323]: 2026-10-15T20:32:18 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:19 archlinux luminos-power[92323]: 2026-10-15T20:32:19 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:19 archlinux luminos-power[92323]: 2026-10-15T20:32:19 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:20 archlinux luminos-power[92323]: 2026-10-15T20:32:20 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:20 archlinux luminos-power[92323]: 2026-10-15T20:32:20 [INFO ] luminos-power: SPI=67  temp=74.5°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:21 archlinux luminos-power[92323]: 2026-10-15T20:32:21 [INFO ] luminos-power: SPI=67  temp=74.5°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:21 archlinux luminos-power[92323]: 2026-10-15T20:32:21 [INFO ] luminos-power: SPI=67  temp=74.5°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:22 archlinux luminos-power[92323]: 2026-10-15T20:32:22 [INFO ] luminos-power: SPI=68  temp=74.4°C  cpu=100%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:22 archlinux luminos-power[92323]: 2026-10-15T20:32:22 [INFO ] luminos-power: SPI=68  temp=74.4°C  cpu=100%  igpu=26%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:23 archlinux luminos-power[92323]: 2026-10-15T20:32:23 [INFO ] luminos-power: SPI=68  temp=74.2°C  cpu=100%  igpu=27%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:23 archlinux luminos-power[92323]: 2026-10-15T20:32:23 [INFO ] luminos-power: SPI=68  temp=74.2°C  cpu=100%  igpu=27%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:24 archlinux luminos-power[92323]: 2026-10-15T20:32:24 [INFO ] luminos-power: SPI=68  temp=74.2°C  cpu=100%  igpu=27%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:24 archlinux luminos-power[92323]: 2026-10-15T20:32:24 [INFO ] luminos-power: SPI=68  temp=74.2°C  cpu=100%  igpu=27%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:25 archlinux luminos-power[92323]: 2026-10-15T20:32:25 [INFO ] luminos-power: SPI=68  temp=74.2°C  cpu=100%  igpu=28%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:25 archlinux luminos-power[92323]: 2026-10-15T20:32:25 [INFO ] luminos-power: SPI=68  temp=74.2°C  cpu=100%  igpu=27%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:26 archlinux luminos-power[92323]: 2026-10-15T20:32:26 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:26 archlinux luminos-power[92323]: 2026-10-15T20:32:26 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:27 archlinux luminos-power[92323]: 2026-10-15T20:32:27 [INFO ] luminos-power: SPI=67  temp=74.1°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:27 archlinux luminos-power[92323]: 2026-10-15T20:32:27 [INFO ] luminos-power: SPI=67  temp=74.1°C  cpu=100%  igpu=22%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:28 archlinux luminos-power[92323]: 2026-10-15T20:32:28 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:28 archlinux luminos-power[92323]: 2026-10-15T20:32:28 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:29 archlinux luminos-power[92323]: 2026-10-15T20:32:29 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:29 archlinux luminos-power[92323]: 2026-10-15T20:32:29 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:30 archlinux luminos-power[92323]: 2026-10-15T20:32:30 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:30 archlinux luminos-power[92323]: 2026-10-15T20:32:30 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:31 archlinux luminos-power[92323]: 2026-10-15T20:32:31 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:31 archlinux luminos-power[92323]: 2026-10-15T20:32:31 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:32 archlinux luminos-power[92323]: 2026-10-15T20:32:32 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:32 archlinux luminos-power[92323]: 2026-10-15T20:32:32 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:33 archlinux luminos-power[92323]: 2026-10-15T20:32:33 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:33 archlinux luminos-power[92323]: 2026-10-15T20:32:33 [INFO ] luminos-power: SPI=67  temp=74.5°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:34 archlinux luminos-power[92323]: 2026-10-15T20:32:34 [INFO ] luminos-power: SPI=67  temp=74.5°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:35 archlinux luminos-power[92323]: 2026-10-15T20:32:35 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:35 archlinux luminos-power[92323]: 2026-10-15T20:32:35 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:36 archlinux luminos-power[92323]: 2026-10-15T20:32:36 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:36 archlinux luminos-power[92323]: 2026-10-15T20:32:36 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:37 archlinux luminos-power[92323]: 2026-10-15T20:32:37 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:37 archlinux luminos-power[92323]: 2026-10-15T20:32:37 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:38 archlinux luminos-power[92323]: 2026-10-15T20:32:38 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:38 archlinux luminos-power[92323]: 2026-10-15T20:32:38 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:39 archlinux luminos-power[92323]: 2026-10-15T20:32:39 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:39 archlinux luminos-power[92323]: 2026-10-15T20:32:39 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:40 archlinux luminos-power[92323]: 2026-10-15T20:32:40 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:40 archlinux luminos-power[92323]: 2026-10-15T20:32:40 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:41 archlinux luminos-power[92323]: 2026-10-15T20:32:41 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:41 archlinux luminos-power[92323]: 2026-10-15T20:32:41 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:42 archlinux luminos-power[92323]: 2026-10-15T20:32:42 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=23%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:42 archlinux luminos-power[92323]: 2026-10-15T20:32:42 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:43 archlinux luminos-power[92323]: 2026-10-15T20:32:43 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=100%  igpu=25%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:43 archlinux luminos-power[92323]: 2026-10-15T20:32:43 [INFO ] luminos-power: SPI=67  temp=74.5°C  cpu=100%  igpu=24%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:44 archlinux luminos-power[92323]: 2026-10-15T20:32:44 [INFO ] luminos-power: SPI=68  temp=74.5°C  cpu=100%  igpu=26%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:32:44 archlinux luminos-power[92323]: 2026-10-15T20:32:44 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=99%  igpu=26%  dgpu=0%  ram=33%avail  burst=false
+Oct 15 20:36:10 archlinux luminos-power[92323]: 2026-10-15T20:36:10 [INFO ] luminos-power: exec: chrome → pre-alloc +20% for 30s
+Oct 15 20:36:41 archlinux luminos-power[92323]: 2026-10-15T20:36:41 [INFO ] luminos-power: SPI=61  temp=72.8°C  cpu=80%  igpu=25%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:41 archlinux luminos-power[92323]: 2026-10-15T20:36:41 [INFO ] luminos-power: SPI=63  temp=73.1°C  cpu=86%  igpu=25%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:42 archlinux luminos-power[92323]: 2026-10-15T20:36:42 [INFO ] luminos-power: SPI=64  temp=73.4°C  cpu=90%  igpu=25%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:43 archlinux luminos-power[92323]: 2026-10-15T20:36:43 [INFO ] luminos-power: SPI=65  temp=73.6°C  cpu=93%  igpu=25%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:43 archlinux luminos-power[92323]: 2026-10-15T20:36:43 [INFO ] luminos-power: SPI=66  temp=73.8°C  cpu=95%  igpu=24%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:44 archlinux luminos-power[92323]: 2026-10-15T20:36:44 [INFO ] luminos-power: SPI=66  temp=74.0°C  cpu=96%  igpu=24%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:44 archlinux luminos-power[92323]: 2026-10-15T20:36:44 [INFO ] luminos-power: SPI=67  temp=74.1°C  cpu=97%  igpu=24%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:45 archlinux luminos-power[92323]: 2026-10-15T20:36:45 [INFO ] luminos-power: SPI=67  temp=74.2°C  cpu=98%  igpu=24%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:45 archlinux luminos-power[92323]: 2026-10-15T20:36:45 [INFO ] luminos-power: SPI=67  temp=74.4°C  cpu=99%  igpu=24%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:46 archlinux luminos-power[92323]: 2026-10-15T20:36:46 [INFO ] luminos-power: SPI=67  temp=74.5°C  cpu=99%  igpu=24%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:46 archlinux luminos-power[92323]: 2026-10-15T20:36:46 [INFO ] luminos-power: SPI=68  temp=74.8°C  cpu=99%  igpu=27%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:47 archlinux luminos-power[92323]: 2026-10-15T20:36:47 [INFO ] luminos-power: SPI=70  temp=75.1°C  cpu=99%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:47 archlinux luminos-power[92323]: 2026-10-15T20:36:47 [INFO ] luminos-power: SPI=70  temp=75.2°C  cpu=100%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:48 archlinux luminos-power[92323]: 2026-10-15T20:36:48 [INFO ] luminos-power: SPI=70  temp=75.4°C  cpu=100%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:48 archlinux luminos-power[92323]: 2026-10-15T20:36:48 [INFO ] luminos-power: SPI=70  temp=75.4°C  cpu=100%  igpu=32%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:49 archlinux luminos-power[92323]: 2026-10-15T20:36:49 [INFO ] luminos-power: SPI=70  temp=75.4°C  cpu=100%  igpu=32%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:49 archlinux luminos-power[92323]: 2026-10-15T20:36:49 [INFO ] luminos-power: SPI=70  temp=75.4°C  cpu=100%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:50 archlinux luminos-power[92323]: 2026-10-15T20:36:50 [INFO ] luminos-power: SPI=70  temp=75.5°C  cpu=100%  igpu=32%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:50 archlinux luminos-power[92323]: 2026-10-15T20:36:50 [INFO ] luminos-power: SPI=70  temp=75.5°C  cpu=99%  igpu=32%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:51 archlinux luminos-power[92323]: 2026-10-15T20:36:51 [INFO ] luminos-power: SPI=70  temp=75.8°C  cpu=100%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:51 archlinux luminos-power[92323]: 2026-10-15T20:36:51 [INFO ] luminos-power: SPI=71  temp=75.9°C  cpu=99%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:52 archlinux luminos-power[92323]: 2026-10-15T20:36:52 [INFO ] luminos-power: SPI=72  temp=76.2°C  cpu=100%  igpu=38%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:52 archlinux luminos-power[92323]: 2026-10-15T20:36:52 [INFO ] luminos-power: SPI=71  temp=76.4°C  cpu=100%  igpu=36%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:53 archlinux luminos-power[92323]: 2026-10-15T20:36:53 [INFO ] luminos-power: SPI=71  temp=76.4°C  cpu=100%  igpu=35%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:53 archlinux luminos-power[92323]: 2026-10-15T20:36:53 [INFO ] luminos-power: SPI=71  temp=76.5°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:54 archlinux luminos-power[92323]: 2026-10-15T20:36:54 [INFO ] luminos-power: SPI=71  temp=76.6°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:54 archlinux luminos-power[92323]: 2026-10-15T20:36:54 [INFO ] luminos-power: SPI=71  temp=76.8°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:55 archlinux luminos-power[92323]: 2026-10-15T20:36:55 [INFO ] luminos-power: SPI=71  temp=76.8°C  cpu=100%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:55 archlinux luminos-power[92323]: 2026-10-15T20:36:55 [INFO ] luminos-power: SPI=71  temp=76.9°C  cpu=100%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:56 archlinux luminos-power[92323]: 2026-10-15T20:36:56 [INFO ] luminos-power: SPI=71  temp=77.0°C  cpu=100%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:56 archlinux luminos-power[92323]: 2026-10-15T20:36:56 [INFO ] luminos-power: SPI=71  temp=77.1°C  cpu=100%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:57 archlinux luminos-power[92323]: 2026-10-15T20:36:57 [INFO ] luminos-power: SPI=71  temp=77.1°C  cpu=100%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:57 archlinux luminos-power[92323]: 2026-10-15T20:36:57 [INFO ] luminos-power: SPI=71  temp=77.1°C  cpu=100%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:58 archlinux luminos-power[92323]: 2026-10-15T20:36:58 [INFO ] luminos-power: SPI=72  temp=77.2°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:58 archlinux luminos-power[92323]: 2026-10-15T20:36:58 [INFO ] luminos-power: SPI=72  temp=77.4°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:59 archlinux luminos-power[92323]: 2026-10-15T20:36:59 [INFO ] luminos-power: SPI=72  temp=77.5°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:36:59 archlinux luminos-power[92323]: 2026-10-15T20:36:59 [INFO ] luminos-power: SPI=72  temp=77.6°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:00 archlinux luminos-power[92323]: 2026-10-15T20:37:00 [INFO ] luminos-power: SPI=72  temp=77.6°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:00 archlinux luminos-power[92323]: 2026-10-15T20:37:00 [INFO ] luminos-power: SPI=72  temp=77.8°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:01 archlinux luminos-power[92323]: 2026-10-15T20:37:01 [INFO ] luminos-power: SPI=72  temp=77.9°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:01 archlinux luminos-power[92323]: 2026-10-15T20:37:01 [INFO ] luminos-power: SPI=72  temp=77.9°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:02 archlinux luminos-power[92323]: 2026-10-15T20:37:02 [INFO ] luminos-power: SPI=73  temp=78.0°C  cpu=100%  igpu=35%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:02 archlinux luminos-power[92323]: 2026-10-15T20:37:02 [INFO ] luminos-power: SPI=73  temp=78.1°C  cpu=100%  igpu=35%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:03 archlinux luminos-power[92323]: 2026-10-15T20:37:03 [INFO ] luminos-power: SPI=73  temp=78.2°C  cpu=100%  igpu=35%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:03 archlinux luminos-power[92323]: 2026-10-15T20:37:03 [INFO ] luminos-power: SPI=73  temp=78.4°C  cpu=100%  igpu=35%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:04 archlinux luminos-power[92323]: 2026-10-15T20:37:04 [INFO ] luminos-power: SPI=73  temp=78.5°C  cpu=100%  igpu=35%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:04 archlinux luminos-power[92323]: 2026-10-15T20:37:04 [INFO ] luminos-power: SPI=73  temp=78.5°C  cpu=99%  igpu=35%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:05 archlinux luminos-power[92323]: 2026-10-15T20:37:05 [INFO ] luminos-power: SPI=73  temp=78.6°C  cpu=100%  igpu=34%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:05 archlinux luminos-power[92323]: 2026-10-15T20:37:05 [INFO ] luminos-power: SPI=70  temp=78.0°C  cpu=89%  igpu=33%  dgpu=0%  ram=32%avail  burst=false
+Oct 15 20:37:06 archlinux luminos-power[92323]: 2026-10-15T20:37:06 [INFO ] luminos-power: SPI=60  temp=75.0°C  cpu=64%  igpu=30%  dgpu=0%  ram=32%avail  burst=false

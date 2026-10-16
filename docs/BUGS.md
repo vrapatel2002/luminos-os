@@ -8159,3 +8159,14 @@ limits and fans stay on after load ends → heat, and each eventual profile flip
 - **Symptom (Shawn):** on a sub-page, resting the pointer on the left-edge handle makes the "all settings" drawer slide out and back in, over and over.
 - **Cause:** the handle (MouseArea, z 2) and the drawer (z 3) share one 220 ms close timer. When the drawer slides over the handle, the handle reports "pointer left" and restarts the timer *after* the drawer's HoverHandler had stopped it → drawer closes → handle uncovered → reopens → loop. Same race in the top/right drawers (EdgeDrawers.qml).
 - **Fix (systemsettings 6.7.5-1.6):** the close timer never closes while the drawer's HoverHandler reports the pointer on it, and the handle's exit does not restart the timer then. Built + installed; patched QML confirmed in /usr/bin/systemsettings. Needs System Settings restarted.
+
+## BUG-203 — asusd re-writes the fan curves on every AC/DC toggle, which wakes the dGPU
+<!-- [CHANGE: claude-code | 2026-10-15] -->
+Seen in the spectrum A/B (2026-10-15 23:06:50, a real 80 s charger dropout): asusd logged "External power supply state changed" and
+`write_profile_curve_to_platform` for cpu/gpu/mid even with `change_platform_profile_on_*: false`. That curve write is WMNB 0x00110024
+→ Notify(NPCF, 0xC0) → dGPU wake (~20 s), on top of the firmware's own ACAD events. Not caused by luminos-power. **Open** (asusd
+behaviour; options: asusd config to stop re-applying, or accept 1 wake per cable event).
+
+### BUG-200 status — RESOLVED by DECISION 146 (2026-10-15): beast mode no longer exists.
+### BUG-198 status — daemon side RESOLVED by DECISION 146: luminos-power never writes the profile, fan curves or nvidia-smi.
+Measured 0 daemon-caused wakes over a 28 min ladder, 3 restarts and a watchdog kill. Remaining firmware sources: cable events (BUG-203).

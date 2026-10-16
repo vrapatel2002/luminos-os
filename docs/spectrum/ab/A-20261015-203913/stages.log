@@ -1,0 +1,19 @@
+arm=A quick=1 out=/home/shawn/luminos-os/docs/spectrum/ab/A-20261015-203913 start=2026-10-15 20:39:15
+20:39:15 stage idle1 300s 
+20:44:15 stage cpu4 120s threads=4
+20:46:15 stage cpu8 120s threads=8
+20:48:15 stage cpu16 300s threads=16
+20:53:15 stage idle2 300s 
+20:58:15 stage burst16_1 10s threads=16
+20:58:25 stage gap16_1 90s 
+20:59:55 stage burst16_2 10s threads=16
+21:00:05 stage gap16_2 90s 
+21:01:35 stage burst16_3 10s threads=16
+21:01:45 stage gap16_3 90s 
+21:03:15 stage burst1_1 10s threads=1
+21:03:25 stage gap1_1 90s 
+21:04:55 stage burst1_2 10s threads=1
+21:05:05 stage gap1_2 90s 
+21:06:35 stage burst1_3 10s threads=1
+21:06:45 stage gap1_3 90s 
+21:08:15 stage sus16 120s threads=16

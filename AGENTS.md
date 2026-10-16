@@ -350,6 +350,11 @@ luminos-brain safe "<action>"
 
 | Path | What it does | Why / Bug ref |
 |------|-------------|---------------|
+| `/etc/asusd/asusd.ron` | `change_platform_profile_on_ac: false`, `change_platform_profile_on_battery: false`, `platform_profile_linked_epp: false`. Backup `asusd.ron.bak-spectrum-20261015`. | [CHANGE: claude-code | 2026-10-15] DECISION 146 / BUG-198: asusd flipped the profile on every cable event (= dGPU wake + PPT reset) and rewrote EPP after profile changes. |
+| asusd stored fan curves (`/etc/asusd/` + EC) | Curve v6 on quiet/balanced/performance, written once by `scripts/luminos-fan-curve-install` (`--check`, `--revert`). | [CHANGE: claude-code | 2026-10-15] DECISION 146: the daemon never writes curves (each write wakes the dGPU). |
+| `/etc/systemd/system/luminos-power.service` | `Type=notify`, `WatchdogSec=15`, `After=systemd-modules-load.service asusd.service`, ExecStopPost writes PPT 45/54/65 + cpuinfo_max to every scaling_max_freq. Repo copy `systemd/luminos-power.service`. | [CHANGE: claude-code | 2026-10-15] DECISION 146. |
+| `/etc/luminos/config.toml` | Created: `[power] t_hi_ac_c = 82` only (loader merges over built-in defaults; other daemons unaffected). | [CHANGE: claude-code | 2026-10-15] DECISION 146 tuning: 88 °C bought no throughput. |
+| `/usr/local/bin/luminos-power.pre-spectrum` | The v4.x binary, kept for rollback. | [CHANGE: claude-code | 2026-10-15] DECISION 146. |
 | `/etc/pacman.d/hooks/luminos-desktop-indent.hook` + `/usr/local/bin/luminos-kde-desktop-overlay` + `/usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/main.qml` + `/usr/local/share/luminos/desktopcontainment/{main.qml.orig,reserve}` | **Conditional — only installed if the user-path overlay turns out inert.** Floors the desktop containment's screen rect at the Caelestia bar's width so icons are not placed under the bar; the hook re-applies it after every `plasma-desktop` upgrade, re-snapshotting the restored file as the new pristine copy first. `reserve` records the indent so the hook does not have to read a config it cannot reach as root. Makes `pacman -Qkk plasma-desktop` report `main.qml` altered — expected. Undo: `sudo luminos-kde-desktop-overlay --system-remove`. | BUG-163 / DECISION 111 |
 | `/etc/systemd/system/luminos-pagefile.service` | Brings up `/swapfile.luminos` (32 G, priority 10) at boot via `/usr/local/bin/luminos-pagefile on`. **Size lives in the unit's `Environment=`.** A unit rather than an `/etc/fstab` entry on purpose: a swapfile that is missing, being resized or deliberately deleted fails `swap.target` and takes the boot with it, while a `oneshot` that refuses cannot. `ExecStop` is `off --keep-file` — `systemctl stop` means stop using it, not throw it away. | DECISION 115 / BUG-166 — the box had zram-only swap, so the only way to reclaim a cold browser tab was to delete it. [CHANGE: claude-code \| 2026-09-18] |
 | `/etc/environment` | `KWIN_DRM_DEVICES=/dev/dri/card2` (KWin AMD-only). `__EGL_VENDOR_LIBRARY_FILENAMES=50_mesa.json` (force Mesa EGL globally — prevents NVIDIA EGL waking dGPU). `QT_LOGGING_RULES=kwin_libinput.warning=false` (suppress touchpad spam). | BUG-050, BUG-046c |
@@ -469,6 +474,22 @@ luminos-brain safe "<action>"
 ## 12. Power & Thermal — Summary
 
 Full detail: `docs/LUMINOS_HANDBOOK.md` Part 4.
+
+<!-- [CHANGE: claude-code | 2026-10-15] DECISION 146 -->
+**luminos-power v5.0 "spectrum" (ACTIVE since 2026-10-15) — one continuous dial, no phases.** Full spec: `docs/spectrum/DESIGN.md`.
+- The daemon moves ONE value, the CPU package power limit P (15–45 W, `asus-nb-wmi/ppt_pl1_spl|ppt_pl2_sppt|ppt_fppt`), every 1 s:
+  `P = slew(min(demand hand, heat hand))`, up ≤ 6 W/s, down 3–12 W/s. Demand = busy CPU/iGPU; heat = PI on Tctl toward Thi.
+- Thi: AC **82 °C** (`/etc/luminos/config.toml [power] t_hi_ac_c = 82`; built-in default 88), battery 80, dGPU busy 85. Ceilings
+  blend (not switch): AC 45 W, battery 25→15 W by charge, dGPU busy 30 W.
+- **Never written by the daemon: platform profile, fan curves, nvidia-smi** (each wakes the dGPU, BUG-198). PPT writes do NOT wake it
+  (measured). PPT is re-asserted every 60 s + after profile change/resume because a profile change silently resets it.
+- EPP fixed `balance_power`. Fans: static EC curve **v6** on all three profiles, installed once by `scripts/luminos-fan-curve-install`:
+  CPU/GPU `30c:0%,40c:10%,50c:20%,60c:35%,70c:52%,80c:72%,85c:88%,90c:100%`, mid `30c:0%,40c:5%,50c:13%,60c:23%,70c:35%,80c:48%,85c:70%,90c:100%`.
+- Gone: beast mode (BUG-200), thermal zones/emergency, thermal burst, quiet idle, TGP manager, Conductor. systemd watchdog 15 s;
+  ExecStopPost opens PPT to 45/54/65 W + uncaps on any exit. Status: `level`, `ppt_w`, `binding` in the power.sock status.
+- Measured A/B (docs/spectrum/ab/): 0 dGPU wakes (old: 4 per 28 min), cpu16 +14 % ops at 82 °C, fans 3.6 k vs 6.2 k rpm at 4 threads.
+
+**⬇ Everything below in §12 describes the v4.x daemon and is SUPERSEDED (kept for history).**
 
 **Fan curve v5 (ACTIVE, 2026-05-24):**
 CPU/GPU: `30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%`
@@ -629,6 +650,8 @@ Full reference with root causes: `docs/LUMINOS_HANDBOOK.md` Emergency Card.
 
 | Symptom | Fix |
 |---------|-----|
+| Laptop slow / PPT looks stuck low (v5 spectrum) | `echo '{"type":"status"}' \| socat - UNIX-CONNECT:/run/luminos/power.sock` → read `level`/`ppt_w`/`binding`; `sudo systemctl restart luminos-power` (ExecStopPost opens PPT, start re-asserts). [CHANGE: claude-code | 2026-10-15] |
+| Roll back to the v4.x phase daemon | `sudo install -m755 /usr/local/bin/luminos-power.pre-spectrum /usr/local/bin/luminos-power && git show <pre-146>:systemd/luminos-power.service \| sudo tee /etc/systemd/system/luminos-power.service && sudo systemctl daemon-reload && sudo systemctl restart luminos-power`; asusd: `sudo scripts/luminos-fan-curve-install --revert`. [CHANGE: claude-code | 2026-10-15] |
 | Fans silent at 70°C+ | `sudo systemctl restart luminos-power` |
 | Fans maxed at idle (~7000 RPM, <45°C) | Stale burst curve on a profile (BUG-190). `sudo systemctl restart luminos-power`; check the curve read-back |
 | HIVE not responding (SUPER+SPACE) | `pkill -f hive-daemon.py; pkill -f llama-server; SUPER+SPACE` |

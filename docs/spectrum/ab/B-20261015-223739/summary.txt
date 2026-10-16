@@ -1,0 +1,59 @@
+stage         n  Tctl med/mean  pkgW med/mean fan1 med ppt_w med        ops/s
+idle1       300     55.0/55.24      8.44/8.54   2900.0      20.0         None
+cpu4        120     81.2/80.62     24.0/23.93   5500.0      24.0   2666789520
+cpu8        120     89.0/89.22    27.99/28.23   6300.0      28.0   4816210560
+cpu16       300     87.9/88.04    27.01/27.12   6300.0      27.0   6622591441
+idle2       300     55.9/56.87      8.54/8.64   2950.0      19.0         None
+burst16_1    10    90.65/84.93    33.11/32.34   3050.0      33.0   7342872498
+gap16_1      90      56.1/57.5      8.51/8.73   3500.0      19.0         None
+burst16_2    10     91.4/84.64    33.97/32.38   2700.0      34.0   7325602231
+gap16_2      90     56.4/57.73      8.57/8.79   3550.0      19.0         None
+burst16_3    10     90.9/84.32    33.96/32.27   2800.0      34.0   7326612048
+gap16_3      90     56.3/57.73       8.5/8.75   3450.0      20.0         None
+burst1_1     10    75.15/73.58    21.19/20.32   3050.0      22.0    763012326
+gap1_1       90     55.8/56.59      8.53/8.68   3150.0      20.0         None
+burst1_2     10     75.2/73.22     21.12/20.2   3200.0      22.0    767490272
+gap1_2       90     55.8/56.65      8.49/8.76   3150.0      20.0         None
+burst1_3     10    86.05/82.18     21.02/20.1   2750.0      22.0    761677757
+gap1_3       90      55.5/56.7      8.54/8.68   3300.0      20.0         None
+sus16       120     79.5/80.64    24.12/27.74   4850.0      24.0   6907364031
+
+dGPU rpm_resume (0000:01:00.0): 8
+ACPI notifies: 29 {'0xd3': 1, '0xd1': 2, '0xff': 4, '0xd2': 2, '0x80': 11, '0x2': 2, '0xc0': 3, '0x81': 4}
+WMI calls by method/devid:
+  DSTS devid=0x00110013 373
+  DSTS devid=0x00110031 373
+  DSTS devid=0x00110014 373
+  DEVS devid=0x001200a0 212
+  DEVS devid=0x001200c1 212
+  DEVS devid=0x001200a3 212
+  DSTS devid=0x00130022 2
+  DSTS devid=0x0012006c 2
+  DSTS devid=0x00120099 2
+  DSTS devid=0x00090016 2
+  DSTS devid=0x00090020 2
+  (DSTS reads include this script's own fan rpm polls every 5 s)
+
+DESIGN §6 thresholds:
+  FAIL  dGPU wakes == 0  [8]
+  PASS  WMI DEVS/h <= 1500  [1230/h]
+  PASS  0 fan-curve/profile WMI calls  [0]
+  FAIL  idle Tctl <= 55 C  [55.4]
+  FAIL  idle fan <= 2500 rpm  [2900.0]
+  FAIL  max fan at 50-55 C <= 2800 rpm (assumes full=7000)  [2900.0]
+  PASS  cpu16 last 60 s Tctl mean <= 90  [88.0]
+  PASS  cpu16 last 60 s Tctl peak <= 93  [89.5]
+  FAIL  cpu16 load-step to 0.9*pmax <= 8 s  [inf]
+  PASS  sus16 load-step to 0.9*pmax <= 8 s  [4.0]
+  FAIL  ppt_w max rise <= 6 W/s  [7.0]
+  PASS  ppt_w max fall <= 12 W/s  [11.0]
+  PASS  journal free of old phase strings (beast mode|thermal zone|thermal burst|idle → Quiet|burst fan curve)  [0]
+  PASS  idle W <= other + 0.5  [(8.47, 8.28)]
+  PASS  cpu16 ops >= 0.95 x other  [0.991]
+  PASS  sus16 ops >= 0.95 x other  [1.034]
+  PASS  burst16 ops >= 0.9 x other  [1.095]
+  PASS  burst1 ops >= 1.0 x other  [1.332]
+  FAIL  cpu4 Tctl <= other + 5  [(80.62, 73.8)]
+  PASS  cpu4 fan <= other  [(5500.0, 6150.0)]
+  FAIL  cpu8 Tctl <= other + 5  [(89.22, 82.04)]
+  PASS  cpu8 fan <= other  [(6300.0, 6850.0)]

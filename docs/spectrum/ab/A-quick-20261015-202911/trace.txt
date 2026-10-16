@@ -1,0 +1,27 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 15/15   #P:16
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+     kworker/0:2-82870   [000] ..... 102710.875628: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xc0
+     kworker/0:2-82870   [000] d..1. 102710.875648: rpm_resume: 0000:01:00.0 flags-0 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+     kworker/0:2-82870   [000] d..1. 102711.526493: rpm_resume: 0000:01:00.0 flags-1 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+   kworker/u64:6-88686   [007] d..1. 102711.526505: rpm_resume: 0000:01:00.0 flags-2 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+   kworker/u64:1-97591   [000] d..1. 102711.526529: rpm_resume: 0000:01:00.0 flags-4 cnt-2  dep-0  auto-1 p-0 irq-0 child-0
+     kworker/1:0-108620  [001] ..... 102712.050638: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:4-114522  [015] ..... 102712.089710: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/7:3-104998  [007] ..... 102715.644251: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/1:0-108620  [001] ..... 102715.673578: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/7:3-104998  [007] ..... 102716.763693: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/1:0-108620  [001] ..... 102716.813585: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/3:5-114865  [003] ..... 102718.186349: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/1:0-108620  [001] ..... 102718.252617: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/5:0-111071  [005] ..... 102719.156484: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/7:3-104998  [007] ..... 102719.195045: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1

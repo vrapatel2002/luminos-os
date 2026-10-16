@@ -1,0 +1,21 @@
+# event histogram
+#
+# trigger info: hist:keys=method,devid:vals=hitcount:sort=hitcount.descending:size=1024 [active]
+#
+
+{ method: 1398035268, devid:    1114131 } hitcount:        373
+{ method: 1398035268, devid:    1114161 } hitcount:        373
+{ method: 1398035268, devid:    1114132 } hitcount:        373
+{ method: 1398162756, devid:    1179808 } hitcount:        212
+{ method: 1398162756, devid:    1179841 } hitcount:        212
+{ method: 1398162756, devid:    1179811 } hitcount:        212
+{ method: 1398035268, devid:    1245218 } hitcount:          2
+{ method: 1398035268, devid:    1179756 } hitcount:          2
+{ method: 1398035268, devid:    1179801 } hitcount:          2
+{ method: 1398035268, devid:     589846 } hitcount:          2
+{ method: 1398035268, devid:     589856 } hitcount:          2
+
+Totals:
+    Hits: 1765
+    Entries: 11
+    Dropped: 0

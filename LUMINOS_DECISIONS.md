@@ -8465,3 +8465,24 @@ args, stdin and fds (`--ksldfd`), forwards TERM/INT/HUP/QUIT/USR1/USR2, and on a
 as before (crash → restart lock; security unchanged). A pacman hook re-applies it after kscreenlocker upgrades.
 Rejected: gdb/strace attach (too heavy, races the lock), KCrash/DrKonqi (does not see KILL/TERM). Temporary — remove with
 `sudo luminos-greeter-catch remove` once BUG-199 is fixed.
+
+
+## DECISION 146 — luminos-power v5.0 "spectrum": one continuous power dial replaces every phase
+<!-- [CHANGE: claude-code | 2026-10-15] -->
+**Why:** Shawn (2026-10-15): "I want a continuous spectrum of power which gradually grows — like a gradient… the switch thing is not
+good and thus we have these bugs." The v4.x daemon was a stack of switches (3 profiles, beast mode, thermal zones, emergency, burst,
+quiet-idle); every profile switch and fan-curve write woke the RTX 4050 (BUG-198), beast mode could stick (BUG-200).
+**What:** `cmd/luminos-power/spectrum.go` (182-line pure core) + slimmed `main.go`: P = slew(min(demand, PI-on-Tctl with feed-forward)),
+blended AC/battery/dGPU ceilings, fixed 1 s tick. The daemon writes only PPT, the frequency cap (battery) and EPP. It never writes
+the profile, fan curves or nvidia-smi. Fans = static v6 EC curve installed once. Design (15 ideas weighed, Fable max effort):
+`docs/spectrum/DESIGN.md`. Measured knobs: `docs/spectrum/HARDWARE.md`.
+**Measured** (`scripts/spectrum-ab.sh`, same 28 min ladder, `docs/spectrum/ab/`):
+- dGPU wakes: old 4 / no-daemon 0 / new **0**. Firmware profile/curve writes: 7 / 0 / **0**.
+- 16-thread sustained: old 26 W 84 °C 6.68e9 ops/s / no-daemon 29 W 95 °C 6.90e9 / new 36 W 82 °C 7.60e9.
+- 4 threads: old 74 °C 6 150 rpm / new 66 °C 3 600 rpm. Idle W 8.28 vs 8.32.
+- Restarts ×3 and a watchdog kill: 0 wakes, 0 notifies; watchdog restart in 14 s.
+**Caveats:** the 82 °C run was in a cooler environment than the 88 °C run (idle 42 vs 55 °C), so part of the gain vs the old
+daemon is environment. Three thresholds fail by definition: fan max at 50–55 °C (cool-down samples), cpu16 load-step (heat hand
+binds when the stage starts hot), ppt rise 7 W/s (logger timestamp resolution; core proven ≤ 6). A real 80 s charger dropout
+during one run caused 8 wakes, all from firmware AC events + asusd rewriting curves on AC/DC toggles (BUG-203), none from the daemon.
+**Undo:** AGENTS.md §15 rollback row. **/etc changes:** AGENTS.md §9 (asusd.ron, unit, config.toml, curves).

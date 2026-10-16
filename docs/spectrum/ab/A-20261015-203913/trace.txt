@@ -1,0 +1,19 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 7/7   #P:16
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+     kworker/0:0-130884  [000] ..... 103716.753605: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xc0
+     kworker/0:0-130884  [000] d..1. 103716.753635: rpm_resume: 0000:01:00.0 flags-0 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+     kworker/0:0-130884  [000] d..1. 103717.408437: rpm_resume: 0000:01:00.0 flags-1 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+   kworker/u64:6-88686   [011] d..1. 103717.408449: rpm_resume: 0000:01:00.0 flags-2 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+   kworker/u64:0-99215   [011] d..1. 103717.408465: rpm_resume: 0000:01:00.0 flags-4 cnt-2  dep-0  auto-1 p-0 irq-0 child-0
+     kworker/1:6-134458  [001] ..... 103718.046395: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/7:5-130845  [007] ..... 103718.097512: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1

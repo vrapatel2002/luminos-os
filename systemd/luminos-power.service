@@ -2,12 +2,24 @@
 Description=Luminos OS — Automatic Power & Thermal Manager
 Documentation=https://github.com/luminos-os/luminos
 After=network.target
+# asus-nb-wmi (ppt_* files) comes from systemd-modules-load; asusd owns the fan-curve hwmon the daemon verifies read-only.
+After=systemd-modules-load.service asusd.service
 # Power daemon should start before luminos-ai so the initial AC state is applied at boot.
 Before=luminos-ai.service
 
 [Service]
-Type=simple
+# [CHANGE: claude-code | 2026-10-15] spectrum (DESIGN §3.8): the daemon sends READY=1 after
+# its first tick and WATCHDOG=1 every tick; a hung daemon is killed and restarted within 15 s
+# and re-asserts PPT/EPP/cap itself. ExecStopPost runs on EVERY exit (clean, crash, kill -9)
+# and opens the dial so a dead daemon never leaves a 15 W laptop. `$$` is systemd's escape
+# for a literal `$` inside the shell snippet; `%` is a systemd specifier so the snippet
+# uses $(dirname) instead of ${c%...}. Tested offline against a fake tree.
+# Values 45/54/65 W match shutdown() (PM, 2026-10-15).
+Type=notify
+NotifyAccess=main
+WatchdogSec=15
 ExecStart=/usr/local/bin/luminos-power
+ExecStopPost=/bin/sh -c 'echo 45 > /sys/devices/platform/asus-nb-wmi/ppt_pl1_spl; echo 54 > /sys/devices/platform/asus-nb-wmi/ppt_pl2_sppt; echo 65 > /sys/devices/platform/asus-nb-wmi/ppt_fppt; for c in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do cat $$(dirname $$c)/cpuinfo_max_freq > $$c; done'
 Restart=always
 RestartSec=3
 StandardOutput=journal

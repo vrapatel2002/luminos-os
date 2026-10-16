@@ -1,11 +1,25 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-15 19:00 — Response 6 (heat/Chrome chat)
+Last updated: 2026-10-15 23:55 — Response 6 (heat/Chrome chat → spectrum build)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-15 19:00, heat chat R6) — exact reason for the dGPU wakes FOUND (read-only); fix choice is Shawn's
+## Aim right now (2026-10-15 23:55, R6) — luminos-power v5.0 "spectrum" BUILT, INSTALLED, MEASURED (DECISION 146)
+Shawn: replace phased power profiles with a continuous spectrum (/build, Fable/Opus brainstorm). Done:
+- One dial = CPU PPT 15–45 W (`asus-nb-wmi/ppt_*`, no dGPU wake — measured), moved every 1 s by min(demand, PI heat hand), slewed.
+  Code: cmd/luminos-power/{spectrum.go,spectrum_test.go,main.go}; conductor.go/fan_control.go deleted. Docs: docs/spectrum/*.
+- Installed: binary, /etc/systemd/system/luminos-power.service (notify + watchdog + ExecStopPost), /etc/asusd/asusd.ron (3× false),
+  fan curve v6 on all profiles, /etc/luminos/config.toml `[power] t_hi_ac_c = 82`. Rollback: AGENTS §15 (binary .pre-spectrum).
+- A/B (docs/spectrum/ab/A-*, C-*, B-*, B2-thi82-*): new = 0 dGPU wakes, cpu16 +14 % ops at 82 °C, much less fan. 3 thresholds fail by
+  definition (explained in BUILD_LOG). B2 ran cooler-room than B — part of the gain is environment.
+⚠️ docs/BUGS.md was found TRUNCATED to ~14 lines in the working copy (2026-10-15 ~21:00–23:47, cause unknown — another writer
+rewrote instead of appending). Restored from git (8 161 lines) + new entries, amended into 6e7a549f's successor. Always check `wc -l docs/BUGS.md` (≈8 170) before committing it.
+NEXT / not done: suspend+resume and ROG-key event tests (need Shawn present); Q8 fan rpm-vs-duty calibration (fan floor ~2.4–2.9 k rpm);
+promote Thi 82 into DefaultParams (needs spectrum.go + test change by owners); BUG-203 asusd curve rewrite on AC/DC toggle;
+optional banded EPP; `luminos-train-mode` keep-alive. Watch the Plasma power widget still parses `profile=`.
+
+## Previous aim (2026-10-15 19:00, heat chat R6) — exact reason for the dGPU wakes FOUND (read-only); fix choice is Shawn's
 Shawn: "find why it's firing, then we decide the fix". Answer (BUGS.md, BUG-198 addendum): idle on AC with a full battery → 0 wakes in 6.5 min.
 Every wake = a power-setting change → EC/BIOS recomputes the GPU's power share → Notify(PEGP or NPCF, 0xC0) → nvidia driver wakes the card ~20 s
 (upstream NVIDIA #1300/#1299). Senders here: luminos-power profile switches (19 in 27 h), fan-curve applies (11), bursts (6), nvidia-smi at

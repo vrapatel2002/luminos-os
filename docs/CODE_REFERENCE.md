@@ -708,3 +708,16 @@ END OF CODE_REFERENCE.md
 | `popup.html/js` | enable + spread / fps / intensity sliders → `chrome.storage.local.luminosAmbient` |
 Tests: `tests/ambient/*.test.js` (core properties, static API bans, budgets, fake-DOM behaviour). Benchmark: `tests/ambient/bench.mjs` (env CONFIGS, ROUNDS, WARM, WINDOW, OURS_FPS; run via `systemd-run --user`, it takes minutes).
 Docs: `docs/ambient/{SPEC,CONTRACTS,AUDIT,BUILD_LOG}.md`, results `docs/ambient/bench/run*/`.
+
+
+### cmd/luminos-power — v5.0 spectrum (DECISION 146)
+<!-- [CHANGE: claude-code | 2026-10-15] -->
+| File | What |
+|---|---|
+| `spectrum.go` | pure core: `DefaultParams(hwMaxKHz)`, `Step(Params, State, Inputs) (State, Outputs)` — the whole decision, no I/O |
+| `spectrum_test.go` | P1–P15 properties + independent reference model + simulated plant (`go test -race ./cmd/luminos-power`) |
+| `main.go` | config overrides (`[power]` keys, clamped), 1 s ticker, sensors (k10temp by name, iGPU by vendor 0x1002, BAT, runtime_status), writers (PPT/cap/EPP), sd_notify watchdog, socket (5 request types unchanged + new status keys), AC side effects off-loop |
+| `scripts/luminos-fan-curve-install` | one-time v6 curves + asusd.ron; `--check`, `--revert` |
+| `scripts/spectrum-ab.sh` | A/B ladder + kprobe counters (dGPU wakes, WMI calls by devid); `--quick`, `--compare` |
+| `tests/spectrum/load/` | CPU load + benchmark tool (`-threads -duty -seconds -json`) |
+conductor.go and fan_control.go are deleted.

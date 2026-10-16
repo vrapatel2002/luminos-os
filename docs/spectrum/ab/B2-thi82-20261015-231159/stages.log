@@ -1,0 +1,19 @@
+arm=B2-thi82 quick=1 out=/home/shawn/luminos-os/docs/spectrum/ab/B2-thi82-20261015-231159 start=2026-10-15 23:12:01
+1792120321 23:12:01 stage idle1 300s 
+1792120621 23:17:01 stage cpu4 120s threads=4
+1792120741 23:19:01 stage cpu8 120s threads=8
+1792120861 23:21:01 stage cpu16 300s threads=16
+1792121161 23:26:01 stage idle2 300s 
+1792121461 23:31:01 stage burst16_1 10s threads=16
+1792121471 23:31:11 stage gap16_1 90s 
+1792121561 23:32:41 stage burst16_2 10s threads=16
+1792121571 23:32:51 stage gap16_2 90s 
+1792121661 23:34:21 stage burst16_3 10s threads=16
+1792121671 23:34:31 stage gap16_3 90s 
+1792121761 23:36:01 stage burst1_1 10s threads=1
+1792121771 23:36:11 stage gap1_1 90s 
+1792121861 23:37:41 stage burst1_2 10s threads=1
+1792121871 23:37:51 stage gap1_2 90s 
+1792121961 23:39:21 stage burst1_3 10s threads=1
+1792121971 23:39:31 stage gap1_3 90s 
+1792122061 23:41:01 stage sus16 120s threads=16
