@@ -1,0 +1,19 @@
+<!doctype html><meta charset=utf-8><title>smooth</title>
+<style>html,body{margin:0;background:#000;color:#0f0;font:20px monospace}video{width:100vw;height:100vh;object-fit:contain}#s{position:fixed;top:8px;left:8px}</style>
+<div id=s>light</div><video id=v src="v4k.mp4" muted loop playsinline preload=auto></video>
+<script>
+// Measures what a person sees: video frames dropped by the player, and compositor frames
+// (requestAnimationFrame) that arrived late. Posts one row per second to the local server.
+const v=document.getElementById('v'),s=document.getElementById('s');
+let last=performance.now(),jank=0,max=0,frames=0,phase='light';
+function raf(t){const d=t-last;last=t;frames++;if(d>max)max=d;if(d>25)jank++;requestAnimationFrame(raf)}
+requestAnimationFrame(raf);
+setInterval(async()=>{
+  const q=v.getVideoPlaybackQuality();
+  const row={t:Date.now()/1000,phase,raf_frames:frames,raf_late:jank,raf_max_ms:Math.round(max),
+    vid_total:q.totalVideoFrames,vid_dropped:q.droppedVideoFrames,playing:!v.paused,ct:v.currentTime};
+  frames=0;jank=0;max=0;
+  try{const r=await fetch('/tick',{method:'POST',body:JSON.stringify(row)});const p=(await r.text()).trim();
+    if(p!==phase){phase=p;s.textContent=p;if(p!=='light'&&v.paused)v.play()}}catch(e){}
+},1000);
+</script>

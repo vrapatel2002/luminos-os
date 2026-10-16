@@ -1,0 +1,91 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 79/79   #P:16
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+    kworker/10:0-297544  [010] ..... 170222.351448: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/10:0-297544  [010] d..1. 170222.353236: rpm_resume: 0000:01:00.0 flags-0 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+    kworker/11:1-243328  [011] ..... 170222.537840: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+    kworker/14:4-308648  [014] ..... 170222.809283: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd4
+    kworker/15:0-294228  [015] ..... 170222.872877: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+    kworker/10:0-297544  [010] d..1. 170223.014531: rpm_resume: 0000:01:00.0 flags-1 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+   kworker/u64:2-303994  [015] d..1. 170223.014538: rpm_resume: 0000:01:00.0 flags-2 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+  kworker/u64:15-293549  [013] d..1. 170223.014550: rpm_resume: 0000:01:00.0 flags-4 cnt-2  dep-0  auto-1 p-0 irq-0 child-0
+     kworker/6:1-326146  [006] ..... 170223.244807: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/6:4-326148  [006] ..... 170223.308867: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/11:1-243328  [011] ..... 170225.735350: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/4:0-296732  [004] ..... 170225.852236: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/2:6-311622  [002] ..... 170226.452567: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/11:1-243328  [011] ..... 170226.572967: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/6:4-326148  [006] ..... 170226.718405: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/4:0-296732  [004] ..... 170226.900677: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/8:0-309241  [008] ..... 170226.961276: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/2:6-311622  [002] ..... 170227.066711: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/8:0-309241  [008] ..... 170227.135924: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/1:8-325803  [001] ..... 170227.186858: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/11:1-243328  [011] ..... 170227.272634: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/5:6-327006  [005] ..... 170227.464292: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/6:4-326148  [006] ..... 170227.931534: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/2:6-311622  [002] ..... 170227.967500: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/6:4-326148  [006] ..... 170228.116469: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/2:6-311622  [002] ..... 170228.243488: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/1:8-325803  [001] ..... 170228.795138: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/5:6-327006  [005] ..... 170228.945257: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/5:6-327006  [005] ..... 170229.344760: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/11:1-243328  [011] ..... 170229.576078: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/6:4-326148  [006] ..... 170229.667153: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/11:1-243328  [011] ..... 170229.933714: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/6:4-326148  [006] ..... 170230.253289: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/11:1-243328  [011] ..... 170230.362512: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+    kworker/12:1-302488  [012] ..... 170230.670603: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/6:4-326148  [006] ..... 170230.722663: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/2:6-311622  [002] ..... 170230.810341: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/1:8-325803  [001] ..... 170230.848428: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/11:1-243328  [011] ..... 170230.963540: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/11:1-243328  [011] ..... 170231.103716: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/7:1-306384  [007] ..... 170231.357519: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/5:6-327006  [005] ..... 170231.411983: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/1:8-325803  [001] ..... 170231.977874: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/5:6-327006  [005] ..... 170232.064285: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/15:0-294228  [015] ..... 170233.025531: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:0-294228  [015] ..... 170233.174006: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+    kworker/15:0-294228  [015] ..... 170233.330912: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:0-294228  [015] ..... 170233.383630: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/7:1-306384  [007] ..... 170233.559217: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/12:1-302488  [012] ..... 170233.585722: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/11:1-243328  [011] ..... 170233.917768: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/2:6-311622  [002] ..... 170233.942213: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/5:6-327006  [005] ..... 170234.940224: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:0-294228  [015] ..... 170234.997091: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/12:1-302488  [012] ..... 170235.064287: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] ..... 170235.084833: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/11:1-243328  [011] ..... 170235.238555: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:0-294228  [015] ..... 170235.368459: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/12:1-302488  [012] ..... 170235.999190: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] ..... 170236.168942: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/9:3-306579  [009] ..... 170236.419497: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] .n... 170236.587666: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+    kworker/14:4-308648  [014] ..... 170236.657406: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/12:1-302488  [012] ..... 170236.792541: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+    kworker/12:1-302488  [012] ..... 170236.901538: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:0-294228  [015] ..... 170236.932586: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/1:8-325803  [001] ..... 170237.156335: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:0-294228  [015] ..... 170239.780003: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/5:6-327006  [005] ..... 170239.843871: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/10:0-297544  [010] ..... 170241.093007: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/8:0-309241  [008] ..... 170241.211837: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/7:0-323189  [007] ..... 170242.385244: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/4:1-327073  [004] ..... 170242.449105: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/7:0-323189  [007] ..... 170242.896860: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+    kworker/15:0-294228  [015] ..... 170242.964533: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:0-294228  [015] ..... 170246.815625: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/6:4-326148  [006] ..... 170246.912050: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/1:8-325803  [001] ..... 170249.536100: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+    kworker/10:0-297544  [010] ..... 170249.598329: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2

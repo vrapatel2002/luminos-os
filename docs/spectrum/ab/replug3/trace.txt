@@ -1,0 +1,58 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 46/46   #P:16
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+     kworker/7:1-306384  [007] ..... 170095.345263: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/7:0-323189  [007] ..... 170095.389007: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/13:1-307870  [013] ..... 170095.433333: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+ tokio-rt-worker-206286  [007] ..... 170095.488008: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xc0
+     kworker/7:1-306384  [007] d..1. 170095.488374: rpm_resume: 0000:01:00.0 flags-0 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+ tokio-rt-worker-206286  [015] ..... 170095.496476: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53545344 devid=0x120099
+ tokio-rt-worker-206286  [015] ..... 170095.498783: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53545344 devid=0x12006c
+ tokio-rt-worker-206286  [015] ..... 170095.505904: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53545344 devid=0x90016
+ tokio-rt-worker-206286  [015] ..... 170095.510384: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53545344 devid=0x90020
+ tokio-rt-worker-206286  [015] ..... 170095.514024: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53545344 devid=0x130022
+     kworker/0:3-323174  [000] ..... 170095.547047: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/8:0-309241  [008] ..... 170095.592134: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/0:2-206262  [000] ..... 170095.633208: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/10:2-325967  [010] ..... 170095.676248: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/10:2-325967  [010] ..... 170095.719422: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/10:2-325967  [010] ..... 170095.911418: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+ irq/32-ACPI:Eve-166     [010] ..... 170095.936740: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x2
+    kworker/10:0-297544  [010] ..... 170095.937628: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x81
+ irq/32-ACPI:Eve-166     [010] ..... 170095.941988: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/12:1-302488  [012] ..... 170095.999111: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/7:0-323189  [007] ..... 170096.018480: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xff
+    kworker/13:1-307870  [013] ..... 170096.046132: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/7:1-306384  [007] d..1. 170096.151375: rpm_resume: 0000:01:00.0 flags-1 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+   kworker/u64:2-303994  [003] d..1. 170096.152458: rpm_resume: 0000:01:00.0 flags-4 cnt-2  dep-0  auto-1 p-0 irq-0 child-0
+    kworker/14:4-308648  [014] ..... 170096.504974: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/14:4-308648  [014] ..... 170096.549949: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/6:1-326146  [006] ..... 170096.595975: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/10:2-325967  [010] ..... 170096.653897: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+   luminos-power-286865  [010] ..... 170096.673163: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286865  [010] ..... 170096.695937: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+    kworker/13:1-307870  [013] ..... 170096.696023: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/6:1-326146  [006] ..... 170096.702788: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+   luminos-power-286865  [010] ..... 170096.718426: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+     kworker/6:1-326146  [006] ..... 170096.750898: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/13:0-306392  [013] ..... 170096.797931: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/3:4-311451  [003] ..... 170096.842098: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/13:1-307870  [013] ..... 170096.898260: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x81
+    kworker/13:1-307870  [013] ..... 170096.898290: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/3:4-311451  [003] ..... 170097.144864: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/3:4-311451  [003] ..... 170097.188832: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/9:3-306579  [009] ..... 170099.993738: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/8:0-309241  [008] ..... 170100.029241: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/10:0-297544  [010] ..... 170100.074033: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+   luminos-power-286658  [001] ..... 170110.828442: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286658  [001] ..... 170110.850188: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-315761  [007] ..... 170110.872931: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1

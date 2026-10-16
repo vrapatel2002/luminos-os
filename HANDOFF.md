@@ -1,9 +1,19 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-15 23:55 — Response 6 (heat/Chrome chat → spectrum build)
+Last updated: 2026-10-16 15:40 — Response 7 (spectrum: charger + smoothness tests)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
+
+## 2026-10-16 15:40, R7 — spectrum charger + smoothness tests DONE (tests/spectrum/smooth, results docs/spectrum/ab/smooth-*, unplug3, replug3)
+- Smooth test = 20 s idle → 4K H.264 in Chromium (iGPU) → + Qwen2.5-7B on CPU 8 threads. AC: 1 dropped frame of ~1,290, worst
+  screen hitch 125–292 ms right as the model starts; control with daemon OFF at fixed 45 W: 4 dropped, worst 100 ms → the hitch is
+  the LLM start (CPU/memory contention), not the power level (PPT was already 45 W when it happened). Battery: 1 dropped/1,049, worst 33 ms.
+- Charger: unplug = asusd curve rewrite (0xC0) + firmware D2 (EC _QBC→DNOT); plug = asusd only. BUG-203 updated.
+- NEW BUG-204: heavy CPU while battery CHARGING → EC flaps GPU D-level → ~75 notifies + 4 dGPU wakes in 40 s, same with daemon off.
+- local llama.cpp binaries are broken on CPU (llama-server asserts n_gpu_layers<0, llama-bench missing symbol, llama-simple segfaults);
+  python llama_cpp works but cannot load gemma-4 → used Qwen2.5-7B. Not fixed.
+- Still to do with Shawn present: sleep/resume + ROG key. Ask him: was the charger USB-C or the barrel brick (BUG-204)?
 
 ## Aim right now (2026-10-15 23:55, R6) — luminos-power v5.0 "spectrum" BUILT, INSTALLED, MEASURED (DECISION 146)
 Shawn: replace phased power profiles with a continuous spectrum (/build, Fable/Opus brainstorm). Done:

@@ -1,0 +1,40 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 28/28   #P:16
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+   luminos-power-287877  [013] ..... 170036.674056: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-287877  [013] ..... 170036.696476: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-287877  [013] ..... 170036.718682: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286865  [013] ..... 170047.673758: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286865  [013] ..... 170047.695970: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286865  [003] ..... 170047.717646: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+     kworker/4:0-296732  [004] ..... 170047.905416: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+   luminos-power-287877  [002] ..... 170048.672909: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-287877  [002] ..... 170048.695149: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-287877  [002] ..... 170048.718136: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286654  [004] ..... 170055.675536: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286654  [008] ..... 170055.698301: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286654  [004] ..... 170055.721632: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286654  [011] ..... 170060.676872: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286654  [011] ..... 170060.700356: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286654  [002] ..... 170060.724558: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286866  [010] ..... 170064.675506: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-287877  [015] ..... 170064.699281: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-287877  [015] ..... 170064.722375: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286866  [002] ..... 170071.673757: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286866  [002] ..... 170071.696424: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286866  [001] ..... 170071.719512: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286866  [014] ..... 170073.674092: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286866  [014] ..... 170073.696888: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286866  [013] ..... 170073.720163: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-287877  [012] ..... 170075.673001: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-287877  [012] ..... 170075.695690: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-287877  [012] ..... 170075.718117: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1

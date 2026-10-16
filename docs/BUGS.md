@@ -8170,3 +8170,24 @@ behaviour; options: asusd config to stop re-applying, or accept 1 wake per cable
 ### BUG-200 status — RESOLVED by DECISION 146 (2026-10-15): beast mode no longer exists.
 ### BUG-198 status — daemon side RESOLVED by DECISION 146: luminos-power never writes the profile, fan curves or nvidia-smi.
 Measured 0 daemon-caused wakes over a 28 min ladder, 3 restarts and a watchdog kill. Remaining firmware sources: cable events (BUG-203).
+
+### BUG-203 update (2026-10-16, tests/spectrum/smooth, docs/spectrum/ab/{unplug3,replug3}) — cause pinned per cable edge
+<!-- [CHANGE: claude-code | 2026-10-16] -->
+Kprobe trace with the calling program: on BOTH plug and unplug, asusd (`tokio-rt-worker`, pid of /usr/bin/asusd) raises
+`Notify 0xC0` in the same millisecond its journal logs `write_profile_curve_to_platform` (15:14:39.497) → dGPU resume.
+Unplug ALSO gets a firmware-only `Notify(PEGP, 0xD2)` from EC query _QBC → `DNOT(NVDX)` (DSDT 13862) → dGPU resume. That one is
+the EC telling the GPU "you are on battery, lower power level"; it is not from any program and cannot be stopped from software.
+So per cable event: plug = 1 avoidable wake (asusd), unplug = 1 avoidable (asusd) + 1 firmware wake. Still **Open**.
+
+## BUG-204 — heavy CPU load while the battery is CHARGING makes the EC flap the GPU power level → dGPU wakes (firmware, not luminos-power)
+<!-- [CHANGE: claude-code | 2026-10-16] -->
+Smoothness runs (docs/spectrum/ab/smooth-*): 4K video + 7B LLM on the CPU, on AC.
+- Battery Full (not charging): 0 notifies, card stayed suspended (smooth-ac).
+- Battery Charging 98–99 %: 74–82 `Notify(PEGP, 0xD1/0xD2/0xD3)` in 40 s, dGPU woken 4× (smooth-ac2) — and the SAME with
+  luminos-power stopped and PPT fixed at 45 W (smooth-ac-nodaemon: 75 notifies, 4 wakes). So it is the firmware, not the daemon.
+Mechanism (DSDT): EC query `_QBC` → `DNOT(NVDX)`; DNOT notifies PEGP whenever the EC's GPU power level (D1..D5) changes, gated by
+`SDNT`, which the NVIDIA driver itself sets by calling NV GPS _DSM function 0x13 (SSDT4 "Opt2Tabl"). Starts around 40 W CPU while
+charging and flaps D1↔D2 about twice a second. The charger in use reported as USB-C PD (`ucsi-source-psy-USBC000:001` online) —
+not yet confirmed with Shawn whether that was USB-C or the barrel brick. Candidate fixes (untested): charge limit (asusd
+`charge_control_end_threshold`, e.g. 80) so the battery is not charging during heavy use; or a driver option to not opt in to GPS
+D-notifiers. **Open.**

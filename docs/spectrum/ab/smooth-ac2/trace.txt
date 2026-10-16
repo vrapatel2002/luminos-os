@@ -1,0 +1,185 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 173/173   #P:16
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+   luminos-power-286866  [009] ..... 169640.677490: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286866  [009] ..... 169640.699543: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286866  [009] ..... 169640.721669: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286865  [003] ..... 169641.677065: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286865  [003] ..... 169641.698424: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286865  [003] ..... 169641.719937: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286654  [013] ..... 169662.677526: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286654  [013] ..... 169662.699822: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286654  [013] ..... 169662.722206: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286654  [012] ..... 169664.677528: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286654  [005] ..... 169664.699723: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286654  [005] ..... 169664.722472: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286866  [015] ..... 169669.677472: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286866  [015] ..... 169669.699814: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286866  [005] ..... 169669.722860: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286654  [013] ..... 169670.677559: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286654  [013] ..... 169670.699621: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286654  [013] ..... 169670.721673: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286866  [009] ..... 169671.677169: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286866  [009] ..... 169671.699212: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286866  [005] ..... 169671.720720: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286654  [013] ..... 169672.677496: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286654  [013] ..... 169672.699437: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286654  [013] ..... 169672.721658: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286866  [005] ..... 169673.677114: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286866  [010] ..... 169673.698771: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286866  [010] ..... 169673.720875: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286654  [007] ..... 169676.677848: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286654  [007] ..... 169676.699993: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286654  [007] ..... 169676.722616: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286866  [010] ..... 169677.677849: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286866  [010] ..... 169677.700544: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286866  [010] ..... 169677.723138: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286654  [005] ..... 169680.677353: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286654  [005] ..... 169680.699557: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286654  [005] ..... 169680.722043: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286654  [005] ..... 169682.677289: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286654  [005] ..... 169682.698976: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286654  [005] ..... 169682.720626: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-287074  [008] ..... 169689.677742: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-287074  [009] ..... 169689.699633: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-287074  [009] ..... 169689.721784: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286650  [000] ..... 169690.676891: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286650  [000] ..... 169690.698669: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286650  [011] ..... 169690.720875: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-287074  [001] ..... 169693.677260: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-287074  [004] ..... 169693.699545: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-287074  [001] ..... 169693.721104: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286654  [006] ..... 169694.677341: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-290059  [014] ..... 169694.699169: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-290059  [014] ..... 169694.721078: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286650  [003] ..... 169695.678824: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286650  [003] ..... 169695.702604: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286650  [004] ..... 169695.726253: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-290059  [009] ..... 169696.679486: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-290059  [009] ..... 169696.706499: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-290059  [009] ..... 169696.730210: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+     kworker/4:0-296732  [004] ..... 169697.892236: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/4:0-296732  [004] d..1. 169697.894201: rpm_resume: 0000:01:00.0 flags-0 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+     kworker/7:6-307762  [007] ..... 169697.924501: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/15:2-308260  [015] ..... 169698.018931: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:1-308259  [015] ..... 169698.213136: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+    kworker/15:0-294228  [015] ..... 169698.314288: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/6:2-206298  [006] ..... 169698.423457: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/4:0-296732  [004] d..1. 169698.555816: rpm_resume: 0000:01:00.0 flags-1 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+  kworker/u64:15-293549  [006] d..1. 169698.555828: rpm_resume: 0000:01:00.0 flags-2 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+   kworker/u64:2-303994  [010] d..1. 169698.555861: rpm_resume: 0000:01:00.0 flags-4 cnt-2  dep-0  auto-1 p-0 irq-0 child-0
+   luminos-power-290059  [003] ..... 169698.678618: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-287074  [003] ..... 169698.703496: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-287074  [003] ..... 169698.729216: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+    kworker/15:0-294228  [015] ..... 169699.249476: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/5:2-306508  [005] ..... 169699.310446: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/15:4-315447  [015] ..... 169700.053862: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/10:0-297544  [010] ..... 169700.131580: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/10:5-311865  [010] ..... 169700.252312: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/0:0-294211  [000] .N... 169700.540744: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/3:2-298031  [003] ..... 169700.600601: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] ..... 169700.645847: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/10:5-311865  [010] ..... 169700.715276: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/7:6-307762  [007] ..... 169700.751933: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/8:0-309241  [008] ..... 169701.541860: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:4-315447  [015] ..... 169701.585133: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+   luminos-power-290059  [004] ..... 169702.097702: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-290059  [006] ..... 169702.120033: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-290059  [006] ..... 169702.143697: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+     kworker/5:2-306508  [005] ..... 169702.178780: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/3:2-298031  [003] ..... 169702.233409: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/2:0-297633  [002] ..... 169702.297387: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/9:3-306579  [009] ..... 169702.323385: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/15:4-315447  [015] ..... 169703.038327: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/10:5-311865  [010] ..... 169703.155530: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/14:4-308648  [014] ..... 169703.385327: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/9:3-306579  [009] ..... 169703.422041: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/15:4-315447  [015] ..... 169703.500763: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:4-315447  [015] ..... 169703.538408: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/14:2-308497  [014] ..... 169703.662187: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/9:3-306579  [009] ..... 169703.764546: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/1:2-306471  [001] ..... 169704.047571: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/10:5-311865  [010] ..... 169704.107887: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/1:2-306471  [001] ..... 169704.222617: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/4:0-296732  [004] ..... 169704.251908: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/8:0-309241  [008] ..... 169704.852095: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/14:2-308497  [014] ..... 169704.993272: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/14:2-308497  [014] ..... 169705.214489: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] ..... 169705.518984: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/1:2-306471  [001] .n... 169705.968551: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/3:2-298031  [003] ..... 169705.991531: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/0:0-294211  [000] ..... 169706.133963: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/4:0-296732  [004] ..... 169706.328593: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/4:0-296732  [004] ..... 169706.501634: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/15:4-315447  [015] ..... 169706.573888: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/1:2-306471  [001] ..... 169707.376289: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/4:0-296732  [004] ..... 169707.429134: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/15:4-315447  [015] ..... 169707.830622: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/5:2-306508  [005] ..... 169708.050155: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+   kworker/12:14-133584  [012] ..... 169708.121003: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] ..... 169708.184769: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/10:5-311865  [010] ..... 169709.234281: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] ..... 169709.257715: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/10:5-311865  [010] ..... 169709.660988: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] ..... 169709.777125: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd3
+     kworker/1:2-306471  [001] ..... 169709.860218: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/10:5-311865  [010] ..... 169709.914143: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/1:2-306471  [001] ..... 169710.130292: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/10:5-311865  [010] ..... 169710.194540: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/3:2-298031  [003] ..... 169710.398725: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+    kworker/10:5-311865  [010] ..... 169710.495207: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/3:2-298031  [003] ..... 169710.775920: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/1:2-306471  [001] ..... 169710.819652: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/10:5-311865  [010] ..... 169710.975202: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/4:0-296732  [004] ..... 169711.079806: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/5:2-306508  [005] ..... 169711.336138: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/2:0-297633  [002] ..... 169711.397694: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+   luminos-power-286650  [001] ..... 169712.093714: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286650  [001] ..... 169712.117358: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286650  [001] ..... 169712.141681: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+     kworker/6:2-206298  [006] ..... 169712.316584: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] ..... 169712.357501: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/4:0-296732  [004] ..... 169712.460059: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/5:2-306508  [005] ..... 169712.476219: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/5:2-306508  [005] ..... 169712.602537: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/2:0-297633  [002] ..... 169712.641849: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/8:0-309241  [008] ..... 169713.892999: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] ..... 169713.940017: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/1:2-306471  [001] ..... 169714.287441: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/0:0-294211  [000] ..... 169714.301681: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+     kworker/0:2-206262  [000] ..... 169715.900060: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/4:0-296732  [004] ..... 169715.937551: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+    kworker/15:4-315447  [015] ..... 169716.681527: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/8:0-309241  [008] ..... 169716.697798: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+   luminos-power-286865  [008] ..... 169719.161547: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286865  [008] ..... 169719.184808: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286865  [008] ..... 169719.208966: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+     kworker/6:2-206298  [006] ..... 169720.356975: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd2
+     kworker/6:2-206298  [006] ..... 169720.409436: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xd1
+   luminos-power-286867  [005] ..... 169723.127320: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286867  [005] ..... 169723.150722: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286867  [005] ..... 169723.174720: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286651  [005] ..... 169725.839592: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286651  [005] ..... 169725.861183: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286651  [005] ..... 169725.883354: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286865  [010] ..... 169726.831469: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286865  [010] ..... 169726.853073: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286865  [006] ..... 169726.875764: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286658  [009] ..... 169727.833125: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286658  [009] ..... 169727.855099: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286658  [002] ..... 169727.877214: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-286650  [010] ..... 169728.841130: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-286650  [010] ..... 169728.863181: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-286650  [013] ..... 169728.885410: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
+   luminos-power-287877  [001] ..... 169729.830878: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a3
+   luminos-power-287877  [001] ..... 169729.852512: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200a0
+   luminos-power-287877  [001] ..... 169729.874751: wmi: (asus_wmi_evaluate_method3+0x0/0x1e0 [asus_wmi]) method=0x53564544 devid=0x1200c1
