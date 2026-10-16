@@ -83,7 +83,7 @@ Chromium 153, not branded Chrome. Bench PNGs are git-excluded (.git/info/exclude
 Goal: every KDE window looks like Caelestia Nexus (spec artifacts: "System Settings in Nexus Style" =
 `docs/windowstyle/mock/nexus-replica.html`, "Sub-page Layouts" = `docs/windowstyle/mock/subpages.html`).
 **Live:** KWin decoration `luminos-kdecoration-chromeos 1.0.0-2`; forks qqc2-desktop-style 6.30.0-1.6, kirigami 6.30.0-1.6,
-kirigami-addons 1.13.1-1.2, kcmutils 6.30.0-1.1 (new), systemsettings 6.7.5-1.5, darkly 0.5.40-1.2 — all `packages/*-luminos/`, warn-only
+kirigami-addons 1.13.1-1.2, kcmutils 6.30.0-1.1 (new), systemsettings 6.7.5-1.6, darkly 0.5.40-1.2 — all `packages/*-luminos/`, warn-only
 hooks `luminos-<pkg>.hook`. `scripts/luminos-windowstyle-check` = 31 PASS (live System Settings probes SKIP while Shawn's instance runs).
 DECISIONS 138–141 + 143, BUGS 193, 195–197. Sub-pages = Shawn's edge-drawer idea (left = all settings, top = search, right = page sections),
 motion 180 ms no overshoot. Test aid: `LUMINOS_SS_OPEN_DRAWER=left|top[:q]|right systemsettings`.
@@ -91,6 +91,7 @@ motion 180 ms no overshoot. Test aid: `LUMINOS_SS_OPEN_DRAWER=left|top[:q]|right
 **R15 (10-15, read-only):** BUG-199 lock-screen wallpaper black after lid-open — greeter crashes at suspend entry, the restarted greeter's WebEngine gets no GPU (WebGL disabled) → Rain can't render. Options listed to Shawn; waiting on his pick.
 **R16 (10-15):** BUG-199 (renumbered from 198) crash catcher installed (DECISION 145): `/usr/lib/kscreenlocker_greet` is a wrapper, real = `.luminos-real`; reports in `~/.local/state/luminos/greeter-crash/`. `luminos-greeter-catch status|remove`. Waiting for Shawn to reproduce (lid close/open) → read newest crash log → fix.
 **R17 (10-15):** BUG-201 fixed — live-wallpaper settings centred under the Wallpaper type card (config.qml alignment).
+**R18 (10-15):** BUG-202 fixed — left/top/right drawer open-close loop (systemsettings 6.7.5-1.6).
 **Known limits:** Dolphin row height / group lines are Dolphin's own; no red "danger" items in plain QMenu; Keyboard empty-state shortcut text not runtime-verified.
 InlineMessage, menus/tooltips/scrollbars per Components sheet; systemsettings patch at its 520-line budget.
 **Rule:** after ANY Plasma/KF/Qt upgrade rebuild all six forks + the decoration, then run the checker. Never `git add -A` (parallel chats share this tree).

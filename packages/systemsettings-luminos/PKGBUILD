@@ -24,7 +24,7 @@
 pkgname=systemsettings
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=1.5
+pkgrel=1.6
 pkgdesc='KDE system manager for hardware, software, and workspaces'
 arch=(x86_64)
 url='https://kde.org/plasma-desktop/'
@@ -60,7 +60,7 @@ source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{
         systemsettings-luminos-nexus-sidebar.patch)
 sha256sums=('317a21165709d61796fba19f5454397577ffd8aa96655b29dd286a1df252cddb'
             'SKIP'
-            '8733b28788dadef302335bccbd9e5e80fea9f9aac468b9cc15bab92e091658f2')
+            '3b89ce0d1c5005feb9554c11e4be2ad444b87d1f35673c35313223088b84129c')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
               'D07BD8662C56CB291B316EB2F5675605C74E02CF'  # David Edmundson <davidedmundson@kde.org>

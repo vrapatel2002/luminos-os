@@ -543,9 +543,9 @@ diff -ruN a/app/qml/EdgeDrawers.qml b/app/qml/EdgeDrawers.qml
 +        }
 +    }
 +    onOpenChanged: if (open && kind === "top") search.forceActiveFocus()
-+    Timer { id: closeTimer; interval: 220; onTriggered: if (!(root.kind === "top" && search.text.length > 0)) systemsettings.openEdgeDrawer("") }
++    Timer { id: closeTimer; interval: 220; onTriggered: if (!drawerHover.hovered && !(root.kind === "top" && search.text.length > 0)) systemsettings.openEdgeDrawer("") }
 +    Shortcut { sequence: "Escape"; onActivated: systemsettings.openEdgeDrawer("") }
-+    HoverHandler { onHoveredChanged: hovered ? closeTimer.stop() : closeTimer.restart() }
++    HoverHandler { id: drawerHover; onHoveredChanged: hovered ? closeTimer.stop() : closeTimer.restart() }
 +
 +    Kirigami.ShadowedRectangle {
 +        id: panel
@@ -651,12 +651,12 @@ diff -ruN a/app/qml/Main.qml b/app/qml/Main.qml
 +    readonly property alias pageStack: sideBar.pageStack // the drawer's CategoriesPage navigates through it
 +    property bool drawerOpen: false
 +    function setDrawerOpen(open) { drawerOpen = open && sideBar.pageStack.depth > 1 }
-+    Timer { id: drawerClose; interval: 220; onTriggered: root.drawerOpen = false }
++    Timer { id: drawerClose; interval: 220; onTriggered: if (!drawerHover.hovered) root.drawerOpen = false } // never close under the pointer (BUG-202 hover loop)
 +    Shortcut { sequence: "Escape"; enabled: root.drawerOpen; onActivated: root.drawerOpen = false }
 +    MouseArea { // 14 px hot zone with a 4x56 hint line (outline, 35 % / 90 % under the pointer)
 +        x: 0; y: 52; z: 2; width: 14; height: parent.height - 104; visible: sideBar.pageStack.depth > 1; hoverEnabled: true
 +        onEntered: systemsettings.openEdgeDrawer("left")
-+        onExited: drawerClose.restart()
++        onExited: if (!drawerHover.hovered) drawerClose.restart() // the drawer sliding over this zone is not "leaving"
 +        Rectangle { x: 4; width: 4; height: 56; radius: 2; y: (parent.height - height) / 2; color: Kirigami.Theme.disabledTextColor; opacity: parent.containsMouse ? 0.9 : 0.35 }
 +    }
 +    Kirigami.ShadowedRectangle {
@@ -667,7 +667,7 @@ diff -ruN a/app/qml/Main.qml b/app/qml/Main.qml
 +        color: Kirigami.Theme.backgroundColor
 +        corners { topRightRadius: 24; bottomRightRadius: 24 }
 +        shadow { size: 24; color: Qt.rgba(0, 0, 0, 0.55) }
-+        HoverHandler { onHoveredChanged: hovered ? drawerClose.stop() : drawerClose.restart() }
++        HoverHandler { id: drawerHover; onHoveredChanged: hovered ? drawerClose.stop() : drawerClose.restart() }
 +        CategoriesPage { anchors.fill: parent; onPicked: root.drawerOpen = false }
      }
  

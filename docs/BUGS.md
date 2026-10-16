@@ -8153,3 +8153,9 @@ limits and fans stay on after load ends → heat, and each eventual profile flip
 - **Symptom (Shawn):** on a wide System Settings window the "Wallpaper type" card is centred but everything under it (file row, gallery, Advanced) hugs the left edge.
 - **Cause:** that part is our plugin's `config.qml` (org.luminos.livewallpaper). Every block was capped at 40 grid units (BUG-169) but had no `Layout.alignment`, so a ColumnLayout puts it at x=0.
 - **Fix:** `Layout.alignment: Qt.AlignHCenter` on all 11 capped blocks + the Advanced checkbox. Proven in an offscreen 1800 px harness: x=0 before → x=540 (=(1800−720)/2) after.
+
+## BUG-202 — System Settings left drawer opens and closes in a loop while the pointer sits on its edge handle (FIXED 10-15)
+<!-- [CHANGE: claude-code | 2026-10-15] -->
+- **Symptom (Shawn):** on a sub-page, resting the pointer on the left-edge handle makes the "all settings" drawer slide out and back in, over and over.
+- **Cause:** the handle (MouseArea, z 2) and the drawer (z 3) share one 220 ms close timer. When the drawer slides over the handle, the handle reports "pointer left" and restarts the timer *after* the drawer's HoverHandler had stopped it → drawer closes → handle uncovered → reopens → loop. Same race in the top/right drawers (EdgeDrawers.qml).
+- **Fix (systemsettings 6.7.5-1.6):** the close timer never closes while the drawer's HoverHandler reports the pointer on it, and the handle's exit does not restart the timer then. Built + installed; patched QML confirmed in /usr/bin/systemsettings. Needs System Settings restarted.
