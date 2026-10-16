@@ -18,3 +18,10 @@ Script: ~/luminos-os/scripts/luminos-nvidia-defer  --apply | --revert | --check 
   --apply: patch /usr/src/nvidia-<ver> (idempotent), dkms build+install, keeps pristine copy of the 2 files as *.nvdefer-orig
 Pacman hook: ~/luminos-os/config/pacman-hooks/luminos-nvidia-defer.hook (PostTransaction on nvidia-open-dkms → --apply)
 Budgets: patch ≤ 160 added lines; any new function ≤ 40 lines; nesting ≤ 3. Script ≤ 120 lines.
+
+## Re-plan 1 (2026-10-16 16:25, after independent review)
+- Patch budget 180 added lines; script budget 150 lines (review fixes are real safety work, not bloat).
+- Hook renamed: config/pacman-hooks/80-luminos-nvidia-defer.hook (must sort before 90-mkinitcpio-install), Exec sets LUMINOS_FROM_HOOK=1.
+- Script gains --install (root: installs patch to /usr/local/share/luminos/nvdefer/, script to /usr/local/bin/, hook to /etc/pacman.d/hooks/, then --apply).
+  apply/revert run mkinitcpio -P unless LUMINOS_FROM_HOOK=1. As root only the root-owned installed patch with exact version is used.
+- Replay delivers CURRENT truth: AC read at replay time; D-level re-requested from firmware via rm_request_dnotifier_state. Pending = flags.

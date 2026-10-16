@@ -45,3 +45,9 @@ GPU always ends up with the current limits. Upstream precedent: NVIDIA PR #1299 
 3. GPU goes back to sleep normally afterwards.
 4. `nv_acpi_defer=0` restores stock wake behaviour (proves the patch is the cause of the difference).
 5. Patch + apply/revert script + pacman hook in repo; rollback in one command.
+
+## Notes from review (2026-10-16)
+- On this G14 the GPU's own GC-OFF resume already re-reads _PSR and re-requests the D-level, so AC/D replays are redundant-but-harmless
+  here; the replay's real value is GPS 0xC0 and NVPCF. A replayed count of 0 for AC is NOT a bug.
+- `pacman -Qkk nvidia-open-dkms` will report kernel-open/nvidia/{nv-acpi.c,nv.c} as modified — expected.
+- nv_acpi_replayed also rises on system suspend (pci_pm_suspend runtime-resumes the device first).

@@ -1,0 +1,245 @@
+--- a/kernel-open/nvidia/nv-acpi.c
++++ b/kernel-open/nvidia/nv-acpi.c
+@@ -29,6 +29,9 @@
+ 
+ #include <linux/acpi.h>
+ #include <acpi/video.h>
++/* nvdefer entry points (used by nv.c) */
++void nv_acpi_defer_on_runtime_resume(nv_linux_state_t *nvl);
++void nv_acpi_defer_cancel(void);
+ 
+ #if defined(NV_LINUX_ACPI_EVENTS_SUPPORTED)
+ static NV_STATUS   nv_acpi_extract_integer (const union acpi_object *, void *, NvU32, NvU32 *);
+@@ -68,6 +71,142 @@
+ #define ACPI_NVPCF_EVENT_CHANGE    0xC0
+ 
+ /*
++ * nvdefer: firmware power notifies (PEGP 0xC0 GPS, PEGP 0xD1..0xD5, NPCF 0xC0,
++ * AC change) that arrive while the dGPU is runtime-suspended only set a flag
++ * instead of waking it. After its next real wake each flagged kind is replayed
++ * once from the CURRENT state (AC read now, D-level re-requested), so a stale
++ * value can never overwrite a newer one. Replay never wakes it. 0 = stock.
++ */
++#define NV_ACPI_GPS_STATUS_CHANGE  0xC0
++#define NV_ACPI_POWER_LEVEL_D1     0xD1
++#define NV_ACPI_POWER_LEVEL_D5     0xD5
++#define NV_DEFER_RETRY_MAX         100      /* x 50 ms while the wake settles */
++
++static int nv_acpi_defer = 1;
++module_param(nv_acpi_defer, int, 0644);
++MODULE_PARM_DESC(nv_acpi_defer, "Hold ACPI power notifies while the GPU is runtime-suspended (1=on, 0=stock)");
++static unsigned long nv_acpi_deferred, nv_acpi_replayed;
++module_param(nv_acpi_deferred, ulong, 0444);
++module_param(nv_acpi_replayed, ulong, 0444);
++
++/* Pending kinds, one bit each. */
++#define NV_DEFER_AC       0x1
++#define NV_DEFER_GPS      0x2
++#define NV_DEFER_DNOTIFY  0x4
++#define NV_DEFER_NVPCF    0x8
++
++static DEFINE_SPINLOCK(nv_defer_lock);          /* guards the two below */
++static nv_linux_state_t *nv_defer_nvl;          /* the dGPU, while its notifier is registered */
++static NvU32 nv_defer_pending;
++static unsigned int nv_defer_retries;           /* only touched by the work item */
++
++/* Deliver in contract order: power source, GPS, D-level, NVPCF. */
++static void nv_acpi_defer_replay(nvidia_stack_t *sp, nv_linux_state_t *nvl, NvU32 kinds)
++{
++    NvU32 ac_plugged = 0;
++
++    if ((kinds & NV_DEFER_AC) && (nv_acpi_get_powersource(&ac_plugged) == NV_OK))
++        rm_power_source_change_event(sp, !ac_plugged);
++    if (kinds & NV_DEFER_GPS)
++        rm_acpi_notify(sp, NV_STATE_PTR(nvl), NV_ACPI_GPS_STATUS_CHANGE);
++    if (kinds & NV_DEFER_DNOTIFY)
++        rm_request_dnotifier_state(sp, NV_STATE_PTR(nvl));
++    if (kinds & NV_DEFER_NVPCF)
++        rm_acpi_nvpcf_notify(sp);
++}
++
++static void nv_acpi_defer_work_fn(struct work_struct *work)
++{
++    nv_linux_state_t *nvl = READ_ONCE(nv_defer_nvl);
++    nvidia_stack_t *sp = NULL;
++    unsigned long flags;
++    NvU32 kinds;
++    int st, rc;
++
++    if (nvl == NULL)
++        return;
++    /* Only ride on a wake that already happened; never cause one. */
++    st = READ_ONCE(nvl->dev->power.runtime_status);
++    rc = pm_runtime_get_if_active(nvl->dev);
++    if (rc <= 0)
++    {
++        /* Resuming, or a suspend that failed: look again shortly. Asleep: keep for next wake. */
++        if ((rc == 0) && (st != RPM_SUSPENDED) && (++nv_defer_retries <= NV_DEFER_RETRY_MAX))
++            schedule_delayed_work(to_delayed_work(work), msecs_to_jiffies(50));
++        else
++            nv_defer_retries = 0;
++        return;
++    }
++    nv_defer_retries = 0;
++
++    if (nv_kmem_cache_alloc_stack(&sp) == 0)     /* own stack, never a notifier's */
++    {
++        spin_lock_irqsave(&nv_defer_lock, flags);
++        kinds = nv_defer_pending;
++        nv_defer_pending = 0;
++        nv_acpi_replayed += hweight32(kinds);
++        spin_unlock_irqrestore(&nv_defer_lock, flags);
++        nv_acpi_defer_replay(sp, nvl, kinds);
++        nv_kmem_cache_free_stack(sp);
++    }
++    pm_runtime_put(nvl->dev);
++}
++static DECLARE_DELAYED_WORK(nv_defer_work, nv_acpi_defer_work_fn);
++
++/*
++ * Returns NV_TRUE if the event was flagged instead of delivered now. On the
++ * stock path the kind's flag is cleared first: the live event supersedes it.
++ */
++static NvBool nv_acpi_defer_event(NvU32 kind)
++{
++    struct device *dev;
++    unsigned long flags;
++    NvBool deferred = NV_FALSE;
++
++    spin_lock_irqsave(&nv_defer_lock, flags);
++    dev = (nv_defer_nvl != NULL) ? nv_defer_nvl->dev : NULL;
++    if (READ_ONCE(nv_acpi_defer) && (dev != NULL) && pm_runtime_suspended(dev))
++    {
++        nv_defer_pending |= kind;
++        nv_acpi_deferred++;
++        deferred = NV_TRUE;
++        /* The GPU may have started waking since the check: replay then. */
++        if (!pm_runtime_suspended(dev))
++            schedule_delayed_work(&nv_defer_work, 0);
++    }
++    else
++    {
++        nv_defer_pending &= ~kind;
++    }
++    spin_unlock_irqrestore(&nv_defer_lock, flags);
++
++    return deferred;
++}
++
++/* Called from the runtime-resume callback once the GPU is powered. */
++void nv_acpi_defer_on_runtime_resume(nv_linux_state_t *nvl)
++{
++    unsigned long flags;
++
++    spin_lock_irqsave(&nv_defer_lock, flags);
++    if ((nvl == nv_defer_nvl) && (nv_defer_pending != 0))
++        schedule_delayed_work(&nv_defer_work, 0);
++    spin_unlock_irqrestore(&nv_defer_lock, flags);
++}
++
++/* Stop deferring, wait out any replay, drop what is pending. */
++void nv_acpi_defer_cancel(void)
++{
++    unsigned long flags;
++
++    spin_lock_irqsave(&nv_defer_lock, flags);
++    nv_defer_nvl = NULL;        /* handlers stop deferring from here on */
++    nv_defer_pending = 0;
++    spin_unlock_irqrestore(&nv_defer_lock, flags);
++    cancel_delayed_work_sync(&nv_defer_work);
++}
++
++/*
+  * This callback will be invoked by the acpi_notifier_call_chain()
+  */
+ static int nv_acpi_notifier_call_chain_handler(
+@@ -140,6 +279,8 @@
+         if (nv_acpi_get_powersource(&ac_plugged) != NV_OK)
+             return;
+ 
++        if (nv_acpi_defer_event(NV_DEFER_AC))
++            return;
+         rm_power_source_change_event(pNvAcpiObject->sp, !ac_plugged);
+     }
+ }
+@@ -150,7 +291,8 @@
+ 
+     if (event_type == ACPI_NVPCF_EVENT_CHANGE)
+     {
+-        rm_acpi_nvpcf_notify(pNvAcpiObject->sp);
++        if (!nv_acpi_defer_event(NV_DEFER_NVPCF))
++            rm_acpi_nvpcf_notify(pNvAcpiObject->sp);
+     }
+     else
+     {
+@@ -257,6 +399,12 @@
+      * Function to handle device specific ACPI events such as display hotplug,
+      * GPS and D-notifier events.
+      */
++    if ((event_type == NV_ACPI_GPS_STATUS_CHANGE) &&
++        nv_acpi_defer_event(NV_DEFER_GPS))
++        return;
++    if ((event_type >= NV_ACPI_POWER_LEVEL_D1) && (event_type <= NV_ACPI_POWER_LEVEL_D5) &&
++        nv_acpi_defer_event(NV_DEFER_DNOTIFY))
++        return;
+     rm_acpi_notify(pNvAcpiObject->sp, NV_STATE_PTR(nvl), event_type);
+ }
+ 
+@@ -274,6 +422,8 @@
+             nv_printf(NV_DBG_ERRORS,
+                 "NVRM: nv_acpi_register_notifier: failed to install notifier\n");
+         }
++        else if (READ_ONCE(nv_defer_nvl) == NULL)
++            WRITE_ONCE(nv_defer_nvl, nvl);  /* single dGPU: defer against it */
+     }
+ 
+     nvl->acpi_nb.notifier_call = nv_acpi_notifier_call_chain_handler;
+@@ -282,6 +432,8 @@
+ 
+ void nv_acpi_unregister_notifier(nv_linux_state_t *nvl)
+ {
++    if (nvl == READ_ONCE(nv_defer_nvl))
++        nv_acpi_defer_cancel();
+     unregister_acpi_notifier(&nvl->acpi_nb);
+     if (nvl->nv_acpi_object != NULL)
+     {
+@@ -1424,6 +1576,9 @@
+ 
+ #else // NV_LINUX_ACPI_EVENTS_SUPPORTED
+ 
++void nv_acpi_defer_on_runtime_resume(nv_linux_state_t *nvl) { }
++void nv_acpi_defer_cancel(void) { }
++
+ void NV_API_CALL nv_acpi_methods_init(NvU32 *handlePresent)
+ {
+     *handlePresent = 0;
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -268,6 +268,9 @@
+ static int           nv_pmops_poweroff         (struct device *dev);
+ static int           nv_pmops_runtime_suspend  (struct device *dev);
+ static int           nv_pmops_runtime_resume   (struct device *dev);
++/* nvdefer (nv-acpi.c) */
++void nv_acpi_defer_on_runtime_resume(nv_linux_state_t *nvl);
++void nv_acpi_defer_cancel(void);
+ 
+ struct dev_pm_ops nv_pm_ops = {
+     .suspend         = nv_pmops_suspend,
+@@ -679,6 +682,7 @@
+ static void
+ nv_module_exit(nv_stack_t *sp)
+ {
++    nv_acpi_defer_cancel();     /* nvdefer: no replay may outlive the module */
+     nv_module_state_exit(sp);
+ 
+     rm_shutdown_rm(sp);
+@@ -5182,6 +5186,9 @@
+     }
+ #endif
+ 
++    /* nvdefer: GPU is powered; deliver ACPI notifies held while it slept */
++    nv_acpi_defer_on_runtime_resume(pci_get_drvdata(to_pci_dev(dev)));
++
+     return err;
+ 
+ #if defined(CONFIG_PM_DEVFREQ)

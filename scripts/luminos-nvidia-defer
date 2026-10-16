@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# luminos-nvidia-defer — keep the nvdefer patch on the nvidia-open DKMS source.
+# nvdefer stops firmware power notifies waking a runtime-suspended dGPU
+# (docs/nvdefer/SPEC.md, BUG-198/203/204). Usage (root except --check):
+#   --check    source patched? loaded module patched? initramfs nvidia.ko == installed one?
+#   --install  (from the repo) copy patch/script/hook to /usr/local + /etc/pacman.d/hooks, then --apply
+#   --apply    patch the source (idempotent), dkms build + install, mkinitcpio -P   (pacman hook)
+#   --revert   restore the stock source, dkms build + install, mkinitcpio -P
+# Exit: 0 ok, 1 failed, 2 patch no longer applies (source left stock).
+# Never reloads modules: reboot (or reload the nvidia modules) to use a new build.
+# LUMINOS_FROM_HOOK=1: skip mkinitcpio (pacman's 90-mkinitcpio-install runs after this hook).
+set -u
+TAG=luminos-nvidia-defer
+FILES=(kernel-open/nvidia/nv-acpi.c kernel-open/nvidia/nv.c)
+MARK=nv_acpi_defer_on_runtime_resume
+SHARE=/usr/local/share/luminos/nvdefer
+REPO=$(readlink -f "$(dirname "$(readlink -f "$0")")/..")
+PATCH_OPTS=(-p1 -F0 --no-backup-if-mismatch -s -f)
+
+say()  { echo "$TAG: $*"; }
+warn() { echo "$TAG: $*" >&2; logger -t "$TAG" -p user.warning -- "$*" 2>/dev/null || true; }
+need_root() { [ "$(id -u)" = 0 ] || { warn "$1 needs root"; exit 1; }; }
+
+VER=$(pacman -Q nvidia-open-dkms 2>/dev/null | awk '{print $2}' | sed 's/-[^-]*$//')
+[ -n "$VER" ] || { warn "nvidia-open-dkms is not installed"; exit 1; }
+SRC=/usr/src/nvidia-$VER
+KRUN=$(uname -r)
+
+# As root only the installed copy for this exact version counts, and only if root owns it
+# and nobody else can write it. The repo copy is for --check / --install only.
+trusted_patch() {
+    local p=$SHARE/nvdefer-$VER.patch
+    [ -f "$p" ] && [ "$(stat -c %u "$p")" = 0 ] && (( (8#$(stat -c %a "$p") & 8#022) == 0 )) && echo "$p"
+}
+
+src_patched() { grep -q "$MARK" "$SRC/kernel-open/nvidia/nv-acpi.c" 2>/dev/null; }
+
+# Build + install for every kernel with headers. A failure only counts for the running
+# kernel or a kernel that currently has nvidia/$VER installed.
+dkms_rebuild() {
+    local b k rc=0 must
+    for b in /usr/lib/modules/*/build; do
+        [ -f "$b/Makefile" ] || continue
+        k=$(basename "$(dirname "$b")")
+        must=0
+        { [ "$k" = "$KRUN" ] || dkms status -m nvidia -v "$VER" -k "$k" 2>/dev/null | grep -q installed; } && must=1
+        say "dkms build + install nvidia/$VER for $k"
+        if ! { dkms build -m nvidia -v "$VER" -k "$k" --force && dkms install -m nvidia -v "$VER" -k "$k" --force; }; then
+            warn "dkms failed for $k"; [ $must = 1 ] && rc=1
+        fi
+    done
+    return $rc
+}
+
+initramfs() {
+    [ "${LUMINOS_FROM_HOOK:-0}" = 1 ] && { say "initramfs left to pacman's mkinitcpio hook"; return 0; }
+    mkinitcpio -P || { warn "mkinitcpio -P failed — the initramfs may still hold the old nvidia.ko"; return 1; }
+}
+
+restore_orig() {
+    local f
+    for f in "${FILES[@]}"; do
+        [ -f "$SRC/$f.nvdefer-orig" ] && mv -f "$SRC/$f.nvdefer-orig" "$SRC/$f"
+    done
+}
+
+check_initramfs() {
+    local img mod d rel
+    img=/boot/initramfs-$(cat "/usr/lib/modules/$KRUN/pkgbase" 2>/dev/null || echo linux).img
+    mod=$(modinfo -n nvidia 2>/dev/null)
+    [ -r "$img" ] || { say "initramfs $img: unreadable (run as root)"; return 1; }
+    d=$(mktemp -d) || return 1
+    (cd "$d" && lsinitcpio -x "$img" >/dev/null 2>&1)
+    rel=${mod#/}; rel=usr/${rel#usr/}
+    if [ -n "$mod" ] && cmp -s "$d/$rel" "$mod"; then
+        say "initramfs $img: nvidia.ko matches $mod"; rm -rf "$d"; return 0
+    fi
+    say "initramfs $img: nvidia.ko DIFFERS from $mod (run mkinitcpio -P)"; rm -rf "$d"; return 1
+}
+
+do_check() {
+    local rc=0 p
+    if src_patched; then say "source $SRC: patched"; else say "source $SRC: stock"; rc=1; fi
+    p=$(trusted_patch || true)
+    [ -n "$p" ] || { [ -f "$REPO/patches/nvdefer/nvdefer-$VER.patch" ] && p="$REPO/patches/nvdefer/nvdefer-$VER.patch (repo, not installed)"; }
+    say "patch for $VER: ${p:-none}"
+    if [ -e /sys/module/nvidia/parameters/nv_acpi_defer ]; then
+        say "loaded module: patched (nv_acpi_defer=$(cat /sys/module/nvidia/parameters/nv_acpi_defer)," \
+            "deferred=$(cat /sys/module/nvidia/parameters/nv_acpi_deferred)," \
+            "replayed=$(cat /sys/module/nvidia/parameters/nv_acpi_replayed))"
+    else
+        say "loaded module: stock (or nvidia not loaded)"; rc=1
+    fi
+    check_initramfs || rc=1
+    return $rc
+}
+
+do_apply() {
+    local p f
+    for f in /usr/src/nvidia-*/kernel-open/nvidia/*.nvdefer-orig; do      # leftovers of old versions
+        [ -e "$f" ] && [[ "$f" != "$SRC/"* ]] && rm -f "$f"
+    done
+    if src_patched; then
+        say "source $SRC already patched"
+    else
+        p=$(trusted_patch)
+        [ -n "$p" ] || { warn "no trusted $SHARE/nvdefer-$VER.patch — nvidia $VER stays STOCK (dGPU wakes on firmware notifies)"; exit 2; }
+        if ! patch "${PATCH_OPTS[@]}" --dry-run -d "$SRC" < "$p" >/dev/null; then
+            warn "$(basename "$p") no longer applies to nvidia $VER — driver stays STOCK; port the patch (docs/nvdefer)"
+            exit 2
+        fi
+        for f in "${FILES[@]}"; do cp -p "$SRC/$f" "$SRC/$f.nvdefer-orig"; done
+        patch "${PATCH_OPTS[@]}" -d "$SRC" < "$p" || { restore_orig; warn "patch failed after a clean dry-run; source restored"; exit 1; }
+        say "patched $SRC with $p"
+    fi
+    if ! dkms_rebuild; then
+        warn "dkms build of patched nvidia $VER FAILED — restoring stock source and rebuilding"
+        restore_orig; dkms_rebuild; initramfs; exit 1
+    fi
+    initramfs || exit 1
+    say "done — reboot (or reload nvidia modules) to use it"
+}
+
+do_revert() {
+    if ! src_patched; then say "source $SRC is already stock"; exit 0; fi
+    [ -f "$SRC/${FILES[0]}.nvdefer-orig" ] || { warn "no *.nvdefer-orig copies in $SRC; reinstall nvidia-open-dkms to revert"; exit 1; }
+    restore_orig
+    dkms_rebuild || { warn "dkms build of stock nvidia $VER failed"; exit 1; }
+    initramfs || exit 1
+    say "reverted to stock — reboot (or reload nvidia modules) to use it"
+}
+
+do_install() {
+    local p=$REPO/patches/nvdefer/nvdefer-$VER.patch h=$REPO/config/pacman-hooks/80-luminos-nvidia-defer.hook
+    [ -f "$p" ] && [ -f "$h" ] || { warn "run --install from the repo checkout (need $p and $h)"; exit 1; }
+    install -D -o root -g root -m0644 "$p" "$SHARE/nvdefer-$VER.patch" &&
+    install -D -o root -g root -m0755 "$REPO/scripts/luminos-nvidia-defer" /usr/local/bin/luminos-nvidia-defer &&
+    install -D -o root -g root -m0644 "$h" /etc/pacman.d/hooks/80-luminos-nvidia-defer.hook || { warn "install failed"; exit 1; }
+    say "installed patch, script and pacman hook"
+    do_apply
+}
+
+case "${1:-}" in
+    --check)   do_check ;;
+    --apply)   need_root --apply;   do_apply ;;
+    --revert)  need_root --revert;  do_revert ;;
+    --install) need_root --install; do_install ;;
+    *) echo "usage: $TAG --check | --install | --apply | --revert" >&2; exit 1 ;;
+esac

@@ -1,0 +1,20 @@
+# nvdefer (docs/nvdefer/SPEC.md): re-apply the "don't wake a sleeping dGPU for firmware notifies" patch
+# to the nvidia-open DKMS source after every install/upgrade, and rebuild the module.
+# Installed at /etc/pacman.d/hooks/80-luminos-nvidia-defer.hook by `luminos-nvidia-defer --install`
+# (script /usr/local/bin/luminos-nvidia-defer, patch /usr/local/share/luminos/nvdefer/).
+# Order: after 70-dkms-install (stock build) and before 90-mkinitcpio-install, which then packs the
+# patched nvidia.ko into the initramfs (MODULES has nvidia) — hence LUMINOS_FROM_HOOK=1 skips the
+# script's own mkinitcpio. If the patch no longer applies the driver stays stock and a warning goes
+# to the journal. Never blocks the transaction. Rollback: luminos-nvidia-defer --revert.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = nvidia-open-dkms
+
+[Action]
+Description = Applying the Luminos nvdefer patch to nvidia-open (dGPU stays asleep on firmware notifies)...
+When = PostTransaction
+Depends = dkms
+Depends = patch
+Exec = /usr/bin/env LUMINOS_FROM_HOOK=1 /usr/local/bin/luminos-nvidia-defer --apply
