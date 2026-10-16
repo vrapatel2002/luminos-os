@@ -1,0 +1,11 @@
+
+STEP                   RESULT DETAIL
+------------------------------------------------------------------------
+a precondition         PASS params present, defer=1, GPU suspended, profile=Balanced
+b kprobes              PASS armed; deferred=0 replayed=0
+c defer NPCF           PASS NPCF0xC0=3 notifies=3 rpm_resume=0 non-suspended-samples=0 state=suspended deferred 0->3
+d replay               PASS replayed 0->1, nvidia-smi rc=0, numeric limits=5
+e re-suspend           PASS state=suspended after 21s (limit 90s)
+f control defer=0      PASS NPCF0xC0=1 rpm_resume=4 (want >=1)
+f re-suspend           PASS defer=1 state=suspended after 13s
+g restore              PASS fan-curve state identical=yes, defer=1, kprobes removed

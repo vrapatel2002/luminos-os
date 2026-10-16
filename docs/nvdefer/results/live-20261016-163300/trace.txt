@@ -1,0 +1,17 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 5/5   #P:16
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+ zbus::Connectio-1122    [000] .....   430.163764: notify: (acpi_ev_queue_notify_request+0x4/0x220) name={'N','P','C','F'} value=0xc0
+     kworker/0:1-10      [000] d..1.   430.164000: rpm_resume: 0000:01:00.0 flags-0 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+     kworker/0:1-10      [000] d..1.   430.901986: rpm_resume: 0000:01:00.0 flags-1 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+   kworker/u64:2-121     [012] d..1.   430.902000: rpm_resume: 0000:01:00.0 flags-2 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+   kworker/u64:6-4549    [013] d..1.   430.902012: rpm_resume: 0000:01:00.0 flags-4 cnt-2  dep-0  auto-1 p-0 irq-0 child-0

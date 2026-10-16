@@ -8486,3 +8486,18 @@ daemon is environment. Three thresholds fail by definition: fan max at 50–55 �
 binds when the stage starts hot), ppt rise 7 W/s (logger timestamp resolution; core proven ≤ 6). A real 80 s charger dropout
 during one run caused 8 wakes, all from firmware AC events + asusd rewriting curves on AC/DC toggles (BUG-203), none from the daemon.
 **Undo:** AGENTS.md §15 rollback row. **/etc changes:** AGENTS.md §9 (asusd.ron, unit, config.toml, curves).
+
+## DECISION 147 — nvdefer: patch the NVIDIA open driver so firmware power notes never wake a sleeping dGPU
+<!-- [CHANGE: claude-code | 2026-10-16] -->
+**Problem:** firmware (EC D-notifier while charging, GPS 0xC0, unplug D2), asusd fan-curve writes (NPCF 0xC0) and AC events each
+made nvidia-open 610.57 runtime-resume the RTX 4050 for ~20 s just to note a new power limit (BUG-198/203/204).
+**Decision:** small DKMS patch to kernel-open (nv-acpi.c, nv.c; 163 lines): while the GPU is runtime-suspended those four event
+kinds are held as flags; after the next real resume a work item replays them from current truth (_PSR now, D-level re-requested
+from firmware, GPS/NVPCF re-delivered), never waking the GPU itself. Upstream precedent NVIDIA PR #1299 (NPCF only, unmerged).
+Chosen over charge limit (hides charging only, costs 20 % battery), killing asusd curve writes (1 of 4 sources), ACPI override.
+**Proof (tests/nvdefer/live.sh, docs/nvdefer/results/):** 3 asusd curve rewrites → 3 NPCF notifies, 0 wakes, deferred 0→3; real
+wake → replayed 1, nvidia-smi limits 55/5/90 W; back asleep in 21 s; control nv_acpi_defer=0 → 1 rewrite = 4 rpm_resume.
+**Upgrades:** /etc/pacman.d/hooks/80-luminos-nvidia-defer.hook re-applies (-F0, root-owned patch, exact version) before
+90-mkinitcpio; if the patch no longer applies it fails closed to the stock driver with a journal warning.
+**Undo:** runtime `echo 0 | sudo tee /sys/module/nvidia/parameters/nv_acpi_defer`; permanent `sudo luminos-nvidia-defer --revert` + reboot.
+Old initramfs: /boot/initramfs-linux.img.pre-nvdefer. Docs: docs/nvdefer/.

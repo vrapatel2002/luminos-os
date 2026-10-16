@@ -1,0 +1,15 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 3/3   #P:16
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+ zbus::Connectio-1122    [006] .....   387.240579: notify: (acpi_ev_queue_notify_request+0x4/0x220) name={'N','P','C','F'} value=0xc0
+           asusd-1087    [001] .....   392.291612: notify: (acpi_ev_queue_notify_request+0x4/0x220) name={'N','P','C','F'} value=0xc0
+ zbus::Connectio-1122    [001] .....   397.344419: notify: (acpi_ev_queue_notify_request+0x4/0x220) name={'N','P','C','F'} value=0xc0

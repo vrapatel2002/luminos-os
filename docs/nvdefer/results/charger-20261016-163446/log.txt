@@ -1,0 +1,5 @@
+Waiting up to 60s for the dGPU to sleep (don't start any GPU program)...
+precondition           PASS defer=1, GPU suspended, charger online=1, deferred=3
+
+  >>> UNPLUG the charger now, wait 5+ s, then PLUG IT BACK IN.
+

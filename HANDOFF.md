@@ -1,9 +1,15 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-16 15:40 — Response 7 (spectrum: charger + smoothness tests)
+Last updated: 2026-10-16 16:45 — Response 9 (nvdefer driver patch live + proven)
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
+
+## 2026-10-16 16:45, R9 — nvdefer (DECISION 147) installed, rebooted, live.sh ALL PASS
+- NVIDIA open driver patched (DKMS) to hold firmware/asusd power notes while the dGPU sleeps. live.sh: 3 asusd curve rewrites →
+  0 wakes (control without the fix: woke). Replay works (nvidia-smi limits 55 W), card re-sleeps in 21 s.
+- Pending: tests/nvdefer/charger.sh (needs Shawn to unplug+replug) — run `sudo bash tests/nvdefer/charger.sh`.
+- `pacman -Qkk nvidia-open-dkms` reports 2 modified files — expected. Hook re-applies on driver upgrades; fails closed to stock.
 
 ## 2026-10-16 15:40, R7 — spectrum charger + smoothness tests DONE (tests/spectrum/smooth, results docs/spectrum/ab/smooth-*, unplug3, replug3)
 - Smooth test = 20 s idle → 4K H.264 in Chromium (iGPU) → + Qwen2.5-7B on CPU 8 threads. AC: 1 dropped frame of ~1,290, worst

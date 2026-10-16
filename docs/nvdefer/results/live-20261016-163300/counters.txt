@@ -1,0 +1,1 @@
+final counters: deferred=3 replayed=1

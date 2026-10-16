@@ -1,0 +1,22 @@
+a precondition         PASS params present, defer=1, GPU suspended, profile=Balanced
+b kprobes              PASS armed; deferred=0 replayed=0
+c defer NPCF           PASS NPCF0xC0=3 notifies=3 rpm_resume=0 non-suspended-samples=0 state=suspended deferred 0->3
+d replay               PASS replayed 0->1, nvidia-smi rc=0, numeric limits=5
+    limits:  GPU Ceiling Power Limit; Current Power Limit : 55.00 W; Requested Power Limit : 55.00 W; Default Power Limit : 55.00 W; Min Power Limit : 5.00 W; Max Power Limit : 90.00 W; Current Power Limit : N/A; Requested Power Limit : N/A; Default Power Limit : N/A; Min Power Limit : N/A; Max Power Limit : N/A
+e re-suspend           PASS state=suspended after 21s (limit 90s)
+f control defer=0      PASS NPCF0xC0=1 rpm_resume=4 (want >=1)
+f re-suspend           PASS defer=1 state=suspended after 13s
+final counters: deferred=3 replayed=1
+g restore              PASS fan-curve state identical=yes, defer=1, kprobes removed
+
+STEP                   RESULT DETAIL
+------------------------------------------------------------------------
+a precondition         PASS params present, defer=1, GPU suspended, profile=Balanced
+b kprobes              PASS armed; deferred=0 replayed=0
+c defer NPCF           PASS NPCF0xC0=3 notifies=3 rpm_resume=0 non-suspended-samples=0 state=suspended deferred 0->3
+d replay               PASS replayed 0->1, nvidia-smi rc=0, numeric limits=5
+e re-suspend           PASS state=suspended after 21s (limit 90s)
+f control defer=0      PASS NPCF0xC0=1 rpm_resume=4 (want >=1)
+f re-suspend           PASS defer=1 state=suspended after 13s
+g restore              PASS fan-curve state identical=yes, defer=1, kprobes removed
+raw results: /home/shawn/luminos-os/docs/nvdefer/results/live-20261016-163300

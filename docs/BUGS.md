@@ -8191,3 +8191,9 @@ charging and flaps D1↔D2 about twice a second. The charger in use reported as 
 not yet confirmed with Shawn whether that was USB-C or the barrel brick. Candidate fixes (untested): charge limit (asusd
 `charge_control_end_threshold`, e.g. 80) so the battery is not charging during heavy use; or a driver option to not opt in to GPS
 D-notifiers. **Open.**
+
+### BUG-198 / BUG-203 / BUG-204 — FIXED at the driver by DECISION 147 (nvdefer, 2026-10-16)
+<!-- [CHANGE: claude-code | 2026-10-16] -->
+The firmware and asusd still send their notes; the patched NVIDIA driver no longer wakes the sleeping dGPU to read them (held,
+replayed on the next real wake). Proven for the asusd curve-rewrite path (NPCF 0xC0): 3 triggers → 0 wakes, control → 4 resumes.
+Cable plug/unplug and charging-under-load (PEGP D1–D3 / AC) use the same hold path; live cable proof: tests/nvdefer/charger.sh.
