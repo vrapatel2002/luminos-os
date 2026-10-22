@@ -1,0 +1,11 @@
+# [CHANGE: cowork | 2026-10-22] DECISION 156 — local Claude-name → GLM-5.3 translator for Claude Desktop.
+[Unit]
+Description=Luminos GLM proxy (Claude Desktop -> Abliteration GLM-5.3)
+
+[Service]
+ExecStart=/usr/bin/python3 /home/shawn/luminos-os/scripts/luminos-glm-proxy
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

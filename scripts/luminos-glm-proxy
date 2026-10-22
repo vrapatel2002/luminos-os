@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+# luminos-glm-proxy — local name translator between Claude Desktop (3P mode) and Abliteration.
+# [CHANGE: cowork | 2026-10-22] DECISION 156.
+# WHY: Claude Desktop drops any inferenceModels entry whose name is not an Anthropic model
+# ("is not an Anthropic model and was removed"), and Abliteration 404s every claude-* name.
+# So the app is given Claude-shaped names and this proxy swaps them for the real model:
+#   *haiku*  -> abliterated-model          (cheap, reads images)
+#   anything else -> abliterated-model-large-v2  (GLM-5.3)
+# It also swaps the auth: the app holds only a local token; the real ak_ key stays here.
+# Listens on 127.0.0.1 only. Streams responses through chunk by chunk (SSE).
+import http.client, json, os, sys, ssl
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+
+PORT = int(os.environ.get("GLM_PROXY_PORT", "4141"))
+UP_HOST = "api.abliteration.ai"
+ENVF = os.path.expanduser("~/.config/luminos/abliteration.env")
+
+def load_env():
+    d = {}
+    for line in open(ENVF):
+        if "=" in line:
+            k, v = line.strip().split("=", 1); d[k] = v
+    return d
+
+CFG = load_env()
+REAL_KEY = CFG["ABLITERATION_API_KEY"]
+LOCAL_TOKEN = CFG.get("GLM_LOCAL_TOKEN", "")
+
+def map_model(name):
+    n = (name or "").lower()
+    return "abliterated-model" if "haiku" in n else "abliterated-model-large-v2"
+
+HOP = {"host", "content-length", "connection", "authorization", "x-api-key",
+       "accept-encoding", "transfer-encoding", "keep-alive"}
+
+class H(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    def log_message(self, fmt, *a):
+        sys.stderr.write("%s\n" % (fmt % a))
+
+    def _auth_ok(self):
+        if not LOCAL_TOKEN:
+            return True
+        got = self.headers.get("authorization", "").removeprefix("Bearer ").strip() \
+              or self.headers.get("x-api-key", "").strip()
+        return got == LOCAL_TOKEN
+
+    def _send_json(self, code, obj):
+        b = json.dumps(obj).encode()
+        self.send_response(code); self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(b))); self.end_headers(); self.wfile.write(b)
+
+    def do_GET(self):
+        if self.path.split("?")[0] in ("/health", "/"):
+            return self._send_json(200, {"ok": True})
+        if self.path.split("?")[0] == "/v1/models":
+            ids = ["claude-opus-4-5", "claude-haiku-4-5"]
+            return self._send_json(200, {"data": [{"id": i, "type": "model", "display_name": i} for i in ids],
+                                         "has_more": False})
+        self._send_json(404, {"type": "error", "error": {"type": "not_found_error", "message": self.path}})
+
+    def do_POST(self):
+        if not self._auth_ok():
+            return self._send_json(401, {"type": "error", "error": {"type": "authentication_error", "message": "bad local token"}})
+        body = self.rfile.read(int(self.headers.get("content-length", 0) or 0))
+        asked = None
+        try:
+            j = json.loads(body)
+            if isinstance(j, dict) and "model" in j:
+                asked = j["model"]; j["model"] = map_model(asked)
+                body = json.dumps(j).encode()
+        except Exception:
+            pass
+        hdrs = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
+        hdrs["authorization"] = "Bearer " + REAL_KEY
+        hdrs["content-length"] = str(len(body))
+        conn = http.client.HTTPSConnection(UP_HOST, 443, timeout=900, context=ssl.create_default_context())
+        try:
+            conn.request("POST", self.path, body=body, headers=hdrs)
+            r = conn.getresponse()
+        except Exception as e:
+            return self._send_json(502, {"type": "error", "error": {"type": "api_error", "message": "upstream: %s" % e}})
+        sys.stderr.write("POST %s model %s -> %s : %s\n" % (self.path, asked, map_model(asked) if asked else "-", r.status))
+        self.send_response(r.status)
+        for k, v in r.getheaders():
+            if k.lower() not in ("transfer-encoding", "connection", "content-length", "content-encoding"):
+                self.send_header(k, v)
+        self.send_header("transfer-encoding", "chunked"); self.end_headers()
+        try:
+            while True:
+                chunk = r.read1(65536) if hasattr(r, "read1") else r.read(4096)
+                if not chunk:
+                    break
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk)); self.wfile.flush()
+            self.wfile.write(b"0\r\n\r\n"); self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            conn.close()
+
+if __name__ == "__main__":
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+    sys.stderr.write("luminos-glm-proxy on 127.0.0.1:%d\n" % PORT)
+    srv.serve_forever()

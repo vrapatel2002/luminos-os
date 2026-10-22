@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# luminos-claude-glm — open a SECOND Claude Desktop window that runs on GLM-5.3 (Abliteration),
+# side by side with the normal Max-plan app. [CHANGE: cowork | 2026-10-22] DECISION 156.
+#   luminos-claude-glm          open (or focus) the GLM app
+#   luminos-claude-glm setup    (re)write its config only
+#   luminos-claude-glm status
+# HOW: --user-data-dir gives the app a whole separate profile (~/.config/Claude-glm) with its own
+# single-instance lock and no claude.ai login; its 3P config lives in ~/.config/Claude-glm-3p. The Max app keeps using
+# ~/.config/Claude and is never touched. Model names must look like Claude models (the app drops
+# anything else), so the app talks to luminos-glm-proxy on 127.0.0.1:4141, which swaps names + key.
+set -eu
+GLMDIR="$HOME/.config/Claude-glm"      # the GLM app's own profile (login-free)
+CFGDIR="$GLMDIR-3p"; LIB="$CFGDIR/configLibrary"   # the app reads 3P settings from <profile>-3p
+ID="6c756d69-6e6f-7347-4c4d-353300000001"
+ENVF="$HOME/.config/luminos/abliteration.env"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
+setup() {
+  [ -f "$ENVF" ] || { echo "No Abliteration key — run luminos-glm-key first" >&2; exit 1; }
+  . "$ENVF"; [ -n "${GLM_LOCAL_TOKEN:-}" ] || { echo "GLM_LOCAL_TOKEN missing in $ENVF" >&2; exit 1; }
+  mkdir -p "$LIB" "$GLMDIR"; chmod 700 "$GLMDIR" "$CFGDIR" "$LIB"
+  TOK="$GLM_LOCAL_TOKEN" python3 - "$CFGDIR" "$ID" <<'PY'
+import json,os,sys
+d,i=sys.argv[1],sys.argv[2]
+def w(p,o):
+    t=p+".tmp"; open(t,"w").write(json.dumps(o,indent=2)); os.chmod(t,0o600); os.replace(t,p)
+w(os.path.join(d,"configLibrary",i+".json"),{
+ "inferenceProvider":"gateway",
+ "inferenceGatewayBaseUrl":"http://127.0.0.1:4141",
+ "inferenceGatewayApiKey":os.environ["TOK"],
+ "inferenceGatewayAuthScheme":"bearer",
+ "inferenceModels":[
+   {"name":"claude-opus-4-5","labelOverride":"GLM-5.3 (Abliterated Large v2)","supports1m":True},
+   {"name":"claude-haiku-4-5","labelOverride":"Abliterated (cheaper, reads images)"}]})
+w(os.path.join(d,"configLibrary","_meta.json"),{"appliedId":i,"entries":[{"id":i,"name":"Abliteration GLM-5.3","provider":"gateway"}]})
+p=os.path.join(d,"claude_desktop_config.json")
+try: c=json.load(open(p))
+except Exception: c={}
+c["deploymentMode"]="3p"; w(p,c)
+PY
+}
+
+case "${1:-open}" in
+  setup) setup; echo "GLM app config written to $CFGDIR" ;;
+  status)
+    systemctl --user is-active --quiet luminos-glm-proxy && echo "translator: running" || echo "translator: NOT running"
+    pgrep -f -- "CLAUDE_USER_DATA_DIR" >/dev/null 2>&1 || true
+    grep -h "3P mode active" "$GLMDIR"/logs/main.log 2>/dev/null | tail -1 || true ;;
+  open)
+    setup
+    systemctl --user start luminos-glm-proxy
+    for _ in $(seq 10); do curl -fs 127.0.0.1:4141/health >/dev/null && break; sleep 0.5; done
+    while IFS= read -r line; do
+      case "$line" in KDE_*|XDG_*|WAYLAND_DISPLAY=*|DISPLAY=*|XAUTHORITY=*|DBUS_SESSION_BUS_ADDRESS=*|QT_*|LANG=*|PATH=*) eval "export $line";; esac
+    done < <(systemctl --user show-environment)
+    # --user-data-dir (not CLAUDE_USER_DATA_DIR): Electron applies it before the single-instance
+    # lock, so this really is a second app; the env var is applied too late and the launch just
+    # hands off to the running Max app and quits.
+    exec systemd-run --user --scope --quiet --unit="app-claude-glm-$$" \
+      /usr/bin/claude-desktop --user-data-dir="$GLMDIR" ;;
+  *) echo "usage: luminos-claude-glm [open|setup|status]" >&2; exit 2 ;;
+esac

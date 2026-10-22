@@ -8523,3 +8523,19 @@ cloud-session device bridge; GLM-5.3 can't read images; non-Claude models are no
 Cowork/Code. Plan tier for large-v2 not published (Developer "standard" vs Growth "higher-capacity").
 **Undo:** `luminos-claude-mode max`; full removal `rm -r ~/.config/Claude-3p ~/.config/luminos/abliteration.env` +
 the three scripts, their `~/.local/bin` links and the two `.desktop` files.
+
+**Amendment 2026-10-22 (same day) — side by side instead of a switch:** the desktop app DROPS any `inferenceModels`
+name that isn't an Anthropic model ("is not an Anthropic model and was removed", picker = 0), and Abliteration 404s every
+`claude-*` name. So `scripts/luminos-glm-proxy` (stdlib Python, user unit `luminos-glm-proxy.service`, 127.0.0.1:4141)
+swaps names (`*haiku*` → `abliterated-model`, else → `abliterated-model-large-v2`) and keys (app holds a local
+`GLM_LOCAL_TOKEN`; real key only in the proxy). Proven: non-stream, SSE stream, tool_use, wrong-token 401.
+`scripts/luminos-claude-glm` opens a SECOND app with `--user-data-dir=~/.config/Claude-glm` (the env var
+CLAUDE_USER_DATA_DIR is applied after the single-instance lock, so it just hands off to the Max app and quits). Its 3P
+config lives in `~/.config/Claude-glm-3p/` and in 3P mode the app moves its profile there. Proven live 18:33: Max app
+(pid 41051) untouched, GLM app "3P mode active", picker = 2, first call 200 through the proxy. `luminos-claude-mode`
+(the 1p/3p flip) is RETIRED; `~/.config/Claude-3p` set back to 1p with its configLibrary moved to
+`~/.luminos-backups/claude-3p-configLibrary-old`, so the normal Claude app is always Max.
+claude.ai Projects/memory are account features → not visible in the GLM app; work there by opening ~/luminos-os
+as the Cowork folder (CLAUDE.md/AGENTS.md carry the rules). The project's one doc was copied to
+gameos/docs/claude-project/vela-remote-seat.md.
+**Undo:** close the GLM app; `systemctl --user disable --now luminos-glm-proxy`; `rm -r ~/.config/Claude-glm ~/.config/Claude-glm-3p`.
