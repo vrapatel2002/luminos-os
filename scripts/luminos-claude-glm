@@ -37,7 +37,17 @@ w(os.path.join(d,"configLibrary","_meta.json"),{"appliedId":i,"entries":[{"id":i
 p=os.path.join(d,"claude_desktop_config.json")
 try: c=json.load(open(p))
 except Exception: c={}
-c["deploymentMode"]="3p"; w(p,c)
+c["deploymentMode"]="3p"
+# Local MCP servers (host-shell = run commands on this laptop, mempalace, code-review-graph):
+# the GLM profile has its own config, so copy them from the Max app's on every launch. BUG-206.
+try:
+    mx=json.load(open(os.path.expanduser("~/.config/Claude/claude_desktop_config.json")))
+    if mx.get("mcpServers"): c["mcpServers"]=mx["mcpServers"]
+    tf=mx.get("preferences",{}).get("localAgentModeTrustedFolders")
+    if tf: c.setdefault("preferences",{})["localAgentModeTrustedFolders"]=sorted(set(tf)|set(c.get("preferences",{}).get("localAgentModeTrustedFolders",[])))
+except Exception as e:
+    print("warning: could not copy MCP servers from the Max app:", e)
+w(p,c)
 PY
 }
 

@@ -8042,7 +8042,7 @@ timeout 2 → returns partial output + "timed out after 2s" in 2 s, and the next
 
 ## BUG-194 — Remote streams (phone on mobile data) stall: 55 Mbps 4K transcode pushed through a Tailscale relay
 <!-- [CHANGE: claude | 2026-10-12] -->
-**Status:** PARTLY FIXED 2026-10-12 — stall cause fixed by DECISION 142 (real client IP through Caddy + 8 Mbps remote cap, verified). Still open: phone always on DERP relay (items 4a–c).
+**Status:** PARTLY FIXED — DECISION 142 (cap on every path), DECISION 150 (no cap at home), DECISION 151 (firewall 4a fixed). Open: 4b router has no UPnP/PMP/PCP → owner port-forward; 4c dual-NIC not changed.
 **Symptom:** Shawn: server "not very responsive", streams don't load properly over mobile data.
 **Evidence (luminos-server, measured 2026-10-12 ~19:00):**
 1. **The phone has NEVER had a direct Tailscale path.** `journalctl -u tailscaled --since -10days`: Pixel 9 peer `[uT9qn]` = **90 contacts via=derp, 0 via=direct**. All its video rides Tailscale's shared DERP relay (Toronto).
@@ -8197,3 +8197,32 @@ D-notifiers. **Open.**
 The firmware and asusd still send their notes; the patched NVIDIA driver no longer wakes the sleeping dGPU to read them (held,
 replayed on the next real wake). Proven for the asusd curve-rewrite path (NPCF 0xC0): 3 triggers → 0 wakes, control → 4 resumes.
 Cable plug/unplug and charging-under-load (PEGP D1–D3 / AC) use the same hold path; live cable proof: tests/nvdefer/charger.sh.
+
+## BUG-205 — Turning on Jellyfin tonemapping on the media server breaks EVERY HDR transcode (no OpenCL runtime)
+<!-- [CHANGE: claude | 2026-10-18] -->
+**Status:** FIXED 2026-10-20 — OpenCL runtime installed, tonemapping on, verified (DECISION 152).
+**Found by:** the Playback Doctor one-file test, not by config reading. Fable's source read (SERVER_FORMATS.md) predicted Jellyfin
+would fall back to CPU `tonemapx`; the real command line said otherwise.
+**Measured 2026-10-18 on luminos-server (Jellyfin 10.11.11, jellyfin-ffmpeg 7.1.4p1, i5-10210U/UHD620, NO intel-compute-runtime):**
+- `EnableTonemapping=true`, HEVC hw decode on → `hwmap=derive_device=opencl` → "Failed to get number of OpenCL platforms: -1001" → ffmpeg exit 237, no segments.
+- `EnableTonemapping=true`, HEVC removed from HardwareDecodingCodecs → still `hwupload=derive_device=opencl,tonemap_opencl` → "Device creation failed: -19".
+- `EnableTonemapping=false` (what runs today) → `-hwaccel vaapi` + `setparams=bt709,scale_vaapi` → works, **6.07x realtime**, but HDR is only relabelled → washed-out / DV P5 violet colours.
+**Lesson:** with HardwareAccelerationType=vaapi, Jellyfin chooses OpenCL tonemapping whenever tonemapping is on, because its ffmpeg is *built* with OpenCL; it does not check a runtime exists. Prove settings with a real transcode, never by reading the setting or the source.
+Also: STATUS said `HardwareDecodingCodecs` was empty — it was not (h264/hevc/mpeg2video/vc1/vp8/vp9); stale note corrected.
+
+## BUG-206 — AUR build of intel-compute-runtime-legacy nearly filled the media server's root disk
+<!-- [CHANGE: claude | 2026-10-18] -->
+`yay` builds in `~/.cache/yay` = the 40 G root partition. intel-graphics-compiler-legacy clones the full `llvm-project` git mirror
+(7.8 G in ~20 min, still growing) and then compiles LLVM 14 + clang — tens of GB. Root went 21 G → 13 G free before it was killed.
+A full root disk stops Jellyfin/arrs writing their DBs. **Rule: on luminos-server, big AUR builds use `--builddir /srv/media/.aur-build`.**
+
+## BUG-207 — GLM-5.3 Claude window could not run commands on the laptop
+# [CHANGE: cowork | 2026-10-22]
+**Symptom (Shawn):** the second Claude Desktop window (GLM-5.3, DECISION 156) "is not able to run codes on this device".
+**Cause:** that window uses its own profile (~/.config/Claude-glm-3p), whose claude_desktop_config.json had **no
+mcpServers**. On this box, running commands on the host from Cowork goes through the local `host-shell` MCP server
+(plus mempalace / code-review-graph), registered only in the Max app's ~/.config/Claude/claude_desktop_config.json.
+Without it the GLM window could only run code inside its Cowork VM sandbox.
+**Fix:** scripts/luminos-claude-glm now copies `mcpServers` and `localAgentModeTrustedFolders` from the Max app's config
+on every launch. Verified 19:46: GLM window mcp.log — all three servers "connected", initialize + tools/list answered.
+Not yet verified: GLM-5.3 itself choosing the host-shell tool in a real task (Shawn to test).
