@@ -178,6 +178,53 @@ fix_node() {
     chmod "$MODE" "$node"
 }
 
+# [CHANGE: claude-code | 2026-10-22] BUG-208 — create the MAIN nodes when 60-nvidia.rules was
+# suppressed. Measured 2026-10-22 boot: the machine came up with /dev/nvidia0 and
+# /dev/nvidiactl ABSENT while /dev/nvidia-uvm{,-tools} and /dev/nvidia-modeset existed. The
+# chain: nvidia_uvm loads from modules-load.d early and its nodes exist by the time the PCI
+# bind uevent is processed, so TEST!="/dev/nvidia-uvm" in 60-nvidia.rules suppresses
+# nvidia-modprobe ENTIRELY — and nvidia-modprobe is the only thing that file ever asks to make
+# the main nodes. Result: the NVIDIA Vulkan ICD cannot initialise (no /dev/nvidiactl), every
+# dGPU-gated game on Luminos fails, while Vela (no modules-load.d early load, no gate) runs
+# them fine. Found via `vulkaninfo` showing only the 780M and `dgpu-exec-v2 --check` access OK
+# once the nodes were hand-made.
+#
+# Why mknod and not `nvidia-modprobe -c0`: the helper skips nodes that already exist, so with
+# UVM present it would do nothing for the main nodes either; and we run as root here, so the
+# stripped setuid bit does not matter (same argument as the modeset block below). Minors 0 and
+# 255 are the driver conventions nvidia-modprobe itself creates; the major is read from
+# /proc/devices because the kernel allocates it dynamically (195 on 2026-10-22; do not rely on
+# it). Creating these does NOT trip anything: the only suppression guard in 60-nvidia.rules is on
+# /dev/nvidia-uvm, and nvidia-modprobe only mknods nodes that are ABSENT — an existing
+# root:dgpu 0660 nvidia0 is left completely alone. The stale-major guard mirrors fix_node's.
+nv_major=$(awk '$2 == "nvidia" { print $1 }' /proc/devices)
+main_created=0
+if [ -z "${nv_major:-}" ]; then
+    # The uvm major check above already exits 1 when the module is not loaded, so this is
+    # near-unreachable; kept as a guard rather than an assumption.
+    log "NOTE: nvidia major not in /proc/devices — cannot create main nodes this run"
+fi
+for spec in nvidia0:0 nvidiactl:255; do
+    node=/dev/${spec%%:*}
+    minor=${spec##*:}
+    [ -n "${nv_major:-}" ] || continue
+    if [ -e "$node" ]; then
+        cur_major=$(stat -c '%Hr' "$node" 2>/dev/null || echo "")
+        cur_minor=$(stat -c '%Lr' "$node" 2>/dev/null || echo "")
+        if [ "$cur_major" != "$nv_major" ] || [ "$cur_minor" != "$minor" ]; then
+            log "$node has stale device numbers ($cur_major:$cur_minor, want $nv_major:$minor) — recreating"
+            rm -f "$node"
+        fi
+    fi
+    if [ ! -e "$node" ]; then
+        mknod "$node" c "$nv_major" "$minor"
+        main_created=1
+        log "created $node ($nv_major:$minor) — 60-nvidia.rules was suppressed (BUG-208)"
+    fi
+    chown "root:$gid" "$node"
+    chmod "$MODE" "$node"
+done
+
 fix_node /dev/nvidia-uvm       0
 fix_node /dev/nvidia-uvm-tools 1
 

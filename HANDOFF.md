@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-22 19:20 — Response 1 (GLM-5.3 window, Cowork session)
+Last updated: 2026-10-22 20:10 — R8 (GLM-5.3 window, Cowork session)
 
 **RESET this date per §0.2 tripwire** (file had grown to ~470 lines). Pre-reset content is in git:
 `git show HEAD:HANDOFF.md` (HEAD = `e3177cd4`, 2026-10-22 18:47, the GLM side-by-side commit). Only
@@ -37,6 +37,22 @@ cleanly doing nothing; game uses on-disk packs). Faithful backup: `sp26/ccsconfi
 Fallback if still hangs: rename `sp26/ccsdownloader.exe` → `.off`. Lutris was left stuck believing
 the game runs; Shawn kills with `pkill -9 -f sp26-cod; pkill -9 -f ccsdownloader; pkill -9 -f umu;
 pkill -9 -f wineserver` then relaunches. **PENDING: relaunch result.**
+
+**LUMINOS GAME STACK FIXED (R8, ~20:05) — BUG-208.** Shawn: no Lutris game runs on Luminos,
+all run on Vela (except MW4 = the repack bug above). Root cause: `/dev/nvidia0` +
+`/dev/nvidiactl` never created at boot — `nvidia_uvm` loads early from modules-load.d, so
+`/dev/nvidia-uvm` exists when the PCI bind uevent fires, and its `TEST!=` guard in
+`60-nvidia.rules` suppresses `nvidia-modprobe` entirely (the only creator of the main nodes) →
+NVIDIA Vulkan ICD cannot init → every dGPU-gated game fails; Vela unaffected. Diagnosed via
+host-shell MCP (BUG-207 verified end-to-end by this). **Fix:** `luminos-uvm-gate.sh` now
+creates both main nodes when absent (mknod, major from /proc/devices, root:dgpu 0660, BUG-208
+log lines) — repo `scripts/dgpu-gate/` + installed `/usr/local/bin/luminos-uvm-gate` identical.
+Verified: nodes recreated live, `dgpu-exec-v2 --check` = access OK / gate OK, gated
+vulkaninfo sees the RTX 4050, dGPU suspends at idle. **PENDING: real reboot test** (journal
+should show BUG-208 "created" lines; `luminos-verify` section 3b would catch a failure).
+Mid-session gotcha hit and repaired: `sudo nvidia-modprobe` re-opens UVM nodes to 0666
+(BUG-146) — re-run `luminos-uvm-gate` after any manual use. **MW4 now launchable on Luminos**
+(Vulkan fixed + ccsconfig fix); if Lutris still shows mw4 running from before, pkill first.
 **NEXT — normal steps once unstuck:** Expect a long first launch (shader compile, ntfs3
 read). Watch: MangoHud shows GPU = RTX 4050. If it fails, read
 `~/.local/share/lutris/lutris.log` + `~/steam-*.log` (PROTON_LOG). Remove the `system.env` PROTON_LOG

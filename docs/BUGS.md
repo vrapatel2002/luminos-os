@@ -8226,3 +8226,36 @@ Without it the GLM window could only run code inside its Cowork VM sandbox.
 **Fix:** scripts/luminos-claude-glm now copies `mcpServers` and `localAgentModeTrustedFolders` from the Max app's config
 on every launch. Verified 19:46: GLM window mcp.log — all three servers "connected", initialize + tools/list answered.
 Not yet verified: GLM-5.3 itself choosing the host-shell tool in a real task (Shawn to test).
+
+## BUG-208 — no Lutris game could run on Luminos: /dev/nvidia0 and /dev/nvidiactl never created at boot
+# [CHANGE: claude-code | 2026-10-22]
+**Symptom (Shawn):** no game in Lutris runs on Luminos at all, while the same games run fine on
+Vela OS (except MW4, which was its own repack bug — the ccsdownloader wrapper, same day).
+**Evidence trail:** `vulkaninfo` enumerated ONLY the 780M (RADV) — the loader rejected the NVIDIA
+ICD with "Could not get 'vkCreateInstance' via 'vk_icdGetInstanceProcAddr' for ICD
+libGLX_nvidia.so.0". `nvidia-smi` worked, `/proc/driver/nvidia/gpus/` had the full RTX 4050
+info, the module was loaded and matched userspace (610.57.04 both sides) — but `/dev/nvidia0`
+and `/dev/nvidiactl` did not exist. Modeset/UVM nodes existed; main nodes absent. `dgpu-exec-v2
+--check` flipped from "no NVIDIA device" to "access OK" the moment the nodes were hand-made.
+**Cause:** the suppression chain BUG-147 documented, but on the MAIN nodes this time.
+`60-nvidia.rules` runs `nvidia-modprobe -c0 -u` under the guard `TEST!="/dev/nvidia-uvm"` —
+and at this boot `/dev/nvidia-uvm` already existed when the PCI bind uevent was processed (the
+nvidia_uvm module loads early from modules-load.d and its nodes appear before the driver binds),
+so nvidia-modprobe never ran at all. nvidia-modprobe is the ONLY thing 60-nvidia.rules ever asks
+to create `/dev/nvidia0` and `/dev/nvidiactl`. Net: every boot, the NVIDIA Vulkan ICD cannot
+initialise, every dGPU-gated game (Lutris prefix_command = dgpu-exec-v2, DECISION 90) fails,
+while Vela — which does not early-load the modules through the same path and has no gate — runs
+everything. Found 2026-10-22 by the GLM-window Cowork session via the host-shell MCP (itself
+the subject of BUG-207, now verified end-to-end by this very task).
+**Fix:** `luminos-uvm-gate.sh` (repo `scripts/dgpu-gate/`, installed `/usr/local/bin/`) now also
+creates `/dev/nvidia0` (minor 0) and `/dev/nvidiactl` (minor 255) when absent — mknod as root,
+major read from /proc/devices ("nvidia" region), `root:dgpu 0660` per DECISION 25, stale-major
+guard mirroring fix_node's. Creating them suppresses nothing: the only guard in 60-nvidia.rules
+is on /dev/nvidia-uvm, and nvidia-modprobe only mknods ABSENT nodes. Verified live: nodes
+deleted, gate run → both recreated `root:dgpu 0660` with loud "created … (BUG-208)" lines;
+`--udev` mode quiet and rc=0; `dgpu-exec-v2 --check` = "access OK / gate OK", gated
+`vulkaninfo` prints "NVIDIA GeForce RTX 4050 Laptop GPU". **Not yet verified: a real reboot**
+— the backstop service must recreate the main nodes at boot; watch the journal for the BUG-208
+"created" lines. Mid-session caution: `sudo nvidia-modprobe` with any flag re-opens the UVM
+nodes to 0666 (BUG-146 truth table) — if it is ever run by hand, re-run `luminos-uvm-gate`
+afterwards, exactly as this session did.
