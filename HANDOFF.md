@@ -1,5 +1,15 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-16 16:45 — Response 9 (nvdefer driver patch live + proven)
+Last updated: 2026-10-22 18:10 — Response 3 (claude-desktop non-Anthropic models chat) — ⚠️ file is 460+ lines, over the §0.2 tripwire: next chat should RESET it
+
+## Aim right now (2026-10-22, R1) — use Claude Desktop with non-Anthropic models, switchable — RESEARCH ONLY, nothing changed
+Found: installed claude-desktop 2.31226.1 already contains the official "Claude Desktop on 3P" mode (app.asar has
+`Configure Third-Party Inference`, `inferenceProvider`, `/etc/claude-desktop/managed-settings.json`, `configLibrary`, `deploymentMode` 1p/3p).
+`inferenceProvider: "gateway"` + `inferenceGatewayBaseUrl` → any proxy speaking Anthropic /v1/messages (streaming + tools). Non-Claude models =
+put a translator in front: `ccr` (claude-code-router 2.0.0, already in ~/.npm-global/bin, :3456) or LiteLLM (not installed).
+State: no /etc/claude-desktop, no ~/.config/Claude-3p → app is pure 1P now. ~/.claude-code-router/config.json is OLD schema (api_base, not
+api_base_url; Router.default points at a provider "anthropic" that does not exist) → must be rewritten before use. ~/.claude/settings.json env = {}.
+Risk: switching deploymentMode signs the app out of claude.ai (asar: "persist failed during sign-out; clearing credentials") — BUG-187 showed a
+re-login resets folder grants. Do NOT set `disableDeploymentModeChooser` (it hides the way back). R2: Shawn picked **abliteration.ai** (api.abliteration.ai/v1, model `abliterated-model` = GLM-5.3 abliterated, ~$3/M tok, plans $20/$50/$200 = same amount as credit + 2.5/5/10 % discount). A third-party news page (not yet confirmed by Abliteration's own docs) says it also speaks Anthropic Messages → may plug into Desktop gateway directly, no ccr; MUST verify /v1/messages + streaming + tool use first. R3 VERIFIED from abliteration docs: GLM-5.3 = model id `abliterated-model-large-v2` (1M ctx, TEXT-ONLY → images 400, $3 in/$0.30 cached/$5 out per 1M). Anthropic /v1/messages officially supported (streaming, tools, thinking, cache_control accepted, Bearer or x-api-key, keys `ak_`); FAQ says Claude Code (ANTHROPIC_BASE_URL+ANTHROPIC_AUTH_TOKEN) and Cowork via Desktop 3P mode work → NO ccr needed. UNKNOWN: whether large-v2 is a 'higher-capacity' model (Developer plan = standard only) — test with free credit / GET /v1/models before paying. Credits never expire. R3 research (vendor docs): GLM-5.3 = `abliterated-model-large-v2` (1M ctx, text-only, tools yes, reasoning always on, $3 in/$0.30 cached/$5 out per 1M; base `abliterated-model` $1/$0.10/$3, 262k, vision). Native Anthropic /v1/messages CONFIRMED in their FAQ (streaming, tools, count_tokens); Claude Code: ANTHROPIC_BASE_URL=https://api.abliteration.ai + ANTHROPIC_AUTH_TOKEN=ak_…; FAQ says Cowork works via Desktop 3P gateway → NO ccr needed. Plan credit never expires. UNKNOWN: whether large-v2 is a 'higher-capacity' model (Growth $50+) — Shawn to check Playground model list on Free/Developer. R4 BUILT (DECISION 156): scripts/luminos-glm-key (hidden key prompt → ~/.config/luminos/abliteration.env 0600 + live test), scripts/claude-glm (Claude Code on GLM, per-process env; plain claude = Max), scripts/luminos-claude-mode glm|max|status (+ KDE menu entries config/luminos-claude-{glm,max}.desktop). Links in ~/.local/bin. Switch logic tested in a throwaway HOME both ways; NOT run for real (restarting the app kills this Cowork session). Key NOT saved yet — Shawn must run `luminos-glm-key` in a terminal; then test `claude-glm`, then try the desktop switch himself. Unverified: that 3P mode really uses ~/.config/Claude-3p as its own profile (from claude-desktop-extra notes + asar), and that large-v2 is allowed on his plan.
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
@@ -21,7 +31,40 @@ separate media server — fixing what Shawn reports, and never leaving a change 
   python llama_cpp works but cannot load gemma-4 → used Qwen2.5-7B. Not fixed.
 - Still to do with Shawn present: sleep/resume + ROG key. Ask him: was the charger USB-C or the barrel brick (BUG-204)?
 
-## Aim right now (2026-10-15 23:55, R6) — luminos-power v5.0 "spectrum" BUILT, INSTALLED, MEASURED (DECISION 146)
+## Aim right now (2026-10-16 17:05, media-server chat) — "Playback Doctor" deep-analysis PLAN, waiting on Shawn
+Shawn: server keeps breaking (purple picture, slow, subtitles, playback) — wants deep analysis, plan first, then debug with other models.
+**Written:** `server/docs/PLAYBACK_DOCTOR_PLAN.md` — 6 phases: baseline → library census + client capability matrix →
+log ground-truth (join, find prediction≠reality) → config audit → fix by CATEGORY (one-file gate) → import hook +
+custom formats → automated test shelf with colour detector. Model split in §5. Nothing changed on the server.
+**Shawn's answers (10-18):** file fixes OK but ONLY if fully automatic (he won't call us per file); do NOT restrict downloads —
+make the SERVER handle every format; NO ethernet to the TV; "your call" on order. Asked: can the server play to the TV over a cable?
+Answer: yes via HDMI — server has HDMI-A-1 (i5-10210U/UHD620, HDMI 1.4 → 4K max 30 Hz, no HDR); needs a local player.
+**R8 DONE:** all 3 workers reported (doctor/CENSUS.md: 21 files only; LOG_TRUTH.md: 46 sessions, 7 real failures, phone uses tailnet IP even at
+home so DECISION 142 caps it at home too, Intro Skipper rescans season on every import, Dragon Ball default tracks Japanese+Chinese PGS;
+SERVER_FORMATS.md: measurements). Applied DECISION 148 (throttling, segment deletion, 30-day logs) — verified by a real HLS transcode.
+**BUG-205:** EnableTonemapping=true breaks ALL HDR transcodes (Jellyfin picks tonemap_opencl, no OpenCL runtime) — reverted to false.
+**R9 (Shawn: "do all the rest quickly"):** DONE + verified: DECISION 149 Intro Skipper (no scan on import, nightly 04:00), DECISION 150
+`luminos-phone-cap` timer (phone home → no cap, away → 8 M; tested with G14), DECISION 151 nft udp 41641 accept (router has NO
+UPnP/PMP/PCP → owner port-forward UDP 41641 → .62). **BLOCKED by the session's permission classifier (not attempted around):**
+(1) OpenCL runtime = AUR intel-compute-runtime-legacy build ("Untrusted Code Integration"); (2) auto-fix-on-import worker
+(mkvpropedit default tracks + .en.srt sidecars + Sonarr/Radarr Custom Script hook + nightly timer + maybe sudoers). Both need Shawn's explicit OK.
+**R15 DONE — DECISION 153 auto-fix on import:** luminos-media-fix (+hook as Sonarr/Radarr Custom Script id 2, +nightly 03:30 timer).
+All 21 files fixed: 22 sidecars written, 23 default flags changed; Roku-profile PlaybackInfo picks external English srt / DirectPlay on all.
+Spot-checked by PM: 23 sidecars on disk, timer enabled, S03E01 forced default=0 / SDH default=1. Separate Jellyfin API key in
+/etc/luminos/media-fix-jellyfin.token (root:media 0640). Caveats: extraction reads the whole file (~3.5 min/12 GB) inside the hook;
+S02E03 is mode 644 so only the nightly root run can edit it; no live import seen yet.
+**R12–13 OpenCL install (Shawn runs it — my own runs are blocked by the permission classifier):** first attempt (yay in Shawn's
+ssh terminal) was cloning the full llvm-project mirror into ~/.cache/yay on the 40 G ROOT disk (7.8 G, 13 G free and falling) → I killed it
+and removed the partial clone (root back to 21 G). Nothing was installed. New command given: nohup yay --noconfirm --builddir
+/srv/media/.aur-build (876 G disk), MAKEFLAGS=-j6, log /srv/media/.aur-build/build.log; --noconfirm makes pacman REFUSE (not accept) any
+conflict that would remove intel-gmmlib. Expect 3–6 h (LLVM 14 + IGC on a 4c/8t U CPU). A send_later check fires every 30 min.
+**Older next list:** OpenCL runtime (AUR intel-compute-runtime-legacy) for right HDR colours; import hook for sidecar subs +
+default-track fix; phone-at-home cap; Intro Skipper scan timing; HDMI player option. Test script: /tmp/doctor-play.sh on server (copy to repo).
+**Earlier (R5) workers:** A census (Opus) → server/docs/doctor/CENSUS.md + /var/lib/luminos-doctor/census.jsonl;
+B log truth (Opus) → doctor/LOG_TRUTH.md + sessions.jsonl; C "every format" hw tests (Fable) → doctor/SERVER_FORMATS.md (tonemap
+vaapi/opencl/tonemapx fps + DV P5 colour, hw decode). Server facts: no intel-compute-runtime (no OpenCL), HardwareDecodingCodecs empty, EnableTonemapping=false.
+
+## Previous aim (2026-10-15 23:55, R6) — luminos-power v5.0 "spectrum" BUILT, INSTALLED, MEASURED (DECISION 146)
 Shawn: replace phased power profiles with a continuous spectrum (/build, Fable/Opus brainstorm). Done:
 - One dial = CPU PPT 15–45 W (`asus-nb-wmi/ppt_*`, no dGPU wake — measured), moved every 1 s by min(demand, PI heat hand), slewed.
   Code: cmd/luminos-power/{spectrum.go,spectrum_test.go,main.go}; conductor.go/fan_control.go deleted. Docs: docs/spectrum/*.
@@ -423,3 +466,6 @@ for any transcode question is Jellyfin's own ffmpeg command lines in `/var/log/j
 `/usr/local/bin/ozark-warm-once` (one-off). Jellyfin cache `/var/lib/jellyfin/data/subtitles` grows.
 **G14 (BUG-188 turn):** nothing changed — no `/etc`, no package, no service. AGENTS.md §9 untouched.
 Previous handoff (Claude Desktop, BUG-187): `git show HEAD:HANDOFF.md`.
+
+- 2026-10-20 22:58 (cowork): Windows partition fix — /etc/fstab win-os line had a comment promising ntfs3 `force` but the option was missing, so every boot after Windows logged "volume is dirty and force flag is not set" and /mnt/win-os stayed unmounted. Added `force` (backup /etc/fstab.bak-20261020-ntfsforce); mounted rw, write test OK. No hiberfil.sys on C: (Windows not hibernated). Shawn should run `chkdsk C: /f` in Windows once to clear the dirty flag. Revert: restore the backup. [CHANGE: cowork | 2026-10-20]
+- 2026-10-20 23:10 (cowork): NEW scripts/vela-wine-install (symlink ~/.local/bin) — adds a Windows game to Lutris with Control's proven Vela settings (Proton-CachyOS, DXVK, VKD3D, d3d_extras, NVAPI, esync/fsync, prefix ~/Games/<slug>); add <setup.exe|game.exe|folder> / list / test / remove. Folder mode proven in a sandbox copy of pga.db: right exe picked over unins/crash exes, vela-core library-scan lists it, remove clears it. Installer mode (setup.exe run via Lutris in the new prefix) NOT yet tested with a real installer. [CHANGE: cowork | 2026-10-20]

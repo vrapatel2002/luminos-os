@@ -8501,3 +8501,25 @@ wake → replayed 1, nvidia-smi limits 55/5/90 W; back asleep in 21 s; control n
 90-mkinitcpio; if the patch no longer applies it fails closed to the stock driver with a journal warning.
 **Undo:** runtime `echo 0 | sudo tee /sys/module/nvidia/parameters/nv_acpi_defer`; permanent `sudo luminos-nvidia-defer --revert` + reboot.
 Old initramfs: /boot/initramfs-linux.img.pre-nvdefer. Docs: docs/nvdefer/.
+
+## DECISION 156 — GLM-5.3 (Abliteration API) as a switchable second brain for Claude Code and the Claude desktop app
+# [CHANGE: cowork | 2026-10-22]
+**Ask (Shawn):** use the Claude desktop app / Claude Code with a non-Anthropic model (abliteration.ai, GLM-5.3), and keep
+it simple to switch back to the Max plan.
+**Chosen:** no translator (ccr/LiteLLM) — Abliteration natively serves Anthropic `/v1/messages` (streaming, tools,
+count_tokens per their FAQ). Model `abliterated-model-large-v2` = GLM-5.3, 1M ctx, text-only, reasoning always on;
+`abliterated-model` (cheaper, images) as second choice / Claude Code haiku-tier.
+- **Key:** `~/.config/luminos/abliteration.env` (0600), written only by `luminos-glm-key` (hidden prompt + live test).
+- **Claude Code:** `claude-glm` wrapper sets ANTHROPIC_BASE_URL/AUTH_TOKEN/model env for that process only. Plain `claude` = Max.
+- **Desktop app:** `luminos-claude-mode glm|max|status` (+ KDE menu "Claude → GLM-5.3" / "Claude → Max plan"). Uses the
+  app's own 3P mode (2.31226.1): config in `~/.config/Claude-3p/configLibrary/<fixed id>.json` + `_meta.json appliedId`;
+  3P is active only while `deploymentMode != "1p"` in `~/.config/Claude-3p/claude_desktop_config.json`, so the switch flips
+  that key and restarts via `luminos-claude-restart`. The Max login in `~/.config/Claude/` is a different folder and is not
+  written; a one-time copy of its sign-in files goes to `~/.luminos-backups/claude-max-login/` anyway.
+**Rejected:** `/etc/claude-desktop/managed-settings.json` (needs sudo, overrides everything local, and per the
+claude-desktop-extra notes removing it does not leave 3P on its own); `disableDeploymentModeChooser` (hides the way back).
+**Known limits:** in GLM mode there is no claude.ai account → no claude.ai chats/projects/memory/connectors and no
+cloud-session device bridge; GLM-5.3 can't read images; non-Claude models are not officially supported by Anthropic in
+Cowork/Code. Plan tier for large-v2 not published (Developer "standard" vs Growth "higher-capacity").
+**Undo:** `luminos-claude-mode max`; full removal `rm -r ~/.config/Claude-3p ~/.config/luminos/abliteration.env` +
+the three scripts, their `~/.local/bin` links and the two `.desktop` files.

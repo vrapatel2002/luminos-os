@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# luminos-glm-key — save the Abliteration API key once, hidden, then test it.
+# [CHANGE: cowork | 2026-10-22] DECISION 156 (GLM-5.3 via Abliteration, switchable with Max).
+# Run in a terminal:  luminos-glm-key      (paste the ak_... key, nothing is shown)
+set -eu
+KEYFILE="$HOME/.config/luminos/abliteration.env"
+mkdir -p "$(dirname "$KEYFILE")"; chmod 700 "$(dirname "$KEYFILE")"
+if [ "${1:-}" != "--test" ]; then
+  printf 'Paste your Abliteration API key (ak_...), then Enter. It will not be shown: '
+  IFS= read -rs key; echo
+  key="$(printf '%s' "$key" | tr -d '[:space:]')"
+  case "$key" in ak_*) ;; *) echo "That doesn't start with ak_ — not saved." >&2; exit 1;; esac
+  umask 077; printf 'ABLITERATION_API_KEY=%s\n' "$key" > "$KEYFILE"; chmod 600 "$KEYFILE"
+  echo "Saved to $KEYFILE (only you can read it)."
+fi
+[ -f "$KEYFILE" ] || { echo "No key saved yet — run luminos-glm-key" >&2; exit 1; }
+. "$KEYFILE"
+echo "Testing GLM-5.3 (abliterated-model-large-v2)..."
+out="$(curl -sS -m 120 https://api.abliteration.ai/v1/messages \
+  -H "Authorization: Bearer $ABLITERATION_API_KEY" -H 'anthropic-version: 2023-06-01' \
+  -H 'content-type: application/json' \
+  -d '{"model":"abliterated-model-large-v2","max_tokens":400,"messages":[{"role":"user","content":"Reply with exactly: GLM OK"}]}' \
+  -w '\nHTTP %{http_code}')"
+code="${out##*HTTP }"
+if [ "$code" = 200 ]; then echo "PASS — the key works and GLM-5.3 answered."
+else echo "FAIL (HTTP $code):"; printf '%s\n' "${out%HTTP*}" | head -c 600; echo; exit 1; fi

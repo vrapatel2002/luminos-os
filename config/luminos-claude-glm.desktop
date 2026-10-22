@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Claude → GLM-5.3
+Comment=Switch the Claude desktop app to GLM-5.3 (Abliteration API)
+Exec=/home/shawn/luminos-os/scripts/luminos-claude-mode glm
+Icon=claude-desktop
+Categories=Utility;

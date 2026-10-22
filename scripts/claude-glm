@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# claude-glm — Claude Code on GLM-5.3 (Abliteration). Plain `claude` stays on the Max plan.
+# [CHANGE: cowork | 2026-10-22] DECISION 156. Only THIS process gets the env; nothing global changes.
+set -eu
+KEYFILE="$HOME/.config/luminos/abliteration.env"
+[ -f "$KEYFILE" ] || { echo "No Abliteration key yet — run: luminos-glm-key" >&2; exit 1; }
+. "$KEYFILE"
+unset ANTHROPIC_API_KEY
+export ANTHROPIC_BASE_URL="https://api.abliteration.ai"
+export ANTHROPIC_AUTH_TOKEN="$ABLITERATION_API_KEY"
+export ANTHROPIC_MODEL="abliterated-model-large-v2"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="abliterated-model-large-v2"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="abliterated-model-large-v2"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="abliterated-model"   # cheap model for small background jobs
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+exec "$HOME/.local/bin/claude" "$@"

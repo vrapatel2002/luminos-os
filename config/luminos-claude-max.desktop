@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Claude → Max plan
+Comment=Switch the Claude desktop app back to your claude.ai Max plan
+Exec=/home/shawn/luminos-os/scripts/luminos-claude-mode max
+Icon=claude-desktop
+Categories=Utility;
