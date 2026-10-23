@@ -26,6 +26,35 @@ CFG = load_env()
 REAL_KEY = CFG["ABLITERATION_API_KEY"]
 LOCAL_TOKEN = CFG.get("GLM_LOCAL_TOKEN", "")
 
+# BUG-208: GLM-5.3 is offered the local MCP tools but never picks them on its own (0 calls in 3
+# sessions, while host-shell got 223). Claude follows CLAUDE.md's "use mempalace / code-review-graph"
+# rules; GLM doesn't. So when those tools are in the request, append this FIXED note to the system
+# prompt. It is identical on every request, so prompt caching keeps working.
+NUDGE_MARK = "[luminos-glm-proxy tool note]"
+NUDGE = NUDGE_MARK + """ REQUIRED tool rules for this laptop (these tools are real and connected):
+1. At the START of every new task, your FIRST tool call must be mcp__mempalace__mempalace_search with 2-5 keywords for the topic. Use what it returns.
+2. BEFORE you edit, refactor or explain any .go or .py file, call a code-review-graph tool on it first (mcp__code-review-graph__get_impact_radius_tool or mcp__code-review-graph__query_graph_tool) to see what depends on it. Do not rely on grep alone.
+3. After adding files or changing imports, call mcp__code-review-graph__build_or_update_graph_tool.
+4. After a major change, save it with mcp__mempalace__mempalace_add_drawer (wing luminos-os, room decisions), then read it back with mcp__mempalace__mempalace_get_drawer.
+5. To run commands directly on this laptop (outside the sandbox) use mcp__host-shell__run_command.
+If one of these tools is listed as deferred, load it with ToolSearch first."""
+
+def add_nudge(j):
+    names = [t.get("name", "") for t in (j.get("tools") or []) if isinstance(t, dict)]
+    blob = " ".join(names)
+    if "mempalace" not in blob and "code-review-graph" not in blob and "ToolSearch" not in blob:
+        return False
+    sysp = j.get("system")
+    if isinstance(sysp, str):
+        if NUDGE_MARK in sysp: return False
+        j["system"] = [{"type": "text", "text": sysp}, {"type": "text", "text": NUDGE}]
+    elif isinstance(sysp, list):
+        if any(NUDGE_MARK in (b.get("text") or "") for b in sysp if isinstance(b, dict)): return False
+        sysp.append({"type": "text", "text": NUDGE})
+    else:
+        j["system"] = [{"type": "text", "text": NUDGE}]
+    return True
+
 def map_model(name):
     n = (name or "").lower()
     return "abliterated-model" if "haiku" in n else "abliterated-model-large-v2"
@@ -68,6 +97,11 @@ class H(BaseHTTPRequestHandler):
             j = json.loads(body)
             if isinstance(j, dict) and "model" in j:
                 asked = j["model"]; j["model"] = map_model(asked)
+                if self.path.startswith("/v1/messages") and not self.path.startswith("/v1/messages/count_tokens"):
+                    nudged = add_nudge(j)
+                    tn = [t.get("name","") for t in (j.get("tools") or []) if isinstance(t, dict)]
+                    sys.stderr.write("tools=%d mcp_local=%d toolsearch=%s nudge=%s\n" % (len(tn),
+                        sum(1 for n in tn if "mempalace" in n or "code-review-graph" in n), "ToolSearch" in tn, nudged))
                 body = json.dumps(j).encode()
         except Exception:
             pass

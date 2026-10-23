@@ -8298,3 +8298,18 @@ running the game under qemu with `-cpu host` on Luminos to bisect the CPU-depend
 AppDB/Google for this build's known tricks; a newer GE-Proton; checking whether Vela real boot
 (not VM) reproduces the crash. Evidence files: /tmp/mw4-*.log (direct runs, strace, winedbg
 attempt), Lutris debug log /tmp/lutris-debug.log.
+
+## BUG-208 — GLM-5.3 window has mempalace + code-review-graph but never uses them
+# [CHANGE: cowork | 2026-10-22]
+**Symptom (Shawn):** make sure the GLM Claude window can use MemPalace and code-review-graph.
+**Found:** after BUG-207 all three local MCP servers connect in the GLM window (main.log: mempalace 29 tools,
+code-review-graph 24) and their full definitions are in its sessions — but across 3 sessions GLM made 223
+host-shell calls and **0** mempalace / code-review-graph calls. Capability is fine: `claude-glm -p` with the tools
+named → called both, answered drawers=13690 nodes=3339 ($0.28). GLM just doesn't follow CLAUDE.md's "search
+MemPalace first / query the graph before editing" the way Claude does.
+**Fix:** scripts/luminos-glm-proxy appends one FIXED "required tool rules" block to the system prompt whenever the
+request carries mempalace / code-review-graph / ToolSearch tools (identical every turn → prompt cache unaffected;
+never added twice; requests without those tools untouched). Proxy logs `tools=N mcp_local=N nudge=True|False` per call.
+Test (desktop-shaped request, task not naming the tools): with the note 3/3 runs called mempalace_search FIRST
+(2/3 also the graph); control without it called Read first. Real desktop session not yet observed.
+Side finding: `claude -p` through a custom base URL sent 0 local MCP tools (27 tools only) — one-shot CLI quirk, not chased.
