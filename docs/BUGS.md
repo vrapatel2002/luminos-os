@@ -8321,6 +8321,16 @@ PROTON_LOG `~/steam-default.log` (WINEDEBUG -all, shows only the wineboot bootst
 noise, not the cause: gamemoded `External process failed with exit code 127` = its
 `split_lock_mitigate` script failing; Proton `unable to use parent for game drive, path
 /mnt/win-os` (game still launched from it).
+**GE-Proton11-7 (stock) RULED OUT (2026-10-22 21:57).** Symlinked from
+`~/.local/share/Steam/compatibilitytools.d/GE-Proton11-7-x86_64` into Lutris's runner dir, mw4
+yml switched (backup `.bak-proton117`). Two launches: **both exit code 5 / 0xC0000005 again**
+(umu: `Child 32998/33322 exited with wait status: 5`, return code 1280, ~2 s). Same crash on
+Proton 1789520217 (11-7) as on 11-6-dx12fix → "newer Proton" is not the fix. (Cosmetic noise that run:
+`Authorization required, but no authorization protocol specified` — Lutris had been restarted by
+the agent without `XAUTHORITY`; NOT the crash cause, signature identical to all clean-env runs.
+Lutris since relaunched with full session env.) Awaiting-reboot question answered: re-testing on
+Vela is redundant — both Vela runs above already used the same runner family and OS independence is
+proven; the discriminating next test is `vela-vm.sh -cpu host`.
 
 ## BUG-210 — GLM-5.3 window has mempalace + code-review-graph but never uses them
 # [CHANGE: cowork | 2026-10-22]
