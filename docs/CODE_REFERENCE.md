@@ -721,3 +721,4 @@ Docs: `docs/ambient/{SPEC,CONTRACTS,AUDIT,BUILD_LOG}.md`, results `docs/ambient/
 | `scripts/spectrum-ab.sh` | A/B ladder + kprobe counters (dGPU wakes, WMI calls by devid); `--quick`, `--compare` |
 | `tests/spectrum/load/` | CPU load + benchmark tool (`-threads -duty -seconds -json`) |
 conductor.go and fan_control.go are deleted.
+- `gameos/os/scripts/mw4-cdn-watch.sh` — BUG-209 auto-retry: polls the demonware CDN every 5 min (systemd user unit `mw4-cdn-watch.service`), launches MW4 via Lutris + notification at the first HTTP 200. TEMPORARY — removal in `gameos/os/docs/MW4-BUG209-TRACKER.md`. [CHANGE: claude-code | 2026-10-22]
