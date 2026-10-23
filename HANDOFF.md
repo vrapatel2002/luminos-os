@@ -75,14 +75,21 @@ tree, dGPU state, journal). vela-telemetry: dGPU woke (active, 0% util, 12-23 Mi
 suspended by 21:16:43, gpu_util=na — no frame rendered. **BUG-209 is now proven OS-independent**
 (kernel 7.0.5+610.57 Luminos vs 7.2.6+615.71 Vela, Plasma vs gamescope, fresh prefix) — it is the
 repack/crack/game itself or a CPU-feature branch in the obfuscated init. Only remaining known-good
-run: the qemu-CPU VM. **NEXT (ordered):** (0) newer GE-Proton — **DONE 2026-10-22 ~21:55, awaiting
-Shawn's Play**: GE-Proton11-7-x86_64 (stock, already in `~/.local/share/Steam/compatibilitytools.d/`)
-symlinked into `~/.local/share/lutris/runners/wine/`, mw4 yml switched to it (backup
-`mw4-1792553189.yml.bak-proton117`), Lutris restarted; shared home ⇒ Vela sees it too;
-(1) discriminate the CPU hypothesis — rerun
-`gameos/os/scripts/vela-vm.sh` with `-cpu host`: crash ⇒ Zen4 feature (AVX-512 prime suspect);
-works ⇒ suspect shifts to bare-metal-only env; (2) winedbg register capture at the fault to find
-where r10 is loaded; (3) AppDB/Google for this build's known tricks. Vela run
+run: the qemu-CPU VM. **NEXT (ordered):** (0) newer GE-Proton — **DONE 2026-10-22 ~21:55, CRASHED
+(exit 5, ruled out)**; (0b) **config matrix exhausted ~22:25** — UMU_ID/GAMEID 1938090, d3d_extras/
+dxvk_nvapi stripped, MangoHud off, old-prefix lineage restored, even full offline (`unshare -n`):
+ALL same 2-15 s exit-5 crash. Full register capture obtained (`~/Games/mw4-evidence-20261022/`).
+**HEADLINE: the demonware CDN is the surviving variable** — HTTP 200 during the only two
+engine-alive runs (19:44, 20:39), HTTP 503 during every crashing run since (verified 22:22; no VPN
+confounder; offline also crashes — the game needs a HEALTHY server; also explains the Windows "runs
+once then dead" symptom as CDN health, not pack deletion — packs untouched all night).
+**AUTO-RETRY LIVE: `mw4-cdn-watch.service`** (user unit, gameos/os/scripts/mw4-cdn-watch.sh) polls
+the CDN every 5 min and auto-launches MW4 via Lutris + notifies Shawn at the first 200 (log
+`~/.local/state/luminos/mw4-cdn-watch.log`, flag `mw4-cdn-launched.flag`; remove unit+script when
+BUG-209 closes). NEXT when it fires: watch the run; if it STILL crashes with CDN 200, the wine-side
+lead is the crash thread's two stubbed NtQuerySystemInformation classes (0x91, 0xA5) right before
+the fault + a working winedbg --auto capture. Vela re-test pointless until a Luminos run survives.
+Vela run
 details filed in docs/BUGS.md BUG-209. Vela-side noise (not the cause): gamemoded exit-127 on its
 split_lock_mitigate script; Proton "unable to use parent for game drive /mnt/win-os". BUGS.md
 duplicate BUG-208 (GLM MCP entry) renumbered → BUG-210.

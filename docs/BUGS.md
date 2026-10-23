@@ -8330,7 +8330,40 @@ Proton 1789520217 (11-7) as on 11-6-dx12fix → "newer Proton" is not the fix. (
 the agent without `XAUTHORITY`; NOT the crash cause, signature identical to all clean-env runs.
 Lutris since relaunched with full session env.) Awaiting-reboot question answered: re-testing on
 Vela is redundant — both Vela runs above already used the same runner family and OS independence is
-proven; the discriminating next test is `vela-vm.sh -cpu host`.
+proven.
+# [CHANGE: claude-code | 2026-10-22 ~22:25]
+**FULL CONFIG MATRIX EXHAUSTED (post-reboot session, all same 2-15 s exit-5 death):** UMU_ID/GAMEID
+1938090 via Lutris yml env (umu confirmed GAMEID=1938090 — still exit 5; and Lutris's own gameid
+shows as SteamGameId 0 regardless); d3d_extras+dxvk_nvapi DLL overrides stripped (WINEDLLOVERRIDES
+reduced to `winemenubuilder=` — still exit 5); MangoHud disabled per-game (still exit 5); the OLD
+prefix lineage restored (`mw4.11mix-20261022` → `~/Games/mw4`) + original ccsconfig + all-original
+yml flags through Lutris (still exit 5, ~10 s); **full offline run** (`sudo unshare -n` around
+direct wine — same page fault, same address). **Direct-wine crash capture with FULL REGISTERS
+obtained** (`~/Games/mw4-evidence-20261022/mw4-direct.log`, reproducible on demand): faulting read
+`0x6FFF8B389BFA` via r10, backtrace `sp26-cod.exe+0x1D5789 ← +0xB17EA25 ← kernel32 ← ntdll`
+(a thread-start in the relaunched exe), r11=`0xb5d4c32fffffffff` (obfuscated garbage) — and the
+crashing thread's LAST calls before the fault are **two stubbed `NtQuerySystemInformation` queries
+(wine `fixme ... stub`): class 0x91 (2-byte) and class 0xA5 (16-byte)** — wine returns stub data,
+the anti-tamper computes a pointer from it, page fault. The identical fault address across every
+runner, prefix, OS and launch mode = deterministic. The game's own frame handler is absent; wine's
+ntdll handler declines; winedbg --auto starts but exits instantly.
+**THE GOOD-RUN CORRELATION (2026-10-22 22:23): the demonware CDN is the surviving variable.**
+`https://rex-gvs.prod.demonware.net/v1/public/` answered **HTTP 200 in 0.6 s at ~20:30** (verified
+by the pre-reboot session, in BUG-209 notes) — the era of the only two engine-alive runs (19-min at
+19:44, 3-min at 20:39). At 22:22 it answers **503 (three probes, 0.14-0.29 s)** — the era in which
+every launch dies in 2-15 s. No VPN confounder (no ProtonVPN up; plain home LAN; tailscale only).
+Offline (unshare -n) also crashes → the game does not merely need "no answer", it needs a
+HEALTHY 200 server — which also finally explains the Windows symptom ("runs once, then dead until
+reinstall"): it tracked CDN health, not pack deletion (packs untouched all night, mtimes Oct 17,
+and ccsdownloader.log untouched by tonight's game runs). **Auto-retry installed:** systemd user
+unit `mw4-cdn-watch.service` → `gameos/os/scripts/mw4-cdn-watch.sh` polls the CDN every 5 min and
+launches MW4 through Lutris + notifies Shawn the moment it answers 200 again (flag file
+`~/.local/state/luminos/mw4-cdn-launched.flag`; log `~/.local/state/luminos/mw4-cdn-watch.log`;
+remove unit+script when BUG-209 closes). Evidence dir: `~/Games/mw4-evidence-20261022/` (direct +
+offline +seh crash logs, umu/Lutris launch logs). mw4 yml current state: runner 11-6-dx12fix,
+UMU_ID 1938090, mangohud false, d3d_extras/dxvk_nvapi true (original), original ccsconfig.json
+(.empty/.orig backups all present). Prefix zoo on disk: `~/Games/mw4` (old lineage, live),
+`mw4.fresh-partial`, `mw4.fresh2-20261022` (set aside; safe to delete when BUG-209 closes).
 
 ## BUG-210 — GLM-5.3 window has mempalace + code-review-graph but never uses them
 # [CHANGE: cowork | 2026-10-22]
