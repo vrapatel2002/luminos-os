@@ -8259,3 +8259,42 @@ deleted, gate run → both recreated `root:dgpu 0660` with loud "created … (BU
 "created" lines. Mid-session caution: `sudo nvidia-modprobe` with any flag re-opens the UVM
 nodes to 0666 (BUG-146 truth table) — if it is ever run by hand, re-run `luminos-uvm-gate`
 afterwards, exactly as this session did.
+
+## BUG-209 — MW4 (CoD campaign repack) dies at sp26-cod.exe+0x1D5789 on Luminos: page fault in obfuscated early-init
+# [CHANGE: claude-code | 2026-10-22]
+**Symptom (Shawn):** MW4 "fires up the GPU but the game does not launch" — every other Lutris game
+runs fine on Luminos after BUG-208 (confirmed by Shawn). MW4 shows a brief ~657x400 splash, then
+the whole session dies in ~13-16 s; Lutris reports exit code 5.
+**Exit code 5 = 0xC0000005.** The clean "exit 5" and the crash are the same event.
+**The crash, captured with WINEDEBUG=warn+all under direct wine (GE-Proton11-6-dx12fix):**
+`Unhandled page fault on read access to 00006FFF8B389BFA at sp26-cod.exe+0x1D5789 (mov (%r10),%eax)`
+— r10 holds deterministic garbage; the surrounding code is movabs/xor-obfuscated (anti-tamper).
+Backtrace: sp26-cod.exe+0x1D5789 ← sp26-cod.exe+0xB17EA25 ← kernel32 ← ntdll. Wine then hunts for
+winedbg (found on S:\? no) and the process exits.
+**The launch structure, mapped:** sp26-cod.exe is a stub that (1) shows a splash, (2) RELAUNCHES
+sp26-cod.exe as the real game (the relaunched instance is the one that crashes), and reads a pipe
+whose WRITE END THE STUB ITSELF HOLDS — so a dead child means read() never EOFs: the 19:11 and
+20:23 single-thread `anon_pipe_read` hangs are this stub waiting for a child that had already
+crashed. The repack chain: patched bink2w64.dll imports `rex_sp.dll` (packed, exports one
+function "r4v3n") = the crack; Goldberg emu in steam_settings (offline=1); ccsdownloader.exe
+wrapper (CCS packs from demonware CDN; on timeout it DELETES managed packs — this is the Windows
+"runs once from installer, then dead until reinstall" symptom; packs on disk are _1196, CDN serves
+_874; ccs_history.json = never a successful download).
+**Ruled out (each tested live):** GPU selection (AMD-only via VK_ICD_FILENAMES: same crash),
+locale (tr_TR: same crash), the __sp26-cod PID marker (present/absent: no change), shader caches
++ fresh prefix (GLCache moved aside, prefix rebuilt: same crash), ccsdownloader (empty
+`downloadsubconfigs` config exits 0 instantly, verified by running it manually under wine; also the
+CDN answers 200 in 0.6 s now), MangoHud (direct runs without it crash identically), wined3d vs
+vkd3d d3d12 (both crash identically). `WINEDLLOVERRIDES="mscms="` changes the failure to a
+clean c0000409 fail-fast (mscms is required). strace shows the crash thread last touching
+mscms/ntdll; the 55 SIGSYS lines are wine's own syscall_user_dispatch (normal).
+**The one known-good run:** 19:44-20:03 the engine ran 19 minutes (hundreds of vkd3d
+command-allocator lines, many render threads) — with umu PATH `/mnt/luminos/home/shawn/...` and
+kernel 7.2.6-arch2: that was a VELA VM run (vela-vm.sh, qemu CPU, emulated GPU), NOT bare-metal
+Luminos. Remaining prime suspect: an environment/CPU-dependent branch in the obfuscated init
+(qemu CPU vs real Ryzen 7945HX).
+**Not yet tried:** winedbg interactive register capture at the fault (find where r10 is loaded);
+running the game under qemu with `-cpu host` on Luminos to bisect the CPU-dependence; wine
+AppDB/Google for this build's known tricks; a newer GE-Proton; checking whether Vela real boot
+(not VM) reproduces the crash. Evidence files: /tmp/mw4-*.log (direct runs, strace, winedbg
+attempt), Lutris debug log /tmp/lutris-debug.log.

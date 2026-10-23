@@ -51,8 +51,19 @@ Verified: nodes recreated live, `dgpu-exec-v2 --check` = access OK / gate OK, ga
 vulkaninfo sees the RTX 4050, dGPU suspends at idle. **PENDING: real reboot test** (journal
 should show BUG-208 "created" lines; `luminos-verify` section 3b would catch a failure).
 Mid-session gotcha hit and repaired: `sudo nvidia-modprobe` re-opens UVM nodes to 0666
-(BUG-146) — re-run `luminos-uvm-gate` after any manual use. **MW4 now launchable on Luminos**
-(Vulkan fixed + ccsconfig fix); if Lutris still shows mw4 running from before, pkill first.
+(BUG-146) — re-run `luminos-uvm-gate` after any manual use. **MW4 still blocked — BUG-209 (R9, ~21:00).** After BUG-208, other Lutris games run on Luminos
+(Shawn confirmed) but MW4 dies in 13–16 s: page fault 0xC0000005 at `sp26-cod.exe+0x1D5789`
+(`mov (%r10),%eax`, deterministic garbage r10) in obfuscated early-init of the RELAUNCHED game
+exe; stub-structure and all ruled-out causes in docs/BUGS.md BUG-209 (GPU selection, locale,
+marker, caches, fresh prefix, ccsdownloader, MangoHud, wined3d/vkd3d — all tested, all same
+crash; exit 5 = 0xC0000005). The 19-min "engine ran" session was a Vela VM run (qemu CPU) —
+bare-metal Luminos has never gotten past this crash. Repack chain fully mapped: bink2w64.dll →
+rex_sp.dll (crack, export "r4v3n") + Goldberg emu + ccsdownloader (pack-deleter on CDN timeout
+= the Windows reinstall-only symptom). ccsconfig.json = empty variant (bypass); originals kept
+as `.orig`/`.empty`; marker `__sp26-cod` restored; GLCache.bak-20261022 + `~/Games/mw4.fresh-partial`
+set aside. NEXT: winedbg register capture; qemu -cpu host test; newer GE-Proton; Vela real boot.
+Field cleaned (no wine/umu strays); Lutris GUI restarted in -d mode (log /tmp/lutris-debug.log).
+WINEDEBUG=+seh in the mw4 yml is inert (Lutris forces -all).
 **NEXT — normal steps once unstuck:** Expect a long first launch (shader compile, ntfs3
 read). Watch: MangoHud shows GPU = RTX 4050. If it fails, read
 `~/.local/share/lutris/lutris.log` + `~/steam-*.log` (PROTON_LOG). Remove the `system.env` PROTON_LOG
