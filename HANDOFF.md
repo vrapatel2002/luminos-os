@@ -75,10 +75,14 @@ tree, dGPU state, journal). vela-telemetry: dGPU woke (active, 0% util, 12-23 Mi
 suspended by 21:16:43, gpu_util=na — no frame rendered. **BUG-209 is now proven OS-independent**
 (kernel 7.0.5+610.57 Luminos vs 7.2.6+615.71 Vela, Plasma vs gamescope, fresh prefix) — it is the
 repack/crack/game itself or a CPU-feature branch in the obfuscated init. Only remaining known-good
-run: the qemu-CPU VM. **NEXT (ordered):** (1) discriminate the CPU hypothesis — rerun
+run: the qemu-CPU VM. **NEXT (ordered):** (0) newer GE-Proton — **DONE 2026-10-22 ~21:55, awaiting
+Shawn's Play**: GE-Proton11-7-x86_64 (stock, already in `~/.local/share/Steam/compatibilitytools.d/`)
+symlinked into `~/.local/share/lutris/runners/wine/`, mw4 yml switched to it (backup
+`mw4-1792553189.yml.bak-proton117`), Lutris restarted; shared home ⇒ Vela sees it too;
+(1) discriminate the CPU hypothesis — rerun
 `gameos/os/scripts/vela-vm.sh` with `-cpu host`: crash ⇒ Zen4 feature (AVX-512 prime suspect);
 works ⇒ suspect shifts to bare-metal-only env; (2) winedbg register capture at the fault to find
-where r10 is loaded; (3) newer GE-Proton; (4) AppDB/Google for this build's known tricks. Vela run
+where r10 is loaded; (3) AppDB/Google for this build's known tricks. Vela run
 details filed in docs/BUGS.md BUG-209. Vela-side noise (not the cause): gamemoded exit-127 on its
 split_lock_mitigate script; Proton "unable to use parent for game drive /mnt/win-os". BUGS.md
 duplicate BUG-208 (GLM MCP entry) renumbered → BUG-210.
