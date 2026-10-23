@@ -8295,12 +8295,38 @@ Luminos. Remaining prime suspect: an environment/CPU-dependent branch in the obf
 (qemu CPU vs real Ryzen 7945HX).
 **Not yet tried:** winedbg interactive register capture at the fault (find where r10 is loaded);
 running the game under qemu with `-cpu host` on Luminos to bisect the CPU-dependence; wine
-AppDB/Google for this build's known tricks; a newer GE-Proton; checking whether Vela real boot
-(not VM) reproduces the crash. Evidence files: /tmp/mw4-*.log (direct runs, strace, winedbg
-attempt), Lutris debug log /tmp/lutris-debug.log.
+AppDB/Google for this build's known tricks; a newer GE-Proton. Evidence files: /tmp/mw4-*.log
+(direct runs, strace, winedbg attempt), Lutris debug log /tmp/lutris-debug.log.
+# [CHANGE: claude-code | 2026-10-22]
+**VELA REAL BOOT REPRODUCES THE CRASH (2026-10-22, read from Vela's journal + telemetry +
+tracker capture after the fact).** Shawn booted Vela (kernel 7.2.6-arch2, NVIDIA 615.71.09,
+gamescope session — different kernel, driver, compositor and ntsync stack from Luminos) and launched
+MW4 **twice**: 21:12:57 (captured in full by the mw4-vela-tracker: `mw4-vela-capture-20261022-211213/`)
+and 21:16:09 from Home (vela-core `launch MW4 (lutris:6)`; pga.db lastplayed updated; fresh prefix
+bootstrapped at 21:16:15 by umu with the SAME shared runner GE-Proton11-6-dx12fix). **Both runs died
+with exit code 5 / 0xC0000005 within 4 s of exe start** (journal: `Child 1629/6370 exited with wait
+status: 5`, `Initial process has exited (return code: 1280)` = 5<<8; Lutris: "The game has run for a
+very short time, did it crash?"; scope total 4.8 s CPU / 9.6 s wall / 583 MB peak).
+vela-telemetry + tracker watch: dGPU woke for the launch (active, 0 % util, ~12-23 MiB VRAM —
+driver probed, nothing rendered), back `suspended` by 21:16:43, `gpu_util=na`, `game=-` — no frame
+was ever rendered. No vela-crashd capture (its game tracking never saw a game). **Conclusion: BUG-209
+is OS-independent — not a Luminos environment, driver, kernel, compositor, prefix or launch-chain
+problem. It is the game/repack/crack itself, or a CPU-feature-dependent branch in the obfuscated
+init** (the only known-good run remains the qemu-CPU VM run; a 8845HS/Zen4-only path — e.g.
+AVX-512 — is the surviving suspect; `qemu -cpu host` on the VM is now the discriminating test:
+crash with `-cpu host` = CPU-feature confirmed). Vela evidence: `/vela.img` journal (mounted ro at
+`/mnt/vela-inspect`), telemetry `/var/log/vela/telemetry/vela-20261022-211213.csv`,
+`~/mw4-vela-capture-20261022-211213/` (tracker: per-second process tree, dGPU state, journal),
+PROTON_LOG `~/steam-default.log` (WINEDEBUG -all, shows only the wineboot bootstrap). Vela-side
+noise, not the cause: gamemoded `External process failed with exit code 127` = its
+`split_lock_mitigate` script failing; Proton `unable to use parent for game drive, path
+/mnt/win-os` (game still launched from it).
 
-## BUG-208 — GLM-5.3 window has mempalace + code-review-graph but never uses them
+## BUG-210 — GLM-5.3 window has mempalace + code-review-graph but never uses them
 # [CHANGE: cowork | 2026-10-22]
+# [CHANGE: claude-code | 2026-10-22] RENUMBERED from BUG-208 — number collision with the
+# uvm-gate/Lutris BUG-208 above (this entry was filed the same day, after it). No external
+# references pointed at this one as "BUG-208".
 **Symptom (Shawn):** make sure the GLM Claude window can use MemPalace and code-review-graph.
 **Found:** after BUG-207 all three local MCP servers connect in the GLM window (main.log: mempalace 29 tools,
 code-review-graph 24) and their full definitions are in its sessions — but across 3 sessions GLM made 223

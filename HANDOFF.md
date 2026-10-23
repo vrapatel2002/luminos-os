@@ -1,10 +1,10 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-22 20:10 — R8 (GLM-5.3 window, Cowork session)
+Last updated: 2026-10-22 21:50 — R2 of the post-reboot session (GLM-5.3 window, host-shell available)
 
 **RESET this date per §0.2 tripwire** (file had grown to ~470 lines). Pre-reset content is in git:
 `git show HEAD:HANDOFF.md` (HEAD = `e3177cd4`, 2026-10-22 18:47, the GLM side-by-side commit). Only
-what a newcomer must not re-learn or re-break is carried forward. This reset is written but **not yet
-committed** — git from this session's VM times out; commit from a host shell / terminal.
+what a newcomer must not re-learn or re-break is carried forward. The 2026-10-22 evening updates
+(Vela MW4 result, BUG-210 renumber) are committed by the post-reboot GLM session via host-shell.
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
@@ -64,15 +64,24 @@ as `.orig`/`.empty`; marker `__sp26-cod` restored; GLCache.bak-20261022 + `~/Gam
 set aside. NEXT: winedbg register capture; qemu -cpu host test; newer GE-Proton; Vela real boot.
 Field cleaned (no wine/umu strays); Lutris GUI restarted in -d mode (log /tmp/lutris-debug.log).
 WINEDEBUG=+seh in the mw4 yml is inert (Lutris forces -all).
-**NEXT — normal steps once unstuck:** Expect a long first launch (shader compile, ntfs3
-read). Watch: MangoHud shows GPU = RTX 4050. If it fails, read
-`~/.local/share/lutris/lutris.log` + `~/steam-*.log` (PROTON_LOG). Remove the `system.env` PROTON_LOG
-block once it runs clean. **Then Vela:** Home reads the shared pga.db → mw4 appears after Vela
-restart; launch = vela-lutris, same yml/runner (shared home). NOTE: would be the FIRST Home Play on
-`/vela.img` proprietary (gameos/HANDOFF open item) and Vela gamescope caps 40 fps
-(VELA_FPS_CAP). VRAM: 6 GB OK per DECISION 58 (foreground), set DLSS in-game. Watch root disk
-space (DXVK cache grows). This session's VM shell is DEAD (timeouts) — host actions (launch,
-notes, git commit) are Shawn's or a host-shell session's.
+**VELA REAL BOOT TRIED 2026-10-22 — SAME CRASH, TWICE (R2, ~21:50).** Shawn booted Vela and launched
+MW4 at 21:12:57 and again from Home at 21:16:09 (first Home Play on `/vela.img` proprietary — that
+gameos open item is now closed; the launch chain itself worked: vela-core → vela-lutris → umu → same
+shared runner, fresh prefix bootstrapped, NVIDIA renderD128 active under gamescope). **Both runs died
+within 4 s of exe start with the same exit code 5 / 0xC0000005** (Vela journal: `Child exited with
+wait status: 5`, return code 1280; Lutris: "game has run for a very short time, did it crash?").
+The mw4-vela-tracker captured run 1 fully: `~/mw4-vela-capture-20261022-211213/` (per-second process
+tree, dGPU state, journal). vela-telemetry: dGPU woke (active, 0% util, 12-23 MiB) and was back
+suspended by 21:16:43, gpu_util=na — no frame rendered. **BUG-209 is now proven OS-independent**
+(kernel 7.0.5+610.57 Luminos vs 7.2.6+615.71 Vela, Plasma vs gamescope, fresh prefix) — it is the
+repack/crack/game itself or a CPU-feature branch in the obfuscated init. Only remaining known-good
+run: the qemu-CPU VM. **NEXT (ordered):** (1) discriminate the CPU hypothesis — rerun
+`gameos/os/scripts/vela-vm.sh` with `-cpu host`: crash ⇒ Zen4 feature (AVX-512 prime suspect);
+works ⇒ suspect shifts to bare-metal-only env; (2) winedbg register capture at the fault to find
+where r10 is loaded; (3) newer GE-Proton; (4) AppDB/Google for this build's known tricks. Vela run
+details filed in docs/BUGS.md BUG-209. Vela-side noise (not the cause): gamemoded exit-127 on its
+split_lock_mitigate script; Proton "unable to use parent for game drive /mnt/win-os". BUGS.md
+duplicate BUG-208 (GLM MCP entry) renumbered → BUG-210.
 
 ## Previous aim (2026-10-22, done) — GLM-5.3 in Claude Desktop, side by side with Max (DECISION 156)
 - KDE menu **"Claude (GLM-5.3)"** = `scripts/luminos-claude-glm`: second app instance,
@@ -197,10 +206,11 @@ second, max 1 per tab per 10 min; live tests 3/3 PASS.
   worker; keep Vela `.md` docs updated; file work in MemPalace.
 
 ## Gotchas / dead-ends / things NOT to redo
-**This session's shell is the Cowork VM, not the G14.** `mcp__workspace__bash` sees the connected
-folders only — no desktop session, no systemd, no GPU, no `luminos-notes` (`.notes.db` writes fail
-with disk I/O error), and **git commands over the mount time out** (seen twice this session). State
-files that need the host (notes, brain, git commit) must be run by Shawn or a host-shell session.
+**`mcp__workspace__bash` is the Cowork VM, not the G14** — no desktop session, no systemd, no GPU,
+no `luminos-notes` (`.notes.db` writes fail with disk I/O error), and **git commands over the mount
+time out** (seen twice, pre-reboot session). **The post-reboot session has working `mcp__host-shell`
+access** (BUG-207 fix proven end-to-end again) — use host-shell for notes, git, and anything that
+must touch the real machine; `mcp__workspace__bash` remains sandbox-only.
 
 - **Never `pkill -f` broad patterns** — Cowork's sandbox is a `qemu-system-x86_64`; killing it ends
   the session. Same for anything qemu-shaped.
