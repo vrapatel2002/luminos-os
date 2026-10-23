@@ -86,9 +86,19 @@ once then dead" symptom as CDN health, not pack deletion — packs untouched all
 **AUTO-RETRY LIVE: `mw4-cdn-watch.service`** (user unit, gameos/os/scripts/mw4-cdn-watch.sh) polls
 the CDN every 5 min and auto-launches MW4 via Lutris + notifies Shawn at the first 200 (log
 `~/.local/state/luminos/mw4-cdn-watch.log`, flag `mw4-cdn-launched.flag`; remove unit+script when
-BUG-209 closes). NEXT when it fires: watch the run; if it STILL crashes with CDN 200, the wine-side
-lead is the crash thread's two stubbed NtQuerySystemInformation classes (0x91, 0xA5) right before
-the fault + a working winedbg --auto capture. Vela re-test pointless until a Luminos run survives.
+BUG-209 closes). **CRACK RE (~22:50):** first-run state reset tested (still crash at 503; backup
+`first-run-state-backup-20261022/`); the working Windows run's root `ccsdownloader.log` shows the
+mechanic (live GVS answer → version mismatch → skip downloads → game runs); **fake-GVS server
+built, protocol 90% mapped** — `GET /v1/public/<configId>/`, response `GvsResult{size,payload}` →
+JWT → `GameVariables{variables[key,value]}`, self-signed cert ACCEPTED; last mile = the `size`
+validation + likely JWE crypto (embedded RSA key, PBES2/A128CBC strings). Work saved
+`~/Games/mw4-evidence-20261022/fakegvs/`; DNS hijack removed after testing. NEXT: (a) extract the
+embedded RSA key + try JWE shapes, or (b) the moment the real CDN recovers (watcher fires), curl
+`/v1/public/452de38822126ed008205a38b00a57ab/` and capture a REAL response to clone. Game dir left
+in fresh-install state. NEXT when the watcher fires: watch the run; if it STILL crashes with CDN
+200, the wine-side lead is the crash thread's two stubbed NtQuerySystemInformation classes
+(0x91, 0xA5) right before the fault + a working winedbg --auto capture. Vela re-test pointless
+until a Luminos run survives.
 Vela run
 details filed in docs/BUGS.md BUG-209. Vela-side noise (not the cause): gamemoded exit-127 on its
 split_lock_mitigate script; Proton "unable to use parent for game drive /mnt/win-os". BUGS.md
