@@ -8493,3 +8493,29 @@ self-decryption, or emulate) to find the file it reopens and why the path is gar
 wine; (b) the game's export-walk/string-parse layer (RVAs 0x1d534f/0x1d5683) — same technique
 as the SecureBoot patch once the parsed string is known; (c) the good-run discriminator.
 All artifacts staged in ~/Games/mw4-evidence-20261022/ and /tmp/mw4-*.log.
+# [CHANGE: claude-code | 2026-10-22 ~23:45 — THE CRASH IS FIXED]
+**BREAKTHROUGH (REA + core dumps + static RE + LD_PRELOAD mapping):**
+(1) Static disassembly of the full protection window (RVA 0x1d5100-0x1d5830) identified the
+flow: the crack's init **walks the PEB Loader module list** (`mov 0x18(%rax),%r10` = PEB->Ldr,
+`mov 0x20(%r10),%rdx` + link walk), reads per-module fields, parses a dotted string, and computes
+pointers from the results — the classic anti-tamper environment scan. (2) The fatal fault family
+(all reads at 0x6FFF8B389BFx, deterministic across every run and config) = reads from a
+computed pointer into an UNMAPPED region of wine's PE area (~1.5 GB below the game base).
+(3) **THE FIX — `/tmp/mw4map.so` (source+binary in ~/Games/mw4-evidence-20261022/)**: a
+2-line LD_PRELOAD library that mmaps 0x6FFF8B389000 (16 KB, anonymous, zero-filled) into
+every wine process at startup. With `LD_PRELOAD=/tmp/mw4map.so wine sp26-cod.exe`: **ZERO
+page faults, zero unhandled exceptions** — the game's protection code runs to completion (6
+processes incl. the relaunched game, RPC teardown exceptions handled as first-chance, normal
+control flow) and exits cleanly (rc=0). The 20-second exit-5 death is GONE. (4) Instruction
+patches (SecureBoot/IUM queries + fault-instruction xor) were REVERTED — the original
+sp26-cod.exe (md5 6efe563cc348, from sp26-cod.exe.orig-binary) is back in place; only the
+LD_PRELOAD map is needed. (5) REMAINING: the game exits ~10 s in without reaching the engine
+(GLCache still 0) — the mapped region returns ZEROS where the parse-loop expects a dotted
+string (likely a module version/path from the PEB walk), so a check fails cleanly; and/or the
+game waits on uno/umbrella (both 503 now). NEXT: (a) find what the string parse expects —
+the parse writes a wide string at rsp+0x30a, compare a good-run's content; (b) wire the
+LD_PRELOAD into the Lutris launch (system.env LD_PRELOAD) once the early exit is solved;
+(c) the single-instance guard: stray hung game processes + the __sp26-cod marker file make
+every new run exit instantly — kill strays + rm the marker before testing (bit me repeatedly).
+NOTE: kernel.yama.ptrace_scope was set to 0 for frida/core work — restore to 1 (sudo sysctl
+kernel.yama.ptrace_scope=1) if not already done.
