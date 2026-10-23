@@ -8408,3 +8408,26 @@ server were REMOVED after testing (watcher integrity restored; verified real CDN
 Game dir left in fresh-install state (backup dir has the first-run artifacts). sp26-cod.exe also
 contains 15 JWT/variables refs — the game itself parses GVS JWTs in early init, matching the
 crash-when-unhealthy behavior.
+# [CHANGE: claude-code | 2026-10-22 ~22:55]
+**"DO IT" SESSION — GVS SOLVED, WINE-STUB PATH IS THE FINAL BLOCKER.** The real GVS endpoint
+`/v1/public/452de38822126ed008205a38b00a57ab/` answers **200 even while the root URL 503s** —
+the CDN-health theory refined: only the game-facing URL matters. Real response CAPTURED and saved
+(`~/Games/mw4-evidence-20261022/real-gvs-response.json`): `{"payload": "<RS256 JWT>",
+"claims_b64_size": N}` (the mystery field name — 'size' was wrong all along), JWT claims =
+`{payload: {variables: [...]}, exp, iat, nbf}`, buildVersionVariable = `ccs_version_13_2_29444544_910`
+(same as the working Oct-21 run), plus REX_PROD marker. Launches with GVS live (22:47 manual,
+22:51 via the fixed watcher) **still exit-5** → GVS alone is not the gate. GE-Proton11-7 direct
+run: same two NtQuerySystemInformation stubs (0x91 len 2, 0xA5 len 16), same fault address →
+both wine 11 builds stub them. **Divergence proven: the two good runs (19:44, 20:39) contain
+ZERO NtQuerySystemInformation fixmes — the game never asked on those paths.** Crash-site
+disassembly extracted (`~/Games/mw4-evidence-20261022/crash-site-1D5789.bin` +
+`caller-B17EA25.bin`, raw binary + `objdump -D -b binary` works — the PE itself won't disassemble):
+the fault `mov (%r10),%eax` sits after obfuscated movabs/xor chains writing a VM register array
+(`mov %rcx,(%rdx,%r14,8)`) and a global-counter/xchg sequence (RVA 0xD787DC0 pointer) — virtualized
+anti-tamper; r10 is computed earlier from (likely) the stubbed query results. Watcher FIXED to
+probe the real config URL (was: root URL — never would have fired; it fired immediately and its
+launch also exit-5'd, cleanly removing GVS as the gate). uno/umbrella endpoints partially 503/no-DNS
+(roots only). **NEXT SESSION (bounded task): identify SYSTEM_INFORMATION_CLASS 0x91 (2-byte) and
+0xA5 (16-byte), determine what real Windows returns, and satisfy them — patch wine's ntdll default
+stub or shim — then the game's early-init should complete.** All artifacts staged in
+~/Games/mw4-evidence-20261022/ (real GVS clone, fake-server 90% done, crash-site bins).
