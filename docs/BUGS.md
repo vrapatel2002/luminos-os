@@ -8476,3 +8476,20 @@ compute runtime addresses from the game's load base per run; (b) parse rex_sp's 
 original (unpatched) bink2w64.dll (from another installed game) drops rex_sp from the chain
 entirely; (d) the good-run discriminator (19:44/20:39 engine-alive vs everything else) remains
 unknown — GAMEID 1938090 runs were good at 19:44/20:39 but die tonight with identical setup.
+# [CHANGE: claude-code | 2026-10-22 ~23:25 — RE session end]
+**FULL-RE STATUS (Shawn: "just reverse engineer it" — being done, layer by layer).**
+(1) **bink-swap tested and REVERTED**: the game-root bink2w64.dll is the installer's ORIGINAL
+(no rex_sp import; the sp26 copy is the crack-patched one, md5 d2b7301e91b2 vs ba1a8d313035).
+With the original in place the game STILL exit-5s in 16 s → the fatal checks live in the GAME's
+own virtualized code (sp26-cod.exe+0x1D5789); the crack PATCHES them (removing it helps
+nothing). Cracked bink restored (backup bink2w64.dll.cracked). (2) **The rex_sp→msvcrt crash
+symbolized**: wine msvcrt export-table mapping puts the chain in **freopen/freopen_s/_wfreopen**
+— the crack reopens a FILE with a garbage path pointer (r8=0x0000200100000000). rex_sp's
+imports: KERNEL32 (GetAsyncKeyState), USER32, MSVCP140, VCRUNTIME140, api-ms-win-crt-*
+(stdio/string/convert/runtime) — consistent. rex_sp is PACKED (2.7 MB, strings encrypted —
+only "*key" visible) → full static RE requires unpacking the virtualizer. (3) Remaining RE
+work, in order of leverage: (a) unpack rex_sp (run it under winedbg + dump memory after
+self-decryption, or emulate) to find the file it reopens and why the path is garbage under
+wine; (b) the game's export-walk/string-parse layer (RVAs 0x1d534f/0x1d5683) — same technique
+as the SecureBoot patch once the parsed string is known; (c) the good-run discriminator.
+All artifacts staged in ~/Games/mw4-evidence-20261022/ and /tmp/mw4-*.log.
