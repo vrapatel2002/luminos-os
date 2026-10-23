@@ -8431,3 +8431,26 @@ launch also exit-5'd, cleanly removing GVS as the gate). uno/umbrella endpoints 
 0xA5 (16-byte), determine what real Windows returns, and satisfy them — patch wine's ntdll default
 stub or shim — then the game's early-init should complete.** All artifacts staged in
 ~/Games/mw4-evidence-20261022/ (real GVS clone, fake-server 90% done, crash-site bins).
+# [CHANGE: claude-code | 2026-10-22 ~23:10]
+**THE WINE FIX — QUERIES IDENTIFIED AND PATCHED (still exit-5, deeper VM check remains).**
+The two stubbed queries are IDENTIFIED via wine 11.17's own winternl.h (on-box):
+**0x91 = SystemSecureBootInformation (2 bytes) and 0xA5 = SystemIsolatedUserModeInformation
+(16 bytes)** — the crack checks Secure Boot + VBS at startup. System wine 11.17 stubs both too
+(tested). Both call sites disassembled (RVA 0x1cf513 and 0x1d0673): the game pre-fills obfuscation
+state, calls via obfuscated `call *%rax`, then `test %eax,%eax` — Windows answers SUCCESS, wine
+returns an error status and the game walks the failure path. **SURGICAL BINARY PATCH APPLIED to
+sp26-cod.exe** (backup `sp26-cod.exe.orig-binary` in sp26/): both 21-byte query regions replaced
+with `movw $0x0101,(%rdx)` (SecureBoot enabled+capable) / `movq $0,(%rdx); movq $0,8(%rdx)` (no
+secure kernel) + `xor %eax,%eax` (STATUS_SUCCESS) — verified by disassembly; the fixmes are GONE
+and the exception path CHANGED (no more wine Unhandled-fault + debugger; the game's own handler
+now catches and exits 5). **Still exit-5**: the remaining fault (same read at 0x6FFF8B389BFA via
+r10) traces to deeper virtualized code — the region before the crash walks a loaded module's PE
+EXPORT TABLE (e_lfanew/0x50 export-dir walk at RVA 0x1d534f), then zero-fills a stack buffer,
+then parses a dotted narrow string from module memory into a wide stack string (loop at 0x1d568a),
+then computes r10 from the parse — the module/string wine provides differs from Windows. rex_sp.dll
+loads at 0x6FFFE7440000 (not the fault target). Evidence: ~/Games/mw4-evidence-20261022/
+(query-sequence.bin, pre-loop.bin, mw4-patched.log, mw4-syswine.log). NEXT: identify the module
+whose export table is walked (breakpoint at 0x1d534f with winedbg, read rax) and what dotted
+string it parses — likely a version/path string whose wine value differs; satisfy it like the
+SecureBoot patch. The good-run divergence (no queries at all) remains unexplained — a manual-umu
+launch tonight was never cleanly reproducible (umu layer flaky after rapid kill cycles).
