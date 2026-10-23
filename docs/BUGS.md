@@ -8519,3 +8519,32 @@ LD_PRELOAD into the Lutris launch (system.env LD_PRELOAD) once the early exit is
 every new run exit instantly — kill strays + rm the marker before testing (bit me repeatedly).
 NOTE: kernel.yama.ptrace_scope was set to 0 for frida/core work — restore to 1 (sudo sysctl
 kernel.yama.ptrace_scope=1) if not already done.
+# [CHANGE: claude-code | 2026-10-23 ~00:50 — EXIT 5 ELIMINATED, ALL FAULTS GONE]
+**THE CRACK-FIX SESSION (post-midnight, "try the string buffer / server" directive).**
+(1) **Server theory CLOSED**: strace of a full run showed the game makes NO outbound connects in
+its short life (only local socket checks) — the early exit is purely local. (2) **String-buffer
+theory explored to the bottom**: the parse loop (RVA 0x1d568a) reads a DLL filename, builds
+"«name».dll" wide (appends '.', 'd', 'l', 'l' at 0x1d88e8), then walks the PEB module list
+via gs:[0x60]→PEB→Ldr comparing wide names (cmp %si,%r11w) — the classic anti-tamper module
+validation. Content experiments (zeros / Win-build / GVS-version / ntdll.dll / kernelbase.dll /
+win32u.dll / full-region fills) produced IDENTICAL behavior: 295 DLL loads, clean exit —
+content at the mapped region is not (yet) the lever. (3) **THE UMU LAYER DECODED**: proton for
+umu games does NOT call files/bin/wine — it runs files/lib/wine/x86_64-unix/wine-preloader +
+the unix wine ELF directly ("run with winepreloader directly to avoid restart through start.exe");
+a shell-script wrapper there fails ("failed to read ELF header" — preloader demands a real ELF).
+**FIX: the proton script itself is patched** (backup `proton.orig-mw4`) to inject
+`self.env["LD_PRELOAD"] = "/mnt/win-os/Games/mw4map.so"` (space-free path — ld.so splits
+LD_PRELOAD on spaces!) at the umu.exe launch branch. umu runs now load the map. (4) **THE
+SECOND FAULT FAMILY KILLED**: the umu+map run surfaced the crack's msvcrt/freopen string scan
+reading at 0x00002000FFFFFFFE (r8=0x0000200100000000 — packed UNICODE_STRING-style garbage that
+WALKS +4GB per satisfied read). **mw4map v3/v4 maps the whole 0x0000200000000000-0x210000000000
+range (1TB, MAP_NORESERVE zero pages — free) + the 0x6FFF8B389000 region.** Result: **ZERO
+access violations anywhere, exit code changed 5 → 0** (the old crash exit is GONE), full
+protection dance completes (EnumProcessModulesEx, thread naming, RPC, unwind) — the game still
+exits before the engine (GLCache 0), at its final verdict check. (5) The `files/bin/wine`
+wrapper also installed (logs to sp26/wrapper.log; wine.real kept) — harmless, used by direct
+launches. (6) Remaining: the final check after all reads succeed — needs reading the comparison
+chain past the last satisfied reads (next: winedbg/gdb at the exit decision with the umu env,
+or find the expected value in the obfuscated compare). mw4map.c v4 (blanket + wide filename
+at the scan point) saved in ~/Games/mw4-evidence-20261022/ + /tmp. All 3 lib copies deployed:
+/mnt/win-os/Games/mw4map.so (container-visible, proton uses this), ~/.local/share/, /tmp.
