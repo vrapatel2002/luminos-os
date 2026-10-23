@@ -8454,3 +8454,25 @@ whose export table is walked (breakpoint at 0x1d534f with winedbg, read rax) and
 string it parses — likely a version/path string whose wine value differs; satisfy it like the
 SecureBoot patch. The good-run divergence (no queries at all) remains unexplained — a manual-umu
 launch tonight was never cleanly reproducible (umu layer flaky after rapid kill cycles).
+# [CHANGE: claude-code | 2026-10-22 ~23:20 — end of night]
+**STATUS: NOT FIXED YET; every layer mapped.** (1) STRACE REVELATION: the "flaky manual umu
+launches" were never flaky — ALL launches tonight ran the game and the game exited 5 (umu's rc=5
+mirrors the game's exit; PROTON_LOG simply doesn't propagate through manual umu without Lutris,
+which is why no ~/steam-1938090.log — the "pre-wine death" was a misread; strace shows the full
+wine+game exec chain incl. S:\...sp26-cod.exe). (2) WINEDBG full backtraces captured
+(/tmp/mw4-dbg*.log): the first unhandled fault in winedbg runs is the crack chain
+**rex_sp+0x46c5 → msvcrt (wide-string scan) → ntdll+0x6edaa `movzbl -2(%r8)` with garbage
+r8=0x0000200100000000** — the SAME register signature as the 20:39 good run's late crash, i.e.
+Fault A (game+0x1D5789, r10=0x6FFF8B389BFA) and Fault B (rex_sp→msvcrt string scan, garbage
+0x0000200100000000-family) are two faces of the same protection layer; under winedbg B surfaces
+first. rex_sp+0x46c5 = `mov $1,%ecx; call *IAT(0xf758)` (import to identify). (3) The 32-bit
+process (start.exe child) is plumbing, no game code. (4) Prefix d3d_extras present in current
+prefix (Lutris applied at 23:03) — prefix theory closed. (5) Exe patches (SecureBoot/IUM) stay
+in (fixmes gone, failure signature changed). NEXT SESSION (bounded): (a) winedbg with CORRECT
+command syntax (`break *ADDR`, `print $reg`, `bt`; `info reg` is invalid) at the game's export
+walk (RVA 0x1d534f) and parse loop (RVA 0x1d5683) — read rax (walked module) + r8 (parsed string);
+compute runtime addresses from the game's load base per run; (b) parse rex_sp's IAT at RVA
+0xf758 to name the import called with arg 1; (c) STRONG ALTERNATIVE: replace the crack — an
+original (unpatched) bink2w64.dll (from another installed game) drops rex_sp from the chain
+entirely; (d) the good-run discriminator (19:44/20:39 engine-alive vs everything else) remains
+unknown — GAMEID 1938090 runs were good at 19:44/20:39 but die tonight with identical setup.
