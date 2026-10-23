@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+# [CHANGE: claude | 2026-10-18] DECISION 153 -- every import is auto-fixed (Playback Doctor Phase 4/5).
+"""luminos-media-fix FILE...    fix one or more video files for an English viewer on the Roku
+luminos-media-fix --all        every video under Jellyfin's library roots (nightly safety net)
+a) default tracks (MKV only, mkvpropedit = header-only edit): English audio -> the only default audio;
+   English full text sub -> the only default sub; non-English subs lose default when English exists
+   (embedded or sidecar); forced English is never default.
+b) sidecars: full English text sub -> <stem>.en.srt, forced English -> <stem>.en.forced.srt (only if missing).
+c) Jellyfin refresh of that item.  d) one JSON line per file to /var/log/luminos-media-fix.log.
+Never deletes or moves media. Idempotent. Exit 0 = fixed or nothing to do; 1 = a step failed."""
+import json, os, subprocess, sys, time, urllib.request
+FF, FP = '/usr/lib/jellyfin-ffmpeg/ffmpeg', '/usr/lib/jellyfin-ffmpeg/ffprobe'
+BASE, LOG = 'http://127.0.0.1:8096', '/var/log/luminos-media-fix.log'
+TOKENS = ('/etc/luminos/media-fix-jellyfin.token', '/root/.jellyfin-token')
+VIDEO_EXT = ('.mkv', '.mp4', '.m4v', '.avi', '.ts', '.m2ts', '.webm', '.mov')
+SUB_EXT = ('.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx', '.sup')
+TEXT = {'subrip', 'srt', 'ass', 'ssa', 'mov_text', 'webvtt', 'text'}
+ENG = {'eng', 'en', 'english'}
+LOW = ['ionice', '-c3', 'nice', '-n19']
+
+def token():
+    for p in TOKENS:
+        try: return open(p).read().strip()
+        except OSError: pass
+
+def jf(method, path, body=None, tries=3):
+    """Jellyfin API; Jellyfin may be restarting (other workers) -> wait 15 s and retry."""
+    for n in range(tries):
+        try:
+            req = urllib.request.Request(BASE + path, method=method, headers={'X-Emby-Token': token() or '',
+                  'Content-Type': 'application/json'}, data=json.dumps(body).encode() if body is not None else None)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                raw = r.read(); return json.loads(raw) if raw else {}
+        except Exception as e:
+            err = e
+            if n < tries - 1: time.sleep(15)
+    raise RuntimeError('jellyfin %s %s: %s' % (method, path.split('?')[0], err))
+
+def is_eng(s): return (s.get('lang') or '').lower() in ENG
+
+def probe(path):
+    r = subprocess.run([FP, '-v', 'quiet', '-show_streams', '-of', 'json', path], capture_output=True, text=True, timeout=120)
+    out = []
+    for s in json.loads(r.stdout or '{}').get('streams', []):
+        d = s.get('disposition') or {}
+        if d.get('attached_pic') or s.get('codec_type') not in ('audio', 'subtitle'): continue
+        t = s.get('tags') or {}
+        out.append({'i': s['index'], 'type': s['codec_type'], 'codec': s.get('codec_name') or '',
+                    'lang': t.get('language') or t.get('LANGUAGE'), 'title': t.get('title') or t.get('TITLE') or '',
+                    'default': int(bool(d.get('default'))), 'forced': int(bool(d.get('forced')))})
+    return out
+
+def sidecars(path):
+    d, stem = os.path.dirname(path), os.path.splitext(os.path.basename(path))[0]
+    found = {'full': None, 'forced': None}
+    for n in os.listdir(d):
+        if n.startswith(stem + '.') and n.lower().endswith(SUB_EXT):
+            parts = n[len(stem):].lower().split('.')[1:-1]
+            if any(p in ENG for p in parts): found['forced' if 'forced' in parts else 'full'] = found.get('forced' if 'forced' in parts else 'full') or n
+    return found
+
+def plan_flags(streams, side):
+    """Return {stream_index: new_default} for tracks whose default flag must change."""
+    want = {}
+    aud = [s for s in streams if s['type'] == 'audio']
+    eng_a = [s for s in aud if is_eng(s) and 'comment' not in s['title'].lower()] or [s for s in aud if is_eng(s)]
+    if eng_a:
+        pick = next((s for s in eng_a if s['default']), eng_a[0])
+        for s in aud: want[s['i']] = int(s is pick)
+    subs = [s for s in streams if s['type'] == 'subtitle']
+    full = [s for s in subs if is_eng(s) and not s['forced'] and s['codec'] in TEXT]
+    pick = next((s for s in full if s['default']), full[0]) if full else None
+    for s in subs:
+        if is_eng(s) and s['forced']: want[s['i']] = 0                     # forced English: never default
+        elif pick is not None: want[s['i']] = int(s is pick)                # one English default, nothing else
+        elif side['full'] and not is_eng(s): want[s['i']] = 0              # English lives in the sidecar
+    return {i: v for i, v in want.items() if next(s for s in streams if s['i'] == i)['default'] != v}
+
+def match_owner(src, dst):
+    st = os.stat(src)
+    try: os.chown(dst, st.st_uid if os.geteuid() == 0 else -1, st.st_gid)
+    except OSError: pass
+    os.chmod(dst, st.st_mode & 0o666)
+
+def playing(path):
+    try: return any((s.get('NowPlayingItem') or {}).get('Path') == path for s in jf('GET', '/Sessions?activeWithinSeconds=300', tries=1))
+    except Exception: return False
+
+def fix(path):
+    row = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S%z'), 'file': path, 'actions': [], 'notes': []}
+    if not os.path.isfile(path) or not path.lower().endswith(VIDEO_EXT):
+        row['notes'].append('not a video file'); return row, 0
+    if playing(path):
+        row['notes'].append('playing now - skipped, nightly run retries'); return row, 0
+    streams = probe(path); side = sidecars(path)
+    row['before'] = [{k: s[k] for k in ('i', 'type', 'codec', 'lang', 'default', 'forced')} for s in streams]
+    rc = 0
+    # b) sidecars first, so a.) can count a freshly written .en.srt
+    eng_sub = [s for s in streams if s['type'] == 'subtitle' and is_eng(s)]
+    jobs = []
+    for kind, forced in (('full', 0), ('forced', 1)):
+        cand = [s for s in eng_sub if s['forced'] == forced]
+        txt = [s for s in cand if s['codec'] in TEXT]
+        if side[kind] or not cand: continue
+        if not txt: row['notes'].append('English %s sub is image-only (%s) - needs Bazarr' % (kind, cand[0]['codec'])); continue
+        s = next((x for x in txt if x['default']), txt[0])
+        out = os.path.splitext(path)[0] + ('.en.forced.srt' if forced else '.en.srt')
+        jobs.append((s, out))
+    if jobs:
+        cmd = LOW + [FF, '-v', 'error', '-nostdin', '-y', '-i', path]
+        for s, out in jobs: cmd += ['-map', '0:%d' % s['i'], '-c:s', 'srt', '-f', 'srt', out + '.part']
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3 * 3600)
+        for s, out in jobs:
+            if r.returncode == 0 and os.path.getsize(out + '.part') > 0:
+                os.replace(out + '.part', out); match_owner(path, out)
+                row['actions'].append('sidecar %s <- stream %d (%s)' % (os.path.basename(out), s['i'], s['codec']))
+            else:
+                try: os.remove(out + '.part')
+                except OSError: pass
+                row['notes'].append('extract failed for stream %d: %s' % (s['i'], r.stderr.strip()[-200:])); rc = 1
+        side = sidecars(path)
+    # a) default flags, MKV only
+    change = plan_flags(streams, side)
+    if change and not path.lower().endswith('.mkv'):
+        row['notes'].append('flags need change but not MKV - left alone: %s' % change); change = {}
+    if change:
+        if not os.access(path, os.W_OK):
+            row['notes'].append('no write permission (uid %d) - nightly root run will fix' % os.geteuid()); rc = 1
+        else:
+            cmd = LOW + ['mkvpropedit', '-q', path]
+            for i, v in sorted(change.items()): cmd += ['--edit', 'track:%d' % (i + 1), '--set', 'flag-default=%d' % v]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            after = {s['i']: s['default'] for s in probe(path)}
+            bad = [i for i, v in change.items() if after.get(i) != v] + \
+                  [s['i'] for s in streams if s['i'] not in change and after.get(s['i']) != s['default']]
+            if r.returncode != 0 or bad:
+                row['notes'].append('mkvpropedit rc=%d mismatch=%s %s' % (r.returncode, bad, (r.stdout + r.stderr).strip()[-200:])); rc = 1
+            row['actions'] += ['stream %d default %d->%d' % (i, 1 - v, v) for i, v in sorted(change.items()) if i not in bad]
+    # c) Jellyfin refresh
+    if row['actions']:
+        try:
+            items = jf('GET', '/Items?Recursive=true&IncludeItemTypes=Movie,Episode&Fields=Path').get('Items', [])
+            iid = next((i['Id'] for i in items if i.get('Path') == path), None)
+            if iid:
+                jf('POST', '/Items/%s/Refresh?MetadataRefreshMode=Default&ReplaceAllMetadata=false' % iid)
+                row['jellyfin'] = 'refreshed %s' % iid
+            else:
+                jf('POST', '/Library/Media/Updated', {'Updates': [{'Path': path, 'UpdateType': 'Modified'}]})
+                row['jellyfin'] = 'not indexed yet - reported path to /Library/Media/Updated'
+        except Exception as e:
+            row['notes'].append(str(e)); rc = 1
+    return row, rc
+
+def library_files():
+    roots = [l for vf in jf('GET', '/Library/VirtualFolders') for l in vf.get('Locations', [])]
+    return sorted(os.path.join(dp, n) for r in roots for dp, _, ns in os.walk(r) for n in ns
+                  if n.lower().endswith(VIDEO_EXT) and '/_' not in dp
+                  and not n.startswith('.'))  # [CHANGE: claude | 2026-10-23] skip luminos-dv-fix temp files (BUG-207)
+
+def main(args):
+    if not args or args[0] in ('-h', '--help'): sys.exit(__doc__)
+    files = library_files() if args[0] == '--all' else args
+    worst = 0
+    for p in files:
+        try: row, rc = fix(p)
+        except Exception as e: row, rc = {'ts': time.strftime('%Y-%m-%dT%H:%M:%S%z'), 'file': p, 'error': repr(e)}, 1
+        line = json.dumps(row, ensure_ascii=False)
+        print(line)
+        try:
+            with open(LOG, 'a') as fh: fh.write(line + '\n')
+        except OSError as e: print('log write failed: %s' % e, file=sys.stderr)
+        worst = max(worst, rc)
+    return worst
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

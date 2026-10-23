@@ -1,0 +1,11 @@
+# [CHANGE: claude | 2026-10-23] DECISION 156 / BUG-207 — convert Dolby Vision Profile 5 files to HDR10.
+[Unit]
+Description=Convert Dolby Vision Profile 5 library files to HDR10 (Roku shows P5 purple)
+After=jellyfin.service
+Wants=jellyfin.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-dv-sweep
+Nice=10
+TimeoutStartSec=infinity

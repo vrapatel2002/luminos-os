@@ -2769,3 +2769,319 @@ installed) and warm new imports; do **not** re-download or rewrite media files.
 - **D — Bazarr external subs / re-download.** Rejected: embedded English tracks are already
   correct and in sync; a fetched sub risks timing drift. Shawn: do not re-download.
 **Open:** new imports are cold until 04:00 — a Sonarr/Radarr On-Import warm hook would close it.
+
+
+## DECISION 134 — Multi-network downloads (Ethernet + Wi-Fi) tested and NOT adopted: the disk is the ceiling
+[CHANGE: cowork | 2026-10-10]
+**Asked:** Shawn found Plexo (github.com/anmolkapil/plexo, splits a download across network interfaces) and
+asked whether Ethernet + "the best fastest wifi" together speeds up NZBGet on the server.
+**Measured** (NZBGet idle, per-interface kernel rx_bytes counters, sockets pinned with SO_BINDTODEVICE,
+pass bar fixed in advance at +15% over the best single-link run; spec in `server/docs/multinet/`):
+- HTTPS (CSClub mirror): enp2s0 alone ~970 Mbit/s (gigabit port is full). 2.4 GHz wlan0 ~97 → combined
+  ~1,069 (+10%, FAIL). **5 GHz** wlan0 (BELL851 5.0 GHz, 802.11ac 433 Mb/s link, kept .61) ~354 →
+  combined **~1,313 (+35%)**. So the Bell line is faster than 1 Gbit and the port, not the ISP, is the cap.
+- Usenet (UsenetServer NNTP-TLS, real BODY reads from alt.binaries.boneless): enp2s0 15 conns **723**,
+  30 conns ~935, 40 conns ~957; enp2s0 15 + wlan0 15 ~850 (worse than 30 on the wire);
+  **enp2s0 30 + 5 GHz wlan0 10 ~1,136 Mbit/s (+19%)**, no auth errors at 40 connections (plan allows 50).
+- **Disk (the deciding gate):** 1 GB fdatasync write — sdb `/srv/external` (InterDir) **97 MB/s ≈ 776 Mbit/s**,
+  sda `/srv/media` (DestDir/unpack) **54 MB/s ≈ 432 Mbit/s**. Both spindles are 5400 rpm laptop disks.
+**Decision:** do not split NZBGet across links. Ethernet alone (15 conns, 723 Mbit/s ≈ 90 MB/s) already
+meets the InterDir disk's write ceiling, and unpack to sda is slower still; adding Wi-Fi would buy bandwidth
+the disks cannot store, at the cost of /etc policy routing, a second NZBGet server entry on port 443 and
+keeping the radio on 5 GHz (which dropped back to 2.4 GHz on its own on 2026-10-06 20:35).
+**Plexo itself is not usable here**: Electron GUI, no CLI/daemon, HTTP range requests only — Usenet is NNTP.
+**Left exactly as found:** wlan0 back on BELL851 2.4 GHz (.61), Server1.Connections=15, no /etc change,
+test scripts and temp files removed (verified 0 `.mnt-ddtest` files on both disks).
+**If speed matters later, in order:** (1) an SSD for InterDir — the only change that lifts the real
+ceiling; (2) then Server1.Connections 15→30 on the wire (+~29% network headroom, measured); (3) only after
+both, revisit the 5 GHz split. The old STATUS line "raising the count would buy nothing" was true on the
+100 Mb wifi radio and is now superseded.
+
+
+## DECISION 135 — Wi-Fi kept on 5 GHz alongside Ethernet; upload split measured; RAM can't beat the disk
+[CHANGE: cowork | 2026-10-10] Follow-up to DECISION 134, Shawn: "keep both Ethernet + 5 GHz Wi-Fi".
+**Changed:** `/var/lib/iwd/=42454c4c38353120322e342047487a.psk` (BELL851 2.4 GHz) gained
+`[Settings] AutoConnect=false`; wlan0 joined BELL851 5.0 GHz (802.11ac, 433 Mb/s link, RSSI -46, still .61).
+Why: on 2026-10-06 20:32 the 5 GHz link dropped (deauth reason 4, inactivity) and iwd auto-rejoined
+2.4 GHz (stronger RSSI, -26 vs -40) and never went back. With 2.4 out of autoconnect it can only return to
+5 GHz. Cost accepted: if 5 GHz is down, .61 is unreachable until it returns — Ethernet (.62, default
+route) carries everything meanwhile. Backup: `/root/iwd-2.4-psk.bak-20261010`. Undo: restore that file
+(or `iwctl known-networks "BELL851 2.4 GHz" set-property AutoConnect yes`). Ethernet stays the default
+route; NZBGet is NOT split across links (DECISION 134 — the disk is the cap).
+**Upload, measured (Cloudflare __up, tx_bytes):** enp2s0 4/8 streams ~929/935 Mbit/s, 5 GHz wlan0 ~292,
+both ~1,064 (+14%, under the +15% bar). Irrelevant in practice: the Usenet account is read-only and
+Jellyfin remote streams are single TCP flows on one link (~13 Mbit/s each vs 935 available).
+**RAM-buffer question ("download to RAM, then write"):** NZBGet already does this — ArticleCache=1024 MB.
+A RAM buffer only shifts *when* bytes hit the disk, not how many: sustained throughput stays at the disk
+(97 MB/s sdb, 54 MB/s sda for unpack). For one episode a cache >= ~1/3 of its size lets the network part
+finish ~30% sooner, but the file is not usable until written and unpacked to sda, which is the slowest
+step. tmpfs InterDir (all in RAM) stays rejected: 2160p episodes here are 10–20 GB and season packs far
+more, vs ~14 GB available — an overflow fails the job. Real fix remains an SSD.
+**Trap found:** `curl --data-binary @-` buffers the whole body in RAM — a 2 GB test was OOM-killed and
+dropped the page cache (11 GB → 0.5 GB); all services stayed active. Use `-T -` to stream.
+
+
+## DECISION 136 — Why the disks write slowly: two SMR laptop drives, one of them also the OS disk
+[CHANGE: cowork | 2026-10-10] Shawn asked why write speed is low. Diagnosed, nothing changed except
+installing `smartmontools` 7.5-1 (read-only diagnostics; `pacman -R smartmontools` to undo).
+- **sda WDC WD10SPZX** (internal SATA 6 Gb/s): 1 TB 2.5" 5400 rpm **SMR** (on WD's own 2020 SMR list).
+  Holds `/boot`, `/` AND `/srv/media` — OS, Jellyfin/Sonarr/Radarr databases and the library share one
+  head (~6 MB/s background writes measured while "idle"). 63% full. Read 85 MB/s, write **54 MB/s**.
+- **sdb Seagate ST500LM030** (USB 3 SuperSpeed, UAS — the link is fine): 500 GB 2.5" 5400 rpm **SMR**.
+  Read 105 MB/s, write **97 MB/s** (3% full, so still fast tracks / empty shingles).
+- SMR = overlapping tracks; rewriting means read-modify-write of a whole band, so sustained writes on a
+  fuller drive collapse. Reads are unaffected — that is why sda reads 85 but writes 54.
+- **Health:** both SMART PASSED, 0 reallocated / pending / uncorrectable sectors, 0 CRC errors, 32–35 °C.
+  But **Load_Cycle_Count** is high from laptop head-parking: sda 194,583, sdb 199,139 (sdb normalized
+  value **001** = at the vendor's rated limit). Recovery firms reported elevated WD10SPZX failure rates in
+  2026 (WD investigating) — sda is the drive the OS lives on.
+**Not changed (needs Shawn):** disabling aggressive head-parking (`hdparm -B 254`, may not pass over USB),
+and the real fix: a SATA SSD (CMR/flash) for NZBGet's InterDir and ideally the OS, with the library on a
+CMR drive.
+
+
+## DECISION 137 — /srv/external guarded: automount + immutable bare mountpoint + NZBGet RequiredDir
+[CHANGE: cowork (spec) + claude-fable-5-1 worker (implementation) | 2026-10-10]
+**Why:** at 14:01 Shawn swapped USB ports; the HDD came back but `srv-external.mount` stayed inactive
+(systemd does not remount an fstab `nofail` mount when the device reappears) and the bare mountpoint on
+the 40 GB root fs was writable — NZBGet's InterDir would have filled the OS disk.
+**Changed:** `/etc/fstab` /srv/external line gained `x-systemd.automount` (backup
+`/root/fstab.bak-20261010-mountguard`); bare dir under the mount `chattr +i` (set through a bind mount
+of `/`, no unmount); `nzbget.conf` `RequiredDir=/srv/external/usenet` (backup
+`/var/lib/nzbget/nzbget.conf.bak-20261010-mountguard`), nzbget restarted idle.
+**Verified (independently of the worker):** `findmnt --verify` clean; automount active and generated at
+boot; with mount + automount stopped, `sudo -u nzbget touch /srv/external/x` → Operation not permitted and
+0 entries on the bare dir; restarting the automount and touching the path remounts /dev/sdb1 (ext4).
+nzbget/sonarr/radarr/jellyfin active.
+**Undo:** spec at `server/docs/mountguard/` (rollback list in the worker report, order matters: restore
+files, daemon-reload, stop units, `chattr -i` via bind mount, start mount, restart nzbget).
+**USB port finding (same session):** server has 3 USB-A ports: two USB3 (xHCI pairs usb1/2-port1 and
+usb1/2-port2, both proven at 5 Gbit/s with the HDD) and one USB2-only (usb1-port3). The SanDisk Ultra
+enumerated at 480 Mbit/s in a USB3 port because its SuperSpeed link failed to train on insertion;
+toggling the port's USB2 companion (`echo 1 > .../usb1-port2/disable`, then 0) re-trained it at
+5000 Mbit/s. At USB3: write 17.7 MB/s, read 50–59 MB/s (161 MB/s raw on the G14) — still far below the
+HDDs; the stick is the limit, not the port or driver (usb-storage BOT, max_sectors 1024 KB, no errors).
+
+
+## DECISION 138 — RAM as the buffer between download and unpack: DirectUnpack on, ArticleCache 1→4 GB
+[CHANGE: cowork | 2026-10-10] Shawn: use RAM so the USB HDD (InterDir) isn't seeking between writing ep2
+and reading ep1 for unpack.
+**Measured first:** 2 GB written to /srv/external (96 MB/s), re-read immediately = **9.2 GB/s** (Linux
+page cache), forced from disk = 134 MB/s. So the kernel already serves the unpack read from RAM while the
+file is still cached (~13 GB free RAM); the gap is large 4K items (10–20 GB) evicted by the next download.
+**Changed** (`/var/lib/nzbget/nzbget.conf`, backup `nzbget.conf.bak-20261010-ramcache`, nzbget 26.2
+restarted while idle, running config read back via API):
+- `DirectUnpack=no → yes` — unpack runs during the download, reading each volume seconds after it lands
+  (page-cache hot), so there is no later full re-read pass of the HDD. Unpack output goes to DestDir on sda,
+  a different disk. If par repair is needed NZBGet discards the direct unpack and redoes it normally.
+- `ArticleCache=1024 → 4096` (MB) — bigger in-RAM gathering, fewer/larger sequential writes. Budget:
+  16 GB total, services ~1.5–2 GB, 4 GB cache, rest page cache; zram swap 3.8 GB as backstop.
+**Not done:** tmpfs InterDir (overflow on 10–20 GB 4K items), global vm.dirty_* tuning (affects OS disk).
+**Undo:** restore the backup, restart nzbget. **To confirm in real use:** next big download, watch
+`/proc/diskstats` reads on sdb during unpack (expect ~0) and NZBGet history unpack times.
+
+
+## DECISION 139 — Samsung T7 SSD as a TEMPORARY NZBGet download drive + live pipeline panel on the hub
+[CHANGE: cowork | 2026-10-10] Shawn plugged a Samsung T7 (1 TB, exFAT, USB 5 Gbit/s, 529 GB of his own
+files) into the server: "make it temporary, will still use HDD, do not format the SSD", and show it all on
+the server page under Downloading.
+**SSD:** not formatted, nothing of his touched. Mounted by hand (NOT in fstab — temporary by design) at
+`/mnt/t7`, exfat, `uid=nzbget,gid=media,umask=0002,noatime`; bare mountpoint `chattr +i` first so an
+unmounted /mnt/t7 can never fill the root fs. Test folder `/mnt/t7/luminos-nzbget-test/incomplete`.
+Measured: write 386 MB/s, read 426 MB/s (2 GB, fdatasync/direct) vs external HDD 97/105, internal 54/85.
+exFAT has no sparse files but pre-sizing 4 GB took 0.03 s, so DirectWrite is fine.
+**NZBGet** (backup `nzbget.conf.bak-20261010-t7test`, restarted idle, read back via API):
+`InterDir=/mnt/t7/luminos-nzbget-test/incomplete`, `RequiredDir=/srv/external/usenet, /mnt/t7/luminos-nzbget-test`.
+DestDir unchanged (sda). After a reboot or unplug /mnt/t7 is not mounted → RequiredDir makes NZBGet wait
+instead of writing to root. **End the test:** `sudo luminos-t7-test-off` (refuses while busy; restores
+InterDir/RequiredDir, unmounts; removes only our empty folder).
+**Hub page** (`luminos-hub` + `assets/web/hub.js` + `app.css`, backups `/root/hub-bak-20261010/`): new
+"Pipeline" section under Downloading, polled every 3 s from new read-only `/api/pipe`: internet speed →
+NZBGet RAM buffer (used/4 GB) → drive downloads land on → drive finished files go to, plus per-drive
+read/write MB/s from /proc/diskstats (found by mountpoint, so sdX renaming can't mislabel), free space,
+Direct Unpack on/off, post-processing count, page-cache size, free RAM. Drives with no mount are not
+listed. Tested on a spare port as user luminoshub, then deployed; verified via Caddy (all endpoints 200)
+and a headless Chromium DOM dump.
+
+
+## DECISION 140 — NZBGet: 30 Ethernet connections + 12 over 5 GHz Wi-Fi, DirectRename on
+[CHANGE: cowork | 2026-10-10] Shawn: "do all 1, 2 and 3" (connections 15→30, DirectRename, split across
+Ethernet + Wi-Fi). Reason the split is now worth it: the T7 SSD (DECISION 139) writes 386 MB/s, so the
+disk is no longer the ceiling that killed DECISION 134. Re-measured HTTPS: eth ~959, 5 GHz ~356, both
+~1,300–1,326 Mbit/s.
+**How the split works** (NZBGet has no per-server interface option):
+- `nzbget.conf` (backup `nzbget.conf.bak-20261010-split`): Server1 port 563 Connections 15→30;
+  new **Server2** = same UsenetServer account on **port 443**, 12 connections, Level 0; both Group=1
+  (same provider: no pointless retry of a missing article on the other); `DirectRename=yes`.
+  Total 42 of the plan's 50.
+- `/etc/luminos/luminos-nzb-split.nft` (own table `inet luminos_nzbsplit`, loaded by
+  `luminos-nzb-split.service`, enabled): `meta skuid nzbget tcp dport 443` → mark 0x161 in a route
+  hook (reroute), masquerade on wlan0 so replies return over Wi-Fi. Mark is outside Tailscale's
+  0x00ff0000 mask; no other table touched.
+- `/etc/systemd/network/25-wireless.network.d/30-nzb-split.conf`: rule fwmark 0x161 → table 161
+  (priority 90), table 161 = default via 192.168.2.1 dev wlan0. Owned by networkd (DECISION 36a).
+  Wi-Fi down → table 161 empty → falls through to main → those 12 connections use Ethernet.
+**Verified:** 200 MB as user nzbget to :443 → wlan0 209 MB / eth 0; same as normal user → eth 209 /
+wlan0 0; NNTP 281 login as nzbget on 443 and 563; all services, DNS, Tailscale, Jellyfin + hub on .61
+and .62 OK. Applied behind a 5-min auto-revert (`systemd-run`), disarmed after checks.
+**Hub:** Pipeline panel now also shows live Ethernet + Wi-Fi receive speed (`links` in /api/pipe).
+**Undo:** `sudo luminos-nzb-split-revert` (network side) + restore the nzbget.conf backup, restart nzbget.
+
+
+## DECISION 141 — T7 SSD test ended; NZBGet back on the external HDD; Ethernet+Wi-Fi split kept
+[CHANGE: cowork | 2026-10-10] Shawn removed the SSD and asked to delete the recent test download and go
+back to the HDD, keeping the split. **Result of the test (DECISION 139/140):** Justice League remux
+51,426 MB downloaded in 9m54s = 86.6 MB/s vs Dragon Ball 41,900 MB in 12m15s = 57 MB/s (+52%).
+**Done:** Justice League (Radarr id 12) deleted via Radarr API `deleteFiles=true` (51.2 GB file under
+/srv/media/movies; internal free 262→310 GB; no usenet leftovers). `luminos-t7-test-off` ran: InterDir
+`/srv/external/usenet/incomplete`, RequiredDir `/srv/external/usenet`, nzbget restarted, SSD unmounted
+(not formatted; Shawn's files untouched), empty /mnt/t7 removed (chattr -i first).
+**Kept:** Server1 563×30 + Server2 443×12 over Wi-Fi (DECISION 140), DirectRename, DirectUnpack,
+ArticleCache 4096, the /srv/external mount guard (DECISION 137). Dragon Ball (Radarr id 11,
+/srv/external/movies) NOT deleted — asked Shawn whether "recent" included it.
+**Expect:** download speed now capped by the external HDD (~97 MB/s write) — close to the measured
+86.6 MB/s network rate, so the split still helps; the hub Pipeline shows it live.
+
+
+## DECISION 142 — Jellyfin sees the real client IP through Caddy; remote streams capped at 8 Mbps (BUG-194)
+<!-- [CHANGE: claude | 2026-10-12] -->
+**Problem:** a remote cap is only as good as Jellyfin's "is this client at home?" test, and Caddy made every
+proxied request look like 127.0.0.1 → home. Reproduced before the change: tailnet client via Caddy :8443 →
+`/System/Endpoint` `IsInNetwork:true`; same client direct on :8096 → `false`.
+**Fix (not "always use :8096"):** fix the IP, then every path is judged the same way.
+- `/etc/jellyfin/network.xml`: `KnownProxies` = `127.0.0.1` (trust Caddy's X-Forwarded-For, and only Caddy's);
+  `LocalNetworkSubnets` = `192.168.2.0/24` (explicit; the tailnet 100.64/10 is never "home").
+- `/etc/jellyfin/system.xml`: `RemoteClientBitrateLimit` 0 → `8000000`.
+- Caddyfile unchanged: Caddy 2.11 with no `trusted_proxies` overwrites any client-sent X-Forwarded-For. Never add
+  `trusted_proxies private_ranges` — LAN clients could then claim any IP.
+Backups `/etc/jellyfin/{network,system}.xml.pre-bug194`. Reasoning cross-checked by an independent Fable pass.
+**Verified on the box after restart (19:48):** loopback direct true · tailnet via Caddy **false** · tailnet via Caddy
+with forged XFF 192.168.2.50 **false** · tailnet direct with forged XFF **false** · LAN via Caddy .61:8443 true · LAN
+direct :8096 (Roku path) true. PlaybackInfo for the 55.8 Mbps Dragon Ball remux asking 140 Mbps: LAN direct
+VideoBitrate 134.8 M; **tailnet via Caddy 6.46 M** (8 M minus audio).
+**Traps:** EnableIPv6 is false — if it is ever turned on, LAN IPv6 clients become "remote" unless their prefix is added.
+The G14 on its tailnet IP is now capped too (add its single 100.x IP to LocalNetworkSubnets if that matters; never the /10).
+Keep `EnableRemoteAccess=true` or the phone is refused on every path.
+**Not done (still BUG-194):** the phone still always rides the DERP relay — firewall udp 41641 / router mapping /
+dual-NIC port fix are the next step for quality above 8 Mbps.
+
+
+## DECISION 148 — Playback Doctor round 1: transcodes stop when you stop, 30-day logs; HDR colour needs OpenCL (BUG-205)
+<!-- [CHANGE: claude | 2026-10-18] -->
+Inputs: server/docs/doctor/{CENSUS,LOG_TRUTH,SERVER_FORMATS}.md (three parallel workers, read-only).
+**Applied (/etc/jellyfin/encoding.xml + system.xml, backups `*.pre-doctor`):** `EnableThrottling=true`, `EnableSegmentDeletion=true`
+(a transcode had kept encoding 23 min after the viewer left), `LogFileRetentionDays` 3 → 30 (3 days had deleted every ffmpeg log
+the doctor needed). `EnableTonemapping` stays **false** (BUG-205).
+**Verified:** real HLS transcode of Ozark S02E09 (HDR10 4K) via PlaybackInfo + 3 segments fetched: 1.3 MB output, 6.07x realtime, hw decode+encode.
+Done behind `systemd-run` auto-revert (600/900 s), disarmed after the pass.
+**Open — correct HDR/DV colour on transcodes:** needs an OpenCL runtime for Gen9.5: AUR `intel-compute-runtime-legacy` (Arch extra dropped
+Gen8–11). Risk per SERVER_FORMATS.md: `-bin` variant conflicts with `intel-gmmlib` that `intel-media-driver` uses. Not done yet.
+
+
+## DECISION 149 — Intro Skipper no longer re-scans a season on every import; nightly run moved to 04:00
+<!-- [CHANGE: claude | 2026-10-18] -->
+LOG_TRUTH.md pattern E: on 2026-09-27 every Ozark S3 import re-analysed the season from the same 5400 rpm disk while Shawn watched;
+both Roku failures that evening fell inside it (correlation). Set plugin `AutoDetectIntros=false` via API (backup
+`/var/lib/jellyfin/plugins/configurations/IntroSkipper.xml.pre-doctor`); "Detect and Analyze Media Segments" DailyTrigger 00:00 → **04:00**.
+Cost: a new episode gets its Skip Intro button the next morning, not minutes after import.
+
+## DECISION 150 — phone at home = full quality, away = 8 Mbps (fixes DECISION 142's home cap)
+<!-- [CHANGE: claude | 2026-10-18] -->
+LOG_TRUTH.md pattern B: the Pixel always uses its tailnet IP, so DECISION 142 capped it at home too. `luminos-phone-cap`
+(`server/scripts/`, 28 lines) + `luminos-phone-cap.timer` (every 15 s, root): if the phone is online and `tailscale ping` answers via
+a `192.168.2.x` address → `RemoteClientBitrateLimit=0`, otherwise (offline / relayed / mobile) → `8000000`, via the Jellyfin API.
+Peer endpoint lists (`Addrs`) are NOT exposed by `tailscale status --json`, and `CurAddr` is empty while idle — the ping is the only
+reliable test (first version using Addrs called the G14-at-home "away"; caught by test).
+**Verified:** logic run against the G14 (at home) → home; Pixel (offline) → away; live limit stays 8 M while the phone is offline.
+**Not verified:** a real phone session at home (phone offline 6 days). Trade-off: the cap is global, so while the phone is home any other
+remote client is uncapped too (there are none today). A session started in the 15 s before a flip keeps its bitrate.
+
+## DECISION 151 — nftables: accept UDP 41641 so Tailscale can make direct connections (BUG-194)
+<!-- [CHANGE: claude | 2026-10-18] -->
+`udp dport 41641 accept` added to `/etc/nftables.conf` (backup `.pre-doctor`), behind a 300 s auto-revert, disarmed after Jellyfin,
+DNS, SSH and Tailscale (G14 pong direct via 192.168.2.16) were confirmed. 41641 is WireGuard only; tailscaled drops anything unauthenticated.
+`tailscale debug portmap`: **router offers no UPnP / NAT-PMP / PCP**, so it cannot open the port itself. Direct path from mobile data
+now depends on the router's NAT filtering; **owner-only guaranteed fix:** Bell Giga Hub port forward UDP 41641 → 192.168.2.62
+(+ DHCP reservation for .62). Not verified from mobile data yet.
+
+## DECISION 153 — every import is auto-fixed: default tracks + subtitle sidecars (hook + nightly)
+<!-- [CHANGE: claude | 2026-10-18] -->
+Owner approved in chat 2026-10-18 ("yes do both"): header-only track-flag edits, subtitle sidecars, Sonarr/Radarr hook.
+Playback Doctor Phase 4/5: stop fixing playback one episode at a time from the couch.
+**What:** `server/scripts/luminos-media-fix` (→ `/usr/local/bin/`, python stdlib + `mkvtoolnix-cli` 101.0 from extra + jellyfin-ffmpeg).
+Per file: (a) MKV only, `mkvpropedit` (header-only, ~0.3 s on a 41 GB remux, size unchanged): English audio → the only default audio
+(no English audio → audio untouched); full English **text** sub → the only default sub; non-English subs lose default also when English
+only exists as a sidecar; forced English is **never** default. Flags re-probed after the edit; any mismatch = exit 1.
+(b) `<stem>.en.srt` from the full English text track and `<stem>.en.forced.srt` from the forced one, only if missing, one ffmpeg pass,
+ASS→SRT drops styling on purpose; image-only English (PGS/VobSub) is skipped and logged "needs Bazarr". Sidecar owner/group/mode copied
+from the media file (owner only when root). Heavy steps under `ionice -c3 nice -n19`. (c) Jellyfin `POST /Items/{id}/Refresh`
+(Default, no replace); not yet indexed → `/Library/Media/Updated`. (d) one JSON line per file (incl. before-flags) to
+`/var/log/luminos-media-fix.log`. Skips a file that is playing right now. Never deletes or moves media.
+**Hook:** Custom Script connection "luminos-media-fix" in Sonarr and Radarr (id 2 in both, On Import + On Upgrade) →
+`/usr/local/bin/luminos-media-fix-hook` (reads `sonarr_episodefile_path` / `radarr_moviefile_path`, `Test` exits 0).
+**Nightly safety net:** `luminos-media-fix.timer` 03:30 `Persistent=true` → `luminos-media-fix.service` runs `--all` over Jellyfin's
+library roots (skips `_*` dirs) as root, so it also fixes anything the hook could not write. Before the 04:00 subtitle-warm sweep.
+**Permissions — no sudo:** the arrs run `User=sonarr|radarr Group=media` with `PrivateUsers=true`, `ProtectSystem=full`. Library files
+are `664 :media`, dirs `2775 :media`, so group `media` can `mkvpropedit` and write sidecars. Jellyfin key for the hook: dedicated API key
+"luminos-media-fix" in `/etc/luminos/media-fix-jellyfin.token` (`root:media 0640`); log `root:media 0664`. Proven with a throw-away MKV run
+through `systemd-run` with the **same sandbox** as sonarr.service (User=sonarr, Group=media, PrivateUsers, ProtectSystem=full) → flags
+changed, `.en.srt` written, rc 0 (test dir removed). Exception: `Ozark S02E03` is `644` (DV-fix output) — the hook could not edit it, the
+nightly root run can; it needed no flag change today.
+**Things that bite:** (1) Sonarr/Radarr import by **hardlink**, so the header edit also changes the twin under `/srv/media/downloads`
+(same inode — expected, no extra space). (2) Changing the file's mtime makes Jellyfin **drop its subtitle cache** for that item (seen on
+S02E01) — that is why sidecars are written *before* the flag edit. (3) Extraction reads the whole file: ~3.5 min per 12 GB episode on the
+idle disk, 8–12 min while another job hammers `sda` (an llvm git clone did during the first batch). New imports pay this once.
+**Verified:** Dragon Ball (gate, run as `radarr`): audio untouched (jpn TrueHD+AC3 still default), Chinese PGS default 1→0;
+`PlaybackInfo` (user shawn, Roku-like profile: srt/vtt External only) → DirectPlay, default sub = external English subrip,
+`DeliveryMethod=External`. Ozark S03E01 / S03E10: forced 1→0, SDH 0→1, `.en.srt` + `.en.forced.srt` written, PlaybackInfo → external
+full English, External. Sonarr + Radarr `POST /notification/test` → 200. **Batch (all 21 files, via the real
+`luminos-media-fix.service`, 17:46–19:03, Result=success):** 22 sidecars, 23 flag changes, 0 errors; second pass plans 0 changes on 21/21;
+PlaybackInfo on all 21 → external English SRT, External, DirectPlay. Timer enabled, next run 03:30.
+
+## DECISION 154 — nftables: allow Jellyfin auto-discovery (UDP 7359) from the LAN
+<!-- [CHANGE: claude | 2026-10-18] -->
+2026-10-18 20:49 the Roku app showed "Connect to Server" with an EMPTY server list. Server was healthy the whole time (Jellyfin active,
+`http://192.168.2.61:8096` 200 from the G14, TV .18 pinging 4–8 ms) and the Roku had not contacted Jellyfin at all that day — the app had
+forgotten its saved server (cause unknown; app is 3.2.4 since 10-03). The list was empty because DECISION 90's named-port firewall never
+allowed Jellyfin's discovery port. Added `ip saddr 192.168.2.0/24 udp dport 7359 accept`. Verified: unicast probe from the G14 answers
+`{"Address":"http://192.168.2.62:8096","Name":"luminos-server",...}`. Manual entry `192.168.2.61:8096` always works.
+
+## DECISION 155 — Bazarr auto-syncs every downloaded subtitle to the audio (ffsubsync)
+<!-- [CHANGE: claude | 2026-10-18] -->
+Shawn: Dragon Ball Super: Super Hero English subs "way off". The file has no English track; the `.en.srt` was a Bazarr download timed
+for another release. ffsubsync (Bazarr's bundled 0.5.0, run against the audio as user bazarr, 6m50s for the 42 GB remux) found a
+constant **−6.72 s** offset, framerate scale 1.000. Cross-check: first English cue 40.04 → 33.32 s vs the embedded Chinese PGS first event
+33.16 s. Installed over the sidecar (backup `/var/lib/luminos-doctor/dbs-en.srt.pre-sync`), Jellyfin item refreshed.
+Prevention: `/var/lib/bazarr/config/config.yaml` `subsync.use_subsync` false → **true** (backup `.pre-subsync`), Bazarr restarted, UI 200.
+Thresholds left off so every download is synced (gss on, max offset 60 s, framerate fix off — as configured).
+
+## DECISION 152 — OpenCL runtime on the media server: HDR/DV transcodes now tonemapped on the iGPU (BUG-205 fixed)
+<!-- [CHANGE: claude | 2026-10-20] -->
+Packages (AUR, built by Shawn — the agent's own install was blocked by the permission classifier): `intel-graphics-compiler-legacy
+1.0.17537.24-2`, `intel-compute-runtime-legacy 24.35.30872.45-1`, `level-zero-*-legacy 1.17.44`, `igsc-legacy 0.9.3`, plus `clinfo`.
+Arch extra dropped Gen8–11 from intel-compute-runtime; this UHD 620 (Gen9.5) needs the legacy branch.
+**Trap:** the AUR deps pull `intel-gmmlib-legacy 22.5`, which CONFLICTS with `intel-gmmlib 22.10` that `intel-media-driver` (VAAPI) needs.
+The first run used `--noconfirm`, so pacman refused the removal (nothing changed). Fix: compute-runtime's PKGBUILD depends switched
+`intel-gmmlib-legacy → intel-gmmlib` and built against the installed 22.10 (same soname). Builds ran in `/srv/media/.aur-build`
+(BUG-206: never in ~/.cache on the 40 G root). `intel-gmmlib 22.10.0-1` + `intel-media-driver 26.2.4-1` unchanged.
+**Verified 2026-10-20:** `clinfo` → Intel(R) OpenCL Graphics / UHD Graphics; jellyfin-ffmpeg derives OpenCL from VAAPI as user jellyfin;
+vainfo still HEVC Main10 VLD + H264 EncSlice. `EnableTonemapping=true` (backup `encoding.xml.pre-opencl`, 900 s auto-revert, disarmed):
+real HLS transcode of Ozark S02E07 (HDR10 4K) → chain `scale_vaapi → hwmap opencl → tonemap_opencl bt2390 → hwmap vaapi`, all on GPU,
+**2.88x** realtime; frame check vs CPU tonemapx reference: background luma 217 (new) vs 220 (reference) vs 151 (old relabel-only).
+SDR Ozark S3 transcode unaffected: plain scale_vaapi path, 4.64x.
+**Rebuild risk:** an Intel gmmlib soname bump or a jellyfin-ffmpeg OpenCL change can break this; symptom = every HDR transcode fails
+(BUG-205 shape). Fallback: set EnableTonemapping=false (colours washed, playback works).
+
+## DECISION 156 — every Dolby Vision Profile 5 file is converted to HDR10 automatically (BUG-207)
+<!-- [CHANGE: claude | 2026-10-23] -->
+Root cause (BUG-207): jellyfin-roku 3.2.4 advertises DOVI for HEVC in every container whenever the TV panel reports Dolby Vision,
+so Jellyfin direct-plays DV P5 MKVs; the Roku player shows the raw P5 base layer → violet. The DECISION 152 tonemap fix only runs on
+transcodes, so it never sees these. Server-side Jellyfin 10.11 has no per-device profile to override the app's claim.
+Fix: `luminos-dv-sweep` (server/scripts, 47 lines) + `luminos-dv-sweep.timer` (every 30 min, Persistent) runs the proven
+`luminos-dv-fix` (DECISION 95) on every DV P5 file under Jellyfin's library roots → tagged HDR10 (this TV direct-plays HDR10
+correctly, BUG-189). Original kept in /srv/external/_dv_p5_originals, never deleted; verification (duration/audio count) before swap.
+Output bitrate = 1.3× source, 12–28 Mbps. One file at a time (flock); waits while anyone is watching. After a swap: chmod 664 (the
+arrs' hook needs group write — this is also why Ozark S02E03 was 0644) and Jellyfin `/Library/Media/Updated`.
+Also: `luminos-media-fix` library walk now skips dot-files, so the nightly run can never touch luminos-dv-fix's `.dvfix.*.mkv` temp
+file (backup `/usr/local/bin/luminos-media-fix.pre-dvsweep`). Measured: VisionQuest S01E02 converting at ~0.57× realtime (~80 min/ep).
+Accepted cost: P5 files are purple until converted (≤ 30 min to start + ~1.5–2× runtime); the HDR10 result loses the DV dynamic layer.

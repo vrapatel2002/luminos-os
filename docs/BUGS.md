@@ -8569,3 +8569,28 @@ text → prompt cache stays valid).
 Read-style tool_result with a screenshot → GLM listed the sidebar channels correctly, 16 s first / 5 s cached;
 claude-glm via proxy answers. Not yet seen: GLM in the desktop window choosing luminos-screenshot by itself.
 Note: screenshots are sent to Abliteration (their docs: zero retention by default).
+
+## BUG-207 — VisionQuest purple on the Roku: Dolby Vision Profile 5 DIRECT-PLAYED, so the DECISION 152 colour fix never ran
+<!-- [CHANGE: claude | 2026-10-23] -->
+**Status:** FIX DEPLOYED 2026-10-23 (DECISION 156: auto P5→HDR10 sweep); VisionQuest S01E01/E02 converting; awaiting verification + Shawn watching.
+**Evidence (2026-10-23 ~19:00):** both VisionQuest S01E01/E02 (WEBDL-2160p) are HEVC **DV Profile 5**, bl_signal_compatibility_id 0
+(no HDR10/SDR fallback layer). Jellyfin item: VideoRangeType=DOVI. Live session: Jellyfin Roku 3.2.4 on 65PUL7973, **PlayMethod=DirectPlay**,
+TranscodingInfo none; no FFmpeg.Transcode log since 10-20. The Roku app tells Jellyfin it can play Dolby Vision, so Jellyfin sends the
+raw file; the TV/Roku player decodes the P5 colour data wrong → violet. Same mechanism as BUG-189 (Ozark S02E03).
+**Why the fixes missed it:** DECISION 152 tonemapping only runs when the server *converts* (transcode); direct play never touches ffmpeg.
+DECISION 153 `luminos-media-fix` (import hook + nightly) only fixes subtitle sidecars and default-track flags — it ran on these files
+10-20 03:30 and does not inspect video. `luminos-dv-fix` (DECISION 95, P5→HDR10 conversion) exists on the server but was never wired
+into the hook or the nightly run. Plan §2 listed DV P5 → "luminos-dv-fix" as a category fix; the census found 0 P5 files at the time, so
+the gate was never built — PM error: "purple fixed" was reported on the strength of the transcode path only.
+**Fix options (not applied):** (a) hook + nightly run luminos-dv-fix on any DV P5 import; (b) make Jellyfin refuse to direct-play
+DOVI P5 to the Roku (force transcode → tonemap_opencl path, measured correct, 1080p); (c) both.
+**BUG-207 pinpoint (2026-10-23 19:30, read-only):** jellyfin-roku 3.2.4 `source/utils/deviceCapabilities.bs`:
+`dp = di.GetDisplayProperties()` → `if dp.DolbyVision` → appends `DOVI|DOVIWithHDR10|…` to `hevcVideoRangeTypes`, which goes into
+ONE hevc CodecProfile (no container condition). DirectPlayProfiles list `mkv,webm` with hevc whenever `CanDecodeVideo({hevc, mkv})`.
+So the app tells Jellyfin "HEVC + DOVI is fine in MKV" purely because the TV *panel* supports DV — it never asks whether the Roku
+*player* applies DV metadata from an MKV file, nor which DV profile. Same code on master (2026-10-10) — no newer app fixes it.
+Jellyfin 10.11 only direct-plays VideoRangeType=DOVI when the client lists DOVI → the live DirectPlay proves the TV reported DV=true.
+Roku's own spec (developer.roku.com/dev/docs/media) lists Dolby Vision (dvhe.05) only for HLS/DASH adaptive streams; MP4/MKV rows list
+codecs only. Field reports: same purple/green on DV P5 direct play in the Jellyfin Roku app while the Roku Media Player (DLNA) shows it
+correctly. **Unproven last link:** that the Roku player ignores the DV RPU in progressive MKV (→ shows the raw IPT-PQ-c2 base layer =
+purple). Settle with one A/B on this TV: same 2-min P5 clip as MKV vs fMP4/HLS, watched by Shawn.

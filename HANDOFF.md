@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-22 21:50 — R2 of the post-reboot session (GLM-5.3 window, host-shell available)
+Last updated: 2026-10-23 19:45 — Response 35 (BUG-207/DECISION 156 documented; DV history compiled; sweep converting VisionQuest)
 
 **RESET this date per §0.2 tripwire** (file had grown to ~470 lines). Pre-reset content is in git:
 `git show HEAD:HANDOFF.md` (HEAD = `e3177cd4`, 2026-10-22 18:47, the GLM side-by-side commit). Only
@@ -10,7 +10,14 @@ what a newcomer must not re-learn or re-break is carried forward. The 2026-10-22
 Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
 separate media server — fixing what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-22 evening, GLM window) — get CoD "MW4" running on Luminos, then Vela
+## Aim right now (2026-10-23 19:45) — VisionQuest purple = DV Profile 5 direct play (BUG-207), auto-fix live (DECISION 156)
+Root cause pinned in jellyfin-roku 3.2.4 deviceCapabilities.bs (DOVI advertised for HEVC in any container when the panel reports DV).
+`luminos-dv-sweep.timer` (every 30 min) converts every P5 file to HDR10 via luminos-dv-fix; VisionQuest S01E02 converting since 19:24
+(~80 min/ep), S01E01 next. A send_later check (~20:53) verifies (no DOVI side data, HDR10 in Jellyfin, frame looks natural) and pushes
+Shawn to test on the TV. History of all 4 incidents: server/docs/doctor/DV_PURPLE_HISTORY.md. Unproven: whether MKV→HLS/MP4 would let
+the Roku show real DV (A/B test never run) — would allow keeping DV instead of HDR10.
+
+## Previous aim (2026-10-22 evening, GLM window) — get CoD "MW4" running on Luminos, then Vela
 Game: **Call of Duty - Modern Warfare 4 (2026) campaign repack** at `/mnt/win-os/Games/Call of Duty -
 Modern Warfare 4` (`sp26/sp26-cod.exe` = campaign, `cod.exe` = online HQ launcher, NOT used; Ricochet
 attestation only matters for MP). Lutris entry `mw4` (id row name "mw4", configpath

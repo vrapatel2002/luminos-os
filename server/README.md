@@ -455,3 +455,7 @@ Things that need physical access or the router admin page:
 - **Disable Tailscale key expiry for `luminos-server`** in the admin console. The machine key
   expires **2027-02-01**, and when it does the server drops off the tailnet silently — remote
   access just stops, months from now, with nothing logged on the box. There is no CLI for it.
+
+- **Dolby Vision Profile 5 = purple on the Roku, and the Roku always asks for direct play.** <!-- [CHANGE: claude | 2026-10-23] -->
+  The transcode colour fix never sees it. `luminos-dv-sweep.timer` converts every P5 file to HDR10 every 30 min (DECISION 156).
+  Don't disable it without replacing it. History: `server/docs/doctor/DV_PURPLE_HISTORY.md`.

@@ -1,0 +1,11 @@
+# [CHANGE: claude | 2026-10-23] DECISION 156 / BUG-207
+[Unit]
+Description=Look for new Dolby Vision Profile 5 files every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

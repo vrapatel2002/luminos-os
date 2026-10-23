@@ -1,0 +1,47 @@
+#!/bin/bash
+# luminos-dv-sweep — find every Dolby Vision Profile 5 file in the library and convert it to HDR10.
+# [CHANGE: claude | 2026-10-23] DECISION 156 / BUG-207.
+#
+# Why: the Jellyfin Roku app tells the server "Dolby Vision OK" for ANY file type, because the TV
+# screen supports DV. The server then sends P5 MKVs straight through and the Roku player shows the
+# raw P5 picture — violet/green. The transcode colour fix (DECISION 152) never runs on that path.
+# HDR10 always plays correctly on this TV, so every P5 file is converted with luminos-dv-fix
+# (DECISION 95: verified conversion, original kept in /srv/external/_dv_p5_originals, nothing deleted).
+#
+# Runs from luminos-dv-sweep.timer every 30 min, so a new download is picked up automatically.
+# One file per run at most one at a time (flock). Waits while anyone is watching (shared iGPU).
+set -u
+exec 9>/run/luminos-dv-sweep.lock
+flock -n 9 || exit 0
+
+FP=/usr/lib/jellyfin-ffmpeg/ffprobe
+TOKEN=$(cat /root/.jellyfin-token)
+J=http://127.0.0.1:8096
+ROOTS=$(curl -s -m10 -H "X-Emby-Token: $TOKEN" "$J/Library/VirtualFolders" \
+        | python3 -c 'import json,sys;[print(l) for v in json.load(sys.stdin) for l in v.get("Locations",[])]')
+[ -n "$ROOTS" ] || { echo "no library roots from Jellyfin — not scanning"; exit 1; }
+
+watching() {
+  curl -s -m5 -H "X-Emby-Token: $TOKEN" "$J/Sessions?activeWithinSeconds=120" | grep -q '"NowPlayingItem"'
+}
+
+echo "$ROOTS" | while IFS= read -r root; do
+  find "$root" -path '*/_*' -prune -o -type f -name '*.mkv' ! -name '.*' -print0
+done | while IFS= read -r -d '' f; do
+  /usr/local/bin/luminos-dv-fix --dry-run "$f" | grep -q '^WOULD FIX' || continue
+  if watching; then echo "someone is watching — leaving $f for the next run"; exit 0; fi
+
+  # Match the output size to the source: ~1.3x its bitrate, 12–28 Mbps.
+  src=$($FP -v error -show_entries format=bit_rate -of csv=p=0 "$f" 2>/dev/null)
+  rate=$(( ${src:-20000000} * 13 / 10 / 1000000 )); [ "$rate" -lt 12 ] && rate=12; [ "$rate" -gt 28 ] && rate=28
+  LUMINOS_DV_BITRATE=${rate}M LUMINOS_DV_MAXRATE=$((rate * 3 / 2))M /usr/local/bin/luminos-dv-fix "$f"
+
+  if /usr/local/bin/luminos-dv-fix --dry-run "$f" | grep -q '^SKIP (not Profile 5)'; then
+    chmod 664 "$f"   # luminos-dv-fix writes as root (0644); the arrs' hook needs group write
+    curl -s -m10 -o /dev/null -H "X-Emby-Token: $TOKEN" -H "Content-Type: application/json" \
+      -d "{\"Updates\":[{\"Path\":\"${f//\"/\\\"}\",\"UpdateType\":\"Modified\"}]}" "$J/Library/Media/Updated"
+    echo "converted: $f"
+  else
+    echo "NOT converted (see luminos-dv-fix output above): $f"
+  fi
+done
