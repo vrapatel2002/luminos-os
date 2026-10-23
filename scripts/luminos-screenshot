@@ -1,0 +1,49 @@
+#!/usr/bin/python3
+# luminos-screenshot — take a screenshot and print a TEXT description of it (for text-only models like GLM-5.3).
+# [CHANGE: cowork | 2026-10-23] DECISION 156 / BUG-209.
+#   luminos-screenshot                  whole screen
+#   luminos-screenshot --window         active window only
+#   luminos-screenshot --ask "is there an error dialog?"
+#   luminos-screenshot --no-describe    just save it and print the path
+# Saves to ~/luminos-os/.screens/ (git-excluded, newest 30 kept) as a 1920px JPEG.
+import argparse, base64, glob, io, os, subprocess, sys, time, importlib.util
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--window", action="store_true"); ap.add_argument("--ask")
+ap.add_argument("--no-describe", action="store_true")
+a = ap.parse_args()
+
+env = dict(os.environ)
+env.setdefault("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid())
+env.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=%s/bus" % env["XDG_RUNTIME_DIR"])
+try:   # the caller (an agent shell) may lack the Wayland session vars; take them from the session itself
+    out = subprocess.run(["systemctl", "--user", "show-environment"], env=env, capture_output=True, text=True, timeout=10).stdout
+    for line in out.splitlines():
+        k, _, v = line.partition("=")
+        if k.startswith(("KDE_", "XDG_", "QT_")) or k in ("WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"):
+            env[k] = v
+except Exception:
+    pass
+
+d = os.path.expanduser("~/luminos-os/.screens"); os.makedirs(d, exist_ok=True)
+raw = os.path.join(d, ".raw-%d.png" % os.getpid())
+subprocess.run(["spectacle", "-b", "-n", "-a" if a.window else "-f", "-o", raw], env=env,
+               capture_output=True, timeout=30)
+if not os.path.exists(raw) or os.path.getsize(raw) == 0:
+    sys.exit("FAIL: spectacle wrote no screenshot (is the screen locked or the session not running?)")
+
+from PIL import Image
+im = Image.open(raw).convert("RGB"); full = im.size; im.thumbnail((1920, 1920))
+path = os.path.join(d, time.strftime("shot-%Y%m%d-%H%M%S.jpg")); im.save(path, quality=88); os.remove(raw)
+for old in sorted(glob.glob(os.path.join(d, "shot-*.jpg")))[:-30]:
+    os.remove(old)
+
+print("Screenshot saved: %s  (%s, screen %dx%d, saved %dx%d)" % (path, "active window" if a.window else "full screen",
+      full[0], full[1], im.size[0], im.size[1]))
+if a.no_describe:
+    sys.exit(0)
+spec = importlib.util.spec_from_file_location("lv", os.path.join(os.path.dirname(os.path.realpath(__file__)), "luminos-vision.py"))
+lv = importlib.util.module_from_spec(spec); spec.loader.exec_module(lv)
+buf = io.BytesIO(); im.save(buf, "JPEG", quality=88)
+text, _ = lv.describe("image/jpeg", base64.b64encode(buf.getvalue()).decode(), a.ask)
+print("\nWhat is on the screen (described by abliterated-model):\n" + text)

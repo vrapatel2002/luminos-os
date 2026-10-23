@@ -6,11 +6,16 @@ KEYFILE="$HOME/.config/luminos/abliteration.env"
 [ -f "$KEYFILE" ] || { echo "No Abliteration key yet — run: luminos-glm-key" >&2; exit 1; }
 . "$KEYFILE"
 unset ANTHROPIC_API_KEY
-export ANTHROPIC_BASE_URL="https://api.abliteration.ai"
-export ANTHROPIC_AUTH_TOKEN="$ABLITERATION_API_KEY"
-export ANTHROPIC_MODEL="abliterated-model-large-v2"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="abliterated-model-large-v2"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="abliterated-model-large-v2"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="abliterated-model"   # cheap model for small background jobs
+# Through luminos-glm-proxy (127.0.0.1:4141), like the GLM desktop window: it turns images into text
+# descriptions (GLM-5.3 is text-only, BUG-209) and adds the local-tool rules (BUG-208).
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+systemctl --user start luminos-glm-proxy 2>/dev/null || true
+export ANTHROPIC_BASE_URL="http://127.0.0.1:4141"
+export ANTHROPIC_AUTH_TOKEN="$GLM_LOCAL_TOKEN"
+export ANTHROPIC_MODEL="claude-opus-4-5"                 # proxy -> abliterated-model-large-v2 (GLM-5.3)
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4-5"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-opus-4-5"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5"  # proxy -> abliterated-model (cheap, sees images)
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 exec "$HOME/.local/bin/claude" "$@"

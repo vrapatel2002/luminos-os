@@ -11,6 +11,11 @@
 import http.client, json, os, sys, ssl
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
+import importlib.util
+_vp = os.path.join(os.path.dirname(os.path.realpath(__file__)), "luminos-vision.py")
+_spec = importlib.util.spec_from_file_location("luminos_vision", _vp)
+vision = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(vision)
+
 PORT = int(os.environ.get("GLM_PROXY_PORT", "4141"))
 UP_HOST = "api.abliteration.ai"
 ENVF = os.path.expanduser("~/.config/luminos/abliteration.env")
@@ -37,12 +42,16 @@ NUDGE = NUDGE_MARK + """ REQUIRED tool rules for this laptop (these tools are re
 3. After adding files or changing imports, call mcp__code-review-graph__build_or_update_graph_tool.
 4. After a major change, save it with mcp__mempalace__mempalace_add_drawer (wing luminos-os, room decisions), then read it back with mcp__mempalace__mempalace_get_drawer.
 5. To run commands directly on this laptop (outside the sandbox) use mcp__host-shell__run_command.
+6. You cannot see images yourself. To SEE THE SCREEN, run `luminos-screenshot` with mcp__host-shell__run_command
+   (options: `--window` = only the active window, `--ask "question"` = also answer a question about it). It prints a
+   detailed text description of what is on the display plus the saved image path. Any image in this chat (pasted, or
+   read from a file) has already been replaced by a text description for you.
 If one of these tools is listed as deferred, load it with ToolSearch first."""
 
 def add_nudge(j):
     names = [t.get("name", "") for t in (j.get("tools") or []) if isinstance(t, dict)]
     blob = " ".join(names)
-    if "mempalace" not in blob and "code-review-graph" not in blob and "ToolSearch" not in blob:
+    if "mempalace" not in blob and "code-review-graph" not in blob and "ToolSearch" not in blob and "host-shell" not in blob:
         return False
     sysp = j.get("system")
     if isinstance(sysp, str):
@@ -97,6 +106,10 @@ class H(BaseHTTPRequestHandler):
             j = json.loads(body)
             if isinstance(j, dict) and "model" in j:
                 asked = j["model"]; j["model"] = map_model(asked)
+                # BUG-209: GLM-5.3 is text-only (images -> HTTP 400). Swap each image for a description.
+                if j["model"] == "abliterated-model-large-v2" and vision.has_images(j):
+                    st = vision.strip_images(j, do_describe=not self.path.startswith("/v1/messages/count_tokens"))
+                    sys.stderr.write("vision: %d image(s) described, %d from cache\n" % (st["images"], st["cached"]))
                 if self.path.startswith("/v1/messages") and not self.path.startswith("/v1/messages/count_tokens"):
                     nudged = add_nudge(j)
                     tn = [t.get("name","") for t in (j.get("tools") or []) if isinstance(t, dict)]

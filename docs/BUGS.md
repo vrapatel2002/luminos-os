@@ -8548,3 +8548,24 @@ chain past the last satisfied reads (next: winedbg/gdb at the exit decision with
 or find the expected value in the obfuscated compare). mw4map.c v4 (blanket + wide filename
 at the scan point) saved in ~/Games/mw4-evidence-20261022/ + /tmp. All 3 lib copies deployed:
 /mnt/win-os/Games/mw4map.so (container-visible, proton uses this), ~/.local/share/, /tmp.
+
+## BUG-211 — GLM-5.3 window can't see the screen (model is text-only)
+# [CHANGE: cowork | 2026-10-23]
+**Ask (Shawn):** let the GLM Claude window take and use screenshots of the display like Claude does.
+**Cause:** abliterated-model-large-v2 (GLM-5.3) is text-only — any image block → HTTP 400 (control re-run 16:58: 400).
+So a screenshot read back with the Read tool, or one pasted into the chat, broke the request.
+**Fix ("borrowed eyes"):** scripts/luminos-vision.py — abliterated-model (reads images, $1/M in) describes the image
+(all text verbatim, windows, control states, errors), cached by sha256 in ~/.cache/luminos-glm/vision (same image → same
+text → prompt cache stays valid).
+- luminos-glm-proxy: for requests going to large-v2, every image block (user message or inside a tool_result) is
+  replaced by "[Image — described by abliterated-model:] …"; count_tokens gets a placeholder (no paid call). Logs
+  "vision: N image(s) described, M from cache".
+- scripts/luminos-screenshot [--window] [--ask "…"] [--no-describe]: spectacle (session env pulled from
+  systemctl --user show-environment, so it works from a bare agent shell) → ~/luminos-os/.screens/shot-*.jpg (1920px,
+  newest 30, git-excluded) → prints the description. ~18 s.
+- Proxy tool note gains rule 6 ("to see the screen run luminos-screenshot via host-shell") and now also fires when only
+  host-shell is present. claude-glm now goes through the proxy too (same eyes + rules).
+**Verified:** bare-env luminos-screenshot described the real screen (Chrome/YouTube, tab titles, sidebar); proxied
+Read-style tool_result with a screenshot → GLM listed the sidebar channels correctly, 16 s first / 5 s cached;
+claude-glm via proxy answers. Not yet seen: GLM in the desktop window choosing luminos-screenshot by itself.
+Note: screenshots are sent to Abliteration (their docs: zero retention by default).
