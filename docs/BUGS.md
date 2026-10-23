@@ -8382,3 +8382,29 @@ never added twice; requests without those tools untouched). Proxy logs `tools=N 
 Test (desktop-shaped request, task not naming the tools): with the note 3/3 runs called mempalace_search FIRST
 (2/3 also the graph); control without it called Read first. Real desktop session not yet observed.
 Side finding: `claude -p` through a custom base URL sent 0 local MCP tools (27 tools only) — one-shot CLI quirk, not chased.
+# [CHANGE: claude-code | 2026-10-22 ~22:50]
+**CRACK REVERSE-ENGINEERING (BUG-209, "fix the crack" directive):** Shawn's key hint — "runs
+after install, never the second time" — led to the first-run state test and the GVS protocol dig.
+(1) **First-run state reset tested**: all Oct-21-evening artifacts the working first Windows run
+created were moved aside (backup `first-run-state-backup-20261022/` at the game root:
+sp26/{ccs_history.json,main,D3D12,ImmerseDataSP,shadercache,GLCache} + root
+{xpak_cache,D3D12,ccsdownloader.log}) → still exit-5 crash (with CDN 503). (2) **The first-run
+Windows log (root `ccsdownloader.log`, previously unread) revealed the mechanic**: on the working
+run the downloader queried the live GVS, got build `ccs_version_13_2_29444544_910` vs expected
+`_874`, and SKIPPED downloads — the game ran beside a live, answering GVS. (3) **Fake-GVS server
+built and 90% of the protocol mapped** (`~/Games/mw4-evidence-20261022/fakegvs/`, plus a live
+hosts+TLS setup): request = `GET /v1/public/<configId>/`; response chain (from binary strings +
+empirical iterations with the downloader as oracle): JSON body = `GvsResult{size, payload}` →
+payload = JWT → decoded claims = `GameVariables{payload, variables[]}` with `key`/`value`
+variable objects (versionVariable, buildVersionVariable, killswitchVariable,
+telemetrySamplingVariable; hashes in ccsconfig.json). TLS: self-signed cert ACCEPTED (no pinning
+on this endpoint). **Unsolved last mile**: the `size` field fails validation for every candidate
+value tried (varcount / len(jwt) / len(claims) / 0) — and the binary contains JOSE crypto
+(`PBES2-HS256+A128KW`, `A128CBC-HS256`), an embedded `-----BEGIN RSA PUBLIC KEY-----`, and
+public-key pinning strings — the payload may be JWE-encrypted/signed, `size` may be the
+plaintext size. Next session: extract the embedded RSA key, test JWE shapes, or snoop a REAL
+response when the CDN recovers (curl it then — the watcher proves recovery). DNS hijack + fake
+server were REMOVED after testing (watcher integrity restored; verified real CDN = 503).
+Game dir left in fresh-install state (backup dir has the first-run artifacts). sp26-cod.exe also
+contains 15 JWT/variables refs — the game itself parses GVS JWTs in early init, matching the
+crash-when-unhealthy behavior.
