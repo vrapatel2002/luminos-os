@@ -61,7 +61,16 @@ No arm reached 107. The task is "out of 3.6's reach"; on this hardware the avail
 What would: a better-quantised Qwen3.8 (Q4: needs ~10 GB more free RAM — e.g. the 32 GB SPD mod, or closing apps; baloo
 alone holds 2 GB), or a cloud reviewer (declined by Shawn).
 
-## Claude Desktop end-to-end (Code tab)
-"Claude (Local Qwen)" → Code tab → folder `tests/coder/demo` → Qwen3.6 wrote `duration.py`, spotted its own empty-string
-bug, edited it, wrote `test_duration.py`, ran it. Request size 74 348 tokens (system prompt + MCP tool schemas) → needs
-ctx 131072; first read ~4.5 min held open by 21 gateway pings; generation ~8.5–10 t/s at that depth.
+## Claude Desktop end-to-end (Code tab) — PASSED 2026-10-24 01:34–02:31
+"Claude (Local Qwen)" → Code tab → folder `tests/coder/demo`, task: `parse_duration` (h/m/s, order, at most once,
+ValueError on malformed). What the local pair did, all inside the Desktop app:
+1. Qwen3.6 wrote `duration.py`, spotted its own empty-string bug, fixed it, wrote `test_duration.py`.
+2. `luminos-coder: run_tests` (MCP) → 3/7, it diagnosed all 4 (one wrong expectation in its own test, missing `import
+   pytest`, None → TypeError), fixed both files → 7/7.
+3. `review_start` → gateway swapped to Qwen3.8 (ready 19.6 s) → review 1024 s → "no verified defects", note: dead
+   `all(g is None)` branch → swap back (22 s) → `review_wait` → removed the dead code → 7/7 → final answer.
+Independent check by me afterwards (22 cases incl. `1m2h`, `5s5s`, `1.5h`, `-1h`, `1H`, whitespace): **22/22**.
+Wall time 53 min (prompt re-reads after each swap dominate). Costs found and fixed on the way: Claude Code request is
+74 348 tokens → ctx 131072 (64K gave HTTP 400); stream silent > ~90 s is dropped → gateway SSE pings (21 on the first
+turn); a turn queued behind the 17-min review hit Claude Code's 600 s API timeout and retried by itself →
+`luminos-claude-local` now exports `API_TIMEOUT_MS=3600000`. Each luminos-coder tool asks permission once (Always allow).

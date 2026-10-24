@@ -72,6 +72,10 @@ case "${1:-open}" in
     while IFS= read -r line; do
       case "$line" in KDE_*|XDG_*|WAYLAND_DISPLAY=*|DISPLAY=*|XAUTHORITY=*|DBUS_SESSION_BUS_ADDRESS=*|QT_*|LANG=*|PATH=*) eval "export $line";; esac
     done < <(systemctl --user show-environment)
+    # [CHANGE: claude-code | 2026-10-24] Claude Code gives up on a request after API_TIMEOUT_MS (default 600 s). A writer
+    # turn queued behind a Qwen3.8 review waits 15-20 min, so it timed out at 608 s and retried. The app passes this
+    # variable through to the Code-tab CLI.
+    export API_TIMEOUT_MS=3600000
     exec systemd-run --user --scope --quiet --unit="app-claude-local-$$" \
       /usr/bin/claude-desktop --user-data-dir="$APPDIR" ;;
   *) echo "usage: luminos-claude-local [open|setup|status]" >&2; exit 2 ;;
