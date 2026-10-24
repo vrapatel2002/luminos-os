@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-24 14:45 — Response 27 (post-reboot check; BUG-218 config re-wrap; reaper gaming guards vela/gameos/qemu, wine_grace 60 s, gamescope, zombies — BUG-217) (Max-window chat "Biggest local LLM model")
+Last updated: 2026-10-24 15:03 — Response 28 (Steam excluded from KDE session restore; Max app verified on shared MCP; Qwen3.8 Q3_K_XL + IQ4_XS load test — both fit, see tests/coder/RESULTS.md) (Max-window chat "Biggest local LLM model")
 
 Previous handoff (DECISION 159 shared MCP servers) is in git: `git show 9bafc74c:HANDOFF.md`.
 
