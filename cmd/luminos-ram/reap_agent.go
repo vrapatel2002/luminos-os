@@ -418,21 +418,26 @@ func (a *agent) tmpfs(dry bool) []TmpCandidate {
 	}
 	open := openPaths("/proc", readProcs("/proc", a.uid, true, a.home), a.c.TmpfsDirs)
 	cands = tmpfsCandidates(a.c.TmpfsDirs, a.uid, open, time.Now(), a.c)
+	// [CHANGE: claude-code | 2026-10-24] Return only what is still on disk — the report used to
+	// list files it had just deleted ("738 MB reapable" after they were gone).
+	var left []TmpCandidate
 	for _, t := range cands {
 		if !dry && (a.c.Mode == "act" || t.Test) {
 			if err := os.Remove(t.Path); err != nil {
 				a.log.Warn("TMPFS delete %s (%.0f MB) failed: %v", t.Path, t.SizeMB, err)
+				left = append(left, t)
 			} else {
 				a.log.Info("TMPFS deleted %s — %.0f MB, untouched %.0f min, not open by any process", t.Path, t.SizeMB, t.AgeMin)
 			}
 			continue
 		}
+		left = append(left, t)
 		if !a.tmpLogged[t.Path] {
 			a.tmpLogged[t.Path] = true
 			a.log.Info("TMPFS WOULD-DELETE %s — %.0f MB, untouched %.0f min, not open by any process", t.Path, t.SizeMB, t.AgeMin)
 		}
 	}
-	return cands
+	return left
 }
 
 

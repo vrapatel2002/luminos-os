@@ -8728,3 +8728,13 @@ by the orphaned explorer.exe — it becomes deletable the moment the orphans go)
 `sudo install -m 755 ~/.luminos-backups/luminos-ram.bak-pre-reaper-20261024 /usr/local/bin/luminos-ram && sudo systemctl restart luminos-ram`;
 openclaw: `systemctl --user disable --now openclaw-gateway-proxy.socket`, `git checkout 9bafc74c -- scripts/jobhunt/`,
 `systemctl --user daemon-reload && systemctl --user enable --now openclaw-gateway`.
+
+**Update 2026-10-24 14:27 — ACT mode on + Proton disabled at boot (Shawn: "yes to both").** <!-- [CHANGE: claude-code | 2026-10-24] -->
+Log reviewed before switching: the only WOULD-REAP lines were the two orphaned MW4 Wine prefixes and `/tmp/mw4.core`.
+`reap_mode = act` (user config + repo copy), `systemctl --user reload luminos-ram-reaper`. Within 1 s: both Wine prefixes
+REAPED (10 processes, `left=[]`; these ones went on SIGTERM). Next tmpfs sweep (14:28:28): `/tmp/mw4.core` 386 MB and
+`/tmp/mw4-syswine.log` 351 MB deleted — the log became deletable the moment the orphaned explorer.exe holding it was gone.
+`/tmp` 584 MB → 85 MB. `sudo systemctl disable --now proton.VPN.service` (AGENTS §9 row): 85 MB freed, starts on demand
+through its D-Bus activation file (`SystemdService=proton.VPN.service`). After: `tests/ram-reaper/after-act-20261024.txt`.
+From now on idle apps in app.slice with no window/audio/traffic go after the gradient time — at today's ~9.7 GB
+available that is 60 min (e.g. the Thunar daemon and Discover's tray notifier). Add anything that must stay to `keep =`.

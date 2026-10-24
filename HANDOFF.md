@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-24 14:15 — Response 1 (luminos-ram app reaper built, tested, installed in LOG mode — DECISION 160) (cloud session linked to the G14)
+Last updated: 2026-10-24 14:35 — Response 2 (reaper switched to ACT mode; proton.VPN.service disabled at boot — DECISION 160) (cloud session linked to the G14)
 
 Previous handoff (DECISION 159 shared MCP servers) is in git: `git show 9bafc74c:HANDOFF.md`.
 
@@ -8,8 +8,9 @@ Keep Luminos OS working as a daily-driver Windows replacement — G14 desktop/AI
 what Shawn reports, and never leaving a change undocumented.
 
 ## Aim right now — stop wasting RAM: apps that are not live leave RAM (docs/prompts/luminos-ram-reaper.md)
-Built and installed. Running in **reap_mode = log** (dry run). Waiting on Shawn: read a day of
-`~/.local/state/luminos/ram-reaper.log`, then switch to `act`.
+DONE. Running in **reap_mode = act** since 14:27 (Shawn: "yes to both"). First act: both orphaned MW4 Wine prefixes
+reaped, /tmp/mw4.core + /tmp/mw4-syswine.log (737 MB) deleted, /tmp 584 → 85 MB; proton.VPN.service disabled + stopped
+(85 MB, on-demand via D-Bus). zram stored 2.07 → 1.21 GB. Reaper report: 0 MB reapable.
 
 ## Why / motivation
 16 GB soldered RAM; on 2026-10-24 zram held 5.7 GB. Measured leftovers: orphaned MW4 Wine, 737 MB of debug files in
@@ -34,20 +35,18 @@ Same binary, two halves: root `luminos-ram.service` (unchanged unit) + user `lum
 - Docs: DECISION 160, BUG-214/215/216, RAM architecture "Reaper" section, AGENTS §9/§10, STATUS, CODE_REFERENCE.
 
 ## State — what is IN PROGRESS (and where exactly it was left off)
-Log mode is collecting. At 14:05 it lists: 2 orphaned Wine prefixes (pids 69xxx / 85xxx), /tmp/mw4.core 386 MB,
-proton.VPN.service 85 MB (kept until 60 idle min since daemon start). /tmp/mw4-syswine.log (351 MB) will appear once the
-orphaned explorer.exe that holds it is gone.
+Nothing in flight. Watch `~/.local/state/luminos/ram-reaper.log` for REAPED lines on real apps over the next days —
+first candidates at today's RAM are app.slice apps idle 60 min (Thunar daemon, Discover tray notifier).
+Fixed after the switch: tmpfs report listed files it had just deleted (reap_agent.go `tmpfs()` returns only what is left).
 
 ## Next steps (ordered)
-1. Shawn: read `~/.local/state/luminos/ram-reaper.log` (or `luminos-mem-report`) after a day; add anything to
-   `keep =` that must never go; then set `reap_mode = act` and `systemctl --user reload luminos-ram-reaper`.
-2. Shawn's answer (asked once): also `systemctl disable proton.VPN.service` at boot? If yes → /etc change → AGENTS §9 +
-   DECISIONS. (D-Bus activation file exists, so the Proton app would still start it on demand.)
-3. Real-Chrome check: open Chrome, close the last window → `pgrep -c chrome` must reach 0 (not run — would open a
+1. If the reaper takes something Shawn wanted kept: add it to `keep =` in ~/.config/luminos-ram-reaper.conf and
+   `systemctl --user reload luminos-ram-reaper`. Back to dry run: `reap_mode = log`.
+2. Real-Chrome check: open Chrome, close the last window → `pgrep -c chrome` must reach 0 (not run — would open a
    browser on Shawn's screen).
-4. BUG-214: feed the root LIRS half with the agent's window list, or move it user-side.
-5. Optional: event-driven death detection (pidfds) would cut the agent's 0.8 % of a core further.
-6. `main` ahead of origin — push is Shawn's call.
+3. BUG-214: feed the root LIRS half with the agent's window list, or move it user-side.
+4. Optional: event-driven death detection (pidfds) would cut the agent's 0.8 % of a core further.
+5. `main` ahead of origin — push is Shawn's call.
 
 ## Key decisions & constraints so far
 - Never reap: Claude Max app (default profile; hosts Cowork VM + bridge), qemu, session/luminos units, keep-list
@@ -74,9 +73,9 @@ tests needing Shawn; BUG-213; coder pruned-model tests.
 New: cmd/luminos-ram/{reap.go,reap_agent.go,reap_test.go}, systemd/user/luminos-ram-reaper.service,
 config/luminos-ram-reaper.conf, tests/ram-reaper/{integration.sh,RESULTS-integration.txt,RESULTS-integration-forced-pass.json,
 before-20261024.txt,after-20261024.txt}, scripts/jobhunt/systemd/openclaw-gateway-proxy.{socket,service}.
-Changed: cmd/luminos-ram/main.go, scripts/jobhunt/{systemd/openclaw-gateway.service,install-services.sh,status.py},
+Changed: cmd/luminos-ram/main.go, tests/ram-reaper/after-act-20261024.txt (new), scripts/jobhunt/{systemd/openclaw-gateway.service,install-services.sh,status.py},
 scripts/luminos-mem-report, LUMINOS_DECISIONS.md, docs/BUGS.md, docs/LUMINOS_RAM_ARCHITECTURE.md, AGENTS.md,
 LUMINOS_STATUS.md, docs/CODE_REFERENCE.md, HANDOFF.md.
 Outside repo: /usr/local/bin/luminos-ram (+backup), ~/.config/luminos-ram-reaper.conf, ~/.config/systemd/user/
 {luminos-ram-reaper.service, openclaw-gateway-proxy.*} links, ~/.config/google-chrome/Local State (+backup).
-No /etc change.
+/etc: proton.VPN.service disabled (multi-user.target.wants link removed) — AGENTS §9 row.
