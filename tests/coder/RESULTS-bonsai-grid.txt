@@ -1,0 +1,5 @@
+c8k-q4-fitt64-ub512 |  | {"prompt_n": 3316, "prompt_tps": 406.0, "gen_n": 128, "gen_tps": 12.64, "draft_n": null, "draft_accepted": null, "wall_s": 18.2}
+c16k-q4-fitt64-ub512 |  | {"prompt_n": 3316, "prompt_tps": 379.2, "gen_n": 128, "gen_tps": 10.72, "draft_n": null, "draft_accepted": null, "wall_s": 20.6}
+c32k-q4-fitt64-ub512 |  | {"prompt_n": 3316, "prompt_tps": 346.5, "gen_n": 128, "gen_tps": 8.89, "draft_n": null, "draft_accepted": null, "wall_s": 23.9}
+c16k-q8-fitt64-ub512 |  | {"prompt_n": 3316, "prompt_tps": 357.8, "gen_n": 128, "gen_tps": 9.33, "draft_n": null, "draft_accepted": null, "wall_s": 22.9}
+GRID-DONE

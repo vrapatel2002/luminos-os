@@ -4,7 +4,7 @@
 set -u
 L=$1; PL=$2; GN=$3; shift 4
 OUT=~/.local/state/luminos/coder/bench-$L
-/usr/local/bin/dgpu-exec-v2 -- /usr/bin/llama-server "$@" --host 127.0.0.1 --port 8093 --jinja -fa on --no-ui -t 8 >"$OUT.log" 2>&1 &
+/usr/local/bin/dgpu-exec-v2 -- "${LLAMA_SERVER:-/usr/bin/llama-server}" "$@" --host 127.0.0.1 --port 8093 --jinja -fa on --no-ui -t 8 >"$OUT.log" 2>&1 &
 SP=$!
 for i in $(seq 300); do curl -fs 127.0.0.1:8093/health >/dev/null 2>&1 && break; kill -0 $SP 2>/dev/null || break; sleep 2; done
 LOADED=$(date +%s)

@@ -89,7 +89,9 @@ def main():
         c0 = open(os.path.join(os.path.expanduser(init), "solution.py")).read()
         rec({"run": run, "arm": "initial", "reused_from": init, **score(c0, f"{run}-v0"), "code": c0})
     else:
-        w_text, w_s, w_u = ask("claude-sonnet-4-5", None, WRITE, 24000)
+        # [CHANGE: claude-code | 2026-10-24] PROOF_WRITER picks the model that writes the initial solution
+        # (default the Qwen3.6 writer; e.g. PROOF_WRITER=bonsai to test Ternary Bonsai 2 27B as the writer).
+        w_text, w_s, w_u = ask(os.environ.get("PROOF_WRITER", "claude-sonnet-4-5"), None, WRITE, 24000)
         c0 = code_of(w_text); s0 = score(c0, f"{run}-v0")
         rec({"run": run, "arm": "initial", "seconds": w_s, "usage": w_u, **s0, "code": c0})
 

@@ -70,6 +70,23 @@ PROFILES = {
                  "--reasoning-budget-message", "Time is up. Write the DEFECTS list now."],
     },
 }
+# [CHANGE: claude-code | 2026-10-24] "bonsai": Ternary Bonsai 2 27B (Qwen3.8-27B in 1.7-bit ternary, 5.95 GB, PrismML).
+# Needs PrismML's llama.cpp fork (new PTQ1_0 type; stock llama.cpp rejects it) — its own binary, not /usr/bin.
+# Small enough to sit (almost) wholly on the 6 GB card, unlike the dense Q2–Q4 reviewer that is 60 % CPU.
+# Sampling = the model card's thinking-mode values (presence 0.0 — the card's, overriding COMMON's 1.5).
+PROFILES["bonsai"] = {
+    "alias": "bonsai-27b",
+    "bin": os.path.expanduser("~/.local/share/luminos/llama-prism/src/build/bin/llama-server"),
+    "args": ["-m", os.path.expanduser("~/.local/share/luminos/models/bonsai/Ternary-Bonsai-2-27B-PTQ1_0.gguf"),
+             # Measured 2026-10-24 (tests/coder/bonsai-grid.sh): the model is 5395 MiB, the card has ~5558 MiB free,
+             # so every MiB of KV/compute pushes a layer to the (slow, ternary) CPU path: 64K q8 KV = 4.5 t/s,
+             # 16K q8 = 6.5, 32K q4 KV + ub 512 + 64 MiB margin = 8.9, 16K = 10.7, 8K = 12.6 t/s.
+             "-c", os.environ.get("CODER_BONSAI_CTX", "32768"), "-ctk", "q4_0", "-ctv", "q4_0", "-np", "1",
+             "-b", "512", "-ub", "512", "-fitt", "64",
+             "--reasoning-budget", os.environ.get("CODER_BONSAI_THINK", "8192"),
+             "--reasoning-budget-message", "Enough thinking. Write the answer now."],
+    "post": ["--presence-penalty", "0.0", "--temp", "1.0", "--top-k", "20", "--top-p", "0.95", "--min-p", "0.05"],
+}
 EXTRA = {k: os.environ.get(f"CODER_{k.upper()}_EXTRA", "").split() for k in PROFILES}
 
 def log(*a):
@@ -87,6 +104,8 @@ TOKEN = load_token()
 
 def profile_for(model):
     m = (model or "").lower()
+    if "bonsai" in m:
+        return "bonsai"
     if "opus" in m or "reviewer" in m or "qwen3.8" in m:
         return "reviewer"
     return "writer"
@@ -142,7 +161,7 @@ class Backend:
         if not self.powered:
             power_on(); self.powered = True
         p = PROFILES[prof]
-        argv = [GATE, "--", LLAMA, *p["args"], *COMMON, "-a", p["alias"], *EXTRA[prof]]
+        argv = [GATE, "--", p.get("bin", LLAMA), *p["args"], *COMMON, "-a", p["alias"], *p.get("post", []), *EXTRA[prof]]
         self.logf = open(os.path.join(STATE, f"{prof}.log"), "ab")
         log("backend: starting", prof, " ".join(argv))
         t0 = time.time()
