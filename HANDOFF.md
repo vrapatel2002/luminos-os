@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-24 02:05 — Response 20 (Max-window chat "Biggest local LLM model")
+Last updated: 2026-10-24 09:45 — Response 21 (Max-window chat "Biggest local LLM model")
 
 Previous handoff (VisionQuest DV P5 sweep / MW4 / GLM window) is in git: `git show c5ac3e61:HANDOFF.md`. Nothing from it
 was touched; its open items are listed under "Still open from before".
@@ -42,11 +42,16 @@ value with hidden tests (tests/coder/proof/); drive the real Desktop app with yd
   (Qwen3.8, 1024 s, "no verified defects" + dead-code note) → review_wait → cleanup → 7/7 → final answer;
   my independent 22-case check 22/22. ydotoold stopped, socket removed.
 
+- 2026-10-24 09:40 DECISION 158: Baloo indexer disabled + purged (3.63 GiB index, ~2 GB RSS at peak) — commit 81002997.
+  Free RAM after: ~6.3 GB available (still not enough for Qwen3.8 Q3_K_XL mlock, which needed ~9.6 GB).
+
 ## State — what is IN PROGRESS (and where exactly it was left off)
 Nothing running except the idle gateway (it unloads the writer 15 min after the last request, masks nvidia-powerd and
 the dGPU suspends). The "Claude (Local Qwen)" window was left open on the finished session.
 
 ## Next steps (ordered)
+0. Shawn deciding: test pruned models with tests/coder/proof — Qwen3.8-20B-Minitron (layer-pruned 64→44, FP8 only, no GGUF,
+   needs conversion) for the reviewer; Qwen3.6-28B-REAP20-A3B GGUF (20% experts removed) for the writer. Quality unpublished.
 1. Shawn's call: free RAM for a better reviewer quant (baloo 2 GB; or the 32 GB SPD mod) and re-run tests/coder/proof.
 2. Optional: re-launch the Local app once so `API_TIMEOUT_MS=3600000` takes effect (exported by the launcher).
 3. `main` is ahead of origin by these commits too — push is Shawn's call.
