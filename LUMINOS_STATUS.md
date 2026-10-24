@@ -40,6 +40,7 @@ Prev: 2026-06-13 (BUG-070 FIXED — training OOM root-caused to zram-only swap; 
 | AMD iGPU (Radeon 780M) | ✅ Working | Desktop rendering + KWin compositor |
 | RTX 4050 6GB | ✅ Working | HIVE AI models + gaming (power-gated when idle) |
 | Local coder pair (luminos-coder) | ✅ Working — Code tab; ⚠️ reviewer weak | [CHANGE: claude-code \| 2026-10-24] DECISION 157. "Claude (Local Qwen)" app (`scripts/luminos-claude-local`, 3P gateway) → `luminos-coder-gateway` :4142 → llama-server :8093 (writer Qwen3.6-35B-A3B Q3_K_XL, 128K ctx, ~9–19 t/s; reviewer Qwen3.8-27B Q2_K_XL mlock ~2 t/s) + MCP `luminos-coder` (review_start/review_wait/run_tests/run_python). nvidia-powerd on while loaded, masked + dGPU asleep after 15 min idle. Proven in the Desktop **Code** tab; **Cowork** blocked while the Max app's Cowork VM holds vsock 51234; no Chat tab in 3P. Proof (tests/coder/RESULTS.md): Q2 reviewer free-form made code worse (91→86), quote-grounded 91→95 = ties a plain re-check. BUG-212 fixed (hive-idle-watchdog killed every llama-server). |
+| KDE Baloo file indexer | ⛔ Disabled (DECISION 158) | [CHANGE: claude-code \| 2026-10-24] `balooctl6 disable` + purge: 3.6 GiB index and up to ~2 GB RAM freed for local models. Name search in Dolphin still works; content search does not. Revert: `balooctl6 enable`. |
 | asusctl + supergfxctl | ✅ Working | Hybrid mode locked |
 | Keyboard backlight | ✅ Working | Enhanced KDE KCM (7 modes) + Smart power daemon |
 | NPU (RyzenAI-npu1) | ✅ Working | /dev/accel0 active |

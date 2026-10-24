@@ -8597,3 +8597,15 @@ both servers with `--presence-penalty 1.5` (Qwen's advice for quantized models; 
 **Revert:** `systemctl --user disable --now luminos-coder-gateway; rm ~/.config/systemd/user/luminos-coder-gateway.service
 ~/.local/share/applications/luminos-claude-local.desktop; rm -r ~/.config/Claude-local ~/.config/Claude-local-3p
 ~/.local/share/luminos/models/coder ~/.local/share/luminos/coder-venv`. Nothing in /etc changed; nvidia-powerd ends masked.
+
+## DECISION 158 — KDE Baloo file indexer disabled and its index purged
+<!-- [CHANGE: claude-code | 2026-10-24] -->
+**Asked by Shawn** ("what is baloo … are they necessary? if not then remove"). Baloo is KDE's desktop search indexer
+(content search in Dolphin / KRunner). It had indexed 129 588 files into a **3.63 GiB** index (`~/.local/share/baloo`)
+and its `baloo_file` process was seen at **~2 GB RSS** during the DECISION 157 benchmarks — RAM the Qwen3.8 reviewer
+needs (the reviewer pins 6.3 GB; the desktop was being pushed into swap). Nothing in Luminos uses it.
+**Done:** `balooctl6 disable` (writes `Indexing-Enabled=false` to `~/.config/baloofilerc`, persists across reboots) +
+`balooctl6 purge` (index deleted, 3.7 GB disk back). Backup of the config: `~/.config/baloofilerc.bak-20261024`.
+**Not removed as a package on purpose:** `dolphin`/`plasma` depend on `baloo` — uninstalling would drag them out.
+**Cost:** Dolphin's search still finds files by NAME (it falls back to a live scan, slower); searching inside file
+contents from Dolphin/KRunner no longer works. **Revert:** `balooctl6 enable` (re-indexes from scratch).
