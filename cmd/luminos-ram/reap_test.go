@@ -849,3 +849,18 @@ func TestVelaGameosQemuAlwaysKept(t *testing.T) {
 		t.Error("a Vela prefix was reaped")
 	}
 }
+
+func TestBackgroundJobsAreNotIdleReaped(t *testing.T) {
+	// BUG-219: a systemd-run job (proof runner waiting on llama-server) and a user service look idle; not apps.
+	for _, unit := range []string{"quant-compare.service", "run-u1234.service", "openclaw-gateway-proxy.service", "run-r9f.scope"} {
+		root := fakeTree(t, fp{pid: 300, ppid: 1, comm: "python3", exe: "/usr/bin/python3", args: []string{"python3", "proof.py"}, cg: appSlice + unit})
+		if r, _ := evalAt(t, root, cfg(), noInputs(), 0.4, 3*time.Hour, protCtx{}); len(r.Candidates) != 0 {
+			t.Errorf("%s idle-reaped: %+v", unit, r.Candidates)
+		}
+	}
+	// Control: a desktop app (app-… unit) with the same idleness is still reaped.
+	root := fakeTree(t, fp{pid: 301, ppid: 1, comm: "steam", exe: "/usr/lib/steam/steam", cg: appSlice + "app-steam@a1b2.service"})
+	if r, _ := evalAt(t, root, cfg(), noInputs(), 0.4, 3*time.Hour, protCtx{}); candFor(r, "steam") == nil {
+		t.Error("control: idle desktop app (Steam in the tray) must still be reaped")
+	}
+}

@@ -8760,4 +8760,6 @@ nothing gaming-specific. Added, all in `cmd/luminos-ram/reap.go`, 5 new tests (3
 - **Anything under gamescope is live** ("running inside gamescope"): KWin only sees gamescope's window, the game
   inside (often a Wine prefix grouped away from gamescope) looked window-less. `gamescopeDescendants` walks PPIDs.
 - **Zombies are not processes** (BUG-217).
-Still open for Shawn: Steam idling in the tray (no game, no download) is reaped after the idle gradient like any app.
+Steam idling in the tray IS reaped after the idle gradient (Shawn 2026-10-24: "close steam too"); Steam excluded from
+KDE session restore (`ksmserverrc` `excludeApps=steam`).
+**BUG-219 (15:44):** idle rule limited to desktop apps (`app-…` units) — it had stopped a systemd-run benchmark job.

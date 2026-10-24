@@ -831,7 +831,11 @@ func steamGameRunning(procs map[int]*rproc) bool {
 // eligibleForIdle: only app units (app.slice) and Wine worlds are ever idle-reaped. Units
 // in session.slice / background.slice are the desktop itself.
 func eligibleForIdle(g *rgroup) bool {
-	return g.Kind == "wine" || g.Slice == "app.slice"
+	// [CHANGE: claude-code | 2026-10-24] BUG-219: only APPS are idle-reaped. Desktop launches get units named
+	// app-<id>… (XDG systemd naming, KDE/kstart/Claude/Steam); systemd-run jobs and user services do not. A job
+	// waiting on a local model server is 0 % CPU / 0 KB/s for minutes — the reaper stopped quant-compare.service
+	// after 2 min at 0.45 GB available, killing a 30-min benchmark. Leftover rules still apply to every unit.
+	return g.Kind == "wine" || (g.Slice == "app.slice" && strings.HasPrefix(g.Unit, "app-"))
 }
 
 // ───────────────────────────── liveness ─────────────────────────────
@@ -1422,7 +1426,7 @@ func (e *Evaluator) Pass(groups map[string]*rgroup, procs map[int]*rproc, in Liv
 func (e *Evaluator) idleRule(g *rgroup, st *gstate, view *GroupView, live, soft string, haveFull bool, in LiveInputs, r groupRates, allowed time.Duration, test, force bool, now time.Time, emit func(string, string, string, []*rproc)) {
 	c := e.C
 	switch {
-	case !eligibleForIdle(g):
+	case !eligibleForIdle(g) && !(test && g.Slice == "app.slice"):
 		view.State, view.Reason = "ineligible", "not an app ("+orDash(g.Slice)+") — desktop/session infrastructure"
 		return
 	case soft != "":

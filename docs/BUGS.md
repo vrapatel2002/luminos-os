@@ -8662,3 +8662,13 @@ loaded at start; after Shawn's reboot it started its own mempalace/code-review-g
 copy the Max app's servers each launch, so they would inherit it. **Fix:** `luminos-mcp-share wrap-configs` +
 `luminos-mcp-share-configs.path` (PathChanged, enabled) + launchers call it before launch. Proven: bare entry
 written into the GLM config re-wrapped within 2 s, mode 600 and all other keys kept.
+
+## BUG-219 — reaper stopped a 30-min benchmark job as "idle" (systemd-run units counted as apps)
+<!-- [CHANGE: claude-code | 2026-10-24] -->
+**Status:** FIXED. 15:08: `REAPED app="quant-compare.service" rule=idle … 0.0 % CPU, net 0.0 KB/s (allowed 2 min)`.
+The job (proof.py) was waiting on llama-server for a 29-min review; with the reviewer pinning RAM, available fell to
+~0.45 GB, so the idle gradient allowed only 2 min. Any `systemd-run --user` job or user service in app.slice that
+waits quietly (download script, build, benchmark) was treated like a forgotten desktop app. The orphaned review
+finished at 15:35 into a dead socket and the 9.4 GB model stayed pinned. **Fix:** `eligibleForIdle` = Wine worlds
++ app.slice units named `app-…` (desktop launches) only; leftover rules still cover every unit; act_only test units
+stay eligible. Test: `TestBackgroundJobsAreNotIdleReaped` (+ control: idle Steam `app-steam@….service` still reaped).
