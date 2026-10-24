@@ -38,16 +38,18 @@ value with hidden tests (tests/coder/proof/); drive the real Desktop app with yd
 - BUG-212 FIXED (hive-idle-watchdog killed every llama-server). BUG-213 OPEN (train-mode restores fan v5).
 - Docs: DECISION 157 (LUMINOS_DECISIONS.md), STATUS row, AGENTS §3 + §10, BUGS 212/213, tests/coder/RESULTS.md.
 
+- **Desktop end-to-end PASSED** (01:34–02:31, commit a578b3d4): write → run_tests 3/7 → fix → 7/7 → review_start
+  (Qwen3.8, 1024 s, "no verified defects" + dead-code note) → review_wait → cleanup → 7/7 → final answer;
+  my independent 22-case check 22/22. ydotoold stopped, socket removed.
+
 ## State — what is IN PROGRESS (and where exactly it was left off)
-1. The Desktop Code-tab session "Write duration.py …" in the Claude (Local Qwen) window is waiting on the Qwen3.8 review
-   (~15–25 min from 02:01), then Qwen3.6 resumes (review_wait → apply → re-test → final code).
-2. `luminos-ydotoold` (root transient unit) is running for the GUI test — stop it when done:
-   `sudo systemctl stop luminos-ydotoold`.
+Nothing running except the idle gateway (it unloads the writer 15 min after the last request, masks nvidia-powerd and
+the dGPU suspends). The "Claude (Local Qwen)" window was left open on the finished session.
 
 ## Next steps (ordered)
-1. Let the Desktop session finish; screenshot the final answer; record it in RESULTS.md.
-2. Stop ydotoold; leave the gateway idle so it unloads and the dGPU sleeps.
-3. Shawn's call: free RAM for a better reviewer quant (baloo 2 GB; or the 32 GB SPD mod) and re-run tests/coder/proof.
+1. Shawn's call: free RAM for a better reviewer quant (baloo 2 GB; or the 32 GB SPD mod) and re-run tests/coder/proof.
+2. Optional: re-launch the Local app once so `API_TIMEOUT_MS=3600000` takes effect (exported by the launcher).
+3. `main` is ahead of origin by these commits too — push is Shawn's call.
 
 ## Key decisions & constraints so far
 - One model on the GPU at a time; a swap costs ~20–40 s. Writer ctx 128K (Claude Code needs ~74K just to start).
