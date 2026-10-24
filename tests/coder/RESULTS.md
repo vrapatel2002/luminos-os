@@ -84,3 +84,16 @@ Q2_K_XL 95, Q3_K_XL 93, IQ4_XS 87 (one run each, same 91/107 start; sampling noi
 quote rule so nothing survived the filter; IQ4 quoted correctly but drew wrong conclusions from the quotes, and the
 writer applied them. RAM: Q3 min 231 MB available / 2.8 GB swap; IQ4 min **5 MB** / 4.2 GB swap; no OOM kill.
 Verdict unchanged: on this laptop no Qwen3.8 quant beats Qwen3.6 simply re-checking its own code (95).
+
+## Ternary Bonsai 2 27B (PrismML, Qwen3.8-27B in 1.7-bit ternary, 5.95 GB) — 2026-10-24
+<!-- [CHANGE: claude-code | 2026-10-24] -->
+PrismML llama.cpp fork (`prism` branch, CUDA 13.3, sm_89 — the known #222 CUDA-13.3 crash did not occur; PQ2_0's
+AVX-512 crash avoided by using PTQ1_0). Model 5395 MiB vs ~5558 MiB free on the card, so KV/compute push layers to the
+slow ternary CPU path (RESULTS-bonsai-grid.txt): 64K q8 KV 4.5 t/s · 16K q8 6.5 · 16K q8 fitt64 ub512 9.3 ·
+**32K q4 KV 8.9 (gateway default)** · 16K q4 10.7 · 8K q4 12.6. Prompt 350–400 t/s. Load 5–7 s.
+| arm | result |
+|---|---|
+| writer from scratch (bonsaiW1, think 8192) | **0 / 107 as written** — forgot `import re`; **51 / 107** with only the import added (operators not stripped before partial-version parse → every `>=`/`^`/`~`/`<` range raises). 1592 s, 14 162 tokens. Qwen3.6 first draft = 91. |
+| grounded cross reviewer (bonsaiR1, think 2048, cap 5120, from runA-v0 91/107) | **93 / 107**, review **596 s** (Q2: 1481 s), 2 claims kept / 7 dropped (quotes not in the task), hit the 5120 cap mid-deliberation |
+Verdict: ~4× faster than the Qwen3.8 Q2 reviewer, review quality in the same band (Q2 95, Q3 93, IQ4 87, Bonsai 93),
+weaker first-draft writer than Qwen3.6. Vendor's "98.2 % of Qwen3.8" is not visible on this task (one run each).

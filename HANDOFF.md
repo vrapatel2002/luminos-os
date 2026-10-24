@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-24 17:36 — Response 32 (quant compare done: Q2 95, Q3_K_XL 93, IQ4_XS 87 — bigger quant not better; BUG-219 fixed; abliteration next pending Shawn) (Max-window chat "Biggest local LLM model")
+Last updated: 2026-10-24 18:59 — Response 37 (Bonsai 2 27B: 8.9 t/s; writer 0/51 of 107, reviewer 93 in 10 min; gateway profile 'bonsai'; abliteration next) (Max-window chat "Biggest local LLM model")
 
 Previous handoff (DECISION 159 shared MCP servers) is in git: `git show 9bafc74c:HANDOFF.md`.
 

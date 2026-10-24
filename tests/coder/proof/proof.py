@@ -99,7 +99,8 @@ def main():
         t, s_, u = ask("claude-sonnet-4-5", None, TASK + SOLO2.format(code=c0), 24000)
         c = code_of(t); rec({"run": run, "arm": "solo2", "seconds": s_, "usage": u, **score(c, f"{run}-solo2"), "code": c})
 
-    for arm, model in (("self", "claude-sonnet-4-5"), ("cross", "claude-opus-4-5")):
+    # [CHANGE: claude-code | 2026-10-24] PROOF_REVIEWER picks the cross reviewer (default the Qwen3.8 reviewer).
+    for arm, model in (("self", "claude-sonnet-4-5"), ("cross", os.environ.get("PROOF_REVIEWER", "claude-opus-4-5"))):
         if arm not in arms:
             continue
         # Each reviewer at its own server's thinking budget: the writer server allows 8192 thinking tokens, so its
