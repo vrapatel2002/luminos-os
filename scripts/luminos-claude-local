@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# luminos-claude-local — open a THIRD Claude Desktop window that runs on the on-device coder pair
+# (Qwen3.6 writer + Qwen3.8 reviewer), side by side with the Max app and the GLM app.
+# [CHANGE: claude-code | 2026-10-23] DECISION 157. Same mechanism as luminos-claude-glm (DECISION 156).
+#   luminos-claude-local          open (or focus) the Local app
+#   luminos-claude-local setup    (re)write its config only
+#   luminos-claude-local status
+# HOW: --user-data-dir gives the app its own profile (~/.config/Claude-local) with its own single-instance
+# lock and no claude.ai login; its 3P config lives in ~/.config/Claude-local-3p. The app talks to
+# luminos-coder-gateway on 127.0.0.1:4142, which maps Claude-shaped model names to the two local models
+# and loads/unloads them on the dGPU. Works in the Chat tab (3P catalog surfaces: cowork, code, chat).
+set -eu
+APPDIR="$HOME/.config/Claude-local"
+CFGDIR="$APPDIR-3p"; LIB="$CFGDIR/configLibrary"
+ID="6c756d69-6e6f-734c-4f43-414c00000001"
+ENVF="$HOME/.config/luminos/coder.env"
+REPO="$HOME/luminos-os"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
+setup() {
+  mkdir -p "$(dirname "$ENVF")"
+  if ! grep -q '^CODER_LOCAL_TOKEN=' "$ENVF" 2>/dev/null; then
+    umask 077; echo "CODER_LOCAL_TOKEN=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')" >> "$ENVF"
+  fi
+  chmod 600 "$ENVF"; . "$ENVF"
+  mkdir -p "$LIB" "$APPDIR"; chmod 700 "$APPDIR" "$CFGDIR" "$LIB"
+  TOK="$CODER_LOCAL_TOKEN" REPO="$REPO" python3 - "$CFGDIR" "$ID" <<'PY'
+import json,os,sys
+d,i=sys.argv[1],sys.argv[2]
+def w(p,o):
+    t=p+".tmp"; open(t,"w").write(json.dumps(o,indent=2)); os.chmod(t,0o600); os.replace(t,p)
+w(os.path.join(d,"configLibrary",i+".json"),{
+ "inferenceProvider":"gateway",
+ "inferenceGatewayBaseUrl":"http://127.0.0.1:4142",
+ "inferenceGatewayApiKey":os.environ["TOK"],
+ "inferenceGatewayAuthScheme":"bearer",
+ "inferenceModels":[
+   {"name":"claude-sonnet-4-5","labelOverride":"Qwen3.6 35B (local writer, fast)"},
+   {"name":"claude-opus-4-5","labelOverride":"Qwen3.8 27B (local reviewer, smart, slow)"},
+   {"name":"claude-haiku-4-5","labelOverride":"Qwen3.6 35B (background tasks)"}]})
+w(os.path.join(d,"configLibrary","_meta.json"),{"appliedId":i,"entries":[{"id":i,"name":"Luminos local coder","provider":"gateway"}]})
+p=os.path.join(d,"claude_desktop_config.json")
+try: c=json.load(open(p))
+except Exception: c={}
+c["deploymentMode"]="3p"
+servers={}
+# Same local MCP servers as the Max app (host-shell, mempalace, code-review-graph) — BUG-206 pattern.
+try:
+    mx=json.load(open(os.path.expanduser("~/.config/Claude/claude_desktop_config.json")))
+    servers.update(mx.get("mcpServers") or {})
+    tf=mx.get("preferences",{}).get("localAgentModeTrustedFolders")
+    if tf: c.setdefault("preferences",{})["localAgentModeTrustedFolders"]=sorted(set(tf)|set(c.get("preferences",{}).get("localAgentModeTrustedFolders",[])))
+except Exception as e:
+    print("warning: could not copy MCP servers from the Max app:", e)
+# + the reviewer / run-code tools that make this a writer+reviewer system.
+servers["luminos-coder"]={"command":"/usr/bin/python3","args":[os.path.join(os.environ["REPO"],"scripts","luminos-coder-review-mcp")]}
+c["mcpServers"]=servers
+w(p,c)
+PY
+}
+
+case "${1:-open}" in
+  setup) setup; echo "Local app config written to $CFGDIR" ;;
+  status)
+    systemctl --user is-active --quiet luminos-coder-gateway && echo "gateway: running" || echo "gateway: NOT running"
+    curl -fs 127.0.0.1:4142/health 2>/dev/null && echo || true ;;
+  open)
+    setup
+    systemctl --user start luminos-coder-gateway
+    for _ in $(seq 10); do curl -fs 127.0.0.1:4142/health >/dev/null && break; sleep 0.5; done
+    while IFS= read -r line; do
+      case "$line" in KDE_*|XDG_*|WAYLAND_DISPLAY=*|DISPLAY=*|XAUTHORITY=*|DBUS_SESSION_BUS_ADDRESS=*|QT_*|LANG=*|PATH=*) eval "export $line";; esac
+    done < <(systemctl --user show-environment)
+    exec systemd-run --user --scope --quiet --unit="app-claude-local-$$" \
+      /usr/bin/claude-desktop --user-data-dir="$APPDIR" ;;
+  *) echo "usage: luminos-claude-local [open|setup|status]" >&2; exit 2 ;;
+esac

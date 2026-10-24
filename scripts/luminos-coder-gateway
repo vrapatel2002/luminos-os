@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+# luminos-coder-gateway — the on-device coder pair behind a Claude-Desktop-shaped API.
+# [CHANGE: claude-code | 2026-10-23] DECISION 157.
+#
+# WHAT: Claude Desktop (3P "gateway" mode, the "Claude (Local)" app) talks to this on 127.0.0.1:4142.
+# Two local models, ONE on the GPU at a time (6 GB VRAM — DECISION 58 foreground budget):
+#   writer   = Qwen3.6-35B-A3B  (MoE, ~3B active — fast, writes the code)
+#   reviewer = Qwen3.8-27B      (dense — slower, smarter, cross-checks the code; MTP speculative decoding)
+# Claude Desktop drops non-Claude model names, so the app is given Claude-shaped names and this maps them:
+#   *opus*            -> reviewer        everything else (sonnet, haiku, …) -> writer
+# The review MCP tool (luminos-coder-review-mcp) asks for the reviewer the same way.
+#
+# HOW: one llama-server child on 127.0.0.1:8093, always launched through dgpu-exec-v2 (the dGPU gate —
+# shawn is deliberately not in `dgpu`, DECISION 25). Asking for the other model waits for in-flight
+# requests, stops the child, starts the other one. Native Anthropic /v1/messages on llama-server, so the
+# body is forwarded as-is (only `model` is rewritten) and SSE is streamed through chunk by chunk.
+#
+# POWER (Shawn: GPU at full power while working, cold otherwise):
+#   start -> nvidia-powerd unmasked+started (Dynamic Boost; nvidia-smi -pl is a no-op here, BUG-069)
+#   idle IDLE_S with no request -> child stopped, nvidia-powerd stopped+MASKED again -> dGPU re-suspends.
+#   luminos-power's spectrum dial already sees the card as busy by itself (dgpuHasClients), no socket call needed.
+# Fan curve is NOT touched (feedback: least fan that holds the target; v6 EC curve stays in charge).
+import http.client, json, os, signal, subprocess, sys, threading, time, urllib.request
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+
+PORT = int(os.environ.get("CODER_GATEWAY_PORT", "4142"))
+BPORT = int(os.environ.get("CODER_BACKEND_PORT", "8093"))
+IDLE_S = int(os.environ.get("CODER_IDLE_S", "900"))
+TOKEN_FILE = os.path.expanduser("~/.config/luminos/coder.env")
+STATE = os.path.expanduser("~/.local/state/luminos/coder")
+MODELS = os.path.expanduser("~/.local/share/luminos/models/coder")
+GATE = "/usr/local/bin/dgpu-exec-v2"
+LLAMA = "/usr/bin/llama-server"
+os.makedirs(STATE, exist_ok=True)
+
+COMMON = ["--host", "127.0.0.1", "--port", str(BPORT), "--jinja", "-fa", "on", "--no-ui",
+          "-t", "8", "--metrics",
+          # Both models looped in the proof run (Qwen3.6 self-review repeated one sentence until max_tokens;
+          # Qwen3.8 ran past 2 900 review tokens). Qwen's guidance for quantized models is presence_penalty ~1.5.
+          # It must be a SERVER default: /v1/messages drops a per-request presence_penalty (read back from /slots: 0.0).
+          "--presence-penalty", os.environ.get("CODER_PRESENCE_PENALTY", "1.5")]
+PROFILES = {
+    "writer": {
+        "alias": "qwen3.6-35b-a3b",
+        # Measured 2026-10-23 (tests/coder/RESULTS.md): -ub 4096 = 328 prompt t/s vs 86 at the default 512
+        # (MoE prompt eval drags expert weights over PCIe per micro-batch, so bigger batches amortise it);
+        # 18.7 gen t/s at 32K ctx. 131072 ctx works (49K-token prompt read at 277 t/s) but gen drops to 6–9 t/s
+        # because the larger KV pushes experts off the card — so 65536 is the default, CODER_WRITER_CTX overrides.
+        "args": ["-m", f"{MODELS}/Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf",
+                 "-c", os.environ.get("CODER_WRITER_CTX", "65536"), "-ctk", "q8_0", "-ctv", "q8_0",
+                 "-np", "1", "-b", "4096", "-ub", "4096", "-fitt", "256", "--cache-reuse", "256",
+                 # Unbounded, Qwen3.6 thought for 16 000+ tokens (13+ min) on one spec-heavy task in the proof run.
+                 "--reasoning-budget", os.environ.get("CODER_WRITER_THINK", "8192"),
+                 "--reasoning-budget-message", "Enough thinking. Write the answer now."],
+    },
+    "reviewer": {
+        "alias": "qwen3.8-27b",
+        # Measured 2026-10-23: dense 27B on a 6 GB card runs ~60 % of every token on the CPU, which sits at its
+        # 30 W dGPU-busy ceiling AND the 82 °C target (spectrum) — generation is ~2–3 t/s whatever the quant
+        # (IQ3 1.7, Q2_K 2.3), prompt reads 300+ t/s with -ub 2048. Without -lm mlock the CPU half is evicted
+        # by the desktop and re-read from NVMe (68 k major faults / 6 s, < 1 t/s). So: mlock, MTP, a bounded
+        # thinking budget, and a reviewer prompt that asks for a short defect list, not an essay.
+        # Quant: -lm mlock pins the CPU half — Q2_K_XL pins 6.3 GB (2.4 t/s, 272 prompt t/s); IQ3_XXS pins 7.5 GB
+        # (1.7 t/s); Q3_K_XL (12.5 GB file) was OOM-KILLED at load (9.6 GB shmem). Q2_K_XL is the largest that fits.
+        "args": ["-m", f"{MODELS}/" + os.environ.get("CODER_REVIEWER_GGUF", "Qwen3.8-27B-UD-Q2_K_XL.gguf"),
+                 "-c", os.environ.get("CODER_REVIEWER_CTX", "32768"), "-ctk", "q8_0", "-ctv", "q8_0",
+                 "-np", "1", "-b", "2048", "-ub", "2048", "-fitt", "256", "-lm", "mlock",
+                 "--spec-type", "draft-mtp", "--spec-draft-n-max", "2",
+                 "--reasoning-budget", os.environ.get("CODER_REVIEWER_THINK", "2048"),
+                 "--reasoning-budget-message", "Time is up. Write the DEFECTS list now."],
+    },
+}
+EXTRA = {k: os.environ.get(f"CODER_{k.upper()}_EXTRA", "").split() for k in PROFILES}
+
+def log(*a):
+    sys.stderr.write(time.strftime("%H:%M:%S ") + " ".join(str(x) for x in a) + "\n"); sys.stderr.flush()
+
+def load_token():
+    try:
+        for line in open(TOKEN_FILE):
+            if line.startswith("CODER_LOCAL_TOKEN="):
+                return line.strip().split("=", 1)[1]
+    except OSError:
+        pass
+    return ""
+TOKEN = load_token()
+
+def profile_for(model):
+    m = (model or "").lower()
+    if "opus" in m or "reviewer" in m or "qwen3.8" in m:
+        return "reviewer"
+    return "writer"
+
+def sudo(*cmd):
+    r = subprocess.run(["sudo", "-n", *cmd], capture_output=True, text=True)
+    if r.returncode:
+        log("power: sudo", " ".join(cmd), "failed:", r.stderr.strip())
+    return r.returncode == 0
+
+def power_on():
+    # Dynamic Boost: lets the RTX 4050 go past its base TGP. Masked at idle on purpose (BUG-182).
+    sudo("systemctl", "unmask", "nvidia-powerd") and sudo("systemctl", "start", "nvidia-powerd")
+    log("power: nvidia-powerd ON (Dynamic Boost)")
+
+def power_off():
+    sudo("systemctl", "stop", "nvidia-powerd"); sudo("systemctl", "mask", "nvidia-powerd")
+    log("power: nvidia-powerd stopped + masked (dGPU free to sleep)")
+
+class Backend:
+    def __init__(self):
+        self.cv = threading.Condition()
+        self.current = None      # profile name of the running child
+        self.proc = None
+        self.active = 0          # in-flight requests on the current child
+        self.switching = False
+        self.last = time.time()
+        self.powered = False
+        self.logf = None
+
+    def _alive(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def _healthy(self):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{BPORT}/health", timeout=2) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
+    def _stop_child(self):
+        if self._alive():
+            log("backend: stopping", self.current)
+            # dgpu-exec-v2 execs the target, so this pid IS llama-server
+            self.proc.send_signal(signal.SIGTERM)
+            try:
+                self.proc.wait(30)
+            except subprocess.TimeoutExpired:
+                self.proc.kill(); self.proc.wait()
+        self.proc, self.current = None, None
+
+    def _start_child(self, prof):
+        if not self.powered:
+            power_on(); self.powered = True
+        p = PROFILES[prof]
+        argv = [GATE, "--", LLAMA, *p["args"], *COMMON, "-a", p["alias"], *EXTRA[prof]]
+        self.logf = open(os.path.join(STATE, f"{prof}.log"), "ab")
+        log("backend: starting", prof, " ".join(argv))
+        t0 = time.time()
+        self.proc = subprocess.Popen(argv, stdout=self.logf, stderr=subprocess.STDOUT, start_new_session=True)
+        self.current = prof
+        while time.time() - t0 < 900:
+            if not self._alive():
+                raise RuntimeError(f"{prof} llama-server exited with {self.proc.returncode} — see {STATE}/{prof}.log")
+            if self._healthy():
+                log(f"backend: {prof} ready in {time.time()-t0:.1f}s")
+                return
+            time.sleep(1)
+        raise RuntimeError(f"{prof} did not become healthy in 900s")
+
+    def acquire(self, prof):
+        with self.cv:
+            while True:
+                if self.current == prof and self._alive() and not self.switching:
+                    self.active += 1; self.last = time.time(); return
+                if self.active == 0 and not self.switching:
+                    self.switching = True
+                    break
+                self.cv.wait(1)
+        try:
+            self._stop_child()
+            self._start_child(prof)
+        except Exception:
+            with self.cv:
+                self.switching = False; self.cv.notify_all()
+            raise
+        with self.cv:
+            self.switching = False; self.active += 1; self.last = time.time(); self.cv.notify_all()
+
+    def release(self):
+        with self.cv:
+            self.active -= 1; self.last = time.time(); self.cv.notify_all()
+
+    def idle_loop(self):
+        while True:
+            time.sleep(15)
+            with self.cv:
+                idle = self.active == 0 and not self.switching and (time.time() - self.last) > IDLE_S
+                if idle and (self._alive() or self.powered):
+                    self.switching = True
+                else:
+                    continue
+            log(f"backend: idle {IDLE_S}s — unloading")
+            self._stop_child()
+            if self.powered:
+                power_off(); self.powered = False
+            with self.cv:
+                self.switching = False; self.cv.notify_all()
+
+    def shutdown(self):
+        self._stop_child()
+        if self.powered:
+            power_off(); self.powered = False
+
+B = Backend()
+
+# The writer model is not trained on this app's habits; one FIXED note (identical every request, so prompt
+# caching still works) tells it the review tool exists and when to use it. Same idea as BUG-208's GLM nudge.
+NUDGE_MARK = "[luminos-coder note]"
+NUDGE = NUDGE_MARK + """ You are running locally as the WRITER model (Qwen3.6). A second, stronger local model (Qwen3.8) is
+available as a REVIEWER through the luminos-coder tools:
+- After you write or change non-trivial code, and BEFORE you tell the user it is done, call
+  review_start with the task, the code (full file text) and any test output, then call review_wait with the
+  returned job_id until it reports status "done". Apply every real defect it lists, then re-run the tests.
+- Use run_tests / run_python to actually execute code. Never claim code works without running it."""
+
+def add_nudge(j):
+    names = " ".join(t.get("name", "") for t in (j.get("tools") or []) if isinstance(t, dict))
+    if "review_start" not in names:
+        return
+    s = j.get("system")
+    if isinstance(s, str):
+        if NUDGE_MARK not in s:
+            j["system"] = [{"type": "text", "text": s}, {"type": "text", "text": NUDGE}]
+    elif isinstance(s, list):
+        if not any(NUDGE_MARK in (b.get("text") or "") for b in s if isinstance(b, dict)):
+            s.append({"type": "text", "text": NUDGE})
+    else:
+        j["system"] = [{"type": "text", "text": NUDGE}]
+
+HOP = {"host", "content-length", "connection", "authorization", "x-api-key", "accept-encoding",
+       "transfer-encoding", "keep-alive"}
+
+class H(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    def log_message(self, fmt, *a):
+        sys.stderr.write(time.strftime("%H:%M:%S ") + (fmt % a) + "\n")
+
+    def _auth(self):
+        if not TOKEN:
+            return True
+        got = self.headers.get("x-api-key") or (self.headers.get("authorization") or "").replace("Bearer ", "")
+        if got == TOKEN:
+            return True
+        self._json(401, {"type": "error", "error": {"type": "authentication_error", "message": "bad local token"}})
+        return False
+
+    def _json(self, code, obj):
+        b = json.dumps(obj).encode()
+        self.send_response(code); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+
+    def do_HEAD(self):
+        # Claude Desktop's 3P health check probes `HEAD /` and `HEAD /api/hello`; a 501 made it log the gateway as
+        # "not_testable". Any HEAD gets an empty 200.
+        self.send_response(200); self.send_header("Content-Length", "0"); self.end_headers()
+
+    def do_GET(self):
+        if self.path.startswith("/health"):
+            return self._json(200, {"status": "ok", "loaded": B.current, "active": B.active,
+                                    "powered": B.powered, "idle_s": IDLE_S})
+        if self.path.startswith("/v1/models"):
+            ids = ["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"]
+            return self._json(200, {"data": [{"id": i, "type": "model", "display_name": i} for i in ids],
+                                    "has_more": False, "first_id": ids[0], "last_id": ids[-1]})
+        self._json(404, {"error": "not found"})
+
+    def do_POST(self):
+        if not self._auth():
+            return
+        n = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(n) if n else b""
+        path = self.path.split("?")[0]
+        if path not in ("/v1/messages", "/v1/messages/count_tokens", "/v1/chat/completions"):
+            return self._json(404, {"error": f"unsupported path {path}"})
+        try:
+            j = json.loads(raw or b"{}")
+        except Exception:
+            return self._json(400, {"error": "bad json"})
+        prof = profile_for(j.get("model"))
+        if path == "/v1/messages":
+            add_nudge(j)
+        j["model"] = PROFILES[prof]["alias"]
+        body = json.dumps(j).encode()
+        t0 = time.time()
+        if path == "/v1/messages" and j.get("stream"):
+            try:
+                self._stream_keepalive(path, body, prof)
+            finally:
+                log(f"{path} {prof} stream {time.time()-t0:.1f}s")
+            return
+        try:
+            B.acquire(prof)
+        except Exception as e:
+            log("acquire failed:", e)
+            return self._json(503, {"type": "error", "error": {"type": "overloaded_error", "message": str(e)}})
+        try:
+            self._forward(path, body)
+        finally:
+            B.release()
+            log(f"{path} {prof} {time.time()-t0:.1f}s")
+
+    # [CHANGE: claude-code | 2026-10-24] DECISION 157 — keep-alive for slow first tokens.
+    # Claude Code (inside Cowork) drops a stream that stays silent ~90 s ("client went away mid-stream" at 96.9 s).
+    # A Cowork turn is a ~47 000-token prompt: 140 s of prompt reading on the writer, plus 20–40 s if the model has
+    # to be swapped in first. So for streaming /v1/messages the gateway answers 200 + SSE headers AT ONCE, then sends
+    # Anthropic `ping` events every PING_S while the model loads / reads, ONLY at event boundaries (never inside an
+    # upstream event), relays upstream bytes as they come, and turns an upstream error into an SSE `error` event.
+    # If the client hangs up, the upstream connection is closed so llama-server stops working on it.
+    PING_S = 10
+    PING = b'event: ping\ndata: {"type": "ping"}\n\n'
+
+    def _stream_keepalive(self, path, body, prof):
+        import queue
+        q = queue.Queue()
+        cancel = threading.Event()
+        holder = {}
+        hdr = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
+        hdr["Content-Length"] = str(len(body))
+
+        def worker():
+            acquired = False
+            try:
+                B.acquire(prof); acquired = True
+                if cancel.is_set():
+                    return
+                c = http.client.HTTPConnection("127.0.0.1", BPORT, timeout=3600)
+                holder["c"] = c
+                c.request("POST", path, body, hdr)
+                r = c.getresponse()
+                q.put(("status", r.status))
+                while not cancel.is_set():
+                    chunk = r.read1(65536)
+                    if not chunk:
+                        break
+                    q.put(("data", chunk))
+            except Exception as e:
+                if not cancel.is_set():
+                    q.put(("error", f"{type(e).__name__}: {e}"))
+            finally:
+                try:
+                    holder.get("c") and holder["c"].close()
+                except Exception:
+                    pass
+                if acquired:
+                    B.release()
+                q.put(("end", None))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        def w(b):
+            self.wfile.write(b"%x\r\n%s\r\n" % (len(b), b)); self.wfile.flush()
+
+        def err_event(msg):
+            e = {"type": "error", "error": {"type": "api_error", "message": msg[:2000]}}
+            return b"event: error\ndata: " + json.dumps(e).encode() + b"\n\n"
+
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
+            status, tail, errbuf, pings = None, b"\n\n", b"", 0
+            while True:
+                try:
+                    kind, val = q.get(timeout=self.PING_S)
+                except Exception:
+                    if tail.endswith(b"\n\n"):
+                        w(self.PING); pings += 1
+                    continue
+                if kind == "status":
+                    status = val
+                elif kind == "data":
+                    if status == 200:
+                        w(val); tail = (tail + val)[-2:]
+                    else:
+                        errbuf += val
+                elif kind == "error":
+                    if tail.endswith(b"\n\n"):
+                        w(err_event(val))
+                elif kind == "end":
+                    if status is not None and status != 200:
+                        w(err_event(f"backend HTTP {status}: {errbuf.decode('utf-8', 'replace')}"))
+                    break
+            self.wfile.write(b"0\r\n\r\n"); self.wfile.flush()
+            if pings:
+                log(f"keepalive: sent {pings} ping(s) before/while streaming")
+        except (BrokenPipeError, ConnectionResetError):
+            cancel.set()
+            try:
+                holder.get("c") and holder["c"].sock and holder["c"].sock.shutdown(2)
+            except Exception:
+                pass
+            log("client went away mid-stream — upstream cancelled")
+
+    def _forward(self, path, body):
+        c = http.client.HTTPConnection("127.0.0.1", BPORT, timeout=3600)
+        hdr = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
+        hdr["Content-Length"] = str(len(body))
+        c.request("POST", path, body, hdr)
+        r = c.getresponse()
+        self.send_response(r.status)
+        stream = False
+        for k, v in r.getheaders():
+            if k.lower() in HOP:
+                continue
+            if k.lower() == "content-type" and "event-stream" in v:
+                stream = True
+            self.send_header(k, v)
+        if stream:
+            self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
+            try:
+                while True:
+                    chunk = r.read1(65536) if hasattr(r, "read1") else r.read(4096)
+                    if not chunk:
+                        break
+                    self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk)); self.wfile.flush()
+                self.wfile.write(b"0\r\n\r\n"); self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                log("client went away mid-stream")
+        else:
+            data = r.read()
+            try:
+                self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                # the Desktop health test gives up after ~30 s while the single slot is busy — harmless
+                log("client went away before the reply")
+        c.close()
+
+def main():
+    def bye(*_):
+        log("gateway: shutting down"); B.shutdown(); os._exit(0)
+    signal.signal(signal.SIGTERM, bye); signal.signal(signal.SIGINT, bye)
+    threading.Thread(target=B.idle_loop, daemon=True).start()
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+    srv.daemon_threads = True
+    log(f"luminos-coder-gateway on 127.0.0.1:{PORT} -> llama-server :{BPORT}, idle unload {IDLE_S}s")
+    srv.serve_forever()
+
+if __name__ == "__main__":
+    main()

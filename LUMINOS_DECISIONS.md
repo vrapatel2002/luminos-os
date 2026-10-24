@@ -8539,3 +8539,61 @@ claude.ai Projects/memory are account features → not visible in the GLM app; w
 as the Cowork folder (CLAUDE.md/AGENTS.md carry the rules). The project's one doc was copied to
 gameos/docs/claude-project/vela-remote-seat.md.
 **Undo:** close the GLM app; `systemctl --user disable --now luminos-glm-proxy`; `rm -r ~/.config/Claude-glm ~/.config/Claude-glm-3p`.
+
+## DECISION 157 — On-device coder pair in Claude Desktop: Qwen3.6 writes, Qwen3.8 reviews (luminos-coder)
+<!-- [CHANGE: claude-code | 2026-10-23] -->
+**Date:** 2026-10-23 · **Asked by Shawn:** "make a system [Qwen3.6 writes, Qwen3.8 cross-checks] and test it … take care of
+the power usage … make sure the gpu is running at full power … run these on chat mode on claude desktop app."
+No cloud backup (Shawn: "no cloud backup").
+
+**What:** a third Claude Desktop instance, **"Claude (Local Qwen)"** (`scripts/luminos-claude-local`, profile
+`~/.config/Claude-local`, 3P gateway mode — same mechanism as DECISION 156's GLM window, which proved 3P exposes the
+`chat` surface), talking to **`scripts/luminos-coder-gateway`** on `127.0.0.1:4142` (user unit
+`luminos-coder-gateway.service`). The gateway owns ONE `llama-server` child on `:8093`, launched through `dgpu-exec-v2`:
+- model picker `claude-sonnet-4-5` (+ haiku for background chores) → **writer** Qwen3.6-35B-A3B UD-Q3_K_XL, ctx 64K, ub 4096
+- model picker `claude-opus-4-5` → **reviewer** Qwen3.8-27B UD-Q2_K_XL, ctx 32K, `-lm mlock`, MTP, thinking budget 1024
+- the MCP server **`luminos-coder`** (`scripts/luminos-coder-review-mcp`) gives the writer `review_start`/`review_wait`
+  (asks the reviewer through the same gateway), `run_python` and `run_tests` (pytest in `~/.local/share/luminos/coder-venv`).
+  A fixed system note (same trick as the GLM proxy, BUG-208) tells the writer to review + run tests before saying "done".
+Switching models waits for in-flight requests, stops the child and starts the other (6 GB VRAM: one model at a time,
+DECISION 58 foreground budget). The reviewer is told to list concrete defects with a breaking input, never a score
+(BUG-109 / feedback_llm_reads_not_judges); whether code is right is decided by running tests.
+
+**Power:** model load → `nvidia-powerd` unmask+start (Dynamic Boost — the only TGP lever on this GPU, BUG-069);
+15 min idle (`CODER_IDLE_S`) or gateway stop → child stopped, `nvidia-powerd` stopped + **masked** (BUG-182 idle policy) →
+dGPU `suspended` (verified). luminos-power's spectrum already treats the card as busy by itself (`dgpuHasClients`), so no
+socket call; fans untouched (curve v6). `luminos-train-mode` deliberately NOT used (pins fans 100 %, restores v5 — BUG-213).
+
+**Why these models / quants (measured, tests/coder/RESULTS.md):** writer 328 prompt t/s / 18.7–20 gen t/s; reviewer
+272 prompt t/s / ~2.4 gen t/s. The reviewer is dense: ~60 % of each token runs on the CPU at its 30 W dGPU ceiling and
+82 °C target — quant type does not move it (IQ3 1.7, Q2_K 2.4). Without mlock the CPU half is evicted and re-read from
+NVMe (< 1 t/s); Q3_K_XL with mlock was OOM-killed at load; Q2_K_XL (6.3 GB pinned) is the largest that fits.
+**Trade-off accepted:** while the reviewer is loaded the desktop is pushed into swap (MemAvailable ~0.4 GB); a review takes
+minutes, not seconds. Rejected: llama.cpp router mode (own switcher is simpler to verify and carries the power hooks);
+Qwen3-Coder-Next 80B / Qwen3.8-Flash-Next (do not fit; NVMe-bound); cloud backup (Shawn said no).
+
+**Generation guards (learned in the proof runs):** unbounded, Qwen3.6 thought for 16 000+ tokens on one task, its
+self-review looped on one sentence until max_tokens, and Qwen3.8 ran past 2 900 review tokens — so the gateway starts
+both servers with `--presence-penalty 1.5` (Qwen's advice for quantized models; it must be a server default because
+`/v1/messages` drops a per-request value — read back 0.0 from `/slots`) and `--reasoning-budget` 8192 (writer) /
+1024 (reviewer); the review tool caps a review at 4096 tokens.
+
+**Claude Desktop reality (tested 2026-10-24 by driving the app with ydotool + screenshots):**
+- The 3P app shows **Cowork and Code tabs only — there is no separate "Chat" tab** in this version (the model catalog
+  lists a `chat` surface, the UI does not offer it). Cowork is the conversational surface.
+- **Cowork cannot start while the Max app's Cowork VM is running**: "Failed to start Claude's workspace: vsock listen on
+  port 51234 … address already in use" — the VM port is fixed, one Cowork VM per machine. Close the Max app's Cowork
+  (or the Max app) to use Local Cowork.
+- **The Code tab works** (no VM): it runs Claude Code on the host against the gateway. MCP for Code-tab sessions comes
+  from `~/.claude/settings.json` (user scope, AGENTS §6), so `luminos-coder` is registered there too (backup
+  `settings.json.bak-coder-20261024`; `luminos-verify --mcp` PASS).
+- Claude Code's request is **~74 000 tokens** (system prompt + every MCP tool schema) → writer ctx raised to 131072
+  (`CODER_WRITER_CTX` in the unit; 64K returned HTTP 400). First read ≈ 4–5 min at ~280 t/s; later turns reuse the cache.
+- Claude Code drops a stream that is silent ~90 s → the gateway sends Anthropic `ping` events while the model loads/reads
+  (first real turn: 21 pings over 363 s, then generation at ~8.5 t/s — the turn completed). `HEAD` health probes → 200.
+
+**Conflict documented:** BUG-212 — `hive-idle-watchdog` killed every llama-server; now scoped to HIVE's `--port 8080`.
+
+**Revert:** `systemctl --user disable --now luminos-coder-gateway; rm ~/.config/systemd/user/luminos-coder-gateway.service
+~/.local/share/applications/luminos-claude-local.desktop; rm -r ~/.config/Claude-local ~/.config/Claude-local-3p
+~/.local/share/luminos/models/coder ~/.local/share/luminos/coder-venv`. Nothing in /etc changed; nvidia-powerd ends masked.

@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+# luminos-coder-review-mcp — MCP (stdio) tools that let the local WRITER model get its code cross-checked by
+# the local REVIEWER model, and actually run code. [CHANGE: claude-code | 2026-10-23] DECISION 157.
+#
+# Tools:
+#   review_start(task, code, test_output?)  -> {"job_id"}   (returns at once — the review takes minutes)
+#   review_wait(job_id, wait_seconds?)      -> {"status": "running"|"done"|"error", "review"?}
+#       long-polls up to wait_seconds (default 45) so no single MCP call outlives the client's tool timeout.
+#   run_python(code, stdin?, timeout_s?)    -> stdout/stderr/exit code from a fresh scratch dir
+#   run_tests(solution, tests, timeout_s?)  -> writes solution.py + test_solution.py, runs `python3 -m pytest -q`
+#
+# The reviewer is reached through luminos-coder-gateway as model "claude-opus-4-5" (the gateway maps *opus* to
+# Qwen3.8 and swaps it onto the GPU). The reviewer is told to REPORT concrete defects with locations, never a
+# score — a model asked for a number gives the same safe number every time (BUG-109,
+# feedback_llm_reads_not_judges). Whether the code is right is decided by running it, not by the review.
+import json, os, re, subprocess, sys, tempfile, threading, time, urllib.request, uuid
+
+GW = os.environ.get("CODER_GATEWAY", "http://127.0.0.1:4142")
+STATE = os.path.expanduser("~/.local/state/luminos/coder")
+WORK = os.path.join(STATE, "work")
+os.makedirs(WORK, exist_ok=True)
+REVIEW_MAX_TOKENS = int(os.environ.get("CODER_REVIEW_MAX_TOKENS", "5120"))  # 2048 thinking + defect list; ~2.2 t/s ≈ 39 min worst case
+# Code runs in the harness venv (has pytest); never the system or HIVE interpreters.
+_VPY = os.path.expanduser("~/.local/share/luminos/coder-venv/bin/python")
+PY = os.environ.get("CODER_PY") or (_VPY if os.path.exists(_VPY) else sys.executable)
+
+def _token():
+    try:
+        for l in open(os.path.expanduser("~/.config/luminos/coder.env")):
+            if l.startswith("CODER_LOCAL_TOKEN="):
+                return l.strip().split("=", 1)[1]
+    except OSError:
+        pass
+    return ""
+
+REVIEW_SYSTEM = """You are a senior code reviewer. Another model wrote the code below for the given task.
+Your job is to find REAL defects: wrong results, unhandled edge cases, crashes, off-by-one errors, wrong complexity
+for the stated limits, misread requirements, broken I/O format. Check the code against EVERY requirement in the task,
+one by one, and trace it by hand on small tricky inputs (empty input, single element, duplicates, boundaries,
+maximum sizes, negative numbers, ties) before you decide.
+
+EVERY defect must be backed by the task text: quote, word for word, the sentence or table row of the TASK that
+requires the behaviour, in double quotes after SPEC:. If you cannot quote a sentence of the TASK that requires it, it
+is NOT a defect — leave it out (your own opinion of what the behaviour "should" be does not count). Before you write a
+defect, re-read the quoted sentence and check that it really says what you claim.
+
+Answer in exactly this format:
+DEFECTS:
+1. <where: function/line> — <what is wrong> — <a concrete input, expected vs actual result> — SPEC: "<exact quote from the TASK>" — <how to fix>
+2. ...
+(write "DEFECTS: none found" if you genuinely find nothing after checking every requirement)
+NOTES: <optional, at most 3 short lines on risky spots that are not defects>
+
+Do not give a score or a grade. Do not rewrite the whole program. Be specific and verifiable."""
+
+# [CHANGE: claude-code | 2026-10-23] Grounding filter (DECISION 157, proof run C): the Q2-quantized Qwen3.8 review
+# mixed real defects with invented requirements (">* must raise" — the task says it "matches NOTHING"), and the writer
+# applied both: 91 -> 86/107. The model REPORTS (with a quote), CODE CHECKS the quote is really in the task text
+# (BUG-109 rule: models read, code judges). Defects with no verifiable quote are dropped and counted.
+def _norm(s):
+    s = s.replace("`", "").replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+def ground(review, task):
+    nt = _norm(task).replace("|", " ")
+    nt = re.sub(r"\s+", " ", nt)
+    head, _, body = review.partition("DEFECTS:")
+    if not body:
+        return review, 0, 0
+    body, sep, notes = body.partition("NOTES:")
+    items = re.split(r"\n\s*(?=\d+\.\s)", "\n" + body.strip())
+    kept, dropped = [], 0
+    for it in (i.strip() for i in items):
+        if not it or it.lower().startswith("none found"):
+            continue
+        quotes = re.findall(r'SPEC:\s*["“](.+?)["”](?:\s|$|—|-|\.|,)', it, re.S)
+        ok = any(len(_norm(q)) >= 12 and re.sub(r"\s+", " ", _norm(q).replace("|", " ")) in nt for q in quotes)
+        if ok:
+            kept.append(it)
+        else:
+            dropped += 1
+    out = "DEFECTS:\n" + ("\n".join(f"{n}. " + re.sub(r"^\d+\.\s*", "", k) for n, k in enumerate(kept, 1)) or "none verified")
+    if dropped:
+        out += f"\n(dropped {dropped} claim(s) whose SPEC quote is not in the task text — not verifiable, ignore them)"
+    if sep:
+        out += "\nNOTES:" + notes
+    return out, len(kept), dropped
+
+JOBS = {}
+LOCK = threading.Lock()
+
+def _review(job_id, task, code, test_output):
+    user = f"TASK:\n{task}\n\nCODE:\n```\n{code}\n```\n"
+    if test_output:
+        user += f"\nTEST OUTPUT SO FAR:\n```\n{test_output[-6000:]}\n```\n"
+    body = {"model": "claude-opus-4-5", "max_tokens": REVIEW_MAX_TOKENS, "system": REVIEW_SYSTEM,
+            "messages": [{"role": "user", "content": user}]}
+    t0 = time.time()
+    try:
+        req = urllib.request.Request(GW + "/v1/messages", json.dumps(body).encode(),
+                                     {"Content-Type": "application/json", "x-api-key": _token(),
+                                      "anthropic-version": "2023-06-01"})
+        with urllib.request.urlopen(req, timeout=7200) as r:
+            d = json.load(r)
+        text = "\n".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text").strip()
+        g, kept, dropped = ground(text, task) if task else (text, None, None)
+        res = {"status": "done", "review": g or "(reviewer returned no text)", "verified_defects": kept,
+               "dropped_unverifiable": dropped, "seconds": round(time.time() - t0, 1), "usage": d.get("usage")}
+        with open(os.path.join(STATE, "reviews-raw.jsonl"), "a") as f:
+            f.write(json.dumps({"job_id": job_id, "raw": text}) + "\n")
+    except Exception as e:
+        res = {"status": "error", "error": f"{type(e).__name__}: {e}", "seconds": round(time.time() - t0, 1)}
+    with LOCK:
+        JOBS[job_id].update(res)
+    with open(os.path.join(STATE, "reviews.jsonl"), "a") as f:
+        f.write(json.dumps({"job_id": job_id, "t": time.strftime("%F %T"), **res}) + "\n")
+
+def review_start(a):
+    job = uuid.uuid4().hex[:10]
+    with LOCK:
+        JOBS[job] = {"status": "running", "started": time.time()}
+    threading.Thread(target=_review, args=(job, a.get("task", ""), a.get("code", ""), a.get("test_output", "")),
+                     daemon=True).start()
+    return {"job_id": job, "status": "running",
+            "hint": "Call review_wait with this job_id until status is done. The reviewer may need several minutes."}
+
+def review_wait(a):
+    job = a.get("job_id", ""); wait = max(1, min(int(a.get("wait_seconds", 45)), 50))
+    end = time.time() + wait
+    while True:
+        with LOCK:
+            j = dict(JOBS.get(job) or {})
+        if not j:
+            return {"status": "error", "error": f"unknown job_id {job}"}
+        if j["status"] != "running" or time.time() >= end:
+            if j["status"] == "running":
+                j["elapsed_s"] = round(time.time() - j["started"], 1)
+                j["hint"] = "Still reviewing — call review_wait again with the same job_id."
+            j.pop("started", None)
+            return j
+        time.sleep(1)
+
+def _run(argv, cwd, stdin, timeout):
+    try:
+        p = subprocess.run(argv, cwd=cwd, input=stdin, capture_output=True, text=True, timeout=timeout)
+        return {"exit_code": p.returncode, "stdout": p.stdout[-12000:], "stderr": p.stderr[-6000:], "dir": cwd}
+    except subprocess.TimeoutExpired as e:
+        return {"exit_code": None, "timeout": True, "stdout": (e.stdout or "")[-4000:] if isinstance(e.stdout, str) else "",
+                "stderr": f"killed after {timeout}s", "dir": cwd}
+
+def run_python(a):
+    d = tempfile.mkdtemp(prefix="py-", dir=WORK)
+    open(os.path.join(d, "main.py"), "w").write(a.get("code", ""))
+    return _run([PY, "main.py"], d, a.get("stdin", ""), int(a.get("timeout_s", 60)))
+
+def run_tests(a):
+    d = tempfile.mkdtemp(prefix="t-", dir=WORK)
+    open(os.path.join(d, "solution.py"), "w").write(a.get("solution", ""))
+    open(os.path.join(d, "test_solution.py"), "w").write(a.get("tests", ""))
+    return _run([PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short"], d, "", int(a.get("timeout_s", 120)))
+
+TOOLS = [
+    {"name": "review_start", "description": "Send code to the local REVIEWER model (Qwen3.8-27B) for a defect review. Returns a job_id immediately; then call review_wait.",
+     "inputSchema": {"type": "object", "properties": {
+         "task": {"type": "string", "description": "The full task/requirements the code must satisfy"},
+         "code": {"type": "string", "description": "The complete code to review"},
+         "test_output": {"type": "string", "description": "Optional: output of tests you already ran"}},
+         "required": ["task", "code"]}},
+    {"name": "review_wait", "description": "Wait (up to ~45 s per call) for a review started with review_start. Call repeatedly until status is 'done'.",
+     "inputSchema": {"type": "object", "properties": {"job_id": {"type": "string"}, "wait_seconds": {"type": "integer"}},
+                     "required": ["job_id"]}},
+    {"name": "run_python", "description": "Run a Python 3 program in a fresh scratch directory on this laptop and return stdout/stderr/exit code.",
+     "inputSchema": {"type": "object", "properties": {"code": {"type": "string"}, "stdin": {"type": "string"},
+                                                      "timeout_s": {"type": "integer"}}, "required": ["code"]}},
+    {"name": "run_tests", "description": "Write solution.py and test_solution.py (pytest) into a fresh scratch dir and run pytest.",
+     "inputSchema": {"type": "object", "properties": {"solution": {"type": "string"}, "tests": {"type": "string"},
+                                                      "timeout_s": {"type": "integer"}}, "required": ["solution", "tests"]}},
+]
+IMPL = {"review_start": review_start, "review_wait": review_wait, "run_python": run_python, "run_tests": run_tests}
+
+OUT_LOCK = threading.Lock()
+def send(o):
+    with OUT_LOCK:  # tool calls finish on worker threads; one JSON-RPC line at a time
+        sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+
+def main():
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            m = json.loads(line)
+        except Exception:
+            continue
+        mid, meth = m.get("id"), m.get("method")
+        if meth == "initialize":
+            pv = (m.get("params") or {}).get("protocolVersion") or "2024-11-05"
+            send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": pv, "capabilities": {"tools": {}},
+                  "serverInfo": {"name": "luminos-coder", "version": "1.0.0"}}})
+        elif meth == "tools/list":
+            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}})
+        elif meth == "tools/call":
+            p = m.get("params") or {}
+            fn = IMPL.get(p.get("name"))
+            if not fn:
+                send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "unknown tool"}}); continue
+            def work(mid=mid, fn=fn, args=p.get("arguments") or {}):
+                try:
+                    out = fn(args); err = out.get("status") == "error"
+                except Exception as e:
+                    out, err = {"error": f"{type(e).__name__}: {e}"}, True
+                send({"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": json.dumps(out, indent=1)}],
+                                                              "isError": err}})
+            threading.Thread(target=work, daemon=True).start()
+        elif meth == "ping":
+            send({"jsonrpc": "2.0", "id": mid, "result": {}})
+        elif mid is not None and meth:
+            send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"unsupported {meth}"}})
+
+if __name__ == "__main__":
+    main()

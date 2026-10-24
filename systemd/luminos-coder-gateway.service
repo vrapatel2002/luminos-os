@@ -1,0 +1,18 @@
+# [CHANGE: claude-code | 2026-10-23] DECISION 157 — on-device coder pair (Qwen3.6 writer + Qwen3.8 reviewer)
+# behind a Claude-Desktop-shaped API on 127.0.0.1:4142. Loads a model only on request; unloads after
+# CODER_IDLE_S of silence and re-masks nvidia-powerd so the dGPU can sleep again.
+[Unit]
+Description=Luminos local coder gateway (Qwen3.6 writer / Qwen3.8 reviewer) on 127.0.0.1:4142
+
+[Service]
+ExecStart=/usr/bin/python3 %h/luminos-os/scripts/luminos-coder-gateway
+Environment=CODER_IDLE_S=900
+# Claude Code in the Desktop Code tab sends ~74 000 tokens (system prompt + all MCP tool schemas) — 64K was rejected (HTTP 400).
+Environment=CODER_WRITER_CTX=131072
+Restart=on-failure
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=45
+
+[Install]
+WantedBy=default.target

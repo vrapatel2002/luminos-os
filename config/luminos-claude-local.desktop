@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Claude (Local Qwen)
+Comment=Third Claude window running fully on this laptop — Qwen3.6 writes, Qwen3.8 reviews (luminos-coder, DECISION 157)
+Exec=/home/shawn/luminos-os/scripts/luminos-claude-local
+Icon=claude-desktop
+Categories=Utility;
+StartupWMClass=Claude
