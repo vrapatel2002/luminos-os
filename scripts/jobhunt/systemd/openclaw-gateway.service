@@ -5,12 +5,20 @@
 # therefore died every time Cowork restarted, and the operator saw "Could not connect"
 # with no obvious cause. A user unit gives it its own cgroup and its own life.
 [Unit]
-Description=OpenClaw gateway (Control UI on 127.0.0.1:18789)
+Description=OpenClaw gateway (Control UI on 127.0.0.1:18789 via openclaw-gateway-proxy.socket)
+StopWhenUnneeded=yes
 Documentation=file:///home/shawn/luminos-os/docs/BUGS.md
 
 [Service]
 Type=simple
-ExecStart=/home/shawn/.npm-global/bin/openclaw gateway
+# [CHANGE: claude-code | 2026-10-24] DECISION 160 — socket-activated. The gateway no longer
+# starts at login and no longer owns 18789: openclaw-gateway-proxy.socket holds that port,
+# the first connection starts openclaw-gateway-proxy.service, which Requires= this unit and
+# forwards to 18790. When the proxy exits after 15 idle minutes nothing needs the gateway
+# any more and StopWhenUnneeded= stops it. CLI clients still talk to the configured 18789.
+ExecStart=/home/shawn/.npm-global/bin/openclaw gateway --port 18790
+# The proxy must not forward before the gateway listens, or the first request is refused.
+ExecStartPost=/bin/bash -c 'for i in $(seq 120); do (exec 3<>/dev/tcp/127.0.0.1/18790) 2>/dev/null && exit 0; sleep 0.5; done; exit 1'
 
 # Restart=always IS LOAD-BEARING, and on-failure is NOT enough. Changing
 # gateway.auth.token makes the gateway perform a deliberate "supervisor
@@ -26,5 +34,5 @@ RestartSec=3
 # start from a shell without the variable, and the UI would fail to connect
 # while `openclaw status` still cheerfully reported "auth token".
 
-[Install]
-WantedBy=default.target
+# [CHANGE: claude-code | 2026-10-24] DECISION 160 — no [Install]: enabling this unit would
+# start it at login and keep it "needed" forever. Enable openclaw-gateway-proxy.socket instead.

@@ -1,0 +1,58 @@
+Sat Oct 24 02:05:35 PM EDT 2026
+
+Totals
+                 total        used        free      shared  buff/cache   available
+  Mem:             16G        5.6G        1.1G         89M        9.7G         10G
+  Swap:            42G        2.7G         40G
+
+  MemTotal:           14.91 GB
+  MemAvailable:        9.72 GB
+  Cached:              8.70 GB
+  Shmem:               0.08 GB
+  SReclaimable:        0.23 GB
+  ── 'used' in free already excludes cache. MemAvailable is what you can actually still get.
+
+Top consumers by PSS (shared pages split fairly — this column sums to something real)
+  PROCESS                           PSS        RSS  COUNT
+  claude-desktop                0.86 GB    1.02 GB     10
+  plasmashell                   0.23 GB    0.25 GB      1
+  python3                       0.16 GB    0.18 GB      7
+  qs                            0.07 GB    0.09 GB      1
+  drkonqi-coredum               0.03 GB    0.04 GB      4
+  code-review-gra               0.03 GB    0.03 GB      2
+  luminos-ram                   0.02 GB    0.02 GB      1
+  xdg-desktop-por               0.01 GB    0.03 GB      3
+  kded6                         0.01 GB    0.02 GB      1
+  pipewire-pulse                0.01 GB    0.01 GB      1
+  pipewire                      0.01 GB    0.01 GB      1
+  Xwayland                      0.01 GB    0.01 GB      1
+  wireplumber                   0.01 GB    0.01 GB      1
+  org_kde_powerde               0.00 GB    0.01 GB      1
+  tailscale                     0.00 GB    0.01 GB      1
+  ── PSS is your share of shared pages. RSS is what htop shows and it double-counts.
+
+zram (swapped pages live HERE, compressed, still in RAM)
+  stored 1.96 GB  ->  using 0.66 GB of real RAM  (2.9x compression)
+  NAME              TYPE      SIZE USED PRIO
+  /dev/zram0        partition   8G 2.1G  100
+  /swapfile.luminos file       32G 439M   10
+
+iGPU — taken from the same 16 GB, and invisible to every other tool
+  card2/device/mem_info_vram_used                              0.48 GB
+  card2/device/mem_info_gtt_used                               1.21 GB
+
+Things this box loads on demand — check before blaming anything else
+  llama-server: not running
+  hive-daemon: not running
+  chrome processes: 1  (RAM_PLAN measured 8.5 GB in May 2026)
+
+Reaper (luminos-ram, DECISION 160) — not live, still in RAM (PSS + swap)
+  mode=log  idle allowed now 60 min at 9.7 GB available  (report 14 s old)
+  wine-no-server wine /home/shawn/Games/mw4                       15 MB
+  wine-no-server wine /home/shawn/Games/mw4-syswine               19 MB
+  tmpfs          /tmp/mw4.core                                   386 MB
+  system         proton.VPN.service                               85 MB  (kept)
+  ── total reapable now: 420 MB
+
+Read the PSS column, not free's 'used'. If PSS totals well under 'used',
+the difference is the iGPU and zram above, not a leak.

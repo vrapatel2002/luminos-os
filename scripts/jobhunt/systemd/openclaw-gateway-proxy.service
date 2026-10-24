@@ -1,0 +1,9 @@
+# Forwards the socket-activated 18789 to the real gateway on 18790 and exits after 15 min
+# without a connection. [CHANGE: claude-code | 2026-10-24] DECISION 160
+[Unit]
+Description=OpenClaw Control UI proxy (exits when idle)
+Requires=openclaw-gateway.service openclaw-gateway-proxy.socket
+After=openclaw-gateway.service
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=15min 127.0.0.1:18790

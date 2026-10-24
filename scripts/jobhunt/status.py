@@ -30,8 +30,9 @@ DB_PATH = os.path.expanduser("~/.local/share/luminos/jobhunt.db")
 UNITS = [
     ("jobhunt-pipeline.timer", "nightly run",
      "systemctl --user enable --now jobhunt-pipeline.timer"),
-    ("openclaw-gateway.service", "control UI",
-     "systemctl --user enable --now openclaw-gateway"),
+    # [CHANGE: claude-code | 2026-10-24] DECISION 160 — the gateway starts on first use.
+    ("openclaw-gateway-proxy.socket", "control UI (gateway starts on first use)",
+     "systemctl --user enable --now openclaw-gateway-proxy.socket"),
     ("jobhunt-llm.service", "local model",
      "(on demand — idle is correct)"),
 ]

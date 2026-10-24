@@ -1,0 +1,31 @@
+# luminos-ram-reaper — the USER half of luminos-ram's app reaper (DECISION 160).
+# [CHANGE: claude-code | 2026-10-24]
+#
+# Same binary as the root daemon (/usr/local/bin/luminos-ram), started as `luminos-ram reaper`.
+# It has to run as the user: only the user session can see KWin's window list, PipeWire,
+# the real /tmp and the user's own systemd units. The root daemon cannot (PrivateTmp, no
+# CAP_DAC_OVERRIDE — see the header of cmd/luminos-ram/reap.go).
+#
+# Config:  ~/.config/luminos-ram-reaper.conf   (reap_mode = log | act; `systemctl --user reload` re-reads it)
+# Log:     ~/.local/state/luminos/ram-reaper.log   (WOULD-REAP / REAPED / TMPFS / SYSTEM lines)
+# Report:  echo '{"type":"reap"}' | socat - UNIX-CONNECT:/run/luminos/ram.sock    or    curl 127.0.0.1:9091/reap
+#
+# Install: ln -sfn ~/luminos-os/systemd/user/luminos-ram-reaper.service ~/.config/systemd/user/
+#          systemctl --user daemon-reload && systemctl --user enable --now luminos-ram-reaper
+[Unit]
+Description=Luminos RAM reaper (user half of luminos-ram, DECISION 160)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/luminos-ram reaper
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+# session.slice, not app.slice: the reaper is desktop plumbing, never a reap candidate itself.
+Slice=session.slice
+Nice=5
+
+[Install]
+WantedBy=graphical-session.target

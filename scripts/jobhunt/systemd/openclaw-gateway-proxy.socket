@@ -1,0 +1,16 @@
+# OpenClaw Control UI port — socket-activated. [CHANGE: claude-code | 2026-10-24] DECISION 160
+#
+# Shawn: "we are not using openclaw, so out of RAM". The gateway is only the Control UI
+# (the nightly pipeline uses `openclaw agent --local`, no gateway), so it no longer runs
+# all day: systemd holds 127.0.0.1:18789, the first connection starts
+# openclaw-gateway-proxy.service, which pulls up the real gateway on 18790; 15 min with no
+# connection and the proxy exits, and the gateway (StopWhenUnneeded=yes) goes with it.
+[Unit]
+Description=OpenClaw Control UI port 18789 (starts the gateway on first use)
+
+[Socket]
+ListenStream=127.0.0.1:18789
+Service=openclaw-gateway-proxy.service
+
+[Install]
+WantedBy=sockets.target

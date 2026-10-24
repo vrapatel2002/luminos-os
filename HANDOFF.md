@@ -1,66 +1,82 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-24 10:55 — Response 25 (DECISION 159 shared MCP servers built + tested + switched; luminos-ram reaper prompt written) (Max-window chat "Biggest local LLM model")
+Last updated: 2026-10-24 14:15 — Response 1 (luminos-ram app reaper built, tested, installed in LOG mode — DECISION 160) (cloud session linked to the G14)
 
-Previous handoff (VisionQuest DV P5 sweep / MW4 / GLM window) is in git: `git show c5ac3e61:HANDOFF.md`. Nothing from it
-was touched; its open items are listed under "Still open from before".
+Previous handoff (DECISION 159 shared MCP servers) is in git: `git show 9bafc74c:HANDOFF.md`.
 
 ## Goal (the durable end objective)
 Keep Luminos OS working as a daily-driver Windows replacement — G14 desktop/AI stack + the separate media server — fixing
 what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now — stop wasting RAM (DECISION 159 done; luminos-ram reaper = prompt only)
-Shawn: "make a detailed prompt for luminos-ram … apps close completely … Chrome, MW4, VPN, openclaw, Wine … if it is not
-live working remove it from RAM … no leftovers … and for you to do: the same tool servers started over and over."
-Measured (Response 24): zram 5.7 GB → 2.0 GB; biggest cause 6 × mempalace + 6 × code-review-graph (~1.35 GB swapped).
+## Aim right now — stop wasting RAM: apps that are not live leave RAM (docs/prompts/luminos-ram-reaper.md)
+Built and installed. Running in **reap_mode = log** (dry run). Waiting on Shawn: read a day of
+`~/.local/state/luminos/ram-reaper.log`, then switch to `act`.
 
 ## Why / motivation
-16 GB soldered RAM; the local Qwen3.8 reviewer needs 6.3 GB pinned and the desktop was already in swap.
+16 GB soldered RAM; on 2026-10-24 zram held 5.7 GB. Measured leftovers: orphaned MW4 Wine, 737 MB of debug files in
+/tmp (tmpfs = RAM), an idle Proton VPN daemon, the openclaw gateway, extra Claude profiles, Chrome stragglers.
+
+## Process / approach being used
+Same binary, two halves: root `luminos-ram.service` (unchanged unit) + user `luminos-ram reaper`
+(`systemd/user/luminos-ram-reaper.service`). The root half cannot see the session — see DECISION 160 / BUG-214.
 
 ## State — what is DONE
-- **DECISION 159**: `scripts/luminos-mcp-share` (broker + socat stub). Configs switched (backups `*.bak-mcpshare-20261024`):
-  Max `~/.config/Claude/claude_desktop_config.json`, `~/.config/Claude-glm-3p/…`, `~/.config/Claude-local-3p/…`,
-  `~/.claude/settings.json`, `~/.config/Antigravity/User/mcp.json`. host-shell deliberately NOT shared.
-- `tests/mcp-share/test_share.py` 17/17 (log in tests/mcp-share/RESULTS.txt). Real "Claude (Local Qwen)" app: 2 socat
-  stubs, no private copies; closed → stubs gone.
-- `scripts/luminos-verify` unwraps the wrapper (`unwrap_shared`); installed to /usr/local/bin (backup
-  `~/.luminos-backups/luminos-verify.bak-pre-mcpshare-20261024`); `luminos-verify --mcp` PASS, 0 warnings.
-- `docs/prompts/luminos-ram-reaper.md` — Shawn's prompt for the app reaper (cases: orphan Wine, /tmp files, proton VPN,
-  openclaw, extra Claude apps, Chrome stragglers; dry-run first; gradient threshold; tests). NOT built.
-- Earlier this chat: DECISION 157 coder pair (Desktop Code tab end-to-end PASSED), DECISION 158 Baloo off, BUG-212 fixed.
+- `cmd/luminos-ram/reap.go` (decisions), `reap_agent.go` (I/O), `reap_test.go` (fake /proc, 23 tests) + 3 hooks in
+  main.go (`reaper` subcommand, `reap`/`reap_report` socket types, HTTP `/reap`). `go test ./...` 31 green.
+- Installed `/usr/local/bin/luminos-ram` (backup `~/.luminos-backups/luminos-ram.bak-pre-reaper-20261024`), root
+  daemon restarted; user unit linked + enabled (graphical-session.target), config `~/.config/luminos-ram-reaper.conf`
+  (repo copy `config/luminos-ram-reaper.conf`), `reap_mode = log`.
+- `tests/ram-reaper/integration.sh` on the real desktop: **19/19** (`RESULTS-integration.txt`, forced pass JSON).
+- openclaw: socket-activated (`scripts/jobhunt/systemd/openclaw-gateway-proxy.{socket,service}`, gateway on 18790,
+  StopWhenUnneeded, gateway unit disabled; install-services.sh + status.py updated). Tested: cold start 4.2 s, CLI OK,
+  idle stop works.
+- Chrome `Local State` background_mode.enabled=false (backup in ~/.luminos-backups).
+- `scripts/luminos-mem-report` prints a "Reaper" section (reads :9091/reap).
+- Docs: DECISION 160, BUG-214/215/216, RAM architecture "Reaper" section, AGENTS §9/§10, STATUS, CODE_REFERENCE.
 
 ## State — what is IN PROGRESS (and where exactly it was left off)
-Shared brokers `luminos-mcp-share-mempalace` and `luminos-mcp-share-crg-luminos-os-0f9dba` running (they stop by
-themselves when idle). **The Max app still runs its 2 OLD copies of mempalace + code-review-graph (~560 MB swapped)**
-until Shawn restarts it — not done by me because this chat runs through that app.
+Log mode is collecting. At 14:05 it lists: 2 orphaned Wine prefixes (pids 69xxx / 85xxx), /tmp/mw4.core 386 MB,
+proton.VPN.service 85 MB (kept until 60 idle min since daemon start). /tmp/mw4-syswine.log (351 MB) will appear once the
+orphaned explorer.exe that holds it is gone.
 
 ## Next steps (ordered)
-1. Shawn: restart the Max Claude app when convenient → then `luminos-mcp-share status` should show it as a client and
-   `pgrep -af mempalace.mcp_server` only the broker's one copy.
-2. Shawn: run docs/prompts/luminos-ram-reaper.md in a new session (or tell me to). Quick wins it covers that Shawn may
-   want right away: delete /tmp/mw4-syswine.log + /tmp/mw4.core (576 MB), kill orphan Wine (PIDs 69xxx/85xxx, PPID 1).
-3. Coder: test pruned models (Qwen3.8-20B-Minitron needs GGUF conversion; Qwen3.6-28B-REAP20) with tests/coder/proof.
-4. `main` is ahead of origin — push is Shawn's call.
+1. Shawn: read `~/.local/state/luminos/ram-reaper.log` (or `luminos-mem-report`) after a day; add anything to
+   `keep =` that must never go; then set `reap_mode = act` and `systemctl --user reload luminos-ram-reaper`.
+2. Shawn's answer (asked once): also `systemctl disable proton.VPN.service` at boot? If yes → /etc change → AGENTS §9 +
+   DECISIONS. (D-Bus activation file exists, so the Proton app would still start it on demand.)
+3. Real-Chrome check: open Chrome, close the last window → `pgrep -c chrome` must reach 0 (not run — would open a
+   browser on Shawn's screen).
+4. BUG-214: feed the root LIRS half with the agent's window list, or move it user-side.
+5. Optional: event-driven death detection (pidfds) would cut the agent's 0.8 % of a core further.
+6. `main` ahead of origin — push is Shawn's call.
 
 ## Key decisions & constraints so far
-- MCP configs must use the wrapper form `luminos-mcp-share client <name> -- <cmd>`; code-review-graph uses `crg@auto`
-  (+ `--repo` for GUI clients). Brokers: server idle 600 s, broker idle 120 s (`MCP_SHARE_*_IDLE_S`).
-- Coder: one model on the GPU at a time; reviewer Q2_K_XL + mlock; do not use luminos-train-mode (BUG-213).
+- Never reap: Claude Max app (default profile; hosts Cowork VM + bridge), qemu, session/luminos units, keep-list
+  (built-in metatrader/terminal64.exe/metaeditor64.exe/xvfb), offload pid, tty/terminals, Steam while a game runs.
+- No window list → no idle reaping. Leftovers are judged on fresh data (full collect every tick while pending).
+- act_only + test_idle_s exist for tests only; integration.sh adds and removes them itself.
 
 ## Gotchas / dead-ends / things NOT to redo
-- host-shell bridge cuts any call at 60 s → long jobs via `systemd-run --user`, poll files. Its shell has NO
-  XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS → export them (`/run/user/1000`) before `systemctl --user`.
-- device_commit_files does not overwrite and caches by source path → NEW source filename to a NEW path, `mv`, sha256.
-- luminos-verify is bash with embedded Python — `py_compile` on it fails falsely; run it instead.
-- The broker's own cmdline contains the server command — count real servers excluding `luminos-mcp-share` pids.
-- `llama-server … cleaning up before exit` = SIGTERM from outside (was BUG-212), not a crash.
+- host-shell cuts calls at 60 s → long jobs via `systemd-run --user`, poll files; export XDG_RUNTIME_DIR /
+  DBUS_SESSION_BUS_ADDRESS (`/run/user/1000`) before `systemctl --user`.
+- device_commit_files never overwrites → commit to `.reaper-staging/rN/` then `cp` (that dir is untracked scratch).
+- `systemctl --user disable` on a symlinked unit DELETES the symlink (BUG-216).
+- Wine refuses a WINEPREFIX whose parent dir isn't yours (`/tmp/x` fails, `/tmp/dir/x` works).
+- Wine orphans ignore SIGTERM — SIGKILL is required (BUG-215).
+- `kill -0` on root processes = EPERM; check `/proc/<pid>/stat` instead.
+- The reaper's own runner must not match `act_only` (integration.sh runs as `ramreaper-itest`).
 
 ## Still open from before (untouched this turn)
-VisionQuest DV P5 sweep verification (BUG-207/DECISION 156 server); MW4 BUG-209 + mw4-cdn-watch; server OpenCL build;
-BUG-199 lock-screen repro; spectrum/nvdefer tests needing Shawn; BUG-213; `main` ahead of origin.
+Max app still runs 2 old MCP copies until restarted (DECISION 159). VisionQuest DV P5 sweep verification (BUG-207/
+DECISION 156 server); MW4 BUG-209 + mw4-cdn-watch; server OpenCL build; BUG-199 lock-screen repro; spectrum/nvdefer
+tests needing Shawn; BUG-213; coder pruned-model tests.
 
 ## Files touched / relevant files
-This turn — New: scripts/luminos-mcp-share, tests/mcp-share/{test_share.py,RESULTS.txt}, docs/prompts/luminos-ram-reaper.md.
-Changed: scripts/luminos-verify, LUMINOS_DECISIONS.md (159), LUMINOS_STATUS.md, AGENTS.md (MCP section + file map), HANDOFF.md.
-Outside repo: the 5 MCP configs above (+ backups), /usr/local/bin/luminos-verify, ~/.cache/luminos/mcp-share/,
-$XDG_RUNTIME_DIR/luminos-mcp-share/. No /etc change.
-Earlier (DECISION 157/158): see `git log` a578b3d4..9ea054a6.
+New: cmd/luminos-ram/{reap.go,reap_agent.go,reap_test.go}, systemd/user/luminos-ram-reaper.service,
+config/luminos-ram-reaper.conf, tests/ram-reaper/{integration.sh,RESULTS-integration.txt,RESULTS-integration-forced-pass.json,
+before-20261024.txt,after-20261024.txt}, scripts/jobhunt/systemd/openclaw-gateway-proxy.{socket,service}.
+Changed: cmd/luminos-ram/main.go, scripts/jobhunt/{systemd/openclaw-gateway.service,install-services.sh,status.py},
+scripts/luminos-mem-report, LUMINOS_DECISIONS.md, docs/BUGS.md, docs/LUMINOS_RAM_ARCHITECTURE.md, AGENTS.md,
+LUMINOS_STATUS.md, docs/CODE_REFERENCE.md, HANDOFF.md.
+Outside repo: /usr/local/bin/luminos-ram (+backup), ~/.config/luminos-ram-reaper.conf, ~/.config/systemd/user/
+{luminos-ram-reaper.service, openclaw-gateway-proxy.*} links, ~/.config/google-chrome/Local State (+backup).
+No /etc change.

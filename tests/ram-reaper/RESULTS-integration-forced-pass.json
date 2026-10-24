@@ -1,0 +1,461 @@
+{
+  "acted": [
+    "REAPED app=\"lrtest-e-dummy.scope\" rule=idle reason=\"no window/audio/traffic for 2 s, 0.0 % CPU, net 0.0 KB/s (allowed 30 s)\" pids=[307042] via systemctl --user stop lrtest-e-dummy.scope in 0.0s — left=[] freed≈0 MB (PSS 0 + swap 0)"
+  ],
+  "pass": {
+    "at": "2026-10-24T14:04:04.149493683-04:00",
+    "mode": "log",
+    "avail_gb": 9.287654876708984,
+    "idle_allowed_min": 60,
+    "windows_known": true,
+    "candidates": [
+      {
+        "key": "unit:app-Thunar@ec4f3850dff540b68988b84d3e3cba74.service",
+        "app": "app-Thunar@ec4f3850dff540b68988b84d3e3cba74.service",
+        "rule": "idle",
+        "reason": "no window/audio/traffic for 2 s, 0.0 % CPU, net 0.0 KB/s (allowed 60 min)",
+        "idle_min": 0.034552339433333336,
+        "pids": [
+          2874
+        ],
+        "pss_mb": 0.8125,
+        "swap_mb": 7.765625,
+        "action": "stop-unit",
+        "unit": "app-Thunar@ec4f3850dff540b68988b84d3e3cba74.service"
+      },
+      {
+        "key": "unit:app-org.kde.discover.notifier@autostart.service",
+        "app": "app-org.kde.discover.notifier@autostart.service",
+        "rule": "idle",
+        "reason": "no window/audio/traffic for 2 s, 0.0 % CPU, net 0.0 KB/s (allowed 60 min)",
+        "idle_min": 0.034552339433333336,
+        "pids": [
+          2820
+        ],
+        "pss_mb": 0.0908203125,
+        "swap_mb": 11.58984375,
+        "action": "stop-unit",
+        "unit": "app-org.kde.discover.notifier@autostart.service"
+      },
+      {
+        "key": "unit:lrtest-e-dummy.scope",
+        "app": "lrtest-e-dummy.scope",
+        "rule": "idle",
+        "reason": "no window/audio/traffic for 2 s, 0.0 % CPU, net 0.0 KB/s (allowed 30 s)",
+        "idle_min": 0.034552339433333336,
+        "pids": [
+          307042
+        ],
+        "pss_mb": 0.1767578125,
+        "swap_mb": 0,
+        "action": "stop-unit",
+        "unit": "lrtest-e-dummy.scope",
+        "test": true
+      },
+      {
+        "key": "wine:/home/shawn/Games/mw4",
+        "app": "wine /home/shawn/Games/mw4",
+        "rule": "wine-no-server",
+        "reason": "wineserver for /home/shawn/Games/mw4 is gone; 4 wine process(es) orphaned",
+        "idle_min": 0.034552339433333336,
+        "pids": [
+          85782,
+          85796,
+          85804,
+          86015
+        ],
+        "pss_mb": 0.08984375,
+        "swap_mb": 14.76171875,
+        "action": "signal",
+        "unit": "app-com.anthropic.Claude-19426.scope",
+        "prefix": "/home/shawn/Games/mw4"
+      },
+      {
+        "key": "wine:/home/shawn/Games/mw4-syswine",
+        "app": "wine /home/shawn/Games/mw4-syswine",
+        "rule": "wine-no-server",
+        "reason": "wineserver for /home/shawn/Games/mw4-syswine is gone; 6 wine process(es) orphaned",
+        "idle_min": 0.034552339433333336,
+        "pids": [
+          69073,
+          69172,
+          69177,
+          69214,
+          69241,
+          69447
+        ],
+        "pss_mb": 0.134765625,
+        "swap_mb": 18.53125,
+        "action": "signal",
+        "unit": "app-com.anthropic.Claude-19426.scope",
+        "prefix": "/home/shawn/Games/mw4-syswine"
+      }
+    ],
+    "groups": [
+      {
+        "key": "unit:app-Thunar@ec4f3850dff540b68988b84d3e3cba74.service",
+        "state": "candidate",
+        "reason": "idle: no window/audio/traffic for 2 s, 0.0 % CPU, net 0.0 KB/s (allowed 60 min)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:app-com.anthropic.Claude-158845.scope",
+        "state": "protected",
+        "reason": "Claude Max app (hosts the Cowork VM + bridge sessions)",
+        "idle_min": 0,
+        "procs": 18
+      },
+      {
+        "key": "unit:app-luminos-keyboard-smart@autostart.service",
+        "state": "protected",
+        "reason": "session/luminos unit (luminos-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 2
+      },
+      {
+        "key": "unit:app-org.kde.discover.notifier@autostart.service",
+        "state": "candidate",
+        "reason": "idle: no window/audio/traffic for 2 s, 0.0 % CPU, net 0.0 KB/s (allowed 60 min)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:at-spi-dbus-bus.service",
+        "state": "protected",
+        "reason": "session/luminos unit (dbus)",
+        "idle_min": 0.034552339433333336,
+        "procs": 3
+      },
+      {
+        "key": "unit:claude-cowork.service",
+        "state": "protected",
+        "reason": "session/luminos unit (claude-cowork)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:dbus-:1.17-org.a11y.atspi.Registry@0.service",
+        "state": "protected",
+        "reason": "session/luminos unit (dbus)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:dbus-broker.service",
+        "state": "protected",
+        "reason": "session/luminos unit (dbus)",
+        "idle_min": 0.034552339433333336,
+        "procs": 2
+      },
+      {
+        "key": "unit:dconf.service",
+        "state": "protected",
+        "reason": "session/luminos unit (dconf)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:drkonqi-coredump-launcher@18-12290-28609_43116-0.service",
+        "state": "ineligible",
+        "reason": "not an app (luminos.slice) — desktop/session infrastructure",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:drkonqi-coredump-launcher@19-32769-28668_43122-0.service",
+        "state": "ineligible",
+        "reason": "not an app (luminos.slice) — desktop/session infrastructure",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:drkonqi-coredump-launcher@20-40961-84594_103121-0.service",
+        "state": "ineligible",
+        "reason": "not an app (luminos.slice) — desktop/session infrastructure",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:drkonqi-coredump-launcher@21-40962-86308_88182-0.service",
+        "state": "ineligible",
+        "reason": "not an app (luminos.slice) — desktop/session infrastructure",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:gnome-keyring-daemon.service",
+        "state": "protected",
+        "reason": "session/luminos unit (gnome-keyring)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:gvfs-daemon.service",
+        "state": "protected",
+        "reason": "session/luminos unit (gvfs)",
+        "idle_min": 0.034552339433333336,
+        "procs": 2
+      },
+      {
+        "key": "unit:gvfs-metadata.service",
+        "state": "protected",
+        "reason": "session/luminos unit (gvfs)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:gvfs-udisks2-volume-monitor.service",
+        "state": "protected",
+        "reason": "session/luminos unit (gvfs)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:hive-idle-watchdog.service",
+        "state": "protected",
+        "reason": "session/luminos unit (hive)",
+        "idle_min": 0.034552339433333336,
+        "procs": 2
+      },
+      {
+        "key": "unit:init.scope",
+        "state": "protected",
+        "reason": "protected process systemd",
+        "idle_min": 0.034552339433333336,
+        "procs": 2
+      },
+      {
+        "key": "unit:lrtest-e-dummy.scope",
+        "state": "candidate",
+        "reason": "idle: no window/audio/traffic for 2 s, 0.0 % CPU, net 0.0 KB/s (allowed 30 s)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:luminos-coder-gateway.service",
+        "state": "protected",
+        "reason": "session/luminos unit (luminos-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:luminos-glm-proxy.service",
+        "state": "protected",
+        "reason": "session/luminos unit (luminos-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:luminos-hive.service",
+        "state": "protected",
+        "reason": "session/luminos unit (luminos-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:luminos-keyboard.service",
+        "state": "protected",
+        "reason": "session/luminos unit (luminos-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 2
+      },
+      {
+        "key": "unit:luminos-mobile-chat.service",
+        "state": "protected",
+        "reason": "session/luminos unit (luminos-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:luminos-nzbget.service",
+        "state": "protected",
+        "reason": "session/luminos unit (luminos-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:luminos-ram-reaper.service",
+        "state": "protected",
+        "reason": "session/luminos unit (luminos-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:luminos-taildrop-receiver.service",
+        "state": "protected",
+        "reason": "session/luminos unit (luminos-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:pipewire-pulse.service",
+        "state": "protected",
+        "reason": "session/luminos unit (pipewire)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:pipewire.service",
+        "state": "protected",
+        "reason": "session/luminos unit (pipewire)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:plasma-gmenudbusmenuproxy.service",
+        "state": "protected",
+        "reason": "session/luminos unit (dbus)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:plasma-kaccess.service",
+        "state": "protected",
+        "reason": "session/luminos unit (plasma-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:plasma-kactivitymanagerd.service",
+        "state": "protected",
+        "reason": "session/luminos unit (plasma-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:plasma-kded6.service",
+        "state": "protected",
+        "reason": "session/luminos unit (plasma-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:plasma-ksmserver.service",
+        "state": "protected",
+        "reason": "session/luminos unit (plasma-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:plasma-kwin_wayland.service",
+        "state": "protected",
+        "reason": "session/luminos unit (plasma-)",
+        "idle_min": 0,
+        "procs": 3
+      },
+      {
+        "key": "unit:plasma-plasmashell.service",
+        "state": "protected",
+        "reason": "session/luminos unit (plasma-)",
+        "idle_min": 0,
+        "procs": 1
+      },
+      {
+        "key": "unit:plasma-polkit-agent.service",
+        "state": "protected",
+        "reason": "session/luminos unit (plasma-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:plasma-powerdevil.service",
+        "state": "protected",
+        "reason": "session/luminos unit (plasma-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:plasma-xdg-desktop-portal-kde.service",
+        "state": "protected",
+        "reason": "session/luminos unit (xdg-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:plasma-xembedsniproxy.service",
+        "state": "protected",
+        "reason": "session/luminos unit (plasma-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:ramreaper-itest.service",
+        "state": "protected",
+        "reason": "protected process luminos-ram",
+        "idle_min": 0.034552339433333336,
+        "procs": 3
+      },
+      {
+        "key": "unit:session-4.scope",
+        "state": "protected",
+        "reason": "protected process ksecretd",
+        "idle_min": 0,
+        "procs": 14
+      },
+      {
+        "key": "unit:wireplumber.service",
+        "state": "protected",
+        "reason": "session/luminos unit (wireplumber)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:xdg-desktop-portal-gtk.service",
+        "state": "protected",
+        "reason": "session/luminos unit (xdg-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:xdg-desktop-portal.service",
+        "state": "protected",
+        "reason": "session/luminos unit (xdg-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:xdg-document-portal.service",
+        "state": "protected",
+        "reason": "session/luminos unit (xdg-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 2
+      },
+      {
+        "key": "unit:xdg-permission-store.service",
+        "state": "protected",
+        "reason": "session/luminos unit (xdg-)",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "unit:xvfb.service",
+        "state": "protected",
+        "reason": "keep-list: xvfb",
+        "idle_min": 0.034552339433333336,
+        "procs": 1
+      },
+      {
+        "key": "wine:/home/shawn/Games/mw4",
+        "state": "candidate",
+        "reason": "wine-no-server: wineserver for /home/shawn/Games/mw4 is gone; 4 wine process(es) orphaned",
+        "idle_min": 0.034552339433333336,
+        "procs": 4
+      },
+      {
+        "key": "wine:/home/shawn/Games/mw4-syswine",
+        "state": "candidate",
+        "reason": "wine-no-server: wineserver for /home/shawn/Games/mw4-syswine is gone; 6 wine process(es) orphaned",
+        "idle_min": 0.034552339433333336,
+        "procs": 6
+      }
+    ]
+  },
+  "tmpfs": [
+    {
+      "path": "/tmp/mw4.core",
+      "size_mb": 386.18359375,
+      "age_min": 2309.6961663360166
+    }
+  ]
+}

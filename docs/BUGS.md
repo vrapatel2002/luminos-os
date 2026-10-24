@@ -8620,3 +8620,29 @@ the installed curve is v6, written once by `scripts/luminos-fan-curve-install`, 
 curves. So `train-mode on` + `off` silently downgrades the fans to v5 (old, louder: 55 % at 50 °C). It also pins all fans
 at 100 % while on, which conflicts with the "least fan that holds the target" rule. Fix when next touched: on `off` call
 `luminos-fan-curve-install` (or restore what was read back before `on`), and drop the 100 % pin.
+
+## BUG-214 — luminos-ram's KWin window tracking has been dead: 0 focus events since boot
+<!-- [CHANGE: claude-code | 2026-10-24] -->
+**Status:** OPEN — found while building DECISION 160; not fixed (the reaper does its own window tracking as the user).
+`startKWinListener()` runs inside the ROOT daemon and calls `dbus.ConnectSessionBus()` with no
+`DBUS_SESSION_BUS_ADDRESS` in its environment and no CAP_DAC_OVERRIDE to open `/run/user/1000/bus`. It logs
+"KWin integration active" anyway (the success line is unconditional — same family as BUG-088/089), and
+`journalctl -u luminos-ram -b | grep -c Focus:` = **0** for the whole 2026-10-22 boot. So the HotSet / ColdSet /
+OnScreen machinery has had no input: no window was ever evicted, frozen or protected by it. Fix options: feed it from
+the user agent (it already enumerates KWin windows every 30 s) over ram.sock, or move the LIRS half to the user side.
+
+## BUG-215 — Wine system processes outlive their wineserver for days and ignore SIGTERM
+<!-- [CHANGE: claude-code | 2026-10-24] -->
+**Status:** FIXED by DECISION 160 (reaper rule `wine-no-server`, SIGKILL after 5 s).
+2026-10-24: services.exe, plugplay.exe, svchost.exe, rpcss.exe, explorer.exe /desktop of two MW4 prefixes, PPID 1, no
+wineserver, started 2 days earlier — inside the cgroup of a Claude instance that had exited long before
+(`app-com.anthropic.Claude-19426.scope`), so nothing owned them. explorer.exe still held `/tmp/mw4-syswine.log`
+(351 MB of tmpfs RAM) open. The integration test reproduced it: after `kill -9 wineserver` the remaining Wine
+processes did not exit on SIGTERM; only SIGKILL removed them.
+
+## BUG-216 — `systemctl --user disable` deletes a unit that is installed as a symlink
+<!-- [CHANGE: claude-code | 2026-10-24] -->
+**Status:** worked around (gotcha). Units installed by `ln -s repo-file ~/.config/systemd/user/` are "linked" units;
+`disable` removes that symlink, so the unit vanishes and anything with `Requires=` on it fails. Hit while moving
+openclaw to socket activation. `scripts/jobhunt/install-services.sh` now removes only the
+`default.target.wants/openclaw-gateway.service` link. Re-link with `ln -sfn` if it happens.

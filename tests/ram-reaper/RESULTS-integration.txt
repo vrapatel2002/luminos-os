@@ -1,0 +1,46 @@
+luminos-ram reaper — integration test, 2026-10-24 14:01:09, 7.0.5-arch1-1
+reaper: active, root daemon: active
+
+== (a) app scope: parent + 3 children + 1 double-forked orphan; kill the parent
+  scope lrtest-a.scope holds 5 processes; main bash pid 297914
+  PASS  all 4 leftovers gone 6.2s after the parent died
+  PASS  log: REAPED app="lrtest-a.scope" rule=app-died reason="main process bash (pid 297914) exited 4 s ago; 4 left, none live" pids=[297916 297917 297918 297920] via systemctl --user stop lrtest-a.scope in 0.0s — left=[] freed≈1 MB (PSS 1 + swap 0)
+
+== (b) throwaway WINEPREFIX; kill its wineserver → services.exe & co must be reaped
+  prefix booted in 8.3s: cmd.exe×1 explorer.exe×1 ping×1 plugplay.exe×1 services.exe×1 start.exe×1 svchost.exe×1 winedevice.exe×2 wineserver×1 
+  PASS  prefix has 0 processes 10.5s after wineserver was killed
+  PASS  log: REAPED app="wine /tmp/lrtest-wine/pfx" rule=wine-no-server reason="wineserver for /tmp/lrtest-wine/pfx is gone; 1 wine process(es) orphaned" pids=[298968] via SIGTERM in 0.0s — left=[] freed≈0 MB (PSS 0 + swap 0)
+
+== (c) four window-less scopes: idle / audio / network / CPU (test idle threshold 30 s)
+  PASS  idle scope reaped after 33.4s (threshold 30 s, not before)
+  PASS  audio scope still alive after 100 s (1 procs) — 0 reaper lines about it
+  PASS  net scope still alive after 100 s (1 procs) — 0 reaper lines about it
+  PASS  cpu scope still alive after 100 s (1 procs) — 0 reaper lines about it
+  PASS  log: REAPED app="lrtest-c-idle.scope" rule=idle reason="no window/audio/traffic for 32 s, 0.0 % CPU, net 0.0 KB/s (allowed 30 s)" pids=[303157 303165 303166] via systemctl --user stop lrtest-c-idle.scope in 0.0s — left=[] freed≈1 MB (PSS 1 + swap 0)
+  live reasons the reaper reported:
+    lrtest-c-audio.scope         live      playing/recording audio
+    lrtest-c-cpu.scope           live      CPU 99.6 %
+    lrtest-c-net.scope           live      network traffic 39.7 KB/s
+  (paplay stopped — the audio scope is now empty and gone: 0 procs)
+
+== (d) 60 MB file in /tmp, aged 2 h: kept while held open, deleted once closed
+  PASS  kept for 25 s while pid 306929 holds it open
+  PASS  deleted 8.1s after it was closed
+  PASS  log: TMPFS deleted /tmp/lrtest-tmpfs.bin — 60 MB, untouched 121 min, not open by any process
+
+== (e) forced reap pass (idle time + liveness ignored) aimed AT the protected processes
+  PASS  coder-gateway (pid 213605) survived
+  PASS  plasmashell (pid 2097) survived
+  PASS  pipewire (pid 1976) survived
+  PASS  claude-max (pid 158845) survived
+  PASS  sshd (pid 997) survived
+  PASS  kwin_wayland (pid 1893) survived
+  PASS  positive control lrtest-e-dummy was reaped by the same pass
+    unit:app-com.anthropic.Claude-158845.scope           protected  Claude Max app (hosts the Cowork VM + bridge sessions)
+    unit:luminos-coder-gateway.service                   protected  session/luminos unit (luminos-)
+    unit:pipewire.service                                protected  session/luminos unit (pipewire)
+    unit:plasma-kwin_wayland.service                     protected  session/luminos unit (plasma-)
+    unit:plasma-plasmashell.service                      protected  session/luminos unit (plasma-)
+    acted: ['REAPED app="lrtest-e-dummy.scope" rule=idle reason="no window/audio/traffic for 2 s, 0.0 % CPU, net 0.0 KB/s (allowed 30 s)" pids=[307042] via systemctl --user stop lrtest-e-dummy.scope in 0.0s — left=[] freed≈0 MB (PSS 0 + swap 0)']
+
+RESULT: 19 passed, 0 failed   (2026-10-24 14:04:04)

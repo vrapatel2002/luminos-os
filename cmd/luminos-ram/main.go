@@ -224,6 +224,12 @@ func init() {
 }
 
 func main() {
+	// [CHANGE: claude-code | 2026-10-24] DECISION 160 — `luminos-ram reaper` is the user-session
+	// half of the app reaper (reap.go / reap_agent.go). It runs as the user, not as root.
+	if len(os.Args) > 1 && os.Args[1] == "reaper" {
+		os.Exit(runReaper(os.Args[2:]))
+	}
+
 	var err error
 	appCfg, err = config.Load()
 	if err != nil {
@@ -268,6 +274,11 @@ func main() {
 		http.HandleFunc("/meminfo", handleMemInfo)
 		// [CHANGE: claude-code | 2026-08-11] DECISION 66 — tab sleeper mailbox.
 		http.HandleFunc("/tabs", handleTabs)
+		// [CHANGE: claude-code | 2026-10-24] DECISION 160 — reaper candidates (read-only).
+		http.HandleFunc("/reap", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(rootReap.reapJSON())
+		})
 		// [CHANGE: claude-code | 2026-09-15] Was ":9091" — every interface, including
 		// the LAN. This process runs as root with CAP_SYS_PTRACE and CAP_KILL and the
 		// server has no authentication, so anyone on the same wifi could read a live
@@ -1017,6 +1028,15 @@ func handleMessage(msg socket.Message) socket.Message {
 	// [CHANGE: claude-code | 2026-07-01] Phase 4 — Conductor intent broadcast (DECISION 24).
 	case "intent":
 		return handleIntent(msg)
+	// [CHANGE: claude-code | 2026-10-24] DECISION 160 — app reaper.
+	// reap_report: the user agent posts its pass; root evaluates the one system unit on its
+	// closed list (proton.VPN.service) and answers with it + the offload pid.
+	// reap: the current candidates with reasons and sizes, for the dock / CLI.
+	case "reap_report":
+		sys := rootReap.handleAgentReport(msg.Payload)
+		return replyOK(msg, map[string]interface{}{"system": sys, "offload_pid": offloadPID.Load()})
+	case "reap":
+		return replyOK(msg, rootReap.reapJSON())
 	default:
 		return replyOK(msg, map[string]string{"status": "ok"})
 	}

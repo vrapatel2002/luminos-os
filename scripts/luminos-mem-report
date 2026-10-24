@@ -67,6 +67,35 @@ for u in llama-server hive-daemon; do
     pgrep -a "$u" >/dev/null 2>&1 && echo "  $u: RUNNING  <- an 8B Q4 model is ~4-5 GB" || echo "  $u: not running"
 done
 pgrep -c chrome >/dev/null 2>&1 && echo "  chrome processes: $(pgrep -c chrome)  (RAM_PLAN measured 8.5 GB in May 2026)"
+
+# [CHANGE: claude-code | 2026-10-24] DECISION 160 — what the app reaper has found.
+b "Reaper (luminos-ram, DECISION 160) — not live, still in RAM (PSS + swap)"
+if R=$(curl -s --max-time 2 http://127.0.0.1:9091/reap) && [ -n "$R" ]; then
+    printf '%s' "$R" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+a = d.get("agent") or {}
+if not d.get("agent_reported"):
+    print("  the user agent has not reported (systemctl --user status luminos-ram-reaper)")
+else:
+    print("  mode=%s  idle allowed now %.0f min at %.1f GB available  (report %.0f s old)" % (
+        a.get("mode"), a.get("idle_allowed_min", 0), a.get("avail_gb", 0), d.get("agent_age_s", 0)))
+tot = 0
+for c in a.get("candidates") or []:
+    mb = c["pss_mb"] + c["swap_mb"]; tot += mb
+    print("  %-14s %-44s %6.0f MB" % (c["rule"], c["app"][:44], mb))
+for t in a.get("tmpfs") or []:
+    tot += t["size_mb"]
+    print("  %-14s %-44s %6.0f MB" % ("tmpfs", t["path"][:44], t["size_mb"]))
+for s in d.get("system") or []:
+    mb = s["pss_mb"] + s["swap_mb"]
+    if s["action"] != "kept": tot += mb
+    print("  %-14s %-44s %6.0f MB  (%s)" % ("system", s["unit"], mb, s["action"]))
+print("  ── total reapable now: %.0f MB" % tot)'
+else
+    echo "  luminos-ram not answering on 127.0.0.1:9091"
+fi
+
 echo
 echo "Read the PSS column, not free's 'used'. If PSS totals well under 'used',"
 echo "the difference is the iGPU and zram above, not a leak."

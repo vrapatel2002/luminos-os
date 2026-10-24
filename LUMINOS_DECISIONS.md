@@ -8653,3 +8653,78 @@ both brokers), started no private copy; closed it → stubs gone, clients=0.
 **Takes effect per app on its next start.** The Max app keeps its 2 old copies of each (~560 MB swapped) until it
 is restarted. **Revert:** copy each `*.bak-mcpshare-20261024` back over its config, restore the luminos-verify
 backup, `systemctl --user stop 'luminos-mcp-share-*'`.
+
+## DECISION 160 — luminos-ram app reaper: measured "live", app = unit/prefix, idle gradient, leftovers within 10 s
+<!-- [CHANGE: claude-code | 2026-10-24] -->
+**Date:** 2026-10-24 · **Asked by Shawn** (prompt: `docs/prompts/luminos-ram-reaper.md`): "If the app/software/code is not
+live and working, remove it from RAM … when a process/app dies, get out, remove everything related to it." Explicit
+authorisation to change `cmd/luminos-ram` for this task.
+
+**Why a second process:** the root daemon (`luminos-ram.service`) runs with only CAP_SYS_PTRACE/SYS_NICE/KILL and
+`PrivateTmp=true`. Measured: it sees a private `/tmp` (not the tmpfs holding the MW4 files), cannot open
+`/run/user/1000` (no session bus → no KWin, no PipeWire, no `systemctl --user`). Its own KWin listener has logged
+**0 focus events since the 2026-10-22 boot** (BUG-214). So the same binary runs a second time as the user:
+`luminos-ram reaper` (`systemd/user/luminos-ram-reaper.service`, session.slice). Root keeps only what needs root:
+`proton.VPN.service` (closed list of one) and the `/reap` report. **No /etc change** — the system unit is untouched.
+
+**What it does** (`cmd/luminos-ram/reap.go` = all decisions, pure; `reap_agent.go` = I/O; main.go = 3 small hooks):
+- **Group by app:** the user-manager cgroup unit (`app-*.scope`, `app-*.service`, user services). Wine is regrouped by
+  `WINEPREFIX` (from `/proc/<pid>/environ`) across units. Only `app.slice` units and Wine worlds are ever idle-reaped;
+  `session.slice` / `background.slice` are the desktop.
+- **Live = measured, any one of:** a KWin window (KWin script over D-Bus each collect; Wine windows also matched by
+  `WM_CLASS` = exe name because `_NET_WM_PID` can be 0), focus within 5 min, a RUNNING PipeWire stream (`pw-dump`),
+  ≥ 1 KB/s established TCP traffic (`ss -tinp` byte counters), a listen socket with a client in the last 10 min,
+  CPU ≥ 2 % or disk ≥ 1 MB/s or writes ≥ 100 KB/s (download) averaged over 60 s, an open `/dev/nvidia*`, a render
+  node whose fdinfo engine time moves ≥ 1 %. No window list → **no idle reaping at all** (never guesses).
+- **Gradient:** `idle_allowed = lerp(60 min @ ≥ 6 GB MemAvailable → 2 min @ ≤ 1 GB)`, continuous (test: no step > 10 s
+  for 10 MB of RAM). No mode switch.
+- **Leftovers, 4 s grace, regardless of RAM:** Wine with no wineserver (`signal`); a prefix with only Wine services left
+  and wineserver > 60 s old (`wineserver -k` with that prefix and that wineserver binary); Chromium/Electron helpers
+  (`--type=*`, crashpad) whose main of the same install dir is gone; an app **scope** whose main process we saw exit
+  (whatever is left and not live — scopes only: a `.service` has systemd + `Restart=` cleaning up); MCP servers whose
+  parent chain reaches the user manager through wrappers only (never a DECISION 159 broker).
+- **Reap:** `systemctl --user stop <unit>` → 5 s → `kill SIGKILL` the unit + survivors; Wine `wineserver -k` → 5 s →
+  SIGKILL; plain groups SIGTERM → 5 s → SIGKILL. Every pid checked by start time (no pid-reuse kills); verified after;
+  logged with rule, reason, pids, PSS+swap freed. **Wine orphans ignore SIGTERM** — every Wine reap needed SIGKILL,
+  which is why the 2026-10-22 orphans were still alive two days later (BUG-215).
+- **tmpfs:** our files in `/tmp`, `/dev/shm` > 50 MB, untouched > 30 min, not open (fd) and not mapped by any process.
+- **Protected (never):** keep-list (built in: metatrader, terminal64.exe, metaeditor64.exe, xvfb — the forex bot's
+  headless MT5); units matching luminos-, hive, claude-cowork, dbus, dconf, gnome-keyring, xdg-, at-spi, gvfs, plasma-,
+  pipewire, wireplumber, xvfb, kwallet, polkit…; processes in main.go's `isProtectedAlways` + sshd, tailscaled,
+  NetworkManager, sddm, earlyoom, Xvfb, qemu-system*, llama-server, hive-daemon; the offload pid; the **Claude Max app**
+  (claude-desktop main with no `--user-data-dir` or `~/.config/Claude`). Idle/app-died rules also skip anything with a
+  tty or a terminal emulator, and Steam while a game runs. Extra Claude profiles (GLM, Local) are ordinary apps.
+- **reap_mode = log** (installed default) writes `WOULD-REAP` lines to `~/.local/state/luminos/ram-reaper.log`.
+  `act_only = …` acts on matching groups only (tests). `/reap` on ram.sock and `127.0.0.1:9091/reap` return the
+  candidates, every group's state + reason, tmpfs and system units; `luminos-mem-report` prints a summary.
+- **openclaw:** socket activation instead of an always-on gateway — `openclaw-gateway-proxy.socket` holds
+  127.0.0.1:18789, first connection starts `systemd-socket-proxyd --exit-idle-time=15min` → gateway on 18790
+  (`StopWhenUnneeded=yes`, ExecStartPost waits for the port). Gateway unit disabled.
+- **Chrome:** `background_mode.enabled = false` in `~/.config/google-chrome/Local State` (backup
+  `~/.luminos-backups/chrome-LocalState.bak-pre-reaper-20261024`) so closing the last window ends Chrome.
+
+**Measured cost:** agent 0.8 % of one core incl. its `pw-dump`/`ss` children, 25 MB RSS. First build cost 2.4 % —
+re-reading static /proc files every 2 s; now cached by (pid, start time), other users' pids not even stat'ed on fast
+ticks, fds only read for reapable groups, full collects every 30 s (every tick while a leftover waits).
+
+**Proof:** `go test ./...` 31 tests green (fake /proc trees; negative test for every protected class, incl. a forced
+pass). `tests/ram-reaper/integration.sh` on the real desktop **19/19** (`RESULTS-integration.txt`): app-died 4
+leftovers gone in 5–6 s; real Wine prefix, wineserver SIGKILLed → prefix at 0 processes (SIGKILL needed); idle scope
+reaped at 31–33 s against a 30 s test threshold while audio / 40 KB/s network / 99 % CPU scopes survived 100 s with
+those exact reasons; 60 MB /tmp file kept while open, deleted 2–11 s after close; forced pass aimed at kwin,
+plasmashell, pipewire, sshd, Claude Max and the coder gateway → all alive, positive control reaped by the same pass.
+openclaw: first request 200 after 4.2 s cold start, `openclaw gateway health` OK through the proxy, gateway stopped by
+itself after the idle time (tested with 15 s), port still answering.
+
+**Before → after (luminos-mem-report, `tests/ram-reaper/{before,after}-20261024.txt`):** openclaw-gateway 0.17 GB PSS
+→ 0 (stopped until first use); zram stored 2.07 → 1.96 GB. Still in RAM because the reaper is in **log** mode:
+2 orphaned Wine prefixes (34 MB, mostly swapped), `/tmp/mw4.core` 386 MB, `/tmp/mw4-syswine.log` 351 MB (held open
+by the orphaned explorer.exe — it becomes deletable the moment the orphans go), proton VPN daemon 85 MB.
+≈ 860 MB reapable the moment `reap_mode = act`.
+
+**Open:** a day of log for Shawn, then `reap_mode = act`; whether to also `systemctl disable proton.VPN.service`
+(an /etc-level change → AGENTS §9 + here); real-Chrome close test not run (it would open a browser on Shawn's desktop).
+**Revert:** `systemctl --user disable --now luminos-ram-reaper`; root binary:
+`sudo install -m 755 ~/.luminos-backups/luminos-ram.bak-pre-reaper-20261024 /usr/local/bin/luminos-ram && sudo systemctl restart luminos-ram`;
+openclaw: `systemctl --user disable --now openclaw-gateway-proxy.socket`, `git checkout 9bafc74c -- scripts/jobhunt/`,
+`systemctl --user daemon-reload && systemctl --user enable --now openclaw-gateway`.

@@ -8,7 +8,8 @@
 #
 # WHAT GETS ENABLED, AND WHAT DELIBERATELY DOES NOT:
 #   jobhunt-pipeline.timer     ENABLED — the nightly crawl+score
-#   openclaw-gateway.service   ENABLED — the Control UI, so it survives reboot
+#   openclaw-gateway-proxy.socket ENABLED — the Control UI port; the gateway itself starts on
+#                              first use and stops after 15 idle min (DECISION 160)
 #   jobhunt-llm.service        NOT enabled — on-demand only. Enabling it would
 #                              pin 4.6 GB of VRAM and keep the dGPU awake 24/7,
 #                              re-creating BUG-103. score.py starts and stops it.
@@ -20,7 +21,7 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/systemd"
 DEST="$HOME/.config/systemd/user"
 mkdir -p "$DEST"
 
-for unit in "$SRC"/*.service "$SRC"/*.timer; do
+for unit in "$SRC"/*.service "$SRC"/*.timer "$SRC"/*.socket; do
   name="$(basename "$unit")"
   # -f so re-running this replaces an old symlink instead of failing. -n so a
   # symlink that already points at a DIRECTORY is replaced rather than followed
@@ -34,7 +35,7 @@ systemctl --user daemon-reload
 # systemd will not tell you a unit is malformed until something tries to start
 # it, so verify now rather than at 03:30 tomorrow.
 echo
-for name in jobhunt-llm jobhunt-toolproxy jobhunt-pipeline openclaw-gateway; do
+for name in jobhunt-llm jobhunt-toolproxy jobhunt-pipeline openclaw-gateway openclaw-gateway-proxy.socket; do
   if systemctl --user cat "$name" >/dev/null 2>&1; then
     echo "  ok      $name"
   else
@@ -44,7 +45,12 @@ done
 
 echo
 systemctl --user enable --now jobhunt-pipeline.timer
-systemctl --user enable --now openclaw-gateway.service
+# [CHANGE: claude-code | 2026-10-24] DECISION 160 — socket activation, not an always-on gateway.
+# NOT `systemctl --user disable openclaw-gateway.service`: for a unit that is a symlink in
+# ~/.config/systemd/user, disable deletes that symlink — the unit vanishes and the proxy's
+# Requires= fails (found the hard way 2026-10-24). Remove only the old wants-link.
+rm -f "$DEST/default.target.wants/openclaw-gateway.service"
+systemctl --user enable --now openclaw-gateway-proxy.socket
 
 echo
 echo "  next run:"

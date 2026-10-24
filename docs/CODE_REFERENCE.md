@@ -38,6 +38,7 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 - `cmd/luminos-sentinel/` — Process security monitoring (CAP_SYS_PTRACE, /proc scan)
 - `cmd/luminos-router/` — .exe compatibility classifier (80% rules + 20% ONNX AI)
 - `cmd/luminos-ram/` — v3.0 RAM management (LIRS ranking, HotSet N=8, OnScreen guard)
+  - `reap.go` / `reap_agent.go` / `reap_test.go` — app reaper (DECISION 160): `luminos-ram reaper` runs as the user; `idleAllowed()`, `buildGroups()`, `liveReason()`, `hardProtected()`/`softProtected()`, `Evaluator.Observe/Pass`, `tmpfsCandidates()`, root side `rootReaper.handleAgentReport()` (proton.VPN.service) and `/reap`. [CHANGE: claude-code | 2026-10-24]
 
 ### Python HIVE (src/hive/)
 - `src/hive/agent_base.py` — Base agent class

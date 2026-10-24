@@ -116,3 +116,32 @@ not duplicates.
   ⚠️ **This line has twice been declared false by `docs/BUGS.md` on the strength of `config/99-luminos-ram.conf`
   saying `0`. It was right both times — that repo file has never been installed (BUG-167). Do not "correct" it again
   without reading `/proc/sys/vm/page-cluster` first.**
+
+## Reaper (DECISION 160) — apps that are not live leave RAM
+# [CHANGE: claude-code | 2026-10-24]
+
+An ADDITION; LIRS/HotSet/madvise above are untouched. Code: `cmd/luminos-ram/reap.go` (every decision, pure functions,
+tests in `reap_test.go`), `reap_agent.go` (I/O), three hooks in `main.go`.
+
+**Two halves of one binary.** The root daemon cannot see the session (PrivateTmp, no CAP_DAC_OVERRIDE → no
+`/run/user/1000`, no KWin, no PipeWire, no `systemctl --user`; see BUG-214), so `luminos-ram reaper` runs as the user
+(`systemd/user/luminos-ram-reaper.service`, session.slice). Every 30 s it posts its pass to root as `reap_report` on
+ram.sock; root answers with the system-unit verdict (only `proton.VPN.service`, stopped when no tun/wg/proton
+interface and no Proton app for the idle time) and the offload pid. `{"type":"reap"}` on ram.sock and
+`GET 127.0.0.1:9091/reap` return the last report.
+
+| Step | Detail |
+|---|---|
+| Scan (2 s) | `/proc` stat (+ io on full ticks). Static fields cached per (pid, start time). |
+| Full collect (30 s, or every tick while a leftover is pending) | KWin window list via a loaded KWin script that calls back over D-Bus (own bus name per process; Hyprland: `hyprctl clients`), `pw-dump` running streams, `ss -tinp` bytes + `ss -tlnp`, fds + render-node fdinfo of reapable groups. |
+| Group | user-manager unit; Wine by WINEPREFIX across units. Idle rule only for `app.slice` + Wine. |
+| Live | window · focus ≤ 5 min · audio · net ≥ 1 KB/s · listen client ≤ 10 min · CPU ≥ 2 % · disk ≥ 1 MB/s · write ≥ 100 KB/s · /dev/nvidia* · render engines ≥ 1 % · keep-list. Window list unknown → no idle reaping. |
+| Idle allowed | `lerp(60 min @ ≥ 6 GB avail → 2 min @ ≤ 1 GB)` |
+| Leftovers (4 s grace) | wine-no-server · wine-no-app (`wineserver -k`) · browser-helpers · app-died (scopes, main seen exiting) · mcp-orphan |
+| Reap | unit stop → 5 s → SIGKILL; verify by pid + start time; log PSS+swap freed |
+| tmpfs (60 s) | /tmp, /dev/shm: ours, > 50 MB, > 30 min old, not open, not mapped |
+
+Config `~/.config/luminos-ram-reaper.conf` (repo: `config/luminos-ram-reaper.conf`), `systemctl --user reload
+luminos-ram-reaper` re-reads it. `reap_mode = log` writes WOULD-REAP lines only; `act` reaps. Log:
+`~/.local/state/luminos/ram-reaper.log`. One-shot: `luminos-ram reaper --once [--force] [--act-only=a,b]` prints JSON.
+Cost: ~0.8 % of one core, 25 MB. Tests: `go test ./...`; on the desktop `tests/ram-reaper/integration.sh` (19 checks).
