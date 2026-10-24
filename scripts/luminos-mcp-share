@@ -1,0 +1,436 @@
+#!/home/shawn/.pyenv/versions/3.12.13/bin/python3
+# luminos-mcp-share — ONE copy of a stdio MCP server, shared by every Claude client.
+# [CHANGE: claude-code | 2026-10-24] DECISION 159.
+#
+# Why: every Claude Desktop window and every Claude Code session starts its own private copy of each MCP server
+# (mempalace, code-review-graph …) and keeps it until the app quits. Measured 2026-10-24: 6 mempalace + 6
+# code-review-graph copies, ~1.35 GB swapped out, oldest idle for 2 days. Six copies of mempalace also mean six
+# writers on one ChromaDB.
+#
+#   luminos-mcp-share client <name> -- <server cmd…>   what goes in an MCP config. Makes sure the broker for <name>
+#                                                     is running, then exec()s socat: the stub left per client is
+#                                                     socat (~2 MB), not a Python server.
+#                                                     <name> ending in "@auto" = one broker per git repo of the
+#                                                     client's cwd, and "--repo <top>" is added (code-review-graph).
+#   luminos-mcp-share broker <name> -- <server cmd…>   started by the client through systemd-run (user unit
+#                                                     luminos-mcp-share-<name>); owns the one real server.
+#   luminos-mcp-share status                          what is running, clients, requests, child pid.
+#
+# Broker rules:
+#   - The real server (child) starts on the first request that needs it. initialize / ping / tools/list are answered
+#     from a cache, so an app that merely opens does NOT start the server.
+#   - Request ids are renumbered per broker and mapped back, so clients never see each other's answers.
+#   - Child idle MCP_SHARE_CHILD_IDLE_S (600 s) with nothing in flight → child stopped (whole process group).
+#     Broker with no clients and no child for MCP_SHARE_BROKER_IDLE_S (120 s) → broker exits. Nothing left in RAM.
+#   - Child crash → in-flight requests get an error, the next request starts a new child.
+#   - If the broker cannot come up in 20 s or socat is missing, the client runs the server directly (old behaviour)
+#     — the tool keeps working, it is just not shared.
+import asyncio, fcntl, hashlib, json, os, shutil, signal, socket, subprocess, sys, time
+
+RUN = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}", "luminos-mcp-share")
+CACHE = os.path.expanduser("~/.cache/luminos/mcp-share")
+CHILD_IDLE = float(os.environ.get("MCP_SHARE_CHILD_IDLE_S", "600"))
+BROKER_IDLE = float(os.environ.get("MCP_SHARE_BROKER_IDLE_S", "120"))
+CACHE_MAX_AGE = 86400
+DEFAULT_PV = "2025-06-18"
+PASS_ENV = ("PATH", "HOME", "LANG", "PYTHONPATH", "VIRTUAL_ENV")
+PASS_PREFIX = ("MEMPALACE", "CRG_", "CODE_REVIEW", "MCP_SHARE_")
+
+
+def log(*a):
+    print(time.strftime("%H:%M:%S"), *a, file=sys.stderr, flush=True)
+
+
+def safe(name):
+    return "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in name)[:80]
+
+
+# ----------------------------------------------------------------------------------------------------- broker
+class Client:
+    n = 0
+
+    def __init__(self, writer):
+        Client.n += 1
+        self.cid, self.w, self.pv, self.ids = Client.n, writer, None, {}
+
+    def send(self, msg):
+        try:
+            self.w.write((json.dumps(msg) + "\n").encode())
+        except Exception:
+            pass
+
+
+class Broker:
+    def __init__(self, name, cmd):
+        self.name, self.cmd = name, cmd
+        self.sock = os.path.join(RUN, name + ".sock")
+        self.state = os.path.join(RUN, name + ".state")
+        self.cache_path = os.path.join(CACHE, name + ".json")
+        self.key = hashlib.sha256(json.dumps(cmd).encode()).hexdigest()[:16]
+        self.cache = self.load_cache()
+        self.proc, self.reader, self.stopping, self.closing = None, None, [], False
+        self.child_lock = asyncio.Lock()
+        self.next_id, self.pending, self.clients = 0, {}, set()
+        self.last_use = self.last_client = time.monotonic()
+        self.served = self.from_cache = self.child_starts = 0
+
+    # cache ---------------------------------------------------------------------------------------------------
+    def load_cache(self):
+        try:
+            d = json.load(open(self.cache_path))
+            if d.get("key") == self.key and time.time() - d.get("t", 0) < CACHE_MAX_AGE:
+                return d
+        except Exception:
+            pass
+        return {}
+
+    def save_cache(self):
+        try:
+            os.makedirs(CACHE, exist_ok=True)
+            tmp = self.cache_path + ".tmp"
+            json.dump({**self.cache, "key": self.key, "t": time.time()}, open(tmp, "w"))
+            os.replace(tmp, self.cache_path)
+        except Exception as e:
+            log("cache save failed:", e)
+
+    # child ---------------------------------------------------------------------------------------------------
+    def child_alive(self):
+        return self.proc is not None and self.proc.returncode is None
+
+    def write_child(self, msg):
+        self.proc.stdin.write((json.dumps(msg) + "\n").encode())
+
+    def new_id(self):
+        self.next_id += 1
+        return self.next_id
+
+    async def call_child(self, method, params, timeout=180):
+        bid = self.new_id()
+        fut = asyncio.get_running_loop().create_future()
+        self.pending[bid] = fut
+        self.write_child({"jsonrpc": "2.0", "id": bid, "method": method, "params": params})
+        try:
+            return await asyncio.wait_for(fut, timeout)
+        finally:
+            self.pending.pop(bid, None)
+
+    async def ensure_child(self, pv):
+        async with self.child_lock:
+            if self.child_alive():
+                return
+            t0 = time.monotonic()
+            self.proc = await asyncio.create_subprocess_exec(
+                *self.cmd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                start_new_session=True, limit=64 << 20)
+            self.child_starts += 1
+            self.reader = asyncio.create_task(self.read_child(self.proc))
+            try:
+                r = await self.call_child("initialize", {
+                    "protocolVersion": pv or DEFAULT_PV, "capabilities": {},
+                    "clientInfo": {"name": "luminos-mcp-share", "version": "1"}})
+                if "result" not in r:
+                    raise RuntimeError(f"initialize failed: {r.get('error')}")
+                self.write_child({"jsonrpc": "2.0", "method": "notifications/initialized"})
+                t = await self.call_child("tools/list", {})
+                self.cache["init"], self.cache["tools"] = r["result"], t.get("result")
+                self.save_cache()
+                log(f"child up pid={self.proc.pid} in {time.monotonic() - t0:.1f}s "
+                    f"({len((t.get('result') or {}).get('tools', []))} tools)")
+                self.write_state()
+            except Exception:
+                self.stop_child("handshake failed")
+                raise
+
+    def stop_child(self, why):
+        p = self.proc
+        if p is None:
+            return
+        if p.returncode is None:
+            log(f"stopping child pid={p.pid}: {why}")
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            asyncio.get_running_loop().call_later(5, self._kill_group, p.pid)
+            self.stopping = [t for t in self.stopping if t.returncode is None] + [p]
+        self.proc = None
+
+    @staticmethod
+    def _kill_group(pgid):
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    async def read_child(self, proc):
+        while True:
+            try:
+                line = await proc.stdout.readline()
+            except Exception as e:
+                log("child read error:", e)
+                break
+            if not line:
+                break
+            try:
+                msg = json.loads(line)
+            except Exception:
+                continue
+            if "id" in msg and ("result" in msg or "error" in msg) and "method" not in msg:
+                dest = self.pending.pop(msg["id"], None)
+                if isinstance(dest, asyncio.Future):
+                    if not dest.done():
+                        dest.set_result(msg)
+                elif dest:
+                    c, oid = dest
+                    c.ids.pop(oid, None)
+                    msg["id"] = oid
+                    c.send(msg)
+            elif "method" in msg and "id" in msg:      # server→client request: we offered no capabilities
+                self.write_child({"jsonrpc": "2.0", "id": msg["id"],
+                                  "error": {"code": -32601, "message": "not supported by luminos-mcp-share"}})
+            elif "method" in msg:                       # notification → everyone
+                for c in list(self.clients):
+                    c.send(msg)
+        await proc.wait()
+        log(f"child pid={proc.pid} exited rc={proc.returncode}")
+        if self.proc is proc:
+            self.proc = None
+        self.write_state()
+        for bid, dest in list(self.pending.items()):
+            self.pending.pop(bid, None)
+            if isinstance(dest, asyncio.Future):
+                if not dest.done():
+                    dest.set_exception(RuntimeError("server exited"))
+            elif dest:
+                c, oid = dest
+                c.send({"jsonrpc": "2.0", "id": oid, "error": {"code": -32000, "message": "MCP server exited"}})
+
+    # clients -------------------------------------------------------------------------------------------------
+    async def on_client(self, reader, writer):
+        c = Client(writer)
+        self.clients.add(c)
+        try:
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                try:
+                    msg = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(msg, dict):
+                    await self.from_client(c, msg)
+                    await writer.drain()
+        except Exception as e:
+            log(f"client {c.cid}: {e}")
+        finally:
+            self.clients.discard(c)
+            self.last_client = time.monotonic()
+            for bid, dest in list(self.pending.items()):
+                if isinstance(dest, tuple) and dest[0] is c:
+                    self.pending[bid] = None          # answer arrives later and is dropped
+            try:
+                writer.close()
+            except Exception:
+                pass
+
+    async def from_client(self, c, msg):
+        method, oid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
+        if method is None:
+            return                                    # a reply to a server request we never forward
+        if oid is None:                               # notification
+            if method == "notifications/cancelled" and self.child_alive():
+                bid = c.ids.get(params.get("requestId"))
+                if bid is not None:
+                    self.write_child({"jsonrpc": "2.0", "method": method,
+                                      "params": {**params, "requestId": bid}})
+            return
+        self.served += 1
+        if method == "initialize":
+            c.pv = params.get("protocolVersion")
+            if "init" not in self.cache:
+                try:
+                    await self.ensure_child(c.pv)
+                except Exception as e:
+                    return c.send({"jsonrpc": "2.0", "id": oid, "error": {"code": -32000, "message": str(e)}})
+            else:
+                self.from_cache += 1
+            res = dict(self.cache["init"])
+            if c.pv:
+                res["protocolVersion"] = c.pv          # tools/list + tools/call are the same in every version
+            return c.send({"jsonrpc": "2.0", "id": oid, "result": res})
+        if method == "ping":
+            self.from_cache += 1
+            return c.send({"jsonrpc": "2.0", "id": oid, "result": {}})
+        if method == "tools/list" and not params.get("cursor") and self.cache.get("tools") is not None:
+            self.from_cache += 1
+            return c.send({"jsonrpc": "2.0", "id": oid, "result": self.cache["tools"]})
+        self.last_use = time.monotonic()
+        try:
+            await self.ensure_child(c.pv)
+        except Exception as e:
+            return c.send({"jsonrpc": "2.0", "id": oid, "error": {"code": -32000, "message": f"start failed: {e}"}})
+        bid = self.new_id()
+        self.pending[bid] = (c, oid)
+        c.ids[oid] = bid
+        self.write_child({**msg, "id": bid})
+
+    # housekeeping --------------------------------------------------------------------------------------------
+    def write_state(self):
+        if self.closing:
+            return
+        # child_pid = a real process still in RAM: a child told to stop counts until it has actually exited
+        live = self.proc.pid if self.child_alive() else next(
+            (t.pid for t in self.stopping if t.returncode is None), None)
+        st = {"name": self.name, "pid": os.getpid(), "clients": len(self.clients),
+              "child_pid": live, "child_starts": self.child_starts,
+              "in_flight": sum(1 for d in self.pending.values() if d), "served": self.served,
+              "from_cache": self.from_cache, "idle_s": round(time.monotonic() - self.last_use),
+              "cmd": self.cmd, "t": time.strftime("%Y-%m-%d %H:%M:%S")}
+        try:
+            open(self.state + ".tmp", "w").write(json.dumps(st))
+            os.replace(self.state + ".tmp", self.state)
+        except Exception:
+            pass
+
+    async def housekeeping(self, server):
+        tick = min(15.0, max(1.0, min(CHILD_IDLE, BROKER_IDLE) / 3))
+        while True:
+            await asyncio.sleep(tick)
+            now = time.monotonic()
+            busy = any(d for d in self.pending.values())
+            if self.child_alive() and not busy and now - self.last_use > CHILD_IDLE:
+                self.stop_child(f"idle {now - self.last_use:.0f}s")
+            if not self.clients and not self.child_alive() and now - self.last_client > BROKER_IDLE:
+                log("no clients, no child — broker exiting")
+                server.close()
+                return
+            self.write_state()
+
+    async def run(self):
+        os.makedirs(RUN, exist_ok=True)
+        os.chmod(RUN, 0o700)
+        if os.path.exists(self.sock):
+            os.unlink(self.sock)
+        server = await asyncio.start_unix_server(self.on_client, path=self.sock, limit=64 << 20)
+        os.chmod(self.sock, 0o600)
+        log(f"broker {self.name} listening, cache={'yes' if self.cache else 'no'}, "
+            f"child idle {CHILD_IDLE:.0f}s, broker idle {BROKER_IDLE:.0f}s")
+        self.write_state()
+        loop = asyncio.get_running_loop()
+        stop = loop.create_future()
+        for s in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(s, lambda: stop.done() or stop.set_result(1))
+        hk = asyncio.create_task(self.housekeeping(server))
+        await asyncio.wait([hk, stop], return_when=asyncio.FIRST_COMPLETED)
+        self.closing = True
+        self.stop_child("broker exit")
+        for p in (self.sock, self.state):
+            try:
+                os.unlink(p)
+            except FileNotFoundError:
+                pass
+        await asyncio.sleep(0.2)
+
+
+# ----------------------------------------------------------------------------------------------------- client
+def connectable(path):
+    s = socket.socket(socket.AF_UNIX)
+    try:
+        s.settimeout(1)
+        s.connect(path)
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def client(name, cmd):
+    if name.endswith("@auto"):
+        top = ""
+        if "--repo" in cmd[:-1]:                      # repo given (Desktop apps start in $HOME) → same broker
+            top = os.path.realpath(cmd[cmd.index("--repo") + 1])
+        else:
+            try:
+                top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                                     timeout=5).stdout.strip()
+            except Exception:
+                pass
+        if not top:
+            os.execvp(cmd[0], cmd)                    # not in a repo: unshared, exactly as before
+        name = f"{name[:-5]}-{os.path.basename(top)}-{hashlib.sha1(top.encode()).hexdigest()[:6]}"
+        if "--repo" not in cmd:
+            cmd = cmd + ["--repo", top]
+    name = safe(name)
+    sock = os.path.join(RUN, name + ".sock")
+    socat = shutil.which("socat")
+    if socat is None:
+        os.execvp(cmd[0], cmd)
+    os.makedirs(RUN, exist_ok=True)
+    os.chmod(RUN, 0o700)
+    if not connectable(sock):
+        with open(os.path.join(RUN, name + ".lock"), "w") as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)            # only one client starts the broker
+            if not connectable(sock):
+                env = [f"--setenv={k}={v}" for k, v in os.environ.items()
+                       if k in PASS_ENV or k.startswith(PASS_PREFIX)]
+                # some launchers strip the session vars; systemd-run --user needs them to find the user bus
+                runenv = {**os.environ}
+                runenv.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+                runenv.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.getuid()}/bus")
+                rc = subprocess.run(["systemd-run", "--user", "--quiet", "--collect",
+                                     f"--unit=luminos-mcp-share-{name}", "-p", "KillMode=control-group",
+                                     f"--working-directory={os.getcwd()}", *env, "--",
+                                     os.path.abspath(__file__), "broker", name, "--", *cmd],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=runenv, text=True)
+                # rc != 0 can also mean "unit already exists" (a broker that is still starting) → keep waiting
+                waits = 200 if rc.returncode == 0 or "already" in rc.stderr else 0
+                for _ in range(waits):
+                    if connectable(sock):
+                        break
+                    time.sleep(0.1)
+        if not connectable(sock):
+            print(f"luminos-mcp-share: broker {name} did not start, running unshared", file=sys.stderr)
+            os.execvp(cmd[0], cmd)
+    os.execv(socat, [socat, "STDIO", f"UNIX-CONNECT:{sock}"])
+
+
+def status():
+    if not os.path.isdir(RUN):
+        return print("no shared MCP brokers running")
+    rows = []
+    for f in sorted(os.listdir(RUN)):
+        if not f.endswith(".state"):
+            continue
+        try:
+            r = json.load(open(os.path.join(RUN, f)))
+            os.kill(r["pid"], 0)                      # broker still alive?
+        except (OSError, ValueError, KeyError):
+            try:
+                os.unlink(os.path.join(RUN, f))       # leftover of a killed broker
+            except OSError:
+                pass
+            continue
+        rows.append(r)
+    if not rows:
+        return print("no shared MCP brokers running")
+    for r in rows:
+        print(f"{r['name']:<34} clients={r['clients']:<2} child={r['child_pid'] or 'stopped':<8} "
+              f"starts={r['child_starts']} served={r['served']} cached={r['from_cache']} idle={r['idle_s']}s")
+
+
+def main():
+    a = sys.argv[1:]
+    if a[:1] == ["status"]:
+        return status()
+    if len(a) < 4 or a[0] not in ("client", "broker") or a[2] != "--":
+        sys.exit("usage: luminos-mcp-share client|broker <name> -- <server cmd…> | status")
+    mode, name, cmd = a[0], a[1], a[3:]
+    if mode == "client":
+        return client(name, cmd)
+    asyncio.run(Broker(name, cmd).run())
+
+
+if __name__ == "__main__":
+    main()

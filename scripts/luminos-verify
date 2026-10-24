@@ -358,7 +358,19 @@ def load(path, keys):
         found.update(d.get(k, {}) or {})
     # ~/.claude.json also nests per-project scopes
     found.update(d.get("projects", {}).get(REPO, {}).get("mcpServers", {}) or {})
-    return found
+    return {n: unwrap_shared(c) for n, c in found.items()}
+
+def unwrap_shared(cfg):
+    """DECISION 159: `luminos-mcp-share client <name> -- <real cmd…>` shares ONE server between clients.
+    Every check below must see the REAL server binary (that is what can diverge between clients); the
+    handshake still goes through the wrapper (_via) so the shared path itself is proven."""
+    args = cfg.get("args", []) or []
+    if os.path.basename(cfg.get("command", "")) == "luminos-mcp-share" and "--" in args:
+        i = args.index("--")
+        if i + 1 < len(args):
+            return {**cfg, "command": args[i + 1], "args": args[i + 2:],
+                    "_via": [cfg["command"]] + list(args)}
+    return cfg
 
 registry = {}   # (kind, label) -> {name: cfg}
 for kind, label, path, keys in SOURCES:
@@ -432,9 +444,9 @@ for (kind, label), servers in registry.items():
     for name, cfg in servers.items():
         if name not in REQUIRED:
             continue
-        uniq.setdefault((cfg.get("command", ""), tuple(cfg.get("args", []))), name)
+        uniq.setdefault((cfg.get("command", ""), tuple(cfg.get("args", [])), tuple(cfg.get("_via", []))), name)
 
-for (cmd, args), name in sorted(uniq.items(), key=lambda x: (x[1], x[0][1])):
+for (cmd, args, via), name in sorted(uniq.items(), key=lambda x: (x[1], x[0][1])):
     # A tool can legitimately have >1 invocation variant (e.g. code-review-graph
     # runs bare for Claude Code so it follows the current repo, and with an
     # explicit --repo for GUI clients). Label each variant so two near-identical
@@ -509,7 +521,9 @@ for (cmd, args), name in sorted(uniq.items(), key=lambda x: (x[1], x[0][1])):
                       "params": {"protocolVersion": "2024-11-05", "capabilities": {},
                                  "clientInfo": {"name": "luminos-verify", "version": "1"}}}) + "\n"
     try:
-        p = subprocess.run([cmd] + list(args), input=req.encode(), cwd="/",
+        if via:
+            emit("OK", f"{name}: shared through luminos-mcp-share (one copy for all clients, DECISION 159)")
+        p = subprocess.run(list(via) if via else [cmd] + list(args), input=req.encode(), cwd="/",
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=90)
         info = None
         for line in p.stdout.splitlines():

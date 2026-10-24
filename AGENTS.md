@@ -237,6 +237,13 @@ luminos-verify --mcp   # handshakes every server in every client config; checks 
                        # cross-client binary agreement, --repo, hooks, and hook LIVENESS
 ```
 
+**Shared servers (DECISION 159) [CHANGE: claude-code | 2026-10-24]:** mempalace and code-review-graph are NOT
+started per client any more. Every config runs `scripts/luminos-mcp-share client <name> -- <real cmd…>`: one real
+server per tool (per repo for code-review-graph, `crg@auto`) behind a socket, a ~5 MB socat stub per client, server
+stops after 10 min idle, broker exits 2 min after the last client. `luminos-mcp-share status` shows them;
+user units `luminos-mcp-share-*`. **When adding a client config, copy the wrapper form, not the bare server.**
+host-shell stays per-client on purpose (long calls would queue). Test: `python3 tests/mcp-share/test_share.py`.
+
 ### code-review-graph
 259 files, 3161 nodes, 21658 edges — AST-level map of every function, import, call. 24 MCP tools.
 **Server:** `~/.code-review-graph-venv/bin/code-review-graph serve` (add `--repo <root>` for GUI clients).
@@ -451,6 +458,11 @@ luminos-brain safe "<action>"
 | `scripts/luminos-caelestia-plasma-session` | Installs/checks/uninstalls the **fourth greeter session**, "Luminos (Caelestia on Plasma)" (DECISION 68 STEP A). A **sibling** of `luminos-caelestia-kwin-session`, not an edit to it: the two sessions share the overlay and the `luminos-cael-*.desktop` shortcuts, both of which are per-USER and already owned by the KWin installer, so this one **checks and reports them and never rewrites them** — writing the same files from two scripts is how they drift. Writes only `/usr/local/bin/luminos-caelestia-plasma` and `/usr/share/wayland-sessions/luminos-caelestia-plasma.desktop`, and **verifies the install by reading the bytes back**, because `install` reporting success is not proof. `check` also `bash -n`s the session script **and both scripts it embeds in quoted heredocs** — `bash -n` on the outer file cannot see inside those, and a syntax error in the supervisor would surface only at login as a missing bar. Every existence check is guarded: an unguarded `grep -q … && ok` reports "greeter entry is visible" about a file that is not there. [CHANGE: claude-code \| 2026-08-13] |
 | `scripts/luminos-caelestia-plasma` | The session itself, deployed to `/usr/local/bin`. **Full `startplasma-wayland`** with Caelestia's bar on top — DECISION 68, which reverses DECISION 63's bare-KWin call. plasmashell **keeps running**, so no `LUMINOS_SHELL` env var and no `ConditionEnvironment=` drop-in, so the `Linger=yes` trap never arises. Does **not** start a polkit agent or `xdg-desktop-portal-kde` — Plasma starts both. Keeps the `KWIN_DRM_DEVICES=/dev/dri/luminos-igpu` pin (BUG-094), the `unset HYPRLAND_INSTANCE_SIGNATURE` (BUG-113), `XDG_MENU_PREFIX=plasma-` + sycoca rebuild before start (BUG-112), and the 3-try retry loop with the kitty escape hatch and 60 s uptime reset (BUG-092). **Waits for the compositor by observation, not by sleeping:** snapshots the `wayland-*` sockets before Plasma starts and waits for a NEW one, then cross-checks against `plasmashell`'s `/proc/<pid>/environ`. Do not "simplify" that into reading kwin's environ — `kwin_wayland` has `cap_sys_nice=ep`, so its dumpable flag is clear and `/proc/<pid>/environ` is **EACCES even to its own user**. Under `Linger=yes` a plasmashell from a previous session can outlive it, so plasmashell only overrules the socket scan if the display it names is also new. Logs: `~/.local/state/luminos/caelestia-plasma/`. [CHANGE: claude-code \| 2026-08-13] |
 | `scripts/luminos-caelestia-kwin-overlay` | Builds `~/.config/quickshell/caelestia-kwin`: **279 symlinks** into `/etc/xdg/quickshell/caelestia` + **4 real patched files** (`modules/drawers/ContentWindow.qml`, `modules/drawers/Interactions.qml`, `services/Brightness.qml`, `services/ShellState.qml`), so a `caelestia` package upgrade still reaches us. **It is Python — run it with `python3`, not bash.** Patches are **re-derived from current upstream every run** and each anchor must match *exactly once* — an upstream change fails the build loudly instead of shipping a stale file. `--check` reports DRIFT/STALE/DANGLING/MISSING; `--remove` refuses to delete a directory without the `.luminos-overlay` marker. Rerunning it is the whole maintenance story after a Caelestia upgrade. BUG-113, BUG-116. [CHANGE: claude-code \| 2026-08-10] |
+
+### Shared MCP servers (DECISION 159) [CHANGE: claude-code | 2026-10-24]
+| `scripts/luminos-mcp-share` | broker + socat stub: one copy of each MCP server for all clients |
+| `tests/mcp-share/test_share.py` | 17-check end-to-end test (concurrency, crash, idle, cache, fallback) |
+| `docs/prompts/luminos-ram-reaper.md` | Shawn's prompt for the luminos-ram app reaper (not built yet) |
 
 ### Local coder (DECISION 157) [CHANGE: claude-code | 2026-10-24]
 | Path | Description |

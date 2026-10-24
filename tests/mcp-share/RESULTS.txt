@@ -1,0 +1,20 @@
+PASS 6 concurrent clients all initialised
+PASS tools/list identical to a direct server  [29 tools]
+PASS mempalace_status identical to a direct server
+PASS exactly ONE real mempalace process for 6 clients  [procs=1 starts=1 clients=6]
+PASS per-client stub is socat, small  [4932 kB RSS]
+PASS disconnect mid-call: other clients unaffected
+PASS server crash: next call restarts and works  [old pid 248249 → new pid [248283]]
+     (server gone 6.5s after the last call + 6s idle timer)
+PASS idle: real server leaves RAM, clients stay connected  [clients=6]
+PASS idle: tools/list answered from cache without starting the server
+PASS idle: a real call starts it again
+PASS all apps closed: broker + server fully gone, nothing left
+PASS app opening does not start the server (cache)  [starts=0]
+PASS broker SIGKILLed: next app recovers despite stale socket  [stale_socket=True]
+PASS crg @auto: 3 clients, tools/list identical  [24 tools]
+PASS crg @auto: graph stats identical
+PASS crg @auto: one broker per repo  [test-crg-luminos-os-0f9dba]
+PASS crg @auto outside a git repo: falls back to a direct server
+
+17/17 checks passed

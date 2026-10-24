@@ -8609,3 +8609,47 @@ needs (the reviewer pins 6.3 GB; the desktop was being pushed into swap). Nothin
 **Not removed as a package on purpose:** `dolphin`/`plasma` depend on `baloo` — uninstalling would drag them out.
 **Cost:** Dolphin's search still finds files by NAME (it falls back to a live scan, slower); searching inside file
 contents from Dolphin/KRunner no longer works. **Revert:** `balooctl6 enable` (re-indexes from scratch).
+
+
+## DECISION 159 — One shared copy of each MCP server for every Claude client (luminos-mcp-share)
+<!-- [CHANGE: claude-code | 2026-10-24] -->
+**Date:** 2026-10-24 · **Asked by Shawn:** "stop wasting RAM … the same tool servers started over and over — fix it."
+**Measured (Response 24):** zram held 5.7 GB of data in 2.0 GB of RAM. Biggest single cause: every Claude Desktop
+window and every Claude Code session starts its OWN copy of each MCP server and keeps it until the app quits —
+6 × mempalace (~880 MB swapped), 6 × code-review-graph (~470 MB), 6 × host-shell, the oldest idle for 2 days.
+Six mempalace copies also meant six writers on one ChromaDB (the store behind the silent-write-loss bug).
+
+**What:** `scripts/luminos-mcp-share` (stdlib Python, pyenv 3.12.13).
+- MCP configs now run `luminos-mcp-share client <name> -- <real server cmd…>`. The client makes sure the broker is
+  up (systemd user unit `luminos-mcp-share-<name>`, started via `systemd-run`, flock so only one client starts it)
+  and then `exec`s **socat** — the per-client stub is ~5 MB, not a Python server.
+- The broker owns ONE real server, renumbers JSON-RPC ids per client and maps answers back, answers
+  `initialize`/`ping`/`tools/list` from a cache (`~/.cache/luminos/mcp-share/`), so **opening an app does not start
+  the server at all** — only a real tool call does.
+- Server idle 600 s with nothing in flight → stopped (whole process group). No clients and no server for 120 s →
+  broker exits, socket removed. Server crash → in-flight calls get an error, next call starts a new one.
+  If the broker cannot start (or socat is missing) the client runs the server directly — never worse than before.
+- `crg@auto` = one broker per git repo (from `--repo` or the cwd's git top-level; outside a repo = unshared, as
+  before), so Code sessions in luminos-os and the Desktop apps share one code-review-graph.
+- `luminos-mcp-share status` shows brokers, clients, child pid, requests served / answered from cache.
+- **host-shell is NOT shared on purpose:** it is tiny (2–7 MB) and its calls run up to 60 s; one shared copy
+  answering one message at a time would make every client wait behind another's command.
+
+**Switched (backups `*.bak-mcpshare-20261024`):** `~/.config/Claude/claude_desktop_config.json` (Max),
+`~/.config/Claude-glm-3p/…`, `~/.config/Claude-local-3p/…`, `~/.claude/settings.json` (Claude Code, `crg@auto` without
+`--repo`), `~/.config/Antigravity/User/mcp.json`. `luminos-verify` taught to look THROUGH the wrapper
+(`unwrap_shared`): the same-binary / pyenv / editable checks run on the real server, the handshake runs through the
+wrapper. Installed to `/usr/local/bin/luminos-verify` (backup `~/.luminos-backups/luminos-verify.bak-pre-mcpshare-20261024`).
+`luminos-verify --mcp` → **PASS, 0 warnings**.
+
+**Proof:** `tests/mcp-share/test_share.py` — **17/17**: 6 concurrent clients → exactly 1 real mempalace, results
+byte-identical to a direct server, stub = socat 4.9 MB; client killed mid-call → others fine; server SIGKILL →
+next call restarts it (new pid); idle → server leaves RAM while clients stay connected, `tools/list` still answered
+from cache, next call restarts it; all clients gone → broker + server gone; new app opening → server NOT started;
+broker SIGKILL (stale socket) → next app recovers; crg `@auto` 3 clients identical, one broker per repo; outside a
+repo → direct fallback. Real app: launched "Claude (Local Qwen)" → it connected with 2 socat stubs (clients=1 on
+both brokers), started no private copy; closed it → stubs gone, clients=0.
+
+**Takes effect per app on its next start.** The Max app keeps its 2 old copies of each (~560 MB swapped) until it
+is restarted. **Revert:** copy each `*.bak-mcpshare-20261024` back over its config, restore the luminos-verify
+backup, `systemctl --user stop 'luminos-mcp-share-*'`.
