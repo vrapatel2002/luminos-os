@@ -52,6 +52,8 @@ exclusion missing, `v1.2.3` in a range rejected, `>=1.2.3.4` / `>=` accepted). T
 | Qwen3.6 self-review | + quote filter | 92 / 107 |
 | **Qwen3.8-Q2 cross-review** | thinking 1024, free-form | **86 / 107** (worse) |
 | **Qwen3.8-Q2 cross-review** | thinking 2048 + SPEC-quote rule + code quote filter | **95 / 107** |
+| Qwen3.8-**Q3_K_XL** cross-review (2026-10-24) | same grounded setup; review 1454 s, 0 claims kept / 1 dropped (wrote defects without the SPEC quote) | 93 / 107 (= a plain re-check) |
+| Qwen3.8-**IQ4_XS** cross-review (2026-10-24) | same; review 2315 s, 4 kept / 1 dropped — real quotes, wrong conclusions (e.g. "`=1` must mean `>=1.0.0 <2.0.0`") | **87 / 107** (worse) |
 
 **Honest verdict:** with the Qwen3.8 that fits this laptop (UD-Q2_K_XL, CPU-bound at ~2 t/s), the review is NOT
 reliably smarter than Qwen3.6. Free-form, it mixed real defects (pre-release upper bound, hyphen partial upper ends,
@@ -76,3 +78,9 @@ Wall time 53 min (prompt re-reads after each swap dominate). Costs found and fix
 74 348 tokens → ctx 131072 (64K gave HTTP 400); stream silent > ~90 s is dropped → gateway SSE pings (21 on the first
 turn); a turn queued behind the 17-min review hit Claude Code's 600 s API timeout and retried by itself →
 `luminos-claude-local` now exports `API_TIMEOUT_MS=3600000`. Each luminos-coder tool asks permission once (Always allow).
+
+**2026-10-24 quant comparison (tests/coder/proof/quant-compare.sh):** a bigger reviewer quant did NOT make a better reviewer.
+Q2_K_XL 95, Q3_K_XL 93, IQ4_XS 87 (one run each, same 91/107 start; sampling noise is a few points). Q3 ignored the
+quote rule so nothing survived the filter; IQ4 quoted correctly but drew wrong conclusions from the quotes, and the
+writer applied them. RAM: Q3 min 231 MB available / 2.8 GB swap; IQ4 min **5 MB** / 4.2 GB swap; no OOM kill.
+Verdict unchanged: on this laptop no Qwen3.8 quant beats Qwen3.6 simply re-checking its own code (95).

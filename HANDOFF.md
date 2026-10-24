@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-24 15:03 — Response 28 (Steam excluded from KDE session restore; Max app verified on shared MCP; Qwen3.8 Q3_K_XL + IQ4_XS load test — both fit, see tests/coder/RESULTS.md) (Max-window chat "Biggest local LLM model")
+Last updated: 2026-10-24 17:36 — Response 32 (quant compare done: Q2 95, Q3_K_XL 93, IQ4_XS 87 — bigger quant not better; BUG-219 fixed; abliteration next pending Shawn) (Max-window chat "Biggest local LLM model")
 
 Previous handoff (DECISION 159 shared MCP servers) is in git: `git show 9bafc74c:HANDOFF.md`.
 
