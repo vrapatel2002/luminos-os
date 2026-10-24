@@ -69,6 +69,7 @@ type ReapConfig struct {
 	ListenClientMin float64
 	WindowSec       float64       // averaging window for CPU / I/O / net
 	LeftoverGrace   time.Duration // how long a leftover must stay a leftover before it is reaped
+	WineGrace       time.Duration // wine-no-app only: a launcher handing over to its game leaves a gap
 	TermWait        time.Duration // SIGTERM → SIGKILL
 	TmpfsMinMB      float64
 	TmpfsAgeMin     float64
@@ -101,6 +102,7 @@ func defaultReapConfig(home string) ReapConfig {
 		ListenClientMin: 10,
 		WindowSec:       60,
 		LeftoverGrace:   4 * time.Second,
+		WineGrace:       60 * time.Second,
 		TermWait:        5 * time.Second,
 		TmpfsMinMB:      50,
 		TmpfsAgeMin:     30,
@@ -109,7 +111,10 @@ func defaultReapConfig(home string) ReapConfig {
 		// Defaults that must survive an empty config. Shawn's own entries are ADDED to these.
 		// metatrader/terminal64/xvfb: the forex bot runs MT5 under Wine on a headless Xvfb —
 		// it has no KWin window by design, and it must never be "tidied away".
-		Keep:          []string{"metatrader", "terminal64.exe", "metaeditor64.exe", "xvfb"},
+		// [CHANGE: claude-code | 2026-10-24] gaming guards (DECISION 160 follow-up). 
+		// vela/gameos: Vela's tools run on Luminos too ("Add Game to Vela" = vela-wine-install, gameos/tools/…,
+		// Vela test VMs); qemu: any VM, not only the Cowork one. Shawn: "will it mess up the vela?" — never.
+		Keep:          []string{"metatrader", "terminal64.exe", "metaeditor64.exe", "xvfb", "vela", "gameos", "qemu"},
 		MaxProfileDir: filepath.Join(home, ".config/Claude"),
 		Home:          home,
 	}
@@ -197,6 +202,8 @@ func parseReapConfig(text string, base ReapConfig) (ReapConfig, []string) {
 			dur(&c.FullEvery)
 		case "leftover_grace_s":
 			dur(&c.LeftoverGrace)
+		case "wine_grace_s":
+			dur(&c.WineGrace)
 		case "term_wait_s":
 			dur(&c.TermWait)
 		case "tmpfs_min_mb":
@@ -248,6 +255,7 @@ func idleAllowed(availGB float64, c ReapConfig) time.Duration {
 
 type rproc struct {
 	PID, PPID, UID, TTY int
+	State               string // R S D … (zombies are never returned)
 	Comm                string
 	Exe                 string // readlink /proc/<pid>/exe ("" if unreadable)
 	Args                []string
@@ -261,6 +269,14 @@ type rproc struct {
 	Prefix              string
 	FDs                 []string // readlink of every fd (full collects only)
 	cl                  string   // cached joined command line
+}
+
+// headArgs is argv0 + argv1: enough to see the script path when the exe is an interpreter.
+func (p *rproc) headArgs() string {
+	if len(p.Args) > 1 {
+		return p.Args[0] + " " + p.Args[1]
+	}
+	return p.arg0()
 }
 
 func (p *rproc) arg0() string {
@@ -439,6 +455,13 @@ func readProc(root string, pid, uid int, home string, pc *staticCache) *rproc {
 		return nil
 	}
 	p.PPID, _ = strconv.Atoi(f[1])
+	p.State = f[0]
+	// [CHANGE: claude-code | 2026-10-24] gaming guards (DECISION 160 follow-up). A zombie (Z) or dead (X) process is already
+	// gone: it holds no RAM and cannot be signalled. Counting it made the integration test log
+	// "REAPED" for the same pid 298968 71 times, each time claiming left=[].
+	if p.State == "Z" || p.State == "X" {
+		return nil
+	}
 	p.TTY, _ = strconv.Atoi(f[4])
 	ut, _ := strconv.ParseUint(f[11], 10, 64)
 	stt, _ := strconv.ParseUint(f[12], 10, 64)
@@ -750,7 +773,7 @@ func claudeMaxMain(p *rproc, maxDir string) bool {
 // offload process, the named system services, qemu Cowork VM).
 func hardProtected(g *rgroup, c ReapConfig, pc protCtx) string {
 	for _, p := range g.Procs {
-		for _, field := range []string{p.Comm, p.exeBase(), g.Unit, g.Prefix} {
+		for _, field := range []string{p.Comm, p.exeBase(), g.Unit, g.Prefix, p.headArgs()} {
 			if k := matchAnyLower(field, c.Keep); k != "" {
 				return "keep-list: " + k
 			}
@@ -823,6 +846,7 @@ type LiveInputs struct {
 	GPUBusyPIDs   map[int]bool
 	NetBps        map[int]float64 // established TCP bytes/s per pid
 	ListenClient  map[int]bool    // pid owns a listen socket with an accepted connection right now
+	UnderGamescope map[int]bool   // pid descends from a gamescope process (filled by Pass)
 	ProcOK        bool
 }
 
@@ -840,6 +864,11 @@ func liveReason(g *rgroup, in LiveInputs, r groupRates, lastFocus, lastListen ti
 			if in.WindowClasses[p.exeBase()] || (b != "" && in.WindowClasses[b]) {
 				return "has a window (" + p.exeBase() + ")"
 			}
+		}
+		// [CHANGE: claude-code | 2026-10-24] gaming guards (DECISION 160 follow-up). KWin only sees gamescope's own window; the game
+		// inside (often a Wine prefix, grouped away from gamescope) would look window-less.
+		if in.UnderGamescope[p.PID] {
+			return "running inside gamescope"
 		}
 		if in.AudioPIDs[p.PID] {
 			return "playing/recording audio"
@@ -1193,6 +1222,7 @@ func (e *Evaluator) Pass(groups map[string]*rgroup, procs map[int]*rproc, in Liv
 		uptime = e.Uptime()
 	}
 	taken := map[int]bool{}
+	in.UnderGamescope = gamescopeDescendants(procs)
 
 	keys := make([]string, 0, len(groups))
 	for k := range groups {
@@ -1269,7 +1299,7 @@ func (e *Evaluator) Pass(groups map[string]*rgroup, procs map[int]*rproc, in Liv
 				}
 			case len(real) == 0 && (force || uptime-float64(servers[0].Start)/clkTck > 60):
 				d := since(st.LeftoverSince, "wine-no-app", now)
-				if force || d >= c.LeftoverGrace {
+				if force || d >= c.WineGrace {
 					emit("wine-no-app", fmt.Sprintf("no program left in %s, only Wine services (%s)", g.Prefix, commList(g.Procs)), "wineserver-k", g.Procs)
 				} else {
 					res.PendingLeft = true
@@ -1711,4 +1741,40 @@ func humanDur(d time.Duration) string {
 		return fmt.Sprintf("%.0f s", d.Seconds())
 	}
 	return fmt.Sprintf("%.0f min", d.Minutes())
+}
+
+// gamescopeDescendants marks every pid whose parent chain reaches a gamescope process.
+// [CHANGE: claude-code | 2026-10-24] gaming guards (DECISION 160 follow-up).
+func gamescopeDescendants(procs map[int]*rproc) map[int]bool {
+	out := map[int]bool{}
+	memo := map[int]bool{}
+	for pid := range procs {
+		chain := []int{}
+		hit := false
+		for cur, n := pid, 0; n < 64; n++ {
+			p := procs[cur]
+			if p == nil || cur <= 1 {
+				break
+			}
+			// the gamescope check comes BEFORE the memo: gamescope itself is memoised "not under
+			// gamescope", and its children must not inherit that.
+			if cur != pid && strings.HasPrefix(p.Comm, "gamescope") {
+				hit = true
+				break
+			}
+			if v, ok := memo[cur]; ok && cur != pid {
+				hit = v
+				break
+			}
+			chain = append(chain, cur)
+			cur = p.PPID
+		}
+		for _, c := range chain {
+			memo[c] = hit
+		}
+		if hit {
+			out[pid] = true
+		}
+	}
+	return out
 }

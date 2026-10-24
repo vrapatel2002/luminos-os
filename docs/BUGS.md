@@ -8646,3 +8646,19 @@ processes did not exit on SIGTERM; only SIGKILL removed them.
 `disable` removes that symlink, so the unit vanishes and anything with `Requires=` on it fails. Hit while moving
 openclaw to socket activation. `scripts/jobhunt/install-services.sh` now removes only the
 `default.target.wants/openclaw-gateway.service` link. Re-link with `ln -sfn` if it happens.
+
+## BUG-217 — reaper logged "REAPED … left=[]" for the same zombie pid 71 times
+<!-- [CHANGE: claude-code | 2026-10-24] -->
+**Status:** FIXED. The integration test's orphan (pid 298968) became a zombie after SIGTERM; `readProc` still
+listed it, so every 2 s pass "reaped" it again and logged success (left=[] because the zombie check looked fine).
+Same shape as project_scripts_lie_about_success. **Fix:** `readProc` returns nil for state Z/X (a zombie holds no
+RAM and cannot be signalled). Test: `TestZombieIsNotAProcess`.
+
+## BUG-218 — Claude Desktop rewrites its whole config and drops the luminos-mcp-share wrapper
+<!-- [CHANGE: claude-code | 2026-10-24] -->
+**Status:** FIXED (DECISION 159 follow-up). The Max app keeps `claude_desktop_config.json` in memory and rewrites
+the file on any preference save (2026-10-24 13:11, a `chromeExtension` pref), restoring the bare MCP servers it
+loaded at start; after Shawn's reboot it started its own mempalace/code-review-graph again. The GLM/Local launchers
+copy the Max app's servers each launch, so they would inherit it. **Fix:** `luminos-mcp-share wrap-configs` +
+`luminos-mcp-share-configs.path` (PathChanged, enabled) + launchers call it before launch. Proven: bare entry
+written into the GLM config re-wrapped within 2 s, mode 600 and all other keys kept.

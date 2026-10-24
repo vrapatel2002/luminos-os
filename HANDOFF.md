@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-24 14:35 — Response 2 (reaper switched to ACT mode; proton.VPN.service disabled at boot — DECISION 160) (cloud session linked to the G14)
+Last updated: 2026-10-24 14:45 — Response 27 (post-reboot check; BUG-218 config re-wrap; reaper gaming guards vela/gameos/qemu, wine_grace 60 s, gamescope, zombies — BUG-217) (Max-window chat "Biggest local LLM model")
 
 Previous handoff (DECISION 159 shared MCP servers) is in git: `git show 9bafc74c:HANDOFF.md`.
 
@@ -33,6 +33,19 @@ Same binary, two halves: root `luminos-ram.service` (unchanged unit) + user `lum
 - Chrome `Local State` background_mode.enabled=false (backup in ~/.luminos-backups).
 - `scripts/luminos-mem-report` prints a "Reaper" section (reads :9091/reap).
 - Docs: DECISION 160, BUG-214/215/216, RAM architecture "Reaper" section, AGENTS §9/§10, STATUS, CODE_REFERENCE.
+
+## Response 27 (Max-window chat) — after Shawn's reboot
+- Checked: 10.3 GB available, swap 0, dGPU suspended, nvidia-powerd masked, proton.VPN inactive+disabled, reaper act,
+  openclaw-gateway-proxy.socket active, coder gateway stopped (launcher starts it on demand — fine).
+- BUG-218 FIXED: the Max app had rewritten its config at 13:11 (pref save) back to bare MCP servers → after reboot it
+  ran its own mempalace/crg again. `luminos-mcp-share wrap-configs` + `luminos-mcp-share-configs.path` (enabled) +
+  GLM/Local launchers re-wrap. Commit 93ba0b65. **The Max app still runs its own copies until its NEXT restart.**
+- Reaper gaming guards (36/36 go tests, binary reinstalled, backup luminos-ram.bak-pre-gameguards-20261024-144049):
+  keep vela/gameos/qemu (+argv0+argv1 matching), wine_grace_s=60 for wine-no-app, gamescope descendants live,
+  zombies skipped (BUG-217). Real check tests/ram-reaper/wine-gap-test.sh → RESULTS-winegap.txt (Wine closes an
+  empty prefix itself in ~10 s; reaper untouched it). PERSIST=1 variant did not keep the fresh prefix alive — the
+  persistent-wineserver case is covered by the unit test only.
+- Open for Shawn: should Steam idling in the tray (no game/download) be kept? Currently reaped after the gradient.
 
 ## State — what is IN PROGRESS (and where exactly it was left off)
 Nothing in flight. Watch `~/.local/state/luminos/ram-reaper.log` for REAPED lines on real apps over the next days —

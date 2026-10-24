@@ -8746,3 +8746,18 @@ REAPED (10 processes, `left=[]`; these ones went on SIGTERM). Next tmpfs sweep (
 through its D-Bus activation file (`SystemdService=proton.VPN.service`). After: `tests/ram-reaper/after-act-20261024.txt`.
 From now on idle apps in app.slice with no window/audio/traffic go after the gradient time — at today's ~9.7 GB
 available that is 60 min (e.g. the Thunar daemon and Discover's tray notifier). Add anything that must stay to `keep =`.
+
+**Follow-up [CHANGE: claude-code | 2026-10-24] — gaming guards (Shawn: "will it mess up the vela and other things?").** Act mode was on with
+nothing gaming-specific. Added, all in `cmd/luminos-ram/reap.go`, 5 new tests (36/36 pass), binary reinstalled
+(backup `~/.luminos-backups/luminos-ram.bak-pre-gameguards-20261024-144049`):
+- **Built-in keep `vela`, `gameos`, `qemu`** (Vela's tools run on Luminos: "Add Game to Vela" = `vela-wine-install`,
+  `gameos/tools/…`, Vela test VMs). The keep-list now also matches argv0+argv1, because scripts run as
+  `bash <path>`. Vela itself (`/vela.img`, booted from GRUB) never runs the reaper and its files are never touched.
+- **`wine_grace_s = 60`** for `wine-no-app` (prefix with only Wine services): a launcher handing over to its game, or
+  a long first-run setup, no longer meets a 4 s grace. Orphans with a DEAD wineserver keep `leftover_grace_s` (4 s).
+  Real-machine check `tests/ram-reaper/wine-gap-test.sh`: fresh prefix (wineboot -i) + a program that exits — Wine
+  itself closed the empty prefix ~10 s later, the reaper logged nothing for it. Normal hand-overs are Wine's call.
+- **Anything under gamescope is live** ("running inside gamescope"): KWin only sees gamescope's window, the game
+  inside (often a Wine prefix grouped away from gamescope) looked window-less. `gamescopeDescendants` walks PPIDs.
+- **Zombies are not processes** (BUG-217).
+Still open for Shawn: Steam idling in the tray (no game, no download) is reaped after the idle gradient like any app.

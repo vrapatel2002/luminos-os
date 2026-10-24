@@ -145,3 +145,8 @@ Config `~/.config/luminos-ram-reaper.conf` (repo: `config/luminos-ram-reaper.con
 luminos-ram-reaper` re-reads it. `reap_mode = log` writes WOULD-REAP lines only; `act` reaps. Log:
 `~/.local/state/luminos/ram-reaper.log`. One-shot: `luminos-ram reaper --once [--force] [--act-only=a,b]` prints JSON.
 Cost: ~0.8 % of one core, 25 MB. Tests: `go test ./...`; on the desktop `tests/ram-reaper/integration.sh` (19 checks).
+
+### Gaming guards [CHANGE: claude-code | 2026-10-24]
+Built-in keep adds `vela`, `gameos`, `qemu` (matched against comm, exe, unit, Wine prefix and argv0+argv1).
+`wine_grace_s` (60 s) applies to a prefix holding only Wine services; a prefix whose wineserver is gone keeps
+`leftover_grace_s`. A process whose parent chain reaches `gamescope*` is live. Zombie/dead pids are never listed.

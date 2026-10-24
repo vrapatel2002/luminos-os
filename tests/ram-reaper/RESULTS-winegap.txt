@@ -1,0 +1,16 @@
+0s wineboot -i start
+5s wineboot -i done rc=0, prefix procs=10
+5s launcher: wine cmd /c exit
+5s launcher exited, prefix procs=9 (wineserver + services only)
+10s gap +5s procs=8
+15s gap +10s procs=0
+15s RESULT prefix gone 10 s after the launcher exited
+--- PERSIST=1 run
+0s wineserver -p (persistent)
+0s wineboot -i start
+4s wineboot -i done rc=0, prefix procs=10
+4s launcher: wine cmd /c exit
+4s launcher exited, prefix procs=9 (wineserver + services only)
+9s gap +5s procs=8
+14s gap +10s procs=0
+14s RESULT prefix gone 10 s after the launcher exited

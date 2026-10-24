@@ -31,6 +31,7 @@ type fp struct {
 	rd, wr         uint64
 	fds            []string
 	uid            int
+	state          string // default "S"
 }
 
 const appSlice = "/user.slice/user-1000.slice/user@1000.service/app.slice/"
@@ -54,7 +55,11 @@ func writeProc(t *testing.T, root string, p fp) {
 			t.Fatal(err)
 		}
 	}
-	w("stat", fmt.Sprintf("%d (%s) S %d 0 0 %d 0 0 0 0 0 0 %d 0 0 0 20 0 1 0 %d 0 0", p.pid, p.comm, p.ppid, p.tty, p.cpu, start))
+	state := p.state
+	if state == "" {
+		state = "S"
+	}
+	w("stat", fmt.Sprintf("%d (%s) %s %d 0 0 %d 0 0 0 0 0 0 %d 0 0 0 20 0 1 0 %d 0 0", p.pid, p.comm, state, p.ppid, p.tty, p.cpu, start))
 	w("status", fmt.Sprintf("Name:\t%s\nUid:\t%d\t%d\t%d\t%d\n", p.comm, uid, uid, uid, uid))
 	args := p.args
 	if len(args) == 0 {
@@ -466,7 +471,7 @@ func TestWineServicesOnlyMeansWineserverK(t *testing.T) {
 	ps := wineOrphans("/tmp/lrtest-wine", 0)
 	ps = append(ps, fp{pid: 510, ppid: 1, comm: "wineserver", exe: "/usr/bin/wineserver", args: []string{"/usr/bin/wineserver"}, cg: appSlice + "x.scope", env: []string{"WINEPREFIX=/tmp/lrtest-wine"}, start: 100})
 	root := fakeTree(t, ps...)
-	r, _ := evalAt(t, root, cfg(), noInputs(), 9, 5*time.Second, protCtx{})
+	r, _ := evalAt(t, root, cfg(), noInputs(), 9, 61*time.Second, protCtx{})
 	cd := candFor(r, "wine:/tmp/lrtest-wine")
 	if cd == nil || cd.Rule != "wine-no-app" || cd.Action != "wineserver-k" || cd.Server != "/usr/bin/wineserver" {
 		t.Fatalf("want wineserver -k, got %+v", cd)
@@ -738,5 +743,109 @@ func TestFastTickSkipsOthersAndCarriesIO(t *testing.T) {
 	r := e.States["unit:app-someapp-100.scope"].rates(t0.Add(60*time.Second), 60)
 	if r.ReadBps < 0.9*(1<<20) || r.ReadBps > 1.1*(1<<20) {
 		t.Fatalf("read rate %.0f B/s, want ~1 MiB/s", r.ReadBps)
+	}
+}
+
+// ───────── gaming guards (2026-10-24, DECISION 160 follow-up) ─────────
+
+func TestZombieIsNotAProcess(t *testing.T) {
+	ps := wineOrphans("/home/shawn/Games/mw4", 0)
+	for i := range ps {
+		ps[i].state = "Z"
+	}
+	root := fakeTree(t, ps...)
+	if n := len(readProcs(root, tuid, true, thome)); n != 0 {
+		t.Fatalf("zombies must not be listed, got %d", n)
+	}
+	r, _ := evalAt(t, root, cfg(), noInputs(), 9, 10*time.Second, protCtx{})
+	if len(r.Candidates) != 0 {
+		t.Errorf("a zombie is not reapable: %+v", r.Candidates)
+	}
+}
+
+func TestWineLauncherGapGetsWineGrace(t *testing.T) {
+	// A launcher exited and its game has not appeared yet: wineserver + services only.
+	ps := wineOrphans("/home/shawn/Games/control-resonant", 0)
+	ps = append(ps, fp{pid: 510, ppid: 1, comm: "wineserver", exe: "/usr/bin/wineserver", args: []string{"/usr/bin/wineserver"}, cg: appSlice + "x.scope", env: []string{"WINEPREFIX=/home/shawn/Games/control-resonant"}, start: 100})
+	root := fakeTree(t, ps...)
+	for _, d := range []time.Duration{5 * time.Second, 30 * time.Second, 59 * time.Second} {
+		if r, _ := evalAt(t, root, cfg(), noInputs(), 0.5, d, protCtx{}); candFor(r, "wine:") != nil {
+			t.Errorf("launcher gap of %v killed the prefix (even at 0.5 GB available)", d)
+		}
+	}
+	if r, _ := evalAt(t, root, cfg(), noInputs(), 9, 61*time.Second, protCtx{}); candFor(r, "wine:") == nil {
+		t.Error("after the 60 s Wine grace an empty prefix must still go")
+	}
+	// Orphans whose wineserver is DEAD keep the short grace — they can never come back.
+	root = fakeTree(t, wineOrphans("/home/shawn/Games/mw4", 0)...)
+	if r, _ := evalAt(t, root, cfg(), noInputs(), 9, 5*time.Second, protCtx{}); candFor(r, "wine:") == nil {
+		t.Error("wine-no-server must stay at leftover_grace_s")
+	}
+	// The grace is configurable.
+	c, _ := parseReapConfig("wine_grace_s = 120\n", cfg())
+	if c.WineGrace != 120*time.Second {
+		t.Errorf("wine_grace_s not parsed: %v", c.WineGrace)
+	}
+}
+
+func TestGameInsideGamescopeIsLive(t *testing.T) {
+	pfx := "/home/shawn/Games/free-game"
+	gs := appSlice + "app-gamescope-700.scope"
+	ps := []fp{
+		{pid: 700, ppid: 1, comm: "gamescope", exe: "/usr/bin/gamescope", cg: gs},
+		{pid: 710, ppid: 700, comm: "sh", exe: "/usr/bin/bash", cg: gs},
+		{pid: 720, ppid: 710, comm: "game.exe", exe: "/usr/bin/wine64-preloader", args: []string{`C:\\Game\\game.exe`}, cg: gs, env: []string{"WINEPREFIX=" + pfx}},
+		{pid: 721, ppid: 1, comm: "wineserver", exe: "/usr/bin/wineserver", args: []string{"/usr/bin/wineserver"}, cg: gs, env: []string{"WINEPREFIX=" + pfx}, start: 100},
+	}
+	root := fakeTree(t, ps...)
+	in := noInputs()
+	in.WindowPIDs[700] = true // KWin sees gamescope's window only
+	r, _ := evalAt(t, root, cfg(), in, 0.5, 3*time.Hour, protCtx{})
+	if cd := candFor(r, "wine:"+pfx); cd != nil {
+		t.Fatalf("a paused game inside gamescope was reaped: %+v", cd)
+	}
+	if v := viewFor(r, "wine:"+pfx); v == nil || !strings.Contains(v.Reason, "gamescope") {
+		t.Errorf("reason must say gamescope, got %+v", v)
+	}
+	// Control: the same window-less, idle prefix NOT under gamescope is reaped.
+	ps[2].ppid = 1
+	root = fakeTree(t, ps...)
+	if r, _ = evalAt(t, root, cfg(), in, 0.5, 3*time.Hour, protCtx{}); candFor(r, "wine:"+pfx) == nil {
+		t.Error("control failed: idle prefix outside gamescope should be a candidate")
+	}
+}
+
+func TestGamescopeMemoOrder(t *testing.T) {
+	procs := map[int]*rproc{
+		700: {PID: 700, PPID: 1, Comm: "gamescope"},
+		710: {PID: 710, PPID: 700, Comm: "sh"},
+		720: {PID: 720, PPID: 710, Comm: "game.exe"},
+		800: {PID: 800, PPID: 1, Comm: "plasmashell"},
+	}
+	for i := 0; i < 50; i++ { // map order is random: the result must not depend on it
+		d := gamescopeDescendants(procs)
+		if !d[710] || !d[720] || d[700] || d[800] {
+			t.Fatalf("run %d: got %v", i, d)
+		}
+	}
+}
+
+func TestVelaGameosQemuAlwaysKept(t *testing.T) {
+	cases := []fp{
+		{pid: 900, ppid: 1, comm: "vela-wine-insta", exe: "/usr/bin/python3.12", args: []string{"/usr/bin/python3", "/home/shawn/.local/bin/vela-wine-install", "gui"}, cg: appSlice + "app-vela-900.scope"},
+		{pid: 901, ppid: 1, comm: "nvk-play", exe: "/usr/bin/bash", args: []string{"bash", "/home/shawn/luminos-os/gameos/tools/nvk/nvk-play"}, cg: appSlice + "app-nvk-901.scope"},
+		{pid: 902, ppid: 1, comm: "qemu-img", exe: "/usr/bin/qemu-img", cg: appSlice + "app-vm-902.scope"},
+	}
+	for _, p := range cases {
+		root := fakeTree(t, p)
+		r, _ := evalAt(t, root, cfg(), noInputs(), 0.3, 5*time.Hour, protCtx{})
+		if len(r.Candidates) != 0 {
+			t.Errorf("%s: reaped %+v", p.comm, r.Candidates)
+		}
+	}
+	// A Vela game prefix orphan is kept too (keep-list beats leftovers).
+	root := fakeTree(t, wineOrphans("/home/shawn/Games/vela-cache/pfx", 0)...)
+	if r, _ := evalAt(t, root, cfg(), noInputs(), 9, 10*time.Second, protCtx{}); candFor(r, "wine:") != nil {
+		t.Error("a Vela prefix was reaped")
 	}
 }
