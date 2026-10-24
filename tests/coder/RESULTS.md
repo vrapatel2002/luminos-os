@@ -23,6 +23,8 @@ Gateway default: ctx 65 536, ub 4096, `-fitt 256` (`CODER_WRITER_CTX` overrides)
 | UD-IQ3_XXS, `-lm mlock` | 7.5 GB | 323 | 1.7 | — | faults gone, still slow → not I/O |
 | **UD-Q2_K_XL 9.4 GB, `-lm mlock`** | 6.3 GB | **272** | **2.4** | 180/237 | **chosen** |
 | UD-Q3_K_XL 12.5 GB, `-lm mlock` | — | — | — | — | **OOM-killed at load** (9.6 GB shmem) |
+| **UD-Q3_K_XL, `-lm mlock`, 2026-10-24** (after Baloo off + shared MCP + reaper; 10.4 GB available before) | 9.4 GB | 273 | **2.35** | 70/114 | **loads now**; min available 405 MB, swap 2.5 GB, no OOM |
+| **UD-IQ4_XS 14.3 GB, `-lm mlock`, 2026-10-24** | 10.5 GB | 194 | **2.67** | 73/106 | loads, but min available **81 MB**, swap 3.8 GB — earlyoom (`-m 5 -s 90`) was ~0.3 GB of swap from firing |
 Why ~2.4 t/s is the ceiling: ~60 % of every token is computed on the CPU, and during generation the CPU sits at
 **28 W of its 30 W dGPU-busy ceiling and 80.5 °C of the 82 °C target** (spectrum, DECISION 146). More watts would hit the
 temperature limit next. The quant type does not change it (IQ3 1.7, Q2_K 2.4).
