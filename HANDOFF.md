@@ -1,274 +1,84 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-23 19:45 — Response 35 (BUG-207/DECISION 156 documented; DV history compiled; sweep converting VisionQuest)
+Last updated: 2026-10-23 23:40 — VisionQuest E01+E02 converted + verified (BUG-207 fixed); 5 future-proof fixes offered, waiting on Shawn
 
-**RESET this date per §0.2 tripwire** (file had grown to ~470 lines). Pre-reset content is in git:
-`git show HEAD:HANDOFF.md` (HEAD = `e3177cd4`, 2026-10-22 18:47, the GLM side-by-side commit). Only
-what a newcomer must not re-learn or re-break is carried forward. The 2026-10-22 evening updates
-(Vela MW4 result, BUG-210 renumber) are committed by the post-reboot GLM session via host-shell.
+Previous handoff (VisionQuest DV P5 sweep / MW4 / GLM window) is in git: `git show c5ac3e61:HANDOFF.md`. Nothing from it
+was touched this turn; its open items are copied to "Still open from before" below.
 
 ## Goal (the durable end objective)
-Keep Luminos OS working as a daily-driver Windows replacement — the G14 desktop/AI stack and the
-separate media server — fixing what Shawn reports, and never leaving a change undocumented.
+Keep Luminos OS working as a daily-driver Windows replacement — G14 desktop/AI stack + the separate media server — fixing
+what Shawn reports, and never leaving a change undocumented.
 
-## Aim right now (2026-10-23 19:45) — VisionQuest purple = DV Profile 5 direct play (BUG-207), auto-fix live (DECISION 156)
-Root cause pinned in jellyfin-roku 3.2.4 deviceCapabilities.bs (DOVI advertised for HEVC in any container when the panel reports DV).
-`luminos-dv-sweep.timer` (every 30 min) converts every P5 file to HDR10 via luminos-dv-fix; VisionQuest S01E02 converting since 19:24
-(~80 min/ep), S01E01 next. A send_later check (~20:53) verifies (no DOVI side data, HDR10 in Jellyfin, frame looks natural) and pushes
-Shawn to test on the TV. History of all 4 incidents: server/docs/doctor/DV_PURPLE_HISTORY.md. Unproven: whether MKV→HLS/MP4 would let
-the Roku show real DV (A/B test never run) — would allow keeping DV instead of HDR10.
-
-## Previous aim (2026-10-22 evening, GLM window) — get CoD "MW4" running on Luminos, then Vela
-Game: **Call of Duty - Modern Warfare 4 (2026) campaign repack** at `/mnt/win-os/Games/Call of Duty -
-Modern Warfare 4` (`sp26/sp26-cod.exe` = campaign, `cod.exe` = online HQ launcher, NOT used; Ricochet
-attestation only matters for MP). Lutris entry `mw4` (id row name "mw4", configpath
-`mw4-1792553189`), added by hand 2026-10-20, **never launched** (no prefix existed).
-**DONE this turn:** rewrote `~/.config/lutris/games/mw4-1792553189.yml` — Control's proven settings
-(DXVK, VKD3D, dxvk_nvapi for DLSS/Reflex, d3d_extras, esync+fsync, fresh prefix `~/Games/mw4`,
-PROTON_LOG on for first launches), runner `GE-Proton11-6-dx12fix` (= GE-Proton11-6 + the
-gameos rayquery-validate vkd3d patch; neutral on proprietary, required on Vela/NVK). Working dir =
-the `sp26/` folder. Global dGPU gate + MangoHud apply automatically (system.yml, DECISION 90).
-**LAUNCH 1 (19:11) hung — ROOT CAUSE FOUND AND FIXED (R6, ~21:40).** wchan capture: sp26-cod.exe
-single-threaded, blocked in `anon_pipe_read` = launcher stub waiting on a child. Child identified
-from its own log `sp26/ccsdownloader.log`: the FitGirl-style repack wraps the exe with a
-**ccsdownloader.exe** (custom "CCS Downloader v0.02", 2026-10-16) that at every launch queries
-Activision's live CDN (`rex-gvs` / `objectstore-publishers-rex.prod.demonware.net`, 3–10 s timeouts,
-config `sp26/ccsconfig.json`) and on failure **"cleans up" content files it manages** then leaves the
-stub hanging. This exactly reproduces Shawn's Windows symptom (runs once from installer, crashes,
-never again until reinstall — reinstall re-places the packs the downloader deletes). The needed packs
-are already on disk (`cod26/main/extccs/31/*_1196.bin`); ccs_history.json = `[]` (never a successful
-download). Game is campaign-only, no Ricochet/anticheat in the path (Shawn confirmed). Crack layer =
-Goldberg Steam emu (`sp26/steam_settings/`, offline=1). Playtime 17 h in Lutris = Windows Steam
-data; never played on Linux.
-**FIX APPLIED (R6):** `sp26/ccsconfig.json` → `{"downloadsubconfigs": []}` (downloader now exits
-cleanly doing nothing; game uses on-disk packs). Faithful backup: `sp26/ccsconfig.json.orig`.
-Fallback if still hangs: rename `sp26/ccsdownloader.exe` → `.off`. Lutris was left stuck believing
-the game runs; Shawn kills with `pkill -9 -f sp26-cod; pkill -9 -f ccsdownloader; pkill -9 -f umu;
-pkill -9 -f wineserver` then relaunches. **PENDING: relaunch result.**
-
-**LUMINOS GAME STACK FIXED (R8, ~20:05) — BUG-208.** Shawn: no Lutris game runs on Luminos,
-all run on Vela (except MW4 = the repack bug above). Root cause: `/dev/nvidia0` +
-`/dev/nvidiactl` never created at boot — `nvidia_uvm` loads early from modules-load.d, so
-`/dev/nvidia-uvm` exists when the PCI bind uevent fires, and its `TEST!=` guard in
-`60-nvidia.rules` suppresses `nvidia-modprobe` entirely (the only creator of the main nodes) →
-NVIDIA Vulkan ICD cannot init → every dGPU-gated game fails; Vela unaffected. Diagnosed via
-host-shell MCP (BUG-207 verified end-to-end by this). **Fix:** `luminos-uvm-gate.sh` now
-creates both main nodes when absent (mknod, major from /proc/devices, root:dgpu 0660, BUG-208
-log lines) — repo `scripts/dgpu-gate/` + installed `/usr/local/bin/luminos-uvm-gate` identical.
-Verified: nodes recreated live, `dgpu-exec-v2 --check` = access OK / gate OK, gated
-vulkaninfo sees the RTX 4050, dGPU suspends at idle. **PENDING: real reboot test** (journal
-should show BUG-208 "created" lines; `luminos-verify` section 3b would catch a failure).
-Mid-session gotcha hit and repaired: `sudo nvidia-modprobe` re-opens UVM nodes to 0666
-(BUG-146) — re-run `luminos-uvm-gate` after any manual use. **MW4 still blocked — BUG-209 (R9, ~21:00).** After BUG-208, other Lutris games run on Luminos
-(Shawn confirmed) but MW4 dies in 13–16 s: page fault 0xC0000005 at `sp26-cod.exe+0x1D5789`
-(`mov (%r10),%eax`, deterministic garbage r10) in obfuscated early-init of the RELAUNCHED game
-exe; stub-structure and all ruled-out causes in docs/BUGS.md BUG-209 (GPU selection, locale,
-marker, caches, fresh prefix, ccsdownloader, MangoHud, wined3d/vkd3d — all tested, all same
-crash; exit 5 = 0xC0000005). The 19-min "engine ran" session was a Vela VM run (qemu CPU) —
-bare-metal Luminos has never gotten past this crash. Repack chain fully mapped: bink2w64.dll →
-rex_sp.dll (crack, export "r4v3n") + Goldberg emu + ccsdownloader (pack-deleter on CDN timeout
-= the Windows reinstall-only symptom). ccsconfig.json = empty variant (bypass); originals kept
-as `.orig`/`.empty`; marker `__sp26-cod` restored; GLCache.bak-20261022 + `~/Games/mw4.fresh-partial`
-set aside. NEXT: winedbg register capture; qemu -cpu host test; newer GE-Proton; Vela real boot.
-Field cleaned (no wine/umu strays); Lutris GUI restarted in -d mode (log /tmp/lutris-debug.log).
-WINEDEBUG=+seh in the mw4 yml is inert (Lutris forces -all).
-**VELA REAL BOOT TRIED 2026-10-22 — SAME CRASH, TWICE (R2, ~21:50).** Shawn booted Vela and launched
-MW4 at 21:12:57 and again from Home at 21:16:09 (first Home Play on `/vela.img` proprietary — that
-gameos open item is now closed; the launch chain itself worked: vela-core → vela-lutris → umu → same
-shared runner, fresh prefix bootstrapped, NVIDIA renderD128 active under gamescope). **Both runs died
-within 4 s of exe start with the same exit code 5 / 0xC0000005** (Vela journal: `Child exited with
-wait status: 5`, return code 1280; Lutris: "game has run for a very short time, did it crash?").
-The mw4-vela-tracker captured run 1 fully: `~/mw4-vela-capture-20261022-211213/` (per-second process
-tree, dGPU state, journal). vela-telemetry: dGPU woke (active, 0% util, 12-23 MiB) and was back
-suspended by 21:16:43, gpu_util=na — no frame rendered. **BUG-209 is now proven OS-independent**
-(kernel 7.0.5+610.57 Luminos vs 7.2.6+615.71 Vela, Plasma vs gamescope, fresh prefix) — it is the
-repack/crack/game itself or a CPU-feature branch in the obfuscated init. Only remaining known-good
-run: the qemu-CPU VM. **NEXT (ordered):** (0) newer GE-Proton — **DONE 2026-10-22 ~21:55, CRASHED
-(exit 5, ruled out)**; (0b) **config matrix exhausted ~22:25** — UMU_ID/GAMEID 1938090, d3d_extras/
-dxvk_nvapi stripped, MangoHud off, old-prefix lineage restored, even full offline (`unshare -n`):
-ALL same 2-15 s exit-5 crash. Full register capture obtained (`~/Games/mw4-evidence-20261022/`).
-**HEADLINE: the demonware CDN is the surviving variable** — HTTP 200 during the only two
-engine-alive runs (19:44, 20:39), HTTP 503 during every crashing run since (verified 22:22; no VPN
-confounder; offline also crashes — the game needs a HEALTHY server; also explains the Windows "runs
-once then dead" symptom as CDN health, not pack deletion — packs untouched all night).
-**AUTO-RETRY LIVE: `mw4-cdn-watch.service`** (user unit, gameos/os/scripts/mw4-cdn-watch.sh) polls
-the CDN every 5 min and auto-launches MW4 via Lutris + notifies Shawn at the first 200 (log
-`~/.local/state/luminos/mw4-cdn-watch.log`, flag `mw4-cdn-launched.flag`; remove unit+script when
-BUG-209 closes). **CRACK RE (~22:50):** first-run state reset tested (still crash at 503; backup
-`first-run-state-backup-20261022/`); the working Windows run's root `ccsdownloader.log` shows the
-mechanic (live GVS answer → version mismatch → skip downloads → game runs); **fake-GVS server
-built, protocol 90% mapped** — `GET /v1/public/<configId>/`, response `GvsResult{size,payload}` →
-JWT → `GameVariables{variables[key,value]}`, self-signed cert ACCEPTED; last mile = the `size`
-validation + likely JWE crypto (embedded RSA key, PBES2/A128CBC strings). Work saved
-`~/Games/mw4-evidence-20261022/fakegvs/`; DNS hijack removed after testing. NEXT: (a) extract the
-embedded RSA key + try JWE shapes, or (b) the moment the real CDN recovers (watcher fires), curl
-`/v1/public/452de38822126ed008205a38b00a57ab/` and capture a REAL response to clone. Game dir left
-in fresh-install state. NEXT when the watcher fires: watch the run; if it STILL crashes with CDN
-200, the wine-side lead is the crash thread's two stubbed NtQuerySystemInformation classes
-(0x91, 0xA5) right before the fault + a working winedbg --auto capture. Vela re-test pointless
-until a Luminos run survives.
-Vela run
-details filed in docs/BUGS.md BUG-209. Vela-side noise (not the cause): gamemoded exit-127 on its
-split_lock_mitigate script; Proton "unable to use parent for game drive /mnt/win-os". BUGS.md
-duplicate BUG-208 (GLM MCP entry) renumbered → BUG-210.
-
-## Previous aim (2026-10-22, done) — GLM-5.3 in Claude Desktop, side by side with Max (DECISION 156)
-- KDE menu **"Claude (GLM-5.3)"** = `scripts/luminos-claude-glm`: second app instance,
-  `--user-data-dir ~/.config/Claude-glm`, 3P config in `~/.config/Claude-glm-3p`.
-- `scripts/luminos-glm-proxy` on **:4141** (user unit) renames `claude-*` model ids → abliterated
-  models and holds the real key. Terminal `claude-glm` unchanged. Normal Claude app = Max always
-  (`luminos-claude-mode` retired). Proven live 2026-10-22 18:33.
-- Model = `abliterated-model-large-v2` (GLM-5.3, 1M ctx, **text-only → images 400**, $3 in / $0.30
-  cached / $5 out per 1M, reasoning always on). Abliteration speaks native Anthropic /v1/messages
-  (streaming, tools, cache_control) → **no ccr needed**. Key file `~/.config/luminos/abliteration.env`
-  (+`GLM_LOCAL_TOKEN`).
-- UNKNOWN: whether large-v2 counts as a "higher-capacity" model (Developer plan = standard only) —
-  check the Playground model list before paying. Plan credit never expires.
-- claude.ai account projects don't exist for GLM → use the `~/luminos-os` folder in the GLM window;
-  project docs copied to `gameos/docs/claude-project/`.
-- **NOT yet seen before this chat: a real Cowork task in the GLM window** (tool use, compaction at
-  1M ctx). **This session is that first test.**
+## Aim right now — luminos-coder (DECISION 157): local Qwen3.6 writer + Qwen3.8 reviewer inside Claude Desktop Chat
+Shawn: "3.8 as reviewer … make a system and test it. give a task that is completely out of 3.6 reach and under 3.8 reach …
+take care of the power usage … make sure the gpu is running at full power … run these on chat mode on claude desktop app.
+do not stop until this things system is completed." No cloud backup.
 
 ## Why / motivation
-Shawn wants local/GLM inference usable from the Claude Desktop UI without giving up the Max-plan
-app; side-by-side (DECISION 156) avoids the sign-out trap: switching deploymentMode signs the app out
-of claude.ai, and a re-login resets folder grants (BUG-187). Never set `disableDeploymentModeChooser`.
+Shawn wants the best coder that runs on the G14 (6 GB RTX 4050, 15.6 GiB RAM), long context, usable from the Claude
+Desktop UI, with a smarter model cross-checking. Qwen3.6-35B-A3B (MoE, fast) writes; Qwen3.8-27B (dense, smarter, slow
+here) reviews. DeepSeek V4 needs ≥62 GB — not local.
 
 ## Process / approach being used
-AGENTS.md §8 session checklist: read HANDOFF → AGENTS → search luminos-notes / brain / MemPalace →
-domain docs → surgical changes with `[CHANGE: agent | date]` tags → §13 doc triggers → notes + brain
-+ commit (from a host shell — see gotchas). In this GLM Cowork session there is **no host-shell
-MCP**; `mcp__workspace__bash` is the Cowork VM, not the G14 (it cannot see the desktop session,
-systemd, the GPU, or run luminos-notes reliably).
+Gateway pattern copied from DECISION 156 (GLM window): a separate Desktop profile in 3P gateway mode → a local
+name-translating gateway → llama-server. Measure everything (tests/coder/RESULTS.md) before choosing settings; prove the
+reviewer's value with hidden tests (tests/coder/proof/).
 
 ## State — what is DONE
-**GLM setup (DECISION 156 + amendment)** — everything in "Aim right now"; committed at `e3177cd4`.
+- Models in `~/.local/share/luminos/models/coder/` (home is timeshift-excluded): Qwen3.6-35B-A3B-UD-Q3_K_XL (writer),
+  Qwen3.8-27B UD-Q2_K_XL (reviewer, chosen) + UD-IQ3_XXS / UD-IQ4_XS / UD-Q3_K_XL / MTP (benchmark leftovers — delete
+  the ones not used if disk matters, ~37 GB).
+- No llama.cpp rebuild needed: packaged `llama.cpp-cuda b10452` (`/usr/bin/llama-server`) has draft-mtp, router mode and
+  the Anthropic `/v1/messages` API. CUDA only through `dgpu-exec-v2` (shawn not in `dgpu`, by design).
+- `scripts/luminos-coder-gateway` (+ `systemd/luminos-coder-gateway.service`, installed to `~/.config/systemd/user/`,
+  started, NOT enabled at boot — `luminos-claude-local` starts it): :4142 → one llama-server on :8093; sonnet/haiku →
+  writer, opus → reviewer; power hooks; 15 min idle unload. Verified: non-stream + SSE stream, powerd on with model,
+  powerd masked + dGPU `suspended` after stop.
+- `scripts/luminos-coder-review-mcp` (MCP `luminos-coder`: review_start / review_wait / run_python / run_tests) —
+  handshake + run_tests verified. pytest lives in `~/.local/share/luminos/coder-venv` (brain-safe override logged: the
+  known false-NO banner).
+- `scripts/luminos-claude-local` + `~/.local/share/applications/luminos-claude-local.desktop` ("Claude (Local Qwen)",
+  repo copy `config/luminos-claude-local.desktop`): profile `~/.config/Claude-local`, 3P cfg `~/.config/Claude-local-3p`,
+  token in `~/.config/luminos/coder.env`. `setup` run; app NOT yet opened.
+- BUG-212 FIXED: `scripts/hive-idle-watchdog.sh` killed every llama-server; now only `--port 8080`. BUG-213 OPEN
+  (train-mode restores fan v5).
+- Proof run A so far: Qwen3.6 alone 91/107 hidden tests; Qwen3.6 re-check 95/107.
 
-**Power spectrum v5.0 (DECISION 146, live since 2026-10-15)** — one continuous PPT dial 15–45 W,
-Thi AC 82 °C, fan curve v6, asusd.neutered (`asusd.ron` 3× false), config `/etc/luminos/config.toml`.
-Rollback: AGENTS §15 (binary `.pre-spectrum`). Measured: 0 dGPU wakes, +14 % ops at 82 °C, quieter.
-
-**nvdefer (DECISION 147)** — NVIDIA open driver DKMS patch holding firmware/asusd power notes while the
-dGPU sleeps; installed, rebooted, live.sh ALL PASS (asusd curve rewrites → 0 wakes; replay works;
-card re-sleeps in 21 s). `pacman -Qkk nvidia-open-dkms` reports 2 modified files — expected.
-
-**Windowstyle "Nexus look" (DECISIONS 138–141, 143, 144; BUGS 193, 195–197)** — KWin decoration
-`luminos-kdecoration-chromeos` + forks qqc2 6.30.0-1.6, kirigami 6.30.0-1.6, kirigami-addons
-1.13.1-1.2, kcmutils 6.30.0-1.1, systemsettings 6.7.5-1.6, darkly 0.5.40-1.2, plasma-desktop 6.7.5-1.2
-(all `packages/*-luminos/`, warn-only pacman hooks). Checker: `scripts/luminos-windowstyle-check`.
-**BUG-199 crash catcher installed (DECISION 145)**: `luminos-greeter-catch status`, reports in
-`~/.local/state/luminos/greeter-crash/` — waiting for Shawn to reproduce (lid close/open) so the
-newest crash log can be read and the lock-screen wallpaper bug actually fixed.
-
-**Media server (separate machine, `ssh -i ~/.ssh/luminos-server shawn@192.168.2.61`)** —
-Playback Doctor phases done: census (21 files), log truth (46 sessions, 7 real failures; phone uses
-tailnet IP even at home → DECISION 142 caps it at home too), format measurements. Applied:
-DECISION 148 (throttling, segment deletion, 30-day logs), 149 (Intro Skipper: no scan on import,
-nightly 04:00), 150 (`luminos-phone-cap` timer: home = no cap, away = 8 M), 151 (nft udp 41641
-accept), **153 (auto-fix on import: `luminos-media-fix` + Sonarr/Radarr Custom Script hook id 2 +
-nightly 03:30 timer; all 21 files fixed — 22 sidecars, 23 default flags; Roku PlaybackInfo
-DirectPlay verified)**. BUG-205 (EnableTonemapping broke HDR transcodes; no OpenCL runtime) reverted
-to false. Jellyfin API key at `/etc/luminos/media-fix-jellyfin.token` (root:media 0640).
-
-**Claude Desktop** — app at 2.31226.1 (BUG-191 fixed, DECISION 133); BUG-192 host-shell MCP timeout
-crash fixed in `~/.local/share/claude-host-shell/server.py`. @-mention needs the chat to be in the
-folder-bound space, not an account project.
-
-**2026-10-20 Windows partition fix** — `/etc/fstab` win-os line was missing the ntfs3 `force` option
-its comment promised; added (backup `/etc/fstab.bak-20261020-ntfsforce`), mounted rw, write test OK.
-
-**2026-10-20 `scripts/vela-wine-install`** — adds a Windows game to Lutris with Control's proven Vela
-settings; folder mode proven against a sandboxed pga.db; **installer mode (setup.exe) NOT yet tested
-with a real installer.**
-
-**Tab Sleeper 3.2 runaway guard** — heap > 600 MB or long tasks ≥ 50 % for 2×60 s → reload same
-second, max 1 per tab per 10 min; live tests 3/3 PASS.
-
-## State — what is IN PROGRESS (and where it was left off)
-1. **This GLM Cowork session = first real GLM-window task.** Watch for: tool-heavy behaviour,
-   compaction near 1M ctx, anything the proxy/model id rename breaks.
-2. **OpenCL runtime on the server (for correct HDR tonemapping)** — AUR
-   `intel-compute-runtime-legacy` building via Shawn's terminal: `nohup yay --noconfirm --builddir
-   /srv/media/.aur-build` (MAKEFLAGS=-j6, log `/srv/media/.aur-build/build.log`), expect 3–6 h
-   (LLVM 14 + IGC on a 4c/8t U CPU). First attempt cloned llvm into `~/.cache/yay` on the 40 G root —
-   killed and cleaned (root back to 21 G free); nothing was installed. `--noconfirm` makes pacman
-   REFUSE (not accept) any conflict that would remove `intel-gmmlib`. A 30-min send_later check was
-   armed in the Max-window chat.
-3. **BUG-199 lock-screen wallpaper** — catcher installed; needs Shawn's repro (lid close/open) then
-   read the newest crash log and fix.
-4. **Spectrum + nvdefer tests needing Shawn present:** suspend/resume + ROG-key event tests
-   (spectrum); `sudo bash tests/nvdefer/charger.sh` (unplug + replug).
-5. **BUG-204 question for Shawn:** heavy CPU while battery CHARGING flaps EC GPU D-level (~75 notifies
-   + 4 dGPU wakes in 40 s) — was the charger USB-C or the barrel brick?
-6. **Server leftovers:** `/usr/local/bin/ozark-warm-once` (contains Jellyfin token) still on the
-   server; `sudo rm` blocked by the Max session's permission classifier — needs Shawn. No live import
-   through luminos-media-fix seen yet. Local llama.cpp binaries broken on CPU (llama-server asserts,
-   llama-bench missing symbol) — not fixed.
-7. **`main` is ahead of origin, unpushed on purpose — Shawn's call.**
+## State — what is IN PROGRESS (and where exactly it was left off)
+1. `coder-proof.service` (user, transient) running `tests/coder/proof/proof.py runA` then `runB`; results append to
+   `~/.local/state/luminos/coder/proof-results.jsonl` (ends with PROOF-DONE). Arms: initial, solo2, self, cross.
+2. Then: end-to-end in the Claude (Local Qwen) **Chat** tab (open app → send the TASK.md task → writer calls
+   review_start/review_wait → check gateway log shows writer→reviewer→writer swaps and tests ran).
+3. Docs: DECISION 157 text drafted (append to LUMINOS_DECISIONS.md), STATUS row, RESULTS.md proof table, notes, brain,
+   MemPalace drawer, commit (name paths — another chat has uncommitted edits in docs/BUGS.md, config/, server/).
 
 ## Next steps (ordered)
-1. Finish/observe this GLM Cowork session; report how the GLM window handles real tool use (the
-   DECISION 156 open question).
-2. When the server OpenCL build finishes: verify (`clinfo`), re-test an HDR transcode, then decide
-   re-enabling EnableTonemapping (BUG-205) — with a 300 s auto-revert like other server changes.
-3. Shawn: chrome://extensions → Luminos Tab Sleeper → **Reload** (3.2 runaway guard + still-pending
-   v3.0 2-tab cap are not live in Chrome until that click); while there turn OFF Memory Saver.
-4. Shawn repro for BUG-199 (lid close/open) → read `~/.local/state/luminos/greeter-crash/` newest.
-5. Spectrum suspend/resume + ROG-key tests; nvdefer charger.sh (both need Shawn at the box).
-6. Commit this handoff reset from a host shell; run `luminos-notes.sh add [DOCS]` there too (VM
-   cannot write `.notes.db` — disk I/O error from the bridge).
-7. Open AGENTS.md §14 task list for the long-parked items (Eye model, HIVE web panel, etc.).
+1. Read proof results; if cross ≤ self, try reviewer UD-IQ3_XXS (`CODER_REVIEWER_GGUF`) or more thinking budget.
+2. Desktop Chat end-to-end (above). 3. Docs + commit. 4. Tell Shawn the trade-offs (reviewer 2.4 t/s, desktop swaps
+   while it is loaded).
 
-## Key decisions & constraints
-- **No Docker, no Ollama** (inference = bare llama.cpp); **identity tags mandatory** on edits;
-  `cmd/` Go daemons only when explicitly instructed (§11).
-- **4.6 GB safe VRAM resident / 6 GB foreground** (DECISION 58); one GPU model at a time.
-- **dGPU must stay asleep at idle** (BUG-047/182/198): nvidia-powerd MASKED (not disabled);
-  `luminos-dgpu-watch` re-masks it; `lspci`/`lshw`/`inxi`/bare root `nvidia-smi` all WAKE it.
-- **Profile/fan-curve writes wake the dGPU** (ACPI NVPCF notify) — route through `setProfile()`,
-  deadbands on every threshold pair; nvdefer now blocks the notifies during sleep.
-- **Never re-download media to fix subtitles** (Shawn). Server changes get 300 s auto-revert.
-- **Never restart Claude Desktop from a bare agent shell** (BUG-187) — `scripts/luminos-claude-restart`.
-- **Media server work goes in `server/`**, decision numbering continues the main sequence.
-- AGENTS.md §9 System Config table is authoritative for every `/etc/` change (why + revert).
-- Working preferences (CLAUDE.md): stay out of personal files; `/build` needs ≥1 Opus(high)/Fable
-  worker; keep Vela `.md` docs updated; file work in MemPalace.
+## Key decisions & constraints so far
+- One model on the GPU at a time; switching costs ~20–40 s load. Writer ctx 64K default (128K works but gen halves).
+- Reviewer must use `-lm mlock` (else NVMe thrash) and Q2_K_XL (Q3_K_XL OOM-killed at load).
+- Thinking budgets: writer 8192, reviewer 1024 (`--reasoning-budget`); unbounded writer thought 16K+ tokens.
+- Do not use `luminos-train-mode` for this (fan 100 % pin + stale v5 curve, BUG-213).
 
 ## Gotchas / dead-ends / things NOT to redo
-**`mcp__workspace__bash` is the Cowork VM, not the G14** — no desktop session, no systemd, no GPU,
-no `luminos-notes` (`.notes.db` writes fail with disk I/O error), and **git commands over the mount
-time out** (seen twice, pre-reboot session). **The post-reboot session has working `mcp__host-shell`
-access** (BUG-207 fix proven end-to-end again) — use host-shell for notes, git, and anything that
-must touch the real machine; `mcp__workspace__bash` remains sandbox-only.
+- **host-shell bridge cuts any call at 60 s** — run long jobs with `systemd-run --user` and poll files.
+- **device_commit_files does not overwrite an existing device file and caches by source path** — commit to a NEW
+  path from a NEW source filename, `mv` into place, verify sha256.
+- `llama-server` "operator(): cleaning up before exit" = it got SIGTERM (it was BUG-212), not a crash.
+- MoE prompt speed needs big `-ub` (512 → 86 t/s, 4096 → 328 t/s).
+- `nvidia-smi` via `dgpu-exec-v2` only when the card is already active (BUG-078).
 
-- **Never `pkill -f` broad patterns** — Cowork's sandbox is a `qemu-system-x86_64`; killing it ends
-  the session. Same for anything qemu-shaped.
-- **Never `git add -A` in this repo** — name paths; parallel chats share this tree.
-- `luminos-brain safe` has produced a false NO five times → escape hatch `--reason "…"`.
-- **BUG-171: a deploy is not a load** — restart plasmashell after every QML deploy.
-- **A frozen counter dates the END of an event, not its cause**; runtime-PM has no timestamps.
-- `lsof`/`/proc` answer "who has it OPEN", not "who holds a REFERENCE" (nvidia-powerd: no fd at all).
-- Wallpapers/media must render on the **780M, never the 4050**; `KWIN_DRM_DEVICES` +
-  `__EGL_VENDOR_LIBRARY_FILENAMES` pins must never be undone.
-- Server: ground truth for transcode questions is Jellyfin's own ffmpeg command lines in
-  `/var/log/jellyfin/`; `sudo -n` works over ssh.
-- ⚠️ `docs/BUGS.md` was once found truncated (~14 lines) by another writer — check
-  `wc -l docs/BUGS.md` (≈8 170) before committing it.
-- Old-handoff detail (Roku wifi, BUG-189/188, DECISION 132 warm timer, etc.) is in git history:
-  `git show HEAD:HANDOFF.md`, `docs/BUGS.md`, `server/DECISIONS.md`.
-
-## Gaming OS (Vela) — pointer only
-Own repo **`gameos/`** (parent `.gitignore`s it), own handoff **`gameos/HANDOFF.md`**. Installed on
-this disk since 2026-09-20 (DECISION 130): `/vela.img` + `/boot/vela/` + one `custom.cfg` menuentry;
-Luminos itself unchanged. Undo: `gameos/os/install/vela-uninstall.sh`. Rules: nothing from Vela is
-installed/configured on Luminos; **never `swapoff -a`** (`/swapfile.luminos` is unit-owned, not
-fstab); never export per-app GPU vars from session scripts; test in QEMU via
-`gameos/os/scripts/vela-vm.sh`, kill only with `vela-vm-kill.sh`.
+## Still open from before (untouched this turn)
+VisionQuest DV P5 sweep verification (BUG-207/DECISION 156 server); MW4 BUG-209 + mw4-cdn-watch; server OpenCL build;
+BUG-199 lock-screen repro; spectrum/nvdefer tests needing Shawn; `main` ahead of origin (push is Shawn's call).
 
 ## Files touched / relevant files
-**This turn (2026-10-22 R1, GLM window):** `HANDOFF.md` only (tripwire reset). No code, /etc,
-package or service change on Luminos. AGENTS.md untouched.
-**GLM setup (previous turns, committed `e3177cd4`):** `scripts/luminos-claude-glm`,
-`scripts/luminos-glm-proxy`, `~/.config/Claude-glm-3p/`, `~/.config/luminos/abliteration.env`,
-LUMINOS_DECISIONS.md (156), LUMINOS_STATUS.md.
-**Media server this week:** `/usr/local/bin/luminos-media-fix`, `/etc/luminos/media-fix-jellyfin.token`,
-Sonarr/Radarr hook id 2, nightly 03:30 timer (server/STATUS.md, server/DECISIONS.md 148–153).
+New: scripts/luminos-coder-gateway, scripts/luminos-coder-review-mcp, scripts/luminos-claude-local,
+systemd/luminos-coder-gateway.service, config/luminos-claude-local.desktop, tests/coder/{bench.py,bench-run.sh,
+gw-smoke.py,RESULTS.md}, tests/coder/proof/{TASK.md,reference.py,test_hidden.py,proof.py}.
+Changed: scripts/hive-idle-watchdog.sh (BUG-212), docs/BUGS.md (212, 213), HANDOFF.md.
+Outside repo: ~/.config/systemd/user/luminos-coder-gateway.service, ~/.local/share/applications/luminos-claude-local.desktop,
+~/.config/Claude-local{,-3p}, ~/.config/luminos/coder.env, ~/.local/share/luminos/{models/coder,coder-venv},
+~/.local/state/luminos/coder/. No /etc change. nvidia-powerd ends masked.

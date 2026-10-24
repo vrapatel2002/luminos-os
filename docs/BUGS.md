@@ -8572,7 +8572,7 @@ Note: screenshots are sent to Abliteration (their docs: zero retention by defaul
 
 ## BUG-207 — VisionQuest purple on the Roku: Dolby Vision Profile 5 DIRECT-PLAYED, so the DECISION 152 colour fix never ran
 <!-- [CHANGE: claude | 2026-10-23] -->
-**Status:** FIX DEPLOYED 2026-10-23 (DECISION 156: auto P5→HDR10 sweep); VisionQuest S01E01/E02 converting; awaiting verification + Shawn watching.
+**Status:** FIXED 2026-10-23 (DECISION 156). Both VisionQuest episodes converted by luminos-dv-sweep and verified: E02 21:13, E01 23:21 (rc=0, duration/audio match, HDR10 bt2020/PQ, no DOVI, Jellyfin VideoRangeType=HDR10, frames @600 s natural). Awaiting Shawn's look on the TV.
 **Evidence (2026-10-23 ~19:00):** both VisionQuest S01E01/E02 (WEBDL-2160p) are HEVC **DV Profile 5**, bl_signal_compatibility_id 0
 (no HDR10/SDR fallback layer). Jellyfin item: VideoRangeType=DOVI. Live session: Jellyfin Roku 3.2.4 on 65PUL7973, **PlayMethod=DirectPlay**,
 TranscodingInfo none; no FFmpeg.Transcode log since 10-20. The Roku app tells Jellyfin it can play Dolby Vision, so Jellyfin sends the
@@ -8594,3 +8594,29 @@ Roku's own spec (developer.roku.com/dev/docs/media) lists Dolby Vision (dvhe.05)
 codecs only. Field reports: same purple/green on DV P5 direct play in the Jellyfin Roku app while the Roku Media Player (DLNA) shows it
 correctly. **Unproven last link:** that the Roku player ignores the DV RPU in progressive MKV (→ shows the raw IPT-PQ-c2 base layer =
 purple). Settle with one A/B on this TV: same 2-min P5 clip as MKV vs fMP4/HLS, watched by Shawn.
+
+## BUG-212 — hive-idle-watchdog killed EVERY llama-server on the box, not just HIVE's
+<!-- [CHANGE: claude-code | 2026-10-23] -->
+**Status:** FIXED 2026-10-23 (DECISION 157 session).
+**Symptom:** a llama-server started for something else (the new luminos-coder models on :8093) logged
+`operator(): cleaning up before exit...` mid-request — once 5 min into a benchmark, once 40 s in — and the client got
+`RemoteDisconnected`. No core dump, no OOM, the unit itself kept running: it was a clean SIGTERM from outside.
+**Root cause:** `scripts/hive-idle-watchdog.sh` (user unit `hive-idle-watchdog.service`, running since 2026-04-28) does
+`pgrep -x llama-server` and, when `/tmp/hive-last-request` is older than 300 s, `pkill -x llama-server`. HIVE has been
+idle for months (BUG-097), so the file was always stale and the watchdog killed ANY llama-server within 60 s of its next
+tick — the coder models, the jobhunt servers (8082/8083), a hand-started test. Very likely also why "a llama-server
+launched from an agent shell did not survive" (2026-08-27 MOBILE-CHAT note blamed the shell).
+**Fix:** match only HIVE's own server — the one `hive-start-model.sh` starts with `--port 8080`:
+`HIVE_LLAMA='^[^ ]*llama-server .*--port 8080( |$)'`, used for both the pgrep and the pkill. Anchored on the program name
+because an unanchored pattern also matched the shell that RAN the test (its command line contained the text).
+**Verified:** two fake processes via `exec -a` — `/usr/bin/llama-server … --port 8080` matched, `… --port 8093` did not, nothing
+else matched; service restarted; the next coder benchmarks ran 10+ min with no kill.
+
+## BUG-213 — `luminos-train-mode off` restores fan curve v5, but the live curve is v6
+<!-- [CHANGE: claude-code | 2026-10-23] -->
+**Status:** OPEN — found, not fixed (not needed by the coder work; the coder gateway does not use train-mode).
+`scripts/luminos-train-mode` hard-codes `V5_CPUGPU`/`V5_MID` and writes them back on `off`. Since DECISION 146 (2026-10-15)
+the installed curve is v6, written once by `scripts/luminos-fan-curve-install`, and luminos-power no longer re-applies
+curves. So `train-mode on` + `off` silently downgrades the fans to v5 (old, louder: 55 % at 50 °C). It also pins all fans
+at 100 % while on, which conflicts with the "least fan that holds the target" rule. Fix when next touched: on `off` call
+`luminos-fan-curve-install` (or restore what was read back before `on`), and drop the 100 % pin.
