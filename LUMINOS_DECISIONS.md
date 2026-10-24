@@ -8650,6 +8650,14 @@ broker SIGKILL (stale socket) → next app recovers; crg `@auto` 3 clients ident
 repo → direct fallback. Real app: launched "Claude (Local Qwen)" → it connected with 2 socat stubs (clients=1 on
 both brokers), started no private copy; closed it → stubs gone, clients=0.
 
+**Follow-up 2026-10-24 14:40 — the Max app put the bare servers back.** Claude Desktop holds its config in memory
+and rewrites the whole file on any preference save (13:11: a `chromeExtension` pref) — so after Shawn's reboot the Max
+app started its own copies again; the GLM/Local launchers also copy the Max app's servers on each launch. Fix:
+`luminos-mcp-share wrap-configs` (idempotent; keeps every other key and the file mode; retries if the app writes at
+the same moment) + user unit `luminos-mcp-share-configs.path` (PathChanged on all 5 configs, enabled) + both
+launchers call it right before starting their app. Proven: a bare entry written into the GLM config was re-wrapped
+within 2 s by the path unit (mode 600 kept); Max config re-wrapped with `preferences` byte-identical.
+
 **Takes effect per app on its next start.** The Max app keeps its 2 old copies of each (~560 MB swapped) until it
 is restarted. **Revert:** copy each `*.bak-mcpshare-20261024` back over its config, restore the luminos-verify
 backup, `systemctl --user stop 'luminos-mcp-share-*'`.

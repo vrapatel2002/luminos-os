@@ -1,0 +1,14 @@
+# [CHANGE: claude-code | 2026-10-24] DECISION 159 — Claude Desktop rewrites its whole config on any pref save and
+# puts the bare MCP servers back; this re-applies the shared wrapper form whenever a client config changes.
+[Unit]
+Description=Keep MCP client configs on luminos-mcp-share (DECISION 159)
+
+[Path]
+PathChanged=%h/.config/Claude/claude_desktop_config.json
+PathChanged=%h/.config/Claude-glm-3p/claude_desktop_config.json
+PathChanged=%h/.config/Claude-local-3p/claude_desktop_config.json
+PathChanged=%h/.claude/settings.json
+PathChanged=%h/.config/Antigravity/User/mcp.json
+
+[Install]
+WantedBy=default.target

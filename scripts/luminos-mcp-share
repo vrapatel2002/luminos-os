@@ -396,6 +396,65 @@ def client(name, cmd):
     os.execv(socat, [socat, "STDIO", f"UNIX-CONNECT:{sock}"])
 
 
+# ----------------------------------------------------------------------------------------------- wrap-configs
+# Claude Desktop keeps its config in memory and rewrites the WHOLE file whenever a preference changes (seen
+# 2026-10-24 13:11: a chromeExtension pref save put the bare servers back). The GLM/Local launchers also copy the
+# Max app's servers on every launch. So the wrapper form is re-applied here, idempotently, by
+# luminos-mcp-share-configs.path (fires when any of these files changes) and by the launchers after they write.
+SHARED = {"mempalace": "mempalace", "code-review-graph": "crg@auto"}
+CONFIGS = [("~/.config/Claude/claude_desktop_config.json", "mcpServers"),
+           ("~/.config/Claude-glm-3p/claude_desktop_config.json", "mcpServers"),
+           ("~/.config/Claude-local-3p/claude_desktop_config.json", "mcpServers"),
+           ("~/.claude/settings.json", "mcpServers"),
+           ("~/.config/Antigravity/User/mcp.json", "servers")]
+
+
+def wrap_entry(name, cfg):
+    """Return the wrapped cfg, or None if it is already wrapped / not ours to wrap."""
+    cmd = cfg.get("command", "")
+    if not cmd or os.path.basename(cmd) == "luminos-mcp-share":
+        return None
+    return {**cfg, "command": os.path.realpath(__file__),
+            "args": ["client", SHARED[name], "--", cmd, *(cfg.get("args") or [])]}
+
+
+def wrap_configs(paths=None):
+    changed = 0
+    for path, key in (paths or CONFIGS):
+        path = os.path.expanduser(path)
+        for _ in range(5):                            # retry if the app writes while we do
+            try:
+                st = os.stat(path)
+                raw = open(path).read()
+                d = json.loads(raw)
+            except FileNotFoundError:
+                break
+            except (OSError, ValueError) as e:
+                print(f"{path}: skipped ({e})", file=sys.stderr)
+                break
+            servers = d.get(key) or {}
+            new = {n: wrap_entry(n, c) for n, c in servers.items() if n in SHARED and isinstance(c, dict)}
+            new = {n: c for n, c in new.items() if c}
+            if not new:
+                break
+            servers.update(new)
+            d[key] = servers
+            tmp = path + ".mcpshare-tmp"
+            with open(tmp, "w") as f:
+                json.dump(d, f, indent=2)
+            os.chmod(tmp, st.st_mode & 0o7777)
+            s2 = os.stat(path)
+            if (s2.st_mtime_ns, s2.st_size) != (st.st_mtime_ns, st.st_size):
+                os.unlink(tmp)                        # someone wrote meanwhile — read again
+                time.sleep(0.2)
+                continue
+            os.replace(tmp, path)
+            changed += 1
+            print(f"{path}: re-wrapped {', '.join(sorted(new))}")
+            break
+    return changed
+
+
 def status():
     if not os.path.isdir(RUN):
         return print("no shared MCP brokers running")
@@ -424,8 +483,11 @@ def main():
     a = sys.argv[1:]
     if a[:1] == ["status"]:
         return status()
+    if a[:1] == ["wrap-configs"]:
+        wrap_configs([(p, "servers" if "Antigravity" in p else "mcpServers") for p in a[1:]] or None)
+        return
     if len(a) < 4 or a[0] not in ("client", "broker") or a[2] != "--":
-        sys.exit("usage: luminos-mcp-share client|broker <name> -- <server cmd…> | status")
+        sys.exit("usage: luminos-mcp-share client|broker <name> -- <server cmd…> | status | wrap-configs [file…]")
     mode, name, cmd = a[0], a[1], a[3:]
     if mode == "client":
         return client(name, cmd)

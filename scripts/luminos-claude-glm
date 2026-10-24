@@ -49,6 +49,9 @@ except Exception as e:
     print("warning: could not copy MCP servers from the Max app:", e)
 w(p,c)
 PY
+  # [CHANGE: claude-code | 2026-10-24] DECISION 159: the servers copied from the Max app may be the bare form
+  # (the Max app rewrites its config on any pref save) — put them back on the shared broker before launch.
+  "$HOME/luminos-os/scripts/luminos-mcp-share" wrap-configs "$HOME/.config/Claude-glm-3p/claude_desktop_config.json" >/dev/null || true
 }
 
 case "${1:-open}" in

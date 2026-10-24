@@ -58,6 +58,9 @@ servers["luminos-coder"]={"command":"/usr/bin/python3","args":[os.path.join(os.e
 c["mcpServers"]=servers
 w(p,c)
 PY
+  # [CHANGE: claude-code | 2026-10-24] DECISION 159: the servers copied from the Max app may be the bare form
+  # (the Max app rewrites its config on any pref save) — put them back on the shared broker before launch.
+  "$HOME/luminos-os/scripts/luminos-mcp-share" wrap-configs "$HOME/.config/Claude-local-3p/claude_desktop_config.json" >/dev/null || true
 }
 
 case "${1:-open}" in

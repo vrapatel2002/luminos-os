@@ -1,0 +1,9 @@
+# [CHANGE: claude-code | 2026-10-24] DECISION 159 — triggered by luminos-mcp-share-configs.path; idempotent.
+[Unit]
+Description=Re-wrap MCP client configs onto luminos-mcp-share
+StartLimitIntervalSec=60
+StartLimitBurst=30
+
+[Service]
+Type=oneshot
+ExecStart=%h/luminos-os/scripts/luminos-mcp-share wrap-configs
