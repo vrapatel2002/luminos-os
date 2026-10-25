@@ -46,7 +46,9 @@ PROFILES = {
         # (MoE prompt eval drags expert weights over PCIe per micro-batch, so bigger batches amortise it);
         # 18.7 gen t/s at 32K ctx. 131072 ctx works (49K-token prompt read at 277 t/s) but gen drops to 6–9 t/s
         # because the larger KV pushes experts off the card — so 65536 is the default, CODER_WRITER_CTX overrides.
-        "args": ["-m", f"{MODELS}/Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf",
+        # [CHANGE: claude-code | 2026-10-24] CODER_WRITER_GGUF: file name under MODELS or an absolute path
+        # (e.g. the Heretic-abliterated build in ~/.local/share/luminos/models/abliterated).
+        "args": ["-m", os.path.join(MODELS, os.environ.get("CODER_WRITER_GGUF", "Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf")),
                  "-c", os.environ.get("CODER_WRITER_CTX", "65536"), "-ctk", "q8_0", "-ctv", "q8_0",
                  "-np", "1", "-b", "4096", "-ub", "4096", "-fitt", "256", "--cache-reuse", "256",
                  # Unbounded, Qwen3.6 thought for 16 000+ tokens (13+ min) on one spec-heavy task in the proof run.
@@ -62,7 +64,7 @@ PROFILES = {
         # thinking budget, and a reviewer prompt that asks for a short defect list, not an essay.
         # Quant: -lm mlock pins the CPU half — Q2_K_XL pins 6.3 GB (2.4 t/s, 272 prompt t/s); IQ3_XXS pins 7.5 GB
         # (1.7 t/s); Q3_K_XL (12.5 GB file) was OOM-KILLED at load (9.6 GB shmem). Q2_K_XL is the largest that fits.
-        "args": ["-m", f"{MODELS}/" + os.environ.get("CODER_REVIEWER_GGUF", "Qwen3.8-27B-UD-Q2_K_XL.gguf"),
+        "args": ["-m", os.path.join(MODELS, os.environ.get("CODER_REVIEWER_GGUF", "Qwen3.8-27B-UD-Q2_K_XL.gguf")),
                  "-c", os.environ.get("CODER_REVIEWER_CTX", "32768"), "-ctk", "q8_0", "-ctv", "q8_0",
                  "-np", "1", "-b", "2048", "-ub", "2048", "-fitt", "256", "-lm", "mlock",
                  "--spec-type", "draft-mtp", "--spec-draft-n-max", "2",
