@@ -8672,3 +8672,21 @@ waits quietly (download script, build, benchmark) was treated like a forgotten d
 finished at 15:35 into a dead socket and the 9.4 GB model stayed pinned. **Fix:** `eligibleForIdle` = Wine worlds
 + app.slice units named `app-…` (desktop launches) only; leftover rules still cover every unit; act_only test units
 stay eligible. Test: `TestBackgroundJobsAreNotIdleReaped` (+ control: idle Steam `app-steam@….service` still reaped).
+
+## BUG-220 — Caelestia dashboard "No lyrics found" for almost every YouTube song
+<!-- [CHANGE: claude-code | 2026-10-28] -->
+**Status:** DIAGNOSED, not fixed (Shawn to pick a fix). **Where:** stock `caelestia-shell 2.2.0` —
+`modules/dashboard/media/LyricList.qml:21` passes raw MPRIS metadata to `Lyrics.setTrack()` (C++,
+`plugin/src/Caelestia/Services/lyrics.cpp`). Not patched by `luminos-caelestia-kwin-overlay` (symlink to stock).
+**Root causes (proven 2026-10-28 with curl from the G14 against lrclib.net + music.163.com):**
+1. Chrome/YouTube MPRIS gives artist = channel ("TheWeekndVEVO", "SHUBH") and title = "Artist - Song (Official Video)".
+   No cleanup before lookup. LRCLIB `/api/get` is exact match -> 404 "Failed to find specified track".
+   Same song cleaned ("The Weeknd" / "Can't Feel My Face") -> 200 with synced lyrics.
+2. Auto chain = Local -> LRCLIB `/get` (exact) -> NetEase. The fuzzy `/api/search` results only fill the picker (⋮ menu),
+   never auto-selected. Free-text `/api/search?q=The Weeknd Can't Feel My Face` -> 20 results, 19 synced.
+3. NetEase match = artist substring: "TheWeekndVEVO" vs "The Weeknd" fails on the space -> no match.
+4. Only `syncedLyrics` accepted; songs with only plainLyrics = "No lyrics found".
+5. lrclib.net returned 429 (rate limit) and 503 (busy) during testing. Each track change fires 3-5 requests, no retry;
+   an error is treated as "not found". YouTube ads/title updates trigger extra loads.
+Evidence: `~/.local/state/caelestia/lyrics/lyrics_map.json` holds only 2 successes ever (both SHUBH).
+Works by luck when someone already uploaded the YouTube-style title to LRCLIB (Bruno Mars test: hit).

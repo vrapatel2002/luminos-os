@@ -1,15 +1,29 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-28 — Response 1 (new chat: Vela + leaked DLSS 5 on the 4050; ad-free music on Vela)
+Last updated: 2026-10-28 — Response 1 (new chat: Caelestia lyrics "No lyrics found")
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
 
 ## Aim right now
-1. Get the LEAKED DLSS 5 (neural rendering, `nvngx_dlssnr.dll`) running on Vela's RTX 4050 (40-series, unofficial).
-2. Ad-free music on Vela ("like Chrome + ad blocker").
+Caelestia dashboard Media tab shows "No lyrics found" ~98% of the time (YouTube in Chrome). DIAGNOSED as BUG-220
+(docs/BUGS.md) — nothing changed in code. Fix options listed to Shawn; waiting for his pick.
+
+## Lyrics — key facts
+- Running shell: `qs -p ~/.config/quickshell/caelestia-bar` -> modules symlink to ~/.config/quickshell/caelestia-kwin,
+  built by scripts/luminos-caelestia-kwin-overlay. `modules/dashboard/media/LyricList.qml` is a STOCK symlink.
+  Any fix = add it as a patched file to the overlay script (never edit /etc/xdg or the overlay dir in place).
+- Lookup C++ is in libcaelestia-servicesplugin.so (caelestia-shell 2.2.0 pacman pkg); source copy:
+  reference_code/caelestia-shell-2.2.0/plugin/src/Caelestia/Services/lyrics.cpp. Changing C++ = rebuild package.
+- Cheapest fix = QML-only metadata cleanup in LyricList.qml before Lyrics.setTrack() (strip "Artist - " from title,
+  "(Official Video)" etc., VEVO/" - Topic" from channel). Proven: cleaned names hit LRCLIB /get with synced lyrics.
+- Stronger fix (C++): fallback to lrclib /api/search?q=<artist title> picking closest duration; accept plainLyrics;
+  retry on 429/503; NetEase artist compare with spaces/VEVO removed.
+- Playerctl needs DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus from host-shell.
+
+## PARKED — DLSS 5 + ad-free music (Response 1 of the previous chat)
 Research DONE, nothing installed. Full write-up: `gameos/docs/tracks/DLSS5.md`. Waiting on Shawn's answers.
 
-## Key facts a newcomer is missing
+### DLSS key facts
 - DLSS 5 = neural re-rendering for looks; it COSTS fps (5070: 138 -> 68 fps). It is not a frame booster.
 - Linux/Proton installers already exist (24high/DLSS5-Reshade-Linux-Steam tested on RTX 4080; pantsoftime/dlss5-linux).
   Need proprietary driver >= 610 — Vela images are 615.71, OK. Ada: optical flow fails under Proton -> shader MVs.
@@ -17,17 +31,17 @@ Research DONE, nothing installed. Full write-up: `gameos/docs/tracks/DLSS5.md`. 
 - We do NOT download the leaked DLL from mirrors; Shawn supplies it, we sha256-check it (legal + malware risk).
 - Music: recommended mpv + yt-dlp (no ads by construction, ~50 MB) behind a small QML Music page in Home/Guide.
 
-## Questions put to Shawn (Response 1)
+### DLSS questions put to Shawn
 - Which game first (proposed: Control on the TEST OS, it already runs on Vela; Wukong VRAM is full).
 - Will he supply `nvngx_dlssnr.dll` (he owns NBA 2K27 EA? / other source).
 - Music: OK with mpv+yt-dlp QML page? Also Jellyfin music?
 
-## Next steps (ordered, after answers)
+### DLSS next steps
 1. Copy installer + DLL to the test OS (`/vela-nv.img`, rule R40 — never /vela.img first); `dlaa` mode, then `nr`.
 2. MangoHud + vela-telemetry before/after on the same scene: fps, 1 % low, VRAM, gpu_w.
 3. Music: HTML prototype of the Music page first (Shawn's UI rule), then mpv IPC backend in vela-core.
 
-## Gotchas
+### DLSS gotchas
 - Do not say "impossible"; do not promise frames either — DLSS 5 subtracts frames.
 - Vela rules: gameos/docs/tracks/BOARD.md first; test OS first; Luminos untouched.
 - `luminos-notes.sh` needs sqlite3 — run it on the real host (host-shell), not the Cowork VM.
