@@ -1,24 +1,36 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-28 — Response 1 (new chat: Caelestia lyrics "No lyrics found")
+Last updated: 2026-10-28 — Response 2
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
 
-## Aim right now
-Caelestia dashboard Media tab shows "No lyrics found" ~98% of the time (YouTube in Chrome). DIAGNOSED as BUG-220
-(docs/BUGS.md) — nothing changed in code. Fix options listed to Shawn; waiting for his pick.
+## Aim right now (Vela, three threads)
+1. **BUG-221 controller dead in Home after quitting a game** — FIXED in code, on TEST OS only (R25), proven off-hardware.
+   Waiting on Shawn's hardware test (BOARD "Next test" step 7). Then promote to /vela.img (VELA_R25_ALLOW_MAIN=1).
+2. **Music card** (PS-menu → small Music panel: search, ±10 s, prev/next, album, discover, no ads) — interactive prototype
+   published as Design canvas "Vela Music Card" (artifact Mr9nMHvPe7HUxqHhSsK9pk). Waiting on Shawn's approval/changes.
+   Planned backend: mpv + yt-dlp (YouTube Music, no ads by construction) driven over mpv IPC from vela-core; QML page in Guide.
+3. **DLSS 5 on the 4050** — first game Control (Shawn). DLSS 5 is OFFICIAL since 2026-09-03 (RTX 50; NVIDIA says RTX 40
+   "later this fall"). Linux 610/615 drivers do NOT ship nvngx_dlssnr.dll (checked). Shawn asked Claude to fetch the leaked
+   DLL — declined (leak mirror = NVIDIA's unreleased IP + malware risk). Options given: his own NBA 2K27 copy, or wait for
+   NVIDIA's RTX 40 rollout. Everything else (installer, ReShade, test plan) can be prepped. Details: gameos/docs/tracks/DLSS5.md.
 
-## Lyrics — key facts
-- Running shell: `qs -p ~/.config/quickshell/caelestia-bar` -> modules symlink to ~/.config/quickshell/caelestia-kwin,
-  built by scripts/luminos-caelestia-kwin-overlay. `modules/dashboard/media/LyricList.qml` is a STOCK symlink.
-  Any fix = add it as a patched file to the overlay script (never edit /etc/xdg or the overlay dir in place).
-- Lookup C++ is in libcaelestia-servicesplugin.so (caelestia-shell 2.2.0 pacman pkg); source copy:
-  reference_code/caelestia-shell-2.2.0/plugin/src/Caelestia/Services/lyrics.cpp. Changing C++ = rebuild package.
-- Cheapest fix = QML-only metadata cleanup in LyricList.qml before Lyrics.setTrack() (strip "Artist - " from title,
-  "(Official Video)" etc., VEVO/" - Topic" from channel). Proven: cleaned names hit LRCLIB /get with synced lyrics.
-- Stronger fix (C++): fallback to lrclib /api/search?q=<artist title> picking closest duration; accept plainLyrics;
-  retry on 429/503; NetEase artist compare with spaces/VEVO removed.
-- Playerctl needs DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus from host-shell.
+## Key facts / evidence
+- BUG-221 cause: vela-shell restarts Home the same second the game exits; Home's SDL opens vela-padd's CLONE; padd deletes it;
+  the real pad only gets chmod/ACL back (no udev add) → SDL never re-finds it. Fix = SDL gamepad re-init every 700 ms for 14 s
+  after the last pad vanishes (gameos/ui/vela-home/src/gamepadinput.cpp). Tests: gameos/os/experiments/r25-padrescan/run.sh, run2.sh.
+- Open side question: the wired pad does a full USB disconnect at game START on MW4 runs (21:13:35, 21:16:03 on 10-22) — cause unknown.
+- Build: /var/tmp/vela-build/vh (cmake, host Qt 6.11.2 = image Qt; SDL 3.4.16 both). Old binary kept: /var/tmp/vela-build/vela-home.pre-r25.
+- host-shell bridge returns after 60 s — run long tests with setsid in the background and read logs after.
+
+## Next steps (ordered)
+1. Shawn: test OS → wired pad → Control → quit from the game → Home responds? (read `vela-home: pad rescan` in the journal).
+2. Shawn: feedback on the Music Card → then build (QML page + mpv/yt-dlp in the image, test OS first).
+3. DLSS 5: Shawn decides the DLL source; meanwhile prep the 24high installer for Control on the test OS (dlaa mode first).
+
+## Gotchas
+- Vela rules: BOARD.md first; test OS first; Luminos untouched. gameos/ is its own git repo (ignored by the main repo).
+- `luminos-notes.sh` needs sqlite3 — run on the host (host-shell), not the Cowork VM.
 
 ## PARKED — DLSS 5 + ad-free music (Response 1 of the previous chat)
 Research DONE, nothing installed. Full write-up: `gameos/docs/tracks/DLSS5.md`. Waiting on Shawn's answers.

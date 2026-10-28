@@ -8690,3 +8690,12 @@ stay eligible. Test: `TestBackgroundJobsAreNotIdleReaped` (+ control: idle Steam
    an error is treated as "not found". YouTube ads/title updates trigger extra loads.
 Evidence: `~/.local/state/caelestia/lyrics/lyrics_map.json` holds only 2 successes ever (both SHUBH).
 Works by luck when someone already uploaded the YouTube-style title to LRCLIB (Bruno Mars test: hit).
+
+## BUG-221 — Vela: wired DualSense dead in Home after quitting a game (until replugged)
+<!-- [CHANGE: claude-code | 2026-10-28] -->
+- **Reported:** Shawn 2026-10-28 — "when I close the game the PS5 controller gets disconnected, although it's wired, no input is accepted, every time I exit through the game".
+- **Evidence:** `/var/log/vela/crashes/20261022-194246-exit-CONTROLResonant.exe/journal.txt` — game exits 19:42:45, vela-shell starts a NEW vela-home at 19:42:46 while vela-padd (R20) still owns the pad through its uhid clone. `/var/log/vela/boot-20261022-211927-shutdown.txt`: the real wired pad also does a full `usb 7-1: USB disconnect` at game start (21:13:35, 21:16:03) and re-enumerates while padd hides it (0600, no ACL).
+- **Cause:** Home's SDL3 opens whatever pad is visible — the CLONE. padd then destroys the clone → `GAMEPAD_REMOVED` → Home has no pad. The real hidraw/evdev only gets its mode + ACL back (a chmod — no udev add), so SDL never sees it again. Same result when the real pad re-enumerated while hidden.
+- **Fix (R25, test OS `/vela-nv.img` only):** `gameos/ui/vela-home/src/gamepadinput.cpp` — when the last pad disappears (or none at start), restart SDL's gamepad subsystem every 700 ms for ~14 s. Installer `gameos/os/experiments/r25-padrescan/apply.sh [revert]`.
+- **Proof (Luminos, uinput pads, offscreen Home):** `run.sh` (pad hidden then un-hidden by chmod): old binary sees NO input, new one finds it on rescan 4 and gets every D-pad press. `run2.sh` (visible clone removed + real un-hidden — the exact Vela sequence): old = dead, new = found on rescan 1. Control run (pad never hidden): old binary gets input → harness valid.
+- **Not yet proven on hardware** — needs Shawn: test OS, wired pad, play → quit from the game → Home must respond. Open side question: WHY the pad USB-resets at game start (not seen on the 19:41 Control run).
