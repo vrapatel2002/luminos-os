@@ -1,30 +1,22 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-29 — Response 3
+Last updated: 2026-10-29 — Response 4
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
 
-## Aim right now (Vela, three threads)
-1. **BUG-221 controller dead in Home after quitting a game** — FIXED in code, on TEST OS only (R25), proven off-hardware.
-   Waiting on Shawn's hardware test (BOARD "Next test" step 7). Then promote to /vela.img (VELA_R25_ALLOW_MAIN=1).
-2. **Music card** (PS-menu → small Music panel: search, ±10 s, prev/next, album, discover, no ads) — interactive prototype
-   published as Design canvas "Vela Music Card" (artifact Mr9nMHvPe7HUxqHhSsK9pk). Waiting on Shawn's approval/changes.
-   Planned backend: mpv + yt-dlp (YouTube Music, no ads by construction) driven over mpv IPC from vela-core; QML page in Guide.
-3. **DLSS 5 on the 4050** — first game Control (Shawn). DLSS 5 is OFFICIAL since 2026-09-03 (RTX 50; NVIDIA says RTX 40
-   "later this fall"). Linux 610/615 drivers do NOT ship nvngx_dlssnr.dll (checked). Shawn asked Claude to fetch the leaked
-   DLL — declined (leak mirror = NVIDIA's unreleased IP + malware risk). Options given: his own NBA 2K27 copy, or wait for
-   NVIDIA's RTX 40 rollout. Everything else (installer, ReShade, test plan) can be prepped. Details: gameos/docs/tracks/DLSS5.md.
-
-4. **Input lag in Wukong on /vela.img (Shawn 10-29, session 16:40–17:00)** — diagnosis given, nothing changed yet.
-   Evidence: pad WIRED (usb5) → not Bluetooth. GPU 95–97 % all run, VRAM 5.8/6.0 GB, SW-thermal throttle (0x20) in 57 %
-   of rows, 4050 68–76 W (boost on), CPU 26 % (not the limit). Reflex WORKS (nvapi: SetSleepMode Enabled, latency markers).
-   Game (dx12fix prefix): no fps cap, vsync off, DLSS Perf (ResolutionQuality 50) at 2880x1800, RT off, Shadows+GI 3, Tex 2.
-   Panel VRR range 48–120 Hz (eDP-2, vrr_capable=1); gamescope --adaptive-sync on. Wukong ~35–45 fps = BELOW 48 → LFC only.
-   No fps CSV this run: nvk-play promises a MangoHud log, /var/log/vela/mangohud/ has nothing since 09-27 (bug, not traced).
-   Asked Shawn: is it "heavy/slow" (latency) or "hitches" (frame spikes)? Proposed: lower Shadows/GI/Textures, Reflex
-   On+Boost, cap a few fps below what holds; Claude to fix fps logging; MUX dGPU-direct (BOARD #12) = his call.
+## Aim right now (Vela) — everything new is on the TEST OS (/vela-nv.img) only
+1. **R27 Music card** (Shawn asked to build it) — DONE + e2e PASS inside the image (real YouTube Music via vela-core ->
+   mpv + yt-dlp, ao=null). Doc: gameos/os/docs/MUSIC-01.md. Not yet heard through speakers.
+2. **R26 fps logging** — DONE (BUG-222: MangoHud logs nothing under no_display; hidden is now alpha=0). Proof table in
+   gameos/os/experiments/r26-fpslog/README.md. Next game run on the test OS must produce /var/log/vela/mangohud/*.csv.
+3. **dGPU only for Vela** — Shawn asked "possible?" -> yes; PROPOSAL gameos/os/docs/DGPU-DIRECT-01.md (Vela flips MUX
+   in/out + a Luminos early-boot guard that forces Hybrid). Needs Shawn's go (firmware MUX + a Luminos /etc unit).
+4. Still waiting on Shawn: R25 controller test (BUG-221), "heavy vs hitchy" lag answer, DLSS 5 DLL source.
+   All of it = BOARD "Next test" steps 7 + 8 on the test OS.
 
 ## Key facts / evidence
+- R25+R26+R27 binaries are all built from gameos HEAD (vela-core.r27, vela-home.r27 in /var/tmp/vela-build). Reverting R27 restores R26's vela-core (prev-r27); R26 revert restores pre-R26.
+- Input lag Wukong 10-29: GPU 96 % uncapped, VRAM full, thermal 0x20, fps under VRR floor 48; Reflex works.
 - BUG-221 cause: vela-shell restarts Home the same second the game exits; Home's SDL opens vela-padd's CLONE; padd deletes it;
   the real pad only gets chmod/ACL back (no udev add) → SDL never re-finds it. Fix = SDL gamepad re-init every 700 ms for 14 s
   after the last pad vanishes (gameos/ui/vela-home/src/gamepadinput.cpp). Tests: gameos/os/experiments/r25-padrescan/run.sh, run2.sh.

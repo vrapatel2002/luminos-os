@@ -8699,3 +8699,13 @@ Works by luck when someone already uploaded the YouTube-style title to LRCLIB (B
 - **Fix (R25, test OS `/vela-nv.img` only):** `gameos/ui/vela-home/src/gamepadinput.cpp` — when the last pad disappears (or none at start), restart SDL's gamepad subsystem every 700 ms for ~14 s. Installer `gameos/os/experiments/r25-padrescan/apply.sh [revert]`.
 - **Proof (Luminos, uinput pads, offscreen Home):** `run.sh` (pad hidden then un-hidden by chmod): old binary sees NO input, new one finds it on rescan 4 and gets every D-pad press. `run2.sh` (visible clone removed + real un-hidden — the exact Vela sequence): old = dead, new = found on rescan 1. Control run (pad never hidden): old binary gets input → harness valid.
 - **Not yet proven on hardware** — needs Shawn: test OS, wired pad, play → quit from the game → Home must respond. Open side question: WHY the pad USB-resets at game start (not seen on the 19:41 Control run).
+
+## BUG-222 — Vela: no fps log since 09-27 (MangoHud records nothing while the overlay is hidden)
+<!-- [CHANGE: claude-code | 2026-10-29] -->
+- **Found:** Shawn's 10-29 input-lag question — `/var/log/vela/mangohud/` newest file 09-27, though nvk-play promises one per run.
+- **Cause (proven, MangoHud 0.8.4, glxgears under Xvfb on Luminos):** `no_display` (Vela's default "overlay hidden", vela-core
+  overlay.go) stops logging entirely — no CSV. Live rewrites of the config file do NOT break logging. The 09-27 19:26 log exists
+  because the HUD was shown then. Table: `gameos/os/experiments/r26-fpslog/README.md`.
+- **Fix (R26, test OS):** hidden = `alpha=0` + `background_alpha=0` (0 text pixels on screen, measured) and a whole-session log in
+  vela-core's MangoHud config; nvk-play logs the whole run (rows are flushed live, so crashes keep them).
+- **Not yet proven on hardware.**
