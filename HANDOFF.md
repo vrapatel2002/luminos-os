@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-29 — Response 4
+Last updated: 2026-10-29 — Response 5
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
@@ -11,6 +11,9 @@ Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gam
    gameos/os/experiments/r26-fpslog/README.md. Next game run on the test OS must produce /var/log/vela/mangohud/*.csv.
 3. **dGPU only for Vela** — Shawn asked "possible?" -> yes; PROPOSAL gameos/os/docs/DGPU-DIRECT-01.md (Vela flips MUX
    in/out + a Luminos early-boot guard that forces Hybrid). Needs Shawn's go (firmware MUX + a Luminos /etc unit).
+3b. Response 5: Shawn asked "launch directly on dGPU without restart?" — answered NO for the laptop panel: the MUX is
+   applied by firmware at POST; NVIDIA Advanced Optimus (live switch) has no Linux support (2022 RFC only). The reboot is
+   free anyway (entering Vela is already a reboot). HDMI/TV is already wired to the 4050 = dGPU-direct today.
 4. Still waiting on Shawn: R25 controller test (BUG-221), "heavy vs hitchy" lag answer, DLSS 5 DLL source.
    All of it = BOARD "Next test" steps 7 + 8 on the test OS.
 
