@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-28 — Response 2
+Last updated: 2026-10-29 — Response 3
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
@@ -14,6 +14,15 @@ Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gam
    "later this fall"). Linux 610/615 drivers do NOT ship nvngx_dlssnr.dll (checked). Shawn asked Claude to fetch the leaked
    DLL — declined (leak mirror = NVIDIA's unreleased IP + malware risk). Options given: his own NBA 2K27 copy, or wait for
    NVIDIA's RTX 40 rollout. Everything else (installer, ReShade, test plan) can be prepped. Details: gameos/docs/tracks/DLSS5.md.
+
+4. **Input lag in Wukong on /vela.img (Shawn 10-29, session 16:40–17:00)** — diagnosis given, nothing changed yet.
+   Evidence: pad WIRED (usb5) → not Bluetooth. GPU 95–97 % all run, VRAM 5.8/6.0 GB, SW-thermal throttle (0x20) in 57 %
+   of rows, 4050 68–76 W (boost on), CPU 26 % (not the limit). Reflex WORKS (nvapi: SetSleepMode Enabled, latency markers).
+   Game (dx12fix prefix): no fps cap, vsync off, DLSS Perf (ResolutionQuality 50) at 2880x1800, RT off, Shadows+GI 3, Tex 2.
+   Panel VRR range 48–120 Hz (eDP-2, vrr_capable=1); gamescope --adaptive-sync on. Wukong ~35–45 fps = BELOW 48 → LFC only.
+   No fps CSV this run: nvk-play promises a MangoHud log, /var/log/vela/mangohud/ has nothing since 09-27 (bug, not traced).
+   Asked Shawn: is it "heavy/slow" (latency) or "hitches" (frame spikes)? Proposed: lower Shadows/GI/Textures, Reflex
+   On+Boost, cap a few fps below what holds; Claude to fix fps logging; MUX dGPU-direct (BOARD #12) = his call.
 
 ## Key facts / evidence
 - BUG-221 cause: vela-shell restarts Home the same second the game exits; Home's SDL opens vela-padd's CLONE; padd deletes it;
