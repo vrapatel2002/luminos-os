@@ -1,0 +1,8 @@
+[Desktop Entry]
+# [CHANGE: claude-code | 2026-10-29] DECISION 161
+Type=Application
+Name=Play on Vela (dGPU)
+Comment=Reboot into Vela with the RTX 4050 driving the screen
+Exec=/usr/local/bin/luminos-play-vela
+Icon=input-gaming
+Categories=Game;System;

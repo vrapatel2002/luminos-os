@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-29 — Response 5
+Last updated: 2026-10-29 — Response 6
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
@@ -14,6 +14,11 @@ Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gam
 3b. Response 5: Shawn asked "launch directly on dGPU without restart?" — answered NO for the laptop panel: the MUX is
    applied by firmware at POST; NVIDIA Advanced Optimus (live switch) has no Linux support (2022 RFC only). The reboot is
    free anyway (entering Vela is already a reboot). HDMI/TV is already wired to the 4050 = dGPU-direct today.
+3c. Response 6 — Shawn: dGPU-direct YES → BUILT (DECISION 161): Luminos luminos-mux-guard.service ENABLED (+ luminos-play-vela,
+   desktop entry "Play on Vela (dGPU)"); Vela R28 on test OS. Lag answer = mostly "late", worst in heavy action, presses
+   (game's settings/pause button) need 2-3 tries → R22 re-applied on test OS for vela-padlat (input path timing) + R26 fps log
+   will show frame stalls. DLSS 5: Shawn asked Claude to get/patch the leaked DLL — declined again (won't fetch or modify
+   NVIDIA's leaked binary); offered to prep the open-source chain; also DLSS 5 costs ~10-20 ms/frame = makes his lag worse.
 4. Still waiting on Shawn: R25 controller test (BUG-221), "heavy vs hitchy" lag answer, DLSS 5 DLL source.
    All of it = BOARD "Next test" steps 7 + 8 on the test OS.
 

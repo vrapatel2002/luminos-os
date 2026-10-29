@@ -8763,3 +8763,20 @@ nothing gaming-specific. Added, all in `cmd/luminos-ram/reap.go`, 5 new tests (3
 Steam idling in the tray IS reaped after the idle gradient (Shawn 2026-10-24: "close steam too"); Steam excluded from
 KDE session restore (`ksmserverrc` `excludeApps=steam`).
 **BUG-219 (15:44):** idle rule limited to desktop apps (`app-…` units) — it had stopped a systemd-run benchmark job.
+
+## DECISION 161 — dGPU-direct (MUX) for Vela only; Luminos is always Hybrid, enforced at boot
+<!-- [CHANGE: claude-code | 2026-10-29] -->
+**Shawn 2026-10-29:** yes to dGPU-direct, "I do not want Luminos to run on dGPU, only Vela".
+- The G14's MUX (`/sys/devices/platform/asus-nb-wmi/gpu_mux_mode`: 0 = RTX 4050 drives the panel, 1 = Hybrid) is applied
+  by firmware at POST and persists across OSes. No live switch on Linux (NVIDIA Advanced Optimus has no Linux support).
+  Entering Vela is already a reboot, so the MUX rides on it.
+- **Luminos:** `luminos-mux-guard.service` (before SDDM) — MUX 0 → write 1 → reboot; max 2 tries then gives up loudly.
+  Reading the byte does not wake the dGPU (runtime_status stayed `suspended`, checked). `luminos-play-vela [--main]`
+  (pkexec) = MUX 0 + `grub-reboot` the Vela entry + reboot.
+- **Vela (R28, test OS only):** `vela-mux enter` before the session (Hybrid → 0, `grub-reboot` back to the SAME Vela entry,
+  reboot once; one try) and `vela-mux leave` from the power menu (Shut down / Restart into Luminos → 1 first).
+  Switch: `/etc/vela/mux-direct`. Vela's session already had a MUX mode (front end + gamescope on the 4050).
+- **Conflict documented (Rule 11):** in Vela the 4050 drives the panel for the whole session → never asleep there, more
+  battery draw. Luminos' true-0 W dGPU gating (BUG-047/182) is untouched because Luminos is never on MUX 0.
+- Guard proven with a fake MUX file (hybrid no-op, flip+reboot, give-up after 2, counter cleared); `vela-mux` same.
+  Real hardware: pending Shawn's test-OS run.

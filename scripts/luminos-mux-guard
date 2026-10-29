@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# luminos-mux-guard — Luminos NEVER runs with the panel on the dGPU. [CHANGE: claude-code | 2026-10-29]
+# DECISION 161 (Shawn 10-29: "Vela only has to run on dGPU, not Luminos"). Vela may leave the G14's
+# hardware MUX on 0 (= RTX 4050 drives the panel). Luminos pins KWin to the 780M (AGENTS §9
+# KWIN_DRM_DEVICES / EGL pins), so on MUX=0 the desktop would come up black. Runs before the
+# display manager: MUX 0 → write 1 (Hybrid) → read back → reboot (firmware applies the MUX at POST).
+# Reading the byte does NOT wake the dGPU (checked 2026-10-29: runtime_status stays suspended).
+# Loop guard: at most 2 tries in a row, then give up loudly and let the boot go on.
+set -u
+MUX=${LUMINOS_MUX_PATH:-/sys/devices/platform/asus-nb-wmi/gpu_mux_mode}   # LUMINOS_MUX_* overrides: tests only
+STATE=${LUMINOS_MUX_STATE:-/var/lib/luminos/mux-guard.tries}
+LOG=${LUMINOS_MUX_LOG:-/var/log/luminos/mux-guard.log}
+mkdir -p "$(dirname "$STATE")" "$(dirname "$LOG")"
+log() { echo "$(date '+%F %T') $*" | tee -a "$LOG"; }
+for _ in $(seq 50); do [[ -r $MUX ]] && break; sleep 0.1; done   # asus-nb-wmi may still be loading
+[[ -r $MUX ]] || { log "MUX file missing — nothing to guard"; exit 0; }
+v=$(cat "$MUX")
+if [[ $v != 0 ]]; then rm -f "$STATE"; exit 0; fi
+tries=$(( $(cat "$STATE" 2>/dev/null || echo 0) + 1 ))
+echo "$tries" > "$STATE"
+if (( tries > 2 )); then
+  log "MUX still 0 after $((tries-1)) reboot(s) — GIVING UP, desktop may be black. Fix: echo 1 > $MUX && reboot"
+  exit 0
+fi
+log "MUX=0 (dGPU drives the panel, left by Vela/Windows) — setting Hybrid and rebooting (try $tries)"
+echo 1 > "$MUX" 2>>"$LOG"
+now=$(cat "$MUX")
+log "read back: $now"
+sync
+${LUMINOS_MUX_REBOOT:-systemctl reboot}

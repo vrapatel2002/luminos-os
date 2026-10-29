@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# luminos-play-vela [--main] — reboot into Vela with the RTX 4050 driving the panel (MUX = dGPU).
+# [CHANGE: claude-code | 2026-10-29] DECISION 161. Default = the TEST OS entry while dGPU-direct is
+# only on /vela-nv.img; --main = "Vela OS (gaming)". Same single reboot as picking Vela in GRUB.
+# Luminos is protected by luminos-mux-guard (MUX back to Hybrid before the desktop, every boot).
+set -euo pipefail
+ENTRY="Vela OS - NV test (proprietary copy)"
+[[ ${1:-} == --main ]] && ENTRY="Vela OS (gaming)"
+MUX=/sys/devices/platform/asus-nb-wmi/gpu_mux_mode
+[[ $(id -u) == 0 ]] || exec pkexec "$0" "$@"
+grep -qF "menuentry \"$ENTRY\"" /boot/grub/custom.cfg || { echo "no GRUB entry \"$ENTRY\"" >&2; exit 1; }
+echo 0 > "$MUX"
+[[ $(cat "$MUX") == 0 ]] || { echo "firmware refused MUX=0 — booting Vela in Hybrid instead" >&2; }
+grub-reboot "$ENTRY"
+echo "Rebooting into \"$ENTRY\" (MUX=$(cat "$MUX"))…"
+sync; systemctl reboot

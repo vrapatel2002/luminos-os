@@ -1,0 +1,12 @@
+# [CHANGE: claude-code | 2026-10-29] DECISION 161 — Luminos never starts with the panel on the dGPU.
+[Unit]
+Description=Luminos: put the GPU MUX back to Hybrid before the desktop (Vela-only dGPU direct)
+After=systemd-modules-load.service local-fs.target
+Before=display-manager.service sddm.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-mux-guard
+
+[Install]
+WantedBy=multi-user.target
