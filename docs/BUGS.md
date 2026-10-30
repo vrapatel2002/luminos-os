@@ -8709,3 +8709,18 @@ Works by luck when someone already uploaded the YouTube-style title to LRCLIB (B
 - **Fix (R26, test OS):** hidden = `alpha=0` + `background_alpha=0` (0 text pixels on screen, measured) and a whole-session log in
   vela-core's MangoHud config; nvk-play logs the whole run (rows are flushed live, so crashes keep them).
 - **Not yet proven on hardware.**
+
+## BUG-223 — Vela Home garbled in dGPU-direct (MUX) mode; Xwayland "eglInitialize() failed" on NVIDIA outputs
+<!-- [CHANGE: claude-code | 2026-10-29] -->
+- **Seen:** Shawn's photo 2026-10-29 20:38, first R28 boot: top third of Home fine, rest corrupt tiles; journal: Xwayland
+  `eglInitialize() failed … disabling glamor`. Same Xwayland line as the 09-28 TV sessions (TV-01, HDMI = 4050).
+- **Cause (from config + code, not yet proven live):** the Vela images carry Luminos' `nvidia-egl-priority.hook` rename
+  (`60_nvidia.json` after `50_mesa.json`). vela-session's NVIDIA branches only set `__GLX_VENDOR_LIBRARY_NAME=nvidia`; EGL
+  (Qt/Home, Xwayland glamor) still asked Mesa first → Home drawn by the 780M and scanned out by gamescope on NVIDIA.
+- **Fix (R29, test OS):** vela-session `nvidia_egl()` pins `__EGL_VENDOR_LIBRARY_FILENAMES` to the NVIDIA vendor file in MUX mode
+  and in TV-on-NVIDIA mode. Hybrid panel unchanged. Off-hardware EGL tests were inconclusive (container driver 615 vs host 610;
+  eglinfo's GBM always opens the AMD card on Luminos) → live test via the server seat.
+- **Found alongside (process bug):** the server seat's 10-16 work (frame gen) existed only in its snapshot; R26–R28 vela-core
+  builds dropped it from the test OS. Merged back (gameos 8e53f87); seat now commits in git, laptop `git fetch seat`.
+- Guard check: `luminos-mux-guard` fired 20:44:55 and recovered Luminos; note asus-nb-wmi read-back still shows the OLD MUX
+  value until reboot (the log line "read back: 0" is expected, not a failure).
