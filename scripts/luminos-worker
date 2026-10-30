@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# luminos-worker — start (or continue) a headless Claude Code worker on ANY model, from any chat.
+# [CHANGE: cowork | 2026-10-30] DECISION 162. Lets the GLM window (or anyone) run several models at once.
+#
+#   luminos-worker <model> [options] "<brief>"        brief can also be @path/to/brief.md
+#   models:  glm        GLM-5.3 (Abliteration, via luminos-glm-proxy)
+#            glm-cheap  abliterated-model (cheap, reads images)
+#            opus | sonnet | haiku | fable   real Claude, on the Max plan (plain `claude` login)
+#   options: --resume <session_id>   continue the same worker with its full memory
+#            --tools "Read,Write,Edit,Bash(go:*)"   allow-list (default: Read,Write,Edit,Glob,Grep)
+#            --max-turns N (default 30)   --effort low|medium|high   --cwd DIR   --model-id <exact id>
+# Prints Claude Code's JSON result (read .session_id and .result). Exit code = worker's.
+set -eu
+#   luminos-worker --batch jobs.txt   run MANY workers at the same time; one job per line:
+#                                     <model> <brief…>      (lines starting with # are skipped)
+#                                     prints one JSON line per job: {job, model, result, session_id, is_error}
+if [ "${1:-}" = "--batch" ]; then
+  [ -f "${2:-}" ] || { echo "usage: luminos-worker --batch jobs.txt" >&2; exit 2; }
+  D=$(mktemp -d); n=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue;; esac
+    n=$((n+1)); m="${line%% *}"; b="${line#* }"
+    ( "$0" "$m" ${BATCH_OPTS:-} "$b" > "$D/$n.json" 2> "$D/$n.err"; echo $? > "$D/$n.rc" ) &
+    printf '%s\n' "$m" > "$D/$n.model"
+  done < "$2"
+  wait
+  for i in $(seq 1 $n); do
+    python3 - "$D/$i.json" "$i" "$(cat "$D/$i.model")" "$(cat "$D/$i.rc" 2>/dev/null || echo 1)" <<'PY'
+import json,sys
+p,i,m,rc=sys.argv[1:]
+try: d=json.load(open(p)); print(json.dumps({"job":int(i),"model":m,"result":d.get("result"),"session_id":d.get("session_id"),"is_error":d.get("is_error"),"models_used":list(d.get("modelUsage",{}))}))
+except Exception: print(json.dumps({"job":int(i),"model":m,"result":None,"is_error":True,"rc":rc,"raw":open(p).read()[:300]}))
+PY
+  done
+  rm -rf "$D"; exit 0
+fi
+[ $# -ge 2 ] || { sed -n '3,20p' "$0"; exit 2; }
+model="$1"; shift
+resume=""; tools="Read,Write,Edit,Glob,Grep"; turns=30; effort=""; cwd="$PWD"; mid=""
+while [ $# -gt 1 ]; do
+  case "$1" in
+    --resume) resume="$2"; shift 2;; --tools) tools="$2"; shift 2;; --max-turns) turns="$2"; shift 2;;
+    --effort) effort="$2"; shift 2;; --cwd) cwd="$2"; shift 2;; --model-id) mid="$2"; shift 2;;
+    *) echo "unknown option $1" >&2; exit 2;;
+  esac
+done
+brief="$1"; case "$brief" in @*) brief="$(cat "${brief#@}")";; esac
+
+# Never let one model's settings leak into another worker (a Claude worker started from inside a
+# GLM session would otherwise inherit ANTHROPIC_BASE_URL and silently run on GLM).
+clean=(env -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL
+       -u ANTHROPIC_DEFAULT_OPUS_MODEL -u ANTHROPIC_DEFAULT_SONNET_MODEL -u ANTHROPIC_DEFAULT_HAIKU_MODEL
+       -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)
+case "$model" in
+  glm)       run=("${clean[@]}" "$HOME/luminos-os/scripts/claude-glm"); id="${mid:-abliterated-model-large-v2}";;
+  glm-cheap) run=("${clean[@]}" "$HOME/luminos-os/scripts/claude-glm"); id="${mid:-abliterated-model}";;
+  opus)      run=("${clean[@]}" "$HOME/.local/bin/claude"); id="${mid:-claude-opus-5-5}";;
+  sonnet)    run=("${clean[@]}" "$HOME/.local/bin/claude"); id="${mid:-claude-sonnet-5-5}";;
+  haiku)     run=("${clean[@]}" "$HOME/.local/bin/claude"); id="${mid:-claude-haiku-5-5}";;
+  fable)     run=("${clean[@]}" "$HOME/.local/bin/claude"); id="${mid:-claude-fable-5-1}";;
+  *) echo "unknown model '$model' (glm, glm-cheap, opus, sonnet, haiku, fable)" >&2; exit 2;;
+esac
+args=(-p "$brief" --model "$id" --allowedTools "$tools" --permission-mode acceptEdits
+      --max-turns "$turns" --output-format json)
+[ -n "$effort" ] && args+=(--effort "$effort")
+[ -n "$resume" ] && args+=(--resume "$resume")
+cd "$cwd"
+exec "${run[@]}" "${args[@]}" < /dev/null

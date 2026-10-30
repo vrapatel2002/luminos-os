@@ -13,9 +13,12 @@ export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNT
 systemctl --user start luminos-glm-proxy 2>/dev/null || true
 export ANTHROPIC_BASE_URL="http://127.0.0.1:4141"
 export ANTHROPIC_AUTH_TOKEN="$GLM_LOCAL_TOKEN"
-export ANTHROPIC_MODEL="claude-opus-4-5"                 # proxy -> abliterated-model-large-v2 (GLM-5.3)
-export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4-5"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-opus-4-5"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5"  # proxy -> abliterated-model (cheap, sees images)
+export ANTHROPIC_MODEL="abliterated-model-large-v2"       # GLM-5.3 (real id; proxy passes it through)
+export ANTHROPIC_DEFAULT_OPUS_MODEL="abliterated-model-large-v2"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="abliterated-model-large-v2"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="abliterated-model"   # cheap, sees images
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-exec "$HOME/.local/bin/claude" "$@"
+# DECISION 162: the same app-control server the GLM window gets (GLM only; plain `claude` doesn't load it).
+MCPCFG="$HOME/.cache/luminos-glm/desktop-mcp.json"; mkdir -p "${MCPCFG%/*}"
+printf '{"mcpServers":{"luminos-desktop":{"command":"/usr/bin/python3","args":["%s/luminos-os/scripts/luminos-desktop-mcp"]}}}\n' "$HOME" > "$MCPCFG"
+exec "$HOME/.local/bin/claude" --mcp-config "$MCPCFG" "$@"

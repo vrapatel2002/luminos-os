@@ -1,0 +1,35 @@
+#!/usr/bin/python3
+# luminos-glm-skills — pack Shawn's skills into a Cowork plugin for the GLM window.
+# [CHANGE: cowork | 2026-10-30] DECISION 162.
+# The GLM window (no claude.ai account) only gets ~10 bundled skills, and anything copied into its
+# skills-plugin/ folder is deleted by the app's sync. A user-uploaded plugin is kept, so this builds
+#   ~/luminos-os/config/glm/luminos-skills.plugin   (zip: .claude-plugin/plugin.json + skills/<name>/...)
+# from the Max app's current copies. Upload it once in the GLM window (Customize → Plugins → upload).
+# Re-run + re-upload after a skill changes in the Max app.
+import glob, json, os, shutil, sys, tempfile, time, zipfile
+H = os.path.expanduser("~")
+WANT = ["build", "llm-council", "prompt-engineer", "deep-research", "skill-creator"]
+src = [d for d in glob.glob(H + "/.config/Claude/local-agent-mode-sessions/skills-plugin/*/*") if os.path.isdir(d + "/skills/build")]
+if not src: sys.exit("Max app skills not found")
+src = src[0] + "/skills"
+out = H + "/luminos-os/config/glm/luminos-skills.plugin"
+addendum = open(H + "/luminos-os/config/glm/build-addendum.md").read()
+ver = time.strftime("1.%Y%m%d.%H%M")
+with tempfile.TemporaryDirectory() as t:
+    root = os.path.join(t, "luminos-skills")
+    os.makedirs(root + "/.claude-plugin")
+    json.dump({"name": "luminos-skills", "version": ver,
+               "description": "Shawn's skills for the GLM-5.3 Claude window: build, llm-council, prompt-engineer, deep-research, skill-creator.",
+               "author": {"name": "Luminos"}}, open(root + "/.claude-plugin/plugin.json", "w"), indent=2)
+    for n in WANT:
+        if not os.path.isdir(os.path.join(src, n)): print("missing:", n); continue
+        shutil.copytree(os.path.join(src, n), os.path.join(root, "skills", n))
+        if n == "build":
+            with open(os.path.join(root, "skills", n, "SKILL.md"), "a") as f: f.write(addendum)
+    tmp = out + ".tmp"
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        for dp, _, fs in os.walk(root):
+            for f in fs:
+                full = os.path.join(dp, f); z.write(full, os.path.relpath(full, root))
+    os.replace(tmp, out)
+print("built %s (version %s): %s" % (out, ver, ", ".join(sorted(os.listdir(os.path.join(root, "skills")) if False else WANT))))

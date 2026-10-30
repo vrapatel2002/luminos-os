@@ -1,0 +1,96 @@
+#!/usr/bin/python3
+# luminos-chats — see and steer other Claude chats on this laptop, from any chat (incl. the GLM window).
+# [CHANGE: cowork | 2026-10-30] DECISION 162.
+#   luminos-chats list [--limit 20] [--where cli|glm-window|max-window]
+#   luminos-chats read <id-prefix> [--last 6]
+#   luminos-chats send <id-prefix> [--model glm|glm-cheap|opus|sonnet|haiku|fable] "message"
+# "send" works for terminal/worker sessions (Claude Code CLI, resumed with full memory via luminos-worker).
+# Desktop-window chats (GLM or Max app) are owned by the app: they can be listed and read, not typed into.
+import argparse, glob, json, os, subprocess, sys, time
+
+H = os.path.expanduser("~")
+SOURCES = [("cli", H + "/.claude/projects/*/*.jsonl"),
+           ("glm-window", H + "/.config/Claude-glm-3p/local-agent-mode-sessions/*/*/*/.claude/projects/*/*.jsonl"),
+           ("max-window", H + "/.config/Claude/local-agent-mode-sessions/*/*/*/.claude/projects/*/*.jsonl")]
+MODEL_TO_WORKER = {"claude-opus-4-5": "glm", "claude-haiku-4-5": "glm-cheap", "abliterated-model-large-v2": "glm",
+                   "abliterated-model": "glm-cheap", "claude-opus-5-5": "opus", "claude-sonnet-5-5": "sonnet",
+                   "claude-haiku-5-5": "haiku", "claude-fable-5-1": "fable"}
+
+def text_of(content):
+    if isinstance(content, str): return content
+    out = []
+    for b in content or []:
+        if isinstance(b, dict):
+            if b.get("type") == "text": out.append(b.get("text", ""))
+            elif b.get("type") == "tool_use": out.append("[tool: %s]" % b.get("name"))
+    return " ".join(out)
+
+def scan(path, where):
+    info = {"path": path, "where": where, "id": os.path.basename(path)[:-6], "model": "", "cwd": "", "first": "",
+            "mtime": os.path.getmtime(path), "turns": 0}
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                try: j = json.loads(line)
+                except Exception: continue
+                t = j.get("type")
+                if t == "summary" and j.get("summary"): info["first"] = info["first"] or ("» " + j["summary"])
+                if t in ("user", "assistant"):
+                    info["turns"] += 1; info["cwd"] = info["cwd"] or j.get("cwd", "")
+                    m = j.get("message") or {}
+                    if t == "assistant" and m.get("model"): info["model"] = m["model"]
+                    if t == "user" and not info["first"]:
+                        tx = text_of(m.get("content")).strip()
+                        if tx and not tx.startswith("<"): info["first"] = tx
+    except OSError: pass
+    return info
+
+def all_sessions(where=None):
+    out = []
+    for w, pat in SOURCES:
+        if where and w != where: continue
+        for p in glob.glob(pat):
+            if "/subagents/" in p: continue
+            out.append((os.path.getmtime(p), w, p))
+    out.sort(reverse=True); return out
+
+def find(prefix):
+    hits = [(w, p) for _, w, p in all_sessions() if os.path.basename(p).startswith(prefix)]
+    if not hits: sys.exit("no session starts with %r (try: luminos-chats list)" % prefix)
+    if len(hits) > 1: sys.exit("ambiguous prefix %r: %s" % (prefix, ", ".join(os.path.basename(p)[:12] for _, p in hits[:5])))
+    return hits[0]
+
+ap = argparse.ArgumentParser(); sp = ap.add_subparsers(dest="cmd", required=True)
+a = sp.add_parser("list"); a.add_argument("--limit", type=int, default=20); a.add_argument("--where")
+r = sp.add_parser("read"); r.add_argument("id"); r.add_argument("--last", type=int, default=6)
+s = sp.add_parser("send"); s.add_argument("id"); s.add_argument("--model"); s.add_argument("message")
+s.add_argument("--tools", default="Read,Write,Edit,Glob,Grep"); s.add_argument("--max-turns", default="30")
+ns = ap.parse_args()
+
+if ns.cmd == "list":
+    for mt, w, p in all_sessions(ns.where)[:ns.limit]:
+        i = scan(p, w)
+        print("%s  %-10s  %-20s  %s  turns=%-4d %s\n      %s" % (i["id"][:8], w, (i["model"] or "?")[:20],
+              time.strftime("%m-%d %H:%M", time.localtime(mt)), i["turns"], i["cwd"].replace(H, "~"),
+              (i["first"] or "(no text)").replace("\n", " ")[:110]))
+elif ns.cmd == "read":
+    w, p = find(ns.id); turns = []
+    for line in open(p, errors="replace"):
+        try: j = json.loads(line)
+        except Exception: continue
+        if j.get("type") in ("user", "assistant"):
+            tx = text_of((j.get("message") or {}).get("content")).strip()
+            if tx: turns.append((j["type"], tx))
+    print("session %s (%s)  %s" % (os.path.basename(p)[:-6], w, p.replace(H, "~")))
+    for who, tx in turns[-ns.last:]:
+        print("\n[%s] %s" % (who.upper(), tx[:3000]))
+elif ns.cmd == "send":
+    w, p = find(ns.id)
+    if w != "cli":
+        sys.exit("that chat lives in the %s desktop app — the app owns it, so it can be read (luminos-chats read) "
+                 "but not typed into from outside. Start a worker instead: luminos-worker <model> \"...\"" % w)
+    info = scan(p, w); model = ns.model or MODEL_TO_WORKER.get(info["model"], "opus")
+    cwd = info["cwd"] or os.getcwd()
+    rc = subprocess.call([H + "/luminos-os/scripts/luminos-worker", model, "--resume", info["id"], "--cwd", cwd,
+                          "--tools", ns.tools, "--max-turns", ns.max_turns, ns.message])
+    sys.exit(rc)

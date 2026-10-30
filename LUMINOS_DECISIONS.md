@@ -8780,3 +8780,39 @@ KDE session restore (`ksmserverrc` `excludeApps=steam`).
   battery draw. Luminos' true-0 W dGPU gating (BUG-047/182) is untouched because Luminos is never on MUX 0.
 - Guard proven with a fake MUX file (hybrid no-op, flip+reboot, give-up after 2, counter cleared); `vela-mux` same.
   Real hardware: pending Shawn's test-OS run.
+
+## DECISION 162 — the GLM-5.3 Claude window gets several models at once, chat control, app control and Shawn's skills
+# [CHANGE: cowork | 2026-10-30]
+**Ask (Shawn):** make the GLM Claude window able to use multiple models at a time, access and control other apps,
+control other chats "like Claude can", and use skills (especially /build).
+**Built (all GLM-side; the Max app is unchanged):**
+- `scripts/luminos-worker <glm|glm-cheap|opus|sonnet|haiku|fable> [--resume id] [--tools] [--cwd] "<brief>"` — one
+  headless Claude Code worker on any model (opus…fable = real Claude on the Max plan, glm* = Abliteration via the
+  proxy). Clears every ANTHROPIC_* var first so a Claude worker started from a GLM session can't silently run on GLM
+  (proven: opus with the GLM env set → modelUsage claude-opus-5-5). `--batch jobs.txt` runs many at once (proven: 4
+  models in 7 s; GLM itself runs separate calls sequentially, hence batch). Resume keeps memory (proven).
+- `scripts/luminos-chats list|read|send` — every Claude chat on the laptop (terminal/worker, GLM window, Max window);
+  send resumes terminal/worker chats on their own model; desktop-window chats are read-only (the app owns them).
+- `scripts/luminos-desktop-mcp` (GLM-only MCP server, added by luminos-claude-glm; claude-glm loads it via
+  --mcp-config): list/focus/close windows (KWin script → D-Bus callback), launch_app (.desktop + gtk-launch), open_url,
+  ui_tree/ui_click/ui_set_text/ui_read (AT-SPI, picks apps by window title first), press_keys/type_text (ydotool,
+  root helper via sudo -n), screenshot (luminos-screenshot, now `spectacle -i` so an open Spectacle window doesn't
+  swallow the capture). Accessibility (org.a11y.Status IsEnabled) and ydotoold are switched on only while used and
+  off after 10 min idle / on server exit (only if the server turned them on) — Shawn's RAM rule. Refuses a lone SUPER.
+  Proven: kdialog filled + OK via accessibility ('set via accessibility'), via keyboard ('typed by ydotool 123'),
+  konsole launched + closed, and **GLM itself** (claude-glm -p, plain-English task) filled a dialog → 'glm was here'.
+- Skills: the GLM window only gets ~10 bundled skills and the app's SkillsPlugin sync DELETES anything copied into
+  skills-plugin/ (seen: "5 to remove"). `skillBundles` exists but is "@next" (not in 2.31226). So the GLM 3P config now
+  sets `userPluginUploadsEnabled` + `userPluginMarketplacesEnabled`, and `scripts/luminos-glm-skills` packs build,
+  llm-council, prompt-engineer, deep-research, skill-creator from the Max app into
+  `config/glm/luminos-skills.plugin`; the GLM copy of build gets `config/glm/build-addendum.md` (which model per
+  worker role, at least one opus/fable, --batch). Shawn uploads it once in the GLM window (Customize → Plugins).
+- Proxy: real Abliteration ids now pass through untranslated (CLI workers report true model names); the tool-rules
+  note gained rules 7–10 (apps, workers, chats, skills).
+**Not possible / limits:** desktop-window chats can't be typed into from outside; Chrome/Electron apps only expose
+their controls if started after accessibility came on (else keyboard + screenshot); no pixel-coordinate clicking
+(ydotool coordinates drift on this box — see memory reference_synthetic_input).
+**Numbering note:** DECISION 156 (GLM via Abliteration, LUMINOS_DECISIONS.md) and server/DECISIONS.md DECISION 156
+(Dolby Vision P5) share a number — two chats on the same day; both stay, cite them with their file.
+**Undo:** remove `luminos-desktop` from the GLM config block in scripts/luminos-claude-glm and the --mcp-config line in
+claude-glm; delete the plugin in the GLM window; rm the new scripts + ~/.local/bin links.

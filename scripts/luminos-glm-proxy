@@ -46,12 +46,27 @@ NUDGE = NUDGE_MARK + """ REQUIRED tool rules for this laptop (these tools are re
    (options: `--window` = only the active window, `--ask "question"` = also answer a question about it). It prints a
    detailed text description of what is on the display plus the saved image path. Any image in this chat (pasted, or
    read from a file) has already been replaced by a text description for you.
+7. To SEE AND CONTROL OTHER APPS use the mcp__luminos-desktop__* tools: list_windows, focus_window, close_window,
+   launch_app, open_url; ui_tree(app or window title) lists an app's buttons/menus/fields as refs e1, e2...; then
+   ui_click / ui_set_text / ui_read on those refs; press_keys ("ctrl+s") and type_text for the focused window;
+   screenshot for a text description. Prefer ui_tree + ui_click over keyboard guesses; check the result with
+   ui_tree or screenshot after each step. Never close or type into a window you did not open unless asked.
+8. SEVERAL MODELS AT ONCE: start helper workers on the laptop with mcp__host-shell__run_command:
+   `luminos-worker <glm|glm-cheap|opus|sonnet|haiku|fable> [--tools ...] [--cwd DIR] "<brief>"` (JSON out; continue
+   one with `--resume <session_id>`). opus/sonnet/haiku/fable are real Claude on Shawn's Max plan. To run several
+   AT THE SAME TIME write a jobs file (one "<model> <brief>" per line) and run `luminos-worker --batch jobs.txt`
+   (one JSON line per job). A worker's "models_used" shows the real model it ran on.
+9. OTHER CHATS: `luminos-chats list`, `luminos-chats read <id>`, `luminos-chats send <id> "msg"` (send works for
+   terminal/worker chats; desktop-window chats are read-only).
+10. SKILLS: use the Skill tool. Shawn's own skills (build, llm-council, prompt-engineer, deep-research,
+   skill-creator) come from the luminos-skills plugin — if /build is missing, tell him to upload
+   ~/luminos-os/config/glm/luminos-skills.plugin in Customize → Plugins.
 If one of these tools is listed as deferred, load it with ToolSearch first."""
 
 def add_nudge(j):
     names = [t.get("name", "") for t in (j.get("tools") or []) if isinstance(t, dict)]
     blob = " ".join(names)
-    if "mempalace" not in blob and "code-review-graph" not in blob and "ToolSearch" not in blob and "host-shell" not in blob:
+    if "mempalace" not in blob and "code-review-graph" not in blob and "ToolSearch" not in blob and "host-shell" not in blob and "luminos-desktop" not in blob:
         return False
     sysp = j.get("system")
     if isinstance(sysp, str):
@@ -64,8 +79,10 @@ def add_nudge(j):
         j["system"] = [{"type": "text", "text": NUDGE}]
     return True
 
+REAL = ("abliterated-model", "abliterated-model-large-v2", "abliterated-model-large")
 def map_model(name):
     n = (name or "").lower()
+    if n in REAL: return n
     return "abliterated-model" if "haiku" in n else "abliterated-model-large-v2"
 
 HOP = {"host", "content-length", "connection", "authorization", "x-api-key",

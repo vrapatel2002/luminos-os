@@ -27,7 +27,7 @@ except Exception:
 
 d = os.path.expanduser("~/luminos-os/.screens"); os.makedirs(d, exist_ok=True)
 raw = os.path.join(d, ".raw-%d.png" % os.getpid())
-subprocess.run(["spectacle", "-b", "-n", "-a" if a.window else "-f", "-o", raw], env=env,
+subprocess.run(["spectacle", "-i", "-b", "-n", "-a" if a.window else "-f", "-o", raw], env=env,
                capture_output=True, timeout=30)
 if not os.path.exists(raw) or os.path.getsize(raw) == 0:
     sys.exit("FAIL: spectacle wrote no screenshot (is the screen locked or the session not running?)")

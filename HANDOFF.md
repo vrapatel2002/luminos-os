@@ -1,8 +1,19 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-29 — Response 9
+Last updated: 2026-10-30 — Response 10 (glm chat; Response 9 was the server-seat chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
+
+## GLM-5.3 Claude window (glm chat, 2026-10-30 R10) — DECISION 162 DONE, one step waits on Shawn
+GLM window = second Claude Desktop (`luminos-claude-glm`, profile ~/.config/Claude-glm[-3p]) → `luminos-glm-proxy`
+:4141 → Abliteration (DECISIONS 156 + 162, BUGS 207/208/211). New today, all proven by real runs:
+`luminos-worker` (any model incl. real Claude on Max; `--batch` for parallel; `--resume`), `luminos-chats`
+(list/read all chats, send to terminal/worker ones), `luminos-desktop-mcp` (GLM-only app control: windows, launch,
+AT-SPI ui_tree/click/set_text, keys via ydotool, screenshot; a11y + ydotoold only on while used), skills via
+`config/glm/luminos-skills.plugin` (built by `luminos-glm-skills`).
+**WAITING ON SHAWN:** upload `~/luminos-os/config/glm/luminos-skills.plugin` in the GLM window (Customize → Plugins).
+Then check: newest GLM session's skill list contains luminos-skills:build. Copying skills into skills-plugin/ does NOT
+work (the app's sync deletes them every 10 min). Desktop-window chats can't be typed into from outside.
 
 ## Aim right now (Vela) — everything new is on the TEST OS (/vela-nv.img) only
 1. **R27 Music card** (Shawn asked to build it) — DONE + e2e PASS inside the image (real YouTube Music via vela-core ->

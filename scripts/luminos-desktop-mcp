@@ -1,0 +1,433 @@
+#!/usr/bin/python3
+# luminos-desktop-mcp — MCP server that lets a model see and drive apps on this KDE Plasma (Wayland) desktop.
+# [CHANGE: cowork | 2026-10-30] DECISION 162. Built for the GLM-5.3 Claude window (text-only model), so it works
+# through app STRUCTURE (accessibility tree: buttons, menus, fields by name) rather than pixels.
+#   windows : KWin script over D-Bus (list / focus / close)        launch : .desktop entries via gtk-launch
+#   ui_*    : AT-SPI (read the tree, press, set text, read text)    keys   : ydotool (root helper, sudo -n)
+#   screenshot : luminos-screenshot (text description)
+# Resource rule (Shawn: nothing idle stays in RAM): accessibility is switched ON only when a ui_* tool is used and
+# back OFF after 10 min without one (only if this server turned it on); the ydotool root helper likewise. Both are
+# undone when the server exits.
+import json, os, re, shlex, subprocess, sys, threading, time, glob, configparser
+
+import warnings; warnings.filterwarnings("ignore", category=DeprecationWarning)
+import gi
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi, Gio, GLib
+
+UID = os.getuid(); RUNDIR = "/run/user/%d" % UID
+os.environ.setdefault("XDG_RUNTIME_DIR", RUNDIR)
+os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=%s/bus" % RUNDIR)
+# Whoever starts us may lack the Wayland session variables (an agent shell does) — take them from the session
+# itself, so launch_app / screenshot / ydotool reach the real desktop.
+try:
+    _o = subprocess.run(["systemctl", "--user", "show-environment"], capture_output=True, text=True, timeout=10).stdout
+    for _l in _o.splitlines():
+        _k, _, _v = _l.partition("=")
+        if _k.startswith(("KDE_", "XDG_", "QT_")) or _k in ("WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"):
+            os.environ.setdefault(_k, _v)
+except Exception:
+    pass
+IDLE_S = 600
+LOCK = threading.Lock()
+STATE = {"a11y_ours": False, "a11y_last": 0.0, "ydo": None, "ydo_last": 0.0, "refs": {}}
+
+def log(*a): print("[luminos-desktop]", *a, file=sys.stderr, flush=True)
+
+# ---------------------------------------------------------------- session bus helpers
+BUS = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+
+def dbus_call(dest, path, iface, method, args=None, sig=None, timeout=5000):
+    v = GLib.Variant(sig, args) if sig else None
+    r = BUS.call_sync(dest, path, iface, method, v, None, Gio.DBusCallFlags.NONE, timeout, None)
+    return r.unpack() if r else None
+
+# ---------------------------------------------------------------- accessibility on/off
+def a11y_enabled():
+    return bool(dbus_call("org.a11y.Bus", "/org/a11y/bus", "org.freedesktop.DBus.Properties", "Get",
+                          ("org.a11y.Status", "IsEnabled"), "(ss)")[0])
+
+def a11y_set(on):
+    dbus_call("org.a11y.Bus", "/org/a11y/bus", "org.freedesktop.DBus.Properties", "Set",
+              ("org.a11y.Status", "IsEnabled", GLib.Variant("b", on)), "(ssv)")
+
+def a11y_ensure():
+    STATE["a11y_last"] = time.time()
+    if not a11y_enabled():
+        a11y_set(True); STATE["a11y_ours"] = True; time.sleep(2.0)   # running Qt/GTK apps register within ~1-2 s
+        log("accessibility switched on")
+
+# ---------------------------------------------------------------- ydotool root helper
+YSOCK = RUNDIR + "/.ydotool_socket"
+KEYS = {"esc": 1, "escape": 1, "backspace": 14, "tab": 15, "enter": 28, "return": 28, "ctrl": 29, "control": 29,
+        "shift": 42, "alt": 56, "space": 57, "capslock": 58, "meta": 125, "super": 125, "win": 125,
+        "home": 102, "up": 103, "pageup": 104, "left": 105, "right": 106, "end": 107, "down": 108, "pagedown": 109,
+        "insert": 110, "delete": 111, "del": 111, "minus": 12, "equal": 13, "comma": 51, "dot": 52, "period": 52,
+        "slash": 53, "semicolon": 39, "apostrophe": 40, "grave": 41, "backslash": 43, "leftbrace": 26, "rightbrace": 27,
+        "print": 99, "printscreen": 99}
+for i, c in enumerate("1234567890"): KEYS[c] = 2 + i
+for row, start in (("qwertyuiop", 16), ("asdfghjkl", 30), ("zxcvbnm", 44)):
+    for i, c in enumerate(row): KEYS[c] = start + i
+for i in range(1, 11): KEYS["f%d" % i] = 58 + i
+KEYS["f11"], KEYS["f12"] = 87, 88
+
+def ydo_ensure():
+    STATE["ydo_last"] = time.time()
+    p = STATE["ydo"]
+    if p and p.poll() is None and os.path.exists(YSOCK): return
+    if os.path.exists(YSOCK) and subprocess.run(["pgrep", "-x", "ydotoold"], capture_output=True).returncode == 0:
+        return   # someone else's helper is already running; use it, don't own it
+    STATE["ydo"] = subprocess.Popen(["sudo", "-n", "ydotoold", "--socket-path=" + YSOCK, "--socket-own=%d:%d" % (UID, os.getgid())],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(40):
+        if os.path.exists(YSOCK): break
+        time.sleep(0.1)
+    if not os.path.exists(YSOCK): raise RuntimeError("ydotoold did not start (sudo -n refused?)")
+    time.sleep(0.3); log("ydotoold started")
+
+def ydo(*args):
+    ydo_ensure()
+    r = subprocess.run(["ydotool", *args], env={**os.environ, "YDOTOOL_SOCKET": YSOCK}, capture_output=True, text=True, timeout=30)
+    if r.returncode != 0: raise RuntimeError("ydotool failed: " + (r.stderr or r.stdout)[:300])
+
+def ydo_stop():
+    p = STATE["ydo"]
+    if p and p.poll() is None:
+        try: p.terminate(); p.wait(3)
+        except Exception: pass
+        log("ydotoold stopped")
+    STATE["ydo"] = None
+
+def idle_reaper():
+    while True:
+        time.sleep(30)
+        with LOCK:
+            now = time.time()
+            if STATE["a11y_ours"] and now - STATE["a11y_last"] > IDLE_S:
+                try: a11y_set(False); log("accessibility switched off (idle)")
+                except Exception as e: log("a11y off failed", e)
+                STATE["a11y_ours"] = False; STATE["refs"] = {}
+            if STATE["ydo"] and now - STATE["ydo_last"] > IDLE_S: ydo_stop()
+
+# ---------------------------------------------------------------- KWin windows
+_KW = {"result": None}
+_NODE = Gio.DBusNodeInfo.new_for_xml('<node><interface name="org.luminos.DesktopMcp"><method name="Put">'
+                                     '<arg type="s" direction="in"/></method></interface></node>')
+_NAME = "org.luminos.DesktopMcp.p%d" % os.getpid()
+def _on_call(conn, sender, path, iface, method, params, inv):
+    _KW["result"] = params.unpack()[0]; inv.return_value(None)
+BUS.register_object("/result", _NODE.interfaces[0], _on_call, None, None)  # (deprecation warning is harmless)
+Gio.bus_own_name_on_connection(BUS, _NAME, Gio.BusNameOwnerFlags.NONE, None, None)
+
+def kwin_js(body, timeout=6):
+    """Run a KWin script; `body` must set var R. Returns R (parsed JSON)."""
+    js = ("var R=null;\ntry{\n%s\n}catch(e){R={error:String(e)};}\n"
+          "callDBus('%s','/result','org.luminos.DesktopMcp','Put',JSON.stringify(R));\n") % (body, _NAME)
+    path = "%s/luminos-desktop-%d.js" % (RUNDIR, os.getpid()); open(path, "w").write(js)
+    plugin = "luminos-desktop-%d-%d" % (os.getpid(), int(time.time() * 1000))
+    _KW["result"] = None
+    sid = dbus_call("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "loadScript", (path, plugin), "(ss)")[0]
+    try:
+        dbus_call("org.kde.KWin", "/Scripting/Script%d" % sid, "org.kde.kwin.Script", "run")
+        ctx = GLib.MainContext.default(); end = time.time() + timeout
+        while _KW["result"] is None and time.time() < end:
+            ctx.iteration(False); time.sleep(0.01)
+    finally:
+        try: dbus_call("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "unloadScript", (plugin,), "(s)")
+        except Exception: pass
+        try: os.remove(path)
+        except OSError: pass
+    if _KW["result"] is None: raise RuntimeError("KWin script gave no answer")
+    r = json.loads(_KW["result"])
+    if isinstance(r, dict) and r.get("error"): raise RuntimeError("KWin: " + r["error"])
+    return r
+
+LIST_JS = """var ws=workspace.windowList(); R=[];
+for (var i=0;i<ws.length;i++){var w=ws[i]; if(!(w.normalWindow||w.dialog)||w.skipTaskbar) continue;
+ var g=w.frameGeometry; R.push({id:String(w.internalId),title:String(w.caption),app:String(w.resourceClass),
+ pid:w.pid,active:(w===workspace.activeWindow),minimized:w.minimized,x:g.x,y:g.y,w:g.width,h:g.height});}"""
+
+def windows():
+    return kwin_js(LIST_JS)
+
+def find_window(match):
+    ws = windows(); m = match.lower().strip()
+    exact = [w for w in ws if w["id"] == match or w["id"].strip("{}") == match.strip("{}")]
+    if exact: return exact[0]
+    hits = [w for w in ws if m in w["title"].lower() or m in w["app"].lower()]
+    if not hits: raise RuntimeError("no window matches %r. Open windows: %s" % (match, "; ".join("%s (%s)" % (w["title"], w["app"]) for w in ws)))
+    hits.sort(key=lambda w: (not w["active"], len(w["title"])))
+    return hits[0]
+
+def win_action(match, action):
+    w = find_window(match)
+    body = ("var ws=workspace.windowList(); R={ok:false};\nfor(var i=0;i<ws.length;i++){var w=ws[i]; if(String(w.internalId)==%s){%s R={ok:true};}}"
+            % (json.dumps(w["id"]), action))
+    r = kwin_js(body)
+    if not r.get("ok"): raise RuntimeError("window vanished")
+    return w
+
+# ---------------------------------------------------------------- apps
+def desktop_entries():
+    dirs = [os.path.expanduser("~/.local/share/applications"), "/usr/share/applications",
+            "/var/lib/flatpak/exports/share/applications", os.path.expanduser("~/.local/share/flatpak/exports/share/applications")]
+    out = {}
+    for d in dirs:
+        for f in glob.glob(d + "/**/*.desktop", recursive=True):
+            did = os.path.relpath(f, d).replace("/", "-")
+            if did in out: continue
+            cp = configparser.RawConfigParser(strict=False, interpolation=None)
+            try: cp.read(f, encoding="utf-8")
+            except Exception: continue
+            if not cp.has_section("Desktop Entry"): continue
+            e = dict(cp.items("Desktop Entry"))
+            if e.get("nodisplay", "").lower() == "true" or e.get("type", "Application") != "Application": continue
+            out[did] = {"id": did, "name": e.get("name", did), "generic": e.get("genericname", ""), "exec": e.get("exec", "")}
+    return list(out.values())
+
+def launch(name):
+    q = name.lower().strip(); ents = desktop_entries()
+    score = lambda e: (0 if e["name"].lower() == q else 1 if e["name"].lower().startswith(q) else
+                       2 if q in e["name"].lower() else 3 if q in e["id"].lower() else 4 if q in e["generic"].lower() or q in e["exec"].lower() else 9)
+    best = sorted(ents, key=lambda e: (score(e), len(e["name"])))
+    if not best or score(best[0]) == 9: raise RuntimeError("no app matches %r" % name)
+    e = best[0]
+    subprocess.Popen(["gtk-launch", e["id"][:-8] if e["id"].endswith(".desktop") else e["id"]],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return e
+
+# ---------------------------------------------------------------- AT-SPI
+INTERACTIVE = {"push button", "toggle button", "check box", "radio button", "menu item", "check menu item",
+               "radio menu item", "menu", "combo box", "text", "entry", "password text", "spin button", "slider",
+               "page tab", "link", "list item", "tree item", "table cell", "icon", "button", "switch", "tool bar"}
+def a11y_apps():
+    d = Atspi.get_desktop(0); out = []
+    for i in range(d.get_child_count()):
+        a = d.get_child_at_index(i)
+        if a is None: continue
+        try: out.append((a.get_name() or "", a))
+        except Exception: pass
+    return out
+
+def find_app(name):
+    """Return (root, note). A window/dialog TITLE match wins (precise); else app-name match. Several apps with the
+    same name (e.g. two kdialogs) are reported so the caller can pass a title instead."""
+    q = name.lower(); apps = a11y_apps(); title_hits = []; name_hits = []
+    for n, a in apps:
+        try:
+            for i in range(min(a.get_child_count(), 50)):
+                w = a.get_child_at_index(i)
+                if w is not None and q in (w.get_name() or "").lower(): title_hits.append((n, w))
+        except Exception: pass
+        if q in n.lower(): name_hits.append((n, a))
+    if title_hits:
+        return title_hits[-1][1], ""
+    if not name_hits:
+        try:
+            pid = find_window(name)["pid"]; name_hits = [(n, a) for n, a in apps if a.get_process_id() == pid]
+        except Exception: pass
+    if not name_hits:
+        raise RuntimeError("app %r is not on the accessibility bus. Visible apps: %s. (Chrome/Electron apps only appear if "
+                           "they were started after accessibility was switched on — restart them, or use press_keys/type_text "
+                           "+ screenshot instead.)" % (name, ", ".join(n for n, _ in apps if n)))
+    note = ""
+    if len(name_hits) > 1:
+        titles = []
+        for n, a in name_hits:
+            try: titles += [a.get_child_at_index(i).get_name() for i in range(min(a.get_child_count(), 5))]
+            except Exception: pass
+        note = " NOTE: %d apps named %r are open; showing the newest. Pass a window title to pick another: %s." % (
+            len(name_hits), name, "; ".join(repr(t) for t in titles if t))
+    return name_hits[-1][1], note
+
+def states_of(o):
+    try: ss = o.get_state_set()
+    except Exception: return []
+    want = [("enabled", Atspi.StateType.ENABLED), ("focused", Atspi.StateType.FOCUSED), ("checked", Atspi.StateType.CHECKED),
+            ("selected", Atspi.StateType.SELECTED), ("expanded", Atspi.StateType.EXPANDED), ("editable", Atspi.StateType.EDITABLE),
+            ("pressed", Atspi.StateType.PRESSED)]
+    return [n for n, s in want if ss.contains(s)]
+
+def showing(o):
+    try: ss = o.get_state_set(); return ss.contains(Atspi.StateType.SHOWING) or ss.contains(Atspi.StateType.VISIBLE)
+    except Exception: return False
+
+def actions_of(o):
+    try: return [o.get_action_name(i) for i in range(o.get_n_actions())]   # deprecated-but-working API; the
+    except Exception: return []                                               # "new" Atspi.Action.get_name is absent
+
+def text_of(o, limit=200):
+    try:
+        t = o.get_text_iface()
+        if t: return Atspi.Text.get_text(t, 0, min(Atspi.Text.get_character_count(t), limit))
+    except Exception: pass
+    try:
+        v = o.get_value_iface()
+        if v: return str(Atspi.Value.get_current_value(v))
+    except Exception: pass
+    return ""
+
+def ui_tree(app, query=None, max_items=150, all_nodes=False):
+    a11y_ensure(); root, note = find_app(app); STATE["refs"] = {}
+    lines = []; n = 0; stack = [(root, 0)]; seen = 0; q = (query or "").lower()
+    while stack and n < max_items and seen < 6000:
+        o, depth = stack.pop(); seen += 1
+        try: role = o.get_role_name(); name = o.get_name() or ""; cc = o.get_child_count()
+        except Exception: continue
+        if depth > 0 and not showing(o): continue
+        keep = all_nodes or role in INTERACTIVE or role in ("frame", "dialog", "window", "alert", "label", "heading", "status bar") or (name and role not in ("filler", "panel", "section"))
+        if keep and (depth > 0 or role in ("frame", "dialog", "window", "alert")):
+            txt = text_of(o) if role in ("text", "entry", "password text", "spin button", "slider", "label", "status bar", "heading") else ""
+            line = "%s%s %r" % ("  " * min(depth - 1, 8), role, name[:80])
+            if txt and txt != name: line += "  text=%r" % txt[:120]
+            st = states_of(o); ac = actions_of(o)
+            if st: line += "  [" + ",".join(st) + "]"
+            if ac: line += "  actions=" + "/".join(ac[:4])
+            if not q or q in line.lower():
+                n += 1; ref = "e%d" % n; STATE["refs"][ref] = o; lines.append("%-5s %s" % (ref, line))
+        for i in range(min(cc, 400) - 1, -1, -1):
+            try: c = o.get_child_at_index(i)
+            except Exception: c = None
+            if c is not None: stack.append((c, depth + 1))
+    head = "%r — %d element(s)%s. Use the eN refs with ui_click / ui_set_text / ui_read.%s" % (
+        root.get_name(), n, " (truncated; pass query= to narrow)" if stack and n >= max_items else "", note)
+    return head + "\n" + "\n".join(lines)
+
+def ref(r):
+    STATE["a11y_last"] = time.time()
+    o = STATE["refs"].get(r)
+    if o is None: raise RuntimeError("unknown ref %r — call ui_tree first (refs reset on every ui_tree call)" % r)
+    return o
+
+def ui_click(r, action=None):
+    o = ref(r); acts = actions_of(o)
+    if not acts:
+        try: o.grab_focus()
+        except Exception: pass
+        raise RuntimeError("element has no actions (%s). Focused it instead; try press_keys('enter')." % o.get_role_name())
+    idx = 0
+    if action:
+        low = [a.lower() for a in acts]
+        if action.lower() not in low: raise RuntimeError("action %r not available; has: %s" % (action, acts))
+        idx = low.index(action.lower())
+    else:
+        for pref in ("press", "click", "activate", "toggle", "jump", "open"):
+            if pref in [a.lower() for a in acts]: idx = [a.lower() for a in acts].index(pref); break
+    ok = o.do_action(idx)
+    return "did %r on %s %r -> %s" % (acts[idx], o.get_role_name(), o.get_name(), "ok" if ok else "app reported failure")
+
+def ui_set_text(r, text):
+    o = ref(r)
+    try:
+        e = o.get_editable_text_iface()
+        if e and Atspi.EditableText.set_text_contents(e, text): return "text set on %s %r" % (o.get_role_name(), o.get_name())
+    except Exception as ex: log("set_text_contents failed:", ex)
+    try: o.grab_focus()
+    except Exception: pass
+    time.sleep(0.2); press_keys("ctrl+a"); type_text(text)
+    return "focused %s %r and typed the text (editable interface unavailable)" % (o.get_role_name(), o.get_name())
+
+def ui_read(r):
+    o = ref(r)
+    return json.dumps({"role": o.get_role_name(), "name": o.get_name(), "description": o.get_description(),
+                       "states": states_of(o), "actions": actions_of(o), "text": text_of(o, 20000)}, ensure_ascii=False)
+
+# ---------------------------------------------------------------- keyboard
+def press_keys(combo):
+    parts = [p.strip().lower() for p in re.split(r"[+ ]", combo) if p.strip()]
+    if not parts: raise RuntimeError("no keys given")
+    if len(parts) == 1 and parts[0] in ("super", "meta", "win"):
+        raise RuntimeError("refusing a lone SUPER press: it opens the app launcher and steals focus")
+    codes = []
+    for p in parts:
+        if p not in KEYS: raise RuntimeError("unknown key %r (known: letters, digits, f1-f12, %s)" % (p, ", ".join(sorted(k for k in KEYS if len(k) > 1 and not k.startswith('f')))))
+        codes.append(KEYS[p])
+    seq = ["%d:1" % c for c in codes] + ["%d:0" % c for c in reversed(codes)]
+    ydo("key", *seq); return "pressed " + "+".join(parts)
+
+def type_text(text):
+    ydo("type", "--key-delay", "6", "--", text); return "typed %d characters" % len(text)
+
+# ---------------------------------------------------------------- MCP plumbing
+def tool(name, desc, props, req=()):
+    return {"name": name, "description": desc, "inputSchema": {"type": "object", "properties": props, "required": list(req)}}
+S = {"type": "string"}; I = {"type": "integer"}; B = {"type": "boolean"}
+TOOLS = [
+    tool("list_windows", "List open windows (title, app, active, minimized, geometry, id).", {}),
+    tool("focus_window", "Bring a window to the front. match = window id, or part of its title or app name.", {"match": S}, ["match"]),
+    tool("close_window", "Close a window politely (like clicking X; the app may ask to save). match = id/title/app.", {"match": S}, ["match"]),
+    tool("launch_app", "Start an installed app by name (e.g. 'dolphin', 'konsole', 'system settings', 'kate').", {"name": S}, ["name"]),
+    tool("open_url", "Open a URL or file with its default app (xdg-open).", {"target": S}, ["target"]),
+    tool("ui_tree", "Read an app's on-screen controls (buttons, menus, fields, labels) through accessibility, as numbered refs "
+         "(e1, e2...). app = part of the app name (dolphin, konsole, systemsettings, plasmashell...) or a window title. "
+         "query = only lines containing this text. Works for Qt/KDE/GTK apps; Chrome/Electron only if started after "
+         "accessibility came on.", {"app": S, "query": S, "max_items": I, "all_nodes": B}, ["app"]),
+    tool("ui_click", "Press/activate an element from the last ui_tree (ref like 'e12'). action = optional action name.", {"ref": S, "action": S}, ["ref"]),
+    tool("ui_set_text", "Replace the text in a text field from the last ui_tree.", {"ref": S, "text": S}, ["ref", "text"]),
+    tool("ui_read", "Full details + text content of one element from the last ui_tree.", {"ref": S}, ["ref"]),
+    tool("press_keys", "Press a key or shortcut in the focused window, e.g. 'ctrl+s', 'alt+f4', 'enter', 'ctrl+shift+t'.", {"keys": S}, ["keys"]),
+    tool("type_text", "Type text into the focused window as if on the keyboard (ASCII).", {"text": S}, ["text"]),
+    tool("screenshot", "Take a screenshot and get a detailed TEXT description (you cannot see images). window=true for the "
+         "active window only; ask = a specific question about the screen.", {"window": B, "ask": S}),
+]
+
+def call(name, a):
+    if name == "list_windows":
+        ws = windows()
+        return "\n".join("%s%s  [%s]  pid=%s  %dx%d+%d+%d%s  id=%s" % ("* " if w["active"] else "  ", w["title"], w["app"], w["pid"],
+                         w["w"], w["h"], w["x"], w["y"], "  (minimized)" if w["minimized"] else "", w["id"]) for w in ws) or "(no windows)"
+    if name == "focus_window":
+        w = win_action(a["match"], "w.minimized=false; workspace.activeWindow=w;"); return "focused: %s [%s]" % (w["title"], w["app"])
+    if name == "close_window":
+        w = win_action(a["match"], "w.closeWindow();"); return "asked to close: %s [%s]" % (w["title"], w["app"])
+    if name == "launch_app":
+        e = launch(a["name"]); return "launched %s (%s)" % (e["name"], e["id"])
+    if name == "open_url":
+        subprocess.Popen(["xdg-open", a["target"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True); return "opened " + a["target"]
+    if name == "ui_tree": return ui_tree(a["app"], a.get("query"), int(a.get("max_items") or 150), bool(a.get("all_nodes")))
+    if name == "ui_click": return ui_click(a["ref"], a.get("action"))
+    if name == "ui_set_text": return ui_set_text(a["ref"], a["text"])
+    if name == "ui_read": return ui_read(a["ref"])
+    if name == "press_keys": return press_keys(a["keys"])
+    if name == "type_text": return type_text(a["text"])
+    if name == "screenshot":
+        cmd = [os.path.expanduser("~/luminos-os/scripts/luminos-screenshot")]
+        if a.get("window"): cmd.append("--window")
+        if a.get("ask"): cmd += ["--ask", a["ask"]]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        return (r.stdout + r.stderr).strip()
+    raise RuntimeError("unknown tool " + name)
+
+def send(o): sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+
+def main():
+    threading.Thread(target=idle_reaper, daemon=True).start()
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line: continue
+            try: m = json.loads(line)
+            except Exception: continue
+            mid, meth, p = m.get("id"), m.get("method"), m.get("params") or {}
+            if mid is None: continue
+            if meth == "initialize":
+                send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": p.get("protocolVersion", "2025-06-18"),
+                      "capabilities": {"tools": {}}, "serverInfo": {"name": "luminos-desktop", "version": "1.0"}}})
+            elif meth == "tools/list": send({"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}})
+            elif meth == "ping": send({"jsonrpc": "2.0", "id": mid, "result": {}})
+            elif meth == "tools/call":
+                try:
+                    with LOCK: out = call(p.get("name"), p.get("arguments") or {})
+                    send({"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": str(out)}]}})
+                except Exception as e:
+                    send({"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": "ERROR: %s" % e}], "isError": True}})
+            else:
+                send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found"}})
+    finally:
+        if STATE["a11y_ours"]:
+            try: a11y_set(False)
+            except Exception: pass
+        ydo_stop()
+
+if __name__ == "__main__":
+    main()

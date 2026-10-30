@@ -32,7 +32,11 @@ w(os.path.join(d,"configLibrary",i+".json"),{
  "inferenceGatewayAuthScheme":"bearer",
  "inferenceModels":[
    {"name":"claude-opus-4-5","labelOverride":"GLM-5.3 (Abliterated Large v2)","supports1m":True},
-   {"name":"claude-haiku-4-5","labelOverride":"Abliterated (cheaper, reads images)"}]})
+   {"name":"claude-haiku-4-5","labelOverride":"Abliterated (cheaper, reads images)"}],
+ # DECISION 162: let Shawn upload luminos-skills.plugin (build, llm-council, ...). Skills copied straight into
+ # skills-plugin/ are deleted by the app's own sync every 10 min; uploaded plugins are kept.
+ "userPluginUploadsEnabled":True,
+ "userPluginMarketplacesEnabled":True})
 w(os.path.join(d,"configLibrary","_meta.json"),{"appliedId":i,"entries":[{"id":i,"name":"Abliteration GLM-5.3","provider":"gateway"}]})
 p=os.path.join(d,"claude_desktop_config.json")
 try: c=json.load(open(p))
@@ -43,6 +47,9 @@ c["deploymentMode"]="3p"
 try:
     mx=json.load(open(os.path.expanduser("~/.config/Claude/claude_desktop_config.json")))
     if mx.get("mcpServers"): c["mcpServers"]=mx["mcpServers"]
+    # DECISION 162: GLM-only app control (windows, launch, accessibility clicks/text, keys, screenshot).
+    c.setdefault("mcpServers",{})["luminos-desktop"]={"command":"/usr/bin/python3",
+        "args":[os.path.expanduser("~/luminos-os/scripts/luminos-desktop-mcp")]}
     tf=mx.get("preferences",{}).get("localAgentModeTrustedFolders")
     if tf: c.setdefault("preferences",{})["localAgentModeTrustedFolders"]=sorted(set(tf)|set(c.get("preferences",{}).get("localAgentModeTrustedFolders",[])))
 except Exception as e:
@@ -53,6 +60,7 @@ PY
   # (the Max app rewrites its config on any pref save) — put them back on the shared broker before launch.
   "$HOME/luminos-os/scripts/luminos-mcp-share" wrap-configs "$HOME/.config/Claude-glm-3p/claude_desktop_config.json" >/dev/null || true
 }
+
 
 case "${1:-open}" in
   setup) setup; echo "GLM app config written to $CFGDIR" ;;
