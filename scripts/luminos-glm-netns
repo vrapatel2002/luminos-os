@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# luminos-glm-netns — a private network namespace for the GLM Claude window, so its Cowork sandbox gets its OWN
+# vsock port space and can run at the same time as the Max app's sandbox.
+# [CHANGE: cowork | 2026-10-30] DECISION 163 / BUG-224.
+# WHY: cowork-linux-helper listens on host vsock port 51234 (hard-coded). Kernel 7.0 has vsock namespaces: a netns
+# created while net.vsock.child_ns_mode=local has its own vsock ports, so a second helper inside it can bind 51234.
+#   sudo luminos-glm-netns up        create netns claude-glm (vsock local) + veth 10.77.0.1/30<->10.77.0.2 + NAT + DNS
+#   sudo luminos-glm-netns down      remove all of it, restore ip_forward
+#   sudo luminos-glm-netns status
+#   sudo luminos-glm-netns exec -- env VAR=… cmd …   run cmd inside, as the calling user (SUDO_UID), groups kept
+# Every nft rule carries comment "luminos-glm-netns" so `down` removes exactly what `up` added.
+set -euo pipefail
+NS=claude-glm; HV=glm-h; NV=glm-n; HA=10.77.0.1; NA=10.77.0.2; NET=10.77.0.0/30
+TAG=luminos-glm-netns; STATE=/run/luminos-glm-netns.ipfwd
+[ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
+
+have_ns() { ip netns list | awk '{print $1}' | grep -qx "$NS"; }
+rule_handles() { nft -a list chain inet luminos forward 2>/dev/null | awk -v t="\"$TAG\"" '$0 ~ t {print $NF}'; }
+
+up() {
+  if ! have_ns; then
+    old=$(cat /proc/sys/net/vsock/child_ns_mode)
+    echo local > /proc/sys/net/vsock/child_ns_mode
+    ip netns add "$NS"; rc=$?
+    # The kernel locks child_ns_mode once a namespace has been created with it ("Device or resource busy" on any
+    # later write) until reboot. Harmless here: only NEW netns get local vsock ports; the normal namespace (Max app
+    # sandbox, libvirt) stays global, and Chrome's sandbox netns don't use vsock. Reboot resets it to global.
+    echo "$old" > /proc/sys/net/vsock/child_ns_mode 2>/dev/null || true
+    [ $rc = 0 ] || exit 1
+  fi
+  mode=$(ip netns exec "$NS" cat /proc/sys/net/vsock/ns_mode)
+  if [ "$mode" != local ]; then
+    echo "netns $NS has vsock ns_mode=$mode (need local) — recreate with: $0 down && $0 up" >&2; exit 1
+  fi
+  ip -n "$NS" link set lo up
+  if ! ip link show "$HV" >/dev/null 2>&1; then
+    ip link add "$HV" type veth peer name "$NV"
+    ip link set "$NV" netns "$NS"
+    ip addr add "$HA/30" dev "$HV"; ip link set "$HV" up
+    ip -n "$NS" addr add "$NA/30" dev "$NV"; ip -n "$NS" link set "$NV" up
+    ip -n "$NS" route add default via "$HA"
+  fi
+  if [ "$(sysctl -n net.ipv4.ip_forward)" = 0 ]; then echo 0 > "$STATE"; sysctl -qw net.ipv4.ip_forward=1; fi
+  if [ -z "$(rule_handles)" ]; then
+    nft insert rule inet luminos forward oifname "$HV" ct state established,related accept comment "\"$TAG\""
+    nft insert rule inet luminos forward iifname "$HV" ip saddr "$NET" accept comment "\"$TAG\""
+  fi
+  if ! nft list table ip luminos_glm >/dev/null 2>&1; then
+    nft add table ip luminos_glm
+    nft "add chain ip luminos_glm post { type nat hook postrouting priority srcnat; }"
+    nft add rule ip luminos_glm post ip saddr "$NET" oifname != "$HV" masquerade
+  fi
+  mkdir -p "/etc/netns/$NS"
+  # upstream DNS servers (systemd-resolved's stub 127.0.0.53 is not reachable from inside the namespace)
+  if [ -s /run/systemd/resolve/resolv.conf ]; then grep -E '^(nameserver|search|options)' /run/systemd/resolve/resolv.conf > "/etc/netns/$NS/resolv.conf"
+  else printf 'nameserver 1.1.1.1\nnameserver 9.9.9.9\n' > "/etc/netns/$NS/resolv.conf"; fi
+  echo "up: netns $NS (vsock $mode), $HV $HA <-> $NV $NA, NAT on"
+}
+
+down() {
+  for h in $(rule_handles); do nft delete rule inet luminos forward handle "$h"; done
+  nft delete table ip luminos_glm 2>/dev/null || true
+  ip link del "$HV" 2>/dev/null || true
+  have_ns && ip netns del "$NS"
+  rm -rf "/etc/netns/$NS"
+  if [ -f "$STATE" ]; then sysctl -qw net.ipv4.ip_forward="$(cat "$STATE")"; rm -f "$STATE"; fi
+  echo "down: removed netns $NS, veth, nft rules, DNS file; ip_forward=$(sysctl -n net.ipv4.ip_forward)"
+}
+
+status() {
+  if have_ns; then
+    echo "netns $NS: present, vsock ns_mode=$(ip netns exec "$NS" cat /proc/sys/net/vsock/ns_mode)"
+    echo "processes inside: $(ip netns pids "$NS" | wc -l)"
+  else echo "netns $NS: absent"; fi
+  echo "veth $HV: $(ip -br addr show "$HV" 2>/dev/null || echo absent)"
+  echo "forward rules: $(rule_handles | wc -l)   nat table: $(nft list table ip luminos_glm >/dev/null 2>&1 && echo yes || echo no)   ip_forward=$(sysctl -n net.ipv4.ip_forward)"
+}
+
+case "${1:-status}" in
+  up) up;; down) down;; status) status;;
+  exec)
+    shift; [ "${1:-}" = "--" ] && shift
+    [ -n "${SUDO_UID:-}" ] || { echo "exec must be called through sudo (needs SUDO_UID)" >&2; exit 1; }
+    have_ns || up >/dev/null
+    exec ip netns exec "$NS" setpriv --reuid="$SUDO_UID" --regid="$SUDO_GID" --init-groups --inh-caps=-all -- "$@" ;;
+  *) echo "usage: $0 up|down|status|exec -- cmd" >&2; exit 2;;
+esac

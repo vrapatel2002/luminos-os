@@ -50,6 +50,17 @@ try:
     # DECISION 162: GLM-only app control (windows, launch, accessibility clicks/text, keys, screenshot).
     c.setdefault("mcpServers",{})["luminos-desktop"]={"command":"/usr/bin/python3",
         "args":[os.path.expanduser("~/luminos-os/scripts/luminos-desktop-mcp")]}
+    # DECISION 163: the GLM app runs inside netns claude-glm. Servers that must act on the REAL laptop (host-shell:
+    # localhost services; luminos-desktop: apps it launches) go through luminos-mcp-share, whose broker is started by
+    # the user systemd manager, i.e. in the normal namespace. All entries keep the normal runtime dir so the client
+    # stubs find the broker sockets (the app itself gets a private XDG_RUNTIME_DIR, see open).
+    share=os.path.expanduser("~/luminos-os/scripts/luminos-mcp-share")
+    for n in ("host-shell","luminos-desktop"):
+        e=c["mcpServers"].get(n)
+        if e and os.path.basename(e.get("command",""))!="luminos-mcp-share":
+            c["mcpServers"][n]={**e,"command":share,"args":["client","glm-"+n,"--",e["command"],*(e.get("args") or [])]}
+    for n,e in c["mcpServers"].items():
+        e.setdefault("env",{})["XDG_RUNTIME_DIR"]="/run/user/%d" % os.getuid()
     tf=mx.get("preferences",{}).get("localAgentModeTrustedFolders")
     if tf: c.setdefault("preferences",{})["localAgentModeTrustedFolders"]=sorted(set(tf)|set(c.get("preferences",{}).get("localAgentModeTrustedFolders",[])))
 except Exception as e:
@@ -78,13 +89,40 @@ case "${1:-open}" in
     fi
     systemctl --user start luminos-glm-proxy
     for _ in $(seq 10); do curl -fs 127.0.0.1:4141/health >/dev/null && break; sleep 0.5; done
+    # DECISION 163 / BUG-224: own network namespace (own vsock port 51234 for the Cowork sandbox) and own
+    # XDG_RUNTIME_DIR (own claude-cowork-vm.sock), so the GLM sandbox never collides with the Max app's.
+    NETNS="$HOME/luminos-os/scripts/luminos-glm-netns"; U=$(id -u); R="/run/user/$U"
+    if ! sudo -n "$NETNS" up >/dev/null; then
+      echo "luminos-claude-glm: could not set up the GLM network namespace (sudo -n $NETNS up)" >&2
+      command -v notify-send >/dev/null && notify-send "Claude (GLM-5.3)" "Could not set up its private network — see: sudo luminos-glm-netns up"
+      exit 1
+    fi
+    GRT="$R/claude-glm-rt"; mkdir -p "$GRT"; chmod 700 "$GRT"
+    BR="$R/luminos-glm-proxy.sock"   # 127.0.0.1:4141 inside the netns -> unix socket -> proxy on the real 127.0.0.1:4141
+    systemctl --user is-active --quiet luminos-glm-proxy-bridge || systemd-run --user --quiet --collect \
+      --unit=luminos-glm-proxy-bridge /usr/bin/socat "UNIX-LISTEN:$BR,fork,mode=600,unlink-early" TCP:127.0.0.1:4141
+    systemctl --user is-active --quiet luminos-glm-proxy-ns || systemd-run --user --quiet --collect \
+      --unit=luminos-glm-proxy-ns sudo -n "$NETNS" exec -- /usr/bin/socat TCP-LISTEN:4141,bind=127.0.0.1,fork,reuseaddr "UNIX-CONNECT:$BR"
+    E=(env -i "HOME=$HOME" "USER=$(id -un)" "LOGNAME=$(id -un)" "SHELL=${SHELL:-/bin/bash}"
+       "XDG_RUNTIME_DIR=$GRT" "DBUS_SESSION_BUS_ADDRESS=unix:path=$R/bus" "PIPEWIRE_RUNTIME_DIR=$R" "PULSE_SERVER=unix:$R/pulse/native")
     while IFS= read -r line; do
-      case "$line" in KDE_*|XDG_*|WAYLAND_DISPLAY=*|DISPLAY=*|XAUTHORITY=*|DBUS_SESSION_BUS_ADDRESS=*|QT_*|LANG=*|PATH=*) eval "export $line";; esac
+      case "$line" in
+        XDG_RUNTIME_DIR=*|DBUS_SESSION_BUS_ADDRESS=*) ;;
+        WAYLAND_DISPLAY=*) E+=("WAYLAND_DISPLAY=$R/${line#WAYLAND_DISPLAY=}");;   # absolute: XDG_RUNTIME_DIR differs
+        KDE_*|XDG_*|DISPLAY=*|XAUTHORITY=*|QT_*|LANG=*|LC_*|PATH=*|SSH_AUTH_SOCK=*) E+=("$line");;
+      esac
     done < <(systemctl --user show-environment)
-    # --user-data-dir (not CLAUDE_USER_DATA_DIR): Electron applies it before the single-instance
-    # lock, so this really is a second app; the env var is applied too late and the launch just
-    # hands off to the running Max app and quits.
-    exec systemd-run --user --scope --quiet --unit="app-claude-glm-$$" \
-      /usr/bin/claude-desktop --user-data-dir="$GLMDIR" ;;
+    # --user-data-dir (not CLAUDE_USER_DATA_DIR): Electron applies it before the single-instance lock, so this really
+    # is a second app. Runs as Shawn inside the netns (luminos-glm-netns exec drops root via setpriv).
+    systemd-run --user --scope --quiet --unit="app-claude-glm-$$" \
+      sudo -n "$NETNS" exec -- "${E[@]}" /usr/bin/claude-desktop --user-data-dir="$GLMDIR" "${@:2}"
+    rc=$?
+    # RAM rule: once the GLM app is really gone, take the bridge, socats and namespace down again.
+    sleep 2
+    if ! pgrep -f -- "--user-data-dir=$GLMDIR" >/dev/null; then
+      systemctl --user stop luminos-glm-proxy-ns luminos-glm-proxy-bridge 2>/dev/null || true
+      sudo -n "$NETNS" down >/dev/null 2>&1 || true
+    fi
+    exit $rc ;;
   *) echo "usage: luminos-claude-glm [open|setup|status]" >&2; exit 2 ;;
 esac

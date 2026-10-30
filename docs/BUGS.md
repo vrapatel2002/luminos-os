@@ -8739,3 +8739,6 @@ file left by the killed GLM helper → **restart the Max app** (luminos-claude-r
 GLM's Cowork sandbox then works only while the Max sandbox is down; (b) run the GLM app in its own network namespace
 with `net.vsock.child_ns_mode=local` (kernel 7.0.5 has vsock netns: /proc/sys/net/vsock/{ns_mode,child_ns_mode}
 = global) so it gets its own port 51234 → both sandboxes at once; needs root at launch + veth/NAT for network.
+**Update 2026-10-30 19:40 — FIXED by DECISION 163** (Shawn picked "both at once"): GLM window runs in netns claude-glm with
+vsock ns_mode=local and its own XDG_RUNTIME_DIR; proven with two Cowork sandboxes running concurrently and a real GLM
+task in its own sandbox. Max app: restart once to drop the stale socket file.

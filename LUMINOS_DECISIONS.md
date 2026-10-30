@@ -8825,3 +8825,28 @@ luminos-glm-skills + install on every launch while the GLM window is closed. Pro
 Found 1 local plugins", and read through AT-SPI in the GLM window itself (relaunched once with
 --force-renderer-accessibility, Electron needs it): Customize → Skills → "Created by you · 5": build, deep-research,
 llm-council, … "by Luminos". Window relaunched normally afterwards, accessibility back off.
+
+## DECISION 163 — the GLM Claude window runs in its own network namespace so both Cowork sandboxes can run at once
+# [CHANGE: cowork | 2026-10-30]
+**Problem (BUG-224):** "Failed to start Claude's workspace — vsock listen on port 51234: address already in use". Every
+Claude Desktop instance spawns `cowork-linux-helper`, which listens on host vsock 51234 (hard-coded, no flag) and on
+`$XDG_RUNTIME_DIR/claude-cowork-vm.sock`; with the Max app's sandbox up, the GLM window's could not start, and its helper
+also replaced the shared unix socket file (would have broken new Max connections).
+**Shawn chose "both at once"** over "one at a time".
+**Built:** `scripts/luminos-glm-netns up|down|status|exec` (root via sudo -n): netns `claude-glm` created while
+`net.vsock.child_ns_mode=local` → own vsock port space; veth 10.77.0.1/30↔10.77.0.2 + masquerade; two tagged accept
+rules in `inet luminos forward` (policy drop); DNS from resolved's upstream list; `exec` runs a command inside as the
+caller (setpriv, groups kept — kvm for the VM). `scripts/luminos-claude-glm open` now: netns up → socat bridge
+(127.0.0.1:4141 inside → unix socket → the real proxy) → app inside the netns with a private XDG_RUNTIME_DIR
+(`/run/user/1000/claude-glm-rt`, own claude-cowork-vm.sock; WAYLAND_DISPLAY made absolute, bus/pipewire/pulse explicit)
+→ after the app quits, bridges stopped + netns down (RAM rule). host-shell and luminos-desktop reach the app through
+luminos-mcp-share brokers (DECISION 159), which the user systemd manager starts in the NORMAL namespace, so GLM's laptop
+commands still see localhost services and the apps it launches run normally; every GLM MCP entry pins
+XDG_RUNTIME_DIR=/run/user/1000 so the stubs find the broker sockets. Extra args after `open` go to the app.
+**Proven 19:35:** vsock bind 51234 fails outside / succeeds inside; GLM helper listening on 51234 inside the netns while
+the Max helper holds 51234 outside; two qemu sandboxes at once (Max 17723 since 18:23, untouched; GLM 47840 in netns
+claude-glm); a real GLM Cowork task (typed via the new app-control tools) ran `echo glm-sandbox-ok && uname -n` in its
+own sandbox → "glm-sandbox-ok / claude"; GLM quit → netns, veth, rules, NAT, socats gone, ip_forward back to 0.
+**Known:** child_ns_mode cannot be set back to global until reboot (EBUSY) — only new namespaces affected. The Max app
+still holds a stale claude-cowork-vm.sock file left by the old collision → restart the Max app once.
+**Undo:** `sudo luminos-glm-netns down`, and in luminos-claude-glm `open` go back to launching the app directly.
