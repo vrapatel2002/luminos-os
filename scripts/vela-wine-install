@@ -1,0 +1,206 @@
+#!/usr/bin/python3
+"""vela-wine-install — add a Windows game to Lutris with the settings Vela needs, in one step.
+
+  vela-wine-install add <setup.exe|setup.msi|game.exe|game folder> [--name "Game Name"]
+  vela-wine-install gui                  # simple dialogs (also in the app launcher: "Add Game to Vela")
+  vela-wine-install list
+  vela-wine-install test <slug>          # launch it once through Lutris (same path Vela uses)
+  vela-wine-install remove <slug>        # remove from Lutris (the game files and ~/Games/<slug> stay)
+
+What it sets for you (copied from Control Resonant, the game proven on Vela): Proton-CachyOS, DXVK (DX9-11),
+VKD3D-Proton (DX12), d3d_extras, DXVK-NVAPI (DLSS), esync+fsync, its own Wine prefix in ~/Games/<slug> (ext4).
+Global Lutris options (dGPU gate, MangoHud) still apply. Vela reads this same Lutris library, so the game shows on
+Vela's Home after the next Vela start. Installer mode: runs the setup inside the game's own prefix through Lutris,
+then asks which .exe is the game. Lutris must be closed (it is a database write). pga.db is backed up each run.
+[CHANGE: cowork | 2026-10-20]"""
+import os, re, sqlite3, shutil, subprocess, sys, time
+from pathlib import Path
+
+HOME = Path(os.environ.get("VELA_WI_HOME", Path.home()))
+DB = HOME / ".local/share/lutris/pga.db"
+CFG = HOME / ".config/lutris/games"
+GAMES = HOME / "Games"
+PROTON = "proton-cachyos-x86_64"
+SKIP = re.compile(r"(unins|setup|install|redist|vcredist|directx|dxsetup|dotnet|crash|report|helper|updater|"
+                  r"easyanticheat|battleye|ue4prereq|prereq|7z|cefprocess|quicksfv)", re.I)
+SKIPDIRS = ("/windows/", "/programdata/", "/common files/", "/microsoft", "/temp/", "/_commonredist", "/redist")
+
+def say(msg, title="vela-wine-install"):
+    print(msg)
+    if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+        subprocess.run(["kdialog", "--title", title, "--msgbox", msg], stderr=subprocess.DEVNULL)
+
+def die(msg):
+    say("ERROR: " + msg); sys.exit(1)
+
+def slugify(name):
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]", "-", name.lower())).strip("-")
+
+def lutris_running():
+    return subprocess.run(["pgrep", "-x", "lutris"], capture_output=True).returncode == 0 or \
+           subprocess.run(["pgrep", "-f", "^/usr/bin/python3? /usr/bin/lutris"], capture_output=True).returncode == 0
+
+def db():
+    if not DB.exists(): die(f"no Lutris library at {DB}")
+    return sqlite3.connect(DB)
+
+def backup_db():
+    b = DB.with_name(f"pga.db.bak-vela-wi-{time.strftime('%Y%m%d-%H%M%S')}"); shutil.copy2(DB, b); return b
+
+def find_exes(roots):
+    out = []
+    for root in roots:
+        for p in Path(root).rglob("*.exe"):
+            low = str(p).lower().replace("\\", "/")
+            if any(d in low for d in SKIPDIRS) or SKIP.search(p.name): continue
+            try: out.append((p.stat().st_size, p))
+            except OSError: pass
+    return [p for _, p in sorted(out, reverse=True)[:15]]
+
+def choose(exes, name):
+    if not exes: die("no game .exe found — run `add` again with the game's .exe directly")
+    if len(exes) == 1: return exes[0]
+    if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+        args = ["kdialog", "--title", f"{name}: which one is the game?", "--radiolist", "Pick the game's .exe (biggest first):"]
+        for i, e in enumerate(exes): args += [str(i), str(e), "on" if i == 0 else "off"]
+        r = subprocess.run(args, capture_output=True, text=True)
+        if r.returncode != 0: die("cancelled")
+        return exes[int(r.stdout.strip())]
+    for i, e in enumerate(exes): print(f"  [{i}] {e}")
+    return exes[int(input("which one is the game? [0] ") or 0)]
+
+def write_yml(configpath, exe, prefix):
+    CFG.mkdir(parents=True, exist_ok=True)
+    q = lambda s: "'" + str(s).replace("'", "''") + "'"
+    (CFG / f"{configpath}.yml").write_text(
+        "# written by vela-wine-install [CHANGE: cowork | 2026-10-20]\n"
+        f"game:\n  exe: {q(exe)}\n  working_dir: {q(Path(exe).parent)}\n  prefix: {q(prefix)}\n"
+        f"wine:\n  version: {PROTON}\n  fsr: false\n  dxvk: true\n  vkd3d: true\n  d3d_extras: true\n"
+        "  dxvk_nvapi: true\n  esync: true\n  fsync: true\n  battleye: false\n  eac: false\n")
+
+def add(path, name):
+    src = Path(path).expanduser().resolve()
+    if not src.exists(): die(f"not found: {src}")
+    if lutris_running(): die("close Lutris first (this writes its library database)")
+    installer = src.is_file() and (src.suffix.lower() == ".msi" or re.search(r"setup|install", src.name, re.I) is not None)
+    if not name:
+        name = (src.parent.name if src.is_file() and not installer else src.stem if installer else src.name)
+        name = re.sub(r"[_.]+", " ", name).strip()
+    slug = slugify(name)
+    con = db()
+    if con.execute("select 1 from games where slug=? and installed=1", (slug,)).fetchone():
+        die(f"'{name}' ({slug}) is already in Lutris — `vela-wine-install remove {slug}` first to redo it")
+    prefix = GAMES / slug; prefix.mkdir(parents=True, exist_ok=True)
+    now = int(time.time()); configpath = f"{slug}-{now}"
+    bak = backup_db()
+    first = src if src.is_file() else None
+    if src.is_dir(): first = choose(find_exes([src]), name)
+    write_yml(configpath, first, prefix)
+    cur = con.execute("insert into games (name,slug,platform,runner,directory,installed,installed_at,configpath,updated,"
+                      "has_custom_banner,has_custom_icon,has_custom_coverart_big,playtime) values "
+                      "(?,?,'Windows','wine',?,1,?,?,?,0,0,0,0)", (name, slug, str(prefix), now, configpath, now))
+    gid = cur.lastrowid; con.commit(); con.close()
+    if installer:
+        say(f"The {name} installer opens next, inside its own Proton prefix.\n\n"
+            "Install to the suggested folder (it is inside the prefix). Untick any 'launch game' box at the end.\n"
+            "Come back to this window when the installer has closed.")
+        subprocess.Popen(["lutris", f"lutris:rungameid/{gid}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            subprocess.run(["kdialog", "--title", name, "--msgbox", "Click OK when the installer has FINISHED and closed."])
+        else:
+            input("Press Enter when the installer has finished... ")
+        subprocess.run(["pkill", "-x", "lutris"]); time.sleep(2)
+        game = choose(find_exes([prefix / "drive_c"]), name)
+        write_yml(configpath, game, prefix)
+        first = game
+    print(f"added: {name}  (Lutris id {gid}, slug {slug})\n  exe    {first}\n  prefix {prefix}\n  config {CFG}/{configpath}.yml"
+          f"\n  db backup {bak}")
+    verify(slug)
+    say(f"{name} is in Lutris with Vela's settings.\nTest it here: vela-wine-install test {slug}\nThen it shows on Vela's Home.")
+
+def verify(slug):
+    con = db(); row = con.execute("select id,name,configpath,installed from games where slug=?", (slug,)).fetchone(); con.close()
+    ok = row and row[3] == 1 and (CFG / f"{row[2]}.yml").exists()
+    import yaml
+    y = yaml.safe_load((CFG / f"{row[2]}.yml").read_text()) if ok else {}
+    exe_ok = ok and Path(y["game"]["exe"]).exists()
+    print(f"  check: library row {'OK' if ok else 'MISSING'}, config {'OK' if ok else 'MISSING'}, exe {'OK' if exe_ok else 'MISSING'}")
+    if not (ok and exe_ok): die("verification failed (see above)")
+
+def kd(*args):
+    r = subprocess.run(["kdialog", "--title", "Add game to Vela", *args], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+def pick_game(label):
+    rows = list(db().execute("select slug,name from games where installed=1 order by name"))
+    if not rows: say("No games in the library yet."); return None
+    args = ["--radiolist", label]
+    for i, (slug, name) in enumerate(rows): args += [slug, name, "on" if i == 0 else "off"]
+    return kd(*args)
+
+def gui():
+    """Plain native dialogs only (Shawn 2026-10-20: simple, no fancy UI)."""
+    while True:
+        what = kd("--menu", "What do you want to do?", "add", "Add a Windows game",
+                  "test", "Test a game (launch it once)", "remove", "Remove a game", "list", "Show my games")
+        if what is None: return
+        if lutris_running() and what in ("add", "remove"):
+            if subprocess.run(["kdialog", "--title", "Add game to Vela", "--warningyesno",
+                               "Lutris is open. Close it now so the game can be added?"]).returncode != 0: continue
+            subprocess.run(["pkill", "-x", "lutris"]); time.sleep(2)
+        if what == "add":
+            kind = kd("--menu", "What do you have?", "setup", "An installer (setup.exe / .msi)",
+                      "folder", "A game that is already installed (its folder)")
+            if kind is None: continue
+            path = kd("--getopenfilename", str(Path.home() / "Downloads"), "Windows installer (*.exe *.msi)") \
+                if kind == "setup" else kd("--getexistingdirectory", "/mnt/win-os/Games" if Path("/mnt/win-os/Games").is_dir() else str(Path.home()))
+            if not path: continue
+            src = Path(path)
+            guess = re.sub(r"[_.]+", " ", src.stem if kind == "setup" else src.name).strip()
+            name = kd("--inputbox", "Game name (as it will show on Vela):", guess)
+            if not name: continue
+            try:
+                add(path, name)
+            except SystemExit:
+                continue
+            slug = slugify(name)
+            if subprocess.run(["kdialog", "--title", "Add game to Vela", "--yesno",
+                               f"{name} is added.\n\nLaunch it once now to check it starts?"]).returncode == 0:
+                main(["", "test", slug])
+            return
+        if what == "test":
+            slug = pick_game("Which game should launch?")
+            if slug: main(["", "test", slug])
+        if what == "remove":
+            slug = pick_game("Which game should be removed? (its files stay on disk)")
+            if slug and subprocess.run(["kdialog", "--title", "Add game to Vela", "--warningyesno",
+                                        f"Remove '{slug}' from Lutris and Vela?"]).returncode == 0:
+                try: main(["", "remove", slug]); say(f"Removed {slug}. Its files are still on disk.")
+                except SystemExit: pass
+        if what == "list":
+            say("\n".join(n for (n,) in db().execute("select name from games where installed=1 order by name")) or "No games yet.")
+
+def main(a):
+    if len(a) < 2 or a[1] in ("-h", "--help"): print(__doc__); return
+    cmd = a[1]
+    if cmd == "gui": gui(); return
+    if cmd == "add" and len(a) >= 3:
+        name = a[a.index("--name") + 1] if "--name" in a else None
+        add(a[2], name)
+    elif cmd == "list":
+        for r in db().execute("select id,slug,name from games where installed=1 order by id"): print(*r, sep="\t")
+    elif cmd == "test" and len(a) == 3:
+        r = db().execute("select id from games where slug=?", (a[2],)).fetchone() or die("no such game")
+        subprocess.run(["lutris", f"lutris:rungameid/{r[0]}"])
+    elif cmd == "remove" and len(a) == 3:
+        if lutris_running(): die("close Lutris first")
+        con = db(); r = con.execute("select id,configpath from games where slug=?", (a[2],)).fetchone() or die("no such game")
+        backup_db(); con.execute("delete from games where id=?", (r[0],)); con.commit()
+        y = CFG / f"{r[1]}.yml"
+        if y.exists(): y.rename(y.with_suffix(".yml.removed"))
+        print(f"removed {a[2]} from Lutris (files and ~/Games/{a[2]} kept; config renamed to .yml.removed)")
+    else:
+        print(__doc__); sys.exit(2)
+
+if __name__ == "__main__":
+    main(sys.argv)

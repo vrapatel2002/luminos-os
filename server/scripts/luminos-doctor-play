@@ -1,0 +1,17 @@
+#!/bin/bash
+# [CHANGE: claude | 2026-10-18] drive a real Jellyfin HLS transcode like a 1080p client; save first segments
+set -e
+Q="$1"; OUT=/tmp/doctor-hw/play-$2; mkdir -p $OUT; cd $OUT
+T=$(sudo -n cat /root/.jellyfin-token); H(){ printf 'header = "X-Emby-Token: %s"\nheader = "Content-Type: application/json"\n' "$T"; }
+J=http://127.0.0.1:8096
+U=$(H | curl -s -K - $J/Users | python3 -c 'import json,sys;print([u["Id"] for u in json.load(sys.stdin) if u["Name"]=="shawn"][0])')
+I=$(H | curl -s -K - "$J/Items?searchTerm=$Q&Recursive=true&IncludeItemTypes=Episode,Movie&userId=$U" | python3 -c 'import json,sys;print(json.load(sys.stdin)["Items"][0]["Id"])')
+B='{"DeviceProfile":{"MaxStreamingBitrate":8000000,"DirectPlayProfiles":[],"TranscodingProfiles":[{"Container":"ts","Type":"Video","VideoCodec":"h264","AudioCodec":"aac","Protocol":"hls","MaxAudioChannels":"2"}],"CodecProfiles":[{"Type":"Video","Codec":"h264","Conditions":[{"Condition":"LessThanEqual","Property":"Width","Value":"1920"}]}],"SubtitleProfiles":[{"Format":"srt","Method":"External"}]}}'
+R=$(H | curl -s -K - -X POST -d "$B" "$J/Items/$I/PlaybackInfo?UserId=$U&MaxStreamingBitrate=8000000&StartTimeTicks=9000000000&AutoOpenLiveStream=true")
+TU=$(echo "$R" | python3 -c 'import json,sys;print(json.load(sys.stdin)["MediaSources"][0]["TranscodingUrl"])')
+echo "$TU" | grep -o -E "(TranscodeReasons|VideoBitrate|MaxWidth|VideoCodec)=[^&]*" | tr '\n' ' '; echo
+H | curl -s -K - "$J$TU" > master.m3u8
+MAIN=$(grep -v '^#' master.m3u8 | head -1)
+H | curl -s -K - "$J/videos/$I/$MAIN" > main.m3u8
+for s in $(grep -v '^#' main.m3u8 | head -3); do H | curl -s -m 40 -K - "$J/videos/$I/$s" >> seg.ts; done
+ls -la seg.ts

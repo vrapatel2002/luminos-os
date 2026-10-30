@@ -1,0 +1,13 @@
+# event histogram
+#
+# trigger info: hist:keys=method,devid:vals=hitcount:sort=hitcount.descending:size=1024 [active]
+#
+
+{ method: 1398162756, devid:    1179841 } hitcount:          8
+{ method: 1398162756, devid:    1179811 } hitcount:          8
+{ method: 1398162756, devid:    1179808 } hitcount:          8
+
+Totals:
+    Hits: 24
+    Entries: 3
+    Dropped: 0

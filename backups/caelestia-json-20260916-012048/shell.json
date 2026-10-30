@@ -1,0 +1,76 @@
+{
+    "bar": {
+        "entries": [
+            {
+                "enabled": true,
+                "id": "logo"
+            },
+            {
+                "enabled": true,
+                "id": "spacer"
+            },
+            {
+                "enabled": true,
+                "id": "tray"
+            },
+            {
+                "enabled": true,
+                "id": "clock"
+            },
+            {
+                "enabled": true,
+                "id": "statusIcons"
+            },
+            {
+                "enabled": true,
+                "id": "power"
+            }
+        ],
+        "workspaces": {
+            "maxWindowIcons": 8,
+            "showWindows": true
+        }
+    },
+    "dashboard": {
+        "showDashboard": true,
+        "showMedia": true,
+        "showOnHover": true,
+        "showPerformance": true,
+        "showWeather": true
+    },
+    "launcher": {
+        "showOnHover": true,
+        "useFuzzy": {
+            "apps": false
+        }
+    },
+    "session": {
+        "commands": {
+            "hibernate": [
+                "systemctl",
+                "suspend"
+            ],
+            "logout": [
+                "qdbus6",
+                "org.kde.Shutdown",
+                "/Shutdown",
+                "logout"
+            ],
+            "reboot": [
+                "qdbus6",
+                "org.kde.Shutdown",
+                "/Shutdown",
+                "logoutAndReboot"
+            ],
+            "shutdown": [
+                "qdbus6",
+                "org.kde.Shutdown",
+                "/Shutdown",
+                "logoutAndShutdown"
+            ]
+        },
+        "icons": {
+            "hibernate": "bedtime"
+        }
+    }
+}

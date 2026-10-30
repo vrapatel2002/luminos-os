@@ -2,13 +2,17 @@
 # behind a Claude-Desktop-shaped API on 127.0.0.1:4142. Loads a model only on request; unloads after
 # CODER_IDLE_S of silence and re-masks nvidia-powerd so the dGPU can sleep again.
 [Unit]
-Description=Luminos local coder gateway (Qwen3.6 writer / Qwen3.8 reviewer) on 127.0.0.1:4142
+Description=Luminos local coder gateway (Qwen3.6 Heretic writer / Qwen3.8 Heretic reviewer) on 127.0.0.1:4142
 
 [Service]
 ExecStart=/usr/bin/python3 %h/luminos-os/scripts/luminos-coder-gateway
 Environment=CODER_IDLE_S=900
 # Claude Code in the Desktop Code tab sends ~74 000 tokens (system prompt + all MCP tool schemas) — 64K was rejected (HTTP 400).
 Environment=CODER_WRITER_CTX=131072
+# [CHANGE: claude-code | 2026-10-24] Shawn: "i will be using heretic for both". Heretic-abliterated builds requantized
+# with Unsloth's own per-tensor recipes (tests/coder/RESULTS.md, Heretic section). Originals stay in models/coder.
+Environment=CODER_WRITER_GGUF=%h/.local/share/luminos/models/abliterated/Qwen3.6-35B-A3B-heretic-UD-Q3_K_XL.gguf
+Environment=CODER_REVIEWER_GGUF=%h/.local/share/luminos/models/abliterated/Qwen3.8-27B-heretic-UD-Q2_K_XL.gguf
 Restart=on-failure
 RestartSec=3
 KillMode=mixed

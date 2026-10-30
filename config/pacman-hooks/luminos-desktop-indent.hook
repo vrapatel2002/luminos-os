@@ -1,0 +1,49 @@
+# luminos-desktop-indent — keep the Plasma desktop clear of the Caelestia bar
+# across plasma-desktop upgrades.
+# [CHANGE: claude-code | 2026-09-16] BUG-163 / DECISION 111
+#
+# WHY
+# ---
+# plasmashell builds `availableScreenRect` from its OWN Plasma panels. There are
+# none on this machine (DECISION 68 - the panel was deleted deliberately, and
+# that is what freed Caelestia's launcher), and the left edge is a third-party
+# layer-shell bar. KWin reserves that strip for real windows; plasmashell cannot
+# see it at all, because Wayland has no equivalent of X11's _NET_WORKAREA - the
+# exclusive zone is a private conversation between the bar and the compositor.
+# So the desktop believes the whole screen is free and places icon #1 at 0,0,
+# underneath the bar.
+#
+# The fix floors the rect inside contents/ui/main.qml. Preferred delivery is the
+# user-path overlay (`luminos-kde-desktop-overlay`), which touches nothing pacman
+# owns. This hook exists for the case where that overlay turns out to be inert -
+# whether ~/.local/share shadows /usr/share through `X-Plasma-RootPath` is not
+# something you can read off a filesystem - and the packaged file has to be
+# edited instead.
+#
+# WHY A HOOK AND NOT A ONE-TIME EDIT
+# ----------------------------------
+# main.qml belongs to plasma-desktop, so every upgrade restores it. A one-time
+# edit reverts silently and the icons slide back under the bar with nothing in
+# any log to say why. `--system` re-snapshots the freshly restored file as the
+# new pristine copy and re-derives the patch from it, so the patch follows
+# upstream instead of going stale.
+#
+# WHAT THIS COSTS
+# ---------------
+# `pacman -Qkk plasma-desktop` will report contents/ui/main.qml as altered. That
+# is expected and correct - same trade already accepted for the Servarr skins.
+# Undo: sudo luminos-kde-desktop-overlay --system-remove
+#
+# Install to /etc/pacman.d/hooks/luminos-desktop-indent.hook
+# (`sudo luminos-kde-desktop-overlay --system` does this for you)
+
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = plasma-desktop
+
+[Action]
+Description = Luminos: re-applying the desktop indent past the Caelestia bar (BUG-163)...
+When = PostTransaction
+Exec = /usr/local/bin/luminos-kde-desktop-overlay --system

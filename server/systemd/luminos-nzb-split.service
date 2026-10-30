@@ -1,0 +1,14 @@
+# [CHANGE: cowork | 2026-10-10] DECISION 140 - load the NZBGet Wi-Fi split table at boot.
+[Unit]
+Description=Luminos: route NZBGet port-443 server over Wi-Fi
+After=network-pre.target
+Before=nzbget.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/luminos/luminos-nzb-split.nft
+ExecStop=/usr/sbin/nft delete table inet luminos_nzbsplit
+
+[Install]
+WantedBy=multi-user.target

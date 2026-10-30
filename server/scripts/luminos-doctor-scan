@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+# [CHANGE: claude | 2026-10-18] Playback Doctor Phase 1 -- library census + client prediction. READ-ONLY.
+"""luminos-doctor-scan [scan|report]   (run as root on the media server)
+scan:   ffprobe headers of every video under Jellyfin's library roots -> /var/lib/luminos-doctor/census.jsonl
+report: print a markdown summary of census.jsonl (counts, per client, worst files, rule table)."""
+import json, os, subprocess, sys, time, urllib.request
+FP = '/usr/lib/jellyfin-ffmpeg/ffprobe'
+BASE, OUT = 'http://127.0.0.1:8096', '/var/lib/luminos-doctor/census.jsonl'
+CACHE = '/var/lib/jellyfin/data/subtitles'
+VIDEO_EXT = ('.mkv', '.mp4', '.m4v', '.avi', '.ts', '.m2ts', '.webm', '.mov', '.wmv')
+SUB_EXT = ('.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx', '.sup')
+TEXT_SUBS = {'subrip', 'srt', 'mov_text', 'webvtt', 'text'}
+STYLED_SUBS = {'ass', 'ssa'}  # text, but Roku can't render -> burn-in
+ENG = {'eng', 'en', 'english'}
+WIFI_ROKU_MBPS = 30
+# ---- RULE TABLE: (client, test, verdict, reason, confident?) -- verdict rank RISK > Transcode > DirectStream
+#  Every rule is evaluated; the client's verdict is the worst one that fired (DirectPlay if none).
+def R(c, t, v, why, sure): return (c, t, v, why, sure)
+RULES = [
+ R('ALL', lambda f: f['v'].get('codec') == 'av1', 'RISK', 'AV1: server UHD620 cannot decode AV1 if a transcode is needed', True),
+ R('ALL', lambda f: f['v'].get('dv_profile') == 5, 'RISK', 'DV P5: no HDR10 base layer -> purple/green on non-DV path', True),
+ R('ALL', lambda f: not f['eng_subs'], 'RISK', 'no English subtitle (embedded or sidecar)', True),
+ R('ALL', lambda f: f['first_eng_forced'], 'RISK', 'first English sub is Forced (client may pick it -> "no subs")', True),
+ R('ALL', lambda f: f['aud_only_lossless'], 'RISK', 'only DTS/TrueHD audio (no AC3/EAC3/AAC fallback track)', True),
+ R('ALL', lambda f: not f['eng_audio'], 'DirectPlay', 'note: no English audio track (check this is intended)', True),
+ R('ROKU', lambda f: f['v'].get('codec') not in ('h264', 'hevc', 'vp9'), 'Transcode', 'video codec not Roku-native', True),
+ R('ROKU', lambda f: f['container'] not in ('matroska,webm', 'mov,mp4,m4a,3gp,3g2,mj2'), 'DirectStream', 'container remux', False),
+ R('ROKU', lambda f: f['def_audio'] in ('dts', 'truehd'), 'DirectStream', 'default audio DTS/TrueHD -> audio transcode', True),
+ R('ROKU', lambda f: f['def_sub'] in ('image', 'styled'), 'RISK', 'default/auto sub is ASS/PGS -> burn-in transcode, seek resets', True),
+ R('ROKU', lambda f: (f['mbps'] or 0) > WIFI_ROKU_MBPS, 'RISK', 'bitrate > 30 Mbps on wifi Roku -> buffering', True),
+ R('ROKU', lambda f: f['v'].get('dv_profile') in (7, 8) , 'DirectPlay', 'DV P7/P8 plays as HDR10 base (TV DV support unknown)', False),
+ R('ROKU', lambda f: f['hdr'] != 'SDR' and f['roku_tx'], 'RISK', 'HDR source transcoded, tonemapping off -> washed out', True),
+ R('ANDROID', lambda f: f['v'].get('dv_profile') == 5, 'RISK', 'Pixel 9 has no DV decoder; P5 -> purple (or transcode)', False),
+ R('ANDROID', lambda f: f['def_audio'] in ('dts', 'truehd'), 'DirectPlay', 'DTS/TrueHD via ExoPlayer ffmpeg ext (assumed)', False),
+ R('ANDROID', lambda f: f['def_sub'] == 'styled', 'DirectPlay', 'ASS shown as plain text by ExoPlayer (assumed)', False),
+ R('ANDROID', lambda f: (f['mbps'] or 0) > 20, 'Transcode', 'away-from-home (Tailscale DERP) bitrate cap; home = DirectPlay', False),
+ R('WEB', lambda f: f['container'] != 'mov,mp4,m4a,3gp,3g2,mj2', 'DirectStream', 'MKV remuxed to HLS/fMP4 for Chrome', False),
+ R('WEB', lambda f: f['v'].get('codec') == 'hevc', 'Transcode', 'HEVC in Chrome depends on GPU/OS support', False),
+ R('WEB', lambda f: f['hdr'] != 'SDR', 'RISK', 'HDR in Chrome usually transcoded, tonemapping off -> washed out', False),
+ R('WEB', lambda f: f['def_audio'] in ('dts', 'truehd', 'ac3', 'eac3'), 'DirectStream', 'Chrome lacks AC3/EAC3/DTS/TrueHD -> audio transcode', True),
+]
+RANK = {'DirectPlay': 0, 'DirectStream': 1, 'Transcode': 2, 'RISK': 3}
+
+def jf_items():
+    try:
+        tok = open('/root/.jellyfin-token').read().strip()
+        req = urllib.request.Request(BASE + '/Items?Recursive=true&IncludeItemTypes=Movie,Episode&Fields=Path',
+                                     headers={'X-Emby-Token': tok})
+        items = json.load(urllib.request.urlopen(req, timeout=30))['Items']
+        return {i['Path']: i['Id'] for i in items if i.get('Path')}, \
+               json.load(urllib.request.urlopen(urllib.request.Request(BASE + '/Library/VirtualFolders',
+                                                headers={'X-Emby-Token': tok}), timeout=30))
+    except Exception as e:
+        sys.exit('Jellyfin API failed: %s' % e)
+
+def tag(s, k): return (s.get('tags') or {}).get(k) or (s.get('tags') or {}).get(k.upper())
+def hdr_type(v, path, idx):
+    for sd in v.get('side_data_list') or []:
+        if 'DOVI' in sd.get('side_data_type', ''): return 'DV'
+    if v.get('color_transfer') == 'arib-std-b67': return 'HLG'
+    if v.get('color_transfer') != 'smpte2084': return 'SDR'
+    # HDR10+ lives in per-frame SEI: read only the first video frame (a few MB, not the file)
+    r = subprocess.run([FP, '-v', 'quiet', '-select_streams', 'v:0', '-read_intervals', '%+#1', '-show_frames',
+                        '-show_entries', 'frame=side_data_list', '-of', 'json', path], capture_output=True, text=True, timeout=60)
+    return 'HDR10+' if 'SMPTE2094-40' in r.stdout else 'HDR10'
+
+def sidecars(path):
+    d, stem = os.path.dirname(path), os.path.splitext(os.path.basename(path))[0]
+    out = []
+    for n in sorted(os.listdir(d)):
+        if n.startswith(stem) and n.lower().endswith(SUB_EXT):
+            parts = n[len(stem):].lower().split('.')[1:-1]
+            out.append({'file': n, 'lang': next((p for p in parts if 2 <= len(p) <= 3), None), 'forced': 'forced' in parts})
+    return out
+
+def probe(path, item_id):
+    r = subprocess.run([FP, '-v', 'quiet', '-show_streams', '-show_format', '-of', 'json', path],
+                       capture_output=True, text=True, timeout=120)
+    j = json.loads(r.stdout or '{}'); fmt = j.get('format', {}); ss = j.get('streams', [])
+    vs = next((s for s in ss if s.get('codec_type') == 'video' and not (s.get('disposition') or {}).get('attached_pic')), {})
+    dovi = next((sd for sd in vs.get('side_data_list') or [] if 'DOVI' in sd.get('side_data_type', '')), {})
+    pf = vs.get('pix_fmt') or ''
+    v = {'codec': vs.get('codec_name'), 'profile': vs.get('profile'), 'level': vs.get('level'), 'pix_fmt': pf,
+         'bit_depth': 12 if '12' in pf else 10 if '10' in pf else 8, 'width': vs.get('width'), 'height': vs.get('height'),
+         'color_transfer': vs.get('color_transfer'), 'color_primaries': vs.get('color_primaries'),
+         'dv_profile': dovi.get('dv_profile'), 'dv_bl_compat_id': dovi.get('dv_bl_signal_compatibility_id')}
+    hdr = hdr_type(vs, path, 0)
+    if hdr == 'DV': hdr = 'DV(P%s)' % v['dv_profile']
+    def disp(s, k): return bool((s.get('disposition') or {}).get(k))
+    auds = [{'index': s['index'], 'codec': s.get('codec_name'), 'profile': s.get('profile'), 'channels': s.get('channels'),
+             'lang': tag(s, 'language'), 'default': disp(s, 'default'), 'title': tag(s, 'title')}
+            for s in ss if s.get('codec_type') == 'audio']
+    subs = []
+    for s in (x for x in ss if x.get('codec_type') == 'subtitle'):
+        c = s.get('codec_name') or ''
+        kind = 'text' if c in TEXT_SUBS else 'styled' if c in STYLED_SUBS else 'image'
+        warm = os.path.exists('%s/%s/%s/%d.srt' % (CACHE, item_id[:2], '-'.join(
+            (item_id[:8], item_id[8:12], item_id[12:16], item_id[16:20], item_id[20:])), s['index'])) if item_id else None
+        subs.append({'index': s['index'], 'codec': c, 'kind': kind, 'lang': tag(s, 'language'), 'forced': disp(s, 'forced'),
+                     'default': disp(s, 'default'), 'title': tag(s, 'title'), 'cache_warm': warm if kind != 'image' else None})
+    side = sidecars(path)
+    br = int(fmt.get('bit_rate') or 0)
+    return {'path': path, 'jf_id': item_id, 'size': int(fmt.get('size') or os.path.getsize(path)),
+            'container': fmt.get('format_name'), 'duration': round(float(fmt.get('duration') or 0)),
+            'bitrate': br, 'mbps': round(br / 1e6, 1), 'v': v, 'hdr': hdr, 'audio': auds, 'subs': subs, 'sidecars': side}
+
+def derive(f):
+    eng = [s for s in f['subs'] if (s['lang'] or '').lower() in ENG]
+    eng_side = [s for s in f['sidecars'] if (s['lang'] or '') in ENG]
+    f['eng_subs'] = len(eng) + len(eng_side)
+    f['first_eng_forced'] = bool(eng and eng[0]['forced'] and not eng_side)
+    # Jellyfin pick for user shawn (SubtitleMode=Always, sub+audio pref eng, PlayDefaultAudioTrack=False -- read
+    # from /Users 2026-10-18): first non-forced English embedded, else English sidecar, else forced English. [guess]
+    full = [s for s in eng if not s['forced']]
+    pick = full[0] if full else None if eng_side else (eng[0] if eng else None)
+    f['def_sub'] = pick['kind'] if pick else ('text' if eng_side else None)
+    a = next((x for x in f['audio'] if (x['lang'] or '') in ENG), None) or \
+        next((x for x in f['audio'] if x['default']), f['audio'][0] if f['audio'] else {})
+    f['eng_audio'] = any((x['lang'] or '') in ENG for x in f['audio'])
+    f['def_audio'] = a.get('codec')
+    f['aud_only_lossless'] = bool(f['audio']) and all(x['codec'] in ('dts', 'truehd') for x in f['audio'])
+    f['roku_tx'] = f['v'].get('codec') not in ('h264', 'hevc', 'vp9') or f['def_sub'] in ('image', 'styled')
+    f['predict'] = {}
+    for c in ('ROKU', 'ANDROID', 'WEB'):
+        hits = [(v, why, sure) for (rc, t, v, why, sure) in RULES if rc in (c, 'ALL') and t(f)]
+        worst = max([h[0] for h in hits], key=RANK.get, default='DirectPlay')
+        f['predict'][c] = {'verdict': worst, 'confident': all(h[2] for h in hits if RANK[h[0]] == RANK[worst]) if hits else True,
+                           'reasons': ['%s%s' % (why, '' if sure else ' [guess]') for (v, why, sure) in hits]}
+    return f
+
+def scan():
+    paths, folders = jf_items(); t0 = time.time()
+    roots = [l for vf in folders for l in vf['Locations']]
+    files = sorted(os.path.join(dp, n) for r in roots for dp, _, ns in os.walk(r) for n in ns if n.lower().endswith(VIDEO_EXT))
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    with open(OUT + '.tmp', 'w') as fh:
+        for p in files:
+            try: row = derive(probe(p, paths.get(p)))
+            except Exception as e: row = {'path': p, 'error': repr(e)}
+            fh.write(json.dumps(row) + '\n')
+    os.replace(OUT + '.tmp', OUT)
+    print('scanned %d files under %s in %.1fs -> %s (not in Jellyfin: %d)' % (
+        len(files), roots, time.time() - t0, OUT, sum(1 for p in files if p not in paths)))
+
+def report():
+    rows = [json.loads(l) for l in open(OUT)]; ok = [r for r in rows if 'error' not in r]
+    cnt = lambda key: sorted(__import__('collections').Counter(key(r) for r in ok).items(), key=lambda x: -x[1])
+    print('# Library census\n\nFiles: %d (errors: %d), %.0f GB\n' % (len(rows), len(rows) - len(ok), sum(r['size'] for r in ok) / 1e9))
+    for name, key in [('Video', lambda r: '%s %dbit %sp' % (r['v']['codec'], r['v']['bit_depth'], r['v']['height'])),
+                      ('HDR', lambda r: r['hdr']), ('Default audio', lambda r: r['def_audio']),
+                      ('Auto-picked sub kind', lambda r: r['def_sub']), ('English subs present', lambda r: r['eng_subs'] > 0),
+                      ('English audio present', lambda r: r['eng_audio'])]:
+        print('**%s:** %s  ' % (name, ', '.join('%s=%d' % kv for kv in cnt(key))))
+    print('\n| Client | DirectPlay | DirectStream | Transcode | RISK |\n|---|---|---|---|---|')
+    for c in ('ROKU', 'ANDROID', 'WEB'):
+        k = dict(cnt(lambda r: r['predict'][c]['verdict'])); print('| %s | %s |' % (c, ' | '.join(str(k.get(v, 0)) for v in RANK)))
+    score = lambda r: (sum(RANK[p['verdict']] for p in r['predict'].values()), r['mbps'])
+    print('\n## Worst 20\n\n| # | File | Mbps | Roku / Android / Web | Reasons |\n|---|---|---|---|---|')
+    for i, r in enumerate(sorted(ok, key=score, reverse=True)[:20], 1):
+        why = sorted({w for p in r['predict'].values() for w in p['reasons']})
+        print('| %d | %s | %s | %s | %s |' % (i, os.path.basename(r['path']), r['mbps'],
+              ' / '.join(r['predict'][c]['verdict'] for c in ('ROKU', 'ANDROID', 'WEB')), '; '.join(why)))
+    print('\n## Rule table\n\n| Client | Verdict | Rule | Confident |\n|---|---|---|---|')
+    for (c, _, v, why, sure) in RULES: print('| %s | %s | %s | %s |' % (c, v, why, 'yes' if sure else 'guess'))
+
+if __name__ == '__main__':
+    {'scan': scan, 'report': report}.get((sys.argv[1:] or ['scan'])[0], lambda: sys.exit(__doc__))()

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Talks to this TV's own External Control Protocol (port 8060): list apps, launch an app or input. -->
+<component name="EcpTask" extends="Task">
+    <interface>
+        <field id="command" type="string" />
+        <field id="arg" type="string" />
+        <field id="result" type="assocarray" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/EcpTask.brs" />
+</component>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- dumbtv home: a clock, your apps, your inputs. [CHANGE: claude-code | 2026-10-27] -->
+<component name="Home" extends="Scene">
+    <script type="text/brightscript" uri="pkg:/components/Home.brs" />
+    <children>
+        <Rectangle id="backdrop" width="1920" height="1080" color="0x0E1116FF" />
+
+        <Label id="clock" translation="[140,96]" color="0xEEF1F5FF">
+            <Font role="font" uri="font:BoldSystemFontFile" size="96" />
+        </Label>
+        <Label id="date" translation="[1080,136]" width="700" horizAlign="right" color="0xA3ACB9FF">
+            <Font role="font" uri="font:SystemFontFile" size="34" />
+        </Label>
+
+        <Label id="appsHeader" translation="[140,262]" text="Apps" color="0xA3ACB9FF">
+            <Font role="font" uri="font:BoldSystemFontFile" size="30" />
+        </Label>
+        <Group id="grid" translation="[140,316]" />
+
+        <Label id="inputsHeader" translation="[140,760]" text="Inputs" color="0xA3ACB9FF">
+            <Font role="font" uri="font:BoldSystemFontFile" size="30" />
+        </Label>
+        <Group id="inputs" translation="[140,814]" />
+
+        <Label id="status" translation="[140,560]" width="1640" wrap="true" color="0xF2A33AFF">
+            <Font role="font" uri="font:SystemFontFile" size="32" />
+        </Label>
+
+        <Label id="hint" translation="[140,1000]" text="★ options" color="0x6F7886FF">
+            <Font role="font" uri="font:SystemFontFile" size="26" />
+        </Label>
+
+        <Group id="toastBox" visible="false">
+            <Rectangle id="toastBg" color="0xEEF1F5FF" />
+            <Label id="toast" color="0x0E1116FF" horizAlign="center" vertAlign="center">
+                <Font role="font" uri="font:BoldSystemFontFile" size="30" />
+            </Label>
+        </Group>
+
+        <Group id="menu" visible="false" translation="[1240,0]">
+            <Rectangle width="680" height="1080" color="0x151A21F2" />
+            <Label id="menuTitle" translation="[60,90]" color="0xEEF1F5FF">
+                <Font role="font" uri="font:BoldSystemFontFile" size="40" />
+            </Label>
+            <Group id="menuItems" translation="[60,180]" />
+            <Label translation="[60,990]" text="◀ ▶ change · OK select · Back close" color="0x6F7886FF">
+                <Font role="font" uri="font:SystemFontFile" size="24" />
+            </Label>
+        </Group>
+
+        <Timer id="clockTimer" repeat="true" duration="10" />
+        <Timer id="toastTimer" repeat="false" duration="2" />
+    </children>
+</component>

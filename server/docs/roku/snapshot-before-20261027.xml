@@ -1,0 +1,98 @@
+# Roku snapshot BEFORE — 2026-10-27 (read-only ECP, 192.168.2.18)
+<?xml version="1.0" encoding="UTF-8" ?>
+<device-info>
+	<udn>280010c0-0000-1000-8000-489e9dc34ffa</udn>
+	<serial-number>X01300UCSJC2</serial-number>
+	<device-id>S10N434CSJC2</device-id>
+	<advertising-id>1d56279e-74d8-5a14-90ad-fd54209258c3</advertising-id>
+	<user-profile-type>none</user-profile-type>
+	<vendor-name>PHILIPS</vendor-name>
+	<model-name>65PUL7973/F6</model-name>
+	<model-number>G418X</model-number>
+	<model-region>CA</model-region>
+	<is-tv>true</is-tv>
+	<is-stick>false</is-stick>
+	<screen-size>65</screen-size>
+	<panel-id>18</panel-id>
+	<mobile-has-live-tv>true</mobile-has-live-tv>
+	<ui-resolution>1080p</ui-resolution>
+	<tuner-type>ATSC</tuner-type>
+	<supports-ethernet>true</supports-ethernet>
+	<wifi-mac>48:9e:9d:c3:4f:fa</wifi-mac>
+	<wifi-driver>realtek</wifi-driver>
+	<has-wifi-5G-support>true</has-wifi-5G-support>
+	<ethernet-mac>c8:7e:a1:ae:c3:82</ethernet-mac>
+	<network-type>ethernet</network-type>
+	<friendly-device-name>65" PHILIPS Roku TV</friendly-device-name>
+	<friendly-model-name>PHILIPS•Roku TV</friendly-model-name>
+	<default-device-name>PHILIPS•Roku TV - X01300UCSJC2</default-device-name>
+	<user-device-name>65" PHILIPS Roku TV</user-device-name>
+	<user-device-location>Living room</user-device-location>
+	<build-number>F6G.34E02303A</build-number>
+	<software-version>15.3.4</software-version>
+	<software-build>2303</software-build>
+	<lightning-base-build-number />
+	<ui-build-number>F6G.34E02303A</ui-build-number>
+	<ui-software-version>15.3.4</ui-software-version>
+	<ui-software-build>2303</ui-software-build>
+	<secure-device>true</secure-device>
+	<ecp-setting-mode>enabled</ecp-setting-mode>
+	<language>en</language>
+	<country>CA</country>
+	<locale>en_CA</locale>
+	<closed-caption-mode>Instant replay</closed-caption-mode>
+	<time-zone-auto>true</time-zone-auto>
+	<time-zone>Canada/Eastern</time-zone>
+	<time-zone-name>Canada/Eastern</time-zone-name>
+	<time-zone-tz>America/Toronto</time-zone-tz>
+	<time-zone-offset>-240</time-zone-offset>
+	<clock-format>12-hour</clock-format>
+	<uptime>755</uptime>
+	<power-mode>PowerOn</power-mode>
+	<supports-suspend>true</supports-suspend>
+	<supports-find-remote>false</supports-find-remote>
+	<supports-audio-guide>true</supports-audio-guide>
+	<supports-rva>true</supports-rva>
+	<has-hands-free-voice-remote>false</has-hands-free-voice-remote>
+	<developer-enabled>true</developer-enabled>
+	<keyed-developer-id />
+	<device-automation-bridge-enabled>false</device-automation-bridge-enabled>
+	<search-enabled>true</search-enabled>
+	<search-channels-enabled>true</search-channels-enabled>
+	<voice-search-enabled>true</voice-search-enabled>
+	<supports-private-listening>true</supports-private-listening>
+	<private-listening-blocked>false</private-listening-blocked>
+	<supports-private-listening-dtv>true</supports-private-listening-dtv>
+	<supports-warm-standby>true</supports-warm-standby>
+	<headphones-connected>false</headphones-connected>
+	<supports-audio-settings>false</supports-audio-settings>
+	<expert-pq-enabled>1.0</expert-pq-enabled>
+	<supports-ecs-textedit>true</supports-ecs-textedit>
+	<supports-ecs-microphone>true</supports-ecs-microphone>
+	<supports-wake-on-wlan>true</supports-wake-on-wlan>
+	<supports-airplay>true</supports-airplay>
+	<has-play-on-roku>false</has-play-on-roku>
+	<has-mobile-screensaver>false</has-mobile-screensaver>
+	<support-url>www.philips.com/support</support-url>
+	<grandcentral-version>26.43.10</grandcentral-version>
+	<supports-trc>true</supports-trc>
+	<trc-version>3.0</trc-version>
+	<trc-channel-version>26.40.12</trc-channel-version>
+	<av-sync-calibration-enabled>3.0</av-sync-calibration-enabled>
+	<brightscript-debugger-version>3.5.0</brightscript-debugger-version>
+</device-info>
+<?xml version="1.0" encoding="UTF-8" ?>
+<apps>
+	<app id="tvinput.hdmi1" type="tvin" version="1.0.0">HDMI 1</app>
+	<app id="tvinput.hdmi2" type="tvin" version="1.0.0">HDMI 2</app>
+	<app id="tvinput.hdmi3" type="tvin" version="1.0.0">HDMI 3</app>
+	<app id="tvinput.hdmi4" type="tvin" version="1.0.0">HDMI 4 (eARC)</app>
+	<app id="tvinput.cvbs" type="tvin" version="1.0.0">AV</app>
+	<app id="tvinput.dtv" type="tvin" version="1.0.0">Live TV</app>
+	<app id="13" type="appl" version="16.0.383">Prime Video</app>
+	<app id="837" type="appl" version="2.26.95">YouTube</app>
+	<app id="592369" type="appl" version="3.2.4">Jellyfin</app>
+	<app id="773622" type="appl" version="2.14.1">Backdrops</app>
+	<app id="12" type="appl" version="61.2523.1521020">Netflix</app>
+	<app id="151908" type="appl" version="26.40.12">The Roku Channel</app>
+</apps>

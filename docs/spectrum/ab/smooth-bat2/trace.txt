@@ -1,0 +1,50 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 38/38   #P:16
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+     kworker/7:6-307762  [007] ..... 169560.701447: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/6:2-206298  [006] ..... 169560.746230: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/7:1-306384  [007] ..... 169560.786960: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+ tokio-rt-worker-206276  [004] ..... 169560.830590: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xc0
+     kworker/4:0-296732  [004] d..1. 169560.830618: rpm_resume: 0000:01:00.0 flags-0 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+     kworker/9:3-306579  [009] ..... 169560.932913: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/9:7-310864  [009] ..... 169560.977114: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/4:6-130694  [004] ..... 169561.019242: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/6:2-206298  [006] .N... 169561.061337: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/0:0-294211  [000] ..... 169561.102914: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/7:6-307762  [007] ..... 169561.280946: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/7:1-306384  [007] ..... 169561.326630: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+ irq/32-ACPI:Eve-166     [010] ..... 169561.332007: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x2
+    kworker/10:0-297544  [010] ..... 169561.332512: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x81
+ irq/32-ACPI:Eve-166     [010] ..... 169561.337081: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/3:2-298031  [003] ..... 169561.408997: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/9:3-306579  [009] ..... 169561.447380: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0xff
+     kworker/4:0-296732  [004] d..1. 169561.490478: rpm_resume: 0000:01:00.0 flags-1 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+  kworker/u64:12-293546  [007] d..1. 169561.490535: rpm_resume: 0000:01:00.0 flags-2 cnt-1  dep-0  auto-1 p-0 irq-0 child-0
+   kworker/u64:4-296439  [003] d..1. 169561.490590: rpm_resume: 0000:01:00.0 flags-4 cnt-2  dep-0  auto-1 p-0 irq-0 child-0
+     kworker/0:0-294211  [000] ..... 169561.853019: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/0:0-294211  [000] ..... 169561.897883: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/0:0-294211  [000] ..... 169561.942865: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/8:0-309241  [008] ..... 169561.999782: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/3:2-298031  [003] ..... 169562.063862: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/0:0-294211  [000] ..... 169562.100867: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/0:0-294211  [000] ..... 169562.144814: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/8:0-309241  [008] ..... 169562.190844: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/0:0-294211  [000] ..... 169562.238877: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/3:2-298031  [003] ..... 169562.266034: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x81
+     kworker/3:2-298031  [003] ..... 169562.266053: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/7:6-307762  [007] ..... 169562.487900: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+    kworker/13:1-307870  [013] ..... 169562.531879: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/9:3-306579  [009] ..... 169562.759132: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x81
+     kworker/9:3-306579  [009] ..... 169562.759159: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/7:6-307762  [007] ..... 169565.349114: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/7:1-306384  [007] ..... 169565.394031: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80
+     kworker/7:1-306384  [007] ..... 169565.438496: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80

@@ -284,6 +284,73 @@
     }
   }
 
+
+  /* ---- pipeline [CHANGE: cowork | 2026-10-10] ---------------------------------
+     Where a download's bytes are right now: internet -> NZBGet's RAM buffer -> the
+     drive it lands on -> the drive finished files go to. Polled every 3 s from
+     /api/pipe, which is separate from /api/summary so the slow, API-heavy summary
+     keeps its 15 s rhythm. The bar under each drive is its write speed against
+     450 MB/s -- roughly what a 5 Gbit/s USB port can carry -- so an SSD and a
+     5400 rpm disk are drawn on the same ruler and the difference is visible. */
+  var PIPE_SCALE = 450 * 1048576;
+  function rate(v) { return v == null ? "\u2013" : LUM.size(v) + "/s"; }
+  function makeDrive() {
+    var n = el("div", "item");
+    n._t = el("div", "t", n);
+    n._track = el("div", "track", n);
+    n._bar = el("i", null, n._track);
+    n._meta = el("div", "meta", n);
+    n._w = el("span", null, n._meta);
+    n._r = el("span", null, n._meta);
+    n._f = el("span", null, n._meta);
+    return n;
+  }
+  function fillDrive(n, r) {
+    n._t.textContent = r.name + (r.role.length ? " \u00b7 " + r.role.join(", ") : "");
+    var w = r.write || 0;
+    n._bar.style.transform = "scaleX(" + Math.min(1, w / PIPE_SCALE) + ")";
+    n.classList.toggle("moving", w > 1048576);
+    n._w.classList.toggle("on", w > 1048576);
+    n._w.textContent = "write " + rate(r.write);
+    n._r.textContent = "read " + rate(r.read);
+    n._f.textContent = LUM.size(r.free) + " free";
+  }
+  function paintPipe(p) {
+    var head = $("pipe-head");
+    head.replaceChildren();
+    var land = p.drives.filter(function (d) { return d.role.indexOf("downloads land here") >= 0; })[0];
+    var fin = p.drives.filter(function (d) { return d.role.indexOf("finished files go here") >= 0; })[0];
+    var steps = [
+      ["internet", p.paused ? "paused" : rate(p.speed)],
+      [(p.links || []).map(function (l) { return l.name; }).join(" + ") || "links",
+       (p.links || []).map(function (l) { return rate(l.rx); }).join(" + ")],
+      ["RAM buffer", LUM.size(p.buffer) + " of " + LUM.size(p.bufmax)],
+      [land ? land.name : "download drive MISSING", land ? "write " + rate(land.write) : "\u2013"],
+      [fin ? fin.name : "library drive MISSING", fin ? "write " + rate(fin.write) : "\u2013"]
+    ];
+    steps.forEach(function (st, i) {
+      var b = el("div", "step", head);
+      txt("span", "k", b, st[0]);
+      txt("b", null, b, st[1]);
+      if (i < steps.length - 1) { txt("span", "arr", head, "\u2192"); }
+    });
+    var foot = el("div", "foot", head);
+    foot.textContent = "unpack " + (p.direct ? "during download" : "after download")
+      + " \u00b7 " + p.post + " post-processing \u00b7 "
+      + LUM.size(p.cache) + " of recent files held in RAM \u00b7 "
+      + LUM.size(p.avail) + " RAM free";
+    LUM.keyed($("pipe"), p.drives, function (r) { return r.name; }, makeDrive, fillDrive);
+    $("p-aux").textContent = p.warm ? p.at : "measuring\u2026";
+  }
+  function loadPipe() {
+    if (document.hidden) { return; }
+    LUM.get("/api/pipe").then(paintPipe).catch(function () {
+      $("p-aux").textContent = "no reply";
+    });
+  }
+  loadPipe();
+  setInterval(loadPipe, 3000);
+
   /* ---- poll ----------------------------------------------------------------- */
   var lastDisks = null;
   function paint(d) {

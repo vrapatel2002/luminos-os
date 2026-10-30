@@ -1,0 +1,22 @@
+#!/usr/sbin/nft -f
+# [CHANGE: cowork | 2026-10-10] DECISION 140 - send NZBGet's second news-server entry
+# (UsenetServer on TCP 443) out the Wi-Fi so one download uses Ethernet AND Wi-Fi.
+#
+# Only packets from user nzbget to TCP port 443 are touched. Server1 (port 563) and
+# everything else on the box keep normal routing. Own table, so it can never flush
+# Tailscale's or the main firewall's tables (the DECISION 90 trap).
+# Mark 0x161 is outside Tailscale's 0x00ff0000 mask.
+table inet luminos_nzbsplit
+delete table inet luminos_nzbsplit
+table inet luminos_nzbsplit {
+	chain out {
+		type route hook output priority mangle + 1; policy accept;
+		meta skuid "nzbget" tcp dport 443 meta mark set 0x161
+	}
+	chain post {
+		# the socket picked the Ethernet source (.62) before the reroute; rewrite it to
+		# the Wi-Fi address so the replies come back over the Wi-Fi too
+		type nat hook postrouting priority srcnat + 1; policy accept;
+		meta mark 0x161 oifname "wlan0" masquerade
+	}
+}

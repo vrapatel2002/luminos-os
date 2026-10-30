@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+# [CHANGE: claude | 2026-10-18] Playback Doctor Phase 2 - rebuild every playback session from logs. READ-ONLY.
+# Sources: `journalctl -u jellyfin` (the /var/log/jellyfin files keep only 3 days: LogFileRetentionDays=3)
+# + a COPY of jellyfin.db (ActivityLogs starts, Devices, BaseItems, MediaStreamInfos).
+# Usage (root on luminos-server): luminos-doctor-logs [--days 30] [--out /var/lib/luminos-doctor]
+import argparse, datetime as dt, json, os, re, shutil, sqlite3, subprocess, collections
+ap = argparse.ArgumentParser(); ap.add_argument('--days', type=int, default=30)
+ap.add_argument('--out', default='/var/lib/luminos-doctor'); ap.add_argument('--journal', help='pre-dumped journal text')
+A = ap.parse_args(); os.makedirs(A.out + '/db', exist_ok=True)
+UTC = dt.timezone.utc; NOW = dt.datetime.now(UTC); SINCE = NOW - dt.timedelta(days=A.days)
+for ext in ('', '-wal', '-shm'):  # never open the live DB
+    if os.path.exists('/var/lib/jellyfin/data/jellyfin.db' + ext):
+        shutil.copy('/var/lib/jellyfin/data/jellyfin.db' + ext, A.out + '/db/jellyfin.db' + ext)
+db = sqlite3.connect(A.out + '/db/jellyfin.db'); q = lambda s, *a: db.execute(s, a).fetchall()
+redact = lambda s: re.sub(r'(?i)(api_key|apikey|token)=[^&\s"]+', r'\1=X', s)
+if A.journal: lines = open(A.journal, errors='replace').read().splitlines()
+else: lines = subprocess.run(['journalctl', '-u', 'jellyfin', '-q', '--no-pager', '-o', 'short-iso',
+                              '--since', '@%d' % SINCE.timestamp()], capture_output=True, text=True).stdout.splitlines()
+TS = re.compile(r'^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:?\d\d) \S+ jellyfin\[\d+\]: (?:\[[\d:]+\] )?(?:\[[A-Z]{3}\] )?(.*)$')
+stops, runs, ws, subx = [], [], [], collections.defaultdict(list)
+pend_stop = []
+for ln in lines:
+    m = TS.match(ln)
+    if not m: continue
+    t = dt.datetime.fromisoformat(m[1]); msg = m[2]
+    if t < SINCE: continue
+    if (m2 := re.search(r'Playback stopped reported by app "?(.+?) "?(\d[\d.]*)"? playing "?(.+?)"?\. Stopped at "?(\d+)"? ms', msg)):
+        stops.append(dict(t=t, app=m2[1], ver=m2[2], title=m2[3], pos=int(m2[4])))
+    elif 'jellyfin-ffmpeg/ffmpeg' in msg and ' -c:s copy' in msg and (p := re.search(r'-i file:"([^"]+)"', msg)):
+        subx[p[1]].append([t, None])
+    elif 'subtitle extraction completed for file:' in msg and (p := re.search(r'file:"([^"]+)"', msg)):
+        if subx[p[1]]: subx[p[1]][-1][1] = t
+    elif 'jellyfin-ffmpeg/ffmpeg' in msg and '-f hls' in msg:
+        g = lambda rx, d=None: (lambda x: x[1] if x else d)(re.search(rx, msg))
+        vf = g(r'-(?:vf|filter_complex) "([^"]+)"', '')
+        runs.append(dict(t=t, path=g(r'-i file:"([^"]+)"'), ss=g(r'-ss ([\d:.]+)'), vcodec=g(r'-codec:v:0 (\S+)'),
+            bv=int(g(r'-b:v (\d+)', 0)), acodec=g(r'-codec:a:0 (\S+)'), ab=g(r'-ab (\d+)'), ac=g(r'-ac (\d+)'),
+            res=g(r'scale_vaapi=w=(\d+:h=\d+)', 'source').replace(':h=', 'x'), profile=g(r'-profile:v:0 (\S+)'),
+            setparams=g(r'setparams=(\S+?)[,"]', None) if 'setparams' in vf else None,
+            tonemap=bool(re.search(r'tonemap', vf)), burnin=g(r"subtitles=f='([^']+)'") , m3u8=g(r'-y "([^"]+\.m3u8)"'),
+            stop_req=None, exit=None, end=None, cmd=redact(msg)[:4000]))
+    elif msg.startswith('Stopping ffmpeg process') and (p := re.search(r'for (\S+\.m3u8)', msg)):
+        for r in runs:
+            if r['m3u8'] == p[1]: r['stop_req'] = t; pend_stop.append(r)
+    elif (p := re.match(r'FFmpeg exited with code (-?\d+)', msg)):
+        r = pend_stop.pop(0) if pend_stop else next((r for r in runs if r['exit'] is None), None)
+        if r: r['exit'], r['end'] = int(p[1]), t
+    elif (p := re.match(r'WS "?([\d.:a-f]+)"? (request|closed)', msg)):
+        ws.append((t, p[1], p[2]))
+# activity starts (UTC naive in DB)
+dev2app = {d: a for a, d in q('select AppName, DeviceName from Devices')}
+starts = []
+for when, name, item in q("select DateCreated, Name, ItemId from ActivityLogs where Type='VideoPlayback' order by DateCreated"):
+    t = dt.datetime.fromisoformat(when[:19]).replace(tzinfo=UTC)
+    m = re.match(r'^\S+ is playing (.*) on (.+)$', name)
+    if m and t >= SINCE: starts.append(dict(t=t, full=m[1], dev=m[2], app=dev2app.get(m[2], '?'), item=item, used=False))
+def item_info(item, title):
+    row = None
+    if item: row = q("select Id, Path, RunTimeTicks from BaseItems where lower(replace(Id,'-',''))=?", item.lower())
+    if not row: row = q("select Id, Path, RunTimeTicks from BaseItems where Name=? and Path is not null", title)
+    if not row: return None, None, {}
+    iid, path, ticks = row[0]; info = {'runtime_s': (ticks or 0) / 1e7}
+    for st, codec, prof, w, h, br, trc, dvp, dvc, ch, lang, forced, dflt in q(
+            'select StreamType,Codec,Profile,Width,Height,BitRate,ColorTransfer,DvProfile,DvBlSignalCompatibilityId,'
+            'Channels,Language,IsForced,IsDefault from MediaStreamInfos where ItemId=? order by StreamIndex', iid):
+        if st == 1 and 'v' not in info:
+            info['v'] = f"{codec} {w}x{h} {round((br or 0)/1e6,1)}Mbps {trc or ''}" + (f' DV-P{dvp}/compat{dvc}' if dvp else '')
+            info['dv5'] = dvp == 5
+        elif st == 0: info.setdefault('a', []).append(f'{codec}/{ch}ch/{lang}' + ('*' if dflt else ''))
+        elif st == 2: info.setdefault('s', []).append(f'{codec}/{lang}' + ('/forced' if forced else '') + ('*' if dflt else ''))
+    return iid, path, info
+sessions, last_stop = [], {}
+pending = []
+def build(app, ver, title, st_list, stop):
+    t0 = st_list[0]['t'] if st_list else None; t1 = stop['t'] if stop else st_list[-1]['t']
+    iid, path, info = item_info(st_list[0]['item'] if st_list else None, title)
+    pending.append(dict(a=(app, ver, title, st_list, stop), t0=t0, t1=t1, path=path, info=info, my=[]))
+def finish(P):
+    (app, ver, title, st_list, stop), t0, t1, path, info, my = P['a'], P['t0'], P['t1'], P['path'], P['info'], P['my']
+    lo = (t0 or t1) - dt.timedelta(seconds=90); L = lambda t: t and t.astimezone().isoformat()
+    path = path or (my[0]['path'] if my else None)
+    s = dict(start=L(t0), stop=L(stop and stop['t']), app=app, ver=ver,
+             device=st_list[0]['dev'] if st_list else None, title=title, path=path, source=info,
+             client_start_reports=len(st_list), stopped_ms=stop['pos'] if stop else None, ffmpeg_runs=len(my),
+             ffmpeg_restarts=max(0, len(my) - 1), seeks=[r['ss'] for r in my if r['ss']], ip=None, net=None)
+    if app == 'Jellyfin Roku': s['net'] = 'unknown (Roku opens no WebSocket; IP not logged)'
+    else:
+        cand = [w for w in ws if w[2] == 'request' and w[0] <= t1 and w[0] >= (t0 or t1) - dt.timedelta(hours=3)]
+        if cand:
+            ip = cand[-1][1]; s['ip'] = ip
+            s['net'] = ('LAN' if ip.startswith('192.168.') else 'tailnet' if ip.startswith('100.') else
+                        'via Caddy (real IP hidden)' if ip.startswith('127.') else 'other')
+    if not my: s['method'] = 'DirectPlay'
+    else:
+        s['method'] = 'Transcode' if any(r['vcodec'] != 'copy' for r in my) else 'DirectStream'
+        r = max(my, key=lambda r: r['bv']); why = []
+        if r['vcodec'] != 'copy': why.append(f"video {info.get('v','?').split()[0]}->{r['vcodec']}")
+        if r['burnin']: why.append('subtitle burn-in ' + r['burnin'].rsplit('.', 1)[-1])
+        if r['acodec'] != 'copy': why.append(f"audio {(info.get('a') or ['?'])[0].split('/')[0]}->{r['acodec']}")
+        if info.get('dv5'): why.append('DV P5 source')
+        s.update(reasons_inferred=why, video=dict(codec=r['vcodec'], bv=r['bv'], res=r['res'], profile=r['profile'],
+                 setparams=r['setparams'], tonemap=r['tonemap'], burnin=bool(r['burnin'])),
+                 audio=f"{r['acodec']}" + (f" {r['ac']}ch {r['ab']}bps" if r['acodec'] != 'copy' else ''),
+                 bitrates=[r['bv'] for r in my], exits=[r['exit'] for r in my])
+        sp = []
+        for r in my:  # ran to the end on its own (no stop request) -> realtime factor
+            if r['exit'] == 0 and not r['stop_req'] and r['end'] and info.get('runtime_s'):
+                ss = sum(float(x) * 60 ** i for i, x in enumerate(reversed((r['ss'] or '0').split(':'))))
+                sp.append(round((info['runtime_s'] - ss) / max(1, (r['end'] - r['t']).total_seconds()), 2))
+        s['speed_x'] = sp[0] if sp else None
+        if st_list: s['ffmpeg_to_start_report_s'] = round((st_list[0]['t'] - my[0]['t']).total_seconds(), 1)
+    xs = [(b - a).total_seconds() for a, b in subx.get(path or '', []) if b and lo <= a <= t1]
+    s['sub_extract_s'] = max(xs) if xs else None
+    f = []
+    if stop is None: f.append('no stop reported (abandoned/retried)')
+    elif stop['pos'] < 60000: f.append(f"stopped at {stop['pos']//1000}s")
+    if any(e not in (0, None) for e in s.get('exits', [])): f.append('ffmpeg exit != 0')
+    s['failed_start'] = bool(f); s['fail_why'] = f
+    sessions.append(s)
+for sp in stops:
+    prev = last_stop.get(sp['app'], SINCE)
+    mine = [s for s in starts if not s['used'] and s['app'] == sp['app'] and prev - dt.timedelta(seconds=2) <= s['t'] <= sp['t'] + dt.timedelta(seconds=2)
+            and (s['full'] == sp['title'] or s['full'].endswith(' - ' + sp['title']))]
+    for s in mine: s['used'] = True
+    build(sp['app'], sp['ver'], sp['title'], mine, sp); last_stop[sp['app']] = sp['t']
+for s in starts:
+    if not s['used']:
+        s['used'] = True; build(s['app'], None, s['full'].split(' - ', 1)[-1], [s], None)
+for r in runs:  # each ffmpeg run -> the session whose start is nearest (handles 2 clients on one title)
+    c = [P for P in pending if (P['t0'] or P['t1']) - dt.timedelta(seconds=90) <= r['t'] <= P['t1'] + dt.timedelta(seconds=5)
+         and (not P['path'] or P['path'] == r['path'])]
+    if c: min(c, key=lambda P: abs(((P['t0'] or P['t1']) - r['t']).total_seconds()))['my'].append(r); r['own'] = True
+for P in pending: finish(P)
+for r in runs:
+    if not r.get('own'):
+        sessions.append(dict(start=r['t'].astimezone().isoformat(), app='(no client session logged)', title=os.path.basename(r['path'] or '?'),
+            path=r['path'], method='Transcode' if r['vcodec'] != 'copy' else 'DirectStream', orphan_ffmpeg=True,
+            video=dict(codec=r['vcodec'], bv=r['bv'], res=r['res']), audio=r['acodec'], exits=[r['exit']], seeks=[r['ss']],
+            failed_start=False, fail_why=[]))
+sessions.sort(key=lambda s: s.get('start') or s.get('stop'))
+with open(A.out + '/sessions.jsonl', 'w') as fh:
+    for s in sessions: fh.write(redact(json.dumps(s, default=str)) + '\n')
+C = collections.Counter
+print('sessions', len(sessions), 'journal lines', len(lines), 'ffmpeg hls runs', len(runs), 'since', SINCE.date())
+print('per client', dict(C(s['app'] for s in sessions)))
+print('per method', dict(C(s['method'] for s in sessions)))
+print('failed', sum(s['failed_start'] for s in sessions))

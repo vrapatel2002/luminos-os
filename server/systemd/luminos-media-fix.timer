@@ -1,0 +1,11 @@
+# [CHANGE: claude | 2026-10-18] DECISION 153. 03:30: after Intro Skipper (00:00), before the
+# subtitle warm sweep (04:00) so the warm sweep sees the new sidecars.
+[Unit]
+Description=Nightly luminos-media-fix sweep
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,2 @@
+# Soft dependencies extracted from modules themselves.
+softdep nvidia pre: ecdh_generic,ecdsa_generic

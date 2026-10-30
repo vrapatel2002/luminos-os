@@ -3,3 +3,10 @@ precondition           PASS defer=1, GPU suspended, charger online=1, deferred=3
 
   >>> UNPLUG the charger now, wait 5+ s, then PLUG IT BACK IN.
 
+cable edges            FAIL saw 0/2 edges in 600s
+
+STEP                   RESULT DETAIL
+------------------------------------------------------------------------
+precondition           PASS defer=1, GPU suspended, charger online=1, deferred=3
+cable edges            FAIL saw 0/2 edges in 600s
+raw results: /home/shawn/luminos-os/docs/nvdefer/results/charger-20261016-163446

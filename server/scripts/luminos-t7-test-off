@@ -1,0 +1,14 @@
+#!/bin/bash
+# [CHANGE: cowork | 2026-10-10] End the Samsung T7 download test (DECISION 139).
+# Puts NZBGet back on the external HDD and unmounts the SSD WITHOUT formatting or
+# deleting anything on it (only removes our own empty test folder if it is empty).
+set -euo pipefail
+C=/var/lib/nzbget/nzbget.conf
+P=$(sudo -n grep -E "^ControlPassword=" $C | cut -d= -f2); U=$(sudo -n grep -E "^ControlUsername=" $C | cut -d= -f2)
+st=$(curl -s -u "$U:$P" http://127.0.0.1:6789/jsonrpc/status | python3 -c "import json,sys;r=json.load(sys.stdin)['result'];print(r['RemainingSizeMB'],r['PostJobCount'])")
+[ "$st" = "0 0" ] || { echo "NZBGet is busy ($st) - wait until the queue is empty"; exit 1; }
+sudo -n sed -i "s|^InterDir=.*|InterDir=/srv/external/usenet/incomplete|; s|^RequiredDir=.*|RequiredDir=/srv/external/usenet|" $C
+sudo -n systemctl restart nzbget
+sudo -n rmdir /mnt/t7/luminos-nzbget-test/incomplete /mnt/t7/luminos-nzbget-test 2>/dev/null || true
+sudo -n umount /mnt/t7
+echo "NZBGet back on /srv/external; SSD unmounted - safe to unplug."

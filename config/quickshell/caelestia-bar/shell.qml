@@ -367,9 +367,29 @@ ShellRoot {
                     // Same fix, and the same rounded rect, as the launcher, the
                     // OSD and the dashboard. Declared BEFORE the wrapper so it
                     // paints behind it.
+                    // [CHANGE: claude-code | 2026-09-13] The left corners are
+                    // square on purpose, and that is the whole fix for "it
+                    // looks like a box that spawned".
+                    //
+                    // This rect was rounded on all four corners. Its left edge
+                    // already sits exactly on the bar's right edge (measured:
+                    // wrapperX 0 in a window the compositor starts at x=52), and
+                    // it is filled with the SAME m3surface the bar is filled
+                    // with - measured (19,19,23) on both. So the only thing
+                    // separating the popout from the bar was the two rounded
+                    // left corners, which let the desktop (24,24,24) cut two
+                    // wedges into the seam.
+                    //
+                    // Square them and there is no seam left to see: the popout
+                    // stops being a panel next to the bar and becomes the bar
+                    // getting wider. Rounding stays on the right, which is the
+                    // edge that is actually a free edge.
                     StyledRect {
                         anchors.fill: popoutsWrapper
-                        radius: Tokens.rounding.extraLarge
+                        topLeftRadius: 0
+                        bottomLeftRadius: 0
+                        topRightRadius: Tokens.rounding.extraLarge
+                        bottomRightRadius: Tokens.rounding.extraLarge
                         color: Colours.tPalette.m3surface
                     }
 
@@ -1046,6 +1066,19 @@ ShellRoot {
                     deformScale: (0.2 * Config.appearance.deformScale) / 10000
                 }
 
+                // [CHANGE: claude-code | 2026-09-13] Same rule as the bar
+                // popouts: a corner that sits on a screen edge is not a free
+                // corner, so it is not rounded.
+                //
+                // This panel is anchored top AND right, so it touches TWO screen
+                // edges and therefore has THREE corners that are not free, not
+                // one: top-right is the screen's corner, top-LEFT sits on the
+                // top edge, bottom-right sits on the right edge. Only the
+                // bottom-left is genuinely floating, because the panel's height
+                // follows the notification count.
+                // The first pass only squared the right-hand pair, which left a
+                // rounded notch biting into the top edge - still reading as a
+                // box that had been dropped onto the screen.
                 BlobRect {
                     id: notifsBg
 
@@ -1055,7 +1088,10 @@ ShellRoot {
                     y: notifPanel.y
                     implicitWidth: notifPanel.width
                     implicitHeight: notifPanel.height
-                    radius: Tokens.rounding.extraLarge
+                    topLeftRadius: 0
+                    bottomLeftRadius: Tokens.rounding.extraLarge
+                    topRightRadius: 0
+                    bottomRightRadius: 0
                     deformScale: (0.15 * Config.appearance.deformScale) / 10000
                 }
 
@@ -1071,7 +1107,14 @@ ShellRoot {
                     // the blob's BOTTOM where the panel's bottom is while the
                     // middle still wobbles; the +2 covers the seam.
                     implicitHeight: sidebarDrawer.height * (1 / sidebarBg.rawDeformMatrix.m22) + 2
-                    radius: Tokens.rounding.extraLarge
+                    // Anchored right and bottom, so by the notifsBg rule three
+                    // corners are pinned: bottom-right is the screen corner,
+                    // top-right sits on the right edge, bottom-LEFT sits on the
+                    // bottom edge. Top-left is the only free one.
+                    topLeftRadius: Tokens.rounding.extraLarge
+                    bottomLeftRadius: 0
+                    topRightRadius: 0
+                    bottomRightRadius: 0
                     // Barely any wobble on this one, upstream's value: it is
                     // the tallest panel, and the same angular overshoot moves
                     // its far end much further.

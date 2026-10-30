@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Add Game to Vela
+Comment=Add a Windows game to Lutris with the settings Vela needs
+Exec=/home/shawn/.local/bin/vela-wine-install gui
+Icon=applications-games
+Terminal=false
+Categories=Game;
+Keywords=vela;lutris;wine;windows;game;install;

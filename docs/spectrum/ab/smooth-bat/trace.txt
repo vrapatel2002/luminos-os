@@ -1,0 +1,13 @@
+# tracer: nop
+#
+# entries-in-buffer/entries-written: 1/1   #P:16
+#
+#                                _-----=> irqs-off/BH-disabled
+#                               / _----=> need-resched
+#                              | / _---=> hardirq/softirq
+#                              || / _--=> preempt-depth
+#                              ||| / _-=> migrate-disable
+#                              |||| /     delay
+#           TASK-PID     CPU#  |||||  TIMESTAMP  FUNCTION
+#              | |         |   |||||     |         |
+     kworker/4:0-296732  [004] ..... 169491.219808: notify: (acpi_ev_queue_notify_request+0x4/0x220) value=0x80

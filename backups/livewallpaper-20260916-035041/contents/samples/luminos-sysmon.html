@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<!--
+    Luminos sample wallpaper — live system monitor.
+    Reads window.luminos (populated by the wallpaper when "Expose live stats" is on)
+    and the 'luminos-stats' event. Enable that checkbox in the wallpaper settings.
+    [CHANGE: claude-code | 2026-07-22]
+    SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<meta charset="utf-8">
+<title>Luminos System Monitor</title>
+<style>
+  html,body{margin:0;height:100%;background:#06070c;overflow:hidden;
+    font-family:'JetBrains Mono','DejaVu Sans Mono',monospace;color:#cfe}
+  #wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  #grid{display:grid;grid-template-columns:repeat(3,minmax(190px,1fr));gap:22px;
+    padding:32px;max-width:900px}
+  .card{background:rgba(255,255,255,0.03);border:1px solid rgba(120,180,255,0.12);
+    border-radius:14px;padding:18px 20px}
+  .k{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#7a90b8}
+  .v{font-size:34px;font-weight:600;margin-top:6px;color:#e8f2ff}
+  .u{font-size:15px;color:#8fa6c8;margin-left:3px}
+  .bar{height:6px;border-radius:4px;background:rgba(255,255,255,0.06);margin-top:12px;overflow:hidden}
+  .fill{height:100%;width:0;background:linear-gradient(90deg,#3aa0ff,#8a5cff);transition:width .6s}
+  #note{position:absolute;bottom:18px;width:100%;text-align:center;font-size:12px;color:#556}
+</style>
+<div id="wrap"><div id="grid">
+  <div class="card"><div class="k">CPU Temp</div><div class="v"><span id="ct">--</span><span class="u">&deg;C</span></div><div class="bar"><div class="fill" id="ctb"></div></div></div>
+  <div class="card"><div class="k">CPU Load</div><div class="v"><span id="cl">--</span><span class="u">%</span></div><div class="bar"><div class="fill" id="clb"></div></div></div>
+  <div class="card"><div class="k">Profile</div><div class="v" style="font-size:22px" id="pf">--</div></div>
+  <div class="card"><div class="k">iGPU Temp</div><div class="v"><span id="gt">--</span><span class="u">&deg;C</span></div><div class="bar"><div class="fill" id="gtb"></div></div></div>
+  <div class="card"><div class="k">dGPU</div><div class="v" style="font-size:22px" id="nv">--</div></div>
+  <div class="card"><div class="k">Fan CPU</div><div class="v"><span id="fc">--</span><span class="u">rpm</span></div></div>
+</div></div>
+<div id="note">Enable &ldquo;Expose live stats&rdquo; in the wallpaper settings to feed this page.</div>
+<script>
+(function(){
+  function set(id,v){var e=document.getElementById(id);if(e)e.textContent=v;}
+  function bar(id,pct){var e=document.getElementById(id);if(e)e.style.width=Math.max(0,Math.min(100,pct))+"%";}
+  function num(v){var n=parseFloat(v);return isNaN(n)?null:n;}
+  function render(L){
+    if(!L)return;
+    var ct=num(L.CPU_TEMP); set("ct",ct!=null?ct.toFixed(0):"--"); bar("ctb",ct!=null?(ct-30)/60*100:0);
+    var cl=num(L.CPU_LOAD); set("cl",cl!=null?cl.toFixed(0):"--"); bar("clb",cl!=null?cl:0);
+    set("pf",L.PROFILE||"--");
+    var gt=num(L.AMD_TEMP); set("gt",gt!=null?gt.toFixed(0):"--"); bar("gtb",gt!=null?(gt-30)/60*100:0);
+    set("nv",(L.NV_STATE||"--")+(L.NV_PWR&&L.NV_PWR!=="0.0"?" "+L.NV_PWR+"W":""));
+    set("fc",L.FAN_CPU||"--");
+  }
+  addEventListener("luminos-stats",function(e){render(e.detail);});
+  // If stats arrived before this page loaded:
+  if(window.luminos)render(window.luminos);
+  setInterval(function(){if(window.luminos)render(window.luminos);},2000);
+})();
+</script>

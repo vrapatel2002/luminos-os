@@ -283,6 +283,15 @@ else
     log "        will fail with a headless-environment error."
 fi
 
+# [CHANGE: claude-code | 2026-10-27] BUG-187 source. The bar has XDG_CURRENT_DESKTOP=KDE
+# from the greeter but starts before startplasma sets KDE_SESSION_VERSION. That pair
+# makes xdg-open run the missing `kfmclient` and still exit 0, so every app launched
+# from the bar (Claude Desktop's "Sign in again") silently cannot open a browser.
+for v in KDE_SESSION_VERSION KDE_FULL_SESSION; do
+    val=$(user_env_of "$v")
+    [ -n "$val" ] && export "$v=$val" && log "$v=$val"
+done
+
 # ── the shell ────────────────────────────────────────────────────────────────
 # BUG-092's lesson: a black screen is not evidence of a crash, and three healthy
 # states also render black. If the bar dies there is nothing on screen to say so,

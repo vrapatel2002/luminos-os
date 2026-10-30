@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- One app tile or input pill. Styles: original (the app's own icon) or afterglow (brand colour, name inside). -->
+<component name="Tile" extends="Group">
+    <interface>
+        <field id="w" type="int" value="520" onChange="redraw" />
+        <field id="h" type="int" value="180" onChange="redraw" />
+        <field id="kind" type="string" value="app" onChange="redraw" />
+        <field id="appId" type="string" />
+        <field id="name" type="string" onChange="redraw" />
+        <field id="iconUri" type="string" onChange="redraw" />
+        <field id="styleName" type="string" value="original" onChange="redraw" />
+        <field id="accent" type="string" value="0x4FA3FFFF" onChange="redraw" />
+        <field id="brand" type="string" value="" onChange="redraw" />
+        <field id="isFocused" type="boolean" value="false" onChange="redraw" />
+        <field id="isHidden" type="boolean" value="false" onChange="redraw" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/Tile.brs" />
+    <children>
+        <Rectangle id="ring" />
+        <Rectangle id="bg" />
+        <Poster id="icon" loadDisplayMode="scaleToFit" />
+        <Rectangle id="fadeA" color="0x101010FF" />
+        <Rectangle id="fadeB" color="0x101010D6" />
+        <Rectangle id="fadeC" color="0x10101087" />
+        <Poster id="corner" loadDisplayMode="scaleToFit" opacity="0.55" />
+        <Label id="inside" horizAlign="center" vertAlign="center" color="0xEEF1F5FF">
+            <Font role="font" uri="font:BoldSystemFontFile" size="34" />
+        </Label>
+        <Label id="below" horizAlign="left" color="0xEEF1F5FF">
+            <Font role="font" uri="font:BoldSystemFontFile" size="28" />
+        </Label>
+    </children>
+</component>

@@ -1,0 +1,7 @@
+# [CHANGE: claude | 2026-10-18] DECISION 150
+[Unit]
+Description=Lift Jellyfin remote cap while the phone is on the home network
+After=jellyfin.service tailscaled.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-phone-cap

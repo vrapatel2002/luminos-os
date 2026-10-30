@@ -609,3 +609,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,[tabindex]:focus-visibl
   .roomdoor:hover,.roomdoor:focus-visible{transform:none}
   .roomdoor .enter{opacity:1}
 }
+
+/* [CHANGE: cowork | 2026-10-10] pipeline strip under Downloading */
+.pipe{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);margin-bottom:var(--s3);
+  font-family:var(--f-mono);font-size:var(--t-mono)}
+.pipe .step{display:flex;flex-direction:column;padding:var(--s2) var(--s3);
+  background:linear-gradient(var(--raise),var(--surface));border:1px solid var(--line)}
+.pipe .step .k{font-size:var(--t-micro);opacity:.7}
+.pipe .arr{opacity:.5}
+.pipe .foot{flex-basis:100%;opacity:.7;font-size:var(--t-micro);margin-top:var(--s2)}

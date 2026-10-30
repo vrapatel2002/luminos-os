@@ -1,0 +1,37 @@
+# SPEC — /srv/external mount guard (2026-10-10)
+Shawn: "re configure swap hard drive please do it carefully ... [add the guard] so if the drive ever goes
+missing, downloads fail safely instead of filling the system drive, and the drive reconnects itself."
+## Facts
+- Server luminos-server, ssh -i ~/.ssh/luminos-server shawn@192.168.2.62, passwordless sudo -n.
+- USB HDD ST500LM030, /dev/sdb1 ext4 UUID=28d3c6ed-6da1-497a-bdde-5e9f45ca1757 → /srv/external.
+- fstab today: `UUID=28d3...	/srv/external	ext4	rw,relatime,nofail,x-systemd.device-timeout=10	0 2`
+- Only user: NZBGet (InterDir=/srv/external/usenet/incomplete, user nzbget, group media). Config
+  /var/lib/nzbget/nzbget.conf. NZBGet is idle (verify before changing anything).
+- Incident 14:01: HDD hot-unplugged + replugged → srv-external.mount stayed inactive; bare mountpoint
+  /srv/external (on root fs sda2, 40 GB) was writable → NZBGet would have filled the OS disk.
+## Design (decided)
+1. fstab: add `x-systemd.automount` (keep nofail, device-timeout=10, everything else unchanged). Any access
+   to /srv/external mounts the disk if present → auto-reconnect after replug. If the disk is absent,
+   access fails instead of landing on the root fs.
+2. Belt-and-braces: make the BARE mountpoint directory immutable (`chattr +i`) so even with automount
+   stopped nothing can be created on the root fs. Reach the underlying dir WITHOUT unmounting via a
+   temporary bind mount of `/` (e.g. `mount --bind / /mnt/rootbind`), chattr +i on
+   /mnt/rootbind/srv/external, then umount and rmdir /mnt/rootbind. The bare dir must be empty first.
+3. NZBGet: set `RequiredDir=/srv/external/usenet` so it refuses to start downloading until the disk is
+   there. Edit with a single exact-line replacement of `RequiredDir=`, then restart nzbget only if idle.
+## Done means (mechanical checks — all must pass, exit codes / exact output)
+- C1 `findmnt --verify` exits 0 with no errors about /srv/external.
+- C2 `systemctl is-active srv-external.automount` = active; `findmnt -no FSTYPE /srv/external` shows
+  autofs AND ext4 after `ls /srv/external/usenet` (disk mounted).
+- C3 underlying dir has the `i` attribute (lsattr via a fresh bind mount of /).
+- C4 simulate "disk gone" WITHOUT unplugging: `systemctl stop srv-external.automount srv-external.mount`,
+  then `sudo -u nzbget touch /srv/external/x` must FAIL; then `systemctl start srv-external.automount` and
+  `ls /srv/external/usenet/incomplete` succeeds and findmnt shows ext4 again (= auto-reconnect).
+- C5 nzbget active, RequiredDir line present, NZBGet API status still answers; Sonarr/Radarr/Jellyfin active.
+- C6 a reboot is NOT performed. `systemctl daemon-reload` is required after fstab edit.
+## Safety
+- Back up first: /etc/fstab → /root/fstab.bak-20261010-mountguard ; nzbget.conf →
+  /var/lib/nzbget/nzbget.conf.bak-20261010-mountguard (preserve owner/mode).
+- If ANY check fails, restore both backups, daemon-reload, `systemctl start srv-external.mount`,
+  chattr -i the bare dir, and report FAILED with the failing check.
+- Never touch sda, sdc (USB stick), partitions, mkfs, or any other fstab line. Never delete files.

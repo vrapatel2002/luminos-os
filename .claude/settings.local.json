@@ -6,7 +6,10 @@
       "Bash(env -i PATH=/usr/local/bin:/usr/bin HOME=/home/shawn /bin/sh -c '/home/shawn/luminos-os/scripts/luminos-verify --mcp --quiet')",
       "Bash(echo \"exit=$?\")",
       "Bash(cp .mcp.json /tmp/mcp.good)",
-      "Bash(/usr/bin/python3 -c ':*)"
+      "Bash(/usr/bin/python3 -c ':*)",
+      "mcp__luminos-coder__run_tests",
+      "mcp__luminos-coder__review_start",
+      "mcp__luminos-coder__review_wait"
     ]
   }
 }

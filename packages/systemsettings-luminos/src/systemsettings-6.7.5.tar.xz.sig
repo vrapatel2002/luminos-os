@@ -1,0 +1,1 @@
+/home/shawn/luminos-os/packages/systemsettings-luminos/systemsettings-6.7.5.tar.xz.sig

@@ -1,0 +1,14 @@
+{
+    "shell-tokens.json": {
+        "sizes": {
+            "bar": {
+                "innerWidth": 28
+            }
+        }
+    },
+    "shell.json": {
+        "border": {
+            "thickness": 8
+        }
+    }
+}

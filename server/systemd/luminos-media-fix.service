@@ -1,0 +1,15 @@
+# [CHANGE: claude | 2026-10-18] DECISION 153 -- nightly safety net for the import hook.
+# Re-runs luminos-media-fix over every video under Jellyfin's library roots. Idempotent:
+# a file already fixed costs one ffprobe. Root, so it also fixes files the hook could not write.
+[Unit]
+Description=Fix default tracks + English subtitle sidecars on every library file
+Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
+After=jellyfin.service
+Wants=jellyfin.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-media-fix --all
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=6h

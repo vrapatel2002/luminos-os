@@ -27,6 +27,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -316,6 +317,141 @@ def summary():
     return data
 
 
+# [CHANGE: cowork | 2026-10-10] The download pipeline, live (DECISIONS 138-139).
+#
+# Shawn asked to SEE the path a download takes: internet -> NZBGet's RAM buffer ->
+# the drive it lands on -> the drive finished files end up on, with each drive's
+# real read/write speed. /api/summary is cached 10 s and polled every 15 s, which is
+# too slow to watch bytes move, so this is a separate, cheap feed: two /proc reads,
+# one grep of nzbget.conf and NZBGet's status call. Rates are deltas between two
+# successive builds of THIS feed (at least PIPE_TTL apart), so the first answer after
+# a restart has no rates -- it says so ("warm": false) rather than showing zeros.
+#
+# Drives are found by MOUNT, not by /dev name: sdb/sdc swap places when USB disks
+# are replugged (it happened on 2026-10-10), and a drive that is not mounted is not
+# listed at all -- an unmounted path must never be reported as a working drive.
+PIPE_TTL = 2.0
+PIPE_DRIVES = (
+    # mountpoint, what to call it
+    (MEDIA, "internal HDD"),
+    ("/srv/external", "external HDD"),
+    ("/mnt/t7", "SSD (test)"),
+)
+_pipe = {"at": 0.0, "data": None, "prev": None}
+_pipe_lock = threading.Lock()
+
+
+def _mounted_disks():
+    """mountpoint -> whole-disk name (/dev/sda3 -> sda) for mounted /dev/sd* only."""
+    out = {}
+    try:
+        with open("/proc/mounts") as f:
+            for line in f:
+                dev, mnt = line.split()[:2]
+                if dev.startswith("/dev/sd"):
+                    out[mnt] = re.sub(r"\d+$", "", dev[5:])
+    except OSError:
+        pass
+    return out
+
+
+def _diskstats():
+    """disk name -> (sectors read, sectors written). Sectors are always 512 bytes here."""
+    out = {}
+    try:
+        with open("/proc/diskstats") as f:
+            for line in f:
+                p = line.split()
+                if len(p) > 9:
+                    out[p[2]] = (int(p[5]), int(p[9]))
+    except OSError:
+        pass
+    return out
+
+
+def _meminfo():
+    out = {}
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                k, v = line.split(":", 1)
+                out[k] = int(v.split()[0]) * 1024
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def _under(path, root):
+    return bool(path) and (path == root or path.startswith(root.rstrip("/") + "/"))
+
+
+def build_pipe():
+    now, stats, mounts = time.monotonic(), _diskstats(), _mounted_disks()
+    prev = _pipe["prev"]
+    dt = now - prev[0] if prev else 0.0
+    stats_net = {}
+    inter = _cfg_value(NZBGET_CONF, r"^InterDir=\K.*")
+    dest = _cfg_value(NZBGET_CONF, r"^DestDir=\K.*")
+    bufmax = _cfg_value(NZBGET_CONF, r"^ArticleCache=\K\d+")
+    direct = _cfg_value(NZBGET_CONF, r"^DirectUnpack=\K.*")
+    drives = []
+    for mnt, label in PIPE_DRIVES:
+        dev = mounts.get(mnt)
+        if not dev:
+            continue
+        rd = wr = None
+        if prev and dt > 0 and dev in stats and dev in prev[1]:
+            rd = max(0, stats[dev][0] - prev[1][dev][0]) * 512 / dt
+            wr = max(0, stats[dev][1] - prev[1][dev][1]) * 512 / dt
+        total, used, free = shutil.disk_usage(mnt)
+        role = []
+        if _under(inter, mnt):
+            role.append("downloads land here")
+        if _under(dest, mnt):
+            role.append("finished files go here")
+        drives.append({"name": label, "dev": dev, "read": rd, "write": wr,
+                       "free": free, "total": total, "role": role})
+    # [CHANGE: cowork | 2026-10-10] DECISION 140: which link the bytes arrive on.
+    links = []
+    for ifc, label in (("enp2s0", "Ethernet"), ("wlan0", "Wi-Fi")):
+        try:
+            with open(f"/sys/class/net/{ifc}/statistics/rx_bytes") as f:
+                rx = int(f.read())
+        except (OSError, ValueError):
+            continue
+        rate = None
+        if prev and dt > 0 and ifc in prev[2]:
+            rate = max(0, rx - prev[2][ifc]) / dt
+        stats_net[ifc] = rx
+        links.append({"name": label, "rx": rate})
+    _pipe["prev"] = (now, stats, stats_net)
+    ng = nzbget_status() or {}
+    mem = _meminfo()
+    return {
+        "warm": prev is not None,
+        "speed": int(ng.get("DownloadRate") or 0),
+        "paused": bool(ng.get("DownloadPaused")),
+        "buffer": int(ng.get("ArticleCacheMB") or 0) * 1048576,
+        "bufmax": int(bufmax or 0) * 1048576,
+        "post": int(ng.get("PostJobCount") or 0),
+        "direct": direct.strip().lower() == "yes",
+        "cache": mem.get("Cached", 0),
+        "avail": mem.get("MemAvailable", 0),
+        "drives": drives,
+        "links": links,
+        "at": time.strftime("%H:%M:%S"),
+    }
+
+
+def pipe():
+    with _pipe_lock:
+        if _pipe["data"] and time.monotonic() - _pipe["at"] < PIPE_TTL:
+            return _pipe["data"]
+        data = build_pipe()
+        _pipe["at"], _pipe["data"] = time.monotonic(), data
+        return data
+
+
 # [CHANGE: claude-code | 2026-09-13] The page, rebuilt from nothing.
 #
 # What it used to be: eight equal tiles in an auto-fit grid, each with an emoji,
@@ -428,6 +564,13 @@ PAGE = """<!doctype html>
  <section>
   <div class="lbl">Downloading <span class="aux" id="q-aux"></span></div>
   <div id="queue"></div>
+ </section>
+
+ <!-- [CHANGE: cowork | 2026-10-10] Where the bytes are going, every 3 s. -->
+ <section>
+  <div class="lbl">Pipeline <span class="aux" id="p-aux"></span></div>
+  <div class="pipe" id="pipe-head"></div>
+  <div id="pipe"></div>
  </section>
 
  <!-- The one place in the product with real visual material in it. -->
@@ -606,6 +749,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, self._render(OFFLINE), "text/html; charset=utf-8")
         elif path == "/api/summary":
             self._send(200, json.dumps(summary()), "application/json")
+        elif path == "/api/pipe":
+            self._send(200, json.dumps(pipe()), "application/json")
         elif path == "/healthz":
             self._send(200, "ok", "text/plain")
         elif path in STATIC:

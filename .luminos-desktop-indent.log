@@ -1,0 +1,16 @@
+2026-09-15T22:52:02-04:00  === login run, boot fc5df078 ===
+2026-09-15T22:52:07-04:00  no probe in the journal — the ~/.local/share overlay is INERT (KPackage did not prefer it)
+2026-09-15T22:52:07-04:00  applying the packaged-file fallback
+  snapshotted pristine -> /usr/local/share/luminos/desktopcontainment/main.qml.orig
+  patched /usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/main.qml (44 px, recorded in /usr/local/share/luminos/desktopcontainment/reserve)
+  note: /usr/local/config/pacman-hooks/luminos-desktop-indent.hook not found and /etc/pacman.d/hooks/luminos-desktop-indent.hook is absent - the indent will NOT survive a plasma-desktop upgrade until it is installed
+  takes effect on the next plasmashell start
+removed /home/shawn/.local/share/plasma/plasmoids/org.kde.desktopcontainment - restart plasmashell to go back to the stock desktop
+2026-09-15T22:52:07-04:00  removed the now-redundant user-path overlay
+2026-09-15T22:52:16-04:00  CONFIRMED after fallback: ] overlay live (system), reserving 44 px on the left
+2026-09-15T22:52:16-04:00  removed autostart entry — finished
+2026-09-15T23:39:12-04:00  [hook] installing the upgrade-survival hook
+  /usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/main.qml already carries the 44 px indent
+  installed /etc/pacman.d/hooks/luminos-desktop-indent.hook (from /home/shawn/luminos-os/config/pacman-hooks/luminos-desktop-indent.hook)
+  takes effect on the next plasmashell start
+2026-09-15T23:39:12-04:00  [hook] CONFIRMED: /etc/pacman.d/hooks/luminos-desktop-indent.hook is installed — the indent now survives plasma-desktop upgrades

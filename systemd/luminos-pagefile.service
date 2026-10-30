@@ -1,0 +1,37 @@
+# [CHANGE: claude-code | 2026-09-18] DECISION 115 / BUG-166
+#
+# Brings up the SSD pagefile at boot. A systemd unit rather than /etc/fstab on purpose:
+# an fstab entry for a swapfile that is missing or being resized fails the boot's
+# swap.target, and this file is deliberately deletable at any time (`luminos-pagefile off`)
+# without editing a boot-critical file.
+#
+# Size lives here, in Environment=, so changing it is one line plus a restart. It must
+# agree with what `luminos-pagefile status` reports — the script reads the LIVE kernel
+# numbers, so the script is the truth and this is only the request.
+
+[Unit]
+Description=Luminos pagefile — SSD swap below zram (DECISION 115)
+Documentation=file:///home/shawn/luminos-os/LUMINOS_DECISIONS.md
+After=local-fs.target
+Wants=local-fs.target
+# Nothing else may depend on this: a machine with a full disk must still boot, and the
+# script refuses rather than half-creating. ConditionVirtualization is NOT set — this is
+# correct on bare metal and harmless anywhere.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=LUMINOS_PAGEFILE_GB=32
+ExecStart=/usr/local/bin/luminos-pagefile on --quiet
+# `off --keep-file` on stop: swapoff must bring every paged-out page back into RAM, so
+# deleting the file as well would be a second, pointless round of work. `systemctl stop`
+# means "stop using it", not "throw it away" — use `luminos-pagefile off` by hand for that.
+ExecStop=/usr/local/bin/luminos-pagefile off --keep-file
+# First boot writes up to 32 GB if the filesystem refuses fallocate and it falls back to
+# dd. 300 s is for that case; the normal path is instant.
+TimeoutStartSec=300
+# swapoff can be slow when the pagefile is genuinely full — it is reading it all back.
+TimeoutStopSec=600
+
+[Install]
+WantedBy=multi-user.target

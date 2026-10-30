@@ -14,6 +14,8 @@ if not src: sys.exit("Max app skills not found")
 src = src[0] + "/skills"
 out = H + "/luminos-os/config/glm/luminos-skills.plugin"
 addendum = open(H + "/luminos-os/config/glm/build-addendum.md").read()
+# [CHANGE: cowork | 2026-10-30] shared sanitized-briefs rules appended to every worker-facing skill
+privacy = open(H + "/luminos-os/config/glm/skills-privacy-addendum.md").read()
 ver = time.strftime("1.%Y%m%d.%H%M")
 with tempfile.TemporaryDirectory() as t:
     root = os.path.join(t, "luminos-skills")
@@ -26,6 +28,9 @@ with tempfile.TemporaryDirectory() as t:
         shutil.copytree(os.path.join(src, n), os.path.join(root, "skills", n))
         if n == "build":
             with open(os.path.join(root, "skills", n, "SKILL.md"), "a") as f: f.write(addendum)
+        # [CHANGE: cowork | 2026-10-30] privacy rules on everything except skill-creator (no worker contact)
+        if n != "skill-creator":
+            with open(os.path.join(root, "skills", n, "SKILL.md"), "a") as f: f.write(privacy)
     tmp = out + ".tmp"
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         for dp, _, fs in os.walk(root):

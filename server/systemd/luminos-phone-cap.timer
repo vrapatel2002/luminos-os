@@ -1,0 +1,9 @@
+# [CHANGE: claude | 2026-10-18] DECISION 150
+[Unit]
+Description=Check every 15 s whether the phone is home
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=15
+AccuracySec=1
+[Install]
+WantedBy=timers.target

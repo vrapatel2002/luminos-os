@@ -1,0 +1,8 @@
+#!/bin/sh
+# [CHANGE: claude | 2026-10-18] DECISION 153 -- Sonarr/Radarr "Custom Script" connection (On Import + On Upgrade).
+# Runs as sonarr/radarr (group media): media files are g+w and dirs setgid media, so no sudo is needed.
+ev="${sonarr_eventtype:-${radarr_eventtype:-}}"
+[ "$ev" = "Test" ] && { echo "luminos-media-fix-hook: test ok"; exit 0; }
+f="${sonarr_episodefile_path:-${radarr_moviefile_path:-}}"
+[ -n "$f" ] || { echo "luminos-media-fix-hook: no file path for event '$ev' - nothing to do"; exit 0; }
+exec /usr/local/bin/luminos-media-fix "$f"

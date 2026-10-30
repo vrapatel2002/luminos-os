@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- [CHANGE: claude-code | 2026-07-22] Luminos Live Wallpaper config keys -->
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+      http://www.kde.org/standards/kcfg/1.0/kcfg.xsd" >
+  <kcfgfile name=""/>
+
+  <group name="General">
+    <!-- image | video | web -->
+    <entry name="WallpaperMode" type="String">
+      <label>Which kind of wallpaper to show</label>
+      <default>image</default>
+    </entry>
+
+    <entry name="Image" type="String">
+      <label>Path to the still image</label>
+      <default></default>
+    </entry>
+
+    <entry name="Video" type="String">
+      <label>Path to the video file</label>
+      <default></default>
+    </entry>
+
+    <entry name="WebUrl" type="String">
+      <label>URL or local path to an HTML/JS page</label>
+      <default></default>
+    </entry>
+
+    <!-- Windows-parity fit modes. 0 Stretch (default) fills the screen edge-to-edge
+         with no bars; 1 Fit keeps proportions (adds bars); 2 Fill crops to fill;
+         3 Center; 4 Tile. [CHANGE: claude-code | 2026-07-23] -->
+    <entry name="FillMode" type="int">
+      <label>How image/video is scaled</label>
+      <default>0</default>
+    </entry>
+
+    <entry name="BackgroundColor" type="Color">
+      <label>Backing colour behind the content</label>
+      <default>#000000</default>
+    </entry>
+
+    <entry name="PauseOnBattery" type="bool">
+      <label>Freeze the wallpaper while on battery</label>
+      <default>true</default>
+    </entry>
+
+    <!-- When to stop rendering because nobody can see the wallpaper.
+         0 = never (burn CPU/iGPU even fully hidden)
+         1 = only while a FULLSCREEN window is up
+         2 = whenever the desktop is hidden — fullscreen OR maximized (default)
+         Replaces the old PauseWhenObscured bool, which conflated "maximized"
+         with "fullscreen" and could only be all-or-nothing.
+         [CHANGE: claude-code | 2026-07-24] -->
+    <entry name="ObscurePolicy" type="int">
+      <label>When to freeze the wallpaper because it is not visible</label>
+      <default>2</default>
+    </entry>
+
+    <entry name="MuteAudio" type="bool">
+      <label>Mute video audio</label>
+      <default>true</default>
+    </entry>
+
+    <!-- Web: accept real mouse + clicks (steals desktop clicks while on) -->
+    <entry name="WebInteractive" type="bool">
+      <label>Let the web page receive mouse and clicks</label>
+      <default>false</default>
+    </entry>
+
+    <!-- Web: feed luminos-monitor stats into window.luminos -->
+    <entry name="InjectSystemStats" type="bool">
+      <label>Expose live CPU/GPU/RAM stats to the web page</label>
+      <default>false</default>
+    </entry>
+  </group>
+</kcfg>

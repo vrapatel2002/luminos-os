@@ -1,12 +1,45 @@
 {
     "bar": {
+        "entries": [
+            {
+                "enabled": true,
+                "id": "logo"
+            },
+            {
+                "enabled": true,
+                "id": "spacer"
+            },
+            {
+                "enabled": true,
+                "id": "tray"
+            },
+            {
+                "enabled": true,
+                "id": "clock"
+            },
+            {
+                "enabled": true,
+                "id": "statusIcons"
+            },
+            {
+                "enabled": true,
+                "id": "power"
+            }
+        ],
         "workspaces": {
             "maxWindowIcons": 8,
             "showWindows": true
         }
     },
+    "border": {
+        "thickness": 8
+    },
     "dashboard": {
-        "showOnHover": true
+        "showDashboard": true,
+        "showMedia": true,
+        "showOnHover": true,
+        "showPerformance": true,
+        "showWeather": true
     },
     "launcher": {
         "showOnHover": true,
