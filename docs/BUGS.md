@@ -8724,3 +8724,18 @@ Works by luck when someone already uploaded the YouTube-style title to LRCLIB (B
   builds dropped it from the test OS. Merged back (gameos 8e53f87); seat now commits in git, laptop `git fetch seat`.
 - Guard check: `luminos-mux-guard` fired 20:44:55 and recovered Luminos; note asus-nb-wmi read-back still shows the OLD MUX
   value until reboot (the log line "read back: 0" is expected, not a failure).
+
+## BUG-224 — GLM window: "Failed to start Claude's workspace … vsock listen on port 51234 … address already in use"
+# [CHANGE: cowork | 2026-10-30]
+**Cause:** each Claude Desktop instance spawns its own `cowork-linux-helper`, which listens on host **vsock port 51234**
+(hard-coded; the helper's only flag is -socket) and on the unix socket `$XDG_RUNTIME_DIR/claude-cowork-vm.sock`
+(path derived from XDG_RUNTIME_DIR, so identical for both apps). The Max app's helper (pid 3928) held 51234, so the GLM
+window's sandbox could not start — and worse, the GLM helper **replaced the shared unix socket file**, so any NEW
+connection from the Max app would have reached the broken GLM helper. Running Max sessions survive on their existing
+connection only.
+**Done now:** GLM helpers killed, GLM window closed; Max helper 3928 + its VM untouched. The socket path on disk is a stale
+file left by the killed GLM helper → **restart the Max app** (luminos-claude-restart) at a convenient time.
+**Fix options (Shawn to choose):** (a) separate XDG_RUNTIME_DIR for the GLM app so the unix sockets never collide —
+GLM's Cowork sandbox then works only while the Max sandbox is down; (b) run the GLM app in its own network namespace
+with `net.vsock.child_ns_mode=local` (kernel 7.0.5 has vsock netns: /proc/sys/net/vsock/{ns_mode,child_ns_mode}
+= global) so it gets its own port 51234 → both sandboxes at once; needs root at launch + veth/NAT for network.
