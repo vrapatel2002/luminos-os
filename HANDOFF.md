@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-30 — Response 10 (glm chat; Response 9 was the server-seat chat)
+Last updated: 2026-10-30 — Response 11 (glm chat)
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
@@ -11,6 +11,7 @@ GLM window = second Claude Desktop (`luminos-claude-glm`, profile ~/.config/Clau
 (list/read all chats, send to terminal/worker ones), `luminos-desktop-mcp` (GLM-only app control: windows, launch,
 AT-SPI ui_tree/click/set_text, keys via ydotool, screenshot; a11y + ydotoold only on while used), skills via
 `config/glm/luminos-skills.plugin` (built by `luminos-glm-skills`).
+R11 proven: GLM itself (claude-glm -p) opened a real Opus chat via luminos-worker, continued it with luminos-chats send (answered 84 from remembered 42), and opened a Fable chat — modelUsage claude-opus-5-5 / claude-fable-5-1.
 **WAITING ON SHAWN:** upload `~/luminos-os/config/glm/luminos-skills.plugin` in the GLM window (Customize → Plugins).
 Then check: newest GLM session's skill list contains luminos-skills:build. Copying skills into skills-plugin/ does NOT
 work (the app's sync deletes them every 10 min). Desktop-window chats can't be typed into from outside.
