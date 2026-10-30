@@ -1,5 +1,5 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-29 — Response 8
+Last updated: 2026-10-29 — Response 9
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
@@ -24,6 +24,8 @@ Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gam
    R26-R28 builds → merged back (gameos 8e53f87). Seat now = git copy (~/vela-remote/gameos), laptop remote `seat`,
    ~/vela-remote/vela-ip finds the laptop. Seat link changed: env_018AByA5JzYVwe6w2KGWzoPK (project doc updated).
    gameos repo has NO git remote (never pushed anywhere) — told Shawn; ask whether to add a private GitHub remote.
+3e. Response 9 — Shawn moves ALL Vela work to the server seat (vela-test-os) for this session, no OS switching. Prompt given.
+   On return: `cd gameos && git fetch seat` and merge seat/* branches; read ~/vela-remote/SESSION-LOG.md on the server.
 4. Still waiting on Shawn: R25 controller test (BUG-221), "heavy vs hitchy" lag answer, DLSS 5 DLL source.
    All of it = BOARD "Next test" steps 7 + 8 on the test OS.
 
