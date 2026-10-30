@@ -3,8 +3,11 @@
 
 ## On the GLM window (Luminos) — read this before step 5
 <!-- [CHANGE: cowork | 2026-10-30] DECISION 162 — appended only to the GLM window's copy of this skill. -->
-You are running on GLM-5.3, not Claude. Your own Bash runs in a sandbox, so **start workers on the laptop** with
-`mcp__host-shell__run_command` and the `luminos-worker` command, which runs any model — several at once is fine:
+You are running on GLM-5.3 and you DO have full access to this laptop. You have two ways to run commands:
+your built-in Bash runs in Cowork's sandbox (a safe box that only sees the task folder), while
+`mcp__host-shell__run_command` runs directly on the laptop, with everything installed there. The workers
+(`luminos-worker`, and real Claude on Shawn's Max plan) are installed on the laptop, so **always start workers
+through `mcp__host-shell__run_command`**, never from the sandbox Bash. Several models can run at once:
 
 ```
 luminos-worker <model> --cwd <build_dir> --tools "Read,Write,Edit,Bash(go:*)" --max-turns 30 [--effort high] "@<brief_file>"

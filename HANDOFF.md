@@ -1,5 +1,15 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-30 — Response 12 (glm chat)
+Last updated: 2026-10-30 — Response 1 (GLM chat: build-skill mod)
+
+## Aim right now — MODIFY THE /build SKILL (GLM chat, 2026-10-30)
+Shawn wants to modify the build skill "a little bit". Read + understood:
+`config/glm/luminos-skills.plugin` → skills/build/SKILL.md (14,267 B, zipped 2026-10-30 19:10) +
+`config/glm/build-addendum.md` (the GLM-window appendix appended to that copy: luminos-worker spawn
+rules, model table, ≥1 opus/fable worker, reviewer ≠ implementer model).
+WAITING ON: Shawn to say WHAT the modification is. Nothing changed yet (read-only turn).
+Skill rebuild path: `luminos-glm-skills` builds the plugin; `luminos-glm-skills-install` (or the
+launcher, while the window is closed) installs it. Copying skills into skills-plugin/ by hand does NOT
+work (app sync deletes them every 10 min).
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
@@ -14,7 +24,7 @@ AT-SPI ui_tree/click/set_text, keys via ydotool, screenshot; a11y + ydotoold onl
 R11 proven: GLM itself (claude-glm -p) opened a real Opus chat via luminos-worker, continued it with luminos-chats send (answered 84 from remembered 42), and opened a Fable chat — modelUsage claude-opus-5-5 / claude-fable-5-1.
 R12: skills now installed automatically (scripts/luminos-glm-skills-install mirrors the app's upload code; launcher
 runs it each launch while the window is closed). VERIFIED in the GLM window UI: Customize → Skills lists build +4.
-Electron's accessibility tree needs --force-renderer-accessibility (only used for that check). Copying skills into skills-plugin/ does NOT
+Electron's accessibility tree needs --force-renderer-accessibility (only used for that check). R13: build-addendum reworded — GLM has full laptop access via host-shell; sandbox Bash only sees the task folder. Copying skills into skills-plugin/ does NOT
 work (the app's sync deletes them every 10 min). Desktop-window chats can't be typed into from outside.
 
 ## Aim right now (Vela) — everything new is on the TEST OS (/vela-nv.img) only
