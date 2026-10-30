@@ -1,0 +1,52 @@
+#!/usr/bin/python3
+# luminos-glm-skills-install — install config/glm/luminos-skills.plugin into the GLM Claude window exactly the way the
+# app's own "upload plugin" does (LocalPluginsWriter in app.asar 2.31226.1). [CHANGE: cowork | 2026-10-30] DECISION 162.
+# Run with the GLM window CLOSED (luminos-claude-glm runs it on every launch). Idempotent; replaces an older copy.
+# Steps mirrored from the app: marketplace "local-desktop-app-uploads" (marketplace.json + plugin dir), its entry in
+# cowork_plugins/known_marketplaces.json, cowork_plugins/installed_plugins.json (version 2, scope user), and
+# enabledPlugins in cowork_settings.json.
+import glob, json, os, shutil, sys, tempfile, time, zipfile
+H = os.path.expanduser("~")
+PLUGIN = H + "/luminos-os/config/glm/luminos-skills.plugin"
+MK = "local-desktop-app-uploads"
+bases = [d for d in glob.glob(H + "/.config/Claude-glm-3p/local-agent-mode-sessions/*/*") if os.path.isdir(d)
+         and "skills-plugin" not in d and os.path.exists(d + "/cowork_account_settings.json")]
+if not bases: sys.exit("GLM profile not found (open the GLM window once first)")
+base = bases[0]
+if not os.path.exists(PLUGIN): sys.exit("no %s — run luminos-glm-skills first" % PLUGIN)
+with zipfile.ZipFile(PLUGIN) as z: meta = json.loads(z.read(".claude-plugin/plugin.json"))
+name, ver = meta["name"], meta["version"]; pid = "%s@%s" % (name, MK)
+pdir = base + "/cowork_plugins"; mdir = pdir + "/marketplaces/" + MK; inst = mdir + "/" + name
+now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+def rj(p, d):
+    try: return json.load(open(p))
+    except Exception: return d
+def wj(p, o):
+    os.makedirs(os.path.dirname(p), exist_ok=True); t = p + ".tmp"
+    open(t, "w").write(json.dumps(o, indent=2)); os.replace(t, p)
+# 1) plugin files
+os.makedirs(mdir + "/.claude-plugin", exist_ok=True)
+tmp = tempfile.mkdtemp(dir=mdir)
+with zipfile.ZipFile(PLUGIN) as z: z.extractall(tmp)
+if os.path.isdir(inst): shutil.rmtree(inst)
+os.rename(tmp, inst)
+# 2) marketplace.json
+mp = mdir + "/.claude-plugin/marketplace.json"
+m = rj(mp, {"name": MK, "version": "1.0.0", "description": "Locally uploaded plugins via Claude Desktop app",
+            "owner": {"name": "Local User"}, "plugins": []})
+m["plugins"] = [p for p in m.get("plugins", []) if p.get("name") != name] + [{"name": name, "version": ver, "source": "./" + name}]
+wj(mp, m)
+# 3) known_marketplaces.json
+km = rj(pdir + "/known_marketplaces.json", {})
+km[MK] = {"source": {"source": "directory", "path": mdir}, "installLocation": mdir, "lastUpdated": now}
+wj(pdir + "/known_marketplaces.json", km)
+# 4) installed_plugins.json
+ip = rj(pdir + "/installed_plugins.json", {"version": 2, "plugins": {}}); ip["version"] = 2; ip.setdefault("plugins", {})
+old = [e for e in ip["plugins"].get(pid, []) if e.get("scope") == "user"]
+ip["plugins"][pid] = [{"scope": "user", "installPath": inst, "version": ver,
+                       "installedAt": old[0]["installedAt"] if old else now, "lastUpdated": now}]
+wj(pdir + "/installed_plugins.json", ip)
+# 5) enable
+st = rj(base + "/cowork_settings.json", {}); st.setdefault("enabledPlugins", {})[pid] = True
+wj(base + "/cowork_settings.json", st)
+print("installed %s %s → %s (skills: %s)" % (pid, ver, inst.replace(H, "~"), ", ".join(sorted(os.listdir(inst + "/skills")))))

@@ -70,6 +70,12 @@ case "${1:-open}" in
     grep -h "3P mode active" "$GLMDIR"/logs/main.log 2>/dev/null | tail -1 || true ;;
   open)
     setup
+    # DECISION 162: refresh Shawn's skills (build, llm-council, ...) as an installed local plugin — only while the GLM
+    # window is closed (the app reads plugins at start). Never fatal.
+    if ! pgrep -f -- "--user-data-dir=$GLMDIR" >/dev/null; then
+      "$HOME/luminos-os/scripts/luminos-glm-skills" >/dev/null 2>&1 && "$HOME/luminos-os/scripts/luminos-glm-skills-install" >/dev/null 2>&1 \
+        || echo "warning: skills plugin refresh failed (run luminos-glm-skills-install by hand)" >&2
+    fi
     systemctl --user start luminos-glm-proxy
     for _ in $(seq 10); do curl -fs 127.0.0.1:4141/health >/dev/null && break; sleep 0.5; done
     while IFS= read -r line; do

@@ -8816,3 +8816,12 @@ their controls if started after accessibility came on (else keyboard + screensho
 (Dolby Vision P5) share a number — two chats on the same day; both stay, cite them with their file.
 **Undo:** remove `luminos-desktop` from the GLM config block in scripts/luminos-claude-glm and the --mcp-config line in
 claude-glm; delete the plugin in the GLM window; rm the new scripts + ~/.local/bin links.
+
+**Amendment 2026-10-30 19:08 — skills installed automatically, no upload:** Shawn's upload hadn't happened (no
+cowork_plugins/ at all). `scripts/luminos-glm-skills-install` now mirrors the app's own LocalPluginsWriter
+(marketplace "local-desktop-app-uploads": marketplace.json + plugin dir, cowork_plugins/known_marketplaces.json,
+installed_plugins.json v2 scope user, cowork_settings.json enabledPlugins) and luminos-claude-glm runs
+luminos-glm-skills + install on every launch while the GLM window is closed. Proven: main.log "[LocalPluginsReader]
+Found 1 local plugins", and read through AT-SPI in the GLM window itself (relaunched once with
+--force-renderer-accessibility, Electron needs it): Customize → Skills → "Created by you · 5": build, deep-research,
+llm-council, … "by Luminos". Window relaunched normally afterwards, accessibility back off.
