@@ -456,6 +456,7 @@ Things that need physical access or the router admin page:
   expires **2027-02-01**, and when it does the server drops off the tailnet silently — remote
   access just stops, months from now, with nothing logged on the box. There is no CLI for it.
 
-- **Dolby Vision Profile 5 = purple on the Roku, and the Roku always asks for direct play.** <!-- [CHANGE: claude | 2026-10-23] -->
-  The transcode colour fix never sees it. `luminos-dv-sweep.timer` converts every P5 file to HDR10 every 30 min (DECISION 156).
-  Don't disable it without replacing it. History: `server/docs/doctor/DV_PURPLE_HISTORY.md`.
+- **Dolby Vision Profile 5 = purple in the OFFICIAL Jellyfin Roku app — use JellyRock.** <!-- [CHANGE: claude-code | 2026-10-31] -->
+  JellyRock (Roku store id 819325) asks for a remux and the TV shows real DV (DECISION 167). `luminos-dv-sweep.timer` (HDR10
+  conversion, DECISION 156) is deliberately DISABLED; re-enable it only if a non-JellyRock client must play P5.
+  The TV is now at **192.168.2.18 on ethernet** (was .13 on wifi). History: `server/docs/doctor/DV_PURPLE_HISTORY.md`.

@@ -1,5 +1,14 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-30 — Response 1 (GLM chat: build-skill mod)
+Last updated: 2026-10-31 — Response 1 (new chat: bar clock "; $" bug)
+
+## Aim right now — BAR CLOCK GLYPH BUG (2026-10-31) — DONE, nothing pending
+- Symptom: Caelestia bar clock hour drew "; $" instead of "06". BUG-226 / DECISION 167.
+- Cause: bar process had TWO Google Sans Flex files (Caelestia bundled 3.007 via GSFLoader + system 5.000 from
+  ttf-google-sans-flex installed 2026-10-10, DECISION 139). Glyph numbers from one file drawn with the other's pictures
+  (system '0'=384,'6'=390 → bundled 384=semicolon, 390=dollar). Started when the system font arrived on 10-10.
+- Fix: GSFLoader removed from config/quickshell/caelestia-bar/shell.qml; bar restarted; live screenshot 06/49/pm; one font mapped.
+- Guard: luminos-verify [4c]. Open: Hyprland session's package-owned /etc/xdg Caelestia shell.qml still loads GSFLoader.
+- Cleanup if still there: ~/luminos-os/.tmp-clockglyph/ (test screenshots; delete), /var/tmp/clockglyph/ (repro + shell.qml.bak).
 
 ## Aim right now — WUKONG CRASH INVESTIGATION (GLM chat R4, 2026-10-30) — read seat handoff first
 Source docs: gameos branch `seat/seat/2026-10-30-wukong-handoff` → docs/handoff/WUKONG-CRASH-2026-10-30.md +
@@ -196,7 +205,12 @@ Research DONE, nothing installed. Full write-up: `gameos/docs/tracks/DLSS5.md`. 
 - Vela rules: gameos/docs/tracks/BOARD.md first; test OS first; Luminos untouched.
 - `luminos-notes.sh` needs sqlite3 — run it on the real host (host-shell), not the Cowork VM.
 
-## PARKED — Roku TV work (last state 2026-10-27, Response 13)
+## PARKED — Roku TV work (last state 2026-10-31, Roku chat Response 14)
+**2026-10-31 — DECISION 167 LIVE:** JellyRock (TV app, Roku store 819325) plays DV P5 correctly, so `luminos-dv-sweep.timer` is
+DISABLED and the 3 P5 originals are back in the library (VisionQuest S01E01/E02, Ozark S02E03; Jellyfin reports DOVI 5/0 for all
+three). HDR10 copies in /srv/media/_dv_hdr10_converted, originals also still in /srv/external/_dv_p5_originals. Official Jellyfin
+Roku app still shows P5 purple — use JellyRock. dumbtv-roku launcher: 1.0.3 built (IsAppInstalled fallback), never tested on TV;
+Roku OS 15 returns 403 to ECP from on-device apps; Shawn rejected a server relay.
 ### Why / key facts a newcomer is missing
 - The TV is a **Philips 65PUL7973 Roku TV at 192.168.2.13** (server/README.md). It is Roku OS, NOT Android:
   no ADB, no package disabling, no launcher replacement, no Private DNS setting. The video's steps do not transfer 1:1.

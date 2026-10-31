@@ -14,13 +14,15 @@ layer is ordinary HDR10). See BUG-207 for the code-level pinpoint.
 | 2 | 2026-09-26 | Ozark S02E03 | 1 file (lone WEBDL in the season) | BUG-189: same tool run by hand as a transient unit. Noted at the time: *"Why it wasn't caught: --scan is manual. Nothing scans new imports for P5"* — on-import scan left as "Shawn's call", never built | ❌ manual | Same gap, written down and not closed. Output file was 0644 root → the later import hook couldn't edit it |
 | 3 | 2026-10-18/20 | (Playback Doctor) | none in library at census time | DECISION 148/152: OpenCL tonemapping for **transcodes** (fixes colours only when the server converts). The plan listed "DV P5 → luminos-dv-fix" as a category fix, but the census found 0 P5 files, so the gate was never wired in. Reported to Shawn as "purple fixed" — overclaim | ⚠️ transcodes only | The Roku **direct-plays** DV, so this path never runs for P5 |
 | 4 | 2026-10-23 | VisionQuest | S01E01, S01E02 (both P5) | BUG-207 → DECISION 156: `luminos-dv-sweep` + 30-min timer runs `luminos-dv-fix` on **every** P5 file under Jellyfin's library roots; chmod 664 after swap; Jellyfin notified; `luminos-media-fix` skips the temp file | ✅ every file, every 30 min | — |
+| 5 | 2026-10-27/31 | (client change) | VisionQuest E01/E02, Ozark S02E03 restored to P5 | DECISION 167: JellyRock on the TV remuxes DV MKV; proven on the raw P5 original; sweep timer disabled, HDR10 copies kept aside | ✅ every file, by the client | — |
 
 ## What each fix actually does
 - **luminos-dv-fix (95):** decodes the DV layer properly (only libplacebo can), re-encodes as HDR10 on the iGPU (~0.46–0.57× realtime),
   checks length + audio tracks, swaps, keeps the original. Correct, but someone had to run it.
 - **OpenCL tonemapping (152):** when the server converts a stream, HDR/DV is mapped to normal colours on the GPU. Correct, but only
   for streams the server converts — the Roku asks for direct play on DV, so it never converts P5.
-- **luminos-dv-sweep (156):** makes 95 automatic. Covers every current and future file regardless of title.
+- **luminos-dv-sweep (156):** makes 95 automatic. Covers every current and future file regardless of title. DISABLED by 167.
+- **JellyRock (167):** the client asks for a remux, so the TV gets real DV and nothing is re-encoded. Only this app.
 
 ## Lessons
 1. A gap written down as "owner's call" is still a gap — BUG-189 named this exact hole a month before it bit again.

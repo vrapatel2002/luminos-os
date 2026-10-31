@@ -3085,3 +3085,25 @@ arrs' hook needs group write — this is also why Ozark S02E03 was 0644) and Jel
 Also: `luminos-media-fix` library walk now skips dot-files, so the nightly run can never touch luminos-dv-fix's `.dvfix.*.mkv` temp
 file (backup `/usr/local/bin/luminos-media-fix.pre-dvsweep`). Measured: VisionQuest S01E02 converting at ~0.57× realtime (~80 min/ep).
 Accepted cost: P5 files are purple until converted (≤ 30 min to start + ~1.5–2× runtime); the HDR10 result loses the DV dynamic layer.
+
+## DECISION 167 — JellyRock replaces the HDR10 conversion: Dolby Vision P5 files stay real DV, sweep timer OFF
+<!-- [CHANGE: claude-code | 2026-10-31] -->
+**Why:** DECISION 156 fixed the purple P5 picture by re-encoding every P5 file to HDR10 — correct colours, but the DV dynamic
+layer is thrown away and each episode costs ~80 min of iGPU encode. On 2026-10-27 the TV got **JellyRock 3.2.0** (Roku Channel
+Store id 819325, github.com/jellyrock/jellyrock), a Jellyfin client fork that tells the server it cannot direct-play DV in MKV and
+asks for an on-the-fly **remux** (container repack, picture copied bit-for-bit) instead. Roku's player only honours DV in that
+repacked stream (jellyfin-roku#472: the official app's DV-in-MKV direct play is what shows violet).
+**Proven 2026-10-27 19:22:** the untouched P5 original of VisionQuest S01E01 (HEVC DV P5 compat 0 + EAC3 Atmos), in a temporary
+"DV Test" library with the sweep paused, played in JellyRock with correct colours in Dolby Vision ("true 4K true color" — Shawn).
+**Change (2026-10-31, Shawn: "put it live so every movie runs that way"):**
+- `luminos-dv-sweep.timer` **stopped + disabled** (`systemctl disable --now`). New P5 downloads now stay real DV.
+- The 3 P5 originals put back in the library at their original paths (VisionQuest S01E01, S01E02; Ozark S02E03) by a one-off
+  transient unit (`luminos-dv-restore-once`: cp → size check → swap → 664 media). The HDR10 conversions moved to
+  **/srv/media/_dv_hdr10_converted/** (outside both library roots), the originals are still also in /srv/external/_dv_p5_originals.
+- `luminos-dv-fix` and `luminos-dv-sweep` stay installed, unused.
+**Accepted cost — read before "fixing" a purple report:** P5 is now correct ONLY in JellyRock. The **official Jellyfin Roku app**
+still direct-plays P5 MKV → violet. Phone/browser clients that lack DV get a server transcode, which DECISION 152 tonemaps
+(colours right; 4K-out from P5 is ~10 fps on this iGPU, 1080p-out is fine). If a non-JellyRock client must play P5 correctly,
+re-enable the sweep (below) — do not re-invent a fix.
+**Revert:** `sudo systemctl enable --now luminos-dv-sweep.timer` (it re-converts every P5 file within ~30 min each); or swap a
+single file back from /srv/media/_dv_hdr10_converted.
