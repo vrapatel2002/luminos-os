@@ -47,14 +47,14 @@ stalls. New dGPU-direct bugs: #24 bottom-of-screen colored pixels (scanout artif
 the date → name collision) — split sessions on repeated header rows when parsing.
 OPEN: MUX verdict (Wukong +10 fps avg vs Control regression + artifacts). Next: repeat Control longer
 in dGPU-direct, then #24 artifacts investigation. Per-boot either/or — MUX flip needs a reboot.
-R19 — MORNING STUTTER ROOT-CAUSED + KILLED: VELA_FPS_CAP caps GAMESCOPE (whole session, Home
-included — vela-session --framerate-limit), NOT the game. My 10-30 cap-42 caused Shawn's Home + game
-stutter and worse input feel. REVERTED to 0 (R56 was right). GRUB donut lag in MUX 0 = NVIDIA GOP
-(cosmetic, pre-OS, BOARD #28). Still open: #24 bottom pixels (dGPU scanout), game 300 ms stalls =
-VRAM ceiling (5.8/6 GB), Control ~30 vs 43.7 regression (not MUX — both modes bad tonight). NEXT
-INPUT LEVER: game-only cap (DXVK_FRAME_RATE + VKD3D_FRAME_RATE in game env, Home untouched) — clean
-test: one Wukong run capped-game-only, expect VRAM/stall drop without Home cost. This morning's capped
-run showed VRAM 2.2 GB vs 5.7 (menu confound — re-test needed). BOARD #27/#28 (05e999b).
+R21 — dGPU-DIRECT SYMPTOMS ESCALATE (cap revert did NOT fix Home): bottom screen now a visibly broken
+region (few pixels last night → worse today), carried Home→game, input lag persists. gamescope mode
+correct (2880x1800@120). Progressive across MUX-0 boots → NVIDIA eDP scanout in MUX 0 = the root
+suspect (one family: Home stutter + broken bottom + game stutter + input feel; the cap was only an
+aggravator). ISOLATION ARMED: /etc/vela/mux-direct → .disabled-20261031 — next test-OS boot = HYBRID.
+SHAWN: boot test OS → expect smooth Home, clean screen, no pixels; if all symptoms vanish → root =
+dGPU-direct display path (fix later via 60Hz-in-MUX test / driver bump / link knobs — Wukong's +10
+fps keeps it worth fixing). If symptoms REMAIN in Hybrid → different root, keep digging.
 R17 — INPUT-DELAY ROOT CAUSE + LEVER 1 ARMED: stalls = VRAM-ceiling evictions (Wukong 5.84/6 GB,
 Control 5.82 GB max; swap/psi 0; GPU 0x4+0x20 power/thermal capped 72-78 W throughout). This also explains
 dGPU-direct giving Control nothing (MUX 0 = panel+session VRAM on the 4050) AND the good-era Control 43.7
