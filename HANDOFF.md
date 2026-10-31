@@ -39,6 +39,14 @@ SHAWN'S NEXT RUNS (A/B, same areas/settings as baseline): Wukong ~5 min + Contro
 then reboot to Luminos, "done" → PM re-extracts CSVs and compares avg/1% lows. Note: quit Wukong
 FROM IN-GAME (bug #22: PS-quit blocks the next launch) and expect the white flash (#21) — both filed
 in BOARD, to be fixed after the A/B.
+R16 — A/B DONE (numbers + verdict in BOARD #23-26, commit 2817c7c): WUKONG avg 37.1→47.5 (+28 %),
+1 % low 8.5→7.3; CONTROL avg 30.2→30.9 (no gain), 1 % low 4.4→3.2, stutter 0.6→1.7 % (95 s run — repeat).
+padlat PROVES input path fine in both modes (~4-5 ms usb/bt) — felt input delay = 275-368 ms frame
+stalls. New dGPU-direct bugs: #24 bottom-of-screen colored pixels (scanout artifact, MUX 0 only),
+#26 Control more stuttery. Gotcha: Wukong dGPU CSV APPENDED to the 10-29 filename (clock fix fakes
+the date → name collision) — split sessions on repeated header rows when parsing.
+OPEN: MUX verdict (Wukong +10 fps avg vs Control regression + artifacts). Next: repeat Control longer
+in dGPU-direct, then #24 artifacts investigation. Per-boot either/or — MUX flip needs a reboot.
 BUGS FILED (gameos BOARD, commit 4d55ded): #21 Wukong launch white flash; #22 PS-menu-quit of
 Wukong blocks launching any other game (in-game quit fine, other games fine via PS quit).
 R12 — BASELINE-FIRST PLAN (Shawn: measure avg fps + lows so we can compare; optimize the OS not the
