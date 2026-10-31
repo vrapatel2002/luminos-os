@@ -18,6 +18,14 @@ have_ns() { ip netns list | awk '{print $1}' | grep -qx "$NS"; }
 rule_handles() { nft -a list chain inet luminos forward 2>/dev/null | awk -v t="\"$TAG\"" '$0 ~ t {print $NF}'; }
 
 up() {
+  # After a reboot vsock is not loaded until something needs it (the Max app's sandbox usually loads it when it starts).
+  # /proc/sys/net/vsock only exists once it is — load it ourselves. (BUG-225)
+  if [ ! -e /proc/sys/net/vsock/child_ns_mode ]; then
+    modprobe vhost_vsock 2>/dev/null || modprobe vsock 2>/dev/null || true
+  fi
+  if [ ! -e /proc/sys/net/vsock/child_ns_mode ]; then
+    echo "vsock namespaces unavailable: /proc/sys/net/vsock/child_ns_mode missing even after 'modprobe vhost_vsock'" >&2; exit 1
+  fi
   if ! have_ns; then
     old=$(cat /proc/sys/net/vsock/child_ns_mode)
     echo local > /proc/sys/net/vsock/child_ns_mode

@@ -92,9 +92,9 @@ case "${1:-open}" in
     # DECISION 163 / BUG-224: own network namespace (own vsock port 51234 for the Cowork sandbox) and own
     # XDG_RUNTIME_DIR (own claude-cowork-vm.sock), so the GLM sandbox never collides with the Max app's.
     NETNS="$HOME/luminos-os/scripts/luminos-glm-netns"; U=$(id -u); R="/run/user/$U"
-    if ! sudo -n "$NETNS" up >/dev/null; then
-      echo "luminos-claude-glm: could not set up the GLM network namespace (sudo -n $NETNS up)" >&2
-      command -v notify-send >/dev/null && notify-send "Claude (GLM-5.3)" "Could not set up its private network — see: sudo luminos-glm-netns up"
+    if ! err=$(sudo -n "$NETNS" up 2>&1 >/dev/null); then
+      echo "luminos-claude-glm: could not set up the GLM network namespace: $err" >&2
+      command -v notify-send >/dev/null && notify-send "Claude (GLM-5.3)" "Could not set up its private network: ${err:-unknown error} (sudo luminos-glm-netns up)"
       exit 1
     fi
     GRT="$R/claude-glm-rt"; mkdir -p "$GRT"; chmod 700 "$GRT"

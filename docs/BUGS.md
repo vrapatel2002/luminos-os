@@ -8742,3 +8742,12 @@ with `net.vsock.child_ns_mode=local` (kernel 7.0.5 has vsock netns: /proc/sys/ne
 **Update 2026-10-30 19:40 — FIXED by DECISION 163** (Shawn picked "both at once"): GLM window runs in netns claude-glm with
 vsock ns_mode=local and its own XDG_RUNTIME_DIR; proven with two Cowork sandboxes running concurrently and a real GLM
 task in its own sandbox. Max app: restart once to drop the stale socket file.
+
+## BUG-225 — after a reboot the GLM window says "Could not set up its private network"
+# [CHANGE: cowork | 2026-10-30]
+**Cause:** vsock is a module (CONFIG_VSOCKETS=m) and is not loaded after boot until something needs it (normally the Max
+app's Cowork sandbox). Without it /proc/sys/net/vsock/ does not exist, so `luminos-glm-netns up` failed on its first
+read and, under set -e, exited 1 with no message.
+**Fix:** `up` now runs `modprobe vhost_vsock` (pulls vsock) when /proc/sys/net/vsock/child_ns_mode is missing and prints a
+clear error if it is still missing; the launcher's notification now shows the real error text. Verified from the
+post-reboot state (modules not loaded): up → netns claude-glm vsock local; full launch → GLM app in netns, own helper socket.
