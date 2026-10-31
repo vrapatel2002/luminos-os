@@ -32,8 +32,9 @@ MUX RESTORE DONE: from /var/log/vela/seat-r28-r29-removed-20261030/ into /vela-n
 vela-core (r29: FG+music+EGL fix; R27 core backed up .prev-r30mux), vela-session r29 (EGL pin,
 backup .prev-r30mux), vela-mux + vela-mux-enter.service (enabled) + /etc/vela/mux-direct. Verified
 (FG strings, bash -n, unit symlink). Next test OS boot = MUX 0 dGPU-direct, BUG-223 EGL fix in.
-⚠️ Shawn MUST exit Vela via the power menu (vela-mux leave → MUX 1). Hard power-off → MUX stuck 0 →
-Luminos boots BLACK (guard removed, DECISION 164) → fix = BIOS MUX by hand.
+⚠️ REMOVED R15: exit Vela HOWEVER you like — luminos-mux-guard is BACK (DECISION 166): any exit
+path lands Luminos on Hybrid automatically (worst case one auto-reboot, never black). Vela always
+boots dGPU (vela-mux enter). Verified enabled; MUX=1 today.
 SHAWN'S NEXT RUNS (A/B, same areas/settings as baseline): Wukong ~5 min + Control ~5 min on test OS,
 then reboot to Luminos, "done" → PM re-extracts CSVs and compares avg/1% lows. Note: quit Wukong
 FROM IN-GAME (bug #22: PS-quit blocks the next launch) and expect the white flash (#21) — both filed
