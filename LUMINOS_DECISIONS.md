@@ -8879,3 +8879,16 @@ os/experiments/wukong-clock/apply.sh, backups .prev-wclock). Repo copies: ~/lumi
 zero new crash folders. Tests: ~/builds/wukong-clock/TESTS.md.
 **Undo:** Lutris: restore yml from .bak-wclock. Vela: apply.sh <img> revert. If the game ever updates
 its date check: bump FAKE_DATE to an earlier date.
+
+## DECISION 166 — luminos-mux-guard restored (Vela=dGPU always, Luminos=Hybrid always, no discipline needed)
+# [CHANGE: cowork | 2026-10-30]
+Date: 2026-10-30 (GLM chat R15). Shawn: "can't you make it simple enough so that no matter how, Vela boots dGPU and
+Luminos Hybrid."
+**What:** DECISION 164 removed the guard; this puts it back (same tested binary, repo copies). Two automatic rules:
+Vela's `vela-mux enter` sets dGPU at its own boot (restored to the test OS same day); Luminos' guard runs before the
+display manager and if the MUX reads 0 writes 1 + one auto-reboot (max 2 tries, then logs GIVING UP).
+**Why:** covers every exit path — clean power menu (leave sets 1, no reboot), normal reboot without menu,
+Vela crash, hard power-off: worst case ONE automatic extra reboot at the next Luminos boot, never a black screen.
+**Verified:** enabled + started (MUX=1 no-op today); its 10-29 log line shows the one real save it performed.
+**Undo:** `sudo systemctl disable --now luminos-mux-guard && sudo rm /etc/systemd/system/luminos-mux-guard.service
+/usr/local/bin/luminos-mux-guard`.
