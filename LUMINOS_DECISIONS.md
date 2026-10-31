@@ -8850,3 +8850,16 @@ own sandbox → "glm-sandbox-ok / claude"; GLM quit → netns, veth, rules, NAT,
 **Known:** child_ns_mode cannot be set back to global until reboot (EBUSY) — only new namespaces affected. The Max app
 still holds a stale claude-cowork-vm.sock file left by the old collision → restart the Max app once.
 **Undo:** `sudo luminos-glm-netns down`, and in luminos-claude-glm `open` go back to launching the app directly.
+
+## DECISION 164 — luminos-mux-guard removed (MUX era over on Luminos)
+# [CHANGE: cowork | 2026-10-30]
+Date: 2026-10-30 (GLM chat, R4). Requested by Shawn via the seat handoff ("remove the leftover MUX guard, MUX gone
+completely") — seconded in chat.
+**What:** `luminos-mux-guard.service` + `/usr/local/bin/luminos-mux-guard` + `/usr/local/bin/luminos-play-vela` +
+`~/.local/share/applications/luminos-play-vela.desktop` all REMOVED from the live system (unit disabled first).
+**Why:** DECISION 161 built the guard to auto-recover MUX=0 boots; Vela's R28/R29 MUX code has since been removed
+from the test OS too, so nothing flips the MUX any more and the guard had nothing left to guard.
+**Cost (accepted):** if the MUX ever reads 0 again (Vela crash, Windows boot), Luminos comes up BLACK — KWin is pinned
+to card2/AMD. Recovery is the BIOS/firmware MUX setting by hand; there is no automatic guard any more.
+**Undo:** repo copies kept (`scripts/luminos-mux-guard`, `systemd/luminos-mux-guard.service`, `scripts/luminos-play-vela`,
+`config/luminos-play-vela.desktop`); reinstall + `sudo systemctl enable --now luminos-mux-guard`.
