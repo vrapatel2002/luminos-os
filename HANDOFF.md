@@ -23,6 +23,32 @@ MY INDEPENDENT FINDINGS (R4, all on Luminos directly):
    (b) something pre-10-17 that also broke it then (10-17 17:59 crash predates ALL MUX/runner work — unexplained),
    (c) Windows-side test never done. Minidumps fresh in the shared prefix from today.
 NEXT (Shawn's order R7): music ✅ → MUX dGPU-direct → DLSS 5.
+R14 — BASELINE MEASURED + MUX RESTORED (waiting on Shawn's dGPU-direct runs):
+BASELINE (test OS, Hybrid, FG off, 10-30): Wukong avg 37.1 / median 39.1 / 1% low 8.5 (2.4k frames);
+Control avg 30.2 / median 31.2 / 1% low 4.4 (worst 379 ms — "stuttery"; 12 stutter frames). Good-era main
+10-29 reference: Wukong 43.8/12.8, Control 43.7/12.3 (different night — indicative only). CSVs live on
+LUMINOS /var/log/vela/mangohud/ (nvk-play MHLOG output_folder=/mnt/luminos/...) — NOT inside the image.
+MUX RESTORE DONE: from /var/log/vela/seat-r28-r29-removed-20261030/ into /vela-nv.img — merged
+vela-core (r29: FG+music+EGL fix; R27 core backed up .prev-r30mux), vela-session r29 (EGL pin,
+backup .prev-r30mux), vela-mux + vela-mux-enter.service (enabled) + /etc/vela/mux-direct. Verified
+(FG strings, bash -n, unit symlink). Next test OS boot = MUX 0 dGPU-direct, BUG-223 EGL fix in.
+⚠️ Shawn MUST exit Vela via the power menu (vela-mux leave → MUX 1). Hard power-off → MUX stuck 0 →
+Luminos boots BLACK (guard removed, DECISION 164) → fix = BIOS MUX by hand.
+SHAWN'S NEXT RUNS (A/B, same areas/settings as baseline): Wukong ~5 min + Control ~5 min on test OS,
+then reboot to Luminos, "done" → PM re-extracts CSVs and compares avg/1% lows. Note: quit Wukong
+FROM IN-GAME (bug #22: PS-quit blocks the next launch) and expect the white flash (#21) — both filed
+in BOARD, to be fixed after the A/B.
+BUGS FILED (gameos BOARD, commit 4d55ded): #21 Wukong launch white flash; #22 PS-menu-quit of
+Wukong blocks launching any other game (in-game quit fine, other games fine via PS quit).
+R12 — BASELINE-FIRST PLAN (Shawn: measure avg fps + lows so we can compare; optimize the OS not the
+game; one thing at a time; test OS then main). NO baseline fps exists yet (checked: no MangoHud CSVs
+ever written — all Wukong runs died pre-log; BOARD #5 open). Current test OS state is GOOD for
+baseline: R26 logging wired (vela-core MANGOHUD_CONFIGFILE + nvk-play MHLOG block), VELA_GAME_GPU=dgpu
+(FG off = clean single-variable). PROTOCOL: Shawn boots test OS → Wukong ~5-7 min same area + settings
+recorded → Control ~5 min same area → reboot to Luminos → PM reads /var/log/vela/mangohud/*.csv
+(avg, 1% low, 0.1% low). Then MUX phase (merged vela-core 091098a + R29 EGL pin + new MUX mechanism;
+FG stays OFF for the A/B — FG comparison is a separate axis) → repeat identical runs → compare.
+Tasks #3 (baseline) → #4 (MUX build) → #5 (post-MUX compare).
 (0) R8 — R27 music now on BOTH images, same older tested code (no new code): TEST OS verified complete
 (vela-core sha == .r27 build, vela-home MusicPage, 55 pkgs); MAIN /vela.img applied via
 os/experiments/r27-music/apply.sh + VELA_R27_ALLOW_MAIN=1 (fresh installs, zero upgrades; .prev-r27
