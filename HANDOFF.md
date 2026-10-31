@@ -47,6 +47,14 @@ stalls. New dGPU-direct bugs: #24 bottom-of-screen colored pixels (scanout artif
 the date → name collision) — split sessions on repeated header rows when parsing.
 OPEN: MUX verdict (Wukong +10 fps avg vs Control regression + artifacts). Next: repeat Control longer
 in dGPU-direct, then #24 artifacts investigation. Per-boot either/or — MUX flip needs a reboot.
+R17 — INPUT-DELAY ROOT CAUSE + LEVER 1 ARMED: stalls = VRAM-ceiling evictions (Wukong 5.84/6 GB,
+Control 5.82 GB max; swap/psi 0; GPU 0x4+0x20 power/thermal capped 72-78 W throughout). This also explains
+dGPU-direct giving Control nothing (MUX 0 = panel+session VRAM on the 4050) AND the good-era Control 43.7
+vs tonight ~30 in BOTH modes (a separate, non-MUX Control regression — re-test tomorrow, longer).
+LEVER 1: VELA_FPS_CAP 0→42 on test OS (backup vela.conf.pre-cap42-20261031; off-switch = set 0,
+Shawn's R56 preference). SHAWN: one Wukong run ~5 min, same area; PM compares vs tonight's dGPU run
+(47.5 avg / 7.3 low / 1.2 % stutter): if lows rise + worst frames shrink → keep, else revert to 0.
+Deeper levers queued: VRAM headroom (overlay/session diet, vela-vramd), Control regression hunt.
 BUGS FILED (gameos BOARD, commit 4d55ded): #21 Wukong launch white flash; #22 PS-menu-quit of
 Wukong blocks launching any other game (in-game quit fine, other games fine via PS quit).
 R12 — BASELINE-FIRST PLAN (Shawn: measure avg fps + lows so we can compare; optimize the OS not the
