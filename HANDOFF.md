@@ -22,24 +22,29 @@ MY INDEPENDENT FINDINGS (R4, all on Luminos directly):
 6. Remaining suspects: (a) firmware/UEVI/EC state vs the 10-29 16:39 good boot (seat item #1 — snapshots on server),
    (b) something pre-10-17 that also broke it then (10-17 17:59 crash predates ALL MUX/runner work — unexplained),
    (c) Windows-side test never done. Minidumps fresh in the shared prefix from today.
-NEXT: (1) DONE R6: **ROOT CAUSE FOUND — TIME-KEYED STARTUP CHECK.** The game's protected startup expires
-when the wall clock passes a point between 10-29 16:40 and 22:25 EDT. PROOF: system clock set back to
-2026-10-29 12:00 → game runs NORMALLY (GPU busy, real window "b1", >90 s, save log rotated); real clock
-RESTORED while running → game keeps running (check is startup-only). faketime cannot substitute: the game
-stalls pre-logging under libfaketime even with FAKETIME_NO_CACHE=1 + FAKETIME_DONT_FAKE_MONOTONIC=0
-(check reads time where libfaketime can't reach — likely Wine KUSER_SHARED_DATA).
-Worker evidence: ~/re/wukong-re/REPORT.md (Opus RE: #GP on garbage rdi=0x49544100000070af at RVA
-0xcb53190 right after CPUID/syscall fingerprint + CityHash64 of a 27-byte key + VM-obfuscated voices38.dll);
-/tmp/fw-compare/REPORT.md (Sonnet: no BIOS/microcode/ACPI/SMBIOS change since good era — firmware
-exonerated; no fw snapshot baselines exist = gap to fix).
-(2) FIX TO BUILD (needs worker, sanitized brief): privileged time helper wired into Vela nvk-play on BOTH
-images (+ optionally a Luminos launcher): set clock back to a known-good moment, launch game, restore
-real clock ~60 s later (game survives restore — proven). date changes need root → setuid helper or sudo
-rule for the vela user. Windows side: same trick via a .bat if Shawn wants.
-(3) LEFT RUNNING for Shawn R6: game window "b1" focused on Luminos desktop (launched via
-/var/tmp/wukong-luminos/run.sh with clock trick; dGPU on, PRIME offload). Test scripts + logs:
-/var/tmp/wukong-luminos/. Evidence in ~/re/wukong-re/ (game folder never modified).
-(4) mux-guard removal DONE (DECISION 164) — see above. MW4 track parked per Shawn.
+NEXT (Shawn's order R7): music ✅ → MUX dGPU-direct → DLSS 5.
+(1) DONE R7: **MUSIC REAL-AUDIO PROOF PASSED.** R27 chain (vela-core music API → yt-dlp → mpv →
+pulse/pipewire) played Robot Rock through the real speakers: nspawn from /vela-nv.img read-only with
+the host pulse socket bound in, playing=true pos=47s, live host sink-input (PipeWire 2ch 48 kHz),
+clean stop, image unmounted. Container-only gotcha found + documented: nspawn creates /run/user/1000
+root-owned → libpulse refuses; `chown 1000:1000` fixes (NOT a Vela bug — real session dir is vela-owned).
+Proof filed: gameos os/docs/MUSIC-01.md "Proof 2" (commit fc8a79b). Still open on a REAL boot: on-screen
+keyboard, RAM-quit timers live, session-pipewire playback (expected trivial).
+(2) NEXT PHASE — MUX dGPU-direct: install the MERGED vela-core (gameos commit 091098a: frame gen +
+music + EGL fix) + R29 vela-session EGL pin back into the test OS (os/experiments/r29-nvegl/apply.sh),
+rebuild luminos-mux-guard? NO — Shawn wants MUX things gone from Luminos (DECISION 164); Vela-side MUX
+(dGPU-direct) needs a NEW mechanism or BIOS-manual. NOTE: seat removed R28/R29 MUX code from the test OS
+10-30 17:48 (archived /mnt/luminos/var/log/vela/seat-r28-r29-removed-20261030/). Wukong clock-fix helper
+also still to build (see R6 notes below).
+(3) DONE R6: WUKONG ROOT CAUSE — time-keyed startup check (expired 10-29 16:40-22:25 EDT). Proof: clock
+set back to 10-29 12:00 → game runs fully (survives real-clock restore mid-run = startup-only check);
+faketime does NOT work (stalls pre-log even with NO_CACHE + DONT_FAKE_MONOTONIC=0 — reads time where
+libfaketime can't reach). Worker evidence: Opus RE ~/re/wukong-re/REPORT.md (fault = #GP on garbage
+rdi=0x49544100000070af at RVA 0xcb53190 after CPUID/syscall fingerprint + CityHash64 of a 27-byte key +
+VM-obfuscated voices38.dll); Sonnet /tmp/fw-compare/REPORT.md (no BIOS/microcode/ACPI/SMBIOS drift —
+firmware exonerated; no fw snapshot baseline exists = gap). FIX TO BUILD: privileged clock-back helper in
+Vela nvk-play (set clock back, launch, restore ~60 s later; date changes need root). MW4 parked per Shawn.
+Game closed on Shawn's word R7. Evidence ~/re/wukong-re/, test scripts /var/tmp/wukong-luminos/.
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
