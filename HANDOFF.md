@@ -22,11 +22,24 @@ MY INDEPENDENT FINDINGS (R4, all on Luminos directly):
 6. Remaining suspects: (a) firmware/UEVI/EC state vs the 10-29 16:39 good boot (seat item #1 — snapshots on server),
    (b) something pre-10-17 that also broke it then (10-17 17:59 crash predates ALL MUX/runner work — unexplained),
    (c) Windows-side test never done. Minidumps fresh in the shared prefix from today.
-NEXT: (1) SHAWN: launch Wukong under WINDOWS on this laptop — YES→Linux-stack cause, NO→machine/firmware/game copy.
-(2) Spawn workers (sanitized briefs): firmware/UEFI var compare vs 10-29 16:39 boot snapshot (server has telemetry);
-minidump/stack deep-dive on today's fresh dump. (3) mux-guard removal DONE (DECISION 164) — see below.
-DONE R4 also: luminos-mux-guard + luminos-play-vela REMOVED from live system (DECISION 164; repo copies kept;
-if MUX ever 0 again → Luminos boots black, BIOS recovery by hand).
+NEXT: (1) DONE R6: **ROOT CAUSE FOUND — TIME-KEYED STARTUP CHECK.** The game's protected startup expires
+when the wall clock passes a point between 10-29 16:40 and 22:25 EDT. PROOF: system clock set back to
+2026-10-29 12:00 → game runs NORMALLY (GPU busy, real window "b1", >90 s, save log rotated); real clock
+RESTORED while running → game keeps running (check is startup-only). faketime cannot substitute: the game
+stalls pre-logging under libfaketime even with FAKETIME_NO_CACHE=1 + FAKETIME_DONT_FAKE_MONOTONIC=0
+(check reads time where libfaketime can't reach — likely Wine KUSER_SHARED_DATA).
+Worker evidence: ~/re/wukong-re/REPORT.md (Opus RE: #GP on garbage rdi=0x49544100000070af at RVA
+0xcb53190 right after CPUID/syscall fingerprint + CityHash64 of a 27-byte key + VM-obfuscated voices38.dll);
+/tmp/fw-compare/REPORT.md (Sonnet: no BIOS/microcode/ACPI/SMBIOS change since good era — firmware
+exonerated; no fw snapshot baselines exist = gap to fix).
+(2) FIX TO BUILD (needs worker, sanitized brief): privileged time helper wired into Vela nvk-play on BOTH
+images (+ optionally a Luminos launcher): set clock back to a known-good moment, launch game, restore
+real clock ~60 s later (game survives restore — proven). date changes need root → setuid helper or sudo
+rule for the vela user. Windows side: same trick via a .bat if Shawn wants.
+(3) LEFT RUNNING for Shawn R6: game window "b1" focused on Luminos desktop (launched via
+/var/tmp/wukong-luminos/run.sh with clock trick; dGPU on, PRIME offload). Test scripts + logs:
+/var/tmp/wukong-luminos/. Evidence in ~/re/wukong-re/ (game folder never modified).
+(4) mux-guard removal DONE (DECISION 164) — see above. MW4 track parked per Shawn.
 
 ## Goal (the durable end objective)
 Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
