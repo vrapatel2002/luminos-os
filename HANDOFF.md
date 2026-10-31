@@ -23,13 +23,12 @@ MY INDEPENDENT FINDINGS (R4, all on Luminos directly):
    (b) something pre-10-17 that also broke it then (10-17 17:59 crash predates ALL MUX/runner work — unexplained),
    (c) Windows-side test never done. Minidumps fresh in the shared prefix from today.
 NEXT (Shawn's order R7): music ✅ → MUX dGPU-direct → DLSS 5.
-(1) DONE R7: **MUSIC REAL-AUDIO PROOF PASSED.** R27 chain (vela-core music API → yt-dlp → mpv →
-pulse/pipewire) played Robot Rock through the real speakers: nspawn from /vela-nv.img read-only with
-the host pulse socket bound in, playing=true pos=47s, live host sink-input (PipeWire 2ch 48 kHz),
-clean stop, image unmounted. Container-only gotcha found + documented: nspawn creates /run/user/1000
-root-owned → libpulse refuses; `chown 1000:1000` fixes (NOT a Vela bug — real session dir is vela-owned).
-Proof filed: gameos os/docs/MUSIC-01.md "Proof 2" (commit fc8a79b). Still open on a REAL boot: on-screen
-keyboard, RAM-quit timers live, session-pipewire playback (expected trivial).
+(0) R8 — R27 music now on BOTH images, same older tested code (no new code): TEST OS verified complete
+(vela-core sha == .r27 build, vela-home MusicPage, 55 pkgs); MAIN /vela.img applied via
+os/experiments/r27-music/apply.sh + VELA_R27_ALLOW_MAIN=1 (fresh installs, zero upgrades; .prev-r27
+backups kept for `apply.sh revert`). SHAWN'S TEST: boot test OS → PS button → System row → Music → play;
+then same on main. After his OK → MUX phase (merged vela-core 091098a + R29 EGL pin + new MUX
+mechanism, luminos-mux-guard is gone per DECISION 164) → then DLSS 5. Wukong clock-helper queued.
 (2) NEXT PHASE — MUX dGPU-direct: install the MERGED vela-core (gameos commit 091098a: frame gen +
 music + EGL fix) + R29 vela-session EGL pin back into the test OS (os/experiments/r29-nvegl/apply.sh),
 rebuild luminos-mux-guard? NO — Shawn wants MUX things gone from Luminos (DECISION 164); Vela-side MUX
