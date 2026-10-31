@@ -8863,3 +8863,19 @@ from the test OS too, so nothing flips the MUX any more and the guard had nothin
 to card2/AMD. Recovery is the BIOS/firmware MUX setting by hand; there is no automatic guard any more.
 **Undo:** repo copies kept (`scripts/luminos-mux-guard`, `systemd/luminos-mux-guard.service`, `scripts/luminos-play-vela`,
 `config/luminos-play-vela.desktop`); reinstall + `sudo systemctl enable --now luminos-mux-guard`.
+
+## DECISION 165 — wukong-clock: permanent launch-time clock fix for Black Myth: Wukong
+# [CHANGE: cowork | 2026-10-30]
+Date: 2026-10-30 (GLM chat R10). Built by an Opus worker (sanitized brief), finished + verified by the PM.
+**Why:** the game's startup validates the system date (expires past 2026-10-29 ~17:00 EDT — DECISION-era
+root cause, see HANDOFF R6); every normal launch crashed on every OS incl. Windows.
+**What:** /usr/local/bin/wukong-clock — `arm` (root via sudo): save real epoch + NTP state, NTP off,
+date -s FAKE_DATE (2026-10-29 12:00:00, constant at top), schedule self-restore in 90 s; `restore`:
+real = saved + elapsed (handles long sessions), NTP back on, idempotent; `status`. Never touches RTC.
+Wired into: Lutris prelaunch (Luminos, ~/.config/lutris/games/black-myth-wukong-1788815087.yml,
+backup .bak-wclock) via /usr/local/bin/wukong-clock-luminos; nvk-play in BOTH Vela images (gameos
+os/experiments/wukong-clock/apply.sh, backups .prev-wclock). Repo copies: ~/luminos-os/scripts/wukong-clock.
+**Proof:** live Lutris launch — clock armed automatically, game alive >90 s, clock restored, game survived,
+zero new crash folders. Tests: ~/builds/wukong-clock/TESTS.md.
+**Undo:** Lutris: restore yml from .bak-wclock. Vela: apply.sh <img> revert. If the game ever updates
+its date check: bump FAKE_DATE to an earlier date.

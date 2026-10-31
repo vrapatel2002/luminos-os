@@ -35,6 +35,20 @@ rebuild luminos-mux-guard? NO — Shawn wants MUX things gone from Luminos (DECI
 (dGPU-direct) needs a NEW mechanism or BIOS-manual. NOTE: seat removed R28/R29 MUX code from the test OS
 10-30 17:48 (archived /mnt/luminos/var/log/vela/seat-r28-r29-removed-20261030/). Wukong clock-fix helper
 also still to build (see R6 notes below).
+(3b) R9: Shawn booted test OS (Wukong crashed — expected, no fix installed) and back on Luminos
+(21:46 crash, same -1 signature — confirmed). Explained to him: the clock trick was a diagnostic, the
+permanent clock-back launcher is still the queued work ("Wukong clock-helper"); it must go into Vela
+nvk-play (both images, needs a way for vela to set the clock) + a Luminos launcher. PRIORITY NOW per R9.
+R10 — FOREVER FIX **DONE + LIVE-PROVEN** (Opus worker built, PM finished + verified; DECISION 165):
+/usr/local/bin/wukong-clock (arm: set clock to fixed 2026-10-29 12:00, self-restore 90 s later,
+idempotent, NTP-safe, never touches RTC) wired into (a) Lutris prelaunch on Luminos (yml patched,
+.bak-wclock backup, wrapper /usr/local/bin/wukong-clock-luminos; PM fixed a YAML-space bug the worker
+left) and (b) nvk-play in BOTH Vela images (gameos os/experiments/wukong-clock/apply.sh, .prev-wclock
+backups, idempotent). LIVE PROOF: `lutris lutris:rungameid/4` → clock armed automatically → game alive
+>55 s → clock restored at 90 s → game survived, zero new crashes, helper state clean. Tests:
+~/builds/wukong-clock/TESTS.md. If the game ever updates its date check, bump FAKE_DATE in the script.
+Music on main: already applied R8 (both images carry R27; Shawn boots to verify). Next: MUX dGPU-direct,
+then DLSS 5.
 (3) DONE R6: WUKONG ROOT CAUSE — time-keyed startup check (expired 10-29 16:40-22:25 EDT). Proof: clock
 set back to 10-29 12:00 → game runs fully (survives real-clock restore mid-run = startup-only check);
 faketime does NOT work (stalls pre-log even with NO_CACHE + DONT_FAKE_MONOTONIC=0 — reads time where

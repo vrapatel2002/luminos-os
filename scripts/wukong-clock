@@ -1,0 +1,46 @@
+#!/bin/bash
+# wukong-clock: briefly set the system clock back so Black Myth: Wukong passes
+# its startup date check, then restore the real time 90 s later. Run as root.
+#   wukong-clock arm | restore | status
+
+# Proven good; if the game ever updates its check, set an earlier date.
+FAKE_DATE="2026-10-29 12:00:00"
+DIR=/run/wukong-clock
+
+armed() { [ -f "$DIR/fake_epoch" ]; }
+
+case "$1" in
+arm)
+    armed && { echo "wukong-clock: already armed"; exit 0; }
+    mkdir -p "$DIR"
+    timedatectl show -p NTP --value > "$DIR/ntp"
+    date +%s > "$DIR/real_epoch"
+    [ "$(cat "$DIR/ntp")" = yes ] && timedatectl set-ntp false
+    date -s "$FAKE_DATE" > /dev/null
+    date +%s > "$DIR/fake_epoch"
+    setsid nohup bash -c 'sleep 90 && /usr/local/bin/wukong-clock restore' > /dev/null 2>&1 &
+    echo "wukong-clock: armed, clock set to $FAKE_DATE, restore in 90 s"
+    ;;
+restore)
+    armed || { echo "wukong-clock: not armed, nothing to restore"; exit 0; }
+    elapsed=$(( $(date +%s) - $(cat "$DIR/fake_epoch") ))
+    date -s "@$(( $(cat "$DIR/real_epoch") + elapsed ))" > /dev/null
+    ntp=$(cat "$DIR/ntp")
+    rm -rf "$DIR"
+    [ "$ntp" = yes ] && timedatectl set-ntp true
+    echo "wukong-clock: restored, now $(date)"
+    ;;
+status)
+    if armed; then
+        echo "armed: yes"
+        for f in ntp real_epoch fake_epoch; do echo "$f: $(cat "$DIR/$f")"; done
+    else
+        echo "armed: no"
+    fi
+    echo "date: $(date)"
+    ;;
+*)
+    echo "usage: wukong-clock arm|restore|status" >&2
+    exit 2
+    ;;
+esac
