@@ -3107,3 +3107,91 @@ still direct-plays P5 MKV → violet. Phone/browser clients that lack DV get a s
 re-enable the sweep (below) — do not re-invent a fix.
 **Revert:** `sudo systemctl enable --now luminos-dv-sweep.timer` (it re-converts every P5 file within ~30 min each); or swap a
 single file back from /srv/media/_dv_hdr10_converted.
+
+
+## DECISION 168 — Dolby Vision truth-teller for Jellyfin for Android (BUG-227) — 2026-10-31
+**Problem:** Tab S9+ showed black video (audio + subs fine) on DV Profile 5 (VisionQuest) and Profile 7 (Dragon Ball Super
+Hero). Jellyfin for Android 2.7.3 never tells the server whether the device can decode DV (maps DV to plain "hevc", no
+VideoRangeType rule) → server direct-plays → no DV decoder on Samsung + ExoPlayer has no P5/P7 fallback → black.
+**Shawn's rule:** "if the device has Dolby Vision use it, else find some way to play it on non-DV" — automatic, global.
+**Built:**
+- `luminos-jf-profile-shim` (127.0.0.1:8098, systemd, DynamicUser, stdlib Python): only for PlaybackInfo requests whose
+  DeviceProfile.Name == "Jellyfin for Android", appends a codec rule: VideoRangeType must be SDR/HDR10/HDR10Plus/HLG or DV
+  with one of those as base (P8.x — ExoPlayer falls back to HEVC on those). P5 ("DOVI") and P7 ("DOVIWithEL") then get the
+  server's normal fallback: transcode with OpenCL tonemapping (DECISION 152). Any parse error → original bytes forwarded.
+- Caddy `(jellyfin)` snippet: only `POST /Items/<id>/PlaybackInfo` goes via the shim (shim down → `lb_policy first` falls
+  through to Jellyfin); used by the :8443 sites and a new plain `http://:8095` site.
+- nftables `table inet luminos_jfshim`: incoming tcp/8096 → :8095 (saved server addresses unchanged; loopback untouched);
+  input rule `tcp dport 8095 ct status dnat accept` for the LAN. Jellyfin KnownProxies already had 127.0.0.1, so it logs the
+  real client IP (checked: 192.168.2.16, IsInLocalNetwork True) and remote caps still apply.
+**Who keeps real DV:** JellyRock on the Roku, browsers and the Android TV app decide DV themselves — untouched (shim log
+"not-android"). An Android phone/tablet that DOES have a DV decoder: add its DeviceId or device name to
+/etc/luminos/jf-dv-devices to skip the rule.
+**Proof (2026-10-31):** PlaybackInfo as the Android app: without shim VQ/DB had no VideoRangeTypeNotSupported; through the
+shim they do, Ozark SDR does not. Real HLS pull through :8095: VQ → H.264 3840x2160 bt709, 72 frames/segment, YAVG 114,
+ffmpeg 1.4x; DB → H.264 1440p bt709, 2.96x. LAN request from the laptop logged "rewritten" with XFF 192.168.2.16. Roku
+JellyRock kept playing through the switch. Tests: server/tests/dvshim/{pinfo,play}-test.py.
+**Undo:** `nft delete table inet luminos_jfshim` + remove block from /etc/nftables.conf (backup *.pre-dvshim);
+`systemctl disable --now luminos-jf-profile-shim`; restore /etc/caddy/Caddyfile.pre-dvshim.
+**Not proven yet:** a real play on the Tab S9+ itself (Shawn).
+
+**Addendum 2026-10-31 (same day) — keep HDR10 instead of SDR where the file allows it.** Found in the app source: its only
+video transcoding targets are H.264 (ts + mkv HLS), so every fallback was forced to SDR H.264. The shim now also inserts an
+HEVC fMP4-HLS transcoding profile first (only when it applies the DV rule). Result with a faithful copy of the 2.7.3 profile
+(server/tests/dvshim/app-profile-test.py): Dragon Ball P7 → FFmpeg.Remux, `-codec:v copy` + `hevc_metadata=remove_dovi=1`
+→ HEVC 4K 10-bit smpte2084/bt2020, no DV, YAVG 150, ~2.5x, zero re-encode. VisionQuest P5 (no HDR10 base) → still
+h264_vaapi + tonemap_opencl to SDR; frame 200 compared with the libplacebo-correct HDR10 copy in /srv/media/_dv_hdr10_converted:
+Y/U/V 50.6/142.5/109.6 vs 50.3/142.0/109.8 → colours correct, not purple. Ozark SDR → still DirectPlay. DV P8 files
+(DOVIWithHDR10) direct-play as before (ExoPlayer plays the HDR10 base).
+
+## DECISION 169 — AdGuard Home: network-wide ad/tracker blocking on the media server — 2026-10-31
+<!-- [CHANGE: claude-code | 2026-10-31] -->
+
+**What:** `extra/adguardhome 0.107.79` (native package, no Docker), `adguardhome.service`
+enabled. DNS on **192.168.2.61:53** (udp+tcp), dashboard on **127.0.0.1:3080** only, fronted
+by Caddy on **:8451** (LAN + tailnet + the trusted `luminos-server.tail1fd435.ts.net` cert).
+Login `shawn`, password in `server/.env` as `ADGUARD_PASS` (gitignored, verified).
+
+**Why AdGuard Home and not Pi-hole:** single Go binary in `extra`; Pi-hole is AUR-only and
+drags in a web stack. AdGuard also speaks encrypted upstreams natively, so DECISION 48 holds.
+
+**Config:**
+- Upstream `https://dns.quad9.net/dns-query` + `tls://dns.quad9.net`, load-balanced, bootstrap
+  9.9.9.9. **No plaintext fallback.** Proven: 0 packets to udp/53 leaving the box during
+  lookups; adguardhome's sockets go to 9.9.9.9:443 and :853 only.
+- **`ratelimit: 0`.** The default (20 q/s per /24) puts the whole house in one bucket.
+- Blocklists: AdGuard DNS filter, OISD Big, HaGeZi Pro, HaGeZi native Roku trackers,
+  Perflyst SmartTV — ~630k rules.
+- Firewall: `ip saddr 192.168.2.0/24 meta l4proto {tcp,udp} th dport 53 accept`, and the
+  Caddy range widened to 8443-8451. Applied behind a 300 s auto-revert, disarmed after checks.
+- **Boot race fixed in advance:** `systemd-networkd-wait-online` has been *failing* since
+  boot (2026-10-26), so `After=network-online.target` orders nothing and AdGuard could start
+  before wlan0 holds .61. `/etc/sysctl.d/40-luminos-adguard-bind.conf` sets
+  `net.ipv4.ip_nonlocal_bind=1` so the bind succeeds regardless, plus a
+  `Restart=on-failure` drop-in.
+
+**Verified from the G14** (raw DNS queries to .61): example.com / jellyfin.org resolve;
+doubleclick.net, ads.roku.com, logs.roku.com, amazon-adsystem.com → `0.0.0.0`. TCP works.
+Jellyfin :8096 and Caddy unaffected. Dashboard: 401 without auth, bare :3080 unreachable
+from the LAN.
+
+**What DNS blocking cannot do:** YouTube ads (served from the same hosts as the video),
+Twitch ads, sponsored segments. Anything that hardcodes its own DNS or uses DoH bypasses it.
+
+**Open — how devices get pointed at it.** The Bell Giga Hub 5690 will **not** hand out a
+custom DNS server over DHCP. Options: turn off the hub's DHCP and let AdGuard serve it (needs
+a static .61 on the server; covers the Roku, which has no DNS setting of its own), or set DNS
+per device. Rollback = `systemctl disable --now adguardhome`, restore
+`/etc/nftables.conf.pre-adguard` and `/etc/caddy/Caddyfile.pre-adguard`.
+
+### 169a — "wifi is slow / won't connect" investigated, 2026-11-04
+<!-- [CHANGE: claude-code | 2026-11-04] -->
+Measured, not assumed. **The blocker is not what's slowing the wifi:**
+- DNS: 5,000 lookups across every client (09:46–18:33) — 0 failures, p50 0.4 ms, p95 ~24 ms, max 276 ms.
+- Quad9 upstream: ~1,000 TCP resets in 4 days (DoH + DoT), every one retried transparently — none reached a client.
+- DHCP: Bell hub's server still off (`find_active_dhcp` → no, 3×; only one server answering on udp/67). G14 lease in 0.2 s; tab/phones renewing on schedule.
+- G14 wifi drops went **down** after the switch: 14–70/day before → 2–15/day after.
+- Throughput: G14 6 GHz 680–890 down / 136 up; server wlan0 130 down (Aug baseline 95–107).
+- Firewall drops from the LAN: only mDNS multicast. Port-853 probe counter: 0.
+**One real defect fixed:** local reverse lookups were forwarded to `127.0.0.53` and timed out — 2,003 ms then SERVFAIL. `use_private_ptr_resolvers=false`, `local_ptr_upstreams=[]` → 0 ms NXDOMAIN; leased names still answer from AdGuard's own DHCP table.
+Note: the G14 does not use AdGuard at all — it runs its own DoT to Quad9 via systemd-resolved.

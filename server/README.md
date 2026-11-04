@@ -65,6 +65,8 @@ Away from the house, it is also on a Tailscale tailnet as **100.82.125.26**
 | Sonarr | 8448 → 8989 | LAN + Tailscale, TLS |
 | Prowlarr | 8449 → 9696 | LAN + Tailscale, TLS |
 | Bazarr | 8450 → 6767 | LAN + Tailscale, TLS — subtitles, DECISION 98 |
+| AdGuard Home DNS | 53 | **LAN** udp+tcp — network-wide ad blocking, DECISION 169 |
+| AdGuard Home dashboard | 8451 → 3080 | LAN + Tailscale, TLS |
 | byparr | 8191 | **loopback only** — no auth of any kind, DECISION 90 |
 | SSH | 22 | LAN + Tailscale, key-only |
 | Tailscale | — | outbound only — remote access to Jellyfin, opens nothing |
