@@ -3196,3 +3196,21 @@ Measured, not assumed. **The blocker is not what's slowing the wifi:**
 **One real defect fixed:** local reverse lookups were forwarded to `127.0.0.53` and timed out — 2,003 ms then SERVFAIL. `use_private_ptr_resolvers=false`, `local_ptr_upstreams=[]` → 0 ms NXDOMAIN; leased names still answer from AdGuard's own DHCP table.
 Note: the G14 does not use AdGuard at all — it runs its own DoT to Quad9 via systemd-resolved.
 - 2026-11-04 follow-up (housemates' phones + JellyRock): DHCP transition explained — phones still holding a **Bell** lease (M31 on .71: 285 ignored rebinds overnight Nov 3) are correctly ignored per RFC 2131 until that lease runs out; zero such events on Nov 4. Unicast renewals proven working (G14 test: REQUEST → ACK in 130 ms, captured at the NIC). Server links: no drops on Nov 4. No measurable fault found. **JellyRock talks to Jellyfin by IP (192.168.2.61:8096), so DNS/ad-blocking is not in its path**; the TV is on ethernet. Clean A/B test proposed: hub DHCP back on + AdGuard DHCP off for 24 h.
+
+## DECISION 170 — the server's wifi is retired; 192.168.2.61 moves onto the cable — 2026-11-05
+<!-- [CHANGE: claude-code | 2026-11-05] -->
+**Symptom:** "5 GHz not working" on the G14 and other devices, the internet slow for everyone, JellyRock lagging.
+**Root cause, proven:** `wlan0` sat *associated* to `BELL851 5.0 GHz` (ch 157, −43 dBm, 195 Mb/s) but passed
+nothing — 0/8 pings to the hub, 0/6 to the G14, 403,254 rx drops. From the G14: `.61` 100% loss, `.62` 0% loss.
+The Bell hub's 5 GHz radio is misbehaving (it also moved 6 GHz 165→169 unprompted). The G14's log agrees:
+5 GHz associated and got its lease in 1.4 s, then was dropped by hand ~70 s later.
+**Why it hurt the whole house — our design, not just the hub:** DECISION 169 made `.61` (the *wifi* address)
+the first DNS server handed to every device, and `.61:8096` is the Jellyfin address saved in the TV's JellyRock.
+So a dead 5 GHz link meant a DNS timeout on every lookup, and a dead Jellyfin for the TV.
+**Fix:** `.61` added to `enp2s0` (gigabit Cat 6, DECISION 79); `wlan0` set `ActivationPolicy=down`. No client
+changes needed. NZBGet's fwmark-0x161 route falls through to the cable automatically (verified:
+`ip route get 9.9.9.9 mark 0x161` → `dev enp2s0`). Applied behind a 300 s auto-revert, disarmed after:
+`.61` 0% loss, Jellyfin 200 in 0.01 s on both IPs, Caddy, SSH via `.61`, internet, Tailscale, all six services,
+and raw DNS on both IPs (1–29 ms, ads → 0.0.0.0). Revert: `/root/net-pre-170/revert.sh`.
+**Still owner-only:** the hub's 5 GHz radio — reboot the hub. Its DHCP setting may revert to ON on reboot
+(Bell forum reports this); check `find_active_dhcp` afterwards.
