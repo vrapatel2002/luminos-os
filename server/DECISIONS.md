@@ -3214,3 +3214,7 @@ changes needed. NZBGet's fwmark-0x161 route falls through to the cable automatic
 and raw DNS on both IPs (1–29 ms, ads → 0.0.0.0). Revert: `/root/net-pre-170/revert.sh`.
 **Still owner-only:** the hub's 5 GHz radio — reboot the hub. Its DHCP setting may revert to ON on reboot
 (Bell forum reports this); check `find_active_dhcp` afterwards.
+- 2026-11-04 hub reboot — three-band test from the G14 (join, ping hub, ping server, DNS, 40 MB download), same script before and after:
+  before: 6 GHz ✅ 401 Mb/s · **5 GHz ❌ joins but 100% loss even to the hub** · 2.4 GHz ✅ 256 Mb/s.
+  after:  6 GHz ✅ 558 Mb/s · **5 GHz ✅ 637 Mb/s** (hub moved it ch 157 → ch 60, a DFS channel; join took 28 s) · 2.4 GHz ✅ 218 Mb/s.
+  Hub DHCP stayed OFF across the reboot (`find_active_dhcp` → no ×3). If 5 GHz dies again, pin it to a non-DFS channel in the hub.
