@@ -1,0 +1,14 @@
+# [CHANGE: claude-code | 2026-11-05]
+# Turns a series fully off in Sonarr once its files are gone from disk. DECISION 172.
+# Runs as root: reads the Sonarr API key and walks both library disks.
+[Unit]
+Description=Stop downloading Sonarr series that were removed from disk
+Documentation=file:/home/shawn/luminos-os/server/DECISIONS.md
+After=sonarr.service
+Wants=sonarr.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-series-prune --apply
+Nice=10
+IOSchedulingClass=idle

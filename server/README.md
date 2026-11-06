@@ -127,6 +127,9 @@ These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 - **New episodes only arrive through RSS sync.** <!-- [CHANGE: claude-code | 2026-11-05] --> Adding a show searches once; every later
   episode is caught by the 15-min RSS poll. `rssSyncInterval 0` silently froze every airing show for three months
   (DECISION 171). Check `GET /api/v3/config/indexer` first when "new episodes aren't downloading".
+- **Removing a show's files switches it off in Sonarr within 10 min** <!-- [CHANGE: claude-code | 2026-11-05] -->
+  (`luminos-series-prune.timer`, DECISION 172). To keep a show you emptied on purpose (waiting for a new season),
+  add its Sonarr id to `/var/lib/luminos-series-prune/baseline.json`, or just re-monitor it after.
 - **Any new service on this box is tailnet-exposed the moment it listens, but no longer
   LAN-exposed.** <!-- [CHANGE: claude-code | 2026-09-02] --> This used to be true of the LAN
   too, and it bit: **byparr sat on `:8191` answering HTTP 200 with no authentication at all**

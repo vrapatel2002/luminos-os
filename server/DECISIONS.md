@@ -3258,3 +3258,38 @@ release grabbed today is a different upload.
 missed until a manual search. A daily `MissingEpisodeSearch` timer would close it (offered, not built).
 
 **Also corrected:** server/README.md torrent-halt table still claimed `rssSyncInterval 0`.
+
+
+## DECISION 172 — removing a show turns it off in Sonarr automatically — 2026-11-05
+<!-- [CHANGE: claude-code | 2026-11-05] -->
+**Status:** Applied + proven. Also: The Sopranos switched off by hand on Shawn's word (13 queued S02 remuxes removed).
+
+**Problem (Shawn):** "if I remove a TV series it should also be removed from automatic download".
+Removing a show (Jellyfin delete, luminos-space, rm) only deletes files. The Sonarr series stays monitored with
+`monitorNewItems: all`, so RSS sync (DECISION 171) or the next season pulls it straight back.
+
+**Two layers:**
+1. Sonarr `autoUnmonitorPreviouslyDownloadedEpisodes` false → **true** (read back). Built-in: an episode whose
+   file disappears is unmonitored, so deleting single episodes never re-grabs them.
+2. `luminos-series-prune` + `luminos-series-prune.timer` (every 10 min, faster than the 15-min RSS). A series is
+   fully switched off (monitored=false, every season off, monitorNewItems=none) only when ALL hold: still
+   monitored · its root disk is really mounted (ismount guard, same trap as DECISION 92) · **no video files left
+   on disk** (folder walk — folders usually survive a removal: House of Cards/True Detective had empty folders) ·
+   at least one `downloadFolderImported` in history (a new, never-downloaded show is not "removed") · nothing in
+   the queue and newest history event not `grabbed` (a show just re-requested is left alone) · not in the baseline.
+   **Never deletes.** Dry run by default; `--apply` reads back and exits 2 on mismatch.
+
+**Baseline:** shows already empty on the first run are recorded in `/var/lib/luminos-series-prune/baseline.json`
+and ignored — some may be waiting for a new season on purpose (Solo Leveling S3, True Detective). A baseline
+show leaves the baseline once it gets files again. First baseline: ids 1,2,4,5,6,8,9,10 (House of Cards, True
+Detective, Sopranos, Better Call Saul, Knight of the Seven Kingdoms, Solo Leveling, India's Got Latent, Fake
+Alchemist). Asked Shawn which of those should be off.
+
+**Proof:** first run (dry) recorded the baseline, pruned nothing. Mount guard returns False for an unmounted root.
+VisionQuest with files faked to 0 → correctly SKIPPED (E07 importPending in queue = in-flight guard). Ozark with
+files faked to 0 (real files untouched) → PRUNE, read-back ok (monitored False, newItems none, 4 seasons off);
+then restored from a saved copy and diffed: monitored/newItems/profile/path/tags/seasons identical, S2+S3 10/10
+episodes monitored. Timer enabled; first real `--apply` run Result=success.
+
+**Re-enabling a show:** monitor it again in Sonarr. Re-requesting in Jellyseerr is expected to re-monitor it —
+not yet tested here; check the first time it happens.

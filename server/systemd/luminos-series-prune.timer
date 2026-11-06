@@ -1,0 +1,12 @@
+# [CHANGE: claude-code | 2026-11-05]
+# Every 10 min — faster than Sonarr's 15-min RSS sync, so a removed show is
+# switched off before RSS can grab its next episode.
+[Unit]
+Description=Every 10 min: stop downloading removed Sonarr series
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

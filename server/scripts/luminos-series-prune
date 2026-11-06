@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+# [CHANGE: claude-code | 2026-11-05]
+"""Stop Sonarr downloading a show once you have removed it.  DECISION 172.
+
+Why this exists
+---------------
+Removing a show (Jellyfin delete, the disk browser, rm) only deletes files.
+Sonarr still has the series monitored with "monitor new items: all", so the
+next RSS sync or a new season pulls it straight back down.
+
+The rule
+--------
+A series is treated as REMOVED, and fully unmonitored (series, every season,
+monitorNewItems = none), when ALL of these hold:
+
+  1. it is still monitored in Sonarr
+  2. its root disk is actually mounted   (/srv/external unplugged looks empty!)
+  3. there are no video files left under its folder on disk (or no folder)
+  4. it has at least one successful import in Sonarr history
+     -> a show that was just added and has never downloaded is not "removed"
+  5. nothing for it is in the download queue, and its newest history event is
+     not a "grabbed"  -> a show you just re-requested is left alone
+  6. it is not in the baseline: shows already empty the first time this ran
+     are ignored (they need a human answer), until they get files again.
+
+It NEVER deletes anything. Unmonitoring only stops acquiring.
+Re-enable a show by monitoring it again in Sonarr / requesting it in Jellyseerr.
+
+Usage
+-----
+  luminos-series-prune            # dry run (default)
+  luminos-series-prune --apply    # write, then read back and verify
+
+Exit codes: 0 ok · 1 error · 2 applied but read-back did not match.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+SONARR = "http://127.0.0.1:8989"
+CONFIG = "/var/lib/sonarr/config.xml"
+STATE = "/var/lib/luminos-series-prune/baseline.json"
+VIDEO = (".mkv", ".mp4", ".m4v", ".avi", ".ts", ".m2ts", ".mov", ".wmv")
+
+
+def api_key():
+    try:
+        out = subprocess.run(["sudo", "-n", "grep", "-oP", r"(?<=<ApiKey>)[^<]+", CONFIG],
+                             capture_output=True, text=True, timeout=15)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    k = os.environ.get("SONARR_API_KEY", "").strip()
+    if k:
+        return k
+    sys.exit("ERROR: could not read the Sonarr API key from %s" % CONFIG)
+
+
+def call(key, path, method="GET", body=None):
+    req = urllib.request.Request(
+        SONARR + path, method=method,
+        headers={"X-Api-Key": key, "Content-Type": "application/json"},
+        data=json.dumps(body).encode() if body is not None else None)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as e:
+        sys.exit("ERROR: %s %s -> HTTP %s: %s" % (method, path, e.code, e.read()[:300]))
+    except urllib.error.URLError as e:
+        sys.exit("ERROR: cannot reach Sonarr at %s (%s)" % (SONARR, e.reason))
+
+
+def mount_of(path, roots):
+    """The root folder this series lives in, and whether its disk is mounted."""
+    for r in sorted(roots, key=len, reverse=True):
+        if path == r or path.startswith(r.rstrip("/") + "/"):
+            mp = r
+            while mp != "/" and not os.path.ismount(mp):
+                mp = os.path.dirname(mp)
+            return mp != "/"
+    return False          # unknown root -> never act
+
+
+def videos_on_disk(path):
+    if not os.path.isdir(path):
+        return 0
+    n = 0
+    for _, _, files in os.walk(path):
+        n += sum(1 for f in files if f.lower().endswith(VIDEO))
+    return n
+
+
+def load_baseline():
+    try:
+        with open(STATE) as f:
+            return set(json.load(f)), True
+    except FileNotFoundError:
+        return set(), False
+
+
+def save_baseline(ids):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(sorted(ids), f)
+    os.replace(tmp, STATE)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Unmonitor Sonarr series whose files were removed.")
+    ap.add_argument("--apply", action="store_true", help="write changes (default: dry run)")
+    args = ap.parse_args()
+
+    key = api_key()
+    roots = [r["path"] for r in call(key, "/api/v3/rootfolder")]
+    series = call(key, "/api/v3/series")
+    queued = {q.get("seriesId") for q in
+              call(key, "/api/v3/queue?pageSize=1000").get("records", [])}
+    baseline, have_baseline = load_baseline()
+    first_run = not have_baseline
+
+    print("Sonarr series prune  (%s)%s\n" % (
+        "APPLYING" if args.apply else "dry run", "  — FIRST RUN, recording baseline" if first_run else ""))
+
+    to_prune, new_baseline = [], set(baseline)
+    for s in sorted(series, key=lambda x: x["title"]):
+        sid, title, path = s["id"], s["title"][:34], s["path"]
+        vids = videos_on_disk(path)
+        if vids:
+            new_baseline.discard(sid)          # has files again -> future removals count
+            print("%-34s keep    %d video file(s) on disk" % (title, vids))
+            continue
+        if not s["monitored"] and s.get("monitorNewItems") == "none":
+            print("%-34s skip    already off" % title)
+            continue
+        if not mount_of(path, roots):
+            print("%-34s skip    disk for %s not mounted" % (title, path))
+            continue
+        if first_run or sid in baseline:
+            new_baseline.add(sid)
+            print("%-34s skip    was already empty before this rule (baseline)" % title)
+            continue
+        hist = call(key, "/api/v3/history/series?seriesId=%d" % sid) or []
+        if not any(h["eventType"] == "downloadFolderImported" for h in hist):
+            print("%-34s skip    never downloaded anything yet" % title)
+            continue
+        latest = max(hist, key=lambda h: h["date"])["eventType"]
+        if sid in queued or latest == "grabbed":
+            print("%-34s skip    download in flight / just requested" % title)
+            continue
+        print("%-34s PRUNE   no files left on disk -> stop downloading" % title)
+        to_prune.append(s)
+
+    if args.apply or first_run:
+        save_baseline(new_baseline)
+
+    for s in to_prune:
+        s["monitored"] = False
+        s["monitorNewItems"] = "none"
+        for se in s["seasons"]:
+            se["monitored"] = False
+        if args.apply:
+            call(key, "/api/v3/series/%d" % s["id"], "PUT", s)
+
+    if not to_prune:
+        print("\nNothing to prune.")
+        return 0
+    if not args.apply:
+        print("\nDry run — %d series would be turned off." % len(to_prune))
+        return 0
+
+    fresh = {x["id"]: x for x in call(key, "/api/v3/series")}
+    bad = 0
+    for s in to_prune:
+        f = fresh[s["id"]]
+        ok = (not f["monitored"] and f.get("monitorNewItems") == "none"
+              and not any(se["monitored"] for se in f["seasons"]))
+        print("   %s %s" % ("ok  " if ok else "FAIL", s["title"]))
+        bad += not ok
+    return 2 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
