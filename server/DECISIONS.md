@@ -3284,6 +3284,9 @@ and ignored — some may be waiting for a new season on purpose (Solo Leveling S
 show leaves the baseline once it gets files again. First baseline: ids 1,2,4,5,6,8,9,10 (House of Cards, True
 Detective, Sopranos, Better Call Saul, Knight of the Seven Kingdoms, Solo Leveling, India's Got Latent, Fake
 Alchemist). Asked Shawn which of those should be off.
+**2026-11-06 — Shawn: keep The Fake Alchemist, the rest off.** House of Cards, True Detective, Better Call Saul,
+Knight of the Seven Kingdoms, Solo Leveling, India's Got Latent fully unmonitored (newItems none, read back);
+Sopranos newItems → none. Baseline is now `[10]` (Fake Alchemist only, still monitored S01).
 
 **Proof:** first run (dry) recorded the baseline, pruned nothing. Mount guard returns False for an unmounted root.
 VisionQuest with files faked to 0 → correctly SKIPPED (E07 importPending in queue = in-flight guard). Ozark with
