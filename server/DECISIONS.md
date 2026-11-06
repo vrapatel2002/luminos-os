@@ -3218,3 +3218,43 @@ and raw DNS on both IPs (1–29 ms, ads → 0.0.0.0). Revert: `/root/net-pre-170
   before: 6 GHz ✅ 401 Mb/s · **5 GHz ❌ joins but 100% loss even to the hub** · 2.4 GHz ✅ 256 Mb/s.
   after:  6 GHz ✅ 558 Mb/s · **5 GHz ✅ 637 Mb/s** (hub moved it ch 157 → ch 60, a DFS channel; join took 28 s) · 2.4 GHz ✅ 218 Mb/s.
   Hub DHCP stayed OFF across the reboot (`find_active_dhcp` → no ×3). If 5 GHz dies again, pin it to a non-DFS channel in the hub.
+
+
+## DECISION 171 — RSS polling restored; it had been off since the torrent halt — 2026-11-05
+<!-- [CHANGE: claude-code | 2026-11-05] -->
+**Status:** Applied + proven.
+
+**Symptom (Shawn):** VisionQuest was added while it was still airing; E01–E02 came down, every weekly
+episode after that never did. Same for MobLand S02E07.
+
+**Cause:** DECISION 42 (2026-08-04) set `rssSyncInterval = 0` in Sonarr **and** Radarr as layer 4 of the
+torrent halt. Its restore step was written as "only after the VPN is up" — but DECISION 48 replaced the
+VPN plan with Usenet, so that step never ran. For three months nothing polled the indexers.
+
+**How Sonarr gets new episodes — the part that was missing:**
+- *Adding a show / pressing Search* runs a one-off search for episodes that already exist. That is why
+  VisionQuest E01–E02 (history: grabbed 2026-10-19 00:45) arrived.
+- *Everything released later* is only noticed by **RSS sync**: every N minutes Sonarr reads the
+  indexer's "newest uploads" feed and grabs anything matching a monitored, missing episode. With the
+  interval at 0 that loop never runs, so a weekly show stops at whatever existed on the day it was added.
+- RSS does **not** look back. A release posted while RSS is off (or the box is off) is only found by a
+  search — Missing → Search All, or the `MissingEpisodeSearch` command.
+- The series was configured correctly the whole time: monitored, `monitorNewItems: all`, S01 monitored,
+  episodes monitored, NZBGeek with RSS + automatic search enabled. Only the poll loop was dead.
+
+**Fix:** Sonarr `rssSyncInterval` 0 → **15**, Radarr 0 → **30** (the pre-halt values recorded in DECISION 42),
+read back from both APIs. Then one `MissingEpisodeSearch` (monitored) to catch up.
+
+**Proof:** command 339035 "Completed search for 19 episodes. 19 reports downloaded." — VisionQuest
+S01E03–E07, MobLand S02E07, The Sopranos S02E01–E13 grabbed 04:29–04:30 UTC; NZBGet health 1000, ~25 MB/s,
+E03 already in `MOVING`. ~194 GB queued vs ~820 GB free across both disks.
+
+**Side note — MobLand S02E07 had failed 4× on 2026-11-01** (`Delete Status: HEALTH`): NZBGet's health check
+dropped releases whose articles had been removed — normal for a popular new episode. Sonarr blocklisted
+them and would have tried the next release, but with RSS off no next release was ever seen. The SPWEB
+release grabbed today is a different upload.
+
+**Gap that remains:** if the box is off longer than the indexer's RSS window, releases from that gap are
+missed until a manual search. A daily `MissingEpisodeSearch` timer would close it (offered, not built).
+
+**Also corrected:** server/README.md torrent-halt table still claimed `rssSyncInterval 0`.

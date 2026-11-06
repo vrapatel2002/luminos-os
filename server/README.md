@@ -104,7 +104,7 @@ Enforced in four places so undoing one does not restart traffic:
 | all 22 torrents | `stopped` |
 | `qbittorrent-nox@shawn.service` | stopped **and disabled** — survives reboot |
 | `qbt-portmap.timer` | stopped **and disabled** — it was still re-punching the router forward hourly |
-| Sonarr + Radarr `rssSyncInterval` | `0`, so no grab backlog builds up behind the halt |
+| Sonarr + Radarr `rssSyncInterval` | ~~`0`~~ **restored 2026-11-05 to 15 / 30 — DECISION 171.** Leaving it at 0 after the Usenet switch is why new weekly episodes stopped arriving | <!-- [CHANGE: claude-code | 2026-11-05] -->
 
 Jellyfin is untouched and still streams — that traffic never leaves the house.
 
@@ -124,6 +124,9 @@ sudo grep -oP '(?<=<ApiKey>)[^<]+' /etc/jellyfin/... 2>/dev/null  # or Jellyfin 
 
 These are all learned the hard way — the reasoning is in `DECISIONS.md`.
 
+- **New episodes only arrive through RSS sync.** <!-- [CHANGE: claude-code | 2026-11-05] --> Adding a show searches once; every later
+  episode is caught by the 15-min RSS poll. `rssSyncInterval 0` silently froze every airing show for three months
+  (DECISION 171). Check `GET /api/v3/config/indexer` first when "new episodes aren't downloading".
 - **Any new service on this box is tailnet-exposed the moment it listens, but no longer
   LAN-exposed.** <!-- [CHANGE: claude-code | 2026-09-02] --> This used to be true of the LAN
   too, and it bit: **byparr sat on `:8191` answering HTTP 200 with no authentication at all**
