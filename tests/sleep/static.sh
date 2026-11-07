@@ -430,7 +430,7 @@ webmode_renderer() { # a normal exit is ignored, an abnormal one shows the poste
         normal && /rendererDead = true/ { dead = 1 }
         dead && /revive\.restart\(\)/ { ok = 1 }
         END { exit !ok }' || { echo "no poster, then reload, after the normal check: $body"; return 1; }
-    qml_code | grep -A3 'id: revive' | grep -q 'onTriggered: web.reload()' || { echo "the timer does not reload"; return 1; }
+    qml_code | grep -A3 'id: revive' | grep -qE 'onTriggered:.*web\.reload\(\)' || { echo "the timer does not reload"; return 1; }
     qml_code | grep -A3 'id: revive' | grep -qE 'interval: *[1-9][0-9]{2,}' || { echo "no delay before the reload"; return 1; }
 }
 webmode_recovery() { # a successful load clears a dead renderer, never a missing GPU; a new URL clears both
