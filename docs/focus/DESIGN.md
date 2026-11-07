@@ -21,8 +21,8 @@ cold unless used; prove with measurements, not assertions; nothing not in use st
 - KWin 6.7.5 sends xdg_toplevel `suspended` + stops frame callbacks ONLY for minimized windows, other virtual desktops
   and the lock screen. A window merely COVERED by another keeps getting frame callbacks and keeps rendering
   (KDE bug 492924 "Buffers not released when window occluded", bug 467032 "Consider not sending frame callbacks to
-  occluded windows" — open wishlist). Chromium/Electron do honour `suspended` (they treat it as occluded: stop painting,
-  background-video-track optimisation drops video decode, audio continues).
+  occluded windows" — open wishlist). UNVERIFIED: that Chromium/Electron honour `suspended` (expected: treat it as occluded,
+  stop painting, background-video-track optimisation drops video decode, audio continues) — step 1 measures it.
 
 ## The design: one compositor-side truth, three levers
 ### 0. Truth source — KWin (it is the only component that knows what is really on screen)
