@@ -29,9 +29,13 @@ WallpaperItem {
     // 1 = hidden by a maximized window, 2 = hidden by a fullscreen window.
     // [CHANGE: claude-code | 2026-07-24]
     property int coverLevel: 0
+    // True while some task window on this desktop+activity is the active one.
+    // [CHANGE: claude-code | 2026-11-07] docs/focus SPEC Part W.
+    property bool windowActive: false
 
     // ObscurePolicy: 0 never freeze, 1 freeze only under a fullscreen window,
-    // 2 freeze whenever the desktop is hidden at all (default).
+    // 2 freeze whenever the desktop is hidden at all, 3 play only while the
+    // user is looking at the desktop: no window active (default).
     readonly property bool notVisible: {
         // "Show Desktop" beats every window state, because it means the user is
         // LOOKING at the wallpaper. It is a peek, not a minimise: KWin hides the
@@ -45,6 +49,7 @@ WallpaperItem {
         var p = root.configuration.ObscurePolicy;
         if (p <= 0) return false;
         if (p === 1) return coverLevel >= 2;
+        if (p === 3) return windowActive; // [CHANGE: claude-code | 2026-11-07]
         return coverLevel >= 1;
     }
 
@@ -154,6 +159,13 @@ WallpaperItem {
                                        : model.IsFullScreen ? 2
                                        : model.IsMaximized ? 1 : 0
             onCoverChanged: coverDebounce.restart()
+            // A window becoming active freezes at once; only un-freezing waits
+            // for the debounce. [CHANGE: claude-code | 2026-11-07]
+            readonly property bool active: model.IsActive === true
+            onActiveChanged: {
+                if (active) root.windowActive = true;
+                coverDebounce.restart();
+            }
             Component.onCompleted: coverDebounce.restart()
             Component.onDestruction: coverDebounce.restart()
         }
@@ -165,13 +177,16 @@ WallpaperItem {
         id: coverDebounce
         interval: 400
         onTriggered: {
-            var level = 0;
+            var level = 0, act = false; // [CHANGE: claude-code | 2026-11-07] + act
             for (var i = 0; i < windows.count; i++) {
                 var o = windows.objectAt(i);
                 if (o && o.cover > level)
                     level = o.cover;
+                if (o && o.active)
+                    act = true;
             }
             root.coverLevel = level;
+            root.windowActive = act;
         }
     }
 

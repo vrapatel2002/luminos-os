@@ -53,7 +53,7 @@ ColumnLayout {
     property bool cfg_PauseOnBattery
     property bool cfg_PauseOnBatteryDefault: true
     property int cfg_ObscurePolicy
-    property int cfg_ObscurePolicyDefault: 2
+    property int cfg_ObscurePolicyDefault: 3 // [CHANGE: claude-code | 2026-11-07]
     property bool cfg_MuteAudio
     property bool cfg_MuteAudioDefault: true
     property bool cfg_WebInteractive
@@ -331,7 +331,8 @@ ColumnLayout {
         QQC2.ComboBox {
             Kirigami.FormData.label: i18n("Stop rendering when hidden:")
             model: [ i18n("Never"), i18n("Only under a fullscreen window"),
-                     i18n("Whenever a window covers the desktop") ]
+                     i18n("Whenever a window covers the desktop"),
+                     i18n("Only while I'm looking at the desktop") ] // [CHANGE: claude-code | 2026-11-07]
             currentIndex: root.cfg_ObscurePolicy
             onActivated: root.cfg_ObscurePolicy = currentIndex
         }

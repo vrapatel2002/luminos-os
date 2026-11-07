@@ -40,6 +40,13 @@ Last Updated: 2026-05-24 (fan curve v5: steep recovery, 50°C raised 25%→55%)
 - `cmd/luminos-ram/` — v3.0 RAM management (LIRS ranking, HotSet N=8, OnScreen guard)
   - `reap.go` / `reap_agent.go` / `reap_test.go` — app reaper (DECISION 160): `luminos-ram reaper` runs as the user; `idleAllowed()`, `buildGroups()`, `liveReason()`, `hardProtected()`/`softProtected()`, `Evaluator.Observe/Pass`, `tmpfsCandidates()`, root side `rootReaper.handleAgentReport()` (proton.VPN.service) and `/reap`. [CHANGE: claude-code | 2026-10-24]
 
+### luminos-focus (DECISION 174, docs/focus/) [CHANGE: claude-code | 2026-11-07]
+- `cmd/luminos-focus/` — Go user daemon on org.luminos.Focus: dial.go (Dial/Higher), procmap.go (Descendants/AppUnit/UnitsForApp),
+  audio.go (StreamPIDs from pw-dump), allow.go, plan.go (Plan, selfUnit), glide.go (Glider), systemd.go (SetUnitProperties), main.go.
+- `config/kwin-scripts/luminos-focus/` — KWin JS truth source (rectArea/subtract/visibleFraction/buildSnapshot + wiring).
+- `systemd/user/luminos-focus.service`, `config/luminos/focus-allow.conf`, `scripts/luminos-focus-install`.
+- `tests/focus/` — static.sh (go vet/test, node --test, budgets), kwin_focus.test.js, PM instruments measure.sh/kwin-eval.sh/phaseA.sh.
+
 ### Python HIVE (src/hive/)
 - `src/hive/agent_base.py` — Base agent class
 - `src/hive/nexus.py` — Coordinator (Llama-3.1-8B)

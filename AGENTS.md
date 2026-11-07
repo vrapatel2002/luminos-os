@@ -605,6 +605,10 @@ Task: [what was asked]" && git push origin main
     rewriting is pointless while the credential is still valid. Then delete the file (it is a dead
     config that also re-adds the banned OpenRouter routing), and add `.claude/settings*.json` to
     `.gitignore`. Purging history needs `git filter-repo` + a force-push: user's decision only.
+0f. **luminos-focus Phase B (DECISION 174, docs/focus/)** [CHANGE: claude-code | 2026-11-07] — KWin patch so FULLY covered
+    windows get xdg_toplevel `suspended` (measured: covered = full cost, minimized = painting stops). Needs Shawn's yes
+    (rebuilt KWin package + pacman hook). Also open: Show Desktop not detected by the KWin script (KWin 6.7 API), PSR
+    idle re-measure with Shawn away.
 0a. Sentinel fine-tune: build training dataset (sentinel_*.jsonl, same pattern as nexus_*.jsonl), fine-tune MobileLLM-R1-140M, re-quantize INT8, THEN create `src/npu/npu_daemon.py` + `luminos-npu.service` (blocked 2026-06-10 by luminos-brain safe NO).
 0c. **BUG-069**: fix luminos-power setGPUTGP — `nvidia-smi -pl` is a no-op on mobile (exit 0 despite "not supported"); TGP logs since 2026-06-03 were fiction. Use nvidia-powerd lifecycle + read-back verification. Interim: `scripts/luminos-train-mode` wraps the working mechanism (nvidia-powerd + fan pin) for training runs.
 0b. Fix `luminos-brain safe` to output the actual REASON for a block — currently returns unrelated canned incident lines (e.g. KWin fullscreen crash note when asked about an NPU file), making NO decisions unreviewable.

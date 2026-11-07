@@ -54,13 +54,15 @@
     <!-- When to stop rendering because nobody can see the wallpaper.
          0 = never (burn CPU/iGPU even fully hidden)
          1 = only while a FULLSCREEN window is up
-         2 = whenever the desktop is hidden — fullscreen OR maximized (default)
+         2 = whenever the desktop is hidden — fullscreen OR maximized
+         3 = play only while the user looks at the desktop: Show Desktop, or no
+             window on this desktop is active (default) [CHANGE: claude-code | 2026-11-07]
          Replaces the old PauseWhenObscured bool, which conflated "maximized"
          with "fullscreen" and could only be all-or-nothing.
          [CHANGE: claude-code | 2026-07-24] -->
     <entry name="ObscurePolicy" type="int">
       <label>When to freeze the wallpaper because it is not visible</label>
-      <default>2</default>
+      <default>3</default>
     </entry>
 
     <entry name="MuteAudio" type="bool">

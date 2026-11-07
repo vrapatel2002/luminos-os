@@ -1,0 +1,5 @@
+Round 2 (PM). Read docs/focus/CONTRACTS.md "Re-plan 1" — it settles your questions:
+1. f denominator = the WHOLE frame area (half off-screen, uncovered → 0.5). Make the JS tests strict to that reading, including the seeded properties (no-coverer f = on-output area / frame area exactly) and a pid ≤ 0 window that is dropped from the snapshot but still covers windows below it; Show Desktop = all windows onCurrent=false → every f 0.
+2. Own unit: the contract now names the package var `selfUnit string` (plan.go) — set it in a test and assert Plan never returns that unit even when it is focused/allow-listed/playing audio; restore it after.
+3. Prove static.sh's func-length check rejects a long function: add a fixture tests/focus/fixtures/longfunc.go.txt (41-line func) and a self-test in static.sh that runs the same awk on it and expects it to be flagged (print PASS "func-length check catches a 41-line func").
+Then run `bash tests/focus/static.sh` and report. Same file rules as before.

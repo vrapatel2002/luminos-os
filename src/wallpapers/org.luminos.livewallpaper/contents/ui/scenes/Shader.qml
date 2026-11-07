@@ -76,12 +76,20 @@ Item {
         fragmentShader: Qt.resolvedUrl("../../shaders/luminos-shader.frag.qsb")
         visible: fx.status === ShaderEffect.Compiled
 
-        // One long animation rather than a Timer: the clock advances on the
-        // render thread and stops dead when the wallpaper is frozen.
-        NumberAnimation on iTime {
-            from: 0; to: 36000; duration: 36000000
-            loops: Animation.Infinite
+        // [CHANGE: claude-code | 2026-11-07] docs/focus SPEC Part W: a 33 ms Timer
+        // (≤ 30 fps) instead of a vsync animation (120 fps on this panel). iTime
+        // advances by real elapsed seconds, so the speed is unchanged; a long gap
+        // (freeze, suspend) counts as at most 0.1 s. Wraps at 36000 like before.
+        Timer {
+            interval: 33; repeat: true
             running: scene.running
+            property double last: Date.now()
+            onRunningChanged: last = Date.now()
+            onTriggered: {
+                var now = Date.now();
+                fx.iTime = (fx.iTime + Math.min(0.1, (now - last) / 1000)) % 36000;
+                last = now;
+            }
         }
     }
 

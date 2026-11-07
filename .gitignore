@@ -45,3 +45,4 @@ scripts/jobhunt/tailored/
 
 # gameos is its own repository (nested, no remote yet)
 gameos/
+.monitor/

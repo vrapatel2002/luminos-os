@@ -1,4 +1,4 @@
-# luminos-focus — only what you are looking at gets compute (DESIGN, not built yet)
+# luminos-focus — only what you are looking at gets compute (steps 1–3 BUILT 2026-11-07 — see SPEC.md, BUILD_LOG.md, DECISION 174; step 4 not built)
 # [CHANGE: claude-code | 2026-11-07]
 
 ## Shawn's rule (his words, 2026-11-07)

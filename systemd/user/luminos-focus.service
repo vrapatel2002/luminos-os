@@ -1,0 +1,22 @@
+# luminos-focus — only what is on screen gets CPU (docs/focus/DESIGN.md, CONTRACTS.md).
+# [CHANGE: claude-code | 2026-11-07]
+#
+# Owns org.luminos.Focus on the session bus. The KWin script luminos-focus sends window
+# visibility; the daemon sets runtime-only CPUWeight/CPUQuota on app.slice units.
+# Allow-list: ~/.config/luminos/focus-allow.conf (restart the unit to re-read it).
+# State:      busctl --user call org.luminos.Focus /org/luminos/Focus org.luminos.Focus State
+[Unit]
+Description=Luminos focus (CPU follows what is on screen)
+PartOf=graphical-session.target
+After=plasma-kwin_wayland.service
+
+[Service]
+Type=dbus
+BusName=org.luminos.Focus
+ExecStart=%h/.local/bin/luminos-focus
+Restart=on-failure
+RestartSec=2
+Nice=0
+
+[Install]
+WantedBy=graphical-session.target

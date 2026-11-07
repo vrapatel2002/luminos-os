@@ -1,0 +1,51 @@
+// [CHANGE: claude-code | 2026-11-07] Fixture for static.sh: tooLong spans 41 lines from "func" to "}" and must be
+// flagged; short (3 lines) and oneLiner must not be.
+package fixture
+
+func short() int {
+	return 1
+}
+
+func oneLiner() int { return 2 }
+
+func tooLong() int {
+	n := 0
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	n++
+	return n
+}

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# luminos-focus-install --install | --uninstall | --check   [CHANGE: claude-code | 2026-11-07]
+# Installs the no-reboot parts of luminos-focus (docs/focus/): KWin script, Go user daemon + unit, allow-list,
+# wallpaper plugin copy. No /etc, no root. Uninstall order: stop daemon first (it resets every app unit it
+# throttled), then the KWin script, then files.
+set -euo pipefail
+export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
+R=$(cd "$(dirname "$0")/.." && pwd)
+WP=$HOME/.local/share/plasma/wallpapers/org.luminos.livewallpaper
+UNIT=$HOME/.config/systemd/user/luminos-focus.service
+kwin_reload(){ qdbus6 org.kde.KWin /KWin org.kde.KWin.reconfigure >/dev/null; }
+case "${1:-}" in
+--install)
+  (cd "$R" && GOFLAGS=-mod=mod GOPROXY=off go build -o "$HOME/.local/bin/luminos-focus" ./cmd/luminos-focus)
+  mkdir -p "$HOME/.config/luminos" "$(dirname "$UNIT")"
+  [ -f "$HOME/.config/luminos/focus-allow.conf" ] || cp "$R/config/luminos/focus-allow.conf" "$HOME/.config/luminos/"
+  cp "$R/systemd/user/luminos-focus.service" "$UNIT"
+  systemctl --user daemon-reload
+  systemctl --user enable luminos-focus.service
+  systemctl --user restart luminos-focus.service   # restart: a re-install must replace the running binary
+  kpackagetool6 --type=KWin/Script -u "$R/config/kwin-scripts/luminos-focus" 2>/dev/null \
+    || kpackagetool6 --type=KWin/Script -i "$R/config/kwin-scripts/luminos-focus"
+  kwriteconfig6 --file kwinrc --group Plugins --key luminos-focusEnabled true
+  kwin_reload
+  rsync -a --delete --exclude '*.bak-*' "$R/src/wallpapers/org.luminos.livewallpaper/" "$WP/"
+  echo "installed; wallpaper QML is picked up on the next plasmashell start" ;;
+--uninstall)
+  systemctl --user disable --now luminos-focus.service || true
+  kwriteconfig6 --file kwinrc --group Plugins --key luminos-focusEnabled false; kwin_reload || true
+  kpackagetool6 --type=KWin/Script -r luminos-focus || true
+  rm -f "$UNIT" "$HOME/.local/bin/luminos-focus"; systemctl --user daemon-reload
+  echo "uninstalled (allow-list and wallpaper left in place)" ;;
+--check)
+  systemctl --user is-active luminos-focus.service
+  [ "$(kreadconfig6 --file kwinrc --group Plugins --key luminos-focusEnabled)" = true ] && echo "kwin script enabled"
+  busctl --user call org.luminos.Focus /org/luminos/Focus org.luminos.Focus State
+  diff -rq --exclude '*.bak-*' "$R/src/wallpapers/org.luminos.livewallpaper" "$WP" && echo "wallpaper in sync" ;;
+*) echo "usage: $0 --install|--uninstall|--check"; exit 2 ;;
+esac

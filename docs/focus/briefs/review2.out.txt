@@ -1,0 +1,28 @@
+**VERDICT: keep running, but two fixes before the live A/B is meaningful.** Review1 H1/M1/M2/M3/M4 are closed in code. Two new HIGHs found, both with live evidence in the journals. Not run: `go test`/`go vet`/`pacman` (sandbox denied them); BUILD_LOG claims static.sh 9/9.
+
+Confirmed closed:
+- **M2** `cmd/luminos-focus/audio.go:39-48` returns nil on exec error/timeout; `main.go:122` only assigns when non-nil. A first-ever failure leaves `d.audio` nil (no exemption), unavoidable without a prior map.
+- **M4** `procmap.go:51-53` requires `.service/app.slice/` directly and an `app-` prefix; `systemd.go:56,82` lists `app-*` and checks the parent is `app.slice`. Live log since 14:25 touches only `app-*.scope/@*.service` units. `selfUnit` is now "" (daemon is `luminos-focus.service`, not app-*), harmless.
+- **H1/M1/M3** `main.js:131`, `:115` + `:98-102`, `:86,90`. Per-window connections (`main.js:118-125`): one `watch` per window, at load or `windowAdded`, never both; the shared `schedule` closure holds no window reference, and KWin tears the connections down with the Window object. No leak, no duplicates.
+
+## HIGH
+
+**H2 — Show Desktop is not detected.** `main.js:75` tests `w.hidden`. In KWin 6.7 `hidden` is `Window::isHidden()`, used for auto-hide panels and X11 internal hiding. Show Desktop sets a different flag, `hiddenByShowDesktop` (libkwin.so.6 metaobject strings contain `hiddenByShowDesktop`, `hiddenByShowDesktopChanged`, `isHiddenByShowDesktop`, `setHiddenByShowDesktop`). So during Show Desktop every app window has `hidden=false`, `onCurrent=true`, nothing covers it, and the desktop window takes focus: that is exactly the live log at 14:30:28, Claude `why=f=1.00` while the PM's kwin-eval toggled Show Desktop. Result: Show Desktop releases every app to full speed instead of f=0.
+Fix (2 lines): `main.js:75` → `return desk && act && !w.hiddenByShowDesktop;` and `main.js:124` → `w.hiddenByShowDesktopChanged.connect(schedule);`. Verify first with kwin-eval while Show Desktop is on: `print(workspace.windowList().map(function(w){return w.caption+" "+w.hiddenByShowDesktop}))`.
+
+**H3 — the wallpaper is frozen before it has painted, so it shows black until the desktop is clicked.** `WebMode.qml:240` fires `applyState` as soon as main.qml binds `shouldPlay=false` (`main.qml:422`), i.e. while the page is still loading. `applyState` grabs a blank page, hides the view and freezes it; a frozen renderer does not finish loading. Live evidence: plasmashell restarted 14:27:49 with Claude focused; the page's first console lines (`THREE.WebGLRenderer`, `Particulate.js`) appear only at 14:30:27.96, 30 ms after the Show Desktop eval made `shouldPlay` true. For 2.5 minutes the "frozen frame" was an unpainted page. This happens at every plasmashell start, every login with a focused restored window, and every wallpaper change (see M6).
+Fix (≈4 lines): in `applyState` add before the freeze branches `else if (web.loading) { /* onLoadingChanged re-applies */ }`; and at `WebMode.qml:150` replace `web.applyState()` with `settle.restart()` plus `Timer { id: settle; interval: 1000; onTriggered: web.applyState() }` so the page gets one second to paint its first frame before it is grabbed. The one-second Active window is the price of a real frame.
+
+## MEDIUM
+
+**M6 — URL change while frozen shows the old wallpaper's frame.** `WebMode.qml:74-79` resets the failure flags but not `frozenShown`/`frozenGrab`/lifecycle. Picking a new wallpaper while a window is focused (the settings dialog is one) navigates a frozen page: the load stalls (as in H3) and the previous grab stays on screen until the desktop gets focus. Fix: in `onWebSourceChanged` add `web.lifecycleState = WebEngineView.LifecycleState.Active; webRoot.frozenShown = false; webRoot.frozenGrab = null;`; `onLoadingChanged` then re-freezes with a fresh grab.
+
+**M7 — pw-dump is only consulted when something would be throttled, and the first failure has no previous map.** `main.go:119-125`: with `d.audio` nil and `pw-dump` failing on first use, a hidden music app is capped at 25 %. Accept, or seed `d.audio` once at start regardless of `needAudio`. Low cost, your call.
+
+## LOW
+
+- `WebMode.qml:168-174` renderer crash while Frozen: `reload()` spawns a fresh, unfrozen renderer while QtWebEngine still reports Frozen, so the next `freeze(null)` is a no-op and the hidden page runs until the next play→pause cycle. Self-heals; if wanted, set Active before `web.reload()` in `revive`.
+- Memory: `frozenGrab` keeps one full-screen QImage plus the Image texture while frozen (about 16 MB each at 2560×1600). `frozenGrab = null` drops the reference; the QImage is freed at the next JS GC, not immediately. Acceptable.
+- `main.js:88` skipTaskbar filter also drops real app windows that set skipTaskbar (XWayland Steam overlay/notification windows, PiP on X11). They are neither reported nor cover others, so the error is fail-open.
+- Rapid flips are correct: a late grab after a flip back to play is dropped at `WebMode.qml:92`; a second pause during a pending grab just replaces `frozenGrab`; `freezeWait` fallback keeps "never Active while shouldPlay is false" except for the loading window introduced by H3's fix. Active is restored unconditionally at `WebMode.qml:134-138` before the view is shown, which is the allowed order.
+- Exempt units glide 1000→100 over 2 s after losing focus (log 14:26:20–22). Matches the contract; just noting it is visible in the log as "exempt" at weights 775/550/325.

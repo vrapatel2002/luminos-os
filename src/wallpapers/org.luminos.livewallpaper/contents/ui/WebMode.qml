@@ -76,16 +76,43 @@ Item {
         webRoot.noWebGL = false;
         webRoot.rendererDead = false;
         webRoot.thumbnailUrl = "";
+        // [CHANGE: claude-code | 2026-11-07] M6: a frozen page cannot load the new
+        // URL, and the old frame must go; onLoadingChanged re-freezes with a fresh grab.
+        web.lifecycleState = WebEngineView.LifecycleState.Active;
+        webRoot.frozenShown = false;
+        webRoot.frozenGrab = null;
     }
 
-    Timer { id: revive; interval: 10000; onTriggered: web.reload() }
+    // [CHANGE: claude-code | 2026-11-07] Active first: a reload while Frozen would
+    // leave the new renderer running with QtWebEngine still reporting Frozen.
+    Timer {
+        id: revive; interval: 10000
+        onTriggered: { web.lifecycleState = WebEngineView.LifecycleState.Active; web.reload(); }
+    }
+
+    // [CHANGE: claude-code | 2026-11-07] docs/focus round 3. Chromium refuses
+    // Frozen for a VISIBLE page ("failed to transition from Active to Frozen
+    // state: page is visible"), so this freeze never worked. Now: grab the frame,
+    // show it above the view, hide the view, then freeze. No grab within 1 s →
+    // freeze anyway, over the background colour.
+    property bool frozenShown: false
+    property var frozenGrab: null   // keeps the grab's url alive; null releases it
+    function freeze(grab) {
+        freezeWait.stop();
+        if (webRoot.shouldPlay) return;   // a late grab after a flip back to play
+        if (grab) webRoot.frozenGrab = grab;
+        webRoot.frozenShown = true;       // hides the view (binding below) ...
+        web.lifecycleState = WebEngineView.LifecycleState.Frozen; // ... so this is allowed
+    }
+    Timer { id: freezeWait; interval: 1000; onTriggered: webRoot.freeze(null) }
+    Timer { id: settle; interval: 1000; onTriggered: web.applyState() } // [CHANGE: claude-code | 2026-11-07] H3
 
     anchors.fill: parent
 
     WebEngineView {
         id: web
         anchors.fill: parent
-        visible: !webRoot.failed
+        visible: !webRoot.failed && !webRoot.frozenShown // [CHANGE: claude-code | 2026-11-07]
         url: webRoot.webSource
         // Full interactivity steals desktop clicks, so it is opt-in.
         enabled: webRoot.interactive
@@ -93,17 +120,51 @@ Item {
         settings.showScrollBars: false
         settings.playbackRequiresUserGesture: false
 
+        // [CHANGE: claude-code | 2026-11-07] docs/focus SPEC Part W: 30 fps cap.
+        // The panel runs at 120 Hz and so did every page. Queued callbacks run
+        // as one batch on the first real frame ≥ 33 ms after the last batch,
+        // with the browser's own (monotonic) timestamp. Page code is unchanged.
+        userScripts.collection: [{
+            name: "luminos-raf-30fps",
+            injectionPoint: WebEngineScript.DocumentCreation,
+            worldId: WebEngineScript.MainWorld,
+            runsOnSubFrames: true,
+            sourceCode: "(function(){var raf=window.requestAnimationFrame.bind(window),"
+                + "q={},next=1,pending=0,last=-1e9;"
+                + "function pump(t){pending=0;"
+                + "if(t-last<33){pending=raf(pump);return;}"
+                + "last=t;var run=q;q={};"
+                + "for(var id in run){try{run[id](t);}catch(e){window.reportError(e);}}}"
+                + "window.requestAnimationFrame=function(cb){var id=next++;q[id]=cb;"
+                + "if(!pending)pending=raf(pump);return id;};"
+                + "window.cancelAnimationFrame=function(id){delete q[id];};})();"
+        }]
+
+        // [CHANGE: claude-code | 2026-11-07] see freeze() above.
         function applyState() {
-            web.lifecycleState = webRoot.shouldPlay
-                ? WebEngineView.LifecycleState.Active
-                : WebEngineView.LifecycleState.Frozen;
+            if (webRoot.shouldPlay) {
+                freezeWait.stop();
+                web.lifecycleState = WebEngineView.LifecycleState.Active;
+                webRoot.frozenShown = false;
+                webRoot.frozenGrab = null;
+            } else if (web.loading) {
+                // H3 [CHANGE: claude-code | 2026-11-07]: nothing painted yet; settle re-applies
+            } else if (webRoot.frozenShown) {
+                webRoot.freeze(null);     // already hidden (e.g. a reload): just re-freeze
+            } else {
+                freezeWait.restart();
+                if (!web.grabToImage(function (g) { webRoot.freeze(g); }))
+                    webRoot.freeze(null);
+            }
         }
         onLoadingChanged: function(info) {
             var ok = (info.status === WebEngineView.LoadSucceededStatus);
-            if (ok) {
-                web.applyState();
+            // [CHANGE: claude-code | 2026-11-07] H3: give the page 1 s to paint its first
+            // frame before it is grabbed. A failed load settles too, so it never stays Active.
+            if (info.status !== WebEngineView.LoadStartedStatus)
+                settle.restart();
+            if (ok)
                 webRoot.rendererDead = false;
-            }
             // A Lively page draws nothing until its properties arrive, so this
             // must flip on load and OFF on a reload — see LivelyApi.qml.
             lively.ready = ok;
@@ -126,6 +187,15 @@ Item {
             webRoot.rendererDead = true;
             revive.restart();
         }
+    }
+
+    // The last frame while frozen. Under the poster, so a failure still shows it.
+    // [CHANGE: claude-code | 2026-11-07]
+    Image {
+        anchors.fill: parent
+        visible: webRoot.frozenShown && !webRoot.failed
+        source: webRoot.frozenGrab ? webRoot.frozenGrab.url : ""
+        cache: false
     }
 
     // Above the hidden view. No poster and no thumbnail leaves main.qml's

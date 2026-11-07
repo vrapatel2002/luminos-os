@@ -1,0 +1,12 @@
+{
+  "KPackageStructure": "KWin/Script",
+  "KPlugin": {
+    "Id": "luminos-focus",
+    "Name": "Luminos Focus",
+    "Description": "Publishes which windows are visible/active to org.luminos.Focus [CHANGE: claude-code | 2026-11-07]",
+    "Version": "1.0",
+    "License": "GPL-2.0"
+  },
+  "X-Plasma-API": "javascript",
+  "X-Plasma-MainScript": "code/main.js"
+}

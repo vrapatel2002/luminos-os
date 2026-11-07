@@ -1,0 +1,35 @@
+**VERDICT: safe to install** (no path throttles session.slice/kwin/plasmashell/system units or the daemon itself; worst-case failures release or are reset on restart). It does **not** yet meet the 250 ms spec, and two fail-open holes should be closed before the live A/B.
+
+Verified live, not assumed:
+- Claude main 2866 → children 2954/2956 (zygotes, in `app-com.anthropic.Claude@….service`) → renderers; qemu 561894, virtiofsd 561892, cowork-linux-helper, NodeService and the /build worker shells all sit in `app-com.anthropic.Claude-2866.scope`, which both the shipped conf and the built-in defaults allow-list. Chrome 2869 → 365246… in `app-google\x2dchrome@….service`. `Descendants` + `AppUnit` cover both.
+- kwin, plasmashell, pipewire, portals-kde are in session.slice → `AppUnit` returns false → never touched.
+- godbus: `handleCall` runs per call in its own goroutine (conn.go:435), so a blocked `Update` cannot stall the bus; `uint64` → `t`; `[]prop` → `a(sv)`; `NameFlagDoNotQueue` + `PrimaryOwner` check correct.
+- cpu controller is delegated and active at user@1000.service (`cpu memory pids`); CPUWeight/CPUQuotaPerSecUSec are valid runtime props on scopes and services.
+- Wallpaper: policies 0/1/2 unchanged; Show Desktop still wins; iTime still advances 1.0/s; Timer stops with `scene.running`; `WebEngineScript` is `isStructured` so the object-literal `userScripts.collection` converts; rAF wrapper is correct at 120/60 Hz, cancel works, re-arm inside a batch works.
+- Not run: `go test`/`go vet` and a live KWin eval (sandbox denied). BUILD_LOG claims they pass.
+
+## HIGH
+
+**H1 — focus switch cannot restore rights within 250 ms.** `main.js:97-98,115`: `windowActivated` only arms the 250 ms debounce, so the raise reaches systemd ≥ 250 ms after activation. Un-minimizing a hidden Chrome runs its whole restore + first paints at weight 20 / 25 % of one core (renderer + GPU process share that quota). Fix: `workspace.windowActivated.connect(function () { debounce.stop(); send(); });` and keep the debounce for everything else.
+
+## MEDIUM
+
+**M1 — stale heartbeat defeats fail-open.** `main.js:78-79,103`: the heartbeat resends `last` verbatim. If `send()` ever throws after having succeeded once (`w.output` null during output hotplug, any property renamed by a KWin bump), the stale snapshot is re-pushed every 30 s forever, so a now-focused app stays throttled and the daemon's 60 s rule never fires. Fix: `heartbeat.timeout.connect(send)` (recompute, one callDBus per 30 s) or wrap `send` in try/catch that sets `last = ""`.
+
+**M2 — pw-dump failure drops the audio exemption (fails closed).** `audio.go:41-45` returns an empty map on error/3 s timeout; `main.go:121` stores it. During a PipeWire restart or a wedged `pw-dump`, a hidden music/call app is throttled to 25 % within one tick. Fix: return `nil` on error and in `replan` only assign when non-nil (keep the previous map).
+
+**M3 — an app whose dialog has focus counts as unfocused.** `main.js:85`: `active` is exact-window identity; KWin types transient dialogs as `dialog`, not `normalWindow`, so they are neither reported nor active. A Qt/KDE app whose main window is covered while the user works in its in-process file/properties dialog is capped at 25 %. Fix: `var activePid = workspace.activeWindow ? workspace.activeWindow.pid : -1;` and `active: w.pid === activePid`.
+
+**M4 — crash cleanup misses non-`app-*` units.** `systemd.go:55` lists `app-*` only, but `Plan` throttles any unit directly under app.slice. On this machine app.slice also holds `luminos-hive.service`, `claude-cowork.service`, `luminos-glm-proxy.service`, `luminos-nzbget.service`, `xdg-desktop-portal-gtk.service`, `run-u*.service` style units (SPEC §"Blind spots" claim that HIVE is not in app.slice is wrong). Any of these reached from a window's tree stays throttled after a crash until logout. Fix: pattern `"*"`; `leftover()` already filters on `app.slice` ControlGroup. Also add `luminos-*` and `claude-cowork*` to the allow-list: `app-*luminos*` does **not** match `luminos-hive.service`, so if the HIVE popup is ever spawned by hive-daemon.py the inference daemon gets 25 % of a core whenever the popup is hidden.
+
+**M5 — re-install keeps the old binary running.** `luminos-focus-install:19`: `enable --now` is a no-op on an already-active unit, so after a code change the stale daemon keeps running against the new unit file. Fix: `systemctl --user enable luminos-focus.service && systemctl --user restart luminos-focus.service`.
+
+## LOW
+
+- `systemd.go:81` resets any persistently configured non-100 CPUWeight on `app-*` units at start (user drop-ins would be overridden runtime-side).
+- Nested `app.slice/app-x.slice/…` would make `AppUnit` return a slice; `Set` works on it but `leftover()` only handles `.scope/.service`. Not used by Plasma today.
+- XWayland `pid` comes from `_NET_WM_PID` (client-asserted); a remote/forwarded X app can name an unrelated local pid.
+- `luminos-focus-install:28`: with `set -e`, a failing `kwin_reload` aborts `--uninstall` before the package and files are removed; append `|| true`.
+- Policy 3 keeps the wallpaper playing while a non-task window (portal file dialog, krunner) is active — the TasksModel can't see those. Cosmetic.
+- Journal noise: one log line per glide step per unit (4 per lowering); fine for the A/B, consider logging only start/end later.
+- `dial.go:36-40`: at f ≈ 0.995 the unit gets weight 100 + quota 1592 %, which `throttles()` ignores; harmless (≈ unlimited) but the quota is never counted as "throttled" for the 60 s rule.

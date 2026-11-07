@@ -67,7 +67,8 @@ Item {
         var decls = "", list = uniforms.length > 0 ? uniforms.split(" ") : [];
         for (var i = 0; i < list.length; i++)
             decls += scene.declFor(list[i]);
-        var src = 'import QtQuick\nShaderEffect {\n    anchors.fill: parent\n'
+        // [CHANGE: claude-code | 2026-11-07] iTime from a 33 ms Timer, same as Shader.qml.
+        var src = 'import QtQuick\nShaderEffect {\n    id: fx\n    anchors.fill: parent\n'
             + '    property real iTime: 0\n'
             + '    property vector2d iResolutionXY: Qt.vector2d(width, height)\n'
             + '    property vector4d iMouse: Qt.vector4d(scene.cursorX, height - scene.cursorY, 0, 0)\n'
@@ -78,8 +79,12 @@ Item {
             + '    property variant iChannel0: audioTex.texture\n'
             + decls
             + '    fragmentShader: "file://' + qsbPath + '"\n'
-            + '    NumberAnimation on iTime { from: 0; to: 36000; duration: 36000000;\n'
-            + '        loops: Animation.Infinite; running: scene.running }\n}\n';
+            + '    Timer { interval: 33; repeat: true; running: scene.running\n'
+            + '        property double last: Date.now()\n'
+            + '        onRunningChanged: last = Date.now()\n'
+            + '        onTriggered: { var now = Date.now();\n'
+            + '            fx.iTime = (fx.iTime + Math.min(0.1, (now - last) / 1000)) % 36000;\n'
+            + '            last = now; } }\n}\n';
         try {
             scene.effect = Qt.createQmlObject(src, holder, "luminos-shadertoy");
         } catch (e) {
