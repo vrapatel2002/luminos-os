@@ -3296,3 +3296,50 @@ episodes monitored. Timer enabled; first real `--apply` run Result=success.
 
 **Re-enabling a show:** monitor it again in Sonarr. Re-requesting in Jellyseerr is expected to re-monitor it —
 not yet tested here; check the first time it happens.
+
+## DECISION 175 — Jellyfin runs ffmpeg through a seek-alignment wrapper (JellyRock skip/jump-back fix) — 2026-11-07
+<!-- [CHANGE: claude-code | 2026-11-07] BUG-230 -->
+**Asked:** Shawn — in JellyRock on the Roku "I can not move back and forth".
+
+**Measured, not guessed.** Driving the TV over Roku ECP (`:8060/keypress`) from the server: Right / `>>` *do*
+open the seek bar and the jump lands, but 3 of 4 jumps paused 2–13 s later and snapped back to the exact
+pre-seek position (`/query/media-player` positions + a tcpdump of the TV's segment requests). No SyncPlay, no
+server command. To the viewer that is "skipping doesn't work".
+
+**Cause (server side).** JellyRock plays Dolby Vision files as an HLS **remux** (video copied). Jellyfin 10.11
+builds that playlist from the file's keyframes on a cumulative grid (piece n starts at the first keyframe
+≥ n·L, L = SegmentLength, 5 here). A seek past what is already cut restarts ffmpeg with `-ss` + `-start_number N`,
+and the restarted hls muxer cuts on **its own grid measured from the restart point**, so from then on some
+pieces hold different seconds than the playlist says (measured on Malware: pieces 375/387/435/459/495 1.6–4 s
+late; e2e before the fix: **16 of 19** sampled pieces misaligned after three forced restarts). Jellyfin also
+adds **+0.5 s** to `-ss` on HLS remux (EncodingHelper.GetFastSeekCommandLineParameter), and fftools subtracts
+3/23 s before seeking B-frame video.
+
+**Fix.** `server/scripts/luminos-jf-ffmpeg` installed as `/usr/local/lib/luminos-ffmpeg/ffmpeg` (+ `ffprobe`
+symlink → `/usr/lib/jellyfin-ffmpeg/ffprobe`, Jellyfin derives the probe path from the ffmpeg path) and
+`/etc/jellyfin/jellyfin.env` `JELLYFIN_FFMPEG_OPT="--ffmpeg=/usr/local/lib/luminos-ffmpeg/ffmpeg"`.
+It rewrites exactly one call shape — `-f hls` + `-hls_segment_type mpegts` + `-codec:v:0 copy` + vod, for a
+file that has a `KeyframeData` row — into the **segment muxer** with explicit cut times computed with the
+same algorithm as Jellyfin's playlist (times are relative to the first video packet, indexed per run), and
+moves `-ss` to piece-start + 0.15 s so the seek lands exactly on that keyframe. Every other call (transcodes,
+subtitles, trickplay, `-version`/`-encoders` validation, fmp4, event playlists, unknown `-hls_*` options, any
+error) is exec'd unchanged. Stateless, stdlib Python, 128 lines; `exec` keeps Jellyfin's stdin keys (q, throttle
+c/u) and the pid.
+
+**Proof.** 20 unit/property tests (`server/docs/seek/test_wrapper.py`, runnable in ~/builds/jf-seek-align;
+tester planted 8 bugs, all caught). Live e2e `server/scripts/luminos-jf-seek-check <itemId> [L]` (fetch playlist,
+force forward/forward/back restarts, compare every served piece's real start to the playlist): Reboot L=5
+**0/19** misaligned, Malware L=6 **0/19**; FFmpeg logs show `luminos-jf-ffmpeg: aligned start=N`. Jellyfin
+Healthy, VAAPI + encoders detected through the wrapper. Independent review (Opus) adopted: unknown `-hls_*` /
+non-vod → pass through; SIGPIPE reset before exec. **Not yet proven on the TV** — Shawn chose to test himself.
+
+**Not chosen.** Disabling throttling/segment deletion (fewer restarts, but every restart still drifts, and whole
+10 GB episodes would sit in the HDD cache); patching Jellyfin (rebuilt on every upgrade); equal-length pieces
+(can never match a copied video).
+
+**Watch.** A Jellyfin upgrade that changes the argument shape makes the wrapper pass everything through (old
+behaviour, no breakage) — re-run `luminos-jf-seek-check` after upgrades. `jellyfin.env` is a pacman backup file:
+an upgrade leaves `.pacnew`, ours stays. **systemd EnvironmentFile has no inline comments** — the first edit put
+`# …` on the value line and Jellyfin got the comment as extra arguments (Degraded ~12 s); comment is on its own line now.
+**Undo:** set `JELLYFIN_FFMPEG_OPT="--ffmpeg=/usr/lib/jellyfin-ffmpeg/ffmpeg"` (backup
+`/etc/jellyfin/jellyfin.env.pre-seekalign-20261107`) and `systemctl restart jellyfin`.

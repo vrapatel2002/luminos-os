@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+# [CHANGE: claude-code | 2026-11-07] e2e: do served HLS remux pieces hold the time the playlist promises,
+# also after ffmpeg restarts? Runs ON the server (needs /root/.jellyfin-token via sudo, ffprobe). Exit 0/1.
+import json, re, subprocess, sys, urllib.request, uuid
+BASE = "http://127.0.0.1:8096"
+FFPROBE = "/usr/lib/jellyfin-ffmpeg/ffprobe"
+TOL = 0.05
+
+def token():
+    return subprocess.run(["sudo", "cat", "/root/.jellyfin-token"], capture_output=True, text=True, check=True).stdout.strip()
+
+def get(url, path=None):
+    with urllib.request.urlopen(url, timeout=120) as r:
+        data = r.read()
+    if path:
+        open(path, "wb").write(data)
+    return data
+
+def start_time(path):
+    out = subprocess.run([FFPROBE, "-v", "error", "-select_streams", "v:0", "-show_entries",
+                          "stream=start_time", "-of", "csv=p=0", path], capture_output=True, text=True).stdout
+    return float(out.strip().split("\n")[0].strip(","))
+
+def main():
+    item, seglen = sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "5"
+    tok, sess = token(), uuid.uuid4().hex
+    q = (f"MediaSourceId={item}&PlaySessionId={sess}&DeviceId=seekcheck&VideoCodec=hevc&AudioCodec=eac3,ac3,aac"
+         f"&SegmentContainer=ts&SegmentLength={seglen}&AllowVideoStreamCopy=true&AllowAudioStreamCopy=true&api_key={tok}")
+    pl = get(f"{BASE}/Videos/{item}/main.m3u8?{q}").decode()
+    urls = re.findall(r"^(hls1/main/\d+\.ts\?.*)$", pl, re.M)
+    ticks = [int(re.search(r"runtimeTicks=(\d+)", u).group(1)) for u in urls]
+    n = len(urls)
+    plan = [0, 1, 2] + list(range(40, 46)) + list(range(110, 116)) + list(range(12, 16))  # 3 restarts: fwd, fwd, back
+    plan = [i for i in plan if i < n]
+    bad, offset = 0, None
+    try:
+        for i in plan:
+            p = f"/tmp/seekcheck-{sess}-{i}.ts"
+            get(f"{BASE}/Videos/{item}/{urls[i]}", p)
+            st, want = start_time(p), ticks[i] / 1e7
+            if offset is None and i >= 1:
+                offset = st - want
+            ok = i == 0 or abs(st - want - offset) <= TOL
+            bad += not ok
+            print(f"piece {i:4d} playlist={want:9.3f} file={st:9.3f} {'ok' if ok else 'MISALIGNED'}")
+            subprocess.run(["rm", "-f", p])
+    finally:
+        req = urllib.request.Request(f"{BASE}/Videos/ActiveEncodings?deviceId=seekcheck&playSessionId={sess}&api_key={tok}", method="DELETE")
+        urllib.request.urlopen(req, timeout=30).read()
+    print(f"RESULT pieces={len(plan)} misaligned={bad} offset={offset:.3f}")
+    sys.exit(1 if bad else 0)
+
+if __name__ == "__main__":
+    main()

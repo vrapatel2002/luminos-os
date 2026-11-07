@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""luminos-jf-ffmpeg: ffmpeg wrapper that makes Jellyfin HLS remux pieces match the playlist.
+
+Only HLS mpegts video-copy calls for files with Jellyfin keyframe data are rewritten (hls muxer ->
+segment muxer cutting at the playlist's own boundaries). Everything else, and any error, execs the
+real ffmpeg with the original args. Undo: point Jellyfin back at /usr/lib/jellyfin-ffmpeg/ffmpeg.
+"""
+import json
+import os
+import re
+import signal
+import sqlite3
+import sys
+
+TICKS = 10_000_000  # .NET ticks per second
+DROP = {"-hls_time", "-hls_segment_type", "-start_number", "-hls_segment_filename",
+        "-hls_playlist_type", "-hls_list_size"}
+SQL = ("SELECT k.KeyframeTicks, k.TotalDuration FROM KeyframeData k "
+       "JOIN BaseItems b ON b.Id = k.ItemId WHERE b.Path = ?")
+
+
+def _value(args, flag, want=None):
+    """Value after the first `flag` (whose value is `want`, if given); None if absent."""
+    for i in range(len(args) - 1):
+        if args[i] == flag and want in (None, args[i + 1]):
+            return args[i + 1]
+    return None
+
+
+def _seconds(text):
+    m = re.fullmatch(r"(\d+):(\d\d):(\d\d(?:\.\d+)?)", text)
+    if not m:
+        raise ValueError(text)
+    return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])
+
+
+def parse(args):
+    try:
+        L, N = int(_value(args, "-hls_time")), int(_value(args, "-start_number"))
+        i = args.index("-i")
+        src = args[i + 1]
+        ss = _seconds(args[args.index("-ss") + 1]) if "-ss" in args[:i] else None
+    except (TypeError, ValueError, IndexError):
+        return None
+    pattern = _value(args, "-hls_segment_filename")
+    ok = (L >= 1 and N >= 0 and pattern is not None and src.startswith("file:")
+          and len(args) >= 2 and args[-2] == "-y"
+          and None not in (_value(args, "-f", "hls"), _value(args, "-hls_segment_type", "mpegts"),
+                           _value(args, "-codec:v:0", "copy"))
+          and _value(args, "-hls_playlist_type") == "vod"
+          and all(a in DROP for a in args if a.startswith("-hls_")))  # unknown hls option -> pass through
+    if not ok:
+        return None
+    return {"L": L, "N": N, "ss": ss, "path": src[len("file:"):], "pattern": pattern, "out": args[-1]}
+
+
+def segment_starts(keyframe_ticks, total_ticks, L):
+    """Jellyfin 10.11 DynamicHlsPlaylistGenerator.ComputeSegments, as segment start ticks."""
+    if keyframe_ticks and total_ticks < keyframe_ticks[-1]:
+        raise ValueError("keyframe past total duration")
+    starts, cut = [0], L * TICKS
+    for k in keyframe_ticks:
+        if k >= cut:
+            starts.append(k)
+            cut += L * TICKS
+    return starts
+
+
+def load_keyframes(db, media_path):
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+    try:
+        row = con.execute(SQL, (media_path,)).fetchone()
+    finally:
+        con.close()
+    return None if row is None else (json.loads(row[0]), int(row[1]))
+
+
+def rewrite(args, plan, starts):
+    n, ss = plan["N"], plan["ss"]
+    if n >= len(starts):
+        return None
+    base = starts[n] / TICKS
+    # Jellyfin sends -ss at the piece start, or (HLS remux restarts) 0.5 s after it.
+    if n == 0 and ss is not None or n > 0 and (ss is None or min(abs(ss - base), abs(ss - base - 0.5)) > 0.002):
+        return None
+    body = list(args[:-2])  # drops the trailing "-y OUT"
+    if ss is not None:
+        body[body.index("-ss") + 1] = f"{base + 0.15:.3f}"
+    drop = {j for i, a in enumerate(body)
+            if a in DROP or body[i:i + 2] == ["-f", "hls"] for j in (i, i + 1)}
+    out = [a for i, a in enumerate(body) if i not in drop]
+    out += ["-f", "segment", "-segment_format", "mpegts"]
+    if starts[n + 1:]:
+        out += ["-segment_times", ",".join(f"{s / TICKS - base - 0.02:.3f}" for s in starts[n + 1:])]
+    out += ["-segment_start_number", str(n), "-segment_list", plan["out"],
+            "-segment_list_type", "m3u8", "-y", plan["pattern"]]
+    return out
+
+
+def _aligned(args):
+    """Rewritten args for a call we can align, else None."""
+    plan = parse(args)
+    db = os.environ.get("LUMINOS_JF_FFMPEG_DB", "/var/lib/jellyfin/data/jellyfin.db")
+    kf = plan and load_keyframes(db, plan["path"])
+    if not kf:
+        return None
+    starts = segment_starts(kf[0], kf[1], plan["L"])
+    new = rewrite(args, plan, starts)
+    if new is not None:
+        print(f"luminos-jf-ffmpeg: aligned start={plan['N']} cuts={len(starts) - plan['N'] - 1}",
+              file=sys.stderr, flush=True)
+    return new
+
+
+def main(argv):
+    """argv as sys.argv (argv[0] = this script)."""
+    args = argv[1:]
+    real = os.environ.get("LUMINOS_JF_FFMPEG_REAL", "/usr/lib/jellyfin-ffmpeg/ffmpeg")
+    try:
+        new = _aligned(args)
+    except Exception:
+        new = None
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # Python ignores SIGPIPE; the ignore survives exec
+    os.execv(real, [real] + (args if new is None else new))
+
+
+if __name__ == "__main__":
+    main(sys.argv)

@@ -468,3 +468,8 @@ Things that need physical access or the router admin page:
   JellyRock (Roku store id 819325) asks for a remux and the TV shows real DV (DECISION 167). `luminos-dv-sweep.timer` (HDR10
   conversion, DECISION 156) is deliberately DISABLED; re-enable it only if a non-JellyRock client must play P5.
   The TV is now at **192.168.2.18 on ethernet** (was .13 on wifi). History: `server/docs/doctor/DV_PURPLE_HISTORY.md`.
+- **Jellyfin's ffmpeg is a wrapper now (DECISION 175).** <!-- [CHANGE: claude-code | 2026-11-07] -->
+  `/usr/local/lib/luminos-ffmpeg/ffmpeg` → real `/usr/lib/jellyfin-ffmpeg/ffmpeg`; it only rewrites HLS remux
+  (video copy, mpegts) so pieces match the playlist after seeks — that is what made JellyRock skips jump back.
+  After any Jellyfin upgrade run `server/scripts/luminos-jf-seek-check <DV itemId> 5` on the box (exit 0 = fine).
+  Undo: `JELLYFIN_FFMPEG_OPT` in `/etc/jellyfin/jellyfin.env` back to the real path (no inline `#` comments there).
