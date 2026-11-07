@@ -112,3 +112,10 @@ across restarts / via Show Desktop instead.
 ## Where it stands (14:52)
 DONE + LIVE: steps 1–3. NOT DONE: step 4 (KWin occlusion patch) — waiting for Shawn's yes. Open measurements:
 idle-desktop PSR + package power with Shawn away (target from DESIGN: 8.8 → ≤ 6.8 W).
+- 2026-11-07 16:04-16:15 IDLE MEASURE (Shawn away, AC, 100 % battery, brightness 399000 = 100 %, only Claude + Chrome open; /var/tmp/idle-measure/report-20261107-1602.txt):
+  wallpaper FROZEN (16:05-16:10): pkg 11.2-11.4 W, iGPU 0-1 %, wallpaper CPU 0.03 %; wallpaper PLAYING (16:11-16:15, desktop
+  took focus): pkg 12.0-12.6 W, iGPU 12 %, wallpaper ~19 % of a core (30 fps cap works: was ~34 %). Freeze saves ~1.3 W (matches the
+  focus build's 1.3-1.5 W). PSR stayed 0 in every sample. BUT the whole idle baseline is ~3 W HIGHER than 11-05 (8.1-8.8 W) with
+  less CPU in use (~30 % of a core total), Tctl 57-63 °C (was ~43-47), VDDNB 835 mV (was 714 mV), dGPU suspended, Cowork VM running
+  (qemu 1.7 %). Cause NOT found yet — suspects: data-fabric/memory kept up (VDDNB), heat soak after the build, the Cowork VM's
+  timers keeping cores out of deep idle. Next: repeat with the Claude app closed, then with the Cowork VM stopped.
