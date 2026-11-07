@@ -28,6 +28,7 @@ import QtWebEngine
 // PropertyStore imports nothing but QtQuick; the file read behind it is a
 // subprocess, not a browser. Safe to pull in here. [CHANGE: claude-code | 2026-09-20]
 import "props"
+import org.kde.plasma.plasma5support as P5Support
 
 Item {
     id: webRoot
@@ -49,11 +50,42 @@ Item {
 
     property alias webView: web
 
+    // [CHANGE: claude-code | 2026-11-06] BUG-199. A page that cannot draw shows a
+    // still instead of nothing: the greeter restarted inside a suspend gets no GPU,
+    // three.js gets no WebGL, and the lock screen was black until the next restart.
+    // Two flags: Chromium keeps the GPU off for the life of the process, so no
+    // WebGL lasts until the URL changes, while a dead renderer ends at the reload's
+    // LoadSucceeded - which arrives AFTER that reloaded page's WebGL error.
+    property bool noWebGL: false
+    property bool rendererDead: false
+    readonly property bool failed: noWebGL || rendererDead
+    property string thumbnailUrl: ""
+    // Only a local page has files beside it.
+    readonly property string pageDir: {
+        var s = "" + webRoot.webSource;
+        return s.indexOf("file://") === 0 ? s.substring(0, s.lastIndexOf("/") + 1) : "";
+    }
+
+    function logFailure(why) {
+        if (!webRoot.failed)
+            console.warn("[LUMINOS-WP] web wallpaper cannot draw, showing its poster:", why);
+    }
+
+    onWebSourceChanged: {
+        revive.stop();
+        webRoot.noWebGL = false;
+        webRoot.rendererDead = false;
+        webRoot.thumbnailUrl = "";
+    }
+
+    Timer { id: revive; interval: 10000; onTriggered: web.reload() }
+
     anchors.fill: parent
 
     WebEngineView {
         id: web
         anchors.fill: parent
+        visible: !webRoot.failed
         url: webRoot.webSource
         // Full interactivity steals desktop clicks, so it is opt-in.
         enabled: webRoot.interactive
@@ -68,11 +100,68 @@ Item {
         }
         onLoadingChanged: function(info) {
             var ok = (info.status === WebEngineView.LoadSucceededStatus);
-            if (ok)
+            if (ok) {
                 web.applyState();
+                webRoot.rendererDead = false;
+            }
             // A Lively page draws nothing until its properties arrive, so this
             // must flip on load and OFF on a reload — see LivelyApi.qml.
             lively.ready = ok;
+        }
+        onJavaScriptConsoleMessage: function(level, message) {
+            if (message.indexOf("WebGL context could not be created") !== -1
+                    || message.indexOf("Error creating WebGL context") !== -1) {
+                webRoot.logFailure(message);
+                webRoot.noWebGL = true;
+            }
+            // Having a handler turns off WebEngine's own "js:" journal lines,
+            // which is where BUG-183 and BUG-199 were read from. Keep them, at
+            // warn so that no logging rule can filter out the quieter levels.
+            console.warn("js:", message);
+        }
+        onRenderProcessTerminated: function(status, exitCode) {
+            if (status === WebEngineView.NormalTerminationStatus)
+                return;
+            webRoot.logFailure("renderer exited, status " + status + " code " + exitCode);
+            webRoot.rendererDead = true;
+            revive.restart();
+        }
+    }
+
+    // Above the hidden view. No poster and no thumbnail leaves main.qml's
+    // BackgroundColor showing through, as before.
+    Image {
+        anchors.fill: parent
+        visible: webRoot.failed
+        asynchronous: true
+        fillMode: Image.PreserveAspectCrop
+        source: !webRoot.failed || !webRoot.pageDir ? ""
+            : webRoot.thumbnailUrl || webRoot.pageDir + "poster.png"
+        onStatusChanged: {
+            if (status === Image.Error && !webRoot.thumbnailUrl)
+                thumbnail.read();
+        }
+    }
+
+    // QML cannot read a local file itself (BUG-170), so a subprocess does, and
+    // only on the failure path. The page may sit in a subfolder; LivelyInfo.json
+    // and its Thumbnail live in the wallpaper's root, the nearest folder up that
+    // has one. Lively writes these files, BOMs and all.
+    P5Support.DataSource {
+        id: thumbnail
+        engine: "executable"
+        function read() {
+            var page = decodeURIComponent(("" + webRoot.webSource).substring(7));
+            connectSource("python3 -c 'import json,sys,pathlib;"
+                + "f=next(d/\"LivelyInfo.json\" for d in pathlib.Path(sys.argv[1]).parents"
+                + " if (d/\"LivelyInfo.json\").exists());"
+                + "t=json.loads(f.read_text(encoding=\"utf-8-sig\")).get(\"Thumbnail\");"
+                + "print((f.parent/t).as_uri() if t else \"\")' '"
+                + page.replace(/'/g, "'\\''") + "' 2>/dev/null");
+        }
+        onNewData: function(source, data) {
+            disconnectSource(source);
+            webRoot.thumbnailUrl = ("" + (data["stdout"] || "")).trim();
         }
     }
 

@@ -140,3 +140,47 @@ Repo: ~/luminos-os. All paths below relative to it unless absolute.
   (`systemd-run --on-active=60 --unit=luminos-sdreader-rebind …` or equivalent, transient, idempotent). `pre`: if the
   reader is already unbound (still within the 60 s, record present) → cancel the pending re-bind and do nothing
   (fast). Card-present guard unchanged. Never blocks sleep; errors → log, exit 0. Budget ≤ 40 lines.
+
+## Re-plan 8 (2026-11-07 00:05) — BUG-199 lock-screen black wallpaper
+Evidence (journal 23:53:12): luminos-lid `loginctl lock-sessions` at .262 → its own `systemctl suspend` → logind
+PrepareForSleep at .320 (58 ms later) → KWin sends the greeter SIGUSR1 (end grace time, greeter started with
+--graceTime 5000) before the greeter has installed its handler → default action kills it (crash log: "killed by signal
+SIGUSR1") → KWin restarts the greeter inside the suspend transition → its QtWebEngine GPU init fails ("GPUInfo not
+initialized", WebGL VENDOR 0xffff) → three.js wallpaper draws nothing → BLACK until the greeter restarts. Every boot
+since 10-14 shows exactly one such crash + one WebGL failure.
+### G (owner W3, tests W4) — scripts/luminos-lid: lock, WAIT for the lock, then sleep
+- LOCK_AND_SLEEP: `loginctl lock-sessions`, then poll every 100 ms until every session with Type wayland or x11 and
+  Class user reports LockedHint=yes (`loginctl show-session <id> -p LockedHint --value`), then wait a further 1.0 s
+  settle (greeter finishes start-up and installs its signal handlers), then suspend. Timeout 5 s total → suspend anyway
+  (sleep must never be lost; log "lock not confirmed"). If the lid opens during the wait → abort the sleep (decide()
+  already resets on open; the wait loop must re-read the lid). SLEEP (retries) unchanged (already locked).
+- Pure-core change only if needed; the wait is I/O shell. Budget: luminos-lid ≤ 190 lines.
+### H (owner W5, tests W4) — wallpaper never black when WebGL fails
+- src/wallpapers/org.luminos.livewallpaper/contents/ui/WebMode.qml (repo copy is canonical; deploy copy
+  ~/.local/share/plasma/wallpapers/org.luminos.livewallpaper/ — check how it is installed, e.g. a script under
+  scripts/ or kpackagetool6, and use that): on javaScriptConsoleMessage containing "WebGL context could not be
+  created" OR "Error creating WebGL context", OR on renderProcessTerminated → show a still poster on top of the web
+  view (hide the web view). Poster = `poster.png` next to the page's html if it exists, else the Lively "Thumbnail"
+  (LivelyInfo.json) scaled with PreserveAspectCrop, else nothing (bgColor as today). Log once.
+- New scripts/luminos-wallpaper-poster <wallpaper-dir> [WxH, default 2880x1800]: renders the page with headless
+  Chromium (whatever exists on the box: chromium/google-chrome --headless --screenshot, or node playwright if
+  installed — check, do not install anything system-wide) after ~6 s of animation, writes poster.png beside the html.
+  Run it for ~/.local/share/luminos/wallpapers/medusae. ≤ 80 lines.
+- The lock screen uses the same plugin (kscreenlockerrc Greeter WallpaperPlugin=org.luminos.livewallpaper); DECISION 127
+  keys stay as they are.
+
+## Re-plan 9 (2026-11-07 00:20) — supersedes G's lock step
+Evidence: on every lid close PowerDevil ALSO requests suspend in the same millisecond (19:37:33 and 23:53:12 journals:
+luminos-lid's and org_kde_powerde's requests both at .xx of the same second). Delaying only luminos-lid's suspend
+cannot stop PrepareForSleep arriving at once. KWin's own lock-on-sleep (kscreenlockerrc LockOnResume=true) holds a
+delay inhibitor and starts the greeter with NO grace time → race-free. The greeter that dies is the one luminos-lid's
+`loginctl lock-sessions` started a few ms earlier with --graceTime 5000.
+G': LOCK_AND_SLEEP — for every graphical user session (Type wayland|x11, Class user): if its Desktop
+(`loginctl show-session <id> -p Desktop --value`) is "KDE", do NOT lock it (KWin locks before sleep itself). If any
+graphical session is NOT KDE (e.g. Hyprland): `loginctl lock-session <id>` for those only, then the G wait (LockedHint
+on those sessions, +1.0 s settle, 5 s cap). If there is no non-KDE graphical session: suspend at once. Retries
+unchanged. Never read files in the user's home. Budget ≤ 190 lines.
+G'' (Re-plan 9 addendum, security guard): after every detected resume, 2 s after it (lid open or closed), read
+LockedHint of every KDE graphical user session; any that reads "no" → `loginctl lock-session <id>` + log
+"WARNING: KDE session <id> was NOT locked after wake — locked it now; check kscreenlockerrc LockOnResume". Budget for
+scripts/luminos-lid raised to 205 lines.

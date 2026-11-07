@@ -157,10 +157,44 @@ else
     if timer_on; then fail "$TIMER still there"; else pass "$TIMER gone"; fi
 fi
 
+# --- section H: the wallpaper's still poster. Black or flat would be the very failure it exists to hide.
+POSTER=/home/shawn/.local/share/luminos/wallpapers/medusae/poster.png
+if [ -f "$POSTER" ] && read -r width height stddev < <(python3 tests/sleep/png_stats.py "$POSTER"); then
+    pass "poster.png for medusae: ${width}x$height, pixel stddev $stddev"
+    if [ "$width" -ge 2560 ] && [ "$height" -ge 1600 ]; then pass "poster is at least 2560x1600"; else fail "poster is only ${width}x$height, want at least 2560x1600"; fi
+    if python3 -c "import sys; sys.exit(float('$stddev') <= 5)"; then pass "poster is not a flat frame"; else fail "poster is a flat frame: stddev $stddev"; fi
+else
+    fail "no readable poster.png at $POSTER"
+fi
+if cmp -s src/wallpapers/org.luminos.livewallpaper/contents/ui/WebMode.qml \
+    /home/shawn/.local/share/plasma/wallpapers/org.luminos.livewallpaper/contents/ui/WebMode.qml; then
+    pass "deployed WebMode.qml matches repo"
+else
+    fail "deployed WebMode.qml differs from repo"
+fi
+
 # --- lid supervisor: the running one, not just the file on disk
 if cmp -s scripts/luminos-lid /usr/local/bin/luminos-lid; then pass "deployed luminos-lid matches repo"; else fail "deployed luminos-lid differs from repo"; fi
 if [ -e /usr/local/bin/luminos-lid.pre-v3 ]; then pass "old luminos-lid backed up"; else fail "no luminos-lid.pre-v3 backup"; fi
 if systemctl is-active -q luminos-lid; then pass "luminos-lid active"; else fail "luminos-lid not active"; fi
+
+# Re-plan 9: luminos-lid leaves a session to KWin only if loginctl really says "KDE", and KWin only locks with this on.
+for sid in $(loginctl list-sessions --no-legend | awk '{print $1}'); do
+    props=$(loginctl show-session "$sid" -p Type -p Class --value | paste -sd ' ')
+    case "$props" in
+        "wayland user" | "x11 user") is "session $sid Desktop" "$(loginctl show-session "$sid" -p Desktop --value)" KDE ;;
+    esac
+done
+is "kscreenlockerrc LockOnResume" "$(runuser -u shawn -- kreadconfig6 --file kscreenlockerrc --group Daemon --key LockOnResume --default true)" true
+
+# BUG-199: only printed. A crash log newer than this after a real lid close means the race is back; the PM compares.
+newest_crash=$(ls -t /home/shawn/.local/state/luminos/greeter-crash/crash-*.log 2>/dev/null | head -n1)
+if [ -n "$newest_crash" ]; then
+    echo "NOTE newest greeter crash log: $(date -r "$newest_crash" '+%F %T') $newest_crash"
+else
+    echo "NOTE no greeter crash logs"
+fi
+
 invocation=$(systemctl show -p InvocationID --value luminos-lid)
 if journalctl --no-pager -o cat "_SYSTEMD_INVOCATION_ID=$invocation" | grep -q v3; then
     pass "journal shows a v3 line"

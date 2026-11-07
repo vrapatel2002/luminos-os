@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""luminos-wallpaper-poster <wallpaper-dir> [WxH] — a still of a web wallpaper.
+
+[CHANGE: claude-code | 2026-11-06] BUG-199, Re-plan 8 section H.
+
+WebMode.qml shows poster.png when the page cannot draw, so the lock screen is
+never black. This renders the page in headless Chromium on the software GL, after
+6 s of animation, and writes poster.png beside the html.
+
+A flat frame is refused: poster.png beats the Lively thumbnail, so a black one
+would bring the bug back. Pages that wait for Lively's properties (LivelyApi.qml)
+draw nothing here, and so keep falling back to their thumbnail.
+"""
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ANIMATE_MS = 6000
+FLAT_RANGE = 8   # brightest minus darkest pixel, out of 255
+
+
+def entry_html(wp):
+    for name, key in (("luminos-wallpaper.json", "entry"), ("LivelyInfo.json", "FileName")):
+        try:
+            entry = json.loads((wp / name).read_text()).get(key)
+        except (OSError, ValueError):
+            continue
+        if entry and (wp / entry).is_file():
+            return wp / entry
+    return next(iter(sorted(wp.glob("*.html"))), None)
+
+
+def is_flat(png):
+    gray = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(png), "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+        capture_output=True, check=True).stdout
+    return max(gray) - min(gray) < FLAT_RANGE
+
+
+def main():
+    if len(sys.argv) not in (2, 3):
+        sys.exit(__doc__.splitlines()[0])
+    wp = Path(sys.argv[1]).expanduser().resolve()
+    size = sys.argv[2] if len(sys.argv) == 3 else "2880x1800"
+    html = entry_html(wp)
+    if not html:
+        sys.exit(f"no html page in {wp}")
+    exe = shutil.which("chromium") or shutil.which("google-chrome-stable") or shutil.which("google-chrome")
+    if not exe:
+        sys.exit("no chromium or google-chrome on this machine")
+    if not shutil.which("ffmpeg"):
+        sys.exit("no ffmpeg on this machine; it checks the frame is not flat")
+
+    # Chromium's children can outlive it and still be writing to the profile.
+    with tempfile.TemporaryDirectory(prefix="luminos-poster-", ignore_cleanup_errors=True) as tmp:
+        shot = Path(tmp) / "poster.png"
+        try:
+            subprocess.run(
+                [exe, "--headless=new", f"--user-data-dir={tmp}/profile",
+                 "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+                 "--ignore-gpu-blocklist", "--allow-file-access-from-files",
+                 "--mute-audio", "--hide-scrollbars", "--no-first-run",
+                 "--force-device-scale-factor=1", f"--window-size={size.replace('x', ',')}",
+                 f"--virtual-time-budget={ANIMATE_MS}", f"--screenshot={shot}", html.as_uri()],
+                capture_output=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            sys.exit(f"{exe} timed out rendering {html}")
+        if not shot.is_file():
+            sys.exit(f"{exe} wrote no screenshot of {html}")
+        if is_flat(shot):
+            sys.exit(f"{html.name} rendered a flat frame in {exe}; no poster written")
+        shutil.move(shot, html.parent / "poster.png")
+    print(html.parent / "poster.png")
+
+
+if __name__ == "__main__":
+    main()

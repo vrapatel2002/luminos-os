@@ -16,7 +16,19 @@ HERE = Path(__file__).resolve().parent
 SOURCE = (HERE.parents[1] / "scripts" / "luminos-lid").read_text()
 HOLD = "elif now < give_up and suspend_stats() == stats_before:"
 RESET = "if resumed_at is not None and resumed_at > st.last_try:"
-ARM = "give_up = boottime() + SLEEP_WAIT if act(action, st.attempts) else 0.0\n"
+ARM = "give_up = boottime() + SLEEP_WAIT if act(action, st.attempts, fd) else 0.0\n"
+CONSTANTS = "LOCK_TIMEOUT, LOCK_SETTLE, LOCK_POLL = 5.0, 1.0, 0.1"
+LID_CHECK = "if not lid_is_closed(fd) or asleep_seconds() - asleep > RESUME_JUMP:"
+TYPES = '{"Type=wayland", "Type=x11"}'
+LOCK = '            run(LOGINCTL, "lock-session", sid, timeout=LOCK_CMD_TIMEOUT)\n'
+GUARD_LOCK = 'if run(LOGINCTL, "lock-session", sid, timeout=LOCK_CMD_TIMEOUT) else'
+WAIT = "        if sids and not wait_for_lock(fd, sids):\n            return False\n"
+ASK_FAILED = 'except (OSError, subprocess.SubprocessError) as e:\n        log(f"failed: {e}")\n        return None'
+RUN_FAILED = 'except (OSError, subprocess.SubprocessError) as e:\n        log(f"failed: {e}")\n        return False'
+PLAN = "resumed_at, guard_plan = now, [now + n * LOCK_GUARD for n in range(4)]"
+PLAN_LEFT = "return [] if worked and len(rest) <= 2 else rest"
+WORKED = "worked = listing is not None and None not in answers.values()"
+GUARD_WARNING = """log(f"WARNING: {what} {sid} {'was NOT locked' if hint == 'no' else 'could not be checked'} after wake — {done}{tail}")"""
 
 MUTANTS = {
     "unchanged": ("", ""),
@@ -44,18 +56,74 @@ MUTANTS = {
     "decide keeps hidden state": ("    if not lid_closed:", "    global N\n    N = globals().get('N', 0) + 1\n    if N % 97 == 0:\n        return Action.NONE, st\n    if not lid_closed:"),
     # main()
     "start is no resume": ("st, resumed_at, asleep = State(), boottime(), asleep_seconds()", "st, resumed_at, asleep = State(), None, asleep_seconds()"),
-    "resume not noticed": ("            resumed_at = now\n", ""),
+    "resume not noticed": (PLAN, "guard_plan = [now + n * LOCK_GUARD for n in range(4)]"),
     "no wait for suspend_stats": (HOLD, "elif False:"),
     "waits forever": ("give_up = boottime() + SLEEP_WAIT", "give_up = boottime() + 1e9"),
     "suspend_stats ignored": (HOLD, "elif now < give_up:"),
     "stats read after issuing": ("stats_before = suspend_stats()\n            " + ARM, ARM + "            stats_before = suspend_stats()\n"),
-    "wait armed on a refused suspend": (ARM, "act(action, st.attempts)\n            give_up = boottime() + SLEEP_WAIT\n"),
-    "refusal reported as success": ("        return False\n", "        return True\n"),
+    "wait armed on a refused suspend": (ARM, "act(action, st.attempts, fd)\n            give_up = boottime() + SLEEP_WAIT\n"),
+    "refusal reported as success": ('log(f"failed: {e}")\n        return False', 'log(f"failed: {e}")\n        return True'),
+    # who gets locked, and the wait for it (section G, Re-plan 9)
+    "locks KDE too": (" if not is_kde]", "]"),
+    "locks KDE and not the others": (" if not is_kde]", " if is_kde]"),
+    "locks nothing": (LOCK, "            pass\n"),
+    "back to lock-sessions": ("        for sid in sids:\n" + LOCK, '        run(LOGINCTL, "lock-sessions")\n'),
+    "locks only the first": ("for sid in sids:", "for sid in sids[:1]:"),
+    "failed lock blocks the suspend": (LOCK, '            if not run(LOGINCTL, "lock-session", sid, timeout=LOCK_CMD_TIMEOUT):\n                return False\n'),
+    "no wait for the lock": (WAIT, ""),
+    "abort still suspends": (WAIT, "        if sids:\n            wait_for_lock(fd, sids)\n"),
+    "waits with nothing to lock": ("if sids and not wait_for_lock", "if not wait_for_lock"),
+    "settle runs past the cap": ("min(deadline, boottime() + LOCK_SETTLE)", "boottime() + LOCK_SETTLE"),
+    "no settle": (CONSTANTS, "LOCK_TIMEOUT, LOCK_SETTLE, LOCK_POLL = 5.0, 0.0, 0.1"),
+    "settle too short": (CONSTANTS, "LOCK_TIMEOUT, LOCK_SETTLE, LOCK_POLL = 5.0, 0.5, 0.1"),
+    "timeout too long": (CONSTANTS, "LOCK_TIMEOUT, LOCK_SETTLE, LOCK_POLL = 8.0, 1.0, 0.1"),
+    "timeout too short": (CONSTANTS, "LOCK_TIMEOUT, LOCK_SETTLE, LOCK_POLL = 2.0, 1.0, 0.1"),
+    "polls too slowly": (CONSTANTS, "LOCK_TIMEOUT, LOCK_SETTLE, LOCK_POLL = 5.0, 1.0, 0.5"),
+    "hint ignored": ('all(locked_hint(s) == "yes" for s in sids)', "True"),
+    "tty sessions count": (f' and {TYPES} & set(p)', ""),
+    "x11 not locked": (TYPES, '{"Type=wayland"}'),
+    "wayland not locked": (TYPES, '{"Type=x11"}'),
+    "any class counts": ('"Class=user" in p and ', ""),
+    "waits only for the first": ("for s in sids)", "for s in sids[:1])"),
+    "lid not re-read": (LID_CHECK, "if asleep_seconds() - asleep > RESUME_JUMP:"),
+    "lid only read before the hint": (LID_CHECK, "if (not locked and not lid_is_closed(fd)) or asleep_seconds() - asleep > RESUME_JUMP:"),
+    "lid only read during the settle": (LID_CHECK, "if (locked and not lid_is_closed(fd)) or asleep_seconds() - asleep > RESUME_JUMP:"),
+    "a sleep during the wait unnoticed": (LID_CHECK, "if not lid_is_closed(fd):"),
+    "broken loginctl crashes it": (ASK_FAILED, ASK_FAILED.replace("(OSError, subprocess.SubprocessError)", "KeyError")),
+    "broken loginctl reads as yes": (ASK_FAILED, ASK_FAILED.replace("return None", 'return "yes"')),
+    "timeout not reported": ('log("lock not confirmed — suspending anyway")', "pass"),
+    "timeout gives up the sleep": ('log("lock not confirmed — suspending anyway")\n', 'return False\n'),
+    "retries lock and wait too": ("    if action is Action.LOCK_AND_SLEEP:\n        sids", "    if True:\n        sids"),
+    "a blank line kills it": ("if line.split()]", "]"),
+    # the guard after a wake (Re-plan 9 addendum, review5 H1, H2, M1)
+    "no guard": ("guard_plan = guard_pass(guard_plan)", "guard_plan = []"),
+    "guard never stops": (PLAN_LEFT, "return plan"),
+    "guard armed at service start": ("stats_before, give_up, guard_plan = None, 0.0, []", "stats_before, give_up, guard_plan = None, 0.0, [boottime()]"),
+    "guard not at once": ("for n in range(4)]", "for n in range(1, 4)]"),
+    "guard gap too long": ("[now + n * LOCK_GUARD", "[now + n * 3 * LOCK_GUARD"),
+    "guard only checks once": (PLAN_LEFT, "return [] if worked and len(rest) <= 3 else rest"),
+    "guard never retries": (PLAN_LEFT, "return [] if len(rest) <= 2 else rest"),
+    "guard retries too often": ("for n in range(4)]", "for n in range(6)]"),
+    "guard retries too little": ("for n in range(4)]", "for n in range(3)]"),
+    "guard fails open": ('if hint != "yes":', 'if hint == "no":'),
+    "guard only locks KDE": ('if hint != "yes":', 'if hint != "yes" and is_kde:'),
+    "unreadable hint counts as a working query": ('        worked = worked and hint != ""\n', ""),
+    "failed listing counts as working": (WORKED, "worked = None not in answers.values()"),
+    "failed properties count as working": (WORKED, "worked = listing is not None"),
+    "guard only with the lid open": ("if guard_plan and now >= guard_plan[0]:", "if guard_plan and now >= guard_plan[0] and not lid_is_closed(fd):"),
+    "guard says nothing": (GUARD_WARNING, "pass"),
+    "guard claims it locked": ('"COULD NOT lock it"', '"locked it now"'),
+    "guard blames the wrong setting": ('("session", "")', '("session", "; check kscreenlockerrc LockOnResume")'),
+    "guard hides that it gave up": ('log("WARNING: gave up checking the sessions are locked after wake: loginctl keeps failing")', "pass"),
+    # timeouts (review5 M3)
+    "lock timeout as long as a suspend": ("LOCK_GUARD, LOCK_CMD_TIMEOUT = 2.0, 10", "LOCK_GUARD, LOCK_CMD_TIMEOUT = 2.0, 180"),
+    "guard lock not capped": (GUARD_LOCK, 'if run(LOGINCTL, "lock-session", sid) else'),
+    "pre-sleep lock not capped": (LOCK, '            run(LOGINCTL, "lock-session", sid)\n'),
+    "suspend capped too": ('return run(SYSTEMCTL, "suspend", "-i")', 'return run(SYSTEMCTL, "suspend", "-i", timeout=LOCK_CMD_TIMEOUT)'),
     "opening keeps the wait": ("give_up = 0.0  # opening the lid ends any wait", "pass"),
-    "failed lock blocks the suspend": ('        run(LOGINCTL, "lock-sessions")', '        if not run(LOGINCTL, "lock-sessions"):\n            return False'),
-    "does not lock": ('run(LOGINCTL, "lock-sessions")', "pass"),
+    "does not lock in the guard": (GUARD_LOCK, "if True else"),
     "inhibitors can veto": ('"suspend", "-i"', '"suspend"'),
-    "dies on a failed suspend": ("except (OSError, subprocess.SubprocessError) as e:", "except KeyError as e:"),
+    "dies on a failed suspend": (RUN_FAILED, RUN_FAILED.replace("(OSError, subprocess.SubprocessError)", "KeyError")),
 }
 
 

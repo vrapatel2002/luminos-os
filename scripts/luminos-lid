@@ -1,47 +1,31 @@
 #!/usr/bin/env python3
 """luminos-lid — a closed lid sleeps. No app, service or code can veto it.
-
-[CHANGE: claude-code | 2026-06-03] original: udev-triggered, blanked the eDP panel
-    and deliberately kept the system awake.
-[CHANGE: claude-code | 2026-09-14] rewritten: it suspends, and it watches the lid
-    switch directly instead of via udev.
-
+[CHANGE: claude-code | 2026-06-03] original: udev-triggered, blanked the eDP panel, kept the system awake.
+[CHANGE: claude-code | 2026-09-14] rewritten: it suspends, and watches the lid switch directly, not via udev.
 Why not just let PowerDevil or logind do it:
-
-  * PowerDevil's lid action is vetoable. Any app holding a PolicyAgent inhibition
-    — Chrome's "Playing audio", a page's Video Wake Lock — makes it abort with
-    "Unsatisfied policies, the action has been aborted". Those inhibitions are
-    invisible to `systemd-inhibit --list`, so the machine just silently stays up.
-  * logind can't rescue it: while Plasma runs, PowerDevil holds a *block*
-    inhibitor on handle-lid-switch, so logind's HandleLidSwitch never fires.
-  * The old udev rule could never have worked. On this kernel the lid is
-    PNP0C0D:00 on subsystem 'platform', not LID0 on 'button', and ACPI lid
-    transitions go out over netlink, not as udev uevents.
-
-So this reads the physical switch off its evdev node, which nothing can intercept,
-and suspends with -i, which ignores every inhibitor there is. PowerDevil still
-handles the ordinary case gracefully; this is the backstop for when it is overruled.
-
-[CHANGE: claude-code | 2026-09-15] It now LOCKS before it suspends.
-    The first version did not, and the machine woke straight onto a live desktop.
-    Root cause was `LockOnResume=false` in kscreenlockerrc (set long ago, harmless
-    only because the box never used to sleep) — that is fixed separately. But the
-    lock is not left depending on a KDE checkbox that was already found switched
-    off once: `loginctl lock-sessions` is called here first, so the guarantee lives
-    in the same place as the sleep guarantee.
-    Ordering is safe even with -i: `-i` is `--check-inhibitors=no`, a *client-side*
-    check, so logind still honours kwin's "Ensuring that the screen gets locked
-    before going to sleep" delay inhibitor.
-
+  * PowerDevil's lid action is vetoable. Any app holding a PolicyAgent inhibition — Chrome's
+    "Playing audio", a page's Video Wake Lock — makes it abort with "Unsatisfied policies, the action
+    has been aborted". Those are invisible to `systemd-inhibit --list`: the machine silently stays up.
+  * logind can't rescue it: while Plasma runs, PowerDevil's *block* inhibitor stops HandleLidSwitch firing.
+So this reads the physical switch off its evdev node, which nothing can intercept, and suspends with -i,
+which ignores every inhibitor there is. It is the backstop for when PowerDevil is overruled.
+[CHANGE: claude-code | 2026-09-15] It now LOCKS before it suspends. The first version woke straight onto a live
+    desktop: `LockOnResume=false` in kscreenlockerrc, fixed separately. `-i` is client-side, so logind still
+    honours kwin's delay inhibitor. For KDE sessions this lock is gone again: see 2026-11-07.
 [CHANGE: claude-code | 2026-11-06] v3: it keeps trying until the machine is asleep.
-    v2 fired one suspend per close and never looked back: an aborted attempt (the SD reader's
-    mmc0 wakeup source, routinely) left it awake with the lid shut, and a spontaneous wake
-    had nothing to put it back. v3 reads the switch as a LEVEL (EVIOCGSW) and retries on
-    BACKOFF, never giving up. A resume shows as BOOTTIME−MONOTONIC growing; nothing fires for
-    GRACE s after one, because switch state can lag the wake and a real lid-open must never
-    be fought. A real sleep restarts the backoff; service start counts as a resume.
-    `systemctl suspend -i` returns when logind queues the request, not when asleep, so an
-    accepted attempt holds the next until suspend_stats changes or SLEEP_WAIT s pass.
+    v2 fired one suspend per close and never looked back: an aborted attempt left it awake with the lid
+    shut, and a spontaneous wake had nothing to put it back. v3 reads the switch as a LEVEL (EVIOCGSW) and
+    retries on BACKOFF, never giving up. A resume shows as BOOTTIME−MONOTONIC growing; nothing fires for GRACE
+    s after one, as switch state can lag the wake and a real lid-open must never be fought. A real sleep restarts
+    the backoff; service start counts as a resume. `systemctl suspend -i` returns when logind queues the
+    request, so an accepted attempt holds the next until suspend_stats changes or SLEEP_WAIT s pass.
+[CHANGE: claude-code | 2026-11-07] BUG-199: `lock-sessions` started a greeter, PowerDevil's suspend in the
+    same millisecond made KWin lock again, and that second lock()'s SIGUSR1 killed the greeter before it had a
+    handler. Its restart got no GPU: black wallpaper. So KDE sessions are NOT locked here: KWin's lock before
+    sleep is the only lock() call, which depends on LockOnResume=true. Other graphical sessions are locked here,
+    then wait for LockedHint + LOCK_SETTLE s (cap LOCK_TIMEOUT); lid open aborts. That setting was found off once,
+    so at each resume and LOCK_GUARD s later, lid open or shut, any graphical session not reading
+    LockedHint=yes gets locked, with a WARNING. A failed query retries, twice at most. Service start is no resume here.
 """
 
 import fcntl, os, re, select, subprocess, sys, time
@@ -50,8 +34,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
-SW_LID, SW_MAX = 0x00, 0x10
-SW_BYTES = (SW_MAX + 7) // 8
+SW_LID, SW_BYTES = 0x00, (0x10 + 7) // 8  # SW_MAX = 0x10
 EVIOCGSW = (2 << 30) | (SW_BYTES << 16) | (ord("E") << 8) | 0x1b  # _IOC(_IOC_READ, 'E', 0x1b, len)
 
 # Absolute paths: this runs as root, PATH is not its to trust.
@@ -61,6 +44,8 @@ BACKOFF = (2.0, 5.0, 10.0, 30.0)
 GRACE = 5.0
 RESUME_JUMP = 2.0  # BOOTTIME−MONOTONIC growth that counts as having been asleep
 SLEEP_WAIT = 60.0  # longest an issued sleep may hold back the next action
+LOCK_TIMEOUT, LOCK_SETTLE, LOCK_POLL = 5.0, 1.0, 0.1  # the wait for the greeter before sleeping
+LOCK_GUARD, LOCK_CMD_TIMEOUT = 2.0, 10  # gap between lock checks after a resume; cap on a hung lock-session
 
 
 @dataclass(frozen=True)
@@ -122,22 +107,85 @@ def suspend_stats():
     return [Path(f"/sys/power/suspend_stats/{name}").read_text() for name in ("success", "fail")]
 
 
-def run(*cmd):
+def run(*cmd, timeout=180):
     """True if it worked. A failure is only logged: the next pass of the loop is the retry."""
     try:
-        subprocess.run(cmd, timeout=180, check=True)
+        subprocess.run(cmd, timeout=timeout, check=True)
         return True
     except (OSError, subprocess.SubprocessError) as e:
         log(f"failed: {e}")
         return False
 
 
-def act(action, attempt):
+def ask_loginctl(*args):
+    try:
+        return subprocess.check_output((LOGINCTL, *args), text=True, timeout=2)
+    except (OSError, subprocess.SubprocessError) as e:
+        log(f"failed: {e}")
+        return None
+
+
+def locked_hint(sid):
+    return (ask_loginctl("show-session", sid, "-p", "LockedHint", "--value") or "").strip()
+
+
+def graphical_sessions():
+    """({id: is it KDE} for graphical user sessions, did every query work). KWin only locks KDE ones before sleep."""
+    # Desktop is the session's own XDG_SESSION_DESKTOP: setting it to KDE skips the lock here, for that user only.
+    listing = ask_loginctl("list-sessions", "--no-legend")
+    sids = [line.split()[0] for line in (listing or "").splitlines() if line.split()]
+    answers = {s: ask_loginctl("show-session", s, "-p", "Type", "-p", "Class", "-p", "Desktop") for s in sids}
+    worked = listing is not None and None not in answers.values()
+    props = {s: a.split() for s, a in answers.items() if a}
+    return {s: "Desktop=KDE" in p for s, p in props.items() if "Class=user" in p and {"Type=wayland", "Type=x11"} & set(p)}, worked
+
+
+def lock_guard():
+    """True if every query worked. Anything but LockedHint=yes counts as unlocked: failing open is the worse error."""
+    sessions, worked = graphical_sessions()
+    for sid, is_kde in sessions.items():
+        hint = locked_hint(sid)
+        worked = worked and hint != ""
+        if hint != "yes":
+            what, tail = ("KDE session", "; check kscreenlockerrc LockOnResume") if is_kde else ("session", "")
+            done = "locked it now" if run(LOGINCTL, "lock-session", sid, timeout=LOCK_CMD_TIMEOUT) else "COULD NOT lock it"
+            log(f"WARNING: {what} {sid} {'was NOT locked' if hint == 'no' else 'could not be checked'} after wake — {done}{tail}")
+    return worked
+
+
+def guard_pass(plan):
+    """Runs the check that is due and returns the plan left. Its last two entries are only kept while a query fails."""
+    worked, rest = lock_guard(), plan[1:]
+    if not worked and not rest:
+        log("WARNING: gave up checking the sessions are locked after wake: loginctl keeps failing")
+    return [] if worked and len(rest) <= 2 else rest
+
+
+def wait_for_lock(fd, sids):
+    """False if the lid opened or the machine slept meanwhile: main()'s next pass handles those."""
+    deadline, asleep, locked = boottime() + LOCK_TIMEOUT, asleep_seconds(), False
+    while True:  # re-check before the deadline: BOOTTIME runs through sleep, so a sleep here overruns it
+        if not lid_is_closed(fd) or asleep_seconds() - asleep > RESUME_JUMP:
+            log("lid opened or it slept while waiting for the lock — not suspending")
+            return False
+        if boottime() >= deadline:
+            break
+        if not locked and all(locked_hint(s) == "yes" for s in sids):
+            locked, deadline = True, min(deadline, boottime() + LOCK_SETTLE)
+        time.sleep(LOCK_POLL)
+    if not locked:
+        log("lock not confirmed — suspending anyway")
+    return True
+
+
+def act(action, attempt, fd):
+    log(f"lid shut and awake — {action.value} (attempt {attempt})")
     if action is Action.LOCK_AND_SLEEP:
-        log(f"lid closed — locking, then suspending (attempt {attempt})")
-        run(LOGINCTL, "lock-sessions")
-    else:
-        log(f"lid still closed and awake — suspending again (attempt {attempt})")
+        sids = [s for s, is_kde in graphical_sessions()[0].items() if not is_kde]
+        for sid in sids:
+            run(LOGINCTL, "lock-session", sid, timeout=LOCK_CMD_TIMEOUT)
+        if sids and not wait_for_lock(fd, sids):
+            return False
     return run(SYSTEMCTL, "suspend", "-i")
 
 
@@ -146,15 +194,17 @@ def main():
     log(f"v3 watching {node}")
     fd = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
     st, resumed_at, asleep = State(), boottime(), asleep_seconds()
-    stats_before, give_up = None, 0.0
+    stats_before, give_up, guard_plan = None, 0.0, []
     while True:
         select.select([fd], [], [], 1.0)
         with suppress(BlockingIOError):
             os.read(fd, 4096)
         now, was_asleep, asleep = boottime(), asleep, asleep_seconds()
         if asleep - was_asleep > RESUME_JUMP:
-            resumed_at = now
+            resumed_at, guard_plan = now, [now + n * LOCK_GUARD for n in range(4)]
             log(f"resumed after {asleep - was_asleep:.0f} s asleep")
+        if guard_plan and now >= guard_plan[0]:
+            guard_plan = guard_pass(guard_plan)
         closed = lid_is_closed(fd)
         if not closed:
             give_up = 0.0  # opening the lid ends any wait
@@ -163,7 +213,7 @@ def main():
         action, st = decide(now, closed, resumed_at, st)
         if action is not Action.NONE:
             stats_before = suspend_stats()
-            give_up = boottime() + SLEEP_WAIT if act(action, st.attempts) else 0.0
+            give_up = boottime() + SLEEP_WAIT if act(action, st.attempts, fd) else 0.0
 
 
 if __name__ == "__main__":

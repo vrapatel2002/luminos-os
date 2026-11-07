@@ -47,3 +47,9 @@
   off); idle2 entry 8.3 s / S0i3 67 % = sdreader unbind waiting for the reader's own 7 s "stuck busy" re-init loop.
 - Made permanent: /etc/modprobe.d/luminos-nvsleep-off.conf removed (copy in /var/tmp), mkinitcpio -P. Re-plan 7
   (sdreader deferred re-bind) → W3/W4.
+- 00:05 BUG-199 root cause (lock→suspend 58 ms race kills greeter via SIGUSR1; restarted greeter has no GPU). Re-plan 8: G lid waits for LockedHint + 1 s; H wallpaper poster fallback. W3, W5, W4 spawned.
+- 00:20 Re-plan 9: PowerDevil requests suspend in the same ms → luminos-lid must not lock KDE sessions (KWin's delay-inhibitor lock is race-free, no grace); lock+wait only for non-KDE sessions. W3 resumed; W4 to adapt after its current round.
+- W3 round 9 done; W5 done (poster 2880x1800, offscreen-tested). G'' post-resume lock guard → W3 round 10.
+- W3 round 11 (wait-loop fix) done; tests/sleep/static.sh ALL PASS (106 pytest + mutation). review5 (Fable) on lid + wallpaper fallback.
+- review5 (Fable): VERDICT safe to install; HIGH H1 guard fail-open, H2 non-KDE no backstop; MEDIUM M1-M4; LOWs. Sent to W3 (lid), W5 (wallpaper), W4 (tests).
+- 00:50 BUG-199 fix installed: luminos-lid (220 lines, guard fail-closed) via luminos-strong-sleep --install; WebMode.qml deployed (backup WebMode.qml.bak-pre-bug199-*). static ALL PASS (128 pytest, 86 mutants), live.sh ALL PASS. Waiting for Shawn's lid test.

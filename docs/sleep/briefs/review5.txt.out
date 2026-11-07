@@ -1,0 +1,33 @@
+**Verdict first: safe to install**, conditional on `tests/sleep/live.sh` lines 181-185 passing on the box (Desktop reads exactly `KDE` and LockOnResume is on). Nothing in the diff leaves a session less protected than HEAD did, but the new post-resume guard fails open and should be tightened next round.
+
+What I verified: three.js in medusae logs `console.error("THREE.WebGLRenderer: Error creating WebGL context.")` so the detector string matches the real message. `poster.png` exists for medusae and `jellyfish.html` sits at the wallpaper root, so the poster and thumbnail paths both resolve. All five SDDM session files carry `DesktopNames=KDE` except the two Hyprland ones. Arch's kscreenlocker 6.7.5 has no libseccomp dependency, so no syscall filter stops the greeter spawning python3. I could not run `loginctl`, `journalctl`, or pytest in this sandbox; the BUILD_LOG reports 106 passing.
+
+## HIGH
+
+**H1. Post-resume guard fails open on any loginctl failure.** `scripts/luminos-lid:143` locks only when LockedHint reads exactly `no`. A 2 s timeout or non-zero exit (plausible right after resume while logind is busy) returns `""`, the guard logs "failed" and does nothing, and `guard_at` was already cleared at line 191, so it never retries. Same for `graphical_sessions()` at line 136: an empty session list means no guard at all. Scenario: LockOnResume off, wake, loginctl slow, desktop stays unlocked forever. Fix: treat anything other than `yes` as unlocked (a second lock on a locked KDE session is a no-op), and re-arm `guard_at = now + LOCK_GUARD` when any query failed, capped at two retries. Note `test_a_broken_loginctl_does_not_kill_the_guard_or_the_loop` asserts `commands == []`, which pins the fail-open behaviour; W4 must change it.
+
+**H2. Non-KDE sessions have no backstop at all.** `scripts/luminos-lid:142` guards KDE only (per G''). A Hyprland session where hypridle is not running, or where hyprlock never calls SetLockedHint, gets `lock-session`, waits the 5 s cap, then "lock not confirmed — suspending anyway" (line 161) and wakes unlocked with nothing ever re-locking it. HEAD had the same hole, so not a regression, but the guard is the place to close it. Fix: run `lock_guard()` over every graphical session, not just KDE ones; for a non-KDE session a redundant `lock-session` after wake is harmless.
+
+## MEDIUM
+
+**M1. Two-to-four-second live window after wake when LockOnResume is off.** `scripts/luminos-lid:188` arms the guard at resume plus 2 s, the loop ticks once a second, and detection itself lands up to 1 s after wake. KWin's hint is already `yes` before sleep, so there is no reason to wait. Fix: run the guard immediately on resume detection and again at 2 s.
+
+**M2. Renderer exit shows the poster permanently.** `WebMode.qml:111` fires on every `renderProcessTerminated`, including NormalTerminationStatus, and `failed` only resets on a URL change. On plasmashell, one OOM kill of the renderer leaves the still until the wallpaper is changed. Fix: ignore NormalTerminationStatus, and on abnormal exit call `web.reload()` after a delay and clear `failed` on the next LoadSucceeded.
+
+**M3. A hung `loginctl lock-session` stalls the lid loop for 180 s.** `scripts/luminos-lid:118` uses one 180 s timeout for both `systemctl suspend` and `lock-session` (lines 144, 170). With the lid shut that delays re-sleep by up to three minutes. Fix: pass a 10 s timeout for lock-session.
+
+**M4. Re-plan 9's premise is partly wrong, though the fix still holds.** Both greeter starts in the evidence (`crash-…111309.log:10`, `last-run.log:1`) carry `--immediateLock --graceTime 5000`; KWin passes grace whenever LockGrace is configured, not only for delayed locks. The crash is avoided because there is now one `lock()` call instead of two, so no second SIGUSR1 reaches a handler-less greeter. The docs should say that, and the first live lid-close must confirm no new `crash-*.log` appears.
+
+## LOW
+
+- `scripts/luminos-lid:136`: `line.split()[0]` raises IndexError on an empty line and kills the daemon. Guard with `if line.split()`.
+- `scripts/luminos-lid:138`: Desktop comes from the session's own environment, so a session can opt out of the pre-sleep lock by setting `XDG_SESSION_DESKTOP=KDE`. It only affects that user's own session; acceptable, worth a comment.
+- `scripts/luminos-lid:143`: a fingerprint unlock within ~3 s of lid-open gets re-locked by the guard. Annoyance only.
+- `WebMode.qml:136`: the Thumbnail is resolved relative to the html's directory, but LivelyInfo.json and its Thumbnail live in the wallpaper root. Coincident for medusae; a `FileName` like `sub/page.html` falls through to bgColor. The subprocess fallback inside the greeter is untested; `python3` resolves to the pyenv shim on this box and the greeter's PATH is unknown. `--testing` mode would not prove it either, since the poster path is what is exercised. Acceptable because `poster.png` is the primary path.
+- `WebMode.qml:108`: Info-level JS messages no longer reach the journal. Previously all "js:" lines did.
+- `WebMode.qml:145`: `encodeURI` leaves `#` and `?` unescaped in a thumbnail filename. Cosmetic.
+- `scripts/luminos-wallpaper-poster:40`: missing ffmpeg gives a traceback rather than a message; a Chromium timeout raises TimeoutExpired and the temp-dir cleanup can raise if Chromium children linger. `--allow-file-access-from-files` plus network lets third-party wallpaper JS read local files, the same exposure QtWebEngine already has on the desktop. Argv quoting, temp files, and the no-Chromium exit message are all correct.
+
+Checked and clean: all times are CLOCK_BOOTTIME with sleep detected by the BOOTTIME minus MONOTONIC jump, including inside `wait_for_lock`; the wait loop re-reads the lid every 100 ms; `act()` returning False leaves `attempts=1` so the next retry is a plain SLEEP, which is right because the non-KDE session was already told to lock; no shell is involved anywhere, session ids go through argv; root reads only `/proc`, `/sys`, and loginctl output; a PowerDevil veto is irrelevant because KWin locks on logind's PrepareForSleep regardless of who requested the suspend.
+
+VERDICT: safe to install

@@ -10,6 +10,8 @@ PY=/home/shawn/.local/share/luminos/coder-venv/bin/python
 LID=scripts/luminos-lid
 HOOK=config/system-sleep/luminos-sdreader
 BRIGHT=config/system-sleep/luminos-brightness
+POSTER=scripts/luminos-wallpaper-poster
+WEBMODE=src/wallpapers/org.luminos.livewallpaper/contents/ui/WebMode.qml
 POLICY=scripts/luminos-wake-policy
 INSTALL=scripts/luminos-strong-sleep
 RULE=config/udev/71-luminos-wake.rules
@@ -39,13 +41,14 @@ budget() { # budget file max
     echo "$n lines, budget $2"; [ "$n" -le "$2" ]
 }
 
-for f in "$LID" "$POLICY" "$INSTALL" "$HOOK" "$BRIGHT"; do
+for f in "$LID" "$POLICY" "$INSTALL" "$HOOK" "$BRIGHT" "$POSTER"; do
     check "syntax: $f" syntax "$f"
 done
 check "hook is plain sh" grep -qE '^#!.*[/ ]sh$' "$HOOK"
 check "brightness hook is plain sh" grep -qE '^#!.*[/ ]sh$' "$BRIGHT"
 
-check "budget: $LID" budget "$LID" 170 # Re-plan 2
+check "budget: $LID" budget "$LID" 220 # after review5
+check "budget: $POSTER" budget "$POSTER" 80
 check "budget: $HOOK" budget "$HOOK" 40 # Re-plan 7
 check "budget: $POLICY" budget "$POLICY" 120
 check "budget: $BRIGHT" budget "$BRIGHT" 40
@@ -407,6 +410,56 @@ if [ "$(id -u)" -ne 0 ]; then # root reads and writes through these modes
     check "brightness: failed read never clobbers the value" bright_failed_read_never_clobbers
 fi
 
+# --- section H: read only. Nothing here starts a browser or a WebEngineView; test_poster.py fakes the browser.
+qml_code() { sed -e '/^[[:space:]]*\/\//d' -e 's/[[:space:]]\/\/ .*//' "$WEBMODE"; }
+webmode_console() { # both WebGL strings set the flag that outlives a reload: the GPU stays off for the process's life
+    local body
+    body=$(qml_code | sed -n '/onJavaScriptConsoleMessage/,/noWebGL = true/p')
+    for want in 'WebGL context could not be created' 'Error creating WebGL context' 'noWebGL = true'; do
+        printf '%s\n' "$body" | grep -qF "$want" || { echo "console handler has no: $want"; return 1; }
+    done
+    if qml_code | grep -q InfoMessageLevel; then echo "Info-level js: lines are dropped from the journal"; return 1; fi
+}
+webmode_renderer() { # a normal exit is ignored, an abnormal one shows the poster and then reloads
+    local body
+    body=$(qml_code | sed -n '/onRenderProcessTerminated/,/^        }/p')
+    printf '%s\n' "$body" | grep -A1 'status === WebEngineView.NormalTerminationStatus' | grep -q return \
+        || { echo "NormalTerminationStatus is not ignored"; return 1; }
+    printf '%s\n' "$body" | awk '
+        /NormalTerminationStatus/ { normal = 1 }
+        normal && /rendererDead = true/ { dead = 1 }
+        dead && /revive\.restart\(\)/ { ok = 1 }
+        END { exit !ok }' || { echo "no poster, then reload, after the normal check: $body"; return 1; }
+    qml_code | grep -A3 'id: revive' | grep -q 'onTriggered: web.reload()' || { echo "the timer does not reload"; return 1; }
+    qml_code | grep -A3 'id: revive' | grep -qE 'interval: *[1-9][0-9]{2,}' || { echo "no delay before the reload"; return 1; }
+}
+webmode_recovery() { # a successful load clears a dead renderer, never a missing GPU; a new URL clears both
+    local load source
+    load=$(qml_code | sed -n '/onLoadingChanged/,/lively.ready/p')
+    printf '%s\n' "$load" | grep -q 'rendererDead = false' || { echo "a reload does not bring the page back"; return 1; }
+    if printf '%s\n' "$load" | grep -q 'noWebGL = false'; then echo "the WebGL error comes before LoadSucceeded, this clears it"; return 1; fi
+    source=$(qml_code | sed -n '/onWebSourceChanged/,/^    }/p')
+    for want in revive.stop 'noWebGL = false' 'rendererDead = false'; do
+        printf '%s\n' "$source" | grep -qF "$want" || { echo "a new URL does not: $want"; return 1; }
+    done
+}
+webmode_covers_the_view() {
+    qml_code | grep -qE 'visible: *!webRoot\.failed' || { echo "the web view is not hidden"; return 1; }
+    qml_code | grep -q PreserveAspectCrop || { echo "no PreserveAspectCrop"; return 1; }
+    qml_code | grep -A2 'function logFailure' | grep -q '!webRoot.failed' || { echo "does not log once"; return 1; }
+}
+webmode_lookup_order() { # poster.png first; the Lively thumbnail only when the poster failed to load
+    qml_code | grep -qF 'webRoot.thumbnailUrl || webRoot.pageDir + "poster.png"' || { echo "poster.png is not the first choice"; return 1; }
+    qml_code | grep -A1 'status === Image.Error && !webRoot.thumbnailUrl' | grep -q 'thumbnail.read()' || { echo "thumbnail not limited to a failed poster.png"; return 1; }
+    qml_code | sed -n '/function read()/,/^        }/p' | grep -q 'LivelyInfo.json' || { echo "not read from LivelyInfo.json"; return 1; }
+    qml_code | sed -n '/function read()/,/^        }/p' | grep -q 'Thumbnail' || { echo "no Thumbnail in the lookup"; return 1; }
+}
+check "WebMode: both console strings set the lasting flag, js: lines kept" webmode_console
+check "WebMode: normal renderer exit ignored, abnormal shows the poster then reloads" webmode_renderer
+check "WebMode: load clears a dead renderer only, new URL clears both" webmode_recovery
+check "WebMode: poster covers the hidden view, cropped, logged once" webmode_covers_the_view
+check "WebMode: looks up poster.png, then LivelyInfo Thumbnail" webmode_lookup_order
+
 # --- flags
 has_flags() { # file flag...
     local f=$1 flag; shift
@@ -494,8 +547,9 @@ check "$POLICY targets no PCIe bridge, and everything it should" policy_targets_
 
 # --- pure core
 PYTHONDONTWRITEBYTECODE=1 HYPOTHESIS_STORAGE_DIRECTORY=$tmp/hypothesis \
-    timeout 300 "$PY" -m pytest -q -p no:cacheprovider tests/sleep/test_lid.py
-if [ $? -eq 0 ]; then pass "pytest tests/sleep/test_lid.py"; else fail "pytest tests/sleep/test_lid.py"; fi
+    timeout 300 "$PY" -m pytest -q -p no:cacheprovider --show-capture=no --tb=short \
+    tests/sleep/test_lid.py tests/sleep/test_png_stats.py tests/sleep/test_poster.py
+if [ $? -eq 0 ]; then pass "pytest tests/sleep"; else fail "pytest tests/sleep"; fi
 check "broken copies of luminos-lid fail the tests" timeout 600 "$PY" tests/sleep/mutate.py
 
 echo

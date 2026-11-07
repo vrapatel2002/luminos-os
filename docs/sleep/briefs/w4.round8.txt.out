@@ -1,0 +1,44 @@
+**`static.sh` fails 2 of 67 checks, and both come from one real bug in W3's `scripts/luminos-lid`.** 104 of 106 pytest tests pass; the mutation check fails only because the unbroken script fails those same two tests. I syntax-checked `live.sh` but didn't run it.
+
+## The bug
+`wait_for_lock` can put the machine back to sleep the moment it wakes, even if the lid was just opened. Its loop is `while boottime() < deadline`, and BOOTTIME keeps counting through sleep. If the machine sleeps during the wait, the deadline has passed on waking, so the loop exits before re-checking the lid or the sleep. It then logs "lock not confirmed — suspending anyway" and suspends.
+
+- **When it happens:** only for non-KDE sessions, because KDE sessions skip the wait. Re-plan 9 says PowerDevil requests suspend in the same millisecond on every lid close, so for those sessions the wake could hit this routinely. KDE sessions on this laptop don't reach this code.
+- **Fix for W3:** re-check first, then test the deadline. This adds two lines, so the file stays under 205:
+  ```python
+  while True:
+      if not lid_is_closed(fd) or asleep_seconds() - asleep > RESUME_JUMP:
+          ...
+          return False
+      if boottime() >= deadline:
+          break
+  ```
+  On a temp copy with this fix, `test_lid.py` passes in full and all 71 broken copies of the script fail it.
+
+## What changed in `tests/sleep/`
+- **G now follows Re-plan 9 and its addendum:** W3 had already moved on, so I tested that rather than the original G. `test_lid.py` runs `main()` on a fake clock with fake sessions.
+  - **Who gets locked:** KDE sessions aren't locked and sleep is immediate. Other graphical sessions are locked one by one, and `lock-sessions` is never called.
+  - **The wait:** it waits for `LockedHint` plus a 1 s settle, with a 5 s cap, and still suspends if the lock is never confirmed. Opening the lid aborts it.
+  - **The wake guard:** it runs 2 s after each real wake, once per wake, on KDE sessions only.
+  - **Budget:** `static.sh` now allows 205 lines, not the 190 you asked for, because the addendum raised it.
+- **H in `static.sh`:** it checks that both console strings and `renderProcessTerminated` show the poster, and that `poster.png` is looked up before the LivelyInfo `Thumbnail`. It also checks the crop, the hidden view and the single log line.
+- **`test_poster.py` (new):** runs W5's script with a fake browser and real `ffmpeg`. A flat frame must never replace a good poster. W5's script is Python, so it gets `py_compile` rather than `bash -n`; it's within the 80-line limit.
+- **`live.sh`:** checks the poster exists at 2560x1600 or more with pixel stddev above 5, using a new standard-library `png_stats.py` with its own 17 tests. It measures per channel, so a flat frame of any colour counts as flat.
+- **Real poster:** I ran `png_stats.py` on it directly: 2880x1800, stddev 11.57, so it should pass.
+- **Beyond your brief, in `live.sh`:**
+  - the deployed `WebMode.qml` matches the repo;
+  - each graphical session really reports `Desktop=KDE`;
+  - `LockOnResume` is true.
+
+## For the PM
+- **A broken `loginctl` can skip the lock:** if listing sessions or reading their properties fails, a non-KDE session goes to sleep unlocked, and the guard doesn't cover non-KDE sessions. If the guard's `LockedHint` read fails on a KDE session, it neither locks nor warns. The tests pin this because the contract says sleep must never be lost, but it's a security trade-off you should choose knowingly.
+- **A late lock shortens the settle:** because of the 5 s cap, a hint arriving at 4.95 s gets only 0.05 s of settle, so the greeter race could return in that rare case. It matches the contract, and only non-KDE sessions wait.
+
+## Not verified
+- **`loginctl` output:** running it needed approval, so the fake's format comes from memory. `live.sh` checks the real `Desktop` value.
+- **QML:** `qmllint` also needed approval, so the `WebMode.qml` checks only read the text. No tool has parsed it here, and nothing has shown the poster in a real greeter. BUILD_LOG says W5 tested it offscreen, but I didn't reproduce that.
+- **H checks:** I didn't test these against deliberately broken copies, unlike the lid checks.
+- **`live.sh` additions:** the `LockOnResume` check assumes the key is in `[Daemon]`, which I didn't confirm.
+- **The BUG-199 fix itself:** only a real lid close can show it.
+
+Worker files last changed at 00:09:41 and didn't change during the runs. Once W3 applies the fix, `bash tests/sleep/static.sh` should pass; I haven't started a new poll, so tell me if you want me to run it.
