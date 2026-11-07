@@ -1,0 +1,38 @@
+**VERDICT first: safe to install.** No BLOCKING or HIGH findings. The patch implements the v2.1 design faithfully; every syscore/lock/refcount path I traced is balanced. Two MEDIUMs are worth a one-line fix each but neither is reachable in the normal lid-sleep path.
+
+I could not run `tests/nvsleep/static.sh`, fetch upstream RM source, or read `/sys` in this session (approval-gated); BUILD_LOG's "static+compile ALL PASS" is taken as given.
+
+## Verified correct (file:line)
+
+- **Notifier PREPARE** `nv.c:4521-4551`: marks only after all slots idle; card explicitly unmarked `:4537`; `pm_lock` released on the non-idle path `:4547`; `nv_sleep_skipping` set under `power_state_lock`. Stock fallback for hibernate/non-idle intact `:4633-4665`.
+- **Card .prepare** `nv.c:4602-4621`: runs after freeze with `pm_suspend_target_state` valid (set in `suspend_devices_and_enter` before `dpm_suspend_start`). `pm_runtime_barrier(port)` before the re-check: a queued port resume runs now, port goes active, `nv_sleep_slot_idle` fails, -EBUSY. `-EBUSY` is not swallowed (`main.c:2247` only eats -EAGAIN) and `dpm_prepare` breaks `main.c:2230/2249`; the PM core did `pm_runtime_put` on the failed device `main.c:2177`, the card is not on `dpm_prepared_list` so no complete-without-prepare; POST is delivered via `suspend_finish`.
+- **Symmetry for syscore devices**: get_noresume `main.c:2137` ↔ put `:1247`; block_if_disabled `:2144` ↔ unblock `:1246`; late `pm_runtime_disable` `:1654` ↔ early `pm_runtime_enable` `:947` (reached via `is_late_suspended`, `:1695/:909`); wakeup-abort at late `:1641` skips the disable and early skips the enable, balanced.
+- **POST** `nv.c:4554-4596`: walks the live tree (idempotent), card included; `strict_midlayer` cleared (set `pci-driver.c:742`, normally cleared `:786`); resync `pm_request_resume(card)` only if card suspended and port not. `up_write` once; `nv_sleep_card_syscore` gates the counter.
+- **Recursive walk** `nv.c:4514-4518`: `device_for_each_child` runs the callback outside the klist spinlock; `dev_pm_syscore_device` is a plain store; depth ≈ 6 frames. `pci_walk_bus` stops on first nonzero return, so the `*card = NULL` never gets dereferenced `:4492-4500`. All callers are process context under sleeping locks; no pci_dev refs taken, none to drop.
+- **Lock order** power_state → pm_lock(write) → devices_lock matches `nv_set_system_power_state` `nv.c:5132-5156` and `nvidia_open` `:1913/1922`.
+- **Finding 4 confirmed real**: `device_suspend_late` uses `pm_runtime_disable` (check_resume=true, `runtime.c:1526-1537`) and `device_suspend` runs `pm_runtime_barrier` on the port before the syscore goto `main.c:1894/1902`. Both can power the slot behind a status-suspended card; the POST resync covers both.
+- **nvdefer gating with skip_idle=0**: identical to nvdefer-only except `pm_runtime_status_suspended` vs `pm_runtime_suspended` (`pm_runtime.h:148/183`); they differ only while runtime PM is disabled, and in a stock sleep the card is runtime-active (RM woke it in `nv_suspend_devices`), so no event is newly deferred. Drop path `nv-acpi.c:412` is skip-only.
+- **Race guard** `nv.c:5334-5339`: a resume between .prepare and late sets `pm_abort_suspend`, caught by `main.c:1896/1641` or `s2idle_enter`; after late, the whole subtree is runtime-disabled (children before parent, `main.c:1636`), so nothing can start. Replay work during the sleep: `pm_runtime_get_if_active` returns -EINVAL when disabled (`runtime.c:1234`), work bails, kinds kept.
+- **Hibernate/thaw/restore**: untouched; `.prepare` returns 0 when not skipping, and `pci_pm_prepare` then behaves exactly as with no prepare op (`pci-driver.c:744-760`, no SMART_PREPARE).
+- **Forbidden list**: no `pm_runtime_disable/enable/set_*`, `pci_save/restore/set_power_state`, `dpm_*`, flag changes, or `nv_suspend/resume_devices` in the added code. v1 nv-pci.c changes gone.
+- **Script diff**: `restore_orig nvsleep nvdefer` ordering is right (nv.c.nvsleep-orig is the nvdefer-patched copy), origs copied only after a clean dry-run, dkms failure restores both and rebuilds stock, exit 2 keeps nvdefer when only nvsleep fails to apply, `--revert` requires both orig sets. No issues.
+
+## Findings
+
+**MEDIUM — procfs "resume" during a skipped sleep double-unlocks `nv_system_pm_lock`.** `nv-procfs.c:694` → `nv_set_system_power_state(RUNNING)` `nv.c:5140-5143` sees IN_STANDBY, runs `nv_resume_devices` on a card RM never suspended and `up_write`s; POST's `up_write` `nv.c:4585` then double-releases the rwsem. Root-only, and only in the pre-freeze or thaw→POST windows, but it is a kernel-state corruption. Fix: at the top of `nv_set_system_power_state`, `if (READ_ONCE(nv_sleep_skipping)) return NV_ERR_IN_USE;`.
+
+**MEDIUM — `nv_indicate_not_idle` error path depends on RM honouring the status; unverified.** `nv.c:5752-5757` pairs `pm_runtime_put_noidle` with the new error. If RM ignores it and later calls `nv_indicate_idle`, the usage count underflows (WARN, premature runtime suspend). If RM honours it, balance is correct. Could not fetch upstream `dynamic-power.c` here; the design review already marked 2c as unverifiable and 2a/2b as the real fix. Action: confirm `os_ref_dynamic_power` checks the return before relying on 2c; it is unreachable while 2a/2b hold.
+
+**LOW — `nv_sleep_skipping` cleared after `up_write`** `nv.c:4585-4586`. Microsecond window where an ioctl enters RM with skipping still set: ACPI events get deferred/dropped, guard fires harmlessly. Swap the two lines.
+
+**LOW — `nv_acpi_defer_event` with `nv_defer_nvl == NULL`** `nv-acpi.c:170`: AC/NVPCF events reach RM while skipping if the dGPU has no ACPI companion (not this machine). Make skipping defer regardless of `dev`.
+
+**LOW — `.prepare` dereferences `to_pci_dev(dev)` before the skipping check** `nv.c:4604-4605`; `nv_pm_ops` is also the platform driver's pm (`nv-platform.c:1407`). Tegra only. Move the two assignments after the `nv_sleep_skipping` test or guard with `dev_is_pci`.
+
+**LOW — module unload / device remove while skipping leaves the port subtree syscore.** POST walks `nv_linux_devices` only `nv.c:4582`; a device removed in the thaw→POST window takes its port out of the walk. Self-heals at the next skipped sleep's POST; otherwise harmless (port stays untouched by system sleep). Optional: `nv_sleep_unmark(nvl)` in `nv_pci_remove_helper` when skipping.
+
+**LOW — printk rate.** `nv-acpi.c:414` (one line per dropped ACPI event during sleep) and `nv.c:5755` (KERN_ERR per RM entry attempt) are unratelimited; firmware spam or an RM retry loop could flood. Use `printk_ratelimited`.
+
+**LOW — non-s2idle target aborts forever rather than falling back.** `nv.c:4609`: with `mem_sleep=deep` every attempt aborts and luminos-lid retries. Not reachable per the design (s2idle only); document it.
+
+VERDICT: safe to install

@@ -1,0 +1,34 @@
+Review complete. I could not read `/sys` or `/proc` from this sandbox, so live-state claims (root hub wakeup files, PNP0C0C:00 presence, suspend_stats) are from kernel semantics, not this machine. Everything else is from the sources plus the live `luminos-lid.service` unit.
+
+**What holds up (checked, no finding)**
+- `EVIOCGSW` encoding is right: `0x8002451b`, the kernel matches only the ioctl number and copies `min(size, SW bits)`, so 2 bytes covers `SW_LID` bit 0. Level read every loop, so no stale edge can fire.
+- Clocks are consistent: `now`, `last_try`, `resumed_at`, `give_up` are all `CLOCK_BOOTTIME`. The BOOTTIME−MONOTONIC offset grows only through `timekeeping_suspend`, which s2idle reaches via `tick_freeze`, so there are no false resumes and no missed ones. A long sleep past `give_up` and a short sleep that changed `suspend_stats` both fall through correctly.
+- Lid-open loop is impossible: `decide` returns `NONE, State()` whenever the fresh level read says open. The 5 s grace covers a lagging `_LID` at resume.
+- PowerDevil race: logind serialises; a second request returns "operation in progress", `run()` logs it, and the stats wait rides on PowerDevil's suspend.
+- Unit hardening: `@system-service` includes `ioctl` and `select`; `/sys/power/suspend_stats` is readable under `ProtectKernelTunables`. No shell, absolute binaries, no user-writable inputs at runtime.
+- Install order, modes (755/644 root), revert order, and `systemd-sleep` running `post` even after a failed `/sys/power/state` write are all fine. A stuck record self-heals on the next cycle.
+- Disabling bridge `power/wakeup` does not touch dGPU runtime PM: `pci_dev_run_wake` uses `device_can_wakeup`, not `may_wakeup`.
+
+**Findings**
+
+- **HIGH** `config/system-sleep/luminos-sdreader:14` — `pre` unbinds the reader with a card inserted. Unbind → `mmc_remove_host` → `del_gendisk`: a mounted card is synced then marked dead, any copy in flight fails, and after resume the card is a new device needing a remount. Today's behaviour keeps the mount across sleep, so this is a regression that `live.sh` sidesteps by refusing to run with a card. Fix (sh): before the unbind, `for c in "$DRV/$DEV"/mmc_host/*/mmc*:*; do [ -e "$c" ] && exit 0; done`. The lid retry loop absorbs any `mmc0` abort in that case.
+
+- **MEDIUM** `config/udev/71-luminos-wake.rules:9` and `scripts/luminos-wake-policy:40` — root hubs (`usb1`…`usbN`, idVendor `1d6b`) match "not 0b05" and get `power/wakeup=disabled`. In `xhci_bus_suspend` a root hub with `do_remote_wakeup=0` clears every port's `PORT_WK*` bits, so the internal 0b05 keyboard can no longer wake a manual sleep, contrary to CONTRACTS §D "keep xHCI … and internal 0b05 keyboard as-is". `live.sh:33-39` enforces the wrong thing. Either accept and document it, or add `ATTR{idVendor}!="1d6b"` to the rule and skip `1d6b` in `targets()`.
+
+- **MEDIUM** `scripts/luminos-strong-sleep:39` — `systemctl restart luminos-lid` returns 0 even if the new script dies a second later; `set -e` sees nothing and the installer prints "installed". With `StartLimitBurst=5/120 s`, a crash loop or a few install/revert cycles leave luminos-lid dead, which is the pre-v2 state (PowerDevil only, vetoable). Fix: end `install_all` with `sleep 2; systemctl is-active --quiet luminos-lid || { say "luminos-lid died"; exit 1; }`.
+
+- **LOW** `scripts/luminos-lid:164-165` — `give_up` is armed even when `systemctl suspend -i` failed synchronously (D-Bus error), so the retry waits 60 s instead of 2 s. `give_up`/`stats_before` are also not cleared on lid open, so a close-open-close inside the window is held back. Fix: have `run()` return a bool and set `give_up` only on acceptance; set `give_up = 0.0` on the open branch.
+
+- **LOW** `docs/sleep/CONTRACTS.md:43` and `scripts/luminos-lid:129` — "blocking, timeout 180 s" is wrong: `systemctl suspend` returns as soon as logind queues the request, which is why Re-plan 2 was needed. Harmless now; fix the wording so nobody later removes the stats wait.
+
+- **LOW** `config/system-sleep/luminos-sdreader:15` — the record is written after the unbind. If `mkdir`/`:` fail the reader stays unbound with no record and the log says "could not unbind". Write the record first, unbind second, remove the record if the unbind fails.
+
+- **LOW** `scripts/luminos-wake-policy:20-27` — `BAT0` keeps `power/wakeup=enabled`. On most ASUS EC firmware a charger plug also notifies BAT0, and `power_supply_changed` → `pm_stay_awake(BAT0)` is enough to end an s2idle. SPEC item 2 ("not the charger") may still fail; the lid loop re-sleeps in ~7 s so it is not a safety issue. Verify by plugging the charger during a test sleep; add BAT0 if it wakes.
+
+- **LOW** `scripts/luminos-wake-policy:45-47` — originals are captured only on the first `--apply`. If that first apply happens at a later boot (installer's start failed) the udev rule has already run and USB/root-hub "originals" are saved as `disabled`, so `--revert` cannot restore them. Acceptable, but worth a line in the docs.
+
+- **LOW** `scripts/luminos-wake-policy:18` — if `PNP0C0C:00` does not exist on this firmware (power button is often `LNXPWRBN:00`), sysfs refuses the write, so nothing lands in the wrong place, but the unit fails every boot. Confirm with `cat /sys/devices/platform/PNP0C0C:00/power/wakeup` before install.
+
+- **LOW** behaviour change to flag for the PM: v3 is level-triggered and treats start as a resume, so `--install` with the lid shut (docked) sleeps the machine 5 s after the restart. SPEC says no clamshell mode, so intended, but run the install with the lid open.
+
+VERDICT: not safe to install — as the files stand. Only the HIGH item blocks; with that three-line guard in the sdreader hook, sections B, D and E are safe to install and the rest can follow.

@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# luminos-wake-policy — while asleep, only the lid and the power button may wake the laptop.
+# [CHANGE: claude-code | 2026-11-06] Strong sleep (docs/sleep/CONTRACTS.md §D). The charger,
+# USB devices, the USB4 controller and the audio coprocessor all had wake enabled.
+# Usage (root except --check):
+#   --apply   set every power/wakeup below (idempotent); the first run saves the originals
+#   --check   print a table; exit 0 only if every value is as wanted
+#   --revert  put the saved originals back
+# USB: every device but vendors 0b05 (internal ASUS keyboard) and 1d6b (root hubs: disabling one
+# clears wake on all its ports, keyboard included). xHCI controllers stay as they are.
+# New USB devices are handled by 71-luminos-wake.rules; this catches what was already there.
+set -u
+TAG=luminos-wake-policy
+ORIG=/var/lib/luminos/wake-policy.orig
+PCI=/sys/bus/pci/devices
+
+ENABLE=(
+    /sys/devices/platform/PNP0C0D:00/power/wakeup   # lid
+    /sys/devices/platform/PNP0C0C:00/power/wakeup   # power button
+)
+# No PCIe bridges (00:01.1, 00:02.2, 00:03.1): changing a runtime-suspended bridge's wakeup makes
+# the PCI core runtime-resume it at every sleep, and through 00:01.1 that wakes the dGPU.
+DISABLE=(
+    $PCI/0000:65:00.5/power/wakeup                  # audio coprocessor
+    $PCI/0000:67:00.5/power/wakeup                  # USB4 NHI
+    /sys/class/power_supply/ACAD/power/wakeup       # AC adapter
+)
+
+say() { echo "$TAG: $*"; }
+need_root() { [ "$(id -u)" = 0 ] || { say "$1 needs root" >&2; exit 1; }; }
+value() { cat "$1" 2>/dev/null || echo missing; }
+
+# One "<wanted value> <file>" per line.
+targets() {
+    local f u
+    for f in "${ENABLE[@]}"; do echo "enabled $f"; done
+    for f in "${DISABLE[@]}"; do echo "disabled $f"; done
+    for u in /sys/bus/usb/devices/*; do
+        [ -f "$u/idVendor" ] && [ -f "$u/power/wakeup" ] || continue
+        case "$(value "$u/idVendor")" in
+            0b05|1d6b) ;;
+            *) echo "disabled $u/power/wakeup" ;;
+        esac
+    done
+}
+
+save_originals() {
+    [ -e "$ORIG" ] && return
+    mkdir -p "$(dirname "$ORIG")"
+    targets | while read -r _ f; do [ -e "$f" ] && echo "$f $(value "$f")"; done > "$ORIG"
+    say "saved originals to $ORIG"
+}
+
+apply() {
+    need_root --apply
+    save_originals
+    local want f bad=0
+    while read -r want f; do
+        [ "$(value "$f")" = "$want" ] && continue
+        echo "$want" > "$f" || { say "could not set $f" >&2; bad=1; }
+    done < <(targets)
+    exit $bad
+}
+
+check() {
+    local want f have bad=0
+    printf '%-9s %-9s %s\n' HAVE WANT FILE
+    while read -r want f; do
+        have=$(value "$f")
+        [ "$have" = "$want" ] || bad=1
+        printf '%-9s %-9s %s\n' "$have" "$want" "$f"
+    done < <(targets)
+    exit $bad
+}
+
+revert() {
+    need_root --revert
+    [ -e "$ORIG" ] || { say "nothing saved, nothing to revert"; exit 0; }
+    local f was bad=0
+    while read -r f was; do
+        # A USB device saved at first apply may be gone by now.
+        [ -e "$f" ] || continue
+        echo "$was" > "$f" || { say "could not set $f" >&2; bad=1; }
+    done < "$ORIG"
+    [ $bad = 0 ] && rm -f "$ORIG"
+    exit $bad
+}
+
+case "${1:-}" in
+    --apply) apply ;;
+    --check) check ;;
+    --revert) revert ;;
+    *) echo "usage: $TAG --apply | --check | --revert" >&2; exit 2 ;;
+esac

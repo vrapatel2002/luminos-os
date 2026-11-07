@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# luminos-strong-sleep — install the lid supervisor, SD reader hook and wake policy.
+# [CHANGE: claude-code | 2026-11-06] docs/sleep/CONTRACTS.md §E. Does NOT touch the NVIDIA
+# patch: that is luminos-nvidia-defer --install. Usage (root except --check):
+#   --install  copy into place, keep the old lid script as luminos-lid.pre-v3, start it all
+#   --check    exit 0 only if installed copies match the repo and everything is running
+#   --revert   restore the old lid script, the original wake values, remove the rest
+# §F: the brightness hook replaces luminos-brightness.service; its unit is moved aside, not deleted.
+set -u
+TAG=luminos-strong-sleep
+REPO=$(readlink -f "$(dirname "$(readlink -f "$0")")/..")
+LID=/usr/local/bin/luminos-lid
+POLICY=/usr/local/bin/luminos-wake-policy
+HOOK=/usr/lib/systemd/system-sleep/luminos-sdreader
+BRIGHT_HOOK=/usr/lib/systemd/system-sleep/luminos-brightness
+RULE=/etc/udev/rules.d/71-luminos-wake.rules
+UNIT=/etc/systemd/system/luminos-wake-policy.service
+OLD_BRIGHT=/etc/systemd/system/luminos-brightness.service
+OLD_BRIGHT_AWAY=$OLD_BRIGHT.disabled-by-strong-sleep
+# "<mode> <repo file> <installed file>"
+FILES=(
+    "755 scripts/luminos-lid $LID"
+    "755 scripts/luminos-wake-policy $POLICY"
+    "755 config/system-sleep/luminos-sdreader $HOOK"
+    "755 config/system-sleep/luminos-brightness $BRIGHT_HOOK"
+    "644 config/udev/71-luminos-wake.rules $RULE"
+    "644 systemd/luminos-wake-policy.service $UNIT"
+)
+
+say() { echo "$TAG: $*"; }
+need_root() { [ "$(id -u)" = 0 ] || { say "$1 needs root" >&2; exit 1; }; }
+
+install_all() {
+    need_root --install
+    set -e
+    [ -e "$LID.pre-v3" ] || cp -p "$LID" "$LID.pre-v3"
+    local entry mode src dst
+    for entry in "${FILES[@]}"; do
+        read -r mode src dst <<< "$entry"
+        install -m "$mode" "$REPO/$src" "$dst"
+    done
+    if [ -e "$OLD_BRIGHT" ]; then
+        systemctl disable luminos-brightness
+        mv -f "$OLD_BRIGHT" "$OLD_BRIGHT_AWAY"
+    fi
+    systemctl daemon-reload
+    udevadm control --reload
+    systemctl restart luminos-lid
+    sleep 2
+    systemctl is-active --quiet luminos-lid || { say "luminos-lid died, see journalctl -u luminos-lid" >&2; exit 1; }
+    systemctl enable luminos-wake-policy
+    systemctl restart luminos-wake-policy
+    say "installed"
+}
+
+check() {
+    local entry mode src dst bad=0
+    for entry in "${FILES[@]}"; do
+        read -r mode src dst <<< "$entry"
+        if cmp -s "$REPO/$src" "$dst"; then say "ok      $dst"; else say "DIFFERS $dst"; bad=1; fi
+    done
+    systemctl is-active --quiet luminos-lid && say "ok      luminos-lid running" \
+        || { say "BAD     luminos-lid not running"; bad=1; }
+    systemctl is-enabled --quiet luminos-wake-policy && say "ok      luminos-wake-policy enabled" \
+        || { say "BAD     luminos-wake-policy not enabled"; bad=1; }
+    [ ! -e "$OLD_BRIGHT" ] && say "ok      luminos-brightness.service moved aside" \
+        || { say "BAD     $OLD_BRIGHT still there"; bad=1; }
+    "$POLICY" --check || bad=1
+    exit $bad
+}
+
+revert() {
+    need_root --revert
+    "$POLICY" --revert
+    systemctl disable --now luminos-wake-policy
+    rm -f "$POLICY" "$HOOK" "$BRIGHT_HOOK" "$RULE" "$UNIT"
+    [ -e "$LID.pre-v3" ] && mv -f "$LID.pre-v3" "$LID" || say "no $LID.pre-v3: lid script left in place" >&2
+    [ -e "$OLD_BRIGHT_AWAY" ] && mv -f "$OLD_BRIGHT_AWAY" "$OLD_BRIGHT"
+    systemctl daemon-reload
+    [ -e "$OLD_BRIGHT" ] && systemctl enable luminos-brightness
+    udevadm control --reload
+    systemctl restart luminos-lid
+    say "reverted"
+}
+
+case "${1:-}" in
+    --install) install_all ;;
+    --check) check ;;
+    --revert) revert ;;
+    *) echo "usage: $TAG --install | --check | --revert" >&2; exit 2 ;;
+esac

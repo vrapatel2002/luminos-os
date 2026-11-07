@@ -1,0 +1,40 @@
+#!/bin/sh
+# luminos-sdreader — unbind the empty SD reader across sleep so it cannot abort it.
+# [CHANGE: claude-code | 2026-11-06] Its wakeup source mmc0 aborted sleep attempts
+# (wakeup_count=3 in one boot). Re-bound 60 s after waking, so cards work when awake: a reader
+# re-bound at once was still in its re-init loop at the next sleep, and unbinding it blocked 7.3 s.
+# Installed to /usr/lib/systemd/system-sleep/. Never blocks sleep: always exits 0.
+DRV=/sys/bus/platform/drivers/rtsx_pci_sdmmc
+DEV=rtsx_pci_sdmmc.0
+RECORD=/run/luminos/sdreader-unbound
+UNIT=luminos-sdreader-rebind
+
+log() { echo "luminos-sdreader: $*" >&2; }
+cancel() { /usr/bin/systemctl --no-ask-password "$@" stop "$UNIT.timer" 2>/dev/null; }
+
+rebind() {
+    [ -e "$RECORD" ] || return 0
+    if echo "$DEV" > "$DRV/bind" && rm -f "$RECORD"; then log "re-bound $DEV"; else log "could not re-bind $DEV"; fi
+}
+
+case "${1:-}" in
+    pre)
+        if [ -e "$RECORD" ]; then
+            cancel --no-block
+            [ -e "$DRV/$DEV" ] || { log "$DEV still unbound, nothing to do"; exit 0; }
+        fi
+        [ -e "$DRV/$DEV" ] || exit 0
+        for c in "$DRV/$DEV"/mmc_host/*/mmc*:*; do  # never eject a card: it may be mounted
+            [ -e "$c" ] && { log "card present, leaving $DEV bound"; exit 0; }
+        done
+        mkdir -p /run/luminos && true > "$RECORD" || { log "no record, leaving $DEV bound"; exit 0; }
+        echo "$DEV" > "$DRV/unbind" && { log "unbound $DEV"; exit 0; }
+        rm -f "$RECORD"; log "could not unbind $DEV" ;;
+    post)
+        [ -e "$RECORD" ] || exit 0
+        cancel  # a leftover timer would make systemd-run refuse the name
+        /usr/bin/systemd-run --quiet --no-ask-password --no-block --collect --on-active=60 --unit="$UNIT" /bin/sh "$0" rebind \
+            || { log "could not defer, re-binding now"; rebind; } ;;
+    rebind) rebind ;;
+esac
+exit 0

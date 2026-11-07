@@ -32,25 +32,66 @@ handles the ordinary case gracefully; this is the backstop for when it is overru
     Ordering is safe even with -i: `-i` is `--check-inhibitors=no`, a *client-side*
     check, so logind still honours kwin's "Ensuring that the screen gets locked
     before going to sleep" delay inhibitor.
+
+[CHANGE: claude-code | 2026-11-06] v3: it keeps trying until the machine is asleep.
+    v2 fired one suspend per close and never looked back: an aborted attempt (the SD reader's
+    mmc0 wakeup source, routinely) left it awake with the lid shut, and a spontaneous wake
+    had nothing to put it back. v3 reads the switch as a LEVEL (EVIOCGSW) and retries on
+    BACKOFF, never giving up. A resume shows as BOOTTIME−MONOTONIC growing; nothing fires for
+    GRACE s after one, because switch state can lag the wake and a real lid-open must never
+    be fought. A real sleep restarts the backoff; service start counts as a resume.
+    `systemctl suspend -i` returns when logind queues the request, not when asleep, so an
+    accepted attempt holds the next until suspend_stats changes or SLEEP_WAIT s pass.
 """
 
-import re
-import struct
-import subprocess
-import sys
-import time
+import fcntl, os, re, select, subprocess, sys, time
+from contextlib import suppress
+from dataclasses import dataclass, replace
+from enum import Enum
 from pathlib import Path
 
-EV_SW, SW_LID = 0x05, 0x00
-FMT = "llHHi"  # struct input_event, 24 bytes on 64-bit
-SIZE = struct.calcsize(FMT)
+SW_LID, SW_MAX = 0x00, 0x10
+SW_BYTES = (SW_MAX + 7) // 8
+EVIOCGSW = (2 << 30) | (SW_BYTES << 16) | (ord("E") << 8) | 0x1b  # _IOC(_IOC_READ, 'E', 0x1b, len)
 
 # Absolute paths: this runs as root, PATH is not its to trust.
 LOGINCTL, SYSTEMCTL = "/usr/bin/loginctl", "/usr/bin/systemctl"
 
-# The kernel can re-sync switch state on resume. Without this, a lid that is still
-# closed when the machine wakes would re-fire and could suspend-loop the machine.
-DEBOUNCE_SEC = 10
+BACKOFF = (2.0, 5.0, 10.0, 30.0)
+GRACE = 5.0
+RESUME_JUMP = 2.0  # BOOTTIME−MONOTONIC growth that counts as having been asleep
+SLEEP_WAIT = 60.0  # longest an issued sleep may hold back the next action
+
+
+@dataclass(frozen=True)
+class State:
+    closed_since: float | None = None
+    attempts: int = 0
+    last_try: float | None = None
+
+
+class Action(Enum):
+    NONE = "none"
+    LOCK_AND_SLEEP = "lock_and_sleep"
+    SLEEP = "sleep"
+
+
+def decide(now: float, lid_closed: bool, resumed_at: float | None, st: State) -> tuple[Action, State]:
+    if not lid_closed:
+        return Action.NONE, State()
+    if resumed_at is not None and now - resumed_at < GRACE:
+        return Action.NONE, st
+    if st.attempts == 0:
+        return Action.LOCK_AND_SLEEP, State(closed_since=now, attempts=1, last_try=now)
+    if resumed_at is not None and resumed_at > st.last_try:
+        st = replace(st, attempts=1)  # it really slept: backoff starts over
+    if now - st.last_try >= BACKOFF[min(st.attempts - 1, 3)]:
+        return Action.SLEEP, replace(st, attempts=st.attempts + 1, last_try=now)
+    return Action.NONE, st
+
+
+def log(msg):
+    print(f"luminos-lid: {msg}", flush=True)
 
 
 def lid_event_node():
@@ -63,19 +104,67 @@ def lid_event_node():
     return Path("/dev/input") / handler
 
 
-node = lid_event_node()
-print(f"luminos-lid: watching {node}", flush=True)
+def lid_is_closed(fd):
+    state = bytearray(SW_BYTES)
+    fcntl.ioctl(fd, EVIOCGSW, state, True)
+    return bool(state[0] & (1 << SW_LID))
 
-last_fired = 0.0
-with node.open("rb") as dev:
-    while chunk := dev.read(SIZE):
-        _, _, etype, code, value = struct.unpack(FMT, chunk)
-        if etype != EV_SW or code != SW_LID or value != 1:
-            continue
-        if time.monotonic() - last_fired < DEBOUNCE_SEC:
-            print("luminos-lid: ignoring repeat close event (debounce)", flush=True)
-            continue
-        last_fired = time.monotonic()
-        print("luminos-lid: lid closed — locking, then suspending", flush=True)
-        subprocess.run([LOGINCTL, "lock-sessions"])
-        subprocess.run([SYSTEMCTL, "suspend", "-i", "--no-block"])
+
+def boottime():
+    return time.clock_gettime(time.CLOCK_BOOTTIME)
+
+
+def asleep_seconds():
+    return boottime() - time.clock_gettime(time.CLOCK_MONOTONIC)
+
+
+def suspend_stats():
+    return [Path(f"/sys/power/suspend_stats/{name}").read_text() for name in ("success", "fail")]
+
+
+def run(*cmd):
+    """True if it worked. A failure is only logged: the next pass of the loop is the retry."""
+    try:
+        subprocess.run(cmd, timeout=180, check=True)
+        return True
+    except (OSError, subprocess.SubprocessError) as e:
+        log(f"failed: {e}")
+        return False
+
+
+def act(action, attempt):
+    if action is Action.LOCK_AND_SLEEP:
+        log(f"lid closed — locking, then suspending (attempt {attempt})")
+        run(LOGINCTL, "lock-sessions")
+    else:
+        log(f"lid still closed and awake — suspending again (attempt {attempt})")
+    return run(SYSTEMCTL, "suspend", "-i")
+
+
+def main():
+    node = lid_event_node()
+    log(f"v3 watching {node}")
+    fd = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
+    st, resumed_at, asleep = State(), boottime(), asleep_seconds()
+    stats_before, give_up = None, 0.0
+    while True:
+        select.select([fd], [], [], 1.0)
+        with suppress(BlockingIOError):
+            os.read(fd, 4096)
+        now, was_asleep, asleep = boottime(), asleep, asleep_seconds()
+        if asleep - was_asleep > RESUME_JUMP:
+            resumed_at = now
+            log(f"resumed after {asleep - was_asleep:.0f} s asleep")
+        closed = lid_is_closed(fd)
+        if not closed:
+            give_up = 0.0  # opening the lid ends any wait
+        elif now < give_up and suspend_stats() == stats_before:
+            continue  # an accepted sleep is still in flight
+        action, st = decide(now, closed, resumed_at, st)
+        if action is not Action.NONE:
+            stats_before = suspend_stats()
+            give_up = boottime() + SLEEP_WAIT if act(action, st.attempts) else 0.0
+
+
+if __name__ == "__main__":
+    main()

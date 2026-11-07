@@ -1,0 +1,19 @@
+[Unit]
+# [CHANGE: claude-code | 2026-11-06] Strong sleep: only the lid and the power button wake
+# the laptop (docs/sleep/CONTRACTS.md §D). Re-applied each boot, since sysfs does not persist.
+Description=Luminos wake policy — only the lid and the power button wake the laptop
+After=systemd-udev-trigger.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/usr/bin/udevadm settle --timeout=30
+ExecStart=/usr/local/bin/luminos-wake-policy --apply
+# It only writes /sys (root-owned files, no capability needed) and /var/lib/luminos.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=full
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

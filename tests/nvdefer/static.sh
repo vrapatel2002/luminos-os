@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # nvdefer static checks (no reboot, no root, never touches the GPU). Exit 0 only if every check passes.
 # ---- budgets (docs/nvdefer/CONTRACTS.md, Re-plan 1) ----
-MAX_ADDED=180; MAX_SCRIPT_LINES=150
+MAX_ADDED=180; MAX_SCRIPT_LINES=200  # [CHANGE: claude-code | 2026-11-06] nvsleep shares the script
 ALLOWED='^kernel-open/nvidia/(nv-acpi\.c|nv\.c|nv-linux\.h)$'   # + a NEW header under kernel-open/nvidia/
 # ---------------------------------------------------
 set -u

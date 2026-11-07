@@ -1,0 +1,34 @@
+**Done: nvsleep v2.1 written, patch replaced, static + compile ALL PASS.** No sudo, no install, nothing under tests/ or docs/ touched, no commit.
+
+## What I wrote
+- `patches/nvsleep/v2work/kernel-open/nvidia/{nv.c,nv-acpi.c}` — fresh copies of the nvdefer tree, v2.1 applied. nv-pci.c untouched: `nv_pm_ops` is defined in nv.c (`nv.c:289`), so `.prepare` wires there.
+- `patches/nvsleep/nvsleep-610.57.04.patch` — replaced with the v2.1 diff (a/ b/ paths, 187 added lines, 9 hunks, every hunk marked). Applies `patch -p1 -F0` on a fresh nvdefer copy.
+- `scripts/luminos-nvidia-defer` — one line: `SLEEP_FILES` now nv.c + nv-acpi.c (backup/restore list). Everything else already handled both patches.
+
+## Review findings → code (v2work paths)
+| Finding | Where |
+|---|---|
+| 1 BLOCKING target state unreadable in notifier | Notifier only marks port + descendants, then unmarks the card: `nv.c:4521-4551`. Card `.prepare` reads `pm_suspend_target_state == PM_SUSPEND_TO_IDLE`: `nv.c:4602-4621`; `-EBUSY` (never `-EAGAIN`) at `nv.c:4620` |
+| 2 BLOCKING RM entered with runtime PM disabled | (a) defer condition `nv_sleep_skipping \|\| (nv_acpi_defer && pm_runtime_status_suspended)`: `nv-acpi.c:170-171`. (b) unknown PEGP events dropped + logged before `rm_acpi_notify`: `nv-acpi.c:411-416` (AC/NVPCF handlers have no other rm_* path, so (a) covers them). (c) `nv_indicate_not_idle` returns `NV_ERR_GPU_NOT_FULL_POWER` + `pm_runtime_put_noidle` if still status-suspended: `nv.c:5751-5757` |
+| 3 HIGH notifier→freeze hole | Card syscore set only in `.prepare` after the re-check: `nv.c:4612-4616` |
+| 4 MEDIUM queued port resume at late-suspend | `pm_runtime_barrier(port)` before the re-check: `nv.c:4611`. POST resync `pm_request_resume(card)` once + log when card status-suspended and port not: `nv.c:4563-4567` |
+| strict_midlayer residue | cleared at POST: `nv.c:4562` |
+| Race guard | `pm_system_wakeup()` in runtime_resume while skipping, log gated on target state: `nv.c:5333-5339` |
+| Recursive walk, any depth, idempotent | `nv_sleep_mark` = `dev_pm_syscore_device` + `device_for_each_child` calling itself: `nv.c:4514-4518`; POST clears port subtree incl. card and anything added meanwhile |
+| Slot check | `pci_walk_bus` on `port->subordinate`: all functions in the card's slot and runtime-suspended, plus the port: `nv.c:4492-4511` |
+| Counter | `nv_sleep_skipped++` only if the card's `.prepare` set syscore: `nv.c:4590-4591` |
+
+Params unchanged (`nv_sleep_skip_idle` int 0644 =1, `nv_sleep_skipped` ulong 0444). Only allowed calls used; none of the forbidden list. Budgets: longest function 30 lines, nesting 2.
+
+## Decisions I made
+- **nvdefer override**: while skipping, events are deferred even if `nv_acpi_defer=0` (otherwise that knob alone would reopen the dead-GPU-on-charger-plug path). Otherwise literal to the design.
+- **IN_STANDBY state** kept during a skipped sleep as designed; nothing else reads it.
+- All logs are `printk(KERN_INFO/ERR "NVRM: nvsleep: …")`.
+
+## Verification
+`NVSLEEP_COMPILE=1 bash tests/nvsleep/static.sh` → 29/29 PASS, `make modules rc=0`, 0 new warnings (test writer had already updated it for v2.1).
+
+## Unverified
+- Runtime behaviour (needs reboot + `tests/nvsleep/live.sh`): the live-only claims are that the subtree walk reaches every descendant, that RM honours the `NV_ERR_GPU_NOT_FULL_POWER` refusal, and the D3cold-after-resume result.
+- `patches/nvsleep/v2work/` is not covered by `patches/nvsleep/.gitignore` (which ignores `work/`), so it will show as untracked at commit time; the PM should decide whether to ignore it.
+- Per your instructions I did not run luminos-notes / brain log / commit.

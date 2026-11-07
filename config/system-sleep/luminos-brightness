@@ -1,0 +1,39 @@
+#!/bin/sh
+# luminos-brightness — the panel wakes at the brightness it went to sleep at.
+# [CHANGE: claude-code | 2026-11-06] docs/sleep/CONTRACTS.md §F. Replaces luminos-brightness.service,
+# which forced 100 % and wrote the NVIDIA backlight after every wake (woke the dGPU, EINVAL).
+# A backlight driven by nvidia is never read or written: that goes to RM. Only its driver link is
+# looked at. amdgpu_bl2 has no driver link at all (its device is a DRM connector), which is fine.
+# Installed to /usr/lib/systemd/system-sleep/. Never blocks sleep: always exits 0.
+ROOT=${BACKLIGHT_ROOT:-/sys/class/backlight}
+RUN=${RUN_DIR:-/run/luminos}
+
+log() { echo "luminos-brightness: $*" >&2; }
+
+save() {
+    for b in "$ROOT"/*; do
+        case "$(readlink "$b/device/driver")" in */nvidia) continue ;; esac
+        [ -e "$b/brightness" ] || continue
+        mkdir -p "$RUN" && cat "$b/brightness" > "$RUN/brightness-${b##*/}" || log "could not save ${b##*/}"
+    done
+}
+
+# Walks the records, not the backlights: nothing else can be touched here.
+restore() {
+    for r in "$RUN"/brightness-*; do
+        [ -e "$r" ] || continue
+        b=$ROOT/${r##*/brightness-}
+        case "$(readlink "$b/device/driver")" in */nvidia) rm -f "$r"; continue ;; esac
+        saved=$(cat "$r")
+        if [ -n "$saved" ] && [ "$saved" != "$(cat "$b/brightness" 2>/dev/null)" ]; then
+            echo "$saved" > "$b/brightness" && log "restored ${b##*/} to $saved" || log "could not restore ${b##*/}"
+        fi
+        rm -f "$r"
+    done
+}
+
+case "${1:-}" in
+    pre) save ;;
+    post) restore ;;
+esac
+exit 0

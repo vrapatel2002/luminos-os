@@ -1,0 +1,276 @@
+--- a/kernel-open/nvidia/nv.c
++++ b/kernel-open/nvidia/nv.c
+@@ -180,6 +180,19 @@
+ 
+ struct rw_semaphore nv_system_pm_lock;
+ 
++/*
++ * LUMINOS-NVSLEEP [CHANGE: claude-code | 2026-11-06]  docs/sleep/DESIGN-NVSLEEP-V2.md (v2.1): an s2idle sleep
++ * that finds the dGPU's whole slot runtime-suspended leaves it off. The root port and every descendant are
++ * syscore for the sleep, so the PM core never powers the slot or calls RM. nv-acpi.c reads nv_sleep_skipping.
++ */
++static int nv_sleep_skip_idle = 1;
++module_param(nv_sleep_skip_idle, int, 0644);
++MODULE_PARM_DESC(nv_sleep_skip_idle, "Leave a runtime-suspended GPU off across s2idle (1=on, 0=stock)");
++static unsigned long nv_sleep_skipped;
++module_param(nv_sleep_skipped, ulong, 0444);
++MODULE_PARM_DESC(nv_sleep_skipped, "Count of system sleeps that left the GPU off");
++NvBool nv_sleep_skipping;                /* PM_SUSPEND_PREPARE .. PM_POST_SUSPEND of a skipped sleep */
++
+ #if defined(CONFIG_PM)
+ static nv_power_state_t nv_system_power_state;
+ static nv_pm_action_depth_t nv_system_pm_action_depth;
+@@ -268,11 +281,13 @@
+ static int           nv_pmops_poweroff         (struct device *dev);
+ static int           nv_pmops_runtime_suspend  (struct device *dev);
+ static int           nv_pmops_runtime_resume   (struct device *dev);
++static int           nv_pmops_prepare          (struct device *dev); /* LUMINOS-NVSLEEP */
+ /* nvdefer (nv-acpi.c) */
+ void nv_acpi_defer_on_runtime_resume(nv_linux_state_t *nvl);
+ void nv_acpi_defer_cancel(void);
+ 
+ struct dev_pm_ops nv_pm_ops = {
++    .prepare         = nv_pmops_prepare, /* LUMINOS-NVSLEEP */
+     .suspend         = nv_pmops_suspend,
+     .resume          = nv_pmops_resume,
+     .freeze          = nv_pmops_freeze,
+@@ -4465,6 +4480,144 @@
+ }
+ 
+ /*
++ * LUMINOS-NVSLEEP: PM_SUSPEND_PREPARE marks the port and every descendant except the card syscore.
++ * The card's .prepare (after freeze, pm_suspend_target_state valid) re-checks the slot and marks the
++ * card or aborts the sleep with -EBUSY. PM_POST_SUSPEND (also after an abort) clears everything.
++ */
++static NvBool nv_sleep_card_syscore;     /* the card's .prepare confirmed the skip */
++/* pci_walk_bus callback: a function that is awake, or outside the card's slot, voids the scan. */
++static int nv_sleep_scan_fn(struct pci_dev *pdev, void *data)
++{
++    struct pci_dev **card = data;
++
++    if (pm_runtime_suspended(&pdev->dev) && (PCI_SLOT(pdev->devfn) == PCI_SLOT((*card)->devfn)))
++        return 0;
++    *card = NULL;
++    return 1;
++}
++
++/* True when the port, the card and every function below the port are runtime-suspended. */
++static NvBool nv_sleep_slot_idle(struct pci_dev *card)
++{
++    struct pci_dev *port = pci_upstream_bridge(card);
++
++    if ((port == NULL) || (port->subordinate == NULL) || !pm_runtime_suspended(&port->dev))
++        return NV_FALSE;
++    pci_walk_bus(port->subordinate, nv_sleep_scan_fn, &card);
++    return card != NULL;
++}
++
++/* Set or clear syscore on dev and every descendant, any depth. Idempotent. */
++static int nv_sleep_mark(struct device *dev, void *on)
++{
++    dev_pm_syscore_device(dev, *(NvBool *)on);
++    return device_for_each_child(dev, on, nv_sleep_mark);
++}
++
++/* PM_SUSPEND_PREPARE: every GPU's slot idle -> mark the ports and descendants, not the cards. */
++static NvBool nv_sleep_skip_begin(void)
++{
++    nv_linux_state_t *nvl;
++    NvBool on = NV_TRUE, idle;
++
++    if (!READ_ONCE(nv_sleep_skip_idle))
++        return NV_FALSE;
++    down(&nv_system_power_state_lock);
++    down_write(&nv_system_pm_lock);
++    LOCK_NV_LINUX_DEVICES();
++    idle = (nv_linux_devices != NULL) && (nv_system_power_state == NV_POWER_STATE_RUNNING);
++    for (nvl = nv_linux_devices; idle && (nvl != NULL); nvl = nvl->next)
++        idle = (nvl->pci_dev != NULL) && nv_sleep_slot_idle(nvl->pci_dev);
++    for (nvl = nv_linux_devices; idle && (nvl != NULL); nvl = nvl->next)
++    {
++        nv_sleep_mark(&pci_upstream_bridge(nvl->pci_dev)->dev, &on);
++        dev_pm_syscore_device(nvl->dev, false);    /* the card decides in .prepare */
++    }
++    UNLOCK_NV_LINUX_DEVICES();
++    if (idle)
++    {
++        WRITE_ONCE(nv_sleep_skipping, NV_TRUE);
++        nv_system_power_state = NV_POWER_STATE_IN_STANDBY;
++        printk(KERN_INFO "NVRM: nvsleep: GPU slot idle, leaving it off for this sleep\n");
++    }
++    else
++        up_write(&nv_system_pm_lock);
++    up(&nv_system_power_state_lock);
++
++    return idle;
++}
++
++/* Clear the port subtree (card included); a slot that a queued port resume powered is resynced. */
++static void nv_sleep_unmark(nv_linux_state_t *nvl)
++{
++    struct pci_dev *port = (nvl->pci_dev != NULL) ? pci_upstream_bridge(nvl->pci_dev) : NULL;
++    NvBool off = NV_FALSE;
++
++    if (port == NULL)
++        return;
++    nv_sleep_mark(&port->dev, &off);
++    dev_pm_set_strict_midlayer(nvl->dev, false);   /* pci_pm_prepare set it; the card's complete() never ran */
++    if (pm_runtime_status_suspended(nvl->dev) && !pm_runtime_status_suspended(&port->dev))
++    {
++        printk(KERN_INFO "NVRM: nvsleep: slot powered while the GPU slept, resuming it to resync\n");
++        pm_request_resume(nvl->dev);
++    }
++}
++
++/* PM_POST_SUSPEND after a skipped (or aborted) sleep. Returns NV_FALSE when the stock path applies. */
++static NvBool nv_sleep_skip_end(void)
++{
++    nv_linux_state_t *nvl;
++
++    down(&nv_system_power_state_lock);
++    if (!nv_sleep_skipping)
++    {
++        up(&nv_system_power_state_lock);
++        return NV_FALSE;
++    }
++    LOCK_NV_LINUX_DEVICES();
++    for (nvl = nv_linux_devices; nvl != NULL; nvl = nvl->next)
++        nv_sleep_unmark(nvl);
++    UNLOCK_NV_LINUX_DEVICES();
++    WRITE_ONCE(nv_sleep_skipping, NV_FALSE);
++    up_write(&nv_system_pm_lock);
++    nv_system_power_state = NV_POWER_STATE_RUNNING;
++    printk(KERN_INFO "NVRM: nvsleep: %s\n", nv_sleep_card_syscore ? "sleep over, GPU stayed off" : "sleep aborted, flags cleared");
++    if (nv_sleep_card_syscore)
++        nv_sleep_skipped++;
++    nv_sleep_card_syscore = NV_FALSE;
++    up(&nv_system_power_state_lock);
++
++    return NV_TRUE;
++}
++
++/*
++ * LUMINOS-NVSLEEP: runs after freeze_processes, when pm_suspend_target_state is valid. Confirms
++ * the skip for this card (it becomes syscore too) or aborts the sleep; POST then cleans up.
++ */
++static int nv_pmops_prepare(struct device *dev)
++{
++    struct pci_dev *card, *port;
++
++    if (!READ_ONCE(nv_sleep_skipping) || !dev_is_pci(dev))   /* skipping implies every GPU is PCI */
++        return 0;
++    card = to_pci_dev(dev);
++    port = pci_upstream_bridge(card);
++    if ((pm_suspend_target_state == PM_SUSPEND_TO_IDLE) && (port != NULL))
++    {
++        pm_runtime_barrier(&port->dev);   /* a queued port resume runs now, not at late-suspend */
++        if (nv_sleep_slot_idle(card))
++        {
++            dev_pm_syscore_device(dev, true);
++            nv_sleep_card_syscore = NV_TRUE;
++            return 0;
++        }
++    }
++    printk(KERN_INFO "NVRM: nvsleep: GPU slot no longer idle or not s2idle, aborting this sleep\n");
++    return -EBUSY;
++}
++
++/*
+  * PM notifier for automatic suspend/resume functionality
+  */
+ static int nv_pm_notifier(struct notifier_block *nb, unsigned long event, void *unused)
+@@ -4473,6 +4626,11 @@
+     nv_power_state_t power_state;
+     const char *name;
+ 
++    /* LUMINOS-NVSLEEP: an idle slot stays off; none of RM's suspend/resume runs */
++    if (((event == PM_SUSPEND_PREPARE) && nv_sleep_skip_begin()) ||
++        ((event == PM_POST_SUSPEND) && nv_sleep_skip_end()))
++        return NOTIFY_OK;
++
+     switch (event) {
+     case PM_SUSPEND_PREPARE:
+         power_state = NV_POWER_STATE_IN_STANDBY;
+@@ -4953,6 +5111,10 @@
+     NV_STATUS status;
+     nv_pm_action_t pm_action;
+ 
++    /* LUMINOS-NVSLEEP: a procfs suspend/resume must not run RM's path (or unlock twice) while the GPU is left off */
++    if (READ_ONCE(nv_sleep_skipping))
++        return NV_ERR_IN_USE;
++
+     switch (power_state)
+     {
+         case NV_POWER_STATE_IN_HIBERNATE:
+@@ -5169,6 +5331,14 @@
+     nv_pci_tegra_boost_clocks(dev);
+ #endif
+ 
++    /* LUMINOS-NVSLEEP: a wake during a skipped sleep aborts that sleep; POST then clears the flags */
++    if (READ_ONCE(nv_sleep_skipping))
++    {
++        pm_system_wakeup();
++        if (pm_suspend_target_state != PM_SUSPEND_ON)
++            printk(KERN_INFO "NVRM: nvsleep: GPU resumed during a skipped sleep, aborting the sleep\n");
++    }
++
+     err = nvidia_transition_dynamic_power(dev, NV_FALSE);
+     if (err)
+     {
+@@ -5579,6 +5749,15 @@
+     nvl->is_forced_shutdown = NV_TRUE;
+     pci_bus_type.shutdown(dev);
+ 
++    /* LUMINOS-NVSLEEP: defensive only (the nv-acpi.c gating is the real guard; RM honouring this error is unverified):
++     * that resume fails silently while runtime PM is disabled (system sleep) and RM must not program an unpowered GPU */
++    if (pm_runtime_status_suspended(dev))
++    {
++        pm_runtime_put_noidle(dev);
++        printk_ratelimited(KERN_ERR "NVRM: nvsleep: GPU could not be woken (runtime PM disabled), RM entry refused\n");
++        return NV_ERR_GPU_NOT_FULL_POWER;
++    }
++
+     return NV_OK;
+ #else
+     return NV_ERR_NOT_SUPPORTED;
+--- a/kernel-open/nvidia/nv-acpi.c
++++ b/kernel-open/nvidia/nv-acpi.c
+@@ -32,6 +32,7 @@
+ /* nvdefer entry points (used by nv.c) */
+ void nv_acpi_defer_on_runtime_resume(nv_linux_state_t *nvl);
+ void nv_acpi_defer_cancel(void);
++extern NvBool nv_sleep_skipping;    /* LUMINOS-NVSLEEP (nv.c): a sleep that left the GPU off is in progress */
+ 
+ #if defined(NV_LINUX_ACPI_EVENTS_SUPPORTED)
+ static NV_STATUS   nv_acpi_extract_integer (const union acpi_object *, void *, NvU32, NvU32 *);
+@@ -165,13 +166,15 @@
+ 
+     spin_lock_irqsave(&nv_defer_lock, flags);
+     dev = (nv_defer_nvl != NULL) ? nv_defer_nvl->dev : NULL;
+-    if (READ_ONCE(nv_acpi_defer) && (dev != NULL) && pm_runtime_suspended(dev))
++    /* LUMINOS-NVSLEEP: during a skipped sleep runtime PM may be disabled, so RM must never be entered */
++    if (READ_ONCE(nv_sleep_skipping) ||
++        ((dev != NULL) && READ_ONCE(nv_acpi_defer) && pm_runtime_status_suspended(dev)))
+     {
+         nv_defer_pending |= kind;
+         nv_acpi_deferred++;
+         deferred = NV_TRUE;
+         /* The GPU may have started waking since the check: replay then. */
+-        if (!pm_runtime_suspended(dev))
++        if ((dev != NULL) && !pm_runtime_suspended(dev))
+             schedule_delayed_work(&nv_defer_work, 0);
+     }
+     else
+@@ -405,6 +408,12 @@
+     if ((event_type >= NV_ACPI_POWER_LEVEL_D1) && (event_type <= NV_ACPI_POWER_LEVEL_D5) &&
+         nv_acpi_defer_event(NV_DEFER_DNOTIFY))
+         return;
++    /* LUMINOS-NVSLEEP: anything else would enter RM on a GPU the sleep left off; drop it */
++    if (READ_ONCE(nv_sleep_skipping))
++    {
++        printk_ratelimited(KERN_INFO "NVRM: nvsleep: ACPI event 0x%x dropped during sleep\n", event_type);
++        return;
++    }
+     rm_acpi_notify(pNvAcpiObject->sp, NV_STATE_PTR(nvl), event_type);
+ }
+ 

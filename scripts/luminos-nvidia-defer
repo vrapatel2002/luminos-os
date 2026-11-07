@@ -9,10 +9,15 @@
 # Exit: 0 ok, 1 failed, 2 patch no longer applies (source left stock).
 # Never reloads modules: reboot (or reload the nvidia modules) to use a new build.
 # LUMINOS_FROM_HOOK=1: skip mkinitcpio (pacman's 90-mkinitcpio-install runs after this hook).
+# [CHANGE: claude-code | 2026-11-06] Second patch nvsleep, applied after nvdefer: a dGPU that is
+# already off stays off through system sleep (docs/sleep/). If only nvsleep no longer applies,
+# nvdefer is still built and the script exits 2.
 set -u
 TAG=luminos-nvidia-defer
 FILES=(kernel-open/nvidia/nv-acpi.c kernel-open/nvidia/nv.c)
+SLEEP_FILES=(kernel-open/nvidia/nv.c kernel-open/nvidia/nv-acpi.c)   # [CHANGE: claude-code | 2026-11-06] nvsleep v2.1
 MARK=nv_acpi_defer_on_runtime_resume
+SLEEP_MARK=LUMINOS-NVSLEEP
 SHARE=/usr/local/share/luminos/nvdefer
 REPO=$(readlink -f "$(dirname "$(readlink -f "$0")")/..")
 PATCH_OPTS=(-p1 -F0 --no-backup-if-mismatch -s -f)
@@ -29,11 +34,12 @@ KRUN=$(uname -r)
 # As root only the installed copy for this exact version counts, and only if root owns it
 # and nobody else can write it. The repo copy is for --check / --install only.
 trusted_patch() {
-    local p=$SHARE/nvdefer-$VER.patch
+    local p=$SHARE/${1:-nvdefer}-$VER.patch
     [ -f "$p" ] && [ "$(stat -c %u "$p")" = 0 ] && (( (8#$(stat -c %a "$p") & 8#022) == 0 )) && echo "$p"
 }
 
 src_patched() { grep -q "$MARK" "$SRC/kernel-open/nvidia/nv-acpi.c" 2>/dev/null; }
+sleep_patched() { grep -q "$SLEEP_MARK" "$SRC/kernel-open/nvidia/nv.c" 2>/dev/null; }
 
 # Build + install for every kernel with headers. A failure only counts for the running
 # kernel or a kernel that currently has nvidia/$VER installed.
@@ -57,10 +63,13 @@ initramfs() {
     mkinitcpio -P || { warn "mkinitcpio -P failed — the initramfs may still hold the old nvidia.ko"; return 1; }
 }
 
+# restore_orig nvsleep nvdefer: newest patch first, so nv.c ends at its stock copy.
 restore_orig() {
-    local f
-    for f in "${FILES[@]}"; do
-        [ -f "$SRC/$f.nvdefer-orig" ] && mv -f "$SRC/$f.nvdefer-orig" "$SRC/$f"
+    local f s
+    for s in "$@"; do
+        for f in "${FILES[@]}" "${SLEEP_FILES[@]}"; do
+            [ -f "$SRC/$f.$s-orig" ] && mv -f "$SRC/$f.$s-orig" "$SRC/$f"
+        done
     done
 }
 
@@ -81,9 +90,13 @@ check_initramfs() {
 do_check() {
     local rc=0 p
     if src_patched; then say "source $SRC: patched"; else say "source $SRC: stock"; rc=1; fi
+    if sleep_patched; then say "source $SRC: nvsleep patched"; else say "source $SRC: no nvsleep"; rc=1; fi
     p=$(trusted_patch || true)
     [ -n "$p" ] || { [ -f "$REPO/patches/nvdefer/nvdefer-$VER.patch" ] && p="$REPO/patches/nvdefer/nvdefer-$VER.patch (repo, not installed)"; }
     say "patch for $VER: ${p:-none}"
+    p=$(trusted_patch nvsleep || true)
+    [ -n "$p" ] || { [ -f "$REPO/patches/nvsleep/nvsleep-$VER.patch" ] && p="$REPO/patches/nvsleep/nvsleep-$VER.patch (repo, not installed)"; }
+    say "nvsleep patch for $VER: ${p:-none}"
     if [ -e /sys/module/nvidia/parameters/nv_acpi_defer ]; then
         say "loaded module: patched (nv_acpi_defer=$(cat /sys/module/nvidia/parameters/nv_acpi_defer)," \
             "deferred=$(cat /sys/module/nvidia/parameters/nv_acpi_deferred)," \
@@ -91,13 +104,34 @@ do_check() {
     else
         say "loaded module: stock (or nvidia not loaded)"; rc=1
     fi
+    if [ -e /sys/module/nvidia/parameters/nv_sleep_skip_idle ]; then
+        say "loaded module: nvsleep (nv_sleep_skip_idle=$(cat /sys/module/nvidia/parameters/nv_sleep_skip_idle)," \
+            "nv_sleep_skipped=$(cat /sys/module/nvidia/parameters/nv_sleep_skipped))"
+    else
+        say "loaded module: no nvsleep (or nvidia not loaded)"; rc=1
+    fi
     check_initramfs || rc=1
     return $rc
 }
 
-do_apply() {
+# Returns 0 patched, 1 failed, 2 cannot apply (nvdefer stays usable).
+apply_sleep() {
     local p f
-    for f in /usr/src/nvidia-*/kernel-open/nvidia/*.nvdefer-orig; do      # leftovers of old versions
+    if sleep_patched; then say "source $SRC already has nvsleep"; return 0; fi
+    p=$(trusted_patch nvsleep)
+    [ -n "$p" ] || { warn "no trusted $SHARE/nvsleep-$VER.patch — sleep keeps waking the dGPU"; return 2; }
+    if ! patch "${PATCH_OPTS[@]}" --dry-run -d "$SRC" < "$p" >/dev/null; then
+        warn "$(basename "$p") no longer applies to nvidia $VER — sleep keeps waking the dGPU; port the patch (docs/sleep)"
+        return 2
+    fi
+    for f in "${SLEEP_FILES[@]}"; do cp -p "$SRC/$f" "$SRC/$f.nvsleep-orig"; done
+    patch "${PATCH_OPTS[@]}" -d "$SRC" < "$p" || { restore_orig nvsleep; warn "nvsleep failed after a clean dry-run; nvsleep removed"; return 1; }
+    say "patched $SRC with $p"
+}
+
+do_apply() {
+    local p f sleep_rc=0
+    for f in /usr/src/nvidia-*/kernel-open/nvidia/*.nvdefer-orig /usr/src/nvidia-*/kernel-open/nvidia/*.nvsleep-orig; do      # leftovers of old versions
         [ -e "$f" ] && [[ "$f" != "$SRC/"* ]] && rm -f "$f"
     done
     if src_patched; then
@@ -110,21 +144,24 @@ do_apply() {
             exit 2
         fi
         for f in "${FILES[@]}"; do cp -p "$SRC/$f" "$SRC/$f.nvdefer-orig"; done
-        patch "${PATCH_OPTS[@]}" -d "$SRC" < "$p" || { restore_orig; warn "patch failed after a clean dry-run; source restored"; exit 1; }
+        patch "${PATCH_OPTS[@]}" -d "$SRC" < "$p" || { restore_orig nvdefer; warn "patch failed after a clean dry-run; source restored"; exit 1; }
         say "patched $SRC with $p"
     fi
+    apply_sleep || sleep_rc=$?
     if ! dkms_rebuild; then
         warn "dkms build of patched nvidia $VER FAILED — restoring stock source and rebuilding"
-        restore_orig; dkms_rebuild; initramfs; exit 1
+        restore_orig nvsleep nvdefer; dkms_rebuild; initramfs; exit 1
     fi
     initramfs || exit 1
+    [ $sleep_rc = 0 ] || { warn "built with nvdefer only — nvsleep is NOT in this build"; exit $sleep_rc; }
     say "done — reboot (or reload nvidia modules) to use it"
 }
 
 do_revert() {
-    if ! src_patched; then say "source $SRC is already stock"; exit 0; fi
-    [ -f "$SRC/${FILES[0]}.nvdefer-orig" ] || { warn "no *.nvdefer-orig copies in $SRC; reinstall nvidia-open-dkms to revert"; exit 1; }
-    restore_orig
+    if ! src_patched && ! sleep_patched; then say "source $SRC is already stock"; exit 0; fi
+    if src_patched && [ ! -f "$SRC/${FILES[0]}.nvdefer-orig" ]; then warn "no *.nvdefer-orig copies in $SRC; reinstall nvidia-open-dkms to revert"; exit 1; fi
+    if sleep_patched && [ ! -f "$SRC/${SLEEP_FILES[1]}.nvsleep-orig" ]; then warn "no *.nvsleep-orig copies in $SRC; reinstall nvidia-open-dkms to revert"; exit 1; fi
+    restore_orig nvsleep nvdefer
     dkms_rebuild || { warn "dkms build of stock nvidia $VER failed"; exit 1; }
     initramfs || exit 1
     say "reverted to stock — reboot (or reload nvidia modules) to use it"
@@ -132,8 +169,10 @@ do_revert() {
 
 do_install() {
     local p=$REPO/patches/nvdefer/nvdefer-$VER.patch h=$REPO/config/pacman-hooks/80-luminos-nvidia-defer.hook
-    [ -f "$p" ] && [ -f "$h" ] || { warn "run --install from the repo checkout (need $p and $h)"; exit 1; }
+    local s=$REPO/patches/nvsleep/nvsleep-$VER.patch
+    [ -f "$p" ] && [ -f "$s" ] && [ -f "$h" ] || { warn "run --install from the repo checkout (need $p, $s and $h)"; exit 1; }
     install -D -o root -g root -m0644 "$p" "$SHARE/nvdefer-$VER.patch" &&
+    install -D -o root -g root -m0644 "$s" "$SHARE/nvsleep-$VER.patch" &&
     install -D -o root -g root -m0755 "$REPO/scripts/luminos-nvidia-defer" /usr/local/bin/luminos-nvidia-defer &&
     install -D -o root -g root -m0644 "$h" /etc/pacman.d/hooks/80-luminos-nvidia-defer.hook || { warn "install failed"; exit 1; }
     say "installed patch, script and pacman hook"

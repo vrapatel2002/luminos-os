@@ -1,0 +1,11 @@
+# 71-luminos-wake.rules
+# [CHANGE: claude-code | 2026-11-06] Strong sleep: a USB device plugged in later must not
+# be able to wake the laptop either (docs/sleep/CONTRACTS.md §D). 0b05 = internal keyboard,
+# 1d6b = root hubs (disabling one clears wake on all its ports, keyboard included).
+# "bind" as well as "add": usbhid turns wakeup back ON for keyboards and mice while it binds,
+# which is after the add event. The usb_device bind event comes after that.
+# TEST: devices that cannot wake have no power/wakeup file at all.
+# Installed by scripts/luminos-strong-sleep. Boot-time devices: luminos-wake-policy.service.
+
+ACTION=="add|bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}!="0b05", \
+    ATTR{idVendor}!="1d6b", TEST=="power/wakeup", ATTR{power/wakeup}="disabled"
