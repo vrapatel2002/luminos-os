@@ -5,11 +5,11 @@
 # Sources live in the repo: src/luminos-style/. Rebuild: makepkg -sfi (from this folder).
 pkgname=luminos-style
 pkgver=1.0
-pkgrel=6
+pkgrel=7
 pkgdesc='Luminos: live style values for the forked KDE look + Style Tuner window'
 arch=(x86_64)
 license=(GPL-3.0-or-later)
-depends=(qt6-base qt6-declarative jq kconfig)  # kirigami is needed only by the tuner window, and depends on us (no cycle)
+depends=(qt6-base qt6-declarative jq kconfig networkmanager-qt)  # kirigami is needed only by the tuner window, and depends on us (no cycle)
 makedepends=(cmake)
 source=()
 
@@ -31,7 +31,7 @@ package() {
   install -Dm644 "$t/luminos-style-tuner.desktop" "$pkgdir/usr/share/applications/luminos-style-tuner.desktop"
   # DECISION 177: Wi-Fi page look — /usr/local/share is searched before /usr/share, so these replace plasma-nm's QML
   local n="$startdir/../../src/kcm-nm-look"
-  for f in main.qml ConnectionItem.qml AddConnectionDialog.qml ConfigurationDialog.qml; do
+  for f in main.qml Rows.qml AddConnectionDialog.qml ConfigurationDialog.qml; do
     install -Dm644 "$n/$f" "$pkgdir/usr/local/share/kcm_networkmanagement/qml/$f"
   done
   install -Dm644 "$n/luminos-nm-look.hook" "$pkgdir/usr/share/libalpm/hooks/luminos-nm-look.hook"

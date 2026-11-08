@@ -743,3 +743,12 @@ conductor.go and fan_control.go are deleted.
 | `packages/luminos-style/PKGBUILD` | builds/installs all of the above |
 | `scripts/style-tuner/make-tunables.py` | generates `packages/*-luminos/*-tunables.patch` from a patched tree; exact-count rules |
 | `docs/style-tuner/README.md` | keys, defaults, rebuild notes, proof shots |
+
+## WI-FI PAGE (DECISIONS 177-178) — added 2026-11-08
+<!-- [CHANGE: claude-code | 2026-11-08] -->
+| Path | What |
+|---|---|
+| `src/kcm-nm-look/main.qml` | the Wi-Fi & Networking page: list / details / other connections; installed to /usr/local/share/kcm_networkmanagement/qml |
+| `src/kcm-nm-look/Rows.qml` | Card, TitleText, Section, Segmented, ValueRow building blocks |
+| `src/kcm-nm-look/luminos-nm-look.hook` | pacman hook: warns when plasma-nm leaves 6.7.5 |
+| `src/luminos-style/network/networkconnection.{h,cpp}` | QML `org.luminos.network` `NetworkConnection`: status + editable fields, save with secrets merged, connect/disconnect/forget |

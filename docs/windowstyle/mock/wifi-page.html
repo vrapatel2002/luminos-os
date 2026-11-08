@@ -1,0 +1,264 @@
+<title>Luminos Wi-Fi Page</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,300..700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: System Settings frame (sidebar + rounded page hole). Inside the hole: ONE column.
+   Page 1 = network list, page 2 = one network's details as card rows (no tabs). Single dark look = the live Nexus scheme. */
+:root{
+  color-scheme: dark;
+  --desk:#0e0d11; --win:#131316; --side:#1b1a1f; --hole:#18171b;
+  --card:#211f25; --row:#29282d; --row-hi:#302f36; --sel:#46455f;
+  --accent:#c4c0ff; --on-accent:#2c2766; --good:#a6d49c; --warn:#f2c46d; --bad:#f4a7a7;
+  --fg:#e6e1e8; --fg2:#c9c5d0; --fg3:#928f99; --line:#34333b;
+  --sans:"Google Sans Flex","Google Sans","Roboto Flex",system-ui,sans-serif;
+  --mono:"Roboto Mono",ui-monospace,monospace;
+  --r-out:28px; --r-in:4px;
+}
+*{box-sizing:border-box}
+html,body{background:var(--desk);color:var(--fg);font-family:var(--sans)}
+body{padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.intro{max-width:1180px;margin:0 auto 14px;display:flex;flex-wrap:wrap;gap:6px 24px;align-items:baseline}
+.intro h1{font-size:20px;font-weight:500;margin:0}
+.intro p{margin:0;color:var(--fg3);font-size:13px;max-width:78ch}
+
+.frame{max-width:1180px;margin:0 auto;background:var(--win);border:1px solid var(--line);border-radius:22px;display:grid;grid-template-columns:300px minmax(0,1fr);min-height:760px;overflow:hidden}
+@media (max-width:860px){.frame{grid-template-columns:minmax(0,1fr)}.ss-side{display:none!important}}
+.ss-side{background:var(--win);padding:18px 14px;display:flex;flex-direction:column;gap:4px}
+.chip-back{align-self:flex-start;display:flex;align-items:center;gap:8px;background:var(--row);border-radius:999px;padding:10px 16px;font-size:14px;margin-bottom:10px}
+.ss-row{background:var(--row);border-radius:var(--r-in);padding:14px 14px;display:flex;gap:12px;align-items:center}
+.ss-row.first{border-radius:var(--r-out) var(--r-out) var(--r-in) var(--r-in)}
+.ss-row.last{border-radius:var(--r-in) var(--r-in) var(--r-out) var(--r-out)}
+.ss-row.sel{background:var(--sel);border-radius:32px;margin-bottom:6px}
+.disc{width:36px;height:36px;border-radius:50%;background:var(--accent);display:grid;place-items:center;flex:none}
+.disc svg{width:18px;height:18px;fill:var(--on-accent)}
+.ss-row b{display:block;font-weight:400;font-size:15px}
+.ss-row small{display:block;font-size:12.5px;color:var(--fg2)}
+
+.hole{background:var(--hole);margin:12px 12px 12px 0;border-radius:18px;position:relative;overflow:hidden;min-width:0}
+@media (max-width:860px){.hole{margin:12px}}
+.view{position:absolute;inset:0;overflow-y:auto;padding:26px clamp(14px,4vw,40px) 90px;transition:transform 220ms cubic-bezier(.2,0,0,1),opacity 220ms}
+.view.off-right{transform:translateX(40px);opacity:0;pointer-events:none}
+.view.off-left{transform:translateX(-40px);opacity:0;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.view{transition:none}}
+.col{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+h2.title{font-size:30px;font-weight:400;margin:0 0 10px;text-wrap:balance}
+.sec{font-size:13px;color:var(--fg3);margin:14px 22px 2px;font-weight:500;letter-spacing:.02em}
+
+/* connected rows: a group of rects, outer corners big, touching corners small */
+.group{display:flex;flex-direction:column;gap:3px}
+.item{background:var(--card);border-radius:var(--r-in);min-height:64px;padding:12px 22px;display:flex;align-items:center;gap:16px;min-width:0}
+.group > .item:first-child{border-top-left-radius:var(--r-out);border-top-right-radius:var(--r-out)}
+.group > .item:last-child{border-bottom-left-radius:var(--r-out);border-bottom-right-radius:var(--r-out)}
+.item.click{cursor:pointer}
+.item.click:hover{background:var(--row-hi)}
+.item .t{flex:1;min-width:0}
+.item .t b{display:block;font-weight:400;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .t small{display:block;font-size:13.5px;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .v{color:var(--fg2);font-size:14.5px;text-align:right;min-width:0;overflow-wrap:anywhere}
+.mono{font-family:var(--mono);font-size:13.5px}
+.ico{width:24px;height:24px;flex:none}
+.ico path{fill:currentColor}
+.ico.acc{color:var(--accent)} .ico.dim{color:var(--fg2)}
+.chev{width:18px;height:18px;flex:none;color:var(--fg3)}
+
+/* hero: the connected network */
+.hero{background:var(--card);border-radius:var(--r-out);padding:20px 22px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 18px;align-items:center;cursor:pointer}
+.hero:hover{background:var(--row-hi)}
+.hero .big{width:52px;height:52px;border-radius:50%;background:color-mix(in srgb,var(--accent) 18%,transparent);display:grid;place-items:center;grid-row:span 2}
+.hero .big svg{width:28px;height:28px;color:var(--accent)}
+.hero .n{font-size:19px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hero .s{font-size:14px;color:var(--fg2);display:flex;flex-wrap:wrap;gap:4px 14px}
+.hero .s span{display:inline-flex;gap:6px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--good);display:inline-block}
+.gear{grid-row:span 2;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:var(--accent);border:0;background:transparent;cursor:pointer}
+.gear:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.gear svg{width:24px;height:24px}
+
+/* controls */
+.switch{width:52px;height:32px;border-radius:16px;background:#3a3946;position:relative;border:2px solid #77757f;cursor:pointer;flex:none;padding:0}
+.switch::after{content:"";position:absolute;left:4px;top:4px;width:20px;height:20px;border-radius:50%;background:#8f8c98;transition:all 160ms cubic-bezier(.2,0,0,1)}
+.switch[aria-checked="true"]{background:var(--accent);border-color:var(--accent)}
+.switch[aria-checked="true"]::after{left:24px;top:2px;width:24px;height:24px;background:var(--on-accent)}
+.seg{display:inline-flex;background:var(--row);border-radius:999px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg button{border:0;background:transparent;border-radius:999px;padding:7px 14px;font-size:13.5px;color:var(--fg2);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--sel);color:var(--fg)}
+.field{background:#121115;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font-size:14.5px;min-width:0;width:min(260px,100%)}
+.field:focus{outline:none;border-color:var(--accent)}
+.sel{appearance:none;background:#121115 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m7 10 5 5 5-5' fill='none' stroke='%23c9c5d0' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 10px center/18px;padding-right:36px}
+.pill{border:0;border-radius:999px;padding:10px 18px;font-size:14px;cursor:pointer;background:var(--row)}
+.pill:hover{filter:brightness(1.15)}
+.pill.acc{background:var(--accent);color:var(--on-accent);font-weight:500}
+.pill.bad{background:color-mix(in srgb,var(--bad) 16%,var(--row));color:var(--bad)}
+.stack{flex-direction:column;align-items:stretch;gap:10px}
+.stack .row1{display:flex;align-items:center;gap:16px}
+.meter{display:flex;gap:3px;align-items:flex-end;height:16px}
+.meter i{width:5px;border-radius:2px;background:#45434d}
+.meter i.on{background:var(--good)}
+.backchip{display:inline-flex;align-items:center;gap:6px;border:0;background:var(--row);border-radius:999px;padding:8px 14px 8px 10px;font-size:14px;cursor:pointer;margin-bottom:8px;align-self:flex-start}
+.backchip svg{width:18px;height:18px}
+.head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 20px;margin-bottom:6px}
+.head .ht{flex:1;min-width:220px}
+.head .ht small{color:var(--fg2);font-size:14px;display:flex;gap:8px;align-items:center}
+details.adv summary{list-style:none;cursor:pointer}
+details.adv summary::-webkit-details-marker{display:none}
+details.adv[open] summary .chev{transform:rotate(90deg)}
+.savebar{position:absolute;left:50%;bottom:18px;transform:translate(-50%,120%);background:#2a2930;border:1px solid var(--line);border-radius:999px;padding:8px 8px 8px 20px;display:flex;align-items:center;gap:10px;box-shadow:0 12px 32px rgba(0,0,0,.45);transition:transform 220ms cubic-bezier(.2,0,0,1);white-space:nowrap;max-width:calc(100% - 24px)}
+.savebar.show{transform:translate(-50%,0)}
+.savebar span{font-size:14px;color:var(--fg2);overflow:hidden;text-overflow:ellipsis}
+.note{max-width:1180px;margin:14px auto 0;color:var(--fg3);font-size:12.5px;line-height:1.5}
+.hidden{display:none!important}
+</style>
+
+<div class="intro">
+  <h1>Wi-Fi page — prototype</h1>
+  <p>Click the connected network (or its gear) to open its details. Every setting is a row you can change; a Save bar appears only when something changed. Use the back chip to return. Example data from your screenshot.</p>
+</div>
+
+<div class="frame">
+  <aside class="ss-side" aria-label="System Settings sidebar (unchanged)">
+    <div class="chip-back"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>All settings &nbsp;<span style="color:var(--fg2)">Wi-Fi &amp; Internet</span></div>
+    <div class="ss-row sel"><span class="disc"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></span><span><b>Wi-Fi &amp; Networking</b><small>Edit network connections</small></span></div>
+    <div class="ss-row first"><span class="disc"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/></svg></span><span><b>Firewall</b><small>Control your network rules</small></span></div>
+    <div class="ss-row"><span class="disc"><svg viewBox="0 0 24 24"><path d="M4 6h16v3H4zm0 5h16v3H4zm0 5h16v3H4z"/></svg></span><span><b>Proxy</b><small>Configure the proxy servers used</small></span></div>
+    <div class="ss-row last"><span class="disc"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></span><span><b>Connection Preferences</b><small>Generic network preferences</small></span></div>
+  </aside>
+
+  <section class="hole" aria-label="Wi-Fi page">
+    <!-- ============ PAGE 1: the list ============ -->
+    <div class="view" id="v-list">
+      <div class="col">
+        <h2 class="title">Wi-Fi &amp; Networking</h2>
+
+        <div class="group">
+          <div class="item"><svg class="ico acc" viewBox="0 0 24 24"><path d="M12 18.5a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6ZM2 8.7l1.6 1.8a12.4 12.4 0 0 1 16.8 0L22 8.7a14.8 14.8 0 0 0-20 0Zm3.6 4 1.6 1.8a7.1 7.1 0 0 1 9.6 0l1.6-1.8a9.5 9.5 0 0 0-12.8 0Z"/></svg>
+            <span class="t"><b>Wi-Fi</b><small id="wifiSub">On · 9 networks nearby</small></span>
+            <button class="switch" id="wifiSwitch" role="switch" aria-checked="true" aria-label="Wi-Fi"></button></div>
+        </div>
+
+        <div id="wifiOn">
+          <div class="sec">Connected</div>
+          <div class="hero" id="heroCard" tabindex="0" role="button" aria-label="BELL851 5.0 GHz details">
+            <span class="big"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 18.5a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6ZM2 8.7l1.6 1.8a12.4 12.4 0 0 1 16.8 0L22 8.7a14.8 14.8 0 0 0-20 0Zm3.6 4 1.6 1.8a7.1 7.1 0 0 1 9.6 0l1.6-1.8a9.5 9.5 0 0 0-12.8 0Z"/></svg></span>
+            <span class="n">BELL851 5.0 GHz</span>
+            <button class="gear" id="heroGear" aria-label="Network settings"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.4 4.6.1-1.1-.1-1.1 2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.9-1.1L15.7 3h-3.9l-.4 2.6c-.7.3-1.3.7-1.9 1.1l-2.4-1-2 3.4 2 1.6-.1 1.1.1 1.1-2 1.6 2 3.4 2.4-1c.6.4 1.2.8 1.9 1.1l.4 2.6h3.9l.4-2.6c.7-.3 1.3-.7 1.9-1.1l2.4 1 2-3.4z"/></svg></button>
+            <span class="s"><span><i class="dot"></i>Connected</span><span>5 GHz · Excellent</span><span class="mono">192.168.2.16</span></span>
+          </div>
+
+          <div class="sec">Saved networks</div>
+          <div class="group" id="saved"></div>
+
+          <div class="sec">Other networks</div>
+          <div class="group" id="others"></div>
+
+          <div class="sec">More</div>
+          <div class="group">
+            <div class="item click"><svg class="ico dim" viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg><span class="t"><b>Join a hidden network</b></span><svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2"/></svg></div>
+            <div class="item click"><svg class="ico dim" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/></svg><span class="t"><b>VPN and other connections</b><small>Wired, VPN, hotspot</small></span><svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2"/></svg></div>
+          </div>
+        </div>
+        <div id="wifiOff" class="hidden"><div class="group"><div class="item"><span class="t"><b>Wi-Fi is off</b><small>Turn it on to see networks nearby.</small></span></div></div></div>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 2: one network ============ -->
+    <div class="view off-right" id="v-detail" aria-hidden="true">
+      <div class="col">
+        <button class="backchip" id="back"><svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2"/></svg>Wi-Fi</button>
+        <div class="head">
+          <div class="ht"><h2 class="title" style="margin:0">BELL851 5.0 GHz</h2><small><i class="dot"></i>Connected · 5 GHz · since 9:14 AM</small></div>
+          <button class="pill">Disconnect</button>
+          <button class="pill bad">Forget</button>
+        </div>
+
+        <div class="sec">Status</div>
+        <div class="group">
+          <div class="item"><span class="t"><b>Signal</b></span><span class="v" style="display:flex;gap:10px;align-items:center"><span class="meter" aria-hidden="true"><i class="on" style="height:5px"></i><i class="on" style="height:8px"></i><i class="on" style="height:11px"></i><i class="on" style="height:14px"></i><i style="height:16px"></i></span>77% · Excellent</span></div>
+          <div class="item"><span class="t"><b>Speed</b></span><span class="v">1.2 Gbit/s</span></div>
+          <div class="item"><span class="t"><b>Band</b></span><span class="v">5.785 GHz · channel 157</span></div>
+          <div class="item"><span class="t"><b>IP address</b></span><span class="v mono">192.168.2.16</span></div>
+          <div class="item"><span class="t"><b>Router</b></span><span class="v mono">192.168.2.1</span></div>
+        </div>
+
+        <div class="sec">Connection</div>
+        <div class="group">
+          <div class="item"><span class="t"><b>Connect automatically</b><small>Join when this network is in range</small></span><button class="switch edit" role="switch" aria-checked="true" aria-label="Connect automatically"></button></div>
+          <div class="item"><span class="t"><b>Available to all users</b><small>Other accounts on this laptop can use it</small></span><button class="switch edit" role="switch" aria-checked="true" aria-label="Available to all users"></button></div>
+          <div class="item"><span class="t"><b>Metered connection</b><small>Limits background downloads</small></span><select class="field sel edit" aria-label="Metered connection"><option>Automatic</option><option>Yes</option><option>No</option></select></div>
+        </div>
+
+        <div class="sec">Security</div>
+        <div class="group">
+          <div class="item"><span class="t"><b>Type</b></span><select class="field sel edit" aria-label="Security type"><option>WPA2 Personal</option><option>WPA3 Personal</option><option>WPA2 / WPA3 Personal</option><option>None</option></select></div>
+          <div class="item"><span class="t"><b>Password</b></span><span style="display:flex;gap:8px;align-items:center;min-width:0"><input class="field edit" id="pw" type="password" value="example-password" aria-label="Password" style="width:min(200px,100%)"><button class="pill" id="pwShow" style="padding:8px 14px">Show</button></span></div>
+        </div>
+
+        <div class="sec">IP settings</div>
+        <div class="group">
+          <div class="item stack"><div class="row1"><span class="t"><b>IPv4</b><small id="v4sub">Address from the router (DHCP)</small></span>
+            <span class="seg" data-seg="v4"><button aria-pressed="true" class="edit">Automatic</button><button aria-pressed="false" class="edit">Manual</button></span></div>
+            <div id="v4manual" class="hidden" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
+              <input class="field edit" style="width:100%" placeholder="Address  192.168.2.50" aria-label="IPv4 address">
+              <input class="field edit" style="width:100%" placeholder="Prefix  24" aria-label="Prefix length">
+              <input class="field edit" style="width:100%" placeholder="Router  192.168.2.1" aria-label="Router">
+            </div></div>
+          <div class="item stack"><div class="row1"><span class="t"><b>DNS</b><small id="dnssub">From the router</small></span><button class="switch edit" id="dnsAuto" role="switch" aria-checked="true" aria-label="Automatic DNS"></button></div>
+            <input id="dnsField" class="field edit hidden" style="width:100%" placeholder="Servers, e.g. 1.1.1.1, 9.9.9.9" aria-label="DNS servers"></div>
+          <div class="item stack"><div class="row1"><span class="t"><b>IPv6</b><small id="v6sub">Automatic</small></span>
+            <span class="seg" data-seg="v6"><button aria-pressed="true" class="edit">Automatic</button><button aria-pressed="false" class="edit">Manual</button><button aria-pressed="false" class="edit">Off</button></span></div></div>
+        </div>
+
+        <details class="adv">
+          <summary class="sec" style="display:flex;align-items:center;gap:6px;margin-top:18px">Advanced <svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2"/></svg></summary>
+          <div class="group" style="margin-top:8px">
+            <div class="item"><span class="t"><b>Band</b><small>Lock to one band</small></span><select class="field sel edit" aria-label="Band"><option>Automatic</option><option>2.4 GHz</option><option>5 GHz</option><option>6 GHz</option></select></div>
+            <div class="item"><span class="t"><b>MAC address</b><small>What the router sees</small></span><select class="field sel edit" aria-label="MAC address"><option>Laptop's own (4C:82:A9:B8:71:79)</option><option>Random each time</option><option>Fixed random for this network</option></select></div>
+            <div class="item"><span class="t"><b>Hidden network</b></span><button class="switch edit" role="switch" aria-checked="false" aria-label="Hidden network"></button></div>
+            <div class="item"><span class="t"><b>MTU</b><small>Leave on Automatic unless told otherwise</small></span><input class="field edit" style="width:140px" placeholder="Automatic" aria-label="MTU"></div>
+            <div class="item"><span class="t"><b>Router (BSSID)</b></span><span class="v mono">7A:8D:AF:8A:03:B6</span></div>
+            <div class="item"><span class="t"><b>Wi-Fi card</b></span><span class="v mono">wlp3s0</span></div>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div class="savebar" id="savebar" role="status"><span>Unsaved changes</span><button class="pill" id="undo">Undo</button><button class="pill acc" id="save">Save</button></div>
+  </section>
+</div>
+<p class="note">What changes compared with today: one column instead of a squeezed list + tabs; the connected network is a big card at the top; saved and nearby networks are separate groups with full names; details are plain rows grouped by what they mean (no Status/General/Wi-Fi/IPv4/IPv6 tabs); rarely used settings sit under Advanced; nothing is saved until you press Save.</p>
+
+<script>
+const wifiPath='M12 18.5a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6ZM2 8.7l1.6 1.8a12.4 12.4 0 0 1 16.8 0L22 8.7a14.8 14.8 0 0 0-20 0Zm3.6 4 1.6 1.8a7.1 7.1 0 0 1 9.6 0l1.6-1.8a9.5 9.5 0 0 0-12.8 0Z';
+const lockSvg='<svg class="ico dim" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M12 2a5 5 0 0 0-5 5v3H6v12h12V10h-1V7a5 5 0 0 0-5-5Zm-3 8V7a3 3 0 0 1 6 0v3Zm3 4a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/></svg>';
+const saved=[["BELL851 6.0 GHz","WPA3 · last used 2 hours ago",3],["BELL851 2.4 GHz","WPA2 · last used Nov 4",3]];
+const others=[["BELL045","WPA2",2],["BELL418","WPA2",2],["BELL431","WPA2",2],["BELL648","WPA2",1],["BELL707","WPA2",1],["VIRGIN222","WPA2",1],["DIRECT-roku-810-26C8E5","WPA2",1]];
+function row(n,s,bars){
+  const op=bars>=3?1:bars==2?.8:.55;
+  return `<div class="item click" tabindex="0"><svg class="ico" viewBox="0 0 24 24" style="opacity:${op}"><path d="${wifiPath}"/></svg><span class="t"><b>${n}</b><small>${s}</small></span>${lockSvg}</div>`;
+}
+document.getElementById("saved").innerHTML=saved.map(r=>row(...r)).join("");
+document.getElementById("others").innerHTML=others.map(r=>row(...r)).join("");
+
+const vList=document.getElementById("v-list"), vDet=document.getElementById("v-detail");
+function open(){vList.classList.add("off-left");vDet.classList.remove("off-right");vDet.setAttribute("aria-hidden","false");vList.setAttribute("aria-hidden","true");vDet.scrollTop=0;setTimeout(()=>document.getElementById("back").focus(),230)}
+function close(){document.getElementById("savebar").classList.remove("show");vDet.classList.add("off-right");vList.classList.remove("off-left");vDet.setAttribute("aria-hidden","true");vList.setAttribute("aria-hidden","false")}
+document.getElementById("heroCard").addEventListener("click",open);
+document.getElementById("heroCard").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();open()}});
+document.getElementById("back").addEventListener("click",close);
+
+// switches
+document.querySelectorAll(".switch").forEach(s=>s.addEventListener("click",e=>{e.stopPropagation();s.setAttribute("aria-checked",s.getAttribute("aria-checked")!=="true");if(s.classList.contains("edit"))dirty()}));
+document.getElementById("wifiSwitch").addEventListener("click",()=>{const on=document.getElementById("wifiSwitch").getAttribute("aria-checked")==="true";document.getElementById("wifiOn").classList.toggle("hidden",!on);document.getElementById("wifiOff").classList.toggle("hidden",on);document.getElementById("wifiSub").textContent=on?"On · 9 networks nearby":"Off"});
+document.getElementById("dnsAuto").addEventListener("click",()=>{const a=document.getElementById("dnsAuto").getAttribute("aria-checked")==="true";document.getElementById("dnsField").classList.toggle("hidden",a);document.getElementById("dnssub").textContent=a?"From the router":"Your own servers"});
+// segmented
+document.querySelectorAll(".seg").forEach(g=>g.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{g.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b));
+  if(g.dataset.seg==="v4"){const man=b.textContent==="Manual";document.getElementById("v4manual").classList.toggle("hidden",!man);document.getElementById("v4sub").textContent=man?"Fixed address you type in":"Address from the router (DHCP)"}
+  if(g.dataset.seg==="v6"){document.getElementById("v6sub").textContent=b.textContent}
+  dirty()})));
+document.querySelectorAll("select.edit,input.edit").forEach(i=>i.addEventListener("input",dirty));
+document.getElementById("pwShow").addEventListener("click",()=>{const p=document.getElementById("pw");const s=p.type==="password";p.type=s?"text":"password";document.getElementById("pwShow").textContent=s?"Hide":"Show"});
+const bar=document.getElementById("savebar");
+function dirty(){bar.classList.add("show")}
+document.getElementById("undo").addEventListener("click",()=>bar.classList.remove("show"));
+document.getElementById("save").addEventListener("click",()=>{bar.querySelector("span").textContent="Saved";setTimeout(()=>{bar.classList.remove("show");bar.querySelector("span").textContent="Unsaved changes"},900)});
+</script>
