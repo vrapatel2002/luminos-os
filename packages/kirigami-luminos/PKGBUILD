@@ -39,11 +39,12 @@
 # 1.8: Positive/Warning/Error fills derived from the tone hue (KF6 ignores Background* keys).
 
 # [CHANGE: claude-code | 2026-11-08] pkgrel 1.9 — DECISION 176: kirigami-luminos-tunables.patch swaps the look literals for live
+# 1.10 (R6): icon disc + glyph colour from the tuner (iconDiscColor / iconGlyphColor).
 # org.luminos.style values (same defaults; ~/.config/luminos/style.json changes them live). Needs luminos-style.
 
 pkgname=kirigami
 pkgver=6.30.0
-pkgrel=1.9
+pkgrel=1.10
 pkgdesc='A QtQuick based components set'
 arch=(x86_64)
 url='https://develop.kde.org/products/frameworks/'
@@ -75,7 +76,7 @@ sha256sums=('6de811e559c20dc1086c0cf2c34bb98712dbe4d45f960c62c3c3f887332c95f8'
             'a85ed70422ff8446a39bb5eb46a81b6636026284a1544310b6a103f78802ce9f'
             'ffc6e55fda91bb6bace79c23e679887c4821c7e70a7419fa077a48ccb7b9f29b'
             '3c4b5cda8df04a3ae5430da83b825dcdba8e13eba5ba6b126d5c9e3afb3096c3'
-            'f80fbb9128eee1877974fc229c97b98cb63a4885f4622b200a4f2d42da6aa89d')
+            '9e50bd34cdf6e3964c59098fdba27c6360990e27cb3bf3cc1fd4217cca60c885')
 validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB  # David Faure <faure@kde.org>
               90A968ACA84537CC27B99EAF2C8DF587A6D4AAC1) # Nicolas Fella <nicolas.fella@kde.org>
 

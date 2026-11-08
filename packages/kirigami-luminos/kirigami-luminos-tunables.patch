@@ -17,8 +17,12 @@
      readonly property color __luminosOnPrimary: Qt.hsla(Math.max(0, Platform.Theme.focusColor.hslHue),
          Platform.Theme.focusColor.hslSaturation * 0.4, 0.27, 1)
  
-@@ -184,7 +185,7 @@
-             : (root.selected ? Platform.Theme.focusColor : Platform.Theme.highlightColor)
+@@ -181,10 +182,10 @@
+         height: root.__luminosDisc ? root.__luminosDiscSize : parent.height
+         radius: height / 2
+         color: !root.__luminosDisc ? "transparent"
+-            : (root.selected ? Platform.Theme.focusColor : Platform.Theme.highlightColor)
++            : (root.selected ? Platform.Theme.focusColor : (LxS.Style.iconDiscColor || Platform.Theme.highlightColor))
          Behavior on color {
              // Snappy: 120 ms colour, M3 standard curve (0.2,0,0,1), no overshoot; only on state change
 -            ColorAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
@@ -26,6 +30,15 @@
          }
  
          Primitives.Icon {
+@@ -199,7 +200,7 @@
+             implicitHeight: root.icon.height
+             selected: root.selected
+             color: (root.icon.color.a > 0 || !root.__luminosDisc) ? root.icon.color
+-                : (root.selected ? root.__luminosOnPrimary : Platform.Theme.highlightedTextColor)
++                : (root.selected ? root.__luminosOnPrimary : (LxS.Style.iconGlyphColor || Platform.Theme.highlightedTextColor))
+         }
+     }
+ 
 --- a/src/forms/flat/FormEntry.qml
 +++ b/src/forms/flat/FormEntry.qml
 @@ -4,6 +4,7 @@

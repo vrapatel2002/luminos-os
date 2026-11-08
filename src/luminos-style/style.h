@@ -35,6 +35,18 @@ class Style : public QObject
     LX_PROP(qreal, iconCirclePx)
     LX_PROP(int, animationMs)
     LX_PROP(int, animationShortMs)   // animationMs * 2/3
+    // [CHANGE: claude-code | 2026-11-08] R6: search bar, icons, sidebar bottom gap
+    LX_PROP(qreal, searchHeightPx)
+    LX_PROP(qreal, searchLeftPx)
+    LX_PROP(qreal, searchRightPx)
+    LX_PROP(qreal, searchTopPx)
+    LX_PROP(qreal, searchBottomPx)
+    LX_PROP(qreal, iconGlyphPx)
+    LX_PROP(qreal, iconOffsetXPx)
+    LX_PROP(qreal, iconOffsetYPx)
+    LX_PROP(qreal, sidebarBottomPx)
+    LX_PROP(QString, iconDiscColor)  // "" = theme colour, else #rrggbb
+    LX_PROP(QString, iconGlyphColor) // "" = theme colour, else #rrggbb
 #undef LX_PROP
 public:
     explicit Style(QObject *parent = nullptr);
@@ -59,6 +71,17 @@ public:
     qreal iconCirclePx() const;
     int animationMs() const;
     int animationShortMs() const { return qRound(animationMs() * 2.0 / 3.0); }
+    qreal searchHeightPx() const;
+    qreal searchLeftPx() const;
+    qreal searchRightPx() const;
+    qreal searchTopPx() const;
+    qreal searchBottomPx() const;
+    qreal iconGlyphPx() const;
+    qreal iconOffsetXPx() const;
+    qreal iconOffsetYPx() const;
+    qreal sidebarBottomPx() const;
+    QString iconDiscColor() const;
+    QString iconGlyphColor() const;
 
 Q_SIGNALS:
     void changed();

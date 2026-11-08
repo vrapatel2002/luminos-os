@@ -1,9 +1,12 @@
 --- a/app/ModuleView.cpp
 +++ b/app/ModuleView.cpp
-@@ -6,6 +6,10 @@
+@@ -6,6 +6,13 @@
   *   SPDX-License-Identifier: GPL-2.0-or-later
   */
  
++#include <QMargins>
++#include <QFileSystemWatcher>
++#include <QDir>
 +#include <QStandardPaths>
 +#include <QJsonObject>
 +#include <QJsonDocument>
@@ -11,7 +14,7 @@
  #include "ModuleView.h"
  #include "ExternalAppModule.h"
  #include "MenuItem.h"
-@@ -51,6 +55,15 @@
+@@ -51,6 +58,38 @@
  // sits in a 16 px rounded rect, 12 px in from the window edges, on the Window colour. Child
  // widgets (QQuickWidget KCMs) paint square, so this overlay repaints the four corners on top.
  static constexpr int LuminosHoleInset = 12;
@@ -24,10 +27,33 @@
 +    const QJsonValue v = QJsonDocument::fromJson(f.readAll()).object().value(QLatin1String(key));
 +    return v.isDouble() ? qBound(14, qRound(v.toDouble()), 60) : fallback;
 +}
++// R6: bottom button bar margins. The base is what the code would set anyway; a key in the file overrides one side.
++static void luminosApplyButtons(QWidget *w)
++{
++    const QVariantList base = w->property("_lxBase").toList();
++    if (base.size() != 4)
++        return;
++    QJsonObject o;
++    QFile f(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/luminos/style.json"));
++    if (f.open(QIODevice::ReadOnly))
++        o = QJsonDocument::fromJson(f.readAll()).object();
++    const char *keys[4] = {"buttonsLeftPx", "buttonsTopPx", "buttonsRightPx", "buttonsBottomPx"};
++    int m[4];
++    for (int i = 0; i < 4; ++i) {
++        const QJsonValue v = o.value(QLatin1String(keys[i]));
++        m[i] = v.isDouble() ? qBound(0, qRound(v.toDouble()), 96) : base.at(i).toInt();
++    }
++    w->setContentsMargins(m[0], m[1], m[2], m[3]);
++}
++static void luminosSetButtonBase(QWidget *w, const QMargins &b)
++{
++    w->setProperty("_lxBase", QVariantList{b.left(), b.top(), b.right(), b.bottom()});
++    luminosApplyButtons(w);
++}
  static constexpr qreal LuminosHoleRadius = 16;
  
  // QML KCMs: page on View (the hole), no header strip colour/line, 30 px title. Kirigami.Theme.View == 0.
-@@ -88,7 +101,7 @@
+@@ -88,7 +127,7 @@
              } else if (QByteArray(o->metaObject()->className()).startsWith("Heading") && o->parentItem()
                  && QByteArray(o->parentItem()->metaObject()->className()).startsWith("DefaultPageTitleDelegate")) {
                  QFont f = o->property("font").value<QFont>();
@@ -36,6 +62,43 @@
                  f.setWeight(QFont::Normal);
                  o->setProperty("font", f);
                  titled = true;
+@@ -259,7 +298,22 @@
+     // Create the dialog
+     d->mButtons = new QDialogButtonBox(Qt::Horizontal, this);
+     d->mLayout->addWidget(d->mButtons);
+-    d->mButtons->setContentsMargins(16, 8, 16, 12);
++    luminosSetButtonBase(d->mButtons, QMargins(16, 8, 16, 12));
++    { // R6 (DECISION 176): re-apply the bar margins the moment the style tuner file changes
++        const QString lxDir = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/luminos");
++        const QString lxFile = lxDir + QStringLiteral("/style.json");
++        QDir().mkpath(lxDir);
++        auto *lxWatch = new QFileSystemWatcher(QStringList{lxDir}, this);
++        if (QFile::exists(lxFile))
++            lxWatch->addPath(lxFile);
++        auto lxReload = [this, lxWatch, lxFile] {
++            if (QFile::exists(lxFile) && !lxWatch->files().contains(lxFile))
++                lxWatch->addPath(lxFile);
++            luminosApplyButtons(d->mButtons);
++        };
++        connect(lxWatch, &QFileSystemWatcher::directoryChanged, this, lxReload);
++        connect(lxWatch, &QFileSystemWatcher::fileChanged, this, lxReload);
++    }
+ 
+     // Create the buttons in it
+     d->mApply = d->mButtons->addButton(QDialogButtonBox::Apply);
+@@ -620,10 +674,10 @@
+ 
+     d->mLayout->setContentsMargins(0, 0, 0, 0);
+     d->mLayout->setSpacing(0);
+-    d->mButtons->setContentsMargins(style()->pixelMetric(QStyle::PM_LayoutLeftMargin),
++    luminosSetButtonBase(d->mButtons, QMargins(style()->pixelMetric(QStyle::PM_LayoutLeftMargin),
+                                     style()->pixelMetric(QStyle::PM_LayoutTopMargin),
+                                     style()->pixelMetric(QStyle::PM_LayoutRightMargin),
+-                                    style()->pixelMetric(QStyle::PM_LayoutBottomMargin));
++                                    style()->pixelMetric(QStyle::PM_LayoutBottomMargin)));
+     d->mButtons->setProperty("_breeze_force_frame", true);
+     d->mPageWidget->layout()->setSpacing(0);
+     if (auto titleWidget = qobject_cast<KTitleWidget *>(d->mPageWidget->pageHeader())) {
 --- a/app/qml/CategoriesPage.qml
 +++ b/app/qml/CategoriesPage.qml
 @@ -6,6 +6,7 @@
@@ -46,15 +109,38 @@
  import QtQuick
  import QtQuick.Controls as QQC2
  import QtQuick.Layouts
-@@ -58,7 +59,7 @@
+@@ -26,9 +27,9 @@
+         id: pageHeader
+ 
+         // TODO Plasma 6.6 align size to grid
+-        minimumHeight: 48 + 16 + 8
++        minimumHeight: LxS.Style.searchHeightPx + LxS.Style.searchTopPx + LxS.Style.searchBottomPx
+         preferredHeight: minimumHeight; maximumHeight: minimumHeight; separatorVisible: false
+-        leftPadding: 16; rightPadding: 16; topPadding: 16; bottomPadding: 8
++        leftPadding: LxS.Style.searchLeftPx; rightPadding: LxS.Style.searchRightPx; topPadding: LxS.Style.searchTopPx; bottomPadding: LxS.Style.searchBottomPx
+         background: Item {}
+ 
+         // Not visible; just to get its size so we can match this custom header
+@@ -57,8 +58,8 @@
+                 focus: !Kirigami.InputMethod.willShowOnActive
                  visible: mainColumn.width >= 160
                  Layout.fillWidth: true
-                 Layout.preferredHeight: 48
+-                Layout.preferredHeight: 48
 -                font.pixelSize: 16
++                Layout.preferredHeight: LxS.Style.searchHeightPx
 +                font.pixelSize: 16 * LxS.Style.textScale
                  background: Rectangle {
                      radius: height / 2; Kirigami.Theme.colorSet: Kirigami.Theme.View; color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
                      border.color: searchField.activeFocus ? Kirigami.Theme.focusColor : Qt.alpha(Kirigami.Theme.disabledTextColor, 0.45)
+@@ -138,7 +139,7 @@
+         Accessible.role: Accessible.List
+         leftMargin: mainColumn.width < 160 ? 14 : 16
+         rightMargin: leftMargin < 16 ? 14 : 0 // wide: the ScrollablePage already keeps ~16 px on the right
+-        bottomMargin: 16
++        bottomMargin: LxS.Style.sidebarBottomPx
+ 
+         KeyNavigation.up: searchField
+         KeyNavigation.backtab: hamburgerMenuButton
 @@ -163,7 +164,7 @@
                  opacity: ListView.view.width >= 160 ? 1 : 0
                  height: visible ? implicitHeight : 0
@@ -95,7 +181,7 @@
  
      Accessible.name: text
      Accessible.onPressAction: clicked()
-@@ -44,11 +45,11 @@
+@@ -44,26 +45,27 @@
          color: delegate.hovered && !delegate.highlighted ? Qt.tint(base, Qt.alpha(Kirigami.Theme.textColor, 0.08)) : base
          topLeftRadius: delegate.cornerTop; topRightRadius: delegate.cornerTop
          bottomLeftRadius: delegate.cornerBottom; bottomRightRadius: delegate.cornerBottom
@@ -112,19 +198,29 @@
      }
  
      contentItem: RowLayout {
-@@ -57,9 +58,9 @@
+         spacing: Kirigami.Units.smallSpacing
+ 
          Rectangle { // icon disc
-             Layout.leftMargin: delegate.compact ? 0 : delegate.leadingPadding
+-            Layout.leftMargin: delegate.compact ? 0 : delegate.leadingPadding
++            Layout.leftMargin: (delegate.compact ? 0 : delegate.leadingPadding) + LxS.Style.iconOffsetXPx
++            transform: Translate { y: LxS.Style.iconOffsetYPx }
              Layout.alignment: Qt.AlignVCenter
 -            implicitWidth: 40; implicitHeight: 40; radius: 20
-+            implicitWidth: LxS.Style.iconCirclePx; implicitHeight: LxS.Style.iconCirclePx; radius: LxS.Style.iconCirclePx / 2
-             color: delegate.highlighted ? Kirigami.Theme.focusColor : Kirigami.Theme.highlightColor
+-            color: delegate.highlighted ? Kirigami.Theme.focusColor : Kirigami.Theme.highlightColor
 -            Behavior on color { ColorAnimation { duration: 180 } }
++            implicitWidth: LxS.Style.iconCirclePx; implicitHeight: LxS.Style.iconCirclePx; radius: LxS.Style.iconCirclePx / 2
++            color: delegate.highlighted ? Kirigami.Theme.focusColor : (LxS.Style.iconDiscColor || Kirigami.Theme.highlightColor)
 +            Behavior on color { ColorAnimation { duration: LxS.Style.animationMs } }
              Kirigami.Icon {
-                 anchors.centerIn: parent; width: Kirigami.Units.iconSizes.smallMedium; height: width
+-                anchors.centerIn: parent; width: Kirigami.Units.iconSizes.smallMedium; height: width
++                anchors.centerIn: parent; width: LxS.Style.iconGlyphPx; height: width
                  source: delegate.icon.name; isMask: true
-@@ -73,10 +74,10 @@
+-                color: delegate.highlighted ? Kirigami.Theme.highlightColor : Kirigami.Theme.highlightedTextColor
++                color: delegate.highlighted ? Kirigami.Theme.highlightColor : (LxS.Style.iconGlyphColor || Kirigami.Theme.highlightedTextColor)
+             }
+         }
+ 
+@@ -73,10 +75,10 @@
              Layout.fillWidth: true
              Layout.leftMargin: Kirigami.Units.smallSpacing
              spacing: 1
@@ -211,3 +307,43 @@
      wideScreen: false
  
      pageStack.initialPage: mainColumn
+--- a/app/qml/SubCategoryPage.qml
++++ b/app/qml/SubCategoryPage.qml
+@@ -6,6 +6,7 @@
+ 
+ pragma ComponentBehavior: Bound
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick 2.15
+ import QtQuick.Controls 2.5 as QQC2
+ import QtQuick.Layouts 1.1
+@@ -24,9 +25,9 @@
+ 
+     header: Kirigami.AbstractApplicationHeader {
+         id: pageHeader
+-        minimumHeight: 48 + 16 + 8 // [CHANGE: claude-code | 2026-10-12] Luminos: same header as the categories page
++        minimumHeight: LxS.Style.searchHeightPx + LxS.Style.searchTopPx + LxS.Style.searchBottomPx // [CHANGE: claude-code | 2026-10-12] Luminos: same header as the categories page
+         preferredHeight: minimumHeight; maximumHeight: minimumHeight; separatorVisible: false
+-        leftPadding: subCategoryColumn.width < 160 ? 14 : 16; rightPadding: 16; topPadding: 16; bottomPadding: 8
++        leftPadding: subCategoryColumn.width < 160 ? 14 : LxS.Style.searchLeftPx; rightPadding: LxS.Style.searchRightPx; topPadding: LxS.Style.searchTopPx; bottomPadding: LxS.Style.searchBottomPx
+         background: Item {}
+ 
+         contentItem: RowLayout {
+@@ -45,7 +46,7 @@
+             QQC2.ToolButton {
+                 id: backButton
+ 
+-                implicitHeight: 48
++                implicitHeight: LxS.Style.searchHeightPx
+                 visible: !applicationWindow().wideScreen
+ 
+                 padding: Kirigami.Units.smallSpacing
+@@ -136,7 +137,7 @@
+         anchors.fill: parent
+         leftMargin: subCategoryColumn.width < 160 ? 14 : 16
+         rightMargin: leftMargin < 16 ? 14 : 0 // wide: the ScrollablePage already keeps ~16 px on the right
+-        bottomMargin: 16
++        bottomMargin: LxS.Style.sidebarBottomPx
+         model: systemsettings.subCategoryModel
+         currentIndex: systemsettings.activeSubCategoryRow
+         activeFocusOnTab: true

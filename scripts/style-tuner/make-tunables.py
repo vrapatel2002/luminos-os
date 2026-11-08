@@ -51,7 +51,11 @@ RULES = {
     R("Platform.Theme.defaultFont.pointSize * (lxSection ? 1.0 : 1.2)", f"Platform.Theme.defaultFont.pointSize * (lxSection ? {S}groupLabelPx / 12 : 1.2)"),
     R("Math.min(firstInGroup ? 28 : 4, height / 2)", f"Math.min(firstInGroup ? {S}cornerOuterPx : {S}cornerInnerPx, height / 2)"),
     R("Math.min(lastInGroup ? 28 : 4, height / 2)", f"Math.min(lastInGroup ? {S}cornerOuterPx : {S}cornerInnerPx, height / 2)")],
-  "src/delegates/IconTitleSubtitle.qml": [R("Math.max(40, root.icon.width + 16)", f"Math.max({S}iconCirclePx, root.icon.width + 16)")],
+  "src/delegates/IconTitleSubtitle.qml": [R("Math.max(40, root.icon.width + 16)", f"Math.max({S}iconCirclePx, root.icon.width + 16)"),
+    R("(root.selected ? Platform.Theme.focusColor : Platform.Theme.highlightColor)",
+      f"(root.selected ? Platform.Theme.focusColor : ({S}iconDiscColor || Platform.Theme.highlightColor))"),
+    R("(root.selected ? root.__luminosOnPrimary : Platform.Theme.highlightedTextColor)",
+      f"(root.selected ? root.__luminosOnPrimary : ({S}iconGlyphColor || Platform.Theme.highlightedTextColor))")],
  },
  "kirigami-addons": {
   "src/formcard/FormButtonDelegate.qml": [R("Math.max(40, iconSize + 16)", f"Math.max({S}iconCirclePx, iconSize + 16)")],
@@ -74,7 +78,13 @@ RULES = {
  "systemsettings": {
   "app/qml/CategoriesPage.qml": [
     R("font.pixelSize: 16", f"font.pixelSize: 16 * {S}textScale"),
-    R("font { pixelSize: 12; weight: Font.Medium; letterSpacing: 0.5 }", f"font {{ pixelSize: {S}groupLabelPx; weight: Font.Medium; letterSpacing: 0.5 }}")],
+    R("font { pixelSize: 12; weight: Font.Medium; letterSpacing: 0.5 }", f"font {{ pixelSize: {S}groupLabelPx; weight: Font.Medium; letterSpacing: 0.5 }}"),
+    # R6 (2026-11-08): search bar size/position + sidebar bottom gap
+    R("minimumHeight: 48 + 16 + 8", f"minimumHeight: {S}searchHeightPx + {S}searchTopPx + {S}searchBottomPx"),
+    R("leftPadding: 16; rightPadding: 16; topPadding: 16; bottomPadding: 8",
+      f"leftPadding: {S}searchLeftPx; rightPadding: {S}searchRightPx; topPadding: {S}searchTopPx; bottomPadding: {S}searchBottomPx"),
+    R("Layout.preferredHeight: 48\n", f"Layout.preferredHeight: {S}searchHeightPx\n"),
+    R("        bottomMargin: 16\n", f"        bottomMargin: {S}sidebarBottomPx\n")],
   "app/qml/CategoryItem.qml": [
     R("pressed ? 12 : highlighted ? 32 : groupStart ? 28 : 4", f"pressed ? 12 : highlighted ? {S}cornerSelectedPx : groupStart ? {S}cornerOuterPx : {S}cornerInnerPx"),
     R("pressed ? 12 : highlighted ? 32 : groupEnd ? 28 : 4", f"pressed ? 12 : highlighted ? {S}cornerSelectedPx : groupEnd ? {S}cornerOuterPx : {S}cornerInnerPx"),
@@ -83,11 +93,24 @@ RULES = {
     R("Math.max(0, (width - 40) / 2)", f"Math.max(0, (width - {S}iconCirclePx) / 2)"),
     R("implicitWidth: 40; implicitHeight: 40; radius: 20", f"implicitWidth: {S}iconCirclePx; implicitHeight: {S}iconCirclePx; radius: {S}iconCirclePx / 2"),
     R("font.pixelSize: 16 }", f"font.pixelSize: 16 * {S}textScale }}"),
-    R("opacity: 0.75; font.pixelSize: 13", f"opacity: 0.75; font.pixelSize: 13 * {S}textScale")],
+    R("opacity: 0.75; font.pixelSize: 13", f"opacity: 0.75; font.pixelSize: 13 * {S}textScale"),
+    # R6: icon colour, glyph size, nudge left/right/up/down
+    R("Layout.leftMargin: delegate.compact ? 0 : delegate.leadingPadding",
+      f"Layout.leftMargin: (delegate.compact ? 0 : delegate.leadingPadding) + {S}iconOffsetXPx\n            transform: Translate {{ y: {S}iconOffsetYPx }}"),
+    R("color: delegate.highlighted ? Kirigami.Theme.focusColor : Kirigami.Theme.highlightColor",
+      f"color: delegate.highlighted ? Kirigami.Theme.focusColor : ({S}iconDiscColor || Kirigami.Theme.highlightColor)"),
+    R("width: Kirigami.Units.iconSizes.smallMedium; height: width", f"width: {S}iconGlyphPx; height: width"),
+    R("color: delegate.highlighted ? Kirigami.Theme.highlightColor : Kirigami.Theme.highlightedTextColor",
+      f"color: delegate.highlighted ? Kirigami.Theme.highlightColor : ({S}iconGlyphColor || Kirigami.Theme.highlightedTextColor)")],
   "app/qml/EdgeDrawers.qml": [R("font { pixelSize: 12; weight: Font.Medium }", f"font {{ pixelSize: {S}groupLabelPx; weight: Font.Medium }}")],
   "app/qml/Main.qml": [R("z: 3; width: 340;", f"z: 3; width: {S}sidebarWidthPx + 10;")],
   "app/qml/SideBarItem.qml": [R("? 72 : 330 + 32", f"? 72 : {S}sidebarWidthPx + 32")],
-  "app/qml/SubCategoryPage.qml": [],
+  "app/qml/SubCategoryPage.qml": [
+    R("minimumHeight: 48 + 16 + 8", f"minimumHeight: {S}searchHeightPx + {S}searchTopPx + {S}searchBottomPx"),
+    R("leftPadding: subCategoryColumn.width < 160 ? 14 : 16; rightPadding: 16; topPadding: 16; bottomPadding: 8",
+      f"leftPadding: subCategoryColumn.width < 160 ? 14 : {S}searchLeftPx; rightPadding: {S}searchRightPx; topPadding: {S}searchTopPx; bottomPadding: {S}searchBottomPx"),
+    R("implicitHeight: 48\n", f"implicitHeight: {S}searchHeightPx\n"),
+    R("        bottomMargin: 16\n", f"        bottomMargin: {S}sidebarBottomPx\n")],
  },
 }
 # durations: our motion numbers in every file a luminos patch touched
@@ -114,10 +137,57 @@ CPP = {
       "    const QJsonValue v = QJsonDocument::fromJson(f.readAll()).object().value(QLatin1String(key));\n"
       "    return v.isDouble() ? qBound(14, qRound(v.toDouble()), 60) : fallback;\n"
       "}"),
-    R("f.setPixelSize(30);", "f.setPixelSize(luminosStylePx(\"pageTitlePx\", 30));")],
+    R("f.setPixelSize(30);", "f.setPixelSize(luminosStylePx(\"pageTitlePx\", 30));"),
+    R("    return v.isDouble() ? qBound(14, qRound(v.toDouble()), 60) : fallback;\n}",
+      "    return v.isDouble() ? qBound(14, qRound(v.toDouble()), 60) : fallback;\n}\n"
+      "// R6: bottom button bar margins. The base is what the code would set anyway; a key in the file overrides one side.\n"
+      "static void luminosApplyButtons(QWidget *w)\n"
+      "{\n"
+      "    const QVariantList base = w->property(\"_lxBase\").toList();\n"
+      "    if (base.size() != 4)\n"
+      "        return;\n"
+      "    QJsonObject o;\n"
+      "    QFile f(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral(\"/luminos/style.json\"));\n"
+      "    if (f.open(QIODevice::ReadOnly))\n"
+      "        o = QJsonDocument::fromJson(f.readAll()).object();\n"
+      "    const char *keys[4] = {\"buttonsLeftPx\", \"buttonsTopPx\", \"buttonsRightPx\", \"buttonsBottomPx\"};\n"
+      "    int m[4];\n"
+      "    for (int i = 0; i < 4; ++i) {\n"
+      "        const QJsonValue v = o.value(QLatin1String(keys[i]));\n"
+      "        m[i] = v.isDouble() ? qBound(0, qRound(v.toDouble()), 96) : base.at(i).toInt();\n"
+      "    }\n"
+      "    w->setContentsMargins(m[0], m[1], m[2], m[3]);\n"
+      "}\n"
+      "static void luminosSetButtonBase(QWidget *w, const QMargins &b)\n"
+      "{\n"
+      "    w->setProperty(\"_lxBase\", QVariantList{b.left(), b.top(), b.right(), b.bottom()});\n"
+      "    luminosApplyButtons(w);\n"
+      "}"),
+    R("    d->mButtons->setContentsMargins(16, 8, 16, 12);",
+      "    luminosSetButtonBase(d->mButtons, QMargins(16, 8, 16, 12));\n"
+      "    { // R6 (DECISION 176): re-apply the bar margins the moment the style tuner file changes\n"
+      "        const QString lxDir = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral(\"/luminos\");\n"
+      "        const QString lxFile = lxDir + QStringLiteral(\"/style.json\");\n"
+      "        QDir().mkpath(lxDir);\n"
+      "        auto *lxWatch = new QFileSystemWatcher(QStringList{lxDir}, this);\n"
+      "        if (QFile::exists(lxFile))\n"
+      "            lxWatch->addPath(lxFile);\n"
+      "        auto lxReload = [this, lxWatch, lxFile] {\n"
+      "            if (QFile::exists(lxFile) && !lxWatch->files().contains(lxFile))\n"
+      "                lxWatch->addPath(lxFile);\n"
+      "            luminosApplyButtons(d->mButtons);\n"
+      "        };\n"
+      "        connect(lxWatch, &QFileSystemWatcher::directoryChanged, this, lxReload);\n"
+      "        connect(lxWatch, &QFileSystemWatcher::fileChanged, this, lxReload);\n"
+      "    }"),
+    R("d->mButtons->setContentsMargins(style()->pixelMetric(QStyle::PM_LayoutLeftMargin),",
+      "luminosSetButtonBase(d->mButtons, QMargins(style()->pixelMetric(QStyle::PM_LayoutLeftMargin),"),
+    R("PM_LayoutRightMargin),\n                                    style()->pixelMetric(QStyle::PM_LayoutBottomMargin));",
+      "PM_LayoutRightMargin),\n                                    style()->pixelMetric(QStyle::PM_LayoutBottomMargin)));")],
  },
 }
-CPP_INCLUDES = {"systemsettings": {"app/ModuleView.cpp": ["#include <QFile>", "#include <QJsonDocument>", "#include <QJsonObject>", "#include <QStandardPaths>"]}}
+CPP_INCLUDES = {"systemsettings": {"app/ModuleView.cpp": ["#include <QFile>", "#include <QJsonDocument>", "#include <QJsonObject>", "#include <QStandardPaths>",
+                                                          "#include <QDir>", "#include <QFileSystemWatcher>", "#include <QMargins>"]}}
 
 def main(pkg, tree, out):
     orig = tree + ".orig-tunables"

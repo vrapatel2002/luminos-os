@@ -5,7 +5,7 @@
 # Sources live in the repo: src/luminos-style/. Rebuild: makepkg -sfi (from this folder).
 pkgname=luminos-style
 pkgver=1.0
-pkgrel=3
+pkgrel=4
 pkgdesc='Luminos: live style values for the forked KDE look + Style Tuner window'
 arch=(x86_64)
 license=(GPL-3.0-or-later)

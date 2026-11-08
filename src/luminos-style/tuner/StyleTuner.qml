@@ -29,8 +29,25 @@ QQC2.ApplicationWindow {
         { g: "Space",  id: "sidebarWidthPx", lbl: "Sidebar width",  unit: "px", min: 240, max: 480,  step: 5,   def: 330 },
         { g: "Space",  id: "pageWidthPx",    lbl: "Page width",     unit: "px", min: 560, max: 1400, step: 10,  def: 756 },
         { g: "Space",  id: "iconCirclePx",   lbl: "Icon circles",   unit: "px", min: 24,  max: 56,   step: 1,   def: 40 },
+        { g: "Space",  id: "sidebarBottomPx",lbl: "Sidebar bottom gap", unit: "px", min: 0, max: 80, step: 1,   def: 16 },
+        // [CHANGE: claude-code | 2026-11-08] R6: search bar, icons, bottom buttons
+        { g: "Search bar", id: "searchHeightPx", lbl: "Height",          unit: "px", min: 28, max: 72, step: 1, def: 48 },
+        { g: "Search bar", id: "searchLeftPx",   lbl: "Left edge",       unit: "px", min: 0,  max: 48, step: 1, def: 16 },
+        { g: "Search bar", id: "searchRightPx",  lbl: "Right edge",      unit: "px", min: 0,  max: 48, step: 1, def: 16 },
+        { g: "Search bar", id: "searchTopPx",    lbl: "Space above",     unit: "px", min: 0,  max: 48, step: 1, def: 16 },
+        { g: "Search bar", id: "searchBottomPx", lbl: "Space below",     unit: "px", min: 0,  max: 40, step: 1, def: 8 },
+        { g: "Icons", id: "iconDiscColor",  lbl: "Circle colour", kind: "color", def: "" },
+        { g: "Icons", id: "iconGlyphColor", lbl: "Icon colour",   kind: "color", def: "" },
+        { g: "Icons", id: "iconGlyphPx",    lbl: "Icon size",       unit: "px", min: 12, max: 36, step: 1, def: 22 },
+        { g: "Icons", id: "iconOffsetXPx",  lbl: "Move left / right", unit: "px", min: -16, max: 16, step: 1, def: 0 },
+        { g: "Icons", id: "iconOffsetYPx",  lbl: "Move up / down",  unit: "px", min: -12, max: 12, step: 1, def: 0 },
+        { g: "Bottom buttons", id: "buttonsLeftPx",   lbl: "Left edge",   unit: "px", min: 0, max: 64, step: 1, def: 6 },
+        { g: "Bottom buttons", id: "buttonsRightPx",  lbl: "Right edge",  unit: "px", min: 0, max: 64, step: 1, def: 6 },
+        { g: "Bottom buttons", id: "buttonsTopPx",    lbl: "Space above", unit: "px", min: 0, max: 48, step: 1, def: 6 },
+        { g: "Bottom buttons", id: "buttonsBottomPx", lbl: "Space below (moves the bar up)", unit: "px", min: 0, max: 64, step: 1, def: 6 },
         { g: "Motion", id: "animationMs",    lbl: "Animation",      unit: "ms", min: 0,   max: 500,  step: 10,  def: 180 }
     ]
+    readonly property var swatches: ["", "#c4c0ff", "#a8c7fa", "#80d4c8", "#a6d49c", "#f2c46d", "#f4a7b9", "#3b3a45", "#e6e1e8", "#1b1a1f"]
     readonly property var presets: ({
         "Compact": { textSizePt: 9, pageTitlePx: 24, groupLabelPx: 11, cornerOuterPx: 16, cornerInnerPx: 3, cornerButtonPx: 10,
                      rowHeightPx: 48, rowGapPx: 2, cardPaddingPx: 14, sidebarWidthPx: 280, pageWidthPx: 700, iconCirclePx: 32, animationMs: 120 },
@@ -80,11 +97,26 @@ QQC2.ApplicationWindow {
 
     Timer { id: saveTimer; interval: 60; onTriggered: win.save() }
 
-    Component.onCompleted: {
+    property bool dragging: false
+    function reseed() {
+        // bottom-button keys live only in System Settings' C++, so they come from the file itself
+        let file = {}
+        const xhr = new XMLHttpRequest()
+        xhr.open("GET", filePath, false)
+        try { xhr.send(); file = JSON.parse(xhr.responseText || "{}") } catch (e) { file = {} }
         const v = {}
-        for (const k of knobs) v[k.id] = Style[k.id]
+        for (const k of knobs) {
+            const fromStyle = Style[k.id]
+            v[k.id] = fromStyle !== undefined ? fromStyle : (file[k.id] !== undefined ? file[k.id] : k.def)
+        }
         values = v
         revision++
+    }
+    Component.onCompleted: reseed()
+    // follow edits made to the file by anything else (not while we are writing it ourselves)
+    Connections {
+        target: Style
+        function onChanged() { if (!saveTimer.running && !win.dragging) win.reseed() }
     }
 
     header: QQC2.ToolBar {
@@ -126,7 +158,8 @@ QQC2.ApplicationWindow {
                     required property int index
                     readonly property var k: modelData
                     readonly property bool groupStart: index === 0 || win.knobs[index - 1].g !== k.g
-                    readonly property real val: win.revision >= 0 && win.values[k.id] !== undefined ? win.values[k.id] : k.def
+                    readonly property var val: win.revision >= 0 && win.values[k.id] !== undefined ? win.values[k.id] : k.def
+                    readonly property bool isColor: k.kind === "color"
                     Layout.fillWidth: true
                     Layout.leftMargin: Kirigami.Units.largeSpacing * 2
                     Layout.rightMargin: Kirigami.Units.largeSpacing * 2
@@ -145,7 +178,8 @@ QQC2.ApplicationWindow {
                         Layout.topMargin: Kirigami.Units.smallSpacing
                         QQC2.Label { text: row.k.lbl; Layout.fillWidth: true }
                         QQC2.Label {
-                            text: (row.k.step < 1 ? row.val.toFixed(1) : row.val) + " " + row.k.unit
+                            visible: !row.isColor
+                            text: row.isColor ? "" : (row.k.step < 1 ? Number(row.val).toFixed(1) : row.val) + " " + row.k.unit
                             font.family: "monospace"
                             color: row.val !== row.k.def ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
                         }
@@ -156,16 +190,41 @@ QQC2.ApplicationWindow {
                             opacity: row.val !== row.k.def ? 1 : 0
                             enabled: opacity > 0
                             onClicked: win.setValue(row.k.id, row.k.def, true)
-                            QQC2.ToolTip.text: "Back to " + row.k.def + " " + row.k.unit
+                            QQC2.ToolTip.text: row.isColor ? "Back to the theme colour" : "Back to " + row.k.def + " " + row.k.unit
                             QQC2.ToolTip.visible: hovered
                         }
                     }
-                    QQC2.Slider {
+                    Flow { // colour choices; the first one is "use the theme colour"
+                        visible: row.isColor
                         Layout.fillWidth: true
-                        from: row.k.min; to: row.k.max; stepSize: row.k.step
+                        spacing: 8
+                        Repeater {
+                            model: row.isColor ? win.swatches : []
+                            QQC2.AbstractButton {
+                                required property string modelData
+                                width: 32; height: 32
+                                checkable: true
+                                checked: row.val === modelData
+                                onClicked: win.setValue(row.k.id, modelData, true)
+                                QQC2.ToolTip.text: modelData === "" ? "Theme colour" : modelData
+                                QQC2.ToolTip.visible: hovered
+                                background: Rectangle {
+                                    radius: width / 2
+                                    color: parent.modelData === "" ? "transparent" : parent.modelData
+                                    border.width: parent.checked ? 3 : 1
+                                    border.color: parent.checked ? Kirigami.Theme.focusColor : Qt.alpha(Kirigami.Theme.textColor, 0.35)
+                                    QQC2.Label { anchors.centerIn: parent; visible: parent.parent.modelData === ""; text: "A"; opacity: 0.7 }
+                                }
+                            }
+                        }
+                    }
+                    QQC2.Slider {
+                        visible: !row.isColor
+                        Layout.fillWidth: true
+                        from: row.isColor ? 0 : row.k.min; to: row.isColor ? 1 : row.k.max; stepSize: row.isColor ? 0 : row.k.step
                         snapMode: QQC2.Slider.SnapAlways
-                        value: row.val
-                        onPressedChanged: if (pressed) win.undoStack.push(win.snapshot())
+                        value: row.isColor ? 0 : row.val
+                        onPressedChanged: { win.dragging = pressed; if (pressed) win.undoStack.push(win.snapshot()) }
                         onMoved: win.setValue(row.k.id, Math.round(value / row.k.step) * row.k.step, false)
                         Accessible.name: row.k.lbl
                     }

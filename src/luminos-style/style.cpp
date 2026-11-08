@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
+#include <QRegularExpression>
 #include <QTimer>
 
 namespace
@@ -30,6 +31,15 @@ const QHash<QString, Knob> &knobs()
         {QStringLiteral("pageWidthPx"),    {756, 480, 1600}},
         {QStringLiteral("iconCirclePx"),   {40, 20, 64}},
         {QStringLiteral("animationMs"),    {180, 0, 1000}},
+        {QStringLiteral("searchHeightPx"), {48, 24, 96}},
+        {QStringLiteral("searchLeftPx"),   {16, 0, 64}},
+        {QStringLiteral("searchRightPx"),  {16, 0, 64}},
+        {QStringLiteral("searchTopPx"),    {16, 0, 64}},
+        {QStringLiteral("searchBottomPx"), {8, 0, 64}},
+        {QStringLiteral("iconGlyphPx"),    {22, 10, 48}},
+        {QStringLiteral("iconOffsetXPx"),  {0, -24, 24}},
+        {QStringLiteral("iconOffsetYPx"),  {0, -24, 24}},
+        {QStringLiteral("sidebarBottomPx"),{16, 0, 96}},
     };
     return k;
 }
@@ -45,6 +55,7 @@ public:
         static StyleBackend *b = new StyleBackend;
         return b;
     }
+    QString text(const QString &key) const { return m_texts.value(key); }
     qreal value(const QString &key) const
     {
         const auto it = m_values.constFind(key);
@@ -80,6 +91,7 @@ private:
     {
         rewatch();
         QHash<QString, qreal> next;
+        QHash<QString, QString> nextTexts;
         QFile f(m_path);
         if (f.open(QIODevice::ReadOnly)) {
             QJsonParseError err;
@@ -92,14 +104,22 @@ private:
                 if (v.isDouble())
                     next.insert(it.key(), qBound(it->lo, v.toDouble(), it->hi));
             }
+            static const QRegularExpression hex(QStringLiteral("^#[0-9a-fA-F]{6}$"));
+            for (const char *k : {"iconDiscColor", "iconGlyphColor"}) {
+                const QString s = o.value(QLatin1String(k)).toString();
+                if (hex.match(s).hasMatch())
+                    nextTexts.insert(QLatin1String(k), s);
+            }
         }
-        if (next != m_values) {
+        if (next != m_values || nextTexts != m_texts) {
             m_values = next;
+            m_texts = nextTexts;
             Q_EMIT changed();
         }
     }
     QString m_dir, m_path;
     QHash<QString, qreal> m_values;
+    QHash<QString, QString> m_texts;
     QFileSystemWatcher m_watch;
     QTimer m_debounce;
 };
@@ -124,6 +144,17 @@ LX_GET(qreal, cardPaddingPx)
 LX_GET(qreal, sidebarWidthPx)
 LX_GET(qreal, pageWidthPx)
 LX_GET(qreal, iconCirclePx)
+LX_GET(qreal, searchHeightPx)
+LX_GET(qreal, searchLeftPx)
+LX_GET(qreal, searchRightPx)
+LX_GET(qreal, searchTopPx)
+LX_GET(qreal, searchBottomPx)
+LX_GET(qreal, iconGlyphPx)
+LX_GET(qreal, iconOffsetXPx)
+LX_GET(qreal, iconOffsetYPx)
+LX_GET(qreal, sidebarBottomPx)
+QString Style::iconDiscColor() const { return m_backend->text(QStringLiteral("iconDiscColor")); }
+QString Style::iconGlyphColor() const { return m_backend->text(QStringLiteral("iconGlyphColor")); }
 int Style::animationMs() const { return qRound(m_backend->value(QStringLiteral("animationMs"))); }
 
 #include "style.moc"
