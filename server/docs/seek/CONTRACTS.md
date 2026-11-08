@@ -50,6 +50,11 @@ rewrite(args: list[str], plan: dict, starts: list[int]) -> list[str] | None
       -hls_segment_filename P, -hls_playlist_type <x>, -hls_list_size <x>; and the trailing "-y OUT";
     - appended at the end, in this order:
       -f segment -segment_format mpegts
+      -segment_format_options strict=V — RE-PLAN 3 (2026-11-08): V = the value of the LAST "-strict" in args
+         (verbatim, e.g. "-2" or "experimental"); the pair is omitted when args has no "-strict".
+         Why: the hls muxer copies strict_std_compliance into its inner mpegts muxer, the segment muxer does
+         not, and mpegts only writes the Dolby Vision descriptor at strict <= unofficial. Without it every
+         DV P5 piece goes out tagged plain HEVC and the TV shows purple (BUG-231).
       -segment_times T (comma-joined f"{s/1e7 - base - 0.02:.3f}" for s in starts[N+1:]) — the pair is
          omitted entirely when starts[N+1:] is empty
       -segment_start_number N -segment_list OUT -segment_list_type m3u8 -y P

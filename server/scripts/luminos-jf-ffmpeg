@@ -90,6 +90,13 @@ def rewrite(args, plan, starts):
             if a in DROP or body[i:i + 2] == ["-f", "hls"] for j in (i, i + 1)}
     out = [a for i, a in enumerate(body) if i not in drop]
     out += ["-f", "segment", "-segment_format", "mpegts"]
+    # [CHANGE: claude-code | 2026-11-08] RE-PLAN 3 / BUG-231
+    strict_v = None
+    for i in range(len(args) - 1):
+        if args[i] == "-strict":
+            strict_v = args[i + 1]
+    if strict_v is not None:
+        out += ["-segment_format_options", "strict=" + strict_v]
     if starts[n + 1:]:
         out += ["-segment_times", ",".join(f"{s / TICKS - base - 0.02:.3f}" for s in starts[n + 1:])]
     out += ["-segment_start_number", str(n), "-segment_list", plan["out"],

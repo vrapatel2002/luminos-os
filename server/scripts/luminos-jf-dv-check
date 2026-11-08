@@ -1,0 +1,26 @@
+#!/bin/bash
+# RE-PLAN 3 / BUG-231 e2e: does the wrapper keep Dolby Vision on every piece it writes?
+# Usage (on luminos-server, as root): dv_check.sh <wrapper-path>
+# Exit 0 = every piece probes codec tag DOVI with dv_profile 5. Exit 1 = any piece lost DV. Exit 2 = setup error.
+W=${1:?wrapper path}
+F="/srv/media/tv/VisionQuest/Season 1/VisionQuest - S01E06 - Deadlock WEBDL-2160p.mkv"   # known DV P5 (Jellyfin: DvProfile 5)
+FP=/usr/lib/jellyfin-ffmpeg/ffprobe
+D=$(mktemp -d /tmp/dvcheck.XXXX); trap 'rm -rf "$D"' EXIT
+[ -f "$F" ] || { echo "SETUP: source missing"; exit 2; }
+# Real argv Jellyfin 10.11 sent on 2026-11-08 10:48 (FFmpeg.Remux log), output moved to $D, -t 12 added.
+"$W" -v error -analyzeduration 200M -probesize 1G -ss 00:29:46.625 -t 12 -readrate 10 -fflags +genpts -f matroska \
+  -i file:"$F" -map_metadata -1 -map_chapters -1 -threads 0 -map 0:0 -map 0:1 -map -0:s -codec:v:0 copy \
+  -tag:v:0 dvh1 -strict -2 -bsf:v hevc_mp4toannexb -start_at_zero -codec:a:0 copy -copyts \
+  -avoid_negative_ts disabled -max_muxing_queue_size 2048 -f hls -max_delay 5000000 -hls_time 5 \
+  -hls_segment_type mpegts -start_number 357 -hls_segment_filename "$D/p%d.ts" -hls_playlist_type vod \
+  -hls_list_size 0 -y "$D/p.m3u8" </dev/null 2>"$D/err" || { echo "SETUP: wrapper/ffmpeg failed"; exit 2; }
+grep -q "luminos-jf-ffmpeg: aligned" "$D/err" 2>/dev/null || [ "${ALLOW_PASSTHROUGH:-0}" = 1 ] || { echo "SETUP: wrapper did not rewrite (no 'aligned' line) - check is meaningless"; exit 2; }
+n=0; bad=0
+for s in "$D"/p*.ts; do
+  [ -e "$s" ] || break; n=$((n+1))
+  out=$("$FP" -v error -select_streams v:0 -show_entries stream=codec_tag_string:stream_side_data=dv_profile -of default=nw=1 "$s")
+  if grep -q '^codec_tag_string=DOVI' <<<"$out" && grep -q '^dv_profile=5' <<<"$out"; then echo "OK   $(basename "$s")"
+  else echo "LOST $(basename "$s"): $(tr '\n' ' ' <<<"$out")"; bad=$((bad+1)); fi
+done
+[ "$n" -gt 0 ] || { echo "SETUP: no pieces written"; exit 2; }
+echo "pieces=$n lost_dv=$bad"; [ "$bad" -eq 0 ]

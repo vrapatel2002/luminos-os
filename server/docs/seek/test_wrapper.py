@@ -80,6 +80,11 @@ def hms(x):
     return f"{int(x // 3600):02d}:{int(x % 3600 // 60):02d}:{x % 60:06.3f}"
 
 
+def strict_value(args):
+    vals = [args[i + 1] for i in range(len(args) - 1) if args[i] == "-strict"]
+    return vals[-1] if vals else None
+
+
 def expected_rewrite(args, plan, starts):
     N = plan["N"]
     base = starts[N] / 1e7
@@ -96,6 +101,8 @@ def expected_rewrite(args, plan, starts):
         i += 1
     times = [f"{s / 1e7 - base - 0.02:.3f}" for s in starts[N + 1:]]
     tail = ["-f", "segment", "-segment_format", "mpegts"]
+    if strict_value(args) is not None:
+        tail += ["-segment_format_options", "strict=" + strict_value(args)]
     if times:
         tail += ["-segment_times", ",".join(times)]
     tail += ["-segment_start_number", str(N), "-segment_list", plan["out"],
@@ -287,6 +294,60 @@ class Rewrite(unittest.TestCase):
                     self.assertIsNone(jfw().rewrite(args, dict(plan, ss=starts[N] / 1e7 + off), starts), off)
             else:
                 self.assertIsNone(jfw().rewrite(args, dict(plan, ss=rng.uniform(0, 1)), starts))
+
+
+class RewriteStrict(unittest.TestCase):
+    SEGMENT = ["-f", "segment", "-segment_format", "mpegts"]
+
+    def rewrite(self, args, last_piece=False):
+        starts = jfw().segment_starts(Main.KFS, Main.TOTAL, 5)  # starts[19] = 96.5 s, matches SAMPLE
+        out = jfw().rewrite(list(args), jfw().parse(list(args)), starts[:20] if last_piece else starts)
+        self.assertIsNotNone(out)
+        return out
+
+    def with_strict(self, value):
+        args = list(SAMPLE)
+        args[args.index("-strict") + 1] = value
+        return args
+
+    def test_strict_forwarded_after_segment_format(self):
+        for last_piece, nxt in ((False, "-segment_times"), (True, "-segment_start_number")):
+            out = self.rewrite(SAMPLE, last_piece)
+            i = out.index("-segment_format_options")
+            self.assertEqual(out[i + 1], "strict=-2")
+            self.assertEqual(out[i - 4:i], self.SEGMENT)
+            self.assertEqual(out[i + 2], nxt)
+
+    def test_strict_value_verbatim(self):
+        out = self.rewrite(self.with_strict("experimental"))
+        self.assertTrue(has_pair(out, "-segment_format_options", "strict=experimental"))
+
+    def test_last_strict_wins(self):
+        args = list(SAMPLE)
+        j = args.index("-max_delay")
+        args[j:j] = ["-strict", "experimental"]
+        self.assertTrue(has_pair(self.rewrite(args), "-segment_format_options", "strict=experimental"))
+        args = self.with_strict("experimental")
+        args[j:j] = ["-strict", "-2"]
+        self.assertTrue(has_pair(self.rewrite(args), "-segment_format_options", "strict=-2"))
+
+    def test_no_strict_no_option(self):
+        args = list(SAMPLE)
+        i = args.index("-strict")
+        del args[i:i + 2]
+        self.assertNotIn("-segment_format_options", self.rewrite(args))
+
+    def test_random_strict_kept_and_forwarded(self):
+        rng = random.Random(1234)
+        for _ in range(400):
+            args, plan, starts = random_case(rng)
+            v = rng.choice(["-2", "-1", "experimental", "unofficial", "normal"])
+            args[args.index("-strict") + 1] = v
+            out = jfw().rewrite(list(args), plan, starts)
+            self.assertEqual(out.count("-strict"), 1)
+            self.assertTrue(has_pair(out, "-strict", v))
+            self.assertEqual(out.count("-segment_format_options"), 1)
+            self.assertEqual(out[out.index("-segment_format_options") + 1], "strict=" + v)
 
 
 class LoadKeyframes(unittest.TestCase):

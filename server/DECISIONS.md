@@ -3343,3 +3343,13 @@ an upgrade leaves `.pacnew`, ours stays. **systemd EnvironmentFile has no inline
 `# …` on the value line and Jellyfin got the comment as extra arguments (Degraded ~12 s); comment is on its own line now.
 **Undo:** set `JELLYFIN_FFMPEG_OPT="--ffmpeg=/usr/lib/jellyfin-ffmpeg/ffmpeg"` (backup
 `/etc/jellyfin/jellyfin.env.pre-seekalign-20261107`) and `systemctl restart jellyfin`.
+
+
+### DECISION 175 — RE-PLAN 3 (2026-11-08): the wrapper must keep Dolby Vision (BUG-231)
+<!-- [CHANGE: claude-code | 2026-11-08] -->
+The segment muxer does not inherit `-strict`, so its mpegts muxer dropped the DV descriptor and every DV file played purple
+in JellyRock. Decision: forward Jellyfin's own `-strict` value (verbatim, last one wins) as `-segment_format_options strict=V`;
+add nothing when Jellyfin sent none (parity with the hls muxer). Not chosen: bypassing the wrapper for DV files (brings the
+seek jump-back back on exactly the files that need remux); re-enabling the P5→HDR10 sweep (throws away real DV that JellyRock
+plays, DECISION 167). New standing check after any Jellyfin/ffmpeg upgrade: `luminos-jf-dv-check` alongside `luminos-jf-seek-check`.
+Undo unchanged: point `JELLYFIN_FFMPEG_OPT` back to `/usr/lib/jellyfin-ffmpeg/ffmpeg`.

@@ -58,3 +58,13 @@ so ffmpeg cuts at exactly the playlist's boundaries. Every other call is passed 
 3. On the TV, seeking forward and back in JellyRock lands and keeps playing (no jump back), tested by
    remote-control commands over the network.
 4. Undo is one line (point Jellyfin back at /usr/lib/jellyfin-ffmpeg/ffmpeg) and documented.
+
+## RE-PLAN 3 — 2026-11-08 — Dolby Vision must survive the rewrite (BUG-231)
+Shawn: "same purple error on the newer episodes". Cause measured on the server: stock hls muxer pieces of
+VisionQuest S01E06 (DV P5) probe codec_tag DOVI, dv_profile 5; the wrapper's segment-muxer pieces probe plain
+HEVC with no DV record. Adding `-segment_format_options strict=-2` restores DOVI/5 on every piece.
+Assumptions: forward Jellyfin's own -strict value (whatever it is) rather than hardcoding -2 — parity with the
+hls muxer, which forwards it; no -strict in the call -> add nothing (the hls muxer would not write DV either).
+Done means (added): 5. For a DV source, every piece the wrapper writes carries the same Dolby Vision record
+(codec tag DOVI, same dv_profile) as the piece stock Jellyfin would write — checked by e2e/dv_check.sh on a real
+DV P5 file. 6. All 20 earlier tests still pass.
