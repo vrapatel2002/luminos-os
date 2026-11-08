@@ -270,6 +270,16 @@ CPP = {
       "        connect(lxWatch, &QFileSystemWatcher::directoryChanged, this, lxReload);\n"
       "        connect(lxWatch, &QFileSystemWatcher::fileChanged, this, lxReload);\n"
       "    }"),
+    R("    d->mButtons->setVisible(buttons != KCModule::NoAdditionalButton);\n}",
+      "    d->mButtons->setVisible(buttons != KCModule::NoAdditionalButton);\n"
+      "    // R12 (DECISION 178): the Wi-Fi page saves through its own Save bar. Apply/Reset only mean something while the\n"
+      "    // classic editor holds unsaved changes, so they are hidden until then (and the empty bar with them).\n"
+      "    if (activeModule && activeModule->metaData().pluginId() == QLatin1String(\"kcm_networkmanagement\") && !change) {\n"
+      "        d->mApply->setVisible(false);\n"
+      "        d->mReset->setVisible(false);\n"
+      "        d->mButtons->setVisible(!d->mDefault->isHidden() || !d->mHelp->isHidden());\n"
+      "    }\n"
+      "}"),
     R("d->mButtons->setContentsMargins(style()->pixelMetric(QStyle::PM_LayoutLeftMargin),",
       "luminosSetButtonBase(d->mButtons, QMargins(style()->pixelMetric(QStyle::PM_LayoutLeftMargin),"),
     R("        moduleScroll->setWidget(kcm->widget());\n", "        moduleScroll->setWidget(kcm->widget());\n        LuminosFitFilter::self()->add(kcm->widget()); // R8 BUG-232\n"),

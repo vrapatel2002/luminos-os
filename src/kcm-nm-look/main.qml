@@ -79,7 +79,8 @@ QQC2.Page {
     Component.onCompleted: {
         regroupTimer.start()
         const t = net.testOpenPath()
-        if (t.length > 0) Qt.callLater(() => {
+        if (t === "hidden") Qt.callLater(() => root.view = "hidden")   // test aid
+        else if (t.length > 0) Qt.callLater(() => {
             root.openDetails(t.split("#")[0], "", "", false)
             const y = parseInt(t.split("#")[1] || "0")   // test aid: "<path>#<scroll px>" also opens Advanced
             if (y > 0) { advToggle.checked = true; Qt.callLater(() => detailsFlick.contentY = y) }
@@ -98,6 +99,58 @@ QQC2.Page {
                 const it = items.get(i)
                 const yes = root.classify(it.model) === want
                 if (it.inShown !== yes) it.inShown = yes
+            }
+        }
+    }
+
+    // R12: several manual addresses ("address/prefix" each) + one router
+    component AddressList: ColumnLayout {
+        id: al
+        property var addresses: []
+        property string example
+        property string router
+        property string routerExample
+        signal addressesEdited(var list)
+        signal routerEdited(string r)
+        Layout.fillWidth: true
+        spacing: 8
+        Repeater {
+            model: al.addresses
+            RowLayout {
+                required property string modelData
+                required property int index
+                Layout.fillWidth: true
+                spacing: 6
+                QQC2.TextField {
+                    Layout.fillWidth: true
+                    text: modelData
+                    placeholderText: i18n("Address/prefix, e.g. %1", al.example)
+                    onTextEdited: dcol.edit()
+                    onEditingFinished: if (text !== modelData) { const l = al.addresses.slice(); l[index] = text.trim(); al.addressesEdited(l) }
+                    Accessible.name: i18n("Address %1", index + 1)
+                }
+                QQC2.ToolButton {
+                    visible: al.addresses.length > 1
+                    icon.name: "list-remove"
+                    display: QQC2.AbstractButton.IconOnly
+                    text: i18n("Remove this address")
+                    onClicked: { const l = al.addresses.slice(); l.splice(index, 1); al.addressesEdited(l) }
+                    QQC2.ToolTip.text: text
+                    QQC2.ToolTip.visible: hovered
+                }
+            }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            QQC2.Button { text: i18n("Add another address"); icon.name: "list-add"; onClicked: al.addressesEdited(al.addresses.concat([""])) }
+            QQC2.TextField {
+                Layout.fillWidth: true
+                text: al.router
+                placeholderText: i18n("Router, e.g. %1", al.routerExample)
+                onTextEdited: dcol.edit()
+                onEditingFinished: if (text !== al.router) al.routerEdited(text.trim())
+                Accessible.name: i18n("Router")
             }
         }
     }
@@ -142,6 +195,10 @@ QQC2.Page {
             else saveMessage.text = i18nc("@info", "Couldn't save: %1", message)
         }
         onForgotten: root.backToList()
+        onJoinFinished: (ok, message) => {
+            if (ok) { root.view = "list"; regroupTimer.restart() }
+            else hiddenMessage.text = i18n("Couldn't join: %1", message)
+        }
     }
     Timer { interval: 3000; repeat: true; running: root.view === "details" && root.visible; onTriggered: net.refreshStatus() }
 
@@ -301,11 +358,22 @@ QQC2.Page {
             Rows.Section { text: i18nc("@title:group", "More") }
             Rows.Card {
                 first: true; last: false; clickable: true
+                visible: enabledConnections.wirelessEnabled
+                onClicked: { hiddenName.text = ""; hiddenPw.text = ""; hiddenSec.current = 1; hiddenMessage.text = ""; root.view = "hidden" }
+                contentItem: RowLayout {
+                    spacing: 16
+                    Kirigami.Icon { source: "network-wireless-symbolic"; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth; isMask: true; color: Kirigami.Theme.textColor }
+                    Rows.TitleText { title: i18n("Join a hidden network"); subtitle: i18n("A network that doesn't show its name") }
+                    Kirigami.Icon { source: "go-next-symbolic"; implicitWidth: 18; implicitHeight: 18; opacity: 0.6 }
+                }
+            }
+            Rows.Card {
+                first: !enabledConnections.wirelessEnabled; last: false; clickable: true
                 onClicked: addNewConnectionDialog.show()
                 contentItem: RowLayout {
                     spacing: 16
                     Kirigami.Icon { source: "list-add"; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth; isMask: true; color: Kirigami.Theme.textColor }
-                    Rows.TitleText { title: i18n("Add a network"); subtitle: i18n("Hidden Wi-Fi, VPN, hotspot or wired") }
+                    Rows.TitleText { title: i18n("Add a connection"); subtitle: i18n("VPN, hotspot, wired or anything else") }
                     Kirigami.Icon { source: "go-next-symbolic"; implicitWidth: 18; implicitHeight: 18; opacity: 0.6 }
                 }
             }
@@ -382,6 +450,60 @@ QQC2.Page {
                     spacing: 16
                     Kirigami.Icon { source: "list-add"; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth; isMask: true; color: Kirigami.Theme.textColor }
                     Rows.TitleText { title: i18n("Add a connection") }
+                }
+            }
+        }
+    }
+
+    // ================= page: join a hidden network (R12) =================
+    QQC2.ScrollView {
+        id: hiddenPage
+        anchors.fill: parent
+        background: null
+        visible: opacity > 0
+        opacity: root.view === "hidden" ? 1 : 0
+        x: root.view === "hidden" ? 0 : 40
+        Behavior on opacity { NumberAnimation { duration: LxS.Style.animationMs; easing.type: Easing.OutCubic } }
+        Behavior on x { NumberAnimation { duration: LxS.Style.animationMs; easing.type: Easing.OutCubic } }
+        contentWidth: availableWidth
+        QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
+        ColumnLayout {
+            width: Math.min(hiddenPage.availableWidth - 8, 720)
+            id: hiddenCol
+            x: (hiddenPage.availableWidth - width) / 2
+            spacing: 3
+            readonly property bool pwOk: hiddenSec.current === 0 || (hiddenPw.text.length >= 8 && hiddenPw.text.length <= 63)
+            QQC2.Button { text: i18n("Wi-Fi"); icon.name: "go-previous"; onClicked: root.view = "list"; Layout.bottomMargin: 8 }
+            Kirigami.Heading { text: i18n("Join a hidden network"); level: 1; font.pixelSize: LxS.Style.pageTitlePx; Layout.bottomMargin: 6 }
+            Rows.Card { first: true; last: false
+                contentItem: RowLayout { spacing: 16
+                    QQC2.Label { text: i18n("Network name"); font.pixelSize: 16 * LxS.Style.textScale; Layout.fillWidth: true }
+                    QQC2.TextField { id: hiddenName; Layout.preferredWidth: 260; placeholderText: i18n("Exactly as the router spells it") }
+                }
+            }
+            Rows.Card { first: false; last: hiddenSec.current === 0
+                contentItem: RowLayout { spacing: 16
+                    QQC2.Label { text: i18n("Security"); font.pixelSize: 16 * LxS.Style.textScale; Layout.fillWidth: true }
+                    Rows.Segmented { id: hiddenSec; options: [i18n("None"), i18n("WPA2"), i18n("WPA3")]; current: 1; onPicked: (i) => current = i }
+                }
+            }
+            Rows.Card { visible: hiddenSec.current > 0; first: false; last: true
+                contentItem: RowLayout { spacing: 16
+                    Rows.TitleText { title: i18n("Password"); subtitle: hiddenPw.text.length > 0 && !hiddenCol.pwOk ? i18n("8 to 63 characters") : "" }
+                    Kirigami.PasswordField { id: hiddenPw; Layout.preferredWidth: 260; onAccepted: joinButton.clicked() }
+                }
+            }
+            RowLayout {
+                Layout.topMargin: 12
+                Layout.fillWidth: true
+                QQC2.Label { id: hiddenMessage; Layout.fillWidth: true; wrapMode: Text.Wrap; color: Kirigami.Theme.negativeTextColor; visible: text.length > 0 }
+                Item { Layout.fillWidth: true; visible: hiddenMessage.text.length === 0 }
+                QQC2.Button {
+                    id: joinButton
+                    text: net.busy ? i18n("Joining…") : i18n("Join")
+                    highlighted: true
+                    enabled: !net.busy && hiddenName.text.trim().length > 0 && hiddenCol.pwOk
+                    onClicked: { hiddenMessage.text = ""; net.joinHidden(hiddenName.text, hiddenSec.current, hiddenPw.text, "") }
                 }
             }
         }
@@ -540,17 +662,17 @@ QQC2.Page {
                 contentItem: ColumnLayout { spacing: 10
                     RowLayout { spacing: 16
                         Rows.TitleText { title: "IPv4"; subtitle: net.ipv4Manual ? i18n("Fixed address you type in") : i18n("Address from the router (DHCP)") }
-                        Rows.Segmented { options: [i18n("Automatic"), i18n("Manual")]; current: net.ipv4Manual ? 1 : 0; onPicked: (i) => { net.ipv4Manual = i === 1; dcol.edit() } }
+                        Rows.Segmented { options: [i18n("Automatic"), i18n("Manual")]; current: net.ipv4Manual ? 1 : 0
+                            onPicked: (i) => { net.ipv4Manual = i === 1; if (i === 1 && net.ipv4Addresses.length === 0) net.ipv4Addresses = [""]; dcol.edit() } }
                     }
-                    GridLayout {
+                    AddressList {
                         visible: net.ipv4Manual
-                        Layout.fillWidth: true
-                        columns: width > 520 ? 3 : 1
-                        columnSpacing: 8; rowSpacing: 8
-                        QQC2.TextField { Layout.fillWidth: true; placeholderText: i18n("Address, e.g. 192.168.2.50"); text: net.ipv4Address; onTextEdited: { net.ipv4Address = text; dcol.edit() } }
-                        QQC2.SpinBox { Layout.fillWidth: true; from: 1; to: 32; value: net.ipv4Prefix; onValueModified: { net.ipv4Prefix = value; dcol.edit() }
-                            Accessible.name: i18n("Prefix length") }
-                        QQC2.TextField { Layout.fillWidth: true; placeholderText: i18n("Router, e.g. 192.168.2.1"); text: net.ipv4Gateway; onTextEdited: { net.ipv4Gateway = text; dcol.edit() } }
+                        addresses: net.ipv4Addresses
+                        example: "192.168.2.50/24"
+                        routerExample: "192.168.2.1"
+                        router: net.ipv4Gateway
+                        onAddressesEdited: (list) => { net.ipv4Addresses = list; dcol.edit() }
+                        onRouterEdited: (r) => { net.ipv4Gateway = r; dcol.edit() }
                     }
                 }
             }
@@ -575,17 +697,17 @@ QQC2.Page {
                 contentItem: ColumnLayout { spacing: 10
                     RowLayout { spacing: 16
                         Rows.TitleText { title: "IPv6"; subtitle: [i18n("Automatic"), i18n("Fixed address you type in"), i18n("Off")][net.ipv6Mode] }
-                        Rows.Segmented { options: [i18n("Automatic"), i18n("Manual"), i18n("Off")]; current: net.ipv6Mode; onPicked: (i) => { net.ipv6Mode = i; dcol.edit() } }
+                        Rows.Segmented { options: [i18n("Automatic"), i18n("Manual"), i18n("Off")]; current: net.ipv6Mode
+                            onPicked: (i) => { net.ipv6Mode = i; if (i === 1 && net.ipv6Addresses.length === 0) net.ipv6Addresses = [""]; dcol.edit() } }
                     }
-                    GridLayout {
+                    AddressList {
                         visible: net.ipv6Mode === 1
-                        Layout.fillWidth: true
-                        columns: width > 520 ? 3 : 1
-                        columnSpacing: 8; rowSpacing: 8
-                        QQC2.TextField { Layout.fillWidth: true; placeholderText: i18n("Address"); text: net.ipv6Address; onTextEdited: { net.ipv6Address = text; dcol.edit() } }
-                        QQC2.SpinBox { Layout.fillWidth: true; from: 1; to: 128; value: net.ipv6Prefix; onValueModified: { net.ipv6Prefix = value; dcol.edit() }
-                            Accessible.name: i18n("Prefix length") }
-                        QQC2.TextField { Layout.fillWidth: true; placeholderText: i18n("Router"); text: net.ipv6Gateway; onTextEdited: { net.ipv6Gateway = text; dcol.edit() } }
+                        addresses: net.ipv6Addresses
+                        example: "fd00::5/64"
+                        routerExample: "fd00::1"
+                        router: net.ipv6Gateway
+                        onAddressesEdited: (list) => { net.ipv6Addresses = list; dcol.edit() }
+                        onRouterEdited: (r) => { net.ipv6Gateway = r; dcol.edit() }
                     }
                 }
             }

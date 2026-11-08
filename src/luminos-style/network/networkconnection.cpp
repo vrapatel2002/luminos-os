@@ -6,6 +6,7 @@
 #include <NetworkManagerQt/Connection>
 #include <NetworkManagerQt/ConnectionSettings>
 #include <NetworkManagerQt/Device>
+#include <NetworkManagerQt/GenericTypes>
 #include <NetworkManagerQt/Ipv4Setting>
 #include <NetworkManagerQt/Ipv6Setting>
 #include <NetworkManagerQt/Manager>
@@ -14,6 +15,7 @@
 #include <NetworkManagerQt/WirelessSecuritySetting>
 #include <NetworkManagerQt/WirelessSetting>
 
+#include <QDBusMetaType>
 #include <QDBusPendingCallWatcher>
 #include <QHostAddress>
 #include <QRegularExpression>
@@ -52,6 +54,21 @@ const QString k8021x = QStringLiteral("802-1x");
 NetworkConnection::NetworkConnection(QObject *parent)
     : QObject(parent)
 {
+    // R12: NetworkManagerQt doesn't register these itself; without them a manual-IPv6 save aborted the whole app
+    // ("QList<IpV6DBusAddress> is not registered with D-Bus"). plasma-nm's editor registers them the same way.
+    static const bool registered = [] {
+        qDBusRegisterMetaType<UIntList>();
+        qDBusRegisterMetaType<UIntListList>();
+        qDBusRegisterMetaType<IpV6DBusAddress>();
+        qDBusRegisterMetaType<IpV6DBusAddressList>();
+        qDBusRegisterMetaType<IpV6DBusRoute>();
+        qDBusRegisterMetaType<IpV6DBusRouteList>();
+        qDBusRegisterMetaType<IpV6DBusNameservers>();
+        qDBusRegisterMetaType<NMVariantMapMap>();
+        qDBusRegisterMetaType<NMVariantMapList>();
+        return true;
+    }();
+    Q_UNUSED(registered)
 }
 
 void NetworkConnection::setPath(const QString &p)
@@ -129,30 +146,26 @@ void NetworkConnection::reload()
         m_mtu = int(w->mtu());
     }
 
-    m_ipv4Manual = false; m_ipv4Address.clear(); m_ipv4Gateway.clear(); m_ipv4Prefix = 24; m_dnsAuto = true; m_dnsServers.clear();
+    m_ipv4Manual = false; m_ipv4Addresses.clear(); m_ipv4Gateway.clear(); m_dnsAuto = true; m_dnsServers.clear();
     if (auto v4 = settingOf<Ipv4Setting>(s, Setting::Ipv4)) {
         m_ipv4Manual = v4->method() == Ipv4Setting::Manual;
-        if (!v4->addresses().isEmpty()) {
-            m_ipv4Address = v4->addresses().first().ip().toString();
-            m_ipv4Prefix = v4->addresses().first().prefixLength();
-            if (!v4->addresses().first().gateway().isNull())
-                m_ipv4Gateway = v4->addresses().first().gateway().toString();
-        }
+        for (const IpAddress &a : v4->addresses())
+            m_ipv4Addresses << QStringLiteral("%1/%2").arg(a.ip().toString()).arg(a.prefixLength());
+        if (!v4->addresses().isEmpty() && !v4->addresses().first().gateway().isNull())
+            m_ipv4Gateway = v4->addresses().first().gateway().toString();
         if (!v4->gateway().isEmpty())
             m_ipv4Gateway = v4->gateway();
         m_dnsAuto = !v4->ignoreAutoDns();
         m_dnsServers = joinHosts(v4->dns());
     }
-    m_ipv6Mode = 0; m_ipv6Address.clear(); m_ipv6Gateway.clear(); m_ipv6Prefix = 64;
+    m_ipv6Mode = 0; m_ipv6Addresses.clear(); m_ipv6Gateway.clear();
     if (auto v6 = settingOf<Ipv6Setting>(s, Setting::Ipv6)) {
         const auto m = v6->method();
         m_ipv6Mode = m == Ipv6Setting::Manual ? 1 : (m == Ipv6Setting::Ignored || m == Ipv6Setting::ConfigDisabled) ? 2 : 0;
-        if (!v6->addresses().isEmpty()) {
-            m_ipv6Address = v6->addresses().first().ip().toString();
-            m_ipv6Prefix = v6->addresses().first().prefixLength();
-            if (!v6->addresses().first().gateway().isNull())
-                m_ipv6Gateway = v6->addresses().first().gateway().toString();
-        }
+        for (const IpAddress &a : v6->addresses())
+            m_ipv6Addresses << QStringLiteral("%1/%2").arg(a.ip().toString()).arg(a.prefixLength());
+        if (!v6->addresses().isEmpty() && !v6->addresses().first().gateway().isNull())
+            m_ipv6Gateway = v6->addresses().first().gateway().toString();
     }
     Q_EMIT loaded();
     Q_EMIT edited();
@@ -249,6 +262,32 @@ void NetworkConnection::save()
         Q_EMIT saveFinished(false, QStringLiteral("This connection no longer exists."));
         return;
     }
+    // R12: check every typed address before touching anything
+    auto bad = [](const QStringList &list, QAbstractSocket::NetworkLayerProtocol proto) -> QString {
+        for (const QString &e : list) {
+            const QString t = e.trimmed();
+            if (t.isEmpty())
+                continue;
+            const QHostAddress h(t.section(QLatin1Char('/'), 0, 0));
+            bool okP = true;
+            const int p = t.contains(QLatin1Char('/')) ? t.section(QLatin1Char('/'), 1, 1).toInt(&okP) : 1;
+            if (h.isNull() || h.protocol() != proto || !okP || p < 1 || p > (proto == QAbstractSocket::IPv4Protocol ? 32 : 128))
+                return t;
+        }
+        return QString();
+    };
+    if (m_ipv4Manual) {
+        if (const QString b = bad(m_ipv4Addresses, QAbstractSocket::IPv4Protocol); !b.isEmpty()) {
+            Q_EMIT saveFinished(false, QStringLiteral("\u201c%1\u201d isn't a valid IPv4 address (example: 192.168.2.50/24).").arg(b));
+            return;
+        }
+    }
+    if (m_ipv6Mode == 1) {
+        if (const QString b = bad(m_ipv6Addresses, QAbstractSocket::IPv6Protocol); !b.isEmpty()) {
+            Q_EMIT saveFinished(false, QStringLiteral("\u201c%1\u201d isn't a valid IPv6 address (example: fd00::5/64).").arg(b));
+            return;
+        }
+    }
     setBusy(true);
     const ConnectionSettings::Ptr s = c->settings();
     const bool hasWsec = !settingOf<WirelessSecuritySetting>(s, Setting::WirelessSecurity).isNull();
@@ -311,13 +350,19 @@ void NetworkConnection::doUpdate(const QVariantMap &secretsWs, const QVariantMap
     }
     if (auto v4 = settingOf<Ipv4Setting>(s, Setting::Ipv4)) {
         if (m_ipv4Manual) {
-            IpAddress a;
-            a.setIp(QHostAddress(m_ipv4Address.trimmed()));
-            a.setPrefixLength(m_ipv4Prefix);
-            if (!m_ipv4Gateway.trimmed().isEmpty())
-                a.setGateway(QHostAddress(m_ipv4Gateway.trimmed()));
+            QList<IpAddress> list;
+            for (const QString &e : m_ipv4Addresses) {
+                if (e.trimmed().isEmpty())
+                    continue;
+                IpAddress a;
+                a.setIp(QHostAddress(e.trimmed().section(QLatin1Char('/'), 0, 0)));
+                a.setPrefixLength(e.contains(QLatin1Char('/')) ? e.trimmed().section(QLatin1Char('/'), 1, 1).toInt() : 24);
+                if (list.isEmpty() && !m_ipv4Gateway.trimmed().isEmpty())
+                    a.setGateway(QHostAddress(m_ipv4Gateway.trimmed()));
+                list << a;
+            }
             v4->setMethod(Ipv4Setting::Manual);
-            v4->setAddresses({a});
+            v4->setAddresses(list);
             v4->setGateway(m_ipv4Gateway.trimmed());
         } else if (v4->method() == Ipv4Setting::Manual) {
             v4->setMethod(Ipv4Setting::Automatic);
@@ -336,13 +381,19 @@ void NetworkConnection::doUpdate(const QVariantMap &secretsWs, const QVariantMap
     if (auto v6 = settingOf<Ipv6Setting>(s, Setting::Ipv6)) {
         const auto was = v6->method();
         if (m_ipv6Mode == 1) {
-            IpAddress a;
-            a.setIp(QHostAddress(m_ipv6Address.trimmed()));
-            a.setPrefixLength(m_ipv6Prefix);
-            if (!m_ipv6Gateway.trimmed().isEmpty())
-                a.setGateway(QHostAddress(m_ipv6Gateway.trimmed()));
+            QList<IpAddress> list;
+            for (const QString &e : m_ipv6Addresses) {
+                if (e.trimmed().isEmpty())
+                    continue;
+                IpAddress a;
+                a.setIp(QHostAddress(e.trimmed().section(QLatin1Char('/'), 0, 0)));
+                a.setPrefixLength(e.contains(QLatin1Char('/')) ? e.trimmed().section(QLatin1Char('/'), 1, 1).toInt() : 64);
+                if (list.isEmpty() && !m_ipv6Gateway.trimmed().isEmpty())
+                    a.setGateway(QHostAddress(m_ipv6Gateway.trimmed()));
+                list << a;
+            }
             v6->setMethod(Ipv6Setting::Manual);
-            v6->setAddresses({a});
+            v6->setAddresses(list);
         } else if (m_ipv6Mode == 2) {
             if (was != Ipv6Setting::Ignored && was != Ipv6Setting::ConfigDisabled)
                 v6->setMethod(Ipv6Setting::ConfigDisabled);
@@ -407,5 +458,60 @@ void NetworkConnection::forget()
         w->deleteLater();
         if (!r.isError())
             Q_EMIT forgotten();
+    });
+}
+
+// R12 (DECISION 178): join a network that doesn't broadcast its name. Saves the profile and connects in one call.
+void NetworkConnection::joinHidden(const QString &ssid, int security, const QString &password, const QString &devicePath)
+{
+    QString dev = devicePath;
+    if (dev.isEmpty()) {
+        for (const Device::Ptr &d : networkInterfaces()) {
+            if (d->type() == Device::Wifi) {
+                dev = d->uni();
+                break;
+            }
+        }
+    }
+    if (ssid.trimmed().isEmpty() || dev.isEmpty()) {
+        Q_EMIT joinFinished(false, dev.isEmpty() ? QStringLiteral("No Wi-Fi card found.") : QStringLiteral("Type the network name."));
+        return;
+    }
+    ConnectionSettings::Ptr s(new ConnectionSettings(ConnectionSettings::Wireless));
+    s->setId(ssid.trimmed());
+    s->setUuid(ConnectionSettings::createNewUuid());
+    s->setAutoconnect(true);
+    auto w = s->setting(Setting::Wireless).staticCast<WirelessSetting>();
+    w->setInitialized(true);
+    w->setSsid(ssid.trimmed().toUtf8());
+    w->setMode(WirelessSetting::Infrastructure);
+    w->setHidden(true);
+    if (security > 0) {
+        auto ws = s->setting(Setting::WirelessSecurity).staticCast<WirelessSecuritySetting>();
+        ws->setInitialized(true);
+        ws->setKeyMgmt(security == 2 ? WirelessSecuritySetting::SAE : WirelessSecuritySetting::WpaPsk);
+        ws->setPsk(password);
+    }
+    s->setting(Setting::Ipv4).staticCast<Ipv4Setting>()->setInitialized(true);
+    s->setting(Setting::Ipv4).staticCast<Ipv4Setting>()->setMethod(Ipv4Setting::Automatic);
+    s->setting(Setting::Ipv6).staticCast<Ipv6Setting>()->setInitialized(true);
+    s->setting(Setting::Ipv6).staticCast<Ipv6Setting>()->setMethod(Ipv6Setting::Automatic);
+    setBusy(true);
+    if (qEnvironmentVariableIsSet("LUMINOS_NM_JOIN_DRYRUN")) { // test aid: save the profile without switching networks
+        auto *wd = new QDBusPendingCallWatcher(addConnection(s->toMap()), this);
+        connect(wd, &QDBusPendingCallWatcher::finished, this, [this, wd] {
+            QDBusPendingReply<QDBusObjectPath> r = *wd;
+            wd->deleteLater();
+            setBusy(false);
+            Q_EMIT joinFinished(!r.isError(), r.isError() ? r.error().message() : QString());
+        });
+        return;
+    }
+    auto *wt = new QDBusPendingCallWatcher(addAndActivateConnection(s->toMap(), dev, QString()), this);
+    connect(wt, &QDBusPendingCallWatcher::finished, this, [this, wt] {
+        QDBusPendingReply<QDBusObjectPath, QDBusObjectPath> r = *wt;
+        wt->deleteLater();
+        setBusy(false);
+        Q_EMIT joinFinished(!r.isError(), r.isError() ? r.error().message() : QString());
     });
 }

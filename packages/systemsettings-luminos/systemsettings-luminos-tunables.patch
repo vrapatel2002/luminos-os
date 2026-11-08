@@ -198,6 +198,20 @@
      d->mButtons->setProperty("_breeze_force_frame", true);
      d->mPageWidget->layout()->setSpacing(0);
      if (auto titleWidget = qobject_cast<KTitleWidget *>(d->mPageWidget->pageHeader())) {
+@@ -683,6 +829,13 @@
+     d->mHelp->setVisible(buttons & KCModule::Help);
+ 
+     d->mButtons->setVisible(buttons != KCModule::NoAdditionalButton);
++    // R12 (DECISION 178): the Wi-Fi page saves through its own Save bar. Apply/Reset only mean something while the
++    // classic editor holds unsaved changes, so they are hidden until then (and the empty bar with them).
++    if (activeModule && activeModule->metaData().pluginId() == QLatin1String("kcm_networkmanagement") && !change) {
++        d->mApply->setVisible(false);
++        d->mReset->setVisible(false);
++        d->mButtons->setVisible(!d->mDefault->isHidden() || !d->mHelp->isHidden());
++    }
+ }
+ 
+ void ModuleView::keyPressEvent(QKeyEvent *event)
 --- a/app/qml/CategoriesPage.qml
 +++ b/app/qml/CategoriesPage.qml
 @@ -6,6 +6,7 @@

@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QQmlEngine>
 #include <QString>
+#include <QStringList>
 
 class NetworkConnection : public QObject
 {
@@ -40,14 +41,12 @@ class NetworkConnection : public QObject
     Q_PROPERTY(QString password MEMBER m_password NOTIFY edited)
     Q_PROPERTY(bool passwordEdited MEMBER m_passwordEdited NOTIFY edited)
     Q_PROPERTY(bool ipv4Manual MEMBER m_ipv4Manual NOTIFY edited)
-    Q_PROPERTY(QString ipv4Address MEMBER m_ipv4Address NOTIFY edited)
-    Q_PROPERTY(int ipv4Prefix MEMBER m_ipv4Prefix NOTIFY edited)
+    Q_PROPERTY(QStringList ipv4Addresses MEMBER m_ipv4Addresses NOTIFY edited) // R12: several, "192.168.2.50/24"
     Q_PROPERTY(QString ipv4Gateway MEMBER m_ipv4Gateway NOTIFY edited)
     Q_PROPERTY(bool dnsAuto MEMBER m_dnsAuto NOTIFY edited)
     Q_PROPERTY(QString dnsServers MEMBER m_dnsServers NOTIFY edited) // "1.1.1.1, 9.9.9.9"
     Q_PROPERTY(int ipv6Mode MEMBER m_ipv6Mode NOTIFY edited)      // 0 automatic, 1 manual, 2 off
-    Q_PROPERTY(QString ipv6Address MEMBER m_ipv6Address NOTIFY edited)
-    Q_PROPERTY(int ipv6Prefix MEMBER m_ipv6Prefix NOTIFY edited)
+    Q_PROPERTY(QStringList ipv6Addresses MEMBER m_ipv6Addresses NOTIFY edited) // R12: several, "fd00::5/64"
     Q_PROPERTY(QString ipv6Gateway MEMBER m_ipv6Gateway NOTIFY edited)
     Q_PROPERTY(int band MEMBER m_band NOTIFY edited)              // 0 automatic, 1 2.4 GHz, 2 5 GHz
     Q_PROPERTY(int macMode MEMBER m_macMode NOTIFY edited)        // 0 default, 1 laptop's own, 2 random, 3 stable random
@@ -87,6 +86,8 @@ public:
     Q_INVOKABLE void connectNow(const QString &devicePath);
     Q_INVOKABLE void disconnectNow();
     Q_INVOKABLE void forget();
+    // R12: create + join a hidden network (security 0 none, 1 WPA2 Personal, 2 WPA3 Personal); result in joinFinished
+    Q_INVOKABLE void joinHidden(const QString &ssid, int security, const QString &password, const QString &devicePath);
     // test aid (like LUMINOS_SS_OPEN_DRAWER): LUMINOS_NM_OPEN=<connection path> opens that details page at start-up
     Q_INVOKABLE QString testOpenPath() const { return qEnvironmentVariable("LUMINOS_NM_OPEN"); }
 
@@ -99,6 +100,7 @@ Q_SIGNALS:
     void saveFinished(bool ok, const QString &message);
     void passwordLoaded(bool ok);
     void forgotten();
+    void joinFinished(bool ok, const QString &message);
 
 private:
     void setBusy(bool b);
@@ -120,13 +122,13 @@ private:
     QString m_password;
     bool m_passwordEdited = false;
     bool m_ipv4Manual = false;
-    QString m_ipv4Address, m_ipv4Gateway;
-    int m_ipv4Prefix = 24;
+    QStringList m_ipv4Addresses;
+    QString m_ipv4Gateway;
     bool m_dnsAuto = true;
     QString m_dnsServers;
     int m_ipv6Mode = 0;
-    QString m_ipv6Address, m_ipv6Gateway;
-    int m_ipv6Prefix = 64;
+    QStringList m_ipv6Addresses;
+    QString m_ipv6Gateway;
     int m_band = 0, m_macMode = 0;
     bool m_hidden = false;
     int m_mtu = 0;
