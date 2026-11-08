@@ -1,0 +1,15 @@
+[Desktop Entry]
+# [CHANGE: claude-code | 2026-11-08] DECISION 180
+# No OnlyShowIn= — must appear in both the Plasma and the Caelestia/Hyprland launchers (DECISION 39).
+Name=Luminos Media
+GenericName=Photo and Video Viewer
+Comment=Open photos and videos
+Exec=/usr/local/bin/luminos-media %f
+Icon=multimedia-photo-viewer
+Terminal=false
+Type=Application
+Categories=Graphics;Viewer;AudioVideo;Video;Player;
+Keywords=photo;image;picture;video;movie;viewer;player;heic;luminos;
+MimeType=image/apng;image/avif;image/bmp;image/gif;image/heif;image/heic;image/jp2;image/jpeg;image/jxl;image/jxr;image/openraster;image/png;image/qoi;image/svg+xml;image/svg+xml-compressed;image/tiff;image/vnd.adobe.photoshop;image/vnd.microsoft.icon;image/x-icon;image/vnd.ms-dds;image/vnd.radiance;image/vnd.zbrush.pcx;image/webp;image/x-adobe-dng;image/x-canon-cr2;image/x-canon-cr3;image/x-canon-crw;image/x-epson-erf;image/x-exr;image/x-fuji-raf;image/x-hasselblad-3fr;image/x-hdr;image/x-jp2-codestream;image/x-kde-raw;image/x-kodak-kdc;image/x-leaf-mos;image/x-minolta-mrw;image/x-nikon-nef;image/x-nikon-nrw;image/x-olympus-orf;image/x-panasonic-rw2;image/x-pentax-pef;image/x-phaseone-iiq;image/x-portable-anymap;image/x-portable-bitmap;image/x-portable-graymap;image/x-portable-pixmap;image/x-samsung-srw;image/x-sigma-x3f;image/x-sony-arw;image/x-sony-sr2;image/x-sony-srf;image/x-tga;image/x-xbitmap;image/x-xcf;image/x-xpixmap;video/3gpp;video/3gpp2;video/matroska;video/x-matroska;video/mp2t;video/mp4;video/x-m4v;video/mpeg;video/ogg;video/quicktime;video/vnd.avi;video/x-msvideo;video/avi;video/webm;video/x-flv;video/x-ms-wmv;video/x-ms-asf;video/x-ogm+ogg;
+StartupNotify=true
+StartupWMClass=org.qt-project.qml

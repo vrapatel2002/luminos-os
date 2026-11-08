@@ -1,0 +1,92 @@
+#!/bin/bash
+# Luminos Media — one window for every photo and video (Qt/QML, no new packages)
+# [CHANGE: claude-code | 2026-11-08]  DECISION 180
+#
+# Usage:  luminos-media [FILE|FOLDER]
+#
+# The viewer is a single .qml file run by the stock `qml6` runtime. This wrapper adds
+# what the runtime will not do for itself:
+#   - resolve the Wayland/DBus session (keybinds and .desktop launches inherit little);
+#   - preload the VA-API shim so video decodes on the AMD 780M (BUG-234);
+#   - let QML read files for the Details sheet (XHR file read flag);
+#   - run "Move to Trash" for the QML side, which can only ask (stderr bridge below).
+
+set -u
+
+QML_FILE="/home/shawn/luminos-os/src/media/Media.qml"
+SHIM="/usr/local/lib/luminos/libluminos-vaapi-igpu.so"
+
+# ── Session environment ───────────────────────────────────────────────────
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
+        [ -S "$sock" ] || continue
+        WAYLAND_DISPLAY="$(basename "$sock")"; export WAYLAND_DISPLAY; break
+    done
+fi
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+fi
+export XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-wayland}"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+
+# ── Video decode: VA-API on the iGPU first, Vulkan second ────────────────
+# Never the NVIDIA card: its nodes are gated (DECISION 25) and a viewer must not wake it.
+if [ -r "$SHIM" ]; then
+    export LD_PRELOAD="$SHIM${LD_PRELOAD:+:$LD_PRELOAD}"
+    export QT_FFMPEG_DECODING_HW_DEVICE_TYPES="vaapi,vulkan"
+else
+    echo "luminos-media: $SHIM missing — video falls back to Vulkan/CPU decode" >&2
+    export QT_FFMPEG_DECODING_HW_DEVICE_TYPES="vulkan"
+fi
+
+# ── File access + logging ─────────────────────────────────────────────────
+export QML_XHR_ALLOW_FILE_READ=1
+# qml6 sends console output to journald unless forced; the Trash bridge needs stderr.
+export QT_FORCE_STDERR_LOGGING=1
+export QT_MESSAGE_PATTERN='%{message}'
+
+# ── Argument ──────────────────────────────────────────────────────────────
+TARGET=""
+if [ $# -gt 0 ]; then
+    TARGET="$1"
+    case "$TARGET" in file://*) TARGET="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.unquote(sys.argv[1][7:]))' "$TARGET")";; esac
+    if [ -d "$TARGET" ]; then
+        # A folder: open its first photo/video by name.
+        first="$(find "$TARGET" -maxdepth 1 -type f -regextype posix-extended -iregex \
+            '.*\.(jpe?g|jfif|png|apng|gif|webp|hei[cf]|hif|avif|jxl|bmp|tiff?|svgz?|psd|xcf|exr|dng|arw|cr[23w]|nef|orf|raf|rw2|pef|srw|mp4|m4v|mkv|webm|mov|avi|mpe?g|ts|m2ts|mts|3gp|3g2|wmv|flv|ogv)' \
+            2>/dev/null | LC_ALL=C sort -f | head -1)"
+        TARGET="${first:-$TARGET/}"
+    fi
+    if [ -e "$TARGET" ] && [ ! -r "$TARGET" ]; then
+        echo "luminos-media: '$TARGET' is not readable" >&2; exit 1
+    fi
+    TARGET="$(realpath -m -- "$TARGET")"
+fi
+
+# ── Trash bridge ──────────────────────────────────────────────────────────
+# The QML side prints LUMINOS_MEDIA_TRASH:<path>; only regular files are trashed, via
+# `gio trash` (freedesktop Trash, same place Dolphin's Trash uses). Everything else on
+# stderr passes through unchanged.
+bridge() {
+    local line p
+    while IFS= read -r line; do
+        case "$line" in
+            *LUMINOS_MEDIA_TRASH:*)
+                p="${line#*LUMINOS_MEDIA_TRASH:}"
+                if [ -f "$p" ]; then gio trash -- "$p" 2>&1 || echo "luminos-media: could not trash $p" >&2
+                else echo "luminos-media: refusing to trash '$p' (not a regular file)" >&2; fi ;;
+            *) printf '%s\n' "$line" >&2 ;;
+        esac
+    done
+}
+
+# Self-test / debug flags (--luminos-debug, --luminos-selftest[-trash]) pass through.
+EXTRA=()
+for a in "${@:2}"; do case "$a" in --luminos-*) EXTRA+=("$a");; esac; done
+
+if [ -n "$TARGET" ]; then
+    exec /usr/bin/qml6 "$QML_FILE" -- "$TARGET" "${EXTRA[@]}" 2> >(bridge)
+else
+    exec /usr/bin/qml6 "$QML_FILE" 2> >(bridge)
+fi

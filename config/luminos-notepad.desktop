@@ -1,5 +1,6 @@
 [Desktop Entry]
 # [CHANGE: claude-code | 2026-08-05]
+# [CHANGE: claude-code | 2026-11-08] + toml/rust/lua/ts/php/diff/subtitles/ipynb/Makefile/tex/empty files… (were unclaimed or vim)
 # No OnlyShowIn= — this must appear in both the Plasma launcher and the
 # Caelestia/Hyprland one (DECISION 39 made Hyprland a real session).
 Name=Luminos Notepad
@@ -11,6 +12,6 @@ Terminal=false
 Type=Application
 Categories=Utility;TextEditor;
 Keywords=text;editor;notepad;plaintext;write;luminos;
-MimeType=text/plain;text/markdown;text/x-markdown;application/json;application/x-yaml;text/x-yaml;text/csv;text/x-log;application/x-shellscript;text/x-shellscript;text/x-python;text/x-go;text/x-c;text/x-c++;text/x-java;text/x-sql;text/html;text/css;text/xml;application/xml;application/javascript;text/x-ini;application/x-desktop;
+MimeType=text/plain;text/markdown;text/x-markdown;application/json;application/x-yaml;text/x-yaml;text/csv;text/x-log;application/x-shellscript;text/x-shellscript;text/x-python;text/x-go;text/x-c;text/x-c++;text/x-java;text/x-sql;text/html;text/css;text/xml;application/xml;application/javascript;text/x-ini;application/x-desktop;application/toml;text/x-toml;text/rust;text/x-rust;text/x-patch;text/x-diff;text/x-lua;text/x-kotlin;text/x-typescript;application/x-php;text/x-cmake;text/x-makefile;text/x-tex;application/x-subrip;text/vtt;application/x-ipynb+json;text/x-nfo;text/x-readme;text/x-csharp;application/x-zerosize;text/x-ruby;application/x-perl;text/x-perl;text/x-haskell;text/x-scala;text/x-swift;text/x-meson;text/x-gettext-translation;text/x-changelog;text/x-copying;text/x-authors;text/x-install;application/x-wine-extension-ini;
 StartupNotify=true
 StartupWMClass=org.qt-project.qml
