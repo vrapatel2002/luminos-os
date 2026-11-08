@@ -1,0 +1,11 @@
+# [CHANGE: claude-code | 2026-11-08] DECISION 177 — warn when plasma-nm changes under the Luminos Wi-Fi page copy.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = plasma-nm
+
+[Action]
+Description = Luminos: checking the Wi-Fi page look (based on plasma-nm 6.7.5)...
+When = PostTransaction
+Exec = /usr/bin/sh -c 'v=$(pacman -Q plasma-nm | cut -d" " -f2 | cut -d- -f1); if [ "$v" != "6.7.5" ]; then echo "luminos: WARNING plasma-nm is now $v — /usr/local/share/kcm_networkmanagement/qml is a 6.7.5 copy. If Wi-Fi & Networking looks broken, re-base src/kcm-nm-look on the new QML and rebuild luminos-style (or delete that folder for the stock page)."; else echo "luminos: OK plasma-nm 6.7.5 matches the Wi-Fi page copy"; fi'

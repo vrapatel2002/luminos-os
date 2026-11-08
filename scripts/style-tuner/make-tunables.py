@@ -171,6 +171,31 @@ CPP = {
       "// R8 (BUG-232): some QtWidgets KCMs hard-code a page minimum (Wi-Fi: KCMForm 800x500 in kcm.ui). Our sidebar\n"
       "// leaves ~690 px for the page, so the scroll area grew a sideways scrollbar and clipped the right side.\n"
       "// Drop only big fixed minimum widths (>= 600 px); real content minimums (tabs, lists, labels) stay.\n"
+      "// R9 (DECISION 177): Shawn wants the Wi-Fi Status details left aligned: labels left, section titles left, and the\n"
+      "// form at the left edge instead of centred between two stretches. Each step checks first, so repeat passes are no-ops.\n"
+      "static void luminosLeftAlign(QWidget *w)\n"
+      "{\n"
+      "    for (QFormLayout *f : w->findChildren<QFormLayout *>()) {\n"
+      "        if (f->labelAlignment() != (Qt::AlignLeft | Qt::AlignVCenter))\n"
+      "            f->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);\n"
+      "    }\n"
+      "    for (QLabel *l : w->findChildren<QLabel *>()) {\n"
+      "        if (l->alignment() & Qt::AlignHCenter)\n"
+      "            l->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);\n"
+      "    }\n"
+      "    QList<QHBoxLayout *> rows = w->findChildren<QHBoxLayout *>();\n"
+      "    if (w->parentWidget())\n"
+      "        if (auto *outer = qobject_cast<QHBoxLayout *>(w->parentWidget()->layout()))\n"
+      "            rows.append(outer); // the tab's centring container (stretch | content | stretch)\n"
+      "    for (QHBoxLayout *h : std::as_const(rows)) {\n"
+      "        if (h->count() > 0 && h->itemAt(0)->spacerItem() && h->itemAt(0)->spacerItem()->sizeHint().width() >= 0\n"
+      "            && !h->property(\"_lxLeft\").toBool()) {\n"
+      "            h->itemAt(0)->spacerItem()->changeSize(0, 0, QSizePolicy::Fixed, QSizePolicy::Minimum);\n"
+      "            h->setProperty(\"_lxLeft\", true);\n"
+      "            h->invalidate();\n"
+      "        }\n"
+      "    }\n"
+      "}\n"
       "static void luminosFitWidth(QWidget *root)\n"
       "{\n"
       "    if (!root)\n"
@@ -184,6 +209,14 @@ CPP = {
       "            tb->setUsesScrollButtons(true); // tabs scroll instead of forcing the page wider\n"
       "        if (w->objectName() == QLatin1String(\"connectionView\") && w->minimumWidth() > 240)\n"
       "            w->setMinimumWidth(240); // Wi-Fi list: upstream 300 px; 240 still fits names, frees room for the editor\n"
+      "        if (w->objectName() == QLatin1String(\"connectionView\") && w->parentWidget()) // R9: list shares spare room 2:3\n"
+      "            if (auto *box = qobject_cast<QBoxLayout *>(w->parentWidget()->layout()); box && box->count() == 2\n"
+      "                && box->indexOf(w) == 0 && box->stretch(0) == 0 && box->stretch(1) == 0) {\n"
+      "                box->setStretch(0, 2);\n"
+      "                box->setStretch(1, 3);\n"
+      "            }\n"
+      "        if (QByteArray(w->metaObject()->className()) == \"ConnectionStatusWidget\")\n"
+      "            luminosLeftAlign(w); // R9: Wi-Fi Status tab, everything left aligned\n"
       "    }\n"
       "}\n"
       "// KCMs build and rebuild widgets long after load (Wi-Fi recreates its editor tabs per connection, each tab content\n"
@@ -246,7 +279,8 @@ CPP = {
 }
 CPP_INCLUDES = {"systemsettings": {"app/ModuleView.cpp": ["#include <QFile>", "#include <QJsonDocument>", "#include <QJsonObject>", "#include <QStandardPaths>",
                                                           "#include <QDir>", "#include <QFileSystemWatcher>", "#include <QMargins>",
-                                                          "#include <QTabBar>", "#include <QPointer>", "#include <QApplication>"]}}
+                                                          "#include <QTabBar>", "#include <QPointer>", "#include <QApplication>",
+                                                          "#include <QFormLayout>", "#include <QHBoxLayout>", "#include <QLabel>"]}}
 
 def main(pkg, tree, out):
     orig = tree + ".orig-tunables"
