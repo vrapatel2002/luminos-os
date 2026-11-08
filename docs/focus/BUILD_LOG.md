@@ -119,3 +119,9 @@ idle-desktop PSR + package power with Shawn away (target from DESIGN: 8.8 → �
   less CPU in use (~30 % of a core total), Tctl 57-63 °C (was ~43-47), VDDNB 835 mV (was 714 mV), dGPU suspended, Cowork VM running
   (qemu 1.7 %). Cause NOT found yet — suspects: data-fabric/memory kept up (VDDNB), heat soak after the build, the Cowork VM's
   timers keeping cores out of deep idle. Next: repeat with the Claude app closed, then with the Cowork VM stopped.
+- 2026-11-08 Shawn: wallpaper must stay LIVE whenever any part of it is visible; freeze only when one app fully covers
+  the desktop; and the paused frame looked low-res. Changes: ObscurePolicy default 3 → 2 (config/main.xml) + live desktop
+  config set to 2 via plasmashell evaluateScript; WebMode.qml grabs the freeze frame at device pixels (Screen.devicePixelRatio,
+  2x panel) instead of logical size. Deployed (backups *.bak-pre-20261108), plasmashell restarted. Proven
+  (/var/tmp/wp-policy-test.log): Claude window restored (desktop partly visible) → wallpaper 30 % of a core, iGPU 37 %
+  (live); Claude maximized → 0-5 %, iGPU 10-14 % (frozen). The CPU-dial daemon is unchanged.

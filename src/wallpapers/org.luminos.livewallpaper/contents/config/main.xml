@@ -62,7 +62,10 @@
          [CHANGE: claude-code | 2026-07-24] -->
     <entry name="ObscurePolicy" type="int">
       <label>When to freeze the wallpaper because it is not visible</label>
-      <default>3</default>
+      <!-- [CHANGE: claude-code | 2026-11-08] back to 2: Shawn wants it LIVE whenever any part of it is
+           visible; freeze only when one app fully covers the desktop (maximized / fullscreen). 3 froze it
+           behind every small focused window. -->
+      <default>2</default>
     </entry>
 
     <entry name="MuteAudio" type="bool">

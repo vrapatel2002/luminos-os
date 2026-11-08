@@ -153,7 +153,11 @@ Item {
                 webRoot.freeze(null);     // already hidden (e.g. a reload): just re-freeze
             } else {
                 freezeWait.restart();
-                if (!web.grabToImage(function (g) { webRoot.freeze(g); }))
+                // [CHANGE: claude-code | 2026-11-08] grab at device pixels (2x panel): the default
+                // grabs at logical size, which looked low-res.
+                var dpr = Screen.devicePixelRatio || 1;
+                if (!web.grabToImage(function (g) { webRoot.freeze(g); },
+                                     Qt.size(Math.round(web.width * dpr), Math.round(web.height * dpr))))
                     webRoot.freeze(null);
             }
         }
