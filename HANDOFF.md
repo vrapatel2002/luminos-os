@@ -1,8 +1,8 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-08 — Response 3 (Luminos Media chat)
+Last updated: 2026-11-08 — Response 4 (Luminos Media chat)
 
 
-## Aim right now — LUMINOS MEDIA (one lightest app for ALL images + videos) — engine measured, awaiting engine pick
+## Aim right now — LUMINOS MEDIA (one lightest app for ALL images + videos) — engine CHOSEN (A), prototype published, awaiting approval
 - Origin: Shawn couldn't open photos (.heic). luminos-notepad is text-only (refuses binaries); NO image viewer installed;
   jpg/png/webp -> Chrome, heic/heif/avif -> nothing. VLC already default for video. Notepad also misses ~21 text types
   (toml, rust, lua, ts, php, diff, srt/vtt, ipynb...; Makefile/.tex -> vim) — add them later (default yes).
@@ -19,7 +19,12 @@ Last updated: 2026-11-08 — Response 3 (Luminos Media chat)
   said NO (known fuzzy-match false negative, project_brain_gate_false_negative) — NOT overridden.
 - Options put to Shawn: (A) QML app on Qt Multimedia + shim, zero new packages; (B) QML UI on libmpv (likely lightest
   video, needs -Syu + mpv); (C) QML image viewer + hand videos to VLC.
-- NEXT: Shawn picks engine -> HTML prototype (his UI rule) -> build in src/media + scripts/luminos-media, .desktop with
+- R4: Shawn: "do whatever is the best option" -> chose A (QML + Qt Multimedia + VA-API shim, zero new packages).
+  PROTOTYPE published: artifact "Luminos Media" (claude.ai/artifact/PrgBUe9YzRzgfVPdmGbTNL), repo copy
+  docs/media/mock/luminos-media.html: full-bleed picture, top bar (name/size/format, zoom/fit/rotate, folder strip,
+  details, trash), side arrows, video bar (play, seek, time, speed, mute, loop), folder strip of mixed photos+videos,
+  details sheet (EXIF / codec), controls fade after 2.5 s, keys ←→ Space F I G R M L Del +/-/0, Shift+←→ = ±10 s.
+- NEXT: Shawn approves/changes prototype -> build (his UI rule) -> build in src/media + scripts/luminos-media, .desktop with
   image/* video/*, xdg defaults, double-click proof on every test file, docs/notes/commit.
 
 ## Aim right now — DV PURPLE AGAIN IN JELLYROCK (BUG-231) — FIXED + proven live, TV check = Shawn
@@ -65,6 +70,7 @@ Last updated: 2026-11-08 — Response 3 (Luminos Media chat)
   (read/write kioslaverc [Proxy Settings] + KIO keys), shown in place of kio's two (systemsettings fork swaps the plugin ids).
 - R14 (DECISION 179) BUILT: own Proxy + Connection Preferences QML pages (luminos-style 1.0-10), kio-extras ones hidden
 - R15: Wi-Fi page icons now sit in the same round disc as the sidebar (Rows.Disc, iconCirclePx/iconGlyphPx, follows tuner). Hand-installed to /usr/local/share/kcm_networkmanagement/qml; next luminos-style build packages it. Shot: docs/style-tuner/shots/wifi-discs.png
+- R16: the Wi-Fi glyph itself was still small (wedge art fills ~60% of its box: 20x13 vs globe 20x20) → Disc.glyphScale 1.35 for "wireless" icons + roundToIconSize:false (Kirigami was snapping 27 px back to 22). Measured now 25x17. Hand-installed.
   by systemsettings 1.14. Proven by writing kio-format kioslaverc/kio_ftprc in a private config dir.
 - R5 (2026-11-08): Shawn asked how to use it → told: app menu "Style Tuner" (or run luminos-style-tuner), drag bars, reset arrows, delete style.json to undo. No changes.
 - Shawn: tune the Nexus KDE look himself with HORIZONTAL BARS, LIVE; R4 "do it rather than perfecting it".

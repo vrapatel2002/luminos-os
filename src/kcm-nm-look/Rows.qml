@@ -13,13 +13,17 @@ QtObject {
         property alias source: glyph.source
         property bool accent: false // connected network: highlighted disc
         property bool dim: false
+        // R16: the Wi-Fi wedge only fills ~60% of its icon box (20x13 px vs the sidebar globe's 20x20),
+        // so it is drawn larger to look the same size as the sidebar glyphs.
+        property real glyphScale: String(source).indexOf("wireless") >= 0 ? 1.35 : 1
         Layout.alignment: Qt.AlignVCenter
         implicitWidth: LxS.Style.iconCirclePx; implicitHeight: implicitWidth; radius: implicitWidth / 2
         color: accent ? Kirigami.Theme.focusColor : (LxS.Style.iconDiscColor || Kirigami.Theme.highlightColor)
         opacity: dim ? 0.45 : 1
         Kirigami.Icon {
             id: glyph
-            anchors.centerIn: parent; width: LxS.Style.iconGlyphPx; height: width; isMask: true
+            anchors.centerIn: parent; width: Math.round(LxS.Style.iconGlyphPx * parent.glyphScale); height: width; isMask: true
+            roundToIconSize: false // else Kirigami snaps 27 px back down to 22
             color: parent.accent ? Kirigami.Theme.highlightColor : (LxS.Style.iconGlyphColor || Kirigami.Theme.highlightedTextColor)
         }
     }
