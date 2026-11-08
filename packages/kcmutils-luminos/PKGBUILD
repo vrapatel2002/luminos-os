@@ -13,9 +13,12 @@
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
+# [CHANGE: claude-code | 2026-11-08] pkgrel 1.2 — DECISION 176: kcmutils-luminos-tunables.patch swaps the look literals for live
+# org.luminos.style values (same defaults; ~/.config/luminos/style.json changes them live). Needs luminos-style.
+
 pkgname=kcmutils
 pkgver=6.30.0
-pkgrel=1.1
+pkgrel=1.2
 pkgdesc='Utilities for interacting with KCModules'
 arch=(x86_64)
 url='https://develop.kde.org/products/frameworks/'
@@ -34,22 +37,26 @@ depends=(libstdc++
          kwidgetsaddons
          kxmlgui
          qt6-base
-         qt6-declarative)
+         qt6-declarative
+         luminos-style)
 makedepends=(doxygen
              extra-cmake-modules
              qt6-tools)
 groups=(kf6)
 source=(https://download.kde.org/stable/frameworks/${pkgver%.*}/$pkgname-$pkgver.tar.xz{,.sig}
-        kcmutils-luminos-listcard.patch)
+        kcmutils-luminos-listcard.patch
+        kcmutils-luminos-tunables.patch)
 sha256sums=('0159f80d030ac250b0b353113a55c013ed7e38cb0b678df44d2f0d0b2aca944c'
             'SKIP'
-            'b41e2498b4d570e4b36987f8bac2c0c89b1a3965016ecd5488e74ca1f89d2b43')
+            'b41e2498b4d570e4b36987f8bac2c0c89b1a3965016ecd5488e74ca1f89d2b43'
+            'e29e2fe4234f6dbc40ddb9fa36d1a18aa41b33cb6841c2ccb84feeae1e292bb4')
 validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB # David Faure <faure@kde.org>
               90A968ACA84537CC27B99EAF2C8DF587A6D4AAC1 # Nicolas Fella <nicolas.fella@kde.org>
               )
 
 prepare() {
   patch -p1 -d $pkgname-$pkgver < "$srcdir"/kcmutils-luminos-listcard.patch
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/kcmutils-luminos-tunables.patch  # DECISION 176: live style values (org.luminos.style)
 }
 
 build() {

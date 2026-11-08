@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Style Tuner
+Comment=Tune sizes, corners and spacing of the desktop look live
+Exec=luminos-style-tuner
+Icon=preferences-desktop-theme
+Categories=Settings;DesktopSettings;Qt;KDE;
+Keywords=font;size;corner;radius;spacing;look;theme;

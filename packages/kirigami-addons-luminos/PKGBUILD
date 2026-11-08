@@ -16,9 +16,12 @@
 #   Rebuild:  makepkg -f && sudo pacman -U kirigami-addons-*-1.N-*.pkg.tar.zst
 #   Revert:   sudo pacman -U /var/cache/pacman/pkg/kirigami-addons-1.13.1-1-x86_64.pkg.tar.zst
 
+# [CHANGE: claude-code | 2026-11-08] pkgrel 1.3 — DECISION 176: kirigami-addons-luminos-tunables.patch swaps the look literals for live
+# org.luminos.style values (same defaults; ~/.config/luminos/style.json changes them live). Needs luminos-style.
+
 pkgname=kirigami-addons
 pkgver=1.13.1
-pkgrel=1.2
+pkgrel=1.3
 pkgdesc='Add-ons for the Kirigami framework'
 url='https://invent.kde.org/libraries/kirigami-addons'
 arch=(x86_64)
@@ -40,18 +43,22 @@ depends=(glibc
          qt6-base
          qt6-declarative
          qt6-multimedia
-         sonnet)
+         sonnet
+         luminos-style)
 makedepends=(extra-cmake-modules)
 source=(https://download.kde.org/stable/$pkgname/$pkgname-$pkgver.tar.xz{,.sig}
-        kirigami-addons-luminos-connectedrect.patch)
+        kirigami-addons-luminos-connectedrect.patch
+        kirigami-addons-luminos-tunables.patch)
 sha256sums=('76026f0abe8c948208ce75a02a9ecac60c618ac5288ca546e09da64bc4af7050'
             'SKIP'
-            'ae9f9f31cc339b4931f97e77c298c970e7166144e6ce075ddb1493f5e00b7010')
+            'ae9f9f31cc339b4931f97e77c298c970e7166144e6ce075ddb1493f5e00b7010'
+            '68acbf2cbcd87397b62091613d096e4bdaadaf67c927d216fa3f521344daafb4')
 validpgpkeys=(0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D  # Bhushan Shah (mykolab address) <bshah@mykolab.com>
               39FFA93CAE9C6AFC212AD00202325448204E452A) # Carl Schwan <carl@carlschwan.eu>
 
 prepare() {
   patch -p1 -d $pkgname-$pkgver < "$srcdir"/kirigami-addons-luminos-connectedrect.patch
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/kirigami-addons-luminos-tunables.patch  # DECISION 176: live style values (org.luminos.style)
 }
 
 build() {

@@ -1,0 +1,32 @@
+# [CHANGE: claude-code | 2026-11-08] DECISION 176 — Luminos style tuner.
+# org.luminos.style QML module (live values read from ~/.config/luminos/style.json, inotify-watched)
+# + the Style Tuner window + the apply helper for fonts/Darkly corners.
+# The forked qqc2-desktop-style / kirigami / kirigami-addons / kcmutils / systemsettings depend on it.
+# Sources live in the repo: src/luminos-style/. Rebuild: makepkg -sfi (from this folder).
+pkgname=luminos-style
+pkgver=1.0
+pkgrel=3
+pkgdesc='Luminos: live style values for the forked KDE look + Style Tuner window'
+arch=(x86_64)
+license=(GPL-3.0-or-later)
+depends=(qt6-base qt6-declarative jq kconfig)  # kirigami is needed only by the tuner window, and depends on us (no cycle)
+makedepends=(cmake)
+source=()
+
+_src() { echo "$startdir/../../src/luminos-style"; }
+
+build() {
+  cmake -B build -S "$(_src)" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  local t="$(_src)/tuner"
+  install -Dm644 "$t/StyleTuner.qml" "$pkgdir/usr/share/luminos-style/StyleTuner.qml"
+  install -Dm755 "$t/luminos-style-tuner" "$pkgdir/usr/bin/luminos-style-tuner"
+  install -Dm755 "$t/luminos-style-apply" "$pkgdir/usr/bin/luminos-style-apply"
+  install -Dm644 "$t/luminos-style-apply.path" "$pkgdir/usr/lib/systemd/user/luminos-style-apply.path"
+  install -Dm644 "$t/luminos-style-apply.service" "$pkgdir/usr/lib/systemd/user/luminos-style-apply.service"
+  install -Dm644 "$t/luminos-style-tuner.desktop" "$pkgdir/usr/share/applications/luminos-style-tuner.desktop"
+}

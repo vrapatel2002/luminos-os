@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-11-08] Luminos style tuner (DECISION 176).
+# Run by luminos-style-apply.path whenever ~/.config/luminos/style.json changes.
+# The QML side reads the file itself; this only handles the two values that live in
+# KDE's own config: text size (kdeglobals fonts) and button corners (darklyrc).
+# Acts only when a value really changed, so dragging other bars costs nothing here.
+set -u
+cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
+f="$cfg/luminos/style.json"
+state="${XDG_CACHE_HOME:-$HOME/.cache}/luminos/style-applied"
+mkdir -p "$(dirname "$state")"
+
+pt=10; btn=16
+if [ -f "$f" ] && jq -e . "$f" >/dev/null 2>&1; then
+    pt=$(jq -r '(.textSizePt // 10) | if . < 6 then 6 elif . > 20 then 20 else . end' "$f")
+    btn=$(jq -r '(.cornerButtonPx // 16) | if . < 0 then 0 elif . > 32 then 32 else . end | round' "$f")
+elif [ -f "$f" ]; then
+    exit 0   # half-written or broken: keep what is applied
+fi
+read -r old_pt old_btn 2>/dev/null < "$state" || { old_pt=""; old_btn=""; }
+
+setsize() { # $1 group $2 key $3 size: replace field 2 of a QFont string, keep the rest
+    local cur
+    cur=$(kreadconfig6 --file kdeglobals --group "$1" --key "$2")
+    [ -n "$cur" ] || return 0
+    kwriteconfig6 --file kdeglobals --group "$1" --key "$2" "$(awk -F, -v OFS=, -v s="$3" '{$2=s; print}' <<<"$cur")"
+}
+
+if [ "$pt" != "$old_pt" ]; then
+    small=$(awk -v p="$pt" 'BEGIN{print (p-2<6)?6:p-2}')
+    setsize General font "$pt"
+    setsize General menuFont "$pt"
+    setsize General toolBarFont "$pt"
+    setsize General smallestReadableFont "$small"
+    setsize WM activeFont "$pt"
+    dbus-send --session --type=signal /KDEPlatformTheme org.kde.KDEPlatformTheme.refreshFonts
+fi
+if [ "$btn" != "$old_btn" ]; then
+    kwriteconfig6 --file darklyrc --group Common --key CornerRadius "$btn"
+    dbus-send --session --type=signal /DarklyStyle org.kde.Darkly.Style.reparseConfiguration
+fi
+echo "$pt $btn" > "$state"

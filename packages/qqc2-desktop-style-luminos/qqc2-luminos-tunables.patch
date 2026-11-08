@@ -1,0 +1,255 @@
+--- a/org.kde.desktop/Frame.qml
++++ b/org.kde.desktop/Frame.qml
+@@ -6,6 +6,7 @@
+ */
+ 
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Templates as T
+ import org.kde.kirigami as Kirigami
+@@ -18,12 +19,12 @@
+     implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                              contentHeight + topPadding + bottomPadding)
+ 
+-    padding: 12 // luminos: room for the r28 corners
++    padding: Math.round(LxS.Style.cardPaddingPx * 0.6) // luminos: room for the r28 corners
+ 
+     // [CHANGE: luminos | 2026-10-12] DECISION 140 — Nexus card: View-alternate fill, r28 (clamped), no border
+     background: Rectangle {
+         Item { id: viewTone; Kirigami.Theme.colorSet: Kirigami.Theme.View; Kirigami.Theme.inherit: false }
+         color: viewTone.Kirigami.Theme.alternateBackgroundColor
+-        radius: Math.min(28, width / 2, height / 2)
++        radius: Math.min(LxS.Style.cornerOuterPx, width / 2, height / 2)
+     }
+ }
+--- a/org.kde.desktop/Menu.qml
++++ b/org.kde.desktop/Menu.qml
+@@ -7,6 +7,7 @@
+ */
+ 
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Templates as T
+ import org.kde.kirigami as Kirigami
+@@ -111,9 +112,9 @@
+             property: "opacity"
+             from: 0
+             to: 1
+-            duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
++            duration: LxS.Style.animationMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+         }
+-        NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
++        NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: LxS.Style.animationMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+     }
+ 
+     exit: Transition {
+@@ -121,14 +122,14 @@
+             property: "opacity"
+             from: 1
+             to: 0
+-            duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
++            duration: LxS.Style.animationShortMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+         }
+     }
+ 
+     background: Kirigami.ShadowedRectangle {
+         Kirigami.Theme.colorSet: Kirigami.Theme.Button
+         Kirigami.Theme.inherit: false
+-        radius: 16
++        radius: LxS.Style.cornerButtonPx
+         implicitWidth: 240
+         color: Kirigami.Theme.backgroundColor
+         shadow.xOffset: 0
+--- a/org.kde.desktop/MenuItem.qml
++++ b/org.kde.desktop/MenuItem.qml
+@@ -7,6 +7,7 @@
+ */
+ 
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Layouts
+ import QtQuick.Templates as T
+@@ -131,7 +132,7 @@
+         implicitWidth: Kirigami.Units.gridUnit * 8
+         opacity: (controlRoot.highlighted || controlRoot.down) ? 1 : 0
+         color: Kirigami.Theme.highlightColor
+-        radius: 10
+-        Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
++        radius: LxS.Style.cornerMenuItemPx
++        Behavior on opacity { NumberAnimation { duration: LxS.Style.animationShortMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
+     }
+ }
+--- a/org.kde.desktop/ScrollView.qml
++++ b/org.kde.desktop/ScrollView.qml
+@@ -7,6 +7,7 @@
+ */
+ 
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Templates as T
+ import org.kde.kirigami as Kirigami
+@@ -41,7 +42,7 @@
+         readonly property real leftPadding: 8
+         readonly property real rightPadding: 8
+         color: Kirigami.Theme.alternateBackgroundColor
+-        radius: Math.min(28, width / 2, height / 2)
++        radius: Math.min(LxS.Style.cornerOuterPx, width / 2, height / 2)
+     }
+ 
+     data: [
+--- a/org.kde.desktop/ToolTip.qml
++++ b/org.kde.desktop/ToolTip.qml
+@@ -6,6 +6,7 @@
+ */
+ 
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Templates as T
+ import org.kde.kirigami as Kirigami
+@@ -54,7 +55,7 @@
+             property: "opacity"
+             from: 0.0
+             to: 1.0
+-            duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
++            duration: LxS.Style.animationShortMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+         }
+     }
+ 
+@@ -63,7 +64,7 @@
+             property: "opacity"
+             from: 1.0
+             to: 0.0
+-            duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
++            duration: LxS.Style.animationShortMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+         }
+     }
+ 
+--- a/org.kde.desktop/private/DefaultListItemBackground.qml
++++ b/org.kde.desktop/private/DefaultListItemBackground.qml
+@@ -8,6 +8,7 @@
+ 
+ 
+ // [CHANGE: luminos | 2026-10-11] DECISION 140 — Nexus rows: connected corners per ListView group, selected pill, press squash.
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Templates as T
+ import org.kde.kirigami as Kirigami
+@@ -51,8 +52,8 @@
+         function onReused() { Qt.callLater(() => background.settled = true) }
+     }
+     // radii (logical px): pressed 12, selected pill 32, group ends 28, touching 4, standalone 12
+-    readonly property real topR: control.down ? 12 : selected ? 32 : view === null ? 12 : first ? 28 : 4
+-    readonly property real bottomR: control.down ? 12 : selected ? 32 : view === null ? 12 : last ? 28 : 4
++    readonly property real topR: control.down ? 12 : selected ? LxS.Style.cornerSelectedPx : view === null ? 12 : first ? LxS.Style.cornerOuterPx : LxS.Style.cornerInnerPx
++    readonly property real bottomR: control.down ? 12 : selected ? LxS.Style.cornerSelectedPx : view === null ? 12 : last ? LxS.Style.cornerOuterPx : LxS.Style.cornerInnerPx
+ 
+     Item { id: tone; Kirigami.Theme.colorSet: Kirigami.Theme.Button; Kirigami.Theme.inherit: false }
+ 
+@@ -61,8 +62,8 @@
+         visible: !background.isTable
+         anchors {
+             fill: parent // drawn over the vertical insets, 2 px in, so neighbours show a 4 px gap
+-            topMargin: 2 - background.control.topInset
+-            bottomMargin: 2 - background.control.bottomInset
++            topMargin: LxS.Style.rowHalfGapPx - background.control.topInset
++            bottomMargin: LxS.Style.rowHalfGapPx - background.control.bottomInset
+         }
+         opacity: background.control.enabled ? 1 : 0.5
+         color: background.selected ? Kirigami.Theme.highlightColor : tone.Kirigami.Theme.backgroundColor
+@@ -70,15 +71,15 @@
+         property real br: background.bottomR
+         topLeftRadius: tr; topRightRadius: tr; bottomLeftRadius: br; bottomRightRadius: br
+         // "Snappy": 180 ms, M3 standard easing cubic-bezier(0.2, 0, 0, 1), no overshoot (colours 120 ms)
+-        Behavior on tr { enabled: background.animate; NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
+-        Behavior on br { enabled: background.animate; NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
+-        Behavior on color { enabled: background.animate; ColorAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
++        Behavior on tr { enabled: background.animate; NumberAnimation { duration: LxS.Style.animationMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
++        Behavior on br { enabled: background.animate; NumberAnimation { duration: LxS.Style.animationMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
++        Behavior on color { enabled: background.animate; ColorAnimation { duration: LxS.Style.animationShortMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
+         Rectangle { // state layer: onSurface 8 % on hover/focus
+             anchors.fill: parent
+             topLeftRadius: row.tr; topRightRadius: row.tr; bottomLeftRadius: row.br; bottomRightRadius: row.br
+             color: Kirigami.Theme.textColor
+             opacity: background.control.down ? 0.10 : (background.control.hovered || background.reallyFocus) ? 0.08 : 0
+-            Behavior on opacity { NumberAnimation { duration: 120 } }
++            Behavior on opacity { NumberAnimation { duration: LxS.Style.animationShortMs } }
+         }
+     }
+ 
+--- a/org.kde.desktop/private/M3RadioIndicator.qml
++++ b/org.kde.desktop/private/M3RadioIndicator.qml
+@@ -3,6 +3,7 @@
+     SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-or-later
+ */
+ // [CHANGE: luminos | 2026-10-11] DECISION 140 — Nexus radio: 2 px outline circle; checked = filled primary with a check.
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Shapes
+ import QtQuick.Templates as T
+@@ -24,7 +25,7 @@
+     border.width: control.checked ? 0 : 2
+     border.color: control.hovered || control.visualFocus ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor
+     opacity: control.enabled ? 1 : 0.38
+-    Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
++    Behavior on color { ColorAnimation { duration: LxS.Style.animationShortMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
+ 
+     Rectangle { // hover / press state layer, M3 40 px circle
+         anchors.centerIn: parent
+@@ -47,8 +48,8 @@
+         scale: indicator.control.checked ? indicator.width / 24 * 0.8 : 0.3
+         opacity: indicator.control.checked ? 1 : 0
+         preferredRendererType: Shape.CurveRenderer
+-        Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
+-        Behavior on opacity { NumberAnimation { duration: 120 } }
++        Behavior on scale { NumberAnimation { duration: LxS.Style.animationMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
++        Behavior on opacity { NumberAnimation { duration: LxS.Style.animationShortMs } }
+         ShapePath {
+             strokeColor: Qt.hsla(Kirigami.Theme.focusColor.hslHue, Kirigami.Theme.focusColor.hslSaturation * 0.4, Kirigami.Theme.focusColor.hslLightness > 0.5 ? 0.27 : 1.0, 1)
+             strokeWidth: 2.6
+--- a/org.kde.desktop/private/SwitchIndicator.qml
++++ b/org.kde.desktop/private/SwitchIndicator.qml
+@@ -6,6 +6,7 @@
+ */
+ 
+ // [CHANGE: luminos | 2026-10-10] DECISION 139 — Material 3 switch (52x32 track, 24 thumb with check/cross, 28 pressed).
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Shapes
+ import QtQuick.Templates as T
+@@ -54,7 +55,7 @@
+ 
+         Behavior on color {
+             enabled: Kirigami.Units.shortDuration > 0
+-            ColorAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
++            ColorAnimation { duration: LxS.Style.animationShortMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+         }
+     }
+ 
+@@ -82,19 +83,19 @@
+         Behavior on cx {
+             enabled: !indicator.control.pressed && Kirigami.Units.shortDuration > 0
+             NumberAnimation { // luminos: snappy 180 ms, standard easing
+-                duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
++                duration: LxS.Style.animationMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+             }
+         }
+         Behavior on width {
+             enabled: Kirigami.Units.shortDuration > 0
+-            NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
++            NumberAnimation { duration: LxS.Style.animationMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+         }
+ 
+         Behavior on color {
+             enabled: Kirigami.Units.shortDuration > 0
+             ColorAnimation {
+                 easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1]
+-                duration: 120
++                duration: LxS.Style.animationShortMs
+             }
+         }
+ 

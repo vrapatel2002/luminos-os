@@ -1,0 +1,28 @@
+--- a/src/qml/components/ScrollViewKCM.qml
++++ b/src/qml/components/ScrollViewKCM.qml
+@@ -4,6 +4,7 @@
+     SPDX-License-Identifier: LGPL-2.0-or-later
+ */
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import org.kde.kirigami as Kirigami
+ import org.kde.kcmutils as KCMUtils
+@@ -56,7 +57,7 @@
+         y: scroll.y + headerH
+         width: scroll.width
+         height: Math.max(0, scroll.height - headerH)
+-        radius: Math.min(28, height / 2)
++        radius: Math.min(LxS.Style.cornerOuterPx, height / 2)
+         Kirigami.Theme.colorSet: Kirigami.Theme.View
+         Kirigami.Theme.inherit: false
+         color: Kirigami.Theme.alternateBackgroundColor
+@@ -70,7 +71,7 @@
+             bottomMargin: root.framedView ? 0 : root.margins
+             horizontalCenter: parent.horizontalCenter
+         }
+-        width: root.framedView ? parent.width : Math.min(parent.width - root.margins * 2, Kirigami.Units.gridUnit * 42)
++        width: root.framedView ? parent.width : Math.min(parent.width - root.margins * 2, LxS.Style.pageWidthPx)
+         framedView: root.framedView
+     }
+ }

@@ -1,0 +1,206 @@
+--- a/src/delegates/IconTitleSubtitle.qml
++++ b/src/delegates/IconTitleSubtitle.qml
+@@ -6,6 +6,7 @@
+  * SPDX-License-Identifier: LGPL-2.0-or-later
+  */
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import org.kde.kirigami.platform as Platform
+ import org.kde.kirigami.primitives as Primitives
+@@ -163,7 +164,7 @@
+     // An explicit icon.color set by the app still wins. No icon -> stock layout.
+     readonly property bool __luminosDisc: root.icon.width > 0
+         && (root.icon.name.length > 0 || (!!root.icon.source && root.icon.source.toString().length > 0))
+-    readonly property real __luminosDiscSize: __luminosDisc ? Math.max(40, root.icon.width + 16) : root.icon.width
++    readonly property real __luminosDiscSize: __luminosDisc ? Math.max(LxS.Style.iconCirclePx, root.icon.width + 16) : root.icon.width
+     readonly property color __luminosOnPrimary: Qt.hsla(Math.max(0, Platform.Theme.focusColor.hslHue),
+         Platform.Theme.focusColor.hslSaturation * 0.4, 0.27, 1)
+ 
+@@ -184,7 +185,7 @@
+             : (root.selected ? Platform.Theme.focusColor : Platform.Theme.highlightColor)
+         Behavior on color {
+             // Snappy: 120 ms colour, M3 standard curve (0.2,0,0,1), no overshoot; only on state change
+-            ColorAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
++            ColorAnimation { duration: LxS.Style.animationShortMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+         }
+ 
+         Primitives.Icon {
+--- a/src/forms/flat/FormEntry.qml
++++ b/src/forms/flat/FormEntry.qml
+@@ -4,6 +4,7 @@
+  *  SPDX-License-Identifier: LGPL-2.0-or-later
+  */
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Layouts
+ import QtQuick.Controls as QQC
+@@ -41,10 +42,10 @@
+ 
+     Primitives.ShadowedRectangle {
+         z: -1
+-        readonly property real rTop: root.lxJoined ? 0 : Math.min(root.lxPrev instanceof FT.FormEntry ? 4 : 28, height / 2)
+-        readonly property real rBottom: root.lxJoinNext ? 0 : Math.min(root.lxNext instanceof FT.FormEntry ? 4 : 28, height / 2)
++        readonly property real rTop: root.lxJoined ? 0 : Math.min(root.lxPrev instanceof FT.FormEntry ? LxS.Style.cornerInnerPx : LxS.Style.cornerOuterPx, height / 2)
++        readonly property real rBottom: root.lxJoinNext ? 0 : Math.min(root.lxNext instanceof FT.FormEntry ? LxS.Style.cornerInnerPx : LxS.Style.cornerOuterPx, height / 2)
+         anchors.fill: parent
+-        anchors.topMargin: root.lxJoined ? -2 : 0
++        anchors.topMargin: root.lxJoined ? -LxS.Style.rowHalfGapPx : 0
+         Platform.Theme.colorSet: Platform.Theme.View
+         Platform.Theme.inherit: false
+         color: Platform.Theme.alternateBackgroundColor
+@@ -54,7 +55,7 @@
+     implicitWidth: Math.max(contentItemWrapper.implicitWidth +  Platform.Units.largeSpacing * 2, Platform.Units.gridUnit * 20 +  Platform.Units.largeSpacing * 2)
+     implicitHeight: Math.max(mainLayout.implicitHeight, lxSub.visible ? label.implicitHeight + lxSub.implicitHeight : 0)
+         + lxTopPad + lxBottomPad
+-    Layout.minimumHeight: lxJoined ? 0 : 60
++    Layout.minimumHeight: lxJoined ? 0 : LxS.Style.rowHeightPx
+ 
+     Layout.fillWidth: true
+ 
+@@ -66,7 +67,7 @@
+         anchors {
+             top: parent.top
+             left: parent.left
+-            leftMargin: 20
++            leftMargin: LxS.Style.cardPaddingPx
+             topMargin: mainLayout.y + root.contentItem?.parent.y + root.contentItem?.KirigamiLayouts.FormData.buddyFor.y + layout.y + root.contentItem?.KirigamiLayouts.FormData.buddyFor.height/2 - label.height/2 - (lxSub.visible ? lxSub.height / 2 : 0) ?? 0
+         }
+         width: Math.min(implicitWidth, root.width * 0.45)
+@@ -150,8 +151,8 @@
+             bottom: parent.bottom
+             topMargin: root.lxTopPad
+             bottomMargin: root.lxBottomPad
+-            rightMargin: 20
+-            leftMargin: root.lxStack || !formGroup ? 20 : 20 + Math.min(Math.max(formGroup.__assignedWidthForLabels, label.implicitWidth), root.width * 0.45) + 12
++            rightMargin: LxS.Style.cardPaddingPx
++            leftMargin: root.lxStack || !formGroup ? LxS.Style.cardPaddingPx : LxS.Style.cardPaddingPx + Math.min(Math.max(formGroup.__assignedWidthForLabels, label.implicitWidth), root.width * 0.45) + 12
+         }
+ 
+         spacing: Platform.Units.smallSpacing
+--- a/src/forms/flat/FormGroup.qml
++++ b/src/forms/flat/FormGroup.qml
+@@ -4,6 +4,7 @@
+  *  SPDX-License-Identifier: LGPL-2.0-or-later
+  */
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Layouts
+ import org.kde.kirigami.controls as KirigamiControls
+@@ -47,7 +48,7 @@
+             Layout.fillWidth: true
+             Layout.topMargin: root.parent?.visibleChildren[0] !== root ? 18 : 0
+             Layout.bottomMargin: 8
+-            leftPadding: 20
++            leftPadding: LxS.Style.cardPaddingPx
+             level: 5
+             font.weight: Font.Medium
+             Platform.Theme.colorSet: Platform.Theme.Window
+@@ -74,7 +75,7 @@
+                 }
+                 labelWidth = w;
+             }
+-            spacing: 2 // LUMINOS: 2 px between connected rows
++            spacing: LxS.Style.rowHalfGapPx // LUMINOS: 2 px between connected rows
+         }
+     }
+ }
+--- a/src/forms/templates/Form.qml
++++ b/src/forms/templates/Form.qml
+@@ -4,6 +4,7 @@
+  *  SPDX-License-Identifier: LGPL-2.0-or-later
+  */
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Layouts
+ import org.kde.kirigami.platform as Platform
+@@ -127,7 +128,7 @@
+ 
+         width: root.__collapsed
+                 ? Math.min(implicitWidth, parent.width, Platform.Units.gridUnit * 30)
+-                : Math.min(Math.max(implicitWidth, twinImplicitWidth, Platform.Units.gridUnit * 42), parent.width) // LUMINOS: page-wide cards
++                : Math.min(Math.max(implicitWidth, twinImplicitWidth, LxS.Style.pageWidthPx), parent.width) // LUMINOS: page-wide cards
+         spacing: Platform.Units.largeSpacing + Platform.Units.smallSpacing
+     }
+ }
+--- a/src/layouts/FormLayout.qml
++++ b/src/layouts/FormLayout.qml
+@@ -7,6 +7,7 @@
+ 
+ pragma ComponentBehavior: Bound
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Layouts
+ import QtQuick.Templates as T
+@@ -189,7 +190,7 @@
+         id: lay
+         property int wideImplicitWidth
+         columns: root.wideMode ? 2 : 1
+-        rowSpacing: 2 // LUMINOS: the 2 px gap between connected cards
++        rowSpacing: LxS.Style.rowHalfGapPx // LUMINOS: the 2 px gap between connected cards
+         columnSpacing: 12
+         property var lxBgs: []
+ 
+@@ -207,7 +208,7 @@
+             target: lay
+             property: "width"
+             // LUMINOS: cards span the page column (mock: min(100 %, 760 px))
+-            value: Math.min(root.width, Math.max(root.implicitWidth, Platform.Units.gridUnit * 42))
++            value: Math.min(root.width, Math.max(root.implicitWidth, LxS.Style.pageWidthPx))
+             restoreMode: Binding.RestoreBinding
+         }
+         anchors.horizontalCenter: root.horizontalCenter
+@@ -413,8 +414,8 @@
+ 
+             Layout.row: item?.Layout?.row + (lxInline ? 0 : 1)
+             Layout.column: lxInline ? 1 : 0
+-            Layout.leftMargin: lxInline || lxSection ? 0 : 20
+-            Layout.rightMargin: lxSection ? 0 : 20
++            Layout.leftMargin: lxInline || lxSection ? 0 : LxS.Style.cardPaddingPx
++            Layout.rightMargin: lxSection ? 0 : LxS.Style.cardPaddingPx
+             Layout.topMargin: lxSection ? 0 : (lxBg?.joinedPrev ? 4 : (lxInline ? 12 : 10))
+             Layout.bottomMargin: lxSection ? 0 : (lxBg?.joinNext ? 0 : (lxInline ? 12 : 14))
+ 
+@@ -475,15 +476,15 @@
+ 
+             Layout.row: item?.Layout?.row
+             Layout.column: 0
+-            Layout.leftMargin: 20
+-            Layout.rightMargin: lxInline ? 0 : 20
++            Layout.leftMargin: LxS.Style.cardPaddingPx
++            Layout.rightMargin: lxInline ? 0 : LxS.Style.cardPaddingPx
+             Layout.bottomMargin: lxSection ? 8 : (lxInline && !lxBg?.joinNext ? 12 : 0)
+             // Rows are titles in the card (no trailing colon); sections are the small grey label.
+             Platform.Theme.colorSet: lxSection ? Platform.Theme.Window : Platform.Theme.View
+             Platform.Theme.inherit: false
+             font.weight: lxSection ? Font.Medium : Font.Normal
+             // mock: title 16 px / section 13 px over a 13.3 px (10 pt) body font
+-            font.pointSize: Platform.Theme.defaultFont.pointSize * (lxSection ? 1.0 : 1.2)
++            font.pointSize: Platform.Theme.defaultFont.pointSize * (lxSection ? LxS.Style.groupLabelPx / 12 : 1.2)
+ 
+             enabled: {
+                 const buddy = item?.KirigamiLayouts.FormData.buddyFor;
+@@ -523,7 +524,7 @@
+                 if (!lxInline) { // title above a stacked / narrow control
+                     return text.length > 0 ? implicitHeight : 0;
+                 }
+-                return lxBg?.joinedPrev ? 1 : Math.max(implicitHeight, 36); // 60 px card row
++                return lxBg?.joinedPrev ? 1 : Math.max(implicitHeight, 36 + LxS.Style.rowExtraPx); // 60 px card row
+             }
+ 
+             Layout.alignment: temp.effectiveLayout(item)
+@@ -585,8 +586,8 @@
+                                                     container.y - container.Layout.topMargin)
+             readonly property real lxBottom: Math.max(buddy.visible ? buddy.y + buddy.height + buddy.Layout.bottomMargin : -Infinity,
+                                                        container.y + container.height + container.Layout.bottomMargin)
+-            readonly property real rTop: joinedPrev ? 0 : Math.min(firstInGroup ? 28 : 4, height / 2)
+-            readonly property real rBottom: joinNext ? 0 : Math.min(lastInGroup ? 28 : 4, height / 2)
++            readonly property real rTop: joinedPrev ? 0 : Math.min(firstInGroup ? LxS.Style.cornerOuterPx : LxS.Style.cornerInnerPx, height / 2)
++            readonly property real rBottom: joinNext ? 0 : Math.min(lastInGroup ? LxS.Style.cornerOuterPx : LxS.Style.cornerInnerPx, height / 2)
+ 
+             visible: !!item && item.visible && !root.__lxBreak(item)
+             x: lay.x

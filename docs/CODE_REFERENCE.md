@@ -730,3 +730,16 @@ Docs: `docs/ambient/{SPEC,CONTRACTS,AUDIT,BUILD_LOG}.md`, results `docs/ambient/
 | `tests/spectrum/load/` | CPU load + benchmark tool (`-threads -duty -seconds -json`) |
 conductor.go and fan_control.go are deleted.
 - `gameos/os/scripts/mw4-cdn-watch.sh` — BUG-209 auto-retry: polls the demonware CDN every 5 min (systemd user unit `mw4-cdn-watch.service`), launches MW4 via Lutris + notification at the first HTTP 200. TEMPORARY — removal in `gameos/os/docs/MW4-BUG209-TRACKER.md`. [CHANGE: claude-code | 2026-10-22]
+
+## STYLE TUNER (KDE Nexus look, live) — added 2026-11-08, DECISION 176
+<!-- [CHANGE: claude-code | 2026-11-08] -->
+| Path | What |
+|---|---|
+| `src/luminos-style/style.h`, `style.cpp`, `CMakeLists.txt` | QML module `org.luminos.style`: singleton `Style`, process-wide watcher on `~/.config/luminos/style.json`, clamped values, defaults = old literals |
+| `src/luminos-style/tests/live.qml` | smoke test: prints values, then again after the file changes (run with `QT_FORCE_STDERR_LOGGING=1`) |
+| `src/luminos-style/tuner/StyleTuner.qml` | the bar window (13 bars, presets, undo, reset) |
+| `src/luminos-style/tuner/luminos-style-tuner` | launcher (session env, XHR file write allowed, enables the apply path unit) |
+| `src/luminos-style/tuner/luminos-style-apply` + `.path` + `.service` | text size → kdeglobals fonts + refreshFonts; button corners → darklyrc + Darkly reparse |
+| `packages/luminos-style/PKGBUILD` | builds/installs all of the above |
+| `scripts/style-tuner/make-tunables.py` | generates `packages/*-luminos/*-tunables.patch` from a patched tree; exact-count rules |
+| `docs/style-tuner/README.md` | keys, defaults, rebuild notes, proof shots |

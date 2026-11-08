@@ -1,0 +1,10 @@
+# [CHANGE: claude-code | 2026-11-08] DECISION 176 — inotify watch, no polling.
+[Unit]
+Description=Apply Luminos style tuner values that live in KDE config (fonts, Darkly corners)
+
+[Path]
+PathChanged=%h/.config/luminos/style.json
+Unit=luminos-style-apply.service
+
+[Install]
+WantedBy=default.target

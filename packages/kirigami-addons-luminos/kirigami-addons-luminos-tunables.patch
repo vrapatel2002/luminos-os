@@ -1,0 +1,93 @@
+--- a/src/formcard/FormButtonDelegate.qml
++++ b/src/formcard/FormButtonDelegate.qml
+@@ -3,6 +3,7 @@
+  * SPDX-License-Identifier: LGPL-2.0-or-later
+  */
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Controls
+ import QtQuick.Layouts
+@@ -114,7 +115,7 @@
+             visible: root.icon.name !== ""
+             Layout.rightMargin: visible ? 12 : 0
+             Layout.alignment: Qt.AlignVCenter
+-            implicitWidth: visible ? Math.max(40, iconSize + 16) : 0
++            implicitWidth: visible ? Math.max(LxS.Style.iconCirclePx, iconSize + 16) : 0
+             implicitHeight: implicitWidth
+             radius: height / 2
+             color: Kirigami.Theme.highlightColor
+--- a/src/formcard/FormCard.qml
++++ b/src/formcard/FormCard.qml
+@@ -3,6 +3,7 @@
+  * SPDX-License-Identifier: LGPL-2.0-or-later
+  */
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Controls
+ import QtQuick.Layouts
+@@ -148,10 +149,10 @@
+                 height: row ? row.height : 0
+                 color: Kirigami.Theme.alternateBackgroundColor
+                 corners {
+-                    topLeftRadius: isFirst ? 28 : 4
+-                    topRightRadius: isFirst ? 28 : 4
+-                    bottomLeftRadius: isLast ? 28 : 4
+-                    bottomRightRadius: isLast ? 28 : 4
++                    topLeftRadius: isFirst ? LxS.Style.cornerOuterPx : LxS.Style.cornerInnerPx
++                    topRightRadius: isFirst ? LxS.Style.cornerOuterPx : LxS.Style.cornerInnerPx
++                    bottomLeftRadius: isLast ? LxS.Style.cornerOuterPx : LxS.Style.cornerInnerPx
++                    bottomRightRadius: isLast ? LxS.Style.cornerOuterPx : LxS.Style.cornerInnerPx
+                 }
+             }
+         }
+@@ -173,7 +174,7 @@
+                 return null;
+             }
+ 
+-            spacing: 2
++            spacing: LxS.Style.rowHalfGapPx
+ 
+             anchors {
+                 fill: parent
+--- a/src/formcard/FormDelegateBackground.qml
++++ b/src/formcard/FormDelegateBackground.qml
+@@ -3,6 +3,7 @@
+  * SPDX-License-Identifier: LGPL-2.0-or-later
+  */
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Layouts
+ import QtQuick.Templates as T
+@@ -40,8 +41,8 @@
+     readonly property bool _luminos: control?.parent?._luminosConnected === true
+     readonly property bool _isFirst: _luminos ? control.parent._luminosFirst === control : (_roundCorners && _visibleItems[0] === control)
+     readonly property bool _isLast: _luminos ? control.parent._luminosLast === control : (_roundCorners && _visibleItems[_visibleItems.length - 1] === control)
+-    readonly property real _outerRadius: _luminos ? 28 : Kirigami.Units.cornerRadius
+-    readonly property real _innerRadius: _luminos ? 4 : 0
++    readonly property real _outerRadius: _luminos ? LxS.Style.cornerOuterPx : Kirigami.Units.cornerRadius
++    readonly property real _innerRadius: _luminos ? LxS.Style.cornerInnerPx : 0
+ 
+     color: {
+         let colorOpacity = 0;
+--- a/src/formcard/FormTextDelegate.qml
++++ b/src/formcard/FormTextDelegate.qml
+@@ -3,6 +3,7 @@
+  * SPDX-License-Identifier: LGPL-2.0-or-later
+  */
+ 
++import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
+ import QtQuick.Controls
+ import QtQuick.Layouts
+@@ -107,7 +108,7 @@
+             visible: root.icon.name !== ""
+             Layout.rightMargin: visible ? 12 : 0
+             Layout.alignment: Qt.AlignVCenter
+-            implicitWidth: visible ? Math.max(40, iconSize + 16) : 0
++            implicitWidth: visible ? Math.max(LxS.Style.iconCirclePx, iconSize + 16) : 0
+             implicitHeight: implicitWidth
+             radius: height / 2
+             color: Kirigami.Theme.highlightColor

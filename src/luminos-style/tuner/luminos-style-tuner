@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-11-08] Luminos Style Tuner launcher (DECISION 176).
+# Opens the bar window; the bars write ~/.config/luminos/style.json and the forked KDE
+# libraries pick it up live. Session env is resolved so a menu or keybind launch works.
+set -u
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
+        case "$sock" in *.lock) continue;; esac
+        [ -S "$sock" ] && { WAYLAND_DISPLAY="$(basename "$sock")"; export WAYLAND_DISPLAY; break; }
+    done
+fi
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+fi
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+export QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1   # the only way plain QML writes a file
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/luminos"
+# text size + button corners are applied by a path unit; make sure it is on (cheap, idempotent)
+systemctl --user is-enabled -q luminos-style-apply.path 2>/dev/null \
+    || systemctl --user enable --now luminos-style-apply.path >/dev/null 2>&1
+exec qml6 /usr/share/luminos-style/StyleTuner.qml "$@"

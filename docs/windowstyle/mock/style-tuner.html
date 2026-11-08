@@ -1,0 +1,371 @@
+<title>Luminos Style Tuner</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,300..700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: tuner window on the left, a replica of Shawn's System Settings on the right.
+   Single dark look on purpose: it mirrors the live Caelestia/Nexus scheme on the laptop. */
+:root{
+  color-scheme: dark;
+  --desk:#0e0d11;        /* desktop behind windows */
+  --win:#131316;         /* window body */
+  --side:#1b1a1f;        /* sidebar column */
+  --row:#29282d;         /* list row */
+  --card:#201f23;        /* form card (View alternate) */
+  --sel:#46455f;         /* selected pill */
+  --accent:#c4c0ff;      /* primary */
+  --on-accent:#2c2766;
+  --fg:#e6e1e8;
+  --fg2:#c9c5d0;
+  --fg3:#928f99;
+  --line:#3a3940;
+  --changed:#ffb4a8;
+  --sans:"Google Sans Flex","Google Sans","Roboto Flex",system-ui,sans-serif;
+  --mono:"Roboto Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{background:var(--desk);color:var(--fg);font-family:var(--sans)}
+body{padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.intro{max-width:1300px;margin:0 auto 16px;display:flex;flex-wrap:wrap;gap:8px 24px;align-items:baseline}
+.intro h1{font-size:22px;font-weight:500;margin:0}
+.intro p{margin:0;color:var(--fg3);font-size:13px;max-width:70ch}
+
+.stage{max-width:1300px;margin:0 auto;display:grid;grid-template-columns:340px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:980px){.stage{grid-template-columns:minmax(0,1fr)}}
+
+/* ---------- Tuner window ---------- */
+.tuner{background:var(--win);border-radius:20px;border:1px solid var(--line);overflow:hidden;position:sticky;top:max(12px,env(safe-area-inset-top,0px));display:flex;flex-direction:column;max-height:calc(100vh - 24px)}
+#groups{overflow-y:auto;min-height:0;flex:1}
+@media (max-width:980px){.tuner{position:static;max-height:none}}
+.tbar{display:flex;align-items:center;gap:10px;padding:14px 16px 6px}
+.tbar b{font-weight:500;font-size:15px;flex:1}
+.chip{border:1px solid var(--line);background:transparent;border-radius:999px;padding:5px 12px;font-size:12px;cursor:pointer;color:var(--fg2)}
+.chip:hover{background:var(--row)}
+.chip.on{background:var(--sel);border-color:var(--sel);color:var(--fg)}
+.presets{display:flex;gap:6px;padding:4px 16px 10px;flex-wrap:wrap}
+.group{padding:6px 12px 10px}
+.group h2{font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3);margin:6px 6px 8px}
+.bars{display:flex;flex-direction:column;gap:2px}
+.bar{padding:8px 8px 10px;border-radius:14px}
+.bar:hover{background:#1c1b20}
+.bar .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
+.bar .lbl{font-size:13px;color:var(--fg)}
+.bar .val{font-family:var(--mono);font-size:12px;color:var(--fg2);font-variant-numeric:tabular-nums}
+.bar.changed .val{color:var(--changed)}
+.track{position:relative;height:24px}
+.track .def{position:absolute;top:-3px;width:2px;height:30px;margin-left:-1px;background:var(--fg3);border-radius:1px;pointer-events:none;opacity:.7}
+.bar input{-webkit-appearance:none;appearance:none;width:100%;height:24px;margin:0;background:transparent;cursor:pointer;position:relative;
+  --p:50%}
+.bar input::-webkit-slider-runnable-track{height:12px;border-radius:6px;background:linear-gradient(to right,var(--accent) 0 var(--p),#34333b var(--p) 100%)}
+.bar input::-moz-range-track{height:12px;border-radius:6px;background:#34333b}
+.bar input::-moz-range-progress{height:12px;border-radius:6px;background:var(--accent)}
+.bar input::-webkit-slider-thumb{-webkit-appearance:none;width:4px;height:24px;margin-top:-6px;border-radius:2px;background:var(--fg);box-shadow:0 0 0 3px var(--win)}
+.bar input::-moz-range-thumb{width:4px;height:24px;border:0;border-radius:2px;background:var(--fg);box-shadow:0 0 0 3px var(--win)}
+.bar input:focus-visible{outline:none}
+.bar input:focus-visible::-webkit-slider-thumb{background:var(--accent)}
+.bar:focus-within{background:#1c1b20}
+.tfoot{display:flex;gap:8px;padding:10px 16px 16px;border-top:1px solid var(--line);flex-wrap:wrap}
+.btn{border:0;border-radius:999px;padding:9px 16px;font-size:13px;cursor:pointer;background:var(--row)}
+.btn:hover{filter:brightness(1.15)}
+.btn.primary{background:var(--accent);color:var(--on-accent);font-weight:500}
+.btn:disabled{opacity:.4;cursor:default;filter:none}
+.hint{font-size:11.5px;color:var(--fg3);padding:0 16px 14px;line-height:1.45}
+
+/* ---------- Bake sheet ---------- */
+.bake{grid-column:1/-1;background:var(--win);border:1px solid var(--line);border-radius:20px;padding:18px 20px}
+.bake h3{margin:0 0 4px;font-weight:500;font-size:16px}
+.bake p{margin:0 0 12px;color:var(--fg3);font-size:13px}
+.bake .cols{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px}
+@media (max-width:820px){.bake .cols{grid-template-columns:minmax(0,1fr)}}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--fg3);font-weight:500}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.where{color:var(--fg2)}
+tr.chg td.n.new{color:var(--changed)}
+pre{margin:0;background:#0b0a0e;border-radius:12px;padding:12px;font-family:var(--mono);font-size:12px;overflow:auto;color:var(--fg2);max-height:360px}
+
+/* ---------- Replica of System Settings (driven by the dials) ---------- */
+.ss{
+  --fs:13.3px; --sub:11.3px; --title:30px; --label:12px;
+  --r-big:28px; --r-small:4px; --r-btn:16px;
+  --row-h:56px; --gap:4px; --side-w:260px; --page-w:760px; --disc:32px; --pad:16px;
+  --anim:180ms;
+  background:var(--win);border-radius:20px;border:1px solid var(--line);overflow:hidden;
+  display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);min-height:640px;font-size:var(--fs);
+  transition:grid-template-columns var(--anim) cubic-bezier(.2,0,0,1);
+}
+@media (max-width:700px){.ss{grid-template-columns:minmax(0,1fr)}.ss .sidebar{border-bottom:1px solid var(--line)}}
+.ss *{transition-duration:var(--anim);transition-timing-function:cubic-bezier(.2,0,0,1)}
+.sidebar{background:var(--side);padding:12px 10px;display:flex;flex-direction:column;gap:var(--gap);min-width:0}
+.search{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.search .pill{flex:1;min-width:0;height:calc(var(--row-h)*.62);border:1.5px solid var(--fg3);border-radius:999px;display:flex;align-items:center;gap:8px;padding:0 14px;color:var(--fg3);font-size:var(--fs)}
+.search svg{width:18px;height:18px;flex:none}
+.cat{font-size:var(--label);color:var(--fg3);padding:10px 10px 4px}
+.r{background:var(--row);min-height:var(--row-h);display:flex;align-items:center;gap:12px;padding:6px 12px 6px 8px;border-radius:var(--r-small);transition-property:border-radius,background,min-height;min-width:0}
+.r.first{border-top-left-radius:var(--r-big);border-top-right-radius:var(--r-big)}
+.r.last{border-bottom-left-radius:var(--r-big);border-bottom-right-radius:var(--r-big)}
+.r.only{border-radius:var(--r-big)}
+.r.sel{background:var(--sel);border-radius:min(32px,calc(var(--row-h)/2))}
+.disc{width:var(--disc);height:var(--disc);border-radius:50%;background:#3b3a45;display:grid;place-items:center;flex:none;transition-property:width,height}
+.disc svg{width:calc(var(--disc)*.5);height:calc(var(--disc)*.5);fill:var(--fg2)}
+.r.sel .disc{background:var(--accent)}
+.r.sel .disc svg{fill:var(--on-accent)}
+.rt{flex:1;min-width:0}
+.rt b{display:block;font-weight:400;font-size:var(--fs);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rt small{display:block;font-size:var(--sub);color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chev{width:16px;height:16px;fill:none;stroke:var(--fg2);stroke-width:2;flex:none}
+.sw{width:52px;height:32px;border-radius:16px;background:var(--accent);position:relative;flex:none}
+.sw::after{content:"";position:absolute;right:4px;top:4px;width:24px;height:24px;border-radius:50%;background:var(--on-accent)}
+
+.page{padding:20px clamp(12px,3vw,28px) 28px;min-width:0}
+.page h2{font-size:var(--title);font-weight:400;margin:4px 0 16px;transition-property:font-size;line-height:1.15}
+.col{max-width:var(--page-w);margin:0 auto;display:flex;flex-direction:column;gap:calc(var(--gap)*3);transition-property:max-width}
+.card{background:var(--card);border-radius:var(--r-big);padding:var(--pad) calc(var(--pad) + 4px);transition-property:border-radius,padding;min-width:0}
+.card .h{font-size:calc(var(--fs)*1.15);margin-bottom:12px}
+.themes{display:flex;gap:12px;flex-wrap:wrap}
+.th{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:var(--fs)}
+.th i{display:block;width:120px;max-width:100%;aspect-ratio:16/9.6;border-radius:calc(var(--r-small)*2 + 2px);border:3px solid transparent}
+.th.on i{border-color:var(--accent)}
+.t1{background:linear-gradient(135deg,#9fd0f5,#3d7fd0 60%,#f2c4c4)}
+.t2{background:linear-gradient(135deg,#d65a8a,#3a2c78 55%,#1b6fb5)}
+.t3{background:linear-gradient(100deg,#9fd0f5 0 48%,#2a2342 48% 100%)}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:520px){.btns{grid-template-columns:1fr}}
+.pbtn{background:var(--row);border-radius:var(--r-btn);height:calc(var(--row-h)*.7);display:flex;align-items:center;gap:8px;padding:0 14px;font-size:var(--fs);transition-property:border-radius,height}
+.pbtn svg{width:16px;height:16px;fill:var(--fg2)}
+.slider{display:flex;align-items:center;gap:6px;height:28px}
+.slider .a{flex:5;height:16px;background:var(--accent);border-radius:8px 3px 3px 8px}
+.slider .k{width:4px;height:28px;border-radius:2px;background:var(--accent)}
+.slider .b{flex:5;height:16px;background:#3a3946;border-radius:3px 8px 8px 3px}
+.sl-l{display:flex;justify-content:space-between;font-size:var(--fs);margin-top:8px}
+.radio{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.radio small{display:block;color:var(--fg2);font-size:var(--sub)}
+.ro{display:flex;flex-direction:column;gap:12px;align-items:flex-end}
+.ro span{display:flex;align-items:center;gap:10px}
+.dot{width:24px;height:24px;border-radius:50%;border:2px solid var(--fg2)}
+.dot.on{border:0;background:var(--accent);display:grid;place-items:center}
+.dot.on::after{content:"";width:9px;height:5px;border-left:2px solid var(--on-accent);border-bottom:2px solid var(--on-accent);transform:rotate(-45deg) translate(1px,-1px)}
+.flash{animation:flash var(--anim) cubic-bezier(.2,0,0,1)}
+@keyframes flash{from{transform:scale(.96);opacity:.6}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.ss *,.ss{transition:none!important;animation:none!important}}
+</style>
+
+<div class="intro">
+  <h1>Luminos Style Tuner — prototype</h1>
+  <p>Drag a bar left or right (or click it and use the arrow keys). Double-click resets it; the small tick marks today's value. The window on the right stands in for your real System Settings: in the built version the bars change that app live, along with Dolphin, Discover and every other KDE app.</p>
+</div>
+
+<div class="stage">
+  <section class="tuner" aria-label="Style Tuner">
+    <div class="tbar"><b>Style Tuner</b><button class="chip" id="undo" type="button" disabled>Undo</button></div>
+    <div class="presets" role="group" aria-label="Presets">
+      <button class="chip" data-preset="compact" type="button">Compact</button>
+      <button class="chip on" data-preset="default" type="button">Current look</button>
+      <button class="chip" data-preset="roomy" type="button">Roomy</button>
+    </div>
+    <div id="groups"></div>
+    <div class="tfoot">
+      <button class="btn" id="reset" type="button">Reset all</button>
+      <button class="btn primary" id="bakeBtn" type="button">Bake into code…</button>
+    </div>
+    <p class="hint">Changes apply the moment you move a bar and are kept in <code>~/.config/luminos/style.json</code>. Bake writes them into the KDE code as the new defaults.</p>
+  </section>
+
+  <section class="ss" id="ss" aria-label="System Settings preview">
+    <nav class="sidebar">
+      <div class="search"><div class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Search…</div></div>
+      <div class="r only sel"><span class="disc"><svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9 3h-2.1a7 7 0 0 0-1-2.4l1.5-1.5-1.5-1.5-1.5 1.5a7 7 0 0 0-2.4-1V3h-2v2.1a7 7 0 0 0-2.4 1L8.1 4.6 6.6 6.1l1.5 1.5a7 7 0 0 0-1 2.4H5v2h2.1a7 7 0 0 0 1 2.4l-1.5 1.5 1.5 1.5 1.5-1.5a7 7 0 0 0 2.4 1V21h2v-2.1a7 7 0 0 0 2.4-1l1.5 1.5 1.5-1.5-1.5-1.5a7 7 0 0 0 1-2.4H21z"/></svg></span><span class="rt"><b>Quick Settings</b><small>Landing page with some basic settings</small></span></div>
+      <div class="cat">Input &amp; Output</div>
+      <div class="r first"><span class="disc"><svg viewBox="0 0 24 24"><path d="M12 2a6 6 0 0 0-6 6v8a6 6 0 0 0 12 0V8a6 6 0 0 0-6-6Zm1 8h-2V5h2z"/></svg></span><span class="rt"><b>Mouse &amp; Touchpad</b><small>Mouse, Touchpad</small></span><svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+      <div class="r"><span class="disc"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zm3 3v2h2V9zm4 0v2h2V9zm4 0v2h2V9zM7 13v2h10v-2z"/></svg></span><span class="rt"><b>Keyboard</b><small>Keyboard, On-Screen Keyboard, Virtual…</small></span><svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+      <div class="r"><span class="disc"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3zm3 3v2h2V9zm4 0v2h2V9zm4 0v2h2V9zM7 13v2h10v-2z"/></svg></span><span class="rt"><b>Keyboard Backlight</b><small>Control ASUS ROG keyboard backlight…</small></span></div>
+      <div class="r"><span class="disc"><svg viewBox="0 0 24 24"><path d="M3 4h18v12H3zm6 14h6v2H9z"/></svg></span><span class="rt"><b>Sound</b><small>Configure audio devices and volume</small></span></div>
+      <div class="r last"><span class="disc"><svg viewBox="0 0 24 24"><path d="M3 4h18v12H3zm6 14h6v2H9z"/></svg></span><span class="rt"><b>Display &amp; Monitor</b><small>Display Settings</small></span><svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></div>
+      <div class="cat">Connected Devices</div>
+      <div class="r only"><span class="disc"><svg viewBox="0 0 24 24"><path d="M11 2h1l5 5-4 4 4 4-5 5h-1v-7l-4 4-1.4-1.4L10.6 11 5.6 6.4 7 5l4 4z"/></svg></span><span class="rt"><b>Bluetooth</b><small>Manage Bluetooth devices</small></span><span class="sw" aria-hidden="true"></span></div>
+    </nav>
+
+    <main class="page">
+      <h2>Quick Settings</h2>
+      <div class="col">
+        <div class="card">
+          <div class="h">Theme</div>
+          <div class="themes">
+            <div class="th"><i class="t1"></i>Breeze</div>
+            <div class="th on"><i class="t2"></i>Breeze Dark</div>
+            <div class="th"><i class="t3"></i>Automatic</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="h">More appearance settings</div>
+          <div class="btns">
+            <div class="pbtn"><svg viewBox="0 0 24 24"><path d="M3 4h18v12H3zm6 14h6v2H9z"/></svg>Wallpaper</div>
+            <div class="pbtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>Global Theme</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="h">Animation speed</div>
+          <div class="slider"><span class="a"></span><span class="k"></span><span class="b"></span></div>
+          <div class="sl-l"><span>Slow</span><span>Instant</span></div>
+        </div>
+        <div class="card">
+          <div class="radio">
+            <div><div class="h" style="margin:0">Clicking files or folders</div><small>Open by double-clicking instead</small></div>
+            <div class="ro"><span><i class="dot"></i>Selects them</span><span><i class="dot on"></i>Opens them</span></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <section class="bake" id="bake" hidden aria-label="Bake into code">
+    <h3>Bake into code</h3>
+    <p>This is what the button would do: rewrite each number in the patch files below, rebuild the packages once, and install them. Values in red are the ones you changed.</p>
+    <div class="cols">
+      <div class="tbl"><table><thead><tr><th>Bar</th><th>Was</th><th>Now</th><th>Where it lives</th></tr></thead><tbody id="bakeRows"></tbody></table></div>
+      <div><pre id="json"></pre></div>
+    </div>
+  </section>
+</div>
+
+<script>
+// Knob definitions. "def" is the value currently compiled into the forks (DECISIONS 140-144).
+const KNOBS = [
+  {g:"Text", id:"fs",    lbl:"Text size",        unit:"pt", min:8,  max:14,  step:0.5, def:10,  where:"KDE font setting (kdeglobals) — already live today"},
+  {g:"Text", id:"title", lbl:"Page title",       unit:"px", min:18, max:44,  step:1,   def:30,  where:"systemsettings patch — page heading"},
+  {g:"Text", id:"label", lbl:"Group labels",     unit:"px", min:9,  max:16,  step:0.5, def:12,  where:"systemsettings + kirigami FormLayout section label"},
+  {g:"Shape",id:"rbig",  lbl:"Outer corners",    unit:"px", min:0,  max:36,  step:1,   def:28,  where:"qqc2 rows · kirigami form cards · kirigami-addons · darkly"},
+  {g:"Shape",id:"rsmall",lbl:"Inner corners",    unit:"px", min:0,  max:16,  step:1,   def:4,   where:"same 4 forks — where rows touch"},
+  {g:"Shape",id:"rbtn",  lbl:"Button corners",   unit:"px", min:0,  max:24,  step:1,   def:16,  where:"qqc2 buttons/fields · Darkly CornerRadius"},
+  {g:"Space",id:"rowh",  lbl:"Row height",       unit:"px", min:40, max:80,  step:1,   def:56,  where:"qqc2 list rows · kirigami form rows (≥60)"},
+  {g:"Space",id:"gap",   lbl:"Row gap",          unit:"px", min:0,  max:12,  step:1,   def:4,   where:"qqc2 rows · kirigami form cards (2 px)"},
+  {g:"Space",id:"pad",   lbl:"Card padding",     unit:"px", min:6,  max:32,  step:1,   def:16,  where:"kirigami form cards · kcmutils list card"},
+  {g:"Space",id:"side",  lbl:"Sidebar width",    unit:"px", min:200,max:380, step:5,   def:260, where:"systemsettings patch — sidebar column"},
+  {g:"Space",id:"page",  lbl:"Page width",       unit:"px", min:520,max:1100,step:10,  def:760, where:"systemsettings · kcmutils 760 px column"},
+  {g:"Space",id:"disc",  lbl:"Icon circles",     unit:"px", min:20, max:48,  step:1,   def:32,  where:"kirigami IconTitleSubtitle disc"},
+  {g:"Motion",id:"anim", lbl:"Animation",        unit:"ms", min:0,  max:500, step:10,  def:180, where:"qqc2 · kirigami · systemsettings Behaviors"},
+];
+const PRESETS = {
+  default:{},
+  compact:{fs:9,title:24,label:11,rbig:16,rsmall:3,rbtn:10,rowh:44,gap:2,pad:10,side:230,page:700,disc:26,anim:120},
+  roomy:{fs:11,title:36,label:13,rbig:32,rsmall:6,rbtn:20,rowh:66,gap:6,pad:22,side:300,page:880,disc:40,anim:220},
+};
+const state = {}; KNOBS.forEach(k=>state[k.id]=k.def);
+let history = [];
+const ss = document.getElementById("ss");
+
+function apply(){
+  const s = ss.style, v = state;
+  const px = v.fs*4/3;            // pt → logical px
+  s.setProperty("--fs", px+"px");
+  s.setProperty("--sub", (px*0.85)+"px");
+  s.setProperty("--title", v.title+"px");
+  s.setProperty("--label", v.label+"px");
+  s.setProperty("--r-big", v.rbig+"px");
+  s.setProperty("--r-small", v.rsmall+"px");
+  s.setProperty("--r-btn", v.rbtn+"px");
+  s.setProperty("--row-h", v.rowh+"px");
+  s.setProperty("--gap", v.gap+"px");
+  s.setProperty("--pad", v.pad+"px");
+  s.setProperty("--side-w", v.side+"px");
+  s.setProperty("--page-w", v.page+"px");
+  s.setProperty("--disc", v.disc+"px");
+  s.setProperty("--anim", v.anim+"ms");
+  document.getElementById("undo").disabled = history.length===0;
+  renderBake();
+}
+
+// ----- horizontal bars -----
+function drawDial(el,k){
+  const f=(state[k.id]-k.min)/(k.max-k.min);
+  const inp=el.querySelector("input");
+  inp.value=state[k.id];
+  inp.style.setProperty("--p",(f*100)+"%");
+  const shown = Number.isInteger(k.step)? state[k.id] : state[k.id].toFixed(1);
+  el.querySelector(".val").textContent = shown+" "+k.unit;
+  inp.setAttribute("aria-valuetext", shown+" "+k.unit);
+  el.classList.toggle("changed", state[k.id]!==k.def);
+}
+function snap(k,v){v=Math.min(k.max,Math.max(k.min,v));return Math.round(v/k.step)*k.step}
+function set(k,v,push){
+  v = +snap(k,v).toFixed(2);
+  if(v===state[k.id]) return;
+  if(push) history.push({...state});
+  state[k.id]=v;
+  drawDial(dialEls[k.id],k);
+  markPreset();
+  if(k.id==="anim"){ss.classList.remove("flash");void ss.offsetWidth;ss.classList.add("flash")}
+  apply();
+}
+
+const groupsEl = document.getElementById("groups"), dialEls = {};
+[...new Set(KNOBS.map(k=>k.g))].forEach(g=>{
+  const sec=document.createElement("div");sec.className="group";
+  sec.innerHTML=`<h2>${g}</h2><div class="bars"></div>`;
+  const grid=sec.querySelector(".bars");
+  KNOBS.filter(k=>k.g===g).forEach(k=>{
+    const d=document.createElement("div");
+    d.className="bar";d.id="bar-"+k.id;
+    d.title=k.lbl+" — drag the bar, double-click to reset";
+    const fd=(k.def-k.min)/(k.max-k.min)*100;
+    d.innerHTML=`<div class="top"><label class="lbl" for="in-${k.id}">${k.lbl}</label><span class="val"></span></div>`+
+      `<div class="track"><span class="def" style="left:calc(2px + (100% - 4px) * ${fd/100})" aria-hidden="true"></span>`+
+      `<input type="range" id="in-${k.id}" min="${k.min}" max="${k.max}" step="${k.step}" value="${k.def}"></div>`;
+    const inp=d.querySelector("input");
+    let pushed=false;
+    inp.addEventListener("pointerdown",()=>{history.push({...state});pushed=true});
+    inp.addEventListener("keydown",()=>{if(!pushed){history.push({...state});pushed=true}});
+    inp.addEventListener("input",()=>set(k,+inp.value,false));
+    inp.addEventListener("change",()=>{pushed=false;const last=history[history.length-1];if(last&&JSON.stringify(last)===JSON.stringify(state))history.pop();apply()});
+    d.addEventListener("dblclick",()=>set(k,k.def,true));
+    grid.appendChild(d);dialEls[k.id]=d;drawDial(d,k);
+  });
+  groupsEl.appendChild(sec);
+});
+
+function markPreset(){
+  document.querySelectorAll("[data-preset]").forEach(b=>{
+    const p=PRESETS[b.dataset.preset];
+    const match=KNOBS.every(k=>state[k.id]===(p[k.id]??k.def));
+    b.classList.toggle("on",match);
+  });
+}
+document.querySelectorAll("[data-preset]").forEach(b=>b.addEventListener("click",()=>{
+  history.push({...state});
+  const p=PRESETS[b.dataset.preset];
+  KNOBS.forEach(k=>{state[k.id]=p[k.id]??k.def;drawDial(dialEls[k.id],k)});
+  markPreset();apply();
+}));
+document.getElementById("reset").addEventListener("click",()=>{
+  history.push({...state});KNOBS.forEach(k=>{state[k.id]=k.def;drawDial(dialEls[k.id],k)});markPreset();apply();
+});
+document.getElementById("undo").addEventListener("click",()=>{
+  const prev=history.pop();if(!prev)return;Object.assign(state,prev);
+  KNOBS.forEach(k=>drawDial(dialEls[k.id],k));markPreset();apply();
+});
+document.getElementById("bakeBtn").addEventListener("click",()=>{
+  const b=document.getElementById("bake");b.hidden=!b.hidden;
+  if(!b.hidden)b.scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"});
+});
+
+function renderBake(){
+  const rows=KNOBS.map(k=>{
+    const c=state[k.id]!==k.def;
+    return `<tr class="${c?"chg":""}"><td>${k.lbl}</td><td class="n">${k.def} ${k.unit}</td><td class="n new">${state[k.id]} ${k.unit}</td><td class="where">${k.where}</td></tr>`;
+  }).join("");
+  document.getElementById("bakeRows").innerHTML=rows;
+  const out={}; KNOBS.forEach(k=>out[k.id]=state[k.id]);
+  document.getElementById("json").textContent="// ~/.config/luminos/style.json\n"+JSON.stringify({
+    textSizePt:out.fs, pageTitlePx:out.title, groupLabelPx:out.label,
+    cornerOuterPx:out.rbig, cornerInnerPx:out.rsmall, cornerButtonPx:out.rbtn,
+    rowHeightPx:out.rowh, rowGapPx:out.gap, cardPaddingPx:out.pad,
+    sidebarWidthPx:out.side, pageWidthPx:out.page, iconCirclePx:out.disc,
+    animationMs:out.anim
+  },null,2);
+}
+apply();
+</script>

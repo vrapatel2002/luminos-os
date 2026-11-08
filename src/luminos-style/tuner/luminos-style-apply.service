@@ -1,0 +1,7 @@
+# [CHANGE: claude-code | 2026-11-08] DECISION 176
+[Unit]
+Description=Apply Luminos style tuner values (fonts, Darkly corners)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/luminos-style-apply
