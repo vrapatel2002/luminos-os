@@ -41,3 +41,14 @@ install(TARGETS luminosnetworkplugin LIBRARY DESTINATION ${NETDIR_INSTALL})
 install(FILES ${CMAKE_BINARY_DIR}/org/luminos/network/qmldir
               ${CMAKE_BINARY_DIR}/org/luminos/network/luminosnetworkplugin.qmltypes
         DESTINATION ${NETDIR_INSTALL})
+
+# [CHANGE: claude-code | 2026-11-08] DECISION 179 — our Proxy and Connection Preferences pages (QML KCMs).
+# The systemsettings fork hides kio-extras' kcm_proxy / kcm_netpref when these two are installed.
+set(BUILD_SHARED_LIBS ON) # kcoreaddons_add_plugin makes static plugins otherwise
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib) # kcoreaddons_add_plugin requires it
+set(KDE_INSTALL_PLUGINDIR ${CMAKE_INSTALL_LIBDIR}/qt6/plugins) # where KCM plugins go (no KDEInstallDirs here)
+find_package(ECM REQUIRED NO_MODULE)
+list(APPEND CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
+find_package(KF6 REQUIRED COMPONENTS KCMUtils Config CoreAddons I18n)
+add_subdirectory(kcm/proxy)
+add_subdirectory(kcm/netpref)

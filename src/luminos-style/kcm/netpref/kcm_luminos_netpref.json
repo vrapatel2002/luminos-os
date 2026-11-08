@@ -1,0 +1,10 @@
+{
+    "KPlugin": {
+        "Description": "File transfer behaviour",
+        "Icon": "preferences-system-network-connection",
+        "Name": "Connection Preferences"
+    },
+    "X-KDE-Keywords": "iopref,netpref,network preferences,ftp,passive,partial",
+    "X-KDE-System-Settings-Parent-Category": "networksettings",
+    "X-KDE-Weight": 50
+}

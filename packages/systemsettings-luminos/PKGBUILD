@@ -28,12 +28,13 @@
 # 1.11: also re-checks late-built widgets (LayoutRequest filter), lets tab bars scroll, Wi-Fi list min 300 -> 240.
 # 1.12 (R9, DECISION 177): Wi-Fi Status tab left aligned; Wi-Fi list shares spare width 2:3 with the editor.
 # 1.13 (R12, DECISION 178): Wi-Fi page hides Apply/Reset unless the classic editor has unsaved changes.
+# 1.14 (DECISION 179): hides kio-extras kcm_proxy / kcm_netpref when Luminos' own pages are installed; old ids open the new ones.
 # org.luminos.style values (same defaults; ~/.config/luminos/style.json changes them live). Needs luminos-style.
 
 pkgname=systemsettings
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=1.13
+pkgrel=1.14
 pkgdesc='KDE system manager for hardware, software, and workspaces'
 arch=(x86_64)
 url='https://kde.org/plasma-desktop/'
@@ -72,7 +73,7 @@ source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{
 sha256sums=('317a21165709d61796fba19f5454397577ffd8aa96655b29dd286a1df252cddb'
             'SKIP'
             '3b89ce0d1c5005feb9554c11e4be2ad444b87d1f35673c35313223088b84129c'
-            '1668614d2e88aa4f381694a86549320cc1da48a78803a60f7434b2eb699bf5d6')
+            '39ac034debde742c8cf436600230da558046def4f3fd083e4bc692abd624e62c')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
               'D07BD8662C56CB291B316EB2F5675605C74E02CF'  # David Edmundson <davidedmundson@kde.org>

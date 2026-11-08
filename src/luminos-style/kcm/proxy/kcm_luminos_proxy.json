@@ -1,0 +1,10 @@
+{
+    "KPlugin": {
+        "Description": "Route traffic through another server",
+        "Icon": "preferences-system-network-proxy",
+        "Name": "Proxy"
+    },
+    "X-KDE-Keywords": "Proxy,Proxy server,Firewall,Squid,PAC,WPAD,SOCKS",
+    "X-KDE-System-Settings-Parent-Category": "networksettings",
+    "X-KDE-Weight": 40
+}

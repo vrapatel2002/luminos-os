@@ -752,3 +752,10 @@ conductor.go and fan_control.go are deleted.
 | `src/kcm-nm-look/Rows.qml` | Card, TitleText, Section, Segmented, ValueRow building blocks |
 | `src/kcm-nm-look/luminos-nm-look.hook` | pacman hook: warns when plasma-nm leaves 6.7.5 |
 | `src/luminos-style/network/networkconnection.{h,cpp}` | QML `org.luminos.network` `NetworkConnection`: status + editable fields, save with secrets merged, connect/disconnect/forget |
+
+## PROXY + CONNECTION PREFERENCES PAGES (DECISION 179) — added 2026-11-08
+<!-- [CHANGE: claude-code | 2026-11-08] -->
+| Path | What |
+|---|---|
+| `src/luminos-style/kcm/proxy/` | `kcm_luminos_proxy`: proxy.{h,cpp} (kioslaverc [Proxy Settings] in kio-extras' format), ui/main.qml, ui/Rows.qml |
+| `src/luminos-style/kcm/netpref/` | `kcm_luminos_netpref`: netpref.{h,cpp} (MarkPartial, kio_ftprc), ui/main.qml, ui/Rows.qml |

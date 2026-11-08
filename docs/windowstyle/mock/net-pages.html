@@ -1,0 +1,158 @@
+<title>Luminos Proxy Pages</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,300..700&family=Roboto+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: System Settings frame (sidebar + page hole); inside, one 720px column of grouped card rows — same system as the
+   approved Wi-Fi page. Single dark look = the live Nexus scheme. */
+:root{
+  color-scheme: dark;
+  --desk:#0e0d11; --win:#131316; --hole:#18171b;
+  --card:#211f25; --row:#29282d; --row-hi:#302f36; --sel:#46455f;
+  --accent:#c4c0ff; --on-accent:#2c2766; --good:#a6d49c; --warn:#f2c46d;
+  --fg:#e6e1e8; --fg2:#c9c5d0; --fg3:#928f99; --line:#34333b;
+  --sans:"Google Sans Flex","Google Sans","Roboto Flex",system-ui,sans-serif;
+  --mono:"Roboto Mono",ui-monospace,monospace;
+  --r-out:28px; --r-in:4px;
+}
+*{box-sizing:border-box}
+html,body{background:var(--desk);color:var(--fg);font-family:var(--sans)}
+body{padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+button,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.intro{max-width:1180px;margin:0 auto 14px;display:flex;flex-wrap:wrap;gap:6px 24px;align-items:baseline}
+.intro h1{font-size:20px;font-weight:500;margin:0}
+.intro p{margin:0;color:var(--fg3);font-size:13px;max-width:78ch}
+.frame{max-width:1180px;margin:0 auto;background:var(--win);border:1px solid var(--line);border-radius:22px;display:grid;grid-template-columns:300px minmax(0,1fr);min-height:760px;overflow:hidden}
+@media (max-width:860px){.frame{grid-template-columns:minmax(0,1fr)}.side{display:none!important}}
+.side{padding:18px 14px;display:flex;flex-direction:column;gap:4px}
+.chipb{align-self:flex-start;display:flex;align-items:center;gap:8px;background:var(--row);border-radius:999px;padding:10px 16px;font-size:14px;margin-bottom:10px}
+.srow{background:var(--row);border-radius:var(--r-in);padding:14px;display:flex;gap:12px;align-items:center;border:0;text-align:left;cursor:pointer;width:100%}
+.srow.first{border-radius:var(--r-out) var(--r-out) var(--r-in) var(--r-in)}
+.srow.last{border-radius:var(--r-in) var(--r-in) var(--r-out) var(--r-out)}
+.srow[aria-current="page"]{background:var(--sel);border-radius:32px}
+.disc{width:36px;height:36px;border-radius:50%;background:var(--accent);display:grid;place-items:center;flex:none}
+.disc svg{width:18px;height:18px;fill:var(--on-accent)}
+.srow b{display:block;font-weight:400;font-size:15px}
+.srow small{display:block;font-size:12.5px;color:var(--fg2)}
+.hole{background:var(--hole);margin:12px 12px 12px 0;border-radius:18px;overflow-y:auto;padding:26px clamp(14px,4vw,40px) 40px;min-width:0}
+@media (max-width:860px){.hole{margin:12px}}
+.col{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:3px}
+h2{font-size:30px;font-weight:400;margin:0 0 4px}
+.lead{color:var(--fg2);font-size:14.5px;margin:0 0 12px 2px;max-width:62ch;line-height:1.45}
+.sec{font-size:13px;color:var(--fg3);margin:16px 22px 4px;font-weight:500}
+.item{background:var(--card);border-radius:var(--r-in);min-height:64px;padding:12px 22px;display:flex;align-items:center;gap:16px;min-width:0}
+.first{border-top-left-radius:var(--r-out)!important;border-top-right-radius:var(--r-out)!important}
+.last{border-bottom-left-radius:var(--r-out)!important;border-bottom-right-radius:var(--r-out)!important}
+.item.click{cursor:pointer}
+.item.click:hover{background:var(--row-hi)}
+.t{flex:1;min-width:0}
+.t b{display:block;font-weight:400;font-size:16px}
+.t small{display:block;font-size:13.5px;color:var(--fg2);line-height:1.4}
+.radio{width:22px;height:22px;border-radius:50%;border:2px solid #8f8c98;flex:none;display:grid;place-items:center}
+.item[aria-checked="true"] .radio{border:0;background:var(--accent)}
+.item[aria-checked="true"] .radio::after{content:"";width:9px;height:5px;border-left:2px solid var(--on-accent);border-bottom:2px solid var(--on-accent);transform:rotate(-45deg) translate(1px,-1px)}
+.item[aria-checked="true"]{background:var(--row-hi)}
+.switch{width:52px;height:32px;border-radius:16px;background:#3a3946;position:relative;border:2px solid #77757f;cursor:pointer;flex:none;padding:0}
+.switch::after{content:"";position:absolute;left:4px;top:4px;width:20px;height:20px;border-radius:50%;background:#8f8c98;transition:all 160ms cubic-bezier(.2,0,0,1)}
+.switch[aria-checked="true"]{background:var(--accent);border-color:var(--accent)}
+.switch[aria-checked="true"]::after{left:24px;top:2px;width:24px;height:24px;background:var(--on-accent)}
+.field{background:#121115;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font-size:14.5px;min-width:0}
+.field:focus{outline:none;border-color:var(--accent)}
+.hostport{display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px;width:min(380px,100%)}
+.stack{flex-direction:column;align-items:stretch;gap:10px}
+.stack .r1{display:flex;align-items:center;gap:16px}
+.lbl{width:96px;flex:none;color:var(--fg2);font-size:14.5px}
+.mrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.status{display:flex;align-items:center;gap:10px;background:color-mix(in srgb,var(--good) 10%,var(--card));border-radius:var(--r-out);padding:14px 22px;margin-bottom:6px;font-size:14.5px}
+.status i{width:8px;height:8px;border-radius:50%;background:var(--good)}
+.status.manual i{background:var(--warn)}
+.pill{border:0;border-radius:999px;padding:9px 16px;font-size:14px;cursor:pointer;background:var(--row)}
+.pill.acc{background:var(--accent);color:var(--on-accent);font-weight:500}
+.hidden{display:none!important}
+textarea.field{width:100%;min-height:70px;resize:vertical;font-family:var(--mono);font-size:13px}
+.note{max-width:1180px;margin:14px auto 0;color:var(--fg3);font-size:12.5px;line-height:1.5}
+</style>
+
+<div class="intro">
+  <h1>Proxy &amp; Connection Preferences — prototype</h1>
+  <p>Switch pages in the sidebar. Proxy: pick one of four choices; only the one you pick opens its fields. Connection Preferences: two plain switches with what they actually do. Example values only.</p>
+</div>
+
+<div class="frame">
+  <aside class="side">
+    <div class="chipb"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>All settings &nbsp;<span style="color:var(--fg2)">Wi-Fi &amp; Internet</span></div>
+    <button class="srow first" type="button" disabled style="cursor:default"><span class="disc"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></span><span><b>Wi-Fi &amp; Networking</b><small>Edit network connections</small></span></button>
+    <button class="srow" type="button" disabled style="cursor:default"><span class="disc"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/></svg></span><span><b>Firewall</b><small>Control your network rules</small></span></button>
+    <button class="srow" type="button" data-page="proxy" aria-current="page"><span class="disc"><svg viewBox="0 0 24 24"><path d="M4 6h16v3H4zm0 5h16v3H4zm0 5h16v3H4z"/></svg></span><span><b>Proxy</b><small>Route traffic through another server</small></span></button>
+    <button class="srow last" type="button" data-page="pref"><span class="disc"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></span><span><b>Connection Preferences</b><small>File transfer behaviour</small></span></button>
+  </aside>
+
+  <section class="hole">
+    <!-- ===== Proxy ===== -->
+    <div class="col" id="p-proxy">
+      <h2>Proxy</h2>
+      <p class="lead">A proxy sends your apps' web traffic through another server first — usually only needed at a school or office network. Most people leave this off.</p>
+      <div class="status" id="pstatus"><i></i><span id="pstatusText">No proxy · apps connect directly</span></div>
+
+      <div class="sec">How apps connect</div>
+      <div role="radiogroup" aria-label="Proxy mode" style="display:flex;flex-direction:column;gap:3px">
+        <div class="item click first" role="radio" aria-checked="true" tabindex="0" data-mode="off"><span class="radio"></span><span class="t"><b>Off</b><small>Connect directly. Right for home networks.</small></span></div>
+        <div class="item click" role="radio" aria-checked="false" tabindex="-1" data-mode="auto"><span class="radio"></span><span class="t"><b>Find it automatically</b><small>Ask the network if it has a proxy (WPAD). Used by some office networks.</small></span></div>
+        <div class="item click" role="radio" aria-checked="false" tabindex="-1" data-mode="pac"><span class="radio"></span><span class="t"><b>Use a setup script</b><small>Your IT team gave you an address ending in .pac</small></span></div>
+        <div class="item click last" role="radio" aria-checked="false" tabindex="-1" data-mode="manual"><span class="radio"></span><span class="t"><b>Set it up myself</b><small>Type the proxy server's address and port</small></span></div>
+      </div>
+
+      <div id="m-pac" class="hidden">
+        <div class="sec">Setup script</div>
+        <div class="item first last stack"><div class="r1"><span class="t"><b>Script address</b><small>Example: http://proxy.school.ca/proxy.pac</small></span></div>
+          <input class="field" style="width:100%" placeholder="http://…/proxy.pac" aria-label="Setup script address"></div>
+      </div>
+
+      <div id="m-manual" class="hidden">
+        <div class="sec">Proxy server</div>
+        <div class="item first"><span class="t"><b>Same server for everything</b><small>Use one address for web, secure web and file transfers</small></span><button class="switch" id="same" role="switch" aria-checked="true" aria-label="Same server for everything"></button></div>
+        <div class="item stack"><div class="mrow"><span class="lbl" id="l1">All traffic</span><span class="hostport"><input class="field" placeholder="proxy.example.com" aria-labelledby="l1"><input class="field" placeholder="8080" inputmode="numeric" aria-label="Port"></span></div>
+          <div class="mrow hidden sepw"><span class="lbl">Secure web</span><span class="hostport"><input class="field" placeholder="proxy.example.com" aria-label="HTTPS proxy"><input class="field" placeholder="8080" aria-label="HTTPS port"></span></div>
+          <div class="mrow hidden sepw"><span class="lbl">File transfer</span><span class="hostport"><input class="field" placeholder="proxy.example.com" aria-label="FTP proxy"><input class="field" placeholder="8080" aria-label="FTP port"></span></div>
+          <div class="mrow hidden sepw"><span class="lbl">SOCKS</span><span class="hostport"><input class="field" placeholder="socks.example.com" aria-label="SOCKS proxy"><input class="field" placeholder="1080" aria-label="SOCKS port"></span></div></div>
+        <div class="item last stack"><div class="r1"><span class="t"><b>Skip the proxy for</b><small>One per line or comma separated. Local addresses are always skipped.</small></span></div>
+          <textarea class="field" aria-label="Addresses that skip the proxy">localhost, 127.0.0.1, 192.168.2.0/24</textarea></div>
+      </div>
+
+      <div class="sec">Good to know</div>
+      <div class="item first last"><span class="t"><b>Which apps use this</b><small>KDE apps, Chrome and anything that reads the system proxy. Terminal tools and games usually ignore it.</small></span></div>
+    </div>
+
+    <!-- ===== Connection Preferences ===== -->
+    <div class="col hidden" id="p-pref">
+      <h2>Connection Preferences</h2>
+      <p class="lead">How Dolphin and other KDE apps copy files to and from other computers (network folders, FTP servers).</p>
+      <div class="sec">Uploads</div>
+      <div class="item first last"><span class="t"><b>Mark unfinished uploads</b><small>While a file is still copying it is named <span style="font-family:var(--mono)">name.part</span>, so a half-copied file is never mistaken for a finished one.</small></span><button class="switch" role="switch" aria-checked="true" aria-label="Mark unfinished uploads"></button></div>
+      <div class="sec">FTP servers</div>
+      <div class="item first"><span class="t"><b>Passive mode</b><small>The laptop opens every connection itself. Works through routers and firewalls; turn off only if a server asks you to.</small></span><button class="switch" role="switch" aria-checked="true" aria-label="Passive mode"></button></div>
+      <div class="item last"><span class="t"><b>Mark unfinished FTP uploads</b><small>Same <span style="font-family:var(--mono)">.part</span> naming for FTP</small></span><button class="switch" role="switch" aria-checked="true" aria-label="Mark unfinished FTP uploads"></button></div>
+    </div>
+  </section>
+</div>
+<p class="note">Saving works like the Wi-Fi page: changes take effect when you leave the page or press Save on the bar that appears. Nothing here changes how Wi-Fi itself connects.</p>
+
+<script>
+document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll("[data-page]").forEach(x=>x.removeAttribute("aria-current"));b.setAttribute("aria-current","page");
+  document.getElementById("p-proxy").classList.toggle("hidden",b.dataset.page!=="proxy");
+  document.getElementById("p-pref").classList.toggle("hidden",b.dataset.page!=="pref");
+}));
+const texts={off:"No proxy · apps connect directly",auto:"Looking for the network's proxy automatically",pac:"Using a setup script",manual:"Using your proxy server"};
+const radios=[...document.querySelectorAll("[data-mode]")];
+function pick(r){radios.forEach(x=>{x.setAttribute("aria-checked",x===r);x.tabIndex=x===r?0:-1});const m=r.dataset.mode;
+  document.getElementById("m-pac").classList.toggle("hidden",m!=="pac");document.getElementById("m-manual").classList.toggle("hidden",m!=="manual");
+  document.getElementById("pstatusText").textContent=texts[m];document.getElementById("pstatus").classList.toggle("manual",m!=="off")}
+radios.forEach((r,i)=>{r.addEventListener("click",()=>pick(r));r.addEventListener("keydown",e=>{
+  if(e.key===" "||e.key==="Enter"){e.preventDefault();pick(r)}
+  if(e.key==="ArrowDown"||e.key==="ArrowRight"){e.preventDefault();const n=radios[(i+1)%radios.length];pick(n);n.focus()}
+  if(e.key==="ArrowUp"||e.key==="ArrowLeft"){e.preventDefault();const n=radios[(i+radios.length-1)%radios.length];pick(n);n.focus()}})});
+document.querySelectorAll(".switch").forEach(s=>s.addEventListener("click",()=>s.setAttribute("aria-checked",s.getAttribute("aria-checked")!=="true")));
+document.getElementById("same").addEventListener("click",()=>{const same=document.getElementById("same").getAttribute("aria-checked")==="true";
+  document.querySelectorAll(".sepw").forEach(e=>e.classList.toggle("hidden",same));document.getElementById("l1").textContent=same?"All traffic":"Web"});
+</script>

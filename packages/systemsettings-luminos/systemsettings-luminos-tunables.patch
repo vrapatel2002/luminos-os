@@ -212,6 +212,59 @@
  }
  
  void ModuleView::keyPressEvent(QKeyEvent *event)
+--- a/app/SettingsBase.cpp
++++ b/app/SettingsBase.cpp
+@@ -36,7 +36,7 @@
+ SettingsBase::SettingsBase(SidebarMode::ApplicationMode mode, const QString &startupModule, const QStringList &startupModuleArgs, QWidget *parent)
+     : KMainWindow(parent)
+     , m_mode(mode)
+-    , m_startupModule(startupModule)
++    , m_startupModule(luminosModuleAlias(startupModule)) // DECISION 179
+     , m_startupModuleArgs(startupModuleArgs)
+     , m_actionCollection(new KActionCollection(this))
+     , m_helpMenu(new KHelpMenu(this))
+@@ -242,8 +242,8 @@
+ 
+ void SettingsBase::setStartupModule(const QString &startupModule)
+ {
+-    m_startupModule = startupModule;
+-    view->setStartupModule(startupModule);
++    m_startupModule = luminosModuleAlias(startupModule); // DECISION 179
++    view->setStartupModule(m_startupModule);
+ }
+ 
+ void SettingsBase::setStartupModuleArgs(const QStringList &startupModuleArgs)
+--- a/app/kcmmetadatahelpers.h
++++ b/app/kcmmetadatahelpers.h
+@@ -17,6 +17,19 @@
+ #include <QStandardPaths>
+ 
+ #include <ranges>
++
++// [CHANGE: claude-code | 2026-11-08] DECISION 179: Luminos' own Proxy / Connection Preferences pages (package luminos-style)
++// replace kio-extras' kcm_proxy / kcm_netpref while they are installed; old ids still open the new pages.
++inline bool luminosHasReplacement(const QString &id)
++{
++    static const bool proxy = KPluginMetaData::findPluginById(QStringLiteral("plasma/kcms/systemsettings"), QStringLiteral("kcm_luminos_proxy")).isValid();
++    static const bool netpref = KPluginMetaData::findPluginById(QStringLiteral("plasma/kcms/systemsettings"), QStringLiteral("kcm_luminos_netpref")).isValid();
++    return (id == QLatin1String("kcm_proxy") && proxy) || (id == QLatin1String("kcm_netpref") && netpref);
++}
++inline QString luminosModuleAlias(const QString &id)
++{
++    return luminosHasReplacement(id) ? (id == QLatin1String("kcm_proxy") ? QStringLiteral("kcm_luminos_proxy") : QStringLiteral("kcm_luminos_netpref")) : id;
++}
+ #include <set>
+ 
+ #include "../systemsettings_app_debug.h"
+@@ -82,6 +95,8 @@
+     std::set<QString> uniquePluginIds;
+ 
+     auto filter = [](const KPluginMetaData &data) {
++        if (luminosHasReplacement(data.pluginId())) // DECISION 179
++            return false;
+         const auto supportedPlatforms = data.value(QStringLiteral("X-KDE-OnlyShowOnQtPlatforms"), QStringList());
+         const auto qtPlatformStartsWith = [](const auto &platform) {
+             return qGuiApp->platformName().startsWith(platform);
 --- a/app/qml/CategoriesPage.qml
 +++ b/app/qml/CategoriesPage.qml
 @@ -6,6 +6,7 @@

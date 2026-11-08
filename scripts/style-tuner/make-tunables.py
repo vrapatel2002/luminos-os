@@ -108,6 +108,29 @@ RULES = {
   "app/qml/EdgeDrawers.qml": [R("font { pixelSize: 12; weight: Font.Medium }", f"font {{ pixelSize: {S}groupLabelPx; weight: Font.Medium }}")],
   "app/qml/Main.qml": [R("z: 3; width: 340;", f"z: 3; width: {S}sidebarWidthPx + 10;")],
   "app/qml/SideBarItem.qml": [R("? 72 : 330 + 32", f"? 72 : {S}sidebarWidthPx + 32")],
+  "app/kcmmetadatahelpers.h": [
+    R("#include <ranges>\n",
+      "#include <ranges>\n\n"
+      "// [CHANGE: claude-code | 2026-11-08] DECISION 179: Luminos' own Proxy / Connection Preferences pages (package luminos-style)\n"
+      "// replace kio-extras' kcm_proxy / kcm_netpref while they are installed; old ids still open the new pages.\n"
+      "inline bool luminosHasReplacement(const QString &id)\n"
+      "{\n"
+      "    static const bool proxy = KPluginMetaData::findPluginById(QStringLiteral(\"plasma/kcms/systemsettings\"), QStringLiteral(\"kcm_luminos_proxy\")).isValid();\n"
+      "    static const bool netpref = KPluginMetaData::findPluginById(QStringLiteral(\"plasma/kcms/systemsettings\"), QStringLiteral(\"kcm_luminos_netpref\")).isValid();\n"
+      "    return (id == QLatin1String(\"kcm_proxy\") && proxy) || (id == QLatin1String(\"kcm_netpref\") && netpref);\n"
+      "}\n"
+      "inline QString luminosModuleAlias(const QString &id)\n"
+      "{\n"
+      "    return luminosHasReplacement(id) ? (id == QLatin1String(\"kcm_proxy\") ? QStringLiteral(\"kcm_luminos_proxy\") : QStringLiteral(\"kcm_luminos_netpref\")) : id;\n"
+      "}\n"),
+    R("    auto filter = [](const KPluginMetaData &data) {\n",
+      "    auto filter = [](const KPluginMetaData &data) {\n"
+      "        if (luminosHasReplacement(data.pluginId())) // DECISION 179\n"
+      "            return false;\n")],
+  "app/SettingsBase.cpp": [
+    R("    , m_startupModule(startupModule)\n", "    , m_startupModule(luminosModuleAlias(startupModule)) // DECISION 179\n"),
+    R("    m_startupModule = startupModule;\n    view->setStartupModule(startupModule);",
+      "    m_startupModule = luminosModuleAlias(startupModule); // DECISION 179\n    view->setStartupModule(m_startupModule);")],
   "app/qml/SubCategoryPage.qml": [
     R("visible: !applicationWindow().wideScreen && subCategoryColumn.width >= 160",
       f"visible: {S}showMenuButton && !applicationWindow().wideScreen && subCategoryColumn.width >= 160"),

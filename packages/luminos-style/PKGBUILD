@@ -5,12 +5,12 @@
 # Sources live in the repo: src/luminos-style/. Rebuild: makepkg -sfi (from this folder).
 pkgname=luminos-style
 pkgver=1.0
-pkgrel=9
+pkgrel=10
 pkgdesc='Luminos: live style values for the forked KDE look + Style Tuner window'
 arch=(x86_64)
 license=(GPL-3.0-or-later)
 depends=(qt6-base qt6-declarative jq kconfig networkmanager-qt)  # kirigami is needed only by the tuner window, and depends on us (no cycle)
-makedepends=(cmake)
+makedepends=(cmake extra-cmake-modules)
 source=()
 
 _src() { echo "$startdir/../../src/luminos-style"; }
