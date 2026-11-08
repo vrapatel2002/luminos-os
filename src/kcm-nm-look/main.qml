@@ -224,7 +224,7 @@ QQC2.Page {
                 first: true; last: true
                 contentItem: RowLayout {
                     spacing: 16
-                    Kirigami.Icon { source: "network-wireless-symbolic"; isMask: true; color: Kirigami.Theme.focusColor; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth }
+                    Rows.Disc { source: "network-wireless-symbolic" }
                     Rows.TitleText {
                         title: i18nc("@title", "Wi-Fi")
                         subtitle: enabledConnections.wirelessEnabled ? i18nc("@info", "On · %1 networks nearby", otherModel.shownCount + savedModel.shownCount + heroModel.shownCount) : i18nc("@info", "Off")
@@ -257,11 +257,7 @@ QQC2.Page {
                             Accessible.name: i18nc("@action", "%1 details", model.Name)
                             contentItem: RowLayout {
                                 spacing: 18
-                                Rectangle {
-                                    implicitWidth: 52; implicitHeight: 52; radius: 26
-                                    color: Qt.alpha(Kirigami.Theme.focusColor, 0.18)
-                                    Kirigami.Icon { anchors.centerIn: parent; width: 28; height: 28; source: hero.model.KcmConnectionIcon; isMask: true; color: Kirigami.Theme.focusColor }
-                                }
+                                Rows.Disc { source: hero.model.KcmConnectionIcon; accent: true }
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 4
@@ -305,7 +301,7 @@ QQC2.Page {
                             onClicked: root.tapNetwork(model)
                             contentItem: RowLayout {
                                 spacing: 16
-                                Kirigami.Icon { source: srow.model.KcmConnectionIcon; isMask: true; color: Kirigami.Theme.textColor; opacity: srow.inRange ? 1 : 0.4; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth }
+                                Rows.Disc { source: srow.model.KcmConnectionIcon; dim: !srow.inRange }
                                 Rows.TitleText {
                                     title: srow.model.Name
                                     dim: !srow.inRange
@@ -340,7 +336,7 @@ QQC2.Page {
                             onClicked: root.tapNetwork(model)
                             contentItem: RowLayout {
                                 spacing: 16
-                                Kirigami.Icon { source: orow.model.KcmConnectionIcon; isMask: true; color: Kirigami.Theme.textColor; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth }
+                                Rows.Disc { source: orow.model.KcmConnectionIcon }
                                 Rows.TitleText { title: orow.model.Name; subtitle: root.shortSecurity(orow.model.SecurityTypeString) || i18n("Open") }
                                 Kirigami.Icon { visible: root.secured(orow.model); source: "object-locked"; isMask: true; color: Kirigami.Theme.textColor; opacity: 0.8; implicitWidth: 20; implicitHeight: 20; Layout.rightMargin: 6 }
                             }
@@ -362,7 +358,7 @@ QQC2.Page {
                 onClicked: { hiddenName.text = ""; hiddenPw.text = ""; hiddenSec.current = 1; hiddenMessage.text = ""; root.view = "hidden" }
                 contentItem: RowLayout {
                     spacing: 16
-                    Kirigami.Icon { source: "network-wireless-symbolic"; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth; isMask: true; color: Kirigami.Theme.textColor }
+                    Rows.Disc { source: "network-wireless-symbolic" }
                     Rows.TitleText { title: i18n("Join a hidden network"); subtitle: i18n("A network that doesn't show its name") }
                     Kirigami.Icon { source: "go-next-symbolic"; implicitWidth: 18; implicitHeight: 18; opacity: 0.6 }
                 }
@@ -372,7 +368,7 @@ QQC2.Page {
                 onClicked: addNewConnectionDialog.show()
                 contentItem: RowLayout {
                     spacing: 16
-                    Kirigami.Icon { source: "list-add"; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth; isMask: true; color: Kirigami.Theme.textColor }
+                    Rows.Disc { source: "list-add" }
                     Rows.TitleText { title: i18n("Add a connection"); subtitle: i18n("VPN, hotspot, wired or anything else") }
                     Kirigami.Icon { source: "go-next-symbolic"; implicitWidth: 18; implicitHeight: 18; opacity: 0.6 }
                 }
@@ -382,7 +378,7 @@ QQC2.Page {
                 onClicked: root.view = "extra"
                 contentItem: RowLayout {
                     spacing: 16
-                    Kirigami.Icon { source: "network-vpn-symbolic"; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth; isMask: true; color: Kirigami.Theme.textColor }
+                    Rows.Disc { source: "network-vpn-symbolic" }
                     Rows.TitleText { title: i18n("VPN and other connections"); subtitle: extraModel.shownCount > 0 ? i18np("%1 saved", "%1 saved", extraModel.shownCount) : i18n("Wired, VPN, hotspot") }
                     Kirigami.Icon { source: "go-next-symbolic"; implicitWidth: 18; implicitHeight: 18; opacity: 0.6 }
                 }
@@ -392,7 +388,7 @@ QQC2.Page {
                 onClicked: root.showConfigurationDialog()
                 contentItem: RowLayout {
                     spacing: 16
-                    Kirigami.Icon { source: "configure"; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth; isMask: true; color: Kirigami.Theme.textColor }
+                    Rows.Disc { source: "configure" }
                     Rows.TitleText { title: i18n("Network preferences"); subtitle: i18n("Hotspot name and password, connection checks") }
                 }
             }
@@ -431,7 +427,7 @@ QQC2.Page {
                         onClicked: root.openDetails(model.ConnectionPath, model.Name, model.DevicePath, model.KcmVpnConnectionExportable)
                         contentItem: RowLayout {
                             spacing: 16
-                            Kirigami.Icon { source: xrow.model.KcmConnectionIcon; isMask: true; color: xrow.model.ConnectionState === PlasmaNM.Enums.Activated ? Kirigami.Theme.focusColor : Kirigami.Theme.textColor; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth }
+                            Rows.Disc { source: xrow.model.KcmConnectionIcon; accent: xrow.model.ConnectionState === PlasmaNM.Enums.Activated }
                             Rows.TitleText { title: xrow.model.Name; subtitle: xrow.model.ConnectionState === PlasmaNM.Enums.Activated ? i18n("Connected") : (xrow.model.LastUsed || "") }
                             Kirigami.Icon { source: "go-next-symbolic"; implicitWidth: 18; implicitHeight: 18; opacity: 0.6 }
                         }
@@ -448,7 +444,7 @@ QQC2.Page {
                 onClicked: addNewConnectionDialog.show()
                 contentItem: RowLayout {
                     spacing: 16
-                    Kirigami.Icon { source: "list-add"; implicitWidth: LxS.Style.iconGlyphPx; implicitHeight: implicitWidth; isMask: true; color: Kirigami.Theme.textColor }
+                    Rows.Disc { source: "list-add" }
                     Rows.TitleText { title: i18n("Add a connection") }
                 }
             }

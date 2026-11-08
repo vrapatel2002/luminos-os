@@ -7,6 +7,23 @@ import org.kde.kirigami as Kirigami
 import org.luminos.style as LxS
 
 QtObject {
+    // [CHANGE: claude-code | 2026-11-08] R15: leading icon in the same round disc as the sidebar,
+    // same size knobs (iconCirclePx / iconGlyphPx) so the tuner moves both together.
+    component Disc: Rectangle {
+        property alias source: glyph.source
+        property bool accent: false // connected network: highlighted disc
+        property bool dim: false
+        Layout.alignment: Qt.AlignVCenter
+        implicitWidth: LxS.Style.iconCirclePx; implicitHeight: implicitWidth; radius: implicitWidth / 2
+        color: accent ? Kirigami.Theme.focusColor : (LxS.Style.iconDiscColor || Kirigami.Theme.highlightColor)
+        opacity: dim ? 0.45 : 1
+        Kirigami.Icon {
+            id: glyph
+            anchors.centerIn: parent; width: LxS.Style.iconGlyphPx; height: width; isMask: true
+            color: parent.accent ? Kirigami.Theme.highlightColor : (LxS.Style.iconGlyphColor || Kirigami.Theme.highlightedTextColor)
+        }
+    }
+
     // one card row; put any content in it
     component Card: QQC2.ItemDelegate {
         id: card

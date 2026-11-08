@@ -1,14 +1,173 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-10-31 — Response 1 (new chat: bar clock "; $" bug)
+Last updated: 2026-11-08 — Response 3 (Luminos Media chat)
 
-## Aim right now — BAR CLOCK GLYPH BUG (2026-10-31) — DONE, nothing pending
-- Symptom: Caelestia bar clock hour drew "; $" instead of "06". BUG-226 / DECISION 167.
-- Cause: bar process had TWO Google Sans Flex files (Caelestia bundled 3.007 via GSFLoader + system 5.000 from
-  ttf-google-sans-flex installed 2026-10-10, DECISION 139). Glyph numbers from one file drawn with the other's pictures
-  (system '0'=384,'6'=390 → bundled 384=semicolon, 390=dollar). Started when the system font arrived on 10-10.
-- Fix: GSFLoader removed from config/quickshell/caelestia-bar/shell.qml; bar restarted; live screenshot 06/49/pm; one font mapped.
-- Guard: luminos-verify [4c]. Open: Hyprland session's package-owned /etc/xdg Caelestia shell.qml still loads GSFLoader.
-- Cleanup if still there: ~/luminos-os/.tmp-clockglyph/ (test screenshots; delete), /var/tmp/clockglyph/ (repro + shell.qml.bak).
+
+## Aim right now — LUMINOS MEDIA (one lightest app for ALL images + videos) — engine measured, awaiting engine pick
+- Origin: Shawn couldn't open photos (.heic). luminos-notepad is text-only (refuses binaries); NO image viewer installed;
+  jpg/png/webp -> Chrome, heic/heif/avif -> nothing. VLC already default for video. Notepad also misses ~21 text types
+  (toml, rust, lua, ts, php, diff, srt/vtt, ipynb...; Makefile/.tex -> vim) — add them later (default yes).
+- R3: Shawn: "make a new one like luminous media that handle both images and videos... lightest app". Measured on real
+  files in /var/tmp/lm-test (PSS / CPU, 5 s, full plasmashell env, dGPU stayed suspended every run):
+    images, qml6 Image (kimageformats: heic/avif/jxl/jpg): 114-134 MB, 0 %   | VLC on a jpg: 653 MB, 42 % (!)
+    video qml6+QtMultimedia, Vulkan hw:  h264 165/9.8  hevc10-4K 366/18.8  vp9 124/6.2  av1 107/6.4
+    video qml6+QtMultimedia + VA-API shim: h264 144/6.2 hevc10-4K 325/9.2  vp9 100/4.6  av1 86/4.0
+    VLC (VA-API):                         h264 125/1.8  hevc10-4K 152/3.2
+- BUG-234 (new, docs/BUGS.md): ffmpeg default VA-API device = renderD128 = gated dGPU -> EACCES -> gives up; shim
+  /var/tmp/lm-test/shim/vaapi-igpu.c (LD_PRELOAD, fills in AMD render node) fixes it. Not deployed.
+- mpv tried unpacked in /var/tmp (no install): 0.41.0-7 exits rc=1 silently against installed libs; local pacman DB is
+  STALE (points at mpv 0.41.0-6, mirrors have -7) -> installing mpv needs a full `pacman -Syu` first. luminos-brain safe
+  said NO (known fuzzy-match false negative, project_brain_gate_false_negative) — NOT overridden.
+- Options put to Shawn: (A) QML app on Qt Multimedia + shim, zero new packages; (B) QML UI on libmpv (likely lightest
+  video, needs -Syu + mpv); (C) QML image viewer + hand videos to VLC.
+- NEXT: Shawn picks engine -> HTML prototype (his UI rule) -> build in src/media + scripts/luminos-media, .desktop with
+  image/* video/*, xdg defaults, double-click proof on every test file, docs/notes/commit.
+
+## Aim right now — DV PURPLE AGAIN IN JELLYROCK (BUG-231) — FIXED + proven live, TV check = Shawn
+- Shawn R5: "same purple error on the newer episodes". JellyRock 3.3.1, VisionQuest S01E06 (DV P5). Not the files, not
+  JellyRock: the DECISION 175 seek wrapper (segment muxer) did not pass `-strict` to its inner mpegts muxer, so the DV
+  descriptor was dropped on EVERY DV file since 2026-11-07 (8 P5 = VisionQuest E01–E07 + Ozark S02E03 purple; 6 MobLand
+  P8 silently lost DV). Fix: wrapper forwards `-segment_format_options strict=<Jellyfin's -strict>` (RE-PLAN 3,
+  ~/builds/jf-seek-align, 25 tests). Live at /usr/local/lib/luminos-ffmpeg/ffmpeg; old = ffmpeg.pre-replan3-20261108.
+- Proof: server/scripts/luminos-jf-dv-check (old wrapper lost_dv 3/3, new 0) + luminos-jf-seek-check 0/19 misaligned.
+- NEXT: Shawn plays a VisionQuest episode in JellyRock (start fresh, then skip around) — colour AND seeking. The TV may
+  hold a cached playlist from before the fix: stop playback fully and restart the episode.
+- Gotchas: a remux wrapper must be checked for metadata parity (DV/HDR tags), not only timing. dv-check refuses to
+  report unless the wrapper actually rewrote (a trailing arg makes it pass through and "pass"). Official Jellyfin Roku
+  app is still purple on P5 by design — JellyRock only. Do NOT re-enable luminos-dv-sweep (DECISION 167).
+- Not committed by me: docs/BUGS.md (BUG-231 appended) and HANDOFF.md — other sessions' uncommitted edits are mixed in.
+
+## Aim right now — STYLE TUNER (DECISION 176) — BUILT + LIVE, waiting on Shawn to use it
+- R6 (2026-11-08): added bars — Search bar (height/edges/space), Sidebar bottom gap, Icons (circle + icon colour swatches,
+  size, nudge X/Y), Bottom buttons (edges/space, live C++ watcher). luminos-style 1.0-4, kirigami 1.10, systemsettings 1.8.
+  Proven in nested KWin (shots/r6), checker 36/36. Shawn must CLOSE + REOPEN System Settings once (his window ran the old build).
+- R7: ☰ menu button beside search now hideable (showMenuButton, tuner switch); turned OFF in Shawn's style.json.
+  systemsettings 1.9, luminos-style 1.0-5. Reopen System Settings to see it.
+- R8: BUG-232 Wi-Fi page overflow fixed in systemsettings 1.11 (drop >=600 px fixed minimums, tabs scroll, list 240,
+  LayoutRequest re-check). Proof shots nm-before/nm-after. Shawn: reopen System Settings.
+- R9 (DECISION 177): Wi-Fi page in his "Network panel" look (QML override in /usr/local/share/kcm_networkmanagement via
+  luminos-style 1.0-6, src/kcm-nm-look) + Status tab left aligned (systemsettings 1.12). Search box removed on that page.
+- R10: Shawn: the whole Wi-Fi page "doesn't feel right", General/Wi-Fi/IPv4 tabs need work → PROTOTYPE published
+  (artifact "Luminos Wi-Fi Page", docs/windowstyle/mock/wifi-page.html): one column; page 1 = Wi-Fi switch card,
+  big "Connected" card, Saved / Other networks groups, More (hidden network, VPN & other); page 2 = one network as grouped
+  rows (Status, Connection, Security, IP settings, Advanced collapsed), Save bar only when changed. Waiting on approval.
+  Build plan: QML pages in the /usr/local/share override + a small C++ helper (NetworkManagerQt) in org.luminos.style to
+  read/write settings, since today's tabs are plasma-nm QtWidgets; the old tab editor stays reachable as a fallback.
+- R11 (DECISION 178) BUILT: Wi-Fi page = one column (list → details rows, no tabs) per approved prototype.
+  luminos-style 1.0-7 (adds org.luminos.network C++ helper + new QML in /usr/local/share/kcm_networkmanagement).
+  Save proven on a throwaway LX-TEST profile (11 fields + password kept + password/WPA3 change, then forgotten).
+  Next: Shawn's feedback; gaps listed in DECISION 178.
+- R12: hidden-network page, Apply/Reset hidden on the Wi-Fi page (systemsettings 1.13), multi-address IPv4/IPv6,
+  BUG-233 (IPv6 save abort) fixed — luminos-style 1.0-9. Shawn says more things need taking care of: ask/await his list.
+- R13: Shawn: "make this 2 better" (Proxy = kio kcm_proxy, Connection Preferences = kio kcm_netpref; both QtWidgets).
+  PROTOTYPE published (artifact "Luminos Proxy Pages", docs/windowstyle/mock/net-pages.html): Proxy = status card +
+  4 plain choices (Off / Find automatically / Setup script / Set it up myself) with only the chosen one's fields;
+  Connection Preferences = 3 switches with explanations. Waiting on approval. Build plan: two QML KCMs written by us
+  (read/write kioslaverc [Proxy Settings] + KIO keys), shown in place of kio's two (systemsettings fork swaps the plugin ids).
+- R14 (DECISION 179) BUILT: own Proxy + Connection Preferences QML pages (luminos-style 1.0-10), kio-extras ones hidden
+- R15: Wi-Fi page icons now sit in the same round disc as the sidebar (Rows.Disc, iconCirclePx/iconGlyphPx, follows tuner). Hand-installed to /usr/local/share/kcm_networkmanagement/qml; next luminos-style build packages it. Shot: docs/style-tuner/shots/wifi-discs.png
+  by systemsettings 1.14. Proven by writing kio-format kioslaverc/kio_ftprc in a private config dir.
+- R5 (2026-11-08): Shawn asked how to use it → told: app menu "Style Tuner" (or run luminos-style-tuner), drag bars, reset arrows, delete style.json to undo. No changes.
+- Shawn: tune the Nexus KDE look himself with HORIZONTAL BARS, LIVE; R4 "do it rather than perfecting it".
+- LIVE: app menu "Style Tuner" (`luminos-style-tuner`) → 13 bars write ~/.config/luminos/style.json → package
+  `luminos-style` 1.0-3 (QML module org.luminos.style, inotify watcher) → forks kirigami 1.9, qqc2 1.9, kirigami-addons 1.3,
+  kcmutils 1.2, systemsettings 1.7 read corners/gaps/padding/widths/discs/text px/motion from it. Text size + button corners
+  via user unit luminos-style-apply.path (kdeglobals fonts + refreshFonts; darklyrc + Darkly reparse). Enabled.
+- PROOF: docs/style-tuner/shots — System Settings never restarted: tuned frame differs, back-to-default 0 px diff;
+  tuner + 12.5 pt grows fonts live (t1/t2). windowstyle checker 36/36 before AND after install.
+- Docs: DECISION 176, STATUS row, docs/style-tuner/README.md, CODE_REFERENCE, AGENTS §10. Prototype artifact
+  "Luminos Style Tuner" (bars version) still at claude.ai/artifact/BF8PGi5taLFvrymMBhHSZp.
+- NEXT (Shawn's feedback first): bars don't follow outside edits of the file; "Bake" not built; not wired yet: QtWidgets
+  (Darkly) row corners/menus, System Settings hole/drawer radii, page title only updates on page switch, kirigami
+  InlineMessage motion. Number collision: DECISION 175 = JellyRock, so this is 176 (installed binaries' comments say 175).
+- Gotchas: never remove luminos-style while the forks are installed (all QML apps lose controls); fork rebuilds apply
+  the tunables patch LAST (regenerate with scripts/style-tuner/make-tunables.py); qml6 logs → journald unless
+  QT_FORCE_STDERR_LOGGING=1; KF6 ignores KGlobalSettings notifyChange 1 — use /KDEPlatformTheme refreshFonts;
+  host-shell lacks the session env (apps render Breeze light) — take env from plasmashell's /proc/PID/environ;
+  never `pkill -f` a pattern that is in your own command line (killed my shell once).
+- ⚠️ HANDOFF.md is over the ~400-line tripwire (§0.2) — needs a reset, but parallel chats are live in it.
+
+## Aim right now — JELLYROCK SKIP/SEEK JUMPS BACK (DECISION 175 / BUG-230) — fix LIVE on the server, TV test = Shawn
+- Symptom: Shawn "can't move back and forth" in JellyRock. ECP-driven test: Right/>> + OK lands, then 3 of 4 times the
+  Roku paused and snapped back to the pre-seek spot. Cause: DV files play as HLS remux; after a seek past the cut
+  point Jellyfin restarts ffmpeg (-ss = piece start + 0.5 s) and the restarted hls muxer cuts on its own grid, so
+  pieces stop matching the keyframe playlist (16/19 misaligned).
+- Fix: /usr/local/lib/luminos-ffmpeg/ffmpeg (= server/scripts/luminos-jf-ffmpeg) + ffprobe symlink, set in
+  /etc/jellyfin/jellyfin.env JELLYFIN_FFMPEG_OPT. Rewrites only HLS remux mpegts vod calls with KeyframeData to the
+  segment muxer with Jellyfin's own cut times; everything else exec'd unchanged. e2e server/scripts/luminos-jf-seek-check
+  0/19 on Reboot (L5) and Malware (L6). Build files: ~/builds/jf-seek-align (SPEC/CONTRACTS/BUILD_LOG/tests, 20 pass),
+  copies in server/docs/seek/.
+- NEXT: Shawn tests skipping in JellyRock on a VisionQuest episode. If it still snaps back: capture with
+  `sudo tcpdump -i any -A "tcp port 8096 and host 192.168.2.13"` + ECP /query/media-player (TV is 192.168.2.13 here)
+  and check FFmpeg.Remux logs for "luminos-jf-ffmpeg: aligned". Undo = JELLYFIN_FFMPEG_OPT back to the real path.
+- Gotchas: systemd EnvironmentFile has NO inline comments (broke Jellyfin args once, fixed). Server LAN is enp2s0 now,
+  not wlan0 (tcpdump -i any). Backgrounding over ssh: use setsid nohup … & disown.
+
+
+## Aim right now — LUMINOS-FOCUS "only what I'm looking at gets compute" (DECISION 174) — steps 1–3 LIVE, docs/focus/
+- Read docs/focus/BUILD_LOG.md first (measurements + every re-plan), then SPEC.md / CONTRACTS.md (Re-plans 1–6).
+- LIVE (no reboot, no /etc): KWin script luminos-focus (~/.local/share/kwin/scripts, kwinrc luminos-focusEnabled) →
+  org.luminos.Focus → user unit luminos-focus.service (~/.local/bin/luminos-focus, Go) sets runtime CPUWeight/CPUQuota
+  on app-* units: focused 1000; else weight 20+80f, quota 25+1575f %; audio + ~/.config/luminos/focus-allow.conf
+  exempt; Claude scope (Cowork VM + host-shell + /build workers) always exempt. Show Desktop via KWin's D-Bus signal.
+  Wallpaper ObscurePolicy 3 (set) + grab→hide→Frozen freeze (BUG-229) + 30 fps cap. Check/undo:
+  scripts/luminos-focus-install --check | --uninstall. Tests: bash tests/focus/static.sh (9/9 PASS).
+- Measured: covered window = full cost, minimized = painting stops; hidden busy Chrome capped exactly to the dial,
+  refocus lifts it immediately; allow-listed konsole 99 %; wallpaper frozen → <0.3 % CPU, iGPU 20→4 %, −1.3…1.5 W;
+  daemon itself 0.13 % of a core.
+- NEXT (needs Shawn): (1) say yes/no to Phase B = small KWin patch so FULLY covered windows get `suspended`
+  (rebuilt KWin package + pacman hook, like the forked KDE libs) — biggest remaining win; (2) PSR/idle power re-measure
+  while he is away from the keyboard (every sample today had Claude streaming, PSR never engaged).
+- Gotchas: KWin 6.7 scripts have NO workspace.showingDesktop/stackingOrderChanged; quickshell overlays are
+  normalWindow=true (filter skipTaskbar); Qt refuses Frozen on a visible WebEngineView; evaluateScript writeConfig does
+  not reach a running wallpaper (restart plasmashell); plasmashell restart gives the desktop focus → wallpaper plays
+  until a window is clicked (correct). Never `pkill -f` a pattern that is in your own command line.
+- Not committed by me: HANDOFF.md, LUMINOS_DECISIONS.md, LUMINOS_STATUS.md, docs/BUGS.md (other sessions' edits mixed in).
+
+## STRONG SLEEP / QUICK WAKE (DECISION 173) — DONE, commit 4d5d37d8, docs/sleep/
+- LIVE: luminos-lid v3, wake policy, SD-reader hook, brightness hook, nvsleep v2.1 (entry 4.2→1.9 s, resume 1.23→0.83 s).
+- Waiting on Shawn: real lid close/open; charger + USB-C plug during sleep (journal: luminos-lid + "NVRM: nvsleep").
+  Optional: wireplumber rule so it stops opening the NVIDIA HDMI PCM after every wake (costs HDMI audio) — his call.
+
+## Aim right now — POWER / BATTERY / SLEEP INVESTIGATION (2026-11-05) — findings in docs/BUGS.md BUG-228
+- Shawn: smooth but heats fast, bad battery, battery drains overnight in sleep. Asked to understand only, no fixes.
+- Verdict: (1) awake drain 17-33 W on battery even with CPU dial at 15 W floor -> desktop never idles
+  (jellyfish WebGL wallpaper ~2-3 W pkg + blocks panel self-refresh, plasmashell/kwin/Claude apps/Cowork VM);
+  (2) sleep itself ~0.6-1 %/h (mediocre, works; first attempt always aborts, retry holds);
+  (3) low-battery hibernate fails ("Device or resource busy"; nvidia-suspend/hibernate units disabled while
+  PreserveVideoMemoryAllocations=1; no resume=) -> battery dies to 0; (4) heat = spectrum design (82 C target,
+  fast 45 W slew, gentle fan curve) on top of the never-idle desktop.
+- Next (needs Shawn): rtcwake -m freeze -s 60 + amd_pmc s0ix_stats to prove S0i3; on-battery A/B with wallpaper
+  paused; then pick fixes. Live test script: /var/tmp/wp-ab.sh (SIGSTOP/CONT wallpaper pid, RAPL).
+
+## Aim right now — NEW EPISODES NOT DOWNLOADING (2026-11-05) — FIXED, only watching left
+- Shawn: VisionQuest added while airing, later weekly episodes never downloaded.
+- Cause: Sonarr + Radarr `rssSyncInterval` = 0 since DECISION 42 (torrent halt 2026-08-04); restore step was
+  gated on "VPN up", Usenet replaced the VPN plan, so it never ran. RSS sync is the ONLY thing that picks up
+  episodes released after a show is added. Series/episode monitoring + NZBGeek indexer were all correct.
+- Fix: Sonarr 15 / Radarr 30 (read back). MissingEpisodeSearch cmd 339035 → 19 grabbed (VisionQuest
+  S01E03-E07, MobLand S02E07, Sopranos S02E01-E13), NZBGet 25 MB/s, health 1000. DECISION 171 (server/DECISIONS.md).
+- Next (optional, offered to Shawn): daily MissingEpisodeSearch timer as a safety net for releases posted while
+  the box is off longer than the RSS window. VisionQuest E08 airs 2026-11-11 — check it lands on its own.
+- R6: Sopranos switched off (unmonitored, 13 S02 downloads removed from NZBGet). DECISION 172 BUILT: Sonarr
+  autoUnmonitorPreviouslyDownloadedEpisodes=true + luminos-series-prune.timer (10 min) — once-downloaded series with
+  0 video files on disk → fully unmonitored. Baseline (ignored, already empty): HoC, True Detective, Sopranos, BCS,
+  Knight 7K, Solo Leveling, India's Got Latent, Fake Alchemist — R7 Shawn: keep Fake Alchemist, rest OFF (done, read back; baseline=[10]). Proven via faked-empty
+  Ozark + exact restore. Open: MobLand S02E07 health-failed a 5th time (SPWEB) — next release or wait; VisionQuest
+  E07 importPending (slow disk), should import itself. Jellyseerr re-request re-monitor = untested.
+- R3 NZBGet update pop-up (read-only): server runs nzbget 26.2-3 from Arch [extra], UpdateCheck=stable. Upstream
+  feed (nzbget.com/info/nzbget-version-linux.json) says stable 26.3 (2026-08-27) → that's the pop-up. Arch extra still
+  26.2-3 (checkupdates: nothing). 26.3 = bug fixes + "hardened web auth token generation and unpack-dir symlink
+  handling" (#894), nothing urgent for a LAN/Caddy-only box. Verdict: don't install the upstream .run (bypasses pacman,
+  the in-app updater can't update a pacman install); take it via pacman when Arch ships it. Offered: UpdateCheck=none
+  to silence the pop-up. R4: Shawn asked gain/loss of 26.3 the pacman way → answered: small gain (health-failed
+  'download remaining' #870, crash/race fixes #851, auth hardening #894), nothing lost; only clean route = self-build
+  Arch PKGBUILD bumped to 26.3 (server/packaging/ pattern, like jellyseerr) AFTER the 19-episode queue drains. R5: Shawn — WAIT for Arch to package 26.3; do NOT self-build. Pop-up off + daily missing-search timer still unanswered.
+  Sonarr also nags v4.0.20 (sonarr-bin AUR 4.0.19) — same logic.
+- Commit: only server/ files committed; HANDOFF.md + docs/BUGS.md had other sessions' uncommitted edits, left unstaged.
+
+## Tablet black screen (2026-10-31) — FIXED server-side (BUG-227 / DECISION 168, luminos-jf-profile-shim :8098). Needs Shawn's Tab S9+ test; check `journalctl -u luminos-jf-profile-shim` says "rewritten" for 192.168.2.70.
+
+## BAR CLOCK GLYPH BUG (2026-10-31) — DONE (BUG-226 / DECISION 167). Open: Hyprland session's /etc/xdg Caelestia shell.qml still loads GSFLoader; delete ~/luminos-os/.tmp-clockglyph/ + /var/tmp/clockglyph/.
 
 ## Aim right now — WUKONG CRASH INVESTIGATION (GLM chat R4, 2026-10-30) — read seat handoff first
 Source docs: gameos branch `seat/seat/2026-10-30-wukong-handoff` → docs/handoff/WUKONG-CRASH-2026-10-30.md +

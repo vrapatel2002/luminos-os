@@ -749,7 +749,7 @@ conductor.go and fan_control.go are deleted.
 | Path | What |
 |---|---|
 | `src/kcm-nm-look/main.qml` | the Wi-Fi & Networking page: list / details / other connections; installed to /usr/local/share/kcm_networkmanagement/qml |
-| `src/kcm-nm-look/Rows.qml` | Card, TitleText, Section, Segmented, ValueRow building blocks |
+| `src/kcm-nm-look/Rows.qml` | Card, TitleText, Section, Segmented, ValueRow, Disc (leading icon in the sidebar-style disc, tuner sizes) building blocks |
 | `src/kcm-nm-look/luminos-nm-look.hook` | pacman hook: warns when plasma-nm leaves 6.7.5 |
 | `src/luminos-style/network/networkconnection.{h,cpp}` | QML `org.luminos.network` `NetworkConnection`: status + editable fields, save with secrets merged, connect/disconnect/forget |
 
