@@ -45,6 +45,7 @@ class Style : public QObject
     LX_PROP(qreal, iconOffsetXPx)
     LX_PROP(qreal, iconOffsetYPx)
     LX_PROP(qreal, sidebarBottomPx)
+    LX_PROP(bool, showMenuButton)    // R7: the ☰ button next to the search box
     LX_PROP(QString, iconDiscColor)  // "" = theme colour, else #rrggbb
     LX_PROP(QString, iconGlyphColor) // "" = theme colour, else #rrggbb
 #undef LX_PROP
@@ -80,6 +81,7 @@ public:
     qreal iconOffsetXPx() const;
     qreal iconOffsetYPx() const;
     qreal sidebarBottomPx() const;
+    bool showMenuButton() const;
     QString iconDiscColor() const;
     QString iconGlyphColor() const;
 

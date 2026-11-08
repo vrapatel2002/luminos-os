@@ -40,6 +40,7 @@ const QHash<QString, Knob> &knobs()
         {QStringLiteral("iconOffsetXPx"),  {0, -24, 24}},
         {QStringLiteral("iconOffsetYPx"),  {0, -24, 24}},
         {QStringLiteral("sidebarBottomPx"),{16, 0, 96}},
+        {QStringLiteral("showMenuButton"), {1, 0, 1}},
     };
     return k;
 }
@@ -103,6 +104,8 @@ private:
                 const QJsonValue v = o.value(it.key());
                 if (v.isDouble())
                     next.insert(it.key(), qBound(it->lo, v.toDouble(), it->hi));
+                else if (v.isBool())
+                    next.insert(it.key(), v.toBool() ? 1.0 : 0.0);
             }
             static const QRegularExpression hex(QStringLiteral("^#[0-9a-fA-F]{6}$"));
             for (const char *k : {"iconDiscColor", "iconGlyphColor"}) {
@@ -153,6 +156,7 @@ LX_GET(qreal, iconGlyphPx)
 LX_GET(qreal, iconOffsetXPx)
 LX_GET(qreal, iconOffsetYPx)
 LX_GET(qreal, sidebarBottomPx)
+bool Style::showMenuButton() const { return m_backend->value(QStringLiteral("showMenuButton")) >= 0.5; }
 QString Style::iconDiscColor() const { return m_backend->text(QStringLiteral("iconDiscColor")); }
 QString Style::iconGlyphColor() const { return m_backend->text(QStringLiteral("iconGlyphColor")); }
 int Style::animationMs() const { return qRound(m_backend->value(QStringLiteral("animationMs"))); }

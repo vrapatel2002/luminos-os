@@ -84,7 +84,10 @@ RULES = {
     R("leftPadding: 16; rightPadding: 16; topPadding: 16; bottomPadding: 8",
       f"leftPadding: {S}searchLeftPx; rightPadding: {S}searchRightPx; topPadding: {S}searchTopPx; bottomPadding: {S}searchBottomPx"),
     R("Layout.preferredHeight: 48\n", f"Layout.preferredHeight: {S}searchHeightPx\n"),
-    R("        bottomMargin: 16\n", f"        bottomMargin: {S}sidebarBottomPx\n")],
+    R("        bottomMargin: 16\n", f"        bottomMargin: {S}sidebarBottomPx\n"),
+    # R7: the menu (☰) button can be hidden
+    R("            HamburgerMenuButton {\n                id: hamburgerMenuButton\n",
+      f"            HamburgerMenuButton {{\n                id: hamburgerMenuButton\n                visible: {S}showMenuButton\n")],
   "app/qml/CategoryItem.qml": [
     R("pressed ? 12 : highlighted ? 32 : groupStart ? 28 : 4", f"pressed ? 12 : highlighted ? {S}cornerSelectedPx : groupStart ? {S}cornerOuterPx : {S}cornerInnerPx"),
     R("pressed ? 12 : highlighted ? 32 : groupEnd ? 28 : 4", f"pressed ? 12 : highlighted ? {S}cornerSelectedPx : groupEnd ? {S}cornerOuterPx : {S}cornerInnerPx"),
@@ -106,6 +109,8 @@ RULES = {
   "app/qml/Main.qml": [R("z: 3; width: 340;", f"z: 3; width: {S}sidebarWidthPx + 10;")],
   "app/qml/SideBarItem.qml": [R("? 72 : 330 + 32", f"? 72 : {S}sidebarWidthPx + 32")],
   "app/qml/SubCategoryPage.qml": [
+    R("visible: !applicationWindow().wideScreen && subCategoryColumn.width >= 160",
+      f"visible: {S}showMenuButton && !applicationWindow().wideScreen && subCategoryColumn.width >= 160"),
     R("minimumHeight: 48 + 16 + 8", f"minimumHeight: {S}searchHeightPx + {S}searchTopPx + {S}searchBottomPx"),
     R("leftPadding: subCategoryColumn.width < 160 ? 14 : 16; rightPadding: 16; topPadding: 16; bottomPadding: 8",
       f"leftPadding: subCategoryColumn.width < 160 ? 14 : {S}searchLeftPx; rightPadding: {S}searchRightPx; topPadding: {S}searchTopPx; bottomPadding: {S}searchBottomPx"),

@@ -36,6 +36,7 @@ QQC2.ApplicationWindow {
         { g: "Search bar", id: "searchRightPx",  lbl: "Right edge",      unit: "px", min: 0,  max: 48, step: 1, def: 16 },
         { g: "Search bar", id: "searchTopPx",    lbl: "Space above",     unit: "px", min: 0,  max: 48, step: 1, def: 16 },
         { g: "Search bar", id: "searchBottomPx", lbl: "Space below",     unit: "px", min: 0,  max: 40, step: 1, def: 8 },
+        { g: "Search bar", id: "showMenuButton", lbl: "Menu button (☰) next to search", kind: "toggle", def: 1 },
         { g: "Icons", id: "iconDiscColor",  lbl: "Circle colour", kind: "color", def: "" },
         { g: "Icons", id: "iconGlyphColor", lbl: "Icon colour",   kind: "color", def: "" },
         { g: "Icons", id: "iconGlyphPx",    lbl: "Icon size",       unit: "px", min: 12, max: 36, step: 1, def: 22 },
@@ -84,7 +85,7 @@ QQC2.ApplicationWindow {
     }
     function save() {
         const out = {}
-        for (const k of knobs) out[k.id] = values[k.id]
+        for (const k of knobs) out[k.id] = (k.kind === "toggle") ? (values[k.id] ? 1 : 0) : values[k.id]
         const xhr = new XMLHttpRequest()
         xhr.open("PUT", filePath)
         xhr.send(JSON.stringify(out, null, 2) + "\n")
@@ -108,6 +109,7 @@ QQC2.ApplicationWindow {
         for (const k of knobs) {
             const fromStyle = Style[k.id]
             v[k.id] = fromStyle !== undefined ? fromStyle : (file[k.id] !== undefined ? file[k.id] : k.def)
+            if (k.kind === "toggle") v[k.id] = v[k.id] ? 1 : 0
         }
         values = v
         revision++
@@ -160,6 +162,7 @@ QQC2.ApplicationWindow {
                     readonly property bool groupStart: index === 0 || win.knobs[index - 1].g !== k.g
                     readonly property var val: win.revision >= 0 && win.values[k.id] !== undefined ? win.values[k.id] : k.def
                     readonly property bool isColor: k.kind === "color"
+                    readonly property bool isToggle: k.kind === "toggle"
                     Layout.fillWidth: true
                     Layout.leftMargin: Kirigami.Units.largeSpacing * 2
                     Layout.rightMargin: Kirigami.Units.largeSpacing * 2
@@ -177,9 +180,15 @@ QQC2.ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.topMargin: Kirigami.Units.smallSpacing
                         QQC2.Label { text: row.k.lbl; Layout.fillWidth: true }
+                        QQC2.Switch { // R7: on/off settings
+                            visible: row.isToggle
+                            checked: row.val ? true : false
+                            onToggled: win.setValue(row.k.id, checked ? 1 : 0, true)
+                            Accessible.name: row.k.lbl
+                        }
                         QQC2.Label {
-                            visible: !row.isColor
-                            text: row.isColor ? "" : (row.k.step < 1 ? Number(row.val).toFixed(1) : row.val) + " " + row.k.unit
+                            visible: !row.isColor && !row.isToggle
+                            text: (row.isColor || row.isToggle) ? "" : (row.k.step < 1 ? Number(row.val).toFixed(1) : row.val) + " " + row.k.unit
                             font.family: "monospace"
                             color: row.val !== row.k.def ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
                         }
@@ -187,7 +196,7 @@ QQC2.ApplicationWindow {
                             icon.name: "edit-undo"
                             display: QQC2.AbstractButton.IconOnly
                             text: "Reset " + row.k.lbl
-                            opacity: row.val !== row.k.def ? 1 : 0
+                            opacity: !row.isToggle && row.val !== row.k.def ? 1 : 0
                             enabled: opacity > 0
                             onClicked: win.setValue(row.k.id, row.k.def, true)
                             QQC2.ToolTip.text: row.isColor ? "Back to the theme colour" : "Back to " + row.k.def + " " + row.k.unit
@@ -219,11 +228,11 @@ QQC2.ApplicationWindow {
                         }
                     }
                     QQC2.Slider {
-                        visible: !row.isColor
+                        visible: !row.isColor && !row.isToggle
                         Layout.fillWidth: true
-                        from: row.isColor ? 0 : row.k.min; to: row.isColor ? 1 : row.k.max; stepSize: row.isColor ? 0 : row.k.step
+                        from: (row.isColor || row.isToggle) ? 0 : row.k.min; to: (row.isColor || row.isToggle) ? 1 : row.k.max; stepSize: (row.isColor || row.isToggle) ? 0 : row.k.step
                         snapMode: QQC2.Slider.SnapAlways
-                        value: row.isColor ? 0 : row.val
+                        value: (row.isColor || row.isToggle) ? 0 : row.val
                         onPressedChanged: { win.dragging = pressed; if (pressed) win.undoStack.push(win.snapshot()) }
                         onMoved: win.setValue(row.k.id, Math.round(value / row.k.step) * row.k.step, false)
                         Accessible.name: row.k.lbl

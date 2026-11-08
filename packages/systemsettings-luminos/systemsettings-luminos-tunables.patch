@@ -132,7 +132,15 @@
                  background: Rectangle {
                      radius: height / 2; Kirigami.Theme.colorSet: Kirigami.Theme.View; color: Qt.darker(Kirigami.Theme.backgroundColor, 1.35)
                      border.color: searchField.activeFocus ? Kirigami.Theme.focusColor : Qt.alpha(Kirigami.Theme.disabledTextColor, 0.45)
-@@ -138,7 +139,7 @@
+@@ -84,6 +85,7 @@
+ 
+             HamburgerMenuButton {
+                 id: hamburgerMenuButton
++                visible: LxS.Style.showMenuButton
+ 
+                 KeyNavigation.left: searchField
+ 
+@@ -138,7 +140,7 @@
          Accessible.role: Accessible.List
          leftMargin: mainColumn.width < 160 ? 14 : 16
          rightMargin: leftMargin < 16 ? 14 : 0 // wide: the ScrollablePage already keeps ~16 px on the right
@@ -141,7 +149,7 @@
  
          KeyNavigation.up: searchField
          KeyNavigation.backtab: hamburgerMenuButton
-@@ -163,7 +164,7 @@
+@@ -163,7 +165,7 @@
                  opacity: ListView.view.width >= 160 ? 1 : 0
                  height: visible ? implicitHeight : 0
                  topPadding: 14; bottomPadding: 4; leftPadding: 18
@@ -338,6 +346,15 @@
                  visible: !applicationWindow().wideScreen
  
                  padding: Kirigami.Units.smallSpacing
+@@ -116,7 +117,7 @@
+             HamburgerMenuButton {
+                 id: hamburgerMenuButton
+ 
+-                visible: !applicationWindow().wideScreen && subCategoryColumn.width >= 160
++                visible: LxS.Style.showMenuButton && !applicationWindow().wideScreen && subCategoryColumn.width >= 160
+ 
+                 KeyNavigation.left: backButton
+                 KeyNavigation.down: subCategoryView
 @@ -136,7 +137,7 @@
          anchors.fill: parent
          leftMargin: subCategoryColumn.width < 160 ? 14 : 16
