@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Files Readability Mock</title>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1b1b1f; --panel:#232328; --card:#2a2a30; --hover:#33333b; --sel:#45465a;
+  --text:#e6e1e9; --dim:#a9a4b0; --faint:#77737d; --accent:#c6c3f5; --accentText:#2b2a4a;
+  --folder:#c6c3f5; --code:#9fd8c5; --doc:#f2c99a; --img:#f2a7c3; --log:#b7c2d0; --data:#a9c7f7; --other:#c9c4cf;
+}
+:root:not([data-theme="light"]){color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){}}
+:root[data-theme="dark"]{}
+*{box-sizing:border-box}
+body{margin:0;background:#111114;color:var(--text);font-family:"Google Sans Flex",system-ui,sans-serif;font-size:15px}
+.top{max-width:1180px;margin:0 auto;padding:18px 16px 8px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.top h1{font-size:18px;font-weight:500;margin:0 16px 0 0}
+.seg{display:inline-flex;background:var(--card);border-radius:999px;padding:3px}
+.seg button{border:0;background:none;color:var(--dim);font:inherit;font-size:13px;padding:6px 14px;border-radius:999px;cursor:pointer}
+.seg button.on{background:var(--accent);color:var(--accentText);font-weight:500}
+.lbl{font-size:12px;color:var(--faint);margin-left:6px}
+.win{max-width:1180px;margin:8px auto 18px;background:var(--bg);border-radius:18px;overflow:hidden;display:grid;grid-template-columns:240px 1fr;min-height:640px;box-shadow:0 20px 50px #0008}
+@media (max-width:760px){.win{grid-template-columns:1fr}.side{display:none}}
+/* sidebar */
+.side{padding:14px 10px;background:var(--bg)}
+.side h4{margin:14px 12px 6px;font-size:12px;font-weight:500;color:var(--faint);letter-spacing:.04em;text-transform:uppercase}
+.place{display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:999px;color:var(--text);cursor:pointer;font-size:14.5px}
+.place:hover{background:var(--hover)}
+.place.on{background:var(--sel)}
+.disc{width:30px;height:30px;border-radius:50%;background:var(--accent);display:grid;place-items:center;flex:none}
+.disc svg{width:17px;height:17px;fill:var(--accentText)}
+.place small{margin-left:auto;color:var(--faint);font-size:12px}
+.bar{height:4px;border-radius:2px;background:var(--hover);margin:2px 12px 0 54px;overflow:hidden}
+.bar i{display:block;height:100%;width:62%;background:var(--accent)}
+.side .sub{margin:2px 12px 8px 54px;font-size:12px;color:var(--faint)}
+/* main */
+.main{background:var(--panel);display:flex;flex-direction:column;min-width:0}
+.tool{display:flex;align-items:center;gap:10px;padding:14px 18px}
+.crumb{background:var(--card);border-radius:999px;padding:8px 16px;font-weight:500;flex:1;min-width:0}
+.crumb span{color:var(--faint);font-weight:400}
+.chip{background:var(--card);border-radius:999px;padding:8px 14px;font-size:13px;color:var(--dim);white-space:nowrap}
+.content{padding:4px 18px 18px;overflow:auto;flex:1}
+.group{margin:14px 4px 8px;font-size:13px;font-weight:500;color:var(--dim);display:flex;gap:8px;align-items:center}
+.group b{font-weight:400;color:var(--faint)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--cell,132px),1fr));gap:6px}
+.item{border-radius:14px;padding:12px 8px 10px;text-align:center;cursor:pointer;min-width:0}
+.item:hover{background:var(--hover)}
+.item.on{background:var(--sel)}
+.tile{width:var(--ic,56px);height:var(--ic,56px);margin:0 auto 8px;border-radius:14px;display:grid;place-items:center;position:relative}
+.tile svg{width:55%;height:55%}
+.tile .ext{position:absolute;bottom:-4px;right:-6px;font-size:10px;font-weight:600;padding:1px 5px;border-radius:6px;background:var(--bg);color:var(--dim)}
+.name{font-size:14px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.meta{font-size:12px;color:var(--faint);margin-top:2px}
+.thumb{width:var(--ic,56px);height:var(--ic,56px);margin:0 auto 8px;border-radius:12px;background:#000;position:relative;overflow:hidden}
+.thumb:after{content:"";position:absolute;left:8px;top:10px;width:12px;height:12px;border-radius:50%;background:#e33;box-shadow:10px -4px 0 -2px #3c3,4px -10px 0 -3px #44f}
+/* list view */
+.list{display:flex;flex-direction:column;gap:2px}
+.row{display:grid;grid-template-columns:40px 1fr 150px 90px;align-items:center;gap:12px;padding:6px 12px;border-radius:12px;cursor:pointer}
+.row:hover{background:var(--hover)}
+.row .tile{width:34px;height:34px;margin:0;border-radius:10px}
+.row .thumb{width:34px;height:34px;margin:0;border-radius:8px}
+.row .thumb:after{transform:scale(.6);left:2px;top:4px}
+.row .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .d,.row .s{color:var(--faint);font-size:13px}
+.row .s{text-align:right}
+.hdr{color:var(--faint);font-size:12px;padding:4px 12px}
+@media (max-width:600px){.row{grid-template-columns:40px 1fr 70px}.row .d{display:none}}
+.status{padding:10px 18px;font-size:13px;color:var(--faint);border-top:1px solid #ffffff0d}
+/* "today" mode: imitate the current look */
+.old .disc{background:none;width:18px;height:18px}.old .disc svg{fill:var(--dim);width:15px}
+.old .place{border-radius:8px;padding:5px 8px;font-size:15px;background:#26262b;margin-bottom:4px}
+.old .place.on{background:#2f2f36}
+.old .side h4{text-transform:none;letter-spacing:0;font-size:15px;color:var(--faint);font-weight:400}
+.old .bar,.old .side .sub,.old .place small,.old .group,.old .meta,.old .tile .ext{display:none}
+.old .tile{background:#d7d3dc !important;border-radius:6px;width:46px;height:56px}
+.old .tile svg{fill:#555 !important;stroke:#555 !important}
+.old .name{-webkit-line-clamp:3;font-size:15px}
+.old .crumb,.old .chip{background:none}
+.notes{max-width:1180px;margin:0 auto 40px;padding:0 16px;color:var(--dim);font-size:14px;line-height:1.55}
+.notes h2{font-size:15px;font-weight:500;color:var(--text);margin:18px 0 6px}
+.notes li{margin:3px 0}
+.tag{font-size:11px;padding:1px 7px;border-radius:6px;background:var(--card);color:var(--accent);margin-left:4px}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Files — readability</h1>
+  <div class="seg" id="mode"><button data-v="old">Today</button><button data-v="new" class="on">Proposed</button></div>
+  <div class="seg" id="view"><button data-v="grid" class="on">Icons</button><button data-v="list">List</button></div>
+  <div class="seg" id="size"><button data-v="s">S</button><button data-v="m" class="on">M</button><button data-v="l">L</button></div>
+  <div class="seg" id="colour"><button data-v="on" class="on">Type colours</button><button data-v="off">Mono</button></div>
+</div>
+
+<div class="win" id="win">
+  <aside class="side">
+    <h4>Places</h4>
+    <div class="place on" data-i="home"><span class="disc"></span>Home</div>
+    <div class="place" data-i="down"><span class="disc"></span>Downloads<small>12</small></div>
+    <div class="place" data-i="trash"><span class="disc"></span>Trash<small>empty</small></div>
+    <h4>Remote</h4>
+    <div class="place" data-i="net"><span class="disc"></span>Network</div>
+    <h4>Recent</h4>
+    <div class="place" data-i="clock"><span class="disc"></span>Recent files</div>
+    <div class="place" data-i="pin"><span class="disc"></span>Recent folders</div>
+    <h4>Devices</h4>
+    <div class="place" data-i="drive"><span class="disc"></span>OS</div>
+    <div class="bar"><i style="width:48%"></i></div><div class="sub">240 GiB free of 460</div>
+    <div class="place" data-i="drive"><span class="disc"></span>Internal drive</div>
+    <div class="bar"><i style="width:71%"></i></div><div class="sub">183 GiB free of 629</div>
+  </aside>
+  <section class="main">
+    <div class="tool">
+      <div class="crumb"><span>/home/shawn /</span> Home</div>
+      <div class="chip">Folders first</div><div class="chip">Search</div>
+    </div>
+    <div class="content" id="content"></div>
+    <div class="status" id="status"></div>
+  </section>
+</div>
+
+<div class="notes">
+  <h2>What changes</h2>
+  <ul>
+    <li><b>Sidebar:</b> icons in the same round discs as System Settings, pill highlight, small section labels, no grey box behind every row, drive rows show free space. <span class="tag">needs a small Dolphin patch</span></li>
+    <li><b>Folders and files split</b> into two labelled groups so the 64 folders don't drown the 24 files. <span class="tag">setting</span></li>
+    <li><b>Names</b> max 2 lines, then "…" — no more 3-line wraps like "GameUserSettings.ini.PRE-CONSISTENCY". Full name on hover. <span class="tag">setting</span></li>
+    <li><b>File icons:</b> soft coloured tile per kind (code, document, image, log, data) with a small extension tag, so a script and a log no longer look identical. Mono keeps your current all-grey icons. <span class="tag">icon pack</span></li>
+    <li><b>Small grey line under each name</b> (item count for folders, size for files). <span class="tag">setting</span></li>
+    <li><b>List view</b> option for big folders like Home. <span class="tag">setting</span></li>
+  </ul>
+</div>
+
+<script>
+const P={
+ folder:'M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2h7A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z',
+ video:'M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2h7A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5zM10 10v6l5-3z',
+ doc:'M6 2h8l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm7 1.5V8h4.5M7 12h10M7 15h10M7 18h7',
+ code:'M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16',
+ log:'M5 4h14v16H5zM8 8h8M8 12h8M8 16h5',
+ data:'M12 3c4.4 0 8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3V6c0-1.7 3.6-3 8-3zM4 6c0 1.7 3.6 3 8 3s8-1.3 8-3M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
+ web:'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2c3 3 3 17 0 20M12 2c-3 3-3 17 0 20',
+ bin:'M5 3h14v18H5zM8 7h2v4H8zM13 7h3M13 10h3M8 14h3M14 14h2v4h-2z',
+ home:'M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+ down:'M12 3v12m0 0l-5-5m5 5l5-5M4 20h16',
+ trash:'M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13',
+ net:'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2c3 3 3 17 0 20M12 2c-3 3-3 17 0 20',
+ clock:'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 6v6l4 2',
+ pin:'M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2h7A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5zM12 10v4l3 1',
+ drive:'M3 13l3-8h12l3 8v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zM3 13h18M17 16h.01'
+};
+const stroke=new Set(['code','log','data','web','bin','doc','down','trash','net','clock','drive','pin']);
+function svg(k,col){const s=stroke.has(k);return `<svg viewBox="0 0 24 24"><path d="${P[k]}" fill="${s?'none':col}" stroke="${s?col:'none'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`}
+document.querySelectorAll('.place').forEach(p=>p.querySelector('.disc').innerHTML=svg(p.dataset.i,'#2b2a4a'));
+const kinds={folder:['--folder','folder'],video:['--folder','video'],md:['--doc','doc','MD'],txt:['--doc','doc','TXT'],sh:['--code','code','SH'],json:['--data','data','JSON'],log:['--log','log','LOG'],html:['--code','web','HTML'],bin:['--other','bin','BIN'],cfg:['--other','doc',''],img:['img']};
+const folders=[['ss-shots',14],['sys',3],['sysroot',9],['Templates',0],['tmp',31],['usr',6],['var',4],['vela-rehearsal-20260920-190622',7],['Videos',22,'video'],['vram-overcommit-20260920-211147',5],['vram-spill-20260920-205351',5],['vramd-live-213929',3],['vramd-v2-220207',3],['vratik-archive',58],['worldline',12]];
+const files=[['AGENTS.md','md','18 KB'],['buildconfig','cfg','2 KB'],['claude_config_backup.json','json','9 KB'],['config','cfg','1 KB'],['GameUserSettings.ini.PRE-CONSISTENCY','cfg','4 KB'],['hidden.png','img','220 KB'],['HTML File.html','html','3 KB'],['init','cfg','6 KB'],['init_functions','cfg','11 KB'],['keymap.bin','bin','2 KB'],['keymap.utf8','txt','2 KB'],['luminos-server-credentials.txt','txt','1 KB'],['mt5linux.sh','sh','3 KB'],['SHELL_FLAKY_ISSUE.md','md','5 KB'],['shown.png','img','214 KB'],['steam-0.log','log','80 KB'],['steam-6.log','log','42 KB'],['steam-1938090.log','log','61 KB'],['steam-default.log','log','12 KB'],['STORAGE_CLEANUP.md','md','7 KB'],['vela-dress-rehearsal.sh','sh','4 KB'],['VERSION','txt','1 KB'],['vratik-copy.sh','sh','2 KB'],['wget-log','log','3 KB']];
+const st={mode:'new',view:'grid',size:'m',colour:'on'};
+function icon(kind,inList){
+  if(kind==='img')return '<div class="thumb"></div>';
+  const [v,k,ext]=kinds[kind];const mono=st.colour==='off'||st.mode==='old';
+  const c=mono?'var(--other)':`var(${v})`;
+  const bg=mono?'#3a3a42':`color-mix(in srgb, var(${v}) ${v==="--folder"?34:22}%, #26262b)`;
+  return `<div class="tile" style="background:${bg}">${svg(k,c)}${ext&&!inList?`<span class="ext">${ext}</span>`:''}</div>`;
+}
+function render(){
+  const win=document.getElementById('win');win.classList.toggle('old',st.mode==='old');
+  const sz={s:[108,44],m:[132,56],l:[168,76]}[st.size];
+  win.style.setProperty('--cell',sz[0]+'px');win.style.setProperty('--ic',sz[1]+'px');
+  const c=document.getElementById('content');let h='';
+  const F=folders.map(f=>({n:f[0],k:f[2]||'folder',m:f[1]+' items',d:'Sep 20'})),G=files.map(f=>({n:f[0],k:f[1],m:f[2],d:'Oct 2'}));
+  const block=(title,arr)=>{
+    if(st.view==='grid'||st.mode==='old'){
+      return (st.mode==='new'?`<div class="group">${title} <b>${arr.length}</b></div>`:'')+'<div class="grid">'+arr.map(x=>`<div class="item" title="${x.n}">${icon(x.k)}<div class="name">${x.n}</div><div class="meta">${x.m}</div></div>`).join('')+'</div>';
+    }
+    return `<div class="group">${title} <b>${arr.length}</b></div><div class="list">`+arr.map(x=>`<div class="row" title="${x.n}">${icon(x.k,true)}<div class="n">${x.n}</div><div class="d">${x.d}</div><div class="s">${x.m}</div></div>`).join('')+'</div>';
+  };
+  h=st.mode==='old'?block('',F.concat(G)):block('Folders',F)+block('Files',G);
+  c.innerHTML=h;
+  document.getElementById('status').textContent=st.mode==='old'?'64 folders, 24 files (1.1 MiB)':'64 folders · 24 files · 1.1 MiB';
+}
+['mode','view','size','colour'].forEach(id=>{
+  document.getElementById(id).addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b)return;
+    st[id]=b.dataset.v;document.querySelectorAll('#'+id+' button').forEach(x=>x.classList.toggle('on',x===b));render();
+  });
+});
+render();
+</script>
+</body>
+</html>

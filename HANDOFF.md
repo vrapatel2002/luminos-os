@@ -1,31 +1,46 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-08 — Response 4 (Luminos Media chat)
+Last updated: 2026-11-08 — Response 2 (Living Room wallpaper — investigate only)
+
+## Aim right now — LIVING ROOM WALLPAPER DOESN'T WORK (BUG-235) — cause PROVEN, NOT fixed (Shawn: "do not fix")
+- Page loads three.js via root-absolute paths (`/js/threejs/three.module.js` in its import map, `/js/es-module-shims.js`).
+  Lively serves `/` = wallpaper folder; our WebMode loads `file://…/index.html`, so `/js` = disk root → module never runs,
+  spinner forever, NO console message (network-level failure) → BUG-199 poster fallback never fires either.
+- Proven A/B off-screen (/var/tmp/lr-test/t.qml): file:// → 0 canvases, zero console; http with / = folder → three.js runs.
+- music-tv-lq has the same root paths. Fix options listed in docs/BUGS.md BUG-235 — waiting for Shawn to pick.
+- Gotcha: host-shell's Qt logs go to journald, not stderr — run test qml6 with QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen.
+
+## SNAPPY BUILD (docs/snappy/PROMPT.md) — PAUSED mid step 3, data collected but NOT analysed yet
+- Tools: docs/snappy/idle.py (10-min sampler, sudo), docs/snappy/snap.sh (953-knob snapshot, sudo). Output /var/tmp/snappy/.
+- Arm A (fresh boot, 11-07 21:51): pkg 6.1 W, Tctl 41, iGPU fabric clock pinned at top level 1600 MHz (pp_dpm_fclk) with
+  VDDNB 835-855 mV most of the time (drops to 400 MHz / ~670 mV only in bursts); ~2400 CAL IPIs/s; wifi power_save off.
+  So a fresh boot does NOT give the low-VDDNB state.
+- Arm B (30 s test sleep 22:03 then same 10 min): idleB-1107-2203.txt + snapB-1107-2203.txt exist — NEXT: diff A vs B
+  (idle AVG lines + `diff snapA snapB`), then repeat later in uptime (machine now ~21 h up = the "drifted" case).
+- The bridge dropped after the test sleep (desktop app didn't reconnect) — expect that on every test sleep.
 
 
-## Aim right now — LUMINOS MEDIA (one lightest app for ALL images + videos) — engine CHOSEN (A), prototype published, awaiting approval
-- Origin: Shawn couldn't open photos (.heic). luminos-notepad is text-only (refuses binaries); NO image viewer installed;
-  jpg/png/webp -> Chrome, heic/heif/avif -> nothing. VLC already default for video. Notepad also misses ~21 text types
-  (toml, rust, lua, ts, php, diff, srt/vtt, ipynb...; Makefile/.tex -> vim) — add them later (default yes).
-- R3: Shawn: "make a new one like luminous media that handle both images and videos... lightest app". Measured on real
-  files in /var/tmp/lm-test (PSS / CPU, 5 s, full plasmashell env, dGPU stayed suspended every run):
-    images, qml6 Image (kimageformats: heic/avif/jxl/jpg): 114-134 MB, 0 %   | VLC on a jpg: 653 MB, 42 % (!)
-    video qml6+QtMultimedia, Vulkan hw:  h264 165/9.8  hevc10-4K 366/18.8  vp9 124/6.2  av1 107/6.4
-    video qml6+QtMultimedia + VA-API shim: h264 144/6.2 hevc10-4K 325/9.2  vp9 100/4.6  av1 86/4.0
-    VLC (VA-API):                         h264 125/1.8  hevc10-4K 152/3.2
-- BUG-234 (new, docs/BUGS.md): ffmpeg default VA-API device = renderD128 = gated dGPU -> EACCES -> gives up; shim
-  /var/tmp/lm-test/shim/vaapi-igpu.c (LD_PRELOAD, fills in AMD render node) fixes it. Not deployed.
-- mpv tried unpacked in /var/tmp (no install): 0.41.0-7 exits rc=1 silently against installed libs; local pacman DB is
-  STALE (points at mpv 0.41.0-6, mirrors have -7) -> installing mpv needs a full `pacman -Syu` first. luminos-brain safe
-  said NO (known fuzzy-match false negative, project_brain_gate_false_negative) — NOT overridden.
-- Options put to Shawn: (A) QML app on Qt Multimedia + shim, zero new packages; (B) QML UI on libmpv (likely lightest
-  video, needs -Syu + mpv); (C) QML image viewer + hand videos to VLC.
-- R4: Shawn: "do whatever is the best option" -> chose A (QML + Qt Multimedia + VA-API shim, zero new packages).
-  PROTOTYPE published: artifact "Luminos Media" (claude.ai/artifact/PrgBUe9YzRzgfVPdmGbTNL), repo copy
-  docs/media/mock/luminos-media.html: full-bleed picture, top bar (name/size/format, zoom/fit/rotate, folder strip,
-  details, trash), side arrows, video bar (play, seek, time, speed, mute, loop), folder strip of mixed photos+videos,
-  details sheet (EXIF / codec), controls fade after 2.5 s, keys ←→ Space F I G R M L Del +/-/0, Shift+←→ = ±10 s.
-- NEXT: Shawn approves/changes prototype -> build (his UI rule) -> build in src/media + scripts/luminos-media, .desktop with
-  image/* video/*, xdg defaults, double-click proof on every test file, docs/notes/commit.
+
+## Aim right now — LUMINOS MEDIA (DECISION 180) — BUILT, INSTALLED, DEFAULT for 74 types; waiting on Shawn's feedback
+- Shawn: photos (.heic) wouldn't open -> "make luminous media… lightest app for all images and videos" -> "just do it".
+- LIVE: /usr/local/bin/luminos-media (repo scripts/luminos-media) runs qml6 src/media/Media.qml; LD_PRELOAD
+  /usr/local/lib/luminos/libluminos-vaapi-igpu.so (scripts/vaapi-igpu/, BUG-234 fix: ffmpeg default VA-API device =
+  gated renderD128 -> EACCES -> gives up); ~/.local/share/applications/luminos-media.desktop; xdg defaults for 74 types.
+  Check: scripts/luminos-media-install --check (PASS). Undo: --uninstall (prior defaults in ~/.local/share/luminos/
+  media-defaults.prior; 42 had none, 16 were VLC, 12 Okular, 4 Chrome). Docs: docs/media/README.md, shots docs/media/shots/.
+- PROVEN: all 13 test files open (heic avif jxl jpg png webp still+anim gif, h264 hevc10-4K vp9 av1 on VA-API "hw 3");
+  double-click (xdg-open) PSS: heic 112 MB/0.2 %, jxl 144/0, h264 162/7.8 %, 4K hevc 343/8.8 %, dGPU suspended, shim loaded;
+  selftest: 3x zoom loads full 4032 px, fit releases it; HEIC+JPEG EXIF; strip; next; trash -> ~/.local/share/Trash;
+  no leftover process after close. Test files: /var/tmp/lm-test (scripts probe.sh, dclick.sh, st.sh, shot.sh there).
+- Also: luminos-notepad.desktop + installed copy claim 33 more text types (toml rust lua ts php diff srt vtt ipynb
+  Makefile tex zero-size…), all verified via xdg-mime.
+- Not done / ideas if Shawn asks: video thumbnails in the strip (shows a movie glyph), slideshow, mpv engine after a
+  full -Syu (lighter video), system-wide BUG-234 fix for other ffmpeg apps. VLC still installed, no longer default.
+- Gotchas: AnimatedImage + sourceSize STRETCHES (aspect lost); HEIC EXIF = search TIFF header not "Exif" (iinf type
+  name); font.pixelSize must be int; resetView must hang off cur.pathChanged not indexChanged (stale details);
+  installer must save prior defaults BEFORE installing the .desktop; never pkill -f the Media.qml path from your own shell.
+- Committed by me: only my own files (src/media, scripts/luminos-media*, scripts/vaapi-igpu, config/luminos-media.desktop,
+  config/luminos-notepad.desktop, docs/media). Shared docs (AGENTS, STATUS, DECISIONS, BUGS, CODE_REFERENCE, HANDOFF)
+  edited but left uncommitted — other sessions' uncommitted edits are mixed into them.
 
 ## Aim right now — DV PURPLE AGAIN IN JELLYROCK (BUG-231) — FIXED + proven live, TV check = Shawn
 - Shawn R5: "same purple error on the newer episodes". JellyRock 3.3.1, VisionQuest S01E06 (DV P5). Not the files, not
@@ -71,6 +86,7 @@ Last updated: 2026-11-08 — Response 4 (Luminos Media chat)
 - R14 (DECISION 179) BUILT: own Proxy + Connection Preferences QML pages (luminos-style 1.0-10), kio-extras ones hidden
 - R15: Wi-Fi page icons now sit in the same round disc as the sidebar (Rows.Disc, iconCirclePx/iconGlyphPx, follows tuner). Hand-installed to /usr/local/share/kcm_networkmanagement/qml; next luminos-style build packages it. Shot: docs/style-tuner/shots/wifi-discs.png
 - R16: the Wi-Fi glyph itself was still small (wedge art fills ~60% of its box: 20x13 vs globe 20x20) → Disc.glyphScale 1.35 for "wireless" icons + roundToIconSize:false (Kirigami was snapping 27 px back to 22). Measured now 25x17. Hand-installed.
+- R17: Shawn asked to make Dolphin (Files) more readable → prototype docs/windowstyle/mock/files-page.html (sidebar discs + pill, folders/files groups, 2-line names, type-tinted tiles + ext tag, meta line, list view). WAITING for approval; nothing built. Current: dolphin 26.08.1, icon theme yet-another-monochrome-icon-set, PlacesPanel IconSize=16.
   by systemsettings 1.14. Proven by writing kio-format kioslaverc/kio_ftprc in a private config dir.
 - R5 (2026-11-08): Shawn asked how to use it → told: app menu "Style Tuner" (or run luminos-style-tuner), drag bars, reset arrows, delete style.json to undo. No changes.
 - Shawn: tune the Nexus KDE look himself with HORIZONTAL BARS, LIVE; R4 "do it rather than perfecting it".
