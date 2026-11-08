@@ -1,9 +1,12 @@
 --- a/app/ModuleView.cpp
 +++ b/app/ModuleView.cpp
-@@ -6,6 +6,13 @@
+@@ -6,6 +6,16 @@
   *   SPDX-License-Identifier: GPL-2.0-or-later
   */
  
++#include <QApplication>
++#include <QPointer>
++#include <QTabBar>
 +#include <QMargins>
 +#include <QFileSystemWatcher>
 +#include <QDir>
@@ -14,7 +17,7 @@
  #include "ModuleView.h"
  #include "ExternalAppModule.h"
  #include "MenuItem.h"
-@@ -51,6 +58,38 @@
+@@ -51,6 +61,90 @@
  // sits in a 16 px rounded rect, 12 px in from the window edges, on the Window colour. Child
  // widgets (QQuickWidget KCMs) paint square, so this overlay repaints the four corners on top.
  static constexpr int LuminosHoleInset = 12;
@@ -50,10 +53,62 @@
 +    w->setProperty("_lxBase", QVariantList{b.left(), b.top(), b.right(), b.bottom()});
 +    luminosApplyButtons(w);
 +}
++// R8 (BUG-232): some QtWidgets KCMs hard-code a page minimum (Wi-Fi: KCMForm 800x500 in kcm.ui). Our sidebar
++// leaves ~690 px for the page, so the scroll area grew a sideways scrollbar and clipped the right side.
++// Drop only big fixed minimum widths (>= 600 px); real content minimums (tabs, lists, labels) stay.
++static void luminosFitWidth(QWidget *root)
++{
++    if (!root)
++        return;
++    QList<QWidget *> all = root->findChildren<QWidget *>();
++    all.prepend(root);
++    for (QWidget *w : std::as_const(all)) {
++        if (w->minimumWidth() >= 600 && !w->isWindow())
++            w->setMinimumWidth(0);
++        if (auto *tb = qobject_cast<QTabBar *>(w); tb && !tb->usesScrollButtons())
++            tb->setUsesScrollButtons(true); // tabs scroll instead of forcing the page wider
++        if (w->objectName() == QLatin1String("connectionView") && w->minimumWidth() > 240)
++            w->setMinimumWidth(240); // Wi-Fi list: upstream 300 px; 240 still fits names, frees room for the editor
++    }
++}
++// KCMs build and rebuild widgets long after load (Wi-Fi recreates its editor tabs per connection, each tab content
++// with setMinimumWidth(600)). A size change posts LayoutRequest up the tree, so re-check the open KCMs then, once per
++// event-loop turn. Only widgets that still have a >= 600 px minimum are touched, so a pass that finds none is cheap.
++class LuminosFitFilter : public QObject
++{
++public:
++    static LuminosFitFilter *self()
++    {
++        static LuminosFitFilter *f = [] { auto *x = new LuminosFitFilter; qApp->installEventFilter(x); return x; }();
++        return f;
++    }
++    void add(QWidget *root)
++    {
++        m_roots.append(root);
++        luminosFitWidth(root);
++    }
++protected:
++    bool eventFilter(QObject *o, QEvent *e) override
++    {
++        if (e->type() == QEvent::LayoutRequest && o->isWidgetType() && !m_pending) {
++            m_pending = true;
++            QTimer::singleShot(0, this, [this] {
++                m_pending = false;
++                m_roots.removeAll(nullptr);
++                for (const auto &r : std::as_const(m_roots))
++                    luminosFitWidth(r);
++            });
++        }
++        return false;
++    }
++private:
++    QList<QPointer<QWidget>> m_roots;
++    bool m_pending = false;
++};
  static constexpr qreal LuminosHoleRadius = 16;
  
  // QML KCMs: page on View (the hole), no header strip colour/line, 30 px title. Kirigami.Theme.View == 0.
-@@ -88,7 +127,7 @@
+@@ -88,7 +182,7 @@
              } else if (QByteArray(o->metaObject()->className()).startsWith("Heading") && o->parentItem()
                  && QByteArray(o->parentItem()->metaObject()->className()).startsWith("DefaultPageTitleDelegate")) {
                  QFont f = o->property("font").value<QFont>();
@@ -62,7 +117,7 @@
                  f.setWeight(QFont::Normal);
                  o->setProperty("font", f);
                  titled = true;
-@@ -259,7 +298,22 @@
+@@ -259,7 +353,22 @@
      // Create the dialog
      d->mButtons = new QDialogButtonBox(Qt::Horizontal, this);
      d->mLayout->addWidget(d->mButtons);
@@ -86,7 +141,15 @@
  
      // Create the buttons in it
      d->mApply = d->mButtons->addButton(QDialogButtonBox::Apply);
-@@ -620,10 +674,10 @@
+@@ -416,6 +525,7 @@
+     } else { // It must be a normal module then
+         auto kcm = KCModuleLoader::loadModule(data, moduleScroll, QVariantList(args.begin(), args.end()), d->engine);
+         moduleScroll->setWidget(kcm->widget());
++        LuminosFitFilter::self()->add(kcm->widget()); // R8 BUG-232
+         kcm->widget()->setAutoFillBackground(false);
+         kcm->load();
+         luminosRestyleQmlKcm(kcm->widget(), false);
+@@ -620,10 +730,10 @@
  
      d->mLayout->setContentsMargins(0, 0, 0, 0);
      d->mLayout->setSpacing(0);

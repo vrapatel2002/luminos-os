@@ -167,7 +167,59 @@ CPP = {
       "{\n"
       "    w->setProperty(\"_lxBase\", QVariantList{b.left(), b.top(), b.right(), b.bottom()});\n"
       "    luminosApplyButtons(w);\n"
-      "}"),
+      "}\n"
+      "// R8 (BUG-232): some QtWidgets KCMs hard-code a page minimum (Wi-Fi: KCMForm 800x500 in kcm.ui). Our sidebar\n"
+      "// leaves ~690 px for the page, so the scroll area grew a sideways scrollbar and clipped the right side.\n"
+      "// Drop only big fixed minimum widths (>= 600 px); real content minimums (tabs, lists, labels) stay.\n"
+      "static void luminosFitWidth(QWidget *root)\n"
+      "{\n"
+      "    if (!root)\n"
+      "        return;\n"
+      "    QList<QWidget *> all = root->findChildren<QWidget *>();\n"
+      "    all.prepend(root);\n"
+      "    for (QWidget *w : std::as_const(all)) {\n"
+      "        if (w->minimumWidth() >= 600 && !w->isWindow())\n"
+      "            w->setMinimumWidth(0);\n"
+      "        if (auto *tb = qobject_cast<QTabBar *>(w); tb && !tb->usesScrollButtons())\n"
+      "            tb->setUsesScrollButtons(true); // tabs scroll instead of forcing the page wider\n"
+      "        if (w->objectName() == QLatin1String(\"connectionView\") && w->minimumWidth() > 240)\n"
+      "            w->setMinimumWidth(240); // Wi-Fi list: upstream 300 px; 240 still fits names, frees room for the editor\n"
+      "    }\n"
+      "}\n"
+      "// KCMs build and rebuild widgets long after load (Wi-Fi recreates its editor tabs per connection, each tab content\n"
+      "// with setMinimumWidth(600)). A size change posts LayoutRequest up the tree, so re-check the open KCMs then, once per\n"
+      "// event-loop turn. Only widgets that still have a >= 600 px minimum are touched, so a pass that finds none is cheap.\n"
+      "class LuminosFitFilter : public QObject\n"
+      "{\n"
+      "public:\n"
+      "    static LuminosFitFilter *self()\n"
+      "    {\n"
+      "        static LuminosFitFilter *f = [] { auto *x = new LuminosFitFilter; qApp->installEventFilter(x); return x; }();\n"
+      "        return f;\n"
+      "    }\n"
+      "    void add(QWidget *root)\n"
+      "    {\n"
+      "        m_roots.append(root);\n"
+      "        luminosFitWidth(root);\n"
+      "    }\n"
+      "protected:\n"
+      "    bool eventFilter(QObject *o, QEvent *e) override\n"
+      "    {\n"
+      "        if (e->type() == QEvent::LayoutRequest && o->isWidgetType() && !m_pending) {\n"
+      "            m_pending = true;\n"
+      "            QTimer::singleShot(0, this, [this] {\n"
+      "                m_pending = false;\n"
+      "                m_roots.removeAll(nullptr);\n"
+      "                for (const auto &r : std::as_const(m_roots))\n"
+      "                    luminosFitWidth(r);\n"
+      "            });\n"
+      "        }\n"
+      "        return false;\n"
+      "    }\n"
+      "private:\n"
+      "    QList<QPointer<QWidget>> m_roots;\n"
+      "    bool m_pending = false;\n"
+      "};"),
     R("    d->mButtons->setContentsMargins(16, 8, 16, 12);",
       "    luminosSetButtonBase(d->mButtons, QMargins(16, 8, 16, 12));\n"
       "    { // R6 (DECISION 176): re-apply the bar margins the moment the style tuner file changes\n"
@@ -187,12 +239,14 @@ CPP = {
       "    }"),
     R("d->mButtons->setContentsMargins(style()->pixelMetric(QStyle::PM_LayoutLeftMargin),",
       "luminosSetButtonBase(d->mButtons, QMargins(style()->pixelMetric(QStyle::PM_LayoutLeftMargin),"),
+    R("        moduleScroll->setWidget(kcm->widget());\n", "        moduleScroll->setWidget(kcm->widget());\n        LuminosFitFilter::self()->add(kcm->widget()); // R8 BUG-232\n"),
     R("PM_LayoutRightMargin),\n                                    style()->pixelMetric(QStyle::PM_LayoutBottomMargin));",
       "PM_LayoutRightMargin),\n                                    style()->pixelMetric(QStyle::PM_LayoutBottomMargin)));")],
  },
 }
 CPP_INCLUDES = {"systemsettings": {"app/ModuleView.cpp": ["#include <QFile>", "#include <QJsonDocument>", "#include <QJsonObject>", "#include <QStandardPaths>",
-                                                          "#include <QDir>", "#include <QFileSystemWatcher>", "#include <QMargins>"]}}
+                                                          "#include <QDir>", "#include <QFileSystemWatcher>", "#include <QMargins>",
+                                                          "#include <QTabBar>", "#include <QPointer>", "#include <QApplication>"]}}
 
 def main(pkg, tree, out):
     orig = tree + ".orig-tunables"
