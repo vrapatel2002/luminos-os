@@ -261,30 +261,9 @@ WallpaperItem {
                 ";window.dispatchEvent(new CustomEvent('luminos-stats',{detail:window.luminos}));");
     }
 
-    // =====================================================================
-    //  CURSOR FORWARDING → synthetic mousemove into the web page
-    //  (only when the page is NOT fully interactive)
-    // =====================================================================
-    property real cursorX: -1
-    property real cursorY: -1
-    property real lastCursorX: -2
-    property real lastCursorY: -2
-    Timer {
-        interval: 40; repeat: true
-        running: root.mode === "web" && !root.configuration.WebInteractive && root.shouldPlay
-        onTriggered: {
-            if (root.cursorX === root.lastCursorX && root.cursorY === root.lastCursorY)
-                return;
-            root.lastCursorX = root.cursorX;
-            root.lastCursorY = root.cursorY;
-            var w = modeLoader.item;
-            if (w && w.webView)
-                w.webView.runJavaScript(
-                    "(function(){var e=new MouseEvent('mousemove',{clientX:" +
-                    Math.round(root.cursorX) + ",clientY:" + Math.round(root.cursorY) +
-                    ",bubbles:true});document.dispatchEvent(e);window.dispatchEvent(e);})();");
-        }
-    }
+    // [CHANGE: claude-code | 2026-11-08] BUG-236: the web cursor forwarder that lived
+    // here never received a position (the desktop's icon layer is above the wallpaper)
+    // and only ever sent mousemove. WebMode + PageInput.qml replace it.
 
     // =====================================================================
     //  RENDER MODES
@@ -412,8 +391,7 @@ WallpaperItem {
             id: webHost
             anchors.fill: parent
             source: "WebMode.qml"
-            // Keeps `modeLoader.item.webView` resolving, so injectStats() and the
-            // cursor forwarder above are untouched.
+            // Keeps `modeLoader.item.webView` resolving for injectStats().
             readonly property var webView: webHost.item ? webHost.item.webView : null
             onLoaded: {
                 webHost.item.webSource = Qt.binding(() => root.webSource);
@@ -424,11 +402,7 @@ WallpaperItem {
                 // properties. Same config key as QML mode, keyed by URL.
                 webHost.item.sceneProperties =
                     Qt.binding(() => root.configuration.SceneProperties);
-                // The cursor MouseArea moved with the renderer, so the position
-                // now arrives from the loaded item instead of being written here.
-                // Guarded on `item` because the binding outlives a mode switch.
-                root.cursorX = Qt.binding(() => webHost.item ? webHost.item.cursorX : -1);
-                root.cursorY = Qt.binding(() => webHost.item ? webHost.item.cursorY : -1);
+                webHost.item.audioReactive = Qt.binding(() => root.configuration.AudioReactive); // BUG-236
             }
         }
     }

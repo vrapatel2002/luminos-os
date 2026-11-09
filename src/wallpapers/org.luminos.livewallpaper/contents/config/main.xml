@@ -90,7 +90,7 @@
          FFT thread; the spectrum scene turns it on for itself.
          [CHANGE: claude-code | 2026-09-19] DECISION 117 -->
     <entry name="AudioReactive" type="bool">
-      <label>Feed live audio into the QML scene</label>
+      <label>Feed live audio into the scene (QML scenes and web pages)</label>
       <default>false</default>
     </entry>
 

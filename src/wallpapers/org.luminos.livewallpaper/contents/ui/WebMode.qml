@@ -28,6 +28,7 @@ import QtWebEngine
 // PropertyStore imports nothing but QtQuick; the file read behind it is a
 // subprocess, not a browser. Safe to pull in here. [CHANGE: claude-code | 2026-09-20]
 import "props"
+import "audio"   // AudioBridge imports only QtQuick; the provider arrives by URL (DECISION 112) [CHANGE: claude-code | 2026-11-08]
 import org.kde.plasma.plasma5support as P5Support
 
 Item {
@@ -44,9 +45,9 @@ Item {
     // same key QML mode uses, keyed by the page's URL. BUG-183.
     property string sceneProperties: "{}"
 
-    // Cursor position, written here and read by main.qml's injector.
-    property real cursorX: 0
-    property real cursorY: 0
+    // [CHANGE: claude-code | 2026-11-08] BUG-236: the page's audio (Lively's
+    // livelyAudioListener) is opt-in, the same AudioReactive switch as QML mode.
+    property bool audioReactive: false
 
     property alias webView: web
 
@@ -114,8 +115,9 @@ Item {
         anchors.fill: parent
         visible: !webRoot.failed && !webRoot.frozenShown // [CHANGE: claude-code | 2026-11-07]
         url: webRoot.webSource
-        // Full interactivity steals desktop clicks, so it is opt-in.
-        enabled: webRoot.interactive
+        // [CHANGE: claude-code | 2026-11-08] BUG-236: real input never reaches the
+        // view (the desktop's icon layer is above it); PageInput forwards it instead.
+        enabled: false
         backgroundColor: webRoot.bgColor
         settings.showScrollBars: false
         settings.playbackRequiresUserGesture: false
@@ -256,19 +258,83 @@ Item {
         playing: webRoot.shouldPlay
     }
 
-    onShouldPlayChanged: web.applyState()
+    onShouldPlayChanged: {
+        if (!webRoot.shouldPlay)
+            lively.tv("stop()");   // the pause rule: the TV's stream and decoder go first
+        web.applyState();
+    }
 
-    // Cursor-follow without stealing clicks (non-interactive mode).
-    MouseArea {
-        anchors.fill: parent
-        enabled: !webRoot.interactive
-        visible: enabled
-        hoverEnabled: true
-        acceptedButtons: Qt.NoButton
-        propagateComposedEvents: true
-        onPositionChanged: function(m) {
-            webRoot.cursorX = m.x;
-            webRoot.cursorY = m.y;
+    // ---- BUG-236 [CHANGE: claude-code | 2026-11-08] ---------------------------
+    // Everything below exists only while the wallpaper plays (the pause rule) and
+    // only for a page that asked for it.
+    readonly property bool live: webRoot.shouldPlay && lively.ready && !webRoot.failed
+
+    // Now playing → livelyCurrentTrack, and the TV's video.
+    property var trackCache: ({})
+    Loader {
+        id: nowPlaying
+        active: webRoot.live && lively.wantsTrack
+        source: "NowPlaying.qml"
+        onLoaded: item.cache = webRoot.trackCache
+    }
+    Connections {
+        target: nowPlaying.item
+        ignoreUnknownSignals: true
+        function onTrack(info) { lively.sendTrack(info); }
+        function onPlayback(playing, seconds) { lively.tvState(playing, seconds); }
+    }
+
+    // Audio → livelyAudioListener, 24 times a second (the pages draw at 24 fps).
+    // On a TV page the FFT also stops while nothing is playing.
+    AudioBridge {
+        id: audio
+        audioEnabled: webRoot.audioReactive && lively.wantsAudio
+        running: webRoot.live && (!nowPlaying.item || nowPlaying.item.playing)
+    }
+    Timer {
+        interval: 42; repeat: true
+        running: webRoot.live && audio.audio.active
+        onTriggered: lively.sendAudio(audio.audio.bands)
+    }
+
+    // Cursor → the page. Moves are coalesced to at most 30 a second; presses go at once.
+    property point cursor: Qt.point(-1, -1)
+    property point sentCursor: Qt.point(-2, -2)
+    property bool held: false
+    function flushMove() {
+        if (webRoot.cursor === webRoot.sentCursor)
+            return;
+        webRoot.sentCursor = webRoot.cursor;
+        lively.pointer("move", webRoot.cursor.x, webRoot.cursor.y, webRoot.held);
+    }
+    Timer { id: moveTick; interval: 33; onTriggered: webRoot.flushMove() }
+    Loader {
+        id: pageInput
+        active: webRoot.live
+        source: "PageInput.qml"
+        onLoaded: {
+            item.target = webRoot;
+            item.clicks = Qt.binding(() => webRoot.interactive);
+        }
+    }
+    Connections {
+        target: pageInput.item
+        ignoreUnknownSignals: true
+        function onMoved(x, y) {
+            webRoot.cursor = Qt.point(x, y);
+            if (!moveTick.running) moveTick.start();
+        }
+        function onPressed(x, y) {
+            webRoot.cursor = Qt.point(x, y);
+            webRoot.flushMove();
+            webRoot.held = true;
+            lively.pointer("down", x, y, true);
+        }
+        function onReleased(x, y) {
+            webRoot.cursor = Qt.point(x, y);
+            webRoot.flushMove();
+            webRoot.held = false;
+            lively.pointer("up", x, y, false);
         }
     }
 }

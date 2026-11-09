@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""What is playing, shaped for a Lively page's livelyCurrentTrack() — plus a video for its TV.
+
+[CHANGE: claude-code | 2026-11-08] BUG-236.  SPDX-License-Identifier: GPL-3.0-or-later
+
+    track <title> <artUrl> <identity>  -> {"Title", "Thumbnail": b64|null, "Page": url|null}  (fast)
+    video <page>                       -> {"Video": file-url|null}       (download once per video)
+
+Run only on a track change while the wallpaper is on screen, never polled. Music gets
+its cover and no Page. A video's Page is a local player's file (xesam:url) or the
+YouTube page whose title matches in the browser history. YouTube refuses its stream
+URLs to anything but yt-dlp, so `video` keeps a 240p copy on DISK (newest CACHE_KEEP).
+"""
+import base64, glob, json, os, re, sqlite3, subprocess, sys, urllib.parse
+
+CACHE = os.path.expanduser("~/.cache/luminos/tv")
+CACHE_KEEP = 8
+ART_MAX = 2 * 1024 * 1024
+VIDEO_EXT = (".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi")
+YT_FORMAT = "bv*[height<=240][vcodec^=avc1][ext=mp4]/b[height<=360][ext=mp4]/bv*[height<=360]/b[height<=360]"  # a TV-sized picture: 240p halves decode
+HISTORY_GLOBS = ("~/.config/google-chrome/*/History", "~/.config/chromium/*/History",
+                 "~/.config/BraveSoftware/Brave-Browser/*/History")
+BROWSERS = ("chrome", "chromium", "brave")
+
+
+def thumbnail(art_url):
+    """Base64 of a local cover file, or None (remote, missing, or too big)."""
+    if not art_url.startswith("file://"):
+        return None
+    path = urllib.parse.unquote(art_url[7:])
+    try:
+        if os.path.getsize(path) > ART_MAX:
+            return None
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except OSError:
+        return None
+
+
+def is_video_page(url):
+    """A YouTube watch page — not YouTube Music, which is music: cover only."""
+    host = urllib.parse.urlsplit(url).hostname or ""
+    if host == "music.youtube.com":
+        return False
+    return (host.endswith("youtube.com") and "/watch" in url) or host == "youtu.be"
+
+
+def pick_page(rows, title):
+    """Newest history row (url, title, last_visit) whose page title carries `title`."""
+    want = title.strip().lower()
+    if not want:
+        return None
+    hits = [r for r in rows if want in (r[1] or "").lower() and is_video_page(r[0])]
+    return max(hits, key=lambda r: r[2])[0] if hits else None
+
+
+def history_rows(title):
+    rows = []
+    for pattern in HISTORY_GLOBS:
+        for db in glob.glob(os.path.expanduser(pattern)):
+            try:   # immutable: reads a live, locked DB without copying or locking it
+                con = sqlite3.connect("file:%s?immutable=1" % urllib.parse.quote(db), uri=True)
+                rows += con.execute(
+                    "SELECT url, title, last_visit_time FROM urls WHERE title LIKE ? "
+                    "ORDER BY last_visit_time DESC LIMIT 20", ("%" + title + "%",)).fetchall()
+                con.close()
+            except sqlite3.Error:
+                continue
+    return rows
+
+
+def player_file(title):
+    """A local player's own video file for this title, from its MPRIS metadata."""
+    out = run(["busctl", "--user", "--json=short", "list"])
+    names = re.findall(r'"name":"(org\.mpris\.MediaPlayer2\.[^"]+)"', out or "")
+    for name in names:
+        meta = run(["busctl", "--user", "--json=short", "get-property", name,
+                    "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "Metadata"])
+        try:
+            data = json.loads(meta)["data"]
+        except (TypeError, ValueError, KeyError):
+            continue
+        url = data.get("xesam:url", {}).get("data", "")
+        if data.get("xesam:title", {}).get("data") == title and url.lower().endswith(VIDEO_EXT):
+            return url if url.startswith("file://") else None
+    return None
+
+
+def run(cmd, timeout=5):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def video_id(page):
+    """The YouTube id of a watch page, only if it is safe as a file name."""
+    parts = urllib.parse.urlsplit(page)
+    vid = (parts.path.strip("/") if parts.hostname == "youtu.be"
+           else urllib.parse.parse_qs(parts.query).get("v", [""])[0])
+    return vid if re.fullmatch(r"[A-Za-z0-9_-]{6,20}", vid) else None
+
+
+def prune(keep=CACHE_KEEP):
+    done = [f for f in glob.glob(os.path.join(CACHE, "*.mp4")) if ".tmp." not in f]
+    files = sorted(done, key=os.path.getmtime, reverse=True)
+    for old in files[keep:]:
+        os.remove(old)
+
+
+def download(page):
+    """A <=360p copy of a YouTube page on disk, as a file URL — reused if already there."""
+    vid = video_id(page) if is_video_page(page) else None
+    if not vid:
+        return None
+    path = os.path.join(CACHE, vid + ".mp4")
+    if not os.path.exists(path):
+        os.makedirs(CACHE, exist_ok=True)
+        part = os.path.join(CACHE, "%s.%d.tmp.mp4" % (vid, os.getpid()))
+        run(["yt-dlp", "-q", "--no-warnings", "--no-playlist", "--no-part", "-f", YT_FORMAT,
+             "-o", part, page], timeout=180)
+        if not os.path.exists(part):
+            return None
+        os.replace(part, path)
+        prune()
+    os.utime(path)
+    return "file://" + urllib.parse.quote(path)
+
+
+def page_for(title, identity):
+    if any(b in identity.lower() for b in BROWSERS):
+        return pick_page(history_rows(title), title)
+    return player_file(title)
+
+
+def main(argv):
+    if len(argv) >= 5 and argv[1] == "track":
+        title, art, identity = argv[2], argv[3], argv[4]
+        print(json.dumps({"Title": title, "Thumbnail": thumbnail(art), "Page": page_for(title, identity)}))
+        return 0
+    if len(argv) >= 3 and argv[1] == "video":
+        page = argv[2]
+        print(json.dumps({"Video": page if page.startswith("file://") else download(page)}))
+        return 0
+    print(json.dumps(None))
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
