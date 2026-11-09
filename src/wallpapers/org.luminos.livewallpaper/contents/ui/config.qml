@@ -25,11 +25,19 @@ import QtQuick.Dialogs as Dialogs
 import org.kde.kquickcontrols as KQuickControls
 import org.kde.kirigami as Kirigami
 // [CHANGE: claude-code | 2026-09-19] DECISION 118 — SPEC §3.2
+import QtCore
+import org.kde.plasma.plasma5support as P5Support
+import QtQuick.Effects
 import "props"
 import "scene.js" as Scene
 
+// [CHANGE: claude-code | 2026-11-09] DECISION 183 — Luminos look (approved prototype
+// docs/windowstyle/mock/desktop-settings.html): a "now showing" card with a preview and the actions,
+// the installed wallpapers as a grid, the wallpaper's own settings, then power/sound switches and a
+// folded "More options". Every setting, key and code path below is unchanged — only layout.
 ColumnLayout {
     id: root
+    spacing: 3
 
     // Assigned by the KDE wallpaper KCM; declared so assignment doesn't warn.
     property var configDialog
@@ -140,13 +148,35 @@ ColumnLayout {
         return s.indexOf("file://") === 0 ? s.substring(7) : s;
     }
 
+
+    readonly property real pageWidth: Kirigami.Units.gridUnit * 40
+    readonly property bool showsVideoFile: !root.currentPackage && root.cfg_WallpaperMode === "video"
+        && (root.cfg_Video.charAt(0) === "/" || root.cfg_Video.indexOf("file://") === 0)
+    onCfg_VideoChanged: if (root.showsVideoFile) thumbTimer.restart() // a newly picked video gets its own still
+    readonly property var currentPackage: {
+        const items = gallery.items || [];
+        for (let i = 0; i < items.length; ++i)
+            if (("" + items[i].entryPath) === root.activeEntry) return items[i];
+        return null;
+    }
+    readonly property string currentTitle: root.currentPackage ? (root.currentPackage.title || root.currentPackage.id)
+        : root.currentFile.length ? root.currentFile.replace(/\/+$/, "").split("/").pop().replace(/\.[^.]+$/, "")
+        : i18n("Built-in scene")
+    function surprise() {
+        const items = (gallery.items || []).filter(it => it.playable === true && ("" + it.entryPath) !== root.activeEntry);
+        if (items.length === 0) return;
+        const it = items[Math.floor(Math.random() * items.length)];
+        root.usePackage("" + it.type, "" + it.entryPath);
+    }
+
     // [CHANGE: claude-code | 2026-09-20] BUG-185. Above everything, because if
     // this page is stale then nothing below it does what it says.
     StaleCheck { id: staleCheck }
     Kirigami.InlineMessage {
         Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
+        Layout.maximumWidth: root.pageWidth
+        Layout.alignment: Qt.AlignHCenter
+        Layout.leftMargin: 24; Layout.rightMargin: 24
         visible: staleCheck.stale
         type: Kirigami.MessageType.Warning
         text: i18n("This page is running an older copy of the wallpaper plugin — it was " +
@@ -154,78 +184,341 @@ ColumnLayout {
                    "open it again, or changes made here may not take effect.")
     }
 
-    // =====================================================================
-    //  THE ONLY CONTROL THAT MATTERS: pick a file.
-    // =====================================================================
-    RowLayout {
+    ColumnLayout {
+        id: pageColumn
         Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
-        QQC2.TextField {
-            id: fileField
+        Layout.maximumWidth: root.pageWidth
+        Layout.alignment: Qt.AlignHCenter
+        Layout.leftMargin: 24; Layout.rightMargin: 24
+        Layout.bottomMargin: 24
+        spacing: 3
+
+        // ================= NOW SHOWING =================
+        LxRows.Section { text: i18n("Now showing") }
+        LxRows.Card {
+            first: true; last: false
+            topPadding: 18; bottomPadding: 18
+            contentItem: GridLayout {
+                columns: pageColumn.width > Kirigami.Units.gridUnit * 30 ? 2 : 1
+                columnSpacing: 22; rowSpacing: 14
+
+                Rectangle { // the preview, like a little monitor
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 13
+                    Layout.preferredHeight: Layout.preferredWidth * 9 / 16
+                    Layout.alignment: Qt.AlignVCenter
+                    radius: 12
+                    color: "#0b0b0e"
+                    border.width: 5; border.color: "#0b0b0e"
+                    Rectangle { id: previewMask; anchors.fill: previewArea; radius: 8; visible: false; layer.enabled: true }
+                    Item {
+                        id: previewArea
+                        anchors.fill: parent; anchors.margins: 5
+                        layer.enabled: true
+                        layer.effect: MultiEffect { maskEnabled: true; maskSource: previewMask; maskThresholdMin: 0.5; maskSpreadAtMin: 1.0 }
+                        Image {
+                            id: previewImage
+                            anchors.fill: parent
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            visible: source.toString().length > 0
+                            source: root.currentPackage && root.currentPackage.previewPath ? "file://" + root.currentPackage.previewPath
+                                  : (root.cfg_WallpaperMode === "image" && root.cfg_Image.length) ? (root.cfg_Image.charAt(0) === "/" ? "file://" + root.cfg_Image : root.cfg_Image)
+                                  : ""
+                        }
+                        // a video shows its first frame (decoded once, then paused — no second player running)
+                        // a video gets one still frame, made once by ffmpeg into ~/.cache (no second player
+                        // runs inside the settings window; KDE also builds this page as a throw-away copy)
+                        Image {
+                            id: previewThumb
+                            anchors.fill: parent
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            cache: false
+                            visible: root.showsVideoFile && source.toString().length > 0 && status === Image.Ready
+                        }
+                        P5Support.DataSource {
+                            id: thumbRunner
+                            engine: "executable"
+                            property string target: ""
+                            onNewData: function (src, data) {
+                                disconnectSource(src);
+                                if (("" + data["stdout"]).indexOf("LXTHUMB_OK") >= 0)
+                                    previewThumb.source = "file://" + thumbRunner.target;
+                            }
+                        }
+                        Timer {
+                            id: thumbTimer
+                            interval: 600
+                            running: root.showsVideoFile
+                            repeat: false
+                            onTriggered: {
+                                if (!root.showsVideoFile) return;
+                                const v = root.localPath(root.cfg_Video);
+                                const out = StandardPaths.writableLocation(StandardPaths.GenericCacheLocation).toString().replace("file://", "")
+                                          + "/luminos/wallpaper-thumbs/" + Qt.md5(v) + ".jpg";
+                                thumbRunner.target = out;
+                                const q = s => "'" + ("" + s).replace(/'/g, "'\\''") + "'";
+                                thumbRunner.connectSource("sh -c " + q("mkdir -p \"$(dirname " + q(out) + ")\" && { [ -s " + q(out) + " ] || ffmpeg -nostdin -loglevel error -y -ss 3 -i " + q(v) + " -frames:v 1 -vf scale=640:-2 " + q(out) + "; } && echo LXTHUMB_OK"));
+                            }
+                        }
+                        Kirigami.Icon {
+                            anchors.centerIn: parent
+                            width: 48; height: 48
+                            visible: !previewThumb.visible && previewImage.source.toString().length === 0
+                            source: root.cfg_WallpaperMode === "web" ? "internet-web-browser-symbolic"
+                                  : root.cfg_WallpaperMode === "qml" ? "applications-graphics-symbolic"
+                                  : root.cfg_WallpaperMode === "video" ? "video-x-generic-symbolic" : "image-x-generic-symbolic"
+                            opacity: 0.5
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        text: root.currentTitle
+                        font.pixelSize: 19
+                        font.weight: Font.Medium
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 2
+                        elide: Text.ElideRight
+                    }
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        opacity: 0.65
+                        elide: Text.ElideMiddle
+                        text: root.currentKind === null ? i18n("Pick a picture, video, web page, shader or script")
+                            : root.currentKind.what + (root.hasOwnSettings ? i18n(" · has its own settings below") : "")
+                    }
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        visible: root.pickProblem.length > 0
+                        wrapMode: Text.WordWrap
+                        color: Kirigami.Theme.negativeTextColor
+                        text: root.pickProblem
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 10
+                        spacing: 8
+                        QQC2.Button {
+                            text: i18n("Choose file…")
+                            icon.name: "document-open"
+                            onClicked: fileDialog.open()
+                        }
+                        QQC2.Button {
+                            text: i18n("Surprise me")
+                            icon.name: "media-playlist-shuffle"
+                            enabled: (gallery.items || []).length > 1
+                            onClicked: root.surprise()
+                            QQC2.ToolTip.text: i18n("Picks a random installed wallpaper — press Apply to keep it")
+                            QQC2.ToolTip.visible: hovered
+                        }
+                    }
+                }
+            }
+        }
+        LxRows.Card { // typed paths and web / YouTube addresses still work
+            first: false; last: true
+            contentItem: RowLayout {
+                spacing: 12
+                Kirigami.Icon { source: "link"; implicitWidth: 18; implicitHeight: 18; opacity: 0.6 }
+                QQC2.TextField {
+                    id: fileField
+                    Layout.fillWidth: true
+                    text: root.currentFile
+                    placeholderText: i18n("File path, web or YouTube address…")
+                    onEditingFinished: root.useFile(text)
+                    background: Rectangle { radius: height / 2; color: Qt.alpha(Kirigami.Theme.textColor, 0.06) }
+                    leftPadding: 14; rightPadding: 14
+                }
+            }
+        }
+
+        // ================= INSTALLED =================
+        RowLayout {
             Layout.fillWidth: true
-            text: root.currentFile
-            placeholderText: i18n("Pick a picture, video, web page, shader or script…")
-            // Typed text is accepted too, so a YouTube or web address still works
-            // without a second box for it.
-            onEditingFinished: root.useFile(text)
+            Layout.topMargin: 14
+            LxRows.Section {
+                Layout.topMargin: 0
+                Layout.fillWidth: true
+                text: gallery.busy ? i18n("Working…")
+                    : (gallery.items || []).length === 0 ? i18n("No wallpapers installed yet")
+                    : i18np("%1 installed wallpaper", "%1 installed wallpapers", gallery.items.length)
+            }
+            QQC2.Button {
+                text: i18n("Install…")
+                icon.name: "document-import"
+                flat: true
+                onClicked: gallery.openInstall()
+            }
         }
-        QQC2.Button {
-            text: i18n("Choose file…")
-            icon.name: "document-open"
-            onClicked: fileDialog.open()
+        LxRows.Card {
+            first: true; last: true
+            topPadding: 12; bottomPadding: 12; leftPadding: 12; rightPadding: 12
+            contentItem: WallpaperGallery {
+                id: gallery
+                currentEntry: root.activeEntry
+                onPicked: function (type, entryPath) { root.usePackage(type, entryPath); }
+            }
         }
-    }
-    QQC2.Label {
-        Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
-        wrapMode: Text.WordWrap
-        font: Kirigami.Theme.smallFont
-        visible: root.pickProblem.length === 0
-        opacity: 0.8
-        // "nothing else to set" has to be TRUE. A wallpaper that ships its own
-        // properties (Rain has sixteen) has plenty else to set, and saying
-        // otherwise sends someone looking for a control they were told was not
-        // there. [CHANGE: claude-code | 2026-09-20]
-        text: root.currentKind === null
-            ? i18n("Pick any picture, video, .html page, .frag shader, .js canvas script or "
-                   + ".qml scene. A YouTube or web address works too.")
-            : root.hasOwnSettings
-            ? i18n("%1 — this one has its own settings, below.", root.currentKind.what)
-            : i18n("%1 — nothing else to set.", root.currentKind.what)
-    }
-    QQC2.Label {
-        Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
-        wrapMode: Text.WordWrap
-        visible: root.pickProblem.length > 0
-        color: Kirigami.Theme.negativeTextColor
-        font: Kirigami.Theme.smallFont
-        text: root.pickProblem
+
+        // ================= THE WALLPAPER'S OWN SETTINGS (SPEC §3.2) =================
+        LxRows.Section {
+            visible: root.propsMode && Object.keys(sceneProps.schema).length > 0
+            text: i18n("This wallpaper")
+        }
+        PropertyEditor {
+            Layout.fillWidth: true
+            visible: root.propsMode && root.hasOwnSettings // a wallpaper with no settings shows nothing here
+            schema: sceneProps.schema
+            values: sceneProps.props
+            problem: sceneProps.problem
+            onChanged: function (key, value) {
+                root.cfg_SceneProperties = sceneProps.withValue(root.propsId, key, value);
+            }
+        }
+
+        // ================= PICTURE =================
+        LxRows.Section { text: i18n("Picture") }
+        LxRows.Card {
+            first: true; last: true
+            contentItem: RowLayout {
+                spacing: 12
+                LxRows.TitleText { title: i18n("Fit"); subtitle: i18n("How it fills the screen") }
+                QQC2.ComboBox {
+                    model: [ i18n("Stretch"), i18n("Keep proportions"), i18n("Fill and crop"),
+                             i18n("Centre"), i18n("Tile") ]
+                    currentIndex: root.cfg_FillMode
+                    onActivated: root.cfg_FillMode = currentIndex
+                }
+            }
+        }
+
+        // ================= POWER AND SOUND =================
+        LxRows.Section { text: i18n("Power and sound") }
+        LxRows.Card {
+            first: true; last: false; clickable: true
+            onClicked: root.cfg_PauseOnBattery = !root.cfg_PauseOnBattery
+            contentItem: RowLayout {
+                spacing: 12
+                LxRows.TitleText { title: i18n("Pause on battery"); subtitle: i18n("Saves power when unplugged") }
+                QQC2.Switch { checked: root.cfg_PauseOnBattery; onToggled: root.cfg_PauseOnBattery = checked }
+            }
+        }
+        LxRows.Card {
+            first: false; last: false
+            contentItem: RowLayout {
+                spacing: 12
+                LxRows.TitleText { title: i18n("Stop when hidden"); subtitle: i18n("Stops drawing while windows cover the desktop") }
+                QQC2.ComboBox {
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 14
+                    model: [ i18n("Never"), i18n("Only under a fullscreen window"),
+                             i18n("Whenever a window covers the desktop"),
+                             i18n("Only while I'm looking at the desktop") ] // [CHANGE: claude-code | 2026-11-07]
+                    currentIndex: root.cfg_ObscurePolicy
+                    onActivated: root.cfg_ObscurePolicy = currentIndex
+                }
+            }
+        }
+        LxRows.Card {
+            first: false; last: false; clickable: true
+            onClicked: root.cfg_MuteAudio = !root.cfg_MuteAudio
+            contentItem: RowLayout {
+                spacing: 12
+                LxRows.TitleText { title: i18n("Mute the wallpaper"); subtitle: i18n("Videos and pages play without sound") }
+                QQC2.Switch { checked: root.cfg_MuteAudio; onToggled: root.cfg_MuteAudio = checked }
+            }
+        }
+        LxRows.Card {
+            first: false; last: true; clickable: true
+            onClicked: root.cfg_AudioReactive = !root.cfg_AudioReactive
+            contentItem: RowLayout {
+                spacing: 12
+                LxRows.TitleText { title: i18n("React to what is playing"); subtitle: i18n("Audio-reactive wallpapers move with your music") }
+                QQC2.Switch { checked: root.cfg_AudioReactive; onToggled: root.cfg_AudioReactive = checked }
+            }
+        }
+
+        // ================= MORE OPTIONS (closed by default) =================
+        LxRows.Card {
+            id: advanced
+            property bool expanded: false
+            Layout.topMargin: 12
+            first: true; last: !advanced.expanded; clickable: true
+            onClicked: advanced.expanded = !advanced.expanded
+            Accessible.name: i18n("More options")
+            contentItem: RowLayout {
+                spacing: 10
+                Kirigami.Icon {
+                    source: "go-next-symbolic"
+                    implicitWidth: 16; implicitHeight: 16
+                    rotation: advanced.expanded ? 90 : 0
+                    Behavior on rotation { NumberAnimation { duration: 120 } }
+                    opacity: 0.7
+                }
+                QQC2.Label { text: i18n("More options"); Layout.fillWidth: true; opacity: 0.85 }
+            }
+        }
+        LxRows.Card {
+            visible: advanced.expanded
+            first: false; last: false; clickable: true
+            onClicked: root.cfg_WebInteractive = !root.cfg_WebInteractive
+            contentItem: RowLayout {
+                spacing: 12
+                LxRows.TitleText { title: i18n("Let web wallpapers take clicks"); subtitle: i18n("Off = clicks always go to your desktop icons") }
+                QQC2.Switch { checked: root.cfg_WebInteractive; onToggled: root.cfg_WebInteractive = checked }
+            }
+        }
+        LxRows.Card {
+            visible: advanced.expanded
+            first: false; last: false; clickable: true
+            onClicked: root.cfg_InjectSystemStats = !root.cfg_InjectSystemStats
+            contentItem: RowLayout {
+                spacing: 12
+                LxRows.TitleText { title: i18n("Give pages live system stats"); subtitle: i18n("CPU, memory and temperature for system-monitor wallpapers") }
+                QQC2.Switch { checked: root.cfg_InjectSystemStats; onToggled: root.cfg_InjectSystemStats = checked }
+            }
+        }
+        LxRows.Card {
+            visible: advanced.expanded
+            first: false; last: false
+            contentItem: RowLayout {
+                spacing: 12
+                LxRows.TitleText { title: i18n("Background colour"); subtitle: i18n("Shows around a \"Keep proportions\" picture") }
+                KQuickControls.ColorButton {
+                    property bool armed: false
+                    Component.onCompleted: { color = root.cfg_BackgroundColor; armed = true; }
+                    // Set once, never bound — a bound colour strands the dialog (BUG-174).
+                    onColorChanged: if (armed) root.cfg_BackgroundColor = color
+                }
+            }
+        }
+        LxRows.Card {
+            visible: advanced.expanded
+            first: false; last: true
+            contentItem: RowLayout {
+                spacing: 12
+                LxRows.TitleText { title: i18n("Built-in scene"); subtitle: i18n("Used when no file is chosen") }
+                QQC2.ComboBox {
+                    textRole: "text"
+                    valueRole: "val"
+                    model: [
+                        { text: i18n("Shader — animated rings"), val: "shader" },
+                        { text: i18n("Spectrum — audio bars"),   val: "spectrum" },
+                        { text: i18n("Aurora"),                  val: "aurora" },
+                        { text: i18n("Particles"),               val: "particles" },
+                        { text: i18n("System monitor"),          val: "sysmon" }
+                    ]
+                    onActivated: root.apply({ mode: "qml", key: "QmlScene" }, currentValue)
+                }
+            }
+        }
     }
 
-    // =====================================================================
-    //  INSTALLED WALLPAPERS — the other way to pick one.  SPEC §3.3
-    // =====================================================================
-    Kirigami.Separator {
-        Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
-        Layout.topMargin: Kirigami.Units.largeSpacing
-    }
-    WallpaperGallery {
-        Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
-        currentEntry: root.activeEntry
-        onPicked: function (type, entryPath) { root.usePackage(type, entryPath); }
-    }
-
-    // =====================================================================
-    //  THE WALLPAPER'S OWN SETTINGS (SPEC §3.2) — Rain's sliders live here.
-    // =====================================================================
+    // ---- the wallpaper's own settings: data side (unchanged) ----
     readonly property bool propsMode: root.cfg_WallpaperMode === "qml"
                                    || root.cfg_WallpaperMode === "web"
     readonly property string propsId: root.cfg_WallpaperMode === "web"
@@ -240,124 +533,6 @@ ColumnLayout {
                 return root.cfg_WebUrl;
             var base = Scene.propsBaseFor(root.cfg_QmlScene);
             return Scene.isAbsolute(base) ? base : Qt.resolvedUrl(base);
-        }
-    }
-    Kirigami.Separator {
-        Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
-        Layout.topMargin: Kirigami.Units.largeSpacing
-        visible: root.propsMode && Object.keys(sceneProps.schema).length > 0
-    }
-    Kirigami.Heading {
-        visible: root.propsMode && Object.keys(sceneProps.schema).length > 0
-        Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
-        level: 3
-        text: i18n("This wallpaper's own settings")
-    }
-    PropertyEditor {
-        Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
-        visible: root.propsMode
-        schema: sceneProps.schema
-        values: sceneProps.props
-        problem: sceneProps.problem
-        onChanged: function (key, value) {
-            root.cfg_SceneProperties = sceneProps.withValue(root.propsId, key, value);
-        }
-    }
-
-    // =====================================================================
-    //  ADVANCED — closed by default. Nothing here is needed to set a wallpaper.
-    // =====================================================================
-    Kirigami.Separator {
-        Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
-        Layout.topMargin: Kirigami.Units.largeSpacing
-    }
-    QQC2.CheckBox {
-        id: advanced
-        Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter
-        text: i18n("Advanced options")
-        checked: false
-    }
-    Kirigami.FormLayout {
-        visible: advanced.checked
-        Layout.fillWidth: true
-        // Without a cap the form grows to its widest child, which on a maximised
-        // dialog drags every row to the right. [CHANGE: claude-code | 2026-09-19] BUG-169
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 40
-        Layout.alignment: Qt.AlignHCenter // centre under the KCM's "Wallpaper type" card [CHANGE: claude-code | 2026-10-15]
-
-        QQC2.ComboBox {
-            Kirigami.FormData.label: i18n("Built-in scene:")
-            textRole: "text"
-            valueRole: "val"
-            model: [
-                { text: i18n("Shader — animated rings"), val: "shader" },
-                { text: i18n("Spectrum — audio bars"),   val: "spectrum" },
-                { text: i18n("Aurora"),                  val: "aurora" },
-                { text: i18n("Particles"),               val: "particles" },
-                { text: i18n("System monitor"),          val: "sysmon" }
-            ]
-            onActivated: root.apply({ mode: "qml", key: "QmlScene" }, currentValue)
-        }
-        QQC2.ComboBox {
-            Kirigami.FormData.label: i18n("Fit:")
-            model: [ i18n("Stretch"), i18n("Keep proportions"), i18n("Fill and crop"),
-                     i18n("Centre"), i18n("Tile") ]
-            currentIndex: root.cfg_FillMode
-            onActivated: root.cfg_FillMode = currentIndex
-        }
-        KQuickControls.ColorButton {
-            Kirigami.FormData.label: i18n("Background colour:")
-            property bool armed: false
-            Component.onCompleted: { color = root.cfg_BackgroundColor; armed = true; }
-            // Set once, never bound — a bound colour strands the dialog (BUG-174).
-            onColorChanged: if (armed) root.cfg_BackgroundColor = color
-        }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Save power:")
-            text: i18n("Pause on battery")
-            checked: root.cfg_PauseOnBattery
-            onToggled: root.cfg_PauseOnBattery = checked
-        }
-        QQC2.ComboBox {
-            Kirigami.FormData.label: i18n("Stop rendering when hidden:")
-            model: [ i18n("Never"), i18n("Only under a fullscreen window"),
-                     i18n("Whenever a window covers the desktop"),
-                     i18n("Only while I'm looking at the desktop") ] // [CHANGE: claude-code | 2026-11-07]
-            currentIndex: root.cfg_ObscurePolicy
-            onActivated: root.cfg_ObscurePolicy = currentIndex
-        }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Sound:")
-            text: i18n("Mute the wallpaper")
-            checked: root.cfg_MuteAudio
-            onToggled: root.cfg_MuteAudio = checked
-        }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Audio:")
-            text: i18n("React to what is playing")
-            checked: root.cfg_AudioReactive
-            onToggled: root.cfg_AudioReactive = checked
-        }
-        QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Web pages:")
-            text: i18n("Let the page take clicks")
-            checked: root.cfg_WebInteractive
-            onToggled: root.cfg_WebInteractive = checked
-        }
-        QQC2.CheckBox {
-            text: i18n("Give the page live system stats")
-            checked: root.cfg_InjectSystemStats
-            onToggled: root.cfg_InjectSystemStats = checked
         }
     }
 

@@ -83,26 +83,14 @@ ColumnLayout {
         }
     }
 
-    RowLayout {
-        Layout.fillWidth: true
-        QQC2.Label {
-            Layout.fillWidth: true
-            font: Kirigami.Theme.smallFont
-            text: gallery.busy ? i18n("Working…")
-                : gallery.items.length === 0 ? i18n("No wallpapers installed yet.")
-                : i18np("%1 installed wallpaper", "%1 installed wallpapers", gallery.items.length)
-        }
-        QQC2.Button {
-            text: i18n("Install…")
-            icon.name: "document-import"
-            onClicked: importDialog.open()
-        }
-    }
+    // [CHANGE: claude-code | 2026-11-09] DECISION 183: the count + Install button moved to config.qml's
+    // section header (it calls openInstall()); the grid shows every tile (no inner scrolling inside the
+    // page's own scroll) and ends with an "Add wallpaper" tile.
+    function openInstall() { importDialog.open(); }
 
     QQC2.Label {
         visible: gallery.problem.length > 0
         Layout.fillWidth: true
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 26
         wrapMode: Text.WordWrap
         color: Kirigami.Theme.negativeTextColor
         font: Kirigami.Theme.smallFont
@@ -111,21 +99,22 @@ ColumnLayout {
 
     GridView {
         id: grid
-        visible: gallery.items.length > 0
         Layout.fillWidth: true
-        Layout.preferredHeight: Math.min(3, Math.ceil(count / 3)) * cellHeight + Kirigami.Units.smallSpacing
-        cellWidth: Kirigami.Units.gridUnit * 9
-        cellHeight: Kirigami.Units.gridUnit * 7
-        clip: true
-        model: gallery.items
+        readonly property int columns: Math.max(2, Math.floor(width / (Kirigami.Units.gridUnit * 9)))
+        cellWidth: Math.floor(width / columns)
+        cellHeight: Math.round(cellWidth * 10 / 16) + 52
+        Layout.preferredHeight: Math.ceil(count / columns) * cellHeight
+        interactive: false
+        model: gallery.items.concat([{ add: true }])
 
         delegate: GalleryTile {
-            required property var model
+            required property var modelData
             width: grid.cellWidth
             height: grid.cellHeight
-            modelData: model.modelData
+            tileData: modelData
             currentEntry: gallery.currentEntry
             onPicked: function (type, entryPath) { gallery.picked(type, entryPath); }
+            onAddRequested: importDialog.open()
         }
     }
 

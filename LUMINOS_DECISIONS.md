@@ -8933,3 +8933,38 @@ dolphin 1.2 repaints its file views and the action bar the moment style.json cha
 before/after a style.json edit (docs/style-tuner/shots/files-live-tune.png) — rows, circles, tile corners and bar changed live.
 **Undo:** `sudo pacman -U /var/cache/pacman/pkg/{kio-6.30.0-1,dolphin-26.08.1-1}-x86_64.pkg.tar.zst`;
 `kwriteconfig6 --file kdeglobals --group Icons --key Theme yet-another-monochrome-icon-set`; restore dolphinrc.before.
+
+## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
+<!-- [CHANGE: claude-code | 2026-11-09] -->
+**Ask (Shawn):** "now time to fix this … the window that opens when i right on desktop" → prototype (artifact "Desktop
+Settings Mock", `docs/windowstyle/mock/desktop-settings.html`) → "do i will tell if something is off".
+**Built:** plain QML in `src/desktop-config-look/` (stock copies in `orig/` for diffing), installed over the stock files by
+**plasma-desktop 6.7.5-1.3** (`packages/plasma-desktop-luminos`, package() copies them; now depends on luminos-style).
+- `shell/AppletConfiguration.qml` — frame for this window AND every widget's settings window: System Settings style
+  sidebar (search field, grey "Desktop & wallpaper" label, rows joined into one group), pages inside a rounded hole
+  (View colour, MultiEffect mask), page backgrounds cleared so cards stand out, default size 60×42 grid units. OK / Apply /
+  Cancel replaced by "Changes need Apply" + Close; when something changed a bar shows "Unsaved changes · Undo · Apply"
+  (Undo re-opens the page with the saved values; Close/× still asks first, stock dialog). Stock apply logic untouched
+  (`applyButton` kept as a hidden button that drives it).
+- `shell/ConfigCategoryDelegate.qml` — row = accent disc + name + one-line hint for the known pages.
+- `shell/ConfigurationContainmentAppearance.qml` — "Desktop layout" + "Wallpaper type" as two joined card rows (Get New
+  Plugins = star button). Order kept as stock (layout first).
+- `shell/ConfigurationContainmentActions.qml` — one card row per mouse action (trigger · action · settings · remove) +
+  "Add Action" row with a hint.
+- `folder/ConfigLocation.qml` — each choice its own card row with a hint; place list / custom path only on their row.
+- `shell|folder/LxRows.qml` — copy of the Wi-Fi page building blocks (`src/kcm-nm-look/Rows.qml`).
+- Wallpaper plugin (`src/wallpapers/org.luminos.livewallpaper/contents/ui/`, installed copy in ~/.local/share):
+  `config.qml` = "Now showing" card (preview — package picture, the picture itself, or ONE ffmpeg still for a video cached in
+  ~/.cache/luminos/wallpaper-thumbs, no player inside the settings window), name, kind, Choose file… / Surprise me; a
+  path/address row (typed paths and YouTube still work); installed grid; the wallpaper's own settings (hidden when it has
+  none); Fit; Power and sound switches; folded "More options". `WallpaperGallery.qml` grid shows all tiles + "Add
+  wallpaper" tile; `GalleryTile.qml` rounded picture, accent ring + tick, kind tag. Every cfg_ key and code path unchanged.
+**Not changed:** Icons, Filter and About pages keep the stock layout (already card rows through the Kirigami fork).
+**Proof:** nested KWin + plasmashell with a copy of Shawn's config (`~/builds/style-tuner/nested-plasma.sh`, `desk-run.sh`);
+test aid in AppletConfiguration: with `QML_XHR_ALLOW_FILE_READ=1`, `/tmp/luminos-deskcfg-test` = `page=N scroll=PX
+surprise=1 apply=1`. Run: Surprise me → dirty bar true → Apply → bar false, and the nested appletsrc changed to
+`WallpaperMode=web, WebUrl=…/simple-system/index.html`. All 7 changed QML files load (qml6 harness, status Ready).
+Shots: docs/style-tuner/shots/desk-page*.png, desk-dirty.png. A crash seen on the way was the test switching the plugin
+in the same script that opened the window (Image page bound to the Luminos config object) — the script now waits.
+**Undo:** `sudo pacman -U /var/cache/pacman/pkg/plasma-desktop-6.7.5-1-x86_64.pkg.tar.zst` (or 1.2 for the keyboard empty
+state only); wallpaper page: `git checkout` the three ui files and copy them to ~/.local/share/plasma/wallpapers.

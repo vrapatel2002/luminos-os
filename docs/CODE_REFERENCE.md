@@ -793,3 +793,13 @@ true, `filesViewPanel` true, `filesViewPanelWidth` 330, `filesZoomIcons0..3` 3/4
 **Files** tab (`luminos-style-tuner --files`), knobs with `a: "files"` in src/luminos-style/tuner/StyleTuner.qml.
 Test aid: `LUMINOS_FILES_TEST=view|menu|panel|select|undo dolphin` (+ `LUMINOS_FILES_TEST_OUT=file.png` for menu pictures).
 - `scripts/luminos-wallpaper-ytfile` (+ tools/ copy) — BUG-237. `<youtube url>` → prints file URL of a <=1080p+audio copy in ~/.cache/luminos/wallpaper (newest 3, reused). Called by main.qml's ytResolver. Tests: tests/wallpaper/test_ytfile.py. main.qml videoComp now plays on every source change. [CHANGE: claude-code | 2026-11-08]
+
+## DESKTOP SETTINGS WINDOW (DECISION 183) — added 2026-11-09
+| Path | What |
+|---|---|
+| `src/desktop-config-look/shell/*.qml` | → /usr/share/plasma/shells/org.kde.plasma.desktop/contents/configuration/ (frame, sidebar row, wallpaper type/layout, mouse actions, LxRows) |
+| `src/desktop-config-look/folder/*.qml` | → /usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/ (Location page, LxRows) |
+| `src/desktop-config-look/orig/` | stock 6.7.5 copies — diff against the next Plasma's files before re-basing |
+| `packages/plasma-desktop-luminos` 1.3 | installs the above in package() |
+| `src/wallpapers/org.luminos.livewallpaper/contents/ui/{config,WallpaperGallery,GalleryTile,LxRows}.qml` | wallpaper page (copy to ~/.local/share/plasma/wallpapers/… to install) |
+Test aid: `QML_XHR_ALLOW_FILE_READ=1` + `/tmp/luminos-deskcfg-test` with `page=N [scroll=PX] [surprise=1] [apply=1]`.

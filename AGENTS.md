@@ -485,6 +485,7 @@ luminos-brain safe "<action>"
 ### Style Tuner (DECISION 176) [CHANGE: claude-code | 2026-11-08]
 | `src/luminos-style/` + `packages/luminos-style/` | live look values (`org.luminos.style`) read by the 5 KDE forks from `~/.config/luminos/style.json`; tuner window `luminos-style-tuner`. **Never remove `luminos-style` while the forks are installed** — every QML app would lose its controls. Fork rebuilds: tunables patch goes LAST. |
 | `packages/{kio,dolphin}-luminos/` + `packages/luminos-files-icons/` + `scripts/files-look/` + `scripts/files-icons/` | Files redesign (DECISION 182): kio places sidebar + Dolphin patches (regenerate with `make-*-patch.sh`), icon theme `luminos-files` (inherits YAMIS; kdeglobals Icons Theme). After a kio/dolphin bump: re-run the patch scripts, rebuild, `pacman -U`. [CHANGE: claude-code \| 2026-11-09] |
+| `src/desktop-config-look/` + `packages/plasma-desktop-luminos/` (1.3) | desktop / widget settings window look (DECISION 183): loose QML installed over stock in package(); `orig/` = stock copies. Needs luminos-style. [CHANGE: claude-code \| 2026-11-09] |
 
 ### Archive (DO NOT RESTORE)
 `archive/windows-hive-2026/`, `archive/gtk4-ui/`, `archive/hyprland/`, `archive/stale-docs/`

@@ -31,12 +31,18 @@
 pkgname=plasma-desktop
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=1.2
+# [CHANGE: claude-code | 2026-11-09] 1.3 (DECISION 183): the desktop settings window (right-click → Configure Desktop
+# and Wallpaper, also every widget's settings window) gets the Luminos look — System Settings style sidebar with
+# search, pages in a rounded hole, card rows, and a small "Unsaved changes · Undo · Apply" bar instead of
+# OK/Apply/Cancel. Plain QML files from ~/luminos-os/src/desktop-config-look/{shell,folder} are installed over the
+# stock ones in package() (stock copies kept in src/desktop-config-look/orig for diffing on the next Plasma bump).
+pkgrel=1.3
 pkgdesc='KDE Plasma Desktop'
 arch=(x86_64)
 url='https://kde.org/plasma-desktop/'
 license=(LGPL-2.0-or-later)
 depends=(attica
+         luminos-style # DECISION 183: the desktop settings window reads org.luminos.style
          baloo
          emoji-font # for clock and language KCMs
          glibc
@@ -149,4 +155,8 @@ package() {
   local so=$(find build -name kcm_keyboard.so -type f | head -n1)
   [[ -n $so ]] || { echo "kcm_keyboard.so not built"; return 1; }
   install -Dm755 "$so" "$pkgdir"/usr/lib/qt6/plugins/plasma/kcms/systemsettings/kcm_keyboard.so
+  # DECISION 183: desktop settings window look (loose QML, no compile step)
+  local look="$startdir/../../src/desktop-config-look"
+  install -m644 "$look"/shell/*.qml "$pkgdir"/usr/share/plasma/shells/org.kde.plasma.desktop/contents/configuration/
+  install -m644 "$look"/folder/*.qml "$pkgdir"/usr/share/plasma/plasmoids/org.kde.desktopcontainment/contents/ui/
 }
