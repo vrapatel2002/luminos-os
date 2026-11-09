@@ -1,0 +1,25 @@
+# [CHANGE: claude-code | 2026-11-09] DECISION 182 — Luminos Files icon pack.
+# "luminos-files": coloured rounded tiles (+ MD / SH / LOG... tags) for every file type and folder,
+# inheriting yet-another-monochrome-icon-set so all other icons stay the same. Generated at build
+# time from the installed themes by scripts/files-icons/make-files-icons.py.
+#   Use:    kwriteconfig6 --file kdeglobals --group Icons --key Theme luminos-files
+#   Revert: kwriteconfig6 --file kdeglobals --group Icons --key Theme yet-another-monochrome-icon-set
+pkgname=luminos-files-icons
+pkgver=1.0
+pkgrel=3
+pkgdesc='Luminos: coloured file-type tiles on top of the monochrome icon set'
+arch=(any)
+license=(GPL-3.0-or-later)
+depends=(yamis-icon-theme-git)
+makedepends=(python papirus-icon-theme yamis-icon-theme-git)
+source=(make-files-icons.py::file://$startdir/../../scripts/files-icons/make-files-icons.py)
+sha256sums=(SKIP)
+
+build() {
+  python3 make-files-icons.py "$srcdir/luminos-files"
+}
+
+package() {
+  install -d "$pkgdir/usr/share/icons"
+  cp -r "$srcdir/luminos-files" "$pkgdir/usr/share/icons/"
+}

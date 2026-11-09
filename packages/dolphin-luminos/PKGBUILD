@@ -1,0 +1,94 @@
+# Luminos fork of dolphin (maintained in ~/luminos-os).
+# Based on the Arch PKGBUILD (gitlab.archlinux.org/archlinux/packaging/packages/dolphin).
+#
+# [CHANGE: claude-code | 2026-11-09] LUMINOS FORK — DECISION 182 (Files redesign, approved prototype
+# docs/windowstyle/mock/files-page.html). One patch (made by scripts/files-look/dolphin-edit.py):
+#   rounded hover/selection tiles · grouping by Name = "Folders" / "Files" · the View button opens one panel
+#   (Icons/Compact/List, S-M-L-XL, sort, groups, toggles, this folder / all folders) · regrouped ☰ menu with a
+#   quick row · selecting files shows the action bar · "Moved to Trash · Undo" message.
+# Looks read ~/.config/luminos/style.json (keys files*, see docs/CODE_REFERENCE.md); defaults = prototype.
+# Sidebar look lives in kio-luminos; file-type tiles in luminos-files-icons.
+# Do not "clean up" the pkgrel: 1.x sorts ABOVE the repo's 1; a new upstream pkgver wins again.
+#   Rebuild:  makepkg -si      Revert: sudo pacman -U /var/cache/pacman/pkg/dolphin-26.08.1-1-x86_64.pkg.tar.zst
+# Maintainer: Antonio Rojas <arojas@archlinux,org>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+# Contributor: Pierre Schmitz <pierre@archlinux.de>
+
+pkgname=dolphin
+pkgver=26.08.1
+pkgrel=1.1
+pkgdesc='KDE File Manager'
+arch=(x86_64)
+url='https://apps.kde.org/dolphin/'
+license=(LGPL-2.0-or-later)
+depends=(baloo
+         baloo-widgets
+         glibc
+         kbookmarks
+         kcmutils
+         kcodecs
+         kcolorscheme
+         kcompletion
+         kconfig
+         kconfigwidgets
+         kcoreaddons
+         kcrash
+         kdbusaddons
+         kfilemetadata
+         kguiaddons
+         ki18n
+         kiconthemes
+         kio
+         kio-extras
+         kjobwidgets
+         knewstuff
+         knotifications
+         kparts
+         kservice
+         ktextwidgets
+         kuserfeedback
+         kwidgetsaddons
+         kwindowsystem
+         kxmlgui
+         libstdc++
+         qt6-base
+         qt6-multimedia
+         solid)
+makedepends=(extra-cmake-modules
+             kdoctools)
+optdepends=('dolphin-plugins: extra plugins'
+            'ffmpegthumbs: video thumbnails'
+            'filelight: detailed disk usage statistics'
+            'kde-cli-tools: for editing file type options'
+            'kdegraphics-thumbnailers: PDF and PS thumbnails'
+            'kdenetwork-filesharing: samba usershare properties menu'
+            'kdf: view disk usage'
+            'kio-admin: for managing files as administrator'
+            'kompare: comparing files menu action'
+            'konsole: terminal panel'
+            'purpose: share context menu')
+groups=(kde-applications
+        kde-system)
+source=(https://download.kde.org/stable/release-service/$pkgver/src/$pkgname-$pkgver.tar.xz{,.sig}
+        dolphin-luminos-files.patch)
+sha256sums=('f5635feff84e7070d35342d6defb46e9b42ff1c44e3896635f4bd9f43da947c1'
+            'SKIP'
+            'SKIP')
+validpgpkeys=(CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7  # Albert Astals Cid <aacid@kde.org>
+              F23275E4BF10AFC1DF6914A6DBD2CE893E2D1C87  # Christoph Feck <cfeck@kde.org>
+              D81C0CB38EB725EF6691C385BB463350D6EF31EF) # Heiko Becker <heiko.becker@kde.org>
+
+prepare() {
+  patch -d $pkgname-$pkgver -p1 < dolphin-luminos-files.patch
+}
+
+build() {
+  cmake -B build -S $pkgname-$pkgver \
+    -DBUILD_TESTING=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}

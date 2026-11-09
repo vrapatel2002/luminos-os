@@ -771,3 +771,22 @@ conductor.go and fan_control.go are deleted.
 - `.../ui/PageInput.qml` — passive cursor watcher reparented to the window's contentItem (HoverHandler blocking:false + PointHandler); signals moved/pressed/released in the web view's coordinates.
 - `.../ui/LivelyApi.qml` — added probe() (wantsTrack/wantsAudio, enables setMouseParallax), sendTrack(), sendAudio(), pointer(), tv()/tvState() + tvShim (muted local video → canvasArtist).
 - `scripts/luminos-wallpaper-nowplaying` (+ tools/ copy) — `track <title> <artUrl> <identity>` → {Title, Thumbnail, Page}; `video <page>` → {Video: file URL} (240p, ~/.cache/luminos/tv, newest 8). Tests: tests/wallpaper/test_nowplaying.py. [CHANGE: claude-code | 2026-11-08]
+
+## FILES (Dolphin) REDESIGN (DECISION 182) — added 2026-11-09
+| Path | What |
+|---|---|
+| `scripts/files-icons/make-files-icons.py` + `packages/luminos-files-icons/` | icon theme `luminos-files`: tiles per file kind + tag, inherits YAMIS |
+| `scripts/files-look/luminosfilesstyle_p.h` | header-only reader of `~/.config/luminos/style.json` with live callback (QtWidgets side of the tuner) |
+| `scripts/files-look/kio-edit.py` + `make-kio-patch.sh` → `packages/kio-luminos/` | Places sidebar delegate (Dolphin + file dialogs) |
+| `scripts/files-look/dolphin-edit.py` + `make-dolphin-patch.sh` → `packages/dolphin-luminos/` | Dolphin view/menu/panel changes |
+| `config/pacman-hooks/luminos-{kio,dolphin}.hook` | warn when stock replaces the forks |
+
+style.json keys (defaults): sidebar `filesPlaceRowPx` 44, `filesPlaceDiscPx` 30 (0 = plain icon), `filesPlaceGlyphPx` 18,
+`filesPlacePadPx` 9, `filesPlaceTextGapPx` 12, `filesPlaceGapPx` 2, `filesPlaceRadiusPx` -1 (pill), `filesPlaceSelMix` 100,
+`filesPlaceHoverMix` 8, `filesPlaceDiscDim` 0, `filesPlaceGlyphInk` 12, `filesPlaceTextScale` 1.0, `filesPlaceSmallScale` 0.82,
+`filesPlaceBarPx` 4, `filesPlaceHeaderScale` 0.8, `filesPlaceHeaderTopPx` 14, `filesPlaceHeaderMix` 50, `filesPlaceHeaderCaps` true.
+Dolphin: `filesRoundSelection` true, `filesItemRadiusPx` 14, `filesItemSelMix` 100, `filesItemHoverMix` 7, `filesFolderFileGroups`
+true, `filesViewPanel` true, `filesViewPanelWidth` 330, `filesZoomIcons0..3` 3/4/5/7, `filesZoomCompact0..3` 1/2/3/4,
+`filesZoomList0..3` 0/1/2/3, `filesHamburgerLayout` true, `filesSelectionBar` true, `filesUndoMessage` true,
+`filesUndoMessageMs` 6000, `filesNeutralBars` true, `filesBarMix` 7. Sidebar keys repaint live; Dolphin ones apply on next open.
+Test aid: `LUMINOS_FILES_TEST=view|menu|panel|select|undo dolphin` (+ `LUMINOS_FILES_TEST_OUT=file.png` for menu pictures).

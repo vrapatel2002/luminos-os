@@ -482,6 +482,9 @@ luminos-brain safe "<action>"
 | `scripts/luminos-coder-review-mcp` | MCP `luminos-coder`: review_start / review_wait (reviewer must quote the task; unverifiable claims dropped in code), run_tests / run_python (venv `~/.local/share/luminos/coder-venv`) |
 | `scripts/luminos-claude-local` | "Claude (Local Qwen)" — third Claude Desktop profile in 3P gateway mode. Use the **Code** tab (Cowork collides with the Max app's VM on vsock 51234) |
 | `tests/coder/` | `RESULTS.md` (all measurements + the proof table), `bench-run.sh`, `proof/` (TASK, hidden tests, reference, harness) |
+### Style Tuner (DECISION 176) [CHANGE: claude-code | 2026-11-08]
+| `src/luminos-style/` + `packages/luminos-style/` | live look values (`org.luminos.style`) read by the 5 KDE forks from `~/.config/luminos/style.json`; tuner window `luminos-style-tuner`. **Never remove `luminos-style` while the forks are installed** — every QML app would lose its controls. Fork rebuilds: tunables patch goes LAST. |
+| `packages/{kio,dolphin}-luminos/` + `packages/luminos-files-icons/` + `scripts/files-look/` + `scripts/files-icons/` | Files redesign (DECISION 182): kio places sidebar + Dolphin patches (regenerate with `make-*-patch.sh`), icon theme `luminos-files` (inherits YAMIS; kdeglobals Icons Theme). After a kio/dolphin bump: re-run the patch scripts, rebuild, `pacman -U`. [CHANGE: claude-code \| 2026-11-09] |
 
 ### Archive (DO NOT RESTORE)
 `archive/windows-hive-2026/`, `archive/gtk4-ui/`, `archive/hyprland/`, `archive/stale-docs/`

@@ -1,0 +1,470 @@
+diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidgets/kfileplacesview.cpp
+--- kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-09-04 10:01:22.000000000 -0400
++++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-08 20:13:30.034723817 -0500
+@@ -57,6 +57,7 @@
+ #include <set>
+ 
+ #include "kfileplaceeditdialog.h"
++#include "luminosfilesstyle_p.h" // [CHANGE: claude-code | 2026-11-09] DECISION 182
+ #include "kfileplacesmodel.h"
+ 
+ using namespace std::chrono_literals;
+@@ -77,6 +78,11 @@
+ {
+     m_pollFreeSpace.setInterval(s_pollFreeSpaceInterval);
+     connect(&m_pollFreeSpace, &QTimer::timeout, this, QOverload<>::of(&KFilePlacesViewDelegate::checkFreeSpace));
++    // [CHANGE: claude-code | 2026-11-09] DECISION 182: follow ~/.config/luminos/style.json live
++    LuminosFiles::Style::self().onChange(this, [this] {
++        m_view->doItemsLayout();
++        m_view->viewport()->update();
++    });
+ }
+ 
+ KFilePlacesViewDelegate::~KFilePlacesViewDelegate()
+@@ -86,11 +92,12 @@
+ 
+ QSize KFilePlacesViewDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
+ {
+-    QStyleOptionViewItem hintOption(option);
+-    hintOption.features |= QStyleOptionViewItem::HasDecoration;
+-    hintOption.decorationSize = {m_iconSize, m_iconSize};
+-
+-    int height = QApplication::style()->sizeFromContents(QStyle::CT_ItemViewItem, &hintOption, {}, option.widget).height();
++    // [CHANGE: claude-code | 2026-11-09] DECISION 182: Luminos row = round icon disc + name (+ free-space bar for drives)
++    const auto &lx = LuminosFiles::Style::self();
++    int height = qMax(lx.px("filesPlaceRowPx", 44, 24, 96), option.fontMetrics.height() + 12);
++    if (index.data(KFilePlacesModel::CapacityBarRecommendedRole).toBool()) {
++        height += luminosCapacityExtra(option);
++    }
+ 
+     if (m_appearingItems.contains(index)) {
+         height *= m_appearingHeightScale;
+@@ -158,7 +165,36 @@
+ 
+     m_dragStarted = false;
+ 
+-    QApplication::style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter);
++    // [CHANGE: claude-code | 2026-11-09] DECISION 182: Luminos look — pill background, icon in a
++    // round disc, small free-space bar + "x free of y" for drives. Values: ~/.config/luminos/style.json.
++    const auto &lx = LuminosFiles::Style::self();
++    const int gap = lx.px("filesPlaceGapPx", 2, 0, 12);
++    const int discPx = lx.px("filesPlaceDiscPx", 30, 0, 64);
++    const int glyphPx = lx.px("filesPlaceGlyphPx", 18, 8, 48);
++    const int padL = lx.px("filesPlacePadPx", 9, 0, 40);
++    const int radiusSetting = lx.px("filesPlaceRadiusPx", -1, -1, 40);
++    const bool isLTR = opt.direction == Qt::LeftToRight;
++
++    QRect body = opt.rect.adjusted(2, gap / 2, -2, -(gap - gap / 2));
++    const bool selected = opt.state & QStyle::State_Selected;
++    const bool hovered = opt.state & QStyle::State_MouseOver;
++    const QPalette::ColorGroup cgp = !(opt.state & QStyle::State_Enabled) ? QPalette::Disabled
++        : m_view->isActiveWindow()                                       ? QPalette::Active
++                                                                          : QPalette::Inactive;
++    const QColor winC = opt.palette.color(cgp, QPalette::Window);
++    const QColor textC = opt.palette.color(cgp, QPalette::WindowText);
++    const QColor hiC = opt.palette.color(cgp, QPalette::Highlight);
++    if (selected || hovered) {
++        const qreal mixAmt = selected ? lx.num("filesPlaceSelMix", 100, 0, 100) / 100.0 : lx.num("filesPlaceHoverMix", 8, 0, 100) / 100.0;
++        const QColor bg = KColorUtils::mix(winC, selected ? hiC : textC, mixAmt);
++        const qreal r = radiusSetting < 0 ? body.height() / 2.0 : qMin<qreal>(radiusSetting, body.height() / 2.0);
++        painter->save();
++        painter->setRenderHint(QPainter::Antialiasing, true);
++        painter->setPen(Qt::NoPen);
++        painter->setBrush(bg);
++        painter->drawRoundedRect(QRectF(body), r, r);
++        painter->restore();
++    }
+ 
+     const auto accessibility = placesModel->deviceAccessibility(index);
+     const bool isBusy = (accessibility == KFilePlacesModel::SetupInProgress || accessibility == KFilePlacesModel::TeardownInProgress)
+@@ -171,13 +207,19 @@
+         actionIcon = QIcon::fromTheme(QStringLiteral("media-eject"));
+     }
+ 
+-    bool isLTR = opt.direction == Qt::LeftToRight;
+-    const int iconAreaWidth = s_lateralMargin + m_iconSize;
++    const bool capacityRow = placesModel->data(index, KFilePlacesModel::CapacityBarRecommendedRole).toBool();
++    const int capExtra = capacityRow ? luminosCapacityExtra(opt) : 0;
++    // the name/disc line is the top part of the row; drives add the bar + free text below it
++    QRect line = body;
++    line.setHeight(body.height() - capExtra);
++
++    const int iconBox = discPx > 0 ? discPx : glyphPx;
+     const int actionAreaWidth = !actionIcon.isNull() ? s_lateralMargin + actionIconSize() : s_lateralMargin;
+-    QRect rectText((isLTR ? iconAreaWidth : actionAreaWidth) + s_lateralMargin,
+-                   opt.rect.top(),
+-                   opt.rect.width() - iconAreaWidth - actionAreaWidth - 2 * s_lateralMargin,
+-                   opt.rect.height());
++    const QRect iconRect(isLTR ? body.left() + padL : body.right() - padL - iconBox + 1,
++                         line.top() + (line.height() - iconBox) / 2, iconBox, iconBox);
++    const int textLeft = isLTR ? iconRect.right() + 1 + lx.px("filesPlaceTextGapPx", 12, 0, 40) : body.left() + actionAreaWidth + s_lateralMargin;
++    const int textRight = isLTR ? body.right() - actionAreaWidth - s_lateralMargin : iconRect.left() - lx.px("filesPlaceTextGapPx", 12, 0, 40);
++    QRect rectText(textLeft, line.top(), qMax(0, textRight - textLeft), line.height());
+ 
+     const QPalette activePalette = KIconLoader::global()->customPalette();
+     const bool changePalette = activePalette != opt.palette;
+@@ -185,27 +227,47 @@
+         KIconLoader::global()->setCustomPalette(opt.palette);
+     }
+ 
+-    const bool selectedAndActive = (opt.state & QStyle::State_Selected) && (opt.state & QStyle::State_Active);
+-    QIcon::Mode mode = selectedAndActive ? QIcon::Selected : QIcon::Normal;
+-    QIcon icon = index.model()->data(index, Qt::DecorationRole).value<QIcon>();
+-    QPixmap pm = icon.pixmap(m_iconSize, m_iconSize, mode);
+-    QPoint point(isLTR ? opt.rect.left() + s_lateralMargin : opt.rect.right() - s_lateralMargin - m_iconSize,
+-                 opt.rect.top() + (opt.rect.height() - m_iconSize) / 2);
+-    painter->drawPixmap(point, pm);
++    const QIcon icon = index.model()->data(index, Qt::DecorationRole).value<QIcon>();
++    const qreal dpr = painter->device() ? painter->device()->devicePixelRatioF() : qApp->devicePixelRatio();
++    if (discPx > 0) {
++        // Active colours even when the window is in the background, so the discs never turn grey
++        // accent = the colour scheme's focus colour (lavender in Luminos), glyph = dark ink on it
++        const QColor accent = KColorScheme(QPalette::Active, KColorScheme::Window).decoration(KColorScheme::FocusColor).color();
++        const QColor discC = KColorUtils::mix(accent, winC, lx.num("filesPlaceDiscDim", 0, 0, 100) / 100.0);
++        const QColor glyphC = KColorUtils::mix(winC, accent, lx.num("filesPlaceGlyphInk", 12, 0, 100) / 100.0);
++        painter->save();
++        painter->setRenderHint(QPainter::Antialiasing, true);
++        painter->setPen(Qt::NoPen);
++        painter->setBrush(discC);
++        painter->drawEllipse(QRectF(iconRect));
++        // glyph = the icon's shape, filled with one colour (so every icon reads as a symbol)
++        QImage img = icon.pixmap(QSize(glyphPx, glyphPx), dpr, QIcon::Normal).toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
++        {
++            QPainter ip(&img);
++            ip.setCompositionMode(QPainter::CompositionMode_SourceIn);
++            ip.fillRect(img.rect(), glyphC);
++        }
++        const QSizeF gs = QSizeF(img.size()) / img.devicePixelRatio();
++        painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
++        painter->drawImage(QRectF(QPointF(iconRect.center().x() + 0.5 - gs.width() / 2.0, iconRect.center().y() + 0.5 - gs.height() / 2.0), gs), img);
++        painter->restore();
++    } else {
++        const QPixmap pm = icon.pixmap(QSize(glyphPx, glyphPx), dpr, selected ? QIcon::Selected : QIcon::Normal);
++        painter->drawPixmap(iconRect.topLeft(), pm);
++    }
+ 
+     if (!actionIcon.isNull()) {
+         const int iconSize = actionIconSize();
+         QIcon::Mode mode = QIcon::Normal;
+-        if (selectedAndActive) {
+-            mode = QIcon::Selected;
+-        } else if (m_hoveredAction == index) {
++        if (m_hoveredAction == index) {
+             mode = QIcon::Active;
+         }
+ 
+         const QPixmap pixmap = actionIcon.pixmap(iconSize, iconSize, mode);
+ 
++        // same spot as stock KIO, so clicking it still ejects (pointIsTeardownAction)
+         const QRectF rect(isLTR ? opt.rect.right() - actionAreaWidth : opt.rect.left() + s_lateralMargin,
+-                          opt.rect.top() + (opt.rect.height() - iconSize) / 2,
++                          line.top() + (line.height() - iconSize) / 2,
+                           iconSize,
+                           iconSize);
+ 
+@@ -230,66 +292,56 @@
+         }
+     }
+ 
+-    if (selectedAndActive) {
+-        painter->setPen(opt.palette.highlightedText().color());
+-    } else {
+-        painter->setPen(opt.palette.text().color());
+-    }
++    painter->setPen(textC);
+ 
+-    if (placesModel->data(index, KFilePlacesModel::CapacityBarRecommendedRole).toBool()) {
++    if (capacityRow) {
+         const auto info = m_freeSpaceInfo.value(persistentIndex);
+ 
+         checkFreeSpace(index); // async
+ 
++        const int barH = lx.px("filesPlaceBarPx", 4, 1, 12);
++        const QRect barRect(rectText.left(), line.bottom() + 1, qMax(0, body.right() - lx.px("filesPlacePadPx", 9, 0, 40) - rectText.left()), barH);
++        QColor capacityBgColor = textC;
++        capacityBgColor.setAlphaF(0.14 * capacityBgColor.alphaF());
++        painter->save();
++        painter->setRenderHint(QPainter::Antialiasing, true);
++        painter->setPen(Qt::NoPen);
++        painter->setBrush(capacityBgColor);
++        painter->drawRoundedRect(QRectF(barRect), barH / 2.0, barH / 2.0);
+         if (info.size > 0) {
+-            const int capacityBarHeight = std::ceil(m_iconSize / 8.0);
+             const qreal usedSpace = info.used / qreal(info.size);
+-
+-            // Vertically center text + capacity bar, so move text up a bit
+-            rectText.setTop(opt.rect.top() + (opt.rect.height() - opt.fontMetrics.height() - capacityBarHeight) / 2);
+-            rectText.setHeight(opt.fontMetrics.height());
+-
+-            const int radius = capacityBarHeight / 2;
+-            QRect capacityBgRect(rectText.x(), rectText.bottom(), rectText.width(), capacityBarHeight);
+-            QRect capacityFillRect = capacityBgRect;
+-            capacityFillRect.setWidth(capacityFillRect.width() * usedSpace);
+-
+-            QPalette::ColorGroup cg = QPalette::Active;
+-            if (!(opt.state & QStyle::State_Enabled)) {
+-                cg = QPalette::Disabled;
+-            } else if (!m_view->isActiveWindow()) {
+-                cg = QPalette::Inactive;
+-            }
+-
+-            // Adapted from Breeze style's progress bar rendering
+-            QColor capacityBgColor(opt.palette.color(QPalette::WindowText));
+-            capacityBgColor.setAlphaF(0.2 * capacityBgColor.alphaF());
+-
+-            QColor capacityFgColor(selectedAndActive ? opt.palette.color(cg, QPalette::HighlightedText) : opt.palette.color(cg, QPalette::Highlight));
++            QColor capacityFgColor = KColorScheme(QPalette::Active, KColorScheme::Window).decoration(KColorScheme::FocusColor).color();
+             if (usedSpace > 0.95) {
+                 if (!m_warningCapacityBarColor.isValid()) {
+-                    m_warningCapacityBarColor = KColorScheme(cg, KColorScheme::View).foreground(KColorScheme::NegativeText).color();
++                    m_warningCapacityBarColor = KColorScheme(cgp, KColorScheme::View).foreground(KColorScheme::NegativeText).color();
+                 }
+                 capacityFgColor = m_warningCapacityBarColor;
+             }
+-
+-            painter->save();
+-
+-            painter->setRenderHint(QPainter::Antialiasing, true);
+-            painter->setPen(Qt::NoPen);
+-
+-            painter->setBrush(capacityBgColor);
+-            painter->drawRoundedRect(capacityBgRect, radius, radius);
+-
++            QRectF fill(barRect);
++            fill.setWidth(qMax<qreal>(barH, barRect.width() * usedSpace));
+             painter->setBrush(capacityFgColor);
+-            painter->drawRoundedRect(capacityFillRect, radius, radius);
+-
+-            painter->restore();
+-        }
+-    }
++            painter->drawRoundedRect(fill, barH / 2.0, barH / 2.0);
+ 
++            QFont small = opt.font;
++            small.setPointSizeF(small.pointSizeF() * lx.num("filesPlaceSmallScale", 0.82, 0.5, 1.2));
++            painter->setFont(small);
++            QColor dim = textC;
++            dim.setAlphaF(0.55);
++            painter->setPen(dim);
++            const QString freeText = i18nc("@info free disk space", "%1 free of %2", KIO::convertSize(info.size - info.used), KIO::convertSize(info.size));
++            const QRect smallRect(barRect.left(), barRect.bottom() + 3, barRect.width(), QFontMetrics(small).height());
++            painter->drawText(smallRect, Qt::AlignLeft | Qt::AlignTop, QFontMetrics(small).elidedText(freeText, Qt::ElideRight, smallRect.width()));
++        }
++        painter->restore();
++        painter->setPen(textC);
++    }
++
++    QFont nameFont = opt.font;
++    nameFont.setPointSizeF(nameFont.pointSizeF() * lx.num("filesPlaceTextScale", 1.0, 0.6, 1.6));
++    painter->setFont(nameFont);
++    const QFontMetrics nfm(nameFont);
+     const QString text = index.model()->data(index).toString();
+-    const QString elidedText = opt.fontMetrics.elidedText(text, Qt::ElideRight, rectText.width());
++    const QString elidedText = nfm.elidedText(text, Qt::ElideRight, rectText.width());
+ 
+     const bool isElided = (text != elidedText);
+ 
+@@ -304,6 +356,15 @@
+     painter->restore();
+ }
+ 
++// [CHANGE: claude-code | 2026-11-09] DECISION 182: room under a drive's name for its bar + "x free of y"
++int KFilePlacesViewDelegate::luminosCapacityExtra(const QStyleOptionViewItem &option) const
++{
++    const auto &lx = LuminosFiles::Style::self();
++    QFont small = option.font;
++    small.setPointSizeF(small.pointSizeF() * lx.num("filesPlaceSmallScale", 0.82, 0.5, 1.2));
++    return lx.px("filesPlaceBarPx", 4, 1, 12) + 3 + QFontMetrics(small).height() + 6;
++}
++
+ bool KFilePlacesViewDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option, const QModelIndex &index)
+ {
+     if (event->type() == QHelpEvent::ToolTip) {
+@@ -673,8 +734,17 @@
+         ? i18n("%1 (hidden)", groupLabel)
+         : groupLabel;
+ 
++    // [CHANGE: claude-code | 2026-11-09] DECISION 182: small grey capitals, lined up with the discs
++    const auto &lx = LuminosFiles::Style::self();
++    QFont headerFont = option.font;
++    headerFont.setPointSizeF(headerFont.pointSizeF() * lx.num("filesPlaceHeaderScale", 0.8, 0.5, 1.4));
++    headerFont.setWeight(QFont::Medium);
++    if (lx.flag("filesPlaceHeaderCaps", true)) {
++        headerFont.setCapitalization(QFont::AllUppercase);
++        headerFont.setLetterSpacing(QFont::PercentageSpacing, 106);
++    }
+     QRect textRect(option.rect);
+-    textRect.setLeft(textRect.left() + 6);
++    textRect.setLeft(textRect.left() + 2 + lx.px("filesPlacePadPx", 9, 0, 40) + 3);
+     /* Take spacing into account:
+        The spacing to the previous section compensates for the spacing to the first item.*/
+     textRect.setY(textRect.y() /* + qMax(2, m_view->spacing()) - qMax(2, m_view->spacing())*/);
+@@ -687,8 +757,10 @@
+     const QColor c2 = baseColor(option);
+     QColor penColor = mixedColor(c1, c2, 60);
+ 
++    penColor = mixedColor(c1, c2, lx.px("filesPlaceHeaderMix", 50, 10, 100));
+     painter->setPen(penColor);
+-    painter->drawText(textRect, Qt::AlignLeft | Qt::AlignBottom, option.fontMetrics.elidedText(category, Qt::ElideRight, textRect.width()));
++    painter->setFont(headerFont);
++    painter->drawText(textRect, Qt::AlignLeft | Qt::AlignBottom, QFontMetrics(headerFont).elidedText(category, Qt::ElideRight, textRect.width()));
+     painter->restore();
+ }
+ 
+@@ -723,11 +795,12 @@
+ int KFilePlacesViewDelegate::sectionHeaderHeight(const QModelIndex &index) const
+ {
+     Q_UNUSED(index);
+-    // Account for the spacing between header and item
++    // [CHANGE: claude-code | 2026-11-09] DECISION 182: height of the small capitals + room above
++    const auto &lx = LuminosFiles::Style::self();
++    QFont headerFont = m_view->font();
++    headerFont.setPointSizeF(headerFont.pointSizeF() * lx.num("filesPlaceHeaderScale", 0.8, 0.5, 1.4));
+     const int spacing = (s_lateralMargin + m_view->spacing());
+-    int height = m_view->fontMetrics().height() + spacing;
+-    height += 2 * spacing;
+-    return height;
++    return QFontMetrics(headerFont).height() + lx.px("filesPlaceHeaderTopPx", 14, 0, 60) + spacing;
+ }
+ 
+ int KFilePlacesViewDelegate::actionIconSize() const
+diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidgets/kfileplacesview_p.h
+--- kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-09-04 10:01:22.000000000 -0400
++++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-08 20:13:30.034810892 -0500
+@@ -69,6 +69,7 @@
+     void startDrag();
+ 
+     int sectionHeaderHeight(const QModelIndex &index) const;
++    int luminosCapacityExtra(const QStyleOptionViewItem &option) const; // [CHANGE: claude-code | 2026-11-09] DECISION 182
+     bool indexIsSectionHeader(const QModelIndex &index) const;
+     int actionIconSize() const;
+ 
+diff -ruN kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h
+--- kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	1969-12-31 19:00:00.000000000 -0500
++++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-08 20:13:30.034352872 -0500
+@@ -0,0 +1,125 @@
++// [CHANGE: claude-code | 2026-11-09] DECISION 182 — Luminos Files look values.
++// Reads ~/.config/luminos/style.json (the same file the Style Tuner writes) and calls back when it
++// changes, so QtWidgets code (Dolphin, the KIO places panel) can follow the tuner live.
++// Every value has a built-in default equal to the approved prototype, so a missing file or key
++// changes nothing. Header-only: each library that includes it keeps its own copy.
++#pragma once
++
++#include <QCoreApplication>
++#include <QDir>
++#include <QFile>
++#include <QFileSystemWatcher>
++#include <QJsonDocument>
++#include <QJsonObject>
++#include <QPointer>
++#include <QStandardPaths>
++#include <QTimer>
++
++#include <functional>
++#include <vector>
++
++namespace LuminosFiles
++{
++class Style
++{
++public:
++    static Style &self()
++    {
++        static Style s;
++        return s;
++    }
++
++    // number from style.json, clamped; default when missing / not a number
++    double num(const char *key, double def, double lo, double hi) const
++    {
++        const QJsonValue v = m_obj.value(QLatin1String(key));
++        if (v.isDouble()) {
++            return qBound(lo, v.toDouble(), hi);
++        }
++        if (v.isBool()) {
++            return v.toBool() ? qMin(hi, 1.0) : qMax(lo, 0.0);
++        }
++        return def;
++    }
++    int px(const char *key, int def, int lo, int hi) const
++    {
++        return qRound(num(key, def, lo, hi));
++    }
++    bool flag(const char *key, bool def) const
++    {
++        const QJsonValue v = m_obj.value(QLatin1String(key));
++        if (v.isBool()) {
++            return v.toBool();
++        }
++        if (v.isDouble()) {
++            return v.toDouble() != 0;
++        }
++        return def;
++    }
++
++    // run f whenever style.json changes, for as long as ctx lives
++    void onChange(QObject *ctx, std::function<void()> f)
++    {
++        m_callbacks.push_back({QPointer<QObject>(ctx), std::move(f)});
++    }
++
++private:
++    Style()
++    {
++        load();
++        if (!QCoreApplication::instance()) {
++            return;
++        }
++        m_watcher = new QFileSystemWatcher(QCoreApplication::instance());
++        m_debounce = new QTimer(m_watcher);
++        m_debounce->setSingleShot(true);
++        m_debounce->setInterval(60);
++        QObject::connect(m_debounce, &QTimer::timeout, m_watcher, [this] {
++            load();
++            rewatch();
++            for (auto &c : m_callbacks) {
++                if (c.ctx) {
++                    c.f();
++                }
++            }
++        });
++        QObject::connect(m_watcher, &QFileSystemWatcher::fileChanged, m_debounce, qOverload<>(&QTimer::start));
++        QObject::connect(m_watcher, &QFileSystemWatcher::directoryChanged, m_debounce, qOverload<>(&QTimer::start));
++        rewatch();
++    }
++    static QString dir()
++    {
++        return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/luminos");
++    }
++    static QString path()
++    {
++        return dir() + QStringLiteral("/style.json");
++    }
++    void load()
++    {
++        QFile f(path());
++        m_obj = f.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(f.readAll()).object() : QJsonObject();
++    }
++    void rewatch()
++    {
++        if (!m_watcher) {
++            return;
++        }
++        if (QFile::exists(path()) && !m_watcher->files().contains(path())) {
++            m_watcher->addPath(path()); // editors replace the file, so re-add every time
++        }
++        if (QDir(dir()).exists() && !m_watcher->directories().contains(dir())) {
++            m_watcher->addPath(dir());
++        }
++    }
++
++    struct Callback {
++        QPointer<QObject> ctx;
++        std::function<void()> f;
++    };
++    QJsonObject m_obj;
++    QFileSystemWatcher *m_watcher = nullptr;
++    QTimer *m_debounce = nullptr;
++    std::vector<Callback> m_callbacks;
++};
++}
