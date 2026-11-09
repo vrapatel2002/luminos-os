@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Desktop Settings Mock</title>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --page:#0f0f12; --win:#1c1b1f; --panel:#232228; --card:#2a2930; --card2:#323139; --hover:#36353d; --sel:#45455c; --line:#ffffff0f;
+  --text:#e5e1e7; --dim:#b0acb8; --faint:#7e7a86; --accent:#c2c1ff; --ink:#2b2a4a; --good:#b6e7c2; --warn:#f3d39b;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){color-scheme:dark}}
+:root[data-theme="dark"]{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--text);font-family:"Google Sans Flex",system-ui,sans-serif;font-size:14.5px}
+button,input,select{font:inherit;color:inherit}
+.head{max-width:1120px;margin:0 auto;padding:18px 16px 6px;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.head h1{margin:0;font-size:19px;font-weight:500}.head p{margin:0;color:var(--faint);font-size:13px}
+.seg0{display:inline-flex;background:var(--card);border-radius:999px;padding:3px;margin-left:auto}
+.seg0 button{border:0;background:none;color:var(--dim);font-size:13px;padding:6px 14px;border-radius:999px;cursor:pointer}
+.seg0 button.on{background:var(--accent);color:var(--ink);font-weight:500}
+
+.win{max-width:1120px;height:780px;margin:8px auto 18px;background:var(--win);border-radius:22px;box-shadow:0 24px 60px #000b;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.title{height:46px;display:flex;align-items:center;justify-content:flex-end;padding:0 10px;gap:4px;flex:none}
+.title span{width:34px;height:30px;display:grid;place-items:center;border-radius:8px;color:var(--dim);cursor:default}
+.title span:hover{background:var(--hover)}
+.title svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
+.body{flex:1;display:flex;min-height:0}
+.side{width:268px;flex:none;padding:4px 10px 16px 14px;overflow:auto;display:flex;flex-direction:column}
+.search{height:44px;border-radius:999px;background:var(--card);display:flex;align-items:center;gap:10px;padding:0 16px;margin:0 2px 12px;color:var(--faint)}
+.search svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2}
+.search input{border:0;background:none;outline:0;flex:1;min-width:0}
+.cat{font-size:12px;color:var(--faint);margin:10px 14px 6px}
+.nav{display:flex;align-items:center;gap:14px;padding:9px 12px;border-radius:22px;cursor:pointer;margin-bottom:3px;background:var(--panel)}
+.nav.first{border-radius:22px 22px 6px 6px}.nav.mid{border-radius:6px}.nav.last{border-radius:6px 6px 22px 22px}.nav.only{border-radius:22px}
+.nav:hover{background:var(--hover)}
+.nav.on{background:var(--sel);border-radius:999px}
+.disc{width:40px;height:40px;border-radius:50%;background:var(--accent);display:grid;place-items:center;flex:none;color:var(--ink)}
+.disc svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.nav b{display:block;font-weight:500}.nav small{display:block;color:var(--faint);font-size:12.5px;margin-top:1px}
+.hole{flex:1;min-width:0;margin:0 12px 12px 0;background:#131317;border-radius:24px;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.scroll{flex:1;overflow:auto;padding:26px 30px 100px}
+.inner{max-width:760px;margin:0 auto}
+h2{font-size:28px;font-weight:400;margin:0 0 18px}
+.sec{font-size:12.5px;color:var(--faint);margin:22px 6px 8px}
+.card{background:var(--panel);border-radius:24px;overflow:hidden}
+.row{display:flex;align-items:center;gap:14px;padding:14px 20px;min-height:60px;border-top:3px solid #131317}
+.row:first-child{border-top:0}
+.row .t{flex:1;min-width:0}.row .t b{display:block;font-weight:400}.row .t small{display:block;color:var(--faint);font-size:12.5px;margin-top:2px}
+.row.click{cursor:pointer}.row.click:hover{background:var(--card)}
+.sw{width:46px;height:28px;border-radius:999px;background:var(--hover);position:relative;flex:none;cursor:pointer;transition:.15s}
+.sw:after{content:"";position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:50%;background:var(--faint);transition:.15s}
+.sw.on{background:var(--accent)}.sw.on:after{left:22px;background:var(--ink)}
+.pill{height:38px;border-radius:999px;border:0;background:var(--card2);padding:0 16px;display:inline-flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap}
+.pill:hover{background:var(--hover)}
+.pill.acc{background:var(--accent);color:var(--ink);font-weight:500}
+.pill svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.segs{display:flex;background:var(--card);border-radius:999px;padding:3px;gap:2px;flex-wrap:wrap}
+.segs button{border:0;background:none;border-radius:999px;padding:8px 14px;cursor:pointer;color:var(--dim);font-size:13.5px}
+.segs button.on{background:var(--accent);color:var(--ink);font-weight:500}
+select.dd{appearance:none;height:38px;border-radius:999px;border:0;background:var(--card2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23b0acb8' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 14px center;padding:0 36px 0 16px;cursor:pointer;max-width:240px}
+input[type=range]{accent-color:var(--accent);width:180px}
+.val{min-width:44px;text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
+.chev{color:var(--faint)}
+/* wallpaper */
+.hero{display:flex;gap:22px;align-items:center;padding:20px}
+.monitor{width:260px;flex:none}
+.screen{aspect-ratio:16/9;border-radius:12px;overflow:hidden;position:relative;box-shadow:0 0 0 6px #0b0b0e,0 10px 30px #0008}
+.screen .art{position:absolute;inset:0}
+.screen .live{position:absolute;left:8px;bottom:8px;font-size:11px;background:#000a;padding:2px 8px;border-radius:999px;display:flex;gap:6px;align-items:center}
+.screen .live i{width:6px;height:6px;border-radius:50%;background:#f66;display:block}
+.stand{width:70px;height:12px;margin:8px auto 0;background:#0b0b0e;border-radius:0 0 8px 8px}
+.hero .info{flex:1;min-width:0}
+.hero .info b{font-size:18px;font-weight:500;display:block;word-break:break-word}
+.hero .info small{color:var(--faint);display:block;margin:4px 0 14px}
+.hero .acts{display:flex;gap:8px;flex-wrap:wrap}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:16px 20px 20px}
+.wp{cursor:pointer;border-radius:16px;padding:6px;position:relative}
+.wp:hover{background:var(--card)}
+.wp .th{aspect-ratio:16/10;border-radius:12px;overflow:hidden;position:relative;outline:3px solid transparent;outline-offset:2px}
+.wp.on .th{outline-color:var(--accent)}
+.wp .th .tag{position:absolute;top:6px;left:6px;font-size:10.5px;background:#000a;padding:2px 7px;border-radius:999px}
+.wp .ok{position:absolute;top:12px;right:12px;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--ink);display:none;place-items:center;font-size:13px;font-weight:700}
+.wp.on .ok{display:grid}
+.wp .nm{font-size:13.5px;margin:7px 4px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wp .kd{font-size:11.5px;color:var(--faint);margin:1px 4px 0}
+.wp.add .th{display:grid;place-items:center;background:var(--card);color:var(--dim);border:2px dashed #ffffff22}
+.colors{display:flex;gap:8px}
+.colors span{width:26px;height:26px;border-radius:50%;cursor:pointer;outline:2px solid transparent;outline-offset:2px}
+.colors span.on{outline-color:var(--accent)}
+.more{display:flex;align-items:center;gap:10px;padding:14px 20px;cursor:pointer;color:var(--dim)}
+.more svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;transition:.15s}
+.more.open svg{transform:rotate(90deg)}
+/* mouse */
+.kbd{min-width:120px;height:34px;border-radius:999px;background:var(--card);display:inline-flex;align-items:center;justify-content:center;padding:0 14px;font-size:13px;color:var(--dim);gap:6px}
+.kbd svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+.x{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:var(--faint)}
+.x:hover{background:var(--hover);color:var(--text)}
+.x svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+/* radios */
+.radio{width:22px;height:22px;border-radius:50%;border:2px solid var(--faint);flex:none;display:grid;place-items:center}
+.radio.on{border-color:var(--accent)}.radio.on:after{content:"";width:10px;height:10px;border-radius:50%;background:var(--accent)}
+.field{height:40px;border-radius:999px;background:var(--card);display:flex;align-items:center;padding:0 6px 0 16px;gap:8px;flex:1;min-width:0}
+.field input{border:0;background:none;outline:0;flex:1;min-width:0}
+.ck{width:20px;height:20px;border-radius:6px;border:2px solid var(--faint);flex:none;display:grid;place-items:center;cursor:pointer}
+.ck.on{background:var(--accent);border-color:var(--accent)}.ck.on:after{content:"";width:9px;height:5px;border:2.5px solid var(--ink);border-top:0;border-right:0;transform:rotate(-45deg) translate(1px,-1px)}
+.types{max-height:260px;overflow:auto}
+/* icons preview */
+.mini{display:grid;gap:6px;padding:14px;background:#0004;border-radius:14px;margin:0 20px 16px}
+.mini div{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--dim)}
+.mini i{border-radius:22%;display:block;background:color-mix(in srgb,var(--accent) 34%,#26262b)}
+/* footer */
+.foot{position:absolute;left:0;right:0;bottom:0;padding:14px 22px;display:flex;justify-content:flex-end;gap:10px;align-items:center;background:linear-gradient(transparent,#131317 30%);pointer-events:none}
+.foot>*{pointer-events:auto}
+.foot .note{margin-right:auto;color:var(--faint);font-size:13px}
+.changed{background:var(--card2);border-radius:999px;padding:6px 6px 6px 18px;display:flex;align-items:center;gap:10px;box-shadow:0 10px 30px #0009}
+.toast{position:absolute;left:50%;bottom:84px;transform:translateX(-50%);background:var(--text);color:#1b1b1f;border-radius:999px;padding:9px 18px;font-size:13.5px;box-shadow:0 10px 28px #000a;z-index:5}
+/* old mode */
+.old .nav{flex-direction:column;text-align:center;border-radius:28px !important;padding:22px 8px;background:var(--panel)}
+.old .nav small,.old .search,.old .cat{display:none}
+.old .disc{background:none;color:var(--text)}
+.old .hole{background:var(--win);border-radius:0;margin:0}
+.notes{max-width:1120px;margin:0 auto 50px;padding:0 16px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.gc{background:var(--win);border-radius:18px;padding:18px 20px;color:var(--dim);line-height:1.55}
+.gc h3{margin:0 0 8px;font-size:15.5px;font-weight:500;color:var(--text)}
+.gc ul{margin:0;padding-left:18px}.gc li{margin:3px 0}
+@media (max-width:860px){.win{height:auto;min-height:760px}.side{width:84px;padding:4px 6px}.nav{justify-content:center;padding:9px}.nav .t,.search,.cat{display:none}.notes{grid-template-columns:1fr}.hero{flex-direction:column;align-items:stretch}.monitor{width:100%}.scroll{padding:18px 14px 100px}}
+</style>
+</head>
+<body>
+<div class="head">
+  <h1>Desktop settings — redesign</h1>
+  <p>The window from right-click → Configure Desktop and Wallpaper. Everything is clickable.</p>
+  <div class="seg0" id="mode"><button data-v="old">Today</button><button data-v="new" class="on">Proposed</button></div>
+</div>
+<div class="win" id="win"></div>
+<div class="notes">
+  <div class="gc"><h3>What changes</h3><ul>
+    <li><b>Sidebar like System Settings:</b> rows with a round icon, a title and a one-line hint, search on top — instead of six big boxes.</li>
+    <li><b>Wallpaper page starts with what you have now:</b> a preview of your desktop, the file name, and the actions next to it.</li>
+    <li><b>Installed wallpapers</b> are a proper grid with a tick on the one in use, a "Live / Video / Web" tag, and an Add tile.</li>
+    <li><b>Settings in cards with switches</b> (power, sound, interaction) instead of a long form of checkboxes; rarely used ones fold under "More options".</li>
+    <li><b>Mouse actions, Location, Icons, Filter</b> get the same rows-and-switches style; Icons shows a live mini preview.</li>
+    <li><b>OK / Apply / Cancel</b> become a small bar that only appears when something changed (Apply keeps the window, Close asks if you have unsaved changes).</li>
+  </ul></div>
+  <div class="gc"><h3>What it touches</h3><ul>
+    <li>The window frame + sidebar: <code>plasma-desktop</code> — already a Luminos fork (DECISION 140), so this is one more patch there.</li>
+    <li>The wallpaper page: our own <b>Luminos Live Wallpaper</b> plugin's settings page.</li>
+    <li>Mouse/Location/Icons/Filter pages: same <code>plasma-desktop</code> fork (Folder View settings).</li>
+    <li>Every setting keeps its current meaning and storage — only the look and grouping change.</li>
+    <li>Other wallpaper types (Image, Slideshow, Colour…) keep KDE's own page inside the new frame.</li>
+  </ul></div>
+</div>
+<script>
+const I={
+ wall:'M3 5h18v12H3zM8 21h8M12 17v4',mouse:'M12 3a6 6 0 0 0-6 6v6a6 6 0 0 0 12 0V9a6 6 0 0 0-6-6zM12 3v6',folder:'M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2h7A2.5 2.5 0 0 1 21 9.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z',
+ grid:'M5 5h3v3H5zM10.5 5h3v3h-3zM16 5h3v3h-3zM5 10.5h3v3H5zM10.5 10.5h3v3h-3zM16 10.5h3v3h-3zM5 16h3v3H5zM10.5 16h3v3h-3zM16 16h3v3h-3z',
+ filter:'M4 5h16l-6 8v6l-4-2v-4z',info:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7.5h.01',search:'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4',
+ min:'M5 12h14',max:'M5 5h14v14H5z',close:'M6 6l12 12M18 6L6 18',upload:'M12 16V4m0 0l-4 4m4-4l4 4M5 20h14',plus:'M12 5v14M5 12h14',play:'M8 5v14l11-7z',pause:'M7 5h4v14H7zM13 5h4v14h-4z',
+ chev:'M9 6l6 6-6 6',x:'M6 6l12 12M18 6L6 18',kb:'M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14h8',shuffle:'M4 6h4l8 12h4M4 18h4l2.5-3.75M14 9.75 16 6h4M18 3l3 3-3 3M18 15l3 3-3 3',open:'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6'
+};
+const S=k=>`<svg viewBox="0 0 24 24"><path d="${I[k]}"/></svg>`;
+const ART={
+ arle:'radial-gradient(ellipse at 70% 40%,#f4d6d0 0 18%,transparent 19%),radial-gradient(circle at 74% 30%,#2a4a8a 0 4%,transparent 5%),linear-gradient(120deg,#111 0 55%,#e8c9c2 56% 70%,#111 71%)',
+ living:'linear-gradient(160deg,#bdb6b0,#6d6560 60%,#3b3633)',medusae:'radial-gradient(circle at 50% 50%,#c879ff 0 10%,#6a2ca8 22%,#120a1c 45%,#0a0710)',
+ tunnel:'radial-gradient(circle at 50% 50%,#1b1b3a 0 12%,#ff4fb3 13% 16%,#2a6fd1 22%,#0b0b20 48%)',musictv:'radial-gradient(circle at 50% 55%,#1b1a14 0 20%,#c98a12 21%,#7a4e05 70%)',
+ rain:'linear-gradient(180deg,#5b78c0,#3d5ea6 50%,#2c4a2e 75%,#1e3020)',sys:'linear-gradient(135deg,#ececec,#bdbdbd)',star:'radial-gradient(circle at 30% 30%,#fff 0 1px,transparent 2px),radial-gradient(circle at 70% 60%,#fff 0 1px,transparent 2px),#060a18'
+};
+const WALLS=[
+ {id:'arle',n:'arlecchino-girl-behind-the-curtain',k:'Video',file:'/home/shawn/Downloads/arlecchino-girl-behind-the-curtain.3840x2160.mp4',props:[]},
+ {id:'living',n:'Living Room',k:'Web · 3D',props:[['Mouse parallax','sw',1],['Show the TV','sw',1],['Light','range',60]]},
+ {id:'medusae',n:'Medusae',k:'Web',props:[['Speed','range',40],['Colour','color',0]]},
+ {id:'tunnel',n:'Music Tunnel',k:'Web · audio',props:[['React to music','sw',1],['Glow','range',70]]},
+ {id:'musictv',n:'Music TV (LQ)',k:'Web · audio',props:[['Show cover art','sw',1]]},
+ {id:'rain',n:'Rain',k:'Shader',props:[['Rain amount','range',55],['Blur','range',30]]},
+ {id:'sys',n:'Simple System',k:'Web · stats',props:[['Units','seg',0]]},
+ {id:'star',n:'Starfield',k:'Shader',props:[['Star count','range',50],['Speed','range',35]]}
+];
+const st={mode:'new',page:'wall',type:'Luminos Live Wallpaper',layout:'Folder View',cur:'arle',playing:true,more:false,dirty:false,toast:null,
+ v:{battery:1,hidden:1,mute:1,audio:1,clicks:0,stats:0,fit:'Fill and crop',bg:'#000000'},
+ mouse:[['Right click','Standard menu'],['Middle click','Paste'],['Scroll up / down','Switch virtual desktop'],['Ctrl + Right click','Application launcher']],
+ loc:0,locPath:'~/Desktop',ic:{arr:0,align:0,sort:0,size:3,width:1,lines:2,lock:0,prev:1,popup:1,tip:1,sel:1},
+ flt:0,pattern:'*',types:{'Folders':1,'Images':1,'Videos':1,'Documents':1,'Archives':1,'Scripts':1,'Desktop shortcuts':1,'Other files':1}};
+const PAGES=[['wall','wall','Wallpaper','Picture, video or live scene'],['mouse','mouse','Mouse actions','What each click on the desktop does'],['loc','folder','Location','Which folder the desktop shows'],['icons','grid','Icons','Size, layout and sorting'],['filter','filter','Filter','Which files appear'],['about','info','About','Version and credits']];
+const win=document.getElementById('win');
+const sw=on=>`<span class="sw ${on?'on':''}"></span>`;
+function mark(){st.dirty=true}
+function render(){
+  win.classList.toggle('old',st.mode==='old');
+  let h=`<div class="title"><span>${S('min')}</span><span>${S('max')}</span><span>${S('close')}</span></div><div class="body"><aside class="side">
+   <div class="search">${S('search')}<input placeholder="Search desktop settings"></div><div class="cat">Desktop & wallpaper</div>`;
+  PAGES.forEach(([id,ic,t,s],i)=>{const pos=PAGES.length===1?'only':i===0?'first':i===PAGES.length-1?'last':'mid';
+    h+=`<div class="nav ${pos} ${st.page===id?'on':''}" data-a="page" data-v="${id}"><span class="disc">${S(ic)}</span><span class="t"><b>${t}</b><small>${s}</small></span></div>`});
+  h+=`</aside><section class="hole"><div class="scroll"><div class="inner">${page()}</div></div>`;
+  if(st.mode==='old')h+=`<div class="foot"><button class="pill">✓ OK</button><button class="pill" style="opacity:.5">✓ Apply</button><button class="pill">⦸ Cancel</button></div>`;
+  else h+=`<div class="foot">${st.dirty?`<div class="changed">Unsaved changes<button class="pill" data-a="revert">Undo</button><button class="pill acc" data-a="apply">Apply</button></div>`:`<span class="note">Changes need Apply · nothing changed yet</span>`}</div>`;
+  if(st.toast)h+=`<div class="toast">${st.toast}</div>`;
+  h+=`</section></div>`;
+  win.innerHTML=h;
+}
+function curW(){return WALLS.find(w=>w.id===st.cur)}
+function page(){
+  const p=st.page;
+  if(p==='wall'){
+    const w=curW();
+    let h=`<h2>Wallpaper</h2>
+    <div class="card"><div class="hero"><div class="monitor"><div class="screen"><div class="art" style="background:${ART[w.id]}"></div>${st.playing?'<span class="live"><i></i>Playing</span>':'<span class="live">Paused</span>'}</div><div class="stand"></div></div>
+      <div class="info"><b>${w.n}</b><small>${w.k}${w.file?' · '+w.file.replace('/home/shawn','~'):''}</small>
+      <div class="acts"><button class="pill acc" data-a="choose">${S('upload')}Choose file…</button><button class="pill" data-a="play">${S(st.playing?'pause':'play')}${st.playing?'Pause':'Play'}</button><button class="pill" data-a="random">${S('shuffle')}Surprise me</button></div></div></div>
+      <div class="row"><span class="t"><b>Wallpaper type</b><small>Luminos Live plays videos, web pages and shaders</small></span><select class="dd" data-a="type">${['Luminos Live Wallpaper','Image','Slideshow','Plain colour','Picture of the Day'].map(o=>`<option ${o===st.type?'selected':''}>${o}</option>`).join('')}</select></div>
+      <div class="row"><span class="t"><b>Desktop layout</b><small>Folder View shows your desktop files; Desktop shows none</small></span><div class="segs">${['Folder View','Desktop'].map(o=>`<button class="${o===st.layout?'on':''}" data-a="layout" data-v="${o}">${o}</button>`).join('')}</div></div>
+    </div>`;
+    if(st.type!=='Luminos Live Wallpaper'){return h+`<div class="sec">${st.type}</div><div class="card"><div class="row"><span class="t"><b>KDE's own ${st.type.toLowerCase()} settings appear here</b><small>Shown inside the new frame unchanged</small></span></div></div>`}
+    h+=`<div class="sec">Installed wallpapers · ${WALLS.length}</div><div class="card"><div class="grid">`+WALLS.map(x=>`<div class="wp ${x.id===st.cur?'on':''}" data-a="pick" data-v="${x.id}"><div class="th" style="background:${ART[x.id]}"><span class="tag">${x.k.split(' ')[0]}</span></div><span class="ok">✓</span><div class="nm">${x.n}</div><div class="kd">${x.k}</div></div>`).join('')+
+      `<div class="wp add" data-a="install"><div class="th">${S('plus').replace('<svg','<svg style="width:28px;height:28px;stroke:currentColor;fill:none;stroke-width:2"')}</div><div class="nm">Add wallpaper…</div><div class="kd">Video, web page or Lively zip</div></div></div></div>`;
+    h+=`<div class="sec">${w.props.length?'This wallpaper':'Picture'}</div><div class="card">`;
+    if(w.props.length)h+=w.props.map((pr,i)=>prop(pr,i)).join('');
+    h+=`<div class="row"><span class="t"><b>Fit</b><small>How it fills the screen</small></span><select class="dd" data-a="fit">${['Fill and crop','Keep proportions','Stretch','Centre'].map(o=>`<option ${o===st.v.fit?'selected':''}>${o}</option>`).join('')}</select></div></div>`;
+    h+=`<div class="sec">Power and sound</div><div class="card">
+      <div class="row click" data-a="tog" data-v="battery"><span class="t"><b>Pause on battery</b><small>Saves power when unplugged</small></span>${sw(st.v.battery)}</div>
+      <div class="row"><span class="t"><b>Stop when hidden</b><small>When a window covers the desktop</small></span><select class="dd" data-a="hiddenSel"><option>Never</option><option>Only under a fullscreen window</option><option selected>Under any maximised window</option></select></div>
+      <div class="row click" data-a="tog" data-v="mute"><span class="t"><b>Mute the wallpaper</b><small>Videos and pages play without sound</small></span>${sw(st.v.mute)}</div>
+      <div class="row click" data-a="tog" data-v="audio"><span class="t"><b>React to what is playing</b><small>Audio-reactive wallpapers move with your music</small></span>${sw(st.v.audio)}</div></div>`;
+    h+=`<div class="card" style="margin-top:12px"><div class="more ${st.more?'open':''}" data-a="more">${S('chev')}More options</div>`;
+    if(st.more)h+=`<div class="row click" data-a="tog" data-v="clicks"><span class="t"><b>Let web wallpapers take clicks</b><small>Off = clicks always go to your desktop icons</small></span>${sw(st.v.clicks)}</div>
+      <div class="row click" data-a="tog" data-v="stats"><span class="t"><b>Give pages live system stats</b><small>CPU, memory and temperature for system-monitor wallpapers</small></span>${sw(st.v.stats)}</div>
+      <div class="row"><span class="t"><b>Background colour</b><small>Shows around a "Keep proportions" picture</small></span><div class="colors">${['#000000','#1c1b1f','#2b2a4a','#3d5ea6','#e5e1e7'].map(c=>`<span style="background:${c}" class="${c===st.v.bg?'on':''}" data-a="bg" data-v="${c}"></span>`).join('')}</div></div>
+      <div class="row"><span class="t"><b>Built-in scene when no file is set</b></span><select class="dd"><option>Shader — animated rings</option><option>Spectrum — audio bars</option><option>Aurora</option><option>Particles</option><option>System monitor</option></select></div>`;
+    return h+`</div>`;
+  }
+  if(p==='mouse'){
+    return `<h2>Mouse actions</h2><div class="sec">On the empty desktop</div><div class="card">`+st.mouse.map(([b,a],i)=>`<div class="row"><span class="kbd">${S('mouse')}${b}</span><span class="t"><b>${a}</b></span><select class="dd" data-a="mact" data-v="${i}">${['Standard menu','Paste','Switch virtual desktop','Application launcher','Switch activity','Show desktop','Nothing'].map(o=>`<option ${o===a?'selected':''}>${o}</option>`).join('')}</select><span class="x" data-a="mdel" data-v="${i}">${S('x')}</span></div>`).join('')+
+      `<div class="row click" data-a="madd"><span class="disc" style="width:34px;height:34px">${S('plus')}</span><span class="t"><b>Add an action</b><small>Click here, then press a mouse button (with Ctrl / Shift / Alt if you like)</small></span></div></div>`;
+  }
+  if(p==='loc'){
+    const opts=[['Desktop folder','Shows ~/Desktop — the usual choice'],['Files linked to the current activity','Each activity keeps its own desktop files'],['Another folder','Pick any folder to show on the desktop']];
+    return `<h2>Location</h2><div class="sec">The desktop shows</div><div class="card">`+opts.map(([t,s],i)=>`<div class="row click" data-a="loc" data-v="${i}"><span class="radio ${st.loc===i?'on':''}"></span><span class="t"><b>${t}</b><small>${s}</small></span></div>`).join('')+
+      (st.loc===2?`<div class="row"><div class="field"><input value="${st.locPath}"></div><button class="pill">${S('folder')}Browse…</button></div>`:'')+`</div>
+      <div class="sec">Title</div><div class="card"><div class="row"><span class="t"><b>Show a title over the icons</b><small>Only useful when the desktop shows another folder</small></span>${sw(0)}</div></div>`;
+  }
+  if(p==='icons'){
+    const c=st.ic, sizes=[32,40,48,64,80,96], s=sizes[c.size];
+    let mini=`<div class="mini" style="grid-template-columns:repeat(auto-fill,minmax(${s+26}px,1fr))">`+['Documents','Downloads','notes.txt','Projects','photo.png','run.sh'].map(n=>`<div><i style="width:${s}px;height:${s}px"></i><span style="max-width:${s+(c.width*20)+20}px;overflow:hidden;text-overflow:ellipsis;white-space:${c.lines===1?'nowrap':'normal'};text-align:center">${n}</span></div>`).join('')+`</div>`;
+    return `<h2>Icons</h2><div class="card" style="padding-top:16px">${mini}
+      <div class="row"><span class="t"><b>Size</b></span><input type="range" min="0" max="5" value="${c.size}" data-a="icsize"><span class="val">${s} px</span></div>
+      <div class="row"><span class="t"><b>Label width</b></span><div class="segs">${['Narrow','Medium','Wide'].map((o,i)=>`<button class="${c.width===i?'on':''}" data-a="ic" data-k="width" data-v="${i}">${o}</button>`).join('')}</div></div>
+      <div class="row"><span class="t"><b>Label lines</b></span><div class="segs">${[1,2,3].map(i=>`<button class="${c.lines===i?'on':''}" data-a="ic" data-k="lines" data-v="${i}">${i}</button>`).join('')}</div></div></div>
+      <div class="sec">Arrangement</div><div class="card">
+      <div class="row"><span class="t"><b>Fill</b></span><div class="segs">${['In rows','In columns'].map((o,i)=>`<button class="${c.arr===i?'on':''}" data-a="ic" data-k="arr" data-v="${i}">${o}</button>`).join('')}</div></div>
+      <div class="row"><span class="t"><b>Start from</b></span><div class="segs">${['Left','Right'].map((o,i)=>`<button class="${c.align===i?'on':''}" data-a="ic" data-k="align" data-v="${i}">${o}</button>`).join('')}</div></div>
+      <div class="row"><span class="t"><b>Sort by</b></span><select class="dd">${['Where I put them','Name','Size','Type','Date'].map((o,i)=>`<option ${c.sort===i?'selected':''}>${o}</option>`).join('')}</select></div>
+      <div class="row click" data-a="ictog" data-v="lock"><span class="t"><b>Lock icons in place</b><small>Stops accidental dragging</small></span>${sw(c.lock)}</div></div>
+      <div class="sec">Extras</div><div class="card">
+      <div class="row click" data-a="ictog" data-v="prev"><span class="t"><b>Picture previews</b><small>Images show their picture instead of an icon</small></span>${sw(c.prev)}</div>
+      <div class="row click" data-a="ictog" data-v="popup"><span class="t"><b>Peek into folders</b><small>Hover a folder's arrow to see what's inside</small></span>${sw(c.popup)}</div>
+      <div class="row click" data-a="ictog" data-v="tip"><span class="t"><b>Details on hover</b><small>Size and date in a tooltip</small></span>${sw(c.tip)}</div>
+      <div class="row click" data-a="ictog" data-v="sel"><span class="t"><b>Select with a single click marker</b><small>A small + appears on hover to select without opening</small></span>${sw(c.sel)}</div></div>`;
+  }
+  if(p==='filter'){
+    return `<h2>Filter</h2><div class="card"><div class="row"><span class="t"><b>Which files</b></span><div class="segs">${['Show all','Only these','All except these'].map((o,i)=>`<button class="${st.flt===i?'on':''}" data-a="flt" data-v="${i}">${o}</button>`).join('')}</div></div>
+      ${st.flt?`<div class="row"><span class="t"><b>Name pattern</b><small>e.g. *.png *.jpg — separate with spaces</small></span><div class="field" style="max-width:240px"><input value="${st.pattern}"></div></div>`:''}</div>
+      ${st.flt?`<div class="sec">File types</div><div class="card types">`+Object.entries(st.types).map(([t,on])=>`<div class="row click" data-a="ftype" data-v="${t}"><span class="ck ${on?'on':''}"></span><span class="t"><b>${t}</b></span></div>`).join('')+`</div>`:`<div class="sec" style="margin-top:14px">Every file in the folder is shown. Pick "Only these" or "All except these" to choose types.</div>`}`;
+  }
+  return `<h2>About</h2><div class="card"><div class="row"><span class="disc">${S('wall')}</span><span class="t"><b>Luminos Live Wallpaper</b><small>Version 2.4 · videos, web pages, shaders, Lively wallpapers</small></span></div>
+    <div class="row"><span class="t"><b>Desktop layout</b><small>Folder View · KDE Plasma 6.7.5 (Luminos)</small></span></div>
+    <div class="row click"><span class="t"><b>Where wallpapers are kept</b><small>~/.local/share/luminos/wallpapers</small></span><span class="chev">${S('open').replace('<svg','<svg style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2"')}</span></div></div>`;
+}
+function prop([label,kind,val],i){
+  const w=curW();const key='p_'+w.id+'_'+i;const v=st[key]!==undefined?st[key]:val;
+  if(kind==='sw')return `<div class="row click" data-a="prop" data-k="${key}" data-t="sw"><span class="t"><b>${label}</b></span>${sw(v)}</div>`;
+  if(kind==='range')return `<div class="row"><span class="t"><b>${label}</b></span><input type="range" min="0" max="100" value="${v}" data-a="proprange" data-k="${key}"><span class="val">${v}</span></div>`;
+  if(kind==='color')return `<div class="row"><span class="t"><b>${label}</b></span><div class="colors">${['#c879ff','#7ac8ff','#ff8fb3','#b6e7c2'].map((c,j)=>`<span style="background:${c}" class="${v===j?'on':''}" data-a="propc" data-k="${key}" data-v="${j}"></span>`).join('')}</div></div>`;
+  return `<div class="row"><span class="t"><b>${label}</b></span><div class="segs">${['°C · GB','°F · GiB'].map((o,j)=>`<button class="${v===j?'on':''}" data-a="propc" data-k="${key}" data-v="${j}">${o}</button>`).join('')}</div></div>`;
+}
+let tt;function toast(m){st.toast=m;clearTimeout(tt);tt=setTimeout(()=>{st.toast=null;render()},2200)}
+win.addEventListener('click',e=>{
+  const a=e.target.closest('[data-a]');if(!a)return;const v=a.dataset.v,act=a.dataset.a;
+  if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT')return;
+  switch(act){
+    case 'page':st.page=v;break;
+    case 'pick':st.cur=v;st.playing=true;mark();break;
+    case 'play':st.playing=!st.playing;break;
+    case 'random':{const o=WALLS.filter(w=>w.id!==st.cur);st.cur=o[Math.floor(Math.random()*o.length)].id;mark();break}
+    case 'choose':toast('Opens the file picker (videos, images, .html, Lively .zip)');break;
+    case 'install':toast('Opens the installer — same as Install… today');break;
+    case 'layout':st.layout=v;mark();break;
+    case 'tog':st.v[v]=st.v[v]?0:1;mark();break;
+    case 'more':st.more=!st.more;break;
+    case 'bg':st.v.bg=v;mark();break;
+    case 'prop':st[a.dataset.k]=(st[a.dataset.k]!==undefined?st[a.dataset.k]:1)?0:1;mark();break;
+    case 'propc':st[a.dataset.k]=+v;mark();break;
+    case 'mdel':st.mouse.splice(+v,1);mark();break;
+    case 'madd':st.mouse.push(['Shift + Middle click','Show desktop']);mark();toast('Pressed Shift + Middle click (demo)');break;
+    case 'loc':st.loc=+v;mark();break;
+    case 'ic':st.ic[a.dataset.k]=+v;mark();break;
+    case 'ictog':st.ic[v]=st.ic[v]?0:1;mark();break;
+    case 'flt':st.flt=+v;mark();break;
+    case 'ftype':st.types[v]=st.types[v]?0:1;mark();break;
+    case 'apply':st.dirty=false;toast('Applied — the desktop changes now; window stays open');break;
+    case 'revert':st.dirty=false;toast('Changes undone');break;
+  }
+  render();
+});
+win.addEventListener('change',e=>{const a=e.target.dataset.a;if(a==='type'){st.type=e.target.value;mark()}else if(a==='fit'){st.v.fit=e.target.value;mark()}else if(a==='mact'){st.mouse[+e.target.dataset.v][1]=e.target.value;mark()}else mark();render()});
+win.addEventListener('input',e=>{const a=e.target.dataset.a;if(a==='icsize'){st.ic.size=+e.target.value;mark();render();win.querySelector('[data-a="icsize"]').focus()}else if(a==='proprange'){st[e.target.dataset.k]=+e.target.value;e.target.nextElementSibling.textContent=e.target.value;if(!st.dirty){mark();render()}}});
+document.getElementById('mode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;st.mode=b.dataset.v;document.querySelectorAll('#mode button').forEach(x=>x.classList.toggle('on',x===b));render()});
+render();
+</script>
+</body>
+</html>
