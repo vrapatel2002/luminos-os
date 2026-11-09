@@ -15,6 +15,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 CANDIDATES = {
     "luminos_wallpaper_pkg": ["scripts/luminos-wallpaper-pkg"],
     "luminos_wallpaper_lively": ["scripts/luminos-wallpaper-lively"],
+    "luminos_wallpaper_webpaths": ["scripts/luminos-wallpaper-webpaths"],  # [CHANGE: claude-code | 2026-11-08] BUG-235
     "luminos_wallpaper_props": [
         "src/wallpapers/org.luminos.livewallpaper/contents/tools/luminos-wallpaper-props"],
 }

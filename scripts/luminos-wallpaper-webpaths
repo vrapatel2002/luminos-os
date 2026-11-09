@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Rewrite a web wallpaper's root-absolute paths ("/js/x.js") into relative ones.
+
+[CHANGE: claude-code | 2026-11-08] BUG-235.
+SPDX-License-Identifier: GPL-3.0-or-later
+
+Lively serves a package so that "/" is the package's own folder. We load the page
+over file://, where "/" is the root of the disk, so a page that imports three.js
+from "/js/..." loads nothing and logs nothing. Only a path that names a file or
+folder INSIDE the package is rewritten; anything else stays exactly as written.
+Running it twice changes nothing.
+
+    luminos-wallpaper-webpaths <package-dir>...    fix installed packages in place
+"""
+import os, re, sys
+
+EXTS = (".html", ".htm", ".css")
+# A quoted "/x" or '/x' — never "//host" — and an unquoted CSS url(/x).
+QUOTED = re.compile(r"""(["'])(/(?!/)[^"'\s<>]*)\1""")
+CSS_URL = re.compile(r"""url\(\s*(/(?!/)[^)"'\s]*)\s*\)""")
+
+
+def split_tail(path):
+    """('/a/b.js', '?v=1#x') — the part that names a file, and the rest."""
+    m = re.search(r"[?#]", path)
+    return (path[:m.start()], path[m.start():]) if m else (path, "")
+
+
+def relative(root, here, path):
+    """`path` as seen from folder `here`, or `path` unchanged if it does not name
+    something inside the package at `root`."""
+    bare, tail = split_tail(path)
+    full = os.path.normpath(os.path.join(root, bare.lstrip("/")))
+    if bare == "/" or not full.startswith(root + os.sep) or not os.path.exists(full):
+        return path
+    rel = os.path.relpath(full, here).replace(os.sep, "/")
+    slash = "/" if bare.endswith("/") else ""
+    if rel == ".":
+        return "./" + tail
+    # "./" also keeps import-map addresses valid: they must start / ./ or ../
+    return ("" if rel.startswith("../") else "./") + rel + slash + tail
+
+
+def rewrite_text(root, here, text):
+    text = QUOTED.sub(lambda m: m.group(1) + relative(root, here, m.group(2)) + m.group(1), text)
+    return CSS_URL.sub(lambda m: "url(" + relative(root, here, m.group(1)) + ")", text)
+
+
+def fix_file(root, path):
+    with open(path, encoding="utf-8", errors="surrogateescape") as f:
+        old = f.read()
+    new = rewrite_text(root, os.path.dirname(path), old)
+    if new == old:
+        return False
+    with open(path, "w", encoding="utf-8", errors="surrogateescape") as f:
+        f.write(new)
+    return True
+
+
+def fix_package(root):
+    """Rewrite every page and stylesheet in the package; returns the files changed."""
+    root = os.path.realpath(root)
+    pages = [os.path.join(d, n) for d, _, names in os.walk(root)
+             for n in names if n.lower().endswith(EXTS)]
+    return [os.path.relpath(p, root) for p in pages if fix_file(root, p)]
+
+
+if __name__ == "__main__":
+    for pkg in sys.argv[1:]:
+        print("%s: %s" % (pkg, ", ".join(fix_package(pkg)) or "nothing to change"))

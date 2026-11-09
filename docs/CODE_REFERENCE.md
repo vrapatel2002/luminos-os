@@ -759,3 +759,11 @@ conductor.go and fan_control.go are deleted.
 |---|---|
 | `src/luminos-style/kcm/proxy/` | `kcm_luminos_proxy`: proxy.{h,cpp} (kioslaverc [Proxy Settings] in kio-extras' format), ui/main.qml, ui/Rows.qml |
 | `src/luminos-style/kcm/netpref/` | `kcm_luminos_netpref`: netpref.{h,cpp} (MarkPartial, kio_ftprc), ui/main.qml, ui/Rows.qml |
+
+### Photo + video viewer (src/media/) [CHANGE: claude-code | 2026-11-08] DECISION 180
+- `src/media/Media.qml` — the whole viewer, one file, no build step. Root `Window`; FolderListModel for the folder; `fitImg` (decoded at window size) / `full` (only while zoom > fit) / `AnimatedImage` (GIF, APNG, animated WebP); `MediaPlayer`+`VideoOutput`; details sheet with a JS header/EXIF reader (`meta.read`: JPEG, TIFF/RAW, HEIC/AVIF `ispe`+TIFF header, PNG, GIF, WebP); `--luminos-debug` / `--luminos-selftest` hooks.
+- `scripts/luminos-media` — launcher → /usr/local/bin. Session env, LD_PRELOAD of the VA-API shim + `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=vaapi,vulkan`, `QML_XHR_ALLOW_FILE_READ=1`, folder argument → first media file, stderr bridge that runs `gio trash` for `LUMINOS_MEDIA_TRASH:` lines, passes `--luminos-*` flags.
+- `scripts/vaapi-igpu/luminos-vaapi-igpu.c` — LD_PRELOAD wrapping `av_hwdevice_ctx_create`: VA-API with no device → the AMD render node (vendor 0x1002). BUG-234. Built by the installer to /usr/local/lib/luminos/libluminos-vaapi-igpu.so.
+- `scripts/luminos-media-install` — install / `--check` / `--uninstall`; saves prior defaults to ~/.local/share/luminos/media-defaults.prior.
+- `config/luminos-media.desktop` — app entry + 74 MIME types; no `OnlyShowIn=`.
+- `scripts/luminos-wallpaper-webpaths` (+ copy in `src/wallpapers/org.luminos.livewallpaper/contents/tools/`) — BUG-235. `fix_package(dir)` rewrites package-local root-absolute paths (`"/js/x"`, `url(/x)`) in .html/.htm/.css to relative ones so Lively pages work over file://; idempotent; called by `luminos-wallpaper-install` for every web package; CLI `luminos-wallpaper-webpaths <pkg-dir>...`. Tests: `tests/wallpaper/test_webpaths.py`. [CHANGE: claude-code | 2026-11-08]
