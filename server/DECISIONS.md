@@ -3353,3 +3353,27 @@ add nothing when Jellyfin sent none (parity with the hls muxer). Not chosen: byp
 seek jump-back back on exactly the files that need remux); re-enabling the P5→HDR10 sweep (throws away real DV that JellyRock
 plays, DECISION 167). New standing check after any Jellyfin/ffmpeg upgrade: `luminos-jf-dv-check` alongside `luminos-jf-seek-check`.
 Undo unchanged: point `JELLYFIN_FFMPEG_OPT` back to `/usr/lib/jellyfin-ffmpeg/ffmpeg`.
+
+## DECISION 176 — NZBGet's finished-downloads folder moved to the external drive — 2026-11-08
+<!-- [CHANGE: claude-code | 2026-11-08] -->
+**Asked:** Shawn — a movie at 100% took ~10 min to appear in Jellyfin; "can we speed up unpacking?". He wants the
+library to stay on the external drive (faster than the internal HDD).
+**Measured (A Silent Voice, 33.5 GB remux):** unpacking was NOT the slow part — `DirectUnpack=yes` already unpacks
+during the download. Downloads land on the external (`InterDir=/srv/external/usenet/incomplete`) but the finished
+folder was `DestDir=/srv/media/usenet/complete` (internal), so NZBGet copied 33.5 GB external→internal
+(20:12→20:19:55) and Radarr then copied it back internal→external `/srv/external/movies` (20:20:13→20:28:35).
+Two full cross-disk copies of the same file.
+**Change:** `DestDir=/srv/external/usenet/complete` (dirs nzbget:media 2775, backup `nzbget.conf.pre-destdir-20261108`,
+`luminos-nzbget-setup` constant updated). Download folder, finished folder and `/srv/external/movies` are now one
+filesystem (stat device 2065) → both steps become renames. `RequiredDir=/srv/external/usenet` still stops NZBGet
+if the USB drive is missing, so nothing can spill onto the internal disk. TV going to `/srv/media/tv` still costs one
+copy at import (same total as before, it just moved from NZBGet to Sonarr).
+**Proof so far:** NZBGet API reads back the new DestDir; device ids equal. **Real proof = next movie download**:
+expect "100%" → in Jellyfin within ~1–2 min. Not tested with a live download (Shawn was watching from the external).
+**Undo:** restore the backup conf, `systemctl restart nzbget`.
+
+**Same evening, playback error -3 (JellyRock, A Silent Voice):** first two plays made no server ffmpeg at all —
+JellyRock tried to play the file as-is (DTS-HD MA audio + Blu-ray image subtitles) and the TV refused; third try
+it asked for a transcode (PGS burn-in + AAC) and played. An orphaned Black Swan 4K transcode (no client, 12 min,
+257 % CPU) was killed so it stopped competing with the stream. Not changed: the DTS-only/PGS files themselves —
+`luminos-roku-compat --fix-audio` (adds an AC3 track) is the global fix, offered, not run while he watched.
