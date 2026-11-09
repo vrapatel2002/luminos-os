@@ -8959,7 +8959,12 @@ Settings Mock", `docs/windowstyle/mock/desktop-settings.html`) → "do i will te
   path/address row (typed paths and YouTube still work); installed grid; the wallpaper's own settings (hidden when it has
   none); Fit; Power and sound switches; folded "More options". `WallpaperGallery.qml` grid shows all tiles + "Add
   wallpaper" tile; `GalleryTile.qml` rounded picture, accent ring + tick, kind tag. Every cfg_ key and code path unchanged.
-**Not changed:** Icons, Filter and About pages keep the stock layout (already card rows through the Kirigami fork).
+**Not changed:** Icons and About pages keep the stock layout (already card rows through the Kirigami fork).
+**R2 (plasma-desktop 1.4) — Filter page:** `folder/ConfigFilter.qml`: "Which files" = Show all / Only these / All except these
+switch (drives the hidden stock combo), hidden files = switch, name pattern + search + type list (plain rows with tick box,
+icon, description + mime name) only when filtering; "Tick all shown / Untick all shown / A → Z" buttons with words. Stock
+bug fixed: ticking a type spliced `checkedTypes` in place so Apply never lit; now the array is reassigned. The kcmutils
+list card behind the list is hidden on "Show all". Shots: docs/style-tuner/shots/desk-filter-{all,on}.png.
 **Proof:** nested KWin + plasmashell with a copy of Shawn's config (`~/builds/style-tuner/nested-plasma.sh`, `desk-run.sh`);
 test aid in AppletConfiguration: with `QML_XHR_ALLOW_FILE_READ=1`, `/tmp/luminos-deskcfg-test` = `page=N scroll=PX
 surprise=1 apply=1`. Run: Surprise me → dirty bar true → Apply → bar false, and the nested appletsrc changed to

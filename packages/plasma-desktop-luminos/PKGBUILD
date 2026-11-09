@@ -36,7 +36,8 @@ _dirver=$(echo $pkgver | cut -d. -f1-3)
 # search, pages in a rounded hole, card rows, and a small "Unsaved changes · Undo · Apply" bar instead of
 # OK/Apply/Cancel. Plain QML files from ~/luminos-os/src/desktop-config-look/{shell,folder} are installed over the
 # stock ones in package() (stock copies kept in src/desktop-config-look/orig for diffing on the next Plasma bump).
-pkgrel=1.3
+# 1.4 (R2): Filter page — three-way "Which files" switch, hidden-files switch, pattern + type list only when filtering; ticking a type now enables Apply.
+pkgrel=1.4
 pkgdesc='KDE Plasma Desktop'
 arch=(x86_64)
 url='https://kde.org/plasma-desktop/'
