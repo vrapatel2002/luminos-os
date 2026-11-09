@@ -1,14 +1,16 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-08 — Response 5 (wallpaper interactivity — investigate only)
+Last updated: 2026-11-08 — Response 7 (wallpaper cursor / now-playing / audio — BUILT)
 
-## LIVELY WEB WALLPAPERS NOT INTERACTIVE (BUG-236) — investigated, NOT fixed, waiting for Shawn
-- Cursor: 0 events reach the page (proven with counters + ydotool + Show Desktop). WebInteractive=true turns our forwarder
-  off, and the folder-view icons layer above the wallpaper eats real input. Medusae needs click/drag on its canvas;
-  Living Room's setMouseParallax() is never called by the page itself.
-- Now playing: nobody calls livelyCurrentTrack; MPRIS data (Chrome) is there; feeding it by hand put the YouTube
-  thumbnail + title on the Music TV screen.
-- Audio: wantAudio is qml-mode only → web pages never get livelyAudioListener.
-- Tools: /var/tmp/wp-cdp/ev.py (needs plasmashell started with QTWEBENGINE_REMOTE_DEBUGGING; turned OFF again).
+## LIVELY WEB WALLPAPERS INTERACTIVE (BUG-236 / DECISION 181) — DONE + LIVE
+- Cursor (PageInput.qml, passive, above icons), TV now-playing (NowPlaying.qml + tools/luminos-wallpaper-nowplaying;
+  YouTube video → 240p file in ~/.cache/luminos/tv; music → cover), audio → livelyAudioListener. All off while paused.
+- Cost measured: paused 0-0.1 % core; visible+playing features ≈ 6-7 %, the 3D page itself ≈ 25 % (pre-existing).
+- yt-dlp updated to 2026.10.26 (old one 403'd every YouTube download; also fixes video-wallpaper YouTube mode).
+- Offered, NOT done: cap web wallpapers at devicePixelRatio 1 (would cut most of the ~25 % base cost; softer image).
+- Not covered: QML-mode scenes still use their own MouseArea under the icon layer (same cursor problem) — PageInput
+  could serve them too. Lock-screen clicks stay off (WebInteractive false there).
+- Test tools: /var/tmp/wp-cdp/ (ev.py/nav.py/shot.py/watch.py need plasmashell started with
+  QTWEBENGINE_REMOTE_DEBUGGING=127.0.0.1:9333 — currently OFF), cost.sh, threads.sh, fakeplayer.py.
 
 ## LIVING ROOM WALLPAPER (BUG-235) — FIXED, Shawn to eyeball on the desktop
 - Cause: Lively page loads three.js from root paths `/js/…`; under file:// that is the disk root → nothing ran, nothing logged.
