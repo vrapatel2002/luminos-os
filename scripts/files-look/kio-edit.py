@@ -96,8 +96,9 @@ new_paint = r'''    // [CHANGE: claude-code | 2026-11-09] DECISION 182: Luminos 
 
     const int iconBox = discPx > 0 ? discPx : glyphPx;
     const int actionAreaWidth = !actionIcon.isNull() ? s_lateralMargin + actionIconSize() : s_lateralMargin;
+    // [R21] the disc sits in the middle of the whole row, so on drives it lines up with name + bar + free text
     const QRect iconRect(isLTR ? body.left() + padL : body.right() - padL - iconBox + 1,
-                         line.top() + (line.height() - iconBox) / 2, iconBox, iconBox);
+                         body.top() + (body.height() - iconBox) / 2, iconBox, iconBox);
     const int textLeft = isLTR ? iconRect.right() + 1 + lx.px("filesPlaceTextGapPx", 12, 0, 40) : body.left() + actionAreaWidth + s_lateralMargin;
     const int textRight = isLTR ? body.right() - actionAreaWidth - s_lateralMargin : iconRect.left() - lx.px("filesPlaceTextGapPx", 12, 0, 40);
     QRect rectText(textLeft, line.top(), qMax(0, textRight - textLeft), line.height());

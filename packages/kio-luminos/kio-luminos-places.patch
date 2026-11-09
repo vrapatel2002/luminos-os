@@ -1,6 +1,6 @@
 diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidgets/kfileplacesview.cpp
 --- kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-09-04 10:01:22.000000000 -0400
-+++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-08 21:24:17.213943096 -0500
++++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-09 15:50:34.073768377 -0500
 @@ -57,6 +57,7 @@
  #include <set>
  
@@ -77,7 +77,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  
      const auto accessibility = placesModel->deviceAccessibility(index);
      const bool isBusy = (accessibility == KFilePlacesModel::SetupInProgress || accessibility == KFilePlacesModel::TeardownInProgress)
-@@ -171,13 +207,19 @@
+@@ -171,13 +207,20 @@
          actionIcon = QIcon::fromTheme(QStringLiteral("media-eject"));
      }
  
@@ -95,15 +95,16 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
 -                   opt.rect.top(),
 -                   opt.rect.width() - iconAreaWidth - actionAreaWidth - 2 * s_lateralMargin,
 -                   opt.rect.height());
++    // [R21] the disc sits in the middle of the whole row, so on drives it lines up with name + bar + free text
 +    const QRect iconRect(isLTR ? body.left() + padL : body.right() - padL - iconBox + 1,
-+                         line.top() + (line.height() - iconBox) / 2, iconBox, iconBox);
++                         body.top() + (body.height() - iconBox) / 2, iconBox, iconBox);
 +    const int textLeft = isLTR ? iconRect.right() + 1 + lx.px("filesPlaceTextGapPx", 12, 0, 40) : body.left() + actionAreaWidth + s_lateralMargin;
 +    const int textRight = isLTR ? body.right() - actionAreaWidth - s_lateralMargin : iconRect.left() - lx.px("filesPlaceTextGapPx", 12, 0, 40);
 +    QRect rectText(textLeft, line.top(), qMax(0, textRight - textLeft), line.height());
  
      const QPalette activePalette = KIconLoader::global()->customPalette();
      const bool changePalette = activePalette != opt.palette;
-@@ -185,27 +227,49 @@
+@@ -185,27 +228,49 @@
          KIconLoader::global()->setCustomPalette(opt.palette);
      }
  
@@ -164,7 +165,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
                            iconSize,
                            iconSize);
  
-@@ -230,66 +294,56 @@
+@@ -230,66 +295,56 @@
          }
      }
  
@@ -266,7 +267,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  
      const bool isElided = (text != elidedText);
  
-@@ -304,6 +358,15 @@
+@@ -304,6 +359,15 @@
      painter->restore();
  }
  
@@ -282,7 +283,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  bool KFilePlacesViewDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option, const QModelIndex &index)
  {
      if (event->type() == QHelpEvent::ToolTip) {
-@@ -673,8 +736,17 @@
+@@ -673,8 +737,17 @@
          ? i18n("%1 (hidden)", groupLabel)
          : groupLabel;
  
@@ -301,7 +302,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
      /* Take spacing into account:
         The spacing to the previous section compensates for the spacing to the first item.*/
      textRect.setY(textRect.y() /* + qMax(2, m_view->spacing()) - qMax(2, m_view->spacing())*/);
-@@ -687,8 +759,10 @@
+@@ -687,8 +760,10 @@
      const QColor c2 = baseColor(option);
      QColor penColor = mixedColor(c1, c2, 60);
  
@@ -313,7 +314,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
      painter->restore();
  }
  
-@@ -723,11 +797,12 @@
+@@ -723,11 +798,12 @@
  int KFilePlacesViewDelegate::sectionHeaderHeight(const QModelIndex &index) const
  {
      Q_UNUSED(index);
@@ -332,7 +333,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  int KFilePlacesViewDelegate::actionIconSize() const
 diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidgets/kfileplacesview_p.h
 --- kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-09-04 10:01:22.000000000 -0400
-+++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-08 21:24:17.214013098 -0500
++++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-09 15:50:34.073865931 -0500
 @@ -69,6 +69,7 @@
      void startDrag();
  
@@ -343,7 +344,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidg
  
 diff -ruN kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h
 --- kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	1969-12-31 19:00:00.000000000 -0500
-+++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-08 21:24:17.213615509 -0500
++++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-09 15:50:34.073245062 -0500
 @@ -0,0 +1,125 @@
 +// [CHANGE: claude-code | 2026-11-09] DECISION 182 — Luminos Files look values.
 +// Reads ~/.config/luminos/style.json (the same file the Style Tuner writes) and calls back when it

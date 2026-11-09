@@ -8933,6 +8933,12 @@ dolphin 1.2 repaints its file views and the action bar the moment style.json cha
 before/after a style.json edit (docs/style-tuner/shots/files-live-tune.png) — rows, circles, tile corners and bar changed live.
 **Undo:** `sudo pacman -U /var/cache/pacman/pkg/{kio-6.30.0-1,dolphin-26.08.1-1}-x86_64.pkg.tar.zst`;
 `kwriteconfig6 --file kdeglobals --group Icons --key Theme yet-another-monochrome-icon-set`; restore dolphinrc.before.
+**R21 (2026-11-09) — drive rows + "why isn't the tuner live":** sidebar disc now sits in the middle of the whole row, so on
+drives (name + bar + free text) it lines up with all three instead of the name only (kio 1.3, kio-edit.py iconRect uses `body`).
+Tuner liveness checked: the real tuner (driven by tuner-drive.qml in a nested session) wrote style.json and the nested Dolphin
+changed rows, circles and tile corners on the spot; Shawn's running Dolphin holds inotify watches on style.json + its folder.
+Not instant by design: S-M-L-XL zoom steps (used next time you pick a size), Folders/Files groups (next folder load or re-sort),
+View panel on/off + width (built when Dolphin starts), selection bar / undo note (next select / delete), hamburger layout (next open).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->
