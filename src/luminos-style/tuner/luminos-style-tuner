@@ -19,4 +19,5 @@ mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/luminos"
 # text size + button corners are applied by a path unit; make sure it is on (cheap, idempotent)
 systemctl --user is-enabled -q luminos-style-apply.path 2>/dev/null \
     || systemctl --user enable --now luminos-style-apply.path >/dev/null 2>&1
-exec qml6 /usr/share/luminos-style/StyleTuner.qml "$@"
+if [ $# -gt 0 ]; then exec qml6 /usr/share/luminos-style/StyleTuner.qml -- "$@"; fi   # e.g. --files opens the Files tab
+exec qml6 /usr/share/luminos-style/StyleTuner.qml

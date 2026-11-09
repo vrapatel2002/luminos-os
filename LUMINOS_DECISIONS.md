@@ -8928,3 +8928,44 @@ click opened, so menu shots are rendered pictures (`grab()`); installed binaries
 Luminos Media) — source and patches say 182.
 **Undo:** `sudo pacman -U /var/cache/pacman/pkg/{kio-6.30.0-1,dolphin-26.08.1-1}-x86_64.pkg.tar.zst`;
 `kwriteconfig6 --file kdeglobals --group Icons --key Theme yet-another-monochrome-icon-set`; restore dolphinrc.before.
+
+## DECISION 182 — Files (Dolphin) redesign: kio-luminos + dolphin-luminos forks and the luminos-files icon pack
+<!-- [CHANGE: claude-code | 2026-11-09] -->
+**Ask (Shawn):** "lets make this better got it more readable" (Dolphin Home screenshot) → prototype → "take your time make a
+detailed demo… switch s/m/l and list view" → full working demo (artifact "Files Demo", `docs/windowstyle/mock/files-page.html`)
+→ "this is better do it once its done i will ask you … final tuning adjustable bars".
+**Built (four parts):**
+1. **Settings** (no code): global view props `~/.local/share/dolphin/view_properties/global/.directory` = group by Name, folders
+   first, size line under names (Icons/Compact), Details shows modified/size/type; dolphinrc `MaximumTextLines=2`,
+   `ShowZoomSlider=true`; kdeglobals `[PreviewSettings] Plugins=` = defaults minus `directorythumbnail` + `textthumbnail`
+   (folders/text files show their tile, not a content thumbnail). Backup of old dolphinrc: ~/builds/dolphin-luminos/dolphinrc.before.
+2. **Icon pack `luminos-files-icons` 1.0-3** (`scripts/files-icons/make-files-icons.py`, built at package time from the installed
+   themes): 1322 file types + 37 folders as soft coloured rounded tiles with a glyph and an extension tag (MD, SH, LOG, JSON…),
+   theme `luminos-files` **inherits yet-another-monochrome-icon-set**, so every other icon is unchanged; folders ≤20 px keep the
+   mono glyph (sidebar, menus). kdeglobals `[Icons] Theme=luminos-files` (KDE only; GTK still YAMIS).
+3. **kio 6.30.0-1.1** (`packages/kio-luminos`, patch from `scripts/files-look/kio-edit.py`): the Places sidebar delegate — pill
+   highlight, icon in an accent disc (colour scheme focus colour), small grey capital section labels, drives show a bar +
+   "x free of y". Applies to Dolphin **and every KDE file dialog**. Eject button keeps its exact spot (pointIsTeardownAction).
+4. **dolphin 26.08.1-1.1** (`packages/dolphin-luminos`, patch from `scripts/files-look/dolphin-edit.py`): rounded hover/selection
+   tiles; grouping by Name = "Folders" / "Files"; the View button opens one panel (Icons/Compact/List, S-M-L-XL slider mapped to
+   zoom levels per mode, sort chips — tap the active one to flip order, group chips, 5 switches, This folder / All folders =
+   GeneralSettings::globalViewProps); regrouped ☰ menu (quick row New folder / New tab / Window / Terminal, Create new, Select,
+   This folder, Undo/Redo, Filter, Panels, Configure); selecting files shows the action bar without entering selection mode
+   (its × clears the selection); "Moved to Trash · Undo" message that hides after 6 s; neutral grey bar colour.
+**Tuner-ready:** both patches read `~/.config/luminos/style.json` live through `luminosfilesstyle_p.h` (keys `filesPlace*`,
+`files*`; list in docs/CODE_REFERENCE.md). Defaults = prototype; missing keys change nothing. The Style Tuner bars come next.
+**Proof:** nested KWin with a copy of Shawn's config (`~/builds/style-tuner/nested-dolphin.sh`, `DATA=1` copies the data dir
+too). Test aid `LUMINOS_FILES_TEST=view|menu|panel|select|undo`; `panel` clicks every View-panel control and logs what the view
+did: list→mode 1, XL→zoom 3, Date→sort modificationtime order 1→0 on second tap, By kind→group type, None→grouped 0, hidden 1,
+folders-first 0, size line off, This folder→global 0, All folders→global 1, Compact→mode 2, restored icons/zoom 4/text/text.
+Shots: docs/style-tuner/shots/files-*.png. Real ~/.local/share untouched during tests (md5 same before/after).
+**Not done / honest gaps:** the action bar is full-width (Dolphin's own bar), not the floating pill; Wayland refuses pop-ups no
+click opened, so menu shots are rendered pictures (`grab()`); installed binaries' comments say DECISION 180 (number was taken by
+Luminos Media) — source and patches say 182.
+**R20 (2026-11-09) — tuner bars:** Style Tuner (luminos-style 1.0-11) has a **Files** tab (`luminos-style-tuner --files`):
+44 bars/switches for every `files*` key (sidebar, sidebar labels, files area, S-M-L-XL zoom steps per view, menus and bars).
+dolphin 1.2 repaints its file views and the action bar the moment style.json changes; kio 1.2 fetches the sidebar glyph at
+≤20 px then scales it (a big "Icon size" used to pick the file-type tile and draw a solid square). Proof: same nested window
+before/after a style.json edit (docs/style-tuner/shots/files-live-tune.png) — rows, circles, tile corners and bar changed live.
+**Undo:** `sudo pacman -U /var/cache/pacman/pkg/{kio-6.30.0-1,dolphin-26.08.1-1}-x86_64.pkg.tar.zst`;
+`kwriteconfig6 --file kdeglobals --group Icons --key Theme yet-another-monochrome-icon-set`; restore dolphinrc.before.

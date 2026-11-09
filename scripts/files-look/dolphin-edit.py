@@ -667,7 +667,7 @@ protected:
 '''
 
 edit('dolphinmainwindow.cpp', [
- ('#include <QToolButton>\n', '#include <QToolButton>\n#include <QWidgetAction>\n#include <QAbstractButton>\n#include <QSlider>\n#include <QHBoxLayout>\n#include <QPainter>\n#include <KColorUtils>\n#include "luminosfilesstyle_p.h" ' + TAG + '\n'),
+ ('#include <QToolButton>\n', '#include <QToolButton>\n#include <QWidgetAction>\n#include <QGraphicsView>\n#include <QAbstractButton>\n#include <QSlider>\n#include <QHBoxLayout>\n#include <QPainter>\n#include <KColorUtils>\n#include "luminosfilesstyle_p.h" ' + TAG + '\n'),
  ('#include <KStartupInfo>\n', '#include <KStartupInfo>\n' + QUICK_CLASSES),
  # menu body
  ('''    // This group of actions (until the next separator) contains all the most basic actions
@@ -771,6 +771,12 @@ edit('dolphinmainwindow.cpp', [
  # test aid (like LUMINOS_SS_OPEN_DRAWER in systemsettings)
  ('''    connect(hamburgerMenu, &KHamburgerMenu::aboutToShowMenu, this, &DolphinMainWindow::updateHamburgerMenu);''',
   '''    connect(hamburgerMenu, &KHamburgerMenu::aboutToShowMenu, this, &DolphinMainWindow::updateHamburgerMenu);
+    ''' + TAG + ''': repaint the file views while the Style Tuner moves a bar
+    LuminosFiles::Style::self().onChange(this, [this] {
+        for (auto *gv : findChildren<QGraphicsView *>()) {
+            gv->viewport()->update();
+        }
+    });
     ''' + TAG + ''' test aid: LUMINOS_FILES_TEST=view|menu|select|undo opens that part once, 3.5 s after start
     if (const QByteArray luminosTest = qgetenv("LUMINOS_FILES_TEST"); !luminosTest.isEmpty()) {
         QTimer::singleShot(3500, this, [this, luminosTest] {
@@ -902,6 +908,13 @@ edit('dolphinmainwindow.cpp', [
 
 # neutral grey action bar instead of the tinted one
 edit('selectionmode/backgroundcolorhelper.cpp', [
+ ('''    updateBackgroundColor();
+    qApp->installEventFilter(this);''', '''    updateBackgroundColor();
+    qApp->installEventFilter(this);
+    ''' + TAG + ''': follow the Style Tuner live
+    LuminosFiles::Style::self().onChange(this, [this] {
+        slotPaletteChanged();
+    });'''),
  ('#include "backgroundcolorhelper.h"\n', '#include "backgroundcolorhelper.h"\n#include <KColorUtils>\n#include "luminosfilesstyle_p.h" ' + TAG + '\n'),
  ('''                                        (activeBackgroundColor.alpha() + positiveBackgroundColor.alpha()) / 2);
 }''', '''                                        (activeBackgroundColor.alpha() + positiveBackgroundColor.alpha()) / 2);

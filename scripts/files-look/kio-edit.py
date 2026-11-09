@@ -122,13 +122,15 @@ new_paint = r'''    // [CHANGE: claude-code | 2026-11-09] DECISION 182: Luminos 
         painter->setBrush(discC);
         painter->drawEllipse(QRectF(iconRect));
         // glyph = the icon's shape, filled with one colour (so every icon reads as a symbol)
-        QImage img = icon.pixmap(QSize(glyphPx, glyphPx), dpr, QIcon::Normal).toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        // fetched at <= 20 px so file-type icon packs give their small glyph, not a big tile; then drawn at glyphPx
+        const int fetchPx = qMin(glyphPx, lx.px("filesPlaceGlyphFetchMaxPx", 20, 8, 64));
+        QImage img = icon.pixmap(QSize(fetchPx, fetchPx), dpr, QIcon::Normal).toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
         {
             QPainter ip(&img);
             ip.setCompositionMode(QPainter::CompositionMode_SourceIn);
             ip.fillRect(img.rect(), glyphC);
         }
-        const QSizeF gs = QSizeF(img.size()) / img.devicePixelRatio();
+        const QSizeF gs = (QSizeF(img.size()) / img.devicePixelRatio()) * (qreal(glyphPx) / fetchPx);
         painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
         painter->drawImage(QRectF(QPointF(iconRect.center().x() + 0.5 - gs.width() / 2.0, iconRect.center().y() + 0.5 - gs.height() / 2.0), gs), img);
         painter->restore();

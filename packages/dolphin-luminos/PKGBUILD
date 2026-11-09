@@ -17,7 +17,8 @@
 
 pkgname=dolphin
 pkgver=26.08.1
-pkgrel=1.1
+# 1.2 (R20): file views + action bar repaint live while the Style Tuner moves a bar.
+pkgrel=1.2
 pkgdesc='KDE File Manager'
 arch=(x86_64)
 url='https://apps.kde.org/dolphin/'

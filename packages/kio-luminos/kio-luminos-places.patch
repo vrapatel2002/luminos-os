@@ -1,6 +1,6 @@
 diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidgets/kfileplacesview.cpp
 --- kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-09-04 10:01:22.000000000 -0400
-+++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-08 20:13:30.034723817 -0500
++++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-08 21:24:17.213943096 -0500
 @@ -57,6 +57,7 @@
  #include <set>
  
@@ -103,7 +103,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  
      const QPalette activePalette = KIconLoader::global()->customPalette();
      const bool changePalette = activePalette != opt.palette;
-@@ -185,27 +227,47 @@
+@@ -185,27 +227,49 @@
          KIconLoader::global()->setCustomPalette(opt.palette);
      }
  
@@ -128,13 +128,15 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
 +        painter->setBrush(discC);
 +        painter->drawEllipse(QRectF(iconRect));
 +        // glyph = the icon's shape, filled with one colour (so every icon reads as a symbol)
-+        QImage img = icon.pixmap(QSize(glyphPx, glyphPx), dpr, QIcon::Normal).toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
++        // fetched at <= 20 px so file-type icon packs give their small glyph, not a big tile; then drawn at glyphPx
++        const int fetchPx = qMin(glyphPx, lx.px("filesPlaceGlyphFetchMaxPx", 20, 8, 64));
++        QImage img = icon.pixmap(QSize(fetchPx, fetchPx), dpr, QIcon::Normal).toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
 +        {
 +            QPainter ip(&img);
 +            ip.setCompositionMode(QPainter::CompositionMode_SourceIn);
 +            ip.fillRect(img.rect(), glyphC);
 +        }
-+        const QSizeF gs = QSizeF(img.size()) / img.devicePixelRatio();
++        const QSizeF gs = (QSizeF(img.size()) / img.devicePixelRatio()) * (qreal(glyphPx) / fetchPx);
 +        painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
 +        painter->drawImage(QRectF(QPointF(iconRect.center().x() + 0.5 - gs.width() / 2.0, iconRect.center().y() + 0.5 - gs.height() / 2.0), gs), img);
 +        painter->restore();
@@ -162,7 +164,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
                            iconSize,
                            iconSize);
  
-@@ -230,66 +292,56 @@
+@@ -230,66 +294,56 @@
          }
      }
  
@@ -264,7 +266,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  
      const bool isElided = (text != elidedText);
  
-@@ -304,6 +356,15 @@
+@@ -304,6 +358,15 @@
      painter->restore();
  }
  
@@ -280,7 +282,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  bool KFilePlacesViewDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option, const QModelIndex &index)
  {
      if (event->type() == QHelpEvent::ToolTip) {
-@@ -673,8 +734,17 @@
+@@ -673,8 +736,17 @@
          ? i18n("%1 (hidden)", groupLabel)
          : groupLabel;
  
@@ -299,7 +301,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
      /* Take spacing into account:
         The spacing to the previous section compensates for the spacing to the first item.*/
      textRect.setY(textRect.y() /* + qMax(2, m_view->spacing()) - qMax(2, m_view->spacing())*/);
-@@ -687,8 +757,10 @@
+@@ -687,8 +759,10 @@
      const QColor c2 = baseColor(option);
      QColor penColor = mixedColor(c1, c2, 60);
  
@@ -311,7 +313,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
      painter->restore();
  }
  
-@@ -723,11 +795,12 @@
+@@ -723,11 +797,12 @@
  int KFilePlacesViewDelegate::sectionHeaderHeight(const QModelIndex &index) const
  {
      Q_UNUSED(index);
@@ -330,7 +332,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  int KFilePlacesViewDelegate::actionIconSize() const
 diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidgets/kfileplacesview_p.h
 --- kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-09-04 10:01:22.000000000 -0400
-+++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-08 20:13:30.034810892 -0500
++++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-08 21:24:17.214013098 -0500
 @@ -69,6 +69,7 @@
      void startDrag();
  
@@ -341,7 +343,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidg
  
 diff -ruN kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h
 --- kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	1969-12-31 19:00:00.000000000 -0500
-+++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-08 20:13:30.034352872 -0500
++++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-08 21:24:17.213615509 -0500
 @@ -0,0 +1,125 @@
 +// [CHANGE: claude-code | 2026-11-09] DECISION 182 — Luminos Files look values.
 +// Reads ~/.config/luminos/style.json (the same file the Style Tuner writes) and calls back when it
