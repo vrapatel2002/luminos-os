@@ -16,7 +16,8 @@ CANDIDATES = {
     "luminos_wallpaper_pkg": ["scripts/luminos-wallpaper-pkg"],
     "luminos_wallpaper_lively": ["scripts/luminos-wallpaper-lively"],
     "luminos_wallpaper_webpaths": ["scripts/luminos-wallpaper-webpaths"],
-    "luminos_wallpaper_nowplaying": ["scripts/luminos-wallpaper-nowplaying"],  # [CHANGE: claude-code | 2026-11-08] BUG-236  # [CHANGE: claude-code | 2026-11-08] BUG-235
+    "luminos_wallpaper_nowplaying": ["scripts/luminos-wallpaper-nowplaying"],
+    "luminos_wallpaper_ytfile": ["scripts/luminos-wallpaper-ytfile"],  # [CHANGE: claude-code | 2026-11-08] BUG-237  # [CHANGE: claude-code | 2026-11-08] BUG-236  # [CHANGE: claude-code | 2026-11-08] BUG-235
     "luminos_wallpaper_props": [
         "src/wallpapers/org.luminos.livewallpaper/contents/tools/luminos-wallpaper-props"],
 }

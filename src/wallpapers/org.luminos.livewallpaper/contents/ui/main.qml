@@ -109,6 +109,10 @@ WallpaperItem {
         maybeResolveYouTube();
     }
     onModeChanged: maybeResolveYouTube()
+    // [CHANGE: claude-code | 2026-11-08] BUG-237: a new YouTube link while already in
+    // video mode was never resolved — only a mode change triggered it.
+    readonly property string videoSetting: root.configuration.Video
+    onVideoSettingChanged: maybeResolveYouTube()
 
     Rectangle {
         anchors.fill: parent
@@ -199,17 +203,21 @@ WallpaperItem {
         onNewData: (source, data) => {
             disconnectSource(source);
             var out = ("" + (data["stdout"] || "")).trim();
-            if (out.length > 0)
-                root.resolvedVideo = out.split("\n")[0];
+            // Only the answer for the video still selected; a slow download for an
+            // earlier pick must not replace a newer one.
+            var asked = decodeURIComponent(source.substring(source.lastIndexOf("#") + 1));
+            if (out.indexOf("file://") === 0 && asked === root.configuration.Video)
+                root.resolvedVideo = out;
         }
+        // [CHANGE: claude-code | 2026-11-08] BUG-237. Streaming never worked: every
+        // `yt-dlp -g` URL answers 403 to anything but yt-dlp (all of them now, not only
+        // the DASH ones), so this keeps a <=1080p copy with sound on disk instead —
+        // downloaded once, reused on every later start (tools/luminos-wallpaper-ytfile).
+        readonly property string tool: decodeURIComponent(
+            ("" + Qt.resolvedUrl("../tools/luminos-wallpaper-ytfile")).replace("file://", ""))
         function resolve(url) {
-            // Must be a *muxed* progressive mp4 (single self-contained file). YouTube's
-            // higher-res streams are video-only DASH whose googlevideo URLs are locked to
-            // the extractor's client User-Agent — QtMultimedia's ffmpeg can't send that
-            // header, so they return HTTP 403 (black). Muxed tops out at 360p (itag 18)
-            // but actually plays. True 1080p needs a download-and-cache path (see HANDOFF).
-            // [CHANGE: claude-code | 2026-07-22]
-            connectSource("yt-dlp -f 'best[ext=mp4][height<=1080]/best[ext=mp4]/best' -g '" + url + "'");
+            var q = function (s) { return "'" + ("" + s).replace(/'/g, "'\\''") + "'"; };
+            connectSource("python3 " + q(ytResolver.tool) + " " + q(url) + " #" + encodeURIComponent(url));
         }
     }
     function maybeResolveYouTube() {
@@ -312,6 +320,7 @@ WallpaperItem {
     Component {
         id: videoComp
         Item {
+            id: videoRoot
             anchors.fill: parent
             readonly property bool active: root.shouldPlay
 
@@ -319,6 +328,12 @@ WallpaperItem {
                 id: player
                 source: root.effectiveVideo
                 loops: MediaPlayer.Infinite
+                // [CHANGE: claude-code | 2026-11-08] BUG-237: Qt STOPS the player on every
+                // source change, and play() used to run only once, on creation — so a video
+                // picked in the settings dialog (which applies keys one by one), a switch
+                // from one video to another, and every YouTube link (resolved after the
+                // player exists) sat stopped at 0:00. Play whatever arrives, unless paused.
+                onSourceChanged: if (videoRoot.active && ("" + source) !== "") player.play()
                 videoOutput: vOut
                 audioOutput: AudioOutput {
                     muted: root.configuration.MuteAudio

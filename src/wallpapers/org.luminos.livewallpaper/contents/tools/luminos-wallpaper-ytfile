@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""A YouTube video wallpaper as a file on disk.
+
+[CHANGE: claude-code | 2026-11-08] BUG-237.  SPDX-License-Identifier: GPL-3.0-or-later
+
+    luminos-wallpaper-ytfile <youtube url>   ->  prints file:///…/<id>.mp4, or nothing
+
+YouTube's stream URLs (`yt-dlp -g`) answer 403 to anything but yt-dlp itself, so Qt's
+player could never stream them. Instead a <=1080p copy with sound is kept in
+~/.cache/luminos/wallpaper (newest KEEP) and reused on every later start. Runs once
+when the wallpaper's Video setting changes — never polled.
+"""
+import importlib.machinery, importlib.util, os, re, sys, urllib.parse
+
+CACHE = os.path.expanduser("~/.cache/luminos/wallpaper")
+KEEP = 3
+FORMAT = ("bv*[height<=1080][vcodec^=avc1][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]"
+          "/bv*[height<=1080]+ba/b[height<=1080]")
+
+
+def load(stem):
+    """The tested now-playing helper — beside this file, or in scripts/ for the tests."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for rel in (stem, os.path.join("..", "..", "..", "..", "..", "scripts", stem)):
+        path = os.path.normpath(os.path.join(here, rel))
+        if os.path.isfile(path):
+            loader = importlib.machinery.SourceFileLoader(stem.replace("-", "_"), path)
+            mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+            loader.exec_module(mod)
+            return mod
+    raise SystemExit("cannot find " + stem)
+
+
+N = load("luminos-wallpaper-nowplaying")
+
+
+def youtube_id(url):
+    """watch?v=, youtu.be/ and /shorts/ links; only a file-name-safe id."""
+    m = re.match(r"https?://(www\.|m\.)?youtube\.com/shorts/([A-Za-z0-9_-]{6,20})", url)
+    if m:
+        return m.group(2)
+    host = urllib.parse.urlsplit(url).hostname or ""
+    if host == "music.youtube.com" or not (host.endswith("youtube.com") or host == "youtu.be"):
+        return None
+    return N.video_id(url)
+
+
+def prune():
+    done = [os.path.join(CACHE, f) for f in os.listdir(CACHE) if f.endswith(".mp4") and ".tmp." not in f]
+    for old in sorted(done, key=os.path.getmtime, reverse=True)[KEEP:]:
+        os.remove(old)
+
+
+def fetch(url):
+    vid = youtube_id(url)
+    if not vid:
+        return None
+    path = os.path.join(CACHE, vid + ".mp4")
+    if not os.path.exists(path):
+        os.makedirs(CACHE, exist_ok=True)
+        part = os.path.join(CACHE, "%s.%d.tmp.mp4" % (vid, os.getpid()))
+        N.run(["yt-dlp", "-q", "--no-warnings", "--no-playlist", "--no-part", "-f", FORMAT,
+               "--merge-output-format", "mp4", "--max-filesize", "2G", "-o", part,
+               "https://www.youtube.com/watch?v=" + vid], timeout=900)
+        if not os.path.exists(part):
+            return None
+        os.replace(part, path)
+        prune()
+    os.utime(path)                      # the playing wallpaper is always the newest: never pruned
+    return "file://" + urllib.parse.quote(path)
+
+
+if __name__ == "__main__":
+    out = fetch(sys.argv[1]) if len(sys.argv) > 1 else None
+    if out:
+        print(out)
+    sys.exit(0 if out else 1)
