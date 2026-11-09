@@ -1,13 +1,23 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-08 — Response 2 (Living Room wallpaper — investigate only)
+Last updated: 2026-11-08 — Response 5 (wallpaper interactivity — investigate only)
 
-## Aim right now — LIVING ROOM WALLPAPER DOESN'T WORK (BUG-235) — cause PROVEN, NOT fixed (Shawn: "do not fix")
-- Page loads three.js via root-absolute paths (`/js/threejs/three.module.js` in its import map, `/js/es-module-shims.js`).
-  Lively serves `/` = wallpaper folder; our WebMode loads `file://…/index.html`, so `/js` = disk root → module never runs,
-  spinner forever, NO console message (network-level failure) → BUG-199 poster fallback never fires either.
-- Proven A/B off-screen (/var/tmp/lr-test/t.qml): file:// → 0 canvases, zero console; http with / = folder → three.js runs.
-- music-tv-lq has the same root paths. Fix options listed in docs/BUGS.md BUG-235 — waiting for Shawn to pick.
-- Gotcha: host-shell's Qt logs go to journald, not stderr — run test qml6 with QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen.
+## LIVELY WEB WALLPAPERS NOT INTERACTIVE (BUG-236) — investigated, NOT fixed, waiting for Shawn
+- Cursor: 0 events reach the page (proven with counters + ydotool + Show Desktop). WebInteractive=true turns our forwarder
+  off, and the folder-view icons layer above the wallpaper eats real input. Medusae needs click/drag on its canvas;
+  Living Room's setMouseParallax() is never called by the page itself.
+- Now playing: nobody calls livelyCurrentTrack; MPRIS data (Chrome) is there; feeding it by hand put the YouTube
+  thumbnail + title on the Music TV screen.
+- Audio: wantAudio is qml-mode only → web pages never get livelyAudioListener.
+- Tools: /var/tmp/wp-cdp/ev.py (needs plasmashell started with QTWEBENGINE_REMOTE_DEBUGGING; turned OFF again).
+
+## LIVING ROOM WALLPAPER (BUG-235) — FIXED, Shawn to eyeball on the desktop
+- Cause: Lively page loads three.js from root paths `/js/…`; under file:// that is the disk root → nothing ran, nothing logged.
+- Fix: scripts/luminos-wallpaper-webpaths rewrites package-local root paths to relative; luminos-wallpaper-install runs
+  it on every web import. Applied to installed living-room + music-tv-lq (backup /var/tmp/lr-test/installed-before-bug235.tgz).
+  plasmashell restarted 18:58; page now runs (26 js lines, no WebGL errors). Tests 6/6, budgets pass.
+- If Shawn says it's still blank: check `journalctl --user -u plasma-plasmashell | grep -E "js:|LUMINOS-WP"`; the first-frame
+  grab (1 s settle in WebMode) may catch the room before its model loads — the frozen frame would be the spinner.
+- Gotcha: host-shell Qt logs go to journald — test qml6 with QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen.
 
 ## SNAPPY BUILD (docs/snappy/PROMPT.md) — PAUSED mid step 3, data collected but NOT analysed yet
 - Tools: docs/snappy/idle.py (10-min sampler, sudo), docs/snappy/snap.sh (953-knob snapshot, sudo). Output /var/tmp/snappy/.
@@ -87,6 +97,7 @@ Last updated: 2026-11-08 — Response 2 (Living Room wallpaper — investigate o
 - R15: Wi-Fi page icons now sit in the same round disc as the sidebar (Rows.Disc, iconCirclePx/iconGlyphPx, follows tuner). Hand-installed to /usr/local/share/kcm_networkmanagement/qml; next luminos-style build packages it. Shot: docs/style-tuner/shots/wifi-discs.png
 - R16: the Wi-Fi glyph itself was still small (wedge art fills ~60% of its box: 20x13 vs globe 20x20) → Disc.glyphScale 1.35 for "wireless" icons + roundToIconSize:false (Kirigami was snapping 27 px back to 22). Measured now 25x17. Hand-installed.
 - R17: Shawn asked to make Dolphin (Files) more readable → prototype docs/windowstyle/mock/files-page.html (sidebar discs + pill, folders/files groups, 2-line names, type-tinted tiles + ext tag, meta line, list view). WAITING for approval; nothing built. Current: dolphin 26.08.1, icon theme yet-another-monochrome-icon-set, PlacesPanel IconSize=16.
+- R18: prototype v2 = full working demo (same file): View button popover (Icons/Compact/List, S-M-L-XL slider, sort, groups, toggles, this-folder/all-folders), status-bar zoom, Ctrl+wheel, Ctrl+1/2/3; every item of his current ☰ menu mapped (quick row + Create new/Select/This folder/Undo-Redo labelled/Filter/Panels F9 F11 F7 F4 + lock + hidden places/Configure→Settings dialog/Help/More); selection bar, Undo toast, context menus x3, trash restore/empty, split, tabs, search, filter, folders tree, info panel, fake terminal, drag-drop, rubber band. Guide lists feasibility per part (existing / setting / Dolphin+KIO patch / icon pack). Tested in Playwright, 0 errors, no mobile overflow. WAITING for approval.
   by systemsettings 1.14. Proven by writing kio-format kioslaverc/kio_ftprc in a private config dir.
 - R5 (2026-11-08): Shawn asked how to use it → told: app menu "Style Tuner" (or run luminos-style-tuner), drag bars, reset arrows, delete style.json to undo. No changes.
 - Shawn: tune the Nexus KDE look himself with HORIZONTAL BARS, LIVE; R4 "do it rather than perfecting it".
