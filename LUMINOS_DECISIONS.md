@@ -8975,6 +8975,11 @@ bottom and showed square corners outside it. kcmutils 1.5 (new kcmutils-luminos-
 cut to the card's rounded shape (MultiEffect mask), 8 px in from the card's top (no header) and bottom edge, and the list
 gets matching top/bottom margins so the first and last rows sit inside at rest. Proof: same scrolled test list before/after
 (builds/kcm-rows/before, after3) + System Settings Autostart page renders.
+**R28 (2026-11-10) — the box was the Keyboard "Add Layout" dialog:** two framed ScrollViews (`showFramedBackground`) with
+layout rows. The Nexus frame card had 8 px padding against a 32 px corner, so the list's square corners sat outside the curve
+(at 45 degrees the curve is ~0.29 r in). qqc2-desktop-style 1.10 pads framed lists by max(8, 0.32 r + 2) ≈ 13 px. The grey
+circles were the icon disc drawn for flag images that don't exist on this system; kirigami 1.12 probes file icons and drops
+the disc (and its gap) when the file can't load. Proof: test dialog before/after (builds/kcm-rows/kb-before, kb-after2).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

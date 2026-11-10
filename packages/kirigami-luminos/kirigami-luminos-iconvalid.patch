@@ -1,0 +1,33 @@
+diff -ruN kirigami-6.30.0/src/delegates/IconTitleSubtitle.qml ../b/kirigami-6.30.0/src/delegates/IconTitleSubtitle.qml
+--- a/src/delegates/IconTitleSubtitle.qml	2026-11-10 13:52:09.215579629 -0500
++++ b/src/delegates/IconTitleSubtitle.qml	2026-11-10 13:56:52.470114553 -0500
+@@ -164,7 +164,19 @@
+     // An explicit icon.color set by the app still wins. No icon -> stock layout.
+     readonly property bool __luminosDisc: root.icon.width > 0
+         && (root.icon.name.length > 0 || (!!root.icon.source && root.icon.source.toString().length > 0))
+-    readonly property real __luminosDiscSize: __luminosDisc ? Math.max(LxS.Style.iconCirclePx, root.icon.width + 16) : root.icon.width
++        && (root.icon.name.length > 0 || !__luminosIsFile || __luminosProbe.status === Image.Ready) // [CHANGE: claude-code | 2026-11-10] R28
++    // R28: an icon given as a file (keyboard layout flags) that isn't there drew an empty grey disc; check the file loads
++    readonly property bool __luminosIsFile: root.icon.name.length === 0 && !!root.icon.source
++        && /^(file:|qrc:|\/)/.test(root.icon.source.toString())
++    Image {
++        id: __luminosProbe
++        visible: false
++        asynchronous: true
++        sourceSize: Qt.size(8, 8)
++        source: root.__luminosIsFile ? root.icon.source : ""
++    }
++    readonly property bool __luminosMissing: __luminosIsFile && __luminosProbe.status === Image.Error // nothing to show: no gap either
++    readonly property real __luminosDiscSize: __luminosDisc ? Math.max(LxS.Style.iconCirclePx, root.icon.width + 16) : (__luminosMissing ? 0 : root.icon.width)
+     readonly property color __luminosOnPrimary: Qt.hsla(Math.max(0, Platform.Theme.focusColor.hslHue),
+         Platform.Theme.focusColor.hslSaturation * 0.4, 0.27, 1)
+ 
+@@ -209,7 +221,7 @@
+ 
+         anchors {
+             left: discItem.right
+-            leftMargin: root.icon.width > 0 ? (root.__luminosDisc ? 12 : Platform.Units.mediumSpacing) : 0
++            leftMargin: root.icon.width > 0 && !root.__luminosMissing ? (root.__luminosDisc ? 12 : Platform.Units.mediumSpacing) : 0
+             top: parent.top
+             bottom: parent.bottom
+             right: parent.right

@@ -1,0 +1,22 @@
+diff -ruN qqc2-desktop-style-6.30.0/org.kde.desktop/ScrollView.qml ../b/qqc2-desktop-style-6.30.0/org.kde.desktop/ScrollView.qml
+--- a/org.kde.desktop/ScrollView.qml	2026-11-10 13:52:06.572381192 -0500
++++ b/org.kde.desktop/ScrollView.qml	2026-11-10 13:52:18.364406445 -0500
+@@ -37,10 +37,14 @@
+     // View-alternate fill, r28 (clamped), no border. Unframed ScrollViews keep no background, as before.
+     background: Rectangle {
+         visible: controlRoot.Kirigami.StyleHints.showFramedBackground
+-        readonly property real topPadding: 8
+-        readonly property real bottomPadding: 8
+-        readonly property real leftPadding: 8
+-        readonly property real rightPadding: 8
++        // [CHANGE: claude-code | 2026-11-10] R28: the list sits far enough in that its square corners stay inside
++        // the card's rounded corner (a curve of radius r is ~0.29 r in from the edge at 45 degrees), so rows never
++        // poke out of the box (Add Layout dialog, any framed list)
++        readonly property real inset: Math.max(8, Math.ceil(radius * 0.32) + 2)
++        readonly property real topPadding: inset
++        readonly property real bottomPadding: inset
++        readonly property real leftPadding: inset
++        readonly property real rightPadding: inset
+         color: Kirigami.Theme.alternateBackgroundColor
+         radius: Math.min(LxS.Style.cornerOuterPx, width / 2, height / 2)
+     }
