@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # [CHANGE: claude-code | 2026-10-15] spectrum
+# [CHANGE: claude-code | 2026-11-10] curve v7 — EC applies curves as STEPS (duty of the highest point <= temp), so v6 ran
+#   35% from 60-69 C; v7 adds steps at 45/50/55 so light load sits near 47 C (fan-split test: all fans sharing beats one fan)
 # luminos-fan-curve-install — ONE-TIME, human-run install of fan curve v6 (docs/spectrum/DESIGN.md §3.5)
 # on quiet/balanced/performance, plus /etc/asusd/asusd.ron change_platform_profile_on_ac/battery: false.
 #   sudo luminos-fan-curve-install            install (idempotent)
@@ -10,6 +12,8 @@ set -uo pipefail   # deliberately no -e: every step is checked and reported
 RON=/etc/asusd/asusd.ron
 V6_CG="30c:0%,40c:10%,50c:20%,60c:35%,70c:52%,80c:72%,85c:88%,90c:100%"
 V6_MID="30c:0%,40c:5%,50c:13%,60c:23%,70c:35%,80c:48%,85c:70%,90c:100%"
+V7_CG="30c:10%,45c:25%,50c:35%,55c:45%,60c:52%,70c:60%,80c:75%,88c:100%"
+V7_MID="30c:5%,45c:13%,50c:20%,55c:28%,60c:33%,70c:40%,80c:55%,88c:100%"
 V5_CG="30c:0%,40c:5%,45c:22%,50c:55%,60c:88%,70c:100%,80c:100%,90c:100%"
 V5_MID="30c:0%,40c:0%,45c:15%,50c:37%,60c:59%,70c:70%,80c:88%,90c:100%"
 PROFILES=(quiet balanced performance)
@@ -44,12 +48,12 @@ hwmon_curve() {   # print the active profile's curve as the EC driver caches it;
     echo "  (only the ACTIVE profile's curve is visible in hwmon; the other two cannot be read back from the EC)"
     for f in 1:cpu 2:gpu 3:mid; do
         n=${f%%:*}; name=${f#*:}
-        [[ $name == mid ]] && exp=$(expect "$V6_MID") || exp=$(expect "$V6_CG")
+        [[ $name == mid ]] && exp=$(expect "$V7_MID") || exp=$(expect "$V7_CG")
         got_t=$(for i in 1 2 3 4 5 6 7 8; do cat "$h/pwm${n}_auto_point${i}_temp" 2>/dev/null || echo '?'; done | tr '\n' ' ')
         got_p=$(for i in 1 2 3 4 5 6 7 8; do cat "$h/pwm${n}_auto_point${i}_pwm" 2>/dev/null || echo '?'; done | tr '\n' ' ')
         echo "  $name fan (pwm$n) enable=$(cat "$h/pwm${n}_enable" 2>/dev/null) temp: $got_t pwm: $got_p"
-        if near "${got_t% }|${got_p% }" "$exp"; then ok "$name matches v6 (pwm within ±2)"
-        else bad "$name differs from v6 (expected temp|pwm = $exp)"; fi
+        if near "${got_t% }|${got_p% }" "$exp"; then ok "$name matches v7 (pwm within ±2)"
+        else bad "$name differs from v7 (expected temp|pwm = $exp)"; fi
     done
 }
 
@@ -86,11 +90,11 @@ case "${1:-}" in
     if cmp -s "$b" "$RON"; then ok "$RON already equals $b"
     else run cp -a "$b" "$RON"; cmp -s "$b" "$RON" && ok "restored $b" || bad "restore of $b did not read back"
          run systemctl restart asusd; fi
-    echo "To restore curve v5 (each call wakes the dGPU briefly — BUG-198), run:"
+    echo "To restore curve v6 (each call wakes the dGPU briefly — BUG-198), run:"
     for p in "${PROFILES[@]}"; do
-        echo "  asusctl fan-curve --mod-profile $p --fan cpu --data $V5_CG"
-        echo "  asusctl fan-curve --mod-profile $p --fan gpu --data $V5_CG"
-        echo "  asusctl fan-curve --mod-profile $p --fan mid --data $V5_MID"
+        echo "  asusctl fan-curve --mod-profile $p --fan cpu --data $V6_CG"
+        echo "  asusctl fan-curve --mod-profile $p --fan gpu --data $V6_CG"
+        echo "  asusctl fan-curve --mod-profile $p --fan mid --data $V6_MID"
         echo "  asusctl fan-curve --mod-profile $p --enable-fan-curves true"
     done
     exit $(( FAILS > 0 ));;
@@ -101,11 +105,11 @@ esac
 echo "WARNING: every fan-curve write (and the asusd restart) wakes the RTX 4050 for ~20 s (BUG-198)."
 echo "         This is a known, accepted ONE-TIME cost; the power daemon itself never writes curves."
 echo
-echo "== 1/3 curve v6 on ${PROFILES[*]}"
+echo "== 1/3 curve v7 on ${PROFILES[*]}"
 for p in "${PROFILES[@]}"; do
-    run asusctl fan-curve --mod-profile "$p" --fan cpu --data "$V6_CG"
-    run asusctl fan-curve --mod-profile "$p" --fan gpu --data "$V6_CG"
-    run asusctl fan-curve --mod-profile "$p" --fan mid --data "$V6_MID"
+    run asusctl fan-curve --mod-profile "$p" --fan cpu --data "$V7_CG"
+    run asusctl fan-curve --mod-profile "$p" --fan gpu --data "$V7_CG"
+    run asusctl fan-curve --mod-profile "$p" --fan mid --data "$V7_MID"
     run asusctl fan-curve --mod-profile "$p" --enable-fan-curves true
 done
 
