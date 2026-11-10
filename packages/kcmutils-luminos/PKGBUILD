@@ -18,7 +18,8 @@
 
 pkgname=kcmutils
 pkgver=6.30.0
-pkgrel=1.2
+# [CHANGE: claude-code | 2026-11-10] pkgrel 1.5 — R27: page lists sit 8 px inside their card and are cut to their card's rounded shape (no square rows poking out).
+pkgrel=1.5
 pkgdesc='Utilities for interacting with KCModules'
 arch=(x86_64)
 url='https://develop.kde.org/products/frameworks/'
@@ -45,11 +46,13 @@ makedepends=(doxygen
 groups=(kf6)
 source=(https://download.kde.org/stable/frameworks/${pkgver%.*}/$pkgname-$pkgver.tar.xz{,.sig}
         kcmutils-luminos-listcard.patch
-        kcmutils-luminos-tunables.patch)
+        kcmutils-luminos-tunables.patch
+        kcmutils-luminos-listmask.patch)
 sha256sums=('0159f80d030ac250b0b353113a55c013ed7e38cb0b678df44d2f0d0b2aca944c'
             'SKIP'
             'b41e2498b4d570e4b36987f8bac2c0c89b1a3965016ecd5488e74ca1f89d2b43'
-            'e29e2fe4234f6dbc40ddb9fa36d1a18aa41b33cb6841c2ccb84feeae1e292bb4')
+            'e29e2fe4234f6dbc40ddb9fa36d1a18aa41b33cb6841c2ccb84feeae1e292bb4'
+            'c913372f751ce9e902bb2a6ef13636dd471993c923244db0e60b7b057605cc16')
 validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB # David Faure <faure@kde.org>
               90A968ACA84537CC27B99EAF2C8DF587A6D4AAC1 # Nicolas Fella <nicolas.fella@kde.org>
               )
@@ -57,6 +60,7 @@ validpgpkeys=(53E6B47B45CEA3E0D5B7457758D0EE648A48B3BB # David Faure <faure@kde.
 prepare() {
   patch -p1 -d $pkgname-$pkgver < "$srcdir"/kcmutils-luminos-listcard.patch
   patch -p1 -d $pkgname-$pkgver < "$srcdir"/kcmutils-luminos-tunables.patch  # DECISION 176: live style values (org.luminos.style)
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/kcmutils-luminos-listmask.patch  # R27: list cut to the card's rounded shape
 }
 
 build() {

@@ -1,0 +1,66 @@
+diff -ruN kcmutils-6.30.0/src/qml/components/ScrollViewKCM.qml ../b/kcmutils-6.30.0/src/qml/components/ScrollViewKCM.qml
+--- a/src/qml/components/ScrollViewKCM.qml	2026-11-10 13:43:10.054900945 -0500
++++ b/src/qml/components/ScrollViewKCM.qml	2026-11-10 13:46:56.079527411 -0500
+@@ -6,6 +6,7 @@
+ 
+ import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
+ import QtQuick
++import QtQuick.Effects
+ import org.kde.kirigami as Kirigami
+ import org.kde.kcmutils as KCMUtils
+ 
+@@ -43,6 +44,11 @@
+         if (view) {
+             // Deliberately don't take separators into account, because those are opaque anyway
+             view.clip = Qt.binding(() => __headerContentVisible() || __footerContentVisible());
++            // R27: room between the rows and the card's edges (see listMask)
++            if (!root.framedView && view.topMargin === 0 && view.bottomMargin === 0) {
++                view.topMargin = Qt.binding(() => listCard.padTop);
++                view.bottomMargin = Qt.binding(() => listCard.pad);
++            }
+         }
+     }
+ 
+@@ -51,8 +57,12 @@
+     // rounded card (View alternateBackground, r28 clamped) over the page "hole"; the
+     // view's own header (e.g. an InlineViewHeader) stays above the card as a section row.
+     Kirigami.ShadowedRectangle {
++        id: listCard
+         readonly property real headerH: root.framedView ? 0 : (scroll.view?.headerItem?.height ?? 0)
+         visible: !root.framedView
++        // R27: rows keep 8 px from the card's top (when the list has no header) and bottom edge
++        readonly property real pad: root.framedView ? 0 : 8
++        readonly property real padTop: headerH > 0 ? 0 : pad
+         x: scroll.x
+         y: scroll.y + headerH
+         width: scroll.width
+@@ -73,5 +83,29 @@
+         }
+         width: root.framedView ? parent.width : Math.min(parent.width - root.margins * 2, LxS.Style.pageWidthPx)
+         framedView: root.framedView
++        // [CHANGE: claude-code | 2026-11-10] R27: the list is cut to the card's rounded shape, so rows scrolling past
++        // the top or bottom never stick out of the card with square corners (the header above the card is left alone)
++        layer.enabled: !root.framedView && listCard.height > 0
++        layer.effect: MultiEffect {
++            maskEnabled: true
++            maskSource: listMask
++            maskThresholdMin: 0.5
++            maskSpreadAtMin: 1.0
++        }
++    }
++    Item {
++        id: listMask
++        visible: false
++        layer.enabled: true
++        width: scroll.width
++        height: scroll.height
++        Rectangle { width: parent.width; height: listCard.headerH; color: "white" }
++        Rectangle { // the card's inside: rows scroll away under an edge 8 px in from the card's own
++            y: listCard.headerH + listCard.padTop
++            width: parent.width
++            height: Math.max(0, parent.height - listCard.headerH - listCard.padTop - listCard.pad)
++            radius: Math.max(4, listCard.radius - listCard.pad)
++            color: "white"
++        }
+     }
+ }
