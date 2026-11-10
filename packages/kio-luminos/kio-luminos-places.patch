@@ -1,15 +1,16 @@
 diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidgets/kfileplacesview.cpp
 --- kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-09-04 10:01:22.000000000 -0400
-+++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-09 21:36:31.434296708 -0500
-@@ -57,6 +57,7 @@
++++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-09 21:53:43.525237926 -0500
+@@ -57,6 +57,8 @@
  #include <set>
  
  #include "kfileplaceeditdialog.h"
 +#include "luminosfilesstyle_p.h" // [CHANGE: claude-code | 2026-11-09] DECISION 182
++#include <QRegularExpression>
  #include "kfileplacesmodel.h"
  
  using namespace std::chrono_literals;
-@@ -77,6 +78,11 @@
+@@ -77,6 +79,11 @@
  {
      m_pollFreeSpace.setInterval(s_pollFreeSpaceInterval);
      connect(&m_pollFreeSpace, &QTimer::timeout, this, QOverload<>::of(&KFilePlacesViewDelegate::checkFreeSpace));
@@ -21,7 +22,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  }
  
  KFilePlacesViewDelegate::~KFilePlacesViewDelegate()
-@@ -86,11 +92,12 @@
+@@ -86,11 +93,16 @@
  
  QSize KFilePlacesViewDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
  {
@@ -34,12 +35,16 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
 +    const auto &lx = LuminosFiles::Style::self();
 +    int height = qMax(lx.px("filesPlaceRowPx", 44, 24, 96), option.fontMetrics.height() + 12);
 +    if (index.data(KFilePlacesModel::CapacityBarRecommendedRole).toBool()) {
-+        height += luminosCapacityExtra(option);
++        // [R23] drives: name + bar + free text packed as one tight block, small padding above and below
++        QFont nameFont = option.font;
++        nameFont.setPointSizeF(nameFont.pointSizeF() * lx.num("filesPlaceTextScale", 1.0, 0.6, 1.6));
++        const int block = QFontMetrics(nameFont).height() + luminosCapacityExtra(option);
++        height = qMax(lx.px("filesPlaceDriveRowPx", 44, 24, 120), block + 2 * lx.px("filesPlaceDrivePadPx", 7, 0, 30));
 +    }
  
      if (m_appearingItems.contains(index)) {
          height *= m_appearingHeightScale;
-@@ -158,7 +165,36 @@
+@@ -158,7 +170,36 @@
  
      m_dragStarted = false;
  
@@ -77,7 +82,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  
      const auto accessibility = placesModel->deviceAccessibility(index);
      const bool isBusy = (accessibility == KFilePlacesModel::SetupInProgress || accessibility == KFilePlacesModel::TeardownInProgress)
-@@ -171,13 +207,20 @@
+@@ -171,13 +212,27 @@
          actionIcon = QIcon::fromTheme(QStringLiteral("media-eject"));
      }
  
@@ -86,8 +91,15 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
 +    const bool capacityRow = placesModel->data(index, KFilePlacesModel::CapacityBarRecommendedRole).toBool();
 +    const int capExtra = capacityRow ? luminosCapacityExtra(opt) : 0;
 +    // the name/disc line is the top part of the row; drives add the bar + free text below it
++    // [R23] on drives the name line is only as tall as the text, and name + bar + free text sit centred together
 +    QRect line = body;
-+    line.setHeight(body.height() - capExtra);
++    if (capacityRow) {
++        QFont nf = opt.font;
++        nf.setPointSizeF(nf.pointSizeF() * lx.num("filesPlaceTextScale", 1.0, 0.6, 1.6));
++        const int nameH = QFontMetrics(nf).height();
++        line.setTop(body.top() + (body.height() - nameH - capExtra) / 2);
++        line.setHeight(nameH);
++    }
 +
 +    const int iconBox = discPx > 0 ? discPx : glyphPx;
      const int actionAreaWidth = !actionIcon.isNull() ? s_lateralMargin + actionIconSize() : s_lateralMargin;
@@ -104,7 +116,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  
      const QPalette activePalette = KIconLoader::global()->customPalette();
      const bool changePalette = activePalette != opt.palette;
-@@ -185,27 +228,62 @@
+@@ -185,27 +240,71 @@
          KIconLoader::global()->setCustomPalette(opt.palette);
      }
  
@@ -135,7 +147,16 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
 +        // square. So take the 16 px glyph's own SVG file and draw that at whatever size the bar says.
 +        QImage img;
 +        const QString iconName = placesModel->data(index, KFilePlacesModel::IconNameRole).toString();
-+        const QString glyphFile = iconName.isEmpty() ? QString() : KIconLoader::global()->iconPath(iconName, -16, true);
++        QString glyphFile = iconName.isEmpty() ? QString() : KIconLoader::global()->iconPath(iconName, -16, true);
++        // [R23] some names only exist as a big colour picture further down the theme chain (the iPhone is
++        // breeze's 64 px drawing), which fills as a hollow, oddly sized shape; use the "-symbolic" glyph then
++        static const QRegularExpression smallDir(QStringLiteral("/(8|12|16|18|20|22|24)(x\\d+)?(@\\dx)?/|symbolic|/luminos-files/|/yet-another-monochrome-icon-set/"));
++        if (!glyphFile.isEmpty() && !smallDir.match(glyphFile).hasMatch()) {
++            const QString sym = KIconLoader::global()->iconPath(iconName + QLatin1String("-symbolic"), -16, true);
++            if (!sym.isEmpty()) {
++                glyphFile = sym;
++            }
++        }
 +        if (glyphFile.endsWith(QLatin1String(".svg")) || glyphFile.endsWith(QLatin1String(".svgz"))) {
 +            img = QIcon(glyphFile).pixmap(QSize(glyphPx, glyphPx), dpr, QIcon::Normal).toImage();
 +        }
@@ -178,7 +199,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
                            iconSize,
                            iconSize);
  
-@@ -230,66 +308,56 @@
+@@ -230,66 +329,56 @@
          }
      }
  
@@ -196,7 +217,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
          checkFreeSpace(index); // async
  
 +        const int barH = lx.px("filesPlaceBarPx", 4, 1, 12);
-+        const QRect barRect(rectText.left(), line.bottom() + 1, qMax(0, body.right() - lx.px("filesPlacePadPx", 9, 0, 40) - rectText.left()), barH);
++        const QRect barRect(rectText.left(), line.bottom() + 1 + lx.px("filesPlaceDriveGapPx", 4, 0, 20), qMax(0, body.right() - lx.px("filesPlacePadPx", 9, 0, 40) - rectText.left()), barH);
 +        QColor capacityBgColor = textC;
 +        capacityBgColor.setAlphaF(0.14 * capacityBgColor.alphaF());
 +        painter->save();
@@ -280,7 +301,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  
      const bool isElided = (text != elidedText);
  
-@@ -304,6 +372,15 @@
+@@ -304,6 +393,15 @@
      painter->restore();
  }
  
@@ -290,13 +311,13 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
 +    const auto &lx = LuminosFiles::Style::self();
 +    QFont small = option.font;
 +    small.setPointSizeF(small.pointSizeF() * lx.num("filesPlaceSmallScale", 0.82, 0.5, 1.2));
-+    return lx.px("filesPlaceBarPx", 4, 1, 12) + 3 + QFontMetrics(small).height() + 6;
++    return lx.px("filesPlaceDriveGapPx", 4, 0, 20) + lx.px("filesPlaceBarPx", 4, 1, 12) + 3 + QFontMetrics(small).height();
 +}
 +
  bool KFilePlacesViewDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option, const QModelIndex &index)
  {
      if (event->type() == QHelpEvent::ToolTip) {
-@@ -673,8 +750,17 @@
+@@ -673,8 +771,17 @@
          ? i18n("%1 (hidden)", groupLabel)
          : groupLabel;
  
@@ -315,7 +336,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
      /* Take spacing into account:
         The spacing to the previous section compensates for the spacing to the first item.*/
      textRect.setY(textRect.y() /* + qMax(2, m_view->spacing()) - qMax(2, m_view->spacing())*/);
-@@ -687,8 +773,10 @@
+@@ -687,8 +794,10 @@
      const QColor c2 = baseColor(option);
      QColor penColor = mixedColor(c1, c2, 60);
  
@@ -327,7 +348,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
      painter->restore();
  }
  
-@@ -723,11 +811,12 @@
+@@ -723,11 +832,12 @@
  int KFilePlacesViewDelegate::sectionHeaderHeight(const QModelIndex &index) const
  {
      Q_UNUSED(index);
@@ -346,7 +367,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  int KFilePlacesViewDelegate::actionIconSize() const
 diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidgets/kfileplacesview_p.h
 --- kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-09-04 10:01:22.000000000 -0400
-+++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-09 21:36:31.434385901 -0500
++++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-09 21:53:43.525319849 -0500
 @@ -69,6 +69,7 @@
      void startDrag();
  
@@ -357,7 +378,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidg
  
 diff -ruN kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h
 --- kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	1969-12-31 19:00:00.000000000 -0500
-+++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-09 21:36:31.433880927 -0500
++++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-09 21:53:43.524810476 -0500
 @@ -0,0 +1,125 @@
 +// [CHANGE: claude-code | 2026-11-09] DECISION 182 — Luminos Files look values.
 +// Reads ~/.config/luminos/style.json (the same file the Style Tuner writes) and calls back when it

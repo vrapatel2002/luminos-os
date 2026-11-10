@@ -128,6 +128,32 @@ def main():
         if not os.path.exists(small): small = f'{MONO}/places/scalable/{f}.svg'
         if not os.path.exists(small): small = f'{MONO}/places/16/folder.svg'
         shutil.copy(small, f'{OUT}/places/16/{f}.svg')
+    # [R23] phones: the monochrome set only has a thin outline phone with a KDE logo, which looked hollow and
+    # small next to the filled drive / folder glyphs in the Files sidebar; one filled phone for every phone name
+    os.makedirs(f'{OUT}/devices/scalable')
+    phone = ('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">'
+             '<style id="current-color-scheme">.ColorScheme-Text{color:#dfdfdf}</style>'
+             '<path class="ColorScheme-Text" style="fill:currentColor" fill-rule="evenodd" d="'
+             'M24 5h16a8 8 0 0 1 8 8v38a8 8 0 0 1-8 8H24a8 8 0 0 1-8-8V13a8 8 0 0 1 8-8z'
+             'M23.5 12a2.5 2.5 0 0 0-2.5 2.5v29a2.5 2.5 0 0 0 2.5 2.5h17a2.5 2.5 0 0 0 2.5-2.5v-29a2.5 2.5 0 0 0-2.5-2.5z'
+             'M28.75 50.5a1.75 1.75 0 0 0 0 3.5h6.5a1.75 1.75 0 0 0 0-3.5z"/></svg>\n')
+    for n in ('phone', 'smartphone', 'phone-apple-iphone', 'phone-google-nexus-one', 'phone-samsung-galaxy-s',
+              'phone-htc-g1-white', 'phone-openmoko-freerunner', 'multimedia-player-apple-ipod-touch'):
+        open(f'{OUT}/devices/scalable/{n}.svg', 'w').write(phone)
+    # [R23] "Modified Today / Yesterday" come from Papirus' 24 px outline squares, too big and hollow next to
+    # the other sidebar glyphs; give them filled calendars in the same style
+    os.makedirs(f'{OUT}/actions/scalable')
+    cal = ('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">'
+           '<style id="current-color-scheme">.ColorScheme-Text{color:#dfdfdf}</style>'
+           '<path class="ColorScheme-Text" style="fill:currentColor" fill-rule="evenodd" d="'
+           'M16 11h32a8 8 0 0 1 8 8v31a8 8 0 0 1-8 8H16a8 8 0 0 1-8-8V19a8 8 0 0 1 8-8z'
+           'M17 25a3 3 0 0 0-3 3v21a3 3 0 0 0 3 3h30a3 3 0 0 0 3-3V28a3 3 0 0 0-3-3z"/>'
+           '<path class="ColorScheme-Text" style="fill:currentColor" d="'
+           'M21.5 5a2.5 2.5 0 0 1 2.5 2.5v6a2.5 2.5 0 0 1-5 0v-6A2.5 2.5 0 0 1 21.5 5z'
+           'M42.5 5a2.5 2.5 0 0 1 2.5 2.5v6a2.5 2.5 0 0 1-5 0v-6A2.5 2.5 0 0 1 42.5 5z%s"/></svg>\n')
+    today = 'M27 31h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H27a2 2 0 0 1-2-2V33a2 2 0 0 1 2-2z'
+    open(f'{OUT}/actions/scalable/go-jump-today.svg', 'w').write(cal % today)
+    open(f'{OUT}/actions/scalable/view-calendar-day.svg', 'w').write(cal % 'M21 31h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z')
     open(f'{OUT}/index.theme', 'w').write('''[Icon Theme]
 Name=Luminos Files
 Comment=Luminos: coloured file-type tiles on top of the monochrome set (DECISION 182)
@@ -135,7 +161,7 @@ Inherits=yet-another-monochrome-icon-set,Papirus-Dark,breeze-dark,Adwaita,hicolo
 FollowsColorScheme=true
 Example=folder
 KDE-Extensions=.svg
-Directories=places/16,places/scalable,mimetypes/scalable
+Directories=places/16,places/scalable,mimetypes/scalable,devices/scalable,actions/scalable
 
 [places/16]
 Context=Places
@@ -153,6 +179,20 @@ Type=Scalable
 
 [mimetypes/scalable]
 Context=MimeTypes
+Size=64
+MinSize=8
+MaxSize=512
+Type=Scalable
+
+[devices/scalable]
+Context=Devices
+Size=64
+MinSize=8
+MaxSize=512
+Type=Scalable
+
+[actions/scalable]
+Context=Actions
 Size=64
 MinSize=8
 MaxSize=512

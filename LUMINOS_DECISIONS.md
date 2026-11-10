@@ -8945,6 +8945,13 @@ lookup that counts screen pixels on his 2x/1.25x screens can land on the tile, w
 theme for the 16 px glyph's SVG file (KIconLoader::iconPath(name, -16)) and draws that file at the bar's size, so every size is
 crisp and can never pick a tile; non-SVG icons keep the old fetch (now capped at 16). Not reproducible in nested at 1x-2x, so
 proof is: nested 2x at glyph 12/20/30 all draw the right symbol, sharp (docs proof shots in builds/style-tuner/a12,a20,a30).
+**R23 (2026-11-10) — compact drive rows + matching phone/calendar glyphs:** drive rows were a normal 44 px row plus the bar
+underneath, so "OS" floated far above its bar. Now name + bar + free text are one tight block centred in the row (kio 1.5):
+row = max(`filesPlaceDriveRowPx` 44, block + 2×`filesPlaceDrivePadPx` 7), name→bar gap `filesPlaceDriveGapPx` 4 — three new
+tuner bars (luminos-style 1.0-12). The iPhone glyph fell back to the monochrome set's thin outline phone with a KDE logo, and
+Modified Today/Yesterday to Papirus' 24 px hollow squares; luminos-files-icons 1.0-5 adds filled phone (devices/) and calendar
+(actions/) glyphs in the same style. kio also swaps to `<name>-symbolic` when a name only resolves to a big colour picture.
+Proof: nested 2x sidebar — every disc carries a filled glyph of the same weight, drive rows compact.
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

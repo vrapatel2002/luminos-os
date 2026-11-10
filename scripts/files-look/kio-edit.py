@@ -15,7 +15,7 @@ def R(a, b, n=1):
 
 shutil.copy(hdr, f'{root}/src/filewidgets/luminosfilesstyle_p.h')
 
-R('#include "kfileplaceeditdialog.h"\n', '#include "kfileplaceeditdialog.h"\n#include "luminosfilesstyle_p.h" // [CHANGE: claude-code | 2026-11-09] DECISION 182\n')
+R('#include "kfileplaceeditdialog.h"\n', '#include "kfileplaceeditdialog.h"\n#include "luminosfilesstyle_p.h" // [CHANGE: claude-code | 2026-11-09] DECISION 182\n#include <QRegularExpression>\n')
 
 # constructor: repaint when the tuner changes style.json
 R('''    m_pollFreeSpace.setInterval(s_pollFreeSpaceInterval);
@@ -38,7 +38,11 @@ R('''    QStyleOptionViewItem hintOption(option);
     const auto &lx = LuminosFiles::Style::self();
     int height = qMax(lx.px("filesPlaceRowPx", 44, 24, 96), option.fontMetrics.height() + 12);
     if (index.data(KFilePlacesModel::CapacityBarRecommendedRole).toBool()) {
-        height += luminosCapacityExtra(option);
+        // [R23] drives: name + bar + free text packed as one tight block, small padding above and below
+        QFont nameFont = option.font;
+        nameFont.setPointSizeF(nameFont.pointSizeF() * lx.num("filesPlaceTextScale", 1.0, 0.6, 1.6));
+        const int block = QFontMetrics(nameFont).height() + luminosCapacityExtra(option);
+        height = qMax(lx.px("filesPlaceDriveRowPx", 44, 24, 120), block + 2 * lx.px("filesPlaceDrivePadPx", 7, 0, 30));
     }
 ''')
 
@@ -91,8 +95,15 @@ new_paint = r'''    // [CHANGE: claude-code | 2026-11-09] DECISION 182: Luminos 
     const bool capacityRow = placesModel->data(index, KFilePlacesModel::CapacityBarRecommendedRole).toBool();
     const int capExtra = capacityRow ? luminosCapacityExtra(opt) : 0;
     // the name/disc line is the top part of the row; drives add the bar + free text below it
+    // [R23] on drives the name line is only as tall as the text, and name + bar + free text sit centred together
     QRect line = body;
-    line.setHeight(body.height() - capExtra);
+    if (capacityRow) {
+        QFont nf = opt.font;
+        nf.setPointSizeF(nf.pointSizeF() * lx.num("filesPlaceTextScale", 1.0, 0.6, 1.6));
+        const int nameH = QFontMetrics(nf).height();
+        line.setTop(body.top() + (body.height() - nameH - capExtra) / 2);
+        line.setHeight(nameH);
+    }
 
     const int iconBox = discPx > 0 ? discPx : glyphPx;
     const int actionAreaWidth = !actionIcon.isNull() ? s_lateralMargin + actionIconSize() : s_lateralMargin;
@@ -129,7 +140,16 @@ new_paint = r'''    // [CHANGE: claude-code | 2026-11-09] DECISION 182: Luminos 
         // square. So take the 16 px glyph's own SVG file and draw that at whatever size the bar says.
         QImage img;
         const QString iconName = placesModel->data(index, KFilePlacesModel::IconNameRole).toString();
-        const QString glyphFile = iconName.isEmpty() ? QString() : KIconLoader::global()->iconPath(iconName, -16, true);
+        QString glyphFile = iconName.isEmpty() ? QString() : KIconLoader::global()->iconPath(iconName, -16, true);
+        // [R23] some names only exist as a big colour picture further down the theme chain (the iPhone is
+        // breeze's 64 px drawing), which fills as a hollow, oddly sized shape; use the "-symbolic" glyph then
+        static const QRegularExpression smallDir(QStringLiteral("/(8|12|16|18|20|22|24)(x\\d+)?(@\\dx)?/|symbolic|/luminos-files/|/yet-another-monochrome-icon-set/"));
+        if (!glyphFile.isEmpty() && !smallDir.match(glyphFile).hasMatch()) {
+            const QString sym = KIconLoader::global()->iconPath(iconName + QLatin1String("-symbolic"), -16, true);
+            if (!sym.isEmpty()) {
+                glyphFile = sym;
+            }
+        }
         if (glyphFile.endsWith(QLatin1String(".svg")) || glyphFile.endsWith(QLatin1String(".svgz"))) {
             img = QIcon(glyphFile).pixmap(QSize(glyphPx, glyphPx), dpr, QIcon::Normal).toImage();
         }
@@ -197,7 +217,7 @@ new_paint = r'''    // [CHANGE: claude-code | 2026-11-09] DECISION 182: Luminos 
         checkFreeSpace(index); // async
 
         const int barH = lx.px("filesPlaceBarPx", 4, 1, 12);
-        const QRect barRect(rectText.left(), line.bottom() + 1, qMax(0, body.right() - lx.px("filesPlacePadPx", 9, 0, 40) - rectText.left()), barH);
+        const QRect barRect(rectText.left(), line.bottom() + 1 + lx.px("filesPlaceDriveGapPx", 4, 0, 20), qMax(0, body.right() - lx.px("filesPlacePadPx", 9, 0, 40) - rectText.left()), barH);
         QColor capacityBgColor = textC;
         capacityBgColor.setAlphaF(0.14 * capacityBgColor.alphaF());
         painter->save();
@@ -259,7 +279,7 @@ int KFilePlacesViewDelegate::luminosCapacityExtra(const QStyleOptionViewItem &op
     const auto &lx = LuminosFiles::Style::self();
     QFont small = option.font;
     small.setPointSizeF(small.pointSizeF() * lx.num("filesPlaceSmallScale", 0.82, 0.5, 1.2));
-    return lx.px("filesPlaceBarPx", 4, 1, 12) + 3 + QFontMetrics(small).height() + 6;
+    return lx.px("filesPlaceDriveGapPx", 4, 0, 20) + lx.px("filesPlaceBarPx", 4, 1, 12) + 3 + QFontMetrics(small).height();
 }
 '''
 s = s[:start] + new_paint + s[end_full:]
