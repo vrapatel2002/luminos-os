@@ -1,0 +1,31 @@
+diff -ruN systemsettings-6.7.5/app/qml/CategoryItem.qml b/app/qml/CategoryItem.qml
+--- a/app/qml/CategoryItem.qml	2026-11-10 12:36:06.778274957 -0500
++++ b/app/qml/CategoryItem.qml	2026-11-10 12:36:30.220394292 -0500
+@@ -34,8 +34,10 @@
+     Kirigami.Theme.colorSet: Kirigami.Theme.Button
+     Kirigami.Theme.inherit: false
+ 
+-    topInset: LxS.Style.rowHalfGapPx; bottomInset: LxS.Style.rowHalfGapPx; topPadding: Math.max(4, 18 + LxS.Style.rowExtraPx / 2); bottomPadding: topPadding
+-    leftPadding: compact ? Math.max(0, (width - LxS.Style.iconCirclePx) / 2) : 16; rightPadding: leftPadding
++    topInset: LxS.Style.rowHalfGapPx; bottomInset: LxS.Style.rowHalfGapPx
++    // R25: icon-only tiles are round (same padding on all four sides) instead of a tall cut-off block
++    topPadding: compact ? leftPadding : Math.max(4, 18 + LxS.Style.rowExtraPx / 2); bottomPadding: topPadding
++    leftPadding: compact ? Math.max(4, (width - LxS.Style.iconCirclePx) / 2) : 16; rightPadding: leftPadding
+ 
+     Accessible.name: text
+     Accessible.onPressAction: clicked()
+diff -ruN systemsettings-6.7.5/app/qml/SideBarItem.qml b/app/qml/SideBarItem.qml
+--- a/app/qml/SideBarItem.qml	2026-11-10 12:36:06.778497613 -0500
++++ b/app/qml/SideBarItem.qml	2026-11-10 12:36:30.220186614 -0500
+@@ -15,7 +15,10 @@
+ 
+     // [CHANGE: claude-code | 2026-10-12] Luminos: mock nav width; a narrow window collapses it to icon tiles
+     // Phase 5: one column only; a category's sub-pages replace the main list (which moves to the left drawer)
+-    implicitWidth: systemsettings.width < 860 ? 72 : LxS.Style.sidebarWidthPx + 32
++    // [CHANGE: claude-code | 2026-11-10] R25 responsive: the rows stay (icon circle + name + second line) and the
++    // sidebar takes ~36 % of the window between 190 px and the tuner's width; icon tiles only under 420 px.
++    implicitWidth: systemsettings.width < 420 ? 88
++        : Math.round(Math.max(190, Math.min(LxS.Style.sidebarWidthPx, systemsettings.width * 0.36))) + 32
+     wideScreen: false
+ 
+     pageStack.initialPage: mainColumn

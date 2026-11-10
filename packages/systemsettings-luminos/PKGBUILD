@@ -34,7 +34,9 @@
 pkgname=systemsettings
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=1.14
+# [CHANGE: claude-code | 2026-11-10] pkgrel 1.15 — R25 responsive sidebar: rows (icon + name + 2nd line) at any normal
+# width, sidebar ~36 % of the window (190 px .. tuner width), round icon tiles only under 420 px.
+pkgrel=1.15
 pkgdesc='KDE system manager for hardware, software, and workspaces'
 arch=(x86_64)
 url='https://kde.org/plasma-desktop/'
@@ -69,11 +71,13 @@ makedepends=(extra-cmake-modules
 groups=(plasma)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz{,.sig}
         systemsettings-luminos-nexus-sidebar.patch
-        systemsettings-luminos-tunables.patch)
+        systemsettings-luminos-tunables.patch
+        systemsettings-luminos-responsive.patch)
 sha256sums=('317a21165709d61796fba19f5454397577ffd8aa96655b29dd286a1df252cddb'
             'SKIP'
             '3b89ce0d1c5005feb9554c11e4be2ad444b87d1f35673c35313223088b84129c'
-            '39ac034debde742c8cf436600230da558046def4f3fd083e4bc692abd624e62c')
+            '39ac034debde742c8cf436600230da558046def4f3fd083e4bc692abd624e62c'
+            '2ea20d9c7b7433e55f282fa27ed0b657da629ccb1f779bb8ff3f3990e959c5ff')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
               'D07BD8662C56CB291B316EB2F5675605C74E02CF'  # David Edmundson <davidedmundson@kde.org>
@@ -82,6 +86,7 @@ validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell
 prepare() {
   patch -p1 -d $pkgname-$pkgver < "$srcdir"/systemsettings-luminos-nexus-sidebar.patch
   patch -p1 -d $pkgname-$pkgver < "$srcdir"/systemsettings-luminos-tunables.patch  # DECISION 176: live style values (org.luminos.style)
+  patch -p1 -d $pkgname-$pkgver < "$srcdir"/systemsettings-luminos-responsive.patch  # R25: rows stay in narrow windows
 }
 
 build() {

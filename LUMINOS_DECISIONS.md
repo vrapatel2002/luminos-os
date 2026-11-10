@@ -8954,6 +8954,11 @@ Modified Today/Yesterday to Papirus' 24 px hollow squares; luminos-files-icons 1
 Proof: nested 2x sidebar — every disc carries a filled glyph of the same weight, drive rows compact.
 **R24 (2026-11-10) — saving is safe:** see BUG-238. The tuner only writes the keys its window changed, never over a
 half-written file; the apply unit can't hit the start limit; `luminos-style-history` keeps 200 versions (list/diff/restore).
+**R25 (2026-11-10) — System Settings is responsive (DECISION 140 sidebar):** Shawn compared it with Caelestia's settings at half
+screen: ours had collapsed to cut-off icon blocks under 860 px. Now (systemsettings 1.15, new systemsettings-luminos-responsive.patch)
+the rows stay at every normal width, the sidebar is ~36 % of the window (190 px .. tuner width), and only under 420 px it
+becomes round icon tiles (equal padding, no overflow). Proof: nested window resized by KWin script to 1200/900/640/500/400.
+Same window, any size. Next (approved mock `docs/windowstyle/mock/system-settings-nexus.html`): the pages themselves.
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->
