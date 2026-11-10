@@ -138,7 +138,8 @@ def main():
              'M23.5 12a2.5 2.5 0 0 0-2.5 2.5v29a2.5 2.5 0 0 0 2.5 2.5h17a2.5 2.5 0 0 0 2.5-2.5v-29a2.5 2.5 0 0 0-2.5-2.5z'
              'M28.75 50.5a1.75 1.75 0 0 0 0 3.5h6.5a1.75 1.75 0 0 0 0-3.5z"/></svg>\n')
     for n in ('phone', 'smartphone', 'phone-apple-iphone', 'phone-google-nexus-one', 'phone-samsung-galaxy-s',
-              'phone-htc-g1-white', 'phone-openmoko-freerunner', 'multimedia-player-apple-ipod-touch'):
+              'phone-htc-g1-white', 'phone-openmoko-freerunner', 'multimedia-player-apple-ipod-touch',
+              'multimedia-player'):  # Android phones over USB (MTP) report themselves as media players
         open(f'{OUT}/devices/scalable/{n}.svg', 'w').write(phone)
     # [R23] "Modified Today / Yesterday" come from Papirus' 24 px outline squares, too big and hollow next to
     # the other sidebar glyphs; give them filled calendars in the same style

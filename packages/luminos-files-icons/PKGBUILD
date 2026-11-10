@@ -6,7 +6,7 @@
 #   Revert: kwriteconfig6 --file kdeglobals --group Icons --key Theme yet-another-monochrome-icon-set
 pkgname=luminos-files-icons
 pkgver=1.0
-pkgrel=5
+pkgrel=6
 pkgdesc='Luminos: coloured file-type tiles on top of the monochrome icon set'
 arch=(any)
 license=(GPL-3.0-or-later)
