@@ -1,0 +1,10 @@
+{
+    "KPlugin": {
+        "Description": "Theme, animations, clicking",
+        "Icon": "preferences-desktop-theme-global",
+        "Name": "Quick Settings"
+    },
+    "X-KDE-Keywords": "Quick Settings,Theme,Dark,Light,Animation,Click,Wallpaper",
+    "X-KDE-System-Settings-Parent-Category": "rootcategory",
+    "X-KDE-Weight": 1
+}

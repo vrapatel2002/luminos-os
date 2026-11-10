@@ -8959,6 +8959,14 @@ screen: ours had collapsed to cut-off icon blocks under 860 px. Now (systemsetti
 the rows stay at every normal width, the sidebar is ~36 % of the window (190 px .. tuner width), and only under 420 px it
 becomes round icon tiles (equal padding, no overflow). Proof: nested window resized by KWin script to 1200/900/640/500/400.
 Same window, any size. Next (approved mock `docs/windowstyle/mock/system-settings-nexus.html`): the pages themselves.
+**R25b (2026-11-10) — Quick Settings page rebuilt:** new QML KCM `kcm_luminos_quick` (luminos-style 1.0-18) is System
+Settings' first page; the fork hides kcm_landingpage and aliases it (systemsettings 1.17, sidebar min now 170 px). Parts as in
+the mock: the current wallpaper as a hero (video → the dialog's cached ffmpeg still, made if missing), Light / Dark pills
+(colour scheme only — plasma-apply-colorscheme, the other choice remembered in ~/.config/luminos/quick.conf, so Darkly,
+icons and the Luminos look stay), animation speed (AnimationDurationFactor), Opens / Selects (SingleClick), and link rows to
+Wallpaper, Colours, Global theme, Style Tuner, General behaviour. Everything saves on the spot (no Apply), with
+KConfig::Notify like the stock page. Responsive: pills stack under 460 px, the click choice always fills its card.
+Proof: nested 1200/1000/700/460 screenshots; clicking each control not yet exercised (no input injection in nested).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

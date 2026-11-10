@@ -1,4 +1,38 @@
-diff -ruN systemsettings-6.7.5/app/qml/CategoryItem.qml b/app/qml/CategoryItem.qml
+diff -ruN systemsettings-6.7.5/app/kcmmetadatahelpers.h ../b/systemsettings-6.7.5/app/kcmmetadatahelpers.h
+--- a/app/kcmmetadatahelpers.h	2026-11-10 12:36:06.778092647 -0500
++++ b/app/kcmmetadatahelpers.h	2026-11-10 12:43:23.398827104 -0500
+@@ -24,11 +24,16 @@
+ {
+     static const bool proxy = KPluginMetaData::findPluginById(QStringLiteral("plasma/kcms/systemsettings"), QStringLiteral("kcm_luminos_proxy")).isValid();
+     static const bool netpref = KPluginMetaData::findPluginById(QStringLiteral("plasma/kcms/systemsettings"), QStringLiteral("kcm_luminos_netpref")).isValid();
+-    return (id == QLatin1String("kcm_proxy") && proxy) || (id == QLatin1String("kcm_netpref") && netpref);
++    // R25: our Quick Settings page replaces the stock landing page
++    static const bool quick = KPluginMetaData::findPluginById(QStringLiteral("plasma/kcms/systemsettings"), QStringLiteral("kcm_luminos_quick")).isValid();
++    return (id == QLatin1String("kcm_proxy") && proxy) || (id == QLatin1String("kcm_netpref") && netpref) || (id == QLatin1String("kcm_landingpage") && quick);
+ }
+ inline QString luminosModuleAlias(const QString &id)
+ {
+-    return luminosHasReplacement(id) ? (id == QLatin1String("kcm_proxy") ? QStringLiteral("kcm_luminos_proxy") : QStringLiteral("kcm_luminos_netpref")) : id;
++    if (!luminosHasReplacement(id))
++        return id;
++    return id == QLatin1String("kcm_proxy") ? QStringLiteral("kcm_luminos_proxy")
++         : id == QLatin1String("kcm_netpref") ? QStringLiteral("kcm_luminos_netpref") : QStringLiteral("kcm_luminos_quick");
+ }
+ #include <set>
+ 
+diff -ruN systemsettings-6.7.5/app/ModuleView.cpp ../b/systemsettings-6.7.5/app/ModuleView.cpp
+--- a/app/ModuleView.cpp	2026-11-10 12:36:06.777799681 -0500
++++ b/app/ModuleView.cpp	2026-11-10 12:43:23.399378553 -0500
+@@ -759,7 +759,7 @@
+     }
+ 
+     // TODO: if we'll ever need statistics for kinfocenter modules, save them with an URL like "kinfo:"
+-    if (d->mSaveStatistics && activeModule->metaData().pluginId() != QStringLiteral("kcm_landingpage")) {
++    if (d->mSaveStatistics && activeModule->metaData().pluginId() != QStringLiteral("kcm_landingpage") && activeModule->metaData().pluginId() != QStringLiteral("kcm_luminos_quick")) {
+         KActivities::ResourceInstance::notifyAccessed(QUrl(QStringLiteral("kcm:") + activeModule->metaData().pluginId()),
+                                                       QStringLiteral("org.kde.systemsettings"));
+     }
+diff -ruN systemsettings-6.7.5/app/qml/CategoryItem.qml ../b/systemsettings-6.7.5/app/qml/CategoryItem.qml
 --- a/app/qml/CategoryItem.qml	2026-11-10 12:36:06.778274957 -0500
 +++ b/app/qml/CategoryItem.qml	2026-11-10 12:36:30.220394292 -0500
 @@ -34,8 +34,10 @@
@@ -14,18 +48,30 @@ diff -ruN systemsettings-6.7.5/app/qml/CategoryItem.qml b/app/qml/CategoryItem.q
  
      Accessible.name: text
      Accessible.onPressAction: clicked()
-diff -ruN systemsettings-6.7.5/app/qml/SideBarItem.qml b/app/qml/SideBarItem.qml
+diff -ruN systemsettings-6.7.5/app/qml/SideBarItem.qml ../b/systemsettings-6.7.5/app/qml/SideBarItem.qml
 --- a/app/qml/SideBarItem.qml	2026-11-10 12:36:06.778497613 -0500
-+++ b/app/qml/SideBarItem.qml	2026-11-10 12:36:30.220186614 -0500
++++ b/app/qml/SideBarItem.qml	2026-11-10 12:46:32.256317157 -0500
 @@ -15,7 +15,10 @@
  
      // [CHANGE: claude-code | 2026-10-12] Luminos: mock nav width; a narrow window collapses it to icon tiles
      // Phase 5: one column only; a category's sub-pages replace the main list (which moves to the left drawer)
 -    implicitWidth: systemsettings.width < 860 ? 72 : LxS.Style.sidebarWidthPx + 32
 +    // [CHANGE: claude-code | 2026-11-10] R25 responsive: the rows stay (icon circle + name + second line) and the
-+    // sidebar takes ~36 % of the window between 190 px and the tuner's width; icon tiles only under 420 px.
++    // sidebar takes ~36 % of the window between 170 px and the tuner's width; icon tiles only under 420 px.
 +    implicitWidth: systemsettings.width < 420 ? 88
-+        : Math.round(Math.max(190, Math.min(LxS.Style.sidebarWidthPx, systemsettings.width * 0.36))) + 32
++        : Math.round(Math.max(170, Math.min(LxS.Style.sidebarWidthPx, systemsettings.width * 0.36))) + 32
      wideScreen: false
  
      pageStack.initialPage: mainColumn
+diff -ruN systemsettings-6.7.5/app/SettingsBase.cpp ../b/systemsettings-6.7.5/app/SettingsBase.cpp
+--- a/app/SettingsBase.cpp	2026-11-10 12:36:06.778002028 -0500
++++ b/app/SettingsBase.cpp	2026-11-10 12:43:23.399135256 -0500
+@@ -223,7 +223,7 @@
+ 
+                 if (m_mode == SidebarMode::InfoCenter && metaData.pluginId() == QStringLiteral("kcm_about-distro")) {
+                     homeModule = infoItem;
+-                } else if (m_mode == SidebarMode::SystemSettings && metaData.pluginId() == QStringLiteral("kcm_landingpage")) {
++                } else if (m_mode == SidebarMode::SystemSettings && (metaData.pluginId() == QStringLiteral("kcm_landingpage") || metaData.pluginId() == QStringLiteral("kcm_luminos_quick"))) { // R25
+                     homeModule = infoItem;
+                 }
+             }
