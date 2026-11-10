@@ -6,7 +6,7 @@
 pkgname=luminos-style
 pkgver=1.0
 # [CHANGE: claude-code | 2026-11-09] 1.0-11 (DECISION 182): Style Tuner gets a "Files" tab with bars for every files* key.
-pkgrel=12
+pkgrel=14
 pkgdesc='Luminos: live style values for the forked KDE look + Style Tuner window'
 arch=(x86_64)
 license=(GPL-3.0-or-later)
@@ -27,6 +27,7 @@ package() {
   install -Dm644 "$t/StyleTuner.qml" "$pkgdir/usr/share/luminos-style/StyleTuner.qml"
   install -Dm755 "$t/luminos-style-tuner" "$pkgdir/usr/bin/luminos-style-tuner"
   install -Dm755 "$t/luminos-style-apply" "$pkgdir/usr/bin/luminos-style-apply"
+  install -Dm755 "$t/luminos-style-history" "$pkgdir/usr/bin/luminos-style-history"
   install -Dm644 "$t/luminos-style-apply.path" "$pkgdir/usr/lib/systemd/user/luminos-style-apply.path"
   install -Dm644 "$t/luminos-style-apply.service" "$pkgdir/usr/lib/systemd/user/luminos-style-apply.service"
   install -Dm644 "$t/luminos-style-tuner.desktop" "$pkgdir/usr/share/applications/luminos-style-tuner.desktop"

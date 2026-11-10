@@ -17,6 +17,15 @@ if [ -f "$f" ] && jq -e . "$f" >/dev/null 2>&1; then
 elif [ -f "$f" ]; then
     exit 0   # half-written or broken: keep what is applied
 fi
+# [CHANGE: claude-code | 2026-11-10] R24: keep the last 200 versions of style.json, so a reset (sleep, a second
+# tuner window, anything) can be seen and undone: luminos-style-history [list|restore N]
+hist="${XDG_STATE_HOME:-$HOME/.local/state}/luminos/style-history"
+mkdir -p "$hist"
+last=$(ls -1 "$hist" 2>/dev/null | tail -1)
+if [ -z "$last" ] || ! cmp -s "$f" "$hist/$last"; then
+    cp "$f" "$hist/$(date +%Y%m%d-%H%M%S.%N | cut -c1-19).json"
+    ls -1 "$hist" | head -n -200 | while read -r old; do rm -f "$hist/$old"; done
+fi
 read -r old_pt old_btn 2>/dev/null < "$state" || { old_pt=""; old_btn=""; }
 
 setsize() { # $1 group $2 key $3 size: replace field 2 of a QFont string, keep the rest

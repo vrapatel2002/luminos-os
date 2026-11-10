@@ -1,6 +1,6 @@
 diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidgets/kfileplacesview.cpp
 --- kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-09-04 10:01:22.000000000 -0400
-+++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-09 21:53:43.525237926 -0500
++++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-10 12:28:42.834074755 -0500
 @@ -57,6 +57,8 @@
  #include <set>
  
@@ -367,7 +367,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  int KFilePlacesViewDelegate::actionIconSize() const
 diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidgets/kfileplacesview_p.h
 --- kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-09-04 10:01:22.000000000 -0400
-+++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-09 21:53:43.525319849 -0500
++++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-10 12:28:42.834152360 -0500
 @@ -69,6 +69,7 @@
      void startDrag();
  
@@ -378,8 +378,8 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidg
  
 diff -ruN kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h
 --- kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	1969-12-31 19:00:00.000000000 -0500
-+++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-09 21:53:43.524810476 -0500
-@@ -0,0 +1,125 @@
++++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-10 12:28:42.833652276 -0500
+@@ -0,0 +1,133 @@
 +// [CHANGE: claude-code | 2026-11-09] DECISION 182 — Luminos Files look values.
 +// Reads ~/.config/luminos/style.json (the same file the Style Tuner writes) and calls back when it
 +// changes, so QtWidgets code (Dolphin, the KIO places panel) can follow the tuner live.
@@ -480,7 +480,15 @@ diff -ruN kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h kio-6.30.0/src/filewi
 +    void load()
 +    {
 +        QFile f(path());
-+        m_obj = f.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(f.readAll()).object() : QJsonObject();
++        if (!f.open(QIODevice::ReadOnly)) {
++            m_obj = QJsonObject(); // no file = all defaults
++            return;
++        }
++        QJsonParseError err;
++        const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
++        if (err.error == QJsonParseError::NoError && doc.isObject()) {
++            m_obj = doc.object(); // [R24] half-written / broken file: keep the last good values
++        }
 +    }
 +    void rewatch()
 +    {

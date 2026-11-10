@@ -5,6 +5,7 @@ Description=Apply Luminos style tuner values that live in KDE config (fonts, Dar
 [Path]
 PathChanged=%h/.config/luminos/style.json
 Unit=luminos-style-apply.service
+TriggerLimitIntervalSec=0
 
 [Install]
 WantedBy=default.target

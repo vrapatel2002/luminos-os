@@ -1,5 +1,8 @@
 # [CHANGE: claude-code | 2026-11-08] DECISION 176
 [Unit]
+# R24: dragging a bar writes style.json many times a second; the default start limit (5 in 10 s)
+# failed the unit on 2026-11-08 and text size / button corners stopped applying for two days
+StartLimitIntervalSec=0
 Description=Apply Luminos style tuner values (fonts, Darkly corners)
 
 [Service]

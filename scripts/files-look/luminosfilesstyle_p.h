@@ -98,7 +98,15 @@ private:
     void load()
     {
         QFile f(path());
-        m_obj = f.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(f.readAll()).object() : QJsonObject();
+        if (!f.open(QIODevice::ReadOnly)) {
+            m_obj = QJsonObject(); // no file = all defaults
+            return;
+        }
+        QJsonParseError err;
+        const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+        if (err.error == QJsonParseError::NoError && doc.isObject()) {
+            m_obj = doc.object(); // [R24] half-written / broken file: keep the last good values
+        }
     }
     void rewatch()
     {

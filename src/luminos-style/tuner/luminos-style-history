@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# [CHANGE: claude-code | 2026-11-10] R24 — look at / bring back earlier versions of ~/.config/luminos/style.json.
+#   luminos-style-history            list versions (newest last) with how many values differ from the default
+#   luminos-style-history diff N     what version N changed compared with the one before it
+#   luminos-style-history restore N  put version N back (the tuner and every app follow it live)
+set -u
+hist="${XDG_STATE_HOME:-$HOME/.local/state}/luminos/style-history"
+f="${XDG_CONFIG_HOME:-$HOME/.config}/luminos/style.json"
+mapfile -t v < <(ls -1 "$hist" 2>/dev/null)
+[ ${#v[@]} -gt 0 ] || { echo "no saved versions yet ($hist)"; exit 0; }
+case "${1:-list}" in
+  list) for i in "${!v[@]}"; do printf '%3d  %s\n' "$i" "${v[$i]%.json}"; done ;;
+  diff) n=${2:?N}; p=$((n-1)); [ $p -ge 0 ] || { echo "first version"; exit 0; }
+        diff <(jq -S . "$hist/${v[$p]}") <(jq -S . "$hist/${v[$n]}") | grep '^[<>]' ;;
+  restore) n=${2:?N}; jq -e . "$hist/${v[$n]}" >/dev/null || { echo "version $n is broken"; exit 1; }
+        cp "$hist/${v[$n]}" "$f.tmp" && mv "$f.tmp" "$f" && echo "restored ${v[$n]%.json}" ;;
+  *) sed -n 3,5p "$0" ;;
+esac

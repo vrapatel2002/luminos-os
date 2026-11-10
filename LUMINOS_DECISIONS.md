@@ -8952,6 +8952,8 @@ tuner bars (luminos-style 1.0-12). The iPhone glyph fell back to the monochrome 
 Modified Today/Yesterday to Papirus' 24 px hollow squares; luminos-files-icons 1.0-5 adds filled phone (devices/) and calendar
 (actions/) glyphs in the same style. kio also swaps to `<name>-symbolic` when a name only resolves to a big colour picture.
 Proof: nested 2x sidebar — every disc carries a filled glyph of the same weight, drive rows compact.
+**R24 (2026-11-10) — saving is safe:** see BUG-238. The tuner only writes the keys its window changed, never over a
+half-written file; the apply unit can't hit the start limit; `luminos-style-history` keeps 200 versions (list/diff/restore).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

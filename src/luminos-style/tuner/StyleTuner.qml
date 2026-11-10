@@ -111,6 +111,10 @@ QQC2.ApplicationWindow {
     // current values; seeded from what the libraries are using right now (= the file, or defaults)
     property var values: ({})
     property var undoStack: []
+    // [CHANGE: claude-code | 2026-11-10] R24: keys this window really changed. save() writes only these on top of
+    // what is in the file now, so a second tuner window (Settings + Files tabs open at once) or a stale seed can
+    // never put old/default values back over bars moved somewhere else.
+    property var dirty: ({})
     property int revision: 0   // bumps on every change so bindings refresh
     readonly property url filePath: StandardPaths.writableLocation(StandardPaths.GenericConfigLocation) + "/luminos/style.json"
 
@@ -119,24 +123,44 @@ QQC2.ApplicationWindow {
         if (values[id] === v) return
         if (pushUndo) undoStack.push(snapshot())
         values[id] = v
+        dirty[id] = true
         revision++
         saveTimer.restart()
     }
     function setAll(map) {
         undoStack.push(snapshot())
-        for (const k of knobs) if ((k.a || "settings") === page) values[k.id] = (map[k.id] !== undefined ? map[k.id] : k.def)
+        for (const k of knobs) if ((k.a || "settings") === page) { values[k.id] = (map[k.id] !== undefined ? map[k.id] : k.def); dirty[k.id] = true }
         revision++
         saveTimer.restart()
     }
     function undo() {
         if (undoStack.length === 0) return
-        values = undoStack.pop()
+        const back = undoStack.pop()
+        for (const k of knobs) if (back[k.id] !== values[k.id]) dirty[k.id] = true
+        values = back
         revision++
         saveTimer.restart()
     }
+    // the file as it is right now: {} when missing/empty, null when it is unreadable or half-written
+    function readFile() {
+        const r = new XMLHttpRequest()
+        r.open("GET", filePath, false)
+        try { r.send() } catch (e) { return {} }
+        const txt = (r.responseText || "").trim()
+        if (txt === "") return {}
+        try { const o = JSON.parse(txt); return (o && typeof o === "object") ? o : null } catch (e) { return null }
+    }
+    property int saveRetries: 0
     function save() {
-        const out = {}
-        for (const k of knobs) out[k.id] = (k.kind === "toggle") ? (values[k.id] ? 1 : 0) : values[k.id]
+        const out = readFile()
+        if (out === null) {                       // someone is mid-write: try again shortly, never write blind
+            if (++saveRetries < 20) saveTimer.restart()
+            return
+        }
+        saveRetries = 0
+        for (const k of knobs)
+            if (dirty[k.id] || out[k.id] === undefined)
+                out[k.id] = (k.kind === "toggle") ? (values[k.id] ? 1 : 0) : values[k.id]
         const xhr = new XMLHttpRequest()
         xhr.open("PUT", filePath)
         xhr.send(JSON.stringify(out, null, 2) + "\n")
@@ -152,10 +176,8 @@ QQC2.ApplicationWindow {
     property bool dragging: false
     function reseed() {
         // bottom-button keys live only in System Settings' C++, so they come from the file itself
-        let file = {}
-        const xhr = new XMLHttpRequest()
-        xhr.open("GET", filePath, false)
-        try { xhr.send(); file = JSON.parse(xhr.responseText || "{}") } catch (e) { file = {} }
+        const file = readFile()
+        if (file === null) return                 // half-written: keep what we have, the next change reseeds
         const v = {}
         for (const k of knobs) {
             const fromStyle = Style[k.id]
@@ -163,6 +185,7 @@ QQC2.ApplicationWindow {
             if (k.kind === "toggle") v[k.id] = v[k.id] ? 1 : 0
         }
         values = v
+        dirty = ({})                              // everything now matches the file
         revision++
     }
     Component.onCompleted: reseed()

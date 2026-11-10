@@ -17,7 +17,10 @@ export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 export QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1   # the only way plain QML writes a file
 mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/luminos"
 # text size + button corners are applied by a path unit; make sure it is on (cheap, idempotent)
-systemctl --user is-enabled -q luminos-style-apply.path 2>/dev/null \
-    || systemctl --user enable --now luminos-style-apply.path >/dev/null 2>&1
+# [R24] is-active, not is-enabled: a failed (start-limit) unit is still "enabled" and silently does nothing
+systemctl --user is-active -q luminos-style-apply.path 2>/dev/null || {
+    systemctl --user reset-failed luminos-style-apply.path luminos-style-apply.service >/dev/null 2>&1
+    systemctl --user enable --now luminos-style-apply.path >/dev/null 2>&1
+}
 if [ $# -gt 0 ]; then exec qml6 /usr/share/luminos-style/StyleTuner.qml -- "$@"; fi   # e.g. --files opens the Files tab
 exec qml6 /usr/share/luminos-style/StyleTuner.qml

@@ -8751,3 +8751,22 @@ read and, under set -e, exited 1 with no message.
 **Fix:** `up` now runs `modprobe vhost_vsock` (pulls vsock) when /proc/sys/net/vsock/child_ns_mode is missing and prints a
 clear error if it is still missing; the launcher's notification now shows the real error text. Verified from the
 post-reboot state (modules not loaded): up → netns claude-glm vsock local; full launch → GLM app in netns, own helper socket.
+
+## BUG-238 — Style Tuner changes "don't save" / reset: text size + button corners stuck since 2026-11-08, and two tuner windows overwrite each other
+<!-- [CHANGE: claude-code | 2026-11-10] -->
+**Seen (Shawn):** "the settings are not being saved, maybe after sleep everything just resets".
+**Cause 1 (proven):** `luminos-style-apply.path` was `failed (unit-start-limit-hit)` since 2026-11-08 12:05 — dragging a bar writes
+style.json many times a second and the service's default start limit (5 in 10 s) tripped. From then on text size and button
+corners never reached kdeglobals/darklyrc (file said 11 pt, kdeglobals still 11.5). The launcher only checked `is-enabled`,
+which stays true for a failed unit, so nothing ever restarted it.
+**Cause 2 (proven):** save() wrote EVERY knob from the window's own copy. With a Settings window and a Files window open, the
+one that missed a reseed (it skips while a bar is held) wrote its stale/default values back: test two.qml — old tuner left
+filesPlaceRowPx at 44 after the other window set 60. Same for a half-written file read as {} → defaults.
+**Sleep:** no sleep hook or resume job touches style.json or KDE config (system-sleep has brightness, sdreader, nvidia only;
+no ~/.config file changes after the 10:35 resume besides kwinoutputconfig.json). Not ruled out for other settings.
+**FIX (luminos-style 1.0-14, kio 1.6):** StartLimitIntervalSec=0 / TriggerLimitIntervalSec=0; launcher uses is-active +
+reset-failed; save() reads the file and writes only keys this window changed (dirty set), retries instead of writing when
+the file is half-written; reseed and the C++/kio readers keep last good values on a broken file. New `luminos-style-history`
+keeps the last 200 versions in ~/.local/state/luminos/style-history (list / diff N / restore N), so any future reset shows
+when it happened and can be undone. **Proof:** two.qml old 44 → new 60; 31 rapid writes → unit still active, kdeglobals
+font now 11 (matches the file); history recorded 28 versions.
