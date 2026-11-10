@@ -16,7 +16,8 @@ pkgname=kio
 pkgver=6.30.0
 # 1.2 (R20): sidebar glyph fetched at <=20 px then scaled, so big "Icon size" never shows a file-type tile as a square.
 # 1.3 (R21): sidebar disc centred on the whole row, so drive rows (bar + free text) line up.
-pkgrel=1.3
+# 1.4 (R22): sidebar glyph drawn from the 16 px SVG itself, so 1.25x/2x screens never get the big tile (solid square).
+pkgrel=1.4
 pkgdesc='Resource and network access abstraction'
 arch=(x86_64)
 url='https://develop.kde.org/products/frameworks/'

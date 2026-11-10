@@ -8939,6 +8939,12 @@ Tuner liveness checked: the real tuner (driven by tuner-drive.qml in a nested se
 changed rows, circles and tile corners on the spot; Shawn's running Dolphin holds inotify watches on style.json + its folder.
 Not instant by design: S-M-L-XL zoom steps (used next time you pick a size), Folders/Files groups (next folder load or re-sort),
 View panel on/off + width (built when Dolphin starts), selection bar / undo note (next select / delete), hamburger layout (next open).
+**R22 (2026-11-10) — sidebar icons turning into squares:** Shawn saw Home/Downloads/Network/Recent Locations as solid squares
+at bigger glyph sizes. Those four come from luminos-files `places/16` (8-20 px); the theme's coloured tiles start at 21 px, and a
+lookup that counts screen pixels on his 2x/1.25x screens can land on the tile, which then fills as a square. kio 1.4 asks the
+theme for the 16 px glyph's SVG file (KIconLoader::iconPath(name, -16)) and draws that file at the bar's size, so every size is
+crisp and can never pick a tile; non-SVG icons keep the old fetch (now capped at 16). Not reproducible in nested at 1x-2x, so
+proof is: nested 2x at glyph 12/20/30 all draw the right symbol, sharp (docs proof shots in builds/style-tuner/a12,a20,a30).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

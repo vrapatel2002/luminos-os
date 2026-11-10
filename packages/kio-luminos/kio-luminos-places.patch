@@ -1,6 +1,6 @@
 diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidgets/kfileplacesview.cpp
 --- kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-09-04 10:01:22.000000000 -0400
-+++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-09 15:50:34.073768377 -0500
++++ kio-6.30.0/src/filewidgets/kfileplacesview.cpp	2026-11-09 21:36:31.434296708 -0500
 @@ -57,6 +57,7 @@
  #include <set>
  
@@ -104,7 +104,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  
      const QPalette activePalette = KIconLoader::global()->customPalette();
      const bool changePalette = activePalette != opt.palette;
-@@ -185,27 +228,49 @@
+@@ -185,27 +228,62 @@
          KIconLoader::global()->setCustomPalette(opt.palette);
      }
  
@@ -130,8 +130,21 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
 +        painter->drawEllipse(QRectF(iconRect));
 +        // glyph = the icon's shape, filled with one colour (so every icon reads as a symbol)
 +        // fetched at <= 20 px so file-type icon packs give their small glyph, not a big tile; then drawn at glyphPx
-+        const int fetchPx = qMin(glyphPx, lx.px("filesPlaceGlyphFetchMaxPx", 20, 8, 64));
-+        QImage img = icon.pixmap(QSize(fetchPx, fetchPx), dpr, QIcon::Normal).toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
++        // [R22] asking the theme for an 18 px icon on a 2x / 1.25x screen can hand back the big file-type
++        // tile (it matches on screen pixels, and those tiles start at 21 px), which then fills as a solid
++        // square. So take the 16 px glyph's own SVG file and draw that at whatever size the bar says.
++        QImage img;
++        const QString iconName = placesModel->data(index, KFilePlacesModel::IconNameRole).toString();
++        const QString glyphFile = iconName.isEmpty() ? QString() : KIconLoader::global()->iconPath(iconName, -16, true);
++        if (glyphFile.endsWith(QLatin1String(".svg")) || glyphFile.endsWith(QLatin1String(".svgz"))) {
++            img = QIcon(glyphFile).pixmap(QSize(glyphPx, glyphPx), dpr, QIcon::Normal).toImage();
++        }
++        int fetchPx = glyphPx;
++        if (img.isNull()) {
++            fetchPx = qMin(glyphPx, lx.px("filesPlaceGlyphFetchMaxPx", 16, 8, 64));
++            img = icon.pixmap(QSize(fetchPx, fetchPx), dpr, QIcon::Normal).toImage();
++        }
++        img = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 +        {
 +            QPainter ip(&img);
 +            ip.setCompositionMode(QPainter::CompositionMode_SourceIn);
@@ -165,7 +178,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
                            iconSize,
                            iconSize);
  
-@@ -230,66 +295,56 @@
+@@ -230,66 +308,56 @@
          }
      }
  
@@ -267,7 +280,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  
      const bool isElided = (text != elidedText);
  
-@@ -304,6 +359,15 @@
+@@ -304,6 +372,15 @@
      painter->restore();
  }
  
@@ -283,7 +296,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  bool KFilePlacesViewDelegate::helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option, const QModelIndex &index)
  {
      if (event->type() == QHelpEvent::ToolTip) {
-@@ -673,8 +737,17 @@
+@@ -673,8 +750,17 @@
          ? i18n("%1 (hidden)", groupLabel)
          : groupLabel;
  
@@ -302,7 +315,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
      /* Take spacing into account:
         The spacing to the previous section compensates for the spacing to the first item.*/
      textRect.setY(textRect.y() /* + qMax(2, m_view->spacing()) - qMax(2, m_view->spacing())*/);
-@@ -687,8 +760,10 @@
+@@ -687,8 +773,10 @@
      const QColor c2 = baseColor(option);
      QColor penColor = mixedColor(c1, c2, 60);
  
@@ -314,7 +327,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
      painter->restore();
  }
  
-@@ -723,11 +798,12 @@
+@@ -723,11 +811,12 @@
  int KFilePlacesViewDelegate::sectionHeaderHeight(const QModelIndex &index) const
  {
      Q_UNUSED(index);
@@ -333,7 +346,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview.cpp kio-6.30.0/src/filewidg
  int KFilePlacesViewDelegate::actionIconSize() const
 diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidgets/kfileplacesview_p.h
 --- kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-09-04 10:01:22.000000000 -0400
-+++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-09 15:50:34.073865931 -0500
++++ kio-6.30.0/src/filewidgets/kfileplacesview_p.h	2026-11-09 21:36:31.434385901 -0500
 @@ -69,6 +69,7 @@
      void startDrag();
  
@@ -344,7 +357,7 @@ diff -ruN kio-6.30.0/src/filewidgets/kfileplacesview_p.h kio-6.30.0/src/filewidg
  
 diff -ruN kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h
 --- kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	1969-12-31 19:00:00.000000000 -0500
-+++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-09 15:50:34.073245062 -0500
++++ kio-6.30.0/src/filewidgets/luminosfilesstyle_p.h	2026-11-09 21:36:31.433880927 -0500
 @@ -0,0 +1,125 @@
 +// [CHANGE: claude-code | 2026-11-09] DECISION 182 — Luminos Files look values.
 +// Reads ~/.config/luminos/style.json (the same file the Style Tuner writes) and calls back when it

@@ -124,8 +124,21 @@ new_paint = r'''    // [CHANGE: claude-code | 2026-11-09] DECISION 182: Luminos 
         painter->drawEllipse(QRectF(iconRect));
         // glyph = the icon's shape, filled with one colour (so every icon reads as a symbol)
         // fetched at <= 20 px so file-type icon packs give their small glyph, not a big tile; then drawn at glyphPx
-        const int fetchPx = qMin(glyphPx, lx.px("filesPlaceGlyphFetchMaxPx", 20, 8, 64));
-        QImage img = icon.pixmap(QSize(fetchPx, fetchPx), dpr, QIcon::Normal).toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        // [R22] asking the theme for an 18 px icon on a 2x / 1.25x screen can hand back the big file-type
+        // tile (it matches on screen pixels, and those tiles start at 21 px), which then fills as a solid
+        // square. So take the 16 px glyph's own SVG file and draw that at whatever size the bar says.
+        QImage img;
+        const QString iconName = placesModel->data(index, KFilePlacesModel::IconNameRole).toString();
+        const QString glyphFile = iconName.isEmpty() ? QString() : KIconLoader::global()->iconPath(iconName, -16, true);
+        if (glyphFile.endsWith(QLatin1String(".svg")) || glyphFile.endsWith(QLatin1String(".svgz"))) {
+            img = QIcon(glyphFile).pixmap(QSize(glyphPx, glyphPx), dpr, QIcon::Normal).toImage();
+        }
+        int fetchPx = glyphPx;
+        if (img.isNull()) {
+            fetchPx = qMin(glyphPx, lx.px("filesPlaceGlyphFetchMaxPx", 16, 8, 64));
+            img = icon.pixmap(QSize(fetchPx, fetchPx), dpr, QIcon::Normal).toImage();
+        }
+        img = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
         {
             QPainter ip(&img);
             ip.setCompositionMode(QPainter::CompositionMode_SourceIn);
