@@ -8967,6 +8967,9 @@ icons and the Luminos look stay), animation speed (AnimationDurationFactor), Ope
 Wallpaper, Colours, Global theme, Style Tuner, General behaviour. Everything saves on the spot (no Apply), with
 KConfig::Notify like the stock page. Responsive: pills stack under 460 px, the click choice always fills its card.
 Proof: nested 1200/1000/700/460 screenshots; clicking each control not yet exercised (no input injection in nested).
+**R26 (2026-11-10) — rows are rounded rectangles, not ovals:** Shawn's Touchpad vs Caelestia's Apps row. The selected / end
+rows' corners (outer + 4 = 36 px) hit half the ~76 px row and made a pill. Corners now stop at 36 % of the row height
+(systemsettings 1.18); the icon-only tile stays round. Tuner corner values still apply below that cap.
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

@@ -34,8 +34,19 @@ diff -ruN systemsettings-6.7.5/app/ModuleView.cpp ../b/systemsettings-6.7.5/app/
      }
 diff -ruN systemsettings-6.7.5/app/qml/CategoryItem.qml ../b/systemsettings-6.7.5/app/qml/CategoryItem.qml
 --- a/app/qml/CategoryItem.qml	2026-11-10 12:36:06.778274957 -0500
-+++ b/app/qml/CategoryItem.qml	2026-11-10 12:36:30.220394292 -0500
-@@ -34,8 +34,10 @@
++++ b/app/qml/CategoryItem.qml	2026-11-10 13:12:16.621278460 -0500
+@@ -25,7 +25,9 @@
+     property bool groupEnd: true
+     // Narrow (squeezed) sidebar: icon-only tile, corners clamped to the tile's size.
+     readonly property bool compact: width < 120
+-    readonly property real cornerMax: Math.min(width, height - topInset - bottomInset) / 2
++    // R26: rows are rounded rectangles, not ovals — corners stop at 36 % of the row height (Caelestia's look);
++    // the round icon-only tile keeps the full half
++    readonly property real cornerMax: compact ? Math.min(width, height - topInset - bottomInset) / 2 : (height - topInset - bottomInset) * 0.36
+     readonly property real cornerTop: Math.min(cornerMax, pressed ? 12 : highlighted ? LxS.Style.cornerSelectedPx : groupStart ? LxS.Style.cornerOuterPx : LxS.Style.cornerInnerPx)
+     readonly property real cornerBottom: Math.min(cornerMax, pressed ? 12 : highlighted ? LxS.Style.cornerSelectedPx : groupEnd ? LxS.Style.cornerOuterPx : LxS.Style.cornerInnerPx)
+ 
+@@ -34,8 +36,10 @@
      Kirigami.Theme.colorSet: Kirigami.Theme.Button
      Kirigami.Theme.inherit: false
  
