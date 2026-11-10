@@ -3377,3 +3377,18 @@ JellyRock tried to play the file as-is (DTS-HD MA audio + Blu-ray image subtitle
 it asked for a transcode (PGS burn-in + AAC) and played. An orphaned Black Swan 4K transcode (no client, 12 min,
 257 % CPU) was killed so it stopped competing with the stream. Not changed: the DTS-only/PGS files themselves —
 `luminos-roku-compat --fix-audio` (adds an AC3 track) is the global fix, offered, not run while he watched.
+
+## DECISION 177 — Radarr profile 7 takes 720p as a last resort; "ESubs" is not burned-in — 2026-11-09
+<!-- [CHANGE: claude-code | 2026-11-09] -->
+**Asked:** Shawn requested Rockstar (2011, Hindi) — nothing downloaded. "Hindi audio fine, no subtitle, best quality".
+**Measured:** NZBGeek had only 5 releases, none 1080p/4K: 720p BluRay Hindi AC3 4.7 GB (rejected: 720p not in
+profile 7 + "Hardcode subs found: ESubs"), 720p English (wrong language, correctly rejected), 3× DVDRip.
+"ESubs" in Indian release names means a separate English subtitle track, not burned-in text.
+**Change (Radarr API, read back):** profile 7 "Max Bitrate" now also allows HDTV/WEBDL/WEBRip/Bluray-720p, ranked
+below every 1080p/2160p quality; cutoff stays Remux-2160p and upgrades stay on, so a 720p is replaced automatically
+when anything better appears. Indexer setting `whitelistedHardcodedSubs` = `ESubs,ESub,MSubs,Esubs`.
+Backup of the old profile: `/var/lib/radarr/qp7.pre-720p-20261109.json`. 480p/DVD still refused.
+**Proof:** release list → 4.7 GB Hindi 720p accepted; MoviesSearch grabbed it, NZBGet 76 MB/s, imported
+19:43:08 into /srv/external/movies (file still owned by nzbget with original mtime = a rename, so DECISION 176's
+same-disk move is proven on a real download), Jellyfin listed "Rockstar (2011)" 19:44:39.
+Bazarr added an English .srt alongside (harmless; subtitles can be switched off in the player).
