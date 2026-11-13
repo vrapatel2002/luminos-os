@@ -35,9 +35,14 @@ button { font: inherit; color: inherit; }
 /* the screen */
 .screen { max-width: 1200px; margin: 0 auto; aspect-ratio: 16 / 10; border-radius: 18px; overflow: hidden; position: relative;
   background: var(--night); container-type: inline-size; }
-.screen .wall { position: absolute; inset: 0; opacity: 0; transition: opacity .3s; filter: blur(40px) brightness(.35) saturate(1.2); transform: scale(1.15);
-  background: radial-gradient(40% 70% at 85% 60%, #e9d9d2 0%, transparent 60%), radial-gradient(30% 40% at 78% 35%, #9fb6d6 0%, transparent 70%), #050507; }
-.screen.blurwall .wall { opacity: 1; }
+.art { background:
+    radial-gradient(14% 22% at 84% 44%, #f3d6cf 0%, #f3d6cf 92%, transparent 94%),
+    radial-gradient(24% 52% at 92% 40%, #cfd8e6 0%, #9fb2cc 88%, transparent 90%),
+    radial-gradient(10% 50% at 80% 82%, #f4f4f6 0%, transparent 70%),
+    linear-gradient(115deg, transparent 72%, #16151c 72.5%, transparent 74%),
+    #050507; }
+/* backdrop: KWin's blurred, dimmed wallpaper — kept as today */
+.screen .wall { position: absolute; inset: -6%; filter: blur(34px) brightness(.55); }
 .ov { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 2.2cqw 3cqw 2.6cqw; gap: 1.6cqw; }
 
 /* desktops strip */
@@ -62,20 +67,33 @@ button { font: inherit; color: inherit; }
 .search input::placeholder { color: var(--dim); }
 
 /* stage */
-.stage { flex: 1; width: 100%; border-radius: 2cqw; background: var(--stage); position: relative; overflow: hidden; padding: 2.4cqw 3cqw; display: flex; align-items: center; justify-content: center; }
-.stage .inside { position: absolute; inset: 0; opacity: .5; pointer-events: none;
-  background: radial-gradient(28% 60% at 90% 62%, rgba(233,217,210,.55) 0%, transparent 70%), radial-gradient(22% 36% at 84% 38%, rgba(159,182,214,.4) 0%, transparent 70%); }
-.screen.blurwall .stage .inside { opacity: .8; }
+.stage { flex: 1; width: 100%; position: relative; overflow: hidden; background: #050507; padding: 2.4cqw 3cqw; display: flex; align-items: center; justify-content: center;
+  transition: border-radius .2s, box-shadow .2s, outline-color .2s; }
+.stage .inside { position: absolute; inset: 0; pointer-events: none; }
+.stage .shade { position: absolute; inset: 0; pointer-events: none; transition: background .2s; }
+/* Today: hard black-edged rectangle, small radius */
+.today .stage { border-radius: 1.4cqw; }
+.today .stage .shade { background: transparent; }
+/* Frosted: the desktop shows through, a little dimmed, thin light edge, big radius */
+.frost .stage { border-radius: 2.4cqw; outline: 1.5px solid rgba(255,255,255,.22); outline-offset: -1px; box-shadow: 0 2cqw 5cqw rgba(0,0,0,.45); }
+.frost .stage .shade { background: rgba(10,10,16,.38); }
+/* Floating: no edge, deep soft shadow, desktop dimmed more so windows pop */
+.float .stage { border-radius: 2.8cqw; box-shadow: 0 3cqw 7cqw rgba(0,0,0,.6), 0 0 0 .4cqw rgba(0,0,0,.18); }
+.float .stage .shade { background: linear-gradient(180deg, rgba(10,10,16,.15), rgba(10,10,16,.5)); }
+/* Outlined: lavender ring = "this is the desktop you are on" */
+.ring .stage { border-radius: 2.4cqw; outline: .25cqw solid var(--accent); outline-offset: .45cqw; }
+.ring .stage .shade { background: rgba(10,10,16,.3); }
 .grid { position: relative; display: flex; flex-wrap: wrap; gap: 2.2cqw 2.6cqw; width: 100%; height: 100%; align-content: center; justify-content: center; }
 .win { width: var(--w, 20cqw); display: flex; flex-direction: column; align-items: center; gap: .9cqw; border: 0; background: none; padding: 0; cursor: pointer; min-width: 0; position: relative; }
 .win .shot { width: 100%; aspect-ratio: 16/10; border-radius: 1.2cqw; overflow: hidden; position: relative; box-shadow: 0 1.2cqw 2.6cqw rgba(0,0,0,.45);
   outline: 2px solid transparent; outline-offset: 3px; transition: transform .16s, outline-color .16s; }
 .win:hover .shot { transform: translateY(-.3cqw); }
 .win.sel .shot { outline-color: var(--accent); }
-.win .label { display: flex; align-items: center; gap: .6cqw; max-width: 100%; background: var(--card); border-radius: 1.6cqw; padding: .35cqw 1cqw .35cqw .4cqw; }
-.win .label .ic { flex: none; width: 2.1cqw; height: 2.1cqw; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; }
-.win .label .ic svg { width: 1.2cqw; height: 1.2cqw; }
-.win .label span { font-size: 1.1cqw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.win .ic { position: absolute; left: 50%; top: calc(var(--w, 20cqw) * .625 - 2.2cqw); transform: translateX(-50%); width: 4cqw; height: 4cqw; border-radius: 1.1cqw;
+  background: var(--accent); color: var(--on-accent); display: grid; place-items: center; box-shadow: 0 .4cqw 1cqw rgba(0,0,0,.45); }
+.win .ic svg { width: 2.2cqw; height: 2.2cqw; }
+.win .label { margin-top: 1.6cqw; max-width: 100%; background: rgba(36,35,43,.88); border-radius: 1.6cqw; padding: .35cqw 1.1cqw; }
+.win .label span { display: block; font-size: 1.1cqw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .win .close { position: absolute; top: -.8cqw; right: -.8cqw; width: 2.3cqw; height: 2.3cqw; border-radius: 50%; border: 0; background: var(--card); color: var(--fg);
   display: grid; place-items: center; opacity: 0; transition: opacity .12s; cursor: pointer; box-shadow: 0 .3cqw .8cqw rgba(0,0,0,.5); }
 .win .close svg { width: 1.1cqw; height: 1.1cqw; }
@@ -100,16 +118,18 @@ button { font: inherit; color: inherit; }
 <body>
 <div class="controls">
   <b>Overview mock</b>
-  <span>Behind the box</span>
-  <div class="seg" role="radiogroup" aria-label="Background behind the box">
-    <button id="bgDark" class="on">Dark</button>
-    <button id="bgBlur">Very blurred wallpaper</button>
+  <span>Box style</span>
+  <div class="seg" role="radiogroup" aria-label="Box style" id="styles">
+    <button data-s="frost" class="on">Frosted</button>
+    <button data-s="float">Floating</button>
+    <button data-s="ring">Outlined</button>
+    <button data-s="today">Today</button>
   </div>
   <span>Click a window to pick it · hover for ✕ · type in search</span>
 </div>
 
-<div class="screen" id="screen">
-  <div class="wall"></div>
+<div class="screen blurwall frost" id="screen">
+  <div class="wall art"></div>
   <div class="ov">
     <div class="desks" id="desks"></div>
     <label class="search" for="q">
@@ -117,13 +137,13 @@ button { font: inherit; color: inherit; }
       <input id="q" placeholder="Search windows and apps">
     </label>
     <div class="stage">
-      <div class="inside"></div>
+      <div class="inside art"></div><div class="shade"></div>
       <div class="grid" id="grid"></div>
     </div>
   </div>
 </div>
 
-<p class="hint"><b>What changed from today:</b> no full-size wallpaper behind the box (dark, or blurred so much it's just a soft glow), so nothing looks like it leaks out. Window names sit in a pill with the app's icon in a circle beside them, not stamped on top of the window. Every window has the same rounded corners and spacing, the picked one gets a lavender ring, and close (✕) only shows on hover. Desktops are small rounded tiles with the add button as a circle.</p>
+<p class="hint"><b>Kept as today:</b> the blurred wallpaper behind, the search bar, window cards with the app icon on their bottom edge and the name under it. <b>Changed:</b> only the box — switch the four styles at the top. <b>Frosted:</b> desktop shows through a little dimmed, thin light edge, bigger rounded corners, soft shadow. <b>Floating:</b> no edge, deeper shadow, desktop darker toward the bottom so windows stand out. <b>Outlined:</b> a lavender ring marks the desktop you're on. <b>Today:</b> how it looks now, for comparison.</p>
 
 <script>
 const ICON = {
@@ -176,7 +196,7 @@ function renderWins() {
     const b = document.createElement('div');
     b.className = 'win' + (w.id === sel ? ' sel' : '');
     b.tabIndex = 0;
-    b.innerHTML = `<div class="shot">${appHTML(w.light)}</div><div class="label"><span class="ic">${ICON[w.ic]}</span><span>${w.t}</span></div><button class="close" aria-label="Close ${w.t}">${ICON.x}</button>`;
+    b.innerHTML = `<div class="shot">${appHTML(w.light)}</div><span class="ic">${ICON[w.ic]}</span><div class="label"><span>${w.t}</span></div><button class="close" aria-label="Close ${w.t}">${ICON.x}</button>`;
     b.onclick = e => {
       if (e.target.closest('.close')) { desks[cur].wins = desks[cur].wins.filter(x => x.id !== w.id); render(); return; }
       sel = w.id; renderWins();
@@ -187,8 +207,10 @@ function renderWins() {
 }
 function render() { renderDesks(); renderWins(); }
 $('q').oninput = renderWins;
-$('bgDark').onclick = () => { $('screen').classList.remove('blurwall'); $('bgDark').classList.add('on'); $('bgBlur').classList.remove('on'); };
-$('bgBlur').onclick = () => { $('screen').classList.add('blurwall'); $('bgBlur').classList.add('on'); $('bgDark').classList.remove('on'); };
+document.querySelectorAll('#styles button').forEach(b => b.onclick = () => {
+  const scr = $('screen'); ['frost', 'float', 'ring', 'today'].forEach(c => scr.classList.remove(c)); scr.classList.add(b.dataset.s);
+  document.querySelectorAll('#styles button').forEach(x => x.classList.toggle('on', x === b));
+});
 render();
 </script>
 </body>
