@@ -9033,3 +9033,8 @@ dimmed with rgba(10,10,16,.38). Grid view (desktop grid) keeps stock looks. Warn
 (installed). Proof: nested KWin from the built package vs stock, same desktop (builds/ov-test/f0 stock, f1 frosted).
 Takes effect after logging out and back in (the overview lives inside the running KWin).
 **Undo:** `sudo pacman -U /var/cache/pacman/pkg/kwin-6.7.5-1-x86_64.pkg.tar.zst`, log out/in.
+**R1 (2026-11-12) — desktop strip matches the box:** Shawn: "the solid line is very much not matching". The current desktop
+had a thick grey slab behind it (radius cornerRadius) while the thumbnail used width/20 corners and a 1 px text-colour frame.
+Now (kwin 1.2): tile corners 12 px on screen, hairline white 14 % edge, current = 2 px lavender ring 4 px outside (16 px
+corners), hover = faint white ring; the + button is a soft 12 px tile; search is a pill (hairline, lavender when focused).
+Proof: nested strip before/after (builds/ov-test/f1 → f3).

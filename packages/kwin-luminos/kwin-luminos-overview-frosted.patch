@@ -1,7 +1,97 @@
+diff -ruN kwin-6.7.5/src/plugins/overview/qml/DesktopBar.qml ../b/kwin-6.7.5/src/plugins/overview/qml/DesktopBar.qml
+--- a/src/plugins/overview/qml/DesktopBar.qml	2026-09-08 06:53:35.000000000 -0400
++++ b/src/plugins/overview/qml/DesktopBar.qml	2026-11-12 20:29:02.902397152 -0500
+@@ -123,18 +123,19 @@
+                                     anchors.centerIn: parent
+                                     width: thumbnail.width
+                                     height: thumbnail.height
+-                                    // Using 5% of width since that's constant even under scaling:
+-                                    radius: width / 20
++                                    // [CHANGE: claude-code | 2026-11-12] DECISION 184 R1: one corner size for the tile, its
++                                    // edge and its ring: 12 px on screen (the thumbnail is drawn full size, then scaled down)
++                                    radius: 12 * targetScreen.geometry.height / bar.desktopHeight
+                                 }
+                             }
+                         }
+ 
+-                        Rectangle {
++                        Rectangle { // R1: hairline edge in the box's style (white 14 %), same 12 px corners as the tile
+                             anchors.fill: parent
+-                            radius: Kirigami.Units.cornerRadius
++                            radius: 12
+                             color: "transparent"
+                             border.width: 1
+-                            border.color: highlight.visible ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
++                            border.color: Qt.rgba(1, 1, 1, 0.14)
+                         }
+ 
+                         Highlight {
+@@ -253,8 +254,17 @@
+             }
+ 
+             PC3.Button {
++                id: addButton
+                 width: bar.desktopWidth
+                 height: bar.desktopHeight
++                // R1: a soft tile like the desktops (12 px corners, hairline edge), not the square Plasma button frame
++                background: Rectangle {
++                    radius: 12
++                    color: Qt.rgba(1, 1, 1, addButton.hovered && addButton.enabled ? 0.10 : 0.05)
++                    border.width: 1
++                    border.color: Qt.rgba(1, 1, 1, 0.14)
++                    Behavior on color { ColorAnimation { duration: Kirigami.Units.shortDuration } }
++                }
+ 
+                 text: if (desktopCount < desktopModel.maximum) {
+                     i18nd("kwin", "Add Virtual Desktop")
+@@ -294,16 +304,19 @@
+                 }
+             }
+ 
++            // R1: the current / hovered desktop gets a thin ring 4 px outside the tile (lavender when current,
++            // faint white on hover) instead of a thick grey slab behind it; corners follow the tile's (12 + 4)
+             component Highlight: Rectangle {
+                 required property bool active
+                 required property bool hovered
+                 visible: active || hovered
+                 anchors.fill: parent
+-                anchors.margins: -Kirigami.Units.smallSpacing
+-                radius: Kirigami.Units.cornerRadius
+-                color: Kirigami.Theme.highlightColor
+-                opacity: !active && hovered ? 0.5 : 1.0
+-                z: -10
++                anchors.margins: -4
++                radius: 16
++                color: "transparent"
++                border.width: 2
++                border.color: active ? Kirigami.Theme.focusColor : Qt.rgba(1, 1, 1, 0.30)
++                z: 10
+             }
+         }
+     }
 diff -ruN kwin-6.7.5/src/plugins/overview/qml/Main.qml ../b/kwin-6.7.5/src/plugins/overview/qml/Main.qml
 --- a/src/plugins/overview/qml/Main.qml	2026-09-08 06:53:35.000000000 -0400
-+++ b/src/plugins/overview/qml/Main.qml	2026-11-12 20:14:43.209397604 -0500
-@@ -571,18 +571,22 @@
++++ b/src/plugins/overview/qml/Main.qml	2026-11-12 20:31:53.043416502 -0500
+@@ -364,6 +364,18 @@
+             id: searchField
+             anchors.centerIn: parent
+             width: Math.min(parent.width, 20 * Kirigami.Units.gridUnit)
++            // [CHANGE: claude-code | 2026-11-12] DECISION 184 R1: a soft pill in the same style as the desktop tiles
++            background: Rectangle {
++                // SearchField/TextField read their padding from background.margins (the Plasma frame had them)
++                readonly property QtObject margins: QtObject {
++                    readonly property real left: 12; readonly property real right: 12
++                    readonly property real top: 9; readonly property real bottom: 9
++                }
++                radius: height / 2
++                color: Qt.rgba(1, 1, 1, 0.06)
++                border.width: searchField.activeFocus ? 2 : 1
++                border.color: searchField.activeFocus ? Kirigami.Theme.focusColor : Qt.rgba(1, 1, 1, 0.14)
++            }
+             focus: enabled
+             readOnly: gridVal == 1
+             onReadOnlyChanged: {
+@@ -571,18 +583,22 @@
                          visible: false
                      }
  
@@ -28,7 +118,7 @@ diff -ruN kwin-6.7.5/src/plugins/overview/qml/Main.qml ../b/kwin-6.7.5/src/plugi
                          }
  
                          property var borderWidth: desktopHover.hovered ? Kirigami.Units.largeSpacing : (mainBackground.current ? Kirigami.Units.smallSpacing : 0);
-@@ -590,6 +594,13 @@
+@@ -590,6 +606,13 @@
                          border.width: gridVal == 1 ? borderWidth : 0
                          border.color: gridVal == 1 ? borderColor : "transparent"
                      }
