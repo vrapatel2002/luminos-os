@@ -1,6 +1,15 @@
 diff -ruN kwin-6.7.5/src/plugins/overview/qml/DesktopBar.qml ../b/kwin-6.7.5/src/plugins/overview/qml/DesktopBar.qml
 --- a/src/plugins/overview/qml/DesktopBar.qml	2026-09-08 06:53:35.000000000 -0400
-+++ b/src/plugins/overview/qml/DesktopBar.qml	2026-11-12 20:29:02.902397152 -0500
++++ b/src/plugins/overview/qml/DesktopBar.qml	2026-11-13 17:22:52.520848960 -0500
+@@ -43,7 +43,7 @@
+         flickableDirection: Flickable.HorizontalFlick
+ 
+         Grid {
+-            spacing: Kirigami.Units.largeSpacing
++            spacing: 20 // [CHANGE: claude-code | 2026-11-13] DECISION 184 R2: more air between the desktop tiles and the + tile
+             columns: verticalDesktopBar ? 1 : desktopCount + 1
+ 
+             Repeater {
 @@ -123,18 +123,19 @@
                                      anchors.centerIn: parent
                                      width: thumbnail.width
@@ -26,13 +35,24 @@ diff -ruN kwin-6.7.5/src/plugins/overview/qml/DesktopBar.qml ../b/kwin-6.7.5/src
                          }
  
                          Highlight {
-@@ -253,8 +254,17 @@
+@@ -252,9 +253,26 @@
+                 }
              }
  
++            Item { // R2: holds the + square centred on the desktop tiles (a Grid would top-align it)
++            width: addButton.width
++            height: bar.desktopHeight
              PC3.Button {
+-                width: bar.desktopWidth
+-                height: bar.desktopHeight
 +                id: addButton
-                 width: bar.desktopWidth
-                 height: bar.desktopHeight
++                // R2: a smaller square with a thin, muted + so it reads as a button, not as another desktop
++                width: bar.desktopHeight * 0.72
++                height: width
++                anchors.centerIn: parent
++                icon.width: 22
++                icon.height: 22
++                icon.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, addButton.hovered ? 0.95 : 0.65)
 +                // R1: a soft tile like the desktops (12 px corners, hairline edge), not the square Plasma button frame
 +                background: Rectangle {
 +                    radius: 12
@@ -44,9 +64,11 @@ diff -ruN kwin-6.7.5/src/plugins/overview/qml/DesktopBar.qml ../b/kwin-6.7.5/src
  
                  text: if (desktopCount < desktopModel.maximum) {
                      i18nd("kwin", "Add Virtual Desktop")
-@@ -294,16 +304,19 @@
+@@ -293,17 +311,21 @@
+                     }
                  }
              }
++            }
  
 +            // R1: the current / hovered desktop gets a thin ring 4 px outside the tile (lavender when current,
 +            // faint white on hover) instead of a thick grey slab behind it; corners follow the tile's (12 + 4)

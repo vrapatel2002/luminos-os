@@ -9038,3 +9038,5 @@ had a thick grey slab behind it (radius cornerRadius) while the thumbnail used w
 Now (kwin 1.2): tile corners 12 px on screen, hairline white 14 % edge, current = 2 px lavender ring 4 px outside (16 px
 corners), hover = faint white ring; the + button is a soft 12 px tile; search is a pill (hairline, lavender when focused).
 Proof: nested strip before/after (builds/ov-test/f1 → f3).
+**R2 (2026-11-13):** 20 px between the desktop tiles and the + (was largeSpacing); the + is now a smaller square (72 % of a
+tile's height) centred on the tiles, with a thin muted 22 px + (65 % text colour, 95 % on hover). kwin 1.3. Proof: f4.
