@@ -1,0 +1,44 @@
+diff -ruN kwin-6.7.5/src/plugins/overview/qml/Main.qml ../b/kwin-6.7.5/src/plugins/overview/qml/Main.qml
+--- a/src/plugins/overview/qml/Main.qml	2026-09-08 06:53:35.000000000 -0400
++++ b/src/plugins/overview/qml/Main.qml	2026-11-12 20:14:43.209397604 -0500
+@@ -571,18 +571,22 @@
+                         visible: false
+                     }
+ 
++                    // [CHANGE: claude-code | 2026-11-12] Luminos "Frosted" desktop box (DECISION 184, mock
++                    // docs/windowstyle/mock/overview.html): bigger rounded corners, a soft deep shadow, a thin light
++                    // edge, and the desktop a little dimmed so the windows on it read first. Grid view keeps stock.
++                    readonly property real luminosRadius: 24 * overviewVal + Kirigami.Units.cornerRadius * gridVal * 2
+                     Kirigami.ShadowedTexture {
+                         anchors.fill: parent
+ 
+                         color: "transparent"
+                         source: desktopElement
+ 
+-                        radius: Kirigami.Units.cornerRadius * (overviewVal + gridVal * 2)
++                        radius: backgroundArea.luminosRadius
+ 
+                         shadow {
+-                            size: Kirigami.Units.gridUnit * 2
+-                            color: Qt.rgba(0, 0, 0, 0.3)
+-                            yOffset: 3
++                            size: Kirigami.Units.gridUnit * (2 + 2 * overviewVal)
++                            color: Qt.rgba(0, 0, 0, 0.3 + 0.15 * overviewVal)
++                            yOffset: 3 + 9 * overviewVal
+                         }
+ 
+                         property var borderWidth: desktopHover.hovered ? Kirigami.Units.largeSpacing : (mainBackground.current ? Kirigami.Units.smallSpacing : 0);
+@@ -590,6 +594,13 @@
+                         border.width: gridVal == 1 ? borderWidth : 0
+                         border.color: gridVal == 1 ? borderColor : "transparent"
+                     }
++                    Rectangle { // the dim layer and the thin light edge (overview only)
++                        anchors.fill: parent
++                        radius: backgroundArea.luminosRadius
++                        color: Qt.rgba(10 / 255, 10 / 255, 16 / 255, 0.38 * overviewVal * (1 - gridVal))
++                        border.width: overviewVal > 0 && gridVal < 1 ? 1.5 : 0
++                        border.color: Qt.rgba(1, 1, 1, 0.22 * overviewVal * (1 - gridVal))
++                    }
+ 
+                     DropArea {
+                         anchors.fill: parent

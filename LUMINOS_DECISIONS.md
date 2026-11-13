@@ -9020,3 +9020,16 @@ Shots: docs/style-tuner/shots/desk-page*.png, desk-dirty.png. A crash seen on th
 in the same script that opened the window (Image page bound to the Luminos config object) — the script now waits.
 **Undo:** `sudo pacman -U /var/cache/pacman/pkg/plasma-desktop-6.7.5-1-x86_64.pkg.tar.zst` (or 1.2 for the keyboard empty
 state only); wallpaper page: `git checkout` the three ui files and copy them to ~/.local/share/plasma/wallpapers.
+
+## DECISION 184 — Overview (Meta+W): "Frosted" desktop box, everything else stock
+<!-- [CHANGE: claude-code | 2026-11-12] -->
+**Ask (Shawn):** overview looked like the wallpaper spills out of the box. Finding: the box scales right (measured with a grid
+wallpaper, image and video, on the real machine); the full-size image next to it is KWin's blurred backdrop. Shawn: keep the
+blur and everything else, restyle only the box → mock `docs/windowstyle/mock/overview.html` (artifact "Luminos Overview Mock")
+→ picked **Frosted**.
+**Done:** new fork `packages/kwin-luminos` (kwin 6.7.5-1.1, `kwin-luminos-overview-frosted.patch`, src/plugins/overview/qml/Main.qml):
+box corners 24 px in overview, deeper soft shadow (2→4 gridUnits, 0.45 alpha, 12 px down), 1.5 px edge white @ 22 %, desktop
+dimmed with rgba(10,10,16,.38). Grid view (desktop grid) keeps stock looks. Warn hook `config/pacman-hooks/luminos-kwin.hook`
+(installed). Proof: nested KWin from the built package vs stock, same desktop (builds/ov-test/f0 stock, f1 frosted).
+Takes effect after logging out and back in (the overview lives inside the running KWin).
+**Undo:** `sudo pacman -U /var/cache/pacman/pkg/kwin-6.7.5-1-x86_64.pkg.tar.zst`, log out/in.
