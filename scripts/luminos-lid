@@ -17,8 +17,8 @@ which ignores every inhibitor there is. It is the backstop for when PowerDevil i
     shut, and a spontaneous wake had nothing to put it back. v3 reads the switch as a LEVEL (EVIOCGSW) and
     retries on BACKOFF, never giving up. A resume shows as BOOTTIME−MONOTONIC growing; nothing fires for GRACE
     s after one, as switch state can lag the wake and a real lid-open must never be fought. A real sleep restarts
-    the backoff; service start counts as a resume. `systemctl suspend -i` returns when logind queues the
-    request, so an accepted attempt holds the next until suspend_stats changes or SLEEP_WAIT s pass.
+    the backoff; service start counts as a resume. `systemctl suspend-then-hibernate -i` (BUG-228, 2026-11-13;
+    plain suspend on AC) returns once logind queues it: an attempt holds the next until suspend_stats changes/SLEEP_WAIT.
 [CHANGE: claude-code | 2026-11-07] BUG-199: `lock-sessions` started a greeter, PowerDevil's suspend in the
     same millisecond made KWin lock again, and that second lock()'s SIGUSR1 killed the greeter before it had a
     handler. Its restart got no GPU: black wallpaper. So KDE sessions are NOT locked here: KWin's lock before
@@ -186,7 +186,7 @@ def act(action, attempt, fd):
             run(LOGINCTL, "lock-session", sid, timeout=LOCK_CMD_TIMEOUT)
         if sids and not wait_for_lock(fd, sids):
             return False
-    return run(SYSTEMCTL, "suspend", "-i")
+    return run(SYSTEMCTL, "suspend-then-hibernate", "-i")
 
 
 def main():

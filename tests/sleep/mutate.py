@@ -119,10 +119,10 @@ MUTANTS = {
     "lock timeout as long as a suspend": ("LOCK_GUARD, LOCK_CMD_TIMEOUT = 2.0, 10", "LOCK_GUARD, LOCK_CMD_TIMEOUT = 2.0, 180"),
     "guard lock not capped": (GUARD_LOCK, 'if run(LOGINCTL, "lock-session", sid) else'),
     "pre-sleep lock not capped": (LOCK, '            run(LOGINCTL, "lock-session", sid)\n'),
-    "suspend capped too": ('return run(SYSTEMCTL, "suspend", "-i")', 'return run(SYSTEMCTL, "suspend", "-i", timeout=LOCK_CMD_TIMEOUT)'),
+    "suspend capped too": ('return run(SYSTEMCTL, "suspend-then-hibernate", "-i")', 'return run(SYSTEMCTL, "suspend-then-hibernate", "-i", timeout=LOCK_CMD_TIMEOUT)'),
     "opening keeps the wait": ("give_up = 0.0  # opening the lid ends any wait", "pass"),
     "does not lock in the guard": (GUARD_LOCK, "if True else"),
-    "inhibitors can veto": ('"suspend", "-i"', '"suspend"'),
+    "inhibitors can veto": ('"suspend-then-hibernate", "-i"', '"suspend-then-hibernate"'),
     "dies on a failed suspend": (RUN_FAILED, RUN_FAILED.replace("(OSError, subprocess.SubprocessError)", "KeyError")),
 }
 
