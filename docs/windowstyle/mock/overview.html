@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Luminos Overview Mock</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,400;6..144,500;6..144,600&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: a mock laptop screen — desktops strip on top, search pill, then the current desktop as one rounded stage of window cards. */
+:root {
+  --night: #0f0e13;      /* overview ground */
+  --stage: #17161c;      /* the desktop box */
+  --card: #24232b;       /* title pills, desktop tiles */
+  --line: #34333d;
+  --fg: #e7e4ef;
+  --dim: #a7a3b6;
+  --accent: #c6c3f5;     /* Luminos lavender */
+  --on-accent: #2a2840;
+  --font: "Google Sans Flex", "Inter", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: #08080b; color: var(--fg); font-family: var(--font);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 18px; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.controls { max-width: 1200px; margin: 0 auto 12px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 13px; color: var(--dim); }
+.controls b { color: var(--fg); font-size: 15px; font-weight: 600; margin-right: 4px; }
+.seg { display: inline-flex; background: #1b1a21; border-radius: 20px; padding: 3px; gap: 3px; }
+.seg button { border: 0; background: transparent; color: var(--dim); border-radius: 17px; padding: 6px 12px; cursor: pointer; }
+.seg button.on { background: var(--accent); color: var(--on-accent); }
+
+/* the screen */
+.screen { max-width: 1200px; margin: 0 auto; aspect-ratio: 16 / 10; border-radius: 18px; overflow: hidden; position: relative;
+  background: var(--night); container-type: inline-size; }
+.screen .wall { position: absolute; inset: 0; opacity: 0; transition: opacity .3s; filter: blur(40px) brightness(.35) saturate(1.2); transform: scale(1.15);
+  background: radial-gradient(40% 70% at 85% 60%, #e9d9d2 0%, transparent 60%), radial-gradient(30% 40% at 78% 35%, #9fb6d6 0%, transparent 70%), #050507; }
+.screen.blurwall .wall { opacity: 1; }
+.ov { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 2.2cqw 3cqw 2.6cqw; gap: 1.6cqw; }
+
+/* desktops strip */
+.desks { display: flex; gap: 1.2cqw; align-items: flex-start; }
+.desk { width: 11cqw; display: flex; flex-direction: column; align-items: center; gap: .6cqw; background: none; border: 0; padding: 0; cursor: pointer; position: relative; }
+.desk .thumb { width: 100%; aspect-ratio: 16/10; border-radius: 1.1cqw; background: var(--stage); outline: 2px solid transparent; outline-offset: 2px; overflow: hidden; position: relative; transition: outline-color .15s; }
+.desk:hover .thumb { outline-color: var(--line); }
+.desk.on .thumb { outline-color: var(--accent); }
+.desk .thumb i { position: absolute; border-radius: .3cqw; background: #3a3946; }
+.desk .name { font-size: 1.05cqw; color: var(--dim); }
+.desk.on .name { color: var(--fg); }
+.desk .x { position: absolute; top: -.6cqw; right: -.6cqw; width: 1.9cqw; height: 1.9cqw; border-radius: 50%; border: 0; background: var(--card); color: var(--fg); display: none; place-items: center; font-size: 1.1cqw; cursor: pointer; }
+.desk:hover .x { display: grid; }
+.add { width: 4.4cqw; height: 4.4cqw; margin-top: 1.25cqw; border-radius: 50%; border: 0; background: var(--card); color: var(--fg); display: grid; place-items: center; cursor: pointer; }
+.add:hover { background: #2e2d37; }
+.add svg { width: 1.8cqw; height: 1.8cqw; }
+
+/* search */
+.search { width: min(36cqw, 100%); height: 3.6cqw; border-radius: 1.8cqw; background: rgba(36,35,43,.9); display: flex; align-items: center; gap: .9cqw; padding: 0 1.4cqw; }
+.search svg { width: 1.4cqw; height: 1.4cqw; color: var(--dim); flex: none; }
+.search input { all: unset; flex: 1; min-width: 0; font-size: 1.3cqw; color: var(--fg); }
+.search input::placeholder { color: var(--dim); }
+
+/* stage */
+.stage { flex: 1; width: 100%; border-radius: 2cqw; background: var(--stage); position: relative; overflow: hidden; padding: 2.4cqw 3cqw; display: flex; align-items: center; justify-content: center; }
+.stage .inside { position: absolute; inset: 0; opacity: .5; pointer-events: none;
+  background: radial-gradient(28% 60% at 90% 62%, rgba(233,217,210,.55) 0%, transparent 70%), radial-gradient(22% 36% at 84% 38%, rgba(159,182,214,.4) 0%, transparent 70%); }
+.screen.blurwall .stage .inside { opacity: .8; }
+.grid { position: relative; display: flex; flex-wrap: wrap; gap: 2.2cqw 2.6cqw; width: 100%; height: 100%; align-content: center; justify-content: center; }
+.win { width: var(--w, 20cqw); display: flex; flex-direction: column; align-items: center; gap: .9cqw; border: 0; background: none; padding: 0; cursor: pointer; min-width: 0; position: relative; }
+.win .shot { width: 100%; aspect-ratio: 16/10; border-radius: 1.2cqw; overflow: hidden; position: relative; box-shadow: 0 1.2cqw 2.6cqw rgba(0,0,0,.45);
+  outline: 2px solid transparent; outline-offset: 3px; transition: transform .16s, outline-color .16s; }
+.win:hover .shot { transform: translateY(-.3cqw); }
+.win.sel .shot { outline-color: var(--accent); }
+.win .label { display: flex; align-items: center; gap: .6cqw; max-width: 100%; background: var(--card); border-radius: 1.6cqw; padding: .35cqw 1cqw .35cqw .4cqw; }
+.win .label .ic { flex: none; width: 2.1cqw; height: 2.1cqw; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; }
+.win .label .ic svg { width: 1.2cqw; height: 1.2cqw; }
+.win .label span { font-size: 1.1cqw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.win .close { position: absolute; top: -.8cqw; right: -.8cqw; width: 2.3cqw; height: 2.3cqw; border-radius: 50%; border: 0; background: var(--card); color: var(--fg);
+  display: grid; place-items: center; opacity: 0; transition: opacity .12s; cursor: pointer; box-shadow: 0 .3cqw .8cqw rgba(0,0,0,.5); }
+.win .close svg { width: 1.1cqw; height: 1.1cqw; }
+.win:hover .close, .win:focus-within .close { opacity: 1; }
+.empty { color: var(--dim); font-size: 1.4cqw; position: relative; }
+
+/* fake window contents */
+.app { position: absolute; inset: 0; display: flex; }
+.app .side { width: 24%; background: #1d1c23; padding: 6%; display: flex; flex-direction: column; gap: 6%; }
+.app .side i, .app .main i { display: block; height: 5%; border-radius: 4px; background: #34333d; }
+.app .main { flex: 1; background: #26252d; padding: 6%; display: flex; flex-direction: column; gap: 5%; }
+.app .main .hero { height: 34%; border-radius: 8px; background: linear-gradient(120deg, #3b3768, #2a5465); }
+.app.light .main { background: #f2f1f6; } .app.light .main i { background: #d8d6e2; } .app.light .side { background: #e6e5ee; } .app.light .side i { background: #c9c7d6; }
+.app .main .txt i:nth-child(2n) { width: 70%; }
+
+.hint { max-width: 1200px; margin: 12px auto 0; color: var(--dim); font-size: 13.5px; line-height: 1.55; }
+.hint b { color: var(--fg); font-weight: 500; }
+@media (max-width: 640px) { .screen { aspect-ratio: 3 / 4; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="controls">
+  <b>Overview mock</b>
+  <span>Behind the box</span>
+  <div class="seg" role="radiogroup" aria-label="Background behind the box">
+    <button id="bgDark" class="on">Dark</button>
+    <button id="bgBlur">Very blurred wallpaper</button>
+  </div>
+  <span>Click a window to pick it · hover for ✕ · type in search</span>
+</div>
+
+<div class="screen" id="screen">
+  <div class="wall"></div>
+  <div class="ov">
+    <div class="desks" id="desks"></div>
+    <label class="search" for="q">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4" stroke-linecap="round"/></svg>
+      <input id="q" placeholder="Search windows and apps">
+    </label>
+    <div class="stage">
+      <div class="inside"></div>
+      <div class="grid" id="grid"></div>
+    </div>
+  </div>
+</div>
+
+<p class="hint"><b>What changed from today:</b> no full-size wallpaper behind the box (dark, or blurred so much it's just a soft glow), so nothing looks like it leaks out. Window names sit in a pill with the app's icon in a circle beside them, not stamped on top of the window. Every window has the same rounded corners and spacing, the picked one gets a lavender ring, and close (✕) only shows on hover. Desktops are small rounded tiles with the add button as a circle.</p>
+
+<script>
+const ICON = {
+  globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z"/></svg>',
+  bag: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="2" fill-opacity="1"/></svg>',
+  folder: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'
+};
+const appHTML = light => `<div class="app ${light ? 'light' : ''}"><div class="side"><i></i><i></i><i></i><i></i><i></i></div><div class="main"><div class="hero"></div><div class="txt" style="display:flex;flex-direction:column;gap:12%"><i></i><i></i><i></i><i></i></div></div></div>`;
+let desks = [
+  { name: 'Desktop 1', wins: [
+    { id: 1, t: 'Settings — Discover', ic: 'bag', light: false },
+    { id: 2, t: 'Claude — luminos-os', ic: 'chat', light: false },
+    { id: 3, t: 'tell me about the amd service that constantly writes ssd', ic: 'globe', light: true }
+  ] },
+  { name: 'Desktop 2', wins: [ { id: 4, t: 'Downloads — Files', ic: 'folder', light: false } ] }
+];
+let cur = 0, sel = 2, nextId = 10;
+const $ = id => document.getElementById(id);
+
+function renderDesks() {
+  const el = $('desks'); el.innerHTML = '';
+  desks.forEach((d, i) => {
+    const b = document.createElement('button');
+    b.className = 'desk' + (i === cur ? ' on' : '');
+    b.setAttribute('aria-label', d.name);
+    const blocks = d.wins.slice(0, 4).map((w, k) => `<i style="left:${8 + (k % 2) * 46}%;top:${10 + Math.floor(k / 2) * 44}%;width:38%;height:34%"></i>`).join('');
+    b.innerHTML = `<div class="thumb">${blocks}</div><span class="name">${d.name}</span>` + (desks.length > 1 ? `<span class="x" role="button" aria-label="Remove ${d.name}">${ICON.x}</span>` : '');
+    b.onclick = e => {
+      if (e.target.closest('.x')) { desks.splice(i, 1); cur = Math.min(cur, desks.length - 1); sel = desks[cur].wins[0]?.id ?? null; render(); return; }
+      cur = i; sel = desks[cur].wins[0]?.id ?? null; render();
+    };
+    el.append(b);
+  });
+  const add = document.createElement('button');
+  add.className = 'add'; add.setAttribute('aria-label', 'Add desktop'); add.innerHTML = ICON.plus;
+  add.onclick = () => { desks.push({ name: 'Desktop ' + (desks.length + 1), wins: [] }); render(); };
+  el.append(add);
+}
+function renderWins() {
+  const q = $('q').value.trim().toLowerCase();
+  const list = desks[cur].wins.filter(w => !q || w.t.toLowerCase().includes(q));
+  const grid = $('grid');
+  grid.style.setProperty('--w', list.length <= 1 ? '30cqw' : list.length <= 4 ? '21cqw' : '15cqw'); // fewer windows = bigger cards
+  grid.innerHTML = '';
+  if (!list.length) { grid.innerHTML = `<div class="empty">${q ? 'No windows match "' + q.replace(/[<>&]/g, '') + '"' : 'No windows on this desktop'}</div>`; return; }
+  list.forEach(w => {
+    const b = document.createElement('div');
+    b.className = 'win' + (w.id === sel ? ' sel' : '');
+    b.tabIndex = 0;
+    b.innerHTML = `<div class="shot">${appHTML(w.light)}</div><div class="label"><span class="ic">${ICON[w.ic]}</span><span>${w.t}</span></div><button class="close" aria-label="Close ${w.t}">${ICON.x}</button>`;
+    b.onclick = e => {
+      if (e.target.closest('.close')) { desks[cur].wins = desks[cur].wins.filter(x => x.id !== w.id); render(); return; }
+      sel = w.id; renderWins();
+    };
+    b.onkeydown = e => { if (e.key === 'Enter') { sel = w.id; renderWins(); } };
+    grid.append(b);
+  });
+}
+function render() { renderDesks(); renderWins(); }
+$('q').oninput = renderWins;
+$('bgDark').onclick = () => { $('screen').classList.remove('blurwall'); $('bgDark').classList.add('on'); $('bgBlur').classList.remove('on'); };
+$('bgBlur').onclick = () => { $('screen').classList.add('blurwall'); $('bgBlur').classList.add('on'); $('bgDark').classList.remove('on'); };
+render();
+</script>
+</body>
+</html>
