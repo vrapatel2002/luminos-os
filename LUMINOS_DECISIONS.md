@@ -8990,6 +8990,12 @@ row gap and padding changed live (builds/style-tuner/sl1 a.png/b.png).
 the list scroll bar ran up beside that header. kcmutils 1.7 (ScrollViewKCM): 0.75 gridUnit gap above a list that has a
 header; the vertical scroll bar starts/ends inside the list card (clear of its rounded corners). Every page built on
 ScrollViewKCM gets it. Proof: nested kcm_plasmakeyboard at 1000x760 (builds/style-tuner/sz30/w1000.png).
+**R31 (2026-11-13) — same page, round 2:** Shawn: box still sharp, list too small, rows need room top/bottom and centring.
+kcmutils 1.10: the list header's own box (ToolBar background) gets the card radius and no separator line, and ends
+listCardPad above the first row (bottomInset), so rows start inside the card with the same room as at the bottom; the
+view gets a left padding equal to the scroll bar so rows are centred. AbstractKCM's footer now sits in a Flickable: when
+the window is short it scrolls on its own and ScrollViewKCM keeps 22 gridUnits (header + ~5 rows) for the list
+(__luminosMinContentHeight, 0 for every other page type). Proof: builds/style-tuner/sz33/w1000.png (1000x760).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

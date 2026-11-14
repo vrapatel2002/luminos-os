@@ -1,5 +1,72 @@
+--- a/src/qml/components/AbstractKCM.qml	2026-11-10 13:43:10.053409801 -0500
++++ b/src/qml/components/AbstractKCM.qml	2026-11-13 21:23:28.636218817 -0500
+@@ -103,6 +103,9 @@
+         return !framedView && extraFooterTopPadding;
+     }
+ 
++    // R31: least height the page content keeps before the footer starts scrolling (0 = never scroll the footer)
++    property real __luminosMinContentHeight: 0
++
+     title: (typeof kcm !== "undefined") ? kcm.name : ""
+ 
+     // Make pages fill the whole view by default
+@@ -155,6 +158,7 @@
+     }
+ 
+     footer: Column {
++        id: footerColumn
+         // When the scrollview isn't drawing its own frame, we need to add a
+         // line above the footer ourselves to separate it from the view
+         Kirigami.Separator {
+@@ -166,22 +170,40 @@
+             visible: false // LUMINOS: no separator lines (Nexus)
+         }
+ 
+-        Kirigami.Padding {
+-            id: footerParent
+-
++        // [CHANGE: claude-code | 2026-11-13] R31: when the window is short, the footer (e.g. the options under a list)
++        // scrolls on its own instead of squeezing the page's list down to a sliver; the content keeps at least
++        // __luminosMinContentHeight (set by ScrollViewKCM)
++        Flickable {
++            id: footerFlick
+             anchors {
+                 left: parent.left
+                 right: parent.right
+             }
++            readonly property real cap: root.__luminosMinContentHeight > 0
++                ? Math.max(Kirigami.Units.gridUnit * 4, root.height - (root.header ? root.header.height : 0) - root.__luminosMinContentHeight)
++                : Number.POSITIVE_INFINITY
++            height: Math.min(footerParent.height, cap)
++            contentWidth: width
++            contentHeight: footerParent.height
++            interactive: contentHeight > height
++            boundsBehavior: Flickable.StopAtBounds
++            clip: interactive
++            QQC2.ScrollBar.vertical: QQC2.ScrollBar { policy: footerFlick.interactive ? QQC2.ScrollBar.AsNeeded : QQC2.ScrollBar.AlwaysOff }
+ 
+-            height: root.__footerContentVisible() ? undefined : 0
+-            padding: root.footerPaddingEnabled ? root.margins : 0
++            Kirigami.Padding {
++                id: footerParent
++
++                width: footerFlick.width
++
++                height: root.__footerContentVisible() ? undefined : 0
++                padding: root.footerPaddingEnabled ? root.margins : 0
++            }
+         }
+     }
+ 
+     function __swapContentIntoContainer(property: string, container: Item): void {
+         const content = this[property];
+-        const rootContainer = container.parent;
++        const rootContainer = container === footerParent ? footerColumn : container.parent; // R31: footer sits in a Flickable
+ 
+         if (content && content !== rootContainer) {
+             // Revert the effect of repeated onHeaderChanged invocations
 --- a/src/qml/components/ScrollViewKCM.qml	2026-11-10 13:43:10.054900945 -0500
-+++ b/src/qml/components/ScrollViewKCM.qml	2026-11-13 21:12:52.000698066 -0500
++++ b/src/qml/components/ScrollViewKCM.qml	2026-11-13 21:21:54.540350051 -0500
 @@ -6,6 +6,8 @@
  
  import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
@@ -9,38 +76,49 @@
  import org.kde.kirigami as Kirigami
  import org.kde.kcmutils as KCMUtils
  
-@@ -43,6 +45,11 @@
+@@ -38,11 +40,18 @@
+     property alias view: scroll.view
+ 
+     framedView: false
++    // R31: the list keeps room for its header plus ~5 rows; options below it scroll when the window is short
++    __luminosMinContentHeight: framedView ? 0 : Kirigami.Units.gridUnit * 22
+ 
+     onViewChanged: {
          if (view) {
              // Deliberately don't take separators into account, because those are opaque anyway
              view.clip = Qt.binding(() => __headerContentVisible() || __footerContentVisible());
 +            // R27: room between the rows and the card's edges (see listMask)
 +            if (!root.framedView && view.topMargin === 0 && view.bottomMargin === 0) {
-+                view.topMargin = Qt.binding(() => listCard.padTop);
++                view.topMargin = Qt.binding(() => listCard.headerH > 0 ? 0 : listCard.pad);
 +                view.bottomMargin = Qt.binding(() => listCard.pad);
 +            }
          }
      }
  
-@@ -51,13 +58,17 @@
+@@ -51,13 +60,19 @@
      // rounded card (View alternateBackground, r28 clamped) over the page "hole"; the
      // view's own header (e.g. an InlineViewHeader) stays above the card as a section row.
      Kirigami.ShadowedRectangle {
 +        id: listCard
          readonly property real headerH: root.framedView ? 0 : (scroll.view?.headerItem?.height ?? 0)
++        // R31: a list header's own box ends `pad` above the first row (its bottomInset), so rows start inside the card
++        readonly property real boxH: Math.max(0, headerH - (root.__hdrInsetOk ? pad : 0))
          visible: !root.framedView
 +        // R27: rows keep 8 px from the card's top (when the list has no header) and bottom edge
 +        readonly property real pad: root.framedView ? 0 : LxS.Style.listCardPadPx // R29: tunable (Style Tuner > Lists)
-+        readonly property real padTop: headerH > 0 ? 0 : pad
++        readonly property real padTop: pad // R31: same room above the rows as below, header or not
          x: scroll.x
-         y: scroll.y + headerH
+-        y: scroll.y + headerH
++        y: scroll.y + boxH
          width: scroll.width
-         height: Math.max(0, scroll.height - headerH)
+-        height: Math.max(0, scroll.height - headerH)
 -        radius: Math.min(LxS.Style.cornerOuterPx, height / 2)
++        height: Math.max(0, scroll.height - boxH)
 +        radius: Math.min(LxS.Style.listCardRadiusPx, height / 2)
          Kirigami.Theme.colorSet: Kirigami.Theme.View
          Kirigami.Theme.inherit: false
          color: Kirigami.Theme.alternateBackgroundColor
-@@ -67,11 +78,54 @@
+@@ -67,11 +82,86 @@
          id: scroll
          anchors {
              top: parent.top
@@ -64,7 +142,39 @@
 +    }
 +    // [CHANGE: claude-code | 2026-11-13] R30: the scroll bar runs beside the rows only (inside the card, clear of its
 +    // rounded corners), not up beside the list header
-+    readonly property real __barTop: listCard.headerH + Math.max(listCard.padTop, listCard.radius * 0.5)
++    readonly property real __barTop: listCard.boxH + Math.max(listCard.padTop, listCard.radius * 0.5)
++    // [CHANGE: claude-code | 2026-11-13] R31: the list's header box (e.g. search + message) gets rounded corners and no
++    // square separator line, and ends `pad` above the first row; the rows sit centred (same room left as the scroll bar
++    // takes on the right)
++    readonly property Item __hdr: root.framedView ? null : (scroll.view?.headerItem ?? null)
++    readonly property bool __hdrInsetOk: __hdr !== null && __hdr.bottomInset !== undefined
++    Binding { target: root.__hdr; when: root.__hdrInsetOk; property: "bottomInset"; value: listCard.pad; restoreMode: Binding.RestoreBindingOrValue }
++    Binding { target: root.__hdr; when: root.__hdrInsetOk; property: "bottomPadding"; value: root.__hdr ? root.__hdr.topPadding + listCard.pad : 0; restoreMode: Binding.RestoreBindingOrValue }
++    Binding {
++        target: root.__hdr?.background ?? null
++        when: root.__hdrInsetOk && root.__hdr?.background?.radius !== undefined
++        property: "radius"
++        value: Math.min(listCard.radius, (root.__hdr?.background?.height ?? 0) / 2)
++        restoreMode: Binding.RestoreBindingOrValue
++    }
++    Connections {
++        target: root.__hdr?.background ?? null
++        ignoreUnknownSignals: true
++        function onChildrenChanged() { root.__hideHdrLines(); }
++    }
++    on__HdrChanged: Qt.callLater(root.__hideHdrLines)
++    function __hideHdrLines() {
++        const bg = root.__hdr?.background;
++        if (!bg || bg.radius === undefined) return;
++        for (const c of bg.children) c.visible = false;  // the toolbar's straight separator line
++    }
++    Binding {
++        target: scroll
++        when: !root.framedView
++        property: "leftPadding"
++        value: scroll.QQC2.ScrollBar.vertical.visible && scroll.QQC2.ScrollBar.vertical.interactive ? scroll.QQC2.ScrollBar.vertical.width : 0
++        restoreMode: Binding.RestoreBindingOrValue
++    }
 +    Binding {
 +        target: scroll.QQC2.ScrollBar.vertical
 +        when: !root.framedView && listCard.height > 0
@@ -85,11 +195,11 @@
 +        layer.enabled: true
 +        width: scroll.width
 +        height: scroll.height
-+        Rectangle { width: parent.width; height: listCard.headerH; color: "white" }
-+        Rectangle { // the card's inside: rows scroll away under an edge 8 px in from the card's own
-+            y: listCard.headerH + listCard.padTop
++        Rectangle { width: parent.width; height: listCard.boxH; color: "white" }
++        Rectangle { // the card's inside: rows scroll away under an edge `pad` in from the card's own
++            y: listCard.boxH + listCard.padTop
 +            width: parent.width
-+            height: Math.max(0, parent.height - listCard.headerH - listCard.padTop - listCard.pad)
++            height: Math.max(0, parent.height - listCard.boxH - listCard.padTop - listCard.pad)
 +            radius: Math.max(4, listCard.radius - listCard.pad)
 +            color: "white"
 +        }
