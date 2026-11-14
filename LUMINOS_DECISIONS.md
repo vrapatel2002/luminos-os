@@ -9013,6 +9013,14 @@ the card's pad; the page footer (AbstractKCM __luminosOwnsFooter) is placed stra
 scrolls when short. With options below, the list is listVisibleRows rows tall (0 = fill); pages without options fill.
 Framed views keep the stock ScrollView. AbstractKCM's R31/R32 footer Flickable reverted. Proof: kcm-rows/o6 (4→3 live),
 style-tuner/sz36 (kcm_plasmakeyboard), sz37 (kcm_kwin_effects unaffected).
+**R34 (2026-11-14) — look "not saved" + bold text:** history showed it WAS saved; at 2026-11-13 21:08:08 every Settings
+bar went to defaults in one write (the old "Current look" preset = {} = defaults, one click, no confirm), then
+"Reset all" again at 21:08:56. Restored from style-history (20261113-210804 + list bars from 210853) and seeded
+~/.config/luminos/style-mine.json. Tuner (luminos-style 1.0-22): preset renamed "Default"; presets / Reset all /
+new per-group "Reset group" need a second click within 3 s; "Save my look" / "Load my look" (style-mine.json);
+reseed reads the file first (Style returned resolved numbers for -1 bars, which then got saved). New bar Text >
+"Text boldness" (textWeight 300–800, def 400): luminos-style-apply writes QFont weight (field 5) to kdeglobals
+font/menuFont/smallestReadable, +100 for toolBar/WM. Proof: style-tuner/bw4 vs bw7 (System Settings at 400 vs 700).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

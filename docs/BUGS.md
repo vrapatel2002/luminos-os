@@ -8770,3 +8770,11 @@ the file is half-written; reseed and the C++/kio readers keep last good values o
 keeps the last 200 versions in ~/.local/state/luminos/style-history (list / diff N / restore N), so any future reset shows
 when it happened and can be undone. **Proof:** two.qml old 44 → new 60; 31 rapid writes → unit still active, kdeglobals
 font now 11 (matches the file); history recorded 28 versions.
+
+## BUG-239 — Style Tuner: one click on the "Current look" preset wiped the whole look
+<!-- [CHANGE: claude-code | 2026-11-14] -->
+**Seen (Shawn):** "the settings are not being saved … only thing being saved is the one that you make".
+**Cause (proven from style-history):** 2026-11-13 21:08:08 one write set 19 Settings bars to defaults. The preset row's
+middle button "Current look" was `{}`, i.e. defaults; reads like "keep mine". No confirm, undo only in that window.
+**Fix:** R34 — renamed "Default", second-click confirm on presets/Reset all/Reset group, Save/Load my look, values
+restored from history. Also reseed saved resolved numbers over -1 "follow" bars; now reads the file first.

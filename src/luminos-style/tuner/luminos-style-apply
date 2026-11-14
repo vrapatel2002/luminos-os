@@ -10,10 +10,12 @@ f="$cfg/luminos/style.json"
 state="${XDG_CACHE_HOME:-$HOME/.cache}/luminos/style-applied"
 mkdir -p "$(dirname "$state")"
 
-pt=10; btn=16
+pt=10; btn=16; wt=400
 if [ -f "$f" ] && jq -e . "$f" >/dev/null 2>&1; then
     pt=$(jq -r '(.textSizePt // 10) | if . < 6 then 6 elif . > 20 then 20 else . end' "$f")
     btn=$(jq -r '(.cornerButtonPx // 16) | if . < 0 then 0 elif . > 32 then 32 else . end | round' "$f")
+    # [CHANGE: claude-code | 2026-11-14] R34: text boldness (QFont weight, field 5)
+    wt=$(jq -r '(.textWeight // 400) | if . < 100 then 100 elif . > 900 then 900 else . end | round' "$f")
 elif [ -f "$f" ]; then
     exit 0   # half-written or broken: keep what is applied
 fi
@@ -26,7 +28,7 @@ if [ -z "$last" ] || ! cmp -s "$f" "$hist/$last"; then
     cp "$f" "$hist/$(date +%Y%m%d-%H%M%S.%N | cut -c1-19).json"
     ls -1 "$hist" | head -n -200 | while read -r old; do rm -f "$hist/$old"; done
 fi
-read -r old_pt old_btn 2>/dev/null < "$state" || { old_pt=""; old_btn=""; }
+read -r old_pt old_btn old_wt 2>/dev/null < "$state" || { old_pt=""; old_btn=""; old_wt=""; }
 
 setsize() { # $1 group $2 key $3 size: replace field 2 of a QFont string, keep the rest
     local cur
@@ -44,8 +46,22 @@ if [ "$pt" != "$old_pt" ]; then
     setsize WM activeFont "$pt"
     dbus-send --session --type=signal /KDEPlatformTheme org.kde.KDEPlatformTheme.refreshFonts
 fi
+setweight() { # $1 group $2 key $3 weight: replace field 5 of a QFont string
+    local cur
+    cur=$(kreadconfig6 --file kdeglobals --group "$1" --key "$2")
+    [ -n "$cur" ] || return 0
+    kwriteconfig6 --file kdeglobals --group "$1" --key "$2" "$(awk -F, -v OFS=, -v w="$3" '{$5=w; print}' <<<"$cur")"
+}
+if [ "$wt" != "${old_wt:-}" ]; then
+    setweight General font "$wt"
+    setweight General menuFont "$wt"
+    setweight General smallestReadableFont "$wt"
+    setweight General toolBarFont "$(( wt + 100 > 900 ? 900 : wt + 100 ))"
+    setweight WM activeFont "$(( wt + 100 > 900 ? 900 : wt + 100 ))"
+    dbus-send --session --type=signal /KDEPlatformTheme org.kde.KDEPlatformTheme.refreshFonts
+fi
 if [ "$btn" != "$old_btn" ]; then
     kwriteconfig6 --file darklyrc --group Common --key CornerRadius "$btn"
     dbus-send --session --type=signal /DarklyStyle org.kde.Darkly.Style.reparseConfiguration
 fi
-echo "$pt $btn" > "$state"
+echo "$pt $btn $wt" > "$state"

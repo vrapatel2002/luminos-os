@@ -18,6 +18,8 @@ QQC2.ApplicationWindow {
 
     readonly property var knobs: [
         { g: "Text",   id: "textSizePt",     lbl: "Text size",      unit: "pt", min: 8,   max: 14,   step: 0.5, def: 10 },
+        // [CHANGE: claude-code | 2026-11-14] R34: how bold all text is (kdeglobals fonts; 400 normal, 700 bold)
+        { g: "Text",   id: "textWeight",     lbl: "Text boldness (400 normal · 700 bold)", unit: "", min: 300, max: 800, step: 50, def: 400 },
         { g: "Text",   id: "pageTitlePx",    lbl: "Page title",     unit: "px", min: 18,  max: 44,   step: 1,   def: 30 },
         { g: "Text",   id: "groupLabelPx",   lbl: "Group labels",   unit: "px", min: 9,   max: 18,   step: 0.5, def: 12 },
         { g: "Shape",  id: "cornerOuterPx",  lbl: "Outer corners",  unit: "px", min: 0,   max: 40,   step: 1,   def: 28 },
@@ -109,7 +111,7 @@ QQC2.ApplicationWindow {
     readonly property var presets: ({
         "Compact": { textSizePt: 9, pageTitlePx: 24, groupLabelPx: 11, cornerOuterPx: 16, cornerInnerPx: 3, cornerButtonPx: 10,
                      rowHeightPx: 48, rowGapPx: 2, cardPaddingPx: 14, sidebarWidthPx: 280, pageWidthPx: 700, iconCirclePx: 32, animationMs: 120 },
-        "Current look": {},
+        "Default": {},
         "Roomy":   { textSizePt: 11, pageTitlePx: 36, groupLabelPx: 13, cornerOuterPx: 32, cornerInnerPx: 6, cornerButtonPx: 20,
                      rowHeightPx: 72, rowGapPx: 6, cardPaddingPx: 26, sidebarWidthPx: 380, pageWidthPx: 900, iconCirclePx: 46, animationMs: 220 }
     })
@@ -140,6 +142,47 @@ QQC2.ApplicationWindow {
     function setAll(map) {
         undoStack.push(snapshot())
         for (const k of knobs) if ((k.a || "settings") === page) { values[k.id] = (map[k.id] !== undefined ? map[k.id] : k.def); dirty[k.id] = true }
+        revision++
+        saveTimer.restart()
+    }
+    // [CHANGE: claude-code | 2026-11-14] R34: Shawn lost his whole look to one click on the old "Current look" preset
+    // (it meant defaults). Anything that changes many bars now needs a second click within 3 s.
+    property string armed: ""
+    Timer { id: armTimer; interval: 3000; onTriggered: win.armed = "" }
+    function guarded(key, fn) {
+        if (armed === key) { armed = ""; armTimer.stop(); fn() } else { armed = key; armTimer.restart() }
+    }
+    function resetGroup(g) {
+        undoStack.push(snapshot())
+        for (const k of knobs) if (k.g === g && (k.a || "settings") === page) { values[k.id] = k.def; dirty[k.id] = true }
+        revision++
+        saveTimer.restart()
+    }
+    // "My look": a copy of your values kept in ~/.config/luminos/style-mine.json
+    readonly property url minePath: StandardPaths.writableLocation(StandardPaths.GenericConfigLocation) + "/luminos/style-mine.json"
+    property var mine: null
+    property bool mineSavedFlash: false
+    Timer { id: mineFlash; interval: 1500; onTriggered: win.mineSavedFlash = false }
+    function readMine() {
+        const r = new XMLHttpRequest()
+        r.open("GET", minePath, false)
+        try { r.send() } catch (e) { mine = null; return }
+        try { const o = JSON.parse((r.responseText || "").trim()); mine = (o && typeof o === "object") ? o : null } catch (e) { mine = null }
+    }
+    function saveMine() {
+        const out = mine ? JSON.parse(JSON.stringify(mine)) : {}
+        for (const k of knobs) if ((k.a || "settings") === page) out[k.id] = values[k.id]
+        const xhr = new XMLHttpRequest()
+        xhr.open("PUT", minePath)
+        xhr.send(JSON.stringify(out, null, 2) + "\n")
+        mine = out
+        mineSavedFlash = true; mineFlash.restart()
+        revision++
+    }
+    function loadMine() {
+        if (!mine) return
+        undoStack.push(snapshot())
+        for (const k of knobs) if ((k.a || "settings") === page && mine[k.id] !== undefined) { values[k.id] = mine[k.id]; dirty[k.id] = true }
         revision++
         saveTimer.restart()
     }
@@ -191,14 +234,15 @@ QQC2.ApplicationWindow {
         const v = {}
         for (const k of knobs) {
             const fromStyle = Style[k.id]
-            v[k.id] = fromStyle !== undefined ? fromStyle : (file[k.id] !== undefined ? file[k.id] : k.def)
+            // R34: the file first: Style gives resolved numbers for "-1 = follow" bars, which must stay -1
+            v[k.id] = file[k.id] !== undefined ? file[k.id] : (fromStyle !== undefined && k.def !== -1 ? fromStyle : k.def)
             if (k.kind === "toggle") v[k.id] = v[k.id] ? 1 : 0
         }
         values = v
         dirty = ({})                              // everything now matches the file
         revision++
     }
-    Component.onCompleted: reseed()
+    Component.onCompleted: { reseed(); readMine() }
     // follow edits made to the file by anything else (not while we are writing it ourselves)
     Connections {
         target: Style
@@ -210,6 +254,18 @@ QQC2.ApplicationWindow {
             spacing: Kirigami.Units.smallSpacing
             RowLayout {
                 Kirigami.Heading { text: "Style Tuner"; level: 3; Layout.fillWidth: true }
+                // R34: keep your own look safe: save it, bring it back any time (even after a reset)
+                QQC2.Button {
+                    text: win.mineSavedFlash ? "Saved ✓" : "Save my look"
+                    icon.name: "document-save"
+                    onClicked: win.saveMine()
+                }
+                QQC2.Button {
+                    text: win.armed === "mine" ? "Click again: load my look" : "Load my look"
+                    icon.name: "document-open"
+                    enabled: win.revision >= 0 && win.mine !== null
+                    onClicked: win.guarded("mine", () => win.loadMine())
+                }
                 QQC2.Button { text: "Undo"; enabled: win.revision >= 0 && win.undoStack.length > 0; onClicked: win.undo() }
             }
             QQC2.TabBar { // [CHANGE: claude-code | 2026-11-09] DECISION 182
@@ -231,13 +287,14 @@ QQC2.ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
                 Repeater {
-                    model: ["Compact", "Current look", "Roomy"]
+                    model: ["Compact", "Default", "Roomy"]
                     QQC2.Button {
                         required property string modelData
-                        text: modelData
                         checkable: true
                         checked: win.revision >= 0 && win.presetMatches(modelData)
-                        onClicked: win.setAll(win.presets[modelData])
+                        // R34: a preset replaces every bar on this tab, so it needs a second click
+                        text: win.armed === "preset:" + modelData ? "Click again: " + modelData : modelData
+                        onClicked: win.guarded("preset:" + modelData, () => win.setAll(win.presets[modelData]))
                     }
                 }
             }
@@ -266,14 +323,23 @@ QQC2.ApplicationWindow {
                     Layout.leftMargin: Kirigami.Units.largeSpacing * 2
                     Layout.rightMargin: Kirigami.Units.largeSpacing * 2
                     spacing: 2
-                    QQC2.Label {
+                    RowLayout {
                         visible: row.groupStart
-                        text: row.k.g.toUpperCase()
-                        font.letterSpacing: 1
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        opacity: 0.6
+                        Layout.fillWidth: true
                         Layout.topMargin: Kirigami.Units.largeSpacing * 2
                         Layout.bottomMargin: Kirigami.Units.smallSpacing
+                        QQC2.Label {
+                            text: row.k.g.toUpperCase()
+                            font.letterSpacing: 1
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            opacity: 0.6
+                            Layout.fillWidth: true
+                        }
+                        QQC2.ToolButton { // R34: reset just this group (second click confirms)
+                            text: win.armed === "group:" + row.k.g ? "Click again" : "Reset group"
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            onClicked: win.guarded("group:" + row.k.g, () => win.resetGroup(row.k.g))
+                        }
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -341,7 +407,11 @@ QQC2.ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.margins: Kirigami.Units.largeSpacing * 2
-                QQC2.Button { text: win.page === "files" ? "Reset Files" : "Reset all"; icon.name: "edit-reset"; onClicked: win.setAll({}) }
+                QQC2.Button { // R34: second click needed; Undo (top) and "My look" bring values back
+                    text: win.armed === "resetall" ? "Click again to reset everything" : (win.page === "files" ? "Reset Files" : "Reset all")
+                    icon.name: "edit-reset"
+                    onClicked: win.guarded("resetall", () => win.setAll({}))
+                }
                 Item { Layout.fillWidth: true }
                 QQC2.Label {
                     text: "Saved to ~/.config/luminos/style.json"
