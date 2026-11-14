@@ -1,5 +1,10 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 6 (logins: Shawn already admin; asked self-signup vs I-create)
+Last updated: 2026-11-13 — Response 7 (Q: how do others request? → Jellyseerr; still waiting A/B for logins)
+
+
+## 2026-11-13 R7 — Q answered: others request through Jellyseerr (:8444) with their own Jellyfin login; requests wait for
+Shawn's approval (perm 32). Away from home they need the tailnet (share the node) — LAN-only otherwise. Do NOT give others
+the Space page: its /request uses the API key (requests land as Shawn, skip approval) and the page can delete.
 
 
 ## 2026-11-13 R6 — Logins plan (asked, nothing changed)
