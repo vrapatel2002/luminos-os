@@ -1,5 +1,14 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 2 (mockups for per-person watch progress + Jellyseerr episode picker; nothing built yet)
+Last updated: 2026-11-13 — Response 3 (per-person "interest" via Jellyfin hearts, proposed)
+
+
+## 2026-11-13 R3 — Q: can each account mark interest in a show and sync it to the storage page? → YES, proposed, not built
+- Use Jellyfin's built-in per-user **Favourite (heart)** = "I want to watch this" (UserData.IsFavorite, verified present
+  on the server, currently 0 hearts). No new app/plugin; works on TV, phone, web. Plus the person who **requested** it in
+  Jellyseerr (24 requests in media_request, each with requestedBy) counts as interested automatically.
+- Storage-page rule proposed: a person blocks a delete if they hearted it OR requested it OR started it but haven't finished.
+  Nobody in that list = safe. Un-hearting = "not interested any more". No separate "not interested" button (Jellyfin has none).
+- Waiting on Shawn: OK to fold this into the mockup / the build (task #2).
 
 
 ## 2026-11-13 R2 — Shawn's real ask (AIM RIGHT NOW). Mockup published, WAITING ON APPROVAL. Nothing changed on the server.
