@@ -1,5 +1,16 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 8 (Q: do others need Tailscale? → only away from home)
+Last updated: 2026-11-13 — Response 9 (access audit: who can log in to the server — read-only)
+
+
+## 2026-11-13 R9 — Access audit (read-only, nothing changed)
+- Tailscale (from the server's netmap): self + 4 peers, ALL vratik.patel2002 account — luminos-g14, Tab S9+, vela,
+  Pixel 9 (100.77.43.36). No device from another account (a shared-in friend would show as a peer with his own login).
+  Pending/accepted share invites are only visible in the Tailscale admin console (machine → Share).
+- Jellyfin: 1 user (shawn). Every sign-in since 2026-07-29 maps to his devices: TV 65PUL7973 (.13 then .18), Tab S9+
+  (.70), Pixel 9 (.34 at home / 100.77.43.36 via tailnet), Chrome on .16/.61/.62. Failed logins: only "shawn".
+- Jellyseerr: 1 user (shawn, admin). SSH: one key, all logins from .16 (G14). Router: no open ports (DECISION 51).
+- Open question to Shawn: is the Pixel 9 his? (it is on his Tailscale account, so it is either his phone or someone
+  signed into HIS account).
 
 
 ## 2026-11-13 R8 — Q answered: at home nothing to install (Jellyfin app/TV + browser for Jellyseerr); 192.168.2.61:8444 is
