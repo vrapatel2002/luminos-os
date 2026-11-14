@@ -832,7 +832,7 @@ PAGE = """<!doctype html>
 <link rel="stylesheet" href="/app.css">
 </head><body>
 <div class="air"></div>
-<div class="wrap stagger">
+<div class="wrap wide stagger">
 
  <div class="top">
   <span class="mark">Luminos <em>/ Space</em></span>
@@ -842,16 +842,24 @@ PAGE = """<!doctype html>
  <!-- Same hero, same two registers as the hub: the machine state small and
       always present, the number large. Here the number is the pool, which is the
       question this page exists to answer. -->
- <section class="hero">
+ <!-- [CHANGE: cowork | 2026-11-13] DECISION 190: one grid that re-forms with the window --
+      a column on a phone; on a desktop the figure + drive bars share the top row and
+      downloads (sticky) sit left of the library. -->
+ <div class="sp">
+ <section class="hero sp-hero">
+  <div class="sp-fig">
   <p class="sig" id="sig">measuring</p>
   <p class="figure" id="free">&hellip;</p>
   <p class="sub" id="free-sub">Reading the disks.</p>
   <noscript><p class="sub">This page needs JavaScript.</p></noscript>
+  </div>
+  <div class="mdrv" id="mdrv"></div>
  </section>
 
- <section>
+ <section class="sp-dl">
   <div class="lbl">Downloading <span class="aux" id="dl-aux"></span></div>
   <div id="dl"></div>
+  <button type="button" class="dg-more off" id="dl-more"></button>
   <div class="acts"><button type="button" class="btn off" id="allbtn"
        data-kind="dl"></button></div>
  </section>
@@ -859,7 +867,7 @@ PAGE = """<!doctype html>
  <!-- The hunt. Every node carries a byte size and every node is rankable against
       the largest thing in the library, because that is the only ranking that
       matters on a page about what to delete. -->
- <section>
+ <section class="sp-lib">
   <div class="lbl">Library <span class="aux" id="lib-aux"></span></div>
   <!-- [CHANGE: cowork | 2026-11-13] DECISION 185: who wants what. -->
   <p class="wwhint">Someone <b>blocks a delete</b> if they haven't finished it and they started it,
@@ -868,6 +876,7 @@ PAGE = """<!doctype html>
   <div class="filt" id="filt"></div>
   <div id="lib"></div>
  </section>
+ </div>
 
  <div class="foot"><span>deletes go through Sonarr and Radarr</span>
   <span>refreshes every 5s</span></div>

@@ -1,5 +1,13 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 14 (responsive hub + Space mockup, awaiting approval)
+Last updated: 2026-11-14 — Response 15 (responsive hub/Space LIVE; downloads were stalled by the -Syu, fixed)
+
+
+## 2026-11-14 R15 — DONE: DECISION 190 (hub + Space responsive, grouped downloads) live and browser-verified at 1600/375 px.
+- FOUND WHILE TESTING: NZBGet had been at 0 B/s since the 23:15 -Syu — openssl 4.1 dropped SSLv3, nzbget 26.3 still sets
+  it as the TLS floor → every Usenet connect failed. Downgraded to nzbget 26.2-3 (uses openssl-3 compat lib), pinned in
+  IgnorePkg with Jellyfin. Proven 115–117 MB/s. Lesson: after -Syu, check bytes move, not just "active".
+- Pinned now: jellyfin-server jellyfin-web jellyfin-ffmpeg nzbget. Lift nzbget when upstream fixes OpenSSL 4.
+- Next: nothing pending from Shawn except optional Jellyfin-12 prep.
 
 
 ## 2026-11-13 R14 — Shawn signed in OK (R13 was a wrong password, not a bug). New ask: Space + hub look "made for mobile";

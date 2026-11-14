@@ -38,6 +38,19 @@
     $("sig").textContent = "free";
     var sub = $("free-sub");
     sub.replaceChildren();
+    // [CHANGE: cowork | 2026-11-13] DECISION 190: one bar per drive beside the figure.
+    var md = $("mdrv");
+    if (md) {
+      var rows = (d.disks || []).map(function (k) {
+        var r = el("div", "mdrv-row");
+        txt("span", null, r, k.path.indexOf("external") >= 0 ? "external" : "internal");
+        el("i", null, el("span", "mdrv-bar", r)).style.setProperty(
+          "--w", (k.total ? k.used / k.total : 0).toFixed(4));
+        txt("span", null, r, size(k.free) + " free of " + size(k.total));
+        return r;
+      });
+      md.replaceChildren.apply(md, rows);
+    }
     sub.appendChild(document.createTextNode("of " + size(d.disk.total) + " across "
       + d.disks.length + (d.disks.length === 1 ? " drive. " : " drives. ")));
     var twinned = d.series.reduce(function (a, s) { return a + (s.twins || 0); }, 0)
@@ -265,61 +278,125 @@
     pool(d);
   }
 
-  /* ---- downloads -------------------------------------------------------------
-     Polled every 5s, so nodes are reused rather than rebuilt: a rebuild would
+  /* ---- downloads, grouped -----------------------------------------------------
+     [CHANGE: cowork | 2026-11-13] DECISION 190. One row per show+season (or film);
+     a season opens into one compact line per file, each with its own controls, and
+     the group row carries "pause all / to the front / cancel all". Polled every 5s,
+     so group AND row nodes are reused (LUM.keyed), never rebuilt: a rebuild would
      destroy the button under a thumb already on its way down. */
-  function makeDl() {
-    var n = el("div", "item");
-    n._t = el("div", "t", n);
-    n._track = el("div", "track", n);
-    n._bar = el("i", null, n._track);
-    n._meta = el("div", "meta", n);
+  var DCAP = 4, dOpen = {}, dAll = false, lastDl = null;
+
+  function abtn(parent, cls, act) {
+    var b = txt("button", cls, parent, "");
+    b.type = "button";
+    b.dataset.kind = "dl";
+    b.dataset.act = act;
+    return b;
+  }
+  function makeRow() {
+    var r = el("div", "dg-row");
+    r._n = el("span", "n", r);
+    r._t = el("span", "t", r);
+    r._s = el("span", "s", r);
+    r._p = el("span", "p", r);
+    var ib = el("span", "ib", r);
+    r._pause = abtn(ib, "ibtn", "pause");
+    r._top = abtn(ib, "ibtn", "top");
+    r._top.textContent = "front";
+    r._x = abtn(ib, "ibtn danger", "delete");
+    r._x.textContent = "×";
+    r._x.setAttribute("aria-label", "cancel");
+    return r;
+  }
+  function fillRow(r, x) {
+    var it = x.it, pct = it.bytes ? it.done / it.bytes * 100 : 0;
+    r._n.textContent = x.p.ep ? "E" + LUM.pad2(x.p.ep) : "";
+    r._t.textContent = x.p.epTitle || (x.p.ep ? "Episode " + x.p.ep : it.name);
+    r._t.title = it.name;
+    r._s.textContent = size(it.bytes);
+    r._p.textContent = it.paused ? "held" : pct.toFixed(0) + "%";
+    r._p.classList.toggle("on", !it.paused);
+    r._pause.textContent = it.paused ? "resume" : "pause";
+    r._pause.dataset.act = it.paused ? "resume" : "pause";
+    r._pause.classList.toggle("on", it.paused);
+    [r._pause, r._top, r._x].forEach(function (b) { b.dataset.id = String(it.id); b.disabled = false; });
+    r._x.dataset.label = it.name;
+  }
+  function makeGroup() {
+    var n = el("div", "dg");
+    n._head = el("button", "dg-head", n);
+    n._head.type = "button";
+    el("span", "dg-caret", n._head);
+    var t = el("span", "dg-t", n._head);
+    n._tt = el("span", null, t);
+    n._sub = el("small", null, t);
+    n._amt = el("span", "dg-amt", n._head);
+    n._bar = el("i", null, el("span", "dg-bar", n._head));
+    n._meta = el("span", "dg-meta", n._head);
     n._pct = el("span", "on", n._meta);
-    n._size = el("span", null, n._meta);
     n._state = el("span", null, n._meta);
     n._health = el("span", "bad", n._meta);
-    n._acts = el("div", "acts", n);
-    n._pause = txt("button", "btn", n._acts, "pause");
-    n._top = txt("button", "btn", n._acts, "to the front");
-    n._cancel = txt("button", "btn danger", n._acts, "cancel");
-    [n._pause, n._top, n._cancel].forEach(function (b) {
-      b.type = "button";
-      b.dataset.kind = "dl";
-    });
-    n._top.dataset.act = "top";
-    n._cancel.dataset.act = "delete";
+    var acts = el("div", "dg-acts", n);
+    n._pause = abtn(acts, "btn", "pause");
+    n._top = abtn(acts, "btn", "top");
+    n._top.textContent = "to the front";
+    n._x = abtn(acts, "btn danger", "delete");
+    n._body = el("div", "dg-body", n);
     return n;
   }
-  function fillDl(n, it) {
-    var pct = it.bytes ? (it.done / it.bytes * 100) : 0;
-    n._t.textContent = it.name;
-    n._bar.style.transform = "scaleX(" + (pct / 100).toFixed(4) + ")";
-    n.classList.toggle("moving", !it.paused);
-    n._track.classList.toggle("held", it.paused);
-    n._pct.classList.toggle("on", !it.paused);
-    n._pct.textContent = pct.toFixed(0) + "%";
-    n._size.textContent = size(it.done) + " of " + size(it.bytes);
-    /* `paused` is not NZBGet's Status string: that reads DOWNLOADING for 3-6s
-       after a pause while connections drain, and PausedSizeMB alone is the par2
-       set every healthy group holds back. The server settles both before answering. */
-    n._state.textContent = it.paused ? "held" : (it.status || "").toLowerCase();
-    n._health.textContent = it.health < 100 ? "health " + it.health.toFixed(0) + "%" : "";
-    n._pause.textContent = it.paused ? "resume" : "pause";
-    n._pause.classList.toggle("on", it.paused);
-    n._pause.dataset.act = it.paused ? "resume" : "pause";
-    [n._pause, n._top, n._cancel].forEach(function (b) { b.dataset.id = String(it.id); });
-    n._cancel.dataset.label = it.name;
+  function fillGroup(n, g) {
+    var multi = g.items.length > 1, its = g.items.map(function (x) { return x.it; });
+    var bytes = its.reduce(function (a, i) { return a + i.bytes; }, 0);
+    var done = its.reduce(function (a, i) { return a + i.done; }, 0);
+    var held = its.every(function (i) { return i.paused; });
+    var moving = its.filter(function (i) { return !i.paused && /DOWNLOAD/i.test(i.status || ""); }).length;
+    var worst = Math.min.apply(null, its.map(function (i) { return i.health; }));
+    var frac = bytes ? Math.max(0, Math.min(1, done / bytes)) : 0;
+    var ids = its.map(function (i) { return i.id; }).join(",");
+    n._head.dataset.gtog = multi ? g.key : "";
+    n.classList.toggle("multi", multi);
+    n.classList.toggle("open", multi && !!dOpen[g.key]);
+    n.classList.toggle("moving", !held);
+    n.classList.toggle("held", held);
+    n._tt.textContent = g.show;
+    n._sub.textContent = g.season
+      ? "  Season " + g.season + (multi ? " · " + its.length + " episodes"
+                                       : " · E" + LUM.pad2(g.items[0].p.ep))
+      : (g.year ? "  " + g.year : "");
+    n._amt.textContent = size(done) + " / " + size(bytes);
+    n._bar.style.transform = "scaleX(" + frac.toFixed(4) + ")";
+    n._pct.textContent = (frac * 100).toFixed(0) + "%";
+    n._state.textContent = held ? "held"
+      : (moving ? moving + " downloading" : "waiting")
+        + (multi && its.length - moving > 0 ? " · " + (its.length - moving) + " queued" : "");
+    n._health.textContent = worst < 100 ? "health " + worst.toFixed(0) + "%" : "";
+    var label = g.show + (g.season ? " — Season " + g.season : "")
+      + (multi ? " (" + its.length + " files)" : "");
+    n._pause.textContent = (held ? "resume" : "pause") + (multi ? " all" : "");
+    n._pause.dataset.act = held ? "resume" : "pause";
+    n._pause.classList.toggle("on", held);
+    n._x.textContent = multi ? "cancel all" : "cancel";
+    [n._pause, n._top, n._x].forEach(function (b) {
+      b.dataset.ids = ids; b.dataset.label = label; b.disabled = false;
+    });
+    if (multi) {
+      LUM.keyed(n._body, g.items, function (x) { return String(x.it.id); }, makeRow, fillRow);
+    } else {
+      n._body.replaceChildren();
+      n._body._by = {};
+    }
   }
 
-  var dlBy = {};
   function downloads(d) {
     var root = $("dl");
+    lastDl = d;
     if (d.error) {
-      dlBy = {};
+      root._by = {};
       root.replaceChildren();
-      txt("div", "empty", root, "cannot reach NZBGet \u2014 " + d.error);
+      txt("div", "empty", root, "cannot reach NZBGet — " + d.error);
       $("dl-aux").textContent = "";
       $("allbtn").classList.add("off");
+      $("dl-more").classList.add("off");
       return;
     }
 
@@ -332,23 +409,21 @@
     all.classList.toggle("on", d.globalPaused);
     all.dataset.act = d.globalPaused ? "resumeall" : "pauseall";
 
+    var groups = LUM.groupDownloads(d.items, function (it) { return it.name; });
     $("dl-aux").textContent = d.items.length
-      ? size(d.rate) + "/s \u00b7 " + size(d.remaining) + " left"
+      ? size(d.rate) + "/s · " + size(d.remaining) + " left · "
+        + groups.length + (groups.length === 1 ? " title" : " titles")
       : size(d.free) + " free to unpack into";
 
-    var now = {}, kids = [];
-    d.items.forEach(function (it) {
-      var node = dlBy[it.id] || makeDl();
-      fillDl(node, it);
-      now[it.id] = node;
-      kids.push(node);
+    LUM.keyed(root, dAll ? groups : groups.slice(0, DCAP), function (g) { return g.key; },
+              makeGroup, fillGroup, function () {
+      return txt("div", "empty", null,
+        "Nothing downloading. The queue is empty most of the time on this box.");
     });
-    dlBy = now;
-    if (!kids.length) {
-      kids.push(txt("div", "empty", null,
-        "Nothing downloading. The queue is empty most of the time on this box."));
-    }
-    root.replaceChildren.apply(root, kids);
+    var more = $("dl-more");
+    more.classList.toggle("off", groups.length <= DCAP);
+    more.textContent = dAll ? "show fewer"
+      : "show all " + groups.length + " titles (" + d.items.length + " files)";
   }
 
   /* ---- loading ---------------------------------------------------------------- */
@@ -399,14 +474,40 @@
       return;
     }
 
+    // [CHANGE: cowork | 2026-11-13] DECISION 190: grouped downloads.
+    if (t.id === "dl-more") { dAll = !dAll; if (lastDl) { downloads(lastDl); } return; }
+    if (t.dataset.gtog) {
+      dOpen[t.dataset.gtog] = !dOpen[t.dataset.gtog];
+      if (lastDl) { downloads(lastDl); }
+      return;
+    }
+
     var d = t.dataset;
     if (d.kind === "dl") {
-      if (d.act === "delete" && !confirm("Cancel this download?\n\n" + d.label)) { return; }
+      var ids = d.ids ? d.ids.split(",").map(Number) : null;
+      if (d.act === "delete" && !confirm((ids && ids.length > 1
+            ? "Cancel all " + ids.length + " downloads?" : "Cancel this download?")
+            + "\n\n" + d.label)) { return; }
       t.disabled = true;
-      LUM.post(q("/api/download-action"),
-               { action: d.act, id: d.id ? Number(d.id) : null })
-        .then(function (r) { LUM.say(r.message); })
-        .then(loadDl);
+      if (!ids) {
+        LUM.post(q("/api/download-action"),
+                 { action: d.act, id: d.id ? Number(d.id) : null })
+          .then(function (r) { LUM.say(r.message); })
+          .then(loadDl);
+        return;
+      }
+      /* One call per file, in order. "to the front" goes last-first so the group
+         lands at the top in its own episode order. */
+      if (d.act === "top") { ids.reverse(); }
+      var okN = 0, last = "";
+      ids.reduce(function (p, id) {
+        return p.then(function () {
+          return LUM.post(q("/api/download-action"), { action: d.act, id: id })
+            .then(function (r) { if (r.ok !== false) { okN++; } last = r.message; });
+        });
+      }, Promise.resolve()).then(function () {
+        LUM.say(ids.length === 1 ? last : okN + " of " + ids.length + " done \u2014 " + last);
+      }).then(loadDl);
       return;
     }
 

@@ -155,32 +155,86 @@
   }
 
   /* ---- downloading ---------------------------------------------------------- */
-  function makeQueue() {
-    var n = el("div", "item");
-    n._t = el("div", "t", n);
-    n._track = el("div", "track", n);
-    n._bar = el("i", null, n._track);
-    n._meta = el("div", "meta", n);
+  /* ---- downloading, grouped (DECISION 190) ----------------------------------
+     [CHANGE: cowork | 2026-11-13] One row per show+season (or film); a season opens
+     to one compact line per episode. Display only on this page -- the controls live
+     on Space. The first QCAP groups show; the rest sit behind "show all". */
+  var QCAP = 4, qOpen = {}, qAll = false, lastQueue = [];
+  function qEmpty() {
+    var e = el("div", "empty");
+    e.appendChild(document.createTextNode("Nothing in flight. "));
+    txt("b", null, e, "The indexers are checked on Sonarr and Radarr's own schedule;");
+    e.appendChild(document.createTextNode(" anything found turns up here on its own."));
+    return e;
+  }
+  function makeGroup() {
+    var n = el("div", "dg");
+    n._head = el("button", "dg-head", n);
+    n._head.type = "button";
+    el("span", "dg-caret", n._head);
+    var t = el("span", "dg-t", n._head);
+    n._tt = el("span", null, t);
+    n._sub = el("small", null, t);
+    n._amt = el("span", "dg-amt", n._head);
+    n._bar = el("i", null, el("span", "dg-bar", n._head));
+    n._meta = el("span", "dg-meta", n._head);
     n._pct = el("span", "on", n._meta);
-    n._size = el("span", null, n._meta);
-    n._eta = el("span", null, n._meta);
+    n._state = el("span", null, n._meta);
     n._app = el("span", null, n._meta);
+    n._body = el("div", "dg-body", n);
     return n;
   }
-  function fillQueue(n, r) {
-    n._t.textContent = r.title;
-    /* transform, not width: it stays on the compositor and animates for free.
-       NZBGet's Status string lags up to 16s and calls par2 repair PAUSED, so the
-       byte delta leads and the chip is never allowed to contradict the bar. */
-    n._bar.style.transform = "scaleX(" + (Math.max(0, Math.min(100, r.pct)) / 100) + ")";
-    n.classList.toggle("moving", !r.held);
-    n._track.classList.toggle("held", !!r.held);
-    n._pct.classList.toggle("on", !r.held);
-    n._pct.textContent = r.pct.toFixed(0) + "%";
-    n._size.textContent = size(r.bytes - r.left) + " of " + size(r.bytes);
-    n._eta.textContent = r.held ? "held" : (LUM.eta(r.eta) || "\u2013");
-    n._app.textContent = r.app;
+  function fillGroup(n, g) {
+    var multi = g.items.length > 1;
+    var bytes = g.items.reduce(function (a, x) { return a + (x.it.bytes || 0); }, 0);
+    var left = g.items.reduce(function (a, x) { return a + (x.it.left || 0); }, 0);
+    var held = g.items.every(function (x) { return x.it.held; });
+    var frac = bytes ? Math.max(0, Math.min(1, (bytes - left) / bytes)) : 0;
+    n._head.dataset.gtog = multi ? g.key : "";
+    n.classList.toggle("multi", multi);
+    n.classList.toggle("open", multi && !!qOpen[g.key]);
+    n.classList.toggle("moving", !held);
+    n.classList.toggle("held", held);
+    n._tt.textContent = g.show;
+    n._sub.textContent = g.season
+      ? "  Season " + g.season + (multi ? " · " + g.items.length + " episodes"
+                                       : " · E" + LUM.pad2(g.items[0].p.ep))
+      : (g.year ? "  " + g.year : "");
+    n._amt.textContent = size(bytes - left) + " / " + size(bytes);
+    n._bar.style.transform = "scaleX(" + frac.toFixed(4) + ")";
+    n._pct.textContent = (frac * 100).toFixed(0) + "%";
+    var first = g.items.filter(function (x) { return !x.it.held; })[0];
+    n._state.textContent = held ? "held" : (first && LUM.eta(first.it.eta)) || "–";
+    n._app.textContent = g.items[0].it.app || "";
+    var rows = [];
+    if (multi) {
+      g.items.forEach(function (x) {
+        var r = el("div", "dg-row");
+        txt("span", "n", r, x.p.ep ? "E" + LUM.pad2(x.p.ep) : "");
+        txt("span", "t", r, x.p.epTitle || (x.p.ep ? "Episode " + x.p.ep : x.it.title));
+        txt("span", "s", r, size(x.it.bytes || 0));
+        txt("span", "p" + (x.it.held ? "" : " on"), r, (x.it.pct || 0).toFixed(0) + "%");
+        rows.push(r);
+      });
+    }
+    n._body.replaceChildren.apply(n._body, rows);
   }
+  function renderQueue(groups) {
+    LUM.keyed($("queue"), qAll ? groups : groups.slice(0, QCAP), function (g) { return g.key; },
+              makeGroup, fillGroup, qEmpty);
+    var more = $("queue-more");
+    more.classList.toggle("off", groups.length <= QCAP);
+    more.textContent = qAll ? "show fewer"
+      : "show all " + groups.length + " titles (" + lastQueue.length + " files)";
+  }
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest("button");
+    if (!b) { return; }
+    if (b.id === "queue-more") { qAll = !qAll; }
+    else if (b.dataset.gtog) { qOpen[b.dataset.gtog] = !qOpen[b.dataset.gtog]; }
+    else { return; }
+    renderQueue(LUM.groupDownloads(lastQueue, function (r) { return r.title; }));
+  });
 
   /* ---- arrived --------------------------------------------------------------
      Artwork comes off the arrs' own MediaCover directory, read from disk by the
@@ -365,17 +419,13 @@
     $("room-aux").textContent = size(freeAll) + " free of "
       + size(d.disks.reduce(function (a, x) { return a + (x.total || 0); }, 0));
 
-    LUM.keyed($("queue"), d.queue, function (r) { return r.app + "\u0000" + r.title; },
-              makeQueue, fillQueue, function () {
-      /* An empty queue is the normal state and must not read as a fault. It says
-         what the machine is doing -- waiting -- and nothing more. */
-      var e = el("div", "empty");
-      e.appendChild(document.createTextNode("Nothing in flight. "));
-      txt("b", null, e, "The indexers are checked on Sonarr and Radarr's own schedule;");
-      e.appendChild(document.createTextNode(" anything found turns up here on its own."));
-      return e;
-    });
-    $("q-aux").textContent = d.queue.length ? String(d.queue.length) : "";
+    // [CHANGE: cowork | 2026-11-13] DECISION 190: grouped by show + season.
+    lastQueue = d.queue;
+    var groups = LUM.groupDownloads(d.queue, function (r) { return r.title; });
+    renderQueue(groups);
+    $("q-aux").textContent = d.queue.length
+      ? groups.length + (groups.length === 1 ? " title" : " titles") + " \u00b7 "
+        + d.queue.length + (d.queue.length === 1 ? " file" : " files") : "";
 
     LUM.keyed($("recent"), d.recent, function (r) { return r.kind + "\u0000" + r.title; },
               makeCard, fillCard);

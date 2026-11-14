@@ -299,7 +299,9 @@ def build_summary():
     ng = nzbget_status() or {}
     return {
         "disks": disks,
-        "queue": queue[:8],
+        # [CHANGE: cowork | 2026-11-13] DECISION 190: was [:8]. The page groups by show now,
+        # so a whole season fits in one row -- and the hero's "N waiting" must count them all.
+        "queue": queue[:200],
         "recent": recent[:6],
         "speed": int(ng.get("DownloadRate") or 0),
         "paused": bool(ng.get("DownloadPaused")),
@@ -484,7 +486,7 @@ PAGE = """<!doctype html>
 <link rel="stylesheet" href="/app.css">
 </head><body>
 <div class="air"></div>
-<div class="wrap board stagger">
+<div class="wrap board grid stagger">
 
  <div class="top">
   <span class="mark">Luminos</span>
@@ -561,13 +563,15 @@ PAGE = """<!doctype html>
   </a>
  </section>
 
- <section>
+ <!-- [CHANGE: cowork | 2026-11-13] DECISION 190: grouped queue + named grid areas. -->
+ <section class="hb-dl">
   <div class="lbl">Downloading <span class="aux" id="q-aux"></span></div>
   <div id="queue"></div>
+  <button type="button" class="dg-more off" id="queue-more"></button>
  </section>
 
  <!-- [CHANGE: cowork | 2026-10-10] Where the bytes are going, every 3 s. -->
- <section>
+ <section class="hb-pipe">
   <div class="lbl">Pipeline <span class="aux" id="p-aux"></span></div>
   <div class="pipe" id="pipe-head"></div>
   <div id="pipe"></div>

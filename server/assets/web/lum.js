@@ -271,5 +271,39 @@
     container.replaceChildren.apply(container, kids);
   };
 
+  /* ---- downloads, grouped ---------------------------------------------------
+     [CHANGE: cowork | 2026-11-13] DECISION 190. Ten episodes of one season used to be
+     ten full-width cards. Release names are parsed into show + season (+ episode and
+     its title); anything that is not an episode -- a film -- is its own group. Order of
+     first appearance is kept, so the queue's priority order still reads top-down. */
+  var EP = /^(.+?)[ ._-]+S(\d{1,2})E(\d{1,3})(?:-?E\d{1,3})*(?:[ ._-]+(.*))?$/i;
+  var JUNK = /(?:^|[ ._-]+)(?:REPACK|PROPER|iNTERNAL|\d{3,4}p|WEB(?:-?DL|Rip)?|HDTV|BluRay|NF|AMZN|DSNP|HMAX|ATVP|DDP?\d|x26[45]|H\.?26[45]|HEVC|HDR)\b.*$/i;
+  function words(s) { return String(s || "").replace(/[._]+/g, " ").replace(/\s+/g, " ").trim(); }
+  LUM.parseRelease = function (name) {
+    name = String(name || "");
+    var m = name.match(EP);
+    if (m) {
+      return { key: words(m[1]).toLowerCase() + "|s" + (+m[2]), show: words(m[1]),
+               season: +m[2], ep: +m[3], epTitle: words((m[4] || "").replace(JUNK, "")) };
+    }
+    var y = name.match(/^(.+?)[ ._(-]+((?:19|20)\d\d)\b/);
+    return { key: "f|" + name, show: y ? words(y[1]) : words(name.replace(JUNK, "")),
+             year: y ? y[2] : "", season: 0, ep: 0, epTitle: "" };
+  };
+  LUM.groupDownloads = function (items, nameOf) {
+    var order = [], by = {};
+    items.forEach(function (it) {
+      var p = LUM.parseRelease(nameOf(it));
+      if (!by[p.key]) {
+        by[p.key] = { key: p.key, show: p.show, season: p.season, year: p.year, items: [] };
+        order.push(by[p.key]);
+      }
+      by[p.key].items.push({ p: p, it: it });
+    });
+    order.forEach(function (g) { g.items.sort(function (a, b) { return a.p.ep - b.p.ep; }); });
+    return order;
+  };
+  LUM.pad2 = function (n) { return (n < 10 ? "0" : "") + n; };
+
   window.LUM = LUM;
 }());

@@ -3547,3 +3547,34 @@ foreign. My earlier tests used curl with a real Origin, so they could not catch 
 headers. Fix: a real Origin must still match the host; `null`/absent falls back to `Sec-Fetch-Site` (must be
 same-origin/none). Verified: null+same-origin → 401 (reaches password check), matching → 401, foreign → 403,
 null+cross-site → 403.
+
+**DECISION 189 follow-up (2026-11-13, R15) — the update also stopped every download.** NZBGet sat at 0 B/s with 125 GB
+queued from the -Syu (23:15) until 00:13: log full of `Could not set minimum protocol to SSL3`. openssl 3.6.4 → **4.1.0**
+removed SSLv3 completely and nzbget **26.3** (linked to libssl.so.4) still sets SSL3 as its floor, so every NNTP-TLS
+connect (563 and 443) failed. Network/DNS fine (563 reachable). Fix: back to nzbget **26.2-3** from the package cache
+(signature verified), which links libssl.so.3 from the `openssl-3` compat package the update installed (also required by
+python + dotnet, so it stays); ldd clean (libxml2.so.16, boost 1.92 resolved). Proven: 115–117 MB/s, 5.3 GB in 18 s, no
+new errors. **`nzbget` added to IgnorePkg** next to Jellyfin. Lesson: after a big -Syu, check that bytes actually move —
+"service active" said nothing here.
+
+## DECISION 190 — Hub and Space use the window width; downloads grouped by show — 2026-11-13
+<!-- [CHANGE: cowork | 2026-11-13] -->
+**Ask (Shawn):** both pages "look made for mobile"; long download lists make it worse. Mockup approved
+(claude.ai/artifact/C91aQRDz9J8DwBgLBbEWV1).
+- **Hub:** `.board.grid` with named areas — 1 column < 760 px, 2 columns, 3 columns ≥ 1180 px (hero · room · links /
+  downloads · pipeline / arrived). The hero figure is sized from its own column (`container-type` + `cqi`), so "QUEUED"
+  can never run off an edge. Root cause of the old cut-off look: release names have no spaces, could not wrap, and
+  pushed the page wider than the window.
+- **Space:** `.sp` grid — on ≥ 900 px the figure + new per-drive bars share the top row, downloads sit left (sticky,
+  scrolls on its own) and the library right; one column below.
+- **Grouped downloads** (`LUM.parseRelease` / `LUM.groupDownloads` in lum.js, shared): one row per show+season or film,
+  total bar/size/% and state; a season opens into one compact line per episode. Space keeps full controls: group-level
+  pause/resume all · to the front (sent last-first so the season keeps its order) · cancel all (confirm names the
+  count), and per-episode pause/front/× — nodes reused across the 5 s poll (LUM.keyed), never rebuilt. First 4 groups
+  shown, "show all N titles (M files)" for the rest. Hub server cap `queue[:8]` → `[:200]` so counts are true.
+- Class names prefixed (dg-, mdrv-, sp-, hb-) and checked against the shared stylesheet (lesson from `.hint`, DECISION 187).
+**Verified in a real browser** (built-in pane, short-lived signed test cookie, removed after) at 1600 px and 375 px:
+no horizontal overflow on either page, figure fits its column, real queue 13 files → 3 titles (BCS S2 ×10, BCS S1 ×2,
+Heart of the Beast), group expand works, group buttons carry 10/2/1 ids. No download buttons were pressed in testing.
+Parser fix during test: titles like `S01E09.2160p…` showed "2160p" → JUNK now also matches at the start; untitled
+episodes read "Episode 9". Rollback: `/root/bak-20261113-responsive/`.
