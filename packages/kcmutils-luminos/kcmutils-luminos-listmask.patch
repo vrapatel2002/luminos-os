@@ -1,15 +1,15 @@
-diff -ruN kcmutils-6.30.0/src/qml/components/ScrollViewKCM.qml ../b/kcmutils-6.30.0/src/qml/components/ScrollViewKCM.qml
 --- a/src/qml/components/ScrollViewKCM.qml	2026-11-10 13:43:10.054900945 -0500
-+++ b/src/qml/components/ScrollViewKCM.qml	2026-11-13 20:52:05.388650118 -0500
-@@ -6,6 +6,7 @@
++++ b/src/qml/components/ScrollViewKCM.qml	2026-11-13 21:12:52.000698066 -0500
+@@ -6,6 +6,8 @@
  
  import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
  import QtQuick
 +import QtQuick.Effects
++import QtQuick.Controls as QQC2
  import org.kde.kirigami as Kirigami
  import org.kde.kcmutils as KCMUtils
  
-@@ -43,6 +44,11 @@
+@@ -43,6 +45,11 @@
          if (view) {
              // Deliberately don't take separators into account, because those are opaque anyway
              view.clip = Qt.binding(() => __headerContentVisible() || __footerContentVisible());
@@ -21,7 +21,7 @@ diff -ruN kcmutils-6.30.0/src/qml/components/ScrollViewKCM.qml ../b/kcmutils-6.3
          }
      }
  
-@@ -51,13 +57,17 @@
+@@ -51,13 +58,17 @@
      // rounded card (View alternateBackground, r28 clamped) over the page "hole"; the
      // view's own header (e.g. an InlineViewHeader) stays above the card as a section row.
      Kirigami.ShadowedRectangle {
@@ -40,7 +40,15 @@ diff -ruN kcmutils-6.30.0/src/qml/components/ScrollViewKCM.qml ../b/kcmutils-6.3
          Kirigami.Theme.colorSet: Kirigami.Theme.View
          Kirigami.Theme.inherit: false
          color: Kirigami.Theme.alternateBackgroundColor
-@@ -73,5 +83,29 @@
+@@ -67,11 +78,54 @@
+         id: scroll
+         anchors {
+             top: parent.top
++            // [CHANGE: claude-code | 2026-11-13] R30: a list header (search bar, message) gets a gap under the page title
++            topMargin: !root.framedView && listCard.headerH > 0 ? Kirigami.Units.gridUnit * 0.75 : 0
+             bottom: parent.bottom
+             bottomMargin: root.framedView ? 0 : root.margins
+             horizontalCenter: parent.horizontalCenter
          }
          width: root.framedView ? parent.width : Math.min(parent.width - root.margins * 2, LxS.Style.pageWidthPx)
          framedView: root.framedView
@@ -53,6 +61,23 @@ diff -ruN kcmutils-6.30.0/src/qml/components/ScrollViewKCM.qml ../b/kcmutils-6.3
 +            maskThresholdMin: 0.5
 +            maskSpreadAtMin: 1.0
 +        }
++    }
++    // [CHANGE: claude-code | 2026-11-13] R30: the scroll bar runs beside the rows only (inside the card, clear of its
++    // rounded corners), not up beside the list header
++    readonly property real __barTop: listCard.headerH + Math.max(listCard.padTop, listCard.radius * 0.5)
++    Binding {
++        target: scroll.QQC2.ScrollBar.vertical
++        when: !root.framedView && listCard.height > 0
++        property: "y"
++        value: root.__barTop
++        restoreMode: Binding.RestoreBindingOrValue
++    }
++    Binding {
++        target: scroll.QQC2.ScrollBar.vertical
++        when: !root.framedView && listCard.height > 0
++        property: "height"
++        value: Math.max(0, scroll.height - root.__barTop - Math.max(listCard.pad, listCard.radius * 0.5))
++        restoreMode: Binding.RestoreBindingOrValue
 +    }
 +    Item {
 +        id: listMask

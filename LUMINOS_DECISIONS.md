@@ -8986,6 +8986,10 @@ listRowGapPx (-1 = follow the matching global corner/gap knob) and listIndicator
 kcmutils 1.6 (list card mask) and qqc2-desktop-style 1.11 (framed list inset, row corners/gaps, radio outline) read them.
 Tuner: System Settings tab → "Lists" group. Proof: nested kcm_plasmakeyboard, style.json edited while open → box corners,
 row gap and padding changed live (builds/style-tuner/sl1 a.png/b.png).
+**R30 (2026-11-13) — On-Screen Keyboard page:** the list's header (search + message box) touched the page title, and
+the list scroll bar ran up beside that header. kcmutils 1.7 (ScrollViewKCM): 0.75 gridUnit gap above a list that has a
+header; the vertical scroll bar starts/ends inside the list card (clear of its rounded corners). Every page built on
+ScrollViewKCM gets it. Proof: nested kcm_plasmakeyboard at 1000x760 (builds/style-tuner/sz30/w1000.png).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->
