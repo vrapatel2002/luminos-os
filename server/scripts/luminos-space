@@ -242,6 +242,130 @@ def seerr_request(kind, tmdb_id):
     return {"ok": True, "message": "asked for it \u2014 it will appear when it lands"}
 
 
+# ---------------------------------------------------------------- who wants what
+# [CHANGE: cowork | 2026-11-13] Per-person watch progress and interest. DECISION 185.
+#
+# Shawn deletes by hand from this page and must not delete something another person in
+# the house hasn't finished. Three signals per person, all already recorded elsewhere:
+#   * progress  -- Jellyfin's per-user UserData (Played / PlayedPercentage / LastPlayedDate)
+#   * a heart   -- Jellyfin's per-user Favourite, on the series or the film
+#   * a request -- whoever asked for it in Jellyseerr (requestedBy.jellyfinUsername)
+# A person BLOCKS a delete if they have not finished it AND (started it OR hearted it OR
+# requested it). Nobody blocking = safe. The page shows the reason, the delete still works
+# after a second, explicit confirmation -- this informs, it does not lock.
+#
+# Matching is by FILE PATH (Jellyfin and Sonarr/Radarr see the same files on this box) and
+# by tvdb/tmdb id for Jellyseerr requests. Nothing is guessed from titles.
+#
+# Key: its own Jellyfin API key ("luminos-space", ApiKeys id 5), in a 0600 file owned by
+# this service's user. If it is missing the library still renders; only the "who" goes.
+JELLYFIN = "http://127.0.0.1:8096"
+JF_KEY_FILE = "/var/lib/luminos/space-jellyfin-key"
+DONE_PCT = 90          # Jellyfin's own "counts as played" threshold
+_watch_cache = {"at": 0.0, "data": None}
+
+
+def jf(path, timeout=60):
+    with open(JF_KEY_FILE) as f:
+        k = f.read().strip()
+    req = urllib.request.Request(JELLYFIN + path, headers={"X-Emby-Token": k})
+    with urllib.request.urlopen(req, timeout=timeout) as f:
+        return json.loads(f.read())
+
+
+def _person(name):
+    name = str(name or "?")
+    return name[:1].upper() + name[1:]
+
+
+def watch_data(max_age=30):
+    if _watch_cache["data"] is not None and time.time() - _watch_cache["at"] < max_age:
+        return _watch_cache["data"]
+    out = {"ok": True, "error": "", "people": [], "files": {}, "mins": {},
+           "fav": {}, "req_tv": {}, "req_movie": {}}
+    try:
+        users = [u for u in jf("/Users")
+                 if not (u.get("Policy") or {}).get("IsDisabled")]
+        for u in sorted(users, key=lambda u: (not (u.get("Policy") or {}).get("IsAdministrator"),
+                                              u.get("Name", ""))):
+            name = _person(u.get("Name"))
+            out["people"].append(name)
+            items = jf("/Users/%s/Items?Recursive=true&IncludeItemTypes=Episode,Movie,Series"
+                       "&Fields=Path&EnableUserData=true" % u["Id"]).get("Items", [])
+            for it in items:
+                path = (it.get("Path") or "").rstrip("/")
+                if not path:
+                    continue
+                ud = it.get("UserData") or {}
+                if ud.get("IsFavorite") and it.get("Type") in ("Series", "Movie"):
+                    out["fav"].setdefault(path, []).append(name)
+                if it.get("Type") == "Series":
+                    continue
+                if it.get("RunTimeTicks"):
+                    out["mins"][path] = max(1, round(it["RunTimeTicks"] / 6e8))
+                pct = 100 if ud.get("Played") else int(ud.get("PlayedPercentage") or 0)
+                if pct > 0:
+                    out["files"].setdefault(path, {})[name] = {
+                        "pct": min(100, pct), "last": (ud.get("LastPlayedDate") or "")[:10]}
+    except Exception as e:                       # Jellyfin down or key gone: degrade
+        out.update(ok=False, error=str(e)[:160], people=[], files={}, fav={})
+    try:
+        key, skip = seerr_key(), 0
+        while key:
+            page = call(SEERR, key, "/request?take=100&skip=%d" % skip, timeout=30) or {}
+            res = page.get("results") or []
+            for r in res:
+                m, who = r.get("media") or {}, r.get("requestedBy") or {}
+                name = _person(who.get("jellyfinUsername") or who.get("displayName")
+                               or who.get("username"))
+                if r.get("type") == "tv" and m.get("tvdbId"):
+                    out["req_tv"].setdefault(int(m["tvdbId"]), set()).add(name)
+                elif r.get("type") == "movie" and m.get("tmdbId"):
+                    out["req_movie"].setdefault(int(m["tmdbId"]), set()).add(name)
+            skip += len(res)
+            if not res or skip >= int((page.get("pageInfo") or {}).get("results") or 0):
+                break
+    except Exception:
+        pass                                      # requests are a bonus signal
+    out["req_tv"] = {k: sorted(v) for k, v in out["req_tv"].items()}
+    out["req_movie"] = {k: sorted(v) for k, v in out["req_movie"].items()}
+    _watch_cache.update(at=time.time(), data=out)
+    return out
+
+
+def verdict(units, people, fav, req, ok=True):
+    """units: [(minutes, {person: {"pct", "last"}})]. Returns the pill + one row per person."""
+    if not ok:
+        return {"state": "unknown", "text": "who-watched-what is unavailable", "people": []}
+    rows, why = [], []
+    total = len(units)
+    mins_total = sum(m for m, _ in units)
+    for n in people:
+        ws = [(m, w.get(n) or {}) for m, w in units]
+        done = sum(1 for _, x in ws if x.get("pct", 0) >= DONE_PCT)
+        started = any(x.get("pct", 0) > 0 for _, x in ws)
+        watched = sum(m * min(100, x.get("pct", 0)) / 100 for m, x in ws)
+        last = max([x.get("last", "") for _, x in ws] + [""])
+        f, r = n in fav, n in req
+        rows.append({"name": n, "done": done, "total": total, "mins": round(watched),
+                     "minsTotal": mins_total, "last": last, "fav": f, "req": r})
+        if total and done < total and (started or f or r):
+            if started:
+                why.append(n + " still watching")
+            else:
+                why.append(n + " " + " & ".join(w for w, y in (("hearted", f), ("requested", r)) if y)
+                           + " it, hasn't started")
+    if why:
+        state, text = "warn", " · ".join(why)
+    elif rows and all(x["done"] == x["total"] for x in rows):
+        state, text = "ok", "everyone finished · safe to delete"
+    elif any(x["done"] == x["total"] and x["total"] for x in rows):
+        state, text = "ok", "safe to delete · nobody else wants it"
+    else:
+        state, text = "none", "nobody started or wants it · safe to delete"
+    return {"state": state, "text": text, "people": rows}
+
+
 def token():
     if os.path.exists(TOKEN_FILE):
         t = open(TOKEN_FILE).read().strip()
@@ -365,6 +489,8 @@ def weigh(paths):
 
 def gather():
     sk, rk = api_key("sonarr"), api_key("radarr")
+    wd = watch_data()
+    people, wok = wd["people"], wd["ok"]
 
     series_rows = []
     for s in call(SONARR, sk, "/series"):
@@ -378,6 +504,8 @@ def gather():
         for f in files:
             by_season.setdefault(f["seasonNumber"], []).append(f)
 
+        s_fav = wd["fav"].get((s.get("path") or "").rstrip("/"), [])
+        s_req = wd["req_tv"].get(int(s.get("tvdbId") or 0), [])
         seasons = []
         for sn in sorted(by_season):
             ep_rows = []
@@ -385,7 +513,11 @@ def gather():
                             key=lambda x: eps.get(x["id"], {}).get("episodeNumber", 0)):
                 e = eps.get(f["id"], {})
                 apparent, freed, twins = weigh([f["path"]])
+                fp = f["path"].rstrip("/")
                 ep_rows.append({"fileId": f["id"],
+                                "w": wd["files"].get(fp, {}),
+                                "mins": wd["mins"].get(fp, 0),
+                                "added": str(f.get("dateAdded") or "")[:10],
                                 "episode": e.get("episodeNumber", 0),
                                 "title": e.get("title", ""),
                                 "bytes": apparent, "frees": freed,
@@ -402,12 +534,22 @@ def gather():
                             "bytes": sum(x["bytes"] for x in ep_rows),
                             "frees": sum(x["frees"] for x in ep_rows),
                             "twins": sum(x["twins"] for x in ep_rows),
-                            "monitored": monitored, "eps": ep_rows})
+                            "monitored": monitored, "eps": ep_rows,
+                            "mins": sum(x["mins"] for x in ep_rows),
+                            "added": min([x["added"] for x in ep_rows if x["added"]] or [""]),
+                            "verdict": verdict([(x["mins"] or 45, x["w"]) for x in ep_rows],
+                                               people, s_fav, s_req, wok)})
+            for x in ep_rows:     # per-episode verdict: only used by the delete confirmation
+                x["verdict"] = verdict([(x["mins"] or 45, x["w"])], people, s_fav, s_req, wok)
 
         series_rows.append({"id": s["id"], "title": s["title"],
                             "bytes": sum(x["bytes"] for x in seasons),
                             "frees": sum(x["frees"] for x in seasons),
                             "twins": sum(x["twins"] for x in seasons),
+                            "mins": sum(x["mins"] for x in seasons),
+                            "fav": s_fav, "req": s_req,
+                            "verdict": verdict([(e["mins"] or 45, e["w"]) for x in seasons
+                                                for e in x["eps"]], people, s_fav, s_req, wok),
                             "seasons": seasons})
 
     movie_rows = []
@@ -417,8 +559,15 @@ def gather():
         mf = m.get("movieFile") or {}
         paths = [mf["path"]] if mf.get("path") else []
         apparent, freed, twins = weigh(paths)
+        mp = paths[0].rstrip("/") if paths else ""
+        m_w, m_min = wd["files"].get(mp, {}), wd["mins"].get(mp, 0)
+        m_fav = wd["fav"].get(mp, [])
+        m_req = wd["req_movie"].get(int(m.get("tmdbId") or 0), [])
         movie_rows.append({"id": m["id"], "title": m["title"], "year": m.get("year"),
-                           "bytes": apparent, "frees": freed, "twins": len(twins)})
+                           "bytes": apparent, "frees": freed, "twins": len(twins),
+                           "mins": m_min, "fav": m_fav, "req": m_req,
+                           "added": str(mf.get("dateAdded") or "")[:10],
+                           "verdict": verdict([(m_min or 100, m_w)], people, m_fav, m_req, wok)})
 
     series_rows.sort(key=lambda r: -r["bytes"])
     movie_rows.sort(key=lambda r: -r["bytes"])
@@ -430,6 +579,7 @@ def gather():
                  "used": shutil.disk_usage(r).used,
                  "free": shutil.disk_usage(r).free} for r in live_disks()]
     return {"series": series_rows, "movies": movie_rows,
+            "people": people, "watch": {"ok": wok, "error": wd["error"]},
             "disk": {"total": total, "used": used, "free": free},
             "disks": per_disk}
 
@@ -708,6 +858,11 @@ PAGE = """<!doctype html>
       matters on a page about what to delete. -->
  <section>
   <div class="lbl">Library <span class="aux" id="lib-aux"></span></div>
+  <!-- [CHANGE: cowork | 2026-11-13] DECISION 185: who wants what. -->
+  <p class="wwhint">Someone <b>blocks a delete</b> if they haven't finished it and they started it,
+   <span class="hr">&hearts; hearted</span> it in Jellyfin, or <span class="rq">requested</span> it.
+   Un-heart it to say "not interested".</p>
+  <div class="filt" id="filt"></div>
   <div id="lib"></div>
  </section>
 

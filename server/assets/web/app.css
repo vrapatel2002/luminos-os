@@ -618,3 +618,27 @@ a:focus-visible,button:focus-visible,input:focus-visible,[tabindex]:focus-visibl
 .pipe .step .k{font-size:var(--t-micro);opacity:.7}
 .pipe .arr{opacity:.5}
 .pipe .foot{flex-basis:100%;opacity:.7;font-size:var(--t-micro);margin-top:var(--s2)}
+
+/* ---------------------------------------------------------------- who wants what
+   [CHANGE: cowork | 2026-11-13] DECISION 185. luminos-space only; the hub never draws
+   these classes. Colour stays rationed: ok/warn are the delete-safety state (machine
+   state, rule 2), the heart and "requested" use the accent because they are the reason. */
+.wwhint{font-size:var(--t-caption);color:var(--muted);margin:0 0 var(--s3);max-width:60ch}
+.wwhint b{color:var(--text)}
+.hr,.rq{color:var(--accent)}
+.filt{display:flex;flex-wrap:wrap;gap:var(--s2);margin:0 0 var(--s3)}
+.vdw{margin-top:var(--s2)}
+.vd{display:inline-block;font-family:var(--f-mono);font-size:var(--t-micro);font-weight:800;
+    letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:var(--r)}
+.vd.ok{background:rgba(63,191,106,.12);color:var(--ok)}
+.vd.warn{background:rgba(232,197,71,.12);color:var(--warn)}
+.vd.none,.vd.unknown{background:var(--raise);color:var(--muted)}
+.pp{display:grid;grid-template-columns:minmax(72px,auto) 1fr;gap:2px var(--s3);
+    align-items:center;margin-top:var(--s2);font-size:var(--t-caption)}
+.pp .who{font-weight:800;white-space:nowrap}
+.pp .who .hr,.pp .who .rq{font-weight:500}
+.pp .bar{height:5px;background:var(--sunk);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.pp .bar i{display:block;height:100%;width:100%;transform-origin:left center;
+           transform:scaleX(var(--w,0));background:var(--muted)}
+.pp .bar i.done{background:var(--ok)}
+.pp .meta{grid-column:1/-1;font-family:var(--f-mono);font-size:var(--t-micro);color:var(--muted)}

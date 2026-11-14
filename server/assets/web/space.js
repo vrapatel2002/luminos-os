@@ -61,6 +61,51 @@
   var open = new Set();
   var biggest = 1;
 
+  /* [CHANGE: cowork | 2026-11-13] Who wants what -- DECISION 185. The server works out
+     the verdict (one place, testable); this only draws it. A person blocks a delete if
+     they have not finished it and they started it, hearted it in Jellyfin or requested
+     it in Jellyseerr. */
+  var FILTER = "all";
+  function hm(m) { m = Math.round(m || 0); return m >= 60 ? Math.floor(m / 60) + "h " + (m % 60) + "m" : m + "m"; }
+  function day(d) {
+    if (!d) { return ""; }
+    var t = new Date(d + "T12:00:00");
+    return isNaN(t) ? d : t.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  function personLine(p, parent) {
+    var row = el("div", "pp", parent);
+    var who = el("span", "who", row);
+    who.appendChild(document.createTextNode(p.name));
+    if (p.fav) { txt("span", "hr", who, " \u2665"); }
+    if (p.req) { txt("span", "rq", who, " requested"); }
+    var bar = el("span", "bar", row);
+    var frac = p.minsTotal ? p.mins / p.minsTotal : (p.total ? p.done / p.total : 0);
+    var fill = el("i", p.total && p.done === p.total ? "done" : null, bar);
+    fill.style.setProperty("--w", Math.min(1, frac).toFixed(4));
+    var what = p.total > 1 ? p.done + "/" + p.total + " eps"
+      : (p.done ? "finished" : (p.mins ? Math.round(frac * 100) + "%" : "not started"));
+    var meta = what + " \u00b7 " + hm(p.mins) + " of " + hm(p.minsTotal);
+    if (p.last) { meta += " \u00b7 last " + day(p.last); }
+    txt("span", "meta", row, meta);
+  }
+  function verdictBlock(v, parent) {
+    if (!v) { return; }
+    var box = el("div", "vdw", parent);
+    txt("span", "vd " + v.state, box, v.text);
+    (v.people || []).forEach(function (p) { personLine(p, box); });
+  }
+  function filters() {
+    var root = $("filt");
+    if (!root || root.childNodes.length) { return; }
+    [["all", "everything"], ["ok", "watched & safe"], ["warn", "someone still wants it"],
+     ["none", "nobody started"]].forEach(function (f) {
+      var b = txt("button", "btn" + (f[0] === FILTER ? " on" : ""), root, f[1]);
+      b.type = "button";
+      b.dataset.filt = f[0];
+    });
+  }
+  function shown(v) { return FILTER === "all" || (v && v.state === FILTER); }
+
   function entry(o, parent) {
     var ent = el("div", "ent", parent);
     if (o.key && open.has(o.key)) { ent.classList.add("open"); }
@@ -100,6 +145,7 @@
       txt("span", "stuck", sub, "frees only " + size(o.frees));
     }
     if (!sub.childNodes.length) { sub.classList.add("off"); }
+    if (o.verdict) { verdictBlock(o.verdict, ent); }
 
     var kids = null;
     if (o.key) {
@@ -113,7 +159,7 @@
   /* `face` is what the button says, and it is never just "delete". A season's
      button is the first thing inside the season's open body, directly above
      episode one, so an unlabelled one would read as episode one's. */
-  function deleteBtn(parent, face, label, kind, id, season, frees) {
+  function deleteBtn(parent, face, label, kind, id, season, frees, v) {
     var acts = el("div", "acts", parent);
     var b = txt("button", "btn danger", acts, face);
     b.type = "button";
@@ -122,6 +168,7 @@
     b.dataset.label = label;
     b.dataset.frees = String(frees);
     if (season !== null) { b.dataset.season = String(season); }
+    if (v && v.state === "warn") { b.dataset.why = v.text; }
   }
 
   /* ---- library --------------------------------------------------------------- */
@@ -134,39 +181,51 @@
     var frag = document.createDocumentFragment();
 
     d.series.forEach(function (s) {
+      if (!shown(s.verdict)) { return; }
       var eps = s.seasons.reduce(function (a, x) { return a + x.episodes; }, 0);
+      var sf = [s.seasons.length + (s.seasons.length === 1 ? " season" : " seasons"),
+                eps + (eps === 1 ? " episode" : " episodes")];
+      if (s.mins) { sf.push(hm(s.mins) + " total"); }
       var kids = entry({
         key: "s" + s.id, title: s.title, bytes: s.bytes, frees: s.frees, twins: s.twins,
-        facts: [s.seasons.length + (s.seasons.length === 1 ? " season" : " seasons"),
-                eps + (eps === 1 ? " file" : " files")]
+        facts: sf, verdict: s.verdict
       }, frag);
 
       s.seasons.forEach(function (se) {
-        var facts = [se.episodes + (se.episodes === 1 ? " file" : " files")];
+        var facts = [se.episodes + (se.episodes === 1 ? " episode" : " episodes")];
+        if (se.mins) { facts.push(hm(se.mins)); }
+        if (se.added) { facts.push("on disk since " + day(se.added)); }
         if (!se.monitored) { facts.push("not monitored"); }
         var epk = entry({
           key: "s" + s.id + "e" + se.season,
           title: se.season === 0 ? "Specials" : "Season " + se.season,
           bytes: se.bytes, frees: se.frees, twins: se.twins, facts: facts,
+          verdict: se.verdict,
           acts: function (into) {
             deleteBtn(into,
                       "delete all " + se.episodes
                       + (se.episodes === 1 ? " file" : " files") + " below",
                       s.title + " \u2014 Season " + se.season,
-                      "season", s.id, se.season, se.frees);
+                      "season", s.id, se.season, se.frees, se.verdict);
           }
         }, kids);
 
         se.eps.forEach(function (ep) {
+          var ef = [];
+          if (ep.mins) { ef.push(hm(ep.mins)); }
+          (d.people || []).forEach(function (n) {
+            var w = (ep.w || {})[n];
+            ef.push(n + (w ? (w.pct >= 90 ? " \u2713" : " " + w.pct + "%") : " \u2014"));
+          });
           entry({
-            key: null,
+            key: null, facts: ef,
             title: "E" + String(ep.episode).padStart(2, "0")
                    + (ep.title ? "  " + ep.title : ""),
             bytes: ep.bytes, frees: ep.frees, twins: ep.twins,
             acts: function (into) {
               deleteBtn(into, "delete this episode",
                         s.title + " S" + se.season + "E" + ep.episode,
-                        "episode", ep.fileId, null, ep.frees);
+                        "episode", ep.fileId, null, ep.frees, ep.verdict);
             }
           }, epk);
         });
@@ -174,17 +233,27 @@
     });
 
     d.movies.forEach(function (m) {
+      if (!shown(m.verdict)) { return; }
+      var mf = ["film"];
+      if (m.mins) { mf.push(hm(m.mins)); }
+      if (m.added) { mf.push("on disk since " + day(m.added)); }
       entry({
         key: "m" + m.id,
         title: m.title + (m.year ? " (" + m.year + ")" : ""),
-        bytes: m.bytes, frees: m.frees, twins: m.twins,
+        bytes: m.bytes, frees: m.frees, twins: m.twins, facts: mf, verdict: m.verdict,
         acts: function (into) {
-          deleteBtn(into, "delete this film", m.title, "movie", m.id, null, m.frees);
+          deleteBtn(into, "delete this film", m.title, "movie", m.id, null, m.frees, m.verdict);
         }
       }, frag);
     });
 
-    if (!frag.childNodes.length) { txt("div", "empty", frag, "nothing with files"); }
+    if (!frag.childNodes.length) {
+      txt("div", "empty", frag, FILTER === "all" ? "nothing with files" : "nothing matches this filter");
+    }
+    filters();
+    if (d.watch && !d.watch.ok) {
+      txt("div", "empty", frag, "Who-watched-what is unavailable right now: " + (d.watch.error || "Jellyfin did not answer"));
+    }
     root.replaceChildren(frag);
 
     var titles = d.series.length + d.movies.length;
@@ -283,12 +352,13 @@
   }
 
   /* ---- loading ---------------------------------------------------------------- */
+  var LAST = null;
   function loadLib() {
     /* A delete reloads this whole tree. Hold the scroll position, or the row you
        were looking at jumps away the moment you act on it. */
     var y = window.scrollY;
     return LUM.get(q("/api/data"))
-      .then(function (d) { library(d); window.scrollTo(0, y); })
+      .then(function (d) { LAST = d; library(d); window.scrollTo(0, y); })
       .catch(function (e) {
         $("sig").textContent = e === 403 ? "no token" : "no reply";
         $("sig").classList.add("gone");
@@ -310,6 +380,15 @@
   document.addEventListener("click", function (ev) {
     var t = ev.target.closest("button");
     if (!t) { return; }
+
+    if (t.dataset.filt) {
+      FILTER = t.dataset.filt;
+      Array.prototype.forEach.call($("filt").children, function (b) {
+        b.classList.toggle("on", b === t);
+      });
+      if (LAST) { library(LAST); }
+      return;
+    }
 
     if (t.dataset.tog) {
       var k = t.dataset.tog, ent = t.parentNode;
@@ -334,6 +413,10 @@
     if (d.kind === "season" || d.kind === "movie" || d.kind === "episode") {
       /* The confirmation names the title and the bytes that really come back --
          which is not the row's size when something else holds the inode. */
+      /* [CHANGE: cowork | 2026-11-13] DECISION 185: someone still wants this -> say who,
+         first, before the usual question. Two dialogs, so it cannot be one stray tap. */
+      if (d.why && !confirm("HOLD ON \u2014 " + d.why + ".\n\nDelete " + d.label
+                            + " anyway?")) { return; }
       if (!confirm("Delete " + d.label + "?\n\nThis frees "
                    + size(Number(d.frees)) + " and cannot be undone.")) { return; }
       t.disabled = true;

@@ -3392,3 +3392,37 @@ Backup of the old profile: `/var/lib/radarr/qp7.pre-720p-20261109.json`. 480p/DV
 19:43:08 into /srv/external/movies (file still owned by nzbget with original mtime = a rename, so DECISION 176's
 same-disk move is proven on a real download), Jellyfin listed "Rockstar (2011)" 19:44:39.
 Bazarr added an English .srt alongside (harmless; subtitles can be switched off in the player).
+
+## DECISION 185 — luminos-space shows who still wants each title before a delete — 2026-11-13
+<!-- [CHANGE: cowork | 2026-11-13] -->
+**Ask (Shawn):** when he deletes by hand from the Space page he must see, per film / season / episode, how many episodes,
+how long, since when it has been on disk, and **each person's progress**, so he never deletes something someone else
+hasn't finished. Plus: each account can say it wants a show, and that syncs to the same page.
+
+**Decision.**
+- **Three signals, all already recorded — nothing new for people to learn:** Jellyfin per-user progress
+  (`Played` / `PlayedPercentage` / `LastPlayedDate`), Jellyfin per-user **Favourite (heart)** on the series or film, and
+  the Jellyseerr **requester** (`requestedBy.jellyfinUsername`). Rule: a person **blocks** a delete if they have not
+  finished it AND (started it OR hearted it OR requested it). Nobody blocking → green "safe to delete". Un-heart =
+  "not interested". No separate "not interested" button: Jellyfin has none and "nobody wants it" is already the default.
+- **The verdict is computed server-side** (`verdict()` in `luminos-space`), one place, testable; the page only draws it.
+- **It informs, it does not lock.** A blocked delete shows a first dialog naming who and why ("HOLD ON — Mom still
+  watching"), then the usual "frees X GB" dialog. Two dialogs so it cannot be one stray tap.
+- **Matching is by file path** (Jellyfin and Sonarr/Radarr see the same files) and by tvdb/tmdb id for requests — never
+  by title.
+- **Own Jellyfin API key** "luminos-space" (ApiKeys id 5) in `/var/lib/luminos/space-jellyfin-key`, 0600
+  luminosspace. Missing key / Jellyfin down → library still renders, verdict reads "who-watched-what is unavailable".
+- Filters on the page: everything / watched & safe / someone still wants it / nobody started.
+
+**Limit today:** Jellyfin has ONE user (`shawn`) shared by everyone, so the page can only show "Shawn" until each person
+has their own login (agreed with Shawn: login per person, Shawn admin, others limited; names pending). The page picks up
+new users automatically — no code change.
+
+**Verified (2026-11-13), against the live library, through Caddy on the tailnet name:** Ozark S2 → "everyone finished ·
+safe to delete" (10/10), Ozark S3 → "Shawn still watching" (1/10, E2 at 11 %), MobLand → "Shawn requested it, hasn't
+started", VisionQuest → 7/8. Filters return the right sets. Delete dialogs checked with `confirm` stubbed to "No" (nothing
+deleted): blocked season shows the HOLD ON line first, a safe film goes straight to the frees-X dialog. Negative test: key
+path pointed at a missing file → `watch.ok=false`, all 3 series + 4 films still listed. CSP unchanged, `/api/data` without
+token still 403. **Gotcha hit:** `.hint` already exists in the shared `app.css` (hub, position:absolute) — reusing it hid
+the new line; renamed `.wwhint`. Shared stylesheet = check every new class name against the hub.
+Rollback: `/root/bak-20261113-space/` (luminos-space, space.js, app.css).
