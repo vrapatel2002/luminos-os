@@ -1,5 +1,14 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 12 (gate "bad origin" fixed)
+Last updated: 2026-11-13 — Response 14 (responsive hub + Space mockup, awaiting approval)
+
+
+## 2026-11-13 R14 — Shawn signed in OK (R13 was a wrong password, not a bug). New ask: Space + hub look "made for mobile";
+make them responsive to window size; long download lists make it worse. Mockup published (NOT built):
+https://claude.ai/artifact/C91aQRDz9J8DwBgLBbEWV1 — container-query grid (1 col phone / 2 col tablet / 3 col desktop),
+hub hero figure sized to its column (fixes "QUEUED" overflowing left + queue overflowing right), downloads GROUPED by
+show+season ("Better Call Saul · Season 2 · 10 episodes") with compact expandable episode rows + icon buttons, list capped
+with "show all". Space: hero + mini drive bars on one row; downloads column sticky on the left, library on the right.
+NEXT on approval: implement in app.css (shared — check class names vs hub!), space.js, hub.js, luminos-hub/luminos-space HTML.
 
 
 ## 2026-11-13 R12 — Shawn hit "bad origin" signing in to the hub/Space gate. Origin: null (no-referrer policy). Fixed in
