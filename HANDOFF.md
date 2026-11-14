@@ -1,5 +1,21 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 9 (access audit: who can log in to the server — read-only)
+Last updated: 2026-11-13 — Response 10 (admin gate + jfa-go invites LIVE)
+
+
+## 2026-11-13 R10 — "Production" accounts: BUILT + LIVE (DECISION 187 + 188). Shawn confirmed all Tailscale devices are his.
+- **luminos-gate** (127.0.0.1:8101, user luminosspace, secret /var/lib/luminos/gate-secret): hub :443 + Space :8446
+  behind a sign-in with the Jellyfin account, allow=shawn only. Closed the hole: :8446 used to hand the Space token to
+  anyone on LAN/tailnet. Verified incl. negative tests + real-login success on a temp instance. Rollback
+  /etc/caddy/Caddyfile.pre-gate.
+- **jfa-go 0.6.0** (headless build, /var/lib/jfa-go, user jfago, Caddy :8452, not gated): invite links. Own hidden
+  Jellyfin admin `luminos-invites` (random pw only in config). Default profile "viewer" = watch + request only (no
+  delete/download/settings/remote-control, 3 streams, lockout 5). Jellyseerr gives new users perm 32 (requests need
+  Shawn's approval). E2E 16/16 PASS (server/tests/jfa-e2e.py). Rollback /etc/caddy/Caddyfile.pre-jfa.
+- Space page now skips accounts that can't play media (so luminos-invites never shows as a person).
+- **Shawn's to-dos:** (1) sign in once on the hub/Space with his Jellyfin login; (2) make invites at
+  https://192.168.2.61:8452 (his Jellyfin login → Invites); (3) for remote guests: share the server in Tailscale + add the
+  autogroup:shared grant for tcp 8443/8444/8452 and drop any src:"*" rule; (4) still pending: try the episode picker;
+  server `pacman -Syu` for ca-certificates.
 
 
 ## 2026-11-13 R9 — Access audit (read-only, nothing changed)
