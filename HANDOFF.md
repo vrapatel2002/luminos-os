@@ -1,5 +1,11 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 3 (per-person "interest" via Jellyfin hearts, proposed)
+Last updated: 2026-11-13 — Response 4 (mockup v2: hearts + requested-by added; awaiting approval)
+
+
+## 2026-11-13 R4 — Mockup v2 published (same link): hearts + Jellyseerr requester now block deletes. Still WAITING ON APPROVAL.
+- Rule as mocked: blocker = person not finished AND (started OR hearted OR requested). No blockers → green "safe to delete"
+  (incl. "nobody started or wants it"). Pills read e.g. "Mom hearted it, hasn't started" / "Mom requested it, hasn't started".
+- Logic unit-tested in node against the mock data (verdicts printed correctly for all 6 items + seasons).
 
 
 ## 2026-11-13 R3 — Q: can each account mark interest in a show and sync it to the storage page? → YES, proposed, not built
