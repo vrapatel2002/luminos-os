@@ -1,537 +1,117 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-08 — Response 7 (wallpaper cursor / now-playing / audio — BUILT)
-
-## LIVELY WEB WALLPAPERS INTERACTIVE (BUG-236 / DECISION 181) — DONE + LIVE
-- Cursor (PageInput.qml, passive, above icons), TV now-playing (NowPlaying.qml + tools/luminos-wallpaper-nowplaying;
-  YouTube video → 240p file in ~/.cache/luminos/tv; music → cover), audio → livelyAudioListener. All off while paused.
-- Cost measured: paused 0-0.1 % core; visible+playing features ≈ 6-7 %, the 3D page itself ≈ 25 % (pre-existing).
-- yt-dlp updated to 2026.10.26 (old one 403'd every YouTube download; also fixes video-wallpaper YouTube mode).
-- Offered, NOT done: cap web wallpapers at devicePixelRatio 1 (would cut most of the ~25 % base cost; softer image).
-- Not covered: QML-mode scenes still use their own MouseArea under the icon layer (same cursor problem) — PageInput
-  could serve them too. Lock-screen clicks stay off (WebInteractive false there).
-- Test tools: /var/tmp/wp-cdp/ (ev.py/nav.py/shot.py/watch.py need plasmashell started with
-  QTWEBENGINE_REMOTE_DEBUGGING=127.0.0.1:9333 — currently OFF), cost.sh, threads.sh, fakeplayer.py.
-
-## LIVING ROOM WALLPAPER (BUG-235) — FIXED, Shawn to eyeball on the desktop
-- Cause: Lively page loads three.js from root paths `/js/…`; under file:// that is the disk root → nothing ran, nothing logged.
-- Fix: scripts/luminos-wallpaper-webpaths rewrites package-local root paths to relative; luminos-wallpaper-install runs
-  it on every web import. Applied to installed living-room + music-tv-lq (backup /var/tmp/lr-test/installed-before-bug235.tgz).
-  plasmashell restarted 18:58; page now runs (26 js lines, no WebGL errors). Tests 6/6, budgets pass.
-- If Shawn says it's still blank: check `journalctl --user -u plasma-plasmashell | grep -E "js:|LUMINOS-WP"`; the first-frame
-  grab (1 s settle in WebMode) may catch the room before its model loads — the frozen frame would be the spinner.
-- Gotcha: host-shell Qt logs go to journald — test qml6 with QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen.
-
-## SNAPPY BUILD (docs/snappy/PROMPT.md) — PAUSED mid step 3, data collected but NOT analysed yet
-- Tools: docs/snappy/idle.py (10-min sampler, sudo), docs/snappy/snap.sh (953-knob snapshot, sudo). Output /var/tmp/snappy/.
-- Arm A (fresh boot, 11-07 21:51): pkg 6.1 W, Tctl 41, iGPU fabric clock pinned at top level 1600 MHz (pp_dpm_fclk) with
-  VDDNB 835-855 mV most of the time (drops to 400 MHz / ~670 mV only in bursts); ~2400 CAL IPIs/s; wifi power_save off.
-  So a fresh boot does NOT give the low-VDDNB state.
-- Arm B (30 s test sleep 22:03 then same 10 min): idleB-1107-2203.txt + snapB-1107-2203.txt exist — NEXT: diff A vs B
-  (idle AVG lines + `diff snapA snapB`), then repeat later in uptime (machine now ~21 h up = the "drifted" case).
-- The bridge dropped after the test sleep (desktop app didn't reconnect) — expect that on every test sleep.
+Last updated: 2026-11-13 — Response 1 (watch-progress report for cleanup, read-only)
 
 
+## 2026-11-13 R1 — "how much have I watched, so I can delete" (READ-ONLY, nothing deleted)
+- Pulled Jellyfin UserData via API (key from ApiKeys.AccessToken in jellyfin.db, user shawn 1C9C4F54…) on 127.0.0.1:8096.
+- Fully watched: Eastern Promises 63G (/srv/media), A Silent Voice 32G (/srv/external), Ozark S2 all 10 eps 113G, VisionQuest S1 E1,2,4-8 (E3 not marked).
+- Unwatched: Insidious 2026 19G, Ae Dil Hai Mushkil 3.3G, MobLand S2 0/8 56G, Ozark S3 (E1 watched, E2 11 %, rest unplayed) 112G.
+- Leftovers outside the library: _dv_hdr10_converted 25G + _dv_p5_originals 18G (old DV conversion copies of Ozark S2E03 + VQ E1/E2 — all watched), _llmtest 28G (GGUF models, not media). ~14 empty movie/series folders (4-28K).
+- Disk: /srv/media 487G used / 345G free; /srv/external 53G / 406G free.
+- GOTCHA for whoever deletes: delete via Radarr/Sonarr (delete files + unmonitor) or the *arrs re-download. Waiting on Shawn to pick what to delete.
 
-## Aim right now — LUMINOS MEDIA (DECISION 180) — BUILT, INSTALLED, DEFAULT for 74 types; waiting on Shawn's feedback
-- Shawn: photos (.heic) wouldn't open -> "make luminous media… lightest app for all images and videos" -> "just do it".
-- LIVE: /usr/local/bin/luminos-media (repo scripts/luminos-media) runs qml6 src/media/Media.qml; LD_PRELOAD
-  /usr/local/lib/luminos/libluminos-vaapi-igpu.so (scripts/vaapi-igpu/, BUG-234 fix: ffmpeg default VA-API device =
-  gated renderD128 -> EACCES -> gives up); ~/.local/share/applications/luminos-media.desktop; xdg defaults for 74 types.
-  Check: scripts/luminos-media-install --check (PASS). Undo: --uninstall (prior defaults in ~/.local/share/luminos/
-  media-defaults.prior; 42 had none, 16 were VLC, 12 Okular, 4 Chrome). Docs: docs/media/README.md, shots docs/media/shots/.
-- PROVEN: all 13 test files open (heic avif jxl jpg png webp still+anim gif, h264 hevc10-4K vp9 av1 on VA-API "hw 3");
-  double-click (xdg-open) PSS: heic 112 MB/0.2 %, jxl 144/0, h264 162/7.8 %, 4K hevc 343/8.8 %, dGPU suspended, shim loaded;
-  selftest: 3x zoom loads full 4032 px, fit releases it; HEIC+JPEG EXIF; strip; next; trash -> ~/.local/share/Trash;
-  no leftover process after close. Test files: /var/tmp/lm-test (scripts probe.sh, dclick.sh, st.sh, shot.sh there).
-- Also: luminos-notepad.desktop + installed copy claim 33 more text types (toml rust lua ts php diff srt vtt ipynb
-  Makefile tex zero-size…), all verified via xdg-mime.
-- Not done / ideas if Shawn asks: video thumbnails in the strip (shows a movie glyph), slideshow, mpv engine after a
-  full -Syu (lighter video), system-wide BUG-234 fix for other ffmpeg apps. VLC still installed, no longer default.
-- Gotchas: AnimatedImage + sourceSize STRETCHES (aspect lost); HEIC EXIF = search TIFF header not "Exif" (iinf type
-  name); font.pixelSize must be int; resetView must hang off cur.pathChanged not indexChanged (stale details);
-  installer must save prior defaults BEFORE installing the .desktop; never pkill -f the Media.qml path from your own shell.
-- Committed by me: only my own files (src/media, scripts/luminos-media*, scripts/vaapi-igpu, config/luminos-media.desktop,
-  config/luminos-notepad.desktop, docs/media). Shared docs (AGENTS, STATUS, DECISIONS, BUGS, CODE_REFERENCE, HANDOFF)
-  edited but left uncommitted — other sessions' uncommitted edits are mixed into them.
-
-## Aim right now — DV PURPLE AGAIN IN JELLYROCK (BUG-231) — FIXED + proven live, TV check = Shawn
-- Shawn R5: "same purple error on the newer episodes". JellyRock 3.3.1, VisionQuest S01E06 (DV P5). Not the files, not
-  JellyRock: the DECISION 175 seek wrapper (segment muxer) did not pass `-strict` to its inner mpegts muxer, so the DV
-  descriptor was dropped on EVERY DV file since 2026-11-07 (8 P5 = VisionQuest E01–E07 + Ozark S02E03 purple; 6 MobLand
-  P8 silently lost DV). Fix: wrapper forwards `-segment_format_options strict=<Jellyfin's -strict>` (RE-PLAN 3,
-  ~/builds/jf-seek-align, 25 tests). Live at /usr/local/lib/luminos-ffmpeg/ffmpeg; old = ffmpeg.pre-replan3-20261108.
-- Proof: server/scripts/luminos-jf-dv-check (old wrapper lost_dv 3/3, new 0) + luminos-jf-seek-check 0/19 misaligned.
-- NEXT: Shawn plays a VisionQuest episode in JellyRock (start fresh, then skip around) — colour AND seeking. The TV may
-  hold a cached playlist from before the fix: stop playback fully and restart the episode.
-- Gotchas: a remux wrapper must be checked for metadata parity (DV/HDR tags), not only timing. dv-check refuses to
-  report unless the wrapper actually rewrote (a trailing arg makes it pass through and "pass"). Official Jellyfin Roku
-  app is still purple on P5 by design — JellyRock only. Do NOT re-enable luminos-dv-sweep (DECISION 167).
-- Not committed by me: docs/BUGS.md (BUG-231 appended) and HANDOFF.md — other sessions' uncommitted edits are mixed in.
-
-## Aim right now — STYLE TUNER (DECISION 176) — BUILT + LIVE, waiting on Shawn to use it
-- R6 (2026-11-08): added bars — Search bar (height/edges/space), Sidebar bottom gap, Icons (circle + icon colour swatches,
-  size, nudge X/Y), Bottom buttons (edges/space, live C++ watcher). luminos-style 1.0-4, kirigami 1.10, systemsettings 1.8.
-  Proven in nested KWin (shots/r6), checker 36/36. Shawn must CLOSE + REOPEN System Settings once (his window ran the old build).
-- R7: ☰ menu button beside search now hideable (showMenuButton, tuner switch); turned OFF in Shawn's style.json.
-  systemsettings 1.9, luminos-style 1.0-5. Reopen System Settings to see it.
-- R8: BUG-232 Wi-Fi page overflow fixed in systemsettings 1.11 (drop >=600 px fixed minimums, tabs scroll, list 240,
-  LayoutRequest re-check). Proof shots nm-before/nm-after. Shawn: reopen System Settings.
-- R9 (DECISION 177): Wi-Fi page in his "Network panel" look (QML override in /usr/local/share/kcm_networkmanagement via
-  luminos-style 1.0-6, src/kcm-nm-look) + Status tab left aligned (systemsettings 1.12). Search box removed on that page.
-- R10: Shawn: the whole Wi-Fi page "doesn't feel right", General/Wi-Fi/IPv4 tabs need work → PROTOTYPE published
-  (artifact "Luminos Wi-Fi Page", docs/windowstyle/mock/wifi-page.html): one column; page 1 = Wi-Fi switch card,
-  big "Connected" card, Saved / Other networks groups, More (hidden network, VPN & other); page 2 = one network as grouped
-  rows (Status, Connection, Security, IP settings, Advanced collapsed), Save bar only when changed. Waiting on approval.
-  Build plan: QML pages in the /usr/local/share override + a small C++ helper (NetworkManagerQt) in org.luminos.style to
-  read/write settings, since today's tabs are plasma-nm QtWidgets; the old tab editor stays reachable as a fallback.
-- R11 (DECISION 178) BUILT: Wi-Fi page = one column (list → details rows, no tabs) per approved prototype.
-  luminos-style 1.0-7 (adds org.luminos.network C++ helper + new QML in /usr/local/share/kcm_networkmanagement).
-  Save proven on a throwaway LX-TEST profile (11 fields + password kept + password/WPA3 change, then forgotten).
-  Next: Shawn's feedback; gaps listed in DECISION 178.
-- R12: hidden-network page, Apply/Reset hidden on the Wi-Fi page (systemsettings 1.13), multi-address IPv4/IPv6,
-  BUG-233 (IPv6 save abort) fixed — luminos-style 1.0-9. Shawn says more things need taking care of: ask/await his list.
-- R13: Shawn: "make this 2 better" (Proxy = kio kcm_proxy, Connection Preferences = kio kcm_netpref; both QtWidgets).
-  PROTOTYPE published (artifact "Luminos Proxy Pages", docs/windowstyle/mock/net-pages.html): Proxy = status card +
-  4 plain choices (Off / Find automatically / Setup script / Set it up myself) with only the chosen one's fields;
-  Connection Preferences = 3 switches with explanations. Waiting on approval. Build plan: two QML KCMs written by us
-  (read/write kioslaverc [Proxy Settings] + KIO keys), shown in place of kio's two (systemsettings fork swaps the plugin ids).
-- R14 (DECISION 179) BUILT: own Proxy + Connection Preferences QML pages (luminos-style 1.0-10), kio-extras ones hidden
-- R15: Wi-Fi page icons now sit in the same round disc as the sidebar (Rows.Disc, iconCirclePx/iconGlyphPx, follows tuner). Hand-installed to /usr/local/share/kcm_networkmanagement/qml; next luminos-style build packages it. Shot: docs/style-tuner/shots/wifi-discs.png
-- R16: the Wi-Fi glyph itself was still small (wedge art fills ~60% of its box: 20x13 vs globe 20x20) → Disc.glyphScale 1.35 for "wireless" icons + roundToIconSize:false (Kirigami was snapping 27 px back to 22). Measured now 25x17. Hand-installed.
-- R17: Shawn asked to make Dolphin (Files) more readable → prototype docs/windowstyle/mock/files-page.html (sidebar discs + pill, folders/files groups, 2-line names, type-tinted tiles + ext tag, meta line, list view). WAITING for approval; nothing built. Current: dolphin 26.08.1, icon theme yet-another-monochrome-icon-set, PlacesPanel IconSize=16.
-- R18: prototype v2 = full working demo (same file): View button popover (Icons/Compact/List, S-M-L-XL slider, sort, groups, toggles, this-folder/all-folders), status-bar zoom, Ctrl+wheel, Ctrl+1/2/3; every item of his current ☰ menu mapped (quick row + Create new/Select/This folder/Undo-Redo labelled/Filter/Panels F9 F11 F7 F4 + lock + hidden places/Configure→Settings dialog/Help/More); selection bar, Undo toast, context menus x3, trash restore/empty, split, tabs, search, filter, folders tree, info panel, fake terminal, drag-drop, rubber band. Guide lists feasibility per part (existing / setting / Dolphin+KIO patch / icon pack). Tested in Playwright, 0 errors, no mobile overflow. WAITING for approval.
-  by systemsettings 1.14. Proven by writing kio-format kioslaverc/kio_ftprc in a private config dir.
-- R5 (2026-11-08): Shawn asked how to use it → told: app menu "Style Tuner" (or run luminos-style-tuner), drag bars, reset arrows, delete style.json to undo. No changes.
-- Shawn: tune the Nexus KDE look himself with HORIZONTAL BARS, LIVE; R4 "do it rather than perfecting it".
-- LIVE: app menu "Style Tuner" (`luminos-style-tuner`) → 13 bars write ~/.config/luminos/style.json → package
-  `luminos-style` 1.0-3 (QML module org.luminos.style, inotify watcher) → forks kirigami 1.9, qqc2 1.9, kirigami-addons 1.3,
-  kcmutils 1.2, systemsettings 1.7 read corners/gaps/padding/widths/discs/text px/motion from it. Text size + button corners
-  via user unit luminos-style-apply.path (kdeglobals fonts + refreshFonts; darklyrc + Darkly reparse). Enabled.
-- PROOF: docs/style-tuner/shots — System Settings never restarted: tuned frame differs, back-to-default 0 px diff;
-  tuner + 12.5 pt grows fonts live (t1/t2). windowstyle checker 36/36 before AND after install.
-- Docs: DECISION 176, STATUS row, docs/style-tuner/README.md, CODE_REFERENCE, AGENTS §10. Prototype artifact
-  "Luminos Style Tuner" (bars version) still at claude.ai/artifact/BF8PGi5taLFvrymMBhHSZp.
-- NEXT (Shawn's feedback first): bars don't follow outside edits of the file; "Bake" not built; not wired yet: QtWidgets
-  (Darkly) row corners/menus, System Settings hole/drawer radii, page title only updates on page switch, kirigami
-  InlineMessage motion. Number collision: DECISION 175 = JellyRock, so this is 176 (installed binaries' comments say 175).
-- Gotchas: never remove luminos-style while the forks are installed (all QML apps lose controls); fork rebuilds apply
-  the tunables patch LAST (regenerate with scripts/style-tuner/make-tunables.py); qml6 logs → journald unless
-  QT_FORCE_STDERR_LOGGING=1; KF6 ignores KGlobalSettings notifyChange 1 — use /KDEPlatformTheme refreshFonts;
-  host-shell lacks the session env (apps render Breeze light) — take env from plasmashell's /proc/PID/environ;
-  never `pkill -f` a pattern that is in your own command line (killed my shell once).
-- ⚠️ HANDOFF.md is over the ~400-line tripwire (§0.2) — needs a reset, but parallel chats are live in it.
-
-## Aim right now — JELLYROCK SKIP/SEEK JUMPS BACK (DECISION 175 / BUG-230) — fix LIVE on the server, TV test = Shawn
-- Symptom: Shawn "can't move back and forth" in JellyRock. ECP-driven test: Right/>> + OK lands, then 3 of 4 times the
-  Roku paused and snapped back to the pre-seek spot. Cause: DV files play as HLS remux; after a seek past the cut
-  point Jellyfin restarts ffmpeg (-ss = piece start + 0.5 s) and the restarted hls muxer cuts on its own grid, so
-  pieces stop matching the keyframe playlist (16/19 misaligned).
-- Fix: /usr/local/lib/luminos-ffmpeg/ffmpeg (= server/scripts/luminos-jf-ffmpeg) + ffprobe symlink, set in
-  /etc/jellyfin/jellyfin.env JELLYFIN_FFMPEG_OPT. Rewrites only HLS remux mpegts vod calls with KeyframeData to the
-  segment muxer with Jellyfin's own cut times; everything else exec'd unchanged. e2e server/scripts/luminos-jf-seek-check
-  0/19 on Reboot (L5) and Malware (L6). Build files: ~/builds/jf-seek-align (SPEC/CONTRACTS/BUILD_LOG/tests, 20 pass),
-  copies in server/docs/seek/.
-- NEXT: Shawn tests skipping in JellyRock on a VisionQuest episode. If it still snaps back: capture with
-  `sudo tcpdump -i any -A "tcp port 8096 and host 192.168.2.13"` + ECP /query/media-player (TV is 192.168.2.13 here)
-  and check FFmpeg.Remux logs for "luminos-jf-ffmpeg: aligned". Undo = JELLYFIN_FFMPEG_OPT back to the real path.
-- Gotchas: systemd EnvironmentFile has NO inline comments (broke Jellyfin args once, fixed). Server LAN is enp2s0 now,
-  not wlan0 (tcpdump -i any). Backgrounding over ssh: use setsid nohup … & disown.
+## 2026-11-10 R6 — JellyRock 'problem retrieving data from server' after fast-forward (Rockstar, direct play mkv)
+- Server healthy, no Jellyfin errors; PlaybackInfo via shim :8095 (8096 is DNAT'd to the BUG-227 shim) answers 200 in 18 ms. Retry capture 11:30: every request 200/206 incl. a seek. Jellyfin logged 'Lost 1 WebSockets' 11:23:09 right after the failed play = TV dropped off Wi-Fi briefly. Shawn: leave it, it plays. No change made. If it repeats: TV on Wi-Fi (.13) is the common thread with the R4 audio crackle — ethernet for the TV.
 
 
-## Aim right now — LUMINOS-FOCUS "only what I'm looking at gets compute" (DECISION 174) — steps 1–3 LIVE, docs/focus/
-- Read docs/focus/BUILD_LOG.md first (measurements + every re-plan), then SPEC.md / CONTRACTS.md (Re-plans 1–6).
-- LIVE (no reboot, no /etc): KWin script luminos-focus (~/.local/share/kwin/scripts, kwinrc luminos-focusEnabled) →
-  org.luminos.Focus → user unit luminos-focus.service (~/.local/bin/luminos-focus, Go) sets runtime CPUWeight/CPUQuota
-  on app-* units: focused 1000; else weight 20+80f, quota 25+1575f %; audio + ~/.config/luminos/focus-allow.conf
-  exempt; Claude scope (Cowork VM + host-shell + /build workers) always exempt. Show Desktop via KWin's D-Bus signal.
-  Wallpaper ObscurePolicy 3 (set) + grab→hide→Frozen freeze (BUG-229) + 30 fps cap. Check/undo:
-  scripts/luminos-focus-install --check | --uninstall. Tests: bash tests/focus/static.sh (9/9 PASS).
-- Measured: covered window = full cost, minimized = painting stops; hidden busy Chrome capped exactly to the dial,
-  refocus lifts it immediately; allow-listed konsole 99 %; wallpaper frozen → <0.3 % CPU, iGPU 20→4 %, −1.3…1.5 W;
-  daemon itself 0.13 % of a core.
-- NEXT (needs Shawn): (1) say yes/no to Phase B = small KWin patch so FULLY covered windows get `suspended`
-  (rebuilt KWin package + pacman hook, like the forked KDE libs) — biggest remaining win; (2) PSR/idle power re-measure
-  while he is away from the keyboard (every sample today had Claude streaming, PSR never engaged).
-- Gotchas: KWin 6.7 scripts have NO workspace.showingDesktop/stackingOrderChanged; quickshell overlays are
-  normalWindow=true (filter skipTaskbar); Qt refuses Frozen on a visible WebEngineView; evaluateScript writeConfig does
-  not reach a running wallpaper (restart plasmashell); plasmashell restart gives the desktop focus → wallpaper plays
-  until a window is clicked (correct). Never `pkill -f` a pattern that is in your own command line.
-- Not committed by me: HANDOFF.md, LUMINOS_DECISIONS.md, LUMINOS_STATUS.md, docs/BUGS.md (other sessions' edits mixed in).
+## 2026-11-09 R5 — DECISION 177: Radarr profile 7 allows 720p as last resort (upgrades on), ESubs whitelisted. Rockstar (2011) Hindi 720p grabbed+imported+in Jellyfin in ~4 min; DECISION 176 rename proven on a real download. Audio-crackle A/B (R4) still unanswered.
 
-## STRONG SLEEP / QUICK WAKE (DECISION 173) — DONE, commit 4d5d37d8, docs/sleep/
-- LIVE: luminos-lid v3, wake policy, SD-reader hook, brightness hook, nvsleep v2.1 (entry 4.2→1.9 s, resume 1.23→0.83 s).
-- Waiting on Shawn: real lid close/open; charger + USB-C plug during sleep (journal: luminos-lid + "NVRM: nvsleep").
-  Optional: wireplumber rule so it stops opening the NVIDIA HDMI PCM after every wake (costs HDMI audio) — his call.
 
-## Aim right now — POWER / BATTERY / SLEEP INVESTIGATION (2026-11-05) — findings in docs/BUGS.md BUG-228
-- Shawn: smooth but heats fast, bad battery, battery drains overnight in sleep. Asked to understand only, no fixes.
-- Verdict: (1) awake drain 17-33 W on battery even with CPU dial at 15 W floor -> desktop never idles
-  (jellyfish WebGL wallpaper ~2-3 W pkg + blocks panel self-refresh, plasmashell/kwin/Claude apps/Cowork VM);
-  (2) sleep itself ~0.6-1 %/h (mediocre, works; first attempt always aborts, retry holds);
-  (3) low-battery hibernate fails ("Device or resource busy"; nvidia-suspend/hibernate units disabled while
-  PreserveVideoMemoryAllocations=1; no resume=) -> battery dies to 0; (4) heat = spectrum design (82 C target,
-  fast 45 W slew, gentle fan curve) on top of the never-idle desktop.
-- Next (needs Shawn): rtcwake -m freeze -s 60 + amd_pmc s0ix_stats to prove S0i3; on-battery A/B with wallpaper
-  paused; then pick fixes. Live test script: /var/tmp/wp-ab.sh (SIGSTOP/CONT wallpaper pid, RAPL).
+## 2026-11-08 R4 — audio crackle on A Silent Voice (JellyRock, Shawn listens via Roku phone app private listening)
+- Stream: full re-encode (PGS burn-in) h264_vaapi at 34 Mbps 1080p + DTS-HD MA -> EAC3 5.1 640k; ffmpeg 2.4x+, no errors; TV buffer full.
+- Signal NOT clipping: last ~5 min of cached EAC3 peaks -7.7 dBFS, plain stereo downmix -8.6 dB. DownMixAudioBoost=2 irrelevant (no server downmix).
+- Suspect: TV on Wi-Fi (.13) carrying 34-46 Mbps video while also sending private-listening audio to the phone over Wi-Fi (ping jitter to 37 ms). Asked Shawn to A/B with JellyRock quality gear ~10 Mbps; if it fixes it -> server-side cap on transcode bitrate (wrapper) as the global fix. Not changed yet.
 
-## Aim right now — NEW EPISODES NOT DOWNLOADING (2026-11-05) — FIXED, only watching left
-- Shawn: VisionQuest added while airing, later weekly episodes never downloaded.
-- Cause: Sonarr + Radarr `rssSyncInterval` = 0 since DECISION 42 (torrent halt 2026-08-04); restore step was
-  gated on "VPN up", Usenet replaced the VPN plan, so it never ran. RSS sync is the ONLY thing that picks up
-  episodes released after a show is added. Series/episode monitoring + NZBGeek indexer were all correct.
-- Fix: Sonarr 15 / Radarr 30 (read back). MissingEpisodeSearch cmd 339035 → 19 grabbed (VisionQuest
-  S01E03-E07, MobLand S02E07, Sopranos S02E01-E13), NZBGet 25 MB/s, health 1000. DECISION 171 (server/DECISIONS.md).
-- Next (optional, offered to Shawn): daily MissingEpisodeSearch timer as a safety net for releases posted while
-  the box is off longer than the RSS window. VisionQuest E08 airs 2026-11-11 — check it lands on its own.
-- R6: Sopranos switched off (unmonitored, 13 S02 downloads removed from NZBGet). DECISION 172 BUILT: Sonarr
-  autoUnmonitorPreviouslyDownloadedEpisodes=true + luminos-series-prune.timer (10 min) — once-downloaded series with
-  0 video files on disk → fully unmonitored. Baseline (ignored, already empty): HoC, True Detective, Sopranos, BCS,
-  Knight 7K, Solo Leveling, India's Got Latent, Fake Alchemist — R7 Shawn: keep Fake Alchemist, rest OFF (done, read back; baseline=[10]). Proven via faked-empty
-  Ozark + exact restore. Open: MobLand S02E07 health-failed a 5th time (SPWEB) — next release or wait; VisionQuest
-  E07 importPending (slow disk), should import itself. Jellyseerr re-request re-monitor = untested.
-- R3 NZBGet update pop-up (read-only): server runs nzbget 26.2-3 from Arch [extra], UpdateCheck=stable. Upstream
-  feed (nzbget.com/info/nzbget-version-linux.json) says stable 26.3 (2026-08-27) → that's the pop-up. Arch extra still
-  26.2-3 (checkupdates: nothing). 26.3 = bug fixes + "hardened web auth token generation and unpack-dir symlink
-  handling" (#894), nothing urgent for a LAN/Caddy-only box. Verdict: don't install the upstream .run (bypasses pacman,
-  the in-app updater can't update a pacman install); take it via pacman when Arch ships it. Offered: UpdateCheck=none
-  to silence the pop-up. R4: Shawn asked gain/loss of 26.3 the pacman way → answered: small gain (health-failed
-  'download remaining' #870, crash/race fixes #851, auth hardening #894), nothing lost; only clean route = self-build
-  Arch PKGBUILD bumped to 26.3 (server/packaging/ pattern, like jellyseerr) AFTER the 19-episode queue drains. R5: Shawn — WAIT for Arch to package 26.3; do NOT self-build. Pop-up off + daily missing-search timer still unanswered.
-  Sonarr also nags v4.0.20 (sonarr-bin AUR 4.0.19) — same logic.
-- Commit: only server/ files committed; HANDOFF.md + docs/BUGS.md had other sessions' uncommitted edits, left unstaged.
 
-## Tablet black screen (2026-10-31) — FIXED server-side (BUG-227 / DECISION 168, luminos-jf-profile-shim :8098). Needs Shawn's Tab S9+ test; check `journalctl -u luminos-jf-profile-shim` says "rewritten" for 192.168.2.70.
+## 2026-11-08 R3 — DECISION 176: NZBGet DestDir -> /srv/external/usenet/complete (no more 2x 33GB cross-disk copies). Next movie download = the real test (expect Jellyfin within 1-2 min of 100%).
+- Playback -3 on A Silent Voice: JellyRock direct-play of DTS-HD MA + PGS failed twice, 3rd try transcoded and played. Orphan Black Swan transcode killed. Offered: luminos-roku-compat --fix-audio (AC3 track on DTS-only files) — not run.
 
-## BAR CLOCK GLYPH BUG (2026-10-31) — DONE (BUG-226 / DECISION 167). Open: Hyprland session's /etc/xdg Caelestia shell.qml still loads GSFLoader; delete ~/luminos-os/.tmp-clockglyph/ + /var/tmp/clockglyph/.
 
-## Aim right now — WUKONG CRASH INVESTIGATION (GLM chat R4, 2026-10-30) — read seat handoff first
-Source docs: gameos branch `seat/seat/2026-10-30-wukong-handoff` → docs/handoff/WUKONG-CRASH-2026-10-30.md +
-~/vela-remote/SESSION-LOG.md on the server. Crash: b1-Win64-Shipping.exe+0xcb53190 reads 0xffffffffffffffff,
-~2-8 s after launch, before window; thread does NtQuerySystemInformation(0x66), SystemCpuInformation, SGDT,
-direct syscalls, openssl.cnf/Afd lookups (environment fingerprinting).
-MY INDEPENDENT FINDINGS (R4, all on Luminos directly):
-1. **IT CRASHES ON LUMINOS TOO** — reproduced 20:15 (dgpu-exec-v2 + GE-Proton11-6-dx12fix + shared dx12fix prefix,
-   same env shape as nvk-play): dead at ~10 s, crash dir UECC-…2B37CCD3, same -1 read at base 0x140000000.
-   NOT Vela/MUX/image specific. Test log /var/tmp/wukong-luminos/run.log + run.sh (rerunnable).
-2. ALL runs on all 3 OSes share: game folder /mnt/win-os (files FROZEN since Sept — only vkd3d-proton.cache moves),
-   runner ~/.local/share/lutris/runners/wine/GE-Proton11-6-dx12fix (ON LUMINOS HOME — Vela mounts it), prefix
-   ~/Games/umu/dx12fix (shared; crash dirs from every OS land here).
-3. Runner mods (MW4 BUG-209, 10-23: bin/wine wrapper + proton LD_PRELOAD=mw4map.so) EXONERATED: mw4map.so does not
-   exist anywhere (no-op), the UMU branch never fires under nvk-play (no UMU_ID), AND the good 10-29 16:40 run
-   postdates the mods. Seat missed that `proton` was also replaced (backup proton.orig-mw4) — diff is 3 lines.
-4. Nothing in shared game state changed 10-29 17:00→22:25 (find sweep; only the good run's own artifacts until
-   17:00:32, then Control prefix rebuild 20:41 in its own folder). Clock sane, NTP synced.
-5. pacman.log Sept-26→Oct-18: only KDE theming packages — no kernel/driver/microcode/nvidia change (all pinned).
-6. Remaining suspects: (a) firmware/UEVI/EC state vs the 10-29 16:39 good boot (seat item #1 — snapshots on server),
-   (b) something pre-10-17 that also broke it then (10-17 17:59 crash predates ALL MUX/runner work — unexplained),
-   (c) Windows-side test never done. Minidumps fresh in the shared prefix from today.
-NEXT (Shawn's order R7): music ✅ → MUX dGPU-direct → DLSS 5.
-R14 — BASELINE MEASURED + MUX RESTORED (waiting on Shawn's dGPU-direct runs):
-BASELINE (test OS, Hybrid, FG off, 10-30): Wukong avg 37.1 / median 39.1 / 1% low 8.5 (2.4k frames);
-Control avg 30.2 / median 31.2 / 1% low 4.4 (worst 379 ms — "stuttery"; 12 stutter frames). Good-era main
-10-29 reference: Wukong 43.8/12.8, Control 43.7/12.3 (different night — indicative only). CSVs live on
-LUMINOS /var/log/vela/mangohud/ (nvk-play MHLOG output_folder=/mnt/luminos/...) — NOT inside the image.
-MUX RESTORE DONE: from /var/log/vela/seat-r28-r29-removed-20261030/ into /vela-nv.img — merged
-vela-core (r29: FG+music+EGL fix; R27 core backed up .prev-r30mux), vela-session r29 (EGL pin,
-backup .prev-r30mux), vela-mux + vela-mux-enter.service (enabled) + /etc/vela/mux-direct. Verified
-(FG strings, bash -n, unit symlink). Next test OS boot = MUX 0 dGPU-direct, BUG-223 EGL fix in.
-⚠️ REMOVED R15: exit Vela HOWEVER you like — luminos-mux-guard is BACK (DECISION 166): any exit
-path lands Luminos on Hybrid automatically (worst case one auto-reboot, never black). Vela always
-boots dGPU (vela-mux enter). Verified enabled; MUX=1 today.
-SHAWN'S NEXT RUNS (A/B, same areas/settings as baseline): Wukong ~5 min + Control ~5 min on test OS,
-then reboot to Luminos, "done" → PM re-extracts CSVs and compares avg/1% lows. Note: quit Wukong
-FROM IN-GAME (bug #22: PS-quit blocks the next launch) and expect the white flash (#21) — both filed
-in BOARD, to be fixed after the A/B.
-R16 — A/B DONE (numbers + verdict in BOARD #23-26, commit 2817c7c): WUKONG avg 37.1→47.5 (+28 %),
-1 % low 8.5→7.3; CONTROL avg 30.2→30.9 (no gain), 1 % low 4.4→3.2, stutter 0.6→1.7 % (95 s run — repeat).
-padlat PROVES input path fine in both modes (~4-5 ms usb/bt) — felt input delay = 275-368 ms frame
-stalls. New dGPU-direct bugs: #24 bottom-of-screen colored pixels (scanout artifact, MUX 0 only),
-#26 Control more stuttery. Gotcha: Wukong dGPU CSV APPENDED to the 10-29 filename (clock fix fakes
-the date → name collision) — split sessions on repeated header rows when parsing.
-OPEN: MUX verdict (Wukong +10 fps avg vs Control regression + artifacts). Next: repeat Control longer
-in dGPU-direct, then #24 artifacts investigation. Per-boot either/or — MUX flip needs a reboot.
-R21 — dGPU-DIRECT SYMPTOMS ESCALATE (cap revert did NOT fix Home): bottom screen now a visibly broken
-region (few pixels last night → worse today), carried Home→game, input lag persists. gamescope mode
-correct (2880x1800@120). Progressive across MUX-0 boots → NVIDIA eDP scanout in MUX 0 = the root
-suspect (one family: Home stutter + broken bottom + game stutter + input feel; the cap was only an
-aggravator). ISOLATION ARMED: /etc/vela/mux-direct → .disabled-20261031 — next test-OS boot = HYBRID.
-SHAWN: boot test OS → expect smooth Home, clean screen, no pixels; if all symptoms vanish → root =
-dGPU-direct display path (fix later via 60Hz-in-MUX test / driver bump / link knobs — Wukong's +10
-fps keeps it worth fixing). If symptoms REMAIN in Hybrid → different root, keep digging.
-R17 — INPUT-DELAY ROOT CAUSE + LEVER 1 ARMED: stalls = VRAM-ceiling evictions (Wukong 5.84/6 GB,
-Control 5.82 GB max; swap/psi 0; GPU 0x4+0x20 power/thermal capped 72-78 W throughout). This also explains
-dGPU-direct giving Control nothing (MUX 0 = panel+session VRAM on the 4050) AND the good-era Control 43.7
-vs tonight ~30 in BOTH modes (a separate, non-MUX Control regression — re-test tomorrow, longer).
-LEVER 1: VELA_FPS_CAP 0→42 on test OS (backup vela.conf.pre-cap42-20261031; off-switch = set 0,
-Shawn's R56 preference). SHAWN: one Wukong run ~5 min, same area; PM compares vs tonight's dGPU run
-(47.5 avg / 7.3 low / 1.2 % stutter): if lows rise + worst frames shrink → keep, else revert to 0.
-Deeper levers queued: VRAM headroom (overlay/session diet, vela-vramd), Control regression hunt.
-BUGS FILED (gameos BOARD, commit 4d55ded): #21 Wukong launch white flash; #22 PS-menu-quit of
-Wukong blocks launching any other game (in-game quit fine, other games fine via PS quit).
-R12 — BASELINE-FIRST PLAN (Shawn: measure avg fps + lows so we can compare; optimize the OS not the
-game; one thing at a time; test OS then main). NO baseline fps exists yet (checked: no MangoHud CSVs
-ever written — all Wukong runs died pre-log; BOARD #5 open). Current test OS state is GOOD for
-baseline: R26 logging wired (vela-core MANGOHUD_CONFIGFILE + nvk-play MHLOG block), VELA_GAME_GPU=dgpu
-(FG off = clean single-variable). PROTOCOL: Shawn boots test OS → Wukong ~5-7 min same area + settings
-recorded → Control ~5 min same area → reboot to Luminos → PM reads /var/log/vela/mangohud/*.csv
-(avg, 1% low, 0.1% low). Then MUX phase (merged vela-core 091098a + R29 EGL pin + new MUX mechanism;
-FG stays OFF for the A/B — FG comparison is a separate axis) → repeat identical runs → compare.
-Tasks #3 (baseline) → #4 (MUX build) → #5 (post-MUX compare).
-(0) R8 — R27 music now on BOTH images, same older tested code (no new code): TEST OS verified complete
-(vela-core sha == .r27 build, vela-home MusicPage, 55 pkgs); MAIN /vela.img applied via
-os/experiments/r27-music/apply.sh + VELA_R27_ALLOW_MAIN=1 (fresh installs, zero upgrades; .prev-r27
-backups kept for `apply.sh revert`). SHAWN'S TEST: boot test OS → PS button → System row → Music → play;
-then same on main. After his OK → MUX phase (merged vela-core 091098a + R29 EGL pin + new MUX
-mechanism, luminos-mux-guard is gone per DECISION 164) → then DLSS 5. Wukong clock-helper queued.
-(2) NEXT PHASE — MUX dGPU-direct: install the MERGED vela-core (gameos commit 091098a: frame gen +
-music + EGL fix) + R29 vela-session EGL pin back into the test OS (os/experiments/r29-nvegl/apply.sh),
-rebuild luminos-mux-guard? NO — Shawn wants MUX things gone from Luminos (DECISION 164); Vela-side MUX
-(dGPU-direct) needs a NEW mechanism or BIOS-manual. NOTE: seat removed R28/R29 MUX code from the test OS
-10-30 17:48 (archived /mnt/luminos/var/log/vela/seat-r28-r29-removed-20261030/). Wukong clock-fix helper
-also still to build (see R6 notes below).
-(3b) R9: Shawn booted test OS (Wukong crashed — expected, no fix installed) and back on Luminos
-(21:46 crash, same -1 signature — confirmed). Explained to him: the clock trick was a diagnostic, the
-permanent clock-back launcher is still the queued work ("Wukong clock-helper"); it must go into Vela
-nvk-play (both images, needs a way for vela to set the clock) + a Luminos launcher. PRIORITY NOW per R9.
-R10 — FOREVER FIX **DONE + LIVE-PROVEN** (Opus worker built, PM finished + verified; DECISION 165):
-/usr/local/bin/wukong-clock (arm: set clock to fixed 2026-10-29 12:00, self-restore 90 s later,
-idempotent, NTP-safe, never touches RTC) wired into (a) Lutris prelaunch on Luminos (yml patched,
-.bak-wclock backup, wrapper /usr/local/bin/wukong-clock-luminos; PM fixed a YAML-space bug the worker
-left) and (b) nvk-play in BOTH Vela images (gameos os/experiments/wukong-clock/apply.sh, .prev-wclock
-backups, idempotent). LIVE PROOF: `lutris lutris:rungameid/4` → clock armed automatically → game alive
->55 s → clock restored at 90 s → game survived, zero new crashes, helper state clean. Tests:
-~/builds/wukong-clock/TESTS.md. If the game ever updates its date check, bump FAKE_DATE in the script.
-Music on main: already applied R8 (both images carry R27; Shawn boots to verify). Next: MUX dGPU-direct,
-then DLSS 5.
-(3) DONE R6: WUKONG ROOT CAUSE — time-keyed startup check (expired 10-29 16:40-22:25 EDT). Proof: clock
-set back to 10-29 12:00 → game runs fully (survives real-clock restore mid-run = startup-only check);
-faketime does NOT work (stalls pre-log even with NO_CACHE + DONT_FAKE_MONOTONIC=0 — reads time where
-libfaketime can't reach). Worker evidence: Opus RE ~/re/wukong-re/REPORT.md (fault = #GP on garbage
-rdi=0x49544100000070af at RVA 0xcb53190 after CPUID/syscall fingerprint + CityHash64 of a 27-byte key +
-VM-obfuscated voices38.dll); Sonnet /tmp/fw-compare/REPORT.md (no BIOS/microcode/ACPI/SMBIOS drift —
-firmware exonerated; no fw snapshot baseline exists = gap). FIX TO BUILD: privileged clock-back helper in
-Vela nvk-play (set clock back, launch, restore ~60 s later; date changes need root). MW4 parked per Shawn.
-Game closed on Shawn's word R7. Evidence ~/re/wukong-re/, test scripts /var/tmp/wukong-luminos/.
+## Q 2026-11-08 R2 — "100% downloaded but not in Jellyfin" (A Silent Voice, 33.5 GB remux) — answered, no change
+- Timeline: grabbed 20:06, NZBGet unpack done 20:19:55, Radarr import = full COPY internal HDD -> USB /srv/external (cross-disk, ~50-75 MB/s) 20:20->20:28:35, luminos-media-fix 20:28:33, Jellyfin refresh 20:29:37, visible ~20:30.
+- Offered (unanswered): send new movies to /srv/media (same disk as downloads = instant move). 325G free there.
+
+⚠️ RESET 2026-11-08 under the §0.2 size tripwire (was 537 lines). Full old file: `git show 44f2b89e:HANDOFF.md`
+— every parallel track below is cut to its pointer; read the old file for its detail before continuing that track.
 
 ## Goal (the durable end objective)
-Keep Luminos OS + the home setup working as a daily-driver; Vela (gaming OS, gameos/) gets more graphics + frames.
+Keep Luminos OS + the home setup working as a daily driver; Vela (gaming OS, `gameos/`) gets more graphics + frames.
 
-## GLM-5.3 Claude window (glm chat, 2026-10-30 R10) — DECISION 162 DONE, one step waits on Shawn
-GLM window = second Claude Desktop (`luminos-claude-glm`, profile ~/.config/Claude-glm[-3p]) → `luminos-glm-proxy`
-:4141 → Abliteration (DECISIONS 156 + 162, BUGS 207/208/211). New today, all proven by real runs:
-`luminos-worker` (any model incl. real Claude on Max; `--batch` for parallel; `--resume`), `luminos-chats`
-(list/read all chats, send to terminal/worker ones), `luminos-desktop-mcp` (GLM-only app control: windows, launch,
-AT-SPI ui_tree/click/set_text, keys via ydotool, screenshot; a11y + ydotoold only on while used), skills via
-`config/glm/luminos-skills.plugin` (built by `luminos-glm-skills`).
-R11 proven: GLM itself (claude-glm -p) opened a real Opus chat via luminos-worker, continued it with luminos-chats send (answered 84 from remembered 42), and opened a Fable chat — modelUsage claude-opus-5-5 / claude-fable-5-1.
-R12: skills now installed automatically (scripts/luminos-glm-skills-install mirrors the app's upload code; launcher
-runs it each launch while the window is closed). VERIFIED in the GLM window UI: Customize → Skills lists build +4.
-Electron's accessibility tree needs --force-renderer-accessibility (only used for that check). R14 BUG-224: both apps' Cowork helpers fight over vsock 51234 + the same unix socket; FIXED (DECISION 163): GLM app runs in netns claude-glm (vsock local) + private XDG_RUNTIME_DIR via scripts/luminos-glm-netns + luminos-claude-glm; proven two sandboxes at once + GLM task ran in its own sandbox. (Reboot at 20:31 cleared the stale Max socket.) R15 BUG-225: after reboot vsock module not loaded → netns up failed silently; up now modprobes vhost_vsock + clear error; verified. R13: build-addendum reworded — GLM has full laptop access via host-shell; sandbox Bash only sees the task folder. Copying skills into skills-plugin/ does NOT
-work (the app's sync deletes them every 10 min). Desktop-window chats can't be typed into from outside.
+## Aim right now — VELA: TWO OS BUILDS (Shawn, 2026-11-08, this chat)
+Shawn: "going back to 0". Two Vela variants instead of one image that flips modes:
+- **Vela-D (Direct):** MUX 0 — the RTX 4050 drives the panel, no copy to the 780M.
+- **Vela-H (Hybrid + frame gen):** MUX 1 — 4050 renders → frame to the 780M → Lossless-Scaling frame gen
+  (our lsfg-vk `vela-bridge` fork) on the 780M → panel/TV.
+Reason: in the dGPU-direct A/B some games got better and some worse → he reads it as OS-level behaviour.
+STATE: R2 (11-10) — Shawn: BOTH games worse in every mode, Wukong input lag too → OS design. Read-only analysis DONE,
+plan written: gameos/os/docs/V2-PLAN-01.md (commit afdf135). NOTHING changed on any image. Waiting on Shawn's go for Phase 0/1.
+NEW FINDINGS (R2): (1) amd_pstate fails (-19) on EVERY Vela boot, kernel 7.2.6 → acpi-cpufreq/schedutil; Luminos 7.0.5 has
+amd-pstate-epp. Control main thread 92–100 %. (2) session forces games to OUTPUT 2880x1800 + HDR (gamescope -w 2880 -h 1800
+--hdr-enabled) → gameplay VRAM 5.8–5.99 GB, above the 5760 real ceiling → spill/stalls. (3) fans already max in every game row;
+GPU parks at 86–87 °C (0x20); APU heat (CPU + 780M HDR composite) steals 4050 clocks. (4) Hybrid = copy + 780M composite every frame.
+R1's claim "Control is VRAM-bound, Wukong copy-bound" was too neat: both sit at the VRAM ceiling in gameplay.
 
-## Aim right now (Vela) — everything new is on the TEST OS (/vela-nv.img) only
-1. **R27 Music card** (Shawn asked to build it) — DONE + e2e PASS inside the image (real YouTube Music via vela-core ->
-   mpv + yt-dlp, ao=null). Doc: gameos/os/docs/MUSIC-01.md. Not yet heard through speakers.
-2. **R26 fps logging** — DONE (BUG-222: MangoHud logs nothing under no_display; hidden is now alpha=0). Proof table in
-   gameos/os/experiments/r26-fpslog/README.md. Next game run on the test OS must produce /var/log/vela/mangohud/*.csv.
-3. **dGPU only for Vela** — Shawn asked "possible?" -> yes; PROPOSAL gameos/os/docs/DGPU-DIRECT-01.md (Vela flips MUX
-   in/out + a Luminos early-boot guard that forces Hybrid). Needs Shawn's go (firmware MUX + a Luminos /etc unit).
-3b. Response 5: Shawn asked "launch directly on dGPU without restart?" — answered NO for the laptop panel: the MUX is
-   applied by firmware at POST; NVIDIA Advanced Optimus (live switch) has no Linux support (2022 RFC only). The reboot is
-   free anyway (entering Vela is already a reboot). HDMI/TV is already wired to the 4050 = dGPU-direct today.
-3c. Response 6 — Shawn: dGPU-direct YES → BUILT (DECISION 161): Luminos luminos-mux-guard.service ENABLED (+ luminos-play-vela,
-   desktop entry "Play on Vela (dGPU)"); Vela R28 on test OS. Lag answer = mostly "late", worst in heavy action, presses
-   (game's settings/pause button) need 2-3 tries → R22 re-applied on test OS for vela-padlat (input path timing) + R26 fps log
-   will show frame stalls. DLSS 5: Shawn asked Claude to get/patch the leaked DLL — declined again (won't fetch or modify
-   NVIDIA's leaked binary); offered to prep the open-source chain; also DLSS 5 costs ~10-20 ms/frame = makes his lag worse.
-3d. Response 7-8 — first MUX boot: Home garbled (BUG-223). Shawn hard-reset; luminos-mux-guard fixed the MUX (works).
-   R29 on test OS: NVIDIA EGL pin in vela-session + merged vela-core. FOUND: seat's 10-16 frame-gen work had been dropped by
-   R26-R28 builds → merged back (gameos 8e53f87). Seat now = git copy (~/vela-remote/gameos), laptop remote `seat`,
-   ~/vela-remote/vela-ip finds the laptop. Seat link changed: env_018AByA5JzYVwe6w2KGWzoPK (project doc updated).
-   gameos repo has NO git remote (never pushed anywhere) — told Shawn; ask whether to add a private GitHub remote.
-3e. Response 9 — Shawn moves ALL Vela work to the server seat (vela-test-os) for this session, no OS switching. Prompt given.
-   On return: `cd gameos && git fetch seat` and merge seat/* branches; read ~/vela-remote/SESSION-LOG.md on the server.
-4. Still waiting on Shawn: R25 controller test (BUG-221), "heavy vs hitchy" lag answer, DLSS 5 DLL source.
-   All of it = BOARD "Next test" steps 7 + 8 on the test OS.
+## Why / what a newcomer is missing (Vela, verified 2026-11-08)
+- Images: `/vela.img` (main, never touched first) + `/vela-nv.img` (test OS, GRUB "Vela OS - NV test"). Both NVIDIA
+  615.71, kernel 7.2.6, gamescope session + Qt Vela Home + Go vela-core. Builder `gameos/os/install/vela-install.sh`.
+- LATEST VELA WORK IS ON THE SERVER SEAT, NOT IN THE LAPTOP REPO: seat branch `seat/2026-10-31-stutter` commit 723ff2b
+  (`~/vela-remote/gameos-stutter`) + `~/vela-remote/SESSION-LOG.md` (11-01). Laptop gameos HEAD = 3c5fcea. Fetch + merge first.
+- dGPU-direct A/B (10-30): Wukong avg 37.1→47.5 (+28 %); Control no gain, more stutter. Why it splits (my reading,
+  matches Vela DECISION D5): MUX 0 puts gamescope + Home + scan-out buffers in the 4050's 6 GB, and Control is
+  VRAM-bound (5.99 GB ceiling even in Hybrid) → less headroom = more evictions; Wukong is GPU/copy-bound → the removed
+  PRIME copy is pure gain. NOT yet measured: VRAM used by the session itself in MUX 0 vs Hybrid.
+- dGPU-direct blocker (seat 10-31): bottom-screen corruption = gamescope #2309 (NVIDIA DRM scan-out >1440p). 60 Hz,
+  --force-composition, fbdev=0 all ruled out. Fix direction = GBM-allocated scan-out (port farnoy/gamescope
+  nvidia-gbm-wayland) — plan `~/vela-remote/build/gbm-scanout/SPEC.md` on the server. Test OS left in HYBRID.
+- Frame gen (seat 10-16/17): dual-GPU lsfg works, but real fps 35 → 17 with FG on (out ~34): the 4050 idles at 63 %
+  because the layer waits for the 780M round trip inside the game's own queue. Shawn's parked idea: "780M presents"
+  (one trip 4050→RAM→780M, which generates AND scans out). amdgpu will NOT scan out an imported NVIDIA dma-buf
+  (experiments/cross-gpu/RESULT.md) → the 780M must copy into its own buffer first.
+- 11-01 seat: VRAM budget layer (`os/vram-layer`, clamps reported budget 5830→5300 MiB) installed on test OS (was lost
+  in the 10-14 rebuild) — effect on Control lows NOT measured yet.
+- Wukong needs `wukong-clock` (DECISION 165) on every launch.
 
-## Key facts / evidence
-- R25+R26+R27 binaries are all built from gameos HEAD (vela-core.r27, vela-home.r27 in /var/tmp/vela-build). Reverting R27 restores R26's vela-core (prev-r27); R26 revert restores pre-R26.
-- Input lag Wukong 10-29: GPU 96 % uncapped, VRAM full, thermal 0x20, fps under VRR floor 48; Reflex works.
-- BUG-221 cause: vela-shell restarts Home the same second the game exits; Home's SDL opens vela-padd's CLONE; padd deletes it;
-  the real pad only gets chmod/ACL back (no udev add) → SDL never re-finds it. Fix = SDL gamepad re-init every 700 ms for 14 s
-  after the last pad vanishes (gameos/ui/vela-home/src/gamepadinput.cpp). Tests: gameos/os/experiments/r25-padrescan/run.sh, run2.sh.
-- Open side question: the wired pad does a full USB disconnect at game START on MW4 runs (21:13:35, 21:16:03 on 10-22) — cause unknown.
-- Build: /var/tmp/vela-build/vh (cmake, host Qt 6.11.2 = image Qt; SDL 3.4.16 both). Old binary kept: /var/tmp/vela-build/vela-home.pre-r25.
-- host-shell bridge returns after 60 s — run long tests with setsid in the background and read logs after.
+## Next steps (ordered) — Vela
+0. R3: work moves to the SEAT (media server, claude-vela-rc active). Prompt = gameos/os/docs/V2-SEAT-PROMPT.md, pushed to the
+   seat repo as branch laptop/2026-11-10-v2 (laptop gameos main = 7123e74 merge of seat stutter + V2 docs). Shawn boots the test OS,
+   opens the seat, pastes the prompt. On return: `git fetch seat`, merge seat/2026-11-10-v2.
+1. Shawn's go on V2-PLAN-01 Phase 0 (ruler + same runs on Luminos as control) then Phase 1a (7.0.5 kernel in the test OS)
+   — each Phase-1 item alone, measured. R1's 3 questions (fresh vs fork, which image, order) still open.
+2. `git fetch seat` + merge seat/2026-10-31-stutter into gameos main.
+3. Baseline the same two games (Wukong + Control, same spot/settings) on both variants with MangoHud + telemetry,
+   including session VRAM at Home.
 
-## Next steps (ordered)
-1. Shawn: test OS → wired pad → Control → quit from the game → Home responds? (read `vela-home: pad rescan` in the journal).
-2. Shawn: feedback on the Music Card → then build (QML page + mpv/yt-dlp in the image, test OS first).
-3. DLSS 5: Shawn decides the DLL source; meanwhile prep the 24high installer for Control on the test OS (dlaa mode first).
+## Key decisions & constraints
+- Vela rules: gameos/docs/tracks/BOARD.md first; test OS first; Luminos untouched; Luminos always Hybrid
+  (luminos-mux-guard, DECISION 166). No leaked DLLs. Lossless.dll comes from Shawn's own Steam copy at runtime only.
 
 ## Gotchas
-- Vela rules: BOARD.md first; test OS first; Luminos untouched. gameos/ is its own git repo (ignored by the main repo).
-- `luminos-notes.sh` needs sqlite3 — run on the host (host-shell), not the Cowork VM.
+- VELA_FPS_CAP caps the whole gamescope session (Home too) — use DXVK/VKD3D_FRAME_RATE for a game-only cap.
+- In MUX 0 `systemctl restart vela-session` can die (gamescope SEGV on stop): stop / reset-failed / start.
+- host-shell calls return at ~60 s; long jobs via setsid + log.
 
-## PARKED — DLSS 5 + ad-free music (Response 1 of the previous chat)
-Research DONE, nothing installed. Full write-up: `gameos/docs/tracks/DLSS5.md`. Waiting on Shawn's answers.
+## OTHER LIVE TRACKS — pointers only (details: `git show 44f2b89e:HANDOFF.md`)
+- Lively web wallpapers interactive (BUG-236 / DECISION 181) — DONE; dpr-1 cap offered, not done.
+- Video/YouTube wallpapers + switching (BUG-237) — FIXED + proven live (8-step switch test, /var/tmp/vid-test/switch.sh; set.sh writes wallpaper keys live). Offered: BUG-234 VA-API shim for plasmashell.
+- 2026-11-12 'wallpaper paused after sleep with no window' = PauseOnBattery working as designed: woke 19:01 after 43 h asleep, ACAD online=0, BAT1 discharging 13.5 W @56 %, no USB-C partner; pmSource (powermanagement engine) is event-driven and matches hardware. Waiting on Shawn: keep pause-on-battery (+ show why) / drop it / cheap mode on battery; and whether a charger WAS plugged (then = undetected-charger bug).
+- Living-room wallpaper (BUG-235) — fixed, Shawn to eyeball.
+- Snappy build (docs/snappy/PROMPT.md) — PAUSED step 3: diff idle A vs B in /var/tmp/snappy/.
+- Luminos Media (DECISION 180) — live, default for 74 types; waiting on feedback.
+- DV purple in JellyRock (BUG-231) — fixed server-side; Shawn's TV check pending.
+- Desktop settings window (DECISION 183) BUILT 2026-11-09: plasma-desktop 1.3 installs src/desktop-config-look/{shell,folder}; wallpaper page = src/wallpapers/.../ui/{config,WallpaperGallery,GalleryTile,LxRows}.qml (copied to ~/.local/share). Shawn to report anything off. Filter page done (R2, plasma-desktop 1.4). Not restyled yet: Icons/About pages. Test: ~/builds/style-tuner/desk-run.sh.
+- Style Tuner (DECISION 176–179) — live. Files/Dolphin redesign (DECISION 182) BUILT + installed 2026-11-09: kio 1.1, dolphin 1.1, luminos-files-icons 1.0-3 (kdeglobals Icons=luminos-files). R20: tuner bars DONE (Files tab, luminos-style 1.0-11, dolphin 1.2, kio 1.2) — Shawn is tuning; next = bake his values as defaults if asked. Edit scripts/files-look/*.py then make-*-patch.sh. Gap: action bar full-width, not floating pill.
+- JellyRock seek (DECISION 175 / BUG-230) — live; TV test pending.
+- luminos-focus (DECISION 174) — steps 1–3 live; Phase B KWin patch needs Shawn's yes.
+- Strong sleep (DECISION 173) — done; real lid/charger test pending.
+- Power/battery investigation (BUG-228) — findings only.
+- Sonarr/Radarr RSS (DECISION 171/172) — fixed; NZBGet 26.3 wait for Arch.
+- Tablet black screen (BUG-227) — Tab S9+ test pending. Bar clock glyph (BUG-226) — done.
+- Wukong crash — ROOT CAUSE time-keyed check; fixed by wukong-clock (DECISION 165).
+- GLM Claude window (DECISION 162/163) — done.
+- Roku TV (DECISION 167; dumbtv-roku 1.0.3 untested) — parked.
+- Still open: BUG-187 Claude Desktop re-login verify; BUG-209 MW4; BUG-199 repro; spectrum/nvdefer tests.
+- Shared docs (AGENTS, STATUS, DECISIONS, BUGS) carry other sessions' uncommitted edits — commit only your own files.
 
-### DLSS key facts
-- DLSS 5 = neural re-rendering for looks; it COSTS fps (5070: 138 -> 68 fps). It is not a frame booster.
-- Linux/Proton installers already exist (24high/DLSS5-Reshade-Linux-Steam tested on RTX 4080; pantsoftime/dlss5-linux).
-  Need proprietary driver >= 610 — Vela images are 615.71, OK. Ada: optical flow fails under Proton -> shader MVs.
-- Real blocker on this laptop = 6 GB VRAM (Wukong already 5.1–5.8 GB) + ~55–79 W. Cost on 4050 unmeasured (est. 10–20 ms).
-- We do NOT download the leaked DLL from mirrors; Shawn supplies it, we sha256-check it (legal + malware risk).
-- Music: recommended mpv + yt-dlp (no ads by construction, ~50 MB) behind a small QML Music page in Home/Guide.
-
-### DLSS questions put to Shawn
-- Which game first (proposed: Control on the TEST OS, it already runs on Vela; Wukong VRAM is full).
-- Will he supply `nvngx_dlssnr.dll` (he owns NBA 2K27 EA? / other source).
-- Music: OK with mpv+yt-dlp QML page? Also Jellyfin music?
-
-### DLSS next steps
-1. Copy installer + DLL to the test OS (`/vela-nv.img`, rule R40 — never /vela.img first); `dlaa` mode, then `nr`.
-2. MangoHud + vela-telemetry before/after on the same scene: fps, 1 % low, VRAM, gpu_w.
-3. Music: HTML prototype of the Music page first (Shawn's UI rule), then mpv IPC backend in vela-core.
-
-### DLSS gotchas
-- Do not say "impossible"; do not promise frames either — DLSS 5 subtracts frames.
-- Vela rules: gameos/docs/tracks/BOARD.md first; test OS first; Luminos untouched.
-- `luminos-notes.sh` needs sqlite3 — run it on the real host (host-shell), not the Cowork VM.
-
-## PARKED — Roku TV work (last state 2026-10-31, Roku chat Response 14)
-**2026-10-31 — DECISION 167 LIVE:** JellyRock (TV app, Roku store 819325) plays DV P5 correctly, so `luminos-dv-sweep.timer` is
-DISABLED and the 3 P5 originals are back in the library (VisionQuest S01E01/E02, Ozark S02E03; Jellyfin reports DOVI 5/0 for all
-three). HDR10 copies in /srv/media/_dv_hdr10_converted, originals also still in /srv/external/_dv_p5_originals. Official Jellyfin
-Roku app still shows P5 purple — use JellyRock. dumbtv-roku launcher: 1.0.3 built (IsAppInstalled fallback), never tested on TV;
-Roku OS 15 returns 403 to ECP from on-device apps; Shawn rejected a server relay.
-### Why / key facts a newcomer is missing
-- The TV is a **Philips 65PUL7973 Roku TV at 192.168.2.13** (server/README.md). It is Roku OS, NOT Android:
-  no ADB, no package disabling, no launcher replacement, no Private DNS setting. The video's steps do not transfer 1:1.
-- What Roku DOES have: ECP (External Control Protocol) HTTP API on :8060 — device-info, list apps, launch apps, send
-  remote keypresses (already used: server/docs/MEDIA_SERVER_PLAN.md). Developer mode allows ONE sideloaded channel.
-- Network ad-blocking would have to run on the media server (Inspiron, .61/.62). Constraint: the server is powered on by
-  hand — if it becomes the TV's DNS and is off, the TV loses internet. Bell Giga Hub 5690 DHCP-DNS control unverified.
-- TV is on 2.4 GHz wifi with an unused ethernet port (MEDIA_SERVER_PLAN.md) — free speed win.
-
-### Proposed final result (awaiting Shawn's confirmation)
-1. Control from the G14/server over ECP (scripted, repeatable).  2. Remove unused user channels; reorder home grid.
-3. Every ad/tracking/ACR privacy toggle off (driven by ECP keypresses where possible, else a checklist for the remote).
-4. Optional: AdGuard Home on the server as DNS for the TV (needs decision on 24/7 server + router DNS).
-5. Optional: dev-mode custom channel as a clean "home" (cannot replace Roku Home — Home button always returns there).
-6. Before/after proof: ECP readouts (app list, settings state), DNS block counts. A system RAM number like the video's
-   is NOT available on Roku — say so, don't fake it.
-
-### Probe results 2026-10-27 (read-only, from the G14 via host-shell curl)
-- TV IP CHANGED: now **192.168.2.18** (was .13 — .13 is dead). Now on **ethernet** (network-type: ethernet).
-  Needs a DHCP reservation on the Giga Hub; server/README.md still says .13 — update when work starts.
-- Roku OS 15.3.4 build 2303, model 65PUL7973/F6 (G418X), developer mode ON (port 80 installer answers 401 = login).
-- ECP mode is **limited**: active-app works; query/apps, chanperf, media-player return 403. Shawn must set
-  Settings > System > Advanced system settings > Control by mobile apps > Network access = Permissive.
-- ECP has no screenshot and no uninstall — menu work is blind keypresses; dev installer screenshot only covers the dev channel.
-- I must not type the dev-mode password (safety rule) — any sideload upload is Shawn's click.
-
-### Step 1 DONE (Response 3)
-- ECP now `enabled` (Permissive). query/apps works. Snapshot: server/docs/roku/snapshot-before-20261027.xml
-- User channels (only 6): Prime Video 13, YouTube 837, Jellyfin 592369, Backdrops 773622, Netflix 12, The Roku Channel 151908 (system, likely not removable).
-- query/chanperf returns per-channel memory/CPU while a channel runs -> real before/after metric (no system-wide RAM).
-
-### Shawn's answers (Response 4)
-- Remove: ONLY Backdrops (KEEP Prime + Netflix — I misread once, nothing wrong was removed). Shawn removed it with the remote;
-  verified via query/apps 2026-10-27 19:05: Prime, YouTube, Jellyfin, Netflix, Roku Channel remain.
-- ECP gotcha: launch/11?contentID=<id> opens the store page but Roku OS 15 shows NO Remove button there; removal is
-  Home tile -> * -> Remove (blind grid nav not possible, no screenshots). ECP keypress works (Home sent OK).
-- DNS ad-block: YES, server stays on 24/7 -> AdGuard Home on the Inspiron.
-- Launcher: Shawn wants BOTH clean launcher and JellyRock. Dev mode = one sideloaded app. Proposed: JellyRock in dev slot
-  first; launcher = HTML prototype first (his rule), then host as Roku beta channel (needs Shawn's free Roku dev account).
-- NEW ASK: play files with real Dolby Vision + best audio, bypass the P5 purple bug (server docs: DV_PURPLE_HISTORY.md).
-
-### DV research (Response 4)
-- TV panel supports DV; purple = Roku player ignores DV in MKV (jellyfin-roku #472, closed "can't fix client side").
-- Fix A (server): lossless remux MKV -> MP4 with dvh1 tag keeps real DV (reported working in #472). Replace or
-  supplement luminos-dv-sweep (today it converts P5 -> HDR10, losing DV). Watch: .mkv->.mp4 path change for Sonarr/Radarr,
-  audio codecs in MP4. PROVE on one file before any library change.
-- Fix B (client): JellyRock (github jellyrock/jellyrock) tells server MKV unsupported -> HLS remux, DV MKV remux on by
-  default. Sideload via dev mode (Shawn uploads; password).
-- Audio: Roku TV can't do TrueHD; DTS doubtful -> server audio-only transcode to EAC3 (Atmos-capable). Asked Shawn what
-  speaker/soundbar is on eARC.
-
-### JellyRock (Response 6)
-- JellyRock IS in the Roku Channel Store: channel id 819325 (github jellyrock/jellyrock v3.2.0, 2026-10-21).
-  Installed via ECP `POST /install/819325` -> store page on TV -> Shawn pressed Add. Verified in query/apps (v3.2.0).
-- So the dev-mode slot is FREE again for the clean launcher (HTML prototype first).
-- Keep the official Jellyfin app until JellyRock's DV playback is proven on a real P5 file.
-
-### DV test (Response 7) — PASSED 2026-10-27 19:22, test state UNDONE in Response 8
-- `sudo systemctl stop luminos-dv-sweep.timer` on luminos-server (19:14) so the P5 test file is NOT auto-converted.
-- Copied (not hardlinked — luminos-media-fix edits MKVs in place) P5 original to
-  /srv/external/_dvtest/VisionQuest DV Test (2026)/Season 01/VisionQuest DV Test - S01E01 - No Strings.mkv
-  (HEVC DV P5 compat 0 + EAC3 Atmos 5.1). Jellyfin library "DV Test" (tvshows, /srv/external/_dvtest) added via API.
-- UNDO: delete Jellyfin library "DV Test" (DELETE /Library/VirtualFolders?name=DV%20Test), sudo rm -r /srv/external/_dvtest,
-  sudo systemctl start luminos-dv-sweep.timer. Do not leave the timer stopped.
-- Shawn's audio: SOUNDBAR on HDMI 4 (eARC). Model unknown (asked) — decides Atmos/DTS handling.
-- SSH: `ssh -i ~/.ssh/luminos-server shawn@192.168.2.61`. host-shell bridge times out at 60 s and queues behind long calls.
-
-### Response 8
-- Shawn: JellyRock plays the raw DV P5 file correctly — "true 4K true color". Sound = later (soundbar on HDMI 4; test file had EAC3 Atmos).
-- Undone: Jellyfin "DV Test" library deleted (204), /srv/external/_dvtest removed, luminos-dv-sweep.timer started again (active).
-  Libraries now: Shows, Movies.
-- OPEN DECISION for Shawn: dv-sweep still converts P5 -> HDR10 (loses DV). With JellyRock that is no longer needed on the TV,
-  but other clients (old Jellyfin app, phone, browser) would show purple. Also 3 P5 originals sit in /srv/external/_dv_p5_originals.
-- Launcher: HTML/Design prototype v1 published (claude.ai Design canvas "Roku Clean Launcher", artifact DeDcKVJkTdYCHx6aJtwjcu):
-  clock, server/ad-block pills, Continue watching (Jellyfin resume), Apps row, Inputs row. Awaiting Shawn's approval/changes.
-  v2 (Response 9, Shawn: "remove continue watching, make it simple"): clock + date, 3x2 app grid (JellyRock, YouTube,
-  Netflix, Prime Video, Jellyfin, Live TV), one row of input pills (HDMI 1-4, AV). No status pills, no resume row.
-  Build plan after approval: SceneGraph dev channel; launches apps by POSTing to the TV's own ECP (known technique,
-  github umitic/Roku-Channel-Within); resume row from Jellyfin API; sideload = Shawn uploads zip at http://192.168.2.18.
-
-### Launcher build (Response 10)
-- Shawn pointed at github.com/humblemuzzu/dumbtv (MIT). It is Fire TV/Android only (Java APK over ADB); its own
-  docs/OTHER-TVS.md says Roku = control API only. So: ported the dumbtv home DESIGN (clock, apps grid, inputs row,
-  Afterglow tiles, accents, hide/move, Back -> first tile) to a Roku SceneGraph channel. No dumbtv code copied.
-- Source: server/roku/dumbtv-roku/ (manifest, source/, components/Home|Tile|EcpTask, images/, README, build.sh,
-  LICENSE-dumbtv). Zip: server/roku/dumbtv-roku/dist/dumbtv-roku.zip. Linted with brighterscript 0.69.13: 0 errors
-  (fixed reserved words `run`, `pos`).
-- Mechanism: Task node -> roUrlTransfer to the TV's own ECP (GetIPAddrs():8060) for /query/apps, /launch/<id>;
-  Poster icons from /query/icon/<id>. Settings in registry section "dumbtv". The Roku Channel hidden by default.
-- UNPROVEN until on the TV: (1) channel->own-ECP works on Roku OS 15.3.4, (2) icons load, (3) layout fits.
-  Verify after sideload: query/active-app shows dev channel; keypress Right/Select via ECP; chanperf memory.
-
-### On-TV result 1 (Response 11)
-- Sideloaded OK: clock/date/layout render fine. App list EMPTY -> status message. LAN ECP still fine (query/apps 200
-  from the G14, ecp-setting-mode enabled) so the failure is channel -> own ECP.
-- Debug console: `telnet 192.168.2.18 8085` (no password) shows channel prints — read with bash /dev/tcp from host-shell.
-- Build 1.0.2: EcpTask tries every base (LAN IP, 127.0.0.1, localhost), async with 5 s timeout, logs code + failure
-  reason to console and on screen.
-- PLAN B if Roku blocks self-ECP: relay on the media server (24/7): channel -> http://192.168.2.62:<port>/apps|launch|icon
-  -> server -> TV ECP :8060 (LAN ECP proven working).
-
-### On-TV result 2 + decision (Responses 12-13)
-- 1.0.2 on TV: LAN IP, 127.0.0.1 and localhost ALL -> 403 Forbidden for /query/apps. Roku OS 15 blocks ECP from
-  on-device apps. Not a setting; keep Control by mobile apps = Permissive.
-- Shawn: NO server relay ("server can go down, can't afford it"). Also no DNS ad-block on the server for same reason.
-- Bell Giga Hub cannot hand out custom DNS (forum.bell.ca), Roku has no DNS setting -> network ad-block needs a separate
-  always-on DHCP/DNS box. Not viable under Shawn's constraint.
-- ifAppManager has IsAppInstalled but NO LaunchApp (Roku docs). No public root for Roku OS 15.3.4 known.
-- Build 1.0.3: when ECP query is refused, app list = built-in known ids filtered by roAppManager.IsAppInstalled,
-  tiles forced to Afterglow (icons come from ECP too). Launch still via ECP POST — UNKNOWN whether also 403;
-  if it is, the launcher cannot open apps and the launcher track is dead -> fall back to Roku home settings cleanup.
-
-### Next steps (ordered)
-1. Shawn confirms goal + answers: which annoyances matter, DNS-on-server yes/no, ethernet cable possible, docs location.
-2. After Permissive: snapshot app list + settings; write server/scripts/luminos-roku (status/apps/launch/key).
-3. Then build.
-
-### Gotchas
-- Do not claim Android-only steps are possible on Roku; do not claim everything is impossible either (ECP covers a lot).
-- Server work rule: server stuff goes in server/ docs, not G14 docs.
-
-## Still open from before (untouched)
-- BUG-187 Claude Desktop re-login: supervisor fix installed in scripts/luminos-caelestia-plasma (effective next login);
-  waiting on Shawn to click "Sign in again" then verify main.log (Chrome start, claudeURLHandler, no session_stale_relogin,
-  MCP servers connect); write BUG-187 addendum + commit. Launch Claude Desktop via luminos-claude-restart, not the bar.
-- VisionQuest DV P5 sweep verification (BUG-207/DECISION 156); MW4 BUG-209; server OpenCL build; BUG-199 repro;
-  spectrum/nvdefer tests; BUG-213; coder pruned-model tests.
-
-## Files touched / relevant files
-HANDOFF.md only. Read: AGENTS.md, server/README.md, server/docs/MEDIA_SERVER_PLAN.md, server/STATUS.md.
+## Files touched / relevant files (this chat)
+HANDOFF.md (reset), gameos/os/docs/V2-PLAN-01.md (new). Analysis script /var/tmp/vela-plan/tsum.py. Read: AGENTS.md, gameos/{HANDOFF.md, docs/tracks/BOARD.md, os/docs/STUTTER-01.md,
+DGPU-DIRECT-01.md, LSFG-01.md, DECISIONS.md}, server ~/vela-remote/SESSION-LOG.md + commit 723ff2b.
