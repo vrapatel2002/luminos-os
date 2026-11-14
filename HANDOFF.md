@@ -1,5 +1,23 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 4 (mockup v2: hearts + requested-by added; awaiting approval)
+Last updated: 2026-11-13 — Response 5 (storage page + Jellyseerr episode picker BUILT and live)
+
+
+## 2026-11-13 R5 — BUILT + LIVE. Storage page (DECISION 185) and Jellyseerr episode picker (DECISION 186).
+- **luminos-space** now shows per film/season/episode: length, on-disk-since, each person's progress bar (x/y eps, time,
+  last watched), ♥ hearted / "requested" tags, a verdict pill, 4 filters, and a HOLD-ON dialog before deleting something
+  someone still wants. Verdict computed server-side (`verdict()`), own Jellyfin key `/var/lib/luminos/space-jellyfin-key`.
+  Verified via Caddy on the tailnet name with real data + negative test (missing key → library still renders).
+  Gotcha: shared app.css already had `.hint` (hub) → renamed mine `.wwhint`. Check every new class against the hub.
+- **Jellyseerr 3.4.1-2**: optional "All episodes ▾" picker per season (patch + generator script in
+  server/packaging/jellyseerr/). Backend proven live: Adolescence S1 picks {1:[2]} → only E2 monitored → grabbed only
+  S01E02; test fully cleaned up (NZBGet was paused for it and resumed). **Request screen NOT clicked through by a person**
+  (built-in browser isn't signed in to Jellyseerr) — Shawn to try.
+- Gotcha: pacman on the server is blocked by the `00-informant` hook while Arch news is unread. I marked the 3 items read
+  to install. ⚠️ One applies: **ca-certificates-mozilla 3.128 < 3.131.1 (MITM fix)** → server needs a full `pacman -Syu`
+  (not done — Shawn's call). php / LUKS items don't apply.
+- Backups: /root/bak-20261113-space/ and /root/bak-20261113-jellyseerr/ (old pkg + db + settings).
+- NEXT: (1) Shawn tries the picker; (2) per-person logins once he gives names — Shawn admin, others limited
+  (Jellyfin non-admin, no delete; Jellyseerr request perms; they set own passwords). Storage page picks them up automatically.
 
 
 ## 2026-11-13 R4 — Mockup v2 published (same link): hearts + Jellyseerr requester now block deletes. Still WAITING ON APPROVAL.
