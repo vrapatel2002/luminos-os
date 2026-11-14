@@ -69,7 +69,7 @@ Away from the house, it is also on a Tailscale tailnet as **100.82.125.26**
 | luminos-gate (admin sign-in) | 8101 | **loopback only** — Caddy forward_auth for :443 and :8446, DECISION 187 |
 | AdGuard Home DNS | 53 | **LAN** udp+tcp — network-wide ad blocking, DECISION 169 |
 | AdGuard Home dashboard | 8451 → 3080 | LAN + Tailscale, TLS |
-| byparr | 8191 | **loopback only** — no auth of any kind, DECISION 90 |
+| byparr | 8191 | **disabled 2026-11-13** (DECISION 189) — loopback only, no auth; only fed the retired 1337x torrent indexer |
 | SSH | 22 | LAN + Tailscale, key-only |
 | Tailscale | — | outbound only — remote access to Jellyfin, opens nothing |
 | qBittorrent | — | **uninstalled**, DECISION 84 |

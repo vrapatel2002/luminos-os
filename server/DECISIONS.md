@@ -3506,3 +3506,37 @@ behind the gate (invitees have no account yet). Unit `server/systemd/jfa-go.serv
   `{"src": ["autogroup:shared"], "dst": ["*"], "ip": ["tcp:8443", "tcp:8444", "tcp:8452"]}` and make sure no
   `src: ["*"]` rule remains (that would include shared users). Not applied — Shawn's admin console.
 Rollback: `sudo systemctl disable --now jfa-go`, restore `/etc/caddy/Caddyfile.pre-jfa`, delete `luminos-invites`.
+
+## DECISION 189 — Full system update (272 pkgs) with Jellyfin held at 10.11, boot no longer waits for the retired radio, byparr off — 2026-11-13
+<!-- [CHANGE: cowork | 2026-11-13] -->
+**Ask (Shawn):** run `pacman -Syu` on the server (ca-certificates-mozilla 3.128 < 3.131.1 MITM fix, Arch news 2026-10-21).
+
+**Done:** 272 packages, EXIT 0. Kernel 7.2.2 → 7.3.4 (rebooted, verified), glibc, ca-certificates-mozilla 3.133, caddy 2.11.7,
+nodejs 26.13.1, nzbget 26.3, tailscale 1.104.7, sonarr/radarr, intel-media-driver. Log: `/var/log/luminos-syu-20261113.log`.
+Pre-update package list was in /tmp (lost on reboot). Two harmless `.pacnew` files under /etc/tpm2-tss (TPM profiles, unused).
+
+**Jellyfin rolled back and pinned.** The update took jellyfin-server/web 10.11.11 → **12.4** and jellyfin-ffmpeg 7.1 → 8.1.
+12.4 migrated the DB fine, but: (1) it accepts the API key ONLY as `Authorization: MediaBrowser Token="…"` — `X-Emby-Token`,
+`X-Emby-Authorization`, `X-MediaBrowser-Token` and `?api_key=` all return 401 (measured). That breaks luminos-space,
+luminos-gate's revalidation (would lock Shawn out), luminos-doctor-scan/-play, luminos-dv-sweep, luminos-media-fix,
+luminos-jf-seek-check, luminos-phone-cap, jfa-go 0.6.0 (binary uses X-Emby-Authorization) and likely Sonarr/Radarr's
+Jellyfin notify; (2) Intro Skipper 1.10.11.22 fails to load; (3) unknown for the Roku apps. Seerr already sends the new
+header. → Restored 10.11.11 (server+web+ffmpeg, Arch archive, signatures verified) + the pre-start backup of
+data/plugins/config (`/root/bak-20261113-jellyfin10`). Verified: 10.11.11, X-Emby-Token 200, Intro Skipper Active, 20
+played items intact, Space data back, ffmpeg wrapper + VAAPI encode OK, jfa-go authenticates. **`IgnorePkg = jellyfin-server
+jellyfin-web jellyfin-ffmpeg` in /etc/pacman.conf** (backup `/etc/pacman.conf.bak-20261113`). The 12.x data dirs are kept as
+`/var/lib/jellyfin/{data,plugins}.jf12-*`. **A Jellyfin 12 migration is its own task:** switch every script to the
+`Authorization: MediaBrowser Token=` header first (works on 10.11 too — do it before upgrading), check jfa-go/Intro Skipper/
+JellyRock compatibility, then lift the pin.
+
+**Boot waited 2 min for the retired radio — since DECISION 170.** `20-wired.network` still had `RequiredForOnline=no` from
+when wifi was primary, and wifi was required; after 170 put wlan0 `ActivationPolicy=down`, systemd-networkd-wait-online
+burned its full 2-minute timeout on every boot and Jellyfin/arrs/Jellyseerr started late. Fix: drop-in
+`20-wired.network.d/60-required-for-online.conf` (`RequiredForOnline=routable`) + `RequiredForOnline=no` on the wifi drop-in
+`25-wireless.network.d/50-static.conf`. Proven: wait-online rc=0 in 0 s (was a 10 s/120 s timeout). wlan0 stays down
+(it was briefly brought up by hand while diagnosing, then put back down).
+
+**byparr disabled.** FastAPI 0.162 dropped the `log_level` kwarg and python-playwright 1.65 no longer matches its browser
+(protocol error). Its only user is the 1337x torrent indexer, already disabled (torrents retired, DECISION 84); NZBGeek
+does not use it. `systemctl disable --now byparr`, package file left pristine. Re-enable only with a byparr update.
+System state after: `running`, 0 failed units; all services and endpoints checked.

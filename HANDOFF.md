@@ -1,5 +1,16 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 10 (admin gate + jfa-go invites LIVE)
+Last updated: 2026-11-13 — Response 11 (server pacman -Syu done; Jellyfin rolled back + pinned)
+
+
+## 2026-11-13 R11 — Server full update DONE (DECISION 189). Shawn is testing the episode picker meanwhile (no result yet).
+- 272 pkgs, kernel 7.3.4 (rebooted, verified), ca-certificates 3.133 → security item closed.
+- **Jellyfin 12.4 arrived and was ROLLED BACK to 10.11.11 + pinned (IgnorePkg).** 12.x only accepts
+  `Authorization: MediaBrowser Token=` → 7 of our scripts, luminos-space, luminos-gate revalidation and jfa-go would 401;
+  Intro Skipper wouldn't load. DB restored from pre-start backup; all verified. 12.x migration = separate planned task
+  (switch scripts to the new header first; it works on 10.11 too).
+- Boot used to wait 2 min for the retired wifi (since DECISION 170) → fixed with RequiredForOnline drop-ins; wait-online 0 s.
+- byparr disabled (broken by FastAPI/playwright; only served the disabled 1337x torrent indexer).
+- State: `running`, 0 failed units. Next: Shawn's episode-picker result; optional Jellyfin-12 prep task.
 
 
 ## 2026-11-13 R10 — "Production" accounts: BUILT + LIVE (DECISION 187 + 188). Shawn confirmed all Tailscale devices are his.
