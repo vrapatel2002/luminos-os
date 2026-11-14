@@ -9030,6 +9030,11 @@ circle + tick). Radios already used M3RadioIndicator; check boxes still went thr
 CheckBox and CheckDelegate use M3RadioIndicator too (pixelMetric answers indicatorwidth/checkboxlabelspacing; tri-state
 shows a dash). Menus keep CheckIndicator (it also draws menu icons); QtWidgets pages are drawn by Darkly. Proof:
 style-tuner/ck1 (keyboard page: list + option check boxes).
+**R37 (2026-11-14) — switch matches the tick:** Shawn: "same goes for this button" (switch). Every QML switch already
+used SwitchIndicator; the mismatch was with the R36 tick. qqc2 1.13: the "on" thumb is now the tick button itself
+(focusColor circle, dark tick, same path, stroke 2.6, 80 % size) on a softer track (bg tinted 42 % focusColor); "off"
+unchanged (grey thumb with ×). Gotcha: a property named onTrackColor reads as a signal handler and came out black —
+named trackOnColor. Proof: kcm-rows/sw3 (switch / check box / radio side by side, on and off).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

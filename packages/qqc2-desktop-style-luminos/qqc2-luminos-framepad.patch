@@ -88,6 +88,44 @@ diff -ruN qqc2-desktop-style-6.30.0/org.kde.desktop/private/M3RadioIndicator.qml
 +        color: Qt.hsla(Kirigami.Theme.focusColor.hslHue, Kirigami.Theme.focusColor.hslSaturation * 0.4, Kirigami.Theme.focusColor.hslLightness > 0.5 ? 0.27 : 1.0, 1)
 +    }
  }
+diff -ruN qqc2-desktop-style-6.30.0/org.kde.desktop/private/SwitchIndicator.qml ../b/qqc2-desktop-style-6.30.0/org.kde.desktop/private/SwitchIndicator.qml
+--- a/org.kde.desktop/private/SwitchIndicator.qml	2026-11-10 13:52:06.572723137 -0500
++++ b/org.kde.desktop/private/SwitchIndicator.qml	2026-11-14 18:43:43.650959587 -0500
+@@ -35,9 +35,12 @@
+         // primary = focus colour (the selection set may be a muted secondaryContainer); onPrimary = same hue, tone 20 (dark) or white
+         readonly property color primaryColor: Kirigami.Theme.focusColor
+         readonly property color thumbOnColor: toneOnPrimary(primaryColor)
+-        readonly property color trackColor: indicator.control.checked ? primaryColor : offTrackColor
+-        readonly property color handleColor: indicator.control.checked ? thumbOnColor : outlineColor
+-        readonly property color glyphColor: indicator.control.checked ? primaryColor : offTrackColor
++        // [CHANGE: claude-code | 2026-11-14] R37: "on" thumb = the round tick button (M3RadioIndicator): lavender circle,
++        // dark tick, same glyph and stroke; it slides on a softer lavender track
++        readonly property color trackOnColor: Qt.tint(Kirigami.Theme.backgroundColor, Qt.alpha(Kirigami.Theme.focusColor, 0.42))
++        readonly property color trackColor: indicator.control.checked ? trackOnColor : offTrackColor
++        readonly property color handleColor: indicator.control.checked ? primaryColor : outlineColor
++        readonly property color glyphColor: indicator.control.checked ? thumbOnColor : offTrackColor
+ 
+         function toneOnPrimary(p: color): color {
+             return Qt.hsla(p.hslHue, p.hslSaturation * 0.4, p.hslLightness > 0.5 ? 0.27 : 1.0, 1)
+@@ -102,15 +105,15 @@
+         Shape { // check or cross drawn on a 24-unit grid, scaled to the thumb
+             width: 24; height: 24
+             anchors.centerIn: parent
+-            scale: handle.width / 24
++            scale: handle.width / 24 * (indicator.control.checked ? 0.8 : 1) // R37: same tick size as the tick button
+             preferredRendererType: Shape.CurveRenderer
+             ShapePath {
+                 strokeColor: colorFactory.glyphColor
+-                strokeWidth: 2.2
++                strokeWidth: indicator.control.checked ? 2.6 : 2.2 // R37: tick matches the tick button
+                 fillColor: "transparent"
+                 capStyle: ShapePath.RoundCap
+                 joinStyle: ShapePath.RoundJoin
+-                PathSvg { path: indicator.control.checked ? "M7 12.5 L10.5 16 L17.5 8.5" : "M8 8 L16 16 M16 8 L8 16" }
++                PathSvg { path: indicator.control.checked ? "M6.5 12.5 L10.5 16.5 L17.5 8.5" : "M8 8 L16 16 M16 8 L8 16" }
+             }
+         }
+     }
 diff -ruN qqc2-desktop-style-6.30.0/org.kde.desktop/ScrollView.qml ../b/qqc2-desktop-style-6.30.0/org.kde.desktop/ScrollView.qml
 --- a/org.kde.desktop/ScrollView.qml	2026-11-10 13:52:06.572381192 -0500
 +++ b/org.kde.desktop/ScrollView.qml	2026-11-13 20:52:05.449005241 -0500
