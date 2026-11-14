@@ -1,5 +1,14 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 5 (storage page + Jellyseerr episode picker BUILT and live)
+Last updated: 2026-11-13 — Response 6 (logins: Shawn already admin; asked self-signup vs I-create)
+
+
+## 2026-11-13 R6 — Logins plan (asked, nothing changed)
+- Verified: Jellyfin `shawn` IsAdministrator=true (only user). Jellyseerr already lets any Jellyfin user sign in
+  (newPlexLogin=true) and gives new users permission 32 = REQUEST only (requests wait for Shawn's approval).
+- Shawn wants others to "sign in, make id/pass". Jellyfin has NO self-registration. Offered: (A) I create each account
+  (non-admin, no delete, no settings) with a one-time password they change in Jellyfin → Profile → Password; no new
+  software. (B) invite links via jfa-go (AUR, extra service behind Caddy) so each person picks their own name+password.
+  Waiting on his pick (+ names if A).
 
 
 ## 2026-11-13 R5 — BUILT + LIVE. Storage page (DECISION 185) and Jellyseerr episode picker (DECISION 186).
