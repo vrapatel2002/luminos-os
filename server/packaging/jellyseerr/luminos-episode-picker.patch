@@ -1,0 +1,547 @@
+diff -ruN a/seerr-3.4.1/seerr-api.yml b/seerr-3.4.1/seerr-api.yml
+--- a/seerr-3.4.1/seerr-api.yml	2026-07-30 05:24:48.000000000 -0400
++++ b/seerr-3.4.1/seerr-api.yml	2026-11-13 22:30:19.507931136 -0500
+@@ -6518,6 +6518,14 @@
+                         minimum: 0
+                     - type: string
+                       enum: [all]
++                episodes:
++                  type: object
++                  description: Luminos episode picker. Season number -> episode numbers to download. A season left out gets all its episodes.
++                  additionalProperties:
++                    type: array
++                    items:
++                      type: number
++                      minimum: 0
+                 is4k:
+                   type: boolean
+                   example: false
+diff -ruN a/seerr-3.4.1/server/api/servarr/sonarr.ts b/seerr-3.4.1/server/api/servarr/sonarr.ts
+--- a/seerr-3.4.1/server/api/servarr/sonarr.ts	2026-07-30 05:24:48.000000000 -0400
++++ b/seerr-3.4.1/server/api/servarr/sonarr.ts	2026-11-13 22:30:19.506967842 -0500
+@@ -95,6 +95,8 @@
+   profileId: number;
+   languageProfileId?: number;
+   seasons: number[];
++  // [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186). season -> episode numbers to keep monitored. Absent = whole season.
++  episodes?: Record<number, number[]>;
+   seasonFolder: boolean;
+   rootFolderPath: string;
+   tags?: number[];
+@@ -246,6 +248,13 @@
+             });
+           }
+ 
++          // [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186).
++          await this.applyEpisodePicks(
++            newSeriesResponse.data.id,
++            options.episodes,
++            false
++          );
++
+           if (options.searchNow) {
+             this.searchSeries(newSeriesResponse.data.id);
+           }
+@@ -283,13 +292,27 @@
+           seriesType: options.seriesType,
+           addOptions: {
+             ignoreEpisodesWithFiles: true,
+-            searchForMissingEpisodes: options.searchNow,
++            // [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186). With picks, Sonarr must not search on add: the
++            // picks are applied first, then the search runs on what is left monitored.
++            searchForMissingEpisodes:
++              options.searchNow && !this.hasEpisodePicks(options.episodes),
+           },
+         } as Partial<SonarrSeries>
+       );
+ 
+       if (createdSeriesResponse.data.id) {
+         logger.info('Sonarr accepted request', { label: 'Sonarr' });
++        // [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186).
++        if (this.hasEpisodePicks(options.episodes)) {
++          await this.applyEpisodePicks(
++            createdSeriesResponse.data.id,
++            options.episodes,
++            true
++          );
++          if (options.searchNow) {
++            this.searchSeries(createdSeriesResponse.data.id);
++          }
++        }
+         logger.debug('Sonarr add details', {
+           label: 'Sonarr',
+           series: createdSeriesResponse.data,
+@@ -388,6 +411,107 @@
+     }
+   }
+ 
++  // [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186).
++  private hasEpisodePicks(picks?: Record<number, number[]>): boolean {
++    return (
++      !!picks &&
++      Object.values(picks).some((list) => Array.isArray(list) && list.length > 0)
++    );
++  }
++
++  public async unmonitorEpisodes(episodeIds: number[]): Promise<void> {
++    await this.axios.put('/episode/monitor', {
++      episodeIds,
++      monitored: false,
++    });
++  }
++
++  // Leave only the picked episodes monitored in each picked season.
++  // A series Sonarr has only just added fills its episode list from a background refresh,
++  // so wait for it, and re-apply a few times afterwards: Sonarr's own post-add step can
++  // still set monitored flags once the refresh finishes. Every pass is idempotent.
++  private async applyEpisodePicks(
++    seriesId: number | undefined,
++    picks: Record<number, number[]> | undefined,
++    justAdded: boolean
++  ): Promise<void> {
++    if (!seriesId || !picks || !this.hasEpisodePicks(picks)) {
++      return;
++    }
++    const seasons = Object.keys(picks).map(Number);
++    const sleep = (ms: number) =>
++      new Promise((resolve) => setTimeout(resolve, ms));
++    const pass = async (): Promise<boolean> => {
++      const episodes = await this.getEpisodes(seriesId);
++      const inSeasons = episodes.filter((ep) =>
++        seasons.includes(ep.seasonNumber)
++      );
++      if (inSeasons.length === 0) {
++        return false;
++      }
++      const wanted = (ep: EpisodeResult) =>
++        (picks[ep.seasonNumber] || []).includes(ep.episodeNumber);
++      const drop = inSeasons
++        .filter((ep) => ep.monitored && !wanted(ep))
++        .map((ep) => ep.id);
++      const keep = inSeasons
++        .filter((ep) => !ep.monitored && wanted(ep))
++        .map((ep) => ep.id);
++      if (drop.length) {
++        await this.unmonitorEpisodes(drop);
++      }
++      if (keep.length) {
++        await this.monitorEpisodes(keep);
++      }
++      logger.info('Applied episode picks', {
++        label: 'Sonarr',
++        seriesId,
++        unmonitored: drop.length,
++        monitored: keep.length,
++        picks,
++      });
++      return true;
++    };
++
++    let applied = false;
++    for (let attempt = 0; attempt < (justAdded ? 40 : 3) && !applied; attempt++) {
++      try {
++        applied = await pass();
++      } catch (e) {
++        logger.warn('Failed to apply episode picks, retrying', {
++          label: 'Sonarr',
++          seriesId,
++          errorMessage: e.message,
++        });
++      }
++      if (!applied) {
++        await sleep(3000);
++      }
++    }
++    if (!applied) {
++      logger.error('Gave up applying episode picks', {
++        label: 'Sonarr',
++        seriesId,
++        picks,
++      });
++      return;
++    }
++    if (justAdded) {
++      for (const wait of [10000, 20000, 30000]) {
++        await sleep(wait);
++        try {
++          await pass();
++        } catch (e) {
++          logger.warn('Episode picks re-check failed', {
++            label: 'Sonarr',
++            seriesId,
++            errorMessage: e.message,
++          });
++        }
++      }
++    }
++  }
++
+   private buildSeasonList(
+     seasons: number[],
+     existingSeasons?: SonarrSeason[]
+diff -ruN a/seerr-3.4.1/server/entity/MediaRequest.ts b/seerr-3.4.1/server/entity/MediaRequest.ts
+--- a/seerr-3.4.1/server/entity/MediaRequest.ts	2026-07-30 05:24:48.000000000 -0400
++++ b/seerr-3.4.1/server/entity/MediaRequest.ts	2026-11-13 22:30:19.505924916 -0500
+@@ -42,6 +42,25 @@
+   isAutoRequest?: boolean;
+ };
+ 
++// [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186).
++// Turns the picks for one season into what SeasonRequest.episodes stores. Anything empty,
++// malformed or absent becomes null, which means "the whole season" -- the safe default.
++const pickEpisodes = (
++  picks: MediaRequestBody['episodes'],
++  seasonNumber: number
++): string | null => {
++  const list = picks?.[String(seasonNumber)];
++  if (!Array.isArray(list) || list.length === 0) {
++    return null;
++  }
++  const clean = Array.from(
++    new Set(
++      list.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < 10000)
++    )
++  ).sort((a, b) => a - b);
++  return clean.length ? JSON.stringify(clean) : null;
++};
++
+ @Entity()
+ export class MediaRequest {
+   public static async request(
+@@ -521,6 +540,7 @@
+           (sn) =>
+             new SeasonRequest({
+               seasonNumber: sn,
++              episodes: pickEpisodes(requestBody.episodes, sn),
+               status: user.hasPermission(
+                 [
+                   requestBody.is4k
+diff -ruN a/seerr-3.4.1/server/entity/SeasonRequest.ts b/seerr-3.4.1/server/entity/SeasonRequest.ts
+--- a/seerr-3.4.1/server/entity/SeasonRequest.ts	2026-07-30 05:24:48.000000000 -0400
++++ b/seerr-3.4.1/server/entity/SeasonRequest.ts	2026-11-13 22:30:19.488973059 -0500
+@@ -21,6 +21,11 @@
+   @Column({ type: 'int', default: MediaRequestStatus.PENDING })
+   public status: MediaRequestStatus;
+ 
++  // [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186).
++  // JSON array of the episode numbers to download for this season. null = the whole season.
++  @Column({ type: 'text', nullable: true })
++  public episodes?: string | null;
++
+   @ManyToOne(() => MediaRequest, (request) => request.seasons, {
+     onDelete: 'CASCADE',
+   })
+diff -ruN a/seerr-3.4.1/server/interfaces/api/requestInterfaces.ts b/seerr-3.4.1/server/interfaces/api/requestInterfaces.ts
+--- a/seerr-3.4.1/server/interfaces/api/requestInterfaces.ts	2026-07-30 05:24:48.000000000 -0400
++++ b/seerr-3.4.1/server/interfaces/api/requestInterfaces.ts	2026-11-13 22:30:19.489174509 -0500
+@@ -18,6 +18,8 @@
+   mediaId: number;
+   tvdbId?: number;
+   seasons?: number[] | 'all';
++  // [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186). season number -> episode numbers; a season left out = all episodes.
++  episodes?: Record<string, number[]>;
+   is4k?: boolean;
+   serverId?: number;
+   profileId?: number;
+diff -ruN a/seerr-3.4.1/server/migration/postgres/1794620000000-AddEpisodesToSeasonRequest.ts b/seerr-3.4.1/server/migration/postgres/1794620000000-AddEpisodesToSeasonRequest.ts
+--- a/seerr-3.4.1/server/migration/postgres/1794620000000-AddEpisodesToSeasonRequest.ts	1969-12-31 19:00:00.000000000 -0500
++++ b/seerr-3.4.1/server/migration/postgres/1794620000000-AddEpisodesToSeasonRequest.ts	2026-11-13 22:30:19.506265817 -0500
+@@ -0,0 +1,16 @@
++// [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186).
++import type { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class AddEpisodesToSeasonRequest1794620000000 implements MigrationInterface {
++  name = 'AddEpisodesToSeasonRequest1794620000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(`ALTER TABLE "season_request" ADD "episodes" text`);
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "season_request" DROP COLUMN "episodes"`
++    );
++  }
++}
+diff -ruN a/seerr-3.4.1/server/migration/sqlite/1794620000000-AddEpisodesToSeasonRequest.ts b/seerr-3.4.1/server/migration/sqlite/1794620000000-AddEpisodesToSeasonRequest.ts
+--- a/seerr-3.4.1/server/migration/sqlite/1794620000000-AddEpisodesToSeasonRequest.ts	1969-12-31 19:00:00.000000000 -0500
++++ b/seerr-3.4.1/server/migration/sqlite/1794620000000-AddEpisodesToSeasonRequest.ts	2026-11-13 22:30:19.506148210 -0500
+@@ -0,0 +1,18 @@
++// [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186).
++import type { MigrationInterface, QueryRunner } from 'typeorm';
++
++export class AddEpisodesToSeasonRequest1794620000000 implements MigrationInterface {
++  name = 'AddEpisodesToSeasonRequest1794620000000';
++
++  public async up(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "season_request" ADD COLUMN "episodes" text`
++    );
++  }
++
++  public async down(queryRunner: QueryRunner): Promise<void> {
++    await queryRunner.query(
++      `ALTER TABLE "season_request" DROP COLUMN "episodes"`
++    );
++  }
++}
+diff -ruN a/seerr-3.4.1/server/subscriber/MediaRequestSubscriber.ts b/seerr-3.4.1/server/subscriber/MediaRequestSubscriber.ts
+--- a/seerr-3.4.1/server/subscriber/MediaRequestSubscriber.ts	2026-07-30 05:24:48.000000000 -0400
++++ b/seerr-3.4.1/server/subscriber/MediaRequestSubscriber.ts	2026-11-13 22:30:19.506648505 -0500
+@@ -707,6 +707,23 @@
+           title: series.name,
+           tvdbid: tvdbId,
+           seasons: entity.seasons.map((season) => season.seasonNumber),
++          // [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186).
++          episodes: entity.seasons.reduce<Record<number, number[]>>(
++            (acc, season) => {
++              if (season.episodes) {
++                try {
++                  const list = JSON.parse(season.episodes);
++                  if (Array.isArray(list) && list.length) {
++                    acc[season.seasonNumber] = list.map(Number);
++                  }
++                } catch {
++                  // unreadable -> whole season, the safe default
++                }
++              }
++              return acc;
++            },
++            {}
++          ),
+           seasonFolder: sonarrSettings.enableSeasonFolders,
+           seriesType,
+           tags,
+diff -ruN a/seerr-3.4.1/src/components/RequestModal/TvRequestModal.tsx b/seerr-3.4.1/src/components/RequestModal/TvRequestModal.tsx
+--- a/seerr-3.4.1/src/components/RequestModal/TvRequestModal.tsx	2026-07-30 05:24:48.000000000 -0400
++++ b/seerr-3.4.1/src/components/RequestModal/TvRequestModal.tsx	2026-11-13 22:30:19.508668456 -0500
+@@ -19,7 +19,7 @@
+ import { Permission } from '@server/lib/permissions';
+ import type { TvDetails } from '@server/models/Tv';
+ import axios from 'axios';
+-import { useState } from 'react';
++import { Fragment, useState } from 'react';
+ import { useIntl } from 'react-intl';
+ import useSWR, { mutate } from 'swr';
+ 
+@@ -52,6 +52,91 @@
+   pendingapproval: 'Your request is pending approval.',
+ });
+ 
++// [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186).
++// The optional "All episodes" picker under a season. Ignoring it keeps today's behaviour
++// (whole season). `picked` undefined = all; [] = none (the season is then left out).
++interface PickerSeason {
++  episodes: { episodeNumber: number; name: string }[];
++}
++
++const EpisodePicker = ({
++  tmdbId,
++  seasonNumber,
++  picked,
++  onChange,
++}: {
++  tmdbId: number;
++  seasonNumber: number;
++  picked?: number[];
++  onChange: (list: number[] | null) => void;
++}) => {
++  const { data, error } = useSWR<PickerSeason>(
++    `/api/v1/tv/${tmdbId}/season/${seasonNumber}`
++  );
++  if (error) {
++    return (
++      <div className="text-sm text-red-400">
++        Could not load the episode list.
++      </div>
++    );
++  }
++  if (!data) {
++    return <div className="text-sm text-gray-400">Loading episodes…</div>;
++  }
++  const all = data.episodes.map((e) => e.episodeNumber);
++  const sel = new Set(picked ?? all);
++  const update = (next: Set<number>) =>
++    onChange(next.size === all.length ? null : all.filter((n) => next.has(n)));
++  return (
++    <div>
++      <div className="mb-2 flex flex-wrap items-center gap-4 text-xs text-gray-400">
++        <span>Pick episodes. Leave them all ticked to get the whole season.</span>
++        <button
++          type="button"
++          className="text-indigo-300 hover:text-indigo-200"
++          onClick={() => onChange(null)}
++        >
++          All
++        </button>
++        <button
++          type="button"
++          className="text-indigo-300 hover:text-indigo-200"
++          onClick={() => onChange([])}
++        >
++          None
++        </button>
++      </div>
++      <div className="grid gap-1 sm:grid-cols-2">
++        {data.episodes.map((e) => (
++          <label
++            key={e.episodeNumber}
++            className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-gray-200 hover:bg-gray-700"
++          >
++            <input
++              type="checkbox"
++              className="h-4 w-4 rounded border-gray-500 text-indigo-600"
++              checked={sel.has(e.episodeNumber)}
++              onChange={() => {
++                const next = new Set(sel);
++                if (next.has(e.episodeNumber)) {
++                  next.delete(e.episodeNumber);
++                } else {
++                  next.add(e.episodeNumber);
++                }
++                update(next);
++              }}
++            />
++            <span className="w-9 tabular-nums text-gray-400">
++              E{e.episodeNumber}
++            </span>
++            <span className="truncate">{e.name}</span>
++          </label>
++        ))}
++      </div>
++    </div>
++  );
++};
++
+ interface RequestModalProps extends React.HTMLAttributes<HTMLDivElement> {
+   tmdbId: number;
+   onCancel?: () => void;
+@@ -88,6 +173,12 @@
+     show: true,
+   });
+   const [tvdbId, setTvdbId] = useState<number | undefined>(undefined);
++  // [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186). Only seasons the user narrowed down are in here.
++  const [pickedEpisodes, setPickedEpisodes] = useState<
++    Record<number, number[]>
++  >({});
++  const [openPicker, setOpenPicker] = useState<number | null>(null);
++
+   const { data: quota } = useSWR<QuotaResponse>(
+     user &&
+       (!requestOverrides?.user?.id || hasPermission(Permission.MANAGE_USERS))
+@@ -194,17 +285,36 @@
+           tags: requestOverrides.tags,
+         };
+       }
++      // [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186).
++      const seasonsToSend = settings.currentSettings.partialRequestsEnabled
++        ? selectedSeasons.sort((a, b) => a - b)
++        : getAllSeasons().filter(
++            (season) => !getAllRequestedSeasons().includes(season)
++          );
++      // A season narrowed down to zero episodes is left out of the request.
++      const finalSeasons = seasonsToSend.filter(
++        (sn) => !(pickedEpisodes[sn] && pickedEpisodes[sn].length === 0)
++      );
++      if (finalSeasons.length === 0) {
++        addToast('Pick at least one episode.', {
++          appearance: 'error',
++          autoDismiss: true,
++        });
++        return;
++      }
++      const episodePicks = Object.fromEntries(
++        finalSeasons
++          .filter((sn) => pickedEpisodes[sn]?.length)
++          .map((sn) => [String(sn), pickedEpisodes[sn]])
++      );
+       const response = await axios.post<MediaRequest>('/api/v1/request', {
+         mediaId: data?.id,
+         tvdbId: tvdbId ?? data?.externalIds.tvdbId,
+         mediaType: 'tv',
+         is4k,
+         ignoreQuota: requestOverrides?.ignoreQuota,
+-        seasons: settings.currentSettings.partialRequestsEnabled
+-          ? selectedSeasons.sort((a, b) => a - b)
+-          : getAllSeasons().filter(
+-              (season) => !getAllRequestedSeasons().includes(season)
+-            ),
++        seasons: finalSeasons,
++        ...(Object.keys(episodePicks).length ? { episodes: episodePicks } : {}),
+         ...overrideParams,
+       });
+       mutate('/api/v1/request?filter=all&take=10&sort=modified&skip=0');
+@@ -593,7 +703,8 @@
+                             MediaStatus.DELETED
+                       );
+                       return (
+-                        <tr key={`season-${season.id}`}>
++                        <Fragment key={`season-${season.id}`}>
++                        <tr>
+                           <td
+                             className={`whitespace-nowrap px-4 py-4 text-sm font-medium leading-5 text-gray-100 ${
+                               !settings.currentSettings
+@@ -704,8 +815,63 @@
+                                 {intl.formatMessage(globalMessages.available)}
+                               </Badge>
+                             )}
++                            {/* [CHANGE: cowork | 2026-11-13] Luminos episode picker (DECISION 186). */}
++                            {!editRequest &&
++                              !mediaSeason &&
++                              !seasonRequest &&
++                              (!settings.currentSettings.partialRequestsEnabled ||
++                                isSelectedSeason(season.seasonNumber)) && (
++                                <button
++                                  type="button"
++                                  onClick={() =>
++                                    setOpenPicker(
++                                      openPicker === season.seasonNumber
++                                        ? null
++                                        : season.seasonNumber
++                                    )
++                                  }
++                                  className={`ml-2 rounded-md border px-2 py-0.5 text-xs ${
++                                    pickedEpisodes[season.seasonNumber]
++                                      ? 'border-indigo-500 bg-indigo-900/60 text-indigo-100'
++                                      : 'border-gray-600 text-gray-300 hover:border-gray-400'
++                                  }`}
++                                >
++                                  {pickedEpisodes[season.seasonNumber]
++                                    ? `${pickedEpisodes[season.seasonNumber].length} of ${season.episodeCount} eps`
++                                    : 'All episodes'}{' '}
++                                  {openPicker === season.seasonNumber ? '▴' : '▾'}
++                                </button>
++                              )}
+                           </td>
+                         </tr>
++                        {openPicker === season.seasonNumber &&
++                          !editRequest &&
++                          !mediaSeason &&
++                          !seasonRequest &&
++                          (!settings.currentSettings.partialRequestsEnabled ||
++                            isSelectedSeason(season.seasonNumber)) && (
++                            <tr>
++                              <td colSpan={4} className="bg-gray-800/60 px-4 py-3">
++                                <EpisodePicker
++                                  tmdbId={tmdbId}
++                                  seasonNumber={season.seasonNumber}
++                                  picked={pickedEpisodes[season.seasonNumber]}
++                                  onChange={(list) =>
++                                    setPickedEpisodes((prev) => {
++                                      const next = { ...prev };
++                                      if (list === null) {
++                                        delete next[season.seasonNumber];
++                                      } else {
++                                        next[season.seasonNumber] = list;
++                                      }
++                                      return next;
++                                    })
++                                  }
++                                />
++                              </td>
++                            </tr>
++                          )}
++                        </Fragment>
+                       );
+                     })}
+                 </tbody>
