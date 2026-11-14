@@ -46,6 +46,7 @@ RESUME_JUMP = 2.0  # BOOTTIME−MONOTONIC growth that counts as having been asle
 SLEEP_WAIT = 60.0  # longest an issued sleep may hold back the next action
 LOCK_TIMEOUT, LOCK_SETTLE, LOCK_POLL = 5.0, 1.0, 0.1  # the wait for the greeter before sleeping
 LOCK_GUARD, LOCK_CMD_TIMEOUT = 2.0, 10  # gap between lock checks after a resume; cap on a hung lock-session
+FAILSAFE = 600.0  # lid shut but awake this long (every sleep refused): power off, never cook in a bag (2026-11-13)
 
 
 @dataclass(frozen=True)
@@ -189,12 +190,23 @@ def act(action, attempt, fd):
     return run(SYSTEMCTL, "suspend", "-i")
 
 
+def failsafe(now, closed, shut_since):
+    """Seconds-shut-and-awake clock; powers off once it reaches FAILSAFE, then restarts it."""
+    if not closed or shut_since is None:
+        return now if closed else None
+    if now - shut_since < FAILSAFE:
+        return shut_since
+    log(f"lid shut but awake for {FAILSAFE:.0f} s, every sleep refused — powering off")
+    run(SYSTEMCTL, "poweroff", "-i")
+    return now
+
+
 def main():
     node = lid_event_node()
     log(f"v3 watching {node}")
     fd = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
     st, resumed_at, asleep = State(), boottime(), asleep_seconds()
-    stats_before, give_up, guard_plan = None, 0.0, []
+    stats_before, give_up, guard_plan, shut_since = None, 0.0, [], None
     while True:
         select.select([fd], [], [], 1.0)
         with suppress(BlockingIOError):
@@ -203,9 +215,11 @@ def main():
         if asleep - was_asleep > RESUME_JUMP:
             resumed_at, guard_plan = now, [now + n * LOCK_GUARD for n in range(4)]
             log(f"resumed after {asleep - was_asleep:.0f} s asleep")
+            shut_since = None  # it really slept: the failsafe clock starts over
         if guard_plan and now >= guard_plan[0]:
             guard_plan = guard_pass(guard_plan)
         closed = lid_is_closed(fd)
+        shut_since = failsafe(now, closed, shut_since)
         if not closed:
             give_up = 0.0  # opening the lid ends any wait
         elif now < give_up and suspend_stats() == stats_before:

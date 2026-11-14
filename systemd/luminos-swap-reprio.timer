@@ -1,0 +1,6 @@
+# [CHANGE: claude-code | 2026-11-13] BUG-228: 60 s after waking from hibernate.
+[Unit]
+Description=Luminos: re-rank the disk swap file a minute after hibernate
+[Timer]
+OnActiveSec=60
+RemainAfterElapse=no

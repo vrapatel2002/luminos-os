@@ -787,3 +787,26 @@ def test_lid_function_budgets():
         if isinstance(node, ast.FunctionDef):
             assert node.end_lineno - node.lineno + 1 <= 40, f"{node.name} is over 40 lines"
             assert depth(node) <= 3, f"{node.name} nests deeper than 3"
+
+
+def poweroffs(world):
+    return [t for t, cmd in world.commands if "poweroff" in cmd]
+
+
+def test_ten_minutes_of_refused_sleeps_powers_off_once():
+    """Re-plan 10: 2026-11-13, 338 refused sleeps kept it awake and hot for 3 h with the lid shut."""
+    world = run_main(World(900, on_suspend=lambda w: 1))
+    assert len(poweroffs(world)) == 1 and 600.0 <= poweroffs(world)[0] <= 602.0
+    assert ("/usr/bin/systemctl", "poweroff", "-i") in [cmd for _, cmd in world.commands]
+
+
+def test_sleeps_that_work_never_power_off():
+    assert poweroffs(run_main(World(2000, on_suspend=lambda w: w.sleep(300)))) == []
+
+
+def test_opening_the_lid_restarts_the_failsafe_clock():
+    assert poweroffs(run_main(World(1000, on_suspend=lambda w: 1, at={500: False, 510: True}))) == []
+
+
+def test_an_open_lid_never_powers_off():
+    assert poweroffs(run_main(World(2000, closed=False))) == []

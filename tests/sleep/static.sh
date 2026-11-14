@@ -47,7 +47,7 @@ done
 check "hook is plain sh" grep -qE '^#!.*[/ ]sh$' "$HOOK"
 check "brightness hook is plain sh" grep -qE '^#!.*[/ ]sh$' "$BRIGHT"
 
-check "budget: $LID" budget "$LID" 220 # after review5
+check "budget: $LID" budget "$LID" 235 # Re-plan 10 (2026-11-13): the poweroff failsafe
 check "budget: $POSTER" budget "$POSTER" 80
 check "budget: $HOOK" budget "$HOOK" 40 # Re-plan 7
 check "budget: $POLICY" budget "$POLICY" 120

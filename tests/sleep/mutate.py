@@ -98,7 +98,9 @@ MUTANTS = {
     # the guard after a wake (Re-plan 9 addendum, review5 H1, H2, M1)
     "no guard": ("guard_plan = guard_pass(guard_plan)", "guard_plan = []"),
     "guard never stops": (PLAN_LEFT, "return plan"),
-    "guard armed at service start": ("stats_before, give_up, guard_plan = None, 0.0, []", "stats_before, give_up, guard_plan = None, 0.0, [boottime()]"),
+    "guard armed at service start": ("stats_before, give_up, guard_plan, shut_since = None, 0.0, [], None", "stats_before, give_up, guard_plan, shut_since = None, 0.0, [boottime()], None"),
+    "failsafe never fires": ("if now - shut_since < FAILSAFE:", "if True:"),
+    "failsafe ignores a real sleep": ("shut_since = None  # it really slept", "pass  # it really slept"),
     "guard not at once": ("for n in range(4)]", "for n in range(1, 4)]"),
     "guard gap too long": ("[now + n * LOCK_GUARD", "[now + n * 3 * LOCK_GUARD"),
     "guard only checks once": (PLAN_LEFT, "return [] if worked and len(rest) <= 3 else rest"),

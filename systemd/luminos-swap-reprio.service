@@ -1,0 +1,6 @@
+# [CHANGE: claude-code | 2026-11-13] BUG-228: after a hibernate, put the disk swap file back below zram.
+[Unit]
+Description=Luminos: disk swap file back below zram after hibernate
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'swapoff /swapfile.luminos && swapon -p 10 /swapfile.luminos'

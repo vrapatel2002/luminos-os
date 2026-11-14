@@ -1,0 +1,20 @@
+#!/bin/sh
+# luminos-hibernate-prep — make room for the hibernate image (BUG-228).
+# [CHANGE: claude-code | 2026-11-13] The first try failed "Error -12 creating image": freeing RAM pushed pages
+# into zram, which is RAM. Before hibernating, the disk swap file outranks zram and the image is made as small
+# as possible; a minute after waking it goes back below zram. Installed to /usr/lib/systemd/system-sleep/.
+# Never blocks sleep: always exits 0.
+SWAP=/swapfile.luminos
+log() { echo "luminos-hibernate-prep: $*" >&2; }
+prio() { swapoff "$SWAP" && swapon -p "$1" "$SWAP" && log "$SWAP priority $1" || log "could not set $SWAP priority $1"; }
+
+case "$1:${SYSTEMD_SLEEP_ACTION:-$2}" in
+    pre:hibernate)
+        echo 0 > /sys/power/image_size || log "could not shrink image_size"
+        prio 32000
+        ;;
+    post:hibernate|post:suspend-after-failed-hibernate)
+        /usr/bin/systemctl --no-block start luminos-swap-reprio.timer 2>/dev/null || prio 10
+        ;;
+esac
+exit 0
