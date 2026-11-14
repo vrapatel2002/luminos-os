@@ -1,5 +1,23 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 1 (watch-progress report for cleanup, read-only)
+Last updated: 2026-11-13 — Response 2 (mockups for per-person watch progress + Jellyseerr episode picker; nothing built yet)
+
+
+## 2026-11-13 R2 — Shawn's real ask (AIM RIGHT NOW). Mockup published, WAITING ON APPROVAL. Nothing changed on the server.
+1. **Storage page = luminos-space (:8446).** Before deleting by hand he wants to see, per movie/season/episode: episode count,
+   length, size, on-disk-since, and **each person's progress** (done / % / not started, last watched) so he never deletes
+   something another person hasn't finished. Verdict pill: "everyone finished" / "X still watching" / "nobody started";
+   delete warns + needs a second tap if someone isn't done.
+2. **Logins per person** (Shawn's answer). Shawn = most powerful (admin); others limited. TODAY Jellyfin has ONE user (shawn)
+   shared by everyone, so per-person progress is impossible until accounts exist. Jellyseerr logs people in with Jellyfin
+   accounts, so one Jellyfin login per person covers both. Names: Shawn said "skip for now". Each person sets their own password.
+   Play log by DEVICE exists since 2026-07-29 (ActivityLogs in jellyfin.db: TV 65PUL7973, Vratik's Tab S9+, Pixel 9) — fallback for history.
+3. **Jellyseerr optional episode picker** — default = all episodes of the season. Seerr (even 3.5) only requests whole
+   seasons; Shawn asked "seasons work, so what's the problem with episodes?" → it is doable, it needs a source patch to the
+   vendored build (server/packaging/jellyseerr): season modal UI + request storage + Sonarr step (add season, then unmonitor the
+   unpicked episodes BEFORE the search fires). Patch must be redone on Jellyseerr updates.
+- Mockup (interactive, both screens, fake 2nd person "Mom"): https://claude.ai/artifact/7FvfW8nmndJiMvqmVKxFBy
+- NEXT: Shawn approves/changes mockup → build #1 in luminos-space (Jellyfin /Users + per-user UserData; runtime from RunTimeTicks)
+  → patch Jellyseerr (#3) → create logins when he gives names (#2). Prove each end to end (memory rule).
 
 
 ## 2026-11-13 R1 — "how much have I watched, so I can delete" (READ-ONLY, nothing deleted)
