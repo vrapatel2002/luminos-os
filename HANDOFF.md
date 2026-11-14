@@ -1,5 +1,10 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 7 (Q: how do others request? → Jellyseerr; still waiting A/B for logins)
+Last updated: 2026-11-13 — Response 8 (Q: do others need Tailscale? → only away from home)
+
+
+## 2026-11-13 R8 — Q answered: at home nothing to install (Jellyfin app/TV + browser for Jellyseerr); 192.168.2.61:8444 is
+Caddy `tls internal` → a one-time "not secure" warning on each new device. Away from home: Tailscale app + Shawn shares
+the node with their Tailscale account (no router ports — DECISION 51). Still waiting on A/B for logins.
 
 
 ## 2026-11-13 R7 — Q answered: others request through Jellyseerr (:8444) with their own Jellyfin login; requests wait for
