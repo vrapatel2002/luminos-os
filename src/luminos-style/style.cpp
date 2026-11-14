@@ -41,6 +41,13 @@ const QHash<QString, Knob> &knobs()
         {QStringLiteral("iconOffsetYPx"),  {0, -24, 24}},
         {QStringLiteral("sidebarBottomPx"),{16, 0, 96}},
         {QStringLiteral("showMenuButton"), {1, 0, 1}},
+        {QStringLiteral("listCardRadiusPx"),  {-1, -1, 48}},
+        {QStringLiteral("listCardPadPx"),     {8, 0, 32}},
+        {QStringLiteral("listRowOuterPx"),    {-1, -1, 40}},
+        {QStringLiteral("listRowInnerPx"),    {-1, -1, 24}},
+        {QStringLiteral("listRowSelectedPx"), {-1, -1, 40}},
+        {QStringLiteral("listRowGapPx"),      {-1, -1, 16}},
+        {QStringLiteral("listIndicatorPct"),  {45, 10, 100}},
     };
     return k;
 }
@@ -156,6 +163,15 @@ LX_GET(qreal, iconGlyphPx)
 LX_GET(qreal, iconOffsetXPx)
 LX_GET(qreal, iconOffsetYPx)
 LX_GET(qreal, sidebarBottomPx)
+// R29: list values; a negative value means "same as the matching Shape / Space value"
+static qreal lxOr(qreal v, qreal fallback) { return v < 0 ? fallback : v; }
+qreal Style::listCardRadiusPx() const { return lxOr(m_backend->value(QStringLiteral("listCardRadiusPx")), cornerOuterPx()); }
+qreal Style::listCardPadPx() const { return m_backend->value(QStringLiteral("listCardPadPx")); }
+qreal Style::listRowOuterPx() const { return lxOr(m_backend->value(QStringLiteral("listRowOuterPx")), cornerOuterPx()); }
+qreal Style::listRowInnerPx() const { return lxOr(m_backend->value(QStringLiteral("listRowInnerPx")), cornerInnerPx()); }
+qreal Style::listRowSelectedPx() const { return lxOr(m_backend->value(QStringLiteral("listRowSelectedPx")), cornerSelectedPx()); }
+qreal Style::listRowGapPx() const { return lxOr(m_backend->value(QStringLiteral("listRowGapPx")), rowGapPx()); }
+qreal Style::listIndicatorPct() const { return m_backend->value(QStringLiteral("listIndicatorPct")); }
 bool Style::showMenuButton() const { return m_backend->value(QStringLiteral("showMenuButton")) >= 0.5; }
 QString Style::iconDiscColor() const { return m_backend->text(QStringLiteral("iconDiscColor")); }
 QString Style::iconGlyphColor() const { return m_backend->text(QStringLiteral("iconGlyphColor")); }

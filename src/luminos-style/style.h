@@ -45,6 +45,15 @@ class Style : public QObject
     LX_PROP(qreal, iconOffsetXPx)
     LX_PROP(qreal, iconOffsetYPx)
     LX_PROP(qreal, sidebarBottomPx)
+    // [CHANGE: claude-code | 2026-11-13] R29: list boxes on settings pages (−1 = follow the Shape value)
+    LX_PROP(qreal, listCardRadiusPx)
+    LX_PROP(qreal, listCardPadPx)
+    LX_PROP(qreal, listRowOuterPx)
+    LX_PROP(qreal, listRowInnerPx)
+    LX_PROP(qreal, listRowSelectedPx)
+    LX_PROP(qreal, listRowGapPx)
+    LX_PROP(qreal, listRowHalfGapPx)
+    LX_PROP(qreal, listIndicatorPct)
     LX_PROP(bool, showMenuButton)    // R7: the ☰ button next to the search box
     LX_PROP(QString, iconDiscColor)  // "" = theme colour, else #rrggbb
     LX_PROP(QString, iconGlyphColor) // "" = theme colour, else #rrggbb
@@ -81,6 +90,14 @@ public:
     qreal iconOffsetXPx() const;
     qreal iconOffsetYPx() const;
     qreal sidebarBottomPx() const;
+    qreal listCardRadiusPx() const;
+    qreal listCardPadPx() const;
+    qreal listRowOuterPx() const;
+    qreal listRowInnerPx() const;
+    qreal listRowSelectedPx() const;
+    qreal listRowGapPx() const;
+    qreal listRowHalfGapPx() const { return listRowGapPx() / 2.0; }
+    qreal listIndicatorPct() const;
     bool showMenuButton() const;
     QString iconDiscColor() const;
     QString iconGlyphColor() const;

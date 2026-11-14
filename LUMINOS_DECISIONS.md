@@ -8980,6 +8980,12 @@ layout rows. The Nexus frame card had 8 px padding against a 32 px corner, so th
 (at 45 degrees the curve is ~0.29 r in). qqc2-desktop-style 1.10 pads framed lists by max(8, 0.32 r + 2) ≈ 13 px. The grey
 circles were the icon disc drawn for flag images that don't exist on this system; kirigami 1.12 probes file icons and drops
 the disc (and its gap) when the file can't load. Proof: test dialog before/after (builds/kcm-rows/kb-before, kb-after2).
+**R29 (2026-11-14) — list look is tunable:** Shawn: "make adjustable thing so i can tune this design". luminos-style
+1.0-19 adds 7 keys (style.json): listCardRadiusPx, listCardPadPx, listRowOuterPx, listRowInnerPx, listRowSelectedPx,
+listRowGapPx (-1 = follow the matching global corner/gap knob) and listIndicatorPct (radio/check outline strength, 45).
+kcmutils 1.6 (list card mask) and qqc2-desktop-style 1.11 (framed list inset, row corners/gaps, radio outline) read them.
+Tuner: System Settings tab → "Lists" group. Proof: nested kcm_plasmakeyboard, style.json edited while open → box corners,
+row gap and padding changed live (builds/style-tuner/sl1 a.png/b.png).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

@@ -47,6 +47,14 @@ QQC2.ApplicationWindow {
         { g: "Bottom buttons", id: "buttonsTopPx",    lbl: "Space above", unit: "px", min: 0, max: 48, step: 1, def: 6 },
         { g: "Bottom buttons", id: "buttonsBottomPx", lbl: "Space below (moves the bar up)", unit: "px", min: 0, max: 64, step: 1, def: 6 },
         { g: "Motion", id: "animationMs",    lbl: "Animation",      unit: "ms", min: 0,   max: 500,  step: 10,  def: 180 },
+        // [CHANGE: claude-code | 2026-11-13] R29: list boxes on settings pages (−1 = same as Shape / Space above)
+        { g: "Lists", id: "listCardRadiusPx",  lbl: "Box corners (−1 = Outer corners)", unit: "px", min: -1, max: 48, step: 1, def: -1 },
+        { g: "Lists", id: "listCardPadPx",     lbl: "Space inside the box",       unit: "px", min: 0,  max: 32, step: 1, def: 8 },
+        { g: "Lists", id: "listRowOuterPx",    lbl: "Row end corners (−1 = Outer)",  unit: "px", min: -1, max: 40, step: 1, def: -1 },
+        { g: "Lists", id: "listRowInnerPx",    lbl: "Row middle corners (−1 = Inner)", unit: "px", min: -1, max: 24, step: 1, def: -1 },
+        { g: "Lists", id: "listRowSelectedPx", lbl: "Selected row corners (−1 = auto)", unit: "px", min: -1, max: 40, step: 1, def: -1 },
+        { g: "Lists", id: "listRowGapPx",      lbl: "Gap between rows (−1 = Row gap)", unit: "px", min: -1, max: 16, step: 1, def: -1 },
+        { g: "Lists", id: "listIndicatorPct",  lbl: "Round / tick box outline",   unit: "%",  min: 10, max: 100, step: 5, def: 45 },
         // [CHANGE: claude-code | 2026-11-09] DECISION 182: Files (Dolphin) page. a: "files" = shown on the Files tab.
         { a: "files", g: "Sidebar", id: "filesPlaceRowPx",      lbl: "Row height",            unit: "px", min: 28, max: 80, step: 1, def: 44 },
         { a: "files", g: "Sidebar", id: "filesPlaceGapPx",      lbl: "Gap between rows",      unit: "px", min: 0,  max: 12, step: 1, def: 2 },
