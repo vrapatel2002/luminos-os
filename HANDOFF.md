@@ -1,5 +1,16 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-14 — Response 15 (responsive hub/Space LIVE; downloads were stalled by the -Syu, fixed)
+Last updated: 2026-11-14 — Response 16 (stuck 100% downloads cleared)
+
+
+## 2026-11-14 R16 — "stuck at 100% since yesterday" — fixed, no config change.
+- BCS S02E08/E10: already imported (Season 2 complete E01–E10) but Sonarr kept them "importPending" because each download
+  folder still held a leftover .nzb ("no files eligible"). Removed the 2 queue items (removeFromClient, no blocklist) +
+  the nzb-only folders. Root cause of the leftover .nzb not proven (only 2 of 12) — if it recurs, look at NZBGet
+  cleanup vs Sonarr "remove completed".
+- Heart of the Beast: Radarr grabbed "the.beast.2026.1080p…-kyogo" (matched by ID, name differs → importBlocked).
+  Verified same film: 101 min = Radarr runtime, same group as the failed "heart.of.the.beast" release. Manual import →
+  /srv/external/movies/Heart of the Beast (2026)/; Jellyfin needed a library scan (manual import didn't trigger it); now listed.
+- Queues: Sonarr 0, Radarr 0.
 
 
 ## 2026-11-14 R15 — DONE: DECISION 190 (hub + Space responsive, grouped downloads) live and browser-verified at 1600/375 px.
