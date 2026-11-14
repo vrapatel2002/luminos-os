@@ -270,9 +270,18 @@ class H(http.server.BaseHTTPRequestHandler):
         if path != "/luminos-auth/login":
             return self.send(404, b"not found", "text/plain")
         # Cross-site form posts are refused: the Origin must be this same host.
+        # [CHANGE: cowork | 2026-11-13] Origin can be the literal "null": Caddy sends
+        # Referrer-Policy: no-referrer, and browsers then post forms with `Origin: null`
+        # (Shawn hit "bad origin" on the first real sign-in). A real Origin must match the
+        # host; a null/absent one falls back to Sec-Fetch-Site, which browsers set to
+        # "same-origin" for this form whatever the referrer policy is.
         origin = self.headers.get("Origin", "")
         host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host", "")
-        if origin and urllib.parse.urlparse(origin).netloc != host:
+        site = self.headers.get("Sec-Fetch-Site", "")
+        if origin and origin != "null":
+            if urllib.parse.urlparse(origin).netloc != host:
+                return self.send(403, b"bad origin", "text/plain")
+        elif site and site not in ("same-origin", "none"):
             return self.send(403, b"bad origin", "text/plain")
         n = int(self.headers.get("Content-Length") or 0)
         if n > 4096:

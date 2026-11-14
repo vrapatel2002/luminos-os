@@ -1,5 +1,9 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-13 — Response 11 (server pacman -Syu done; Jellyfin rolled back + pinned)
+Last updated: 2026-11-13 — Response 12 (gate "bad origin" fixed)
+
+
+## 2026-11-13 R12 — Shawn hit "bad origin" signing in to the hub/Space gate. Origin: null (no-referrer policy). Fixed in
+luminos-gate (Sec-Fetch-Site fallback), deployed, 4 header cases verified. Waiting for Shawn to retry sign-in + episode picker.
 
 
 ## 2026-11-13 R11 — Server full update DONE (DECISION 189). Shawn is testing the episode picker meanwhile (no result yet).

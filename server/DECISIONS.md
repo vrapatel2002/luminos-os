@@ -3540,3 +3540,10 @@ burned its full 2-minute timeout on every boot and Jellyfin/arrs/Jellyseerr star
 (protocol error). Its only user is the 1337x torrent indexer, already disabled (torrents retired, DECISION 84); NZBGeek
 does not use it. `systemctl disable --now byparr`, package file left pristine. Re-enable only with a byparr update.
 System state after: `running`, 0 failed units; all services and endpoints checked.
+
+**DECISION 187 follow-up (2026-11-13, R12):** first real sign-in from Shawn's browser → "bad origin". Cause: the `gated`
+snippet sends `Referrer-Policy: no-referrer`, so browsers post the form with `Origin: null`, which the gate treated as
+foreign. My earlier tests used curl with a real Origin, so they could not catch it — test with the browser's actual
+headers. Fix: a real Origin must still match the host; `null`/absent falls back to `Sec-Fetch-Site` (must be
+same-origin/none). Verified: null+same-origin → 401 (reaches password check), matching → 401, foreign → 403,
+null+cross-site → 403.
