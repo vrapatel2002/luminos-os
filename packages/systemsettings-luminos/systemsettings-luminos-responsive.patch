@@ -74,6 +74,80 @@ diff -ruN systemsettings-6.7.5/app/qml/SideBarItem.qml ../b/systemsettings-6.7.5
      wideScreen: false
  
      pageStack.initialPage: mainColumn
+diff -ruN systemsettings-6.7.5/app/qml/SubCategoryPage.qml ../b/systemsettings-6.7.5/app/qml/SubCategoryPage.qml
+--- a/app/qml/SubCategoryPage.qml	2026-11-10 12:36:06.778568775 -0500
++++ b/app/qml/SubCategoryPage.qml	2026-11-14 18:25:16.973280894 -0500
+@@ -49,44 +49,38 @@
+                 implicitHeight: LxS.Style.searchHeightPx
+                 visible: !applicationWindow().wideScreen
+ 
+-                padding: Kirigami.Units.smallSpacing
+-                leftPadding: subCategoryColumn.width < 160 ? 10 : 12; rightPadding: leftPadding + 2
+-                background: Rectangle { // Luminos: standalone tonal pill
++                // [CHANGE: claude-code | 2026-11-14] R35: round back-arrow button (like the Wi-Fi page header) instead of
++                // the "All settings" pill; goes back to the full settings list
++                implicitWidth: implicitHeight
++                padding: 0
++                background: Rectangle {
+                     radius: height / 2; Kirigami.Theme.colorSet: Kirigami.Theme.Button; Kirigami.Theme.inherit: false
+-                    color: backButton.hovered ? Qt.tint(Kirigami.Theme.backgroundColor, Qt.alpha(Kirigami.Theme.textColor, 0.08)) : Kirigami.Theme.backgroundColor
++                    color: backButton.down ? Qt.tint(Kirigami.Theme.backgroundColor, Qt.alpha(Kirigami.Theme.textColor, 0.16))
++                         : backButton.hovered ? Qt.tint(Kirigami.Theme.backgroundColor, Qt.alpha(Kirigami.Theme.textColor, 0.08)) : Kirigami.Theme.backgroundColor
+                 }
+ 
+                 // Uncomment once QQC2.ToolButton can force-left-align its contents
+                 // text: subCategoryColumn.title
+                 // icon.name: LayoutMirroring.enabled ? "go-previous-symbolic-rtl" : "go-previous-symbolic"
+-                onClicked: systemsettings.openEdgeDrawer("left") // [CHANGE: claude-code | 2026-10-12] Luminos: "All settings" chip
++                onClicked: root.pageStack.currentIndex = 0 // R35: back to the full list (stock "Back" behaviour)
+ 
+-                Accessible.name: buttonLabel.text
++                Accessible.name: i18nc("@action:button go back", "Back")
+ 
+                 // Need a custom content item to left-align everything, because
+                 // ToolButtons center everything when you force the width to be
+                 // higher than normal, which looks bad here
+-                contentItem: RowLayout {
++                contentItem: Item {
+                     Kirigami.Icon {
+                         id: backIcon
+-                        source: "sidebar-expand-left"
+-                        fallback: "view-left-new"
+-                        Layout.leftMargin: Kirigami.Units.smallSpacing
+-                        Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+-                        Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+-                        Layout.alignment: Qt.AlignCenter
+-                    }
+-                    QQC2.Label {
+-                        id: buttonLabel
+-                        visible: subCategoryColumn.width >= 160
+-                        Layout.fillWidth: true
+-                        Layout.fillHeight: true
+-                        text: i18nc("@action:button open the drawer with all settings", "All settings")
+-                        verticalAlignment: Text.AlignVCenter
+-                        elide: Text.ElideRight
+-                        textFormat: Text.PlainText
++                        anchors.centerIn: parent
++                        source: LayoutMirroring.enabled ? "go-previous-symbolic-rtl" : "go-previous-symbolic"
++                        width: Kirigami.Units.iconSizes.smallMedium
++                        height: width
+                     }
+                 }
++                QQC2.ToolTip.text: i18nc("@action:button go back", "Back")
++                QQC2.ToolTip.visible: hovered
++                QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+ 
+                 KeyNavigation.right: hamburgerMenuButton
+                 KeyNavigation.down: subCategoryView
+@@ -106,7 +100,7 @@
+                 Layout.fillHeight: true
+                 // Don't be too short when the back and burger buttons aren't visible
+                 Layout.minimumHeight: Math.max(backButton.implicitHeight, hamburgerMenuButton.implicitHeight)
+-                Layout.leftMargin: backIcon.visible ? 0 : Kirigami.Units.smallSpacing
++                Layout.leftMargin: backButton.visible ? Kirigami.Units.smallSpacing : Kirigami.Units.smallSpacing // R35
+                 level: 3
+                 text: subCategoryColumn.title
+                 verticalAlignment: Text.AlignVCenter
 diff -ruN systemsettings-6.7.5/app/SettingsBase.cpp ../b/systemsettings-6.7.5/app/SettingsBase.cpp
 --- a/app/SettingsBase.cpp	2026-11-10 12:36:06.778002028 -0500
 +++ b/app/SettingsBase.cpp	2026-11-10 12:43:23.399135256 -0500

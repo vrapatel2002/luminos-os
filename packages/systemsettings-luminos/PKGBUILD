@@ -38,7 +38,8 @@ _dirver=$(echo $pkgver | cut -d. -f1-3)
 # width, sidebar ~36 % of the window (190 px .. tuner width), round icon tiles only under 420 px.
 # 1.17 (R25, sidebar min 170 px) / 1.16 (R25): our Quick Settings page (luminos-style kcm_luminos_quick) is the first page; kcm_landingpage hidden.
 # 1.18 (R26): sidebar rows are rounded rectangles (corners <= 36 % of the row height), not ovals.
-pkgrel=1.18
+# [CHANGE: claude-code | 2026-11-14] pkgrel 1.19 — R35: round back-arrow button replaces the "All settings" chip on sub-pages.
+pkgrel=1.19
 pkgdesc='KDE system manager for hardware, software, and workspaces'
 arch=(x86_64)
 url='https://kde.org/plasma-desktop/'
@@ -79,7 +80,7 @@ sha256sums=('317a21165709d61796fba19f5454397577ffd8aa96655b29dd286a1df252cddb'
             'SKIP'
             '3b89ce0d1c5005feb9554c11e4be2ad444b87d1f35673c35313223088b84129c'
             '39ac034debde742c8cf436600230da558046def4f3fd083e4bc692abd624e62c'
-            'b170de46b4433546ce83d827800d658a752cfcba67f4fdc31d177bb2e48a06d5')
+            '2799415cd914536853299042722110b3f5e3ca2f495126d43b8b8606cb900a1a')
 validpgpkeys=('E0A3EB202F8E57528E13E72FD7574483BB57B18D'  # Jonathan Esk-Riddell <jr@jriddell.org>
               '0AAC775BB6437A8D9AF7A3ACFE0784117FBCE11D'  # Bhushan Shah <bshah@kde.org>
               'D07BD8662C56CB291B316EB2F5675605C74E02CF'  # David Edmundson <davidedmundson@kde.org>

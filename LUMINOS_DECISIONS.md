@@ -9021,6 +9021,10 @@ new per-group "Reset group" need a second click within 3 s; "Save my look" / "Lo
 reseed reads the file first (Style returned resolved numbers for -1 bars, which then got saved). New bar Text >
 "Text boldness" (textWeight 300–800, def 400): luminos-style-apply writes QFont weight (field 5) to kdeglobals
 font/menuFont/smallestReadable, +100 for toolBar/WM. Proof: style-tuner/bw4 vs bw7 (System Settings at 400 vs 700).
+**R35 (2026-11-14) — round back button:** Shawn: "i want this type back button … instead of all setting" (Wi-Fi
+page's circular ← button). systemsettings 1.19: the sub-page header's "All settings" pill is now a round tonal button
+(searchHeightPx square, go-previous icon, Back tooltip) and does KDE's stock Back (pageStack.currentIndex = 0 → full
+list in the sidebar); the edge hot zone still opens the drawer. Proof: style-tuner/bk2 (kcm_plasmakeyboard).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->
