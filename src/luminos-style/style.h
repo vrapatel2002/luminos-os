@@ -54,6 +54,7 @@ class Style : public QObject
     LX_PROP(qreal, listRowGapPx)
     LX_PROP(qreal, listRowHalfGapPx)
     LX_PROP(qreal, listIndicatorPct)
+    LX_PROP(qreal, listFadePx)        // R33: rows fade out over this many px at the list's top/bottom edge
     LX_PROP(qreal, listVisibleRows)   // R32: rows a page list shows when options sit under it (0 = fill)
     LX_PROP(bool, showMenuButton)    // R7: the ☰ button next to the search box
     LX_PROP(QString, iconDiscColor)  // "" = theme colour, else #rrggbb
@@ -100,6 +101,7 @@ public:
     qreal listRowHalfGapPx() const { return listRowGapPx() / 2.0; }
     qreal listIndicatorPct() const;
     qreal listVisibleRows() const;
+    qreal listFadePx() const;
     bool showMenuButton() const;
     QString iconDiscColor() const;
     QString iconGlyphColor() const;

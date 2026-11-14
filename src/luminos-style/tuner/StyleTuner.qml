@@ -54,7 +54,8 @@ QQC2.ApplicationWindow {
         { g: "Lists", id: "listRowInnerPx",    lbl: "Row middle corners (−1 = Inner)", unit: "px", min: -1, max: 24, step: 1, def: -1 },
         { g: "Lists", id: "listRowSelectedPx", lbl: "Selected row corners (−1 = auto)", unit: "px", min: -1, max: 40, step: 1, def: -1 },
         { g: "Lists", id: "listRowGapPx",      lbl: "Gap between rows (−1 = Row gap)", unit: "px", min: -1, max: 16, step: 1, def: -1 },
-        { g: "Lists", id: "listVisibleRows",   lbl: "Rows shown (0 = fill the page)", unit: "", min: 0, max: 20, step: 0.5, def: 4 },
+        { g: "Lists", id: "listVisibleRows",   lbl: "Rows shown when options are below (0 = fill)", unit: "", min: 0, max: 20, step: 0.5, def: 4 },
+        { g: "Lists", id: "listFadePx",        lbl: "Edge fade (rows fade out at top/bottom)", unit: "px", min: 0, max: 40, step: 1, def: 10 },
         { g: "Lists", id: "listIndicatorPct",  lbl: "Round / tick box outline",   unit: "%",  min: 10, max: 100, step: 5, def: 45 },
         // [CHANGE: claude-code | 2026-11-09] DECISION 182: Files (Dolphin) page. a: "files" = shown on the Files tab.
         { a: "files", g: "Sidebar", id: "filesPlaceRowPx",      lbl: "Row height",            unit: "px", min: 28, max: 80, step: 1, def: 44 },

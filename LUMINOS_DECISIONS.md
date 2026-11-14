@@ -9003,6 +9003,16 @@ bar. New knob listVisibleRows (luminos-style 1.0-20, default 4, 0 = fill; tuner 
 shown"): with a footer, the list is that many rows tall (row height measured from the view) and AbstractKCM's footer
 takes the rest, scrolling if needed (__luminosContentHeight replaces R31's min height). Proof: sz34 (4 rows), kcm-rows/o1
 (scrolled row has rounded cut; style.json 4→3 live).
+**R33 (2026-11-13) — remade:** Shawn: "do complete re make of this part … match the current theme and setting".
+R27–R32 kept patching the stock layout (list header overlaid inside the list, masks, separately scrolling footer) and
+each fix exposed another seam. kcmutils 1.13 replaces the unframed ScrollViewKCM with one centred card column (page
+width): the view's own header Component is lifted out of the ListView into a Loader (keeps its context, so search
+still filters) and styled as a rounded card; the list sits in a rounded card with the rows inside a rounded window
+that fades rows out at top/bottom (new knob listFadePx, default 10, luminos-style 1.0-21); a slim scroll bar sits in
+the card's pad; the page footer (AbstractKCM __luminosOwnsFooter) is placed straight under the list; the whole column
+scrolls when short. With options below, the list is listVisibleRows rows tall (0 = fill); pages without options fill.
+Framed views keep the stock ScrollView. AbstractKCM's R31/R32 footer Flickable reverted. Proof: kcm-rows/o6 (4→3 live),
+style-tuner/sz36 (kcm_plasmakeyboard), sz37 (kcm_kwin_effects unaffected).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->
