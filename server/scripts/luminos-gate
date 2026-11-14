@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""[CHANGE: cowork | 2026-11-13] luminos-gate -- the admin lock in front of the hub and the
+Space page. DECISION 187.
+
+WHY: Caddy used to hand the Space token to ANYONE who opened :8446 (it redirected / to
+/?token=...), and the hub on :443 had no login at all. Once other people have accounts and
+sit on the same Wi-Fi or tailnet, that is a delete button for everyone. This puts one real
+sign-in in front of both, using the Jellyfin account Shawn already has.
+
+HOW: Caddy `forward_auth` asks GET /luminos-auth/check before every request to those sites.
+  * valid cookie            -> 200 (+ X-Luminos-User), Caddy passes the request through
+  * no / bad / expired one  -> 302 to /luminos-auth/login?next=<where you were going>
+The login form posts the username + password to Jellyfin's own AuthenticateByName. Only
+names in ALLOW (default: shawn) that Jellyfin also reports as administrator get a cookie.
+The Jellyfin session that check creates is logged out straight away, so no ghost device.
+
+The cookie is an HMAC-signed {user id, name, expiry}, HttpOnly + Secure + SameSite=Strict,
+30 days. Cookies ignore the port, so one sign-in on a host covers :443 and :8446 together.
+Every 10 minutes per user the gate re-asks Jellyfin (with the Space page's own API key)
+whether that account still exists, is enabled and is still an admin -- demoting or
+disabling the account locks the gate within 10 minutes without touching any cookie.
+Rotate the secret file to sign everybody out at once.
+
+Failed sign-ins: 5 per IP per 10 minutes, then 429. Nothing is ever logged with a password.
+
+  luminos-gate                    # serve on 127.0.0.1:8101
+"""
+import base64
+import hashlib
+import hmac
+import html
+import http.server
+import json
+import os
+import secrets
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+BIND, PORT = "127.0.0.1", 8101
+JELLYFIN = "http://127.0.0.1:8096"
+JF_KEY_FILE = "/var/lib/luminos/space-jellyfin-key"     # read-only lookups (revalidation)
+SECRET_FILE = "/var/lib/luminos/gate-secret"
+CSS_FILE = "/usr/local/share/luminos/web/app.css"
+ALLOW = {n.strip().lower() for n in os.environ.get("LUMINOS_GATE_ALLOW", "shawn").split(",") if n.strip()}
+COOKIE = "luminos_gate"
+MAX_AGE = 30 * 24 * 3600
+RECHECK = 600
+FAIL_LIMIT, FAIL_WINDOW = 5, 600
+CSP = ("default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self' data:; "
+       "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+
+_fails = {}            # ip -> [timestamps]
+_checked = {}          # uid -> (time, ok)
+_lock = threading.Lock()
+
+
+def secret():
+    try:
+        with open(SECRET_FILE, "rb") as f:
+            s = f.read().strip()
+        if len(s) >= 32:
+            return s
+    except OSError:
+        pass
+    s = secrets.token_hex(32).encode()
+    fd = os.open(SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(s)
+    return s
+
+
+SECRET = secret()
+
+
+def b64(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def unb64(s):
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def sign(payload):
+    body = b64(json.dumps(payload, separators=(",", ":")).encode())
+    mac = b64(hmac.new(SECRET, body.encode(), hashlib.sha256).digest())
+    return body + "." + mac
+
+
+def verify(token):
+    try:
+        body, mac = token.split(".", 1)
+        good = b64(hmac.new(SECRET, body.encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(mac, good):
+            return None
+        p = json.loads(unb64(body))
+        if p.get("exp", 0) < time.time() or str(p.get("n", "")).lower() not in ALLOW:
+            return None
+        return p
+    except Exception:
+        return None
+
+
+def jf_key():
+    with open(JF_KEY_FILE) as f:
+        return f.read().strip()
+
+
+def still_admin(uid):
+    """Re-ask Jellyfin at most every RECHECK seconds. Fails CLOSED if Jellyfin says no,
+    fails OPEN only on a network error with a recent good answer (a Jellyfin restart must
+    not lock Shawn out of the page that shows him what is wrong)."""
+    now = time.time()
+    with _lock:
+        hit = _checked.get(uid)
+    if hit and now - hit[0] < RECHECK:
+        return hit[1]
+    try:
+        req = urllib.request.Request(JELLYFIN + "/Users/" + urllib.parse.quote(uid),
+                                     headers={"X-Emby-Token": jf_key()})
+        with urllib.request.urlopen(req, timeout=10) as f:
+            u = json.loads(f.read())
+        pol = u.get("Policy") or {}
+        ok = bool(pol.get("IsAdministrator")) and not pol.get("IsDisabled") \
+            and str(u.get("Name", "")).lower() in ALLOW
+    except urllib.error.HTTPError:
+        ok = False                       # 404 = account gone
+    except Exception:
+        return bool(hit and hit[1] and now - hit[0] < 6 * 3600)
+    with _lock:
+        _checked[uid] = (now, ok)
+    return ok
+
+
+def jellyfin_login(username, password):
+    """Returns (user_id, name, is_admin) or None. Never raises on a wrong password."""
+    auth = ('MediaBrowser Client="luminos-gate", Device="luminos-gate", '
+            'DeviceId="luminos-gate", Version="1.0"')
+    req = urllib.request.Request(
+        JELLYFIN + "/Users/AuthenticateByName",
+        data=json.dumps({"Username": username, "Pw": password}).encode(),
+        headers={"Content-Type": "application/json", "Authorization": auth}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as f:
+            r = json.loads(f.read())
+    except urllib.error.HTTPError:
+        return None
+    u, tok = r.get("User") or {}, r.get("AccessToken")
+    if tok:      # do not leave a session behind for every sign-in
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                JELLYFIN + "/Sessions/Logout", data=b"", method="POST",
+                headers={"Authorization": auth + ', Token="%s"' % tok}), timeout=10).read()
+        except Exception:
+            pass
+    pol = u.get("Policy") or {}
+    return u.get("Id"), u.get("Name", ""), bool(pol.get("IsAdministrator")) and not pol.get("IsDisabled")
+
+
+def too_many(ip):
+    now = time.time()
+    with _lock:
+        lst = [t for t in _fails.get(ip, []) if now - t < FAIL_WINDOW]
+        _fails[ip] = lst
+        return len(lst) >= FAIL_LIMIT
+
+
+def failed(ip):
+    with _lock:
+        _fails.setdefault(ip, []).append(time.time())
+
+
+def safe_next(n):
+    n = n or "/"
+    if not n.startswith("/") or n.startswith("//") or "\\" in n or n.startswith("/luminos-auth/"):
+        return "/"
+    return n
+
+
+PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Sign in</title>
+<link rel="stylesheet" href="/luminos-auth/app.css">
+</head><body>
+<div class="air"></div>
+<div class="wrap">
+ <div class="top"><span class="mark">Luminos <em>/ sign in</em></span></div>
+ <section class="hero gate">
+  <p class="sig">admin only</p>
+  <form method="post" action="/luminos-auth/login" class="gateform">
+   <input type="hidden" name="next" value="%(next)s">
+   <label>Jellyfin username<input name="username" autocomplete="username" autocapitalize="none" required autofocus></label>
+   <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+   <button class="btn on" type="submit">sign in</button>
+   <p class="gatemsg">%(msg)s</p>
+  </form>
+ </section>
+ <div class="foot"><span>same account as Jellyfin</span><span>stays signed in for 30 days</span></div>
+</div>
+</body></html>
+"""
+
+
+class H(http.server.BaseHTTPRequestHandler):
+    server_version = "luminos-gate"
+    sys_version = ""
+
+    def ip(self):
+        # Caddy is the only client; it sets X-Forwarded-For.
+        return (self.headers.get("X-Forwarded-For") or self.client_address[0]).split(",")[0].strip()
+
+    def cookie(self):
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == COOKIE:
+                return v
+        return ""
+
+    def send(self, code, body=b"", ctype="text/html; charset=utf-8", headers=()):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Security-Policy", CSP)
+        self.send_header("X-Frame-Options", "DENY")
+        for k, v in headers:
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def page(self, nxt, msg="", code=200):
+        body = PAGE % {"next": html.escape(safe_next(nxt), quote=True), "msg": html.escape(msg)}
+        self.send(code, body.encode())
+
+    def do_GET(self):
+        path, _, query = self.path.partition("?")
+        q = urllib.parse.parse_qs(query)
+        if path == "/luminos-auth/check":
+            p = verify(self.cookie())
+            if p and still_admin(p["u"]):
+                return self.send(200, b"", "text/plain", [("X-Luminos-User", p["n"])])
+            nxt = self.headers.get("X-Forwarded-Uri") or "/"
+            return self.send(302, b"", "text/plain", [
+                ("Location", "/luminos-auth/login?next=" + urllib.parse.quote(safe_next(nxt), safe=""))])
+        if path == "/luminos-auth/login":
+            return self.page(q.get("next", ["/"])[0])
+        if path == "/luminos-auth/logout":
+            return self.send(302, b"", "text/plain", [
+                ("Set-Cookie", COOKIE + "=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict"),
+                ("Location", "/luminos-auth/login")])
+        if path == "/luminos-auth/app.css":
+            try:
+                with open(CSS_FILE, "rb") as f:
+                    css = f.read()
+            except OSError:
+                css = b""
+            return self.send(200, css, "text/css; charset=utf-8")
+        return self.send(404, b"not found", "text/plain")
+
+    do_HEAD = do_GET
+
+    def do_POST(self):
+        path = self.path.partition("?")[0]
+        if path != "/luminos-auth/login":
+            return self.send(404, b"not found", "text/plain")
+        # Cross-site form posts are refused: the Origin must be this same host.
+        origin = self.headers.get("Origin", "")
+        host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host", "")
+        if origin and urllib.parse.urlparse(origin).netloc != host:
+            return self.send(403, b"bad origin", "text/plain")
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > 4096:
+            return self.send(413, b"too large", "text/plain")
+        form = urllib.parse.parse_qs(self.rfile.read(n).decode("utf-8", "replace"))
+        user = (form.get("username", [""])[0] or "")[:128]
+        pw = (form.get("password", [""])[0] or "")[:256]
+        nxt = form.get("next", ["/"])[0]
+        ip = self.ip()
+        if too_many(ip):
+            return self.page(nxt, "Too many tries. Wait 10 minutes.", 429)
+        res = jellyfin_login(user, pw) if user and pw else None
+        if not res:
+            failed(ip)
+            time.sleep(1.0)
+            return self.page(nxt, "That username or password is wrong.", 401)
+        uid, name, admin = res
+        if not admin or name.lower() not in ALLOW:
+            failed(ip)
+            return self.page(nxt, "This account can watch and request, but these admin pages are "
+                                  "only for the server owner.", 403)
+        with _lock:
+            _checked[uid] = (time.time(), True)
+        token = sign({"u": uid, "n": name, "exp": int(time.time()) + MAX_AGE})
+        self.send(303, b"", "text/plain", [
+            ("Set-Cookie", "%s=%s; Path=/; Max-Age=%d; HttpOnly; Secure; SameSite=Strict"
+             % (COOKIE, token, MAX_AGE)),
+            ("Location", safe_next(nxt))])
+
+    def log_message(self, fmt, *args):
+        # Paths only -- never bodies. /check is too chatty to log.
+        if "/luminos-auth/check" not in (args[0] if args else ""):
+            super().log_message(fmt, *args)
+
+
+def main():
+    srv = http.server.ThreadingHTTPServer((BIND, PORT), H)
+    srv.daemon_threads = True
+    print("luminos-gate on %s:%d, allow=%s" % (BIND, PORT, ",".join(sorted(ALLOW))), flush=True)
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

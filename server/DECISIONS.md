@@ -3458,3 +3458,51 @@ moved), regenerate the patch with `diff -ruN a/ b/`, rebuild. **Gotcha hit:** `p
 `informant list --unread` before installing anything.
 Rollback: `sudo pacman -U /root/bak-20261113-jellyseerr/jellyseerr-3.4.1-1-x86_64.pkg.tar.zst` (old code ignores the
 extra column) and, if wanted, restore `/root/bak-20261113-jellyseerr/db/`.
+
+## DECISION 187 — The hub and the Space page sit behind a real sign-in (luminos-gate) — 2026-11-13
+<!-- [CHANGE: cowork | 2026-11-13] -->
+**Found:** Caddy handed the Space token to anyone who opened :8446 (`redir / -> /?token=…`), so every device on the
+house Wi-Fi or the tailnet got the delete buttons; the hub on :443 had no login at all. Fine with one user, not once
+other people have accounts (DECISION 188).
+
+**Decision:** `luminos-gate` (server/scripts/luminos-gate, 127.0.0.1:8101, runs as luminosspace) + Caddy
+`forward_auth` on both sites (snippets `gated` / `gatedspace`, generator `luminos-gate-caddy.py`). Sign in with the
+Jellyfin account; only names in `LUMINOS_GATE_ALLOW` (= `shawn`) that Jellyfin reports as administrator get an
+HMAC-signed cookie (HttpOnly, Secure, SameSite=Strict, 30 days). Cookies ignore the port, so one sign-in per host covers
+:443 and :8446. Every 10 min the gate re-asks Jellyfin whether the account is still an enabled admin (fails closed on a
+"no", tolerates a Jellyfin restart for up to 6 h). 5 failed sign-ins per IP per 10 min → 429. Cross-site POSTs refused
+by Origin. The Jellyfin session the check creates is logged out immediately. `/fonts/*` stays open (sign-in page
+typeface). Rotate `/var/lib/luminos/gate-secret` to sign everyone out.
+
+**Verified:** all three hosts (LAN IP, tailnet name) → 302 to sign-in, including `/api/data`; tampered cookie → 302;
+wrong password → 401; cross-site Origin → 403; a real Jellyfin login on a temporary gate allowing the service account →
+303 + cookie with all three flags → check 200, and the SAME cookie on the live gate (allow=shawn) → 302; a guest
+account → 403 "only for the server owner". Jellyfin 8443/8096 and Jellyseerr untouched. Sign-in page screenshot checked.
+Rollback: `sudo cp /etc/caddy/Caddyfile.pre-gate /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
+
+## DECISION 188 — Other people get invite links (jfa-go) and a limited "viewer" account — 2026-11-13
+<!-- [CHANGE: cowork | 2026-11-13] -->
+**Ask (Shawn):** production-style: him admin everywhere, everyone else limited; they sign up themselves (own
+username + password). Jellyfin has no self-registration, so: **jfa-go 0.6.0** (upstream author's AUR recipe, rebuilt
+headless — TRAY=off, E2EE=off — `server/packaging/jfa-go/PKGBUILD`), loopback :8056, Caddy :8452 (LAN + tailnet), NOT
+behind the gate (invitees have no account yet). Unit `server/systemd/jfa-go.service`, system user `jfago`, data in
+`/var/lib/jfa-go` (0700; config 0600). Update checks off. Password reset by email off (no mail server).
+
+- jfa-go cannot create users with an API key, so it has its own Jellyfin admin **`luminos-invites`** — hidden, no
+  remote access, no playback, 40-char random password that exists only in its config (never shown). It is not a person:
+  the Space page skips accounts that cannot play media.
+- Default profile **"viewer"** (copied from a template account, then the template was deleted): not admin, hidden
+  from the login-screen list, playback + transcoding, remote access ON (tailnet counts as remote), NO delete, NO
+  download, NO remote-control of others, NO Live TV / subtitle / collection management, max 3 streams, locked after 5
+  bad passwords, SyncPlay join only.
+- Jellyseerr: no change needed — any Jellyfin user can sign in (`newPlexLogin`) and lands with permissions 32 =
+  REQUEST only, so their requests wait for Shawn's approval and they only see their own requests.
+- **Proved end to end** (`server/tests/jfa-e2e.py`, 16/16 PASS): 1-use invite → page opens through Caddy → sign-up via
+  the public URL → account has exactly the policy above → signs in to Jellyfin but gets 403 on server settings → admin
+  gate refuses it (403) → signs in to Jellyseerr with permissions 32 → test user, Jellyseerr user and invite removed.
+- How Shawn invites: `https://192.168.2.61:8452` → sign in with his Jellyfin login → Invites → create (1 use) → send the
+  link. The link works on the tailnet name too (same path, swap the host) for people away from home.
+- **Away-from-home guests** need the server shared to their Tailscale account. Restrict them in the tailnet policy:
+  `{"src": ["autogroup:shared"], "dst": ["*"], "ip": ["tcp:8443", "tcp:8444", "tcp:8452"]}` and make sure no
+  `src: ["*"]` rule remains (that would include shared users). Not applied — Shawn's admin console.
+Rollback: `sudo systemctl disable --now jfa-go`, restore `/etc/caddy/Caddyfile.pre-jfa`, delete `luminos-invites`.

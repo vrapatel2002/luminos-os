@@ -1,0 +1,44 @@
+# [CHANGE: cowork | 2026-11-13] DECISION 188 -- invite links for Jellyfin accounts.
+# Adapted from the AUR jfa-go 0.6.0-2 PKGBUILD (maintainer Harvey Tindall, the upstream author).
+# Differences, both because this is a headless server:
+#   * TRAY=off  -> no libayatana-appindicator (would drag GTK onto the box)
+#   * E2EE=off  -> no libolm (only for the Matrix-chat integration, which is not used)
+#   * swag is not a makedepend: upstream's Makefile `go install`s it when missing, so
+#     $GOPATH/bin is put on PATH instead of building an AUR package for it.
+pkgname=jfa-go
+pkgver=0.6.0
+pkgrel=3
+pkgdesc="A web app for managing users on Jellyfin (headless build: no tray, no Matrix E2EE)"
+arch=('x86_64')
+url="https://github.com/hrfee/jfa-go"
+license=('MIT')
+makedepends=('go>=1.24' 'nodejs' 'npm' 'esbuild' 'git')
+depends=()
+source=("jfa-go::git+https://github.com/hrfee/jfa-go.git#tag=v$pkgver")
+md5sums=(SKIP)
+
+prepare() {
+    cd jfa-go
+    npm i
+    export GOPATH="$(go env GOPATH)"
+    export PATH="$PATH:$GOPATH/bin"
+    make precompile GOESBUILD=on INTERNAL=off E2EE=off TRAY=off
+}
+
+build() {
+    cd jfa-go
+    export GOPATH="$(go env GOPATH)"
+    export PATH="$PATH:$GOPATH/bin"
+    make INTERNAL=off E2EE=off TRAY=off BUILTBY="makepkg (luminos)"
+}
+
+package() {
+    cd jfa-go
+    install -d "$pkgdir"/opt
+    make install DESTDIR="$pkgdir"/opt
+    mkdir -p "$pkgdir"/usr/bin
+    chmod 755 "$pkgdir"/opt/$pkgname/$pkgname
+    ln -sf /opt/$pkgname/$pkgname "$pkgdir"/usr/bin/$pkgname
+    install -Dm644 static/fonts/OFL.txt -t "$pkgdir"/usr/share/licenses/$pkgname
+    install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
+}

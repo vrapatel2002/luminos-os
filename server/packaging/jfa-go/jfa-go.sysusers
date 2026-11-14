@@ -1,0 +1,2 @@
+# /etc/sysusers.d/jfa-go.conf -- [CHANGE: cowork | 2026-11-13] DECISION 188
+u jfago - "jfa-go invite service" /var/lib/jfa-go

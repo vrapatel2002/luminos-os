@@ -642,3 +642,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,[tabindex]:focus-visibl
            transform:scaleX(var(--w,0));background:var(--muted)}
 .pp .bar i.done{background:var(--ok)}
 .pp .meta{grid-column:1/-1;font-family:var(--f-mono);font-size:var(--t-micro);color:var(--muted)}
+
+/* ---------------------------------------------------------------- admin sign-in
+   [CHANGE: cowork | 2026-11-13] DECISION 187. Served by luminos-gate at
+   /luminos-auth/app.css; class names checked against the hub (gate*-prefixed). */
+.gateform{display:grid;gap:var(--s3);max-width:24rem;margin-top:var(--s4)}
+.gateform label{display:grid;gap:var(--s1);font-size:var(--t-caption);color:var(--muted)}
+.gateform .btn{justify-self:start}
+.gatemsg{min-height:1.5em;margin:0;font-size:var(--t-caption);color:var(--warn)}

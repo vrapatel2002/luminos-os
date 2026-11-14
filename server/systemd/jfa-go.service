@@ -1,0 +1,41 @@
+# /etc/systemd/system/jfa-go.service
+# [CHANGE: cowork | 2026-11-13] DECISION 188 -- invite links for Jellyfin accounts.
+# Loopback only; Caddy fronts it on :8452 (LAN + tailnet, TLS). Config/data in /var/lib/jfa-go
+# (config.ini 0600 holds the luminos-invites service password). Update checks are off.
+[Unit]
+Description=jfa-go (Jellyfin invite links / account page)
+After=network.target jellyfin.service
+Wants=jellyfin.service
+
+[Service]
+Type=simple
+User=jfago
+Group=jfago
+StateDirectory=jfa-go
+StateDirectoryMode=0700
+ExecStart=/opt/jfa-go/jfa-go -config /var/lib/jfa-go/config.ini -data /var/lib/jfa-go -host 127.0.0.1 -port 8056
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+[Install]
+WantedBy=multi-user.target

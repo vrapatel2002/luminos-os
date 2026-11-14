@@ -59,28 +59,99 @@
 	reverse_proxy 127.0.0.1:{args[0]}
 }
 
+# [CHANGE: claude | 2026-10-31] BUG-227 / DECISION 168 — Jellyfin front with the Dolby Vision truth-teller.
+# Only "POST /Items/<id>/PlaybackInfo" goes through luminos-jf-profile-shim (:8098); everything else (streams,
+# websockets, images) goes straight to Jellyfin. If the shim is down, `lb_policy first` falls through to Jellyfin.
+(jellyfin) {
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+	@playbackinfo {
+		method POST
+		path_regexp (?i)^/Items/[^/]+/PlaybackInfo$
+	}
+	handle @playbackinfo {
+		reverse_proxy 127.0.0.1:8098 127.0.0.1:8096 {
+			lb_policy first
+			lb_try_duration 2s
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8096
+	}
+}
+
 (tsname) {
 	tls /var/lib/luminos/tls/cert.pem /var/lib/luminos/tls/key.pem
+}
+
+# [CHANGE: cowork | 2026-11-13] DECISION 187 -- admin-only sites. luminos-gate (127.0.0.1:8101)
+# answers /luminos-auth/* itself and is asked (forward_auth) before anything else is served.
+# /fonts/* stays open so the sign-in page can use the house typeface; fonts reveal nothing.
+(gated) {
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+	handle /luminos-auth/* {
+		reverse_proxy 127.0.0.1:8101
+	}
+	handle /fonts/* {
+		reverse_proxy 127.0.0.1:{args[0]}
+	}
+	handle {
+		forward_auth 127.0.0.1:8101 {
+			uri /luminos-auth/check
+			copy_headers X-Luminos-User
+		}
+		reverse_proxy 127.0.0.1:{args[0]}
+	}
+}
+(gatedspace) {
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+	handle /luminos-auth/* {
+		reverse_proxy 127.0.0.1:8101
+	}
+	handle /fonts/* {
+		reverse_proxy 127.0.0.1:8099
+	}
+	handle {
+		route {
+			forward_auth 127.0.0.1:8101 {
+				uri /luminos-auth/check
+				copy_headers X-Luminos-User
+			}
+			import spacetoken
+			reverse_proxy 127.0.0.1:8099
+		}
+	}
 }
 
 # --- the landing page :443 ----------------------------------------------------
 luminos-server.tail1fd435.ts.net {
 	import tsname
-	import proxy 8100
+	import gated 8100
 }
 100.82.125.26, 192.168.2.61, 192.168.2.62 {
 	tls internal
-	import proxy 8100
+	import gated 8100
 }
 
 # --- Jellyfin :8443 -----------------------------------------------------------
 luminos-server.tail1fd435.ts.net:8443 {
 	import tsname
-	import proxy 8096
+	import jellyfin
 }
 100.82.125.26:8443, 192.168.2.61:8443, 192.168.2.62:8443 {
 	tls internal
-	import proxy 8096
+	import jellyfin
 }
 
 # --- Jellyseerr :8444 ---------------------------------------------------------
@@ -112,17 +183,15 @@ luminos-server.tail1fd435.ts.net:8445 {
 		path /
 		not query token=*
 	}
-	redir @needtoken /?token=REDACTED_SEE_mobile-setup.txt
+	redir @needtoken /?token=10l8BkUxrklAAqaTf9W_iRMG
 }
 luminos-server.tail1fd435.ts.net:8446 {
 	import tsname
-	import spacetoken
-	import proxy 8099
+	import gatedspace
 }
 100.82.125.26:8446, 192.168.2.61:8446, 192.168.2.62:8446 {
 	tls internal
-	import spacetoken
-	import proxy 8099
+	import gatedspace
 }
 
 # --- Radarr :8447 -------------------------------------------------------------
@@ -156,14 +225,11 @@ luminos-server.tail1fd435.ts.net:8449 {
 }
 
 # --- Bazarr :8450 -------------------------------------------------------------
-# [CHANGE: claude-code | 2026-09-16] DECISION 98 added this block to the LIVE
-# /etc/caddy/Caddyfile on 2026-09-13 17:51 and never wrote it back here, so this file was
-# one `sudo cp` away from silently deleting Bazarr's front door.
-# ⚠️ HONEST PROVENANCE: this block was RECONSTRUCTED from the nine blocks above plus the
-# port recorded in DECISION 98 (6767 → 8450). It was NOT copied off the server — the
-# session that wrote it had no route to the box. `diff` it against /etc/caddy/Caddyfile
-# before this file is ever installed.
-# Bazarr listens on 6767, loopback-only and LAN-blocked; 8450 is its only way in.
+# [CHANGE: claude-code | 2026-09-13] DECISION 98.
+# Gate from the header of this file was run before adding it: from 127.0.0.1 with no
+# credentials, /api/system/status and /api/series both return 401, a wrong X-API-KEY
+# returns 401, and the unauthenticated index does NOT contain the API key (grep -c = 0).
+# Only the SPA shell is served anonymously; every data route demands the key or a session.
 luminos-server.tail1fd435.ts.net:8450 {
 	import tsname
 	import proxy 6767
@@ -171,4 +237,33 @@ luminos-server.tail1fd435.ts.net:8450 {
 100.82.125.26:8450, 192.168.2.61:8450, 192.168.2.62:8450 {
 	tls internal
 	import proxy 6767
+}
+
+# --- Jellyfin plain-HTTP front :8095 (BUG-227 / DECISION 168) ----------------------------------------
+# nftables redirects incoming tcp/8096 here (table inet luminos_jfshim), so the Roku/tablet/phone keep their
+# saved http://<server>:8096 address. Jellyfin itself still listens on 8096 for loopback.
+http://:8095 {
+	import jellyfin
+}
+
+# [CHANGE: claude-code | 2026-10-31] AdGuard Home dashboard - DECISION 169
+luminos-server.tail1fd435.ts.net:8451 {
+	import tsname
+	import proxy 3080
+}
+100.82.125.26:8451, 192.168.2.61:8451, 192.168.2.62:8451 {
+	tls internal
+	import proxy 3080
+}
+
+# [CHANGE: cowork | 2026-11-13] DECISION 188 -- jfa-go invite links + "my account" page.
+# Deliberately NOT behind luminos-gate: invited people must reach /invite/<code> before they
+# have any account. jfa-go's admin page needs a Jellyfin admin login of its own.
+luminos-server.tail1fd435.ts.net:8452 {
+	import tsname
+	import proxy 8056
+}
+100.82.125.26:8452, 192.168.2.61:8452, 192.168.2.62:8452 {
+	tls internal
+	import proxy 8056
 }
