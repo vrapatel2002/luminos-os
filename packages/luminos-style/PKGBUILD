@@ -6,7 +6,7 @@
 pkgname=luminos-style
 pkgver=1.0
 # [CHANGE: claude-code | 2026-11-09] 1.0-11 (DECISION 182): Style Tuner gets a "Files" tab with bars for every files* key.
-pkgrel=19
+pkgrel=20
 pkgdesc='Luminos: live style values for the forked KDE look + Style Tuner window'
 arch=(x86_64)
 license=(GPL-3.0-or-later)

@@ -48,6 +48,7 @@ const QHash<QString, Knob> &knobs()
         {QStringLiteral("listRowSelectedPx"), {-1, -1, 40}},
         {QStringLiteral("listRowGapPx"),      {-1, -1, 16}},
         {QStringLiteral("listIndicatorPct"),  {45, 10, 100}},
+        {QStringLiteral("listVisibleRows"),   {4, 0, 20}},
     };
     return k;
 }
@@ -172,6 +173,7 @@ qreal Style::listRowInnerPx() const { return lxOr(m_backend->value(QStringLitera
 qreal Style::listRowSelectedPx() const { return lxOr(m_backend->value(QStringLiteral("listRowSelectedPx")), cornerSelectedPx()); }
 qreal Style::listRowGapPx() const { return lxOr(m_backend->value(QStringLiteral("listRowGapPx")), rowGapPx()); }
 qreal Style::listIndicatorPct() const { return m_backend->value(QStringLiteral("listIndicatorPct")); }
+qreal Style::listVisibleRows() const { return m_backend->value(QStringLiteral("listVisibleRows")); }
 bool Style::showMenuButton() const { return m_backend->value(QStringLiteral("showMenuButton")) >= 0.5; }
 QString Style::iconDiscColor() const { return m_backend->text(QStringLiteral("iconDiscColor")); }
 QString Style::iconGlyphColor() const { return m_backend->text(QStringLiteral("iconGlyphColor")); }

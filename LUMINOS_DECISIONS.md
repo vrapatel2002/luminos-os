@@ -8996,6 +8996,13 @@ listCardPad above the first row (bottomInset), so rows start inside the card wit
 view gets a left padding equal to the scroll bar so rows are centred. AbstractKCM's footer now sits in a Flickable: when
 the window is short it scrolls on its own and ScrollViewKCM keeps 22 gridUnits (header + ~5 rows) for the list
 (__luminosMinContentHeight, 0 for every other page type). Proof: builds/style-tuner/sz33/w1000.png (1000x760).
+**R32 (2026-11-13) — let Shawn set it:** "only 3 or 4 language visible at a time" + rows overflowing the box. The
+"overflow" (real window shot) was a scrolled row cut flat by the full-width mask, reading as a square box. kcmutils 1.11:
+the mask's row window is exactly the rows' width with the row end radius (listRowOuterPx), plus a strip for the scroll
+bar. New knob listVisibleRows (luminos-style 1.0-20, default 4, 0 = fill; tuner System Settings > Lists > "Rows
+shown"): with a footer, the list is that many rows tall (row height measured from the view) and AbstractKCM's footer
+takes the rest, scrolling if needed (__luminosContentHeight replaces R31's min height). Proof: sz34 (4 rows), kcm-rows/o1
+(scrolled row has rounded cut; style.json 4→3 live).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

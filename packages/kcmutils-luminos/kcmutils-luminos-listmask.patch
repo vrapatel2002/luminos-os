@@ -1,16 +1,17 @@
 --- a/src/qml/components/AbstractKCM.qml	2026-11-10 13:43:10.053409801 -0500
-+++ b/src/qml/components/AbstractKCM.qml	2026-11-13 21:23:28.636218817 -0500
-@@ -103,6 +103,9 @@
++++ b/src/qml/components/AbstractKCM.qml	2026-11-13 21:32:10.330675127 -0500
+@@ -103,6 +103,10 @@
          return !framedView && extraFooterTopPadding;
      }
  
-+    // R31: least height the page content keeps before the footer starts scrolling (0 = never scroll the footer)
-+    property real __luminosMinContentHeight: 0
++    // R31/R32: height the page content (e.g. a list) gets when there is a footer; the footer takes the rest and
++    // scrolls if it doesn't fit (0 = stock: footer as tall as its content, content fills what is left)
++    property real __luminosContentHeight: 0
 +
      title: (typeof kcm !== "undefined") ? kcm.name : ""
  
      // Make pages fill the whole view by default
-@@ -155,6 +158,7 @@
+@@ -155,6 +159,7 @@
      }
  
      footer: Column {
@@ -18,7 +19,7 @@
          // When the scrollview isn't drawing its own frame, we need to add a
          // line above the footer ourselves to separate it from the view
          Kirigami.Separator {
-@@ -166,22 +170,40 @@
+@@ -166,22 +171,40 @@
              visible: false // LUMINOS: no separator lines (Nexus)
          }
  
@@ -34,10 +35,10 @@
                  left: parent.left
                  right: parent.right
              }
-+            readonly property real cap: root.__luminosMinContentHeight > 0
-+                ? Math.max(Kirigami.Units.gridUnit * 4, root.height - (root.header ? root.header.height : 0) - root.__luminosMinContentHeight)
-+                : Number.POSITIVE_INFINITY
-+            height: Math.min(footerParent.height, cap)
++            readonly property bool fixedContent: root.__luminosContentHeight > 0 && root.__footerContentVisible()
++            height: fixedContent
++                ? Math.max(Kirigami.Units.gridUnit * 4, root.height - (root.header ? root.header.height : 0) - root.__luminosContentHeight)
++                : footerParent.height
 +            contentWidth: width
 +            contentHeight: footerParent.height
 +            interactive: contentHeight > height
@@ -66,7 +67,7 @@
          if (content && content !== rootContainer) {
              // Revert the effect of repeated onHeaderChanged invocations
 --- a/src/qml/components/ScrollViewKCM.qml	2026-11-10 13:43:10.054900945 -0500
-+++ b/src/qml/components/ScrollViewKCM.qml	2026-11-13 21:21:54.540350051 -0500
++++ b/src/qml/components/ScrollViewKCM.qml	2026-11-13 21:32:10.330875333 -0500
 @@ -6,6 +6,8 @@
  
  import org.luminos.style as LxS // [CHANGE: claude-code | 2026-11-08] DECISION 176: live style values
@@ -76,12 +77,20 @@
  import org.kde.kirigami as Kirigami
  import org.kde.kcmutils as KCMUtils
  
-@@ -38,11 +40,18 @@
+@@ -38,11 +40,26 @@
      property alias view: scroll.view
  
      framedView: false
-+    // R31: the list keeps room for its header plus ~5 rows; options below it scroll when the window is short
-+    __luminosMinContentHeight: framedView ? 0 : Kirigami.Units.gridUnit * 22
++    // R32: with options under it, the list is exactly "Rows shown" rows tall (Style Tuner > Lists, 0 = fill);
++    // the options get the rest of the page and scroll if they don't fit
++    readonly property real __rowH: {
++        const v = scroll.view;
++        if (!v || !(v.count > 0)) return Kirigami.Units.gridUnit * 2.5;
++        return Math.max(1, (v.contentHeight - (v.headerItem?.height ?? 0) - (v.footerItem?.height ?? 0)) / v.count);
++    }
++    __luminosContentHeight: framedView || LxS.Style.listVisibleRows <= 0 ? 0
++        : scroll.anchors.topMargin + listCard.boxH + listCard.padTop + listCard.pad
++          + LxS.Style.listVisibleRows * __rowH + root.margins
  
      onViewChanged: {
          if (view) {
@@ -95,7 +104,7 @@
          }
      }
  
-@@ -51,13 +60,19 @@
+@@ -51,13 +68,19 @@
      // rounded card (View alternateBackground, r28 clamped) over the page "hole"; the
      // view's own header (e.g. an InlineViewHeader) stays above the card as a section row.
      Kirigami.ShadowedRectangle {
@@ -118,7 +127,7 @@
          Kirigami.Theme.colorSet: Kirigami.Theme.View
          Kirigami.Theme.inherit: false
          color: Kirigami.Theme.alternateBackgroundColor
-@@ -67,11 +82,86 @@
+@@ -67,11 +90,95 @@
          id: scroll
          anchors {
              top: parent.top
@@ -196,11 +205,20 @@
 +        width: scroll.width
 +        height: scroll.height
 +        Rectangle { width: parent.width; height: listCard.boxH; color: "white" }
-+        Rectangle { // the card's inside: rows scroll away under an edge `pad` in from the card's own
++        Rectangle { // R32: rows are cut by a rounded window exactly as wide as the rows, with the rows' own end
++            // corners, so a row scrolling past the top or bottom never shows a flat, square-cornered edge
++            x: scroll.leftPadding
 +            y: listCard.boxH + listCard.padTop
-+            width: parent.width
++            width: Math.max(0, scroll.availableWidth)
 +            height: Math.max(0, parent.height - listCard.boxH - listCard.padTop - listCard.pad)
-+            radius: Math.max(4, listCard.radius - listCard.pad)
++            radius: Math.min(LxS.Style.listRowOuterPx, width / 2, height / 2)
++            color: "white"
++        }
++        Rectangle { // the scroll bar's strip stays visible
++            x: scroll.leftPadding + scroll.availableWidth
++            y: root.__barTop
++            width: Math.max(0, scroll.width - x)
++            height: scroll.QQC2.ScrollBar.vertical.height
 +            color: "white"
 +        }
      }
