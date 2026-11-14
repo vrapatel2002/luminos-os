@@ -9025,6 +9025,11 @@ font/menuFont/smallestReadable, +100 for toolBar/WM. Proof: style-tuner/bw4 vs b
 page's circular ← button). systemsettings 1.19: the sub-page header's "All settings" pill is now a round tonal button
 (searchHeightPx square, go-previous icon, Back tooltip) and does KDE's stock Back (pageStack.currentIndex = 0 → full
 list in the sidebar); the edge hot zone still opens the drawer. Proof: style-tuner/bk2 (kcm_plasmakeyboard).
+**R36 (2026-11-14) — one tick style:** Shawn: "this button is not the same in whole setting window" (filled lavender
+circle + tick). Radios already used M3RadioIndicator; check boxes still went through Darkly's StyleItem. qqc2 1.12:
+CheckBox and CheckDelegate use M3RadioIndicator too (pixelMetric answers indicatorwidth/checkboxlabelspacing; tri-state
+shows a dash). Menus keep CheckIndicator (it also draws menu icons); QtWidgets pages are drawn by Darkly. Proof:
+style-tuner/ck1 (keyboard page: list + option check boxes).
 
 ## DECISION 183 — the desktop settings window (right-click → Configure Desktop and Wallpaper) gets the Luminos look
 <!-- [CHANGE: claude-code | 2026-11-09] -->

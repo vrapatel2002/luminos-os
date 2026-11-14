@@ -1,3 +1,29 @@
+diff -ruN qqc2-desktop-style-6.30.0/org.kde.desktop/CheckBox.qml ../b/qqc2-desktop-style-6.30.0/org.kde.desktop/CheckBox.qml
+--- a/org.kde.desktop/CheckBox.qml	2026-09-04 07:43:58.000000000 -0400
++++ b/org.kde.desktop/CheckBox.qml	2026-11-14 18:33:44.709911944 -0500
+@@ -27,8 +27,7 @@
+ 
+     hoverEnabled: true
+ 
+-    indicator: Private.CheckIndicator {
+-        elementType: "checkbox"
++    indicator: Private.M3RadioIndicator { // [CHANGE: claude-code | 2026-11-14] R36: same filled-circle tick as radios everywhere
+         x: if (control.contentItem !== null && control.contentItem.width > 0) {
+             return control.mirrored ?
+                 control.width - width - control.rightPadding : control.leftPadding
+diff -ruN qqc2-desktop-style-6.30.0/org.kde.desktop/CheckDelegate.qml ../b/qqc2-desktop-style-6.30.0/org.kde.desktop/CheckDelegate.qml
+--- a/org.kde.desktop/CheckDelegate.qml	2026-11-10 13:52:06.569190648 -0500
++++ b/org.kde.desktop/CheckDelegate.qml	2026-11-14 18:33:44.710020528 -0500
+@@ -86,8 +86,7 @@
+         }
+     }
+ 
+-    indicator: Private.CheckIndicator {
+-        elementType: "checkbox"
++    indicator: Private.M3RadioIndicator { // [CHANGE: claude-code | 2026-11-14] R36: same filled-circle tick as radios everywhere
+         x: !controlRoot.mirrored ? controlRoot.horizontalPadding : controlRoot.width - width - controlRoot.horizontalPadding
+         y: controlRoot.topPadding + (controlRoot.display === T.AbstractButton.TextUnderIcon ? 0 : ((controlRoot.availableHeight - height) / 2) )
+ 
 diff -ruN qqc2-desktop-style-6.30.0/org.kde.desktop/private/DefaultListItemBackground.qml ../b/qqc2-desktop-style-6.30.0/org.kde.desktop/private/DefaultListItemBackground.qml
 --- a/org.kde.desktop/private/DefaultListItemBackground.qml	2026-11-10 13:52:06.572557785 -0500
 +++ b/org.kde.desktop/private/DefaultListItemBackground.qml	2026-11-13 20:52:05.448896387 -0500
@@ -25,16 +51,43 @@ diff -ruN qqc2-desktop-style-6.30.0/org.kde.desktop/private/DefaultListItemBackg
          color: background.selected ? Kirigami.Theme.highlightColor : tone.Kirigami.Theme.backgroundColor
 diff -ruN qqc2-desktop-style-6.30.0/org.kde.desktop/private/M3RadioIndicator.qml ../b/qqc2-desktop-style-6.30.0/org.kde.desktop/private/M3RadioIndicator.qml
 --- a/org.kde.desktop/private/M3RadioIndicator.qml	2026-11-10 13:52:06.572644118 -0500
-+++ b/org.kde.desktop/private/M3RadioIndicator.qml	2026-11-13 20:52:05.449059773 -0500
-@@ -23,7 +23,7 @@
++++ b/org.kde.desktop/private/M3RadioIndicator.qml	2026-11-14 18:33:44.710199614 -0500
+@@ -15,15 +15,20 @@
+     property bool drawIcon: false // kept for API parity with CheckIndicator (ignored)
+     // the label code in RadioButton.qml asks the indicator for these style metrics
+     function pixelMetric(name: string): int {
+-        return name === "exclusiveindicatorwidth" ? width : name === "radiobuttonlabelspacing" ? Kirigami.Units.mediumSpacing : 0
++        // R36: also serves check boxes (CheckBox, CheckDelegate)
++        return (name === "exclusiveindicatorwidth" || name === "indicatorwidth") ? width
++             : (name === "radiobuttonlabelspacing" || name === "checkboxlabelspacing") ? Kirigami.Units.mediumSpacing : 0
+     }
+ 
+     implicitWidth: 24
+     implicitHeight: 24
      radius: width / 2
-     color: control.checked ? Kirigami.Theme.focusColor : "transparent"
-     border.width: control.checked ? 0 : 2
+-    color: control.checked ? Kirigami.Theme.focusColor : "transparent"
+-    border.width: control.checked ? 0 : 2
 -    border.color: control.hovered || control.visualFocus ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor
++    // R36: a tri-state check box's "some" state shows a dash on the same filled circle
++    readonly property bool partial: control.checkState !== undefined && control.checkState === Qt.PartiallyChecked
++    readonly property bool on: control.checked || partial
++    color: on ? Kirigami.Theme.focusColor : "transparent"
++    border.width: on ? 0 : 2
 +    border.color: control.hovered || control.visualFocus ? Kirigami.Theme.textColor : Qt.alpha(Kirigami.Theme.textColor, LxS.Style.listIndicatorPct / 100) // R29: was disabledTextColor (hard to see on dark rows)
      opacity: control.enabled ? 1 : 0.38
      Behavior on color { ColorAnimation { duration: LxS.Style.animationShortMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] } }
  
+@@ -59,4 +64,10 @@
+             PathSvg { path: "M6.5 12.5 L10.5 16.5 L17.5 8.5" }
+         }
+     }
++    Rectangle { // R36: partially-checked dash
++        anchors.centerIn: parent
++        visible: indicator.partial && !indicator.control.checked
++        width: indicator.width * 0.45; height: 2.6; radius: 1.3
++        color: Qt.hsla(Kirigami.Theme.focusColor.hslHue, Kirigami.Theme.focusColor.hslSaturation * 0.4, Kirigami.Theme.focusColor.hslLightness > 0.5 ? 0.27 : 1.0, 1)
++    }
+ }
 diff -ruN qqc2-desktop-style-6.30.0/org.kde.desktop/ScrollView.qml ../b/qqc2-desktop-style-6.30.0/org.kde.desktop/ScrollView.qml
 --- a/org.kde.desktop/ScrollView.qml	2026-11-10 13:52:06.572381192 -0500
 +++ b/org.kde.desktop/ScrollView.qml	2026-11-13 20:52:05.449005241 -0500
