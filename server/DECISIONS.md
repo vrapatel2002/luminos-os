@@ -3578,3 +3578,22 @@ no horizontal overflow on either page, figure fits its column, real queue 13 fil
 Heart of the Beast), group expand works, group buttons carry 10/2/1 ids. No download buttons were pressed in testing.
 Parser fix during test: titles like `S01E09.2160p…` showed "2160p" → JUNK now also matches at the start; untitled
 episodes read "Episode 9". Rollback: `/root/bak-20261113-responsive/`.
+
+
+## DECISION 191 — Import guard: stuck-at-100% downloads fix themselves — 2026-11-14
+<!-- [CHANGE: cowork | 2026-11-14] -->
+**Why:** 2026-11-13/14 three finished downloads sat at "100%" on the hub for a day (R16). Two shapes:
+(A) already imported but a leftover .nzb in the download folder kept Sonarr on "No files found are eligible for import";
+(B) Radarr "matched to movie by ID — Manual Import required" because the release name differed from the title.
+**What:** `server/scripts/luminos-import-guard` → `/usr/local/bin`, run by `luminos-import-guard.timer` every 10 min
+(root, oneshot, Nice 10, state in `/var/lib/luminos-import-guard/seen.json`). Acts only after an item has been stuck
+≥15 min across runs. Case A: all episodes / the movie already have a file AND the folder has no video ≥50 MB → remove
+the queue item (removeFromClient, **never blocklist**); folder deleted only if every file left is <20 MB and not video.
+Case B: exactly one video, the app's own manual-import check has no rejections, and ffprobe length matches runtime
+(movie ±max(3 min, 8 %); episode ±max(5 min, 25 %)) → ManualImport (auto) + Jellyfin library scan. Everything else is
+logged `HOLD … needs a person` and left alone. Only paths under the NZBGet complete roots are touched; nothing in the
+library is ever deleted.
+**Verified:** decision logic tested against the real R16 records (BCS clear, the.beast import at 101/101 min; wrong
+length, sample rejection, 2 videos, path outside roots all hold/skip). Deployed, dry run + live run clean (queues empty),
+API reads OK for both apps, timer active. **See it:** `journalctl -u luminos-import-guard -n 20`.
+**Off:** `sudo systemctl disable --now luminos-import-guard.timer`. Dry run anytime: `sudo luminos-import-guard`.

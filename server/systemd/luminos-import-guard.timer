@@ -1,0 +1,11 @@
+# [CHANGE: cowork | 2026-11-14] DECISION 191
+[Unit]
+Description=Run the Luminos import guard every 10 minutes
+
+[Timer]
+OnBootSec=5min
+OnCalendar=*:0/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target

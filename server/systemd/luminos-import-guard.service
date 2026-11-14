@@ -1,0 +1,12 @@
+# [CHANGE: cowork | 2026-11-14] DECISION 191 -- unstick finished downloads (see the script header).
+[Unit]
+Description=Luminos import guard: clear or import downloads stuck at 100%%
+After=sonarr.service radarr.service
+Wants=sonarr.service radarr.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/luminos-import-guard --apply
+StateDirectory=luminos-import-guard
+Nice=10
+TimeoutStartSec=10min

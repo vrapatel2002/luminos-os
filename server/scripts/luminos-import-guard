@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""[CHANGE: cowork | 2026-11-14] luminos-import-guard -- unstick finished downloads. DECISION 191.
+
+Shawn saw finished downloads sit at "100% < 1 min" on the hub for a day. Two shapes, both
+real on 2026-11-13/14, and this handles exactly those two and nothing else:
+
+  A. CLEAR -- already in the library, but still "waiting to import".
+     Sonarr/Radarr imported the file, yet the download folder still holds a leftover
+     (a .nzb), so the queue says "No files found are eligible for import" forever.
+     Rule: every episode / the movie of that download already HAS its file AND the folder
+     holds no video. -> remove the queue entry (removeFromClient, never blocklist) and,
+     if what is left is only small non-video files, delete that folder.
+
+  B. IMPORT -- "matched by ID, manual import required".
+     The release name differs from the title (Radarr grabbed "the.beast.2026" for
+     "Heart of the Beast"), so the app refuses to import on its own.
+     Rule, ALL of: exactly one video file; the app's own manual-import check reports no
+     rejections; and the file's running time matches the movie's runtime (+-3 min / 8 %)
+     or the series' episode runtime (+-25 %). -> ManualImport, then ask Jellyfin to scan.
+
+Anything else that is stuck is only LOGGED ("needs a person") -- never touched.
+A download must have been stuck for --min-age minutes (seen on an earlier run) before any
+action, so this never races the apps' own import. Only folders under the NZBGet complete
+roots are ever touched; nothing is ever blocklisted; nothing in the library is deleted.
+
+  luminos-import-guard            # dry run: says what it would do
+  luminos-import-guard --apply    # what the timer runs every 10 minutes
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+APPS = {"sonarr": 8989, "radarr": 7878}
+SAFE_ROOTS = ("/srv/external/usenet/complete/", "/srv/media/usenet/complete/")
+VIDEO_EXT = (".mkv", ".mp4", ".avi", ".m4v", ".ts", ".m2ts", ".wmv", ".mov", ".webm")
+MIN_VIDEO = 50 * 1024 * 1024          # smaller "videos" are samples / extras
+MAX_LEFTOVER = 20 * 1024 * 1024       # a folder is only deleted if every file is tiny + not video
+STUCK_STATES = ("importPending", "importBlocked", "importFailed")
+JELLYFIN = "http://127.0.0.1:8096"
+JF_KEY_FILE = "/var/lib/luminos/space-jellyfin-key"
+STATE_DIR = os.environ.get("STATE_DIRECTORY", "/var/lib/luminos-import-guard")
+
+
+# ------------------------------------------------------------------ pure decision logic
+def runtime_ok(app, runtime_min, dur_min):
+    if not runtime_min or not dur_min:
+        return False
+    tol = max(3.0, 0.08 * runtime_min) if app == "radarr" else max(5.0, 0.25 * runtime_min)
+    return abs(dur_min - runtime_min) <= tol
+
+
+def decide(app, rec, already_imported, videos, rejections, runtime_min, dur_min):
+    """-> (action, reason). action in clear | import | hold | skip. No I/O in here."""
+    if rec.get("status") != "completed" or rec.get("trackedDownloadState") not in STUCK_STATES:
+        return "skip", "not stuck"
+    out = rec.get("outputPath") or ""
+    if not out.startswith(SAFE_ROOTS) or ".." in out:
+        return "skip", "folder outside the download roots: %s" % out
+    msgs = " ".join(m for s in rec.get("statusMessages") or [] for m in s.get("messages") or [])
+    if already_imported and not videos:
+        return "clear", "already in the library; download folder holds no video"
+    if already_imported and videos:
+        return "hold", "library has a file but the download folder still has a video (upgrade?)"
+    if "by ID" in msgs and "anual" in msgs:
+        if len(videos) != 1:
+            return "hold", "ID-matched but %d video files" % len(videos)
+        if rejections:
+            return "hold", "ID-matched but the app objects: %s" % "; ".join(rejections)[:200]
+        if not runtime_ok(app, runtime_min, dur_min):
+            return "hold", "ID-matched but length %s min vs runtime %s min" % (
+                round(dur_min or 0), runtime_min)
+        return "import", "ID-matched; 1 video, no objections, %d min vs runtime %d min" % (
+            round(dur_min), runtime_min)
+    return "hold", "stuck, needs a person: " + (msgs or rec.get("trackedDownloadState", ""))[:200]
+
+
+# ------------------------------------------------------------------ I/O
+def api_key(app):
+    with open("/var/lib/%s/config.xml" % app) as f:
+        return re.search(r"<ApiKey>([^<]+)</ApiKey>", f.read()).group(1)
+
+
+def api(app, path, method="GET", body=None, timeout=60):
+    req = urllib.request.Request(
+        "http://127.0.0.1:%d/api/v3%s" % (APPS[app], path), method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"X-Api-Key": api_key(app), "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as f:
+        raw = f.read()
+    return json.loads(raw) if raw else None
+
+
+def video_files(folder):
+    out = []
+    if not os.path.isdir(folder):
+        return out
+    for dp, _dn, fns in os.walk(folder):
+        for fn in fns:
+            p = os.path.join(dp, fn)
+            if fn.lower().endswith(VIDEO_EXT) and not os.path.islink(p) and os.path.getsize(p) >= MIN_VIDEO:
+                out.append(p)
+    return out
+
+
+def duration_min(path):
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                            "-of", "default=nw=1:nk=1", path],
+                           capture_output=True, text=True, timeout=60)
+        return float(r.stdout.strip()) / 60.0
+    except Exception:
+        return 0.0
+
+
+def remove_leftover_folder(folder):
+    """Delete the folder only if it is under a download root and holds nothing but tiny,
+    non-video, non-symlink files. Returns what happened, in words."""
+    if not folder.startswith(SAFE_ROOTS) or not os.path.isdir(folder) or os.path.islink(folder):
+        return "folder kept (outside roots or gone)"
+    files = []
+    for dp, dn, fns in os.walk(folder):
+        for d in dn:
+            if os.path.islink(os.path.join(dp, d)):
+                return "folder kept (contains a link)"
+        for fn in fns:
+            p = os.path.join(dp, fn)
+            if os.path.islink(p) or fn.lower().endswith(VIDEO_EXT) or os.path.getsize(p) > MAX_LEFTOVER:
+                return "folder kept (%s is not a small leftover)" % fn
+            files.append(p)
+    for p in files:
+        os.remove(p)
+    for dp, _dn, _fn in sorted(os.walk(folder), key=lambda t: -len(t[0])):
+        os.rmdir(dp)
+    return "folder removed (%d leftover file%s)" % (len(files), "" if len(files) == 1 else "s")
+
+
+def jellyfin_scan():
+    try:
+        with open(JF_KEY_FILE) as f:
+            k = f.read().strip()
+        urllib.request.urlopen(urllib.request.Request(
+            JELLYFIN + "/Library/Refresh", data=b"", method="POST",
+            headers={"X-Emby-Token": k}), timeout=30).read()
+        return "Jellyfin scan started"
+    except Exception as e:
+        return "Jellyfin scan failed: %s" % e
+
+
+def load_state():
+    try:
+        with open(os.path.join(STATE_DIR, "seen.json")) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_state(s):
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(os.path.join(STATE_DIR, "seen.json"), "w") as f:
+            json.dump(s, f)
+    except OSError as e:
+        print("warning: cannot save state: %s" % e)
+
+
+def wait_command(app, cid):
+    for _ in range(40):
+        time.sleep(3)
+        st = api(app, "/command/%d" % cid)
+        if st.get("status") in ("completed", "failed", "aborted"):
+            return st
+    return {"status": "timeout"}
+
+
+def facts(app, recs):
+    """Everything decide() needs, for one download (one or more queue records)."""
+    rec = recs[0]
+    folder = rec.get("outputPath") or ""
+    vids = video_files(folder)
+    if app == "radarr":
+        movie = api(app, "/movie/%d" % rec["movieId"])
+        already = bool(movie.get("hasFile"))
+        runtime = movie.get("runtime") or 0
+    else:
+        eps = [api(app, "/episode/%d" % r["episodeId"]) for r in recs if r.get("episodeId")]
+        already = bool(eps) and all(e.get("hasFile") for e in eps)
+        series = api(app, "/series/%d" % rec["seriesId"])
+        runtime = series.get("runtime") or 0
+    rejections, cands = [], []
+    if not already and len(vids) == 1:
+        q = {"folder": folder, "downloadId": rec.get("downloadId", ""), "filterExistingFiles": "false"}
+        q["movieId" if app == "radarr" else "seriesId"] = rec["movieId" if app == "radarr" else "seriesId"]
+        cands = [c for c in api(app, "/manualimport?" + urllib.parse.urlencode(q)) or []
+                 if c.get("path") == vids[0]]
+        rejections = [r.get("reason", "?") for c in cands for r in c.get("rejections") or []]
+        if app == "sonarr" and cands and not cands[0].get("episodes"):
+            rejections.append("no episode recognised in the file name")
+        if not cands:
+            rejections.append("app offered no import candidate")
+    dur = duration_min(vids[0]) if len(vids) == 1 and not already else 0.0
+    return already, vids, rejections, runtime, dur, cands
+
+
+def do_import(app, recs, cand):
+    rec = recs[0]
+    f = {"path": cand["path"], "quality": cand["quality"],
+         "languages": cand.get("languages") or [{"id": 1, "name": "English"}],
+         "releaseGroup": cand.get("releaseGroup") or "", "downloadId": rec.get("downloadId", ""),
+         "indexerFlags": cand.get("indexerFlags", 0)}
+    if app == "radarr":
+        f["movieId"] = rec["movieId"]
+    else:
+        f["seriesId"] = rec["seriesId"]
+        f["episodeIds"] = [e["id"] for e in cand.get("episodes") or []]
+    cmd = api(app, "/command", "POST", {"name": "ManualImport", "importMode": "auto", "files": [f]})
+    st = wait_command(app, cmd["id"])
+    return st.get("status"), st.get("message", "")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Unstick finished Sonarr/Radarr downloads (DECISION 191).")
+    ap.add_argument("--apply", action="store_true", help="act; without it, only report")
+    ap.add_argument("--min-age", type=int, default=15, help="minutes stuck before acting (default 15)")
+    a = ap.parse_args()
+
+    seen, now, still, acted, held = load_state(), time.time(), {}, 0, 0
+    for app in APPS:
+        try:
+            recs = api(app, "/queue?pageSize=500")["records"]
+        except Exception as e:
+            print("%s: cannot read the queue: %s" % (app, e))
+            continue
+        by_dl = {}
+        for r in recs:
+            by_dl.setdefault(r.get("downloadId") or "id%d" % r["id"], []).append(r)
+        for dl, group in by_dl.items():
+            title = group[0].get("title", "?")
+            try:
+                if decide(app, group[0], False, [], [], 0, 0)[0] == "skip":
+                    continue
+                already, vids, rej, runtime, dur, cands = facts(app, group)
+                action, why = decide(app, group[0], already, vids, rej, runtime, dur)
+            except Exception as e:
+                print("%s: %s -- could not inspect: %s" % (app, title, e))
+                continue
+            if action == "skip":
+                continue
+            k = app + ":" + dl
+            still[k] = seen.get(k, now)
+            age = (now - still[k]) / 60.0
+            tag = "%s: %s -- %s" % (app, title[:80], why)
+            if action == "hold":
+                held += 1
+                print("HOLD   " + tag)
+                continue
+            if age < a.min_age:
+                print("WAIT   %s (stuck %.0f of %d min)" % (tag, age, a.min_age))
+                continue
+            if not a.apply:
+                print("WOULD %s %s" % (action.upper(), tag))
+                continue
+            if action == "clear":
+                for r in group:
+                    try:
+                        api(app, "/queue/%d?removeFromClient=true&blocklist=false" % r["id"], "DELETE")
+                    except urllib.error.HTTPError as e:
+                        if e.code != 404:     # a season pack's other records go with the first
+                            raise
+                print("CLEAR  %s; %s" % (tag, remove_leftover_folder(group[0].get("outputPath") or "")))
+            else:
+                status, msg = do_import(app, group, cands[0])
+                print("IMPORT %s; %s %s; %s" % (tag, status, msg, jellyfin_scan() if status == "completed" else ""))
+            still.pop(k, None)
+            acted += 1
+    save_state(still)
+    print("done: %d acted, %d need a person" % (acted, held))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

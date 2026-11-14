@@ -1,5 +1,12 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-14 — Response 16 (stuck 100% downloads cleared)
+Last updated: 2026-11-14 — Response 17 (import guard, DECISION 191)
+
+
+## 2026-11-14 R17 — "how to avoid this in future?" → import guard (DECISION 191), live.
+- New `luminos-import-guard` (server/scripts) + .service/.timer (server/systemd), every 10 min as root.
+- Auto-fixes only R16's two shapes (already-imported leftover; ID-matched with matching runtime). Anything else → HOLD in
+  the journal, untouched. Never blocklists, never deletes library files. Queues were empty at deploy, so the live paths
+  (DELETE queue / ManualImport) have not fired on a real item yet — first real case: check `journalctl -u luminos-import-guard`.
 
 
 ## 2026-11-14 R16 — "stuck at 100% since yesterday" — fixed, no config change.
