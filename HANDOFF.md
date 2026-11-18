@@ -1,5 +1,13 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-14 — Response 17 (import guard, DECISION 191)
+Last updated: 2026-11-18 — Response 1 (CMF Buds Pro 2 controls, DECISION 192)
+
+## 2026-11-18 R1 — CMF Buds Pro 2 on Linux: BudsLink installed + verified (DECISION 192). [CHANGE: claude-code | 2026-11-18]
+- Flatpak `io.github.maniacx.BudsLink` 0.2.2 (system). Buds Pro 2 (B172) is on its TESTED list. Has its own GUI → no Luminos UI built.
+- GTK4 ban: installed on Shawn's ask (hyprmod/Flatseal precedent); GNOME 50 runtime was already on disk. Open: scope the ban to Luminos UI.
+- Verified: window lists "CMF Buds Pro 2"; dGPU stayed suspended (gate refuses GTK's renderD128 Vulkan probe → 780M).
+- Audio already A2DP AAC. LDAC not advertised: enable once in the Nothing X phone app. Only one buds app at a time (single RFCOMM owner).
+- NOT done by me: clicking into the device page (ANC/EQ toggles) — Shawn to try. Screenshot: "Claude outputs/budslink/window.png".
+
 
 
 ## 2026-11-14 R17 — "how to avoid this in future?" → import guard (DECISION 191), live.

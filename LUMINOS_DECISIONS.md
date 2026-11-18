@@ -9095,3 +9095,20 @@ corners), hover = faint white ring; the + button is a soft 12 px tile; search is
 Proof: nested strip before/after (builds/ov-test/f1 → f3).
 **R2 (2026-11-13):** 20 px between the desktop tiles and the + (was largeSpacing); the + is now a smaller square (72 % of a
 tile's height) centred on the tiles, with a thin muted 22 px + (65 % text colour, 95 % on hover). kwin 1.3. Proof: f4.
+
+## DECISION 192 — CMF Buds Pro 2 controls: BudsLink (Flatpak), not a home-built app (2026-11-18)
+<!-- [CHANGE: claude-code | 2026-11-18] -->
+**Ask (Shawn):** install + use a Linux companion app for the CMF Buds Pro 2 (ANC, EQ, low latency, battery); build a UI if it has none.
+**Chosen:** `io.github.maniacx.BudsLink` 0.2.2 from Flathub (system install). Its compatibility page lists **CMF Buds Pro 2 (B172) as
+tested** for every feature it has (battery L/R/case, ANC Low/Mid/High + Adaptive, EQ presets, enhanced bass, spatial audio, in-ear
+detection, low latency, Find My, gestures; custom EQ not implemented). Rejected EarA (io.github.oneydef.eara): only Nothing Ear (a) tested.
+It already has a full GUI → **no Luminos UI built** (nothing to wrap; re-implementing the RFCOMM protocol in QML is not worth it).
+**GTK4 ban conflict (AGENTS.md §1):** BudsLink is GTK4/libadwaita (GJS). Installed anyway on Shawn's ask — same precedent as hyprmod and the
+already-installed Flatseal. Cost on the host: zero new host packages; runtime `org.gnome.Platform//50` was already installed (Flatseal);
+nothing resident when the window is closed. The install also pulled `org.freedesktop.Platform.codecs-extra//25.08-extra` and refreshed
+GL.default 25.08 + GL.nvidia-610-57-04 1.4 in-branch. **Open, Shawn's call:** scope the ban to Luminos' own UI (third-party Flatpaks OK) in AGENTS.md.
+**Verified live:** window lists "CMF Buds Pro 2"; GTK's Vulkan probe of renderD128 (NVIDIA) is refused by the dGPU gate → falls back to the
+780M, dGPU stayed `suspended`. Audio: PipeWire already on A2DP **AAC** (`api.bluez5.codec = "aac"`); LDAC is not advertised by the buds —
+it needs "LDAC / high-quality audio" switched on once in the Nothing X phone app (BudsLink has no LDAC toggle).
+**Gotcha:** the buds' control socket is single-owner — only one of BudsLink / EarA / earctl / earweb at a time.
+Revert: `flatpak uninstall io.github.maniacx.BudsLink` (+ `flatpak uninstall --unused`).
