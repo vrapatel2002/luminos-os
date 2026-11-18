@@ -81,6 +81,9 @@ check_initramfs() {
     d=$(mktemp -d) || return 1
     (cd "$d" && lsinitcpio -x "$img" >/dev/null 2>&1)
     rel=${mod#/}; rel=usr/${rel#usr/}
+    if [ ! -e "$d/$rel" ] && ! find "$d" -name 'nvidia.ko*' | grep -q .; then  # [CHANGE: claude-code | 2026-11-18] BUG-228
+        say "initramfs $img: no nvidia.ko (loads from the root fs, as hibernate resume needs)"; rm -rf "$d"; return 0
+    fi
     if [ -n "$mod" ] && cmp -s "$d/$rel" "$mod"; then
         say "initramfs $img: nvidia.ko matches $mod"; rm -rf "$d"; return 0
     fi
