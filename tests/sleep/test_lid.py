@@ -400,7 +400,7 @@ class World:
         if self.lock_hangs and "lock-session" in cmd:
             self.advance(kwargs["timeout"])
             raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
-        code = self.on_suspend(self) if "suspend" in cmd else self.lock_code
+        code = self.on_suspend(self) if "suspend-then-hibernate" in cmd else self.lock_code
         if "lock-session" in cmd and not code:
             self.locked_at[cmd[2]] = self.now
         if check and code:
@@ -408,7 +408,7 @@ class World:
         return subprocess.CompletedProcess(cmd, code)
 
     def suspends(self):
-        return [t for t, cmd in self.commands if "suspend" in cmd]
+        return [t for t, cmd in self.commands if "suspend-then-hibernate" in cmd]
 
     def locks(self):
         return [(t, cmd[2]) for t, cmd in self.commands if "lock-session" in cmd]
@@ -447,7 +447,7 @@ def hypr(delay=0.0, sid="2", kind="wayland"):
 
 
 def test_service_start_counts_as_a_resume():
-    assert run_main(World(8)).commands == [(5.0, ("/usr/bin/systemctl", "suspend", "-i"))]
+    assert run_main(World(8)).commands == [(5.0, ("/usr/bin/systemctl", "suspend-then-hibernate", "-i"))]
 
 
 def test_open_lid_never_sleeps():
@@ -490,7 +490,7 @@ def test_opening_the_lid_ends_the_wait():
 @pytest.mark.parametrize("kind", ["wayland", "x11"])
 def test_a_kde_session_is_not_locked_here_and_sleep_is_immediate(kind):
     world = run_main(World(8, sessions=[Session("2", kind, "user", None, "KDE")]))
-    assert world.commands == [(5.0, ("/usr/bin/systemctl", "suspend", "-i"))]
+    assert world.commands == [(5.0, ("/usr/bin/systemctl", "suspend-then-hibernate", "-i"))]
     assert world.polls == 0
 
 
@@ -545,7 +545,7 @@ def test_failed_lock_still_suspends_after_the_timeout():
     Session("3", "tty", "manager", None, ""),
 ])
 def test_only_graphical_user_sessions_count(other):
-    assert run_main(World(8, sessions=[other])).commands == [(5.0, ("/usr/bin/systemctl", "suspend", "-i"))]
+    assert run_main(World(8, sessions=[other])).commands == [(5.0, ("/usr/bin/systemctl", "suspend-then-hibernate", "-i"))]
     world = run_main(World(12, sessions=[hypr(), other]))
     assert world.locks() == [(5.0, "2")]
     assert world.suspends() == near(6.0)
@@ -633,7 +633,7 @@ def test_the_second_check_catches_a_session_that_reads_unlocked_by_then():
 
 def test_the_guard_also_runs_with_the_lid_shut_before_the_sleep_comes_back():
     world = run_main(World(40, on_suspend=lambda w: w.sleep(10.0)))
-    assert [cmd[1] for _, cmd in world.commands[:3]] == ["suspend", "lock-session", "suspend"]
+    assert [cmd[1] for _, cmd in world.commands[:3]] == ["suspend-then-hibernate", "lock-session", "suspend-then-hibernate"]
     assert world.locks()[0][0] < world.suspends()[1]
 
 
@@ -722,7 +722,7 @@ def test_a_blank_line_from_loginctl_does_not_kill_the_daemon():
 
 def test_lock_session_has_a_10_s_timeout_and_suspend_keeps_180():
     world = run_main(World(12, sessions=[hypr()]))
-    assert world.timeouts == {"lock-session": 10, "suspend": 180}
+    assert world.timeouts == {"lock-session": 10, "suspend-then-hibernate": 180}
     assert run_main(guarded()).timeouts == {"lock-session": 10}
 
 
