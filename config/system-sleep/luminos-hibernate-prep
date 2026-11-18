@@ -3,17 +3,28 @@
 # [CHANGE: claude-code | 2026-11-13] The first try failed "Error -12 creating image": freeing RAM pushed pages
 # into zram, which is RAM. Before hibernating, the disk swap file outranks zram and the image is made as small
 # as possible; a minute after waking it goes back below zram. Installed to /usr/lib/systemd/system-sleep/.
+# [CHANGE: claude-code | 2026-11-17] NVIDIA's own hibernate code needs the dGPU at full power: run from runtime
+# D3cold it fails restore with NV_ERR_GPU_NOT_FULL_POWER (0x11) and refuses every later suspend. So the dGPU is
+# held on across a hibernate and handed back to runtime PM after it.
 # Never blocks sleep: always exits 0.
 SWAP=/swapfile.luminos
+GPU=/sys/bus/pci/devices/0000:01:00.0/power
 log() { echo "luminos-hibernate-prep: $*" >&2; }
+gpu_on() {
+    echo on > "$GPU/control" || { log "could not hold the dGPU on"; return; }
+    for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(cat "$GPU/runtime_status")" = active ] && { log "dGPU held on"; return; }; sleep 0.5; done
+    log "dGPU did not reach active in 5 s"
+}
 prio() { swapoff "$SWAP" && swapon -p "$1" "$SWAP" && log "$SWAP priority $1" || log "could not set $SWAP priority $1"; }
 
 case "$1:${SYSTEMD_SLEEP_ACTION:-$2}" in
     pre:hibernate)
         echo 0 > /sys/power/image_size || log "could not shrink image_size"
         prio 32000
+        [ -e "$GPU/control" ] && gpu_on
         ;;
     post:hibernate|post:suspend-after-failed-hibernate)
+        [ -e "$GPU/control" ] && { echo auto > "$GPU/control" && log "dGPU back to runtime PM"; }
         /usr/bin/systemctl --no-block start luminos-swap-reprio.timer 2>/dev/null || prio 10
         ;;
 esac
