@@ -3197,6 +3197,8 @@ Measured, not assumed. **The blocker is not what's slowing the wifi:**
 Note: the G14 does not use AdGuard at all — it runs its own DoT to Quad9 via systemd-resolved.
 - 2026-11-04 follow-up (housemates' phones + JellyRock): DHCP transition explained — phones still holding a **Bell** lease (M31 on .71: 285 ignored rebinds overnight Nov 3) are correctly ignored per RFC 2131 until that lease runs out; zero such events on Nov 4. Unicast renewals proven working (G14 test: REQUEST → ACK in 130 ms, captured at the NIC). Server links: no drops on Nov 4. No measurable fault found. **JellyRock talks to Jellyfin by IP (192.168.2.61:8096), so DNS/ad-blocking is not in its path**; the TV is on ethernet. Clean A/B test proposed: hub DHCP back on + AdGuard DHCP off for 24 h.
 
+- 2026-11-20 ("saw ads on the TV"): AdGuard verified working for the TV — 36.8k queries from .18 since 11-10, ~67% blocked (Roku logs, doubleclick, Amazon/Netflix telemetry). The ads were in YouTube / Roku home, which DNS cannot block (YouTube ads share googlevideo.com with the video; Roku home ads share api.roku.com with the UI). No change made. <!-- [CHANGE: claude-code | 2026-11-20] -->
+
 ## DECISION 170 — the server's wifi is retired; 192.168.2.61 moves onto the cable — 2026-11-05
 <!-- [CHANGE: claude-code | 2026-11-05] -->
 **Symptom:** "5 GHz not working" on the G14 and other devices, the internet slow for everyone, JellyRock lagging.

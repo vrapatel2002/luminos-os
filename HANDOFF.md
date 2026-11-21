@@ -1,5 +1,15 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-18 — Response 1 (CMF Buds Pro 2 controls, DECISION 192)
+Last updated: 2026-11-20 — Response 1 (TV ads vs AdGuard, read-only)
+
+## 2026-11-20 R1 — "saw ads on the TV, we have a network adblocker" — READ-ONLY, nothing changed. [CHANGE: claude-code | 2026-11-20]
+- AdGuard (DECISION 169) is healthy: active, protection+filtering on, all 5 lists on, AdGuard is the DHCP server (hub DHCP off),
+  TV has static leases .18 (cable) / .13 (wifi). TV IS using it: 36.8k queries from .18 since 11-10, ~67% blocked
+  (scribe/liberty.logs.roku.com, googleads.g.doubleclick.net, Amazon/Netflix telemetry, identity.ads.roku.com, display.ravm.tv).
+- TV use since 11-19 = YouTube + Roku home/screensaver only. YouTube ads come from the same googlevideo.com hosts as the video →
+  DNS blocking CANNOT stop them (already written in DECISION 169 "What DNS blocking cannot do"). Roku home-screen banner ads come
+  from api.roku.com / themes-service.sr.roku.com, which the Roku also needs to work → blocking them breaks the home screen.
+- Waiting on Shawn: which app showed the ads (YouTube / Roku home / other). Options offered: YouTube Premium; a cheap Android TV/
+  Google TV stick on the TV's HDMI with SmartTube (blocks YouTube ads + sponsor segments); Roku debloat track (DECISION 167, parked).
 
 ## 2026-11-18 R1 — CMF Buds Pro 2 on Linux: BudsLink installed + verified (DECISION 192). [CHANGE: claude-code | 2026-11-18]
 - Flatpak `io.github.maniacx.BudsLink` 0.2.2 (system). Buds Pro 2 (B172) is on its TESTED list. Has its own GUI → no Luminos UI built.
