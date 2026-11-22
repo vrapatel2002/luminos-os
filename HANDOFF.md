@@ -1,5 +1,14 @@
 # HANDOFF.md — continue-from-here note (single source, overwritten in place)
-Last updated: 2026-11-20 — Response 1 (TV ads vs AdGuard, read-only)
+Last updated: 2026-11-21 — Response 2 (Gaanth nested-rar import)
+
+## 2026-11-21 R2 — "downloaded 22 GB series, not in Jellyfin" — FIXED (no config change). [CHANGE: claude-code | 2026-11-21]
+- Gaanth S01 (8 eps). "22 GB" = Sonarr showing the 2.8 GB release once per episode (8x). Real cause: release was a RAR
+  INSIDE a RAR; NZBGet unpacked the outer one (SUCCESS) and left a 2.3 GB inner .rar → Sonarr "Found archive file", import
+  guard correctly HELD it (not one of its two auto-fix shapes).
+- Fix: `unrar x` the inner rar in place as nzbget → Sonarr imported 8/8 to /srv/external/tv/Gaanth → Jellyfin listed the
+  series with 0 episodes until a per-item Refresh (Recursive) → 8 episodes. Queue 0.
+- Offered, NOT built: teach luminos-import-guard to unpack a nested archive when the HOLD reason is "Found archive file" and
+  then trigger Jellyfin refresh (global fix, per standing rule). Waiting on Shawn.
 
 ## 2026-11-20 R1 — "saw ads on the TV, we have a network adblocker" — READ-ONLY, nothing changed. [CHANGE: claude-code | 2026-11-20]
 - AdGuard (DECISION 169) is healthy: active, protection+filtering on, all 5 lists on, AdGuard is the DHCP server (hub DHCP off),
